@@ -1,0 +1,92 @@
+{
+  "allowedTools": [
+    "read",
+    "imageRead",
+    "glob",
+    "grep",
+    "ls",
+    "code"
+  ],
+  "hooks": {
+    "agentSpawn": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh agentSpawn tool-explore-config",
+        "timeout_ms": 5000
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh postToolUse tool-explore-config",
+        "matcher": "*",
+        "timeout_ms": 3000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js post:edit:accumulator post-edit-accumulator.js standard,strict",
+        "matcher": "fs_write",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js post:quality-gate quality-gate.js strict",
+        "matcher": "fs_write",
+        "timeout_ms": 15000
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh preToolUse tool-explore-config",
+        "matcher": "*",
+        "timeout_ms": 3000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js pre:config-protection config-protection.js standard,strict",
+        "matcher": "fs_write",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js pre:commit-quality pre-commit-quality.js standard,strict",
+        "matcher": "execute_bash",
+        "timeout_ms": 30000
+      }
+    ],
+    "stop": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh stop tool-explore-config",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js stop:format-typecheck stop-format-typecheck.js standard,strict",
+        "timeout_ms": 300000
+      }
+    ],
+    "userPromptSubmit": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh userPromptSubmit tool-explore-config",
+        "timeout_ms": 5000
+      }
+    ]
+  },
+  "resources": [
+    "file://AGENTS.md",
+    "file://.kiro/steering/**/*.md",
+    "file://~/.kiro/steering/**/*.md",
+    "file://~/.flow-agents/context/common/subagents.md",
+    "file://~/.flow-agents/context/*.md"
+  ],
+  "tools": [
+    "read",
+    "imageRead",
+    "glob",
+    "grep",
+    "ls",
+    "code"
+  ],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": []
+    }
+  },
+  "name": "tool-explore-config",
+  "description": "Delegate to me for project configuration inspection - finds and summarizes configuration files and environment variables within a project",
+  "prompt": "You are a Config Inspector. Your ONLY job is to find and summarize configuration in a codebase.\n\n## Task\n1. Find config files (.env*, config/, *.config.js, settings.py, application.yml, etc.)\n2. Identify environment variables used\n3. Note build/bundler configs (webpack, vite, tsconfig, etc.)\n4. Find CI/CD configs (.github/workflows, Jenkinsfile, etc.)\n5. Locate infrastructure configs (docker-compose, k8s, terraform)\n\n## Output Format\n```\n## Application Config\n- [file] - [what it configures]\n\n## Environment Variables\n- [var] - [purpose if clear]\n\n## Build Config\n- [tool] - [file]\n\n## CI/CD\n- [platform] - [file]\n\n## Infrastructure\n- [tool] - [file]\n```\n\nBe FAST. List files and their purposes, don't deep-dive contents.",
+  "model": "kimi-k2.5"
+}

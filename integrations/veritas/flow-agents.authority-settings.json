@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "id": "flow-agents",
+  "name": "Flow Agents Authority Settings",
+  "description": "Conservative local authority settings for recording Veritas as optional Flow Agents evidence before any release.",
+  "defaults": {
+    "mode": "advisory",
+    "new_rule_stage": "recommend"
+  },
+  "review_preferences": {
+    "human_signoff_required_for_stage_promotion": true,
+    "reviewer_confidence_scale": [
+      "low",
+      "medium",
+      "high"
+    ],
+    "major_rewrite_definition": "A change counts as a major rewrite when the reviewer replaces the main workflow, contract, or hook structure instead of making local edits."
+  },
+  "promotion_preferences": {
+    "evidence_checks_required_before_block": [
+      "npm run validate:source"
+    ],
+    "warnings_block_in_ci": false,
+    "require_consistent_eval_before_promotion": true
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "package-registry": {
+      "args": [
+        "package-registry-mcp"
+      ],
+      "command": "npx"
+    },
+    "package-version-check": {
+      "args": [
+        "package-version-check-mcp",
+        "--mode=stdio"
+      ],
+      "command": "uvx",
+      "env": {
+        "GITHUB_PAT": "${GITHUB_TOKEN}"
+      }
+    }
+  }
+}

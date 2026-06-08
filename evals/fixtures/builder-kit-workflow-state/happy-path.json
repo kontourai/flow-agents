@@ -1,0 +1,71 @@
+{
+  "schema_version": "1.0",
+  "description": "Happy path from pull-work through design-probe/pickup-probe into plan-work.",
+  "state": {
+    "schema_version": "1.0",
+    "task_slug": "builder-kit-happy-path",
+    "status": "planned",
+    "phase": "planning",
+    "updated_at": "2026-05-28T16:00:00Z",
+    "artifact_paths": [
+      ".agents/flow-agents/builder-kit-happy-path/builder-kit-probe.json",
+      ".agents/flow-agents/builder-kit-happy-path/handoff.json"
+    ],
+    "next_action": {
+      "status": "continue",
+      "summary": "Pickup Probe passed; run plan-work with the selected item and Probe record.",
+      "target_phase": "planning",
+      "target_artifact": ".agents/flow-agents/builder-kit-happy-path/builder-kit-probe.json"
+    }
+  },
+  "probe_record": {
+    "schema_version": "1.0",
+    "task_slug": "builder-kit-happy-path",
+    "current_step": "design-probe",
+    "next_step": "plan-work",
+    "route_reason": "continue -> plan-work",
+    "automation_mode": "guided",
+    "recovery_mode": "builder-kit-build-flow",
+    "probe_status": "passed",
+    "probe_artifact_ref": ".agents/flow-agents/builder-kit-happy-path/builder-kit-probe.json",
+    "grouping_decision": {
+      "status": "single-item",
+      "justification": "one ready issue selected"
+    },
+    "selected_work_items": [
+      {
+        "provider": "github",
+        "ref": "kontourai/flow-agents#68",
+        "title": "Define Builder Kit workflow state and design-probe contracts"
+      }
+    ],
+    "missing_evidence": [],
+    "unresolved_questions": [],
+    "accepted_gaps": [],
+    "resume_prompt": "Resume by running plan-work from the pull-work artifact and Builder Kit Probe record.",
+    "artifact_refs": [
+      ".agents/flow-agents/builder-kit-happy-path/builder-kit-happy-path--pull-work.md"
+    ],
+    "planning_readiness": "ready",
+    "expected_modified_files": [
+      "context/contracts/builder-kit-workflow-state-contract.md",
+      "skills/design-probe/SKILL.md",
+      "skills/pickup-probe/SKILL.md"
+    ],
+    "conflict_risks": [
+      "workflow guidance shared with downstream Builder Kit automation"
+    ],
+    "flow_boundary": {
+      "builder_kit_owns": "product-level build-flow coordination and next-step selection",
+      "flow_agents_owns": "workflow artifacts, primitive execution, and evidence harness",
+      "flow_owns": "gate authority semantics"
+    }
+  },
+  "handoff": {
+    "next_steps": [
+      "Use plan-work with the Probe record and selected work item refs."
+    ],
+    "blockers": [],
+    "warnings": []
+  }
+}

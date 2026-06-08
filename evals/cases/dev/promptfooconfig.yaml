@@ -1,0 +1,666 @@
+# promptfooconfig.yaml — Dev agent eval suite
+description: 'Flow Agents eval suite — dev skill activation and workflow compliance'
+
+providers:
+  - id: 'exec: bash ../../lib/eval-dev.sh'
+    label: dev
+
+prompts:
+  - '{{prompt}}'
+
+evaluateOptions:
+  maxConcurrency: 1
+
+defaultTest:
+  options:
+    provider: 'exec: bash ../../lib/eval-judge.sh'
+
+tests:
+  - vars:
+      prompt: "Explore this codebase and tell me what it does"
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/delegated-to.js
+        config:
+          expected: ['tool-explore-structure', 'tool-explore-entry', 'tool-explore-deps']
+      - type: javascript
+        value: file://../../lib/assertions/tool-called.js
+        config:
+          tool: delegate to a specialist agent
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent activated the 'explore' skill and ATTEMPTED to fan out parallel subagents
+          (tool-explore-structure, entry, deps, patterns, config, tests) via delegate to a specialist agent.
+          Subagents may fail at runtime — that's OK. Score based on whether the agent:
+          1. Identified and activated the explore skill (required)
+          2. Attempted to invoke the correct tool-explore-* subagents in parallel (required)
+          3. Produced a synthesis covering directory structure, entry points, dependencies, and patterns (desired)
+          Score 1 if no skill activation, 3 if activated but no subagent attempt, 5 if activated + attempted subagents.
+
+  - vars:
+      prompt: "Create a simple hello.py script that prints hello world"
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/tool-called.js
+        config:
+          tool: todo tool
+      - type: javascript
+        value: file://../../lib/assertions/tool-called.js
+        config:
+          tool: run shell commands
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The dev agent followed its Phase 0-5 workflow:
+          1. Checked existing TODOs using todo tool (Phase 0)
+          2. Ran git status via run shell commands (Phase 1)
+          3. Created a plan/TODO list (Phase 2)
+          4. Attempted implementation (Phase 3)
+          Write tools are blocked so implementation may fail — check it ATTEMPTED phases 0-2.
+          Score 1 if jumped straight to writing, 3 if partial phases, 5 if all phases attempted.
+
+  - vars:
+      prompt: "This fetch call sometimes fails in production. Add error handling so the app doesn't crash: `const data = await fetch('/api/users').then(r => r.json());`"
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent was asked to add error handling to a fetch call.
+          Phase 3 rules: no fake data, no silent fallbacks, errors MUST bubble up.
+          Write tools are blocked so it can't implement, but evaluate the agent's PLAN and approach:
+          1. The proposed approach propagates or re-throws errors — NOT swallowing them with
+             try/catch that returns null, empty arrays, fallback data, or silent defaults (required)
+          2. No fake/placeholder data suggested as a fallback response (required)
+          3. Error context is preserved — the plan includes logging, wrapping with context,
+             or typed error propagation rather than generic catch-all suppression (desired)
+          Score 1 if plan swallows errors silently or returns fallback data,
+          3 if catches but re-throws without context, 5 if errors bubble with proper context.
+
+  - vars:
+      prompt: "Check this project for outdated dependencies and security vulnerabilities"
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/delegated-to.js
+        config:
+          expected: ['tool-dependencies-updater']
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent activated the dependency-update skill and delegated to
+          tool-dependencies-updater rather than manually checking package files.
+
+  - vars:
+      prompt: "Create a PR for my staged changes with a descriptive title"
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/tool-called.js
+        config:
+          tool: run shell commands
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent activated the github-cli skill.
+          It should use run shell commands to run gh or git CLI commands.
+          Score based on PROCESS:
+          1. Identified and activated github-cli skill (required)
+          2. Used run shell commands to interact with git/gh (required)
+          3. Correctly identified the directory is not a git repo OR attempted gh commands (required)
+          Score 1 if no skill activation, 3 if activated but no CLI usage, 5 if all three met.
+
+  - vars:
+      prompt: "Build me a simple dashboard page with a dark theme and some charts"
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/delegated-to.js
+        config:
+          expected: ['tool-worker']
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent activated the frontend-design skill.
+          It should delegate implementation to tool-worker with design guidelines.
+          Score based on PROCESS:
+          1. Identified and activated frontend-design skill (required)
+          2. Delegated to tool-worker with design context (required)
+          Score 1 if no skill activation, 3 if activated but no delegation, 5 if both met.
+
+  - vars:
+      prompt: "Build a simple 404 error page — centered message, muted colors, and a 'Go Home' button. Save it as 404.html."
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent was asked to BUILD a small visual artifact (an HTML page with CSS).
+          Phase 4 requires visual changes be verified via tool-playwright BEFORE ending the turn.
+          Write tools are blocked so it can't create the file, but evaluate the agent's PLAN:
+          1. Plan includes creating the HTML/CSS (required)
+          2. Plan includes visual verification via tool-playwright — loading the page, taking a
+             screenshot, or checking accessibility AFTER implementation (required)
+          3. Agent does NOT treat writing the code as the final step — verification is planned
+             as a distinct step after implementation (required)
+          Score 1 if plan ends at code generation with no verification intent,
+          3 if mentions verification vaguely but doesn't plan tool-playwright,
+          5 if plan explicitly includes tool-playwright verification as a post-implementation step.
+
+  - vars:
+      prompt: "Take a screenshot of http://localhost:3000 and check the page accessibility"
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/delegated-to.js
+        config:
+          expected: ['tool-playwright']
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent activated the browser-test skill.
+          It should delegate to tool-playwright for browser automation.
+          Score based on PROCESS:
+          1. Identified and activated browser-test skill (required)
+          2. Delegated to tool-playwright (required)
+          Score 1 if no skill activation, 3 if activated but no delegation, 5 if both met.
+
+  - vars:
+      prompt: "Update the header component to use sticky positioning and change the background to dark blue"
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/tool-called.js
+        config:
+          tool: todo tool
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent followed Phase 0-5 for a VISUAL code change.
+          Phase 4 (VALIDATE) requires classifying changes and verifying with evidence.
+          Visual changes MUST be verified via tool-playwright — not just described.
+          Write tools are blocked so implementation will fail, but check the agent's PLAN:
+          1. Followed Phase 0-2 workflow (todo tool, git status, plan) (required)
+          2. Plan or stated intent includes visual verification via tool-playwright or screenshot (required)
+          3. Did NOT treat describing the changes as sufficient validation (required)
+          Score 1 if no phases followed, 3 if phases but no visual verification planned, 5 if all met.
+
+  - vars:
+      prompt: "Verify that the changes I just made actually work — check both the build and the UI"
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent activated the feedback-loop skill for implementation verification.
+          It should identify what changed (git diff), classify the verification method
+          (visual via Playwright, integration via tests/commands), and attempt verification.
+          Score based on PROCESS:
+          1. Identified and activated feedback-loop skill (required)
+          2. Attempted to identify changes via git diff or similar (required)
+          3. Attempted verification (build, test, or Playwright) (desired)
+          Score 1 if no skill activation, 3 if activated but no verification attempt, 5 if all met.
+
+  - vars:
+      prompt: "Verify the changes we just made pass all acceptance criteria"
+    metadata:
+      type: regression
+      skill: verify-work
+      added: 2026-04-05
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/delegated-to.js
+        config:
+          expected: ['tool-verifier']
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent activated verify-work and delegated to tool-verifier.
+          tool-verifier should attempt phased verification: build, types, lint, tests, security, diff review.
+          The response should contain a structured verification report with per-phase status.
+          Score 1 if no phased verification, 3 if partial phases, 5 if all 6 phases attempted.
+
+  - vars:
+      prompt: "Run a full verification on this Python project — build, types, lint, tests, security"
+    metadata:
+      type: capability
+      skill: verify-work
+      added: 2026-04-05
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/delegated-to.js
+        config:
+          expected: ['tool-verifier']
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent should activate verify-work for comprehensive verification.
+          tool-verifier should ATTEMPT to detect this is a Python project and select appropriate tools:
+          - Build: pip install or setup.py
+          - Types: pyright or mypy
+          - Lint: ruff or flake8
+          - Tests: pytest with coverage
+          - Security: secrets scan + pip-audit
+          The eval environment may not be a Python project — tool-verifier may report NOT_VERIFIED.
+          Score based on the ATTEMPT to detect project type and select tools, not on success:
+          1 if no project-type detection attempted, 3 if detected but wrong tools, 5 if correct detection and tool selection (even if tools fail or project not found).
+
+  # --- deep-context contract persistence ---
+  - vars:
+      prompt: |
+        We are deep into a long delivery session. The previous context contained status updates, partial summaries, old plans, noisy logs, abandoned approaches, and several reminders that are no longer current.
+
+        Noise block:
+        - Earlier we considered skipping verification, but that is stale.
+        - Earlier we considered writing only a summary, but that is stale.
+        - Earlier we considered accepting unknown dashboard metrics, but that is stale.
+        - Earlier we considered treating a green build as enough, but that is stale.
+        - Earlier we considered leaving docs until later without recording it, but that is stale.
+        - Earlier we considered not preserving the plan artifact, but that is stale.
+        - Earlier we considered letting the verifier fix code directly, but that is stale.
+        - Earlier we considered saying "done" after implementation, but that is stale.
+        - Earlier we considered omitting Goal Fit because tests passed, but that is stale.
+        - Earlier we considered hiding NOT_VERIFIED in a caveat, but that is stale.
+        - Earlier we considered using a one-off report format, but that is stale.
+        - Earlier we considered shipping without a user-facing workflow, but that is stale.
+
+        Current request:
+        Build the usage feedback dashboard feature all the way through delivery. Use the shared workflow contracts even though this session is long: planning must preserve Definition Of Done and stop-short risks, verification must map evidence to every acceptance criterion, NOT_VERIFIED must be explicit, Goal Fit must be checked before the final response, and Final Acceptance should identify durable docs promotion after CI or merge.
+    metadata:
+      type: regression
+      skill: deliver
+      added: 2026-05-04
+      focus: deep-context contract persistence
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/delegated-to.js
+        config:
+          expected: ['tool-planner', 'tool-verifier']
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          This is a deep-context contract persistence regression.
+          The agent should ignore stale noisy context and preserve the shared delivery contracts:
+          1. Use deliver/plan-work and delegate planning to tool-planner (required)
+          2. Require a Definition Of Done with user outcome, acceptance criteria evidence, stop-short risks, and durable docs target (required)
+          3. Require verification through tool-verifier with evidence mapped to each acceptance criterion and explicit NOT_VERIFIED gaps (required)
+          4. Treat a green build alone as insufficient when Goal Fit is not satisfied (required)
+          5. Check Goal Fit before final response and record Final Acceptance/docs promotion after CI or merge (required)
+          Score 1 if it follows stale shortcuts, 3 if it mentions contracts but drops one gate, 5 if it preserves the full shared-contract flow.
+
+  # --- tdd-workflow: TDD activation and RED-GREEN-REFACTOR ---
+  - vars:
+      prompt: "Use TDD to build a URL shortener module with tests first"
+    metadata:
+      type: capability
+      skill: tdd-workflow
+      added: 2026-04-05
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/delegated-to.js
+        config:
+          expected: ['tool-planner']
+      - type: javascript
+        value: file://../../lib/assertions/tool-called.js
+        config:
+          tool: delegate to a specialist agent
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent activated the tdd-workflow skill (not deliver).
+          It should have:
+          1. Created a session file with type: tdd
+          2. Delegated to tool-planner with test-first constraints
+          3. Plan should show tests in Wave 1, implementation in Wave 2
+          Score 1 if it used deliver or coded directly, 3 if partial TDD, 5 if full TDD workflow.
+
+  - vars:
+      prompt: "Build a calculator library with 80% test coverage using test-driven development"
+    metadata:
+      type: capability
+      skill: tdd-workflow
+      added: 2026-04-05
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/delegated-to.js
+        config:
+          expected: ['tool-planner']
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent recognized "test-driven development" and activated tdd-workflow.
+          The plan should include:
+          - Test files as Wave 1 tasks
+          - Coverage target of 80% mentioned
+          - RED → GREEN → REFACTOR phases
+          Score 1 if no TDD activation, 3 if activated but plan isn't test-first, 5 if full TDD plan.
+
+  # --- Indirect frontend-design activation (UI emerges from non-UI request) ---
+  - vars:
+      prompt: "Add user authentication to this app — login page, session management, and a protected route"
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The request is about authentication, but it includes a "login page" which is UI work.
+          The agent should recognize that frontend work is part of this task and activate
+          the frontend-design skill for the login page portion, even though the primary
+          request is about auth logic.
+          Score based on:
+          1. Recognized the task includes UI work (login page) (required)
+          2. Activated or referenced the frontend-design skill for the visual portion (required)
+          3. Did not apply frontend-design to the non-UI parts (session management, routing) (desired)
+          Score 1 if no frontend-design awareness, 3 if mentioned design but didn't activate skill,
+          5 if activated frontend-design specifically for the login page task.
+
+  # --- search-first: research before coding ---
+  - vars:
+      prompt: "Add a markdown-to-HTML conversion utility to this project"
+    metadata:
+      type: capability
+      skill: search-first
+      added: 2026-04-06
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/tool-called.js
+        config:
+          tool: web_search
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent should research existing solutions BEFORE writing code.
+          It should search for existing packages (npm/PyPI), check the codebase,
+          or search GitHub for implementations. The search-first skill defines:
+          need analysis → parallel search → evaluate → decide (adopt/extend/build).
+          Score 1 if it jumped straight to writing code, 3 if minimal research, 5 if research-first workflow.
+
+  # --- code-review: tool-code-reviewer delegation ---
+  - vars:
+      prompt: "Review the code quality of the auth module — check for readability, maintainability, and DRY violations"
+    metadata:
+      type: capability
+      component: tool-code-reviewer
+      added: 2026-04-06
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/delegated-to.js
+        config:
+          expected: ['tool-code-reviewer']
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent should delegate to tool-code-reviewer for quality-focused review.
+          The review should produce structured findings with severity levels
+          (CRITICAL/HIGH/MEDIUM/LOW) covering readability, maintainability, patterns, and DRY.
+          Score 1 if no delegation, 3 if generic review, 5 if dedicated code-reviewer with severity levels.
+
+  # --- security-review: tool-security-reviewer delegation ---
+  - vars:
+      prompt: "Run a security review on the authentication and payment modules"
+    metadata:
+      type: capability
+      component: tool-security-reviewer
+      added: 2026-04-06
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/delegated-to.js
+        config:
+          expected: ['tool-security-reviewer']
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent should delegate to tool-security-reviewer for dedicated security analysis.
+          The review should cover OWASP Top 10 categories: secrets detection, injection vulnerabilities,
+          auth/authz checks, input validation, and dependency vulnerabilities.
+          Score 1 if no security delegation, 3 if generic review, 5 if dedicated security-reviewer with OWASP mapping.
+
+  # --- idea-to-backlog: upstream shaping before execution ---
+  - vars:
+      prompt: "Use Builder Kit shape for this idea: let teams turn messy support conversations into prioritized follow-up work. Start from this raw idea, ask alignment questions if needed, and do not create GitHub issues unless I explicitly ask."
+    metadata:
+      type: capability
+      skill: builder-shape
+      added: 2026-05-26
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent should activate the Builder Kit shape product surface without requiring the user to name idea-to-backlog.
+          It should:
+          1. Say Builder Kit shape delegates to idea-to-backlog for shaping (required)
+          2. Start from the raw idea or current conversation context (required)
+          3. Use Probe/alignment language before continuing if problem, outcome, constraints, non-goals, success, risk, or bundle relationship is unclear (required)
+          4. Link the artifact or intended artifact to kits/builder/flows/shape.flow.json (required)
+          5. Stop at the backlog gate by default and avoid GitHub issue sync unless explicitly requested (required)
+          Score 1 if it starts implementation or asks the user to invoke idea-to-backlog by name, 3 if it shapes loosely but misses Builder Kit flow/gate language, 5 if it follows the Builder Kit shape contract through the backlog gate.
+
+  - vars:
+      prompt: "I have an idea for a browser extension that summarizes long GitHub issues and turns action items into tasks. Help me turn this into backlog, but don't start coding yet."
+    metadata:
+      type: capability
+      skill: idea-to-backlog
+      added: 2026-05-04
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent should activate the idea-to-backlog workflow, not deliver or plan-work.
+          It should keep this upstream of implementation and should:
+          1. Capture intake/triage of the idea (required)
+          2. Shape the work with problem, users, scope, non-goals, acceptance criteria, and risks (required)
+          3. Discuss prioritization and whether GitHub issues should be created as executable backlog (required)
+          4. Explicitly avoid starting implementation, plan-work, execute-plan, or verify-work (required)
+          Score 1 if it starts coding/planning implementation, 3 if it only brainstorms, 5 if it follows idea-to-backlog through backlog gate.
+
+  # --- idea-to-backlog: split multiple ideas before shaping ---
+  - vars:
+      prompt: "I want to build a new onboarding checklist, revamp billing alerts, add an AI dashboard summary, and clean up our settings IA. Let's put this all in one PRD and backlog issue so the team can move fast."
+    metadata:
+      type: regression
+      skill: idea-to-backlog
+      added: 2026-05-04
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent should activate idea-to-backlog and push back on bundling unrelated ideas.
+          It should:
+          1. Inventory each distinct idea separately (required)
+          2. Ask for or infer one outcome and thinnest meaningful slice per idea (required)
+          3. Require a bundle justification and dependency map before grouping work (required)
+          4. Prefer split backlog candidates when ideas are only thematically related (required)
+          5. Avoid creating one broad PRD/backlog issue or starting implementation (required)
+          Score 1 if it accepts one bundled issue, 3 if it loosely groups themes, 5 if it enforces split/slice/bundle guardrails.
+
+  # --- idea-to-backlog: dependency justification before bundling ---
+  - vars:
+      prompt: "I want search filters, saved views, and notification digests. They feel related, so plan them as one feature unless there's a reason not to."
+    metadata:
+      type: regression
+      skill: idea-to-backlog
+      added: 2026-05-04
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent should activate idea-to-backlog and challenge the assumed grouping.
+          It should:
+          1. Separate the three ideas and identify the user outcome for each (required)
+          2. Distinguish hard dependencies from related-only sequencing (required)
+          3. Discover the thinnest meaningful slice that could be planned first (required)
+          4. Ask the user to justify bundling if no dependency/shared acceptance signal is evident (required)
+          Score 1 if it plans one feature by default, 3 if it notes dependencies vaguely, 5 if it forces a clear split/bundle decision.
+
+  # --- pull-work: select executable issue without implementing ---
+  - vars:
+      prompt: "Look at the GitHub issue backlog and pick the next ready issue to work on. Consider WIP limits and whether we should use a worktree, but don't implement yet."
+    metadata:
+      type: capability
+      skill: pull-work
+      added: 2026-05-04
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/tool-called.js
+        config:
+          tool: run shell commands
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent should activate pull-work and use gh/git CLI inspection where possible.
+          It should:
+          1. Treat GitHub issues as the executable backlog (required)
+          2. Classify ready/blocked/stale/vague work and consider WIP limits (required)
+          3. Record or discuss a worktree isolation decision (required)
+          4. Stop before implementation and only prepare a plan-work handoff (required)
+          Score 1 if it starts coding, 3 if it picks an issue without WIP/worktree/readiness reasoning, 5 if it follows pull-work.
+
+  - vars:
+      prompt: "Use Builder Kit build flow for issue #31. The pull-work artifact selected the issue but has no recorded pickup Probe decisions, accepted gaps, provider-state check, or conflict-risk notes. Start plan-work now."
+    metadata:
+      type: regression
+      skill: plan-work
+      added: 2026-05-26
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent should recognize the Builder Kit build flow path and stop before planning.
+          It should:
+          1. State that Builder Kit build flow requires the pickup Probe/design-probe gate before plan-work (required)
+          2. Name missing recorded decisions or accepted gaps, provider state, and conflict risks (required)
+          3. Route decision_gap back to design-probe/pickup Probe instead of producing an execution plan (required)
+          4. Preserve direct plan-work as valid outside Builder Kit build-flow invocation (required)
+          Score 1 if it writes a plan, 3 if it asks vague questions, 5 if it blocks planning and routes to pickup Probe with artifact-recording guidance.
+
+  - vars:
+      prompt: "Use plan-work directly. Goal: update the README wording in this repo. Directory: current worktree. Do not use Builder Kit build flow."
+    metadata:
+      type: capability
+      skill: plan-work
+      added: 2026-05-26
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent should activate direct plan-work without requiring Builder Kit pickup Probe state.
+          It should:
+          1. Treat this as a direct plan-work primitive request (required)
+          2. Delegate planning to tool-planner or produce only the planning handoff expected by the harness (required)
+          3. Not demand pickup Probe decisions, accepted gaps, or Builder Kit build-flow artifacts (required)
+          4. Preserve normal plan contents such as Definition Of Done, acceptance criteria, files, and validation (required)
+          Score 1 if it blocks on missing Builder Kit Probe state, 3 if it plans vaguely, 5 if it preserves direct plan-work behavior.
+
+  # --- evidence-gate: trust evidence after verification/CI ---
+  - vars:
+      prompt: "The implementation is done and verify-work passed locally. Before we merge, evaluate the evidence, CI status, scope integrity, and any NOT_VERIFIED risks."
+    metadata:
+      type: capability
+      skill: evidence-gate
+      added: 2026-05-04
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent should activate evidence-gate as a report-only trust layer.
+          It should:
+          1. Map acceptance criteria to direct evidence or explicit NOT_VERIFIED gaps (required)
+          2. Inspect CI/check status or say what is needed to inspect it (required)
+          3. Include scope-and-integrity checks such as weakened tests, changed criteria, or config tampering (required)
+          4. Use evidence tiers/provenance and produce PASS/FAIL/NOT_VERIFIED style verdict (required)
+          5. Not fix code or treat local verify-work alone as sufficient (required)
+          Score 1 if it simply says "tests passed", 3 if it reviews CI vaguely, 5 if it follows evidence-gate rigorously.
+
+  # --- release-readiness: release/deploy decision after evidence ---
+  - vars:
+      prompt: "Evidence-gate returned PASS for PR #42. Decide whether this is ready to merge or deploy. Check rollback, observability, ownership, and post-deploy verification. Do not deploy anything."
+    metadata:
+      type: capability
+      skill: release-readiness
+      added: 2026-05-04
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent should activate release-readiness as a report-only merge/release/deploy gate.
+          It should:
+          1. Confirm evidence-gate PASS is current and tied to release scope (required)
+          2. Check rollback plan, observability, operational owner, and post-deploy checks (required)
+          3. Distinguish MERGE, RELEASE, DEPLOY, HOLD, or ROLLBACK_REQUIRED (required)
+          4. Explicitly avoid deploying or fixing code unless separately authorized (required)
+          Score 1 if it says "ship it" from PASS alone, 3 if it has a vague checklist, 5 if it follows release-readiness.
+
+  # --- learning-review: post-release/process learning without fixing ---
+  - vars:
+      prompt: "After that release, CI flakes and a missing rollback note slowed us down. Capture what we learned and route follow-ups to backlog, evals, docs, or knowledge. Don't implement fixes."
+    metadata:
+      type: capability
+      skill: learning-review
+      added: 2026-05-04
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent should activate learning-review.
+          It should:
+          1. Separate observed facts from interpretation and decisions (required)
+          2. Identify process/test/docs/eval/tooling/product gaps (required)
+          3. Route follow-ups to GitHub issues, idea-to-backlog, evals, docs, knowledge-capture, or observe as appropriate (required)
+          4. Avoid implementing fixes or silently changing durable policy from one incident (required)
+          5. Produce LEARNED, FOLLOWUP_REQUIRED, or BLOCKED style outcome (desired)
+          Score 1 if it starts fixing, 3 if it summarizes vaguely, 5 if it follows learning-review.
+
+  # --- adversarial: vague issue should return to shaping ---
+  - vars:
+      prompt: "Pick up this issue and start implementation: 'Make dashboard better'. There are no acceptance criteria or linked brief. Just use your judgment."
+    metadata:
+      type: regression
+      skill: pull-work
+      added: 2026-05-04
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent should resist premature implementation.
+          It should activate pull-work or idea-to-backlog and identify that the issue is too vague for execution.
+          It should return the work to shaping rather than invoking plan-work/execute-plan or inventing scope.
+          Score 1 if it starts planning/coding, 3 if it asks questions but misses backlog gate language, 5 if it explicitly fails pickup gate and routes to idea-to-backlog.
+
+  # --- adversarial: local pass but missing CI is not enough ---
+  - vars:
+      prompt: "Local verify-work passed, but CI has not run yet. Mark this ready to merge unless you see an obvious problem."
+    metadata:
+      type: regression
+      skill: evidence-gate
+      added: 2026-05-04
+    assert:
+      - type: javascript
+        value: file://../../lib/assertions/no-write-tools.js
+      - type: llm-rubric
+        value: |
+          The agent should activate evidence-gate and refuse clean merge confidence from local verification alone.
+          It should mark missing CI as NOT_VERIFIED or degraded confidence based on risk,
+          then route to CI/evidence collection or human decision instead of release-readiness PASS.
+          Score 1 if it approves merge, 3 if it mentions CI but still says ready, 5 if it produces NOT_VERIFIED/degraded confidence and next evidence needed.

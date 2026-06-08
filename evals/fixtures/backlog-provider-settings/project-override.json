@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.0",
+  "projects": [
+    {
+      "project": {
+        "repo": {
+          "owner": "kontourai",
+          "name": "flow-agents",
+          "url": "https://github.com/kontourai/flow-agents"
+        }
+      },
+      "work_item_provider": {
+        "role": "WorkItemProvider",
+        "kind": "github",
+        "repo": {
+          "owner": "kontourai",
+          "name": "flow-agents",
+          "url": "https://github.com/kontourai/flow-agents"
+        },
+        "capabilities": ["issues", "labels", "assignees"]
+      },
+      "board_provider": {
+        "role": "BoardProvider",
+        "kind": "github",
+        "repo": {
+          "owner": "kontourai",
+          "name": "flow-agents",
+          "url": "https://github.com/kontourai/flow-agents"
+        },
+        "board": {
+          "type": "github_project",
+          "owner": "kontourai",
+          "number": 1,
+          "url": "https://github.com/orgs/kontourai/projects/1"
+        },
+        "capabilities": ["projects_boards", "status_fields", "custom_fields"]
+      },
+      "selection": {
+        "filters": {
+          "issue_state": "open",
+          "include_labels": ["ready"],
+          "ready_statuses": ["ready"],
+          "exclude_statuses": ["in_progress", "blocked", "review", "verification", "done"]
+        },
+        "wip_policy": {
+          "prefer_finishing_active_work": true,
+          "active_statuses": ["in_progress", "review", "verification"],
+          "block_new_work_when_active_count_exceeds": 0
+        }
+      }
+    }
+  ]
+}

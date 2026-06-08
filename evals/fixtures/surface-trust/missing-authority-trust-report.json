@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "artifact_kind": "TrustReport",
+  "artifact_ref": "surface-trust://fixtures/missing-authority-trust-report.json",
+  "subject": {
+    "type": "change",
+    "id": "surface-trust-fixtures"
+  },
+  "gate": {
+    "id": "implementation-scope",
+    "kind": "surface.claim"
+  },
+  "claim": {
+    "type": "builder.execute.scope",
+    "subject": "change",
+    "status": "accepted"
+  },
+  "authority": null,
+  "integrity": {
+    "digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+    "verified": true
+  },
+  "freshness": {
+    "status": "fresh",
+    "checked_at": "2026-05-26T00:00:00Z"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "artifact_kind": "TrustReport",
+  "artifact_ref": "surface-trust://fixtures/accepted-claim-trust-report.json",
+  "subject": {
+    "type": "flow-step",
+    "id": "verify"
+  },
+  "gate": {
+    "id": "tests-evidence",
+    "kind": "surface.claim"
+  },
+  "claim": {
+    "type": "builder.verify.tests",
+    "subject": "flow-step",
+    "status": "accepted"
+  },
+  "authority": {
+    "producer": "fixture-trust-provider",
+    "trace_ref": "surface-trust://authority/fixture-provider"
+  },
+  "integrity": {
+    "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "subject_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "verified": true
+  },
+  "freshness": {
+    "status": "fresh",
+    "checked_at": "2026-05-26T00:00:00Z"
+  }
+}

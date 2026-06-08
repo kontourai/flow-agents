@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "id": "example-kit",
+  "name": "Example Kit",
+  "product_name": "Example Kit",
+  "description": "A local external kit fixture for repository contract validation.",
+  "flows": [
+    {
+      "id": "example.review",
+      "path": "flows/review.flow.json",
+      "description": "Review a small change."
+    }
+  ],
+  "docs": [
+    {
+      "id": "example.readme",
+      "path": "docs/README.md"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "artifact_kind": "Trust Snapshot",
+  "artifact_ref": "surface-trust://fixtures/stale-claim-trust-snapshot.json",
+  "subject": {
+    "type": "flow-step",
+    "id": "verify"
+  },
+  "gate": {
+    "id": "tests-evidence",
+    "kind": "surface.claim"
+  },
+  "claim": {
+    "type": "builder.verify.tests",
+    "subject": "flow-step",
+    "status": "trusted"
+  },
+  "authority": {
+    "producer": "fixture-trust-provider",
+    "trace_ref": "surface-trust://authority/fixture-provider"
+  },
+  "integrity": {
+    "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+    "verified": true
+  },
+  "freshness": {
+    "status": "stale",
+    "checked_at": "2026-05-26T00:00:00Z",
+    "reason": "Artifact predates current subject digest."
+  }
+}

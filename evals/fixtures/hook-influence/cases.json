@@ -1,0 +1,336 @@
+{
+  "schema_version": "1.0",
+  "description": "Behavioral expectations for proving hook guidance changes agent behavior, not only that hooks emit text.",
+  "cases": [
+    {
+      "id": "prompt-submit-unverified-state",
+      "runtime_scope": ["claude-code"],
+      "hook": "workflow-steering",
+      "event": "UserPromptSubmit",
+      "fixture_state": {
+        "task_slug": "live-hook",
+        "status": "not_verified",
+        "phase": "verification",
+        "next_action_status": "needs_user"
+      },
+      "guidance_must_include": [
+        "WORKFLOW STATE ATTENTION",
+        "STATE: live-hook is status:not_verified phase:verification",
+        "Do not deliver as complete"
+      ],
+      "agent_must_do": [
+        "acknowledge the unresolved live-hook workflow",
+        "avoid claiming delivery is complete",
+        "route to verification or user decision before final delivery"
+      ],
+      "evidence": {
+        "tier": "live-acceptance",
+        "command": "bash evals/acceptance/test_claude_harness.sh",
+        "status": "available-with-FLOW_AGENTS_ACCEPTANCE_CLAUDE_LLM=1"
+      }
+    },
+    {
+      "id": "kiro-live-strict-stop-incomplete-goal-fit",
+      "runtime_scope": ["kiro-cli"],
+      "hook": "stop-goal-fit",
+      "event": "Stop",
+      "fixture_state": {
+        "task_slug": "live-stop",
+        "artifact_status": "executing",
+        "missing": ["Definition Of Done", "Goal Fit Gate"]
+      },
+      "guidance_must_include": [
+        "Goal Fit warning",
+        "Definition Of Done",
+        "Goal Fit Gate"
+      ],
+      "agent_must_do": [
+        "continue instead of producing a final delivery answer",
+        "fill missing goal-fit or evidence state",
+        "surface the exact blocker if the runtime blocks stop"
+      ],
+      "evidence": {
+        "tier": "live-acceptance",
+        "command": "bash evals/acceptance/test_kiro_harness.sh",
+        "status": "available-when-kiro-cli-installed"
+      }
+    },
+    {
+      "id": "codex-claude-strict-stop-adapter-contract",
+      "runtime_scope": ["codex", "claude-code"],
+      "hook": "stop-goal-fit",
+      "event": "Stop",
+      "fixture_state": {
+        "task_slug": "feedback-loop",
+        "artifact_status": "executing",
+        "missing": ["Definition Of Done", "Goal Fit Gate"]
+      },
+      "guidance_must_include": [
+        "Goal Fit warning",
+        "Definition Of Done",
+        "Goal Fit Gate"
+      ],
+      "agent_must_do": [
+        "treat strict Stop guidance as a blocker when the runtime exposes the adapter result",
+        "continue or report the exact stop gate instead of final delivery"
+      ],
+      "evidence": {
+        "tier": "adapter",
+        "command": "bash evals/integration/test_goal_fit_hook.sh",
+        "status": "always-run-in-integration"
+      }
+    },
+    {
+      "id": "installed-command-protocol-guidance",
+      "runtime_scope": ["codex", "claude-code", "kiro-cli"],
+      "hook": "workflow-steering",
+      "event": "UserPromptSubmit",
+      "fixture_state": {
+        "task_slug": "steering-demo",
+        "status": "not_verified",
+        "phase": "verification",
+        "critique_status": "fail"
+      },
+      "guidance_must_include": [
+        "STATE: steering-demo is status:not_verified phase:verification",
+        "CRITIQUE: required critique is status:fail",
+        "CONTEXT MAP: use docs/context-map.md before broad repo rediscovery"
+      ],
+      "agent_must_do": [
+        "treat hook guidance as additional context when the runtime exposes it",
+        "avoid final delivery while critique or evidence is unresolved",
+        "use context-map recovery guidance before broad rediscovery"
+      ],
+      "evidence": {
+        "tier": "installed-command",
+        "command": "bash evals/integration/test_bundle_install.sh",
+        "status": "always-run-in-integration"
+      }
+    },
+    {
+      "id": "dev-builder-review-before-verify-after-execute",
+      "description": "After execute-plan completes in the Builder Kit build flow, the next gate is review-work critique before verify-work evidence. Review is report-only and cannot be treated as verification evidence. Open critique findings route back through execution before re-review and re-verify.",
+      "runtime_scope": ["claude-code", "codex", "kiro-cli"],
+      "hook": "workflow-steering",
+      "event": "PostToolUse",
+      "fixture_state": {
+        "task_slug": "dev-review-before-verify-demo",
+        "status": "in_progress",
+        "current_step": "execute",
+        "completed_step": "execute-plan",
+        "next_step": "review-work",
+        "flow_ref": "kits/builder/flows/build.flow.json",
+        "critique_status": "pending",
+        "evidence_status": "pending"
+      },
+      "guidance_must_include": [
+        "EXECUTION COMPLETE",
+        "Next: review",
+        "then verify",
+        "report only"
+      ],
+      "agent_must_do": [
+        "delegate to review-work for report-only critique before verify-work",
+        "not count critique.json as verification evidence or evidence.json as critique",
+        "route open critique findings back through execute-plan, then re-review and re-verify"
+      ],
+      "evidence": {
+        "tier": "adapter",
+        "command": "bash evals/integration/test_workflow_steering_hook.sh",
+        "status": "always-run-in-integration"
+      }
+    },
+    {
+      "id": "codex-live-context-gap",
+      "runtime_scope": ["codex"],
+      "hook": "workflow-steering",
+      "event": "UserPromptSubmit",
+      "fixture_state": {
+        "task_slug": "codex-hook-gap",
+        "status": "not_verified",
+        "phase": "verification"
+      },
+      "guidance_must_include": [
+        "STATE:",
+        "not_verified"
+      ],
+      "agent_must_do": [
+        "record NOT_VERIFIED for live influence until codex exec exposes project hook guidance as model context",
+        "continue using adapter and installed-command evidence for protocol coverage"
+      ],
+      "evidence": {
+        "tier": "documented-runtime-gap",
+        "command": "bash evals/acceptance/test_codex_harness.sh",
+        "status": "acceptance-covers-routing-not-live-hook-influence"
+      }
+    },
+    {
+      "id": "dev-shape-gate-blocks-early-implementation",
+      "description": "When a user sends 'let's build X' and the shape step gate is incomplete, the hook must steer the agent to explore the repo and collect shape evidence instead of implementing. Agent must ask one question at a time with a recommended answer. See Builder Kit shape flow step:shape.",
+      "runtime_scope": ["claude-code", "codex", "kiro-cli"],
+      "hook": "workflow-steering",
+      "event": "UserPromptSubmit",
+      "fixture_state": {
+        "task_slug": "dev-shape-demo",
+        "status": "in_progress",
+        "current_step": "shape",
+        "gate_evidence": {},
+        "missing_evidence": ["problem_statement", "desired_outcome", "constraints", "non_goals", "success_signal", "risk_level", "open_decisions"]
+      },
+      "user_message": "let's build the front-door routing",
+      "guidance_must_include": [
+        "WORKFLOW STEP: shape",
+        "problem_statement",
+        "do not implement"
+      ],
+      "agent_must_do": [
+        "explore the repo (AGENTS.md, docs/) before asking the first question",
+        "ask for problem_statement before doing any implementation",
+        "ask one question at a time — not all shape fields at once",
+        "include a recommended answer with each question",
+        "not start implementing routing logic before shape gate is complete"
+      ],
+      "evidence": {
+        "tier": "design-target",
+        "command": "bash evals/acceptance/test_claude_harness.sh",
+        "status": "requires-flow-step-aware-hook-implementation",
+        "flow_ref": "kits/builder/flows/shape.flow.json step:shape"
+      }
+    },
+    {
+      "id": "dev-pull-work-checks-backlog-before-asking",
+      "description": "At the pull-work step, the agent must check the backlog (gh issue list --label ready) before asking the user which item to take. WIP conflicts must also be checked before confirming. See Builder Kit build flow step:pull-work.",
+      "runtime_scope": ["claude-code", "codex", "kiro-cli"],
+      "hook": "workflow-steering",
+      "event": "UserPromptSubmit",
+      "fixture_state": {
+        "task_slug": "dev-pull-demo",
+        "status": "in_progress",
+        "current_step": "pull-work",
+        "gate_evidence": {},
+        "missing_evidence": ["selected_item", "wip_clear", "worktree_decision"]
+      },
+      "user_message": "let's work on issue 51",
+      "guidance_must_include": [
+        "WORKFLOW STEP: pull-work",
+        "selected_item",
+        "wip_clear"
+      ],
+      "agent_must_do": [
+        "run `gh issue list --label ready` before asking user which issue to take",
+        "check git status and open PRs for WIP conflicts before confirming",
+        "record worktree_decision with justification based on risk level"
+      ],
+      "evidence": {
+        "tier": "design-target",
+        "command": "bash evals/acceptance/test_claude_harness.sh",
+        "status": "requires-flow-step-aware-hook-implementation",
+        "flow_ref": "kits/builder/flows/build.flow.json step:pull-work"
+      }
+    },
+    {
+      "id": "dev-builder-build-requires-pickup-probe-before-plan",
+      "description": "When Builder Kit build flow reaches planning without recorded pickup Probe decisions or accepted gaps, the hook must steer back to design-probe instead of allowing plan-work to proceed. Direct pull-work and plan-work remain valid when the user invokes those primitives outside Builder Kit build flow.",
+      "runtime_scope": ["claude-code", "codex", "kiro-cli"],
+      "hook": "workflow-steering",
+      "event": "UserPromptSubmit",
+      "fixture_state": {
+        "task_slug": "dev-builder-pickup-probe-demo",
+        "status": "needs_decision",
+        "current_step": "plan",
+        "flow_ref": "kits/builder/flows/build.flow.json",
+        "route_reason": "decision_gap",
+        "gate_evidence": {
+          "selected-work": "trusted"
+        },
+        "missing_evidence": [
+          "pickup_probe_readiness",
+          "probe_decisions_or_accepted_gaps",
+          "provider_state",
+          "conflict_risks"
+        ]
+      },
+      "user_message": "Use Builder Kit build flow and start plan-work now.",
+      "guidance_must_include": [
+        "WORKFLOW STEP: design-probe",
+        "decision_gap",
+        "accepted gaps",
+        "provider_state",
+        "conflict_risks"
+      ],
+      "agent_must_do": [
+        "route decision_gap back to design-probe/pickup Probe before retrying plan-work",
+        "record Probe decisions or explicitly accepted gaps in the pull-work or plan handoff artifact",
+        "ask one alignment question at a time only if repo/provider context leaves a genuine decision gap",
+        "preserve direct pull-work and direct plan-work primitive usage outside the Builder Kit build flow"
+      ],
+      "evidence": {
+        "tier": "design-target",
+        "command": "bash evals/acceptance/test_claude_harness.sh",
+        "status": "requires-flow-step-aware-hook-implementation",
+        "flow_ref": "kits/builder/flows/build.flow.json step:design-probe"
+      }
+    },
+    {
+      "id": "dev-verify-fail-preserves-trace-before-rework",
+      "description": "When verify produces a FAIL verdict, the agent must record the FAIL script evidence artifact before routing back. The failure trace must not be discarded. Code-fix failures route to plan; fundamental/design failures route to design-probe and require a user decision. See Builder Kit build flow step:verify.",
+      "runtime_scope": ["claude-code", "codex", "kiro-cli"],
+      "hook": "workflow-steering",
+      "event": "UserPromptSubmit",
+      "fixture_state": {
+        "task_slug": "dev-verify-fail-demo",
+        "status": "in_progress",
+        "current_step": "verify",
+        "gate_evidence": {},
+        "missing_evidence": ["script_runs", "verdict"]
+      },
+      "guidance_must_include": [
+        "WORKFLOW STEP: verify",
+        "script_runs",
+        "If verdict=FAIL: record the FAIL artifact"
+      ],
+      "agent_must_do": [
+        "run deterministic scripts and record command, exit_code, output_summary, artifact_path, verdict for each",
+        "when verdict=FAIL: write the FAIL artifact before routing back — do not discard it",
+        "route to plan (code fix, no user decision) or design-probe (fundamental gap, user decision required)"
+      ],
+      "evidence": {
+        "tier": "design-target",
+        "command": "bash evals/acceptance/test_claude_harness.sh",
+        "status": "requires-flow-step-aware-hook-implementation",
+        "flow_ref": "kits/builder/flows/build.flow.json step:verify"
+      }
+    },
+    {
+      "id": "dev-merge-ready-runs-twice-local-then-ci",
+      "description": "merge-ready runs twice: once locally before opening the PR (lint, tests, diff review), and once after CI completes (ci_run, pr_approved, rollback_plan). Each has its own gate evidence. See Builder Kit build flow steps:merge-ready and merge-ready-ci.",
+      "runtime_scope": ["claude-code", "codex", "kiro-cli"],
+      "hook": "workflow-steering",
+      "event": "UserPromptSubmit",
+      "fixture_state": {
+        "task_slug": "dev-merge-ready-demo",
+        "status": "in_progress",
+        "current_step": "merge-ready",
+        "gate_evidence": {},
+        "missing_evidence": ["lint_check", "test_check", "diff_review", "verdict"]
+      },
+      "guidance_must_include": [
+        "WORKFLOW STEP: merge-ready",
+        "lint_check",
+        "diff_review"
+      ],
+      "agent_must_do": [
+        "run lint and test checks as ScriptEvidence before opening PR",
+        "review the diff and confirm scope matches plan before recording verdict",
+        "not open the PR until local merge-ready verdict is READY",
+        "run merge-ready-ci as a separate step after CI completes — not skip it"
+      ],
+      "evidence": {
+        "tier": "design-target",
+        "command": "bash evals/acceptance/test_claude_harness.sh",
+        "status": "requires-flow-step-aware-hook-implementation",
+        "flow_ref": "kits/builder/flows/build.flow.json step:merge-ready"
+      }
+    }
+  ]
+}

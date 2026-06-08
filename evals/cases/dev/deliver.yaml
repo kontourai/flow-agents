@@ -1,0 +1,66 @@
+# dev/deliver.yaml — Eval: dev agent activates deliver and verify-work skills
+- vars:
+    prompt: "Build a CLI tool that converts markdown files to HTML"
+  assert:
+    - type: javascript
+      value: file://../../lib/assertions/delegated-to.js
+      config:
+        expected: ['tool-planner']
+    - type: javascript
+      value: file://../../lib/assertions/tool-called.js
+      config:
+        tool: delegate to a specialist agent
+    - type: javascript
+      value: file://../../lib/assertions/no-write-tools.js
+    - type: javascript
+      value: file://../../lib/assertions/verify-after-fix.js
+    - type: llm-rubric
+      value: |
+        The agent activated the 'deliver' skill which chains plan-work → execute-plan → review-work → verify-work.
+        It should have created a session file, then delegated to tool-planner for the plan phase.
+        It should NOT have written code directly — the orchestrator delegates all implementation to tool-worker via execute-plan.
+        Reviewers (tool-code-reviewer, tool-security-reviewer) and verifiers (tool-verifier, tool-playwright) must ONLY report findings — never fix code.
+        If issues were found during review/verify, the agent must loop back through execute → review → verify until clean.
+        Score 1 if reviewers fixed code or skipped re-verify, 3 if partial compliance, 5 if full report-only + re-verify loop.
+
+- vars:
+    prompt: "Build a REST API for user management, then verify the implementation meets all acceptance criteria"
+  assert:
+    - type: javascript
+      value: file://../../lib/assertions/delegated-to.js
+      config:
+        expected: ['tool-verifier']
+    - type: javascript
+      value: file://../../lib/assertions/no-write-tools.js
+    - type: javascript
+      value: file://../../lib/assertions/verify-after-fix.js
+    - type: llm-rubric
+      value: |
+        The agent activated the 'verify-work' skill and delegated to tool-verifier (and optionally tool-playwright for visual changes).
+        It should NOT have reviewed code itself — verification is delegated to specialists.
+        Verifiers must be READ-ONLY — they report findings but never modify source code.
+        Score 1 if it reviewed code manually or verifiers fixed code, 3 if partial delegation, 5 if full verify-work workflow with read-only verifiers.
+
+- vars:
+    prompt: "Build a todo app with React. After building, review the code quality and verify everything works."
+  metadata:
+    type: capability
+    skill: deliver
+    added: 2026-04-07
+  assert:
+    - type: javascript
+      value: file://../../lib/assertions/delegated-to.js
+      config:
+        expected: ['tool-planner', 'tool-code-reviewer', 'tool-verifier']
+    - type: javascript
+      value: file://../../lib/assertions/verify-after-fix.js
+    - type: llm-rubric
+      value: |
+        This tests the full deliver loop with report-only review and re-verification.
+        Expected flow: plan → execute → review (report only) → verify (report only) → if issues, loop back to execute → review → verify.
+        CRITICAL checks:
+        1. tool-code-reviewer must NOT invoke write files or write tools — it only reports findings
+        2. tool-verifier must NOT apply fixes (no "1 format fix applied") — it only reports
+        3. If review/verify found issues, the agent must re-execute fixes via tool-worker, then re-run review+verify
+        4. Delivery happens ONLY after a clean review+verify pass with zero findings
+        Score 1 if reviewers fixed code inline, 2 if fixes applied but no re-verify, 3 if re-verify attempted but incomplete, 5 if full loop until clean.

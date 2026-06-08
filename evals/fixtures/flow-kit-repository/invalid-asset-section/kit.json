@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "asset-section",
+  "name": "Asset Section",
+  "flows": [
+    { "id": "asset.section", "path": "flows/review.flow.json" }
+  ],
+  "docs": {
+    "path": "docs/README.md"
+  }
+}

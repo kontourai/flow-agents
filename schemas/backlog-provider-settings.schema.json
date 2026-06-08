@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flow-agents.dev/schemas/backlog-provider-settings.schema.json",
+  "title": "Flow Agents Backlog Provider Settings",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "const": "1.0" },
+    "defaults": { "$ref": "#/$defs/backlog_settings" },
+    "projects": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/project_backlog_settings" }
+    }
+  },
+  "anyOf": [{ "required": ["defaults"] }, { "required": ["projects"] }],
+  "$defs": {
+    "project_backlog_settings": {
+      "allOf": [
+        { "$ref": "#/$defs/backlog_settings" },
+        { "type": "object", "required": ["project"] }
+      ]
+    },
+    "backlog_settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["work_item_provider", "board_provider", "selection"],
+      "properties": {
+        "project": { "$ref": "#/$defs/project_match" },
+        "work_item_provider": { "$ref": "#/$defs/work_item_provider" },
+        "board_provider": { "$ref": "#/$defs/board_provider" },
+        "selection": { "$ref": "#/$defs/selection" }
+      }
+    },
+    "project_match": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo"],
+      "properties": {
+        "repo": { "$ref": "#/$defs/repo" },
+        "paths": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "work_item_provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "kind", "repo", "capabilities"],
+      "properties": {
+        "role": { "const": "WorkItemProvider" },
+        "kind": { "enum": ["github"] },
+        "repo": { "$ref": "#/$defs/repo" },
+        "capabilities": { "$ref": "#/$defs/capabilities" }
+      }
+    },
+    "board_provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "kind", "repo", "board", "capabilities"],
+      "properties": {
+        "role": { "const": "BoardProvider" },
+        "kind": { "enum": ["github"] },
+        "repo": { "$ref": "#/$defs/repo" },
+        "board": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "number"],
+          "properties": {
+            "type": { "enum": ["github_project"] },
+            "owner": { "type": "string", "minLength": 1 },
+            "number": { "type": "integer", "minimum": 1 },
+            "url": { "type": "string" }
+          }
+        },
+        "capabilities": { "$ref": "#/$defs/capabilities" }
+      }
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["filters", "wip_policy"],
+      "properties": {
+        "filters": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["issue_state", "include_labels", "ready_statuses", "exclude_statuses"],
+          "properties": {
+            "issue_state": { "enum": ["open", "closed", "all"] },
+            "include_labels": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "ready_statuses": { "type": "array", "items": { "enum": ["todo", "ready"] } },
+            "exclude_statuses": {
+              "type": "array",
+              "items": { "enum": ["in_progress", "blocked", "review", "verification", "done"] }
+            }
+          }
+        },
+        "wip_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["prefer_finishing_active_work", "active_statuses"],
+          "properties": {
+            "prefer_finishing_active_work": { "type": "boolean" },
+            "active_statuses": { "type": "array", "items": { "enum": ["in_progress", "review", "verification"] } },
+            "block_new_work_when_active_count_exceeds": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "issues",
+          "projects_boards",
+          "status_fields",
+          "custom_fields",
+          "dependencies",
+          "labels",
+          "milestones",
+          "assignees",
+          "pr_links",
+          "comments"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "repo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "name"],
+      "properties": {
+        "owner": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "url": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0",
+  "description": "Builder Kit plan-work recovery routes missing pickup Probe state back to design-probe.",
+  "state": {
+    "schema_version": "1.0",
+    "task_slug": "missing-prestep-recovery",
+    "status": "blocked",
+    "phase": "planning",
+    "updated_at": "2026-05-29T10:10:00Z",
+    "artifact_paths": [
+      ".agents/flow-agents/missing-prestep-recovery/handoff.json"
+    ],
+    "next_action": {
+      "status": "blocked",
+      "summary": "plan-work lacks Builder Kit pickup Probe evidence; route decision_gap to design-probe.",
+      "target_phase": "pickup",
+      "target_artifact": ".agents/flow-agents/missing-prestep-recovery/builder-kit-probe.json"
+    }
+  },
+  "probe_record": {
+    "schema_version": "1.0",
+    "task_slug": "missing-prestep-recovery",
+    "current_step": "plan-work",
+    "next_step": "design-probe",
+    "route_reason": "decision_gap -> design-probe",
+    "automation_mode": "strict",
+    "recovery_mode": "builder-kit-build-flow",
+    "probe_status": "missing",
+    "probe_artifact_ref": ".agents/flow-agents/missing-prestep-recovery/builder-kit-probe.json",
+    "grouping_decision": {
+      "status": "single-item",
+      "justification": "selected item exists but pickup Probe is absent"
+    },
+    "selected_work_items": [
+      {
+        "provider": "github",
+        "ref": "kontourai/flow-agents#51",
+        "title": "Enforce pickup Probe per pulled work item"
+      }
+    ],
+    "missing_evidence": [
+      "probe_status",
+      "probe_artifact_ref",
+      "accepted gaps",
+      "expected modified files",
+      "conflict risks"
+    ],
+    "unresolved_questions": [
+      "Is the selected item ready for planning?"
+    ],
+    "accepted_gaps": [],
+    "resume_prompt": "Resume by running design-probe / pickup-probe, then retry plan-work only after Probe evidence is recorded.",
+    "artifact_refs": [
+      ".agents/flow-agents/missing-prestep-recovery/handoff.json"
+    ],
+    "planning_readiness": "blocked",
+    "expected_modified_files": [],
+    "conflict_risks": [],
+    "flow_boundary": {
+      "builder_kit_owns": "product-level build-flow coordination and next-step selection",
+      "flow_agents_owns": "workflow artifacts, primitive execution, and evidence harness",
+      "flow_owns": "gate authority semantics"
+    }
+  }
+}

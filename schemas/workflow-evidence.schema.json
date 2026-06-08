@@ -1,0 +1,353 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flow-agents.dev/schemas/workflow-evidence.schema.json",
+  "title": "Flow Agents Workflow Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_slug",
+    "verdict",
+    "checks"
+  ],
+  "$defs": {
+    "evidence_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["source", "command", "artifact", "provider", "external"]
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "file": {
+          "type": "string",
+          "minLength": 1
+        },
+        "line_start": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "line_end": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "excerpt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "source"
+              }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["file", "line_start", "line_end", "excerpt"]
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "artifact"
+              }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "allOf": [
+              {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "required": ["file"]
+                  },
+                  {
+                    "type": "object",
+                    "required": ["url"]
+                  }
+                ]
+              },
+              {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "required": ["summary"]
+                  },
+                  {
+                    "type": "object",
+                    "required": ["excerpt"]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "command"
+              }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": ["excerpt"]
+              },
+              {
+                "type": "object",
+                "required": ["summary"]
+              },
+              {
+                "type": "object",
+                "required": ["url"]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "enum": ["provider", "external"]
+              }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["url"]
+          }
+        }
+      ]
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "task_slug": {
+      "type": "string",
+      "minLength": 1
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["pass", "partial", "fail", "not_verified"]
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "status", "summary"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["build", "types", "lint", "test", "security", "diff", "browser", "runtime", "policy", "external"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pass", "fail", "not_verified", "skip"]
+          },
+          "command": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "artifact_refs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/evidence_ref"
+            },
+            "uniqueItems": true
+          },
+          "standard_refs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["standard", "ref"],
+              "properties": {
+                "standard": {
+                  "type": "string",
+                  "enum": ["sarif", "opentelemetry-log", "opentelemetry-trace", "junit", "tap", "veritas", "custom"]
+                },
+                "ref": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "role": {
+                  "type": "string",
+                  "enum": ["native", "export", "source", "mapping"]
+                },
+                "summary": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "surface_trust_refs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "artifact_kind",
+                "artifact_ref",
+                "gate_id",
+                "claim_type",
+                "claim_status",
+                "subject",
+                "freshness",
+                "authority",
+                "integrity",
+                "status"
+              ],
+              "properties": {
+                "artifact_kind": {
+                  "type": "string",
+                  "enum": ["TrustReport", "Trust Snapshot"]
+                },
+                "artifact_ref": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "gate_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "claim_type": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "claim_status": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "subject": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "freshness": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["status", "summary"],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": ["fresh", "stale", "expired", "unknown"]
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "authority": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["producer", "summary"],
+                  "properties": {
+                    "producer": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "integrity": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["status", "summary"],
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": ["matched", "mismatch", "unknown"]
+                    },
+                    "summary": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "digest": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["pass", "fail", "not_verified"]
+                },
+                "summary": {
+                  "type": "string"
+                }
+              }
+            },
+            "uniqueItems": true
+          }
+        }
+      }
+    },
+    "external_evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["system", "ref"],
+        "properties": {
+          "system": {
+            "type": "string"
+          },
+          "ref": {
+            "$ref": "#/$defs/evidence_ref"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "standard": {
+            "type": "string",
+            "enum": ["sarif", "opentelemetry-log", "opentelemetry-trace", "junit", "tap", "veritas", "custom"]
+          }
+        }
+      }
+    },
+    "not_verified_gaps": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

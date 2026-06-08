@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flow-agents.dev/schemas/workflow-learning.schema.json",
+  "title": "Flow Agents Workflow Learning",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_slug",
+    "status",
+    "updated_at",
+    "records"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "task_slug": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pending", "learned", "followup_required", "blocked"]
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "records": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "recorded_at", "source_refs", "outcome", "facts", "interpretation", "routing"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source_refs": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "outcome": {
+            "type": "string",
+            "enum": ["success", "failure", "mixed", "unknown"]
+          },
+          "facts": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "interpretation": {
+            "type": "string",
+            "minLength": 1
+          },
+          "routing": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["target", "action", "status"],
+              "properties": {
+                "target": {
+                  "type": "string",
+                  "enum": ["rule", "skill", "power", "agent", "eval", "doc", "backlog", "knowledge", "none"]
+                },
+                "action": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["open", "completed", "accepted", "deferred", "rejected"]
+                },
+                "ref": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "correction": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["needed"],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "needed": {
+                      "const": false
+                    }
+                  },
+                  "required": ["needed"]
+                },
+                "then": {
+                  "required": ["evidence"]
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "needed": {
+                      "const": true
+                    }
+                  },
+                  "required": ["needed"]
+                },
+                "then": {
+                  "required": ["type", "recurrence_key", "intended_behavior", "observed_behavior", "gap"],
+                  "anyOf": [
+                    {
+                      "required": ["prevention"]
+                    },
+                    {
+                      "required": ["no_change_rationale"]
+                    }
+                  ]
+                }
+              }
+            ],
+            "properties": {
+              "needed": {
+                "type": "boolean"
+              },
+              "type": {
+                "type": "string",
+                "enum": ["workflow", "skill", "agent", "tooling", "test", "doc", "process", "product", "provider", "none"]
+              },
+              "recurrence_key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "intended_behavior": {
+                "type": "string",
+                "minLength": 1
+              },
+              "observed_behavior": {
+                "type": "string",
+                "minLength": 1
+              },
+              "gap": {
+                "type": "string",
+                "minLength": 1
+              },
+              "evidence": {
+                "type": "string",
+                "minLength": 1
+              },
+              "no_change_rationale": {
+                "type": "string",
+                "minLength": 1
+              },
+              "prevention": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["target", "action", "status"],
+                "properties": {
+                  "target": {
+                    "type": "string",
+                    "enum": ["rule", "skill", "power", "agent", "eval", "doc", "backlog", "knowledge", "none"]
+                  },
+                  "action": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["open", "completed", "accepted", "deferred", "rejected"]
+                  },
+                  "ref": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "learned"
+          }
+        },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "records": {
+            "items": {
+              "required": ["correction"]
+            }
+          }
+        }
+      }
+    }
+  ]
+}

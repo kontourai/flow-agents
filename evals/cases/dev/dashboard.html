@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Analytics // Command Center</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --border: rgba(0,229,255,0.1);
+    --cyan: #00e5ff;
+    --amber: #ffab00;
+    --green: #69ff47;
+    --rose: #ff5252;
+    --text: #e0e0e0;
+    --muted: #5a5a72;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background-color: var(--bg);
+    background-image: radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px);
+    background-size: 28px 28px;
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    padding: 28px 32px;
+  }
+
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 28px;
+    opacity: 0;
+    animation: fadeUp 0.5s ease 0.05s forwards;
+  }
+  header h1 {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  header h1 span { color: var(--cyan); }
+  header .ts {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+  }
+
+  .kpi-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 20px 22px;
+    position: relative;
+    overflow: hidden;
+    opacity: 0;
+    animation: fadeUp 0.5s ease forwards;
+    transition: box-shadow 0.25s ease;
+  }
+  .card:hover { box-shadow: 0 0 24px rgba(0,229,255,0.07); }
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    border-radius: 6px 6px 0 0;
+  }
+  .c-cyan::before  { background: var(--cyan);  box-shadow: 0 0 10px var(--cyan); }
+  .c-amber::before { background: var(--amber); box-shadow: 0 0 10px var(--amber); }
+  .c-green::before { background: var(--green); box-shadow: 0 0 10px var(--green); }
+  .c-rose::before  { background: var(--rose);  box-shadow: 0 0 10px var(--rose); }
+
+  .kpi-row .card:nth-child(1) { animation-delay: 0.10s; }
+  .kpi-row .card:nth-child(2) { animation-delay: 0.16s; }
+  .kpi-row .card:nth-child(3) { animation-delay: 0.22s; }
+  .kpi-row .card:nth-child(4) { animation-delay: 0.28s; }
+
+  .kpi-label {
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .kpi-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 30px;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 10px;
+  }
+  .kpi-delta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .kpi-delta.up   { color: var(--green); }
+  .kpi-delta.down { color: var(--rose); }
+
+  .chart-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .chart-grid .card:nth-child(1) { animation-delay: 0.34s; }
+  .chart-grid .card:nth-child(2) { animation-delay: 0.40s; }
+  .chart-grid .card:nth-child(3) { animation-delay: 0.46s; }
+  .chart-grid .card:nth-child(4) { animation-delay: 0.52s; }
+
+  .chart-label {
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 16px;
+  }
+  .chart-wrap {
+    position: relative;
+    height: 220px;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (max-width: 900px) {
+    .kpi-row    { grid-template-columns: repeat(2, 1fr); }
+    .chart-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 480px) {
+    .kpi-row { grid-template-columns: 1fr; }
+    body { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>COMMAND <span>// </span>ANALYTICS</h1>
+  <span class="ts" id="ts"></span>
+</header>
+
+<div class="kpi-row">
+  <div class="card c-cyan">
+    <div class="kpi-label">Total Revenue</div>
+    <div class="kpi-value" style="color:var(--cyan)">$4.82M</div>
+    <div class="kpi-delta up">↑ 12.4% vs last month</div>
+  </div>
+  <div class="card c-amber">
+    <div class="kpi-label">Active Users</div>
+    <div class="kpi-value" style="color:var(--amber)">128,340</div>
+    <div class="kpi-delta up">↑ 8.1% vs last month</div>
+  </div>
+  <div class="card c-green">
+    <div class="kpi-label">Conversion Rate</div>
+    <div class="kpi-value" style="color:var(--green)">3.67%</div>
+    <div class="kpi-delta down">↓ 0.3% vs last month</div>
+  </div>
+  <div class="card c-rose">
+    <div class="kpi-label">Avg Session</div>
+    <div class="kpi-value" style="color:var(--rose)">4m 22s</div>
+    <div class="kpi-delta up">↑ 0:18 vs last month</div>
+  </div>
+</div>
+
+<div class="chart-grid">
+  <div class="card c-cyan">
+    <div class="chart-label">Revenue Trend — 2024</div>
+    <div class="chart-wrap"><canvas id="cRevenue"></canvas></div>
+  </div>
+  <div class="card c-amber">
+    <div class="chart-label">Monthly Active Users</div>
+    <div class="chart-wrap"><canvas id="cUsers"></canvas></div>
+  </div>
+  <div class="card c-green">
+    <div class="chart-label">Traffic Sources</div>
+    <div class="chart-wrap"><canvas id="cTraffic"></canvas></div>
+  </div>
+  <div class="card c-rose">
+    <div class="chart-label">Conversion Rate — Last 12 Weeks</div>
+    <div class="chart-wrap"><canvas id="cConversion"></canvas></div>
+  </div>
+</div>
+
+<script>
+  document.getElementById('ts').textContent =
+    new Date().toLocaleDateString('en-US', { weekday:'short', year:'numeric', month:'short', day:'numeric' }).toUpperCase();
+
+  const C = { cyan:'#00e5ff', amber:'#ffab00', green:'#69ff47', rose:'#ff5252', muted:'#5a5a72', grid:'rgba(255,255,255,0.05)' };
+  const mono = { family:"'JetBrains Mono'", size: 10 };
+  const axisBase = { grid:{ color: C.grid }, ticks:{ color: C.muted, font: mono } };
+  const baseOpts = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend:{ display:false }, tooltip:{ backgroundColor:'#1a1a26', titleFont: mono, bodyFont: mono, borderColor: C.grid, borderWidth:1 } },
+    scales: { x: axisBase, y: axisBase }
+  };
+
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  // Revenue — line chart
+  new Chart(document.getElementById('cRevenue'), {
+    type: 'line',
+    data: {
+      labels: months,
+      datasets: [{
+        data: [310,285,340,390,420,465,510,488,540,590,620,680],
+        borderColor: C.cyan,
+        backgroundColor: 'rgba(0,229,255,0.07)',
+        borderWidth: 2,
+        pointRadius: 3,
+        pointBackgroundColor: C.cyan,
+        fill: true,
+        tension: 0.4
+      }]
+    },
+    options: { ...baseOpts, scales: { x: axisBase, y: { ...axisBase, ticks: { ...axisBase.ticks, callback: v => '$'+v+'K' } } } }
+  });
+
+  // Monthly users — bar chart
+  new Chart(document.getElementById('cUsers'), {
+    type: 'bar',
+    data: {
+      labels: months,
+      datasets: [{
+        data: [72000,68000,81000,89000,95000,103000,112000,108000,118000,124000,128000,134000],
+        backgroundColor: 'rgba(255,171,0,0.55)',
+        borderColor: C.amber,
+        borderWidth: 1,
+        borderRadius: 3
+      }]
+    },
+    options: { ...baseOpts, scales: { x: axisBase, y: { ...axisBase, ticks: { ...axisBase.ticks, callback: v => (v/1000)+'K' } } } }
+  });
+
+  // Traffic sources — doughnut
+  new Chart(document.getElementById('cTraffic'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Organic','Direct','Paid','Referral','Social','Email'],
+      datasets: [{
+        data: [34,22,18,12,9,5],
+        backgroundColor: [C.cyan, C.amber, C.green, C.rose, '#7c4dff', '#00bcd4'],
+        borderColor: '#12121a',
+        borderWidth: 3,
+        hoverOffset: 6
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '68%',
+      plugins: {
+        legend: { display:true, position:'right', labels:{ color: C.muted, font: mono, boxWidth:10, padding:12 } },
+        tooltip: { backgroundColor:'#1a1a26', titleFont: mono, bodyFont: mono, borderColor: C.grid, borderWidth:1 }
+      }
+    }
+  });
+
+  // Conversion rate — area/line chart
+  const weeks = Array.from({length:12}, (_,i) => `W${i+1}`);
+  const convData = [3.1,3.4,3.2,3.6,3.5,3.8,3.7,4.0,3.9,3.7,3.6,3.67];
+  new Chart(document.getElementById('cConversion'), {
+    type: 'line',
+    data: {
+      labels: weeks,
+      datasets: [{
+        data: convData,
+        borderColor: C.rose,
+        backgroundColor: 'rgba(255,82,82,0.08)',
+        borderWidth: 2,
+        pointRadius: 3,
+        pointBackgroundColor: C.rose,
+        fill: true,
+        tension: 0.4
+      }]
+    },
+    options: { ...baseOpts, scales: { x: axisBase, y: { ...axisBase, ticks: { ...axisBase.ticks, callback: v => v+'%' } } } }
+  });
+</script>
+</body>
+</html>

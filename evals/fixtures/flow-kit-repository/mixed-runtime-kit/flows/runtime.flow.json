@@ -1,0 +1,26 @@
+{
+  "id": "mixed.runtime",
+  "version": "1.0",
+  "steps": [
+    { "id": "start", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "gates": {
+    "runtime-gate": {
+      "step": "start",
+      "expects": [
+        {
+          "id": "runtime-evidence",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "Runtime activation evidence exists.",
+          "claim": {
+            "type": "mixed.runtime.evidence",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    }
+  }
+}

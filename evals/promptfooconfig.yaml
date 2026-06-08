@@ -1,0 +1,70 @@
+description: Flow Agents Eval Suite — dev skill activation and workflow compliance
+providers:
+- id: 'exec: bash lib/kiro-dev.sh'
+  label: dev
+prompts:
+- '{{prompt}}'
+tests:
+- vars:
+    prompt: Explore this codebase and tell me what it does
+  assert:
+  - type: javascript
+    value: file://lib/assertions/delegated-to.js
+    config:
+      expected:
+      - tool-explore-structure
+      - tool-explore-entry
+      - tool-explore-deps
+  - type: javascript
+    value: file://lib/assertions/tool-called.js
+    config:
+      tool: delegate to a specialist agent
+  - type: javascript
+    value: file://lib/assertions/no-write-tools.js
+  - type: llm-rubric
+    value: 'The agent activated the ''explore'' skill and fanned out parallel subagents
+
+      (tool-explore-structure, entry, deps, patterns, config, tests) in Wave 1.
+
+      Response contains a synthesis of directory structure, entry points, dependencies, and patterns.
+
+      '
+  options:
+    provider: 'exec: bash lib/kiro-dev.sh'
+- vars:
+    prompt: Create a simple hello.py script that prints hello world
+  assert:
+  - type: javascript
+    value: file://lib/assertions/tool-called.js
+    config:
+      tool: todo tool
+  - type: javascript
+    value: file://lib/assertions/no-write-tools.js
+  - type: llm-rubric
+    value: 'The dev agent followed its Phase 0-5 workflow: checked existing TODOs,
+
+      ran git status, created a plan, then attempted implementation.
+
+      Write tools are blocked so implementation may fail — check it ATTEMPTED the workflow phases.
+
+      '
+  options:
+    provider: 'exec: bash lib/kiro-dev.sh'
+- vars:
+    prompt: Check this project for outdated dependencies and security vulnerabilities
+  assert:
+  - type: javascript
+    value: file://lib/assertions/delegated-to.js
+    config:
+      expected:
+      - tool-dependencies-updater
+  - type: javascript
+    value: file://lib/assertions/no-write-tools.js
+  - type: llm-rubric
+    value: 'The agent activated the dependency-update skill and delegated to
+
+      tool-dependencies-updater rather than manually checking package files.
+
+      '
+  options:
+    provider: 'exec: bash lib/kiro-dev.sh'

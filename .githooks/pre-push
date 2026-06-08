@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+cd "$ROOT_DIR"
+
+echo "flow-agents pre-push: validating repo Git hook setup"
+npm run validate:repo-hooks --silent
+
+echo "flow-agents pre-push: validating source tree"
+npm run validate:source --silent

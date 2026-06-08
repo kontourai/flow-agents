@@ -1,0 +1,19 @@
+{
+  "name": "Development Orchestrator",
+  "agent": "dev",
+  "description": "Handles coding, refactoring, debugging, planning, verification, and code-quality workflows.",
+  "domain": "engineering",
+  "capabilities": [
+    "code-implementation",
+    "planning",
+    "verification",
+    "code-review",
+    "security-review",
+    "dependency-updates",
+    "playwright-ui-validation"
+  ],
+  "preferredDelegation": {
+    "background": "tool-agent-delegate",
+    "interactive": "tool-agent-handoff"
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "allowedTools": [
+    "read",
+    "imageRead",
+    "glob",
+    "grep",
+    "ls",
+    "code"
+  ],
+  "hooks": {
+    "agentSpawn": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh agentSpawn tool-explore-patterns",
+        "timeout_ms": 5000
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh postToolUse tool-explore-patterns",
+        "matcher": "*",
+        "timeout_ms": 3000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js post:edit:accumulator post-edit-accumulator.js standard,strict",
+        "matcher": "fs_write",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js post:quality-gate quality-gate.js strict",
+        "matcher": "fs_write",
+        "timeout_ms": 15000
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh preToolUse tool-explore-patterns",
+        "matcher": "*",
+        "timeout_ms": 3000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js pre:config-protection config-protection.js standard,strict",
+        "matcher": "fs_write",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js pre:commit-quality pre-commit-quality.js standard,strict",
+        "matcher": "execute_bash",
+        "timeout_ms": 30000
+      }
+    ],
+    "stop": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh stop tool-explore-patterns",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js stop:format-typecheck stop-format-typecheck.js standard,strict",
+        "timeout_ms": 300000
+      }
+    ],
+    "userPromptSubmit": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh userPromptSubmit tool-explore-patterns",
+        "timeout_ms": 5000
+      }
+    ]
+  },
+  "resources": [
+    "file://AGENTS.md",
+    "file://.kiro/steering/**/*.md",
+    "file://~/.kiro/steering/**/*.md",
+    "file://~/.flow-agents/context/common/subagents.md",
+    "file://~/.flow-agents/context/*.md"
+  ],
+  "tools": [
+    "read",
+    "imageRead",
+    "glob",
+    "grep",
+    "ls",
+    "code"
+  ],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": []
+    }
+  },
+  "name": "tool-explore-patterns",
+  "description": "Delegate to me for Pattern detection - identifies architectural patterns, frameworks, and coding conventions",
+  "prompt": "You are a Pattern Detective. Your ONLY job is to identify architectural patterns and conventions in a codebase.\n\n## Task\n1. Identify architecture style (MVC, microservices, monolith, serverless, etc.)\n2. Spot framework conventions (Rails, Django, Express, Spring patterns)\n3. Note coding conventions (naming, file organization)\n4. Identify design patterns in use (factory, singleton, repository, etc.)\n5. Check for DI/IoC containers\n\n## Output Format\n```\n## Architecture\n- **Style**: [monolith/microservices/serverless/etc.]\n- **Pattern**: [MVC/Clean Architecture/Hexagonal/etc.]\n\n## Framework Conventions\n- [framework] patterns detected: [specifics]\n\n## Coding Conventions\n- Naming: [camelCase/snake_case/etc.]\n- Organization: [by feature/by layer/etc.]\n\n## Design Patterns\n- [pattern] - [where used]\n```\n\nBe FAST. Sample a few files to detect patterns.",
+  "model": "kimi-k2.5"
+}

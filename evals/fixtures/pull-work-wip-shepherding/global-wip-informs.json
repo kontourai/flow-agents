@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0",
+  "description": "Global WIP informs risk but does not automatically block selected work.",
+  "wip_assessment": {
+    "my_active_work": [],
+    "shepherding_candidates": [],
+    "stale_worktrees": [],
+    "open_prs_by_me": [],
+    "global_conflicts": [
+      {
+        "kind": "pull_request",
+        "owner": "other-user",
+        "ref": "kontourai/flow-agents#99",
+        "files": [
+          "docs/workflow-usage-guide.md"
+        ],
+        "risk": "documentation overlap only"
+      }
+    ],
+    "dependency_impacts": [
+      {
+        "ref": "kontourai/flow-agents#99",
+        "impact": "coordinate docs wording if both PRs edit the same paragraph"
+      }
+    ]
+  },
+  "start_new_work_decision": {
+    "decision": "proceed",
+    "reason": "No personal WIP is blocking. Global WIP is documented as coordination risk, not a dependency or release blocker.",
+    "next_action": "Proceed with isolated worktree and record overlapping doc risk in the handoff."
+  },
+  "worktree_lifecycle": {
+    "path": "~/code/kontourai/flow-agents-example",
+    "branch": "example-branch",
+    "retain_until": "pr_merged",
+    "cleanup_owner": "orchestrator",
+    "cleanup_command": "git worktree remove ~/code/kontourai/flow-agents-example",
+    "cleanup_blocked_by": [
+      "open PR",
+      "pending CI"
+    ]
+  }
+}

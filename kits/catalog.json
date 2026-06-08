@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "kits": [
+    {
+      "id": "builder",
+      "name": "Builder Kit",
+      "path": "kits/builder",
+      "description": "Flow-backed shaping, planning, build, verification, merge readiness, pull request readiness, and learning workflows."
+    }
+  ]
+}

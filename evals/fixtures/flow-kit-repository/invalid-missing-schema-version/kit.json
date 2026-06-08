@@ -1,0 +1,7 @@
+{
+  "id": "missing-schema",
+  "name": "Missing Schema",
+  "flows": [
+    { "id": "missing.schema", "path": "flows/review.flow.json" }
+  ]
+}

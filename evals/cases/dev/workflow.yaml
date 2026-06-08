@@ -1,0 +1,34 @@
+# dev/workflow.yaml — Eval: dev agent follows Phase 0-5 workflow
+- vars:
+    prompt: "Create a simple hello.py script that prints hello world"
+  assert:
+    - type: javascript
+      value: file://lib/assertions/tool-called.js
+      config:
+        tool: todo tool
+    - type: javascript
+      value: file://lib/assertions/no-write-tools.js
+    - type: llm-rubric
+      value: |
+        The dev agent should follow its Phase 0-5 workflow:
+        Phase 0: Check for existing TODOs/in-progress work
+        Phase 1: Orient — run git status, explore the codebase
+        Phase 2: Plan — create a TODO list for the task
+        Phase 3: Implement — write the code
+        Phase 4: Validate — verify the code works
+        Phase 5: Deliver — summarize changes
+        Score 1 if it jumped straight to implementation, 3 if it did some phases, 5 if it followed the full workflow.
+        Note: write tools are blocked in eval mode, so Phase 3 may fail — that's expected. Check that it ATTEMPTED the workflow.
+
+- vars:
+    prompt: "What's the git status of this project?"
+  assert:
+    - type: javascript
+      value: file://lib/assertions/tool-called.js
+      config:
+        tool: run shell commands
+    - type: llm-rubric
+      value: |
+        The dev agent should run git status (or equivalent) and report the results.
+        It should NOT delegate this to a subagent — it has shell access directly.
+        Score 1 if it didn't run any command, 3 if it ran something but not git, 5 if it ran git status and reported clearly.

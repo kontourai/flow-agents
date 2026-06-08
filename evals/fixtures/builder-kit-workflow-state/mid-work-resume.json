@@ -1,0 +1,80 @@
+{
+  "schema_version": "1.0",
+  "description": "Mid-work resume state where artifacts alone identify review-work as the next action.",
+  "state": {
+    "schema_version": "1.0",
+    "task_slug": "builder-kit-mid-work-resume",
+    "status": "in_progress",
+    "phase": "execution",
+    "updated_at": "2026-05-28T16:10:00Z",
+    "artifact_paths": [
+      ".agents/flow-agents/builder-kit-mid-work-resume/builder-kit-probe.json",
+      ".agents/flow-agents/builder-kit-mid-work-resume/builder-kit-mid-work-resume--deliver.md",
+      ".agents/flow-agents/builder-kit-mid-work-resume/handoff.json"
+    ],
+    "next_action": {
+      "status": "continue",
+      "summary": "Execution complete; run review-work before verify-work.",
+      "target_phase": "execution",
+      "target_artifact": ".agents/flow-agents/builder-kit-mid-work-resume/builder-kit-mid-work-resume--deliver.md"
+    }
+  },
+  "probe_record": {
+    "schema_version": "1.0",
+    "task_slug": "builder-kit-mid-work-resume",
+    "current_step": "execute-plan",
+    "next_step": "review-work",
+    "route_reason": "execution_complete -> review-work",
+    "automation_mode": "autonomous-bounded",
+    "recovery_mode": "builder-kit-build-flow",
+    "probe_status": "passed",
+    "probe_artifact_ref": ".agents/flow-agents/builder-kit-mid-work-resume/builder-kit-probe.json",
+    "grouping_decision": {
+      "status": "single-item",
+      "justification": "one selected issue remains the active bounded work item"
+    },
+    "selected_work_items": [
+      {
+        "provider": "github",
+        "ref": "kontourai/flow-agents#68",
+        "title": "Define Builder Kit workflow state and design-probe contracts"
+      }
+    ],
+    "missing_evidence": [
+      "critique.json",
+      "evidence.json"
+    ],
+    "unresolved_questions": [],
+    "accepted_gaps": [],
+    "resume_prompt": "Resume by running review-work for the deliver artifact, then verify-work after critique passes.",
+    "artifact_refs": [
+      ".agents/flow-agents/builder-kit-mid-work-resume/builder-kit-mid-work-resume--deliver-plan.md",
+      ".agents/flow-agents/builder-kit-mid-work-resume/builder-kit-mid-work-resume--deliver.md"
+    ],
+    "planning_readiness": "completed",
+    "expected_modified_files": [
+      "context/contracts/builder-kit-workflow-state-contract.md",
+      "skills/design-probe/SKILL.md",
+      "skills/pickup-probe/SKILL.md",
+      "evals/fixtures/builder-kit-workflow-state/happy-path.json",
+      "evals/fixtures/builder-kit-workflow-state/mid-work-resume.json"
+    ],
+    "conflict_risks": [
+      "do not cross into new pull-work without a fresh Probe"
+    ],
+    "flow_boundary": {
+      "builder_kit_owns": "product-level build-flow coordination and next-step selection",
+      "flow_agents_owns": "workflow artifacts, primitive execution, and evidence harness",
+      "flow_owns": "gate authority semantics"
+    }
+  },
+  "handoff": {
+    "next_steps": [
+      "Run review-work before verify-work; do not skip critique when resuming from execution."
+    ],
+    "blockers": [],
+    "warnings": [
+      "autonomous-bounded mode cannot select new work without fresh pull-work and pickup-probe."
+    ]
+  }
+}

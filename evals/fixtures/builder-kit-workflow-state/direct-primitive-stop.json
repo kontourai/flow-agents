@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "description": "Direct pull-work remains a primitive and stops with next-step guidance instead of auto-continuing.",
+  "state": {
+    "schema_version": "1.0",
+    "task_slug": "direct-primitive-stop",
+    "status": "handoff_ready",
+    "phase": "pickup",
+    "updated_at": "2026-05-29T10:05:00Z",
+    "artifact_paths": [
+      ".agents/flow-agents/direct-primitive-stop/direct-primitive-stop--pull-work.md"
+    ],
+    "next_action": {
+      "status": "needs_user",
+      "summary": "Direct pull-work complete; user may run plan-work or opt into Builder Kit build Probe.",
+      "target_phase": "planning",
+      "target_artifact": ".agents/flow-agents/direct-primitive-stop/direct-primitive-stop--pull-work.md"
+    }
+  },
+  "probe_record": {
+    "schema_version": "1.0",
+    "task_slug": "direct-primitive-stop",
+    "current_step": "pull-work",
+    "next_step": "plan-work",
+    "route_reason": "manual primitive stop -> report expected next step",
+    "automation_mode": "manual",
+    "recovery_mode": "direct-primitive",
+    "probe_status": "missing",
+    "probe_artifact_ref": "",
+    "grouping_decision": {
+      "status": "single-item",
+      "justification": "direct primitive selected one item"
+    },
+    "selected_work_items": [
+      {
+        "provider": "github",
+        "ref": "kontourai/flow-agents#64",
+        "title": "Make Builder Kit product flows guide shape and build skill chaining"
+      }
+    ],
+    "missing_evidence": [
+      "Builder Kit pickup Probe not requested in direct primitive mode"
+    ],
+    "unresolved_questions": [],
+    "accepted_gaps": [],
+    "resume_prompt": "Resume manually by running plan-work, or ask for Builder Kit build to add pickup Probe first.",
+    "artifact_refs": [
+      ".agents/flow-agents/direct-primitive-stop/direct-primitive-stop--pull-work.md"
+    ],
+    "planning_readiness": "manual-next-step",
+    "expected_modified_files": [],
+    "conflict_risks": [],
+    "flow_boundary": {
+      "builder_kit_owns": "product-level build-flow coordination and next-step selection",
+      "flow_agents_owns": "workflow artifacts, primitive execution, and evidence harness",
+      "flow_owns": "gate authority semantics"
+    }
+  }
+}

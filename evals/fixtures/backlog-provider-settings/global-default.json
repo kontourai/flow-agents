@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0",
+  "defaults": {
+    "work_item_provider": {
+      "role": "WorkItemProvider",
+      "kind": "github",
+      "repo": {
+        "owner": "example",
+        "name": "global-default",
+        "url": "https://github.com/example/global-default"
+      },
+      "capabilities": ["issues", "labels"]
+    },
+    "board_provider": {
+      "role": "BoardProvider",
+      "kind": "github",
+      "repo": {
+        "owner": "example",
+        "name": "global-default",
+        "url": "https://github.com/example/global-default"
+      },
+      "board": {
+        "type": "github_project",
+        "owner": "example",
+        "number": 9,
+        "url": "https://github.com/orgs/example/projects/9"
+      },
+      "capabilities": ["projects_boards", "status_fields"]
+    },
+    "selection": {
+      "filters": {
+        "issue_state": "open",
+        "include_labels": ["global-ready"],
+        "ready_statuses": ["ready"],
+        "exclude_statuses": ["blocked", "done"]
+      },
+      "wip_policy": {
+        "prefer_finishing_active_work": true,
+        "active_statuses": ["in_progress"],
+        "block_new_work_when_active_count_exceeds": 1
+      }
+    }
+  }
+}

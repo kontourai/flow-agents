@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "scenario": "artifact_absent",
+  "artifact_kind": "TrustReport",
+  "artifact_ref": "surface-trust://fixtures/missing-trust-report.json",
+  "gate": {
+    "id": "implementation-plan",
+    "kind": "surface.claim"
+  },
+  "claim": {
+    "type": "builder.plan.implementation",
+    "subject": "artifact",
+    "status": "not_verified"
+  },
+  "gap": {
+    "status": "not_verified",
+    "summary": "Configured trust artifact was not readable."
+  }
+}

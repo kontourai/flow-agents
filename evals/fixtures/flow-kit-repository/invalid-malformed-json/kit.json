@@ -1,0 +1,8 @@
+{
+  "schema_version": "1.0",
+  "id": "malformed",
+  "name": "Malformed",
+  "flows": [
+    { "id": "malformed.json", "path": "flows/review.flow.json" }
+  ],
+}

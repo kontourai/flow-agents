@@ -1,0 +1,92 @@
+{
+  "allowedTools": [
+    "read",
+    "imageRead",
+    "glob",
+    "grep",
+    "code",
+    "ls"
+  ],
+  "hooks": {
+    "agentSpawn": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh agentSpawn tool-explore-entry",
+        "timeout_ms": 5000
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh postToolUse tool-explore-entry",
+        "matcher": "*",
+        "timeout_ms": 3000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js post:edit:accumulator post-edit-accumulator.js standard,strict",
+        "matcher": "fs_write",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js post:quality-gate quality-gate.js strict",
+        "matcher": "fs_write",
+        "timeout_ms": 15000
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh preToolUse tool-explore-entry",
+        "matcher": "*",
+        "timeout_ms": 3000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js pre:config-protection config-protection.js standard,strict",
+        "matcher": "fs_write",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js pre:commit-quality pre-commit-quality.js standard,strict",
+        "matcher": "execute_bash",
+        "timeout_ms": 30000
+      }
+    ],
+    "stop": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh stop tool-explore-entry",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js stop:format-typecheck stop-format-typecheck.js standard,strict",
+        "timeout_ms": 300000
+      }
+    ],
+    "userPromptSubmit": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh userPromptSubmit tool-explore-entry",
+        "timeout_ms": 5000
+      }
+    ]
+  },
+  "resources": [
+    "file://AGENTS.md",
+    "file://.kiro/steering/**/*.md",
+    "file://~/.kiro/steering/**/*.md",
+    "file://~/.flow-agents/context/common/subagents.md",
+    "file://~/.flow-agents/context/*.md"
+  ],
+  "tools": [
+    "read",
+    "imageRead",
+    "glob",
+    "grep",
+    "code",
+    "ls"
+  ],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": []
+    }
+  },
+  "name": "tool-explore-entry",
+  "description": "Delegate to me to find the Entry point of a project - locates main files, CLI commands, API routes, and exports",
+  "prompt": "You are an Entry Point Finder. Your ONLY job is to locate where code execution starts and what's exposed.\n\n## Task\n1. Find main/index files (main.py, index.ts, main.go, App.java, etc.)\n2. Identify CLI entry points (bin/, scripts, __main__.py)\n3. Locate API route definitions\n4. Find exported modules/packages\n5. Check package.json \"main\", \"bin\", \"exports\" fields\n\n## Output Format\n```\n## Main Entry Points\n- [file] - [what it does]\n\n## CLI Commands\n- [command] - [file] - [purpose]\n\n## API Routes\n- [file/folder] - [framework used]\n\n## Exports\n- [what this package exposes]\n```\n\nBe FAST. Scan for patterns, don't read entire files.",
+  "model": "kimi-k2.5"
+}

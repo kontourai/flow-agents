@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "description": "Personal WIP blocks starting new implementation because an owned PR/worktree needs shepherding.",
+  "wip_assessment": {
+    "my_active_work": [
+      {
+        "kind": "worktree",
+        "path": "~/code/kontourai/flow-agents-workflow-hardening",
+        "branch": "workflow-hardening-publish-change",
+        "status": "dirty",
+        "summary": "Unpublished publish-change contract/helper work is still active."
+      }
+    ],
+    "shepherding_candidates": [
+      {
+        "kind": "worktree",
+        "ref": "workflow-hardening-publish-change",
+        "next_action": "Decide whether to publish, continue, or abandon before starting another implementation."
+      }
+    ],
+    "stale_worktrees": [],
+    "open_prs_by_me": [],
+    "global_conflicts": [],
+    "dependency_impacts": []
+  },
+  "start_new_work_decision": {
+    "decision": "shepherd_existing",
+    "reason": "Personal WIP is dirty and touches workflow contracts that overlap new workflow work.",
+    "next_action": "Shepherd or explicitly park the active worktree before selecting more implementation work."
+  },
+  "worktree_lifecycle": {
+    "path": "~/code/kontourai/flow-agents-workflow-hardening",
+    "branch": "workflow-hardening-publish-change",
+    "retain_until": "user_override",
+    "cleanup_owner": "user",
+    "cleanup_command": "git worktree remove ~/code/kontourai/flow-agents-workflow-hardening",
+    "cleanup_blocked_by": [
+      "dirty files",
+      "user decision"
+    ]
+  }
+}

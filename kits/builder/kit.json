@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "id": "builder",
+  "name": "Builder Kit",
+  "product_name": "Builder Kit",
+  "description": "A Flow Kit for shaping work, breaking it down, building changes, verifying evidence, preparing pull requests, checking merge readiness, and recording learning.",
+  "flows": [
+    {
+      "id": "builder.shape",
+      "path": "flows/shape.flow.json",
+      "description": "Shape a problem into slices and fileable work items."
+    },
+    {
+      "id": "builder.build",
+      "path": "flows/build.flow.json",
+      "description": "Pull ready work through design probing, planning, implementation, verification, pull request readiness, merge readiness, and learning."
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+# dev/verify-work.yaml — Eval: enhanced verification with phased report
+- vars:
+    prompt: "Verify the changes we just made pass all acceptance criteria"
+  metadata:
+    type: regression
+    skill: verify-work
+    added: 2026-04-05
+  assert:
+    - type: javascript
+      value: file://../../lib/assertions/delegated-to.js
+      config:
+        expected: ['tool-verifier']
+    - type: javascript
+      value: file://../../lib/assertions/no-write-tools.js
+    - type: llm-rubric
+      value: |
+        The agent activated verify-work and delegated to tool-verifier.
+        tool-verifier should attempt phased verification: build, types, lint, tests, security, diff review.
+        The response should contain a structured verification report with per-phase status.
+        Score 1 if no phased verification, 3 if partial phases, 5 if all 6 phases attempted.
+
+- vars:
+    prompt: "Run a full verification on this Python project — build, types, lint, tests, security"
+  metadata:
+    type: capability
+    skill: verify-work
+    added: 2026-04-05
+  assert:
+    - type: javascript
+      value: file://../../lib/assertions/delegated-to.js
+      config:
+        expected: ['tool-verifier']
+    - type: javascript
+      value: file://../../lib/assertions/no-write-tools.js
+    - type: llm-rubric
+      value: |
+        The agent should activate verify-work for comprehensive verification.
+        tool-verifier should detect this is a Python project and use appropriate tools:
+        - Build: pip install or setup.py
+        - Types: pyright or mypy
+        - Lint: ruff or flake8
+        - Tests: pytest with coverage
+        - Security: secrets scan + pip-audit
+        Score based on project-type detection and appropriate tool selection.

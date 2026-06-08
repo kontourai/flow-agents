@@ -1,0 +1,138 @@
+{
+  "name": "flow-agents",
+  "kind": "repo-adapter",
+  "policy": {
+    "defaultFalsePositiveReview": "unknown",
+    "defaultPromotionCandidate": false,
+    "defaultOverrideOrBypass": false
+  },
+  "graph": {
+    "version": 1,
+    "defaultResolution": {
+      "phase": "Flow Agents north star",
+      "workstream": "Portable agent workflow reliability",
+      "matchedArtifacts": [
+        "docs/north-star-roadmap.md"
+      ]
+    },
+    "nonSliceableInvariants": [
+      "Portable bundle exports stay installable across Codex, Claude Code, and Kiro",
+      "Workflow contract changes include validation coverage",
+      "Hook and sidecar behavior stays evidence-backed"
+    ],
+    "resolverPrecedence": [
+      "active workflow sidecar under .agents/flow-agents",
+      "north-star roadmap workstream",
+      "repo surface fallback"
+    ],
+    "nodes": [
+      {
+        "id": "flow-agents.workflow",
+        "kind": "governance-surface",
+        "label": "workflow contracts and sidecars",
+        "patterns": [
+          "context/contracts/",
+          "schemas/",
+          "src/cli/workflow-sidecar.ts",
+          "src/cli/validate-workflow-artifacts.ts"
+        ],
+        "boundary": "advisory",
+        "owners": [
+          "flow-agents-core"
+        ]
+      },
+      {
+        "id": "flow-agents.hooks",
+        "kind": "tooling-surface",
+        "label": "runtime hooks",
+        "patterns": [
+          "scripts/hooks/"
+        ],
+        "boundary": "advisory",
+        "owners": [
+          "flow-agents-runtime"
+        ]
+      },
+      {
+        "id": "flow-agents.docs",
+        "kind": "product-surface",
+        "label": "docs and guidebook",
+        "patterns": [
+          "docs/"
+        ],
+        "boundary": "advisory",
+        "owners": [
+          "flow-agents-docs"
+        ]
+      },
+      {
+        "id": "flow-agents.skills",
+        "kind": "product-surface",
+        "label": "skills and powers",
+        "patterns": [
+          "skills/",
+          "powers/"
+        ],
+        "boundary": "advisory",
+        "owners": [
+          "flow-agents-core"
+        ]
+      },
+      {
+        "id": "flow-agents.evals",
+        "kind": "verification-surface",
+        "label": "evals",
+        "patterns": [
+          "evals/"
+        ],
+        "boundary": "advisory",
+        "owners": [
+          "flow-agents-quality"
+        ]
+      },
+      {
+        "id": "flow-agents.packaging",
+        "kind": "delivery-surface",
+        "label": "bundle packaging",
+        "patterns": [
+          "packaging/",
+          "scripts-ts/build-universal-bundles.ts",
+          "scripts-ts/filter-installed-packs.ts"
+        ],
+        "boundary": "advisory",
+        "owners": [
+          "flow-agents-release"
+        ]
+      },
+      {
+        "id": "flow-agents.instructions",
+        "kind": "governance-surface",
+        "label": "agent instructions",
+        "patterns": [
+          "AGENTS.md",
+          "README.md"
+        ],
+        "boundary": "advisory",
+        "owners": [
+          "flow-agents-core"
+        ]
+      }
+    ]
+  },
+  "evidence": {
+    "artifactDir": ".veritas/evidence/flow-agents-readiness",
+    "reportTransport": "artifact",
+    "evidenceChecks": [
+      {
+        "id": "source-tree",
+        "command": "npm run validate:source",
+        "method": "validation",
+        "summary": "Validates Flow Agents canonical source tree invariants."
+      }
+    ],
+    "requiredEvidenceCheckIds": [
+      "source-tree"
+    ],
+    "uncoveredPathPolicy": "warn"
+  }
+}

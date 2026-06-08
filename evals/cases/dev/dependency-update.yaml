@@ -1,0 +1,16 @@
+# dev/dependency-update.yaml — Eval: dev agent delegates to tool-dependencies-updater
+- vars:
+    prompt: "Check this project for outdated dependencies and security vulnerabilities"
+  assert:
+    - type: javascript
+      value: file://lib/assertions/delegated-to.js
+      config:
+        expected: ['tool-dependencies-updater']
+    - type: javascript
+      value: file://lib/assertions/no-write-tools.js
+    - type: llm-rubric
+      value: |
+        The dev agent should activate the dependency-update skill.
+        It should delegate to tool-dependencies-updater subagent for the actual scanning.
+        It should NOT try to manually check package.json or run npm audit itself — the skill says to delegate.
+        Score 1 if it did manual checking, 3 if it delegated but with poor context, 5 if it delegated with clear scope.

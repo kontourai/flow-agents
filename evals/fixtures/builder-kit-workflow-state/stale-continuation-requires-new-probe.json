@@ -1,0 +1,57 @@
+{
+  "schema_version": "1.0",
+  "description": "Broad continuation after merge can inspect the queue but requires a fresh Probe before planning the next item.",
+  "state": {
+    "schema_version": "1.0",
+    "task_slug": "stale-continuation-requires-new-probe",
+    "status": "pickup_probe_required",
+    "phase": "pickup",
+    "updated_at": "2026-05-29T10:15:00Z",
+    "artifact_paths": [
+      ".agents/flow-agents/stale-continuation-requires-new-probe/builder-kit-probe.json"
+    ],
+    "next_action": {
+      "status": "continue",
+      "summary": "Queue inspected after merge; create fresh pickup Probe for the newly selected item before planning.",
+      "target_phase": "pickup",
+      "target_artifact": ".agents/flow-agents/stale-continuation-requires-new-probe/builder-kit-probe.json"
+    }
+  },
+  "probe_record": {
+    "schema_version": "1.0",
+    "task_slug": "stale-continuation-requires-new-probe",
+    "current_step": "pull-work",
+    "next_step": "pickup-probe",
+    "route_reason": "stale broad continuation requires fresh Probe",
+    "automation_mode": "autonomous-bounded",
+    "recovery_mode": "builder-kit-build-flow",
+    "probe_status": "required",
+    "probe_artifact_ref": ".agents/flow-agents/stale-continuation-requires-new-probe/builder-kit-probe.json",
+    "grouping_decision": {
+      "status": "single-item",
+      "justification": "newly selected work after prior merge"
+    },
+    "selected_work_items": [
+      {
+        "provider": "github",
+        "ref": "kontourai/flow-agents#62",
+        "title": "Prove Codex hooked Builder Kit plan execute review verify loop"
+      }
+    ],
+    "missing_evidence": [
+      "fresh pickup Probe for newly selected item"
+    ],
+    "unresolved_questions": [],
+    "accepted_gaps": [],
+    "resume_prompt": "Resume by completing pickup-probe for the newly selected item; do not reuse the previous merged item's approval.",
+    "artifact_refs": [],
+    "planning_readiness": "not-ready",
+    "expected_modified_files": [],
+    "conflict_risks": [],
+    "flow_boundary": {
+      "builder_kit_owns": "product-level build-flow coordination and next-step selection",
+      "flow_agents_owns": "workflow artifacts, primitive execution, and evidence harness",
+      "flow_owns": "gate authority semantics"
+    }
+  }
+}

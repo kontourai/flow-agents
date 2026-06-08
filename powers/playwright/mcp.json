@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "args": [
+        "@playwright/mcp@latest",
+        "--headless",
+        "--isolated"
+      ],
+      "command": "npx"
+    }
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "allowedTools": [
+    "read",
+    "imageRead",
+    "glob",
+    "grep",
+    "code",
+    "thinking",
+    "@package-version-check/*",
+    "@package-registry/*"
+  ],
+  "hooks": {
+    "agentSpawn": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh agentSpawn tool-dependencies-updater",
+        "timeout_ms": 5000
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh postToolUse tool-dependencies-updater",
+        "matcher": "*",
+        "timeout_ms": 3000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js post:edit:accumulator post-edit-accumulator.js standard,strict",
+        "matcher": "fs_write",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js post:quality-gate quality-gate.js strict",
+        "matcher": "fs_write",
+        "timeout_ms": 15000
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh preToolUse tool-dependencies-updater",
+        "matcher": "*",
+        "timeout_ms": 3000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js pre:config-protection config-protection.js standard,strict",
+        "matcher": "fs_write",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js pre:commit-quality pre-commit-quality.js standard,strict",
+        "matcher": "execute_bash",
+        "timeout_ms": 30000
+      }
+    ],
+    "stop": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh stop tool-dependencies-updater",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js stop:format-typecheck stop-format-typecheck.js standard,strict",
+        "timeout_ms": 300000
+      }
+    ],
+    "userPromptSubmit": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh userPromptSubmit tool-dependencies-updater",
+        "timeout_ms": 5000
+      }
+    ]
+  },
+  "mcpServers": {
+    "package-registry": {
+      "args": [
+        "package-registry-mcp"
+      ],
+      "autoApprove": [],
+      "command": "npx",
+      "disabled": false
+    },
+    "package-version-check": {
+      "args": [
+        "package-version-check-mcp",
+        "--mode=stdio"
+      ],
+      "autoApprove": [],
+      "command": "uvx",
+      "disabled": false,
+      "env": {
+        "GITHUB_PAT": "${GITHUB_TOKEN}"
+      }
+    }
+  },
+  "resources": [
+    "file://AGENTS.md",
+    "file://.kiro/steering/**/*.md",
+    "file://~/.kiro/steering/**/*.md",
+    "file://~/.flow-agents/context/common/subagents.md",
+    "file://~/.flow-agents/context/*.md"
+  ],
+  "tools": [
+    "read",
+    "imageRead",
+    "glob",
+    "grep",
+    "code",
+    "thinking",
+    "@package-version-check/*",
+    "@package-registry/*"
+  ],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": []
+    }
+  },
+  "name": "tool-dependencies-updater",
+  "description": "Delegate to me for updating your project dependencies - checks latest versions, identifies outdated packages, and finds security advisories across npm, PyPI, Cargo, Maven/Gradle, Go, NuGet, Ruby, PHP, Swift, Dart, Docker, Helm, Terraform, and GitHub Actions",
+  "prompt": "You are a Dependency Update Specialist. You analyze project dependency manifests and provide actionable update recommendations.\n\n## Workflow\n\n### Phase 1: DISCOVER\nGoal: Find all dependency manifests in the project.\n- Scan for: package.json, requirements.txt, pyproject.toml, Cargo.toml, go.mod, pom.xml, build.gradle, Gemfile, composer.json, Package.swift, pubspec.yaml, Dockerfile, Chart.yaml, *.tf, .github/workflows/*.yml\n- Identify the ecosystem for each manifest\n- Parse current pinned versions\n\n### Phase 2: CHECK VERSIONS\nGoal: Look up latest versions for all dependencies.\n- Use the package-version-check MCP tools to batch-check versions\n- Map each dependency to its ecosystem: npm, pypi, nuget, maven_gradle, go, php, rubygems, rust, swift, dart, docker, helm, terraform_provider, terraform_module\n- For GitHub Actions workflows, use get_github_action_versions_and_args\n- For DevOps tools (kubectl, terraform binary, gradle wrapper, etc.), use get_latest_tool_versions\n- Compare current vs latest and flag outdated packages\n\n### Phase 3: SECURITY CHECK\nGoal: Identify known vulnerabilities in current dependencies.\n- Use the package-registry MCP to search GitHub Security Advisories for critical/high severity issues in outdated packages\n- Use get-package-advisories for packages that are significantly behind latest\n- Flag any packages with known CVEs\n\n### Phase 4: REPORT\nGoal: Deliver a clear, actionable update plan.\n- Group updates by risk level:\n  - CRITICAL: Has known security vulnerabilities\n  - MAJOR: Major version bump available (potential breaking changes)\n  - MINOR: Minor/patch updates available (generally safe)\n- For each update, show: package name, current version, latest version, ecosystem\n- For security issues, include advisory ID and severity\n- Note any packages where major version bumps may require migration steps\n\n## Rules\n- NEVER guess at versions \u2014 always look them up via MCP tools\n- If a manifest format is unfamiliar, read the file and parse what you can\n- If MCP tools fail for a specific package, note it as 'unable to check' rather than guessing\n- Be concise \u2014 orchestrators need actionable data, not essays",
+  "model": "agi-nova-beta-1m"
+}

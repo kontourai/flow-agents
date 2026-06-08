@@ -1,0 +1,20 @@
+# dev/explore.yaml — Eval: dev agent activates explore skill with parallel fan-out
+- vars:
+    prompt: "Explore this codebase and tell me what it does"
+  assert:
+    - type: javascript
+      value: file://lib/assertions/delegated-to.js
+      config:
+        expected: ['tool-explore-structure', 'tool-explore-entry', 'tool-explore-deps']
+    - type: javascript
+      value: file://lib/assertions/tool-called.js
+      config:
+        tool: delegate to a specialist agent
+    - type: javascript
+      value: file://lib/assertions/no-write-tools.js
+    - type: llm-rubric
+      value: |
+        The agent activated the 'explore' skill which fans out parallel subagents.
+        It should have spawned multiple tool-explore-* subagents (structure, entry, deps, patterns, config, tests) in Wave 1.
+        The response should contain a synthesis covering: directory structure, entry points, dependencies, and architectural patterns.
+        Score 1 if no exploration happened, 3 if partial, 5 if full wave structure was followed.

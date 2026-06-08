@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>{{ page.title | default: site.title }}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Newsreader:opsz,wght@6..72,500;6..72,650&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,650&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ '/assets/site.css' | relative_url }}">
+  </head>
+  <body>
+    <script>
+      (function () {
+        var stored = localStorage.getItem("flow-agents-docs-theme");
+        var preferred = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.dataset.theme = stored || preferred;
+      })();
+    </script>
+    <div class="site-shell">
+      <aside class="site-rail" aria-label="Documentation">
+        <a class="brand" href="{{ '/' | relative_url }}">
+          <span class="brand-mark" aria-hidden="true">F</span>
+          <span>
+            <span class="brand-name">Flow Agents</span>
+            <span class="brand-kicker">Agent workflows</span>
+          </span>
+        </a>
+        <nav class="doc-nav">
+          <a href="{{ '/' | relative_url }}">Overview</a>
+          <a href="{{ '/workflow-usage-guide.html' | relative_url }}">Quick Start</a>
+          <a href="{{ '/skills-map.html' | relative_url }}">Workflow Map</a>
+          <a href="{{ '/sandbox-policy.html' | relative_url }}">Execution Safety</a>
+          <a href="{{ '/veritas-integration.html' | relative_url }}">Governance Evidence</a>
+          <a href="{{ '/workflow-usage-guide.html' | relative_url }}">Usage Guide</a>
+          <a href="{{ '/workflow-eval-strategy.html' | relative_url }}">Eval Strategy</a>
+          <a href="{{ '/context-map.html' | relative_url }}">Developer Reference</a>
+        </nav>
+        <button class="theme-toggle" type="button" data-theme-toggle aria-label="Toggle color theme">
+          <span class="theme-toggle__track" aria-hidden="true">
+            <span class="theme-toggle__thumb"></span>
+          </span>
+          <span data-theme-label>Theme</span>
+        </button>
+      </aside>
+      <main class="doc-main">
+        <div class="doc-topbar">
+          <a class="mobile-brand" href="{{ '/' | relative_url }}">Flow Agents</a>
+          <button class="theme-toggle theme-toggle--compact" type="button" data-theme-toggle aria-label="Toggle color theme">
+            <span class="theme-toggle__track" aria-hidden="true">
+              <span class="theme-toggle__thumb"></span>
+            </span>
+            <span data-theme-label>Theme</span>
+          </button>
+        </div>
+        <article class="doc-content">
+          {{ content }}
+        </article>
+      </main>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+    <script src="{{ '/assets/site.js' | relative_url }}" defer></script>
+  </body>
+</html>

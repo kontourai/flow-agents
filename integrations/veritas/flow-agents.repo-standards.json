@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "name": "flow-agents-governance",
+  "description": "Local Veritas repo standards for Flow Agents development. This stays optional and adapter-boundary scoped.",
+  "rules": [
+    {
+      "id": "agent-instructions-remain-flow-agents-source",
+      "kind": "required-pattern",
+      "classification": "hard-invariant",
+      "stage": "warn",
+      "message": "Flow Agents source instructions must keep the canonical source-of-truth framing.",
+      "owner": "flow-agents-core",
+      "rollback_switch": null,
+      "match": {
+        "files": [
+          "AGENTS.md"
+        ],
+        "pattern": "Flow Agents Source"
+      },
+      "explain": {
+        "summary": "Agent instruction files are governance surface. They must continue to identify this repo as the canonical Flow Agents source.",
+        "mustDo": [
+          "Keep AGENTS.md present and scoped to Flow Agents source behavior.",
+          "Route instruction changes through normal workflow evidence."
+        ],
+        "mustNotDo": [
+          "Replace source-of-truth guidance with generated bundle instructions."
+        ],
+        "contextLinks": [
+          "docs/operating-layers.md",
+          "context/contracts/governance-adapter-contract.md"
+        ]
+      }
+    },
+    {
+      "id": "workflow-contract-changes-require-evals",
+      "kind": "diff-required",
+      "classification": "promotable-policy",
+      "stage": "warn",
+      "message": "Workflow contract or sidecar schema changes should include eval coverage.",
+      "owner": "flow-agents-quality",
+      "rollback_switch": null,
+      "match": {
+        "if-changed": "{context/contracts/,schemas/,src/cli/workflow-sidecar.ts,src/cli/validate-workflow-artifacts.ts}",
+        "then-require": "evals/"
+      },
+      "explain": {
+        "summary": "Workflow state is a reliability boundary. Contract, schema, and sidecar writer changes need executable coverage.",
+        "mustDo": [
+          "Add or update static/integration evals when workflow contracts or sidecar schemas change.",
+          "Record eval evidence in Flow Agents evidence sidecars."
+        ],
+        "contextLinks": [
+          "docs/workflow-usage-guide.md"
+        ]
+      }
+    },
+    {
+      "id": "hook-changes-require-hook-evals",
+      "kind": "diff-required",
+      "classification": "promotable-policy",
+      "stage": "warn",
+      "message": "Runtime hook changes should include hook influence or steering eval updates.",
+      "owner": "flow-agents-runtime",
+      "rollback_switch": null,
+      "match": {
+        "if-changed": "scripts/hooks/",
+        "then-require": "evals/"
+      },
+      "explain": {
+        "summary": "Hook behavior is a just-in-time guidance boundary. Hook changes need eval evidence that guidance still reaches agents or fails honestly.",
+        "mustDo": [
+          "Update hook integration or hook-influence cases when runtime hook behavior changes.",
+          "Document runtime gaps instead of implying live influence."
+        ],
+        "contextLinks": [
+          "evals/fixtures/hook-influence/cases.json"
+        ]
+      }
+    }
+  ]
+}

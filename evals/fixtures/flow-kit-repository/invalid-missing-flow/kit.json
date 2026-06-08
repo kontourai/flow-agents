@@ -1,0 +1,8 @@
+{
+  "schema_version": "1.0",
+  "id": "missing-flow",
+  "name": "Missing Flow",
+  "flows": [
+    { "id": "missing.flow", "path": "flows/missing.flow.json" }
+  ]
+}

@@ -1,0 +1,31 @@
+dist/
+build/
+_site/
+test-results/
+
+# Local agent/session state
+.agents/*
+!.agents/flow-agents/
+.agents/flow-agents/*
+!.agents/flow-agents/changes/
+!.agents/flow-agents/changes/**
+.claude/
+.ai/
+.omx/
+.telemetry/
+.promptfoo/
+.veritas/
+.surface/runs/
+
+# Dependency installs and build caches
+node_modules/
+__pycache__/
+*.py[cod]
+
+# Generated eval output
+evals/results/*.json
+evals/results/reports/
+
+# OS/editor noise
+.DS_Store
+*.log

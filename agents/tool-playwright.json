@@ -1,0 +1,145 @@
+{
+  "allowedTools": [
+    "read",
+    "imageRead",
+    "@playwright/browser_close",
+    "@playwright/browser_resize",
+    "@playwright/browser_console_messages",
+    "@playwright/browser_handle_dialog",
+    "@playwright/browser_evaluate",
+    "@playwright/browser_file_upload",
+    "@playwright/browser_fill_form",
+    "@playwright/browser_install",
+    "@playwright/browser_press_key",
+    "@playwright/browser_type",
+    "@playwright/browser_navigate",
+    "@playwright/browser_navigate_back",
+    "@playwright/browser_network_requests",
+    "@playwright/browser_run_code",
+    "@playwright/browser_take_screenshot",
+    "@playwright/browser_snapshot",
+    "@playwright/browser_click",
+    "@playwright/browser_drag",
+    "@playwright/browser_hover",
+    "@playwright/browser_select_option",
+    "@playwright/browser_tabs",
+    "@playwright/browser_wait_for",
+    "ls"
+  ],
+  "hooks": {
+    "agentSpawn": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh agentSpawn tool-playwright",
+        "timeout_ms": 5000
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh postToolUse tool-playwright",
+        "matcher": "*",
+        "timeout_ms": 3000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js post:edit:accumulator post-edit-accumulator.js standard,strict",
+        "matcher": "fs_write",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js post:quality-gate quality-gate.js strict",
+        "matcher": "fs_write",
+        "timeout_ms": 15000
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh preToolUse tool-playwright",
+        "matcher": "*",
+        "timeout_ms": 3000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js pre:config-protection config-protection.js standard,strict",
+        "matcher": "fs_write",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js pre:commit-quality pre-commit-quality.js standard,strict",
+        "matcher": "execute_bash",
+        "timeout_ms": 30000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js pre:report-only-guard report-only-guard.js standard,strict",
+        "matcher": "fs_write",
+        "timeout_ms": 3000
+      }
+    ],
+    "stop": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh stop tool-playwright",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js stop:format-typecheck stop-format-typecheck.js standard,strict",
+        "timeout_ms": 300000
+      }
+    ],
+    "userPromptSubmit": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh userPromptSubmit tool-playwright",
+        "timeout_ms": 5000
+      }
+    ]
+  },
+  "mcpServers": {
+    "playwright": {
+      "args": [
+        "@playwright/mcp@latest",
+        "--headless",
+        "--isolated"
+      ],
+      "command": "npx"
+    }
+  },
+  "resources": [
+    "file://AGENTS.md",
+    "file://.kiro/steering/**/*.md",
+    "file://~/.kiro/steering/**/*.md",
+    "file://~/.flow-agents/context/common/subagents.md",
+    "file://~/.flow-agents/context/*.md"
+  ],
+  "tools": [
+    "read",
+    "imageRead",
+    "@playwright/browser_close",
+    "@playwright/browser_resize",
+    "@playwright/browser_console_messages",
+    "@playwright/browser_handle_dialog",
+    "@playwright/browser_evaluate",
+    "@playwright/browser_file_upload",
+    "@playwright/browser_fill_form",
+    "@playwright/browser_install",
+    "@playwright/browser_press_key",
+    "@playwright/browser_type",
+    "@playwright/browser_navigate",
+    "@playwright/browser_navigate_back",
+    "@playwright/browser_network_requests",
+    "@playwright/browser_run_code",
+    "@playwright/browser_take_screenshot",
+    "@playwright/browser_snapshot",
+    "@playwright/browser_click",
+    "@playwright/browser_drag",
+    "@playwright/browser_hover",
+    "@playwright/browser_select_option",
+    "@playwright/browser_tabs",
+    "@playwright/browser_wait_for",
+    "ls"
+  ],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": []
+    }
+  },
+  "name": "tool-playwright",
+  "description": "Delegate to me for browser automation, testing, and debugging - loading real pages, testing navigation, checking accessibility via structured snapshots, evaluating scripts, and visual verification. Anything that would otherwise require a browser. Do NOT use for general web search or fetching content",
+  "prompt": "You interact with a browser through Playwright for real browser testing and frontend debugging.\n\n## When to Use Me\n- Loading and navigating real web pages\n- Testing frontend accessibility via structured accessibility snapshots (ARIA, tab order, roles)\n- Evaluating JavaScript in a live browser context\n- Taking screenshots for visual verification\n- Inspecting page content, forms, and interactive elements\n- Filling forms, clicking buttons, and testing user flows\n- Generating and validating Playwright test code\n\n## NOT For\n- General web search or fetching page content for research \u2014 decline and suggest a research/web agent instead\n- Scraping data from websites\n\n## Screenshot Verification\nWhen you take a screenshot with `browser_screenshot`, ALWAYS read the saved image file back using the `Read` tool to visually confirm what the page actually looks like. Don't just take the screenshot and assume it worked \u2014 look at it. This catches rendering issues, unexpected states, and layout problems that accessibility snapshots miss.\n\n## Tips\n- Use accessibility snapshots (`browser_snapshot`) as the primary way to understand page structure \u2014 it's more token-efficient than screenshots\n- Use `browser_navigate` to load pages, then `browser_snapshot` to inspect\n- For interactions, prefer `browser_click`, `browser_type`, `browser_select_option` over raw JS evaluation\n- When visual verification matters, take a screenshot AND read it back to confirm\n- Close the browser when done",
+  "model": "claude-sonnet-4.6-1m"
+}

@@ -1,0 +1,170 @@
+{
+  "canonical_copy_dirs": [
+    "agent-cards",
+    "context",
+    "docs",
+    "evals",
+    "kits",
+    "packaging",
+    "powers",
+    "prompts",
+    "scripts",
+    "schemas",
+    "skills"
+  ],
+  "optional_copy_dirs": [],
+  "source_root_aliases": [
+    "~/.flow-agents",
+    "$HOME/.flow-agents"
+  ],
+  "kiro": {
+    "path_token": "__KIRO_PACKAGE_ROOT__",
+    "install_default": "~/.flow-agents"
+  },
+  "claude_code": {
+    "task_dir": ".agents/flow-agents",
+    "permissions": {
+      "defaultMode": "auto"
+    },
+    "skipDangerousModePermissionPrompt": true
+  },
+  "codex": {
+    "task_dir": ".agents/flow-agents",
+    "settings": {
+      "approvals_reviewer": "auto_review"
+    },
+    "tui": {
+      "status_line": [
+        "model-with-reasoning",
+        "project-name",
+        "git-branch",
+        "task-progress",
+        "context-remaining",
+        "run-state"
+      ]
+    },
+    "features": {
+      "multi_agent": true,
+      "js_repl": true,
+      "hooks": true,
+      "apps": false,
+      "plugins": false
+    },
+    "excluded_agents": [
+      "dev"
+    ],
+    "profiles": {
+      "kdev": {
+        "model": "gpt-5.5",
+        "model_reasoning_effort": "medium",
+        "approval_policy": "on-request",
+        "sandbox_mode": "workspace-write",
+        "web_search": "cached",
+        "developer_instructions": "You are operating in Flow Agents dev mode. You write and modify code, validate it works, and deliver clean results. You own the code; specialist tool-* subagents provide bounded context, review, verification, or parallel implementation support. Use deliver for feature work, fix-bug for bug fixes, plan-work for planning, execute-plan for approved plans, review-work for critique, verify-work for evidence collection, search-first for unfamiliar external APIs, and context-budget when context grows. When a workflow skill or shared contract names a delegate, that delegate is a required gate, not an optional optimization: plan-work must delegate to tool-planner, execute-plan to tool-worker, review-work to tool-code-reviewer and conditionally tool-security-reviewer, verify-work to tool-verifier, and browser/UI verification to tool-playwright when those agents are available. Attempt required delegation even in read-only or partially blocked environments; if blocked, report the blocked gate as NOT_VERIFIED or incomplete with evidence instead of replacing it with a local summary. In progress and final reports, name exact delegate ids such as tool-planner, tool-worker, tool-code-reviewer, tool-security-reviewer, tool-verifier, and tool-playwright so text-only evals remain auditable when telemetry is unavailable. In Codex, required specialist delegation must pass the role through the spawn tool, for example agent_type=tool-worker; do not spawn unnamed/default subagents for Flow Agents worker, planner, reviewer, verifier, or Playwright gates."
+      },
+      "kdev-br": {
+        "model_provider": "amazon-bedrock",
+        "model": "amazon.nova-pro-v1:0",
+        "model_reasoning_effort": "medium",
+        "approval_policy": "on-request",
+        "sandbox_mode": "workspace-write",
+        "web_search": "cached",
+        "developer_instructions": "You are operating in Flow Agents dev mode on Amazon Bedrock. You write and modify code, validate it works, and deliver clean results. You own the code; specialist tool-* subagents provide bounded context, review, verification, or parallel implementation support. Use deliver for feature work, fix-bug for bug fixes, plan-work for planning, execute-plan for approved plans, review-work for critique, verify-work for evidence collection, search-first for unfamiliar external APIs, and context-budget when context grows. When a workflow skill or shared contract names a delegate, that delegate is a required gate, not an optional optimization: plan-work must delegate to tool-planner, execute-plan to tool-worker, review-work to tool-code-reviewer and conditionally tool-security-reviewer, verify-work to tool-verifier, and browser/UI verification to tool-playwright when those agents are available. Attempt required delegation even in read-only or partially blocked environments; if blocked, report the blocked gate as NOT_VERIFIED or incomplete with evidence instead of replacing it with a local summary. In progress and final reports, name exact delegate ids such as tool-planner, tool-worker, tool-code-reviewer, tool-security-reviewer, tool-verifier, and tool-playwright so text-only evals remain auditable when telemetry is unavailable. In Codex, required specialist delegation must pass the role through the spawn tool, for example agent_type=tool-worker; do not spawn unnamed/default subagents for Flow Agents worker, planner, reviewer, verifier, or Playwright gates."
+      }
+    },
+    "model_providers": {
+      "amazon-bedrock": {
+        "aws": {
+          "region": "us-east-1"
+        }
+      }
+    }
+  },
+  "tool_name_map": {
+    "read": "Read",
+    "imageRead": "Read",
+    "code": "Edit",
+    "write": "Write",
+    "shell": "Bash",
+    "ls": "Bash",
+    "grep": "Grep",
+    "glob": "Glob",
+    "subagent": "Task",
+    "web_fetch": "WebFetch",
+    "web_search": "WebSearch"
+  },
+  "claude_model_map": {
+    "claude-opus": "opus",
+    "claude-sonnet": "sonnet",
+    "default": "sonnet"
+  },
+  "codex_model_map": {
+    "claude-opus": "gpt-5.5",
+    "claude-sonnet": "gpt-5.5",
+    "kimi-k2.5": "gpt-5.3-codex-spark",
+    "agi-nova-beta-1m": "gpt-5.4-mini",
+    "default": "gpt-5.4-mini"
+  },
+  "codex_reasoning_map": {
+    "claude-opus": "high",
+    "claude-sonnet": "low",
+    "kimi-k2.5": "low",
+    "agi-nova-beta-1m": "medium",
+    "default": "medium"
+  },
+  "target_substitutions": {
+    "common": [],
+    "claude_code": [
+      {
+        "from": "Claude Code",
+        "to": "Claude Code"
+      },
+      {
+        "from": "todo tool",
+        "to": "todo tool"
+      },
+      {
+        "from": "delegate to a specialist agent",
+        "to": "delegate to a specialist agent"
+      },
+      {
+        "from": "run shell commands",
+        "to": "run shell commands"
+      },
+      {
+        "from": "read files",
+        "to": "read files"
+      },
+      {
+        "from": "write files",
+        "to": "write files"
+      }
+    ],
+    "codex": [
+      {
+        "from": "Claude Code",
+        "to": "Codex"
+      },
+      {
+        "from": "todo tool",
+        "to": "todo tool"
+      },
+      {
+        "from": "delegate to a specialist agent",
+        "to": "delegate to a native subagent"
+      },
+      {
+        "from": "run shell commands",
+        "to": "run shell commands"
+      },
+      {
+        "from": "read files",
+        "to": "read files"
+      },
+      {
+        "from": "write files",
+        "to": "write files"
+      }
+    ]
+  }
+}

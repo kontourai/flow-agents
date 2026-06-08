@@ -1,0 +1,26 @@
+{
+  "id": "example.review",
+  "version": "1.0",
+  "steps": [
+    { "id": "review", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "gates": {
+    "review-gate": {
+      "step": "review",
+      "expects": [
+        {
+          "id": "review-evidence",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "Review evidence has been recorded.",
+          "claim": {
+            "type": "example.review.evidence",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    }
+  }
+}

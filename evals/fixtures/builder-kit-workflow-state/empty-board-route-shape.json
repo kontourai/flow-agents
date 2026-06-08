@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "description": "Empty or non-executable board state routes back to Builder Kit shape instead of implementation.",
+  "state": {
+    "schema_version": "1.0",
+    "task_slug": "empty-board-route-shape",
+    "status": "blocked",
+    "phase": "pickup",
+    "updated_at": "2026-05-29T10:20:00Z",
+    "artifact_paths": [
+      ".agents/flow-agents/empty-board-route-shape/empty-board-route-shape--pull-work.md"
+    ],
+    "next_action": {
+      "status": "needs_user",
+      "summary": "No executable backlog item is ready; route to Builder Kit shape / idea-to-backlog.",
+      "target_phase": "shaping",
+      "target_artifact": ".agents/flow-agents/empty-board-route-shape/empty-board-route-shape--idea-to-backlog.md"
+    }
+  },
+  "probe_record": {
+    "schema_version": "1.0",
+    "task_slug": "empty-board-route-shape",
+    "current_step": "pull-work",
+    "next_step": "builder-shape",
+    "route_reason": "empty board -> builder-shape",
+    "automation_mode": "guided",
+    "recovery_mode": "builder-kit-build-flow",
+    "probe_status": "blocked",
+    "probe_artifact_ref": ".agents/flow-agents/empty-board-route-shape/empty-board-route-shape--pull-work.md",
+    "grouping_decision": {
+      "status": "empty-board",
+      "justification": "no ready executable work items found"
+    },
+    "selected_work_items": [],
+    "missing_evidence": [
+      "executable backlog item"
+    ],
+    "unresolved_questions": [
+      "What idea should be shaped into executable backlog next?"
+    ],
+    "accepted_gaps": [],
+    "resume_prompt": "Resume by running Builder Kit shape / idea-to-backlog to create executable backlog work.",
+    "artifact_refs": [
+      ".agents/flow-agents/empty-board-route-shape/empty-board-route-shape--pull-work.md"
+    ],
+    "planning_readiness": "blocked",
+    "expected_modified_files": [],
+    "conflict_risks": [],
+    "flow_boundary": {
+      "builder_kit_owns": "product-level build-flow coordination and next-step selection",
+      "flow_agents_owns": "workflow artifacts, primitive execution, and evidence harness",
+      "flow_owns": "gate authority semantics"
+    }
+  }
+}

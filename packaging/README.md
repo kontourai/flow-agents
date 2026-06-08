@@ -1,0 +1,49 @@
+# Universal Packaging
+
+This directory defines the cross-harness packaging layer for Flow Agents.
+
+## Canonical Source
+
+The repo root stays canonical:
+
+- `agents/` contains source Kiro-style agent specs: the `dev` workflow surface plus specialist `tool-*` agents.
+- `agent-cards/` contains discovery metadata for routable orchestrators.
+- `skills/`, `context/`, `powers/`, `prompts/`, `scripts/`, and `evals/` remain shared content.
+- `packaging/manifest.json` describes target-specific copy rules, profile definitions, substitutions, and model/provider mappings.
+- Generated bundles live under `dist/`, are intentionally untracked, and can be recreated at any time.
+
+## Targets
+
+- `dist/kiro/` keeps native Kiro JSON agents and rewrites path-bound config through the install token.
+- `dist/claude-code/` exports `.claude/agents/*.md` and `.claude/skills/*/SKILL.md`.
+- `dist/codex/` exports `.codex/agents/*.toml`, `.codex/skills/*/SKILL.md`, and profile config for `kdev` and its Bedrock variant.
+
+All targets also receive shared canonical directories where supported: `context/`, `powers/`, `prompts/`, `scripts/`, and `evals/`.
+
+## Validation And Build
+
+Run the source validator before rebuilding:
+
+```bash
+npm run validate:source --
+```
+
+Rebuild every target bundle:
+
+```bash
+npm run build:bundles --
+```
+
+Run static package checks after rebuilding:
+
+```bash
+bash evals/run.sh static
+```
+
+For telemetry and shell integration coverage:
+
+```bash
+bash evals/run.sh integration
+```
+
+The builder is stdlib-only so the package stays dependency-free.

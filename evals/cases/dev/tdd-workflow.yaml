@@ -1,0 +1,48 @@
+# dev/tdd-workflow.yaml — Eval: TDD workflow activation and RED-GREEN-REFACTOR
+- vars:
+    prompt: "Use TDD to build a URL shortener module with tests first"
+  metadata:
+    type: capability
+    skill: tdd-workflow
+    added: 2026-04-05
+  assert:
+    - type: javascript
+      value: file://../../lib/assertions/delegated-to.js
+      config:
+        expected: ['tool-planner']
+    - type: javascript
+      value: file://../../lib/assertions/tool-called.js
+      config:
+        tool: delegate to a specialist agent
+    - type: javascript
+      value: file://../../lib/assertions/no-write-tools.js
+    - type: llm-rubric
+      value: |
+        The agent activated the tdd-workflow skill (not deliver).
+        It should have:
+        1. Created a session file with type: tdd
+        2. Delegated to tool-planner with test-first constraints
+        3. Plan should show tests in Wave 1, implementation in Wave 2
+        Score 1 if it used deliver or coded directly, 3 if partial TDD, 5 if full TDD workflow.
+
+- vars:
+    prompt: "Build a calculator library with 80% test coverage using test-driven development"
+  metadata:
+    type: capability
+    skill: tdd-workflow
+    added: 2026-04-05
+  assert:
+    - type: javascript
+      value: file://../../lib/assertions/delegated-to.js
+      config:
+        expected: ['tool-planner']
+    - type: javascript
+      value: file://../../lib/assertions/no-write-tools.js
+    - type: llm-rubric
+      value: |
+        The agent recognized "test-driven development" and activated tdd-workflow.
+        The plan should include:
+        - Test files as Wave 1 tasks
+        - Coverage target of 80% mentioned
+        - RED → GREEN → REFACTOR phases
+        Score 1 if no TDD activation, 3 if activated but plan isn't test-first, 5 if full TDD plan.

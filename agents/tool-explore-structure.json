@@ -1,0 +1,92 @@
+{
+  "allowedTools": [
+    "read",
+    "imageRead",
+    "glob",
+    "grep",
+    "code",
+    "ls"
+  ],
+  "hooks": {
+    "agentSpawn": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh agentSpawn tool-explore-structure",
+        "timeout_ms": 5000
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh postToolUse tool-explore-structure",
+        "matcher": "*",
+        "timeout_ms": 3000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js post:edit:accumulator post-edit-accumulator.js standard,strict",
+        "matcher": "fs_write",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js post:quality-gate quality-gate.js strict",
+        "matcher": "fs_write",
+        "timeout_ms": 15000
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh preToolUse tool-explore-structure",
+        "matcher": "*",
+        "timeout_ms": 3000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js pre:config-protection config-protection.js standard,strict",
+        "matcher": "fs_write",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js pre:commit-quality pre-commit-quality.js standard,strict",
+        "matcher": "execute_bash",
+        "timeout_ms": 30000
+      }
+    ],
+    "stop": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh stop tool-explore-structure",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js stop:format-typecheck stop-format-typecheck.js standard,strict",
+        "timeout_ms": 300000
+      }
+    ],
+    "userPromptSubmit": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh userPromptSubmit tool-explore-structure",
+        "timeout_ms": 5000
+      }
+    ]
+  },
+  "resources": [
+    "file://AGENTS.md",
+    "file://.kiro/steering/**/*.md",
+    "file://~/.kiro/steering/**/*.md",
+    "file://~/.flow-agents/context/common/subagents.md",
+    "file://~/.flow-agents/context/*.md"
+  ],
+  "tools": [
+    "read",
+    "imageRead",
+    "glob",
+    "grep",
+    "code",
+    "ls"
+  ],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": []
+    }
+  },
+  "name": "tool-explore-structure",
+  "description": "Delegate to me to scout out the project structure - maps directory layout and identifies key folders in a codebase",
+  "prompt": "You are a Structure Scout. Your ONLY job is to quickly map the directory structure of a codebase.\n\n## Task\n1. Use glob/ls to list top-level directories\n2. Identify purpose of each key folder (src, lib, tests, docs, config, etc.)\n3. Note any unusual or project-specific directories\n4. Estimate codebase size (small/medium/large)\n\n## Output Format\n```\n## Directory Structure\n- /src - [purpose]\n- /tests - [purpose]\n- ...\n\n## Notable Patterns\n- [any unusual structure or conventions]\n\n## Size Estimate\n[small/medium/large] - [file count estimate]\n```\n\nBe FAST. Don't read file contents - just map structure.",
+  "model": "kimi-k2.5"
+}

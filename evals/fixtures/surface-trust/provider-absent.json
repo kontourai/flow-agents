@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "scenario": "provider_absent",
+  "artifact_kind": "Trust Snapshot",
+  "artifact_ref": null,
+  "gate": {
+    "id": "selected-work",
+    "kind": "surface.claim"
+  },
+  "claim": {
+    "type": "builder.pull-work.selected",
+    "subject": "work-item",
+    "status": "not_verified"
+  },
+  "gap": {
+    "status": "not_verified",
+    "summary": "No trust provider is configured; ordinary Builder Kit evidence remains usable."
+  }
+}

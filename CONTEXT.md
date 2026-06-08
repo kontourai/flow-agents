@@ -1,0 +1,300 @@
+# Flow Agents Context
+
+## Glossary
+
+### Flow Agents
+
+An operating layer that helps agents route natural user requests into the right procedures, tools, state, evidence, knowledge, and follow-ups without requiring the user to remember implementation details. Flow Agents is a product that applies Flow and Veritas discipline inside the agent tools people already use.
+
+### User
+
+The person asking Flow Agents for an outcome. Use `end user` only when contrasting the user's vocabulary with Flow Agents internals.
+
+### Work Mode
+
+A user-facing category of intent, such as Build, Understand, Capture, Prepare, or Follow Up. Work modes help Flow Agents decide which operating path to use.
+
+### Build
+
+The work mode for creating, changing, fixing, verifying, publishing, or shipping software and other buildable artifacts.
+
+### Builder Kit
+
+The first Kontour-authored Flow Kit for opinionated AI-assisted building work. The Builder Kit owns shaping, probing, planning, execution, verification, merge readiness, PR readiness, and learning workflows.
+_Avoid_: Development pack, generic coding workflow
+
+### Initiative
+
+A larger product, platform, governance, or dogfood outcome that groups related executable work. Initiatives are optional first-class Kontour Resource Contracts for planning and traceability, not executable units. Initiatives explain why related work belongs together; dependency links explain what must happen before other work can proceed.
+_Avoid_: Epic, Feature as the generic term
+
+### Understand
+
+The work mode for explaining what exists, researching context, comparing options, or making accumulated information understandable.
+
+### Capture
+
+The work mode for turning raw input into durable memory, such as notes, decisions, meetings, transcripts, source material, and useful pointers.
+
+### Prepare
+
+The work mode for getting ready for a meeting, review, planning session, customer conversation, or decision.
+
+### Follow Up
+
+The work mode for tracking commitments, open loops, tasks, reminders, activity logging, and next actions.
+
+### Capability
+
+Something a work mode needs from the outside world or from Flow Agents infrastructure, such as a backlog, knowledge store, CRM, calendar, email, docs store, CI system, or code host.
+
+### Provider
+
+A configured implementation of a capability, such as GitHub for backlog, Obsidian for knowledge storage, or Google Calendar for calendar access.
+
+### Provider Contract
+
+The declared capabilities, defaults, conventions, and limits of a provider type. Provider contracts make integrations predictable and testable without requiring the live provider.
+
+### Kontour Resource Contract
+
+A versioned Kontour record shape for durable machine-readable configuration, scope, run state, evidence, provider output, and cross-product interchange. Kontour Resource Contracts are the default for new pre-public durable contracts unless a product records why a native shape is clearer.
+_Avoid_: Manifest as the generic term, Kubernetes resource when Kubernetes is not the runtime
+
+### Local-First Default
+
+A baseline provider choice that works with local files before hosted integrations are configured. Local-first defaults should preserve durable records, relationship links, source pointers, follow-ups, status, searchability, and migration paths.
+
+### Relationship Link
+
+A durable connection between records, people, customers, projects, initiatives, issues, meetings, follow-ups, or source systems. Local-first providers may store relationship links as Markdown links or pointers; richer providers may map them to backlinks, graph edges, CRM relationships, or issue links.
+
+### Skill
+
+A reusable procedure Flow Agents can invoke to carry out part of a work mode. Skills are implementation details from the user's perspective.
+
+### Flow Kit
+
+An installable, authorable bundle of Flow-backed workflows and optional supporting assets, such as Flow Definitions, docs, skills, adapters, provider contracts, and evals. Flow Kits are runtime-neutral: skills are one supported asset type, not a requirement.
+_Avoid_: Pack, plugin, marketplace package
+
+### Flow Kit Repository
+
+A local folder or remote repository with a Flow Kit manifest at its root. A Flow Kit Repository can be installed by Flow or Flow Agents from a local path, git URL, GitHub shorthand, or package registry source.
+_Avoid_: Skill repository as the generic term
+
+### Workflow
+
+A stateful multi-step path with gates, handoffs, evidence, and next actions. Not every task or skill needs a workflow.
+
+### Gate
+
+A workflow checkpoint that decides whether a Workflow Run can advance, must stop, or should route back. Gates record structured evidence, gaps, authority, actors, attempts, and route decisions, while exposing Status Condition summaries for shared reporting rather than relying on hidden agent confidence.
+
+### Status Condition
+
+A current, inspectable statement about the lifecycle state of a Kontour Resource Contract, Gate, Workflow Run, or Delivery Run. Status Conditions summarize status, reason, message, evidence pointers, and transition time without replacing the underlying evidence record. Static definitions do not need Status Conditions unless they are installed or applied into an environment.
+
+### Core Condition Vocabulary
+
+The small shared set of Status Condition meanings Flow Agents standardizes for interoperability, reporting, Console views, evals, and analytics. Flow Kits may add domain-specific condition reasons, but shared conditions such as ready, blocked, in progress, scope overlap, scope changed, configuration gap, missing evidence, and route-back required should keep the same meaning across kits.
+
+### Scope Overlap
+
+A Status Condition indicating that one Workflow Run's active Selected Scope intersects with another active Workflow Run or provider-backed work record. Scope Overlap supports Alignment Gate coordination without implying distributed lock, lease, or reservation semantics.
+_Avoid_: Scope Reservation, Lease, Lock
+
+### Gate Role
+
+Optional metadata that describes the kind of decision a Gate is making, such as alignment, readiness, review, verification, evidence, publication, release, or approval. Gate Roles provide shared language for reporting and adapters; Workflow or Flow Kit definitions decide the required evidence and route-back behavior.
+_Avoid_: Gate Type when implying rigid core behavior
+
+### Alignment Gate
+
+A Gate that confirms intent, selected scope, assumptions, authority, or user decisions before a Workflow Run advances. Alignment Gates may be satisfied from context, provider state, explicit approval, or a kit-specific interaction such as a Probe.
+
+### Publication Gate
+
+A Gate that makes a Workflow Run output externally inspectable or consumable through a provider or durable artifact. Publication Gates are core; Builder Kit's Prepare PR is the code-host pull request implementation.
+
+### Release Gate
+
+A Gate that decides whether a published Workflow Run output can be accepted, merged, released, deployed, held, or rolled back. Release Gates are core; Builder Kit's Merge Readiness is the code-host pull request implementation.
+
+### Gate Actor
+
+The person, agent, provider, automation, or authority allowed to evaluate, satisfy, or approve a Gate. Gate Actors are separate from Gate Roles because a verification, release, or approval gate may require different actors in different Workflows.
+_Avoid_: Gate Role for permission semantics
+
+### Required Capability
+
+The provider, tool, or runtime capability needed to evaluate a Gate, such as CI checks, a code host pull request, browser automation, a calendar provider, a CRM, a governance adapter, or a Surface trust provider.
+
+### Required Evidence
+
+The proof a Workflow or Flow Kit says a Gate needs before it can pass. Flow Agents owns the evidence mechanics; the Workflow or Flow Kit defines which evidence is required for each Gate.
+
+### Route Back
+
+The workflow transition selected when a Gate cannot advance and the next useful action is an earlier step. Flow Agents owns route-back recording and loop-protection mechanics; the Workflow or Flow Kit defines the route reasons and target steps.
+
+### Attempt
+
+A deterministic count of how many times a Workflow Run has evaluated or retried a Gate, Step, or Route Back path. Flow owns attempt counting for workflow enforcement; Flow Agents records attempt metadata for agent workflow analysis, evals, and learning.
+
+### Reason Code
+
+A stable explanation for why a Gate passed, failed, could not be verified, or routed back. Flow Agents provides a small shared reason vocabulary for analytics and interoperability, while Flow Kits may define domain-specific reason codes.
+
+### Workflow Run
+
+One execution of a Workflow from selected scope through its gates, evidence, route-backs, and terminal outcome. A Workflow Run references its canonical Selected Scope and snapshots the selected subject identifiers for audit history. Builder Kit Delivery Runs are a build-specific kind of Workflow Run.
+_Avoid_: Delivery Run as the generic term
+
+### Run Plan
+
+The core workflow-level plan for a Workflow Run. Run Plans describe intended gate order, selected scope, required capabilities, required evidence, route-back policy, and learning points without assuming the work is software delivery.
+_Avoid_: Execution Plan as the generic term
+
+### Selected Scope
+
+The first-class Kontour Resource Contract that declares the explicit subject or set of subjects a Workflow Run is authorized to operate on. Selected Scope may include Work Items, files, documents, customers, meetings, research sources, or other provider-backed records, and it should be narrow enough for the workflow's gates to evaluate coherently. Material Selected Scope changes route back to an Alignment Gate.
+_Avoid_: Work Item Group as the generic term
+
+### Scope Change
+
+A recorded event or Status Condition describing a change to the Selected Scope of a Workflow Run. Material Scope Changes route back to an Alignment Gate so coordination, authority, overlap, and downstream Work Item impact can be evaluated before continuing.
+_Avoid_: Boundary Crossing as the generic Flow Agents term
+
+### Work Item
+
+An executable backlog or queue unit selected by a workflow. Work Items are provider-backed when a backlog provider is configured, and Flow Agents keeps a portable local-first Kontour Resource Contract shape for local use, tests, kit demos, and migration. A Work Item is smaller than an Initiative and large enough to move through one coherent Workflow Run with clear acceptance evidence.
+_Avoid_: Task as the generic term, Issue as the provider-neutral term
+
+### Work Item Group
+
+A Builder Kit Selected Scope containing multiple related Work Items delivered through one Delivery Run because grouping reduces coordination risk and preserves one coherent acceptance and evidence story. Work Item Groups are exceptions justified by `pull-work`; they do not replace Initiatives.
+_Avoid_: Initiative, Execution Wave, batch as the generic term
+
+### Delivery Run
+
+One attempt to deliver a selected Work Item or justified Work Item Group through alignment, planning, execution, review, verification, publication, evidence, release readiness, and learning.
+_Avoid_: Task, issue, wave
+
+### Execution Plan
+
+The Builder Kit delivery-specific plan for a selected Work Item or Work Item Group. An Execution Plan specializes a Run Plan with implementation approach, file ownership, verification strategy, publication strategy, and how work is divided into Execution Waves.
+_Avoid_: Run Plan as the generic term, Backlog plan, Initiative plan
+
+### Execution Wave
+
+A subdivision inside one Execution Plan used to organize implementation work, often for parallel workers. Execution Waves are not backlog units and do not create new Work Item scope.
+_Avoid_: Work Item, Work Item Group
+
+### Prepare PR
+
+The Builder Kit Publication Gate that turns a locally verified Delivery Run into a reviewable external code-host change. Prepare PR includes commits, branch push, pull request creation or update, Work Item links, PR body evidence, and CI trigger preparation.
+_Avoid_: Evidence Gate, Release Readiness
+
+### Merge Readiness
+
+The Builder Kit Release Gate that decides whether a published code-host change is ready to merge. Merge Readiness may use provider state such as pull request mergeability and CI checks, and may also use optional governance evidence such as Veritas when configured.
+_Avoid_: Veritas readiness as the only meaning
+
+### Provider Mergeability
+
+The code-host provider's merge signal for a published change, such as pull request existence, mergeable state, branch protection, review state, and CI or status checks. Provider Mergeability is one sub-check of Builder Kit Merge Readiness.
+
+### Governance Readiness
+
+Optional policy or trust-backed readiness evidence for a published change, such as Veritas readiness, Surface trust claims, repo standards, protected area authority, evidence freshness, or boundary checks. Governance Readiness is one sub-check of Builder Kit Merge Readiness when configured.
+
+### Configuration Gap
+
+A reason code for a Gate that cannot be evaluated or cannot pass because a required provider, capability, or setting is missing, invalid, unavailable, or incompatible. Required Configuration Gaps block advancement; optional Configuration Gaps should be recorded as advisory or not verified with remediation.
+
+### Probe
+
+A Builder Kit Alignment Gate that explores context, challenges assumptions, and records aligned decisions before the process continues. A Probe asks one question at a time, recommends an answer, and uses repository context before asking when the answer can be discovered.
+_Avoid_: Grill, interrogation
+
+### Flow
+
+Kontour AI's process transparency and gate enforcement layer. Flow owns steps, gates, transitions, Flow Runs, exceptions, continuation, and Flow Reports. Flow Agents consumes Flow for agent-facing workflows rather than owning the generic enforcement kernel.
+
+### Project Settings
+
+Settings that apply to a repo, folder, team workspace, customer effort, writing effort, or personal initiative. Project Settings override Global Settings for that project.
+
+### Global Settings
+
+The user's default Flow Agents setup across projects.
+
+### Runtime Adapter
+
+The translation layer that turns Flow Agents source configuration and operating concepts into a specific runtime's native shape.
+
+### Framework Adapter
+
+A Runtime Adapter for API- or framework-based agents such as LangGraph, Strands, CrewAI, VoltAgent, or direct model-inference systems. Framework Adapters map framework events, state, and tool calls into Flow Runs, gates, and evidence.
+_Avoid_: Skill, hook, plugin as the generic term
+
+### Runtime Portability
+
+The requirement that Flow Agents provide a consistent operating experience across agent runtimes such as Pi, Claude Code, Codex, Kiro CLI, Droid, Hermes, and future runtimes. Flow Agents should not depend on owning the chat interface or agent runtime.
+
+### Workflow Enforcement
+
+The Flow Agents principle that important work should move through explicit gates without hidden shortcuts. Each gate should expose inspectable evidence, gaps, or user decisions before the workflow advances.
+
+### Learning
+
+The feedback loop that turns workflow outcomes, friction, failures, user corrections, and evidence gaps into durable improvement candidates. Learning is a core capability, but not every terminal Workflow Run needs a Learning record.
+_Avoid_: Retrospective as the generic term
+
+### Traceability
+
+The ability to inspect what the agent was asked to do, which operating path it followed, what evidence was collected, which gates passed or failed, and why the next action is trustworthy or blocked.
+
+### Governance Adapter
+
+An optional integration that supplies policy, proof, or trust evidence without making Flow Agents own the external tool's rule semantics. Veritas is the first known governance adapter candidate.
+
+### Claim Expectation
+
+A gate-level expectation for a Surface claim type, accepted trust statuses, and whether missing or rejected evidence should block the transition. Claim Expectations describe what a Flow gate needs without naming the producer that will satisfy it.
+_Avoid_: Provider-specific requirement, Veritas requirement
+
+### Trusted Producer
+
+A Surface producer accepted by a project or runtime config as authoritative for one or more claim types. Trusted Producers satisfy Claim Expectations by emitting Surface claims with acceptable trust status and authority trace.
+_Avoid_: Hardcoded provider, tool name inside a Flow Definition
+
+### Flow Agents Source Config
+
+The portable Flow Agents configuration owned by Flow Agents itself.
+
+### Kit Catalog
+
+The Flow Agents index that lists available Flow Kits and the runtime assets each kit installs. The Kit Catalog points to Flow Kit content; it does not define workflow gate semantics itself.
+_Avoid_: Pack manifest, global workflow spec
+
+### Runtime Config
+
+Configuration generated or maintained for a specific runtime such as Codex, Claude Code, or Kiro.
+
+### Console
+
+The optional visual setup, status, usage, and improvement surface for Flow Agents. Flow Agents should work without opening the Console, but the Console helps users configure modes and providers, inspect global and project settings, view active workflow state, review telemetry and eval outcomes, and act on suggested improvements.
+
+### Project Console
+
+The default Console view when launched from a workspace. It shows effective settings, provider overrides, active workflow state, usage, evals, and improvement opportunities for the current project while also explaining inherited Global Settings.
+
+### Global Console
+
+The Console overview for global setup, registered projects, cross-project usage, global providers, and system-wide improvement opportunities.
+
+### Control API
+
+The shared tool layer used by the Console, CLI, AI agents, and automation. The Control API owns operations such as reading effective settings, explaining provider resolution, testing provider health, previewing config changes, writing config, inspecting workflow state, and reporting usage or eval outcomes.

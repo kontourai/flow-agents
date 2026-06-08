@@ -1,0 +1,69 @@
+{
+  "schema_version": "1.0",
+  "packs": [
+    {
+      "name": "core",
+      "default": true,
+      "description": "Small default surface for reliable coding and workflow execution.",
+      "skills": [
+        "search-first",
+        "plan-work",
+        "execute-plan",
+        "review-work",
+        "verify-work",
+        "evidence-gate",
+        "feedback-loop",
+        "knowledge-capture",
+        "browser-test"
+      ],
+      "agents": [
+        "tool-planner",
+        "tool-worker",
+        "tool-verifier",
+        "tool-code-reviewer",
+        "tool-playwright"
+      ],
+      "powers": [
+        "playwright"
+      ]
+    },
+    {
+      "name": "development",
+      "default": false,
+      "description": "Development workflow depth for backlog, release, dependency, GitHub, TDD, and frontend work.",
+      "skills": [
+        "builder-shape",
+        "idea-to-backlog",
+        "pull-work",
+        "design-probe",
+        "pickup-probe",
+        "deliver",
+        "fix-bug",
+        "tdd-workflow",
+        "release-readiness",
+        "learning-review",
+        "dependency-update",
+        "eval-rebuild",
+        "explore",
+        "github-cli",
+        "frontend-design",
+        "agentic-engineering",
+        "context-budget"
+      ],
+      "agents": [
+        "dev",
+        "tool-dependencies-updater",
+        "tool-security-reviewer",
+        "tool-explore-config",
+        "tool-explore-deps",
+        "tool-explore-entry",
+        "tool-explore-patterns",
+        "tool-explore-structure",
+        "tool-explore-tests"
+      ],
+      "powers": [
+        "dependency-checker"
+      ]
+    }
+  ]
+}

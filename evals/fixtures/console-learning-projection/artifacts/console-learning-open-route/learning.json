@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0",
+  "task_slug": "console-learning-open-route",
+  "status": "learned",
+  "updated_at": "2026-06-06T19:10:00Z",
+  "records": [
+    {
+      "id": "record-open-route",
+      "recorded_at": "2026-06-06T19:00:00Z",
+      "source_refs": [
+        "flow-agents-console-learning-producer-96--plan.md#Wave-3",
+        "evals/integration/test_console_learning_projection.sh"
+      ],
+      "outcome": "success",
+      "facts": [
+        "The projection is derived from workflow-learning sidecars.",
+        "The source record does not require a correction."
+      ],
+      "interpretation": "Open routes should remain visible without turning the Console projection into an authoritative action list.",
+      "routing": [
+        {
+          "target": "doc",
+          "action": "Document the inert projection command.",
+          "status": "open",
+          "ref": "docs/workflow-usage-guide.md"
+        },
+        {
+          "target": "backlog",
+          "action": "Track any future Console import work separately.",
+          "status": "accepted",
+          "ref": "github:kontourai/flow-agents#96"
+        }
+      ],
+      "correction": {
+        "needed": false,
+        "evidence": "The source workflow completed with an accepted documentation route and no behavior correction required.",
+        "no_change_rationale": "The record is informational projection context only."
+      }
+    }
+  ]
+}

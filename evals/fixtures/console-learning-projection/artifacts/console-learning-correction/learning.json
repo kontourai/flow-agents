@@ -1,0 +1,50 @@
+{
+  "schema_version": "1.0",
+  "task_slug": "console-learning-correction",
+  "status": "followup_required",
+  "updated_at": "2026-06-06T18:05:00Z",
+  "records": [
+    {
+      "id": "record-correction-needed",
+      "recorded_at": "2026-06-06T18:00:00Z",
+      "source_refs": [
+        "critique.json#/critiques/0/findings/0",
+        "evals/integration/test_console_learning_projection.sh"
+      ],
+      "outcome": "mixed",
+      "facts": [
+        "A generated projection omitted recurrence metadata.",
+        "The source learning record retained the recurrence key."
+      ],
+      "interpretation": "Projection consumers need recurrence metadata to correlate repeated workflow friction.",
+      "routing": [
+        {
+          "target": "eval",
+          "action": "Add projection recurrence assertions.",
+          "status": "open",
+          "ref": "github:kontourai/flow-agents#96"
+        },
+        {
+          "target": "skill",
+          "action": "Update workflow learning guidance after release.",
+          "status": "deferred",
+          "ref": "skills/learning-review/SKILL.md"
+        }
+      ],
+      "correction": {
+        "needed": true,
+        "type": "workflow",
+        "recurrence_key": "console-learning-projection.recurrence-metadata",
+        "intended_behavior": "Projection records carry recurrence keys from correction-needed source learnings.",
+        "observed_behavior": "The fixture models a missing recurrence key regression.",
+        "gap": "Without recurrence metadata, Console cannot cluster repeated workflow learning signals.",
+        "prevention": {
+          "target": "eval",
+          "action": "Guard recurrence key projection.",
+          "status": "open",
+          "ref": "evals/integration/test_console_learning_projection.sh"
+        }
+      }
+    }
+  ]
+}

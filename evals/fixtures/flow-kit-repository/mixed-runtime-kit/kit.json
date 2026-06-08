@@ -1,0 +1,44 @@
+{
+  "schema_version": "1.0",
+  "id": "mixed-runtime-kit",
+  "name": "Mixed Runtime Kit",
+  "product_name": "Mixed Runtime Kit",
+  "description": "A fixture with one Flow Definition and unsupported runtime asset classes.",
+  "flows": [
+    {
+      "id": "mixed.runtime",
+      "path": "flows/runtime.flow.json",
+      "description": "Exercise Codex-local activation."
+    }
+  ],
+  "skills": [
+    {
+      "id": "mixed.skill",
+      "path": "kit-skills/mixed/SKILL.md"
+    }
+  ],
+  "docs": [
+    {
+      "id": "mixed.docs",
+      "path": "docs/README.md"
+    }
+  ],
+  "adapters": [
+    {
+      "id": "mixed.adapter",
+      "path": "adapters/example.json"
+    }
+  ],
+  "evals": [
+    {
+      "id": "mixed.eval",
+      "path": "kit-evals/example.json"
+    }
+  ],
+  "assets": [
+    {
+      "id": "mixed.asset",
+      "path": "assets/example.txt"
+    }
+  ]
+}

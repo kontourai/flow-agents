@@ -1,0 +1,92 @@
+{
+  "allowedTools": [
+    "read",
+    "imageRead",
+    "glob",
+    "grep",
+    "code",
+    "ls"
+  ],
+  "hooks": {
+    "agentSpawn": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh agentSpawn tool-explore-tests",
+        "timeout_ms": 5000
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh postToolUse tool-explore-tests",
+        "matcher": "*",
+        "timeout_ms": 3000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js post:edit:accumulator post-edit-accumulator.js standard,strict",
+        "matcher": "fs_write",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js post:quality-gate quality-gate.js strict",
+        "matcher": "fs_write",
+        "timeout_ms": 15000
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh preToolUse tool-explore-tests",
+        "matcher": "*",
+        "timeout_ms": 3000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js pre:config-protection config-protection.js standard,strict",
+        "matcher": "fs_write",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js pre:commit-quality pre-commit-quality.js standard,strict",
+        "matcher": "execute_bash",
+        "timeout_ms": 30000
+      }
+    ],
+    "stop": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh stop tool-explore-tests",
+        "timeout_ms": 5000
+      },
+      {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js stop:format-typecheck stop-format-typecheck.js standard,strict",
+        "timeout_ms": 300000
+      }
+    ],
+    "userPromptSubmit": [
+      {
+        "command": "bash ~/.flow-agents/scripts/telemetry/telemetry.sh userPromptSubmit tool-explore-tests",
+        "timeout_ms": 5000
+      }
+    ]
+  },
+  "resources": [
+    "file://AGENTS.md",
+    "file://.kiro/steering/**/*.md",
+    "file://~/.kiro/steering/**/*.md",
+    "file://~/.flow-agents/context/common/subagents.md",
+    "file://~/.flow-agents/context/*.md"
+  ],
+  "tools": [
+    "read",
+    "imageRead",
+    "glob",
+    "grep",
+    "code",
+    "ls"
+  ],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": []
+    }
+  },
+  "name": "tool-explore-tests",
+  "description": "Delegate to me to find and understand testing strategies - locates test files and understands testing strategy",
+  "prompt": "You are a Test Mapper. Your ONLY job is to understand the testing strategy of a codebase.\n\n## Task\n1. Find test directories and files (*test*, *spec*, __tests__, tests/)\n2. Identify testing frameworks (jest, pytest, go test, junit, etc.)\n3. Note test types present (unit, integration, e2e)\n4. Check for test utilities, mocks, fixtures\n5. Look for coverage configuration\n\n## Output Format\n```\n## Test Location\n- [folder/pattern] - [type of tests]\n\n## Testing Framework\n- [framework] - [config file if any]\n\n## Test Types\n- Unit: [yes/no] - [location]\n- Integration: [yes/no] - [location]\n- E2E: [yes/no] - [location]\n\n## Test Utilities\n- Mocks: [location]\n- Fixtures: [location]\n\n## Coverage\n- [configured/not configured] - [tool]\n```\n\nBe FAST. Map test structure, don't analyze test quality.",
+  "model": "kimi-k2.5"
+}

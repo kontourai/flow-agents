@@ -1,0 +1,20 @@
+# dev/search-first.yaml — Eval: dev agent activates search-first skill
+- vars:
+    prompt: "Add a markdown-to-HTML conversion utility to this project"
+  metadata:
+    type: capability
+    skill: search-first
+    added: 2026-04-06
+  assert:
+    - type: javascript
+      value: file://../../lib/assertions/tool-called.js
+      config:
+        tool: web_search
+    - type: javascript
+      value: file://../../lib/assertions/no-write-tools.js
+    - type: llm-rubric
+      value: |
+        The agent should research existing solutions BEFORE writing code.
+        It should search for existing packages (npm/PyPI), check the codebase for similar functionality,
+        or search GitHub for implementations. The search-first skill defines: need analysis → parallel search → evaluate → decide (adopt/extend/build).
+        Score 1 if it jumped straight to writing code, 3 if it did minimal research, 5 if it followed the research-first workflow.

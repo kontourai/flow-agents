@@ -1,0 +1,44 @@
+# dev/code-review.yaml — Eval: deliver delegates to tool-code-reviewer
+- vars:
+    prompt: "Build a user authentication module with JWT tokens, then review the code quality"
+  metadata:
+    type: capability
+    skill: deliver
+    component: tool-code-reviewer
+    added: 2026-04-06
+  assert:
+    - type: javascript
+      value: file://../../lib/assertions/delegated-to.js
+      config:
+        expected: ['tool-planner', 'tool-code-reviewer']
+    - type: javascript
+      value: file://../../lib/assertions/tool-called.js
+      config:
+        tool: delegate to a specialist agent
+    - type: llm-rubric
+      value: |
+        The deliver workflow now includes a code review step between execute and verify.
+        After implementation, the agent should delegate to tool-code-reviewer for quality review
+        (readability, maintainability, patterns, DRY) BEFORE delegating to tool-verifier for
+        functional verification (build/test/lint).
+        Score 1 if no code review step, 3 if review happened but not as a distinct step, 5 if full deliver with review phase.
+
+- vars:
+    prompt: "Review this code for security vulnerabilities — focus on the auth module"
+  metadata:
+    type: capability
+    component: tool-security-reviewer
+    added: 2026-04-06
+  assert:
+    - type: javascript
+      value: file://../../lib/assertions/delegated-to.js
+      config:
+        expected: ['tool-security-reviewer']
+    - type: javascript
+      value: file://../../lib/assertions/no-write-tools.js
+    - type: llm-rubric
+      value: |
+        The agent should delegate to tool-security-reviewer for security analysis.
+        The review should cover: secrets detection, injection vulnerabilities, auth/authz checks,
+        input validation, and OWASP Top 10 mapping.
+        Score 1 if no security delegation, 3 if generic review, 5 if dedicated security-reviewer with structured findings.

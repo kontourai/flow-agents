@@ -1,0 +1,58 @@
+{
+  "allowedTools" : [ "@builtin" ],
+  "hooks" : {
+    "agentSpawn" : [ {
+      "command" : "bash ~/.flow-agents/scripts/telemetry/telemetry.sh agentSpawn tool-worker",
+      "timeout_ms" : 5000
+    } ],
+    "postToolUse" : [ {
+      "command" : "bash ~/.flow-agents/scripts/telemetry/telemetry.sh postToolUse tool-worker",
+      "matcher" : "*",
+      "timeout_ms" : 3000
+    }, {
+      "command" : "node ~/.flow-agents/scripts/hooks/run-hook.js post:edit:accumulator post-edit-accumulator.js standard,strict",
+      "matcher" : "fs_write",
+      "timeout_ms" : 5000
+    }, {
+      "command" : "node ~/.flow-agents/scripts/hooks/run-hook.js post:quality-gate quality-gate.js strict",
+      "matcher" : "fs_write",
+      "timeout_ms" : 15000
+    } ],
+    "preToolUse" : [ {
+      "command" : "bash ~/.flow-agents/scripts/telemetry/telemetry.sh preToolUse tool-worker",
+      "matcher" : "*",
+      "timeout_ms" : 3000
+    }, {
+      "command" : "node ~/.flow-agents/scripts/hooks/run-hook.js pre:config-protection config-protection.js standard,strict",
+      "matcher" : "fs_write",
+      "timeout_ms" : 5000
+    }, {
+      "command" : "node ~/.flow-agents/scripts/hooks/run-hook.js pre:commit-quality pre-commit-quality.js standard,strict",
+      "matcher" : "execute_bash",
+      "timeout_ms" : 30000
+    } ],
+    "stop" : [ {
+      "command" : "bash ~/.flow-agents/scripts/telemetry/telemetry.sh stop tool-worker",
+      "timeout_ms" : 5000
+    }, {
+      "command" : "node ~/.flow-agents/scripts/hooks/run-hook.js stop:format-typecheck stop-format-typecheck.js standard,strict",
+      "timeout_ms" : 300000
+    } ],
+    "userPromptSubmit" : [ {
+      "command" : "bash ~/.flow-agents/scripts/telemetry/telemetry.sh userPromptSubmit tool-worker",
+      "timeout_ms" : 5000
+    } ]
+  },
+  "resources" : [ "file://AGENTS.md", "file://docs/context-map.md", "file://.kiro/steering/**/*.md", "file://~/.kiro/steering/**/*.md", "file://~/.flow-agents/context/common/subagents.md", "file://~/.flow-agents/context/contracts/*.md" ],
+  "tools" : [ "@builtin" ],
+  "toolsSettings" : {
+    "shell" : {
+      "allowedPaths" : [ ],
+      "autoAllowReadonly" : true
+    }
+  },
+  "name" : "tool-worker",
+  "description" : "Delegate to me for writing and developing source code for a project. Works best when a detailed plan can be provided. NO access to web tools. Can be used in parallel for any coding tasks that require trusted access to the write and shell tools. WARNING: May spawn a `git worktree`",
+  "prompt" : "You are an autonomous coding worker. You execute well-defined tasks without human interaction. If instructions are insufficient, stop and report the blocker clearly.\n\n## Shared Contracts\nFollow `context/contracts/artifact-contract.md` and `context/contracts/execution-contract.md`. Those contracts are the source of truth for task artifacts, modified file tracking, conflict checks, parallel wave behavior, validation expectations, and completion rules.\n\n## Input\nYou receive a task from an approved plan, including files, changes, acceptance criteria, Definition Of Done items, context, and usually the plan artifact path.\n\n## Workflow\n1. Read `docs/context-map.md` when it exists, then check existing workflow artifacts for overlapping work and modified file conflicts.\n2. Validate that the task has clear scope, expected behavior, files, and acceptance criteria.\n3. Implement using existing project patterns and the smallest change that satisfies the plan.\n4. Update task/session artifacts with modified files and progress.\n5. Run relevant validation for changed areas.\n6. Report what changed, which files changed, what validation ran, and any blockers or deferred gaps.\n\n## Rules\n- Do not revert unrelated user or agent changes.\n- Do not invent speculative features or silent fallbacks.\n- If another in-progress task blocks this work, report it instead of forcing through.\n- If validation fails because of your changes, fix and re-run validation before reporting complete.\n- If validation cannot be run, report it as NOT_VERIFIED with the reason.",
+  "model" : "claude-sonnet-4.6-1m"
+}

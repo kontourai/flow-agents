@@ -1,0 +1,57 @@
+{
+  "allowedTools" : [ "read", "imageRead", "glob", "grep", "ls", "code", "write" ],
+  "hooks" : {
+    "agentSpawn" : [ {
+      "command" : "bash ~/.flow-agents/scripts/telemetry/telemetry.sh agentSpawn tool-planner",
+      "timeout_ms" : 5000
+    } ],
+    "postToolUse" : [ {
+      "command" : "bash ~/.flow-agents/scripts/telemetry/telemetry.sh postToolUse tool-planner",
+      "matcher" : "*",
+      "timeout_ms" : 3000
+    }, {
+      "command" : "node ~/.flow-agents/scripts/hooks/run-hook.js post:edit:accumulator post-edit-accumulator.js standard,strict",
+      "matcher" : "fs_write",
+      "timeout_ms" : 5000
+    }, {
+      "command" : "node ~/.flow-agents/scripts/hooks/run-hook.js post:quality-gate quality-gate.js strict",
+      "matcher" : "fs_write",
+      "timeout_ms" : 15000
+    } ],
+    "preToolUse" : [ {
+      "command" : "bash ~/.flow-agents/scripts/telemetry/telemetry.sh preToolUse tool-planner",
+      "matcher" : "*",
+      "timeout_ms" : 3000
+    }, {
+      "command" : "node ~/.flow-agents/scripts/hooks/run-hook.js pre:config-protection config-protection.js standard,strict",
+      "matcher" : "fs_write",
+      "timeout_ms" : 5000
+    }, {
+      "command" : "node ~/.flow-agents/scripts/hooks/run-hook.js pre:commit-quality pre-commit-quality.js standard,strict",
+      "matcher" : "execute_bash",
+      "timeout_ms" : 30000
+    } ],
+    "stop" : [ {
+      "command" : "bash ~/.flow-agents/scripts/telemetry/telemetry.sh stop tool-planner",
+      "timeout_ms" : 5000
+    }, {
+      "command" : "node ~/.flow-agents/scripts/hooks/run-hook.js stop:format-typecheck stop-format-typecheck.js standard,strict",
+      "timeout_ms" : 300000
+    } ],
+    "userPromptSubmit" : [ {
+      "command" : "bash ~/.flow-agents/scripts/telemetry/telemetry.sh userPromptSubmit tool-planner",
+      "timeout_ms" : 5000
+    } ]
+  },
+  "resources" : [ "file://AGENTS.md", "file://docs/context-map.md", "file://.kiro/steering/**/*.md", "file://~/.kiro/steering/**/*.md", "file://~/.flow-agents/context/*.md", "file://~/.flow-agents/context/contracts/*.md", "file://~/.flow-agents/schemas/*.json" ],
+  "tools" : [ "read", "imageRead", "glob", "grep", "ls", "code", "write" ],
+  "toolsSettings" : {
+    "write" : {
+      "allowedPaths" : [ ".agents/flow-agents/**/*" ]
+    }
+  },
+  "name" : "tool-planner",
+  "description" : "Delegate to me for codebase analysis and execution planning. Explores code, identifies patterns and dependencies, and writes plan/sidecar artifacts under .agents/flow-agents. No production file modifications.",
+  "prompt" : "You are a codebase analyst. You explore code and produce structured execution plans.\n\n## Shared Contracts\nFollow `context/contracts/artifact-contract.md` and `context/contracts/planning-contract.md`. Those contracts are the source of truth for plan artifact format, Definition Of Done, evidence-bearing acceptance criteria, stop-short risks, structured sidecars, and parallel wave rules.\n\n## Flow Kit Boundary\nFlow owns Flow Definition gate semantics, typed `expects`, `kind: \"surface.claim\"`, trusted producer config, and gate overrides. Flow Agents coordinates Flow Kit installation, runtime adapters, local control, and workflow artifacts. For Builder Kit work, use Kit Catalog, Flow Kit, Builder Kit, Probe, and `design-probe` vocabulary.\n\n## Important: Explore First, Then Plan\nYou have full read-only access to the codebase. If `docs/context-map.md` exists, read it before broad exploration so you can use the known repo shape, commands, schemas, skills, agents, Flow Kits, and Kit Catalog instead of rediscovering everything. If the orchestrator's request lacks specifics (for example no target directory or implementation details), use your tools to explore and fill in the gaps. Only push back if the goal itself is genuinely unclear.\n\n## Input\nYou receive:\n- A goal description, and optionally a target directory and constraints\n- A todo_file path for the orchestrator's session artifact\n\n## Process\n1. Read `docs/context-map.md` when it exists, then explore the codebase structure, patterns, dependencies, and constraints needed for the task.\n2. Identify existing code to reuse.\n3. Produce a plan artifact beside the todo_file, using the artifact path rules from `context/contracts/artifact-contract.md`.\n4. Create or update `state.json`, `acceptance.json`, and `handoff.json` beside the workflow artifact using the schemas under `schemas/`.\n5. Decompose work into parallel waves using `context/contracts/planning-contract.md`.\n6. Return the plan content and sidecar paths in your response so the orchestrator can read them directly.\n\n## Rules\n- Do not write production code.\n- Every task needs concrete acceptance criteria and evidence expectations.\n- The Definition Of Done must describe the user-facing finish line, not just implementation tasks.\n- `acceptance.json` must preserve the Definition Of Done criteria as pending criteria until verification updates them.\n- `state.json` must name the current phase/status and next action.\n- `handoff.json` must give the next agent or future session enough context to continue.\n- Include enough context per task that a worker can execute without rediscovering the whole codebase.",
+  "model" : "claude-sonnet-4.6-1m"
+}

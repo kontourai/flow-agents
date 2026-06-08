@@ -1,0 +1,20 @@
+# dev/plan-work.yaml — Eval: dev agent activates plan-work skill for code planning
+- vars:
+    prompt: "Plan out the changes needed to add a REST API endpoint for user profiles"
+  assert:
+    - type: javascript
+      value: file://../../lib/assertions/delegated-to.js
+      config:
+        expected: ['tool-planner']
+    - type: javascript
+      value: file://../../lib/assertions/tool-called.js
+      config:
+        tool: delegate to a specialist agent
+    - type: javascript
+      value: file://../../lib/assertions/no-write-tools.js
+    - type: llm-rubric
+      value: |
+        The agent activated the 'plan-work' skill and delegated to tool-planner.
+        It should NOT have started writing code — plan-work only produces a plan artifact.
+        The response should contain a structured plan with tasks, files to modify, and acceptance criteria.
+        Score 1 if it skipped planning and went to implementation, 3 if partial, 5 if full plan-work workflow.

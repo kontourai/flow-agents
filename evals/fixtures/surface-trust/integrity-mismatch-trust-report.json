@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "artifact_kind": "TrustReport",
+  "artifact_ref": "surface-trust://fixtures/integrity-mismatch-trust-report.json",
+  "subject": {
+    "type": "artifact",
+    "id": "surface-trust-evidence--plan.md"
+  },
+  "gate": {
+    "id": "implementation-plan",
+    "kind": "surface.claim"
+  },
+  "claim": {
+    "type": "builder.plan.implementation",
+    "subject": "artifact",
+    "status": "accepted"
+  },
+  "authority": {
+    "producer": "fixture-trust-provider",
+    "trace_ref": "surface-trust://authority/fixture-provider"
+  },
+  "integrity": {
+    "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+    "expected_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+    "verified": false,
+    "mismatch": "digest"
+  },
+  "freshness": {
+    "status": "fresh",
+    "checked_at": "2026-05-26T00:00:00Z"
+  }
+}

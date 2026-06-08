@@ -1,0 +1,336 @@
+#!/usr/bin/env node
+import fs from "node:fs";
+import path from "node:path";
+import { loadJson, readText, root, walkFiles, writeText } from "./common.js";
+
+type Agent = Record<string, unknown> & { name: string; prompt: string };
+const dist = path.join(root, "dist");
+const manifest = loadJson<Record<string, any>>(path.join(root, "packaging/manifest.json"));
+const packs = loadJson<Record<string, any>>(path.join(root, "packaging/packs.json"));
+const textExtensions = new Set([".css", ".html", ".js", ".json", ".md", ".sh", ".toml", ".txt", ".yaml", ".yml", ".ts"]);
+const dropDiagnostics: string[] = [];
+const printDiagnostics = !["0", "false", "no"].includes(String(process.env.FLOW_AGENTS_EXPORT_DIAGNOSTICS ?? "1").toLowerCase());
+
+function resetDir(dir: string): void {
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+function sourceRootPatterns(): RegExp[] {
+  return manifest.source_root_aliases.map((alias: string) => new RegExp(alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g"));
+}
+
+function applySubstitutions(text: string, substitutions: Array<{ from: string; to: string }>): string {
+  let result = text;
+  for (const item of substitutions ?? []) result = result.split(item.from).join(item.to);
+  return result;
+}
+
+function sanitizeText(text: string, target: string, rootReplacement: string, proseSubstitutions = true): string {
+  let result = text;
+  for (const pattern of sourceRootPatterns()) result = result.replace(pattern, rootReplacement);
+  if (target === "claude-code" || target === "codex") result = applySubstitutions(result, manifest.target_substitutions.common);
+  if (!proseSubstitutions) return result;
+  if (target === "claude-code") result = applySubstitutions(result, manifest.target_substitutions.claude_code);
+  if (target === "codex") result = applySubstitutions(result, manifest.target_substitutions.codex);
+  return result;
+}
+
+function isCodeAsset(src: string, relPath: string): boolean {
+  return path.basename(src) === "scripts" || relPath.split(path.sep).includes("scripts");
+}
+
+function copyTree(src: string, dest: string, target: string, rootReplacement: string): void {
+  if (!fs.existsSync(src)) return;
+  for (const file of walkFiles(src)) {
+    const relPath = path.relative(src, file);
+    if (path.basename(src) === "evals" && relPath.split(path.sep)[0] === "results") continue;
+    const out = path.join(dest, relPath);
+    if (textExtensions.has(path.extname(file).toLowerCase())) {
+      writeText(out, sanitizeText(readText(file), target, rootReplacement, !isCodeAsset(src, relPath)));
+    } else {
+      fs.mkdirSync(path.dirname(out), { recursive: true });
+      fs.copyFileSync(file, out);
+    }
+  }
+}
+
+function resolveSourcePath(pathText: string): string {
+  let normalized = pathText;
+  for (const alias of manifest.source_root_aliases) normalized = normalized.split(alias).join(root);
+  normalized = normalized.replace(/^~/, process.env.HOME ?? "");
+  return path.isAbsolute(normalized) ? normalized : path.join(root, normalized);
+}
+
+function candidatePaths(value: string): string[] {
+  return value.split(/\s+/).flatMap((raw) => {
+    const part = raw.replace(/^["']|["']$/g, "");
+    if (part.includes("=")) {
+      const maybePath = part.split("=", 2)[1];
+      return maybePath.startsWith("/") ? [maybePath] : [];
+    }
+    return part.startsWith("/") ? [part] : [];
+  });
+}
+
+function portableAbsolutePath(value: string): boolean {
+  const candidate = resolveSourcePath(value);
+  if (manifest.source_root_aliases.some((alias: string) => value.startsWith(alias))) return fs.existsSync(candidate);
+  return fs.existsSync(candidate) && candidate.startsWith(root);
+}
+
+function sanitizeAgentJson(spec: Agent): Agent {
+  const cleaned = JSON.parse(JSON.stringify(spec)) as Agent;
+  const agentName = String(cleaned.name ?? "unknown");
+  const resources = Array.isArray(cleaned.resources) ? cleaned.resources : [];
+  cleaned.resources = resources.filter((resource: any) => {
+    const source = typeof resource === "object" ? resource.source : resource;
+    if (typeof source !== "string" || !source.startsWith("file://") || source.includes("*")) return true;
+    const keep = fs.existsSync(resolveSourcePath(source.slice("file://".length)));
+    if (!keep) dropDiagnostics.push(`${agentName}: dropped missing resource ${source}`);
+    return keep;
+  });
+  if (cleaned.hooks && typeof cleaned.hooks === "object") {
+    const hooks: Record<string, any[]> = {};
+    for (const [hookName, entries] of Object.entries(cleaned.hooks as Record<string, any[]>)) {
+      const kept = (Array.isArray(entries) ? entries : []).filter((entry) => candidatePaths(String(entry.command ?? "")).every(portableAbsolutePath));
+      if (kept.length) hooks[hookName] = kept;
+      else if (Array.isArray(entries) && entries.length) dropDiagnostics.push(`${agentName}: no portable entries remain for hook ${hookName}`);
+    }
+    cleaned.hooks = hooks;
+  }
+  return cleaned;
+}
+
+function modelPrefix(value: string): string {
+  if (value.startsWith("claude-opus")) return "claude-opus";
+  if (value.startsWith("claude-sonnet")) return "claude-sonnet";
+  return value;
+}
+function mapped(mapName: string, value: unknown): string {
+  const map = manifest[mapName];
+  return map[modelPrefix(String(value ?? ""))] ?? map.default;
+}
+function resolveCodexModel(spec: Agent): string {
+  return ["tool-agent-delegate", "tool-agent-handoff"].includes(spec.name) ? "gpt-5.4-mini" : mapped("codex_model_map", spec.model);
+}
+function normalizeCodexText(text: string): string {
+  const replacements: Record<string, string> = { "—": "-", "–": "-", "→": "->", "←": "<-", "’": "'", "“": '"', "”": '"', "⚡": "[quick]", "🖥️": "[interactive]" };
+  let normalized = text;
+  for (const [from, to] of Object.entries(replacements)) normalized = normalized.split(from).join(to);
+  return normalized.normalize("NFKD").replace(/[^\x00-\x7F]/g, "");
+}
+function appendExportNote(body: string, note: string): string {
+  return `${body.trimEnd()}\n\n## Export Notes\n\n${note}\n`;
+}
+function generatedAgentsSummary(agents: Agent[]): string {
+  return agents.slice().sort((a, b) => a.name.localeCompare(b.name)).map((spec) => `- \`${spec.name}\` — ${String(spec.description ?? "").trim()}`).join("\n");
+}
+function exportRootAgentsMd(label: string, agents: Agent[], taskDir: string): string {
+  return `# Universal Agent Bundle (${label})\n\nThis bundle was generated from the canonical source in this repo. Treat the repo root as the source of truth and regenerate the bundle instead of editing exported agent files by hand.\n\n## Shared Conventions\n\n- \`skills/\`, \`context/\`, \`powers/\`, \`prompts/\`, \`scripts/\`, and \`evals/\` were copied from the canonical source.\n- Cross-session task artifacts should live under \`${taskDir}\`.\n- Kiro-only hook wiring was stripped from exported non-Kiro agents to keep the package portable.\n\n## Exported Agents\n\n${generatedAgentsSummary(agents)}\n`;
+}
+function exportTargetReadme(label: string, installHint: string): string {
+  return `# ${label} Bundle\n\nGenerated from the canonical source in this repository.\n\n## Install\n\n\`\`\`bash\n${installHint}\n\`\`\`\n\nOptional pack filtering is available at install time with \`FLOW_AGENTS_PACKS\`.\nThe default pack is always included:\n\n\`\`\`bash\nFLOW_AGENTS_PACKS=development,knowledge ${installHint}\n\`\`\`\n\n## Contents\n\n- Harness-specific agents\n- Shared skills\n- Shared context, powers, prompts, scripts, and evals\n`;
+}
+
+function mapClaudeTools(allowedTools: unknown): string[] {
+  const ordered: string[] = [];
+  for (const tool of Array.isArray(allowedTools) ? allowedTools : []) {
+    const mappedTool = manifest.tool_name_map[String(tool)];
+    if (mappedTool && !ordered.includes(mappedTool)) ordered.push(mappedTool);
+  }
+  return ordered.length ? ordered : ["Read", "Bash"];
+}
+function exportClaudeAgent(spec: Agent): string {
+  const prompt = appendExportNote(sanitizeText(spec.prompt, "claude-code", "<bundle-root>"), "Kiro hook wiring and JSON-only runtime fields were omitted. If this agent mentions Kiro-specific scheduler or hook behavior, treat that as optional operational guidance rather than a hard dependency.");
+  return `---\nname: ${spec.name}\ndescription: ${String(spec.description ?? "").trim()}\ntools: ${JSON.stringify(mapClaudeTools(spec.allowedTools))}\nmodel: ${mapped("claude_model_map", spec.model)}\n---\n\n${prompt}`;
+}
+function codexNicknames(agentName: string): string[] {
+  const base = agentName.replace(/^tool-/, "");
+  return [...new Set([agentName, base, base.replace(/[-_]/g, " ")].map((item) => item.trim()).filter(Boolean))];
+}
+function exportCodexAgent(spec: Agent): string {
+  const prompt = appendExportNote(normalizeCodexText(sanitizeText(spec.prompt, "codex", "<bundle-root>")), "Exported from a Kiro agent spec. Hooks, resource auto-loading, and tool allowlists were converted into prompt guidance only. Any explicit Kiro scheduler commands are preserved as optional shell workflows.");
+  const description = normalizeCodexText(String(spec.description ?? "")).replace(/"/g, "'");
+  return `# exported from agents/${spec.name}.json\nname = "${spec.name}"\nnickname_candidates = ${JSON.stringify(codexNicknames(spec.name))}\ndescription = "${description}"\nmodel = "${resolveCodexModel(spec)}"\nmodel_reasoning_effort = "${mapped("codex_reasoning_map", spec.model)}"\ndeveloper_instructions = ${JSON.stringify(prompt)}\n`;
+}
+function tomlValue(value: unknown): string {
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") return String(value);
+  if (Array.isArray(value)) return `[${value.map((item) => tomlValue(item)).join(", ")}]`;
+  return JSON.stringify(value);
+}
+function exportCodexConfig(): string {
+  const lines = ["# Generated from packaging/manifest.json. Edit the manifest, not this file.", ""];
+  const settings = manifest.codex.settings ?? {};
+  for (const [key, value] of Object.entries(settings)) lines.push(`${key} = ${tomlValue(value)}`);
+  if (Object.keys(settings).length) lines.push("");
+  if (manifest.codex.tui) {
+    lines.push("[tui]");
+    for (const [key, value] of Object.entries(manifest.codex.tui)) lines.push(`${key} = ${tomlValue(value)}`);
+    lines.push("");
+  }
+  lines.push("[features]");
+  for (const [key, value] of Object.entries(manifest.codex.features ?? {})) lines.push(`${key} = ${tomlValue(value)}`);
+  lines.push("");
+  for (const [providerName, providerRaw] of Object.entries(manifest.codex.model_providers ?? {})) {
+    const provider = providerRaw as Record<string, unknown>;
+    const scalars = Object.entries(provider).filter(([, value]) => typeof value !== "object" || value === null);
+    if (scalars.length) {
+      lines.push(`[model_providers.${providerName}]`);
+      for (const [key, value] of scalars) lines.push(`${key} = ${tomlValue(value)}`);
+      lines.push("");
+    }
+    for (const [childName, childRaw] of Object.entries(provider).filter(([, value]) => typeof value === "object" && value !== null)) {
+      lines.push(`[model_providers.${providerName}.${childName}]`);
+      for (const [key, value] of Object.entries(childRaw as Record<string, unknown>)) lines.push(`${key} = ${tomlValue(value)}`);
+      lines.push("");
+    }
+  }
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+function exportCodexProfileConfig(profile: Record<string, unknown>, settings: Record<string, unknown>): string {
+  const lines = ["# Generated from packaging/manifest.json. Edit the manifest, not this file.", ""];
+  if ("approvals_reviewer" in settings && !("approvals_reviewer" in profile)) lines.push(`approvals_reviewer = ${tomlValue(settings.approvals_reviewer)}`);
+  for (const [key, value] of Object.entries(profile)) if (typeof value !== "object" || value === null) lines.push(`${key} = ${tomlValue(value)}`);
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+function shellHook(command: string, timeout = 10, statusMessage?: string): Record<string, unknown> {
+  const hook: Record<string, unknown> = { type: "command", command, timeout };
+  if (statusMessage) hook.statusMessage = statusMessage;
+  return hook;
+}
+function claudeTelemetry(event: string): string {
+  return `bash -lc 'root="\${CLAUDE_PROJECT_DIR:-$(pwd)}"; node "$root/scripts/hooks/claude-telemetry-hook.js" ${event} dev'`;
+}
+function claudePolicy(event: string, script: string): string {
+  return `bash -lc 'root="\${CLAUDE_PROJECT_DIR:-$(pwd)}"; node "$root/scripts/hooks/claude-hook-adapter.js" ${event} ${script.replace(/\.js$/, "")} ${script} default'`;
+}
+function codexTelemetry(event: string): string {
+  if (event === "PermissionRequest") return `bash -lc 'root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); bash "$root/scripts/telemetry/telemetry.sh" permissionRequest dev'`;
+  return `bash -lc 'root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); node "$root/scripts/hooks/codex-telemetry-hook.js" ${event} dev'`;
+}
+function codexPolicy(event: string, script: string): string {
+  return `bash -lc 'root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); node "$root/scripts/hooks/codex-hook-adapter.js" ${script.replace(/\.js$/, "")} ${script} default'`;
+}
+function exportClaudeSettings(): string {
+  const hooks: Record<string, Array<Record<string, unknown>>> = {};
+  for (const event of ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop", "SessionEnd"]) {
+    hooks[event] = [{ hooks: [shellHook(claudeTelemetry(event), 10, "Recording Flow Agents telemetry")] }];
+  }
+  hooks.Stop.push({ hooks: [shellHook(claudePolicy("Stop", "stop-goal-fit.js"), 30, "Running Flow Agents hook policy")] });
+  hooks.UserPromptSubmit.push({ hooks: [shellHook(claudePolicy("UserPromptSubmit", "workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
+  hooks.PostToolUse.push({ hooks: [shellHook(claudePolicy("PostToolUse", "quality-gate.js"), 30, "Running Flow Agents hook policy")] });
+  hooks.PreToolUse.push({ hooks: [shellHook(claudePolicy("PreToolUse", "config-protection.js"), 30, "Running Flow Agents hook policy")] });
+  return `${JSON.stringify({
+    statusLine: { type: "command", command: 'bash -lc \'root="${CLAUDE_PROJECT_DIR:-$(pwd)}"; node "$root/scripts/statusline/flow-agents-statusline.js"\'' },
+    permissions: manifest.claude_code.permissions ?? {},
+    skipDangerousModePermissionPrompt: manifest.claude_code.skipDangerousModePermissionPrompt ?? true,
+    hooks,
+  }, null, 2)}\n`;
+}
+function exportCodexHooks(): string {
+  const hooks: Record<string, Array<Record<string, unknown>>> = {};
+  for (const event of ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop"]) {
+    hooks[event] = [{ hooks: [shellHook(codexTelemetry(event), 10, "Recording Flow Agents telemetry")] }];
+  }
+  hooks.Stop.push({ hooks: [shellHook(codexPolicy("Stop", "stop-goal-fit.js"), 30, "Running Flow Agents hook policy")] });
+  hooks.UserPromptSubmit.push({ hooks: [shellHook(codexPolicy("UserPromptSubmit", "workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
+  return `${JSON.stringify({ hooks }, null, 2)}\n`;
+}
+
+function copySharedContent(targetRoot: string, targetName: string, token: string): void {
+  const dirs = [...manifest.canonical_copy_dirs];
+  if (fs.existsSync(path.join(root, "kits")) && !dirs.includes("kits")) dirs.push("kits");
+  for (const dir of dirs) copyTree(path.join(root, dir), path.join(targetRoot, dir), targetName, token);
+  for (const dir of manifest.optional_copy_dirs ?? []) copyTree(path.join(root, dir), path.join(targetRoot, dir), targetName, token);
+  writeText(path.join(targetRoot, "build/package.json"), `${JSON.stringify({ type: "module" }, null, 2)}\n`);
+  const filterBuilt = path.join(root, "build/scripts-ts/filter-installed-packs.js");
+  const commonBuilt = path.join(root, "build/scripts-ts/common.js");
+  if (fs.existsSync(filterBuilt)) writeText(path.join(targetRoot, "scripts/filter-installed-packs.mjs"), readText(filterBuilt).replace("./common.js", "./common.mjs"));
+  if (fs.existsSync(commonBuilt)) writeText(path.join(targetRoot, "scripts/common.mjs"), readText(commonBuilt));
+  copyTree(path.join(root, "build/src"), path.join(targetRoot, "build/src"), targetName, token);
+  copyTree(path.join(root, "build/scripts-ts"), path.join(targetRoot, "build/scripts-ts"), targetName, token);
+}
+function installScript(label: string, usage: string, token?: string): string {
+  const replaceBlock = token ? `\nexport DEST\nfind "$DEST" -type f \\( -name '*.json' -o -name '*.md' -o -name '*.sh' -o -name '*.js' -o -name '*.ts' -o -name '*.yaml' -o -name '*.yml' \\) -print0 | xargs -0 perl -0pi -e 's#${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}#$ENV{DEST}#g'` : "";
+  return `#!/usr/bin/env bash\nset -euo pipefail\n\nDEST="${usage}"\nSRC="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"\n\nmkdir -p "$DEST"\nrsync -a ${token ? "--delete " : ""}"$SRC"/ "$DEST"/\nif [[ -n "\${FLOW_AGENTS_PACKS:-}" ]]; then\n  node "$DEST/scripts/filter-installed-packs.mjs" "$DEST" --packs "$FLOW_AGENTS_PACKS"\nfi${replaceBlock}\necho "Installed ${label} bundle ${token ? "to" : "into"} $DEST"\n`;
+}
+function buildKiro(agents: Agent[]): void {
+  const bundle = path.join(dist, "kiro");
+  const token = manifest.kiro.path_token;
+  resetDir(bundle);
+  copySharedContent(bundle, "kiro", token);
+  for (const spec of agents) writeText(path.join(bundle, "agents", `${spec.name}.json`), sanitizeText(`${JSON.stringify(sanitizeAgentJson(spec), null, 2)}\n`, "kiro", token));
+  writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Kiro", agents, ".agents/flow-agents"));
+  writeText(path.join(bundle, "README.md"), exportTargetReadme("Kiro", "bash install.sh $HOME/.flow-agents"));
+  writeText(path.join(bundle, "install.sh"), installScript("Kiro", "${1:-$HOME/.flow-agents}", token));
+  fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
+}
+function buildClaudeCode(agents: Agent[]): void {
+  const bundle = path.join(dist, "claude-code");
+  resetDir(bundle);
+  copySharedContent(bundle, "claude-code", "<bundle-root>");
+  writeText(path.join(bundle, manifest.claude_code.task_dir, ".gitkeep"), "");
+  for (const spec of agents) writeText(path.join(bundle, ".claude/agents", `${spec.name}.md`), exportClaudeAgent(spec));
+  for (const skill of fs.readdirSync(path.join(root, "skills"))) {
+    const skillPath = path.join(root, "skills", skill, "SKILL.md");
+    if (fs.existsSync(skillPath)) writeText(path.join(bundle, ".claude/skills", skill, "SKILL.md"), sanitizeText(readText(skillPath), "claude-code", "<bundle-root>"));
+  }
+  writeText(path.join(bundle, ".claude/settings.json"), exportClaudeSettings());
+  writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Claude Code", agents, manifest.claude_code.task_dir));
+  writeText(path.join(bundle, "README.md"), exportTargetReadme("Claude Code", "bash install.sh /path/to/workspace"));
+  writeText(path.join(bundle, "install.sh"), installScript("Claude Code", '${1:?usage: bash install.sh /path/to/workspace}'));
+  fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
+}
+function buildCodex(agents: Agent[]): void {
+  const bundle = path.join(dist, "codex");
+  const excluded = new Set(manifest.codex.excluded_agents ?? []);
+  const targetAgents = agents.filter((spec) => !excluded.has(spec.name));
+  resetDir(bundle);
+  copySharedContent(bundle, "codex", "<bundle-root>");
+  writeText(path.join(bundle, manifest.codex.task_dir, ".gitkeep"), "");
+  writeText(path.join(bundle, ".codex/config.toml"), exportCodexConfig());
+  const settings = manifest.codex.settings ?? {};
+  for (const [profileName, profile] of Object.entries(manifest.codex.profiles ?? {})) writeText(path.join(bundle, ".codex", `${profileName}.config.toml`), exportCodexProfileConfig(profile as Record<string, unknown>, settings));
+  writeText(path.join(bundle, ".codex/hooks.json"), exportCodexHooks());
+  for (const spec of targetAgents) writeText(path.join(bundle, ".codex/agents", `${spec.name}.toml`), exportCodexAgent(spec));
+  for (const skill of fs.readdirSync(path.join(root, "skills"))) {
+    const skillPath = path.join(root, "skills", skill, "SKILL.md");
+    if (fs.existsSync(skillPath)) writeText(path.join(bundle, ".codex/skills", skill, "SKILL.md"), sanitizeText(readText(skillPath), "codex", "<bundle-root>"));
+  }
+  writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Codex", targetAgents, manifest.codex.task_dir));
+  writeText(path.join(bundle, "README.md"), exportTargetReadme("Codex", "bash install.sh /path/to/workspace"));
+  writeText(path.join(bundle, "install.sh"), installScript("Codex", '${1:?usage: bash install.sh /path/to/workspace}'));
+  fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
+}
+function buildCatalog(agents: Agent[]): Record<string, unknown> {
+  const kitsCatalog = path.join(root, "kits/catalog.json");
+  return {
+    source_root: ".",
+    agents: agents.slice().sort((a, b) => a.name.localeCompare(b.name)).map((spec) => spec.name),
+    skills: fs.readdirSync(path.join(root, "skills")).filter((name) => fs.existsSync(path.join(root, "skills", name, "SKILL.md"))).sort(),
+    powers: fs.readdirSync(path.join(root, "powers")).filter((name) => fs.existsSync(path.join(root, "powers", name, "mcp.json"))).sort(),
+    packs: packs.packs ?? [],
+    kits: fs.existsSync(kitsCatalog) ? loadJson<Record<string, unknown>>(kitsCatalog).kits ?? [] : [],
+  };
+}
+export function main(): number {
+  fs.mkdirSync(dist, { recursive: true });
+  const agents = fs.readdirSync(path.join(root, "agents")).filter((name) => name.endsWith(".json")).sort().map((name) => loadJson<Agent>(path.join(root, "agents", name)));
+  buildKiro(agents);
+  buildClaudeCode(agents);
+  buildCodex(agents);
+  writeText(path.join(dist, "catalog.json"), `${JSON.stringify(buildCatalog(agents), null, 2)}\n`);
+  writeText(path.join(dist, "README.md"), "# Universal Bundles\n\nRun `npm run build:bundles` from the repo root to regenerate these bundles.\n");
+  console.log("Built bundles:");
+  console.log(" - dist/kiro");
+  console.log(" - dist/claude-code");
+  console.log(" - dist/codex");
+  if (printDiagnostics && dropDiagnostics.length) {
+    console.error("Export sanitization diagnostics:");
+    for (const item of dropDiagnostics) console.error(` - ${item}`);
+  }
+  return 0;
+}
+if (import.meta.url === `file://${process.argv[1]}`) process.exit(main());
