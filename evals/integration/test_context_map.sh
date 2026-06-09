@@ -46,9 +46,9 @@ for expected in \
   'workflow-learning.schema.json' \
   'plan-work' \
   'tool-planner' \
-  'confidence scoring' \
-  'pending proposals are detected' \
-  'triggers index rebuild'; do
+  'Eval-first execution' \
+  'Research-before-coding workflow' \
+  'Save durable knowledge'; do
   if rg -q "$expected" "$MAP"; then
     _pass "context map includes $expected"
   else

@@ -1,5 +1,4 @@
 import * as fs from "node:fs";
-import * as path from "node:path";
 
 const validTiers = new Set(["adapter", "design-target", "installed-command", "live-acceptance", "documented-runtime-gap"]);
 const validRuntimes = new Set(["codex", "claude-code", "kiro-cli"]);

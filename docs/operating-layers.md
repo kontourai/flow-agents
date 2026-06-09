@@ -8,6 +8,8 @@ Flow Agents should stay understandable by keeping a small public vocabulary. Eac
 
 The layers are ordered from durable context to execution evidence. When adding a new capability, choose the lowest layer that can own it cleanly. Do not create a new layer unless the existing ones make the behavior harder to understand.
 
+For the concrete directory-by-directory source map, generated output policy, runtime state policy, and cleanup rules, use [Repository Structure](repository-structure.md). This page explains conceptual ownership layers; the repository structure page is the durable file-placement reference.
+
 ## Layer Map
 
 | Layer | Owns | Does Not Own | Source Pattern |
@@ -37,10 +39,13 @@ Governance tools such as Veritas belong at the Evidence boundary. Flow Agents sh
 | `docs/workflow-*.md` | Workflows | Human-readable workflow contracts and usage guidance. |
 | `.agents/flow-agents/` | Workflows | Cross-session task artifacts. Runtime state stays local; reviewable in-progress change work may live under `.agents/flow-agents/changes/<change-id>/` on feature branches and must be promoted before merge. |
 | `scripts/` | Evidence / Workflows / Packaging | Validation, build, telemetry, hooks, and artifact tooling. |
+| `src/` | Workflows / Evidence / Packaging | TypeScript CLI, runtime adapter, Flow Kit, shared library, build, validation, context-map, packaging, and CLI helper source compiled into `build/src/`. |
 | `evals/` | Evidence | Static, behavioral, integration, and acceptance checks. |
 | `.telemetry/` | Evidence | Runtime telemetry, outcomes, and reports. |
 | `packaging/` | Packaging | Cross-harness manifest and bundle docs. |
 | `dist/` | Packaging | Generated exports. Never edit by hand. |
+| `build/` | Packaging | Generated TypeScript compiler output. Never edit by hand. |
+| `_site/` | Docs / Packaging | Generated GitHub Pages output from `docs/`. Never edit by hand. |
 
 ## Flow Kit Coordination
 

@@ -206,12 +206,15 @@ function claudeTelemetry(event: string): string {
 function claudePolicy(event: string, script: string): string {
   return `bash -lc 'root="\${CLAUDE_PROJECT_DIR:-$(pwd)}"; node "$root/scripts/hooks/claude-hook-adapter.js" ${event} ${script.replace(/\.js$/, "")} ${script} default'`;
 }
-function codexTelemetry(event: string): string {
-  if (event === "PermissionRequest") return `bash -lc 'root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); bash "$root/scripts/telemetry/telemetry.sh" permissionRequest dev'`;
-  return `bash -lc 'root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); node "$root/scripts/hooks/codex-telemetry-hook.js" ${event} dev'`;
+function codexRoot(scriptPath: string): string {
+  return `root="\${CODEX_HOME:-}"; if [ -z "$root" ] || [ ! -f "$root/${scriptPath}" ]; then root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); fi`;
 }
-function codexPolicy(event: string, script: string): string {
-  return `bash -lc 'root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); node "$root/scripts/hooks/codex-hook-adapter.js" ${script.replace(/\.js$/, "")} ${script} default'`;
+function codexTelemetry(event: string): string {
+  if (event === "PermissionRequest") return `bash -lc '${codexRoot("scripts/telemetry/telemetry.sh")}; bash "$root/scripts/telemetry/telemetry.sh" permissionRequest dev'`;
+  return `bash -lc '${codexRoot("scripts/hooks/codex-telemetry-hook.js")}; node "$root/scripts/hooks/codex-telemetry-hook.js" ${event} dev'`;
+}
+function codexPolicy(script: string): string {
+  return `bash -lc '${codexRoot("scripts/hooks/codex-hook-adapter.js")}; node "$root/scripts/hooks/codex-hook-adapter.js" ${script.replace(/\.js$/, "")} ${script} default'`;
 }
 function exportClaudeSettings(): string {
   const hooks: Record<string, Array<Record<string, unknown>>> = {};
@@ -234,8 +237,8 @@ function exportCodexHooks(): string {
   for (const event of ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop"]) {
     hooks[event] = [{ hooks: [shellHook(codexTelemetry(event), 10, "Recording Flow Agents telemetry")] }];
   }
-  hooks.Stop.push({ hooks: [shellHook(codexPolicy("Stop", "stop-goal-fit.js"), 30, "Running Flow Agents hook policy")] });
-  hooks.UserPromptSubmit.push({ hooks: [shellHook(codexPolicy("UserPromptSubmit", "workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
+  hooks.Stop.push({ hooks: [shellHook(codexPolicy("stop-goal-fit.js"), 30, "Running Flow Agents hook policy")] });
+  hooks.UserPromptSubmit.push({ hooks: [shellHook(codexPolicy("workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
   return `${JSON.stringify({ hooks }, null, 2)}\n`;
 }
 
@@ -245,12 +248,11 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
   for (const dir of dirs) copyTree(path.join(root, dir), path.join(targetRoot, dir), targetName, token);
   for (const dir of manifest.optional_copy_dirs ?? []) copyTree(path.join(root, dir), path.join(targetRoot, dir), targetName, token);
   writeText(path.join(targetRoot, "build/package.json"), `${JSON.stringify({ type: "module" }, null, 2)}\n`);
-  const filterBuilt = path.join(root, "build/scripts-ts/filter-installed-packs.js");
-  const commonBuilt = path.join(root, "build/scripts-ts/common.js");
+  const filterBuilt = path.join(root, "build/src/tools/filter-installed-packs.js");
+  const commonBuilt = path.join(root, "build/src/tools/common.js");
   if (fs.existsSync(filterBuilt)) writeText(path.join(targetRoot, "scripts/filter-installed-packs.mjs"), readText(filterBuilt).replace("./common.js", "./common.mjs"));
   if (fs.existsSync(commonBuilt)) writeText(path.join(targetRoot, "scripts/common.mjs"), readText(commonBuilt));
   copyTree(path.join(root, "build/src"), path.join(targetRoot, "build/src"), targetName, token);
-  copyTree(path.join(root, "build/scripts-ts"), path.join(targetRoot, "build/scripts-ts"), targetName, token);
 }
 function installScript(label: string, usage: string, token?: string): string {
   const replaceBlock = token ? `\nexport DEST\nfind "$DEST" -type f \\( -name '*.json' -o -name '*.md' -o -name '*.sh' -o -name '*.js' -o -name '*.ts' -o -name '*.yaml' -o -name '*.yml' \\) -print0 | xargs -0 perl -0pi -e 's#${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}#$ENV{DEST}#g'` : "";

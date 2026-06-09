@@ -108,7 +108,7 @@ export function readKitInventory(sourceRoot: string, dest: string): KitInventory
     const registry = readJson(registryPath) as Record<string, unknown>;
     const kits = registry.kits;
     if (Array.isArray(kits)) {
-      kits.forEach((entry, index) => {
+      kits.forEach((entry) => {
         if (typeof entry !== "object" || entry === null) return;
         const record = entry as Record<string, unknown>;
         const id = record.id;

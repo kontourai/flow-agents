@@ -71,7 +71,7 @@ cat > "$FILTER_ATTACK_DEST/packaging/packs.json" <<'JSON'
   ]
 }
 JSON
-if node "$ROOT_DIR/build/scripts-ts/filter-installed-packs.js" "$FILTER_ATTACK_DEST" --packs core >"$TMPDIR_EVAL/filter-attack.out" 2>"$TMPDIR_EVAL/filter-attack.err"; then
+if node "$ROOT_DIR/build/src/tools/filter-installed-packs.js" "$FILTER_ATTACK_DEST" --packs core >"$TMPDIR_EVAL/filter-attack.out" 2>"$TMPDIR_EVAL/filter-attack.err"; then
   _fail "pack filter accepted unsafe metadata traversal"
 else
   _pass "pack filter rejects unsafe metadata traversal before deletion"

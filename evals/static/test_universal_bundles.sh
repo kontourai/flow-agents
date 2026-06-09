@@ -193,12 +193,21 @@ if (missing.length) throw new Error(`missing Codex hook events: ${missing.join("
 if (!(hooks.PermissionRequest || []).some((group) => (group.hooks || []).some((hook) => String(hook.command || "").includes("telemetry.sh")))) throw new Error("PermissionRequest telemetry hook missing");
 if (!(hooks.Stop || []).some((group) => (group.hooks || []).some((hook) => String(hook.command || "").includes("codex-hook-adapter.js") && String(hook.command || "").includes("stop-goal-fit.js")))) throw new Error("Stop goal-fit policy hook missing");
 if (!(hooks.UserPromptSubmit || []).some((group) => [undefined, null, "*"].includes(group.matcher) && (group.hooks || []).some((hook) => String(hook.command || "").includes("codex-hook-adapter.js") && String(hook.command || "").includes("workflow-steering.js")))) throw new Error("prompt-submit workflow-steering policy hook missing");
+for (const groups of Object.values(hooks)) {
+  for (const group of groups || []) {
+    for (const hook of group.hooks || []) {
+      const command = String(hook.command || "");
+      if (!command.includes('root="${CODEX_HOME:-}"')) throw new Error(`Codex hook does not prefer CODEX_HOME: ${command}`);
+      if (command.includes("'root=$(git rev-parse --show-toplevel")) throw new Error(`Codex hook uses stale repo-root-only resolver: ${command}`);
+    }
+  }
+}
 console.log("ok");
 NODE
 then
-  _pass "Codex hooks cover telemetry and policy lifecycle events"
+  _pass "Codex hooks cover telemetry and policy lifecycle events with CODEX_HOME root resolution"
 else
-  _fail "Codex hooks missing telemetry/policy lifecycle coverage"
+  _fail "Codex hooks missing telemetry/policy lifecycle coverage or CODEX_HOME root resolution"
 fi
 
 echo ""

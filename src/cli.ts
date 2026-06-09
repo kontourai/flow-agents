@@ -10,11 +10,11 @@ import { main as pullWorkProvider } from "./cli/pull-work-provider.js";
 import { main as usageFeedback } from "./cli/usage-feedback.js";
 import { main as veritasGovernance } from "./cli/veritas-governance.js";
 import { main as workflowArtifactCleanupAudit } from "./cli/workflow-artifact-cleanup-audit.js";
-import { main as buildBundles } from "../scripts-ts/build-universal-bundles.js";
-import { main as contextMap } from "../scripts-ts/generate-context-map.js";
-import { main as filterInstalledPacks } from "../scripts-ts/filter-installed-packs.js";
-import { main as validateSource } from "../scripts-ts/validate-source-tree.js";
-import { main as validatePackage } from "../scripts-ts/validate-package.js";
+import { main as buildBundles } from "./tools/build-universal-bundles.js";
+import { main as contextMap } from "./tools/generate-context-map.js";
+import { main as filterInstalledPacks } from "./tools/filter-installed-packs.js";
+import { main as validateSource } from "./tools/validate-source-tree.js";
+import { main as validatePackage } from "./tools/validate-package.js";
 import { main as validateHookInfluence } from "./cli/validate-hook-influence.js";
 import { main as runtimeAdapter } from "./cli/runtime-adapter.js";
 
