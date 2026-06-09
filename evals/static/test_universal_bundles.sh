@@ -3,8 +3,16 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
+REPRO_FIRST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/flow-agents-bundle-repro-a.XXXXXX")"
+REPRO_SECOND_DIR="$(mktemp -d "${TMPDIR:-/tmp}/flow-agents-bundle-repro-b.XXXXXX")"
+REPRO_DIFF_FILE="${TMPDIR:-/tmp}/universal-bundle-reproducibility.diff"
 pass=0
 fail=0
+
+cleanup() {
+  rm -rf "$REPRO_FIRST_DIR" "$REPRO_SECOND_DIR"
+}
+trap cleanup EXIT
 
 _pass() { echo "  ✓ $1"; pass=$((pass + 1)); }
 _fail() { echo "  ✗ $1"; fail=$((fail + 1)); }
@@ -31,6 +39,14 @@ if (cd "$ROOT_DIR" && npm run build:bundles >/dev/null); then
   _pass "bundle build completed"
 else
   _fail "bundle build failed"
+fi
+
+if (cd "$ROOT_DIR" && FLOW_AGENTS_DIST_DIR="$REPRO_FIRST_DIR" npm run build:bundles >/dev/null) \
+  && (cd "$ROOT_DIR" && FLOW_AGENTS_DIST_DIR="$REPRO_SECOND_DIR" npm run build:bundles >/dev/null) \
+  && diff -ru "$REPRO_FIRST_DIR" "$REPRO_SECOND_DIR" >"$REPRO_DIFF_FILE"; then
+  _pass "bundle generation is reproducible from clean output directories"
+else
+  _fail "bundle generation is not reproducible from clean output directories (see $REPRO_DIFF_FILE)"
 fi
 
 if (cd "$ROOT_DIR" && npm run typecheck >/tmp/bundle-builder-typecheck.txt 2>&1); then

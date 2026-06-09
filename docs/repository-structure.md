@@ -87,7 +87,9 @@ The package requires Node `>=22`, and GitHub Actions runs CI on Node 22. Keep `@
 
 ## Generated And Runtime Boundaries
 
-`dist/`, `build/`, and `_site/` are generated output. `dist/` mirrors canonical bundle source for runtime installation; `build/` mirrors TypeScript compilation output; `_site/` mirrors the docs site build. If any of these are stale, rebuild them instead of patching them.
+`dist/`, `build/`, and `_site/` are generated output. `dist/` mirrors canonical bundle source for runtime installation; `build/` mirrors TypeScript compilation output; `_site/` mirrors the docs site build. If any of these are stale, rebuild them instead of patching them. Static bundle validation builds the same source into two fresh output directories and diffs the results so reproducibility regressions fail with evidence.
+
+`scripts/` is a compatibility surface, not a dumping ground for implementation logic. Public JavaScript wrappers are documented in `scripts/README.md` and checked by `npm run validate:source --`; keep wrappers thin and move behavior into `src/cli/` or `src/tools/`.
 
 `.codex/` and `.claude/` at the repo root are installed runtime configuration surfaces. They can be useful for local testing, but canonical hook scripts and runtime config live in `scripts/hooks/`, `context/`, `packaging/`, and generated bundle output. The stale local `.codex/hooks.json` incident came from treating an installed runtime file as if it were canonical source. The fix is to regenerate or reinstall runtime config and update the canonical builder/install sources when behavior must change.
 

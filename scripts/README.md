@@ -12,15 +12,19 @@ These files are stable launchers for TypeScript code compiled under `build/src/`
 | `build-docs-preview.js` | `build/src/cli/docs-preview.js` |
 | `filter-installed-packs.js` | `build/src/tools/filter-installed-packs.js` |
 | `generate-context-map.js` | `build/src/tools/generate-context-map.js` |
-| `flow-kit.js` | `build/src/cli.js flow-kit` through package command wiring |
-| `pull-work-provider.js` | `build/src/cli.js pull-work-provider` through package command wiring |
-| `effective-backlog-settings.js` | `build/src/cli.js effective-backlog-settings` through package command wiring |
-| `publish-change-helper.js` | `build/src/cli.js publish-change` through package command wiring |
-| `promote-workflow-artifact.js` | `build/src/cli.js promote-workflow-artifact` through package command wiring |
-| `usage-feedback.js` | `build/src/cli.js usage-feedback` through package command wiring |
+| `flow-kit.js` | `build/src/cli/flow-kit.js` |
+| `pull-work-provider.js` | `build/src/cli/pull-work-provider.js` |
+| `effective-backlog-settings.js` | `build/src/cli/effective-backlog-settings.js` |
+| `publish-change-helper.js` | `build/src/cli/publish-change-helper.js` |
+| `promote-workflow-artifact.js` | `build/src/cli/promote-workflow-artifact.js` |
+| `usage-feedback.js` | `build/src/cli/usage-feedback.js` |
+| `validate-hook-influence-cases.js` | `build/src/cli/validate-hook-influence.js` |
 | `validate-source-tree.js` | `build/src/cli.js validate-source` through package command wiring |
 
 If implementation moves, update these wrappers rather than breaking callers.
+`npm run validate:source --` enforces this table: public wrappers must remain
+thin launchers, and implementation logic belongs under `src/cli/` or
+`src/tools/`.
 
 ## Runtime Hooks
 
@@ -63,3 +67,8 @@ flags for CI/headless installs.
 ## Bundle Policy
 
 `scripts/` is copied into generated bundles intentionally. Do not remove scripts from bundle output only to reduce size unless the corresponding source, generated install behavior, docs, and evals are updated together.
+
+`evals/static/test_universal_bundles.sh` rebuilds bundles and checks the output
+shape. It also verifies reproducibility by building the same source into two
+fresh output directories and diffing the results. A failure means generated
+content is non-deterministic or a bundle build step is carrying stale state.

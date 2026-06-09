@@ -4,7 +4,7 @@ import path from "node:path";
 import { loadJson, readText, root, walkFiles, writeText } from "./common.js";
 
 type Agent = Record<string, unknown> & { name: string; prompt: string };
-const dist = path.join(root, "dist");
+const dist = process.env.FLOW_AGENTS_DIST_DIR ? path.resolve(process.env.FLOW_AGENTS_DIST_DIR) : path.join(root, "dist");
 const manifest = loadJson<Record<string, any>>(path.join(root, "packaging/manifest.json"));
 const packs = loadJson<Record<string, any>>(path.join(root, "packaging/packs.json"));
 const textExtensions = new Set([".css", ".html", ".js", ".json", ".md", ".sh", ".toml", ".txt", ".yaml", ".yml", ".ts"]);

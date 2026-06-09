@@ -28,6 +28,32 @@ const mirroredFiles = new Map<string, { mirror: string; allowedDifferences: Arra
   ["scripts/telemetry/install-console-config.sh", { mirror: "context/scripts/telemetry/install-console-config.sh", allowedDifferences: [] }],
   ["scripts/discover-agents.sh", { mirror: "context/scripts/discover-agents.sh", allowedDifferences: [['ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"', 'ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"']] }],
 ]);
+const publicScriptWrappers = new Map<string, { target: string; significantLines: string[] }>([
+  ["scripts/build-universal-bundles.js", { target: "../build/src/tools/build-universal-bundles.js", significantLines: [
+    "// Supports FLOW_AGENTS_PACKS through the TypeScript bundle builder.",
+    'import("../build/src/tools/build-universal-bundles.js").then(({ main }) => process.exit(main()));',
+  ] }],
+  ["scripts/build-docs-preview.js", { target: "../build/src/cli/docs-preview.js", significantLines: ['import("../build/src/cli/docs-preview.js").then(({ main }) => process.exit(main()));'] }],
+  ["scripts/filter-installed-packs.js", { target: "../build/src/tools/filter-installed-packs.js", significantLines: ['import("../build/src/tools/filter-installed-packs.js").then(({ main }) => process.exit(main(process.argv.slice(2))));'] }],
+  ["scripts/generate-context-map.js", { target: "../build/src/tools/generate-context-map.js", significantLines: ['import("../build/src/tools/generate-context-map.js").then(({ main }) => process.exit(main(process.argv.slice(2))));'] }],
+  ["scripts/flow-kit.js", { target: "../build/src/cli/flow-kit.js", significantLines: ['import("../build/src/cli/flow-kit.js").then(({ main }) => process.exit(main()));'] }],
+  ["scripts/pull-work-provider.js", { target: "../build/src/cli/pull-work-provider.js", significantLines: ['import("../build/src/cli/pull-work-provider.js").then(({ main }) => process.exit(main()));'] }],
+  ["scripts/effective-backlog-settings.js", { target: "../build/src/cli/effective-backlog-settings.js", significantLines: ['import("../build/src/cli/effective-backlog-settings.js").then(({ main }) => process.exit(main()));'] }],
+  ["scripts/publish-change-helper.js", { target: "../build/src/cli/publish-change-helper.js", significantLines: ['import("../build/src/cli/publish-change-helper.js").then(({ main }) => process.exit(main()));'] }],
+  ["scripts/promote-workflow-artifact.js", { target: "../build/src/cli/promote-workflow-artifact.js", significantLines: ['import("../build/src/cli/promote-workflow-artifact.js").then(({ main }) => process.exit(main()));'] }],
+  ["scripts/usage-feedback.js", { target: "../build/src/cli/usage-feedback.js", significantLines: ['import("../build/src/cli/usage-feedback.js").then(({ main }) => process.exit(main()));'] }],
+  ["scripts/validate-hook-influence-cases.js", { target: "../build/src/cli/validate-hook-influence.js", significantLines: ['import("../build/src/cli/validate-hook-influence.js").then(({ main }) => process.exit(main(process.argv.slice(2))));'] }],
+  ["scripts/validate-source-tree.js", { target: "validate:source", significantLines: [
+    'import("node:child_process").then(({ spawnSync }) => {',
+    'const result = spawnSync("npm", ["run", "validate:source", "--silent", "--", ...process.argv.slice(2)], {',
+    'cwd: new URL("..", import.meta.url),',
+    'encoding: "utf8",',
+    'stdio: "inherit",',
+    '});',
+    'process.exit(result.status ?? 1);',
+    '});',
+  ] }],
+]);
 const requiredUsageFeedbackFiles = [
   "package.json", "tsconfig.json", "scripts/usage-feedback.js", "src/cli/usage-feedback.ts", "docs/agent-usage-feedback-loop.md",
   "scripts/hooks/stop-goal-fit.js", "scripts/promote-workflow-artifact.js", "evals/integration/test_goal_fit_hook.sh",
@@ -253,6 +279,23 @@ function validateMirrors(reporter: Reporter): void {
 function validateUsageFeedbackFiles(reporter: Reporter): void {
   for (const file of requiredUsageFeedbackFiles) reporter.check(fs.existsSync(path.join(root, file)), `required usage feedback artifact missing: ${file}`);
 }
+function significantScriptLines(text: string): string[] {
+  return text.split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#!"));
+}
+function validatePublicScriptWrappers(reporter: Reporter): void {
+  const readme = readText(path.join(root, "scripts/README.md"));
+  for (const [file, policy] of publicScriptWrappers) {
+    const abs = path.join(root, file);
+    reporter.check(fs.existsSync(abs), `${file}: public script wrapper is missing`);
+    reporter.check(readme.includes(path.basename(file)), `scripts/README.md: public wrapper table is missing ${path.basename(file)}`);
+    if (!fs.existsSync(abs)) continue;
+    const text = readText(abs);
+    const significantLines = significantScriptLines(text);
+    reporter.check(JSON.stringify(significantLines) === JSON.stringify(policy.significantLines), `${file}: public wrapper must match the exact thin launcher body for ${policy.target}`);
+  }
+}
 function isExcludedPythonPath(file: string): boolean {
   return path.relative(root, file).split(path.sep).some((part) => pythonInventoryExcludes.has(part));
 }
@@ -307,6 +350,7 @@ export function main(argv = process.argv.slice(2)): number {
   validateLegacyRefs(reporter);
   validateMirrors(reporter);
   validateUsageFeedbackFiles(reporter);
+  validatePublicScriptWrappers(reporter);
   validateNoFirstPartyPythonFiles(reporter);
   validateNoFirstPartyPythonCommands(reporter);
   if (reporter.errors.length) { console.log("Source tree validation failed:"); for (const error of reporter.errors) console.log(` - ${error}`); return 1; }
