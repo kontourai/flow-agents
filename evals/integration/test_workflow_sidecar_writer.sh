@@ -78,6 +78,29 @@ else
   _fail "sidecar writer did not record stable repository identity"
 fi
 
+UNSAFE_REPO_ROOT="$TMPDIR_EVAL/unsafe-repo"
+mkdir -p "$UNSAFE_REPO_ROOT"
+if (cd "$UNSAFE_REPO_ROOT" \
+  && git init -q \
+  && git remote add origin "file:///Users/alice/customer-secret.git" \
+  && FLOW_AGENTS_REPO="/Users/alice/customer-secret" flow_agents_node "$WRITER" ensure-session \
+    --artifact-root ".flow-agents" \
+    --task-slug unsafe-repo \
+    --title "Unsafe repo" \
+    --summary "Unsafe repo fallback." \
+    --timestamp "2026-05-09T00:00:00Z" >/dev/null 2>"$TMPDIR_EVAL/unsafe-repo.err" \
+  && node - ".flow-agents/unsafe-repo/state.json" <<'NODE'
+const fs = require("node:fs");
+const repo = JSON.parse(fs.readFileSync(process.argv[2], "utf8")).repo;
+if (repo !== "unsafe-repo") throw new Error(`unsafe repo fallback was ${JSON.stringify(repo)}`);
+if (repo.includes("alice") || repo.includes("/") || repo.startsWith("/")) throw new Error(`unsafe repo leaked local path material: ${repo}`);
+NODE
+); then
+  _pass "sidecar writer rejects path-like repository identity inputs"
+else
+  _fail "sidecar writer leaked or rejected path-like repository identity inputs: $(cat "$TMPDIR_EVAL/unsafe-repo.err" 2>/dev/null)"
+fi
+
 if flow_agents_node "$WRITER" current --artifact-root "$SESSION_ROOT" --format slug >"$TMPDIR_EVAL/current-slug.out" 2>"$TMPDIR_EVAL/current-slug.err" \
   && [[ "$(cat "$TMPDIR_EVAL/current-slug.out")" == "ensured-session" ]] \
   && flow_agents_node "$WRITER" current --artifact-root "$SESSION_ROOT" --format path >"$TMPDIR_EVAL/current-path.out" 2>"$TMPDIR_EVAL/current-path.err" \
