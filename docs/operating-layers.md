@@ -39,8 +39,7 @@ Governance tools such as Veritas belong at the Evidence boundary. Flow Agents sh
 | `docs/workflow-*.md` | Workflows | Human-readable workflow contracts and usage guidance. |
 | `.agents/flow-agents/` | Workflows | Cross-session task artifacts. Runtime state stays local; reviewable in-progress change work may live under `.agents/flow-agents/changes/<change-id>/` on feature branches and must be promoted before merge. |
 | `scripts/` | Evidence / Workflows / Packaging | Validation, build, telemetry, hooks, and artifact tooling. |
-| `scripts-ts/` | Evidence / Workflows / Packaging | TypeScript source for build, validation, context-map, packaging, and CLI helper modules compiled into `build/scripts-ts/`. |
-| `src/` | Workflows / Packaging | TypeScript CLI, runtime adapter, Flow Kit, and shared library source compiled into `build/src/`. |
+| `src/` | Workflows / Evidence / Packaging | TypeScript CLI, runtime adapter, Flow Kit, shared library, build, validation, context-map, packaging, and CLI helper source compiled into `build/src/`. |
 | `evals/` | Evidence | Static, behavioral, integration, and acceptance checks. |
 | `.telemetry/` | Evidence | Runtime telemetry, outcomes, and reports. |
 | `packaging/` | Packaging | Cross-harness manifest and bundle docs. |

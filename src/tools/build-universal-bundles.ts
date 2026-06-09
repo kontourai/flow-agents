@@ -248,12 +248,11 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
   for (const dir of dirs) copyTree(path.join(root, dir), path.join(targetRoot, dir), targetName, token);
   for (const dir of manifest.optional_copy_dirs ?? []) copyTree(path.join(root, dir), path.join(targetRoot, dir), targetName, token);
   writeText(path.join(targetRoot, "build/package.json"), `${JSON.stringify({ type: "module" }, null, 2)}\n`);
-  const filterBuilt = path.join(root, "build/scripts-ts/filter-installed-packs.js");
-  const commonBuilt = path.join(root, "build/scripts-ts/common.js");
+  const filterBuilt = path.join(root, "build/src/tools/filter-installed-packs.js");
+  const commonBuilt = path.join(root, "build/src/tools/common.js");
   if (fs.existsSync(filterBuilt)) writeText(path.join(targetRoot, "scripts/filter-installed-packs.mjs"), readText(filterBuilt).replace("./common.js", "./common.mjs"));
   if (fs.existsSync(commonBuilt)) writeText(path.join(targetRoot, "scripts/common.mjs"), readText(commonBuilt));
   copyTree(path.join(root, "build/src"), path.join(targetRoot, "build/src"), targetName, token);
-  copyTree(path.join(root, "build/scripts-ts"), path.join(targetRoot, "build/scripts-ts"), targetName, token);
 }
 function installScript(label: string, usage: string, token?: string): string {
   const replaceBlock = token ? `\nexport DEST\nfind "$DEST" -type f \\( -name '*.json' -o -name '*.md' -o -name '*.sh' -o -name '*.js' -o -name '*.ts' -o -name '*.yaml' -o -name '*.yml' \\) -print0 | xargs -0 perl -0pi -e 's#${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}#$ENV{DEST}#g'` : "";

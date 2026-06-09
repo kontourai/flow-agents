@@ -12,7 +12,7 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
 - Do not edit `dist/`, `build/`, or `_site/` by hand. They are generated from tracked source.
 - Do not commit local runtime state from `.agents/flow-agents/<slug>/`, `.codex/`, `.claude/`, `.omx/`, `.promptfoo/`, `.telemetry/`, `.surface/runs/`, `.veritas/`, or tool caches.
 - The only reviewable workflow runtime exception is `.agents/flow-agents/changes/<change-id>/`, and it must be promoted to durable docs or provider records before merging to `main`.
-- Treat generated exports and installed runtime config as products of `packaging/manifest.json`, `scripts-ts/build-universal-bundles.ts`, `scripts/install-*.sh`, and the source directories they copy.
+- Treat generated exports and installed runtime config as products of `packaging/manifest.json`, `src/tools/build-universal-bundles.ts`, `scripts/install-*.sh`, and the source directories they copy.
 
 ## Target Layout
 
@@ -20,7 +20,7 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
 /
   README.md                    # human entry point
   src/                         # TypeScript CLI and runtime source
-  scripts-ts/                  # TypeScript build and validation modules used by the CLI
+  src/tools/                   # TypeScript build, packaging, validation, and context-map tooling
   scripts/                     # public wrappers, shell tools, hooks, telemetry, installers
   agents/ agent-cards/         # canonical agent specs and discovery cards
   skills/ context/ powers/ prompts/
@@ -49,7 +49,7 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
 | `_site/` | generated docs output | Built from `docs/`. | Ignored. | Recreate with docs preview/build tooling. |
 | `agent-cards/` | canonical source | Discovery metadata for routable agents. | Exported into runtime bundles. | Do not delete without checking bundle manifests and evals. |
 | `agents/` | canonical source | Source agent definitions. | Exported to Kiro, Claude Code, Codex, and compatible harnesses. | Keep public agent names compatible or provide shims. |
-| `build/` | generated output | TypeScript compiler output from `src/` and `scripts-ts/`. | Ignored. | Recreate with `npm run build --`. |
+| `build/` | generated output | TypeScript compiler output from `src/`. | Ignored. | Recreate with `npm run build --`. |
 | `context/` | canonical source | Shared contracts, settings, templates, hooks context, and reusable guidance. | Exported to bundles. | Contract changes require validation and docs review. |
 | `dist/` | generated bundle output | Created by `npm run build:bundles --`. | Ignored. | Never edit by hand; rebuild from source and packaging metadata. |
 | `docs/` | canonical docs/site source | Durable developer and product documentation. | Source for GitHub Pages and context docs. | Update when behavior or boundaries change; regenerate context map when relevant. |
@@ -61,7 +61,7 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
 | `prompts/` | canonical source | Saved prompt entry points. | Exported where supported. | Promote stable procedures into skills when needed. |
 | `schemas/` | canonical source | JSON schemas for sidecars and provider/resource records. | Used by validators and workflow tooling. | Schema changes require artifact validation. |
 | `scripts/` | canonical source and compatibility surface | Shell and JavaScript wrappers, installers, hooks, telemetry, workflow tooling. | Some scripts wrap compiled `build/` output. | Public wrappers are compatibility-sensitive; check package scripts, installers, docs, and evals before moving. |
-| `scripts-ts/` | canonical TypeScript tooling source | Build, packaging, context-map, validators, and utility modules imported by `src/cli.ts`. | Compiled to `build/scripts-ts/`. | Keep documented unless a later migration consolidates into `src/` with shims. |
+| `src/tools/` | canonical TypeScript tooling source | Build, packaging, context-map, validators, and utility modules imported by `src/cli.ts`. | Compiled to `build/src/tools/`. | Keep public wrappers in `scripts/` stable when tooling internals move. |
 | `skills/` | canonical source | Reusable workflow skills. | Exported to runtime bundles. | Skill renames need compatibility and docs updates. |
 | `src/` | canonical TypeScript product source | CLI, runtime adapters, Flow Kit helpers, and shared libraries. | Compiled to `build/src/`. | Preserve public bin command behavior. |
 | root files | canonical metadata | `package.json`, `tsconfig.json`, `install.sh`, license, contribution docs, security docs, and repo instructions. | Source. | Keep command names and install behavior compatible. |
@@ -94,7 +94,7 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
 Do not delete production source in a cleanup pass unless repeatable proof shows it is unused and validators still pass. Minimum proof for a candidate:
 
 1. `git ls-files <path>` shows whether the path is tracked source or local ignored state.
-2. `rg -n "<path-or-command-name>" README.md docs context agents agent-cards skills powers prompts scripts scripts-ts src evals packaging kits integrations package.json install.sh .github .githooks` has no live references, or all references are updated in the same change.
+2. `rg -n "<path-or-command-name>" README.md docs context agents agent-cards skills powers prompts scripts src evals packaging kits integrations package.json install.sh .github .githooks` has no live references, or all references are updated in the same change.
 3. Public commands, package bins, installers, bundle manifests, kit catalogs, and evals do not depend on the path, or compatibility shims remain in place.
 4. Generated output has a documented source and regeneration command before removal.
 5. Relevant validation passes after cleanup.
