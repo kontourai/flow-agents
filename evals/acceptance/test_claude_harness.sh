@@ -142,9 +142,9 @@ fi
 
 echo ""
 echo "--- Live Hook Influence ---"
-mkdir -p "$TMP_WORK/.agents/flow-agents/live-hook" "$TMP_WORK/docs"
+mkdir -p "$TMP_WORK/.flow-agents/live-hook" "$TMP_WORK/docs"
 printf '# Context Map\n' > "$TMP_WORK/docs/context-map.md"
-cat > "$TMP_WORK/.agents/flow-agents/live-hook/state.json" <<'JSON'
+cat > "$TMP_WORK/.flow-agents/live-hook/state.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "live-hook",
@@ -158,7 +158,7 @@ cat > "$TMP_WORK/.agents/flow-agents/live-hook/state.json" <<'JSON'
   }
 }
 JSON
-cat > "$TMP_WORK/.agents/flow-agents/live-hook/critique.json" <<'JSON'
+cat > "$TMP_WORK/.flow-agents/live-hook/critique.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "live-hook",

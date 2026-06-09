@@ -18,10 +18,10 @@ echo "=== Layer 2: Flow Agents Statusline ==="
 echo ""
 
 WORKSPACE="$TMPDIR_EVAL/workspace"
-TASK_DIR="$WORKSPACE/.agents/flow-agents/status-demo"
+TASK_DIR="$WORKSPACE/.flow-agents/status-demo"
 mkdir -p "$TASK_DIR"
 
-cat >"$WORKSPACE/.agents/flow-agents/current.json" <<'JSON'
+cat >"$WORKSPACE/.flow-agents/current.json" <<'JSON'
 {
   "schema_version": "1.0",
   "active_slug": "status-demo",

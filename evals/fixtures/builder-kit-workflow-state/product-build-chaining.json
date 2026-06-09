@@ -8,14 +8,14 @@
     "phase": "pickup",
     "updated_at": "2026-05-29T10:00:00Z",
     "artifact_paths": [
-      ".agents/flow-agents/builder-kit-product-build-chaining/builder-kit-probe.json",
-      ".agents/flow-agents/builder-kit-product-build-chaining/builder-kit-product-build-chaining--pull-work.md"
+      ".flow-agents/builder-kit-product-build-chaining/builder-kit-probe.json",
+      ".flow-agents/builder-kit-product-build-chaining/builder-kit-product-build-chaining--pull-work.md"
     ],
     "next_action": {
       "status": "continue",
       "summary": "Builder Kit build selected work; run design-probe / pickup-probe before plan-work.",
       "target_phase": "pickup",
-      "target_artifact": ".agents/flow-agents/builder-kit-product-build-chaining/builder-kit-probe.json"
+      "target_artifact": ".flow-agents/builder-kit-product-build-chaining/builder-kit-probe.json"
     }
   },
   "probe_record": {
@@ -27,7 +27,7 @@
     "automation_mode": "guided",
     "recovery_mode": "builder-kit-build-flow",
     "probe_status": "required",
-    "probe_artifact_ref": ".agents/flow-agents/builder-kit-product-build-chaining/builder-kit-probe.json",
+    "probe_artifact_ref": ".flow-agents/builder-kit-product-build-chaining/builder-kit-probe.json",
     "grouping_decision": {
       "status": "single-item",
       "justification": "one ready issue selected"
@@ -46,7 +46,7 @@
     "accepted_gaps": [],
     "resume_prompt": "Resume by running design-probe / pickup-probe for the selected work before plan-work.",
     "artifact_refs": [
-      ".agents/flow-agents/builder-kit-product-build-chaining/builder-kit-product-build-chaining--pull-work.md"
+      ".flow-agents/builder-kit-product-build-chaining/builder-kit-product-build-chaining--pull-work.md"
     ],
     "planning_readiness": "not-ready",
     "expected_modified_files": [],

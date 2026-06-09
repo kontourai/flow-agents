@@ -3,14 +3,9 @@ build/
 _site/
 test-results/
 
-# Local agent/session state. These folders may appear at the repo root during
-# local runs, but canonical source belongs in docs/, context/, integrations/,
-# scripts/, or tracked bundle source directories.
-.agents/*
-!.agents/flow-agents/
-.agents/flow-agents/*
-!.agents/flow-agents/changes/
-!.agents/flow-agents/changes/**
+# Local Flow Agents runtime/session state. Durable source belongs in docs/,
+# context/, integrations/, scripts/, or tracked bundle source directories.
+.flow-agents/*
 .claude/
 /.codex/
 .ai/

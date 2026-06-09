@@ -28,7 +28,7 @@ else
 fi
 
 telemetry="$TMPDIR_EVAL/telemetry"
-artifacts="$TMPDIR_EVAL/.agents/flow-agents"
+artifacts="$TMPDIR_EVAL/.flow-agents"
 mkdir -p "$telemetry" "$artifacts/auto-feedback" "$artifacts/open-feedback"
 cat > "$artifacts/auto-feedback/auto-feedback--deliver.md" <<'MARKDOWN'
 # Auto Feedback Delivery

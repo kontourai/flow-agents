@@ -42,7 +42,7 @@ if TELEMETRY_DATA_DIR="$TMPDIR_EVAL" flow_agents_node "$USAGE_FEEDBACK" record-o
   --task-type "deliver" \
   --task-slug "usage-feedback-success" \
   --human-minutes-saved 12 \
-  --evidence ".agents/flow-agents/agent-usage-feedback-loop/agent-usage-feedback-loop--deliver.md" >/dev/null 2>"$TMPDIR_EVAL/success.err"; then
+  --evidence ".flow-agents/agent-usage-feedback-loop/agent-usage-feedback-loop--deliver.md" >/dev/null 2>"$TMPDIR_EVAL/success.err"; then
   _pass "record-outcome accepts success with profile/prompt/skill ids"
 else
   _fail "record-outcome rejected success: $(cat "$TMPDIR_EVAL/success.err" 2>/dev/null)"

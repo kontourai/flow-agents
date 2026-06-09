@@ -12,10 +12,10 @@ _pass() { echo "  ✓ $1"; }
 _fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 
 REPO="$TMPDIR_EVAL/repo"
-mkdir -p "$REPO/.agents/flow-agents/feedback-loop"
+mkdir -p "$REPO/.flow-agents/feedback-loop"
 printf '# Test Repo\n' > "$REPO/AGENTS.md"
 
-cat > "$REPO/.agents/flow-agents/feedback-loop/feedback-loop--deliver.md" <<'MARKDOWN'
+cat > "$REPO/.flow-agents/feedback-loop/feedback-loop--deliver.md" <<'MARKDOWN'
 # Build feedback loop
 
 branch: main
@@ -58,7 +58,7 @@ else
   fi
 fi
 
-cat > "$REPO/.agents/flow-agents/feedback-loop/feedback-loop--deliver.md" <<'MARKDOWN'
+cat > "$REPO/.flow-agents/feedback-loop/feedback-loop--deliver.md" <<'MARKDOWN'
 # Build feedback loop
 
 branch: main
@@ -112,9 +112,9 @@ else
 fi
 
 BACKLOG_REPO="$TMPDIR_EVAL/backlog-repo"
-mkdir -p "$BACKLOG_REPO/.agents/flow-agents/configurable-workflow-routing"
+mkdir -p "$BACKLOG_REPO/.flow-agents/configurable-workflow-routing"
 printf '# Test Repo\n' > "$BACKLOG_REPO/AGENTS.md"
-cat > "$BACKLOG_REPO/.agents/flow-agents/configurable-workflow-routing/configurable-workflow-routing--idea-to-backlog.md" <<'MARKDOWN'
+cat > "$BACKLOG_REPO/.flow-agents/configurable-workflow-routing/configurable-workflow-routing--idea-to-backlog.md" <<'MARKDOWN'
 # Configurable Workflow Routing
 
 status: complete
@@ -148,7 +148,7 @@ else
   fi
 fi
 
-cat > "$REPO/.agents/flow-agents/feedback-loop/state.json" <<'JSON'
+cat > "$REPO/.flow-agents/feedback-loop/state.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -162,7 +162,7 @@ cat > "$REPO/.agents/flow-agents/feedback-loop/state.json" <<'JSON'
 }
 JSON
 
-cat > "$REPO/.agents/flow-agents/feedback-loop/acceptance.json" <<'JSON'
+cat > "$REPO/.flow-agents/feedback-loop/acceptance.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -187,7 +187,7 @@ cat > "$REPO/.agents/flow-agents/feedback-loop/acceptance.json" <<'JSON'
 }
 JSON
 
-cat > "$REPO/.agents/flow-agents/feedback-loop/evidence.json" <<'JSON'
+cat > "$REPO/.flow-agents/feedback-loop/evidence.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -204,7 +204,7 @@ cat > "$REPO/.agents/flow-agents/feedback-loop/evidence.json" <<'JSON'
 }
 JSON
 
-cat > "$REPO/.agents/flow-agents/feedback-loop/handoff.json" <<'JSON'
+cat > "$REPO/.flow-agents/feedback-loop/handoff.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -241,7 +241,7 @@ else
   fi
 fi
 
-cat > "$REPO/.agents/flow-agents/feedback-loop/critique.json" <<'JSON'
+cat > "$REPO/.flow-agents/feedback-loop/critique.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -270,7 +270,7 @@ else
   _fail "strict critique hook should allow valid critique: $(cat "$TMPDIR_EVAL/critique-valid.err")"
 fi
 
-cat > "$REPO/.agents/flow-agents/feedback-loop/state.json" <<'JSON'
+cat > "$REPO/.flow-agents/feedback-loop/state.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -285,7 +285,7 @@ cat > "$REPO/.agents/flow-agents/feedback-loop/state.json" <<'JSON'
 }
 JSON
 
-cat > "$REPO/.agents/flow-agents/feedback-loop/evidence.json" <<'JSON'
+cat > "$REPO/.flow-agents/feedback-loop/evidence.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -304,7 +304,7 @@ cat > "$REPO/.agents/flow-agents/feedback-loop/evidence.json" <<'JSON'
 }
 JSON
 
-cat > "$REPO/.agents/flow-agents/feedback-loop/critique.json" <<'JSON'
+cat > "$REPO/.flow-agents/feedback-loop/critique.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -404,7 +404,7 @@ else
   _fail "Codex hook adapter should exit successfully after translating Stop block"
 fi
 
-cat > "$REPO/.agents/flow-agents/feedback-loop/evidence.json" <<'JSON'
+cat > "$REPO/.flow-agents/feedback-loop/evidence.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -435,7 +435,7 @@ else
   fi
 fi
 
-cat > "$REPO/.agents/flow-agents/feedback-loop/evidence.json" <<'JSON'
+cat > "$REPO/.flow-agents/feedback-loop/evidence.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -452,7 +452,7 @@ cat > "$REPO/.agents/flow-agents/feedback-loop/evidence.json" <<'JSON'
 }
 JSON
 
-if flow_agents_node "$ROOT/scripts/promote-workflow-artifact.js" "$REPO/.agents/flow-agents/feedback-loop/feedback-loop--deliver.md" >"$TMPDIR_EVAL/promote.out" 2>"$TMPDIR_EVAL/promote.err"; then
+if flow_agents_node "$ROOT/scripts/promote-workflow-artifact.js" "$REPO/.flow-agents/feedback-loop/feedback-loop--deliver.md" >"$TMPDIR_EVAL/promote.out" 2>"$TMPDIR_EVAL/promote.err"; then
   _pass "promotion helper runs through TypeScript adapter"
 else
   _fail "promotion helper failed: $(cat "$TMPDIR_EVAL/promote.err")"

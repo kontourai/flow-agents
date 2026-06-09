@@ -87,11 +87,11 @@ The `tool-planner` prompt context must include the latest-base confirmation and 
 
 ## Workflow
 
-1. Create session file in `.agents/flow-agents/<slug>/` if one wasn't provided:
+1. Create session file in `.flow-agents/<slug>/` if one wasn't provided:
    - Filename: `<slug>--plan-work.md`
    - `status: planning`, `type: plan-work`
    - Create or update `state.json` with phase `planning`
-   - use `npm run workflow:sidecar -- ensure-session --source-request ... --summary ... --criterion ...` when the repository provides it; this also writes `.agents/flow-agents/current.json`
+   - use `npm run workflow:sidecar -- ensure-session --source-request ... --summary ... --criterion ...` when the repository provides it; this also writes `.flow-agents/current.json`
 2. Delegate to `tool-planner`:
    ```
    Goal: <goal>
@@ -167,7 +167,7 @@ Copied from the plan artifact. This is the stop condition for delivery.
 
 ## Output
 
-- Session file in `.agents/flow-agents/<slug>/` with status `planned`
+- Session file in `.flow-agents/<slug>/` with status `planned`
 - Plan artifact: `<session-basename>-plan.md`
 - Structured sidecars: `state.json`, `acceptance.json`, and `handoff.json`
 - The plan artifact is the source of truth — tool-worker agents read it directly

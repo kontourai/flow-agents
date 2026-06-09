@@ -31,12 +31,18 @@ const ignoredPathPatterns = [
 ];
 
 function trackedFiles() {
+  const injected = process.env.FLOW_AGENTS_CONTENT_BOUNDARY_FILES;
+  if (injected) return injected.split(/\r?\n/).filter(Boolean);
   const output = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" });
   return output.split("\0").filter(Boolean);
 }
 
 function isIgnoredPath(filePath) {
   return filePath === SELF || ignoredPathPatterns.some((pattern) => pattern.test(filePath));
+}
+
+function isWorkflowRuntimeArtifact(filePath) {
+  return filePath.startsWith(".flow-agents/");
 }
 
 function lineNumberFor(content, index) {
@@ -46,11 +52,11 @@ function lineNumberFor(content, index) {
 const findings = [];
 
 for (const filePath of trackedFiles()) {
-  if (filePath.startsWith(".agents/")) {
+  if (isWorkflowRuntimeArtifact(filePath)) {
     findings.push({
       filePath,
       line: 1,
-      label: "agent workflow artifact must not be tracked in this repo",
+      label: "Flow Agents runtime artifact must not be tracked in this repo",
     });
     continue;
   }

@@ -48,7 +48,7 @@ function printHelp(): void {
   console.log("Read-only dry-run audit for local workflow artifact directories.");
   console.log("");
   console.log("Options:");
-  console.log("  --artifact-root <path>  Local artifact root to scan (default: .agents/flow-agents)");
+  console.log("  --artifact-root <path>  Local artifact root to scan (default: .flow-agents)");
   console.log("  --json                  Print stable JSON buckets instead of text");
   console.log("  --help                  Show this help");
   console.log("");
@@ -268,7 +268,7 @@ export function main(argv = process.argv.slice(2)): number {
   }
   let result: AuditResult;
   try {
-    result = audit(flagString(args.flags, "artifact-root", ".agents/flow-agents") ?? ".agents/flow-agents");
+    result = audit(flagString(args.flags, "artifact-root", ".flow-agents") ?? ".flow-agents");
   } catch (error) {
     console.error(`workflow-artifact-cleanup-audit: ${error instanceof Error ? error.message : String(error)}`);
     return 1;

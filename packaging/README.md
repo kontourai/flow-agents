@@ -29,7 +29,7 @@ All targets also receive shared canonical directories where supported: `context/
 
 `dist/` is a generated export surface, not the source of truth. Installed runtime directories such as `.codex/` and `.claude/` are also not source. They are created from the generated target bundle and installer scripts. If generated or installed hook config is wrong, fix the canonical source, rebuild `dist/`, and reinstall the runtime config.
 
-Runtime workflow state under `.agents/flow-agents/<slug>/` is local working memory. Packaging should copy canonical workflow contracts and skills, but it should not publish local task artifacts as product source. The only narrow exception is reviewable `.agents/flow-agents/changes/<change-id>/` work, which must be promoted before merge.
+Runtime workflow state under `.flow-agents/<slug>/` is local working memory. Packaging should copy canonical workflow contracts and skills, but it should not publish local task artifacts as product source. Durable outcomes must be promoted into docs, source, schemas, or provider records before merge.
 
 ## Validation And Build
 

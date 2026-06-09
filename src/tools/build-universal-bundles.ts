@@ -267,8 +267,8 @@ function buildBase(agents: Agent[]): void {
   const bundle = path.join(dist, "base");
   resetDir(bundle);
   copySharedContent(bundle, "base", "<bundle-root>");
-  writeText(path.join(bundle, ".agents/flow-agents", ".gitkeep"), "");
-  writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Base", agents, ".agents/flow-agents"));
+  writeText(path.join(bundle, ".flow-agents", ".gitkeep"), "");
+  writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Base", agents, ".flow-agents"));
   writeText(path.join(bundle, "README.md"), exportTargetReadme("Base", "bash install.sh /path/to/workspace"));
   writeText(path.join(bundle, "install.sh"), installScript("Base", "/path/to/workspace"));
   fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
@@ -280,7 +280,7 @@ function buildKiro(agents: Agent[]): void {
   resetDir(bundle);
   copySharedContent(bundle, "kiro", token);
   for (const spec of agents) writeText(path.join(bundle, "agents", `${spec.name}.json`), sanitizeText(`${JSON.stringify(sanitizeAgentJson(spec), null, 2)}\n`, "kiro", token));
-  writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Kiro", agents, ".agents/flow-agents"));
+  writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Kiro", agents, ".flow-agents"));
   writeText(path.join(bundle, "README.md"), exportTargetReadme("Kiro", "bash install.sh $HOME/.flow-agents"));
   writeText(path.join(bundle, "install.sh"), installScript("Kiro", "$HOME/.flow-agents", token, '${FLOW_AGENTS_DEST:-$HOME/.flow-agents}'));
   fs.chmodSync(path.join(bundle, "install.sh"), 0o755);

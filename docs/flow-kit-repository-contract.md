@@ -83,7 +83,7 @@ Activation reuses the installed local kit registry at `<dest>/kits/local/install
 Generated files are written under:
 
 ```text
-<dest>/.agents/flow-agents/runtime/codex/
+<dest>/.flow-agents/runtime/codex/
 ```
 
 Flow Definition copies are placed under `flows/<kit-id>/<flow-id>.flow.json`, and activation writes an `activation.json` manifest in the same runtime-local area.

@@ -212,7 +212,7 @@ fi
 
 echo ""
 echo "--- Shared Task Dirs ---"
-for dir in "$DIST_DIR/claude-code/.agents/flow-agents" "$DIST_DIR/codex/.agents/flow-agents"; do
+for dir in "$DIST_DIR/claude-code/.flow-agents" "$DIST_DIR/codex/.flow-agents"; do
   if [[ -d "$dir" ]]; then
     _pass "$(realpath "$dir" 2>/dev/null || echo "$dir") exists"
   else

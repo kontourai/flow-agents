@@ -10,8 +10,8 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
 
 - Edit canonical source in the repo root areas listed below, then regenerate derived output with the documented commands.
 - Do not edit `dist/`, `build/`, or `_site/` by hand. They are generated from tracked source.
-- Do not commit local runtime state from `.agents/flow-agents/<slug>/`, `.codex/`, `.claude/`, `.omx/`, `.promptfoo/`, `.telemetry/`, `.surface/`, `.veritas/`, or tool caches.
-- The only reviewable workflow runtime exception is `.agents/flow-agents/changes/<change-id>/`, and it must be promoted to durable docs or provider records before merging to `main`.
+- Do not commit local runtime state from `.flow-agents/<slug>/`, `.codex/`, `.claude/`, `.omx/`, `.promptfoo/`, `.telemetry/`, `.surface/`, `.veritas/`, or tool caches.
+- Runtime workflow artifacts stay local and ignored; promote reviewable or durable outcomes to docs, source, schemas, or provider records before merging to `main`.
 - Treat generated exports and installed runtime config as products of `packaging/manifest.json`, `src/tools/build-universal-bundles.ts`, `scripts/install-*.sh`, and the source directories they copy.
 
 ## Target Layout
@@ -32,14 +32,14 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
   docs/                        # durable docs and GitHub Pages source
   integrations/                # optional external integration config
   dist/ build/ _site/           # generated output; ignored
-  .agents/ .codex/ .claude/ ... # local runtime state; ignored by default
+  .flow-agents/ .codex/ .claude/ ... # local runtime state; ignored by default
 ```
 
 ## Top-Level Inventory
 
 | Path | Classification | Source of truth | Generated or runtime policy | Safe cleanup rule |
 | --- | --- | --- | --- | --- |
-| `.agents/` | runtime state | Workflow tools write local session artifacts. | Ignored except `.agents/flow-agents/changes/**` for reviewable in-progress change work. | Do not commit task runtime roots; promote durable decisions to docs or providers. |
+| `.flow-agents/` | runtime state | Workflow tools write local session artifacts. | Ignored. | Do not commit task runtime roots; promote durable decisions to docs, source, schemas, or providers before merge. |
 | `.claude/` | installed runtime config | Generated bundle or local runtime install. | Ignored. | Reinstall from `dist/claude-code/` instead of editing as source. |
 | `.codex/` | installed runtime config | Generated bundle or local runtime install. | Ignored. | Reinstall from `dist/codex/` or `scripts/install-codex-home.sh`; do not treat local hooks as canonical. |
 | `.githooks/` | canonical repo tooling | Tracked repository hook scripts. | Source, not runtime agent hooks. | Keep compatible with `npm run setup:repo-hooks` and `npm run validate:repo-hooks --`. |
@@ -91,7 +91,7 @@ The package requires Node `>=22`, and GitHub Actions runs CI on Node 22. Keep `@
 
 `.codex/` and `.claude/` at the repo root are installed runtime configuration surfaces. They can be useful for local testing, but canonical hook scripts and runtime config live in `scripts/hooks/`, `context/`, `packaging/`, and generated bundle output. The stale local `.codex/hooks.json` incident came from treating an installed runtime file as if it were canonical source. The fix is to regenerate or reinstall runtime config and update the canonical builder/install sources when behavior must change.
 
-`.agents/flow-agents/<slug>/` is workflow working memory. Keep plans, sidecars, evidence, and handoffs there while work is active. Promote stable outcomes into `docs/`, schemas, source, or provider records before final acceptance.
+`.flow-agents/<slug>/` is workflow working memory. Keep plans, sidecars, evidence, and handoffs there while work is active. Promote stable outcomes into `docs/`, schemas, source, or provider records before final acceptance.
 
 ## Dead-Code Cleanup Policy
 

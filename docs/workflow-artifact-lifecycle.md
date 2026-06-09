@@ -4,7 +4,7 @@ title: Workflow Artifact Lifecycle
 
 # Workflow Artifact Lifecycle
 
-Flow Agents treats task artifacts as useful working memory, not permanent product documentation. A feature branch may carry an explicit change workspace while work is in progress, but completed work must promote the durable parts into normal project docs and remove the temporary workspace before it reaches `main`.
+Flow Agents treats task artifacts as useful working memory, not permanent product documentation. Feature branches should promote durable planning, decisions, evidence pointers, and acceptance notes into normal project docs, source, schemas, or provider records instead of carrying `.flow-agents/` runtime files.
 
 The local artifact root is a current-state dashboard first and a short-lived recovery cache second. It should answer "what needs attention now?" without forcing agents to sift through old successful deliveries.
 
@@ -13,24 +13,23 @@ The local artifact root is a current-state dashboard first and a short-lived rec
 Use the read-only cleanup audit before making any local retention decision:
 
 ```bash
-npm run workflow-artifact-cleanup-audit -- --artifact-root .agents/flow-agents
-npm run workflow-artifact-cleanup-audit -- --artifact-root .agents/flow-agents --json
+npm run workflow-artifact-cleanup-audit -- --artifact-root .flow-agents
+npm run workflow-artifact-cleanup-audit -- --artifact-root .flow-agents --json
 ```
 
-The command scans immediate workflow directories, skips non-workflow lanes such as `changes/` and `archive/`, and reports active WIP separately from cleanup candidates, terminal done records, active learning follow-ups, and invalid sidecars. This first slice is dry-run classification only: it does not delete, archive, move, or rewrite runtime artifacts by default, and it has no apply mode.
+The command scans immediate workflow directories, skips non-workflow lanes such as `archive/`, and reports active WIP separately from cleanup candidates, terminal done records, active learning follow-ups, and invalid sidecars. This first slice is dry-run classification only: it does not delete, archive, move, or rewrite runtime artifacts by default, and it has no apply mode.
 
 Use the Current-State Semantics and Local Retention Policy sections below to interpret each bucket. In particular, learning records with `learning.status: followup_required` or any `routing[].status: open` remain active learning follow-ups until every route is completed, opened elsewhere, deferred with a trigger, accepted, or rejected.
 
 ## Artifact Lanes
 
-Use two lanes under `.agents/flow-agents/`:
+Use one local lane under `.flow-agents/`:
 
 | Lane | Path | Commit Policy | Purpose |
 | --- | --- | --- | --- |
-| Runtime workspace | `.agents/flow-agents/<slug>/` | Do not commit | Local session state, sidecars, delegate events, scratch evidence, and recovery notes. |
-| Change workspace | `.agents/flow-agents/changes/<change-id>/` | May be committed on feature branches only | Reviewable in-progress plans, acceptance criteria, decision notes, verification notes, and closeout status. |
+| Runtime workspace | `.flow-agents/<slug>/` | Do not commit | Local session state, sidecars, delegate events, scratch evidence, and recovery notes. |
 
-The runtime workspace stays local because it may contain stale session state, machine-specific paths, or noisy intermediate artifacts. The change workspace is intentionally narrow and reviewable. Commit it only when the branch needs cross-session or cross-person traceability.
+The runtime workspace stays local because it may contain stale session state, machine-specific paths, or noisy intermediate artifacts. When a branch needs cross-session or cross-person traceability, promote the durable summary, decisions, evidence pointers, and acceptance notes into docs, source, schemas, or provider records instead of committing runtime artifacts.
 
 ## Current-State Semantics
 
@@ -76,13 +75,13 @@ Durable learning should be promoted by target:
 
 ## Local Retention Policy
 
-For local-only users, keep enough local state to recover recent work, but do not use `.agents/flow-agents/<slug>/` as the long-term system of record.
+For local-only users, keep enough local state to recover recent work, but do not use `.flow-agents/<slug>/` as the long-term system of record.
 
 Recommended defaults:
 
 | Artifact class | Retain locally | Durable destination |
 | --- | --- | --- |
-| Active WIP, blockers, and unresolved decisions | Until resolved | Current `.agents/flow-agents/<slug>/` state and handoff. |
+| Active WIP, blockers, and unresolved decisions | Until resolved | Current `.flow-agents/<slug>/` state and handoff. |
 | Recently merged or accepted deliveries | 14-30 days, or until the next queue audit | PR body, issue comments, release records, promoted docs, or archived evidence refs. |
 | Security, migration, release, or provider-governance evidence | 30-90 days when useful for audit | Provider record, release note, durable doc, or external evidence store. |
 | Routine successful local runtime artifacts | Delete or archive after durable promotion and recovery window | Usually none beyond provider record and docs. |
@@ -100,20 +99,9 @@ To prevent historical entries from polluting current-state scans:
 4. Queue audits should flag `needs_decision` or `followup_required` records older than the local recovery window.
 5. Cleanup should preserve links to PRs, issues, durable docs, and evidence summaries before deleting or archiving local runtime folders.
 
-## Change Workspace Shape
+## Durable Closeout Shape
 
-Recommended files:
-
-```text
-.agents/flow-agents/changes/<change-id>/
-  plan.md
-  acceptance.md
-  verification.md
-  decisions.md
-  closeout.md
-```
-
-`closeout.md` is the handoff from working memory to durable project knowledge. It should record:
+Durable closeout content is the handoff from working memory to project knowledge. Put it in the provider record, PR body, issue comments, release note, ADR, README section, schema docs, or runbook that owns the shipped behavior. It should record:
 
 - shipped behavior or explicit non-shipped result
 - provider change records such as PRs or issues
@@ -121,18 +109,18 @@ Recommended files:
 - durable docs targets updated or intentionally skipped
 - ADRs, README sections, schema docs, runbooks, or release notes created
 - follow-up issues or learning-review records
-- removal status for the change workspace
+- confirmation that `.flow-agents/` runtime artifacts remain untracked
 
 ## Completion Rule
 
 Before merge to `main`:
 
 1. Promote durable behavior, contracts, decisions, operations notes, and usage guidance into long-lived docs such as `README.md`, `docs/`, `docs/adr/`, schema docs, runbooks, changelogs, or provider records.
-2. Make sure `closeout.md` names the promotion targets and any accepted gaps.
-3. Delete `.agents/flow-agents/changes/<change-id>/` from the branch.
+2. Make sure the durable record names the promotion targets and any accepted gaps.
+3. Confirm `.flow-agents/` runtime artifacts remain untracked.
 4. Keep links to provider records, durable docs, or archived external evidence instead of relying on temporary local files.
 
-`main` must not contain tracked files under `.agents/flow-agents/changes/`. If a change workspace is still needed after merge, its durable content has not been promoted yet.
+`main` must not contain tracked files under `.flow-agents/`. If runtime artifacts still seem necessary after merge, their durable content has not been promoted yet.
 
 ## Promotion Targets
 
@@ -150,4 +138,4 @@ Do not promote raw intermediate thinking wholesale. Promote the resulting decisi
 
 ## Enforcement
 
-The source tree allows `.agents/flow-agents/changes/**` to be tracked on feature branches while keeping ordinary runtime state ignored. Static package validation fails on `main` if tracked files remain in that lane. Reviewers should also reject PRs that delete the change workspace without promoting the durable docs needed to understand the shipped behavior.
+Runtime state remains ignored under `.flow-agents/`. Static package validation fails if runtime artifacts are tracked. Reviewers should reject PRs that omit durable docs, source, schema, provider, or evidence updates needed to understand shipped behavior.

@@ -31,7 +31,7 @@ Evidence Gate is not Release Readiness. It asks whether completed work has enoug
 
 ## Artifact Contract
 
-Write or update `.agents/flow-agents/<slug>/<slug>--evidence-gate.md` with:
+Write or update `.flow-agents/<slug>/<slug>--evidence-gate.md` with:
 
 - `intent`: issue/brief, acceptance criteria, non-goals, risk class
 - `evidence_manifest`: command/check name, source, timestamp, result, link/output pointer

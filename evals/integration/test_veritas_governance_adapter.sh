@@ -19,7 +19,7 @@ _fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 ADAPTER="veritas-governance"
 VALIDATOR="validate-workflow-artifacts"
 REPO="$TMPDIR_EVAL/repo"
-ARTIFACT_DIR="$REPO/.agents/flow-agents/veritas-fixture"
+ARTIFACT_DIR="$REPO/.flow-agents/veritas-fixture"
 mkdir -p "$ARTIFACT_DIR" "$TMPDIR_EVAL/bin" "$REPO/.veritas"
 FAKE_PASS="$ROOT/evals/fixtures/veritas-governance-adapter/fake-veritas-pass.sh"
 FAKE_UNCONFIGURED="$ROOT/evals/fixtures/veritas-governance-adapter/fake-veritas-unconfigured.sh"

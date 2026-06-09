@@ -8,15 +8,15 @@
     "phase": "execution",
     "updated_at": "2026-05-28T16:10:00Z",
     "artifact_paths": [
-      ".agents/flow-agents/builder-kit-mid-work-resume/builder-kit-probe.json",
-      ".agents/flow-agents/builder-kit-mid-work-resume/builder-kit-mid-work-resume--deliver.md",
-      ".agents/flow-agents/builder-kit-mid-work-resume/handoff.json"
+      ".flow-agents/builder-kit-mid-work-resume/builder-kit-probe.json",
+      ".flow-agents/builder-kit-mid-work-resume/builder-kit-mid-work-resume--deliver.md",
+      ".flow-agents/builder-kit-mid-work-resume/handoff.json"
     ],
     "next_action": {
       "status": "continue",
       "summary": "Execution complete; run review-work before verify-work.",
       "target_phase": "execution",
-      "target_artifact": ".agents/flow-agents/builder-kit-mid-work-resume/builder-kit-mid-work-resume--deliver.md"
+      "target_artifact": ".flow-agents/builder-kit-mid-work-resume/builder-kit-mid-work-resume--deliver.md"
     }
   },
   "probe_record": {
@@ -28,7 +28,7 @@
     "automation_mode": "autonomous-bounded",
     "recovery_mode": "builder-kit-build-flow",
     "probe_status": "passed",
-    "probe_artifact_ref": ".agents/flow-agents/builder-kit-mid-work-resume/builder-kit-probe.json",
+    "probe_artifact_ref": ".flow-agents/builder-kit-mid-work-resume/builder-kit-probe.json",
     "grouping_decision": {
       "status": "single-item",
       "justification": "one selected issue remains the active bounded work item"
@@ -48,8 +48,8 @@
     "accepted_gaps": [],
     "resume_prompt": "Resume by running review-work for the deliver artifact, then verify-work after critique passes.",
     "artifact_refs": [
-      ".agents/flow-agents/builder-kit-mid-work-resume/builder-kit-mid-work-resume--deliver-plan.md",
-      ".agents/flow-agents/builder-kit-mid-work-resume/builder-kit-mid-work-resume--deliver.md"
+      ".flow-agents/builder-kit-mid-work-resume/builder-kit-mid-work-resume--deliver-plan.md",
+      ".flow-agents/builder-kit-mid-work-resume/builder-kit-mid-work-resume--deliver.md"
     ],
     "planning_readiness": "completed",
     "expected_modified_files": [

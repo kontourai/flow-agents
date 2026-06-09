@@ -98,8 +98,8 @@ fi
 
 echo ""
 echo "--- Strict Stop Gate ---"
-mkdir -p "$TMP_WORK/.agents/flow-agents/live-stop"
-cat > "$TMP_WORK/.agents/flow-agents/live-stop/live-stop--deliver.md" <<'MARKDOWN'
+mkdir -p "$TMP_WORK/.flow-agents/live-stop"
+cat > "$TMP_WORK/.flow-agents/live-stop/live-stop--deliver.md" <<'MARKDOWN'
 # Live Stop Gate
 
 status: executing

@@ -9,7 +9,7 @@ npx @kontourai/flow-agents init
 ```
 
 `flow-agents init` walks through a base workspace install built around `AGENTS.md`,
-`.agents/flow-agents/`, optional Console telemetry, and optional runtime-specific
+`.flow-agents/`, optional Console telemetry, and optional runtime-specific
 wiring. For CI or scripted installs, use the same command headlessly:
 
 ```bash
@@ -42,7 +42,7 @@ The installer copies the bundled agents, skills, context, scripts, evals, and Fl
 - Runtime-specific agent definitions for supported harnesses
 - Shared workflow skills such as `idea-to-backlog`, `pull-work`, `plan-work`, `execute-plan`, `review-work`, `verify-work`, `evidence-gate`, `release-readiness`, and `learning-review`
 - Builder Kit assets for turning product or engineering ideas into executable work
-- Local workflow artifacts under `.agents/flow-agents/`
+- Local workflow artifacts under `.flow-agents/`
 - Validation and eval scripts for checking the installed bundle
 - Optional governance evidence integration through Veritas readiness reports
 
@@ -103,7 +103,7 @@ See [Repository Structure](docs/repository-structure.md) for the canonical devel
 - `agents/`, `agent-cards/`, `skills/`, `context/`, `powers/`, and `prompts/` are canonical bundle source.
 - `src/` and `scripts/` are canonical product, tooling, validation, installer, hook, telemetry, and compatibility source; see [scripts/README.md](scripts/README.md) for wrapper and runtime-hook boundaries.
 - `kits/`, `schemas/`, `packaging/`, `evals/`, `docs/`, and `integrations/` hold Flow Kit assets, contracts, package metadata, evals, durable docs, and optional integrations.
-- `dist/`, `build/`, and `_site/` are generated output. Local `.agents/`, `.codex/`, `.claude/`, telemetry, promptfoo, Veritas, and cache directories are runtime state and are ignored by default.
+- `dist/`, `build/`, and `_site/` are generated output. Local `.flow-agents/`, `.codex/`, `.claude/`, telemetry, promptfoo, Veritas, and cache directories are runtime state and are ignored by default; durable outcomes belong in docs, source, schemas, or provider records.
 
 ## Documentation
 

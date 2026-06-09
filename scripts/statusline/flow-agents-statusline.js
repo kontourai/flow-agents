@@ -2,7 +2,7 @@
 /**
  * Compact Flow Agents workflow status for runtimes with status bar support.
  *
- * Reads optional runtime JSON from stdin, discovers `.agents/flow-agents`, and
+ * Reads optional runtime JSON from stdin, discovers `.flow-agents`, and
  * prints one ASCII line suitable for Claude Code statusLine or Pi setStatus.
  */
 
@@ -56,7 +56,7 @@ function runtimeCwd(input) {
 function findWorkflowRoot(startDir) {
   let current = path.resolve(startDir || process.cwd());
   for (;;) {
-    const candidate = path.join(current, '.agents', 'flow-agents');
+    const candidate = path.join(current, '.flow-agents');
     if (fs.existsSync(candidate)) return candidate;
     const parent = path.dirname(current);
     if (parent === current) return null;

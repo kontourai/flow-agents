@@ -8,13 +8,13 @@
     "phase": "planning",
     "updated_at": "2026-05-29T10:10:00Z",
     "artifact_paths": [
-      ".agents/flow-agents/missing-prestep-recovery/handoff.json"
+      ".flow-agents/missing-prestep-recovery/handoff.json"
     ],
     "next_action": {
       "status": "blocked",
       "summary": "plan-work lacks Builder Kit pickup Probe evidence; route decision_gap to design-probe.",
       "target_phase": "pickup",
-      "target_artifact": ".agents/flow-agents/missing-prestep-recovery/builder-kit-probe.json"
+      "target_artifact": ".flow-agents/missing-prestep-recovery/builder-kit-probe.json"
     }
   },
   "probe_record": {
@@ -26,7 +26,7 @@
     "automation_mode": "strict",
     "recovery_mode": "builder-kit-build-flow",
     "probe_status": "missing",
-    "probe_artifact_ref": ".agents/flow-agents/missing-prestep-recovery/builder-kit-probe.json",
+    "probe_artifact_ref": ".flow-agents/missing-prestep-recovery/builder-kit-probe.json",
     "grouping_decision": {
       "status": "single-item",
       "justification": "selected item exists but pickup Probe is absent"
@@ -51,7 +51,7 @@
     "accepted_gaps": [],
     "resume_prompt": "Resume by running design-probe / pickup-probe, then retry plan-work only after Probe evidence is recorded.",
     "artifact_refs": [
-      ".agents/flow-agents/missing-prestep-recovery/handoff.json"
+      ".flow-agents/missing-prestep-recovery/handoff.json"
     ],
     "planning_readiness": "blocked",
     "expected_modified_files": [],

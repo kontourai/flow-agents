@@ -37,7 +37,7 @@ Governance tools such as Veritas belong at the Evidence boundary. Flow Agents sh
 | `kits/` | Flow Kits | Kit Catalog entries, Flow Kit manifests, Flow Definitions, and supporting assets. Builder Kit is the first proof point. |
 | `prompts/` | Skills / Rules | Saved invocations. Promote repeatable procedures into skills when they grow stable. |
 | `docs/workflow-*.md` | Workflows | Human-readable workflow contracts and usage guidance. |
-| `.agents/flow-agents/` | Workflows | Cross-session task artifacts. Runtime state stays local; reviewable in-progress change work may live under `.agents/flow-agents/changes/<change-id>/` on feature branches and must be promoted before merge. |
+| `.flow-agents/` | Workflows | Cross-session task artifacts. Runtime state stays local and ignored; durable outcomes are promoted into docs, source, schemas, or provider records before merge. |
 | `scripts/` | Evidence / Workflows / Packaging | Validation, build, telemetry, hooks, and artifact tooling. |
 | `src/` | Workflows / Evidence / Packaging | TypeScript CLI, runtime adapter, Flow Kit, shared library, build, validation, context-map, packaging, and CLI helper source compiled into `build/src/`. |
 | `evals/` | Evidence | Static, behavioral, integration, and acceptance checks. |
@@ -80,7 +80,7 @@ Builder Kit evidence gates can reference Surface trust state without naming a pr
 Workflow artifacts have their own lifecycle policy:
 https://github.com/kontourai/flow-agents/blob/main/docs/workflow-artifact-lifecycle.md
 
-Use `.agents/flow-agents/<slug>/` for local runtime/session state. Use `.agents/flow-agents/changes/<change-id>/` only when in-progress planning needs to be checked in for review or handoff. Before the change reaches `main`, promote durable decisions and behavior into normal docs, then remove the change workspace.
+Use `.flow-agents/<slug>/` for local runtime/session state. If in-progress planning needs review or handoff, promote the durable decision, behavior, and evidence summary into normal docs or provider records before merge; keep runtime artifacts out of git.
 
 If a proposed artifact seems to belong to multiple layers, split it. For example, a dependency-checking capability may have:
 

@@ -18,7 +18,7 @@ _fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 
 VALIDATOR="validate-workflow-artifacts"
 REPO="$TMPDIR_EVAL/repo"
-ARTIFACT_DIR="$REPO/.agents/flow-agents/workflow-contract-e2e"
+ARTIFACT_DIR="$REPO/.flow-agents/workflow-contract-e2e"
 mkdir -p "$ARTIFACT_DIR"
 
 cat > "$REPO/AGENTS.md" <<'MARKDOWN'

@@ -23,7 +23,7 @@ Also create or update structured sidecars beside the Markdown artifacts:
 Use the sidecar writer when available:
 
 ```bash
-npm run workflow:sidecar -- init-plan .agents/flow-agents/<slug>/<slug>--deliver.md \
+npm run workflow:sidecar -- init-plan .flow-agents/<slug>/<slug>--deliver.md \
   --source-request "<original request>" \
   --summary "<planning summary>" \
   --next-action "<next execution step>"

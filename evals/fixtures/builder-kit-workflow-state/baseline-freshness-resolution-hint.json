@@ -8,14 +8,14 @@
     "phase": "planning",
     "updated_at": "2026-06-04T00:00:00Z",
     "artifact_paths": [
-      ".agents/flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-probe.json",
-      ".agents/flow-agents/builder-kit-not-verified-resolution-hints/handoff.json"
+      ".flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-probe.json",
+      ".flow-agents/builder-kit-not-verified-resolution-hints/handoff.json"
     ],
     "next_action": {
       "status": "continue",
       "summary": "Pickup Probe accepted the missing planned_base_sha gap; run plan-work with the explicit fallback baseline and resolution hints.",
       "target_phase": "planning",
-      "target_artifact": ".agents/flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-probe.json"
+      "target_artifact": ".flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-probe.json"
     }
   },
   "probe_record": {
@@ -27,7 +27,7 @@
     "automation_mode": "autonomous-bounded",
     "recovery_mode": "builder-kit-build-flow",
     "probe_status": "accepted_gap",
-    "probe_artifact_ref": ".agents/flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-probe.json",
+    "probe_artifact_ref": ".flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-probe.json",
     "grouping_decision": {
       "status": "single-item",
       "justification": "one selected Builder Kit work item with an explicit accepted fallback baseline"
@@ -46,7 +46,7 @@
       "current_target_ref": "main",
       "current_target_sha": "73f050b275290838a5b8f3a5a1e9eb8715830c46",
       "accepted_fallback_baseline": "main@73f050b275290838a5b8f3a5a1e9eb8715830c46",
-      "source_artifact": ".agents/flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-not-verified-resolution-hints--idea-to-backlog.md",
+      "source_artifact": ".flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-not-verified-resolution-hints--idea-to-backlog.md",
       "freshness_assessment": "not_fresh_planned_base",
       "summary": "Missing planned_base_sha is accepted only as an explicit fallback gap; do not treat it as fresh baseline evidence."
     },
@@ -95,7 +95,7 @@
             "id": "provider_history_source_artifact",
             "kind": "provider_history",
             "description": "Provider history plus source shaped artifact used to accept the missing planned_base_sha gap.",
-            "source_artifact": ".agents/flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-not-verified-resolution-hints--idea-to-backlog.md"
+            "source_artifact": ".flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-not-verified-resolution-hints--idea-to-backlog.md"
           }
         ],
         "fallback_policy_id": "accepted-baseline-main-73f050b275290838a5b8f3a5a1e9eb8715830c46",
@@ -103,7 +103,7 @@
           "status": "accepted_gap",
           "baseline": "main@73f050b275290838a5b8f3a5a1e9eb8715830c46",
           "requires_provider_history": true,
-          "source_artifact": ".agents/flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-not-verified-resolution-hints--idea-to-backlog.md",
+          "source_artifact": ".flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-not-verified-resolution-hints--idea-to-backlog.md",
           "freshness_assessment": "not_fresh_planned_base",
           "summary": "Use only the explicit accepted fallback baseline; missing planned_base_sha remains a NOT_VERIFIED freshness gap."
         },
@@ -112,8 +112,8 @@
     ],
     "resume_prompt": "Resume by running plan-work with the accepted fallback baseline main@73f050b275290838a5b8f3a5a1e9eb8715830c46 and the Builder Kit resolution hints.",
     "artifact_refs": [
-      ".agents/flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-not-verified-resolution-hints--pull-work.md",
-      ".agents/flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-not-verified-resolution-hints--idea-to-backlog.md"
+      ".flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-not-verified-resolution-hints--pull-work.md",
+      ".flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-not-verified-resolution-hints--idea-to-backlog.md"
     ],
     "planning_readiness": "ready_with_accepted_gap",
     "expected_modified_files": [

@@ -16,12 +16,12 @@ _pass() { echo "  ✓ $1"; }
 _fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 
 REPO="$TMPDIR_EVAL/repo"
-mkdir -p "$REPO/.agents/flow-agents/steering-demo"
+mkdir -p "$REPO/.flow-agents/steering-demo"
 mkdir -p "$REPO/docs"
 printf '# Test Repo\n' > "$REPO/AGENTS.md"
 printf '# Context Map\n' > "$REPO/docs/context-map.md"
 
-cat > "$REPO/.agents/flow-agents/steering-demo/state.json" <<'JSON'
+cat > "$REPO/.flow-agents/steering-demo/state.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "steering-demo",
@@ -36,7 +36,7 @@ cat > "$REPO/.agents/flow-agents/steering-demo/state.json" <<'JSON'
 }
 JSON
 
-cat > "$REPO/.agents/flow-agents/steering-demo/critique.json" <<'JSON'
+cat > "$REPO/.flow-agents/steering-demo/critique.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "steering-demo",
@@ -285,7 +285,7 @@ else
   _fail "Codex hook adapter should not fail for prompt-submit workflow steering"
 fi
 
-cat > "$REPO/.agents/flow-agents/steering-demo/state.json" <<'JSON'
+cat > "$REPO/.flow-agents/steering-demo/state.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "steering-demo",
@@ -298,7 +298,7 @@ cat > "$REPO/.agents/flow-agents/steering-demo/state.json" <<'JSON'
   }
 }
 JSON
-rm -f "$REPO/.agents/flow-agents/steering-demo/critique.json"
+rm -f "$REPO/.flow-agents/steering-demo/critique.json"
 
 if node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/done.out" 2>"$TMPDIR_EVAL/done.err" <<JSON
 {"cwd":"$REPO","tool_input":{"command":"InvokeSubagents","content":{"subagents":[{"agent_name":"tool-verifier"}]}},"tool_response":"verification finished"}

@@ -128,7 +128,7 @@ function safeSegment(value: string): string {
 
 export function activateCodexLocal(sourceRoot: string, dest: string): Record<string, unknown> {
   const inventory = readKitInventory(sourceRoot, dest);
-  const runtimeDir = path.join(dest, ".agents", "flow-agents", "runtime", "codex");
+  const runtimeDir = path.join(dest, ".flow-agents", "runtime", "codex");
   const generated: Record<string, string>[] = [];
   const skipped: Record<string, string | null>[] = [];
   for (const asset of inventory.assets) {

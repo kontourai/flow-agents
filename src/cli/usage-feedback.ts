@@ -142,7 +142,7 @@ function syncArtifacts(argv: string[]): number {
   const dir = telemetryDir(flags);
   ensureSafeDir(dir);
   const artifacts = flagList(flags, "artifact-dir");
-  const records = (artifacts.length ? artifacts : [".agents/flow-agents"]).flatMap((item) => fs.existsSync(item) ? artifactOutcomes(item, flags) : []);
+  const records = (artifacts.length ? artifacts : [".flow-agents"]).flatMap((item) => fs.existsSync(item) ? artifactOutcomes(item, flags) : []);
   writeJsonlUpsert(path.join(dir, "outcomes.jsonl"), records, "outcome_id");
   if (!flagBool(flags, "quiet")) console.log(`synced ${records.length} artifact outcome(s) to ${path.join(dir, "outcomes.jsonl")}`);
   return 0;
@@ -318,7 +318,7 @@ function registerProject(argv: string[]): number {
   ensureSafeDir(globalDir);
   const repoRoot = path.resolve(flagString(flags, "repo-root", ".") ?? ".");
   const name = flagString(flags, "name", path.basename(repoRoot)) ?? path.basename(repoRoot);
-  const record = { name, repo_root: repoRoot, artifact_dir: path.join(repoRoot, ".agents", "flow-agents"), input_telemetry_dir: path.join(repoRoot, ".telemetry"), runtime: flagString(flags, "runtime", "codex"), repo: flagString(flags, "repo", name), agent: flagString(flags, "agent"), profile_id: flagString(flags, "profile-id"), prompt_id: flagString(flags, "prompt-id"), prompt_variant: flagString(flags, "prompt-variant"), skill_ids: flagList(flags, "skill-id"), skill_variant: flagString(flags, "skill-variant") };
+  const record = { name, repo_root: repoRoot, artifact_dir: path.join(repoRoot, ".flow-agents"), input_telemetry_dir: path.join(repoRoot, ".telemetry"), runtime: flagString(flags, "runtime", "codex"), repo: flagString(flags, "repo", name), agent: flagString(flags, "agent"), profile_id: flagString(flags, "profile-id"), prompt_id: flagString(flags, "prompt-id"), prompt_variant: flagString(flags, "prompt-variant"), skill_ids: flagList(flags, "skill-id"), skill_variant: flagString(flags, "skill-variant") };
   const registryFile = path.join(globalDir, "projects.json");
   const existing = fs.existsSync(registryFile) ? JSON.parse(fs.readFileSync(registryFile, "utf8")) : { projects: [] };
   const projects = Array.isArray(existing) ? existing : Array.isArray(existing.projects) ? existing.projects : [];
@@ -341,7 +341,7 @@ function syncProject(project: Record<string, unknown>, globalDir: string): void 
   const name = String(project.name ?? project.repo ?? "project").replace(/[^a-zA-Z0-9_.-]+/g, "-") || "project";
   const store = path.join(globalDir, "projects", name);
   ensureSafeDir(store);
-  const artifactDir = String(project.artifact_dir ?? path.join(String(project.repo_root), ".agents", "flow-agents"));
+  const artifactDir = String(project.artifact_dir ?? path.join(String(project.repo_root), ".flow-agents"));
   const flags: Record<string, string | boolean | string[]> = {
     "repo": String(project.repo ?? name),
     "runtime": String(project.runtime ?? "codex"),
@@ -360,9 +360,9 @@ function syncProject(project: Record<string, unknown>, globalDir: string): void 
 function discoverProjects(root: string): Record<string, unknown>[] {
   if (!fs.existsSync(root)) return [];
   const candidates = [root, ...fs.readdirSync(root).map((name) => path.join(root, name))];
-  return candidates.filter((candidate) => fs.existsSync(path.join(candidate, ".agents", "flow-agents"))).map((repoRoot) => {
+  return candidates.filter((candidate) => fs.existsSync(path.join(candidate, ".flow-agents"))).map((repoRoot) => {
     const name = path.basename(repoRoot);
-    return { name, repo: name, repo_root: repoRoot, artifact_dir: path.join(repoRoot, ".agents", "flow-agents"), input_telemetry_dir: path.join(repoRoot, ".telemetry"), runtime: "codex", skill_ids: [] };
+    return { name, repo: name, repo_root: repoRoot, artifact_dir: path.join(repoRoot, ".flow-agents"), input_telemetry_dir: path.join(repoRoot, ".telemetry"), runtime: "codex", skill_ids: [] };
   });
 }
 

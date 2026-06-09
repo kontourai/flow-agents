@@ -34,10 +34,10 @@ run_bounded() {
 
 WRITER="workflow-sidecar"
 VALIDATOR="validate-workflow-artifacts"
-ARTIFACT_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/auto-sidecars"
+ARTIFACT_DIR="$TMPDIR_EVAL/repo/.flow-agents/auto-sidecars"
 mkdir -p "$ARTIFACT_DIR"
 
-SESSION_ROOT="$TMPDIR_EVAL/repo/.agents/flow-agents"
+SESSION_ROOT="$TMPDIR_EVAL/repo/.flow-agents"
 if flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$SESSION_ROOT" \
   --task-slug ensured-session \
@@ -91,7 +91,7 @@ else
 fi
 
 cp "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-traversal-agent.json"
-TRAVERSAL_AGENT_OUTSIDE="$TMPDIR_EVAL/repo/.agents/flow-agents/evil-agent-outside.jsonl"
+TRAVERSAL_AGENT_OUTSIDE="$TMPDIR_EVAL/repo/.flow-agents/evil-agent-outside.jsonl"
 if run_bounded 5 flow_agents_node "$WRITER" record-agent-event \
   --artifact-root "$SESSION_ROOT" \
   --agent-id ../evil-agent-outside \
@@ -148,7 +148,7 @@ if flow_agents_node "$WRITER" ensure-session \
   --timestamp "2026-05-09T00:00:50Z" >"$TMPDIR_EVAL/ensure-traversal.out" 2>&1; then
   _fail "sidecar writer should reject traversal task slugs"
 elif rg -q -- '--task-slug must not contain' "$TMPDIR_EVAL/ensure-traversal.out" \
-  && [[ ! -d "$TMPDIR_EVAL/repo/.agents/outside" ]]; then
+  && [[ ! -d "$TMPDIR_EVAL/repo/.flow-agents/outside" ]]; then
   _pass "sidecar writer rejects traversal task slugs without creating outside dirs"
 else
   _fail "sidecar writer traversal rejection was not fail-closed: $(cat "$TMPDIR_EVAL/ensure-traversal.out")"
@@ -449,7 +449,7 @@ else
   _fail "sidecar writer did not update state and acceptance"
 fi
 
-INVALID_REF_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/invalid-evidence-ref"
+INVALID_REF_DIR="$TMPDIR_EVAL/repo/.flow-agents/invalid-evidence-ref"
 mkdir -p "$INVALID_REF_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$INVALID_REF_DIR/invalid-evidence-ref--deliver.md"
 flow_agents_node "$WRITER" init-plan "$INVALID_REF_DIR/invalid-evidence-ref--deliver.md" \
@@ -484,7 +484,7 @@ else
   _fail "incomplete structured artifact_refs rejection was not fail-closed: $(cat "$TMPDIR_EVAL/incomplete-ref.out" "$TMPDIR_EVAL/incomplete-ref.err")"
 fi
 
-INVALID_ACCEPTANCE_REF_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/invalid-acceptance-ref"
+INVALID_ACCEPTANCE_REF_DIR="$TMPDIR_EVAL/repo/.flow-agents/invalid-acceptance-ref"
 mkdir -p "$INVALID_ACCEPTANCE_REF_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$INVALID_ACCEPTANCE_REF_DIR/invalid-acceptance-ref--deliver.md"
 flow_agents_node "$WRITER" init-plan "$INVALID_ACCEPTANCE_REF_DIR/invalid-acceptance-ref--deliver.md" \
@@ -556,7 +556,7 @@ check_surface_fixture() {
   local verdict="$3"
   local expected_status="$4"
   local expected_text="$5"
-  local dir="$TMPDIR_EVAL/repo/.agents/flow-agents/surface-$name"
+  local dir="$TMPDIR_EVAL/repo/.flow-agents/surface-$name"
   mkdir -p "$dir"
   if flow_agents_node "$WRITER" record-evidence "$dir" \
     --task-slug "surface-$name" \
@@ -580,7 +580,7 @@ check_surface_fixture "integrity-mismatch" "integrity-mismatch-trust-report.json
 check_surface_fixture "provider-absent" "provider-absent.json" "not_verified" "not_verified" "No trust provider is configured"
 check_surface_fixture "artifact-absent" "artifact-absent.json" "not_verified" "not_verified" "not readable"
 
-PURE_SURFACE_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/surface-trust-only"
+PURE_SURFACE_DIR="$TMPDIR_EVAL/repo/.flow-agents/surface-trust-only"
 mkdir -p "$PURE_SURFACE_DIR"
 if flow_agents_node "$WRITER" record-evidence "$PURE_SURFACE_DIR" \
   --task-slug "surface-trust-only" \
@@ -658,7 +658,7 @@ else
   _fail "terminal jump rejection lacked diagnostics or mutated authoritative sidecars"
 fi
 
-BUILDER_TRANSITION_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/builder-transition-guard"
+BUILDER_TRANSITION_DIR="$TMPDIR_EVAL/repo/.flow-agents/builder-transition-guard"
 mkdir -p "$BUILDER_TRANSITION_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$BUILDER_TRANSITION_DIR/builder-transition-guard--deliver.md"
 flow_agents_node "$WRITER" init-plan "$BUILDER_TRANSITION_DIR/builder-transition-guard--deliver.md" \
@@ -756,7 +756,7 @@ else
   _fail "Builder Kit max-attempt route-back behavior was not deterministic"
 fi
 
-LEGACY_TRANSITION_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/legacy-transition-guard"
+LEGACY_TRANSITION_DIR="$TMPDIR_EVAL/repo/.flow-agents/legacy-transition-guard"
 mkdir -p "$LEGACY_TRANSITION_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$LEGACY_TRANSITION_DIR/legacy-transition-guard--deliver.md"
 flow_agents_node "$WRITER" init-plan "$LEGACY_TRANSITION_DIR/legacy-transition-guard--deliver.md" \
@@ -785,7 +785,7 @@ else
   _fail "legacy-compatible direct primitive route-back failed: $(cat "$TMPDIR_EVAL/legacy-route-back.out" "$TMPDIR_EVAL/legacy-route-back.err")"
 fi
 
-NV_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/not-verified-sidecars"
+NV_DIR="$TMPDIR_EVAL/repo/.flow-agents/not-verified-sidecars"
 mkdir -p "$NV_DIR"
 cat > "$NV_DIR/not-verified-sidecars--deliver.md" <<'MARKDOWN'
 # Route not verified evidence
@@ -854,7 +854,7 @@ else
   _fail "sidecar writer did not preserve not-verified state"
 fi
 
-NEW_INVALID_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/new-invalid-artifact"
+NEW_INVALID_DIR="$TMPDIR_EVAL/repo/.flow-agents/new-invalid-artifact"
 if flow_agents_node "$WRITER" record-evidence "$NEW_INVALID_DIR" \
   --verdict banana \
   --check-json '{"id":"invalid-new","kind":"test","status":"pass","summary":"Should fail."}' >"$TMPDIR_EVAL/new-invalid.out" 2>&1; then
@@ -865,7 +865,7 @@ else
   _fail "sidecar writer left lock file for invalid new artifact command"
 fi
 
-LOCK_DENIED_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/lock-denied"
+LOCK_DENIED_DIR="$TMPDIR_EVAL/repo/.flow-agents/lock-denied"
 mkdir -p "$LOCK_DENIED_DIR"
 if chmod 500 "$LOCK_DENIED_DIR" 2>"$TMPDIR_EVAL/lock-denied-chmod.err"; then
   if run_bounded 5 flow_agents_node "$WRITER" record-critique "$LOCK_DENIED_DIR" \
@@ -909,7 +909,7 @@ else
   _fail "sidecar writer critique failed: $(cat "$TMPDIR_EVAL/critique.out" "$TMPDIR_EVAL/critique.err")"
 fi
 
-CONCURRENT_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/concurrent-critiques"
+CONCURRENT_DIR="$TMPDIR_EVAL/repo/.flow-agents/concurrent-critiques"
 mkdir -p "$CONCURRENT_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$CONCURRENT_DIR/concurrent-critiques--deliver.md"
 flow_agents_node "$WRITER" init-plan "$CONCURRENT_DIR/concurrent-critiques--deliver.md" \
@@ -972,7 +972,7 @@ else
   _fail "sidecar writer did not update release state"
 fi
 
-NO_SUMMARY_RELEASE_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/no-summary-release"
+NO_SUMMARY_RELEASE_DIR="$TMPDIR_EVAL/repo/.flow-agents/no-summary-release"
 mkdir -p "$NO_SUMMARY_RELEASE_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$NO_SUMMARY_RELEASE_DIR/no-summary-release--deliver.md"
 flow_agents_node "$WRITER" init-plan "$NO_SUMMARY_RELEASE_DIR/no-summary-release--deliver.md" \
@@ -1026,7 +1026,7 @@ else
   _fail "no-correction learning closeout failed validation: $(cat "$TMPDIR_EVAL/learning-valid.out" "$TMPDIR_EVAL/learning-valid.err")"
 fi
 
-CORRECTION_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/correction-needed-learning"
+CORRECTION_DIR="$TMPDIR_EVAL/repo/.flow-agents/correction-needed-learning"
 mkdir -p "$CORRECTION_DIR"
 if flow_agents_node "$WRITER" record-learning "$CORRECTION_DIR" \
   --task-slug correction-needed-learning \
@@ -1040,7 +1040,7 @@ else
   _fail "correction-needed learning closeout failed: $(cat "$TMPDIR_EVAL/correction-needed-learning.out" "$TMPDIR_EVAL/correction-needed-learning.err" "$TMPDIR_EVAL/correction-needed-valid.out" "$TMPDIR_EVAL/correction-needed-valid.err")"
 fi
 
-DOGFOOD_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/dogfood-pass"
+DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-pass"
 mkdir -p "$DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$DOGFOOD_DIR/dogfood-pass--deliver.md"
 flow_agents_node "$WRITER" init-plan "$DOGFOOD_DIR/dogfood-pass--deliver.md" \
@@ -1061,7 +1061,7 @@ else
   _fail "dogfood-pass missing actionable no-evidence error"
 fi
 
-DIRTY_EVIDENCE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/dogfood-dirty-evidence"
+DIRTY_EVIDENCE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-dirty-evidence"
 mkdir -p "$DIRTY_EVIDENCE_DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$DIRTY_EVIDENCE_DOGFOOD_DIR/dogfood-dirty-evidence--deliver.md"
 flow_agents_node "$WRITER" init-plan "$DIRTY_EVIDENCE_DOGFOOD_DIR/dogfood-dirty-evidence--deliver.md" \
@@ -1107,7 +1107,7 @@ else
   _fail "dogfood-pass existing dirty evidence was not fail-closed"
 fi
 
-INVALID_EXISTING_EVIDENCE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/dogfood-existing-invalid-evidence"
+INVALID_EXISTING_EVIDENCE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-existing-invalid-evidence"
 mkdir -p "$INVALID_EXISTING_EVIDENCE_DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$INVALID_EXISTING_EVIDENCE_DOGFOOD_DIR/dogfood-existing-invalid-evidence--deliver.md"
 flow_agents_node "$WRITER" init-plan "$INVALID_EXISTING_EVIDENCE_DOGFOOD_DIR/dogfood-existing-invalid-evidence--deliver.md" \
@@ -1181,10 +1181,11 @@ else
   _fail "dogfood-pass not_verified clean-pass check was not fail-closed"
 fi
 
-INVALID_EVIDENCE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/dogfood-invalid-evidence"
+INVALID_EVIDENCE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-invalid-evidence"
 mkdir -p "$INVALID_EVIDENCE_DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$INVALID_EVIDENCE_DOGFOOD_DIR/dogfood-invalid-evidence--deliver.md"
 flow_agents_node "$WRITER" init-plan "$INVALID_EVIDENCE_DOGFOOD_DIR/dogfood-invalid-evidence--deliver.md" \
+  --artifact-root "$SESSION_ROOT" \
   --source-request "Dogfood invalid evidence fixture." \
   --summary "Dogfood invalid evidence fixture." \
   --next-action "Run dogfood pass with invalid evidence metadata." \
@@ -1207,7 +1208,7 @@ else
   _fail "dogfood-pass invalid evidence metadata was not fail-closed"
 fi
 
-INVALID_LEARNING_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/dogfood-invalid-learning"
+INVALID_LEARNING_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-invalid-learning"
 mkdir -p "$INVALID_LEARNING_DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$INVALID_LEARNING_DOGFOOD_DIR/dogfood-invalid-learning--deliver.md"
 flow_agents_node "$WRITER" init-plan "$INVALID_LEARNING_DOGFOOD_DIR/dogfood-invalid-learning--deliver.md" \
@@ -1233,7 +1234,7 @@ else
   _fail "dogfood-pass invalid learning was not fail-closed"
 fi
 
-INVALID_LEARNING_SHAPE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/dogfood-invalid-learning-shape"
+INVALID_LEARNING_SHAPE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-invalid-learning-shape"
 mkdir -p "$INVALID_LEARNING_SHAPE_DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$INVALID_LEARNING_SHAPE_DOGFOOD_DIR/dogfood-invalid-learning-shape--deliver.md"
 flow_agents_node "$WRITER" init-plan "$INVALID_LEARNING_SHAPE_DOGFOOD_DIR/dogfood-invalid-learning-shape--deliver.md" \
@@ -1259,7 +1260,7 @@ else
   _fail "dogfood-pass invalid learning shape was not fail-closed"
 fi
 
-EXISTING_INVALID_LEARNING_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/dogfood-existing-invalid-learning"
+EXISTING_INVALID_LEARNING_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-existing-invalid-learning"
 mkdir -p "$EXISTING_INVALID_LEARNING_DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$EXISTING_INVALID_LEARNING_DOGFOOD_DIR/dogfood-existing-invalid-learning--deliver.md"
 flow_agents_node "$WRITER" init-plan "$EXISTING_INVALID_LEARNING_DOGFOOD_DIR/dogfood-existing-invalid-learning--deliver.md" \
@@ -1312,7 +1313,7 @@ else
   _fail "dogfood-pass existing invalid learning was not fail-closed"
 fi
 
-EXISTING_LEARNED_NO_CORRECTION_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/dogfood-learned-no-correction"
+EXISTING_LEARNED_NO_CORRECTION_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-learned-no-correction"
 mkdir -p "$EXISTING_LEARNED_NO_CORRECTION_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$EXISTING_LEARNED_NO_CORRECTION_DIR/dogfood-learned-no-correction--deliver.md"
 flow_agents_node "$WRITER" init-plan "$EXISTING_LEARNED_NO_CORRECTION_DIR/dogfood-learned-no-correction--deliver.md" \
@@ -1367,7 +1368,7 @@ else
   _fail "dogfood-pass existing learned learning missing correction was not fail-closed"
 fi
 
-INVALID_CRITIQUE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/dogfood-invalid-critique"
+INVALID_CRITIQUE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-invalid-critique"
 mkdir -p "$INVALID_CRITIQUE_DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$INVALID_CRITIQUE_DOGFOOD_DIR/dogfood-invalid-critique--deliver.md"
 flow_agents_node "$WRITER" init-plan "$INVALID_CRITIQUE_DOGFOOD_DIR/dogfood-invalid-critique--deliver.md" \
@@ -1399,7 +1400,7 @@ else
   _fail "dogfood-pass invalid critique metadata was not fail-closed"
 fi
 
-EXISTING_INVALID_CRITIQUE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/dogfood-existing-invalid-critique"
+EXISTING_INVALID_CRITIQUE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-existing-invalid-critique"
 mkdir -p "$EXISTING_INVALID_CRITIQUE_DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$EXISTING_INVALID_CRITIQUE_DOGFOOD_DIR/dogfood-existing-invalid-critique--deliver.md"
 flow_agents_node "$WRITER" init-plan "$EXISTING_INVALID_CRITIQUE_DOGFOOD_DIR/dogfood-existing-invalid-critique--deliver.md" \
@@ -1565,7 +1566,7 @@ else
   _fail "dogfood-pass failing critique was not fail-closed"
 fi
 
-DIRTY_CRITIQUE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/dogfood-dirty-critique"
+DIRTY_CRITIQUE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-dirty-critique"
 mkdir -p "$DIRTY_CRITIQUE_DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$DIRTY_CRITIQUE_DOGFOOD_DIR/dogfood-dirty-critique--deliver.md"
 flow_agents_node "$WRITER" init-plan "$DIRTY_CRITIQUE_DOGFOOD_DIR/dogfood-dirty-critique--deliver.md" \
@@ -1616,7 +1617,7 @@ else
   _fail "dogfood-pass existing dirty critique was not fail-closed"
 fi
 
-FAILED_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/dogfood-failed-pass"
+FAILED_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-failed-pass"
 mkdir -p "$FAILED_DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$FAILED_DOGFOOD_DIR/dogfood-failed-pass--deliver.md"
 flow_agents_node "$WRITER" init-plan "$FAILED_DOGFOOD_DIR/dogfood-failed-pass--deliver.md" \
@@ -1744,7 +1745,7 @@ else
   _fail "dogfood-pass release readiness did not update expected sidecars"
 fi
 
-DOGFOOD_NV_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/dogfood-not-verified"
+DOGFOOD_NV_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-not-verified"
 mkdir -p "$DOGFOOD_NV_DIR"
 cat > "$DOGFOOD_NV_DIR/dogfood-not-verified--deliver.md" <<'MARKDOWN'
 # Dogfood not verified fixture
@@ -1823,7 +1824,7 @@ else
   _fail "invalid release decision failure was not actionable"
 fi
 
-SEMANTIC_RELEASE_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/semantic-release"
+SEMANTIC_RELEASE_DIR="$TMPDIR_EVAL/repo/.flow-agents/semantic-release"
 mkdir -p "$SEMANTIC_RELEASE_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$SEMANTIC_RELEASE_DIR/semantic-release--deliver.md"
 flow_agents_node "$WRITER" init-plan "$SEMANTIC_RELEASE_DIR/semantic-release--deliver.md" \
@@ -1871,7 +1872,8 @@ if flow_agents_node "$WRITER" record-learning "$ARTIFACT_DIR" \
 elif rg -q 'correction.recurrence_key is required' "$TMPDIR_EVAL/correction-missing-recurrence.out"; then
   _pass "sidecar writer rejects correction-needed records without recurrence key"
 else
-  _fail "missing correction recurrence key failure was not actionable: $(cat "$TMPDIR_EVAL/correction-missing-recurrence.out")"
+  detail="$(cat "$TMPDIR_EVAL/correction-missing-recurrence.out")"
+  _fail "missing correction recurrence key failure was not actionable: $detail"
 fi
 
 if flow_agents_node "$WRITER" record-learning "$ARTIFACT_DIR" \
@@ -1882,7 +1884,8 @@ if flow_agents_node "$WRITER" record-learning "$ARTIFACT_DIR" \
 elif rg -q 'correction requires prevention route or no_change_rationale' "$TMPDIR_EVAL/correction-missing-prevention.out"; then
   _pass "sidecar writer rejects correction-needed records without prevention or no-change rationale"
 else
-  _fail "missing correction prevention failure was not actionable: $(cat "$TMPDIR_EVAL/correction-missing-prevention.out")"
+  detail="$(cat "$TMPDIR_EVAL/correction-missing-prevention.out")"
+  _fail "missing correction prevention failure was not actionable: $detail"
 fi
 
 if flow_agents_node "$WRITER" record-learning "$ARTIFACT_DIR" \
@@ -1896,7 +1899,7 @@ else
   _fail "incomplete correction prevention failure was not actionable: $(cat "$TMPDIR_EVAL/correction-incomplete-prevention.out")"
 fi
 
-SEMANTIC_LEARNING_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/semantic-learning"
+SEMANTIC_LEARNING_DIR="$TMPDIR_EVAL/repo/.flow-agents/semantic-learning"
 mkdir -p "$SEMANTIC_LEARNING_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$SEMANTIC_LEARNING_DIR/semantic-learning--deliver.md"
 flow_agents_node "$WRITER" init-plan "$SEMANTIC_LEARNING_DIR/semantic-learning--deliver.md" \
@@ -1930,7 +1933,7 @@ else
   _fail "semantic learning failure advanced state or lacked actionable output"
 fi
 
-REVIEW_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/imported-critique"
+REVIEW_DIR="$TMPDIR_EVAL/repo/.flow-agents/imported-critique"
 mkdir -p "$REVIEW_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$REVIEW_DIR/imported-critique--deliver.md"
 flow_agents_node "$WRITER" init-plan "$REVIEW_DIR/imported-critique--deliver.md" \
@@ -1995,7 +1998,7 @@ else
   _fail "writer output failed validation: $(cat "$TMPDIR_EVAL/valid.out" "$TMPDIR_EVAL/valid.err")"
 fi
 
-BAD_DIR="$TMPDIR_EVAL/repo/.agents/flow-agents/bad-critique"
+BAD_DIR="$TMPDIR_EVAL/repo/.flow-agents/bad-critique"
 mkdir -p "$BAD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$BAD_DIR/bad-critique--deliver.md"
 
@@ -2023,7 +2026,7 @@ else
   _fail "open critique failure did not mention open findings"
 fi
 
-IMPORT_BAD="$TMPDIR_EVAL/repo/.agents/flow-agents/imported-bad-critique"
+IMPORT_BAD="$TMPDIR_EVAL/repo/.flow-agents/imported-bad-critique"
 mkdir -p "$IMPORT_BAD"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$IMPORT_BAD/imported-bad-critique--deliver.md"
 flow_agents_node "$WRITER" init-plan "$IMPORT_BAD/imported-bad-critique--deliver.md" \

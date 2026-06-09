@@ -8,13 +8,13 @@
     "phase": "pickup",
     "updated_at": "2026-05-29T10:05:00Z",
     "artifact_paths": [
-      ".agents/flow-agents/direct-primitive-stop/direct-primitive-stop--pull-work.md"
+      ".flow-agents/direct-primitive-stop/direct-primitive-stop--pull-work.md"
     ],
     "next_action": {
       "status": "needs_user",
       "summary": "Direct pull-work complete; user may run plan-work or opt into Builder Kit build Probe.",
       "target_phase": "planning",
-      "target_artifact": ".agents/flow-agents/direct-primitive-stop/direct-primitive-stop--pull-work.md"
+      "target_artifact": ".flow-agents/direct-primitive-stop/direct-primitive-stop--pull-work.md"
     }
   },
   "probe_record": {
@@ -45,7 +45,7 @@
     "accepted_gaps": [],
     "resume_prompt": "Resume manually by running plan-work, or ask for Builder Kit build to add pickup Probe first.",
     "artifact_refs": [
-      ".agents/flow-agents/direct-primitive-stop/direct-primitive-stop--pull-work.md"
+      ".flow-agents/direct-primitive-stop/direct-primitive-stop--pull-work.md"
     ],
     "planning_readiness": "manual-next-step",
     "expected_modified_files": [],
