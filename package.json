@@ -8,6 +8,9 @@
     "type": "git",
     "url": "git+https://github.com/kontourai/flow-agents.git"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "bin": {
     "flow-agents": "build/src/cli.js",
     "flow-agents-build-bundles": "build/src/cli.js",
