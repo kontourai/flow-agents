@@ -24,3 +24,4 @@ title: Release Notes
 - SHA-pinned GitHub Actions with version comments, including dereferencing the annotated `actions/checkout@v6.0.3` tag to its commit SHA.
 - Split Flow Agents CI into independent source/static, workflow-contract, and runtime/kit lanes with separate evidence artifacts.
 - Preserved fail-closed CI evidence finalization: failed, missing, duplicate, or invalid check rows fail the corresponding CI lane.
+- Verified the npm lockfile with a clean audit and updated `promptfoo` to `0.121.15`.
