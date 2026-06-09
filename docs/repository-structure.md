@@ -81,6 +81,25 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
 | Run integration evals | `bash evals/run.sh integration` |
 | Validate repo Git hooks | `npm run validate:repo-hooks --` |
 
+## Where Changes Belong
+
+Use this table before adding a new file or moving behavior. Prefer the most
+specific row that matches the change.
+
+| Change | Put it here | Validate with |
+| --- | --- | --- |
+| Agent behavior, specialist instructions, model/tool routing | `agents/`, `agent-cards/`, and the relevant `skills/` or `context/` contract | `npm run validate:source --` and `bash evals/run.sh static` |
+| Product CLI behavior or reusable implementation logic | `src/cli/`, `src/tools/`, `src/lib/`, or a product-specific `src/` module | `npm run typecheck --` and the relevant integration eval |
+| Stable command path for existing callers | Thin launcher in `scripts/`; implementation remains in `src/` | `npm run validate:source --` |
+| Runtime hook adapter or policy behavior | `scripts/hooks/` for runtime JS/shell hooks; shared helpers under `scripts/hooks/lib/` | `npm run validate:source --` plus the relevant hook integration eval |
+| Bundle/export shape | `packaging/`, `src/tools/build-universal-bundles.ts`, and source directories copied into bundles | `bash evals/static/test_universal_bundles.sh` |
+| Installer or local runtime setup behavior | `scripts/install-*.sh`, package bins, and generated bundle install scripts | `bash evals/integration/test_bundle_install.sh` |
+| Workflow artifact, sidecar, or provider contract | `context/contracts/`, `schemas/`, `src/cli/workflow-*`, and matching eval fixtures | `npm run workflow:validate-artifacts --` and workflow integration evals |
+| Flow Kit catalog or bundled kit content | `kits/`, Flow Definition files, and kit repository fixtures | `npm run flow-kit -- validate` or `bash evals/integration/test_flow_kit_repository.sh` |
+| Durable developer guidance | `docs/`; regenerate/check the context map when navigation or durable contracts change | `npm run context-map:check --` |
+| Eval scenario or fixture | `evals/static/`, `evals/integration/`, `evals/fixtures/`, or `evals/cases/` | The owning eval plus `bash evals/run.sh static` when contracts are touched |
+| Optional external integration configuration | `integrations/` or `veritas.claims.json`; keep local run output ignored | The integration-specific eval or documented dry run |
+
 ## Runtime And TypeScript Policy
 
 The package requires Node `>=22`, and GitHub Actions runs CI on Node 22. Keep `@types/node` on the Node 22 major line while CI remains the runtime baseline. Moving to a newer Node type major should be paired with an explicit runtime policy update and CI validation.
@@ -94,6 +113,10 @@ The package requires Node `>=22`, and GitHub Actions runs CI on Node 22. Keep `@
 `.codex/` and `.claude/` at the repo root are installed runtime configuration surfaces. They can be useful for local testing, but canonical hook scripts and runtime config live in `scripts/hooks/`, `context/`, `packaging/`, and generated bundle output. The stale local `.codex/hooks.json` incident came from treating an installed runtime file as if it were canonical source. The fix is to regenerate or reinstall runtime config and update the canonical builder/install sources when behavior must change.
 
 `.flow-agents/<slug>/` is workflow working memory. Keep plans, sidecars, evidence, and handoffs there while work is active. Promote stable outcomes into `docs/`, schemas, source, or provider records before final acceptance.
+
+`evals/fixtures/` ownership is tracked in [Fixture Ownership](fixture-ownership.md).
+Do not delete or add fixture directories without updating that inventory and the
+owning eval evidence.
 
 ## Dead-Code Cleanup Policy
 

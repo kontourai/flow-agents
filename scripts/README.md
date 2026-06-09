@@ -30,11 +30,30 @@ thin launchers, and implementation logic belongs under `src/cli/` or
 
 `scripts/hooks/` contains runtime hook adapters and policies for Claude Code, Codex, Kiro-style hooks, and repo guardrails. Canonical hook behavior lives here and in TypeScript bundle generation, not in local `.codex/` or `.claude/` installs.
 
-Important groups:
+`npm run validate:source --` enforces this inventory. If a hook moves, is
+renamed, or changes category, update the table and the validator together.
 
-- `claude-*-hook.js` and `codex-*-hook.js`: runtime-specific adapters.
-- `workflow-steering.js`, `stop-goal-fit.js`, `quality-gate.js`, `config-protection.js`: policy hooks.
-- `hooks/lib/`: shared shell/JavaScript hook helpers.
+| Hook file | Category | Purpose |
+| --- | --- | --- |
+| `claude-hook-adapter.js` | runtime adapter | Translates Claude hook events into the shared hook runner contract. |
+| `codex-hook-adapter.js` | runtime adapter | Translates Codex hook events into the shared hook runner contract. |
+| `claude-telemetry-hook.js` | telemetry shim | Captures Claude hook telemetry and fails open. |
+| `codex-telemetry-hook.js` | telemetry shim | Captures Codex hook telemetry and fails open. |
+| `run-hook.js` | hook runner | Applies profile/disable flags, traversal checks, and hook execution. |
+| `config-protection.js` | policy hook | Blocks unsafe runtime config edits. |
+| `governance-audit.sh` | policy hook | Emits governance/Veritas audit context when configured. |
+| `post-edit-accumulator.js` | policy hook | Tracks edited files across a turn for later quality hooks. |
+| `quality-gate.js` | policy hook | Runs configured quality checks as hook policy. |
+| `report-only-guard.js` | policy hook | Protects report-only specialist roles from production edits. |
+| `stop-format-typecheck.js` | policy hook | Runs stop-time format/typecheck feedback. |
+| `stop-goal-fit.js` | policy hook | Warns when a workflow is about to stop short of Goal Fit. |
+| `workflow-steering.js` | policy hook | Provides workflow guidance from current artifact state. |
+| `pre-commit-quality.js` | repo guardrail hook | Supports repository Git hook checks, not installed runtime hooks. |
+| `desktop-notify.sh` | local notification helper | Optional local desktop notification helper. |
+| `lib/audit-transport.sh` | shared hook library | Shared audit event transport functions. |
+| `lib/hook-flags.js` | shared hook library | Shared profile/disable flag parsing. |
+| `lib/patterns.sh` | shared hook library | Shared shell pattern constants. |
+| `lib/resolve-formatter.js` | shared hook library | Shared formatter resolution helper. |
 
 ## Telemetry
 

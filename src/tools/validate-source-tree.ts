@@ -54,6 +54,39 @@ const publicScriptWrappers = new Map<string, { target: string; significantLines:
     '});',
   ] }],
 ]);
+const hookFilePolicies = new Map<string, { category: string; requiredNeedles: string[] }>([
+  ["scripts/hooks/claude-hook-adapter.js", { category: "runtime adapter", requiredNeedles: ["claude", "run-hook.js"] }],
+  ["scripts/hooks/codex-hook-adapter.js", { category: "runtime adapter", requiredNeedles: ["codex", "run-hook.js"] }],
+  ["scripts/hooks/claude-telemetry-hook.js", { category: "telemetry shim", requiredNeedles: ["claude", "telemetry"] }],
+  ["scripts/hooks/codex-telemetry-hook.js", { category: "telemetry shim", requiredNeedles: ["codex", "telemetry"] }],
+  ["scripts/hooks/run-hook.js", { category: "hook runner", requiredNeedles: ["isHookEnabled", "Path traversal rejected"] }],
+  ["scripts/hooks/config-protection.js", { category: "policy hook", requiredNeedles: ["Config Protection Hook"] }],
+  ["scripts/hooks/governance-audit.sh", { category: "policy hook", requiredNeedles: ["governance-audit.sh", "audit_emit"] }],
+  ["scripts/hooks/post-edit-accumulator.js", { category: "policy hook", requiredNeedles: ["Post-Edit"] }],
+  ["scripts/hooks/pre-commit-quality.js", { category: "repo guardrail hook", requiredNeedles: ["staged"] }],
+  ["scripts/hooks/quality-gate.js", { category: "policy hook", requiredNeedles: ["Quality"] }],
+  ["scripts/hooks/report-only-guard.js", { category: "policy hook", requiredNeedles: ["Report-Only Guard Hook"] }],
+  ["scripts/hooks/stop-format-typecheck.js", { category: "policy hook", requiredNeedles: ["Stop Hook", "typecheck"] }],
+  ["scripts/hooks/stop-goal-fit.js", { category: "policy hook", requiredNeedles: ["Stop Hook", "Goal Fit"] }],
+  ["scripts/hooks/workflow-steering.js", { category: "policy hook", requiredNeedles: ["Workflow Steering Hook"] }],
+  ["scripts/hooks/desktop-notify.sh", { category: "local notification helper", requiredNeedles: ["desktop-notify.sh", "osascript"] }],
+  ["scripts/hooks/lib/audit-transport.sh", { category: "shared hook library", requiredNeedles: ["audit_emit"] }],
+  ["scripts/hooks/lib/hook-flags.js", { category: "shared hook library", requiredNeedles: ["isHookEnabled"] }],
+  ["scripts/hooks/lib/patterns.sh", { category: "shared hook library", requiredNeedles: ["_detect_secrets"] }],
+  ["scripts/hooks/lib/resolve-formatter.js", { category: "shared hook library", requiredNeedles: ["resolveFormatter"] }],
+]);
+const fixtureOwnerPolicies = new Map<string, { owners: string[]; classification: string }>([
+  ["evals/fixtures/backlog-provider-settings", { owners: ["evals/integration/test_effective_backlog_settings.sh"], classification: "settings precedence fixtures" }],
+  ["evals/fixtures/builder-kit-workflow-state", { owners: ["evals/static/test_workflow_skills.sh"], classification: "Builder Kit workflow-state fixtures" }],
+  ["evals/fixtures/console-learning-projection", { owners: ["evals/integration/test_console_learning_projection.sh"], classification: "console learning projection fixtures" }],
+  ["evals/fixtures/flow-kit-repository", { owners: ["evals/integration/test_flow_kit_repository.sh", "evals/integration/test_local_flow_kit_install.sh", "evals/integration/test_runtime_adapter_activation.sh", "evals/static/test_workflow_skills.sh"], classification: "Flow Kit repository contract fixtures" }],
+  ["evals/fixtures/hook-influence", { owners: ["evals/integration/test_hook_influence_cases.sh", "evals/static/test_workflow_skills.sh", "scripts/validate-hook-influence-cases.js"], classification: "hook influence behavioral cases" }],
+  ["evals/fixtures/pull-work-provider", { owners: ["evals/integration/test_pull_work_provider.sh"], classification: "work item provider normalization fixtures" }],
+  ["evals/fixtures/pull-work-wip-shepherding", { owners: ["evals/static/test_workflow_skills.sh"], classification: "WIP shepherding state fixtures" }],
+  ["evals/fixtures/surface-trust", { owners: ["evals/integration/test_workflow_sidecar_writer.sh"], classification: "Surface trust evidence fixtures" }],
+  ["evals/fixtures/usage-feedback", { owners: ["evals/integration/test_usage_feedback_import.sh", "evals/integration/test_usage_feedback_outcomes.sh", "evals/integration/test_usage_feedback_report.sh"], classification: "usage feedback import/outcome fixtures" }],
+  ["evals/fixtures/veritas-governance-adapter", { owners: ["evals/integration/test_veritas_governance_adapter.sh"], classification: "Veritas governance adapter fixtures" }],
+]);
 const requiredUsageFeedbackFiles = [
   "package.json", "tsconfig.json", "scripts/usage-feedback.js", "src/cli/usage-feedback.ts", "docs/agent-usage-feedback-loop.md",
   "scripts/hooks/stop-goal-fit.js", "scripts/promote-workflow-artifact.js", "evals/integration/test_goal_fit_hook.sh",
@@ -296,6 +329,53 @@ function validatePublicScriptWrappers(reporter: Reporter): void {
     reporter.check(JSON.stringify(significantLines) === JSON.stringify(policy.significantLines), `${file}: public wrapper must match the exact thin launcher body for ${policy.target}`);
   }
 }
+function validateHookInventory(reporter: Reporter): void {
+  const readme = readText(path.join(root, "scripts/README.md"));
+  const hookFiles = walkFiles(path.join(root, "scripts/hooks"))
+    .filter((file) => [".js", ".sh"].includes(path.extname(file)))
+    .map((file) => rel(file))
+    .sort();
+  const expected = [...hookFilePolicies.keys()].sort();
+  reporter.check(JSON.stringify(hookFiles) === JSON.stringify(expected), `scripts/hooks: hook file inventory changed; update validate-source-tree hookFilePolicies and scripts/README.md`);
+  for (const [file, policy] of hookFilePolicies) {
+    const abs = path.join(root, file);
+    reporter.check(fs.existsSync(abs), `${file}: ${policy.category} missing`);
+    reporter.check(readme.includes(path.basename(file)), `scripts/README.md: hook inventory is missing ${path.basename(file)}`);
+    reporter.check(readme.includes(policy.category), `scripts/README.md: hook inventory is missing category '${policy.category}'`);
+    if (!fs.existsSync(abs)) continue;
+    const text = readText(abs);
+    for (const needle of policy.requiredNeedles) reporter.check(text.toLowerCase().includes(needle.toLowerCase()), `${file}: expected ${policy.category} marker '${needle}'`);
+  }
+}
+function validateFixtureOwnership(reporter: Reporter): void {
+  const doc = readText(path.join(root, "docs/fixture-ownership.md"));
+  const ownerScanFiles = ["evals/static", "evals/integration", "scripts"]
+    .flatMap((entry) => walkFiles(path.join(root, entry)))
+    .filter((file) => textRefExtensions.has(path.extname(file)))
+    .sort();
+  const fixtureDirs = fs.readdirSync(path.join(root, "evals/fixtures"))
+    .filter((name) => fs.statSync(path.join(root, "evals/fixtures", name)).isDirectory())
+    .map((name) => `evals/fixtures/${name}`)
+    .sort();
+  const expected = [...fixtureOwnerPolicies.keys()].sort();
+  reporter.check(JSON.stringify(fixtureDirs) === JSON.stringify(expected), `evals/fixtures: fixture directory inventory changed; update fixtureOwnerPolicies and docs/fixture-ownership.md`);
+  for (const [dir, policy] of fixtureOwnerPolicies) {
+    reporter.check(fs.existsSync(path.join(root, dir)), `${dir}: fixture directory missing`);
+    reporter.check(doc.includes(dir), `docs/fixture-ownership.md: missing fixture directory ${dir}`);
+    reporter.check(doc.includes(policy.classification), `docs/fixture-ownership.md: missing fixture classification '${policy.classification}'`);
+    for (const owner of policy.owners) {
+      reporter.check(fs.existsSync(path.join(root, owner)), `${dir}: fixture owner missing: ${owner}`);
+      reporter.check(doc.includes(owner), `docs/fixture-ownership.md: ${dir} missing owner ${owner}`);
+    }
+    const directRefs = ownerScanFiles
+      .filter((file) => readText(file).includes(dir))
+      .map((file) => rel(file))
+      .filter((file) => !file.startsWith("evals/fixtures/"))
+      .sort();
+    const missingOwners = directRefs.filter((file) => !policy.owners.includes(file));
+    reporter.check(missingOwners.length === 0, `${dir}: direct fixture references missing from owner inventory: ${missingOwners.join(", ")}`);
+  }
+}
 function isExcludedPythonPath(file: string): boolean {
   return path.relative(root, file).split(path.sep).some((part) => pythonInventoryExcludes.has(part));
 }
@@ -351,6 +431,8 @@ export function main(argv = process.argv.slice(2)): number {
   validateMirrors(reporter);
   validateUsageFeedbackFiles(reporter);
   validatePublicScriptWrappers(reporter);
+  validateHookInventory(reporter);
+  validateFixtureOwnership(reporter);
   validateNoFirstPartyPythonFiles(reporter);
   validateNoFirstPartyPythonCommands(reporter);
   if (reporter.errors.length) { console.log("Source tree validation failed:"); for (const error of reporter.errors) console.log(` - ${error}`); return 1; }
