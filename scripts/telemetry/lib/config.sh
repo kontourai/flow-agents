@@ -28,8 +28,12 @@ TELEMETRY_GOVERNANCE_AUDIT_MAX_FILES="${TELEMETRY_GOVERNANCE_AUDIT_MAX_FILES:-5}
 TELEMETRY_CHANNEL_FULL_LOG_FILE="${TELEMETRY_CHANNEL_FULL_LOG_FILE:-${TELEMETRY_DATA_DIR}/full.jsonl}"
 TELEMETRY_CHANNEL_FULL_REDACT="${TELEMETRY_CHANNEL_FULL_REDACT:-hook.raw_input,turn.prompt_text,tool.input,tool.output}"
 TELEMETRY_CHANNEL_ANALYTICS_LOG_FILE="${TELEMETRY_CHANNEL_ANALYTICS_LOG_FILE:-${TELEMETRY_DATA_DIR}/analytics.jsonl}"
-TELEMETRY_CHANNEL_ANALYTICS_REDACT="${TELEMETRY_CHANNEL_ANALYTICS_REDACT:-tool.input,tool.output,turn.prompt_text,delegation.targets.query,context.cwd,hook.raw_input}"
+TELEMETRY_CHANNEL_ANALYTICS_REDACT="${TELEMETRY_CHANNEL_ANALYTICS_REDACT:-tool.input,tool.output,turn.prompt_text,delegation.targets.query,context.cwd,hook.raw_input,hook.last_assistant_message,hook.transcript_path}"
 TELEMETRY_CHANNEL_ANALYTICS_ENDPOINT_URL="${TELEMETRY_CHANNEL_ANALYTICS_ENDPOINT_URL:-}"
+CONSOLE_TELEMETRY_URL="${CONSOLE_TELEMETRY_URL:-${CONSOLE_URL:-}}"
+CONSOLE_TELEMETRY_ENDPOINT_URL="${CONSOLE_TELEMETRY_ENDPOINT_URL:-}"
+CONSOLE_TELEMETRY_TOKEN="${CONSOLE_TELEMETRY_TOKEN:-${CONSOLE_AUTH_TOKEN:-}}"
+CONSOLE_TENANT_ID="${CONSOLE_TENANT_ID:-}"
 
 # Load config file if it exists
 if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
@@ -64,10 +68,18 @@ if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
         governance) TELEMETRY_GOVERNANCE="$value" ;;
         governance_audit_max_size_mb) TELEMETRY_GOVERNANCE_AUDIT_MAX_SIZE_MB="$value" ;;
         governance_audit_max_files) TELEMETRY_GOVERNANCE_AUDIT_MAX_FILES="$value" ;;
+        console_url) CONSOLE_TELEMETRY_URL="$value" ;;
+        console_telemetry_url) CONSOLE_TELEMETRY_URL="$value" ;;
+        console_telemetry_endpoint_url) CONSOLE_TELEMETRY_ENDPOINT_URL="$value" ;;
+        console_telemetry_token) CONSOLE_TELEMETRY_TOKEN="$value" ;;
+        console_tenant_id) CONSOLE_TENANT_ID="$value" ;;
+        console_telemetry_redact) CONSOLE_TELEMETRY_REDACT="$value" ;;
       esac
     fi
   done < "$TELEMETRY_CONFIG_FILE"
 fi
+
+CONSOLE_TELEMETRY_REDACT="${CONSOLE_TELEMETRY_REDACT:-${TELEMETRY_CHANNEL_ANALYTICS_REDACT}}"
 
 # Ensure directories exist
 mkdir -p "$TELEMETRY_DATA_DIR" "$TELEMETRY_SESSION_DIR" 2>/dev/null

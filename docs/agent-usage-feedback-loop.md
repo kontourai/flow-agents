@@ -22,6 +22,16 @@ Repo-local telemetry defaults to `.telemetry/`:
 
 Locations are configurable. CLI commands should accept `--telemetry-dir`, and shell workflows may set `TELEMETRY_DATA_DIR`. User-level or global Codex telemetry roots, such as `~/.codex/telemetry` or `~/.flow-agents/telemetry`, should be treated as configurable installation choices, not hard-coded truth. When comparing multiple repositories or machines, pass each telemetry root explicitly with repeatable `--telemetry-dir` flags.
 
+Runtime hooks can also mirror redacted telemetry to Console without changing the
+event shape. Set `CONSOLE_TELEMETRY_URL=http://127.0.0.1:3737` for a local
+Console, or `CONSOLE_URL=https://console.kontourai.io` for a deployed Console.
+The transport posts to `/api/telemetry/records` by default. Hosted Console URLs
+must use `https://`; `http://` is accepted only for `localhost` or `127.0.0.1`
+local development. Use `CONSOLE_TELEMETRY_ENDPOINT_URL` only when the API path
+is nonstandard, `CONSOLE_TELEMETRY_TOKEN` or `CONSOLE_AUTH_TOKEN` for bearer
+auth, and `CONSOLE_TENANT_ID` for hosted tenant routing. If no Console URL is
+set, telemetry remains local-only.
+
 ## Normalized Records
 
 ### Session
