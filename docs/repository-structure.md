@@ -10,7 +10,7 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
 
 - Edit canonical source in the repo root areas listed below, then regenerate derived output with the documented commands.
 - Do not edit `dist/`, `build/`, or `_site/` by hand. They are generated from tracked source.
-- Do not commit local runtime state from `.agents/flow-agents/<slug>/`, `.codex/`, `.claude/`, `.omx/`, `.promptfoo/`, `.telemetry/`, `.surface/runs/`, `.veritas/`, or tool caches.
+- Do not commit local runtime state from `.agents/flow-agents/<slug>/`, `.codex/`, `.claude/`, `.omx/`, `.promptfoo/`, `.telemetry/`, `.surface/`, `.veritas/`, or tool caches.
 - The only reviewable workflow runtime exception is `.agents/flow-agents/changes/<change-id>/`, and it must be promoted to durable docs or provider records before merging to `main`.
 - Treat generated exports and installed runtime config as products of `packaging/manifest.json`, `src/tools/build-universal-bundles.ts`, `scripts/install-*.sh`, and the source directories they copy.
 
@@ -44,7 +44,7 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
 | `.codex/` | installed runtime config | Generated bundle or local runtime install. | Ignored. | Reinstall from `dist/codex/` or `scripts/install-codex-home.sh`; do not treat local hooks as canonical. |
 | `.githooks/` | canonical repo tooling | Tracked repository hook scripts. | Source, not runtime agent hooks. | Keep compatible with `npm run setup:repo-hooks` and `npm run validate:repo-hooks --`. |
 | `.github/` | canonical CI config | GitHub workflow files. | Source. | Preserve workflow command names and artifact expectations. |
-| `.ai/`, `.omx/`, `.promptfoo/`, `.surface/runs/`, `.telemetry/`, `.veritas/` | runtime, cache, or integration output | Local tools and optional integrations. | Ignored runtime state. | Clean locally when not needed; promote only stable integration config under `integrations/` or durable docs. |
+| `.ai/`, `.omx/`, `.promptfoo/`, `.surface/`, `.telemetry/`, `.veritas/` | runtime, cache, or integration output | Local tools and optional integrations. | Ignored runtime state. | Clean locally when not needed; promote only stable integration config under `integrations/` or durable docs. |
 | `.venv/`, `node_modules/`, `test-results/`, `__pycache__/` | dependency/cache output | Package managers and test tools. | Ignored. | Safe local cleanup; recreate with normal install or test commands. |
 | `_site/` | generated docs output | Built from `docs/`. | Ignored. | Recreate with docs preview/build tooling. |
 | `agent-cards/` | canonical source | Discovery metadata for routable agents. | Exported into runtime bundles. | Do not delete without checking bundle manifests and evals. |

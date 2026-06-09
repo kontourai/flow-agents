@@ -36,7 +36,6 @@ const allowedPythonCommandFiles = [
   /^agents\/tool-explore-deps\.json$/,
   /^evals\/results\//,
   /^evals\/lib\/python\.sh$/,
-  /^skills\/transcript-research\/scripts\/transcript-to-oar\.sh$/,
   /(^|\/)telemetry\/lib\/enrich\.sh$/,
 ];
 
