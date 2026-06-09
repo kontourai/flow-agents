@@ -69,6 +69,12 @@ flow_agents_node() {
       node "$FLOW_AGENTS_EVAL_ROOT/build/src/cli.js" workflow-artifact-cleanup-audit "$@"
       return
       ;;
+    fixture-retirement-audit)
+      shift
+      flow_agents_build_ts || return
+      node "$FLOW_AGENTS_EVAL_ROOT/build/src/cli.js" fixture-retirement-audit "$@"
+      return
+      ;;
     */scripts/publish-change-helper.js|scripts/publish-change-helper.js)
       shift
       flow_agents_build_ts || return

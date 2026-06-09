@@ -46,27 +46,27 @@ document a compatibility wrapper, or delete the stale surface.
 `npm run validate:source --` enforces this inventory. If a hook moves, is
 renamed, or changes category, update the table and the validator together.
 
-| Hook file | Category | Purpose |
-| --- | --- | --- |
-| `claude-hook-adapter.js` | runtime adapter | Translates Claude hook events into the shared hook runner contract. |
-| `codex-hook-adapter.js` | runtime adapter | Translates Codex hook events into the shared hook runner contract. |
-| `claude-telemetry-hook.js` | telemetry shim | Captures Claude hook telemetry and fails open. |
-| `codex-telemetry-hook.js` | telemetry shim | Captures Codex hook telemetry and fails open. |
-| `run-hook.js` | hook runner | Applies profile/disable flags, traversal checks, and hook execution. |
-| `config-protection.js` | policy hook | Blocks unsafe runtime config edits. |
-| `governance-audit.sh` | policy hook | Emits governance/Veritas audit context when configured. |
-| `post-edit-accumulator.js` | policy hook | Tracks edited files across a turn for later quality hooks. |
-| `quality-gate.js` | policy hook | Runs configured quality checks as hook policy. |
-| `report-only-guard.js` | policy hook | Protects report-only specialist roles from production edits. |
-| `stop-format-typecheck.js` | policy hook | Runs stop-time format/typecheck feedback. |
-| `stop-goal-fit.js` | policy hook | Warns when a workflow is about to stop short of Goal Fit. |
-| `workflow-steering.js` | policy hook | Provides workflow guidance from current artifact state. |
-| `pre-commit-quality.js` | repo guardrail hook | Supports repository Git hook checks, not installed runtime hooks. |
-| `desktop-notify.sh` | local notification helper | Optional local desktop notification helper. |
-| `lib/audit-transport.sh` | shared hook library | Shared audit event transport functions. |
-| `lib/hook-flags.js` | shared hook library | Shared profile/disable flag parsing. |
-| `lib/patterns.sh` | shared hook library | Shared shell pattern constants. |
-| `lib/resolve-formatter.js` | shared hook library | Shared formatter resolution helper. |
+| Hook file | Category | Owning checks | Purpose |
+| --- | --- | --- | --- |
+| `claude-hook-adapter.js` | runtime adapter | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_runtime_adapter_activation.sh` | Translates Claude hook events into the shared hook runner contract. |
+| `codex-hook-adapter.js` | runtime adapter | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_runtime_adapter_activation.sh` | Translates Codex hook events into the shared hook runner contract. |
+| `claude-telemetry-hook.js` | telemetry shim | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_telemetry.sh` | Captures Claude hook telemetry and fails open. |
+| `codex-telemetry-hook.js` | telemetry shim | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_telemetry.sh` | Captures Codex hook telemetry and fails open. |
+| `run-hook.js` | hook runner | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_goal_fit_hook.sh`, `evals/integration/test_workflow_steering_hook.sh` | Applies profile/disable flags, traversal checks, and hook execution. |
+| `config-protection.js` | policy hook | `evals/integration/test_hook_category_behaviors.sh` | Blocks unsafe runtime config edits. |
+| `governance-audit.sh` | policy hook | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_telemetry.sh` | Emits governance/Veritas audit context when configured. |
+| `post-edit-accumulator.js` | policy hook | `evals/integration/test_hook_category_behaviors.sh` | Tracks edited files across a turn for later quality hooks. |
+| `quality-gate.js` | policy hook | `evals/integration/test_hook_category_behaviors.sh` | Runs configured quality checks as hook policy. |
+| `report-only-guard.js` | policy hook | `evals/integration/test_hook_category_behaviors.sh` | Protects report-only specialist roles from production edits. |
+| `stop-format-typecheck.js` | policy hook | `evals/integration/test_hook_category_behaviors.sh` | Runs stop-time format/typecheck feedback. |
+| `stop-goal-fit.js` | policy hook | `evals/integration/test_goal_fit_hook.sh` | Warns when a workflow is about to stop short of Goal Fit. |
+| `workflow-steering.js` | policy hook | `evals/integration/test_workflow_steering_hook.sh` | Provides workflow guidance from current artifact state. |
+| `pre-commit-quality.js` | repo guardrail hook | `evals/integration/test_hook_category_behaviors.sh` | Supports repository Git hook checks, not installed runtime hooks. |
+| `desktop-notify.sh` | local notification helper | `evals/integration/test_hook_category_behaviors.sh` | Optional local desktop notification helper. |
+| `lib/audit-transport.sh` | shared hook library | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_telemetry.sh` | Shared audit event transport functions. |
+| `lib/hook-flags.js` | shared hook library | `evals/integration/test_hook_category_behaviors.sh` | Shared profile/disable flag parsing. |
+| `lib/patterns.sh` | shared hook library | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_telemetry.sh` | Shared shell pattern constants. |
+| `lib/resolve-formatter.js` | shared hook library | `evals/integration/test_hook_category_behaviors.sh` | Shared formatter resolution helper. |
 
 ## Telemetry
 

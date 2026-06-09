@@ -7,7 +7,7 @@ title: Fixture Ownership
 `evals/fixtures/` is canonical eval source, not generic sample data. Keep fixture
 groups only when an owning eval or validator names the behavior they protect.
 When adding, moving, or deleting a fixture directory, update this inventory and
-run `npm run validate:source --`.
+run `npm run validate:source --` and `npm run fixture:retirement-audit --`.
 
 ## Ownership Inventory
 
@@ -37,3 +37,8 @@ tests. A fixture deletion is safe only when:
 
 Generated eval output belongs under ignored result directories, not under
 `evals/fixtures/`.
+
+`npm run fixture:retirement-audit --` is a read-only retirement pass. It reports
+fixture groups as kept when they have documented owners and live eval/script
+references. A nonzero retire-candidate count is not permission to delete by
+itself; it is a prompt to update or remove the owning eval and fixture together.

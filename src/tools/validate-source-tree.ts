@@ -91,6 +91,9 @@ const requiredUsageFeedbackFiles = [
   "package.json", "tsconfig.json", "scripts/usage-feedback.js", "src/cli/usage-feedback.ts", "docs/agent-usage-feedback-loop.md",
   "scripts/hooks/stop-goal-fit.js", "scripts/promote-workflow-artifact.js", "evals/integration/test_goal_fit_hook.sh",
 ];
+const fixtureOwnershipSelfAuditRefs = new Set([
+  "evals/integration/test_fixture_retirement_audit.sh",
+]);
 const pythonInventoryExcludes = new Set([".git", ".flow-agents", "node_modules", ".venv", "dist", "__pycache__", ".pytest_cache", ".cache", "build"]);
 const pythonCommandScanRoots = ["README.md", "docs", "context", "skills", "prompts", "agents", "evals", "scripts", "packaging", "package.json"];
 const allowedPythonCommandFiles = [
@@ -371,6 +374,7 @@ function validateFixtureOwnership(reporter: Reporter): void {
       .filter((file) => readText(file).includes(dir))
       .map((file) => rel(file))
       .filter((file) => !file.startsWith("evals/fixtures/"))
+      .filter((file) => !fixtureOwnershipSelfAuditRefs.has(file))
       .sort();
     const missingOwners = directRefs.filter((file) => !policy.owners.includes(file));
     reporter.check(missingOwners.length === 0, `${dir}: direct fixture references missing from owner inventory: ${missingOwners.join(", ")}`);

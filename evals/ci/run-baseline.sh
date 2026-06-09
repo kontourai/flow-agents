@@ -16,9 +16,11 @@ CHECKS=(
   "Static eval suite|bash evals/run.sh static"
   "Workflow artifact integration|bash evals/integration/test_workflow_artifacts.sh"
   "Workflow artifact cleanup audit integration|bash evals/integration/test_workflow_artifact_cleanup_audit.sh"
+  "Fixture retirement audit integration|bash evals/integration/test_fixture_retirement_audit.sh"
   "Publish-change helper integration|bash evals/integration/test_publish_change_helper.sh"
   "Workflow sidecar writer integration|bash evals/integration/test_workflow_sidecar_writer.sh"
   "Goal Fit hook integration|bash evals/integration/test_goal_fit_hook.sh"
+  "Hook category behavior integration|bash evals/integration/test_hook_category_behaviors.sh"
   "Workflow steering hook integration|bash evals/integration/test_workflow_steering_hook.sh"
   "Hook influence contract integration|bash evals/integration/test_hook_influence_cases.sh"
   "Flow Kit repository integration|bash evals/integration/test_flow_kit_repository.sh"
@@ -36,12 +38,14 @@ LANE_SOURCE_AND_STATIC=(
 LANE_WORKFLOW_CONTRACTS=(
   "Workflow artifact integration"
   "Workflow artifact cleanup audit integration"
+  "Fixture retirement audit integration"
   "Publish-change helper integration"
   "Workflow sidecar writer integration"
 )
 
 LANE_RUNTIME_AND_KIT=(
   "Goal Fit hook integration"
+  "Hook category behavior integration"
   "Workflow steering hook integration"
   "Hook influence contract integration"
   "Flow Kit repository integration"

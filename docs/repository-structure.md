@@ -80,6 +80,7 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
 | Run static evals | `bash evals/run.sh static` |
 | Run integration evals | `bash evals/run.sh integration` |
 | Validate repo Git hooks | `npm run validate:repo-hooks --` |
+| Audit fixture retirement candidates | `npm run fixture:retirement-audit --` |
 
 ## Where Changes Belong
 

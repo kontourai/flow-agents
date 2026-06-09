@@ -159,9 +159,13 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_goal_fit_hook.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_hook_category_behaviors.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_workflow_artifacts.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_workflow_artifact_cleanup_audit.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_fixture_retirement_audit.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_publish_change_helper.sh" || result=1
   echo ""
