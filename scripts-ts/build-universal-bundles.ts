@@ -206,12 +206,15 @@ function claudeTelemetry(event: string): string {
 function claudePolicy(event: string, script: string): string {
   return `bash -lc 'root="\${CLAUDE_PROJECT_DIR:-$(pwd)}"; node "$root/scripts/hooks/claude-hook-adapter.js" ${event} ${script.replace(/\.js$/, "")} ${script} default'`;
 }
+function codexRoot(scriptPath: string): string {
+  return `root="\${CODEX_HOME:-}"; if [ -z "$root" ] || [ ! -f "$root/${scriptPath}" ]; then root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); fi`;
+}
 function codexTelemetry(event: string): string {
-  if (event === "PermissionRequest") return `bash -lc 'root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); bash "$root/scripts/telemetry/telemetry.sh" permissionRequest dev'`;
-  return `bash -lc 'root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); node "$root/scripts/hooks/codex-telemetry-hook.js" ${event} dev'`;
+  if (event === "PermissionRequest") return `bash -lc '${codexRoot("scripts/telemetry/telemetry.sh")}; bash "$root/scripts/telemetry/telemetry.sh" permissionRequest dev'`;
+  return `bash -lc '${codexRoot("scripts/hooks/codex-telemetry-hook.js")}; node "$root/scripts/hooks/codex-telemetry-hook.js" ${event} dev'`;
 }
 function codexPolicy(event: string, script: string): string {
-  return `bash -lc 'root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); node "$root/scripts/hooks/codex-hook-adapter.js" ${script.replace(/\.js$/, "")} ${script} default'`;
+  return `bash -lc '${codexRoot("scripts/hooks/codex-hook-adapter.js")}; node "$root/scripts/hooks/codex-hook-adapter.js" ${script.replace(/\.js$/, "")} ${script} default'`;
 }
 function exportClaudeSettings(): string {
   const hooks: Record<string, Array<Record<string, unknown>>> = {};
