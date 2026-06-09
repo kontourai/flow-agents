@@ -19,6 +19,10 @@
       "type": "string",
       "minLength": 1
     },
+    "repo": {
+      "type": "string",
+      "minLength": 1
+    },
     "summary": {
       "type": "string",
       "minLength": 1

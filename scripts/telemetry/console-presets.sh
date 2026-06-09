@@ -8,3 +8,7 @@ flow_agents_local_kontour_console_url() {
 flow_agents_kontour_cloud_console_url() {
   printf '%s\n' "${FLOW_AGENTS_KONTOUR_CLOUD_CONSOLE_URL:-https://console.kontourai.com}"
 }
+
+flow_agents_kontour_hosted_console_url() {
+  flow_agents_kontour_cloud_console_url
+}

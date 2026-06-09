@@ -14,6 +14,10 @@
   `0600` token file that is deleted after install.
 - Telemetry setup now uses named sinks. Local file telemetry remains the
   default. Add `--telemetry-sink local-kontour-console`,
-  `--telemetry-sink kontour-cloud`, or
-  `--telemetry-sink hosted-kontour-console --console-url ...` to mirror local
-  telemetry into a Console API.
+  `--telemetry-sink kontour-hosted-console`, or
+  `--telemetry-sink user-hosted-console --console-url ...` to mirror local
+  telemetry into a Console API. Legacy `kontour-cloud` and
+  `hosted-kontour-console` names still work as aliases.
+- Flow Agents now owns and ships `console.telemetry.json`. Console should load
+  the descriptor from the Flow Agents product root rather than owning Flow
+  Agents-specific telemetry facets or sidecar mappings.

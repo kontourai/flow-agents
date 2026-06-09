@@ -7,8 +7,9 @@ usage() {
 usage: install-console-config.sh /path/to/telemetry.conf [options]
 
 Options:
-  --telemetry-sink NAME   local-files, local-kontour-console, kontour-cloud,
-                          or hosted-kontour-console. May be repeated.
+  --telemetry-sink NAME   local-files, local-kontour-console,
+                          kontour-hosted-console, user-hosted-console,
+                          or legacy aliases. May be repeated.
   --console-url URL       Console base URL. Derives /api/telemetry/records.
   --console-endpoint URL  Full Console telemetry records endpoint URL.
   --console-token-file PATH
@@ -59,6 +60,7 @@ validate_url() {
 validate_token() {
   local value="$1"
   [[ -z "$value" ]] && return 0
+  [[ "${#value}" -le 4096 ]] || die "Console token must be 4096 characters or fewer"
   has_control_chars "$value" && die "Console token must not contain control characters"
   [[ "$value" =~ ^[A-Za-z0-9._~+/=-]+$ ]] || die "Console token contains unsupported characters"
 }
@@ -68,6 +70,8 @@ read_token_file() {
   [[ -f "$file" ]] || die "--console-token-file does not exist: $file"
   local value
   value="$(tr -d '\r\n' <"$file")"
+  [[ -n "$value" ]] || die "--console-token-file is empty"
+  [[ "${#value}" -le 4096 ]] || die "Console token must be 4096 characters or fewer"
   printf '%s\n' "$value"
 }
 
@@ -162,13 +166,13 @@ main() {
         console_sink_count=$((console_sink_count + 1))
         console_url="${console_url:-$(flow_agents_local_kontour_console_url)}"
         ;;
-      kontour-cloud)
+      kontour-hosted-console|kontour-cloud)
         console_sink_count=$((console_sink_count + 1))
-        console_url="${console_url:-$(flow_agents_kontour_cloud_console_url)}"
+        console_url="${console_url:-$(flow_agents_kontour_hosted_console_url)}"
         ;;
-      hosted-kontour-console)
+      user-hosted-console|hosted-kontour-console)
         console_sink_count=$((console_sink_count + 1))
-        [[ -n "$console_url" || -n "$console_endpoint" ]] || die "hosted-kontour-console requires --console-url or --console-endpoint"
+        [[ -n "$console_url" || -n "$console_endpoint" ]] || die "user-hosted-console requires --console-url or --console-endpoint"
         ;;
       *)
         die "unknown telemetry sink: $sink"

@@ -32,6 +32,32 @@ is nonstandard, `CONSOLE_TELEMETRY_TOKEN` or `CONSOLE_AUTH_TOKEN` for bearer
 auth, and `CONSOLE_TENANT_ID` for hosted tenant routing. If no Console URL is
 set, telemetry remains local-only.
 
+Flow Agents owns the Console telemetry descriptor at `console.telemetry.json`.
+Generated bundles include that root descriptor beside `AGENTS.md`, scripts, and
+kit assets. The descriptor maps Flow Agents runtime telemetry and workflow
+sidecars into generic Console facets for skills, tools, flows, repositories,
+projects, runtimes, agents, models, statuses, and outcomes. Console consumes
+those mappings as product-owned display metadata; Flow-owned gate and transition
+semantics stay in Flow contracts and sidecars. Repository and project metadata
+are stable cross-user workspace identifiers when present. Local working-directory
+paths stay out of the descriptor so Console display metadata does not expose
+usernames or machine-local paths; records without a repository identifier should
+fall back to their logical product root such as `product:flow-agents:.flow-agents`.
+
+Packaged setup modes are:
+
+- `local-files`: default local JSONL telemetry only; no Console URL or token.
+- `local-kontour-console`: mirror to a separately running local Console, using
+  `http://127.0.0.1:3737` unless `FLOW_AGENTS_LOCAL_KONTOUR_CONSOLE_URL` is set.
+- `kontour-hosted-console`: mirror to Kontour's hosted Console default URL.
+  Pass `--console-token-file` and `--console-tenant` for headless hosted setup.
+- `user-hosted-console`: mirror to a self-hosted Console; requires
+  `--console-url` or `--console-endpoint`.
+
+Use `flow-agents init --yes` or `--headless` with the same flags in CI. The
+legacy sink names `kontour-cloud` and `hosted-kontour-console` are still
+accepted for existing scripts.
+
 ## Normalized Records
 
 ### Session

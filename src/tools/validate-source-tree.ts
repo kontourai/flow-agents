@@ -160,6 +160,12 @@ function validatePowers(reporter: Reporter): void {
 function validateManifest(reporter: Reporter, manifest: any, agentNames: Set<string>): void {
   for (const key of ["canonical_copy_dirs", "source_root_aliases", "target_substitutions"]) reporter.check(key in manifest, `${rel(manifestPath)}: missing .${key}`);
   for (const dir of manifest.canonical_copy_dirs ?? []) reporter.check(fs.existsSync(path.join(root, dir)), `${rel(manifestPath)}: canonical_copy_dirs entry missing: ${dir}`);
+  for (const file of manifest.root_copy_files ?? []) {
+    reporter.check(typeof file === "string" && !path.isAbsolute(file) && !file.split(/[\\/]/).includes(".."), `${rel(manifestPath)}: root_copy_files entry must be a safe relative path: ${file}`);
+    if (typeof file === "string" && !path.isAbsolute(file) && !file.split(/[\\/]/).includes("..")) {
+      reporter.check(fs.existsSync(path.join(root, file)), `${rel(manifestPath)}: root_copy_files entry missing: ${file}`);
+    }
+  }
   for (const dir of manifest.optional_copy_dirs ?? []) if (!fs.existsSync(path.join(root, dir))) console.log(`warning: ${rel(manifestPath)} optional_copy_dirs entry absent: ${dir}`);
   for (const agent of manifest.codex?.excluded_agents ?? []) reporter.check(agentNames.has(agent), `${rel(manifestPath)}: codex excluded agent '${agent}' does not exist`);
 }

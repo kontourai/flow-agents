@@ -12,6 +12,9 @@
     "schemas",
     "skills"
   ],
+  "root_copy_files": [
+    "console.telemetry.json"
+  ],
   "optional_copy_dirs": [],
   "source_root_aliases": [
     "~/.flow-agents",

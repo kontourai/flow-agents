@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { execFileSync } from "node:child_process";
 
 type AnyObj = Record<string, any>;
 
@@ -22,6 +23,43 @@ function appendJsonl(file: string, payload: AnyObj): void {
 }
 function die(message: string): never { throw new Error(message); }
 function slugify(value: string, fallback: string): string { return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || fallback; }
+
+function parseRepoRemote(value: string): string {
+  const trimmed = value.trim().replace(/\.git$/, "");
+  const ssh = /^git@[^:]+:(?<owner>[^/]+)\/(?<repo>[^/]+)$/.exec(trimmed);
+  if (ssh?.groups) return `${ssh.groups.owner}/${ssh.groups.repo}`;
+  try {
+    const url = new URL(trimmed);
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length >= 2) return `${parts.at(-2)}/${parts.at(-1)}`;
+  } catch {
+    // Non-URL remotes fall back to repository directory name below.
+  }
+  return "";
+}
+
+function repoIdentifier(): string {
+  const explicit = process.env.FLOW_AGENTS_REPO?.trim();
+  if (explicit) return explicit.replace(/\.git$/, "");
+  try {
+    const remote = execFileSync("git", ["config", "--get", "remote.origin.url"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const parsed = parseRepoRemote(remote);
+    if (parsed) return parsed;
+  } catch {
+    // Keep sidecar writing independent of Git availability.
+  }
+  try {
+    const top = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    if (top) return path.basename(top);
+  } catch {
+    // Fall through to cwd basename for non-Git workspaces.
+  }
+  return path.basename(process.cwd()) || "workspace";
+}
+
+function sidecarBase(slug: string): AnyObj {
+  return { schema_version: "1.0", task_slug: slug, repo: repoIdentifier() };
+}
 
 function parseArgs(argv: string[]): { command: string; positional: string[]; opts: Record<string, string[]>; flags: Set<string> } {
   const [command, ...rest] = argv;
@@ -208,17 +246,17 @@ function updateCurrentAgent(root: string, dir: string, agentId: string, status: 
 function initSidecars(dir: string, slug: string, sourceRequest: string, summary: string, nextAction: string, timestamp: string, markdown?: string): void {
   const criteria = markdown ? definitionAcceptanceLines(markdown).map(parseCriterion) : [];
   writeJson(path.join(dir, "state.json"), {
-    schema_version: "1.0", task_slug: slug, status: "planned", phase: "planning", created_at: timestamp, updated_at: timestamp,
+    ...sidecarBase(slug), status: "planned", phase: "planning", created_at: timestamp, updated_at: timestamp,
     artifact_paths: relArtifacts(dir),
     next_action: { status: "continue", summary: nextAction || summary },
   });
   writeJson(path.join(dir, "acceptance.json"), {
-    schema_version: "1.0", task_slug: slug, source_request: sourceRequest,
+    ...sidecarBase(slug), source_request: sourceRequest,
     criteria,
     goal_fit: { status: "pending", summary: "Goal fit has not been verified yet." },
   });
   writeJson(path.join(dir, "handoff.json"), {
-    schema_version: "1.0", task_slug: slug, summary, current_state_ref: "state.json", next_steps: nextAction ? [nextAction] : [], blockers: [], warnings: [],
+    ...sidecarBase(slug), summary, current_state_ref: "state.json", next_steps: nextAction ? [nextAction] : [], blockers: [], warnings: [],
   });
 }
 
@@ -378,7 +416,7 @@ function validateAcceptanceEvidenceRefs(dir: string): void {
   });
 }
 function writeState(dir: string, slug: string, status: string, phase: string, timestamp: string, summary: string, next = "continue"): void {
-  writeJson(path.join(dir, "state.json"), { ...loadJson(path.join(dir, "state.json")), schema_version: "1.0", task_slug: slug, status, phase, updated_at: timestamp, artifact_paths: relArtifacts(dir), next_action: { status: next, summary } });
+  writeJson(path.join(dir, "state.json"), { ...loadJson(path.join(dir, "state.json")), ...sidecarBase(slug), status, phase, updated_at: timestamp, artifact_paths: relArtifacts(dir), next_action: { status: next, summary } });
 }
 function recordEvidence(p: ReturnType<typeof parseArgs>): number {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
@@ -388,7 +426,7 @@ function recordEvidence(p: ReturnType<typeof parseArgs>): number {
   const checks = [...opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"))), ...opts(p, "surface-trust-json").map(surfaceCheckFromArtifact)];
   if (!checks.length && opts(p, "surface-trust-json").length === 0) die("record-evidence requires at least one --check-json or --surface-trust-json");
   validateAcceptanceEvidenceRefs(dir);
-  const payload = { schema_version: "1.0", task_slug: slug, verdict, checks, not_verified_gaps: opts(p, "gap") };
+  const payload = { ...sidecarBase(slug), verdict, checks, not_verified_gaps: opts(p, "gap") };
   writeJson(path.join(dir, "evidence.json"), payload);
   updateAcceptance(dir, verdict);
   const stateStatus = verdict === "pass" ? "verified" : verdict === "fail" ? "failed" : "not_verified";
@@ -426,7 +464,7 @@ function advanceState(p: ReturnType<typeof parseArgs>): number {
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const timestamp = opt(p, "timestamp", now());
   writeState(dir, slug, status, phase, timestamp, opt(p, "summary"));
-  writeJson(path.join(dir, "handoff.json"), { ...loadJson(path.join(dir, "handoff.json")), schema_version: "1.0", task_slug: slug, summary: opt(p, "summary"), current_state_ref: "state.json", next_steps: [opt(p, "next-action")].filter(Boolean), blockers: [], warnings: [] });
+  writeJson(path.join(dir, "handoff.json"), { ...loadJson(path.join(dir, "handoff.json")), ...sidecarBase(slug), summary: opt(p, "summary"), current_state_ref: "state.json", next_steps: [opt(p, "next-action")].filter(Boolean), blockers: [], warnings: [] });
   return 0;
 }
 
@@ -446,7 +484,7 @@ function recordCritique(p: ReturnType<typeof parseArgs>): number {
   const critique = { id: opt(p, "id") || "review", reviewer: opt(p, "reviewer", "tool-code-reviewer"), reviewed_at: opt(p, "timestamp", now()), verdict: opt(p, "verdict", "pass"), summary: opt(p, "summary"), artifact_refs: opts(p, "artifact-ref"), findings: opts(p, "finding-json").map((v) => normalizeFinding(parseJson(v, "--finding-json"))) };
   const critiques = [...(Array.isArray(existing.critiques) ? existing.critiques : []), critique];
   if (critique.verdict === "pass" && critique.findings.some((f: AnyObj) => f.status === "open")) die("required critique must pass");
-  writeJson(path.join(dir, "critique.json"), { schema_version: "1.0", task_slug: slug, status: critiqueStatus(critiques, true), required: true, updated_at: critique.reviewed_at, critiques });
+  writeJson(path.join(dir, "critique.json"), { ...sidecarBase(slug), status: critiqueStatus(critiques, true), required: true, updated_at: critique.reviewed_at, critiques });
   return 0;
 }
 function frontmatter(text: string, key: string): string {
@@ -481,7 +519,7 @@ function recordRelease(p: ReturnType<typeof parseArgs>): number {
   if (!["merge", "release", "deploy", "hold", "rollback_required"].includes(decision)) die("decision must be one of: merge, release, deploy, hold, rollback_required");
   const gates = opts(p, "gate-json").map((v) => parseJson(v, "--gate-json"));
   if (["merge", "release", "deploy"].includes(decision) && !gates.some((g) => g.name === decision && g.status === "pass")) die(`positive release decision requires ${decision} gate to pass`);
-  const payload = { schema_version: "1.0", task_slug: slug, decision: opt(p, "decision"), updated_at: opt(p, "timestamp", now()), scope: opt(p, "scope"), evidence_ref: opt(p, "evidence-ref"), gates: opts(p, "gate-json").map((v) => parseJson(v, "--gate-json")), rollback_plan: parseJson(opt(p, "rollback-json", '{"status":"not_required","summary":"Not required.","owner":"maintainer"}'), "--rollback-json"), observability_plan: parseJson(opt(p, "observability-json", '{"status":"not_required","summary":"Not required."}'), "--observability-json"), post_deploy_checks: opts(p, "post-deploy-json").map((v) => parseJson(v, "--post-deploy-json")), docs: parseJson(opt(p, "docs-json", '{"status":"not_needed","summary":"Not needed."}'), "--docs-json") };
+  const payload = { ...sidecarBase(slug), decision: opt(p, "decision"), updated_at: opt(p, "timestamp", now()), scope: opt(p, "scope"), evidence_ref: opt(p, "evidence-ref"), gates: opts(p, "gate-json").map((v) => parseJson(v, "--gate-json")), rollback_plan: parseJson(opt(p, "rollback-json", '{"status":"not_required","summary":"Not required.","owner":"maintainer"}'), "--rollback-json"), observability_plan: parseJson(opt(p, "observability-json", '{"status":"not_required","summary":"Not required."}'), "--observability-json"), post_deploy_checks: opts(p, "post-deploy-json").map((v) => parseJson(v, "--post-deploy-json")), docs: parseJson(opt(p, "docs-json", '{"status":"not_needed","summary":"Not needed."}'), "--docs-json") };
   const stateSummary = opt(p, "summary").trim() || `Release readiness recorded for ${decision}.`;
   writeJson(path.join(dir, "release.json"), payload);
   writeState(dir, slug, "delivered", "release", payload.updated_at, stateSummary);
@@ -533,7 +571,7 @@ function recordLearning(p: ReturnType<typeof parseArgs>): number {
   const status = opt(p, "status", "learned");
   if (status === "learned" && records.some((r) => r.routing.some((x: AnyObj) => x.status === "open"))) die("learning status learned cannot have open routing");
   if (status === "learned" && records.some((r) => r.correction === undefined)) die("learning status learned requires every record to include correction.needed");
-  writeJson(path.join(dir, "learning.json"), { schema_version: "1.0", task_slug: slug, status, updated_at: timestamp, records });
+  writeJson(path.join(dir, "learning.json"), { ...sidecarBase(slug), status, updated_at: timestamp, records });
   writeState(dir, slug, "accepted", "learning", timestamp, opt(p, "summary"));
   return 0;
 }
