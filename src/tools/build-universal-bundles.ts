@@ -213,7 +213,7 @@ function codexTelemetry(event: string): string {
   if (event === "PermissionRequest") return `bash -lc '${codexRoot("scripts/telemetry/telemetry.sh")}; bash "$root/scripts/telemetry/telemetry.sh" permissionRequest dev'`;
   return `bash -lc '${codexRoot("scripts/hooks/codex-telemetry-hook.js")}; node "$root/scripts/hooks/codex-telemetry-hook.js" ${event} dev'`;
 }
-function codexPolicy(event: string, script: string): string {
+function codexPolicy(script: string): string {
   return `bash -lc '${codexRoot("scripts/hooks/codex-hook-adapter.js")}; node "$root/scripts/hooks/codex-hook-adapter.js" ${script.replace(/\.js$/, "")} ${script} default'`;
 }
 function exportClaudeSettings(): string {
@@ -237,8 +237,8 @@ function exportCodexHooks(): string {
   for (const event of ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop"]) {
     hooks[event] = [{ hooks: [shellHook(codexTelemetry(event), 10, "Recording Flow Agents telemetry")] }];
   }
-  hooks.Stop.push({ hooks: [shellHook(codexPolicy("Stop", "stop-goal-fit.js"), 30, "Running Flow Agents hook policy")] });
-  hooks.UserPromptSubmit.push({ hooks: [shellHook(codexPolicy("UserPromptSubmit", "workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
+  hooks.Stop.push({ hooks: [shellHook(codexPolicy("stop-goal-fit.js"), 30, "Running Flow Agents hook policy")] });
+  hooks.UserPromptSubmit.push({ hooks: [shellHook(codexPolicy("workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
   return `${JSON.stringify({ hooks }, null, 2)}\n`;
 }
 
