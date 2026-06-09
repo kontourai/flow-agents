@@ -60,7 +60,7 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
 | `powers/` | canonical source | Optional MCP/tool capability bundles. | Exported where supported. | Keep activation guidance separate from credentials. |
 | `prompts/` | canonical source | Saved prompt entry points. | Exported where supported. | Promote stable procedures into skills when needed. |
 | `schemas/` | canonical source | JSON schemas for sidecars and provider/resource records. | Used by validators and workflow tooling. | Schema changes require artifact validation. |
-| `scripts/` | canonical source and compatibility surface | Shell and JavaScript wrappers, installers, hooks, telemetry, workflow tooling. | Some scripts wrap compiled `build/` output. | Public wrappers are compatibility-sensitive; check package scripts, installers, docs, and evals before moving. |
+| `scripts/` | canonical source and compatibility surface | Shell and JavaScript wrappers, installers, hooks, telemetry, workflow tooling. | Some scripts wrap compiled `build/` output. | Public wrappers are compatibility-sensitive; see [`scripts/README.md`](../scripts/README.md) before moving. |
 | `src/tools/` | canonical TypeScript tooling source | Build, packaging, context-map, validators, and utility modules imported by `src/cli.ts`. | Compiled to `build/src/tools/`. | Keep public wrappers in `scripts/` stable when tooling internals move. |
 | `skills/` | canonical source | Reusable workflow skills. | Exported to runtime bundles. | Skill renames need compatibility and docs updates. |
 | `src/` | canonical TypeScript product source | CLI, runtime adapters, Flow Kit helpers, and shared libraries. | Compiled to `build/src/`. | Preserve public bin command behavior. |

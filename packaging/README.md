@@ -23,6 +23,8 @@ For the full source/generated/runtime inventory, see [Repository Structure](../d
 
 All targets also receive shared canonical directories where supported: `context/`, `powers/`, `prompts/`, `scripts/`, and `evals/`.
 
+`docs/` and `evals/` are intentionally included in generated bundles today. `docs/` gives installed agents durable local reference material, and `evals/` provides install-time and runtime smoke tests for the exported bundle. If bundle size becomes a product constraint, prune these through `packaging/manifest.json` and update install tests rather than deleting generated output by hand.
+
 ## Generated And Runtime Boundaries
 
 `dist/` is a generated export surface, not the source of truth. Installed runtime directories such as `.codex/` and `.claude/` are also not source. They are created from the generated target bundle and installer scripts. If generated or installed hook config is wrong, fix the canonical source, rebuild `dist/`, and reinstall the runtime config.
