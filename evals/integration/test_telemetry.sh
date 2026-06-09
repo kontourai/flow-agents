@@ -88,7 +88,21 @@ echo ""
 echo "--- Event Type Mapping ---"
 mock_json='{"cwd":"/tmp/eval-test","prompt":"test prompt","tool_name":"test_tool","tool_input":{},"tool_response":{}}'
 
-for pair in "agentSpawn:session.start" "stop:session.end" "userPromptSubmit:turn.user" "preToolUse:tool.invoke" "postToolUse:tool.result"; do
+for pair in \
+  "agentSpawn:session.start" \
+  "SessionStart:session.start" \
+  "stop:session.end" \
+  "Stop:session.end" \
+  "SessionEnd:session.end" \
+  "userPromptSubmit:turn.user" \
+  "UserPromptSubmit:turn.user" \
+  "preToolUse:tool.invoke" \
+  "PreToolUse:tool.invoke" \
+  "permissionRequest:tool.permission_request" \
+  "PermissionRequest:tool.permission_request" \
+  "postToolUse:tool.result" \
+  "PostToolUse:tool.result" \
+  "PostToolUseFailure:tool.result"; do
   hook_type="${pair%%:*}"
   expected="${pair#*:}"
 
@@ -177,6 +191,16 @@ if [[ "$hook_turn_id" == "turn-1" && "$hook_runtime_session_id" == "runtime-sess
   _pass "preToolUse preserves runtime hook envelope and raw input"
 else
   _fail "preToolUse hook envelope incomplete: turn='$hook_turn_id' runtime_session='$hook_runtime_session_id' raw_command='$hook_raw_command'"
+fi
+
+runtime_tool_output=$(_run_telemetry "PreToolUse" "eval-test" '{"session_id":"runtime-session-2","turn_id":"turn-runtime","transcript_path":"/tmp/transcript.jsonl","hook_event_name":"PreToolUse","model":"test-model","cwd":"/tmp","tool_name":"Bash","tool_input":{"command":"echo runtime"}}')
+runtime_tool_type=$(echo "$runtime_tool_output" | jq -r '.event_type // empty' 2>/dev/null)
+runtime_tool_name=$(echo "$runtime_tool_output" | jq -r '.tool.normalized_name // empty' 2>/dev/null)
+runtime_turn_id=$(echo "$runtime_tool_output" | jq -r '.hook.turn_id // empty' 2>/dev/null)
+if [[ "$runtime_tool_type" == "tool.invoke" && "$runtime_tool_name" == "execute_bash" && "$runtime_turn_id" == "turn-runtime" ]]; then
+  _pass "PreToolUse captures runtime-native tool payload"
+else
+  _fail "PreToolUse runtime-native payload incomplete: type='$runtime_tool_type' tool='$runtime_tool_name' turn='$runtime_turn_id'"
 fi
 
 permission_output=$(_run_telemetry "permissionRequest" "eval-test" '{"cwd":"/tmp","hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"rm -rf /tmp/example","description":"Run escalated shell command"}}')
