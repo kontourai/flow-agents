@@ -5,10 +5,37 @@ Flow Agents installs workflow-aware agent bundles for local development. It give
 ## Install
 
 ```bash
-bash install.sh /path/to/workspace
+npx @kontourai/flow-agents init
 ```
 
-The installer copies the bundled agents, skills, context, scripts, evals, and Flow Kit assets into the target workspace.
+`flow-agents init` walks through a base workspace install built around `AGENTS.md`,
+`.agents/flow-agents/`, optional Console telemetry, and optional runtime-specific
+wiring. For CI or scripted installs, use the same command headlessly:
+
+```bash
+npx @kontourai/flow-agents init \
+  --dest /path/to/workspace \
+  --telemetry-sink local-files \
+  --yes
+```
+
+Runtime-specific bundle wiring is opt-in:
+
+```bash
+npx @kontourai/flow-agents init \
+  --runtime codex \
+  --dest /path/to/workspace \
+  --activate-kits \
+  --yes
+```
+
+The low-level bundle installer remains available when you already have a generated bundle checkout:
+
+```bash
+bash install.sh /path/to/workspace --telemetry-sink local-kontour-console
+```
+
+The installer copies the bundled agents, skills, context, scripts, evals, and Flow Kit assets into the target workspace. Telemetry writes to local files by default. Optional sinks can add a Console mirror: `local-kontour-console` for a separately running local Console, `kontour-cloud` for Kontour's hosted Console, or `hosted-kontour-console` with `--console-url` for a self-hosted Console.
 
 ## What You Get
 

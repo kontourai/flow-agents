@@ -254,10 +254,26 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
   if (fs.existsSync(commonBuilt)) writeText(path.join(targetRoot, "scripts/common.mjs"), readText(commonBuilt));
   copyTree(path.join(root, "build/src"), path.join(targetRoot, "build/src"), targetName, token);
 }
-function installScript(label: string, usage: string, token?: string): string {
+function installScript(label: string, defaultDestDisplay: string, token?: string, destFallbackShell?: string): string {
   const replaceBlock = token ? `\nexport DEST\nfind "$DEST" -type f \\( -name '*.json' -o -name '*.md' -o -name '*.sh' -o -name '*.js' -o -name '*.ts' -o -name '*.yaml' -o -name '*.yml' \\) -print0 | xargs -0 perl -0pi -e 's#${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}#$ENV{DEST}#g'` : "";
-  return `#!/usr/bin/env bash\nset -euo pipefail\n\nDEST="${usage}"\nSRC="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"\n\nmkdir -p "$DEST"\nrsync -a ${token ? "--delete " : ""}"$SRC"/ "$DEST"/\nif [[ -n "\${FLOW_AGENTS_PACKS:-}" ]]; then\n  node "$DEST/scripts/filter-installed-packs.mjs" "$DEST" --packs "$FLOW_AGENTS_PACKS"\nfi${replaceBlock}\necho "Installed ${label} bundle ${token ? "to" : "into"} $DEST"\n`;
+  const destFallback = destFallbackShell ? `\nif [[ -z "$DEST" ]]; then\n  DEST="${destFallbackShell}"\nfi` : "";
+  const destRequired = !destFallbackShell;
+  const requiredCheck = destRequired ? `if [[ -z "$DEST" ]]; then\n  usage\n  exit 2\nfi\n` : "";
+  const usageDest = destRequired ? "/path/to/workspace" : defaultDestDisplay;
+  return `#!/usr/bin/env bash\nset -euo pipefail\n\nusage() {\n  cat >&2 <<'EOF'\nusage: bash install.sh ${usageDest} [options]\n\nOptions:\n  --telemetry-sink NAME   local-files, local-kontour-console, kontour-cloud,\n                          or hosted-kontour-console. May be repeated.\n  --console-url URL       Persist Console telemetry base URL.\n  --console-endpoint URL  Persist full Console telemetry records endpoint URL.\n  --console-token-file PATH\n                          Read Console telemetry bearer token from a file.\n  --console-tenant ID     Persist Console tenant identifier.\nEOF\n}\n\nDEST=""\nDEST_SET=0\nCONSOLE_CONFIG_ARGS=()\nwhile [[ $# -gt 0 ]]; do\n  case "$1" in\n    --telemetry-sink|--telemetry-sinks|--console-url|--console-endpoint|--console-endpoint-url|--console-token-file|--console-tenant|--console-tenant-id)\n      [[ $# -ge 2 ]] || { echo "install.sh: $1 requires a value" >&2; exit 2; }\n      CONSOLE_CONFIG_ARGS+=("$1" "$2")\n      shift 2\n      ;;\n    --help|-h)\n      usage\n      exit 0\n      ;;\n    -*)\n      echo "install.sh: unknown option: $1" >&2\n      usage\n      exit 2\n      ;;\n    *)\n      if [[ "$DEST_SET" -eq 1 ]]; then\n        echo "install.sh: unexpected argument: $1" >&2\n        usage\n        exit 2\n      fi\n      DEST="$1"\n      DEST_SET=1\n      shift\n      ;;\n  esac\ndone${destFallback}\n${requiredCheck}SRC="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"\n\nmkdir -p "$DEST"\nrsync -a ${token ? "--delete " : ""}"$SRC"/ "$DEST"/\nif [[ -n "\${FLOW_AGENTS_PACKS:-}" ]]; then\n  node "$DEST/scripts/filter-installed-packs.mjs" "$DEST" --packs "$FLOW_AGENTS_PACKS"\nfi${replaceBlock}\nif [[ \${#CONSOLE_CONFIG_ARGS[@]} -gt 0 || -n "\${FLOW_AGENTS_TELEMETRY_SINK:-}" || -n "\${FLOW_AGENTS_TELEMETRY_SINKS:-}" || -n "\${FLOW_AGENTS_CONSOLE_URL:-}" || -n "\${CONSOLE_TELEMETRY_URL:-}" || -n "\${CONSOLE_URL:-}" || -n "\${FLOW_AGENTS_CONSOLE_TOKEN_FILE:-}" || -n "\${CONSOLE_TELEMETRY_TOKEN_FILE:-}" ]]; then\n  bash "$DEST/scripts/telemetry/install-console-config.sh" "$DEST/scripts/telemetry/telemetry.conf" "\${CONSOLE_CONFIG_ARGS[@]}"\nfi\necho "Installed ${label} bundle ${token ? "to" : "into"} $DEST"\n`;
 }
+
+function buildBase(agents: Agent[]): void {
+  const bundle = path.join(dist, "base");
+  resetDir(bundle);
+  copySharedContent(bundle, "base", "<bundle-root>");
+  writeText(path.join(bundle, ".agents/flow-agents", ".gitkeep"), "");
+  writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Base", agents, ".agents/flow-agents"));
+  writeText(path.join(bundle, "README.md"), exportTargetReadme("Base", "bash install.sh /path/to/workspace"));
+  writeText(path.join(bundle, "install.sh"), installScript("Base", "/path/to/workspace"));
+  fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
+}
+
 function buildKiro(agents: Agent[]): void {
   const bundle = path.join(dist, "kiro");
   const token = manifest.kiro.path_token;
@@ -266,7 +282,7 @@ function buildKiro(agents: Agent[]): void {
   for (const spec of agents) writeText(path.join(bundle, "agents", `${spec.name}.json`), sanitizeText(`${JSON.stringify(sanitizeAgentJson(spec), null, 2)}\n`, "kiro", token));
   writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Kiro", agents, ".agents/flow-agents"));
   writeText(path.join(bundle, "README.md"), exportTargetReadme("Kiro", "bash install.sh $HOME/.flow-agents"));
-  writeText(path.join(bundle, "install.sh"), installScript("Kiro", "${1:-$HOME/.flow-agents}", token));
+  writeText(path.join(bundle, "install.sh"), installScript("Kiro", "$HOME/.flow-agents", token, '${FLOW_AGENTS_DEST:-$HOME/.flow-agents}'));
   fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
 }
 function buildClaudeCode(agents: Agent[]): void {
@@ -282,7 +298,7 @@ function buildClaudeCode(agents: Agent[]): void {
   writeText(path.join(bundle, ".claude/settings.json"), exportClaudeSettings());
   writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Claude Code", agents, manifest.claude_code.task_dir));
   writeText(path.join(bundle, "README.md"), exportTargetReadme("Claude Code", "bash install.sh /path/to/workspace"));
-  writeText(path.join(bundle, "install.sh"), installScript("Claude Code", '${1:?usage: bash install.sh /path/to/workspace}'));
+  writeText(path.join(bundle, "install.sh"), installScript("Claude Code", "/path/to/workspace"));
   fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
 }
 function buildCodex(agents: Agent[]): void {
@@ -303,7 +319,7 @@ function buildCodex(agents: Agent[]): void {
   }
   writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Codex", targetAgents, manifest.codex.task_dir));
   writeText(path.join(bundle, "README.md"), exportTargetReadme("Codex", "bash install.sh /path/to/workspace"));
-  writeText(path.join(bundle, "install.sh"), installScript("Codex", '${1:?usage: bash install.sh /path/to/workspace}'));
+  writeText(path.join(bundle, "install.sh"), installScript("Codex", "/path/to/workspace"));
   fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
 }
 function buildCatalog(agents: Agent[]): Record<string, unknown> {
@@ -320,12 +336,14 @@ function buildCatalog(agents: Agent[]): Record<string, unknown> {
 export function main(): number {
   fs.mkdirSync(dist, { recursive: true });
   const agents = fs.readdirSync(path.join(root, "agents")).filter((name) => name.endsWith(".json")).sort().map((name) => loadJson<Agent>(path.join(root, "agents", name)));
+  buildBase(agents);
   buildKiro(agents);
   buildClaudeCode(agents);
   buildCodex(agents);
   writeText(path.join(dist, "catalog.json"), `${JSON.stringify(buildCatalog(agents), null, 2)}\n`);
   writeText(path.join(dist, "README.md"), "# Universal Bundles\n\nRun `npm run build:bundles` from the repo root to regenerate these bundles.\n");
   console.log("Built bundles:");
+  console.log(" - dist/base");
   console.log(" - dist/kiro");
   console.log(" - dist/claude-code");
   console.log(" - dist/codex");

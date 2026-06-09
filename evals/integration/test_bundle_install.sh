@@ -2,6 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# shellcheck source=/dev/null
+source "$ROOT_DIR/scripts/telemetry/console-presets.sh"
+LOCAL_KONTOUR_CONSOLE_URL="$(flow_agents_local_kontour_console_url)"
 TMPDIR_EVAL="$(mktemp -d /tmp/universal-bundle-install.XXXXXX)"
 pass=0
 fail=0
@@ -25,9 +28,17 @@ else
 fi
 
 KIRO_DEST="$TMPDIR_EVAL/kiro-home"
+BASE_DEST="$TMPDIR_EVAL/base-workspace"
 CLAUDE_DEST="$TMPDIR_EVAL/claude-workspace"
 CODEX_DEST="$TMPDIR_EVAL/codex-workspace"
 CODEX_CORE_DEST="$TMPDIR_EVAL/codex-core-workspace"
+CODEX_CONSOLE_DEST="$TMPDIR_EVAL/codex-console-workspace"
+CODEX_BAD_CONSOLE_DEST="$TMPDIR_EVAL/codex-bad-console-workspace"
+BASE_INIT_DEST="$TMPDIR_EVAL/base-init-workspace"
+CODEX_INIT_DEST="$TMPDIR_EVAL/codex-init-workspace"
+CONSOLE_TOKEN_FILE="$TMPDIR_EVAL/console-token"
+printf 'test-token\n' > "$CONSOLE_TOKEN_FILE"
+chmod 600 "$CONSOLE_TOKEN_FILE" 2>/dev/null || true
 
 echo ""
 echo "--- Install ---"
@@ -35,6 +46,12 @@ if (cd "$ROOT_DIR/dist/kiro" && bash install.sh "$KIRO_DEST" >/dev/null); then
   _pass "Kiro install succeeded"
 else
   _fail "Kiro install failed"
+fi
+
+if (cd "$ROOT_DIR/dist/base" && bash install.sh "$BASE_DEST" >/dev/null); then
+  _pass "Base install succeeded"
+else
+  _fail "Base install failed"
 fi
 
 if (cd "$ROOT_DIR/dist/claude-code" && bash install.sh "$CLAUDE_DEST" >/dev/null); then
@@ -47,6 +64,30 @@ if (cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_DEST" >/dev/null); then
   _pass "Codex install succeeded"
 else
   _fail "Codex install failed"
+fi
+
+if (cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_CONSOLE_DEST" --telemetry-sink local-kontour-console --console-token-file "$CONSOLE_TOKEN_FILE" --console-tenant tenant-a >/dev/null); then
+  _pass "Codex install with Console telemetry config succeeded"
+else
+  _fail "Codex install with Console telemetry config failed"
+fi
+
+if (cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_BAD_CONSOLE_DEST" --telemetry-sink hosted-kontour-console --console-url http://example.com >/dev/null 2>&1); then
+  _fail "Codex install accepted unsafe hosted Console http URL"
+else
+  _pass "Codex install rejects unsafe hosted Console http URL"
+fi
+
+if node "$ROOT_DIR/build/src/cli.js" init --dest "$BASE_INIT_DEST" --telemetry-sink local-kontour-console --yes >/dev/null; then
+  _pass "flow-agents init headless base install succeeded"
+else
+  _fail "flow-agents init headless base install failed"
+fi
+
+if node "$ROOT_DIR/build/src/cli.js" init --runtime codex --dest "$CODEX_INIT_DEST" --telemetry-sink local-kontour-console --console-tenant tenant-a --activate-kits --yes >/dev/null; then
+  _pass "flow-agents init headless Codex install succeeded"
+else
+  _fail "flow-agents init headless Codex install failed"
 fi
 
 USER_SKILLS_DIR="$CODEX_CORE_DEST/.codex/sk""ills/user-skill"
@@ -81,6 +122,7 @@ echo ""
 echo "--- Installed Layout ---"
 for dir in \
   "$KIRO_DEST/agents" \
+  "$BASE_DEST/.agents/flow-agents" \
   "$CLAUDE_DEST/.claude/agents" \
   "$CLAUDE_DEST/.claude/skills" \
   "$CLAUDE_DEST/.agents/flow-agents" \
@@ -105,7 +147,37 @@ fi
 
 echo ""
 echo "--- Installed Artifact Checks ---"
-for dir in "$KIRO_DEST" "$CLAUDE_DEST" "$CODEX_DEST"; do
+if rg -F -q "console_telemetry_url=$LOCAL_KONTOUR_CONSOLE_URL" "$CODEX_CONSOLE_DEST/scripts/telemetry/telemetry.conf" \
+  && rg -q '^console_telemetry_token=test-token$' "$CODEX_CONSOLE_DEST/scripts/telemetry/telemetry.conf" \
+  && rg -q '^console_tenant_id=tenant-a$' "$CODEX_CONSOLE_DEST/scripts/telemetry/telemetry.conf"; then
+  _pass "Codex install persists Console telemetry config"
+else
+  _fail "Codex install did not persist Console telemetry config"
+fi
+
+if rg -q '^console_telemetry_url=' "$BASE_DEST/scripts/telemetry/telemetry.conf"; then
+  _fail "Base install persisted Console telemetry config without an explicit sink"
+else
+  _pass "Base install defaults telemetry to local files only"
+fi
+
+if rg -F -q "console_telemetry_url=$LOCAL_KONTOUR_CONSOLE_URL" "$CODEX_INIT_DEST/scripts/telemetry/telemetry.conf" \
+  && rg -q '^console_tenant_id=tenant-a$' "$CODEX_INIT_DEST/scripts/telemetry/telemetry.conf" \
+  && [[ -f "$CODEX_INIT_DEST/.agents/flow-agents/runtime/codex/activation.json" ]]; then
+  _pass "flow-agents init persists Console config and activates Codex kits"
+else
+  _fail "flow-agents init did not persist Console config or activate Codex kits"
+fi
+
+if [[ -f "$BASE_INIT_DEST/AGENTS.md" ]] \
+  && [[ -d "$BASE_INIT_DEST/.agents/flow-agents" ]] \
+  && rg -F -q "console_telemetry_url=$LOCAL_KONTOUR_CONSOLE_URL" "$BASE_INIT_DEST/scripts/telemetry/telemetry.conf"; then
+  _pass "flow-agents init default installs base AGENTS.md workspace contract"
+else
+  _fail "flow-agents init default did not install base AGENTS.md workspace contract"
+fi
+
+for dir in "$KIRO_DEST" "$BASE_DEST" "$CLAUDE_DEST" "$CODEX_DEST"; do
   if [[ -f "$dir/kits/catalog.json" && -f "$dir/kits/builder/kit.json" ]]; then
     _pass "$dir includes Kit Catalog and Builder Kit manifest"
   else
@@ -118,7 +190,7 @@ for dir in "$KIRO_DEST" "$CLAUDE_DEST" "$CODEX_DEST"; do
   fi
 done
 
-for dir in "$KIRO_DEST" "$CLAUDE_DEST" "$CODEX_DEST"; do
+for dir in "$KIRO_DEST" "$BASE_DEST" "$CLAUDE_DEST" "$CODEX_DEST"; do
   if [[ -f "$dir/scripts/flow-kit.js" ]] \
     && node "$dir/scripts/flow-kit.js" list --dest "$dir" >/tmp/flow-kit-list.out 2>&1 \
     && node "$dir/scripts/flow-kit.js" status --dest "$dir" >/tmp/flow-kit-status.out 2>&1 \
@@ -156,7 +228,7 @@ else
   sed -n '1,180p' /tmp/codex-runtime-activation.json 2>/dev/null || true
 fi
 
-if node - "$KIRO_DEST" "$CLAUDE_DEST" "$CODEX_DEST" <<'NODE'
+if node - "$KIRO_DEST" "$BASE_DEST" "$CLAUDE_DEST" "$CODEX_DEST" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 for (const root of process.argv.slice(2)) {
@@ -186,7 +258,7 @@ else
   _fail "installed Kiro agent JSON parse failed"
 fi
 
-if rg -n '/Users/[^/]+/\.flow-agents|~/\.flow-agents' "$KIRO_DEST" "$CLAUDE_DEST" "$CODEX_DEST" --glob '!**/evals/**' >/tmp/installed-bundle-leaks.txt 2>/dev/null; then
+if rg -n '/Users/[^/]+/\.flow-agents|~/\.flow-agents' "$KIRO_DEST" "$BASE_DEST" "$CLAUDE_DEST" "$CODEX_DEST" --glob '!**/evals/**' >/tmp/installed-bundle-leaks.txt 2>/dev/null; then
   _fail "installed bundles contain machine-local absolute paths (see /tmp/installed-bundle-leaks.txt)"
 else
   _pass "installed bundles are free of machine-local absolute paths"
