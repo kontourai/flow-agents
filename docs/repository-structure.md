@@ -76,7 +76,7 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
 | Regenerate context map | `npm run context-map --` |
 | Check context map drift | `npm run context-map:check --` |
 | Rebuild runtime bundles | `npm run build:bundles --` |
-| Validate packaging | `npm run validate:package --` |
+| Validate packaging | `npm run validate:package -- <package-prefix>` |
 | Run static evals | `bash evals/run.sh static` |
 | Run integration evals | `bash evals/run.sh integration` |
 | Validate repo Git hooks | `npm run validate:repo-hooks --` |
