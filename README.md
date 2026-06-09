@@ -61,6 +61,14 @@ bash evals/run.sh static
 
 `npm run setup:repo-hooks` enables the tracked `.githooks/pre-push` lane for this clone by setting `git config --local core.hooksPath .githooks`. This is a repo Git hook for local developer checks, not a Flow Agents runtime hook. Runtime hooks remain under `scripts/hooks/`; see `docs/developer-hook-setup.md` for the boundary and verification details.
 
+For release-readiness or repo-shape changes, run the split CI baseline locally:
+
+```bash
+bash evals/ci/run-baseline.sh --lane source-and-static
+bash evals/ci/run-baseline.sh --lane workflow-contracts
+bash evals/ci/run-baseline.sh --lane runtime-and-kit
+```
+
 ## Repository Layout
 
 See [Repository Structure](docs/repository-structure.md) for the canonical developer-facing map, source/generated/runtime boundaries, regeneration commands, and cleanup policy.

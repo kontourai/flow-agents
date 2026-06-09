@@ -9,6 +9,7 @@ These files are stable launchers for TypeScript code compiled under `build/src/`
 | Wrapper | Compiled implementation |
 | --- | --- |
 | `build-universal-bundles.js` | `build/src/tools/build-universal-bundles.js` |
+| `build-docs-preview.js` | `build/src/cli/docs-preview.js` |
 | `filter-installed-packs.js` | `build/src/tools/filter-installed-packs.js` |
 | `generate-context-map.js` | `build/src/tools/generate-context-map.js` |
 | `flow-kit.js` | `build/src/cli.js flow-kit` through package command wiring |
@@ -39,7 +40,7 @@ Important groups:
 
 - `install-codex-home.sh`: installs the isolated generated Codex home.
 - `setup-repo-hooks.sh`: configures this clone's Git hook path.
-- `check-content-boundary.cjs`, `detect-tools.sh`, `discover-agents.sh`, `git-status.sh`, `transcript-to-oar.sh`: repo-local helper commands.
+- `check-content-boundary.cjs`, `detect-tools.sh`, `discover-agents.sh`, `git-status.sh`: repo-local helper commands.
 - `context-budget/` and `statusline/`: specialized support tooling copied into bundles where needed.
 
 ## Bundle Policy
