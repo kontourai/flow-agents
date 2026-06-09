@@ -24,14 +24,25 @@ function appendJsonl(file: string, payload: AnyObj): void {
 function die(message: string): never { throw new Error(message); }
 function slugify(value: string, fallback: string): string { return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || fallback; }
 
+function safeRepoIdentifier(value: string): string {
+  const trimmed = value.trim().replace(/\.git$/, "");
+  if (!trimmed || trimmed.length > 120) return "";
+  if (path.isAbsolute(trimmed) || trimmed.includes("\\") || /[\x00-\x1F\x7F]/.test(trimmed)) return "";
+  const parts = trimmed.split("/");
+  if (parts.length > 2 || parts.some((part) => !part || part === "." || part === "..")) return "";
+  if (!parts.every((part) => /^[A-Za-z0-9_.-]+$/.test(part))) return "";
+  return parts.join("/");
+}
+
 function parseRepoRemote(value: string): string {
   const trimmed = value.trim().replace(/\.git$/, "");
   const ssh = /^git@[^:]+:(?<owner>[^/]+)\/(?<repo>[^/]+)$/.exec(trimmed);
-  if (ssh?.groups) return `${ssh.groups.owner}/${ssh.groups.repo}`;
+  if (ssh?.groups) return safeRepoIdentifier(`${ssh.groups.owner}/${ssh.groups.repo}`);
   try {
     const url = new URL(trimmed);
+    if (!["https:", "http:", "ssh:", "git:"].includes(url.protocol)) return "";
     const parts = url.pathname.split("/").filter(Boolean);
-    if (parts.length >= 2) return `${parts.at(-2)}/${parts.at(-1)}`;
+    if (parts.length >= 2) return safeRepoIdentifier(`${parts.at(-2)}/${parts.at(-1)}`);
   } catch {
     // Non-URL remotes fall back to repository directory name below.
   }
@@ -39,8 +50,8 @@ function parseRepoRemote(value: string): string {
 }
 
 function repoIdentifier(): string {
-  const explicit = process.env.FLOW_AGENTS_REPO?.trim();
-  if (explicit) return explicit.replace(/\.git$/, "");
+  const explicit = safeRepoIdentifier(process.env.FLOW_AGENTS_REPO ?? "");
+  if (explicit) return explicit;
   try {
     const remote = execFileSync("git", ["config", "--get", "remote.origin.url"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
     const parsed = parseRepoRemote(remote);
@@ -50,11 +61,11 @@ function repoIdentifier(): string {
   }
   try {
     const top = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-    if (top) return path.basename(top);
+    if (top) return safeRepoIdentifier(path.basename(top)) || "workspace";
   } catch {
     // Fall through to cwd basename for non-Git workspaces.
   }
-  return path.basename(process.cwd()) || "workspace";
+  return safeRepoIdentifier(path.basename(process.cwd())) || "workspace";
 }
 
 function sidecarBase(slug: string): AnyObj {
