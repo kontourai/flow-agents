@@ -46,12 +46,12 @@ telemetry_session_id() {
 schema_event_type() {
   local event_type="$1"
   case "$event_type" in
-    agentSpawn) echo "session.start" ;;
-    stop) echo "session.end" ;;
-    userPromptSubmit) echo "turn.user" ;;
-    preToolUse) echo "tool.invoke" ;;
+    agentSpawn|SessionStart) echo "session.start" ;;
+    stop|Stop|SessionEnd) echo "session.end" ;;
+    userPromptSubmit|UserPromptSubmit) echo "turn.user" ;;
+    preToolUse|PreToolUse) echo "tool.invoke" ;;
     permissionRequest|PermissionRequest) echo "tool.permission_request" ;;
-    postToolUse) echo "tool.result" ;;
+    postToolUse|PostToolUse|PostToolUseFailure) echo "tool.result" ;;
     *) echo "unknown" ;;
   esac
 }
@@ -326,13 +326,13 @@ add_stop_data_and_emit_usage() {
 add_event_specific_data() {
   local event="$1" event_type="$2" agent_name="$3" stdin_json="$4"
   case "$event_type" in
-    userPromptSubmit)
+    userPromptSubmit|UserPromptSubmit)
       add_user_prompt_data "$event" "$stdin_json"
       ;;
-    preToolUse|permissionRequest|PermissionRequest|postToolUse)
+    preToolUse|PreToolUse|permissionRequest|PermissionRequest|postToolUse|PostToolUse|PostToolUseFailure)
       add_tool_data_and_emit_delegation "$event" "$event_type" "$stdin_json"
       ;;
-    stop)
+    stop|Stop|SessionEnd)
       add_stop_data_and_emit_usage "$event" "$agent_name"
       ;;
     *)
