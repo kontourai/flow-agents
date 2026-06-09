@@ -376,6 +376,40 @@ function validateFixtureOwnership(reporter: Reporter): void {
     reporter.check(missingOwners.length === 0, `${dir}: direct fixture references missing from owner inventory: ${missingOwners.join(", ")}`);
   }
 }
+function validatePackageCommandSurface(reporter: Reporter): void {
+  const pkg = tryLoadJson(path.join(root, "package.json"), reporter);
+  if (!pkg || typeof pkg !== "object") return;
+  const cli = readText(path.join(root, "src/cli.ts"));
+  reporter.check(!cli.includes("pendingCommands"), "src/cli.ts: pending command migration scaffolding must not return; add real commands or remove stale registrations");
+  const availableBlock = /const availableCommands = new Map[\s\S]*?\n\]\);/.exec(cli)?.[0] ?? "";
+  const aliasesBlock = /const aliases = new Map[\s\S]*?\n\]\);/.exec(cli)?.[0] ?? "";
+  reporter.check(Boolean(availableBlock), "src/cli.ts: availableCommands map not found");
+  reporter.check(Boolean(aliasesBlock), "src/cli.ts: aliases map not found");
+  const availableCommands = new Set([...availableBlock.matchAll(/\["([^"]+)",/g)].map((match) => match[1]));
+  const aliases = new Map([...aliasesBlock.matchAll(/\["(flow-agents-[^"]+)",\s*"([^"]+)"\]/g)].map((match) => [match[1], match[2]]));
+
+  const scripts = pkg.scripts && typeof pkg.scripts === "object" ? pkg.scripts as Record<string, unknown> : {};
+  for (const [name, value] of Object.entries(scripts)) {
+    if (typeof value !== "string") continue;
+    const command = /node build\/src\/cli\.js ([a-z0-9:-]+)/.exec(value)?.[1];
+    if (command) reporter.check(availableCommands.has(command), `package.json scripts.${name}: command '${command}' is not registered in src/cli.ts`);
+  }
+
+  const bins = pkg.bin && typeof pkg.bin === "object" ? pkg.bin as Record<string, unknown> : {};
+  for (const [name, value] of Object.entries(bins)) {
+    if (typeof value !== "string") continue;
+    if (value === "build/src/cli.js" && name !== "flow-agents") {
+      reporter.check(aliases.has(name), `package.json bin '${name}' points at build/src/cli.js but has no src/cli.ts alias`);
+      const target = aliases.get(name);
+      if (target) reporter.check(availableCommands.has(target), `package.json bin '${name}' aliases missing command '${target}'`);
+      continue;
+    }
+    if (value.startsWith("build/src/cli/")) {
+      const source = value.replace(/^build\//, "").replace(/\.js$/, ".ts");
+      reporter.check(fs.existsSync(path.join(root, source)), `package.json bin '${name}' points at missing TypeScript source ${source}`);
+    }
+  }
+}
 function isExcludedPythonPath(file: string): boolean {
   return path.relative(root, file).split(path.sep).some((part) => pythonInventoryExcludes.has(part));
 }
@@ -433,6 +467,7 @@ export function main(argv = process.argv.slice(2)): number {
   validatePublicScriptWrappers(reporter);
   validateHookInventory(reporter);
   validateFixtureOwnership(reporter);
+  validatePackageCommandSurface(reporter);
   validateNoFirstPartyPythonFiles(reporter);
   validateNoFirstPartyPythonCommands(reporter);
   if (reporter.errors.length) { console.log("Source tree validation failed:"); for (const error of reporter.errors) console.log(` - ${error}`); return 1; }

@@ -19,15 +19,6 @@ import { main as validatePackage } from "./tools/validate-package.js";
 import { main as validateHookInfluence } from "./cli/validate-hook-influence.js";
 import { main as runtimeAdapter } from "./cli/runtime-adapter.js";
 
-type PendingCommand = {
-  name: string;
-  description: string;
-  plannedSource: string;
-};
-
-const pendingCommands: readonly PendingCommand[] = [
-];
-
 const availableCommands = new Map<string, (argv: string[]) => number | Promise<number>>([
   ["build-bundles", () => buildBundles()],
   ["build-docs-preview", () => buildDocsPreview()],
@@ -73,9 +64,6 @@ function printHelp(): void {
   console.log("");
   console.log("Available commands:");
   for (const name of availableCommands.keys()) console.log(`  ${name}`);
-  console.log("");
-  console.log("Registered pending ports:");
-  for (const command of pendingCommands) console.log(`  ${command.name.padEnd(28)} ${command.description}`);
 }
 
 const invokedAs = basename(process.argv[1] ?? "flow-agents");
@@ -90,20 +78,11 @@ async function run(): Promise<number> {
 
   if (commandName === "commands" || commandName === "list") {
     for (const name of availableCommands.keys()) console.log(name);
-    for (const command of pendingCommands) console.log(command.name);
     return 0;
   }
 
   const availableCommand = availableCommands.get(commandName);
   if (availableCommand) return await availableCommand(forwardedArgs);
-
-  const pendingCommand = pendingCommands.find((candidate) => candidate.name === commandName);
-  if (pendingCommand) {
-    console.error(
-      `flow-agents ${pendingCommand.name} is registered in the TypeScript command surface but has not been ported yet. Planned source: ${pendingCommand.plannedSource}.`
-    );
-    return 78;
-  }
 
   console.error(`Unknown flow-agents command: ${commandName}`);
   console.error("Run `flow-agents --help` for registered commands.");

@@ -26,6 +26,19 @@ If implementation moves, update these wrappers rather than breaking callers.
 thin launchers, and implementation logic belongs under `src/cli/` or
 `src/tools/`.
 
+## Package Command Surface
+
+`package.json` exposes command names through npm scripts and package bins.
+Commands that run `node build/src/cli.js <command>` must be registered in
+`src/cli.ts`; bins that point at `build/src/cli.js` must have a matching
+`flow-agents-*` alias in `src/cli.ts`. Direct bins may point at compiled
+single-command entry points such as `build/src/cli/workflow-sidecar.js` when
+callers need a stable executable name without the multiplexer.
+
+`npm run validate:source --` checks this command surface and rejects stale
+migration scaffolding such as pending command registries. Add a real command,
+document a compatibility wrapper, or delete the stale surface.
+
 ## Runtime Hooks
 
 `scripts/hooks/` contains runtime hook adapters and policies for Claude Code, Codex, Kiro-style hooks, and repo guardrails. Canonical hook behavior lives here and in TypeScript bundle generation, not in local `.codex/` or `.claude/` installs.
