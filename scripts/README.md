@@ -83,11 +83,12 @@ Console URL unset keeps telemetry local-only.
 Installers persist telemetry sink choices into the installed
 `scripts/telemetry/telemetry.conf`. `local-files` is the default and requires no
 Console. Add `--telemetry-sink local-kontour-console` for a separately running
-local Console, `--telemetry-sink kontour-cloud` for Kontour's hosted Console, or
-`--telemetry-sink hosted-kontour-console --console-url ...` for a self-hosted
-Console. `--console-token` and `--console-tenant` can be used with any Console
-sink. Prefer `flow-agents init` for a prompted setup; use `--yes` with the same
-flags for CI/headless installs.
+local Console, `--telemetry-sink kontour-hosted-console` for Kontour's hosted
+Console, or `--telemetry-sink user-hosted-console --console-url ...` for a
+self-hosted Console. Legacy `kontour-cloud` and `hosted-kontour-console` names
+remain accepted. `--console-token-file` and `--console-tenant` can be used with
+any Console sink. Prefer `flow-agents init` for a prompted setup; use `--yes`
+with the same flags for CI/headless installs.
 
 ## Install And Repo Utilities
 

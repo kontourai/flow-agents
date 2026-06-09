@@ -10,7 +10,7 @@ import { main as buildBundles } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
 
 type Runtime = "base" | "codex" | "claude-code" | "kiro";
-type TelemetrySink = "local-files" | "local-kontour-console" | "kontour-cloud" | "hosted-kontour-console";
+type TelemetrySink = "local-files" | "local-kontour-console" | "kontour-hosted-console" | "user-hosted-console" | "kontour-cloud" | "hosted-kontour-console";
 
 type InitOptions = {
   runtime: Runtime;
@@ -38,7 +38,7 @@ function usage(): void {
 Options:
   --runtime base|codex|claude-code|kiro
   --dest PATH
-  --telemetry-sink local-files|local-kontour-console|kontour-cloud|hosted-kontour-console
+  --telemetry-sink local-files|local-kontour-console|kontour-hosted-console|user-hosted-console
   --console-url URL
   --console-endpoint URL
   --console-token-file PATH
@@ -57,7 +57,7 @@ function normalizeRuntime(value: string | undefined): Runtime | undefined {
 }
 
 function normalizeTelemetrySink(value: string): TelemetrySink {
-  if (value === "local-files" || value === "local-kontour-console" || value === "kontour-cloud" || value === "hosted-kontour-console") return value;
+  if (value === "local-files" || value === "local-kontour-console" || value === "kontour-hosted-console" || value === "user-hosted-console" || value === "kontour-cloud" || value === "hosted-kontour-console") return value;
   throw new Error(`unknown telemetry sink '${value}'`);
 }
 
@@ -134,8 +134,8 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
       ? sinkDefault.join(",")
       : await rl.question(`Telemetry sinks [${sinkDefault.join(",")}]: `);
     const telemetrySinks = telemetrySinksFromValues([sinkAnswer || sinkDefault.join(",")]);
-    const needsHostedUrl = telemetrySinks.includes("hosted-kontour-console");
-    const consoleUrl = flagString(args.flags, "console-url") ?? (needsHostedUrl ? await rl.question("Hosted Kontour Console URL: ") : undefined);
+    const needsUserHostedUrl = telemetrySinks.includes("user-hosted-console") || telemetrySinks.includes("hosted-kontour-console");
+    const consoleUrl = flagString(args.flags, "console-url") ?? (needsUserHostedUrl ? await rl.question("User-hosted Console URL: ") : undefined);
     const consoleEndpoint = flagString(args.flags, "console-endpoint") ?? flagString(args.flags, "console-endpoint-url");
     const consoleTokenFile = flagString(args.flags, "console-token-file");
     const consoleTokenValue = consoleTokenFile ? undefined : (needsConsoleCredentials(telemetrySinks) ? await questionHidden("Console telemetry token (blank to skip): ") : undefined);

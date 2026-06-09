@@ -152,6 +152,10 @@
       "type": "string",
       "minLength": 1
     },
+    "repo": {
+      "type": "string",
+      "minLength": 1
+    },
     "verdict": {
       "type": "string",
       "enum": ["pass", "partial", "fail", "not_verified"]

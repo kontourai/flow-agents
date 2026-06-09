@@ -1,0 +1,152 @@
+{
+  "schema_version": "1.0",
+  "product": {
+    "id": "flow-agents",
+    "name": "Flow Agents"
+  },
+  "recordSources": [
+    {
+      "id": "flow-agents-workflow-state",
+      "label": "Workflow state",
+      "root": "product:flow-agents:.flow-agents",
+      "files": ["state.json"],
+      "attributes": {
+        "taskSlug": "task_slug",
+        "repo": "repo",
+        "project": "project",
+        "runtime": "runtime",
+        "flow": "flow_id",
+        "skill": "skill_id",
+        "agent": "agent_id",
+        "model": "model",
+        "status": "status",
+        "phase": "phase",
+        "outcome": "outcome",
+        "title": "summary",
+        "observedAt": "updated_at"
+      }
+    },
+    {
+      "id": "flow-agents-acceptance",
+      "label": "Acceptance criteria",
+      "root": "product:flow-agents:.flow-agents",
+      "files": ["acceptance.json"],
+      "attributes": {
+        "taskSlug": "task_slug",
+        "repo": "repo",
+        "project": "project",
+        "flow": "flow_id",
+        "skill": "skill_id",
+        "status": "status",
+        "outcome": "goal_fit.status",
+        "title": "summary",
+        "observedAt": "updated_at"
+      }
+    },
+    {
+      "id": "flow-agents-evidence",
+      "label": "Verification evidence",
+      "root": "product:flow-agents:.flow-agents",
+      "files": ["evidence.json"],
+      "attributes": {
+        "taskSlug": "task_slug",
+        "repo": "repo",
+        "project": "project",
+        "runtime": "runtime",
+        "flow": "flow_id",
+        "skill": "skill_id",
+        "agent": "verifier.agent_id",
+        "model": "verifier.model",
+        "status": "verdict",
+        "outcome": "verdict",
+        "title": "summary",
+        "observedAt": "updated_at"
+      }
+    },
+    {
+      "id": "flow-agents-handoffs",
+      "label": "Handoffs",
+      "root": "product:flow-agents:.flow-agents",
+      "files": ["handoff.json"],
+      "attributes": {
+        "taskSlug": "task_slug",
+        "repo": "repo",
+        "project": "project",
+        "runtime": "runtime",
+        "flow": "flow_id",
+        "skill": "skill_id",
+        "agent": "agent_id",
+        "model": "model",
+        "status": "next_action.status",
+        "outcome": "status",
+        "title": "summary",
+        "observedAt": "updated_at"
+      }
+    },
+    {
+      "id": "flow-agents-learning",
+      "label": "Learning records",
+      "root": "product:flow-agents:.flow-agents",
+      "files": ["learning.json"],
+      "attributes": {
+        "taskSlug": "task_slug",
+        "repo": "repo",
+        "project": "project",
+        "flow": "flow_id",
+        "skill": "skill_id",
+        "status": "status",
+        "title": "summary",
+        "observedAt": "updated_at"
+      }
+    }
+  ],
+  "facets": [
+    { "id": "skills", "label": "Skills", "attribute": "skill", "limit": 16 },
+    { "id": "tools", "label": "Tools", "attribute": "toolName", "limit": 16 },
+    { "id": "flows", "label": "Flows", "attribute": "flow", "limit": 16 },
+    { "id": "repositories", "label": "Repositories", "attribute": "repo", "limit": 16 },
+    { "id": "projects", "label": "Projects", "attribute": "project", "limit": 16 },
+    { "id": "runtimes", "label": "Runtimes", "attribute": "runtime", "limit": 12 },
+    { "id": "agents", "label": "Agents", "attribute": "agent", "limit": 16 },
+    { "id": "models", "label": "Models", "attribute": "model", "limit": 16 },
+    { "id": "statuses", "label": "Statuses", "attribute": "status", "limit": 12 },
+    { "id": "outcomes", "label": "Outcomes", "attribute": "outcome", "limit": 12 }
+  ],
+  "flows": [
+    {
+      "id": "builder.shape",
+      "label": "Builder shape",
+      "match": { "attribute": "flow", "includes": "builder.shape" },
+      "titleAttribute": "title",
+      "limit": 10
+    },
+    {
+      "id": "builder.build",
+      "label": "Builder build",
+      "match": { "attribute": "flow", "includes": "builder.build" },
+      "titleAttribute": "title",
+      "limit": 10
+    },
+    {
+      "id": "delivery",
+      "label": "Delivery workflows",
+      "match": { "attribute": "skill", "includes": "deliver" },
+      "titleAttribute": "title",
+      "limit": 10
+    },
+    {
+      "id": "verification",
+      "label": "Verification workflows",
+      "match": { "attribute": "skill", "includes": "verify-work" },
+      "titleAttribute": "title",
+      "limit": 10
+    },
+    {
+      "id": "review",
+      "label": "Review workflows",
+      "match": { "attribute": "skill", "includes": "review-work" },
+      "titleAttribute": "title",
+      "limit": 10
+    }
+  ]
+}

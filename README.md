@@ -35,7 +35,7 @@ The low-level bundle installer remains available when you already have a generat
 bash install.sh /path/to/workspace --telemetry-sink local-kontour-console
 ```
 
-The installer copies the bundled agents, skills, context, scripts, evals, and Flow Kit assets into the target workspace. Telemetry writes to local files by default. Optional sinks can add a Console mirror: `local-kontour-console` for a separately running local Console, `kontour-cloud` for Kontour's hosted Console, or `hosted-kontour-console` with `--console-url` for a self-hosted Console.
+The installer copies the bundled agents, skills, context, scripts, evals, Flow Kit assets, and Flow Agents-owned `console.telemetry.json` descriptor into the target workspace. Telemetry writes to local files by default. Optional sinks can add a Console mirror: `local-kontour-console` for a separately running local Console, `kontour-hosted-console` for Kontour's hosted Console, or `user-hosted-console` with `--console-url` for a self-hosted Console. Legacy `kontour-cloud` and `hosted-kontour-console` sink names remain accepted.
 
 ## What You Get
 

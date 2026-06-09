@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # shellcheck source=/dev/null
 source "$ROOT_DIR/scripts/telemetry/console-presets.sh"
 LOCAL_KONTOUR_CONSOLE_URL="$(flow_agents_local_kontour_console_url)"
+KONTOUR_HOSTED_CONSOLE_URL="$(flow_agents_kontour_hosted_console_url)"
 TMPDIR_EVAL="$(mktemp -d /tmp/universal-bundle-install.XXXXXX)"
 pass=0
 fail=0
@@ -33,6 +34,9 @@ CLAUDE_DEST="$TMPDIR_EVAL/claude-workspace"
 CODEX_DEST="$TMPDIR_EVAL/codex-workspace"
 CODEX_CORE_DEST="$TMPDIR_EVAL/codex-core-workspace"
 CODEX_CONSOLE_DEST="$TMPDIR_EVAL/codex-console-workspace"
+CODEX_HOSTED_CONSOLE_DEST="$TMPDIR_EVAL/codex-hosted-console-workspace"
+CODEX_USER_HOSTED_CONSOLE_DEST="$TMPDIR_EVAL/codex-user-hosted-console-workspace"
+CODEX_LEGACY_CONSOLE_DEST="$TMPDIR_EVAL/codex-legacy-console-workspace"
 CODEX_BAD_CONSOLE_DEST="$TMPDIR_EVAL/codex-bad-console-workspace"
 BASE_INIT_DEST="$TMPDIR_EVAL/base-init-workspace"
 CODEX_INIT_DEST="$TMPDIR_EVAL/codex-init-workspace"
@@ -72,7 +76,25 @@ else
   _fail "Codex install with Console telemetry config failed"
 fi
 
-if (cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_BAD_CONSOLE_DEST" --telemetry-sink hosted-kontour-console --console-url http://example.com >/dev/null 2>&1); then
+if (cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_HOSTED_CONSOLE_DEST" --telemetry-sink kontour-hosted-console --console-token-file "$CONSOLE_TOKEN_FILE" --console-tenant tenant-hosted >/dev/null); then
+  _pass "Codex install with Kontour hosted Console telemetry config succeeded"
+else
+  _fail "Codex install with Kontour hosted Console telemetry config failed"
+fi
+
+if (cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_USER_HOSTED_CONSOLE_DEST" --telemetry-sink user-hosted-console --console-url https://console.example.test --console-token-file "$CONSOLE_TOKEN_FILE" >/dev/null); then
+  _pass "Codex install with user-hosted Console telemetry config succeeded"
+else
+  _fail "Codex install with user-hosted Console telemetry config failed"
+fi
+
+if (cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_LEGACY_CONSOLE_DEST" --telemetry-sink hosted-kontour-console --console-url https://legacy-console.example.test >/dev/null); then
+  _pass "Codex install preserves legacy hosted Console sink alias"
+else
+  _fail "Codex install rejected legacy hosted Console sink alias"
+fi
+
+if (cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_BAD_CONSOLE_DEST" --telemetry-sink user-hosted-console --console-url http://example.com >/dev/null 2>&1); then
   _fail "Codex install accepted unsafe hosted Console http URL"
 else
   _pass "Codex install rejects unsafe hosted Console http URL"
@@ -155,6 +177,26 @@ else
   _fail "Codex install did not persist Console telemetry config"
 fi
 
+if rg -F -q "console_telemetry_url=$KONTOUR_HOSTED_CONSOLE_URL" "$CODEX_HOSTED_CONSOLE_DEST/scripts/telemetry/telemetry.conf" \
+  && rg -q '^console_tenant_id=tenant-hosted$' "$CODEX_HOSTED_CONSOLE_DEST/scripts/telemetry/telemetry.conf"; then
+  _pass "Codex install persists Kontour hosted Console telemetry config"
+else
+  _fail "Codex install did not persist Kontour hosted Console telemetry config"
+fi
+
+if rg -q '^console_telemetry_url=https://console.example.test$' "$CODEX_USER_HOSTED_CONSOLE_DEST/scripts/telemetry/telemetry.conf" \
+  && rg -q '^console_telemetry_token=test-token$' "$CODEX_USER_HOSTED_CONSOLE_DEST/scripts/telemetry/telemetry.conf"; then
+  _pass "Codex install persists user-hosted Console telemetry config"
+else
+  _fail "Codex install did not persist user-hosted Console telemetry config"
+fi
+
+if rg -q '^console_telemetry_url=https://legacy-console.example.test$' "$CODEX_LEGACY_CONSOLE_DEST/scripts/telemetry/telemetry.conf"; then
+  _pass "Codex install persists legacy hosted Console sink alias config"
+else
+  _fail "Codex install did not persist legacy hosted Console sink alias config"
+fi
+
 if rg -q '^console_telemetry_url=' "$BASE_DEST/scripts/telemetry/telemetry.conf"; then
   _fail "Base install persisted Console telemetry config without an explicit sink"
 else
@@ -178,6 +220,47 @@ else
 fi
 
 for dir in "$KIRO_DEST" "$BASE_DEST" "$CLAUDE_DEST" "$CODEX_DEST"; do
+  if [[ -f "$dir/console.telemetry.json" ]] \
+    && node - "$dir/console.telemetry.json" <<'NODE'
+const fs = require("node:fs");
+const descriptor = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const facets = descriptor.facets || [];
+const recordSources = descriptor.recordSources || [];
+const facetIds = new Set(facets.map((facet) => facet.id));
+const sourceIds = new Set((descriptor.recordSources || []).map((source) => source.id));
+for (const id of ["skills", "tools", "flows", "repositories", "projects", "runtimes", "agents", "models", "outcomes"]) {
+  if (!facetIds.has(id)) throw new Error(`missing descriptor facet: ${id}`);
+}
+for (const id of ["flow-agents-workflow-state", "flow-agents-evidence", "flow-agents-learning"]) {
+  if (!sourceIds.has(id)) throw new Error(`missing descriptor record source: ${id}`);
+}
+const summaryFields = new Set([
+  "agentName",
+  "cwd",
+  "eventType",
+  "hookEventName",
+  "model",
+  "outcome",
+  "project",
+  "runtime",
+  "sessionId",
+  "sourceKind",
+  "status",
+  "toolName"
+]);
+const mappedAttributes = new Set(recordSources.flatMap((source) => Object.keys(source.attributes || {})));
+for (const facet of facets) {
+  if (!summaryFields.has(facet.attribute) && !mappedAttributes.has(facet.attribute)) {
+    throw new Error(`facet ${facet.id} uses Console-unreadable attribute: ${facet.attribute}`);
+  }
+}
+console.log("ok");
+NODE
+  then
+    _pass "$dir includes Flow Agents Console telemetry descriptor"
+  else
+    _fail "$dir is missing or has invalid Flow Agents Console telemetry descriptor"
+  fi
   if [[ -f "$dir/kits/catalog.json" && -f "$dir/kits/builder/kit.json" ]]; then
     _pass "$dir includes Kit Catalog and Builder Kit manifest"
   else

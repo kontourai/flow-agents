@@ -6,8 +6,9 @@ usage() {
 usage: bash install.sh /path/to/workspace [options]
 
 Options:
-  --telemetry-sink NAME   local-files, local-kontour-console, kontour-cloud,
-                          or hosted-kontour-console. May be repeated.
+  --telemetry-sink NAME   local-files, local-kontour-console,
+                          kontour-hosted-console, user-hosted-console,
+                          or legacy aliases. May be repeated.
   --console-url URL       Persist Console telemetry base URL.
   --console-endpoint URL  Persist full Console telemetry records endpoint URL.
   --console-token-file PATH

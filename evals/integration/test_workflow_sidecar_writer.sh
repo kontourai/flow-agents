@@ -64,6 +64,20 @@ else
   _fail "sidecar writer did not create expected session files"
 fi
 
+if node - "$ENSURED_DIR/state.json" "$ENSURED_DIR/acceptance.json" "$ENSURED_DIR/handoff.json" <<'NODE'
+const fs = require("node:fs");
+for (const file of process.argv.slice(2)) {
+  const repo = JSON.parse(fs.readFileSync(file, "utf8")).repo;
+  if (repo !== "kontourai/flow-agents") throw new Error(`${file} repo was ${JSON.stringify(repo)}`);
+  if (repo.includes("/") && repo.startsWith("/")) throw new Error(`${file} repo is an absolute path`);
+}
+NODE
+then
+  _pass "sidecar writer records stable repository identity without local paths"
+else
+  _fail "sidecar writer did not record stable repository identity"
+fi
+
 if flow_agents_node "$WRITER" current --artifact-root "$SESSION_ROOT" --format slug >"$TMPDIR_EVAL/current-slug.out" 2>"$TMPDIR_EVAL/current-slug.err" \
   && [[ "$(cat "$TMPDIR_EVAL/current-slug.out")" == "ensured-session" ]] \
   && flow_agents_node "$WRITER" current --artifact-root "$SESSION_ROOT" --format path >"$TMPDIR_EVAL/current-path.out" 2>"$TMPDIR_EVAL/current-path.err" \
