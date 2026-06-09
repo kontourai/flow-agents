@@ -74,6 +74,10 @@ Use fix-bug. Reproduce the problem, diagnose root cause, implement the fix, and 
     <strong>Developer Architecture</strong>
     <span>Understand Flow Agents' coordination role, product boundaries, artifact flow, and cross-product vocabulary.</span>
   </a>
+  <a class="doc-card" href="repository-structure.html">
+    <strong>Repository Structure</strong>
+    <span>Find the canonical source, generated output, runtime state, package, docs, eval, and cleanup boundaries.</span>
+  </a>
   <a class="doc-card" href="skills-map.html">
     <strong>Workflow Map</strong>
     <span>See the core skills, gates, artifacts, and route-back behavior.</span>

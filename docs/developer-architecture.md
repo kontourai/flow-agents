@@ -17,6 +17,7 @@ Flow Agents is the agent-facing operating layer. It turns a user's intent into w
 Use these local references when you need more detail:
 
 - [Context glossary](../CONTEXT.md) defines Flow Agents vocabulary.
+- [Repository Structure](repository-structure.md) is the canonical map for source, generated output, runtime state, packaging, eval, and cleanup boundaries.
 - [ADR 0003](adr/0003-flow-agents-coordinates-kits-and-adapters.md) records the kit and adapter boundary.
 - [ADR 0005](adr/0005-kubernetes-inspired-resource-contracts.md) records the Kontour Resource Contract direction.
 - [Kontour Resource Contract](kontour-resource-contract.md) documents the shared durable record shape.
@@ -136,8 +137,9 @@ Kontour Resource Contracts provide the shared shape for durable records that cro
 Start here, then follow the local docs in this order:
 
 1. [Workflow Usage Guide](workflow-usage-guide.md) for the user-facing delivery path.
-2. [Skills Map](skills-map.md) for workflow phase composition.
-3. [Workflow Artifact Lifecycle](workflow-artifact-lifecycle.md) for what stays local, what gets promoted, and what must not be merged.
-4. [Flow Kit Repository Contract](flow-kit-repository-contract.md) for kit repository validation and activation behavior.
-5. [Veritas Integration Boundary](veritas-integration.md) for optional governance evidence.
-6. [Developer Reference](context-map.md) for generated repository structure, commands, agents, skills, scripts, and contracts.
+2. [Repository Structure](repository-structure.md) for where changes belong and what is generated or runtime-only.
+3. [Skills Map](skills-map.md) for workflow phase composition.
+4. [Workflow Artifact Lifecycle](workflow-artifact-lifecycle.md) for what stays local, what gets promoted, and what must not be merged.
+5. [Flow Kit Repository Contract](flow-kit-repository-contract.md) for kit repository validation and activation behavior.
+6. [Veritas Integration Boundary](veritas-integration.md) for optional governance evidence.
+7. [Developer Reference](context-map.md) for generated repository structure, commands, agents, skills, scripts, and contracts.

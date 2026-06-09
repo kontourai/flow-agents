@@ -63,14 +63,12 @@ bash evals/run.sh static
 
 ## Repository Layout
 
-- `agents/` - source agent definitions
-- `skills/` - reusable workflow skills
-- `context/` - shared contracts, settings, hooks, and supporting context
-- `kits/` - Flow Kit catalog and bundled kit assets
-- `scripts/` - install, validation, workflow artifact, and integration helpers
-- `evals/` - static, integration, and behavioral evals
-- `docs/` - developer and product documentation
-- `integrations/veritas/` - optional Veritas readiness configuration
+See [Repository Structure](docs/repository-structure.md) for the canonical developer-facing map, source/generated/runtime boundaries, regeneration commands, and cleanup policy.
+
+- `agents/`, `agent-cards/`, `skills/`, `context/`, `powers/`, and `prompts/` are canonical bundle source.
+- `src/`, `scripts-ts/`, and `scripts/` are canonical product, build, validation, installer, hook, telemetry, and compatibility source.
+- `kits/`, `schemas/`, `packaging/`, `evals/`, `docs/`, and `integrations/` hold Flow Kit assets, contracts, package metadata, evals, durable docs, and optional integrations.
+- `dist/`, `build/`, and `_site/` are generated output. Local `.agents/`, `.codex/`, `.claude/`, telemetry, promptfoo, Veritas, and cache directories are runtime state and are ignored by default.
 
 ## Documentation
 
