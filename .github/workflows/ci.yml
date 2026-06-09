@@ -107,6 +107,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check workflow-artifact-cleanup-audit-integration
 
+      - name: Fixture retirement audit integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check fixture-retirement-audit-integration
+
       - name: Publish-change helper integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check publish-change-helper-integration
@@ -159,6 +163,10 @@ jobs:
       - name: Goal Fit hook integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check goal-fit-hook-integration
+
+      - name: Hook category behavior integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check hook-category-behavior-integration
 
       - name: Workflow steering hook integration
         continue-on-error: true
