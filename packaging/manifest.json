@@ -22,14 +22,14 @@
     "install_default": "~/.flow-agents"
   },
   "claude_code": {
-    "task_dir": ".agents/flow-agents",
+    "task_dir": ".flow-agents",
     "permissions": {
       "defaultMode": "auto"
     },
     "skipDangerousModePermissionPrompt": true
   },
   "codex": {
-    "task_dir": ".agents/flow-agents",
+    "task_dir": ".flow-agents",
     "settings": {
       "approvals_reviewer": "auto_review"
     },

@@ -8,14 +8,14 @@
     "phase": "planning",
     "updated_at": "2026-05-28T16:00:00Z",
     "artifact_paths": [
-      ".agents/flow-agents/builder-kit-happy-path/builder-kit-probe.json",
-      ".agents/flow-agents/builder-kit-happy-path/handoff.json"
+      ".flow-agents/builder-kit-happy-path/builder-kit-probe.json",
+      ".flow-agents/builder-kit-happy-path/handoff.json"
     ],
     "next_action": {
       "status": "continue",
       "summary": "Pickup Probe passed; run plan-work with the selected item and Probe record.",
       "target_phase": "planning",
-      "target_artifact": ".agents/flow-agents/builder-kit-happy-path/builder-kit-probe.json"
+      "target_artifact": ".flow-agents/builder-kit-happy-path/builder-kit-probe.json"
     }
   },
   "probe_record": {
@@ -27,7 +27,7 @@
     "automation_mode": "guided",
     "recovery_mode": "builder-kit-build-flow",
     "probe_status": "passed",
-    "probe_artifact_ref": ".agents/flow-agents/builder-kit-happy-path/builder-kit-probe.json",
+    "probe_artifact_ref": ".flow-agents/builder-kit-happy-path/builder-kit-probe.json",
     "grouping_decision": {
       "status": "single-item",
       "justification": "one ready issue selected"
@@ -44,7 +44,7 @@
     "accepted_gaps": [],
     "resume_prompt": "Resume by running plan-work from the pull-work artifact and Builder Kit Probe record.",
     "artifact_refs": [
-      ".agents/flow-agents/builder-kit-happy-path/builder-kit-happy-path--pull-work.md"
+      ".flow-agents/builder-kit-happy-path/builder-kit-happy-path--pull-work.md"
     ],
     "planning_readiness": "ready",
     "expected_modified_files": [

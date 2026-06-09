@@ -48,7 +48,7 @@ If a fix is needed, report it as a finding. The orchestrator routes it back to e
 
 ## Input
 
-- Session file path in `.agents/flow-agents/<slug>/` when available
+- Session file path in `.flow-agents/<slug>/` when available
 - Plan artifact or implementation summary
 - Modified files from execution progress or `git diff --name-only`
 - Project standards, especially `context/code-review-standards.md` when present

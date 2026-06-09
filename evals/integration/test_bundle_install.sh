@@ -122,14 +122,14 @@ echo ""
 echo "--- Installed Layout ---"
 for dir in \
   "$KIRO_DEST/agents" \
-  "$BASE_DEST/.agents/flow-agents" \
+  "$BASE_DEST/.flow-agents" \
   "$CLAUDE_DEST/.claude/agents" \
   "$CLAUDE_DEST/.claude/skills" \
-  "$CLAUDE_DEST/.agents/flow-agents" \
+  "$CLAUDE_DEST/.flow-agents" \
   "$CODEX_DEST/.codex/agents" \
   "$CODEX_DEST/.codex/skills" \
-  "$CODEX_DEST/.agents/flow-agents" \
-  "$CODEX_CORE_DEST/.agents/flow-agents"; do
+  "$CODEX_DEST/.flow-agents" \
+  "$CODEX_CORE_DEST/.flow-agents"; do
   if [[ -d "$dir" ]]; then
     _pass "$dir exists"
   else
@@ -163,14 +163,14 @@ fi
 
 if rg -F -q "console_telemetry_url=$LOCAL_KONTOUR_CONSOLE_URL" "$CODEX_INIT_DEST/scripts/telemetry/telemetry.conf" \
   && rg -q '^console_tenant_id=tenant-a$' "$CODEX_INIT_DEST/scripts/telemetry/telemetry.conf" \
-  && [[ -f "$CODEX_INIT_DEST/.agents/flow-agents/runtime/codex/activation.json" ]]; then
+  && [[ -f "$CODEX_INIT_DEST/.flow-agents/runtime/codex/activation.json" ]]; then
   _pass "flow-agents init persists Console config and activates Codex kits"
 else
   _fail "flow-agents init did not persist Console config or activate Codex kits"
 fi
 
 if [[ -f "$BASE_INIT_DEST/AGENTS.md" ]] \
-  && [[ -d "$BASE_INIT_DEST/.agents/flow-agents" ]] \
+  && [[ -d "$BASE_INIT_DEST/.flow-agents" ]] \
   && rg -F -q "console_telemetry_url=$LOCAL_KONTOUR_CONSOLE_URL" "$BASE_INIT_DEST/scripts/telemetry/telemetry.conf"; then
   _pass "flow-agents init default installs base AGENTS.md workspace contract"
 else
@@ -218,7 +218,7 @@ for (const expected of ["builder.shape", "builder.build", "codex-local.activatio
 for (const item of data.generated_runtime_files || []) {
   if (!fs.existsSync(path.join(dest, item.path))) throw new Error(`generated runtime file missing: ${item.path}`);
 }
-if (!fs.existsSync(path.join(dest, ".agents/flow-agents/runtime/codex/activation.json"))) throw new Error("runtime activation manifest missing");
+if (!fs.existsSync(path.join(dest, ".flow-agents/runtime/codex/activation.json"))) throw new Error("runtime activation manifest missing");
 console.log("ok");
 NODE
 then
@@ -264,13 +264,13 @@ else
   _pass "installed bundles are free of machine-local absolute paths"
 fi
 
-if [[ -f "$CLAUDE_DEST/.agents/flow-agents/.gitkeep" ]]; then
+if [[ -f "$CLAUDE_DEST/.flow-agents/.gitkeep" ]]; then
   _pass "Claude Code task dir scaffold installed"
 else
   _fail "Claude Code task dir scaffold missing"
 fi
 
-if [[ -f "$CODEX_DEST/.agents/flow-agents/.gitkeep" ]]; then
+if [[ -f "$CODEX_DEST/.flow-agents/.gitkeep" ]]; then
   _pass "Codex task dir scaffold installed"
 else
   _fail "Codex task dir scaffold missing"
@@ -370,7 +370,7 @@ const critique = {
   }],
 };
 function writeFixture(root) {
-  const taskDir = path.join(root, ".agents/flow-agents/installed-hook-demo");
+  const taskDir = path.join(root, ".flow-agents/installed-hook-demo");
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, "state.json"), JSON.stringify(state), "utf8");
   fs.writeFileSync(path.join(taskDir, "critique.json"), JSON.stringify(critique), "utf8");
@@ -399,6 +399,7 @@ function workflowCommand(file, ...eventNames) {
 function runCommand(label, command, cwd, runtimeJson) {
   const payload = JSON.stringify({ hook_event_name: "UserPromptSubmit", cwd, prompt: "continue" });
   const env = { ...process.env, SA_HOOK_PROFILE: "standard", CLAUDE_PROJECT_DIR: cwd };
+  if (label === "Codex") env.CODEX_HOME = cwd;
   const result = spawnSync(command, { input: payload, cwd, env, shell: true, encoding: "utf8", timeout: 30000 });
   if (result.status !== 0) throw new Error(`${label} installed hook failed: rc=${result.status} stdout=${result.stdout} stderr=${result.stderr}`);
   const ctx = runtimeJson ? (JSON.parse(result.stdout).hookSpecificOutput?.additionalContext || "") : result.stdout;
@@ -437,7 +438,7 @@ else
   _fail "Codex core-pack skill filtering failed"
 fi
 
-if [[ -f "$CODEX_CORE_DEST/.agents/flow-agents/installed-packs.json" ]]; then
+if [[ -f "$CODEX_CORE_DEST/.flow-agents/installed-packs.json" ]]; then
   _pass "Codex core-pack install records selected packs"
 else
   _fail "Codex core-pack install did not record selected packs"

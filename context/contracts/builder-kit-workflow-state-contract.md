@@ -44,7 +44,7 @@ Every Builder Kit build-flow pause, resume, or step transition must make the fol
 
 ## Probe Record
 
-A Builder Kit Probe record is a JSON sidecar beside the other workflow artifacts, for example `.agents/flow-agents/<slug>/builder-kit-probe.json`. It is the durable location for pickup/design context that would otherwise make `state.json` too broad.
+A Builder Kit Probe record is a JSON sidecar beside the other workflow artifacts, for example `.flow-agents/<slug>/builder-kit-probe.json`. It is the durable location for pickup/design context that would otherwise make `state.json` too broad.
 
 Required shape:
 
@@ -58,7 +58,7 @@ Required shape:
   "automation_mode": "guided",
   "recovery_mode": "builder-kit-build-flow",
   "probe_status": "passed",
-  "probe_artifact_ref": ".agents/flow-agents/example-task/builder-kit-probe.json",
+  "probe_artifact_ref": ".flow-agents/example-task/builder-kit-probe.json",
   "grouping_decision": {
     "status": "single-item",
     "justification": "one selected work item"
@@ -76,8 +76,8 @@ Required shape:
   "resolution_hints": [],
   "resume_prompt": "Resume Builder Kit build-flow by running plan-work from the selected work item and Probe record.",
   "artifact_refs": [
-    ".agents/flow-agents/example-task/state.json",
-    ".agents/flow-agents/example-task/handoff.json"
+    ".flow-agents/example-task/state.json",
+    ".flow-agents/example-task/handoff.json"
   ],
   "flow_boundary": {
     "builder_kit_owns": "product-level build-flow coordination and next-step selection",
@@ -163,13 +163,13 @@ Baseline freshness example for missing historical `planned_base_sha`:
           "id": "provider_history",
           "description": "Provider issue/project history or equivalent source proving the selected work context inspected during pickup.",
           "source": "provider adapter output",
-          "example_value": ".agents/flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-not-verified-resolution-hints--pull-work.md"
+          "example_value": ".flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-not-verified-resolution-hints--pull-work.md"
         },
         {
           "id": "source_artifact",
           "description": "Source shaped artifact or pickup artifact used to accept the fallback baseline.",
-          "source": ".agents/flow-agents/<slug>/<slug>--idea-to-backlog.md",
-          "example_value": ".agents/flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-not-verified-resolution-hints--idea-to-backlog.md"
+          "source": ".flow-agents/<slug>/<slug>--idea-to-backlog.md",
+          "example_value": ".flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-not-verified-resolution-hints--idea-to-backlog.md"
         }
       ],
       "fallback_policy_id": "accepted_fallback_baseline.current_target_plus_provider_history",

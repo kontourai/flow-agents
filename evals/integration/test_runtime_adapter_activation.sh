@@ -63,7 +63,7 @@ for (const item of data.skipped_assets) {
   }
   if (!item.reason.includes("diagnostic-only")) throw new Error(`unexpected skip reason: ${item.reason}`);
 }
-if (!fs.existsSync(path.join(dest, ".agents/flow-agents/runtime/codex/activation.json"))) throw new Error("runtime activation manifest missing");
+if (!fs.existsSync(path.join(dest, ".flow-agents/runtime/codex/activation.json"))) throw new Error("runtime activation manifest missing");
 console.log("ok");
 NODE
 then

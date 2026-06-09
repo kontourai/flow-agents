@@ -80,7 +80,7 @@ When review runs as part of a workflow, write or update the configured critique 
 Prefer the sidecar writer when available:
 
 ```bash
-npm run workflow:sidecar -- record-critique .agents/flow-agents/<slug> \
+npm run workflow:sidecar -- record-critique .flow-agents/<slug> \
   --id code-review \
   --reviewer tool-code-reviewer \
   --verdict pass \
@@ -90,8 +90,8 @@ npm run workflow:sidecar -- record-critique .agents/flow-agents/<slug> \
 For Markdown reviewer reports, import them when possible:
 
 ```bash
-npm run workflow:sidecar -- import-critique .agents/flow-agents/<slug> \
-  .agents/flow-agents/<slug>/<slug>--code-review.md \
+npm run workflow:sidecar -- import-critique .flow-agents/<slug> \
+  .flow-agents/<slug>/<slug>--code-review.md \
   --reviewer tool-code-reviewer
 ```
 

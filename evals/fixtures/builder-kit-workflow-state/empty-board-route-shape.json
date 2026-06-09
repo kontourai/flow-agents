@@ -8,13 +8,13 @@
     "phase": "pickup",
     "updated_at": "2026-05-29T10:20:00Z",
     "artifact_paths": [
-      ".agents/flow-agents/empty-board-route-shape/empty-board-route-shape--pull-work.md"
+      ".flow-agents/empty-board-route-shape/empty-board-route-shape--pull-work.md"
     ],
     "next_action": {
       "status": "needs_user",
       "summary": "No executable backlog item is ready; route to Builder Kit shape / idea-to-backlog.",
       "target_phase": "shaping",
-      "target_artifact": ".agents/flow-agents/empty-board-route-shape/empty-board-route-shape--idea-to-backlog.md"
+      "target_artifact": ".flow-agents/empty-board-route-shape/empty-board-route-shape--idea-to-backlog.md"
     }
   },
   "probe_record": {
@@ -26,7 +26,7 @@
     "automation_mode": "guided",
     "recovery_mode": "builder-kit-build-flow",
     "probe_status": "blocked",
-    "probe_artifact_ref": ".agents/flow-agents/empty-board-route-shape/empty-board-route-shape--pull-work.md",
+    "probe_artifact_ref": ".flow-agents/empty-board-route-shape/empty-board-route-shape--pull-work.md",
     "grouping_decision": {
       "status": "empty-board",
       "justification": "no ready executable work items found"
@@ -41,7 +41,7 @@
     "accepted_gaps": [],
     "resume_prompt": "Resume by running Builder Kit shape / idea-to-backlog to create executable backlog work.",
     "artifact_refs": [
-      ".agents/flow-agents/empty-board-route-shape/empty-board-route-shape--pull-work.md"
+      ".flow-agents/empty-board-route-shape/empty-board-route-shape--pull-work.md"
     ],
     "planning_readiness": "blocked",
     "expected_modified_files": [],

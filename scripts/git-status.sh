@@ -32,11 +32,11 @@ if [ "$WORKTREE_COUNT" -gt 1 ]; then
   echo "=== Active Worktrees ($WORKTREE_COUNT) ==="
   git worktree list
   echo ""
-  echo "⚠️  Multiple worktrees active — check .agents/flow-agents/ for in-progress tasks before modifying shared files"
+  echo "⚠️  Multiple worktrees active — check .flow-agents/ for in-progress tasks before modifying shared files"
 fi
 
 # List existing TODOs for awareness
-TODO_DIR=".agents/flow-agents"
+TODO_DIR=".flow-agents"
 if [ -d "$TODO_DIR" ]; then
   TODO_COUNT=$(find "$TODO_DIR" -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
   if [ "$TODO_COUNT" -gt 0 ]; then

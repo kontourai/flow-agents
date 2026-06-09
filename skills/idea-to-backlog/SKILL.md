@@ -23,7 +23,7 @@ Convert raw ideas into shaped, prioritized, executable backlog without starting 
 
 ## Artifact Contract
 
-Create or update `.agents/flow-agents/<slug>/<slug>--idea-to-backlog.md` with:
+Create or update `.flow-agents/<slug>/<slug>--idea-to-backlog.md` with:
 
 - `source_ideas`: raw inputs and dedupe links
 - `idea_inventory`: one record per distinct idea, classification, outcome, and reason
@@ -215,7 +215,7 @@ Provider-neutral marker example:
       "planned_base_ref": "main",
       "planned_base_sha": "0123456789abcdef0123456789abcdef01234567",
       "planned_at": "2026-06-03T03:23:14Z",
-      "planning_artifact_ref": ".agents/flow-agents/example/example--idea-to-backlog.md",
+      "planning_artifact_ref": ".flow-agents/example/example--idea-to-backlog.md",
       "planning_scope_refs": [
         "skills/idea-to-backlog/SKILL.md",
         "context/contracts/work-item-contract.md"

@@ -37,7 +37,7 @@ When activated:
 2. State that Builder Kit shape delegates to `idea-to-backlog` and uses `kits/builder/flows/shape.flow.json`.
 3. Gather the raw idea or current conversation context.
 4. If needed, use `design-probe`: ask one Probe/alignment question at a time before shaping. Prefer questions that clarify user outcome, constraints, non-goals, success criteria, risk, or whether bundled ideas truly belong together.
-5. Create or update the standard `.agents/flow-agents/<slug>/<slug>--idea-to-backlog.md` artifact using the `idea-to-backlog` artifact contract.
+5. Create or update the standard `.flow-agents/<slug>/<slug>--idea-to-backlog.md` artifact using the `idea-to-backlog` artifact contract.
 6. Add a `builder_kit_shape` or equivalent note in the artifact that links to `kits/builder/flows/shape.flow.json` and records that the product-level Builder Kit shape surface was used.
 7. Stop at `next_gate: Backlog Gate` unless the user explicitly requested GitHub issue sync.
 8. If the user asked for guided Builder Kit continuation, record the expected next step as `pull-work` after issue sync or backlog approval; otherwise record manual mode and stop.

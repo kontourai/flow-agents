@@ -32,7 +32,7 @@ const requiredUsageFeedbackFiles = [
   "package.json", "tsconfig.json", "scripts/usage-feedback.js", "src/cli/usage-feedback.ts", "docs/agent-usage-feedback-loop.md",
   "scripts/hooks/stop-goal-fit.js", "scripts/promote-workflow-artifact.js", "evals/integration/test_goal_fit_hook.sh",
 ];
-const pythonInventoryExcludes = new Set([".git", ".agents", "node_modules", ".venv", "dist", "__pycache__", ".pytest_cache", ".cache", "build"]);
+const pythonInventoryExcludes = new Set([".git", ".flow-agents", "node_modules", ".venv", "dist", "__pycache__", ".pytest_cache", ".cache", "build"]);
 const pythonCommandScanRoots = ["README.md", "docs", "context", "skills", "prompts", "agents", "evals", "scripts", "packaging", "package.json"];
 const allowedPythonCommandFiles = [
   /^agents\/tool-explore-deps\.json$/,

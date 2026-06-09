@@ -14,7 +14,7 @@ Turn delivery outcomes into durable learning and follow-up work.
 - Capture facts, decisions, and follow-up issues separately.
 - Feed actionable changes back to `idea-to-backlog`, GitHub issues, tests, docs, or knowledge.
 - Use `knowledge-capture` or `observe` when the learning should persist beyond the repo.
-- Compare long-lived docs against the archived `.agents/flow-agents/<slug>/` plan, any completed `.agents/flow-agents/changes/<change-id>/closeout.md`, and the final acceptance artifact so implementation intent is not lost after merge.
+- Compare long-lived docs against the local `.flow-agents/<slug>/` plan and the final acceptance artifact so implementation intent is not lost after merge.
 - Treat `learning-review` as the terminal closeout decision point for correction telemetry. Compare intended behavior to observed behavior before writing `learning.json`, then record either `correction.needed: false` for a clean run or `correction.needed: true` for a mismatch.
 
 ## Inputs
@@ -23,7 +23,7 @@ Turn delivery outcomes into durable learning and follow-up work.
 
 ## Artifact Contract
 
-Create or update `.agents/flow-agents/<slug>/<slug>--learning-review.md` with:
+Create or update `.flow-agents/<slug>/<slug>--learning-review.md` with:
 
 - `scope`: delivered work, issue/PR/release links, dates
 - `outcomes`: expected vs observed behavior and signals
@@ -33,13 +33,13 @@ Create or update `.agents/flow-agents/<slug>/<slug>--learning-review.md` with:
 - `followups`: GitHub issues, idea-to-backlog items, docs/tests/eval work
 - `knowledge_updates`: notes captured or observations proposed
 - `docs_promotion`: durable docs updated, source artifacts archived/linked, and gaps routed
-- `change_workspace_cleanup`: tracked `.agents/flow-agents/changes/<change-id>/` removed before merge or a blocker recorded
+- `runtime_artifact_cleanup`: `.flow-agents/` runtime artifacts remain untracked or a blocker is recorded
 - `verdict`: LEARNED, FOLLOWUP_REQUIRED, or BLOCKED
 
 When the repository provides `npm run workflow:sidecar --`, also write `learning.json` with:
 
 ```bash
-npm run workflow:sidecar -- record-learning .agents/flow-agents/<slug> \
+npm run workflow:sidecar -- record-learning .flow-agents/<slug> \
   --status learned \
   --record-json '{"id":"...","source_refs":["release.json"],"outcome":"success","facts":["..."],"interpretation":"...","routing":[{"target":"none","action":"No follow-up required after intended-vs-observed closeout.","status":"completed"}],"correction":{"needed":false,"evidence":"Acceptance, release, docs promotion, and learning closeout behaved as intended."}}' \
   --summary "..."
@@ -99,7 +99,7 @@ Use `knowledge-capture` for durable project or relationship knowledge and `obser
 
 ### 5. Confirm Docs Promotion
 
-Check whether accepted delivery artifacts were promoted into long-lived documentation and whether any tracked change workspace was removed before merge to `main`. If not, route the missing doc or cleanup work as an owned follow-up or explicitly record why the delivery was self-explanatory.
+Check whether accepted delivery artifacts were promoted into long-lived documentation and whether `.flow-agents/` runtime artifacts remained untracked before merge to `main`. If not, route the missing doc or cleanup work as an owned follow-up or explicitly record why the delivery was self-explanatory.
 
 ### 6. Close The Loop
 

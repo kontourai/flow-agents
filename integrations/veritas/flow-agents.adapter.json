@@ -21,7 +21,7 @@
       "Hook and sidecar behavior stays evidence-backed"
     ],
     "resolverPrecedence": [
-      "active workflow sidecar under .agents/flow-agents",
+      "active workflow sidecar under .flow-agents",
       "north-star roadmap workstream",
       "repo surface fallback"
     ],

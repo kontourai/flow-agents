@@ -5,7 +5,7 @@ This bundle was generated from the canonical source in this repo. Treat the repo
 ## Shared Conventions
 
 - `skills/`, `context/`, `powers/`, `prompts/`, `scripts/`, and `evals/` were copied from the canonical source.
-- Cross-session task artifacts should live under `.agents/flow-agents`.
+- Cross-session task artifacts should live under `.flow-agents`.
 - Kiro-only hook wiring was stripped from exported non-Kiro agents to keep the package portable.
 
 ## Exported Agents
@@ -19,8 +19,8 @@ This bundle was generated from the canonical source in this repo. Treat the repo
 - `tool-explore-patterns` — Delegate to me for Pattern detection - identifies architectural patterns, frameworks, and coding conventions
 - `tool-explore-structure` — Delegate to me to scout out the project structure - maps directory layout and identifies key folders in a codebase
 - `tool-explore-tests` — Delegate to me to find and understand testing strategies - locates test files and understands testing strategy
-- `tool-planner` — Delegate to me for codebase analysis and execution planning. Explores code, identifies patterns and dependencies, and writes plan/sidecar artifacts under .agents/flow-agents. No production file modifications.
+- `tool-planner` — Delegate to me for codebase analysis and execution planning. Explores code, identifies patterns and dependencies, and writes plan/sidecar artifacts under .flow-agents. No production file modifications.
 - `tool-playwright` — Delegate to me for browser automation, testing, and debugging - loading real pages, testing navigation, checking accessibility via structured snapshots, evaluating scripts, and visual verification. Anything that would otherwise require a browser. Do NOT use for general web search or fetching content
 - `tool-security-reviewer` — Delegate to me for security analysis. Checks OWASP Top 10, secrets detection, input validation, injection vulnerabilities, auth/authz, and rate limiting. Read-only analysis with shell for scanning tools.
-- `tool-verifier` — Delegate to me for implementation verification. Read-only + shell for source code; writes review/evidence artifacts under .agents/flow-agents. Verifies acceptance criteria and produces PASS/FAIL/NOT_VERIFIED verdicts with evidence. No production file modifications.
+- `tool-verifier` — Delegate to me for implementation verification. Read-only + shell for source code; writes review/evidence artifacts under .flow-agents. Verifies acceptance criteria and produces PASS/FAIL/NOT_VERIFIED verdicts with evidence. No production file modifications.
 - `tool-worker` — Delegate to me for writing and developing source code for a project. Works best when a detailed plan can be provided. NO access to web tools. Can be used in parallel for any coding tasks that require trusted access to the write and shell tools. WARNING: May spawn a `git worktree`

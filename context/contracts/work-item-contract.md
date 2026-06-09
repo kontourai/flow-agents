@@ -176,7 +176,7 @@ GitHub is the first concrete mapping for this contract, not the generic vocabula
 | `related_links` | Issue links, closing references, discussions, docs, and cross-references. |
 | `source_provider` | `github`, repository owner/name, issue number, node id, and issue URL. |
 | `pr_links` | Linked pull requests, closing PRs, branches, or manually referenced PR URLs. |
-| `artifact_refs` | `.agents/flow-agents/<slug>/` artifacts, plan/review/evidence links, and promoted docs referenced from the issue or workflow. |
+| `artifact_refs` | `.flow-agents/<slug>/` artifacts, plan/review/evidence links, and promoted docs referenced from the issue or workflow. |
 
 ### GitHub Projects as `BoardProvider`
 

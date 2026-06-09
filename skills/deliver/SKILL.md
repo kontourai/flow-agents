@@ -22,7 +22,7 @@ Inherited from primitives:
 
 ## Orchestrator Rule
 
-You never use `read`, `glob`, `grep`, or `code` on source files. You only read/write the session file and artifact files in `.agents/flow-agents/<slug>/`.
+You never use `read`, `glob`, `grep`, or `code` on source files. You only read/write the session file and artifact files in `.flow-agents/<slug>/`.
 
 ## Shared Contracts
 
@@ -52,9 +52,9 @@ When the repository provides `npm run workflow:sidecar --`, use it for routine w
 - `record-learning` for learning-review outcomes
 - `dogfood-pass` for Flow Agents repo changes that should record evidence, critique, optional learning, state, and handoff in one validated pass
 
-After writer updates, run `npm run workflow:validate-artifacts -- --require-sidecars .agents/flow-agents/<slug>` when local validation is available. If the writer or validation is unavailable or blocked by sandbox policy, record the exact gap in the session artifact as `NOT_VERIFIED` instead of pretending structured state exists.
+After writer updates, run `npm run workflow:validate-artifacts -- --require-sidecars .flow-agents/<slug>` when local validation is available. If the writer or validation is unavailable or blocked by sandbox policy, record the exact gap in the session artifact as `NOT_VERIFIED` instead of pretending structured state exists.
 
-`ensure-session` maintains `.agents/flow-agents/current.json`. The orchestrator owns root `state.json` and `handoff.json` updates. Delegated agents must be given the workflow artifact root and should append events under `agents/<agent-id>/events.jsonl` through `record-agent-event` instead of guessing the slug or rewriting root state.
+`ensure-session` maintains `.flow-agents/current.json`. The orchestrator owns root `state.json` and `handoff.json` updates. Delegated agents must be given the workflow artifact root and should append events under `agents/<agent-id>/events.jsonl` through `record-agent-event` instead of guessing the slug or rewriting root state.
 
 ## Input
 
@@ -80,7 +80,7 @@ Direct ad hoc implementation requests that are not provider-backed backlog picku
 
 ## Session File
 
-Path: `.agents/flow-agents/<slug>/<slug>--deliver.md`
+Path: `.flow-agents/<slug>/<slug>--deliver.md`
 
 ```markdown
 # <Goal one-liner>
@@ -100,8 +100,8 @@ iteration: 0
 - Loop exits only after the Goal Fit Gate is fully checked or explicitly accepted
 - CRITICAL/HIGH → re-plan → execute → review → verify
 - MEDIUM/FAIL → execute fix pass → review → verify
-- Temporary planning and execution artifacts live in `.agents/flow-agents/<slug>/`; durable feature documentation is promoted after CI/merge
-- Reviewable in-progress change work may live in `.agents/flow-agents/changes/<change-id>/` on a feature branch, but it must be removed before merge to `main`
+- Temporary planning and execution artifacts live in `.flow-agents/<slug>/`; durable feature documentation is promoted after CI/merge
+- Local runtime work stays under `.flow-agents/` and remains untracked; durable outcomes must be promoted before merge to `main`
 
 ## Plan
 
@@ -224,11 +224,11 @@ Do not invoke `release-readiness` before this gate unless the user explicitly ac
 After CI passes and the work is merged or otherwise accepted:
 
 1. Update `## Final Acceptance` in the session file.
-2. Archive the working artifacts under `.agents/flow-agents/<slug>/archive/` or keep a stable link to them.
-3. If the branch used `.agents/flow-agents/changes/<change-id>/`, complete its `closeout.md` with provider records, verification evidence, durable docs targets, accepted gaps, and follow-up routing.
+2. Archive the working artifacts under `.flow-agents/<slug>/archive/` or keep a stable link to them.
+3. Record provider records, verification evidence, durable docs targets, accepted gaps, and follow-up routing in durable docs or provider records.
 4. Promote the relevant plan, decision, evidence, and usage notes into long-lived docs such as `docs/`, `README.md`, or a project decision record.
 5. Link the long-lived doc back to the provider record, archived plan artifact, or accepted evidence when useful so future readers can see why and how the feature was built.
-6. Remove any tracked `.agents/flow-agents/changes/<change-id>/` workspace before merge to `main`.
+6. Confirm `.flow-agents/` runtime artifacts remain untracked before merge to `main`.
 7. Hand off to `learning-review` when the delivery exposed workflow, testing, documentation, or product follow-up.
 
 ### 11. Deliver

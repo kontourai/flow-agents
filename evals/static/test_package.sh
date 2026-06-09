@@ -60,21 +60,35 @@ if [[ "$EVAL_MODE" == "repo" ]]; then
   else
     _fail "source tree validation failed (see /tmp/source-tree-validation.txt)"
   fi
-  legacy_pattern='[Kk]agents|K''AGENTS|\.agents/[Kk]agents|[Kk]agents\.dev'
+  legacy_pattern='[Kk]agents|K''AGENTS|[Kk]agents\.dev'
   if (cd "$ROOT_DIR" && git ls-files -z | xargs -0 rg -n "$legacy_pattern" >/tmp/legacy-product-refs.txt 2>&1); then
     _fail "tracked source contains legacy Flow Agents rename references (see /tmp/legacy-product-refs.txt)"
   else
     _pass "tracked source has no legacy Flow Agents rename references"
   fi
-  current_branch="$(cd "$ROOT_DIR" && git branch --show-current 2>/dev/null || true)"
-  tracked_change_artifacts="$(cd "$ROOT_DIR" && git ls-files -- '.agents/flow-agents/changes' 2>/dev/null || true)"
-  if [[ "$current_branch" == "main" && -n "$tracked_change_artifacts" ]]; then
-    printf '%s\n' "$tracked_change_artifacts" >/tmp/tracked-flow-agent-change-artifacts.txt
-    _fail "main contains tracked workflow change artifacts (see /tmp/tracked-flow-agent-change-artifacts.txt)"
-  elif [[ "$current_branch" == "main" ]]; then
-    _pass "main has no tracked workflow change artifacts"
+  if (cd "$ROOT_DIR" && FLOW_AGENTS_CONTENT_BOUNDARY_FILES='.flow-agents/example/state.json' node scripts/check-content-boundary.cjs >/tmp/content-boundary-runtime.out 2>&1); then
+    _fail "content boundary allows ordinary workflow runtime artifacts"
+  elif rg -q 'Flow Agents runtime artifact must not be tracked' /tmp/content-boundary-runtime.out; then
+    _pass "content boundary blocks ordinary workflow runtime artifacts"
   else
-    _skip "tracked workflow change artifacts are allowed off main"
+    _fail "content boundary runtime rejection was not actionable"
+  fi
+  if (cd "$ROOT_DIR" && FLOW_AGENTS_CONTENT_BOUNDARY_FILES='.flow-agents/nested/example/closeout.md' node scripts/check-content-boundary.cjs >/tmp/content-boundary-nested.out 2>&1); then
+    _fail "content boundary allows nested workflow runtime artifacts"
+  elif rg -q 'Flow Agents runtime artifact must not be tracked' /tmp/content-boundary-nested.out; then
+    _pass "content boundary blocks nested workflow runtime artifacts"
+  else
+    _fail "content boundary nested runtime rejection was not actionable"
+  fi
+  current_branch="$(cd "$ROOT_DIR" && git branch --show-current 2>/dev/null || true)"
+  tracked_runtime_artifacts="$(cd "$ROOT_DIR" && git ls-files -- '.flow-agents' 2>/dev/null || true)"
+  if [[ "$current_branch" == "main" && -n "$tracked_runtime_artifacts" ]]; then
+    printf '%s\n' "$tracked_runtime_artifacts" >/tmp/tracked-flow-agent-runtime-artifacts.txt
+    _fail "main contains tracked workflow runtime artifacts (see /tmp/tracked-flow-agent-runtime-artifacts.txt)"
+  elif [[ "$current_branch" == "main" ]]; then
+    _pass "main has no tracked workflow runtime artifacts"
+  else
+    _skip "tracked workflow runtime artifact main-branch guard skipped off main"
   fi
   echo ""
 

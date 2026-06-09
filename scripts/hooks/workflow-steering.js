@@ -96,7 +96,7 @@ function readJson(file) {
 }
 
 function latestWorkflowState(root) {
-  const states = walkStateFiles(path.join(root, '.agents', 'flow-agents'))
+  const states = walkStateFiles(path.join(root, '.flow-agents'))
     .map(file => {
       let stat;
       try { stat = fs.statSync(file); } catch { return null; }

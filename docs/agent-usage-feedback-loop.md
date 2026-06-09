@@ -8,7 +8,7 @@ The loop has three parts:
 2. Sync quality outcomes from task artifacts, evals, release gates, or humans.
 3. Report usage and outcome metrics by repo, runtime, profile, prompt, skill, or task type.
 
-Quality outcomes are not inferred from raw telemetry alone. The CLI can automatically derive coarse outcomes from task artifacts such as `.agents/flow-agents/<slug>/*.md`: `delivered` and `complete` become `success`, `failed` becomes `failure`, and optionally open artifacts can be recorded as `not_verified`. It does not invent `quality_score` or `human_minutes_saved`; those remain human/eval/release-gate facts.
+Quality outcomes are not inferred from raw telemetry alone. The CLI can automatically derive coarse outcomes from task artifacts such as `.flow-agents/<slug>/*.md`: `delivered` and `complete` become `success`, `failed` becomes `failure`, and optionally open artifacts can be recorded as `not_verified`. It does not invent `quality_score` or `human_minutes_saved`; those remain human/eval/release-gate facts.
 
 ## Storage Defaults
 
@@ -114,7 +114,7 @@ Usage-only metrics can be computed from telemetry. Quality and value metrics req
 
 ### Project Dashboard
 
-Generate the local HTML dashboard. This syncs terminal task artifacts from `.agents/flow-agents` into `.telemetry/outcomes.jsonl` before rendering:
+Generate the local HTML dashboard. This syncs terminal task artifacts from `.flow-agents` into `.telemetry/outcomes.jsonl` before rendering:
 
 ```bash
 npm run usage-feedback -- dashboard --force
@@ -126,7 +126,7 @@ Sync artifacts without rendering the dashboard:
 
 ```bash
 npm run usage-feedback -- sync-artifacts \
-  --artifact-dir .agents/flow-agents \
+  --artifact-dir .flow-agents \
   --repo flow-agents \
   --profile-id codex-default \
   --prompt-id deliver-v1 \
@@ -177,7 +177,7 @@ npm run usage-feedback -- record-outcome \
   --result success \
   --quality-score 5 \
   --human-minutes-saved 35 \
-  --evidence .agents/flow-agents/agent-usage-feedback-loop/agent-usage-feedback-loop--deliver.md
+  --evidence .flow-agents/agent-usage-feedback-loop/agent-usage-feedback-loop--deliver.md
 ```
 
 Generate a report:

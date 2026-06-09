@@ -39,7 +39,7 @@ This skill owns orchestration and routing. The verification contract owns phases
 
 ## Input
 
-- **Session file path**: the session file in `.agents/flow-agents/<slug>/` (preferred)
+- **Session file path**: the session file in `.flow-agents/<slug>/` (preferred)
 - The session file references the plan artifact (which has acceptance criteria) and execution progress (which has modified files)
 - If NO session file exists, delegate to tool-verifier directly (see Standalone Verification below)
 

@@ -23,7 +23,7 @@ function printHelp(): void {
   console.log("Build an inert Console learning projection from local workflow learning sidecars.");
   console.log("");
   console.log("Options:");
-  console.log("  --artifact-root <path>  Workflow artifact root to scan (default: .agents/flow-agents)");
+  console.log("  --artifact-root <path>  Workflow artifact root to scan (default: .flow-agents)");
   console.log("  --kontour-root <path>   Local Kontour root to write under (default: .kontour)");
   console.log("  --scope <id>            Projection scope id (default: current directory name)");
   console.log("  --scope-kind <kind>     Projection scope kind (default: repo)");
@@ -104,7 +104,7 @@ export function main(argv = process.argv.slice(2)): number {
   }
 
   try {
-    const artifactRoot = path.resolve(flagString(flags, "artifact-root", ".agents/flow-agents") ?? ".agents/flow-agents");
+    const artifactRoot = path.resolve(flagString(flags, "artifact-root", ".flow-agents") ?? ".flow-agents");
     const kontourRoot = path.resolve(flagString(flags, "kontour-root", ".kontour") ?? ".kontour");
     const producer = requireSafeSegment(flagString(flags, "producer", "flow-agents-learning") ?? "flow-agents-learning", "--producer");
     const scope = {

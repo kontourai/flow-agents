@@ -51,7 +51,7 @@ function isUnderDir(dir: string, root: string): boolean {
 function explicitArtifactRoot(p: ReturnType<typeof parseArgs>): string {
   const explicit = opt(p, "artifact-dir");
   const configuredRoot = opt(p, "artifact-root");
-  if (!explicit) return path.resolve(configuredRoot || ".agents/flow-agents");
+  if (!explicit) return path.resolve(configuredRoot || ".flow-agents");
   const dir = path.resolve(explicit);
   if (!fs.existsSync(dir)) die(`artifact directory does not exist: ${dir}`);
   if (fs.lstatSync(dir).isSymbolicLink()) die(`artifact directory must not be a symlink: ${dir}`);
@@ -223,7 +223,7 @@ function initSidecars(dir: string, slug: string, sourceRequest: string, summary:
 }
 
 function ensureSession(p: ReturnType<typeof parseArgs>): number {
-  const root = path.resolve(opt(p, "artifact-root", ".agents/flow-agents"));
+  const root = path.resolve(opt(p, "artifact-root", ".flow-agents"));
   const slug = opt(p, "task-slug") || die("--task-slug is required");
   const dir = sessionDirFor(root, slug);
   fs.mkdirSync(dir, { recursive: true });
@@ -242,7 +242,7 @@ function ensureSession(p: ReturnType<typeof parseArgs>): number {
 }
 
 function current(p: ReturnType<typeof parseArgs>): number {
-  const root = path.resolve(opt(p, "artifact-root", ".agents/flow-agents"));
+  const root = path.resolve(opt(p, "artifact-root", ".flow-agents"));
   const dir = currentDir(root);
   if (!dir) die("no current workflow session is recorded");
   const format = opt(p, "format", "path");
@@ -562,7 +562,7 @@ function assertExistingLearningValid(dir: string): void {
   }
 }
 function dogfoodPass(p: ReturnType<typeof parseArgs>): number {
-  const root = path.resolve(opt(p, "artifact-root", ".agents/flow-agents"));
+  const root = path.resolve(opt(p, "artifact-root", ".flow-agents"));
   const dir = path.resolve(opt(p, "artifact-dir") || currentDir(root) || "");
   requireArtifactDirUnderRoot(dir, root);
   assertExistingLearningValid(dir);
@@ -605,7 +605,7 @@ function dogfoodPass(p: ReturnType<typeof parseArgs>): number {
 async function main(): Promise<number> {
   const p = parseArgs(process.argv.slice(2));
   if (!p.command) die("workflow-sidecar command is required");
-  const lockRoot = ["ensure-session", "current", "dogfood-pass"].includes(p.command) ? path.resolve(opt(p, "artifact-root", ".agents/flow-agents")) : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
+  const lockRoot = ["ensure-session", "current", "dogfood-pass"].includes(p.command) ? path.resolve(opt(p, "artifact-root", ".flow-agents")) : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
   return withLock(lockRoot, ["ensure-session", "record-agent-event", "dogfood-pass"].includes(p.command), p.command, () => {
     switch (p.command) {
       case "ensure-session": return ensureSession(p);

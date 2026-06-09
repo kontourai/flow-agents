@@ -10,12 +10,12 @@ ideas -> Builder Kit shape / idea-to-backlog -> work items -> pull-work -> picku
 
 You can do this in one conversation, but the gates should stay explicit. Do not let shaping, planning, implementation, and release confidence blur into one continuous task.
 
-Workflow artifacts follow a closeout lifecycle. Local runtime artifacts live under `.agents/flow-agents/<slug>/` and normally stay uncommitted. When a branch needs reviewable in-progress planning, use `.agents/flow-agents/changes/<change-id>/` with a `closeout.md`. Before merge, promote durable behavior, decisions, evidence, and usage notes into long-lived docs or provider records, then delete the change workspace so `main` does not carry temporary planning files.
+Workflow artifacts follow a closeout lifecycle. Local runtime artifacts live under `.flow-agents/<slug>/` and stay uncommitted. When a branch needs reviewable in-progress planning, promote durable behavior, decisions, evidence, and usage notes into long-lived docs, source, schemas, or provider records before merge.
 
 For local artifact queue hygiene, run the read-only cleanup audit:
 
 ```bash
-npm run workflow-artifact-cleanup-audit -- --artifact-root .agents/flow-agents
+npm run workflow-artifact-cleanup-audit -- --artifact-root .flow-agents
 ```
 
 The audit is linked to the lifecycle policy in `docs/workflow-artifact-lifecycle.md`. It classifies active WIP, cleanup candidates, terminal done records, active learning follow-ups, and invalid sidecars without deleting or archiving anything.
@@ -50,7 +50,7 @@ Expected behavior:
 Expected artifact:
 
 ```text
-.agents/flow-agents/<slug>/<slug>--idea-to-backlog.md
+.flow-agents/<slug>/<slug>--idea-to-backlog.md
 ```
 
 The artifact should include `source_ideas`, `idea_inventory`, `slice_candidates`, `bundle_justification`, `dependency_map`, `phase`, `decisions`, `opportunity_briefs`, `shaped_work`, `risk_release_notes`, `backlog_links`, `parked_or_rejected`, `open_questions`, `next_gate`, and the Builder Kit Flow Definition link. Use this phase to decide what deserves backlog space. Provider-backed work items should be executable or near-executable work, not a dumping ground for every idea. GitHub issues are the first adapter example.
@@ -103,7 +103,7 @@ Expected behavior:
 Expected artifact:
 
 ```text
-.agents/flow-agents/<slug>/<slug>--pull-work.md
+.flow-agents/<slug>/<slug>--pull-work.md
 ```
 
 When a repository has backlog provider settings, `pull-work` should use those settings without requiring the user to name the board. In Flow Agents, `npm run effective-backlog-settings -- --repo-path . --json` resolves `kontourai/flow-agents` to GitHub Project `kontourai/1`, so a prompt like `use pull-work` is enough for the configured provider path.
@@ -130,7 +130,7 @@ Your WIP can block starting new work. Other people's WIP should block only when 
 
 After `pull-work` passes the pickup gate in the Builder Kit build flow, use the Builder Kit pickup Probe before planning. The Flow Definition step is named `design-probe`, and the build path is `pull-work -> design-probe -> plan`. The generic `design-probe` skill owns one-question-at-a-time design alignment; the `pickup-probe` skill is the Builder Kit work-item/docs/provider-grounded specialization used at that step.
 
-The pickup Probe must record goal fit and scope, blockers and dependencies, dependency freshness, acceptance criteria quality, provider state, risk, stop-short risks, planning readiness, decisions, unresolved questions, accepted gaps, sandbox/worktree mode, expected modified files, and conflict risks. Record those in `.agents/flow-agents/<slug>/<slug>--pull-work.md` or the plan handoff artifact before `plan-work` begins.
+The pickup Probe must record goal fit and scope, blockers and dependencies, dependency freshness, acceptance criteria quality, provider state, risk, stop-short risks, planning readiness, decisions, unresolved questions, accepted gaps, sandbox/worktree mode, expected modified files, and conflict risks. Record those in `.flow-agents/<slug>/<slug>--pull-work.md` or the plan handoff artifact before `plan-work` begins.
 
 When the selected work item includes `planned_base_ref` and `planned_base_sha`, compare that base with current `main` before planning. If relevant files, contracts, docs, schemas, or dependency states changed since the work was shaped, classify the drift as `no_material_drift`, `scope_drift`, `dependency_drift`, `contract_drift`, or `conflict_risk`. Ask for alignment before planning when drift changes scope, acceptance criteria, dependency assumptions, or execution risk.
 
@@ -178,7 +178,7 @@ Then use `plan-work`.
 Example prompt:
 
 ```text
-Use plan-work for the selected work item in .agents/flow-agents/<slug>/<slug>--pull-work.md. Produce an execution plan with acceptance criteria, file ownership, test strategy, and parallelization opportunities. Do not implement yet.
+Use plan-work for the selected work item in .flow-agents/<slug>/<slug>--pull-work.md. Produce an execution plan with acceptance criteria, file ownership, test strategy, and parallelization opportunities. Do not implement yet.
 ```
 
 Then use `execute-plan` only after the plan is accepted.
@@ -194,7 +194,7 @@ When `pull-work` chooses a worktree, record `worktree_lifecycle`: path, branch, 
 Example prompt:
 
 ```text
-Use execute-plan for .agents/flow-agents/<slug>/<slug>--plan.md. Prefer isolated worktrees for parallel or risky work. Execute the plan and keep progress in the session artifact.
+Use execute-plan for .flow-agents/<slug>/<slug>--plan.md. Prefer isolated worktrees for parallel or risky work. Execute the plan and keep progress in the session artifact.
 ```
 
 ## 5. Review, Then Verify
@@ -206,7 +206,7 @@ Review checks quality, security triggers, architecture fit, project standards, r
 Example prompt:
 
 ```text
-Use review-work for .agents/flow-agents/<slug>/<slug>--deliver.md. Run code review, security review if triggered, and standards/architecture critique. Record findings in critique.json. Do not fix code.
+Use review-work for .flow-agents/<slug>/<slug>--deliver.md. Run code review, security review if triggered, and standards/architecture critique. Record findings in critique.json. Do not fix code.
 ```
 
 Then use `verify-work` for implementation verification. Verification is evidence: it asks what proves the accepted behavior works.
@@ -216,7 +216,7 @@ Verification runs build/type/lint/test/security/browser/runtime checks as releva
 Example prompt:
 
 ```text
-Use verify-work for .agents/flow-agents/<slug>/<slug>--deliver.md. Map every acceptance criterion to evidence and record PASS, FAIL, or NOT_VERIFIED.
+Use verify-work for .flow-agents/<slug>/<slug>--deliver.md. Map every acceptance criterion to evidence and record PASS, FAIL, or NOT_VERIFIED.
 ```
 
 ## 6. Build Trust With Evidence Gate
@@ -247,7 +247,7 @@ Pickup Probe may update durable docs only when the decision is no longer a trans
 
 ## 7. Check Goal Fit Before Stopping
 
-Goal Fit is the local stop condition before a final answer. The working artifact in `.agents/flow-agents/<slug>/` should answer:
+Goal Fit is the local stop condition before a final answer. The working artifact in `.flow-agents/<slug>/` should answer:
 
 - What did the user originally ask for?
 - Can the user run, understand, inspect, or act on the result now?
@@ -266,7 +266,7 @@ npm run workflow:sidecar -- ensure-session \
   --summary "<summary>" \
   --criterion "<acceptance criterion>"
 
-npm run workflow:sidecar -- init-plan .agents/flow-agents/<slug>/<slug>--deliver.md \
+npm run workflow:sidecar -- init-plan .flow-agents/<slug>/<slug>--deliver.md \
   --source-request "<request>" \
   --summary "<summary>" \
   --next-action "<next step>"
@@ -275,7 +275,7 @@ npm run workflow:sidecar -- init-plan .agents/flow-agents/<slug>/<slug>--deliver
 Reviewer Markdown artifacts can be imported into `critique.json`:
 
 ```bash
-npm run workflow:sidecar -- import-critique .agents/flow-agents/<slug> .agents/flow-agents/<slug>/<slug>--review.md
+npm run workflow:sidecar -- import-critique .flow-agents/<slug> .flow-agents/<slug>/<slug>--review.md
 ```
 
 Core workflow skills should use these writer commands when available. If a writer command or validation is unavailable or blocked, the artifact should record the exact sidecar gap as `NOT_VERIFIED` rather than silently falling back to an unstructured pass.
@@ -347,17 +347,17 @@ Use release-readiness for this evidence-gate PASS. Decide whether to MERGE, RELE
 
 ## 10. Promote Final Acceptance Docs
 
-`.agents/flow-agents/<slug>/` is local runtime/session state by default in the Flow Agents source tree. Exported agent bundles may map the runtime root to a distribution-specific path through their bundle instructions. Treat local workflow roots as working memory for a delivery. After provider checks pass and the work is merged or otherwise accepted, promote the useful parts into durable documentation, provider comments/descriptions, release notes, or archive records.
+`.flow-agents/<slug>/` is local runtime/session state by default in the Flow Agents source tree. Exported agent bundles may map the runtime root to a distribution-specific path through their bundle instructions. Treat local workflow roots as working memory for a delivery. After provider checks pass and the work is merged or otherwise accepted, promote the useful parts into durable documentation, provider comments/descriptions, release notes, or archive records.
 
 Use the helper:
 
 ```bash
-npm run promote-workflow-artifact -- .agents/flow-agents/<slug>/<slug>--deliver.md
+npm run promote-workflow-artifact -- .flow-agents/<slug>/<slug>--deliver.md
 ```
 
 Expected behavior:
 
-- copy the source artifact into `.agents/flow-agents/<slug>/archive/<date>/`
+- copy the source artifact into `.flow-agents/<slug>/archive/<date>/`
 - create or update a durable doc under `docs/delivery/`
 - include the plan, evidence, Goal Fit, and Final Acceptance sections when present
 - link the durable doc back to the archived artifact so future readers can inspect why and how the feature was built
@@ -391,12 +391,12 @@ Correction records live in `learning.json` for this slice. They are local workfl
 To publish local workflow-learning as Console-readable context, run:
 
 ```bash
-flow-agents console-learning-projection --artifact-root .agents/flow-agents --kontour-root .kontour
+flow-agents console-learning-projection --artifact-root .flow-agents --kontour-root .kontour
 ```
 
 Those flags are the defaults. The command writes `.kontour/projections/flow-agents-learning/<scope-kind>-<scope-id>.json`. Generated learnings are inert, non-authoritative Console read models with `family: "workflow"` and `nonAuthority: true`. `learning.json` remains the Flow Agents-owned source data; the command does not mutate it, execute routing or prevention, create provider issues, implement Source/Sink storage, add UI, or model domain-learning. The producer performs minimal projection source-shape checks for required fields; full `learning.json` JSON Schema validation remains covered by `npm run workflow:validate-artifacts`. When a sibling Console checkout is available, `inspectLocalKontour` may inspect the generated projection, but Flow Agents local tests validate the committed projection shape.
 
-For local-only users, `.agents/flow-agents/<slug>/` is the recent recovery cache and queue dashboard. Retain active blockers and unresolved learning. Prune or archive routine successful runtime artifacts after 14-30 days once provider records, durable docs, or knowledge notes contain the useful history. Keep security, migration, release, or provider-governance evidence longer when auditability matters, usually 30-90 days unless a project policy says otherwise.
+For local-only users, `.flow-agents/<slug>/` is the recent recovery cache and queue dashboard. Retain active blockers and unresolved learning. Prune or archive routine successful runtime artifacts after 14-30 days once provider records, durable docs, or knowledge notes contain the useful history. Keep security, migration, release, or provider-governance evidence longer when auditability matters, usually 30-90 days unless a project policy says otherwise.
 
 ## Quick Prompt Templates
 
@@ -421,7 +421,7 @@ Use evidence-gate. Map acceptance criteria to evidence, inspect CI and scope int
 Check local goal fit:
 
 ```text
-Before final answer, update the Goal Fit Gate in the current `.agents/flow-agents/<slug>/` delivery artifact. Keep working on unchecked items unless I explicitly accept them.
+Before final answer, update the Goal Fit Gate in the current `.flow-agents/<slug>/` delivery artifact. Keep working on unchecked items unless I explicitly accept them.
 ```
 
 Release decision:

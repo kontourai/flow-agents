@@ -164,7 +164,7 @@ status:
       message: The selected Work Item and documentation file are narrow enough for the planned workflow.
       evidenceRefs:
         - kind: SessionArtifact
-          path: .agents/flow-agents/resource-contract-skeleton/resource-contract-skeleton--deliver.md
+          path: .flow-agents/resource-contract-skeleton/resource-contract-skeleton--deliver.md
       observedGeneration: 1
       lastTransitionTime: "2026-05-28T06:10:21Z"
     - type: ScopeOverlap
@@ -173,7 +173,7 @@ status:
       message: No active overlapping workflow was recorded for this selected scope.
       evidenceRefs:
         - kind: SessionArtifact
-          path: .agents/flow-agents/resource-contract-skeleton/resource-contract-skeleton--deliver.md
+          path: .flow-agents/resource-contract-skeleton/resource-contract-skeleton--deliver.md
       observedGeneration: 1
       lastTransitionTime: "2026-05-28T06:10:21Z"
 ```
@@ -236,7 +236,7 @@ status:
       message: The documentation workflow is executing the resource contract examples and compatibility guidance.
       evidenceRefs:
         - kind: SessionArtifact
-          path: .agents/flow-agents/resource-contract-skeleton/resource-contract-skeleton--deliver.md
+          path: .flow-agents/resource-contract-skeleton/resource-contract-skeleton--deliver.md
       observedGeneration: 1
       lastTransitionTime: "2026-05-28T06:10:21Z"
     - type: MissingEvidence
@@ -319,7 +319,7 @@ status:
       message: The Run Plan has enough desired gate and evidence detail for execution.
       evidenceRefs:
         - kind: PlanArtifact
-          path: .agents/flow-agents/resource-contract-skeleton/resource-contract-skeleton--plan.md
+          path: .flow-agents/resource-contract-skeleton/resource-contract-skeleton--plan.md
       observedGeneration: 1
       lastTransitionTime: "2026-05-28T06:10:21Z"
     - type: RouteBackRequired
@@ -328,7 +328,7 @@ status:
       message: No material scope change or missing required plan input has been observed.
       evidenceRefs:
         - kind: PlanArtifact
-          path: .agents/flow-agents/resource-contract-skeleton/resource-contract-skeleton--plan.md
+          path: .flow-agents/resource-contract-skeleton/resource-contract-skeleton--plan.md
       observedGeneration: 1
       lastTransitionTime: "2026-05-28T06:10:21Z"
 ```

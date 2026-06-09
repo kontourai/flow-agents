@@ -59,7 +59,7 @@ After CI passes and the work is merged, released, or otherwise accepted:
 - [ ] working artifacts archived or linked
 - [ ] long-lived docs updated with why and how the feature was built
 - [ ] durable docs link back to the provider record, archived plan, or session artifact when useful
-- [ ] any tracked `.agents/flow-agents/changes/<change-id>/` workspace is removed before merge to `main`
+- [ ] local `.flow-agents/` runtime artifacts remain untracked, and durable outcomes are promoted before merge to `main`
 - [ ] follow-up issues or learning-review items created for deferred work
 
 ## Distribution Rule

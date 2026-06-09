@@ -48,7 +48,7 @@ The optional TypeScript adapter is available through:
 
 ```bash
 npm run veritas-governance -- evidence \
-  --artifact-dir .agents/flow-agents/<task-slug> \
+  --artifact-dir .flow-agents/<task-slug> \
   --repo-root . \
   --veritas-bin veritas \
   --veritas-artifact .veritas/readiness/evidence.json \

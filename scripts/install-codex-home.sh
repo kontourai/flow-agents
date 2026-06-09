@@ -62,7 +62,7 @@ mkdir -p "$DEST"
 # This is an isolated generated Codex home. Clean generated bundle content before
 # overlaying so renamed/deleted source files do not survive across installs.
 rm -rf \
-  "$DEST/.agents" \
+  "$DEST/.flow-agents" \
   "$DEST/.codex" \
   "$DEST/AGENTS.md" \
   "$DEST/README.md" \

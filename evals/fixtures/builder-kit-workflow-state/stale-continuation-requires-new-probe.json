@@ -8,13 +8,13 @@
     "phase": "pickup",
     "updated_at": "2026-05-29T10:15:00Z",
     "artifact_paths": [
-      ".agents/flow-agents/stale-continuation-requires-new-probe/builder-kit-probe.json"
+      ".flow-agents/stale-continuation-requires-new-probe/builder-kit-probe.json"
     ],
     "next_action": {
       "status": "continue",
       "summary": "Queue inspected after merge; create fresh pickup Probe for the newly selected item before planning.",
       "target_phase": "pickup",
-      "target_artifact": ".agents/flow-agents/stale-continuation-requires-new-probe/builder-kit-probe.json"
+      "target_artifact": ".flow-agents/stale-continuation-requires-new-probe/builder-kit-probe.json"
     }
   },
   "probe_record": {
@@ -26,7 +26,7 @@
     "automation_mode": "autonomous-bounded",
     "recovery_mode": "builder-kit-build-flow",
     "probe_status": "required",
-    "probe_artifact_ref": ".agents/flow-agents/stale-continuation-requires-new-probe/builder-kit-probe.json",
+    "probe_artifact_ref": ".flow-agents/stale-continuation-requires-new-probe/builder-kit-probe.json",
     "grouping_decision": {
       "status": "single-item",
       "justification": "newly selected work after prior merge"

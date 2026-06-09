@@ -29,11 +29,11 @@ Select ready backlog work and prepare a bounded execution handoff without implem
 - Repository or working directory.
 - Optional labels, milestone, project board, assignee, or priority filter.
 - Optional WIP limit or current in-progress context.
-- Existing `.agents/flow-agents/<slug>/` artifacts, PRs, and CI/review queues.
+- Existing `.flow-agents/<slug>/` artifacts, PRs, and CI/review queues.
 
 ## Artifact Contract
 
-Create or update `.agents/flow-agents/<slug>/<slug>--pull-work.md` with:
+Create or update `.flow-agents/<slug>/<slug>--pull-work.md` with:
 
 - `board_snapshot`: filters, issue list, labels, milestone/provider milestone state, project fields, state, blockers
 - `wip_assessment`: active work, reviews, verification, CI remediation, with personal WIP separated from global conflict context
@@ -119,7 +119,7 @@ Personal WIP scan:
 
 - Inspect local worktrees and branches for dirty state, unpublished commits, merged branches, abandoned branches, and unclear ownership.
 - Inspect open PRs authored by the current user and record review/check state, requested changes, mergeability, and whether the PR needs shepherding.
-- Inspect active `.agents/flow-agents/<slug>/` sidecars owned by the current user or current session, especially `planning`, `planned`, `in_progress`, `verifying`, `needs_decision`, `not_verified`, `failed`, and `blocked`.
+- Inspect active `.flow-agents/<slug>/` sidecars owned by the current user or current session, especially `planning`, `planned`, `in_progress`, `verifying`, `needs_decision`, `not_verified`, `failed`, and `blocked`.
 - Classify personal items into `my_active_work`, `shepherding_candidates`, `stale_worktrees`, and `open_prs_by_me`.
 
 Global conflict scan:

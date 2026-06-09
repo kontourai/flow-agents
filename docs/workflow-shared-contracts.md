@@ -23,7 +23,7 @@ That reference is docs-only guidance for new resource-shaped contracts and does 
 The lifecycle for in-progress and completed workflow artifacts is documented in the Workflow Artifact Lifecycle:
 https://github.com/kontourai/flow-agents/blob/main/docs/workflow-artifact-lifecycle.md
 
-Feature branches may commit reviewable change workspaces under `.agents/flow-agents/changes/<change-id>/`. Completed work must promote durable behavior, decisions, contracts, and evidence into long-lived docs or provider records, then remove the change workspace before merge to `main`.
+Runtime workflow artifacts under `.flow-agents/` remain local and ignored. Completed work must promote durable behavior, decisions, contracts, and evidence into long-lived docs, source, schemas, or provider records before merge to `main`.
 
 ## How Skills And Agents Use Them
 

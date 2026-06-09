@@ -116,7 +116,7 @@ export function main(argv = process.argv.slice(2)): number {
     removed_entries: removed,
     kept: Object.fromEntries(Object.entries(selected).map(([field, values]) => [field, [...values].sort()])),
   };
-  if (!dryRun) writeText(path.join(rootDir, ".agents/flow-agents/installed-packs.json"), `${JSON.stringify(summary, null, 2)}\n`);
+  if (!dryRun) writeText(path.join(rootDir, ".flow-agents/installed-packs.json"), `${JSON.stringify(summary, null, 2)}\n`);
   console.log(JSON.stringify(summary, null, 2));
   return 0;
 }
