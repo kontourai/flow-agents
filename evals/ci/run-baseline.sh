@@ -26,8 +26,73 @@ CHECKS=(
   "Bundle install integration|bash evals/integration/test_bundle_install.sh"
 )
 
+LANE_SOURCE_AND_STATIC=(
+  "Content boundary"
+  "Source tree validation"
+  "Context map drift"
+  "Static eval suite"
+)
+
+LANE_WORKFLOW_CONTRACTS=(
+  "Workflow artifact integration"
+  "Workflow artifact cleanup audit integration"
+  "Publish-change helper integration"
+  "Workflow sidecar writer integration"
+)
+
+LANE_RUNTIME_AND_KIT=(
+  "Goal Fit hook integration"
+  "Workflow steering hook integration"
+  "Hook influence contract integration"
+  "Flow Kit repository integration"
+  "Runtime adapter activation integration"
+  "Bundle install integration"
+)
+
 slugify() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-//; s/-$//'
+}
+
+active_lane() {
+  printf '%s' "${FLOW_AGENTS_CI_LANE:-all}"
+}
+
+lane_labels() {
+  case "$(active_lane)" in
+    all)
+      local entry
+      for entry in "${CHECKS[@]}"; do
+        printf '%s\n' "${entry%%|*}"
+      done
+      ;;
+    source-and-static)
+      printf '%s\n' "${LANE_SOURCE_AND_STATIC[@]}"
+      ;;
+    workflow-contracts)
+      printf '%s\n' "${LANE_WORKFLOW_CONTRACTS[@]}"
+      ;;
+    runtime-and-kit)
+      printf '%s\n' "${LANE_RUNTIME_AND_KIT[@]}"
+      ;;
+    *)
+      echo "Unknown CI baseline lane: $(active_lane)" >&2
+      return 1
+      ;;
+  esac
+}
+
+active_checks() {
+  local label labels row
+  labels="$(lane_labels)" || return 1
+  while IFS= read -r label; do
+    [[ -n "$label" ]] || continue
+    row="$(find_check "$label")" || return 1
+    printf '%s\n' "$row"
+  done <<<"$labels"
+}
+
+validate_active_lane() {
+  lane_labels >/dev/null
 }
 
 init_results() {
@@ -47,6 +112,18 @@ find_check() {
       return 0
     fi
   done
+  return 1
+}
+
+find_active_check() {
+  local requested="$1"
+  local row id label command
+  while IFS=$'\t' read -r id label command; do
+    if [[ "$requested" == "$id" || "$requested" == "$label" ]]; then
+      printf '%s\t%s\t%s\n' "$id" "$label" "$command"
+      return 0
+    fi
+  done < <(active_checks)
   return 1
 }
 
@@ -82,11 +159,10 @@ record_skip() {
 }
 
 ensure_expected_results() {
-  local entry label id count
+  local row label id count
 
   touch "$STATUS_FILE"
-  for entry in "${CHECKS[@]}"; do
-    label="${entry%%|*}"
+  while IFS=$'\t' read -r _check_id label _check_command; do
     id="$(slugify "$label")"
     count="$(awk -F'\t' -v expected="$id" '$1 == expected { count += 1 } END { print count + 0 }' "$STATUS_FILE")"
     if [[ "$count" -eq 0 ]]; then
@@ -94,7 +170,7 @@ ensure_expected_results() {
     elif [[ "$count" -gt 1 ]]; then
       echo -e "$id-duplicate\t$label duplicate result\tfail\tduplicate CI result rows for $id\t" >>"$STATUS_FILE"
     fi
-  done
+  done < <(active_checks)
 }
 
 finalize_results() {
@@ -103,6 +179,7 @@ finalize_results() {
   local skip=0
   local id label status command log marker rel_log
 
+  validate_active_lane || exit 2
   ensure_expected_results
   record_skip "Live GitHub mutation checks" "Skipped by default; publish-change/live provider mutation checks require an explicit maintainer-run lane."
   record_skip "LLM acceptance evals" "Skipped by default; invoke acceptance or LLM eval lanes separately with explicit opt-in flags."
@@ -155,6 +232,7 @@ finalize_results() {
 
 case "${1:-}" in
   --init)
+    validate_active_lane || exit 2
     init_results
     ;;
   --check)
@@ -162,8 +240,9 @@ case "${1:-}" in
       echo "Usage: $0 --check <check-id-or-label>" >&2
       exit 2
     fi
-    if ! check_row="$(find_check "$2")"; then
-      echo "Unknown CI baseline check: $2" >&2
+    validate_active_lane || exit 2
+    if ! check_row="$(find_active_check "$2")"; then
+      echo "Unknown CI baseline check for lane $(active_lane): $2" >&2
       exit 2
     fi
     IFS=$'\t' read -r _check_id check_label check_command <<<"$check_row"
@@ -173,14 +252,28 @@ case "${1:-}" in
     finalize_results
     ;;
   "")
+    validate_active_lane || exit 2
     init_results
-    for entry in "${CHECKS[@]}"; do
-      run_check "${entry%%|*}" "${entry#*|}" || true
-    done
+    while IFS=$'\t' read -r _check_id check_label check_command; do
+      run_check "$check_label" "$check_command" || true
+    done < <(active_checks)
+    finalize_results
+    ;;
+  --lane)
+    if [[ -z "${2:-}" ]]; then
+      echo "Usage: $0 --lane <source-and-static|workflow-contracts|runtime-and-kit>" >&2
+      exit 2
+    fi
+    FLOW_AGENTS_CI_LANE="$2"
+    validate_active_lane || exit 2
+    init_results
+    while IFS=$'\t' read -r _check_id check_label check_command; do
+      run_check "$check_label" "$check_command" || true
+    done < <(active_checks)
     finalize_results
     ;;
   *)
-    echo "Usage: $0 [--init|--check <check-id-or-label>|--finalize]" >&2
+    echo "Usage: $0 [--init|--check <check-id-or-label>|--finalize|--lane <lane>]" >&2
     exit 2
     ;;
 esac

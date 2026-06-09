@@ -81,6 +81,10 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
 | Run integration evals | `bash evals/run.sh integration` |
 | Validate repo Git hooks | `npm run validate:repo-hooks --` |
 
+## Runtime And TypeScript Policy
+
+The package requires Node `>=22`, and GitHub Actions runs CI on Node 22. Keep `@types/node` on the Node 22 major line while CI remains the runtime baseline. Moving to a newer Node type major should be paired with an explicit runtime policy update and CI validation.
+
 ## Generated And Runtime Boundaries
 
 `dist/`, `build/`, and `_site/` are generated output. `dist/` mirrors canonical bundle source for runtime installation; `build/` mirrors TypeScript compilation output; `_site/` mirrors the docs site build. If any of these are stale, rebuild them instead of patching them.
