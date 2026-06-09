@@ -36,6 +36,23 @@ Important groups:
 
 `scripts/telemetry/` contains shell telemetry collection and redaction helpers. Runtime hook wrappers call these scripts; generated bundles copy them for installed runtime use.
 
+Set `CONSOLE_TELEMETRY_URL` or `CONSOLE_URL` to mirror redacted runtime
+telemetry to a Console API. The transport derives `/api/telemetry/records`
+unless `CONSOLE_TELEMETRY_ENDPOINT_URL` is set explicitly. Hosted Console URLs
+must use `https://`; `http://` is accepted only for `localhost` or `127.0.0.1`
+local development. Use `CONSOLE_TELEMETRY_TOKEN` or `CONSOLE_AUTH_TOKEN` for
+bearer auth, and `CONSOLE_TENANT_ID` for hosted tenant routing. Leaving the
+Console URL unset keeps telemetry local-only.
+
+Installers persist telemetry sink choices into the installed
+`scripts/telemetry/telemetry.conf`. `local-files` is the default and requires no
+Console. Add `--telemetry-sink local-kontour-console` for a separately running
+local Console, `--telemetry-sink kontour-cloud` for Kontour's hosted Console, or
+`--telemetry-sink hosted-kontour-console --console-url ...` for a self-hosted
+Console. `--console-token` and `--console-tenant` can be used with any Console
+sink. Prefer `flow-agents init` for a prompted setup; use `--yes` with the same
+flags for CI/headless installs.
+
 ## Install And Repo Utilities
 
 - `install-codex-home.sh`: installs the isolated generated Codex home.

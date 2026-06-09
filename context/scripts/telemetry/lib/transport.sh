@@ -3,6 +3,97 @@
 
 source "${TELEMETRY_DIR}/lib/redact.sh"
 
+console_telemetry_endpoint_url() {
+  if [[ -n "${CONSOLE_TELEMETRY_ENDPOINT_URL:-}" ]]; then
+    echo "$CONSOLE_TELEMETRY_ENDPOINT_URL"
+    return
+  fi
+  [[ -z "${CONSOLE_TELEMETRY_URL:-}" ]] && return
+  local base="${CONSOLE_TELEMETRY_URL%/}"
+  case "$base" in
+    */api/telemetry/records) echo "$base" ;;
+    */api/telemetry) echo "${base}/records" ;;
+    *) echo "${base}/api/telemetry/records" ;;
+  esac
+}
+
+console_telemetry_endpoint_allowed() {
+  local endpoint_url="$1"
+  [[ -z "$endpoint_url" || "$endpoint_url" == *$'\n'* || "$endpoint_url" == *$'\r'* || "$endpoint_url" == *'"'* ]] && return 1
+  case "$endpoint_url" in
+    https://*) return 0 ;;
+    http://127.0.0.1|http://127.0.0.1/*|http://127.0.0.1:*|http://localhost|http://localhost/*|http://localhost:*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+console_telemetry_safe_token() {
+  local value="$1"
+  [[ ${#value} -ge 1 && ${#value} -le 4096 && "$value" =~ ^[A-Za-z0-9._~+/=-]+$ ]]
+}
+
+console_telemetry_safe_tenant() {
+  local value="$1"
+  [[ ${#value} -ge 1 && ${#value} -le 128 && "$value" =~ ^[A-Za-z0-9._:-]+$ ]]
+}
+
+console_telemetry_timeout_seconds() {
+  local value="$1" fallback="$2" max="$3"
+  if [[ "$value" =~ ^[0-9]+$ ]] && [[ "$value" -ge 1 && "$value" -le "$max" ]]; then
+    echo "$value"
+  else
+    echo "$fallback"
+  fi
+}
+
+console_telemetry_emit() {
+  local event="$1"
+  local endpoint_url
+  endpoint_url=$(console_telemetry_endpoint_url)
+  [[ -z "$endpoint_url" ]] && return
+  console_telemetry_endpoint_allowed "$endpoint_url" || return
+
+  local processed_event
+  processed_event=$(redact_event "$event" "${CONSOLE_TELEMETRY_REDACT:-${TELEMETRY_CHANNEL_ANALYTICS_REDACT:-}}")
+
+  local curl_config curl_body connect_timeout max_time
+  connect_timeout=$(console_telemetry_timeout_seconds "${CONSOLE_TELEMETRY_CONNECT_TIMEOUT_SECONDS:-2}" 2 30)
+  max_time=$(console_telemetry_timeout_seconds "${CONSOLE_TELEMETRY_MAX_TIME_SECONDS:-5}" 5 60)
+  curl_config=$(mktemp "${TELEMETRY_SESSION_DIR}/console-curl.XXXXXX") || return
+  curl_body=$(mktemp "${TELEMETRY_SESSION_DIR}/console-body.XXXXXX") || {
+    rm -f "$curl_config"
+    return
+  }
+  chmod 600 "$curl_config" "$curl_body" 2>/dev/null
+  printf '%s' "$processed_event" > "$curl_body" || {
+    rm -f "$curl_config" "$curl_body"
+    return
+  }
+
+  {
+    printf 'url = "%s"\n' "$endpoint_url"
+    printf 'request = "POST"\n'
+    printf 'connect-timeout = "%s"\n' "$connect_timeout"
+    printf 'max-time = "%s"\n' "$max_time"
+    printf 'header = "Content-Type: application/json"\n'
+    if [[ -n "${CONSOLE_TELEMETRY_TOKEN:-}" ]] && console_telemetry_safe_token "$CONSOLE_TELEMETRY_TOKEN"; then
+      printf 'header = "Authorization: Bearer %s"\n' "$CONSOLE_TELEMETRY_TOKEN"
+    fi
+    if [[ -n "${CONSOLE_TENANT_ID:-}" ]] && console_telemetry_safe_tenant "$CONSOLE_TENANT_ID"; then
+      printf 'header = "x-console-tenant-id: %s"\n' "$CONSOLE_TENANT_ID"
+    fi
+    printf 'data-binary = "@%s"\n' "$curl_body"
+  } > "$curl_config" || {
+    rm -f "$curl_config" "$curl_body"
+    return
+  }
+
+  (
+    curl -s --proto =https,http --proto-redir =https,http --config "$curl_config" >/dev/null 2>&1
+    rm -f "$curl_config" "$curl_body"
+  ) &
+}
+
 transport_emit() {
   local event="$1"
   [[ -z "$event" ]] && return
@@ -40,6 +131,8 @@ transport_emit() {
         "$endpoint_url" >/dev/null 2>&1 &
     fi
   done
+
+  console_telemetry_emit "$event"
 }
 
 transport_maybe_rotate() {

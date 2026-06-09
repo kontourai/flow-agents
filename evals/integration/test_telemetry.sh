@@ -329,7 +329,90 @@ else
   _fail "Claude telemetry hook output mismatch: runtime='$claude_runtime' event='$claude_event_type' delegate='$claude_delegate' continue='$claude_continue'"
 fi
 
-# --- 7. discover-agents.sh finds agent cards ---
+# --- 7. Console telemetry transport ---
+echo ""
+echo "--- Console Transport ---"
+console_capture="${TMPDIR_EVAL}/console-request.json"
+fake_bin="${TMPDIR_EVAL}/fake-bin"
+mkdir -p "$fake_bin"
+cat > "${fake_bin}/curl" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+config_file=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --config)
+      config_file="$2"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+[[ -n "$config_file" && -n "${FLOW_AGENTS_TEST_CONSOLE_CAPTURE:-}" ]]
+node - "$config_file" "$FLOW_AGENTS_TEST_CONSOLE_CAPTURE" <<'NODE'
+const fs = require("fs");
+const [configPath, capturePath] = process.argv.slice(2);
+const config = fs.readFileSync(configPath, "utf8");
+const lines = config.split(/\r?\n/).filter(Boolean);
+const record = { headers: {}, config };
+for (const line of lines) {
+  const match = line.match(/^([^=]+) = "(.*)"$/);
+  if (!match) continue;
+  const key = match[1].trim();
+  const value = match[2];
+  if (key === "url") record.url = value;
+  if (key === "request") record.method = value;
+  if (key === "header") {
+    const index = value.indexOf(":");
+    if (index >= 0) record.headers[value.slice(0, index).toLowerCase()] = value.slice(index + 1).trim();
+  }
+  if (key === "data-binary" && value.startsWith("@")) {
+    record.body = JSON.parse(fs.readFileSync(value.slice(1), "utf8"));
+  }
+}
+fs.writeFileSync(capturePath, JSON.stringify(record));
+NODE
+SH
+chmod +x "${fake_bin}/curl"
+printf '%s\n' '{"cwd":"/tmp","prompt":"console secret","hook_event_name":"UserPromptSubmit","transcript_path":"/tmp/private/transcript.jsonl","last_assistant_message":"sensitive assistant text"}' \
+  | env \
+    PATH="${fake_bin}:$PATH" \
+    FLOW_AGENTS_TEST_CONSOLE_CAPTURE="$console_capture" \
+    TELEMETRY_ENABLED=true \
+    TELEMETRY_CHANNELS=analytics \
+    TELEMETRY_CHANNEL_ANALYTICS_LOG_FILE="${TMPDIR_EVAL}/console-analytics.jsonl" \
+    TELEMETRY_CONFIG_FILE="$TMPDIR_EVAL/telemetry.conf" \
+    TELEMETRY_DATA_DIR="$TMPDIR_EVAL" \
+    TELEMETRY_SESSION_DIR="$TMPDIR_EVAL/sessions" \
+    FLOW_AGENTS_TELEMETRY_FOREGROUND=true \
+    CONSOLE_TELEMETRY_URL="http://127.0.0.1:3737" \
+    CONSOLE_TELEMETRY_TOKEN="console-token" \
+    CONSOLE_TENANT_ID="tenant-a" \
+    CONSOLE_TELEMETRY_CONNECT_TIMEOUT_SECONDS='1" header = "x-bad: bad' \
+    CONSOLE_TELEMETRY_MAX_TIME_SECONDS='5
+url = "https://bad.example"' \
+    bash "$TELEMETRY_SH" userPromptSubmit eval-test 2>/dev/null
+i=0
+while [[ $i -lt 50 && ! -s "$console_capture" ]]; do
+  sleep 0.1; i=$((i + 1))
+done
+console_url=$(jq -r '.url // empty' "$console_capture" 2>/dev/null)
+console_method=$(jq -r '.method // empty' "$console_capture" 2>/dev/null)
+console_auth=$(jq -r '.headers.authorization // empty' "$console_capture" 2>/dev/null)
+console_tenant=$(jq -r '.headers["x-console-tenant-id"] // empty' "$console_capture" 2>/dev/null)
+console_event_type=$(jq -r '.body.event_type // empty' "$console_capture" 2>/dev/null)
+console_prompt=$(jq -r '.body.turn.prompt_text' "$console_capture" 2>/dev/null)
+console_transcript=$(jq -r '.body.hook.transcript_path' "$console_capture" 2>/dev/null)
+console_assistant=$(jq -r '.body.hook.last_assistant_message' "$console_capture" 2>/dev/null)
+if [[ "$console_url" == "http://127.0.0.1:3737/api/telemetry/records" && "$console_method" == "POST" && "$console_auth" == "Bearer console-token" && "$console_tenant" == "tenant-a" && "$console_event_type" == "turn.user" && "$console_prompt" == "null" && "$console_transcript" == "null" && "$console_assistant" == "null" ]]; then
+  _pass "Console telemetry transport posts redacted event with auth and tenant headers"
+else
+  _fail "Console telemetry transport mismatch: url='$console_url' method='$console_method' auth='$console_auth' tenant='$console_tenant' event='$console_event_type' prompt='$console_prompt' transcript='$console_transcript' assistant='$console_assistant'"
+fi
+
+# --- 8. discover-agents.sh finds agent cards ---
 echo ""
 echo "--- Agent Discovery ---"
 if [[ -f "$DISCOVER_SCRIPT" ]]; then

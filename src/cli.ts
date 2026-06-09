@@ -4,6 +4,7 @@ import { main as effectiveBacklogSettings } from "./cli/effective-backlog-settin
 import { main as buildDocsPreview } from "./cli/docs-preview.js";
 import { main as consoleLearningProjection } from "./cli/console-learning-projection.js";
 import { main as flowKit } from "./cli/flow-kit.js";
+import { main as init } from "./cli/init.js";
 import { main as promoteWorkflowArtifact } from "./cli/promote-workflow-artifact.js";
 import { main as publishChange } from "./cli/publish-change-helper.js";
 import { main as pullWorkProvider } from "./cli/pull-work-provider.js";
@@ -27,7 +28,7 @@ type PendingCommand = {
 const pendingCommands: readonly PendingCommand[] = [
 ];
 
-const availableCommands = new Map<string, (argv: string[]) => number>([
+const availableCommands = new Map<string, (argv: string[]) => number | Promise<number>>([
   ["build-bundles", () => buildBundles()],
   ["build-docs-preview", () => buildDocsPreview()],
   ["console-learning-projection", consoleLearningProjection],
@@ -35,6 +36,7 @@ const availableCommands = new Map<string, (argv: string[]) => number>([
   ["effective-backlog-settings", effectiveBacklogSettings],
   ["filter-installed-packs", filterInstalledPacks],
   ["flow-kit", flowKit],
+  ["init", init],
   ["promote-workflow-artifact", promoteWorkflowArtifact],
   ["publish-change", publishChange],
   ["pull-work-provider", pullWorkProvider],
@@ -80,28 +82,32 @@ const invokedAs = basename(process.argv[1] ?? "flow-agents");
 const commandName = aliases.get(invokedAs) ?? process.argv[2];
 const forwardedArgs = aliases.has(invokedAs) ? process.argv.slice(2) : process.argv.slice(3);
 
-if (!commandName || commandName === "--help" || commandName === "-h" || commandName === "help") {
-  printHelp();
-  process.exit(0);
+async function run(): Promise<number> {
+  if (!commandName || commandName === "--help" || commandName === "-h" || commandName === "help") {
+    printHelp();
+    return 0;
+  }
+
+  if (commandName === "commands" || commandName === "list") {
+    for (const name of availableCommands.keys()) console.log(name);
+    for (const command of pendingCommands) console.log(command.name);
+    return 0;
+  }
+
+  const availableCommand = availableCommands.get(commandName);
+  if (availableCommand) return await availableCommand(forwardedArgs);
+
+  const pendingCommand = pendingCommands.find((candidate) => candidate.name === commandName);
+  if (pendingCommand) {
+    console.error(
+      `flow-agents ${pendingCommand.name} is registered in the TypeScript command surface but has not been ported yet. Planned source: ${pendingCommand.plannedSource}.`
+    );
+    return 78;
+  }
+
+  console.error(`Unknown flow-agents command: ${commandName}`);
+  console.error("Run `flow-agents --help` for registered commands.");
+  return 64;
 }
 
-if (commandName === "commands" || commandName === "list") {
-  for (const name of availableCommands.keys()) console.log(name);
-  for (const command of pendingCommands) console.log(command.name);
-  process.exit(0);
-}
-
-const availableCommand = availableCommands.get(commandName);
-if (availableCommand) process.exit(availableCommand(forwardedArgs));
-
-const pendingCommand = pendingCommands.find((candidate) => candidate.name === commandName);
-if (pendingCommand) {
-  console.error(
-    `flow-agents ${pendingCommand.name} is registered in the TypeScript command surface but has not been ported yet. Planned source: ${pendingCommand.plannedSource}.`
-  );
-  process.exit(78);
-}
-
-console.error(`Unknown flow-agents command: ${commandName}`);
-console.error("Run `flow-agents --help` for registered commands.");
-process.exit(64);
+process.exit(await run());
