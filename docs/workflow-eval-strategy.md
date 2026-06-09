@@ -147,7 +147,7 @@ The default Flow Agents CI baseline is the provider-check lane for ordinary pull
 bash evals/ci/run-baseline.sh
 ```
 
-It runs deterministic credential-free checks: source tree validation, context-map drift, static evals, workflow artifact checks, publish-change helper coverage, sidecar writer coverage, Goal Fit and workflow steering hooks, hook-influence contract checks, Flow Kit repository checks, runtime adapter activation, and bundle install smoke tests. It writes logs plus a Markdown provider evidence summary to `evals/results/ci-baseline/`, and GitHub Actions uploads that directory as the `flow-agents-ci-baseline` artifact.
+It runs deterministic credential-free checks: source tree validation, context-map drift, static evals, workflow artifact checks, publish-change helper coverage, sidecar writer coverage, Goal Fit and workflow steering hooks, hook-influence contract checks, Flow Kit repository checks, runtime adapter activation, and bundle install smoke tests. It writes logs plus Markdown provider evidence summaries under `evals/results/ci-baseline/`. GitHub Actions uploads separate per-lane artifacts: `flow-agents-ci-source-and-static`, `flow-agents-ci-workflow-contracts`, and `flow-agents-ci-runtime-and-kit`.
 
 Default CI intentionally skips live GitHub mutation checks, LLM behavioral/acceptance evals, and Veritas/governance provider evidence unless a maintainer opts into those lanes. The CI summary must name those skips so evidence-gate and release-readiness can classify them as accepted skips or `NOT_VERIFIED` according to change risk.
 
@@ -246,7 +246,7 @@ Use the Flow Agents CI baseline as the provider evidence lane for this determini
 bash evals/ci/run-baseline.sh
 ```
 
-For GitHub provider evidence, cite the uploaded `flow-agents-ci-baseline` artifact/check. That artifact is provider evidence for deterministic local contracts and installed-command behavior. It intentionally skips live LLM influence checks unless separately configured, so it must not be cited as proof that Codex live model context was changed by project hooks.
+For GitHub provider evidence, cite the relevant uploaded lane artifact/check: `flow-agents-ci-source-and-static`, `flow-agents-ci-workflow-contracts`, or `flow-agents-ci-runtime-and-kit`. Those artifacts are provider evidence for deterministic local contracts and installed-command behavior. They intentionally skip live LLM influence checks unless separately configured, so they must not be cited as proof that Codex live model context was changed by project hooks.
 
 Run the non-LLM hook-influence contract with:
 

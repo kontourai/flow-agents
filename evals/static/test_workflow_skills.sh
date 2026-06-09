@@ -35,6 +35,21 @@ reject_text_many() {
   if rg -q -- "$pattern" "$@"; then fail "$label"; else pass "$label"; fi
 }
 
+require_status() {
+  local expected="$1"
+  local label="$2"
+  shift 2
+  local output status
+  set +e
+  output="$("$@" 2>&1)"
+  status=$?
+  if [[ "$status" -eq "$expected" ]]; then
+    pass "$label"
+  else
+    fail "$label (expected exit $expected, got $status: $output)"
+  fi
+}
+
 echo "=== Workflow Skill Contract Checks ==="
 
 IDEA="$ROOT/skills/idea-to-backlog/SKILL.md"
@@ -1120,13 +1135,45 @@ require_text "$CI_WORKFLOW" 'pull_request:' "CI workflow runs on pull requests"
 require_text "$CI_WORKFLOW" 'workflow_dispatch:' "CI workflow supports manual runs"
 require_text "$CI_WORKFLOW" 'contents: read' "CI workflow uses read-only contents permission"
 require_text "$CI_WORKFLOW" 'bash evals/ci/run-baseline.sh' "CI workflow runs baseline wrapper"
+require_text "$CI_WORKFLOW" 'source-and-static:' "CI workflow has source and static job"
+require_text "$CI_WORKFLOW" 'workflow-contracts:' "CI workflow has workflow contracts job"
+require_text "$CI_WORKFLOW" 'runtime-and-kit:' "CI workflow has runtime and kit job"
+require_text "$CI_WORKFLOW" 'FLOW_AGENTS_CI_LANE: source-and-static' "CI source lane is explicit"
+require_text "$CI_WORKFLOW" 'FLOW_AGENTS_CI_LANE: workflow-contracts' "CI workflow lane is explicit"
+require_text "$CI_WORKFLOW" 'FLOW_AGENTS_CI_LANE: runtime-and-kit' "CI runtime lane is explicit"
+require_text "$CI_WORKFLOW" 'flow-agents-ci-source-and-static' "CI uploads source lane evidence"
+require_text "$CI_WORKFLOW" 'flow-agents-ci-workflow-contracts' "CI uploads workflow lane evidence"
+require_text "$CI_WORKFLOW" 'flow-agents-ci-runtime-and-kit' "CI uploads runtime lane evidence"
 require_text "$CI_WORKFLOW" 'actions/checkout@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+' "CI workflow checks out with an immutable SHA pin and version comment"
 require_text "$CI_WORKFLOW" 'actions/setup-node@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+' "CI workflow sets up Node with an immutable SHA pin and version comment"
 require_text "$CI_WORKFLOW" 'actions/upload-artifact@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+' "CI workflow uploads evidence artifacts with an immutable SHA pin and version comment"
+require_text "$CI_BASELINE" 'LANE_SOURCE_AND_STATIC' "CI baseline defines source and static lane"
+require_text "$CI_BASELINE" 'LANE_WORKFLOW_CONTRACTS' "CI baseline defines workflow contracts lane"
+require_text "$CI_BASELINE" 'LANE_RUNTIME_AND_KIT' "CI baseline defines runtime and kit lane"
+require_text "$CI_BASELINE" 'find_active_check' "CI baseline scopes individual checks to the active lane"
+require_text "$CI_BASELINE" 'validate_active_lane \|\| exit 2' "CI baseline validates active lane before running commands"
+require_text "$CI_BASELINE" 'missing CI result row' "CI baseline fails closed on missing lane rows"
 require_text "$CI_BASELINE" 'test_publish_change_helper.sh' "CI baseline includes publish-change helper coverage"
 require_text "$CI_BASELINE" 'test_bundle_install.sh' "CI baseline includes bundle install coverage"
 require_text "$CI_BASELINE" 'LLM acceptance evals' "CI baseline records skipped LLM acceptance"
 reject_text "$CI_BASELINE" 'run\.sh llm' "CI baseline does not run LLM evals by default"
+
+CI_LANE_TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/flow-agents-ci-lanes.XXXXXX")"
+require_status 2 "CI baseline rejects invalid lane during init" \
+  env FLOW_AGENTS_CI_LANE=not-a-lane FLOW_AGENTS_CI_RESULTS_DIR="$CI_LANE_TEST_DIR/invalid-init" bash "$CI_BASELINE" --init
+require_status 2 "CI baseline rejects invalid lane during check" \
+  env FLOW_AGENTS_CI_LANE=not-a-lane FLOW_AGENTS_CI_RESULTS_DIR="$CI_LANE_TEST_DIR/invalid-check" bash "$CI_BASELINE" --check content-boundary
+require_status 2 "CI baseline rejects invalid lane during finalize" \
+  env FLOW_AGENTS_CI_LANE=not-a-lane FLOW_AGENTS_CI_RESULTS_DIR="$CI_LANE_TEST_DIR/invalid-finalize" bash "$CI_BASELINE" --finalize
+require_status 2 "CI baseline rejects invalid lane during full run" \
+  env FLOW_AGENTS_CI_LANE=not-a-lane FLOW_AGENTS_CI_RESULTS_DIR="$CI_LANE_TEST_DIR/invalid-full" bash "$CI_BASELINE"
+require_status 2 "CI baseline rejects invalid explicit lane" \
+  env FLOW_AGENTS_CI_RESULTS_DIR="$CI_LANE_TEST_DIR/invalid-explicit-lane" bash "$CI_BASELINE" --lane not-a-lane
+require_status 2 "CI baseline rejects checks outside the active lane" \
+  env FLOW_AGENTS_CI_LANE=source-and-static FLOW_AGENTS_CI_RESULTS_DIR="$CI_LANE_TEST_DIR/wrong-lane-check" bash "$CI_BASELINE" --check bundle-install-integration
+require_status 1 "CI baseline fails closed on missing expected lane rows" \
+  bash -c 'FLOW_AGENTS_CI_LANE=source-and-static FLOW_AGENTS_CI_RESULTS_DIR="$1" bash "$0" --init && FLOW_AGENTS_CI_LANE=source-and-static FLOW_AGENTS_CI_RESULTS_DIR="$1" bash "$0" --finalize' "$CI_BASELINE" "$CI_LANE_TEST_DIR/missing-rows"
+
 require_text "$PAGES_INDEX" '```mermaid' "docs index includes Mermaid graph"
 require_text "$PAGES_LAYOUT" 'assets/site.css' "docs layout uses shared CSS"
 require_text "$PAGES_LAYOUT" 'assets/site.js' "docs layout uses shared JS"

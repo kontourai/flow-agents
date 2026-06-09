@@ -300,7 +300,7 @@ Flow Agents source changes also have a deterministic CI baseline. Run it locally
 bash evals/ci/run-baseline.sh
 ```
 
-The wrapper records command logs and a Markdown provider evidence summary under `evals/results/ci-baseline/`. GitHub Actions runs the same wrapper for pull requests, pushes to `main`, and manual dispatches. Evidence Gate should cite the provider check name, summary, and artifact when they exist. If the provider run is absent, pending, or failed, keep that status as `NOT_VERIFIED` for risky changes instead of treating local output as remote CI.
+The wrapper records command logs and Markdown provider evidence summaries under `evals/results/ci-baseline/`. GitHub Actions runs the same wrapper for pull requests, pushes to `main`, and manual dispatches across the `flow-agents-ci-source-and-static`, `flow-agents-ci-workflow-contracts`, and `flow-agents-ci-runtime-and-kit` artifacts. Evidence Gate should cite the provider check name, summary, and artifact when they exist. If the provider run is absent, pending, or failed, keep that status as `NOT_VERIFIED` for risky changes instead of treating local output as remote CI.
 
 ## 8. Publish The Verified Change
 

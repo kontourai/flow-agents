@@ -78,6 +78,10 @@ Use fix-bug. Reproduce the problem, diagnose root cause, implement the fix, and 
     <strong>Repository Structure</strong>
     <span>Find the canonical source, generated output, runtime state, package, docs, eval, and cleanup boundaries.</span>
   </a>
+  <a class="doc-card" href="release-notes.html">
+    <strong>Release Notes</strong>
+    <span>Review repository cleanup, runtime hook, CI, and release-readiness changes.</span>
+  </a>
   <a class="doc-card" href="skills-map.html">
     <strong>Workflow Map</strong>
     <span>See the core skills, gates, artifacts, and route-back behavior.</span>
