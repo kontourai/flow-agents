@@ -1,3 +1,7 @@
+---
+title: Workflow Eval Strategy
+---
+
 # Workflow Eval Strategy
 
 The Builder Kit workflow system now has concrete skill contracts for `idea-to-backlog`, `pull-work`, `plan-work`, `review-work`, `deliver`, `evidence-gate`, `release-readiness`, and `learning-review`, plus shared workflow contracts in `context/contracts/`. Evals should prove both the written contracts and the agent behavior around gates, artifacts, worktrees, Goal Fit, release readiness, final acceptance docs, and learning feedback.

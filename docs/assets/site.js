@@ -56,23 +56,23 @@ async function renderMermaid() {
     theme,
     themeVariables: currentTheme() === "dark"
       ? {
-          background: "#171c18",
-          primaryColor: "#222920",
-          primaryTextColor: "#fff8eb",
-          primaryBorderColor: "#53624f",
-          lineColor: "#88e5c9",
-          secondaryColor: "#16382f",
-          tertiaryColor: "#0c100d",
+          background: "#111824",
+          primaryColor: "#16202d",
+          primaryTextColor: "#eef3f8",
+          primaryBorderColor: "#3d566e",
+          lineColor: "#5cc4e0",
+          secondaryColor: "#11303c",
+          tertiaryColor: "#0a0e13",
           fontFamily: "IBM Plex Mono, monospace"
         }
       : {
-          background: "#fbfdf8",
-          primaryColor: "#e7eee7",
-          primaryTextColor: "#101511",
-          primaryBorderColor: "#9cad99",
-          lineColor: "#0b6f5c",
-          secondaryColor: "#dceee6",
-          tertiaryColor: "#f4f7f3",
+          background: "#ffffff",
+          primaryColor: "#ecebe4",
+          primaryTextColor: "#101114",
+          primaryBorderColor: "#9aa6b2",
+          lineColor: "#1f6f88",
+          secondaryColor: "#ddebef",
+          tertiaryColor: "#f5f4ef",
           fontFamily: "IBM Plex Mono, monospace"
         }
   });
@@ -97,8 +97,27 @@ async function renderMermaid() {
   }
 }
 
+function setupNavDrawer() {
+  const toggle = document.querySelector("[data-nav-toggle]");
+  const rail = document.getElementById("site-rail");
+  const backdrop = document.querySelector("[data-nav-backdrop]");
+  if (!toggle || !rail || !backdrop) {
+    return;
+  }
+  const setOpen = (open) => {
+    toggle.setAttribute("aria-expanded", String(open));
+    rail.classList.toggle("open", open);
+    backdrop.hidden = !open;
+    document.body.classList.toggle("nav-open", open);
+  };
+  toggle.addEventListener("click", () => setOpen(toggle.getAttribute("aria-expanded") !== "true"));
+  backdrop.addEventListener("click", () => setOpen(false));
+  window.matchMedia("(min-width: 861px)").addEventListener("change", () => setOpen(false));
+}
+
 prepareMermaid();
 updateToggleLabels();
+setupNavDrawer();
 
 for (const button of document.querySelectorAll("[data-theme-toggle]")) {
   button.addEventListener("click", async () => {

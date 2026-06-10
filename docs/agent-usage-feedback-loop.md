@@ -1,3 +1,7 @@
+---
+title: Agent Usage Feedback Loop
+---
+
 # Agent Usage Feedback Loop
 
 This document defines the usage feedback loop for comparing agent runs across repositories, runtimes, profiles, prompts, skills, and future setups. The measurement schema is runtime-neutral: every runtime should import or emit normalized session, event, and outcome records before reporting. Codex and Claude Code can both flow through the shared telemetry envelope; Kiro uses the same canonical telemetry script when hooks are installed.

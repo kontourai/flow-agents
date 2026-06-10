@@ -1,3 +1,7 @@
+---
+title: Developer Git Hook Setup
+---
+
 # Developer Git Hook Setup
 
 Flow Agents has a repo-owned Git pre-push lane for contributors who want local checks before pushing this repository.

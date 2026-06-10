@@ -1,3 +1,7 @@
+---
+title: ADR 0002: Flow Kits As The Extension Unit
+---
+
 # ADR 0002: Flow Kits As The Extension Unit
 
 Flow Agents will use **Flow Kit** as the product and implementation term for installable workflow bundles, replacing the older "pack" vocabulary. A Flow Kit may contain Flow Definitions, skills, adapters, provider contracts, docs, and evals; the Kit Catalog lists available kits and installable assets, but the workflow semantics live in kit-owned Flow Definition files. This avoids overloading packaging metadata with process semantics and gives custom workflow authoring a clearer product language.

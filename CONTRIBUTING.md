@@ -18,6 +18,22 @@ Agents. This file is the footnote for people developing the product itself.
 - run `npm run build && npm run validate:source && bash evals/ci/run-baseline.sh`
   before opening a PR
 
+## Docs Site Preview
+
+The GitHub Pages site is built from `docs/` by the `Publish Docs` workflow
+using Jekyll. To preview locally, install Jekyll 3.9 with the github-pages
+default plugins and build into the ignored `_site/` directory:
+
+```bash
+gem install --user-install jekyll -v 3.9.5 jekyll-optional-front-matter \
+  jekyll-relative-links jekyll-readme-index jekyll-titles-from-headings \
+  kramdown-parser-gfm
+"$(ruby -e 'print Gem.user_dir')/bin/jekyll" build --source docs --destination _site
+```
+
+Set `FLOW_CLI_ROOT` to a Flow checkout or installed `@kontourai/flow` package
+root to enable full Flow Definition validation in `npm run validate:source`.
+
 ## Validation
 
 - `npm run validate:source` — source-tree integrity (paths, packs, manifests)
