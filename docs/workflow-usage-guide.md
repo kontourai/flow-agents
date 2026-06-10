@@ -378,7 +378,7 @@ Completion gate:
 
 The validator and stop hook enforce this shape for terminal workflows. If a delivery is terminal and neither the Markdown artifact nor `state.json.artifact_paths` points at durable docs, validation should fail unless the artifact records an explicit no-docs decision.
 
-## 10. Capture Learning
+## 11. Capture Learning
 
 Use `learning-review` after release, failed gates, incidents, repeated friction, or workflow gaps.
 

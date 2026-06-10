@@ -96,7 +96,7 @@ specific row that matches the change.
 | Bundle/export shape | `packaging/`, `src/tools/build-universal-bundles.ts`, and source directories copied into bundles | `bash evals/static/test_universal_bundles.sh` |
 | Installer or local runtime setup behavior | `scripts/install-*.sh`, package bins, and generated bundle install scripts | `bash evals/integration/test_bundle_install.sh` |
 | Workflow artifact, sidecar, or provider contract | `context/contracts/`, `schemas/`, `src/cli/workflow-*`, and matching eval fixtures | `npm run workflow:validate-artifacts --` and workflow integration evals |
-| Flow Kit catalog or bundled kit content | `kits/`, Flow Definition files, and kit repository fixtures | `npm run flow-kit -- validate` or `bash evals/integration/test_flow_kit_repository.sh` |
+| Flow Kit catalog or bundled kit content | `kits/`, Flow Definition files, and kit repository fixtures | `npm run validate:source -- --kit <path>` or `bash evals/integration/test_flow_kit_repository.sh` |
 | Durable developer guidance | `docs/`; regenerate/check the context map when navigation or durable contracts change | `npm run context-map:check --` |
 | Eval scenario or fixture | `evals/static/`, `evals/integration/`, `evals/fixtures/`, or `evals/cases/` | The owning eval plus `bash evals/run.sh static` when contracts are touched |
 | Optional external integration configuration | `integrations/` or `veritas.claims.json`; keep local run output ignored | The integration-specific eval or documented dry run |

@@ -45,6 +45,9 @@ flowchart LR
   Learn -->|new work| Shape
 ```
 
+> `publish-change` is a CLI-driven workflow step, not a loadable skill.
+> `goal-fit` is a hook-enforced check, not a loadable skill.
+
 ## Current Shape
 
 The operating model now has first-class coverage from idea intake through trusted delivery:
@@ -76,7 +79,7 @@ This view shows how each phase is composed. The left rail is the durable phase s
     <div class="phase-step"><span>01</span><strong>Discovery & shaping</strong></div>
     <div class="phase-lanes">
       <section class="phase-lane phase-lane--primary"><h3>Primary</h3><p><code>builder-shape</code> <code>idea-to-backlog</code></p></section>
-      <section class="phase-lane"><h3>Support</h3><p><code>knowledge-search</code> <code>search-first</code> <code>explore</code> <code>crowdsource</code> <code>frontend-design</code> <code>github-cli</code> <code>knowledge-capture</code></p></section>
+      <section class="phase-lane"><h3>Support</h3><p><code>search-first</code> <code>explore</code> <code>frontend-design</code> <code>github-cli</code> <code>knowledge-capture</code></p></section>
       <section class="phase-lane"><h3>Nested sections / future primitives</h3><p>intake/dedupe, separate ideas, thinnest meaningful slice, opportunity review, explore options, <code>shape-work</code>, prioritize work, sync executable backlog</p></section>
       <section class="phase-lane phase-lane--gate"><h3>Gate & artifact</h3><p>Idea, slice, shape, and backlog gates. Writes shaped briefs and GitHub issue links in <code>.flow-agents/&lt;slug&gt;/</code>.</p></section>
     </div>
@@ -112,7 +115,7 @@ This view shows how each phase is composed. The left rail is the durable phase s
     <div class="phase-step"><span>05</span><strong>Learning & improvement</strong></div>
     <div class="phase-lanes">
       <section class="phase-lane phase-lane--primary"><h3>Primary</h3><p><code>learning-review</code></p></section>
-      <section class="phase-lane"><h3>Support</h3><p><code>knowledge-capture</code> <code>observe</code> <code>idea-to-backlog</code> <code>eval-rebuild</code></p></section>
+      <section class="phase-lane"><h3>Support</h3><p><code>knowledge-capture</code> <code>idea-to-backlog</code> <code>eval-rebuild</code></p></section>
       <section class="phase-lane"><h3>Nested sections / future primitives</h3><p>facts vs interpretation, follow-up routing, docs promotion review, knowledge updates, eval updates, skill/backlog improvements</p></section>
       <section class="phase-lane phase-lane--gate"><h3>Gate & artifact</h3><p>Learning gate. Writes outcomes, gaps, docs promotion state, follow-ups, knowledge updates, and verdict.</p></section>
     </div>
@@ -121,11 +124,11 @@ This view shows how each phase is composed. The left rail is the durable phase s
 
 | Phase | Primary workflow skill | Supporting skills | Nested sections / future primitive candidates |
 | --- | --- | --- | --- |
-| Idea discovery and shaping | `builder-shape`, `idea-to-backlog` | `knowledge-search`, `search-first`, `explore`, `crowdsource`, `frontend-design`, `github-cli`, `knowledge-capture` | intake/dedupe, separate ideas, thinnest meaningful slice, opportunity review, explore options, shape work, prioritize work, sync executable backlog |
+| Idea discovery and shaping | `builder-shape`, `idea-to-backlog` | `search-first`, `explore`, `frontend-design`, `github-cli`, `knowledge-capture` | intake/dedupe, separate ideas, thinnest meaningful slice, opportunity review, explore options, shape work, prioritize work, sync executable backlog |
 | Backlog pickup | `pull-work` | `github-cli` | board snapshot, WIP check, grouping/dependency check, Probe decision, worktree decision, handoff |
 | Execution planning and build | `design-probe`, `pickup-probe`, `plan-work`, `execute-plan`, `review-work`, `verify-work` | `feedback-loop`, `browser-test`, `deliver`, `fix-bug`, `tdd-workflow` | Probe notes, Builder Kit Probe record, Definition Of Done, execution plan, parallel waves, implementation session state, critique report, verification report, Goal Fit Gate |
 | Evidence and release confidence | `evidence-gate`, `release-readiness` | `github-cli`, `eval-rebuild` | criteria-to-evidence map, CI confidence, scope/integrity check, publish-change, rollback review, observability review, final acceptance docs, post-deploy plan |
-| Learning and improvement | `learning-review` | `knowledge-capture`, `observe`, `idea-to-backlog`, `eval-rebuild` | facts vs interpretation, docs promotion review, follow-up routing, knowledge updates, eval/skill/backlog improvements |
+| Learning and improvement | `learning-review` | `knowledge-capture`, `idea-to-backlog`, `eval-rebuild` | facts vs interpretation, docs promotion review, follow-up routing, knowledge updates, eval/skill/backlog improvements |
 
 The highest-leverage future extractions are likely `shape-work`, `test-map`, `scope-and-integrity-check`, and `remediate-ci`. They are still nested because their behavior is present, but not yet large enough to need separate activation contracts.
 
@@ -189,6 +192,9 @@ flowchart LR
   Pull -->|too vague / stale| BacklogSkill
   Learning -->|systemic change| Eval[eval-rebuild / backlog / skill update]
 ```
+
+> `publish-change` is a CLI-driven workflow step, not a loadable skill.
+> `goal-fit` is a hook-enforced check, not a loadable skill.
 
 ## Eval Coverage
 
