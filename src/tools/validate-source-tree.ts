@@ -302,6 +302,7 @@ function validateLegacyRefs(reporter: Reporter): void {
     for (const match of text.matchAll(legacyRefRe)) {
       const ref = match[0].replace(/[.,)'"\]]+$/, "");
       if (/[{}$]/.test(ref)) continue;
+      if (ref.split(/[\\/]/).includes("node_modules")) continue;
       const candidates = [path.join(root, ref), ...(ref.startsWith("evals/") ? [] : [path.join(root, "evals", ref)])];
       if (!candidates.some(fs.existsSync)) reporter.fail(`${rel(file)}: references missing source path: ${ref}`);
     }

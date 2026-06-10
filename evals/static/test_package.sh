@@ -60,6 +60,63 @@ if [[ "$EVAL_MODE" == "repo" ]]; then
   else
     _fail "source tree validation failed (see /tmp/source-tree-validation.txt)"
   fi
+  if node - "$ROOT_DIR/package.json" <<'NODE'
+const fs = require("node:fs");
+const pkg = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const files = pkg.files;
+if (!Array.isArray(files) || files.length === 0) {
+  throw new Error("package.json must define an explicit npm files allowlist");
+}
+const required = [
+  "agents/",
+  "build/",
+  "console.telemetry.json",
+  "context/",
+  "docs/",
+  "evals/",
+  "install.sh",
+  "kits/",
+  "packaging/",
+  "scripts/",
+  "skills/",
+  "src/",
+];
+for (const entry of required) {
+  if (!files.includes(entry)) throw new Error(`package files allowlist missing ${entry}`);
+}
+const requiredExcludes = [
+  "!evals/cases/dev/node_modules/",
+  "!**/.flow-agents/",
+  "!**/.surface/",
+  "!**/.telemetry/",
+  "!**/.veritas/",
+  "!**/node_modules/",
+];
+for (const entry of requiredExcludes) {
+  if (!files.includes(entry)) throw new Error(`package files allowlist missing exclusion ${entry}`);
+}
+const forbidden = [
+  ".agents/",
+  ".codex/",
+  ".claude/",
+  ".flow-agents/",
+  ".surface/",
+  ".telemetry/",
+  ".veritas/",
+  "dist/",
+  "node_modules/",
+  "_site/",
+  "test-results/",
+];
+for (const entry of files) {
+  if (!entry.startsWith("!") && forbidden.includes(entry)) throw new Error(`package files allowlist includes runtime/generated path ${entry}`);
+}
+NODE
+  then
+    _pass "package uses explicit npm files allowlist"
+  else
+    _fail "package npm files allowlist is missing or unsafe"
+  fi
   legacy_pattern='[Kk]agents|K''AGENTS|[Kk]agents\.dev'
   if (cd "$ROOT_DIR" && git ls-files -z | xargs -0 rg -n "$legacy_pattern" >/tmp/legacy-product-refs.txt 2>&1); then
     _fail "tracked source contains legacy Flow Agents rename references (see /tmp/legacy-product-refs.txt)"
