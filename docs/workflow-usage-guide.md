@@ -4,7 +4,9 @@ title: Workflow Usage Guide
 
 # Workflow Usage Guide
 
-This guide shows how to use the Builder Kit workflow skills in normal chats. Flow Agents coordinates the local runtime, installs Flow Kits, and records artifacts; Flow owns gate semantics, including typed `expects` entries with `kind: "surface.claim"`, trusted producer config, and gate overrides.
+This guide shows how to use the Builder Kit workflow skills in normal chats.
+
+> **Which doc do I want?** This page is the *driver's manual* — what to say at each stage and what should happen. If you want the conceptual map first — layers, sidecars, hooks, evidence, and why the system is shaped this way — read the [Agent System Guidebook](agent-system-guidebook.md). For a one-line summary of every skill and gate, use the [Skills Map](skills-map.md). Flow Agents coordinates the local runtime, installs Flow Kits, and records artifacts; Flow owns gate semantics, including typed `expects` entries with `kind: "surface.claim"`, trusted producer config, and gate overrides.
 
 The core pattern is:
 
