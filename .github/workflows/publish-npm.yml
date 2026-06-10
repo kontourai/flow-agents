@@ -68,6 +68,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y jq ripgrep
 
+      - name: Build bundle
+        run: npm run build --silent
+
       - name: Verify tag matches package version
         run: |
           PACKAGE_VERSION=$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version")

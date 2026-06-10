@@ -6,6 +6,8 @@ title: Agent System Guidebook
 
 This is the plain-language map of how Flow Agents is assembled and how it should feel to use.
 
+> **Which doc do I want?** This page explains *how the system thinks* — layers, state, hooks, evidence, and the UX rules behind them. If you want to *drive a workflow right now* — stage-by-stage prompts and expected behavior — use the [Workflow Usage Guide](workflow-usage-guide.md). For the one-line summary of every skill and gate, use the [Skills Map](skills-map.md).
+
 The short version: Flow Agents is not one large prompt. It is a portable operating layer that wraps agent runtimes with durable instructions, task-specific procedures, scoped tools, specialist agents, Flow-backed workflow state, hooks, evidence, and learning loops. The goal is to make ordinary agent use more reliable without asking the user to understand all of that machinery.
 
 ## The User Experience
@@ -282,24 +284,7 @@ user request
 
 ## Example: Development Work
 
-User prompt:
-
-```text
-Build the next slice, use critique, keep docs updated, then commit and push.
-```
-
-What Flow Agents should do:
-
-| Step | What Happens | What The User Should Notice |
-| --- | --- | --- |
-| 1. Session | Create or resume `.flow-agents/<slug>/`. | The agent knows what work is active. |
-| 2. Plan | Define acceptance criteria and risks. | The work has a clear finish line. |
-| 3. Execute | Assign scoped implementation to workers or do it locally. | Progress continues without constant prompting. |
-| 4. Critique | Ask reviewers to find issues without fixing them. | Problems are surfaced before delivery. |
-| 5. Fix | Address critique findings and rerun focused checks. | The loop closes instead of hand-waving. |
-| 6. Verify | Run tests, lint, integration checks, or browser checks. | The final answer cites evidence. |
-| 7. Document | Promote important decisions into durable docs. | Future sessions can understand why. |
-| 8. Commit | Commit and push only after evidence is clean. | The repo ends in a usable state. |
+For development work — session, plan, execute, critique, verify, document, commit — the stage-by-stage walkthrough with example prompts and expected behavior lives in the [Workflow Usage Guide](workflow-usage-guide.md). The UX contract is the same as everywhere else in this guidebook: the user states the outcome, and the system supplies the path, the state, the checks, and the proof.
 
 ## Example: Meeting Or Sales Knowledge
 
