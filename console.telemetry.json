@@ -118,6 +118,18 @@
       "label": "Builder shape",
       "match": { "attribute": "flow", "includes": "builder.shape" },
       "titleAttribute": "title",
+      "detailAttributes": {
+        "Project": "project",
+        "Repository": "repo",
+        "Task": "taskSlug",
+        "Status": "status",
+        "Outcome": "outcome",
+        "Phase": "phase",
+        "Skill": "skill",
+        "Agent": "agent",
+        "Model": "model",
+        "Observed": "observedAt"
+      },
       "limit": 10
     },
     {
@@ -125,6 +137,18 @@
       "label": "Builder build",
       "match": { "attribute": "flow", "includes": "builder.build" },
       "titleAttribute": "title",
+      "detailAttributes": {
+        "Project": "project",
+        "Repository": "repo",
+        "Task": "taskSlug",
+        "Status": "status",
+        "Outcome": "outcome",
+        "Phase": "phase",
+        "Skill": "skill",
+        "Agent": "agent",
+        "Model": "model",
+        "Observed": "observedAt"
+      },
       "limit": 10
     },
     {

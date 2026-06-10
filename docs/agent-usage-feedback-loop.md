@@ -58,6 +58,20 @@ Use `flow-agents init --yes` or `--headless` with the same flags in CI. The
 legacy sink names `kontour-cloud` and `hosted-kontour-console` are still
 accepted for existing scripts.
 
+Check an installed telemetry setup without opening an interactive prompt:
+
+```bash
+flow-agents telemetry-doctor --dest /path/to/installed/flow-agents --json --headless
+```
+
+The doctor reads `scripts/telemetry/telemetry.conf`, reports active local and
+Console sinks, the resolved local telemetry files, Console URL/endpoint
+configuration, and a bounded Console reachability check. JSON output is stable
+for CI and setup scripts; a missing or unreachable configured Console makes the
+command exit nonzero while still emitting the report. By default, reachability
+checks are limited to local endpoints; pass `--allow-network` to probe a
+non-local HTTPS Console endpoint explicitly.
+
 ## Normalized Records
 
 ### Session

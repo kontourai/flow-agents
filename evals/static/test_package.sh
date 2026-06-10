@@ -117,6 +117,25 @@ NODE
   else
     _fail "package npm files allowlist is missing or unsafe"
   fi
+  if node - "$ROOT_DIR/console.telemetry.json" <<'NODE'
+const fs = require("node:fs");
+const descriptor = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+for (const id of ["builder.shape", "builder.build"]) {
+  const flow = (descriptor.flows || []).find((candidate) => candidate.id === id);
+  if (!flow) throw new Error(`missing ${id} flow descriptor`);
+  if (!flow.detailAttributes || Array.isArray(flow.detailAttributes) || typeof flow.detailAttributes !== "object") {
+    throw new Error(`${id} detailAttributes must be a label-to-attribute object`);
+  }
+  for (const [label, attribute] of Object.entries(flow.detailAttributes)) {
+    if (!label || typeof attribute !== "string" || !attribute) throw new Error(`${id} has malformed detailAttributes entry`);
+  }
+}
+NODE
+  then
+    _pass "Console telemetry descriptor exposes builder detail attributes"
+  else
+    _fail "Console telemetry descriptor missing builder detail attributes"
+  fi
   legacy_pattern='[Kk]agents|K''AGENTS|[Kk]agents\.dev'
   if (cd "$ROOT_DIR" && git ls-files -z | xargs -0 rg -n "$legacy_pattern" >/tmp/legacy-product-refs.txt 2>&1); then
     _fail "tracked source contains legacy Flow Agents rename references (see /tmp/legacy-product-refs.txt)"
