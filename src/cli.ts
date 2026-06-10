@@ -9,6 +9,7 @@ import { main as init } from "./cli/init.js";
 import { main as promoteWorkflowArtifact } from "./cli/promote-workflow-artifact.js";
 import { main as publishChange } from "./cli/publish-change-helper.js";
 import { main as pullWorkProvider } from "./cli/pull-work-provider.js";
+import { main as telemetryDoctor } from "./cli/telemetry-doctor.js";
 import { main as usageFeedback } from "./cli/usage-feedback.js";
 import { main as veritasGovernance } from "./cli/veritas-governance.js";
 import { main as workflowArtifactCleanupAudit } from "./cli/workflow-artifact-cleanup-audit.js";
@@ -34,6 +35,7 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["publish-change", publishChange],
   ["pull-work-provider", pullWorkProvider],
   ["runtime-adapter", runtimeAdapter],
+  ["telemetry-doctor", telemetryDoctor],
   ["usage-feedback", usageFeedback],
   ["veritas-governance", veritasGovernance],
   ["validate-package", validatePackage],
@@ -55,6 +57,7 @@ const aliases = new Map<string, string>([
   ["flow-agents-publish-change", "publish-change"],
   ["flow-agents-pull-work-provider", "pull-work-provider"],
   ["flow-agents-runtime-adapter", "runtime-adapter"],
+  ["flow-agents-telemetry-doctor", "telemetry-doctor"],
   ["flow-agents-usage-feedback", "usage-feedback"],
   ["flow-agents-veritas-governance", "veritas-governance"],
   ["flow-agents-validate-hook-influence", "validate-hook-influence"],

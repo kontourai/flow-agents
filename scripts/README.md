@@ -90,6 +90,11 @@ remain accepted. `--console-token-file` and `--console-tenant` can be used with
 any Console sink. Prefer `flow-agents init` for a prompted setup; use `--yes`
 with the same flags for CI/headless installs.
 
+Run `flow-agents telemetry-doctor --dest PATH --json --headless` to inspect an
+installed telemetry configuration. It reports active sinks, local JSONL paths,
+Console target settings, and bounded local Console reachability without
+prompting. Add `--allow-network` to probe a non-local HTTPS Console endpoint.
+
 ## Install And Repo Utilities
 
 - `install-codex-home.sh`: installs the isolated generated Codex home.
