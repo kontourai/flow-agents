@@ -1,6 +1,6 @@
 {
   "name": "@kontourai/flow-agents",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Flow Agents — a Kontour product that applies Flow and Veritas discipline inside the agent tools you already use: Claude Code, Codex, Kiro, and GitHub Actions.",
   "keywords": [
     "agents",
