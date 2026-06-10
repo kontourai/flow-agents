@@ -4,6 +4,7 @@
 
 **The discipline of Kontour Flow, inside the agent tools you already use.**
 
+[![npm version](https://img.shields.io/npm/v/%40kontourai%2Fflow-agents)](https://www.npmjs.com/package/@kontourai/flow-agents)
 [![CI](https://github.com/kontourai/flow-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/kontourai/flow-agents/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node >= 22](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](package.json)
@@ -42,13 +43,7 @@ npx @kontourai/flow-agents init --dest /path/to/workspace --telemetry-sink local
 npx @kontourai/flow-agents init --runtime codex --dest /path/to/workspace --activate-kits --yes
 ```
 
-Until the first npm release lands, the same commands work from a checkout:
-
-```bash
-git clone https://github.com/kontourai/flow-agents.git
-cd flow-agents && npm install && npm run build
-node build/src/cli.js init --dest /path/to/workspace
-```
+Working from a checkout (for contributors) is the same flow: `npm install && npm run build`, then `node build/src/cli.js init --dest /path/to/workspace`.
 
 The installer copies the bundled agents, skills, context, scripts, evals, Flow Kit assets, and the Flow Agents-owned `console.telemetry.json` descriptor into the target workspace. Telemetry writes to local files by default; optional sinks mirror it to a local, hosted, or self-hosted Kontour Console (`--telemetry-sink local-kontour-console | kontour-hosted-console | user-hosted-console --console-url …`).
 

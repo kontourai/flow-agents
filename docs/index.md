@@ -49,7 +49,6 @@ Flow Agents adds the operating layer around the model: skills choose the right w
 npx @kontourai/flow-agents init --dest /path/to/workspace
 ```
 
-Until the first npm release lands, the same command works from a checkout: clone the repo, `npm install && npm run build`, then `node build/src/cli.js init --dest /path/to/workspace`.
 
 Then ask for the workflow you want, in plain language:
 
