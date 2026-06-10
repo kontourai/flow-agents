@@ -323,7 +323,6 @@ else
 fi
 require_text "$GITIGNORE" '^\.flow-agents/\*' "gitignore ignores Flow Agents runtime artifacts"
 require_text "$GITIGNORE" '^\.surface/$' "gitignore treats Surface runtime root as local state"
-require_text "$ROOT/scripts/README.md" 'build-docs-preview.js' "scripts README documents docs preview wrapper"
 reject_text "$ROOT/scripts/README.md" 'transcript-to-oar.sh' "scripts README omits removed transcript helper"
 require_text "$ROOT_CONTEXT" '### Flow' "Flow Agents glossary defines Flow"
 require_text "$ROOT_CONTEXT" '### Workflow Enforcement' "Flow Agents glossary defines workflow enforcement"

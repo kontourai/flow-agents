@@ -1,3 +1,7 @@
+---
+title: ADR 0005: Kubernetes-Inspired Kontour Resource Contracts
+---
+
 # ADR 0005: Kubernetes-Inspired Kontour Resource Contracts
 
 Date: 2026-05-27

@@ -1,3 +1,7 @@
+---
+title: Shared Workflow Contracts
+---
+
 # Shared Workflow Contracts
 
 The workflow system now separates durable process contracts from role-specific instructions.

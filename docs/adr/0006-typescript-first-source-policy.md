@@ -1,3 +1,7 @@
+---
+title: ADR 0006: TypeScript-First Source Policy
+---
+
 # ADR 0006: TypeScript-First Source Policy
 
 Date: 2026-05-31

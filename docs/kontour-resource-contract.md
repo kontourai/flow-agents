@@ -1,3 +1,7 @@
+---
+title: Kontour Resource Contract
+---
+
 # Kontour Resource Contract
 
 Kontour Resource Contracts are the durable, versioned record shape for Flow Agents configuration, selected scope, workflow state, evidence pointers, provider output, and cross-product interchange.

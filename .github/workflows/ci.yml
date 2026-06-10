@@ -21,6 +21,7 @@ jobs:
     env:
       FLOW_AGENTS_CI_LANE: source-and-static
       FLOW_AGENTS_CI_RESULTS_DIR: evals/results/ci-baseline/source-and-static
+      FLOW_CLI_ROOT: ${{ github.workspace }}/.flow-cli/node_modules/@kontourai/flow
 
     steps:
       - name: Checkout
@@ -33,6 +34,13 @@ jobs:
 
       - name: Install Node dependencies
         run: npm ci
+
+      - name: Install Flow CLI for definition validation
+        run: |
+          mkdir -p .flow-cli
+          cd .flow-cli
+          printf '{"name":"flow-cli-host","private":true}\n' > package.json
+          npm install --no-save @kontourai/flow
 
       - name: Install shell tools
         run: |

@@ -1,3 +1,7 @@
+---
+title: ADR 0001: Flow Agents Consumes Flow For Workflow Enforcement
+---
+
 # ADR 0001: Flow Agents Consumes Flow For Workflow Enforcement
 
 Date: 2026-05-24

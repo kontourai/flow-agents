@@ -1,3 +1,7 @@
+---
+title: Flow Agents Skills Map
+---
+
 # Flow Agents Skills Map
 
 This map groups the current skills by the user journey they support. The Builder Kit workflow system is centered on concrete workflow skills, while Flow Agents coordinates Flow Kit installation, runtime adapters, and local control.

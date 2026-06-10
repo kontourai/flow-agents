@@ -14,6 +14,7 @@ const packsPath = path.join(root, "packaging/packs.json");
 const kitsCatalogPath = path.join(root, "kits/catalog.json");
 const flowRoot = process.env.FLOW_CLI_ROOT ? path.resolve(process.env.FLOW_CLI_ROOT) : "";
 const flowSchemaPath = flowRoot ? path.join(flowRoot, "schemas", "flow-definition.schema.json") : "";
+const flowCliPath = flowRoot ? ["dist/cli.js", "src/cli.js"].map((candidate) => path.join(flowRoot, candidate)).find((candidate) => fs.existsSync(candidate)) ?? path.join(flowRoot, "dist/cli.js") : "";
 const kitIdRe = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*$/;
 const kitAssetSections = new Set(["skills", "docs", "adapters", "evals", "assets"]);
 const kitTopLevelKeys = new Set(["schema_version", "id", "name", "product_name", "description", "flows", ...kitAssetSections]);
@@ -33,7 +34,6 @@ const publicScriptWrappers = new Map<string, { target: string; significantLines:
     "// Supports FLOW_AGENTS_PACKS through the TypeScript bundle builder.",
     'import("../build/src/tools/build-universal-bundles.js").then(({ main }) => process.exit(main()));',
   ] }],
-  ["scripts/build-docs-preview.js", { target: "../build/src/cli/docs-preview.js", significantLines: ['import("../build/src/cli/docs-preview.js").then(({ main }) => process.exit(main()));'] }],
   ["scripts/filter-installed-packs.js", { target: "../build/src/tools/filter-installed-packs.js", significantLines: ['import("../build/src/tools/filter-installed-packs.js").then(({ main }) => process.exit(main(process.argv.slice(2))));'] }],
   ["scripts/generate-context-map.js", { target: "../build/src/tools/generate-context-map.js", significantLines: ['import("../build/src/tools/generate-context-map.js").then(({ main }) => process.exit(main(process.argv.slice(2))));'] }],
   ["scripts/flow-kit.js", { target: "../build/src/cli/flow-kit.js", significantLines: ['import("../build/src/cli/flow-kit.js").then(({ main }) => process.exit(main()));'] }],
@@ -206,7 +206,7 @@ function safeLocalPath(baseDir: string, pathText: unknown, label: string, report
   return path.join(baseDir, pathText);
 }
 function validateFlowDefinitionShape(file: string, data: any, reporter: Reporter): void {
-  const localCli = flowRoot ? path.join(flowRoot, "src/cli.js") : "";
+  const localCli = flowCliPath;
   if (fs.existsSync(localCli)) {
     const result = spawnSync("node", [localCli, "validate-definition", file, "--json"], { encoding: "utf8" });
     if (result.status !== 0) reporter.fail(`${rel(file)}: Flow validation failed: ${(result.stderr || result.stdout).trim()}`);
@@ -267,7 +267,7 @@ function validateKits(reporter: Reporter): void {
   const kits = catalog?.kits;
   reporter.check(Array.isArray(kits) && kits.length > 0, `${rel(kitsCatalogPath)}: .kits must be a non-empty list`);
   if (!Array.isArray(kits)) return;
-  const localCli = flowRoot ? path.join(flowRoot, "src/cli.js") : "";
+  const localCli = flowCliPath;
   if (flowSchemaPath && fs.existsSync(flowSchemaPath)) console.log(fs.existsSync(localCli) ? `info: validating kit Flow Definitions with Flow CLI at ${localCli}` : `warning: Flow validator unavailable; source-tree check only verifies Flow Definition top-level shape`);
   else console.log("warning: Flow schema not configured; source-tree check only verifies Flow Definition top-level shape. Set FLOW_CLI_ROOT to enable Flow CLI validation.");
   kits.forEach((entry: any, index: number) => {
@@ -456,7 +456,7 @@ export function main(argv = process.argv.slice(2)): number {
     const kitDir = argv[kitIndex + 1];
     if (!kitDir) { console.error("usage: validate-source-tree --kit DIR"); return 2; }
     const reporter = new Reporter();
-    const localCli = flowRoot ? path.join(flowRoot, "src/cli.js") : "";
+    const localCli = flowCliPath;
     if (flowSchemaPath && fs.existsSync(flowSchemaPath) && fs.existsSync(localCli)) console.log(`info: validating kit Flow Definitions with Flow CLI at ${localCli}`);
     else console.log("warning: Flow validation surface unavailable; local kit check uses the minimal Flow Definition fallback");
     validateKitRepository(path.resolve(kitDir), reporter);

@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { basename } from "node:path";
 import { main as effectiveBacklogSettings } from "./cli/effective-backlog-settings.js";
-import { main as buildDocsPreview } from "./cli/docs-preview.js";
 import { main as consoleLearningProjection } from "./cli/console-learning-projection.js";
 import { main as flowKit } from "./cli/flow-kit.js";
 import { main as fixtureRetirementAudit } from "./cli/fixture-retirement-audit.js";
@@ -23,7 +22,6 @@ import { main as runtimeAdapter } from "./cli/runtime-adapter.js";
 
 const availableCommands = new Map<string, (argv: string[]) => number | Promise<number>>([
   ["build-bundles", () => buildBundles()],
-  ["build-docs-preview", () => buildDocsPreview()],
   ["console-learning-projection", consoleLearningProjection],
   ["context-map", contextMap],
   ["effective-backlog-settings", effectiveBacklogSettings],
@@ -46,7 +44,6 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
 
 const aliases = new Map<string, string>([
   ["flow-agents-build-bundles", "build-bundles"],
-  ["flow-agents-build-docs-preview", "build-docs-preview"],
   ["flow-agents-console-learning-projection", "console-learning-projection"],
   ["flow-agents-context-map", "context-map"],
   ["flow-agents-effective-backlog-settings", "effective-backlog-settings"],

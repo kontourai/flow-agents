@@ -1,5 +1,5 @@
-title: Flow Agents Workflow Docs
-description: Workflow skills, gates, usage prompts, and eval strategy for Flow Agents.
+title: Kontour Flow Agents
+description: Structured, evidence-backed workflows for coding agents. Flow Agents keeps Codex, Claude Code, Kiro, and CI agents inspectable from idea to release readiness.
 markdown: kramdown
 
 defaults:
@@ -7,3 +7,9 @@ defaults:
       path: ""
     values:
       layout: default
+
+plugins:
+  - jekyll-optional-front-matter
+  - jekyll-relative-links
+  - jekyll-readme-index
+  - jekyll-titles-from-headings
