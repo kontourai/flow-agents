@@ -102,7 +102,7 @@ Gate: the opportunity is worth shaping, or it is parked/rejected.
 
 ### 4. Explore Options
 
-Use `knowledge-search`, `search-first`, `explore`, or `crowdsource` when context is missing.
+Use `search-first` or `explore` when context is missing.
 
 Decide the path:
 

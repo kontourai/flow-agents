@@ -81,9 +81,10 @@ Kontour AI shows the work behind AI. Each product stands alone; together they co
 
 | Product | Owns |
 | --- | --- |
-| **[Surface](https://github.com/kontourai/surface)** | Portable trust state: claims, evidence, policies, trust snapshots |
-| **[Flow](https://github.com/kontourai/flow)** | Process transparency: steps, gates, transitions, runs, exceptions, reports |
-| **[Veritas](https://github.com/kontourai/veritas)** | Code/change transparency: repo standards, merge readiness |
+| **[Survey](https://kontourai.io/survey)** | Producer evidence: source → extraction → candidate → review → claim |
+| **[Surface](https://kontourai.io/surface)** | Portable trust state: claims, evidence, policies, trust snapshots |
+| **[Flow](https://kontourai.io/flow)** | Process transparency: steps, gates, transitions, runs, exceptions, reports |
+| **[Veritas](https://kontourai.io/veritas)** | Code/change transparency: repo standards, merge readiness |
 | **Flow Agents** | Agent-facing distribution: skills, kits, runtime adapters, hooks, telemetry |
 
 Flow Agents owns the glue — discovery, just-in-time guidance, scoped delegation, Flow-backed state inside harnesses, evidence-backed completion, and feedback loops. It deliberately does not own the model, the runtime, the workflow engine, or repo governance. The [North Star](docs/north-star.md) records the direction and design principles.

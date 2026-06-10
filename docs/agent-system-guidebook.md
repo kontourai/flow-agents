@@ -86,7 +86,7 @@ Flow Agents works like an agent workbench with seven cooperating layers:
 | Powers | Tool bundles and activation guidance for integrations. | `powers/` |
 | Agents | Specialist roles with scoped responsibilities. | `agents/`, `agent-cards/` |
 | Workflows | State, gates, handoffs, and task memory. | Kontour Flow concepts, `.flow-agents/`, `npm run workflow:sidecar --` |
-| Hooks | Just-in-time reminders or blockers from current workflow state. | `hooks/`, exported runtime configs |
+| Hooks | Just-in-time reminders or blockers from current workflow state. | `scripts/hooks/`, exported runtime configs |
 | Evidence | Tests, evals, telemetry, findings, and outcome records. | `evals/`, `.telemetry/`, sidecars |
 
 Each layer should stay small enough to explain independently. When the system feels complicated, the fix is usually to move behavior to the right layer, not to add more global prompt text.
@@ -252,13 +252,12 @@ The intended pattern is that every important workflow rule gets a test at the lo
 
 Packs keep the global surface understandable.
 
-`packaging/packs.json` groups capabilities into sets such as:
+`packaging/packs.json` groups capabilities into sets. Currently defined:
 
 - `core`
 - `development`
-- `knowledge`
-- `aws`
-- `experimental`
+
+Future packs (knowledge, AWS, experimental) are deferred until another producer proof shows repeated friction.
 
 All-pack installs remain the default today. `FLOW_AGENTS_PACKS` lets users opt into a smaller installed surface, and domain depth belongs in packs so a global setup can be narrowed without changing the source bundle.
 

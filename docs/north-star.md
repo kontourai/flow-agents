@@ -180,7 +180,7 @@ Tasks:
 
 - Document the public layers: rules, skills, powers, agents, workflows, knowledge, and evidence. **Done:** see https://github.com/kontourai/flow-agents/blob/main/docs/operating-layers.md.
 - Mark which directories are canonical source, generated exports, runtime state, and optional integrations.
-- Decide which workflow skills are part of the core pack and which are optional domain packs. **Started:** `packaging/packs.json` defines core, development, knowledge, AWS, and experimental packs.
+- Decide which workflow skills are part of the core pack and which are optional domain packs. **Started:** `packaging/packs.json` defines core and development packs.
 - Add a standards register that lists each external standard, how Flow Agents uses it, and what Flow Agents-owned schemas still exist. **Done:** see https://github.com/kontourai/flow-agents/blob/main/docs/standards-register.md.
 - Add a "do not invent without checking standards" rule to contributor docs.
 
