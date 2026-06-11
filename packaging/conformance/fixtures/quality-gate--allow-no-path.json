@@ -1,0 +1,17 @@
+{
+  "description": "quality-gate is non-blocking (exit 0) when no file path is in tool_input",
+  "policy_class": "quality-gate",
+  "canonical_event": "postToolUse",
+  "conformance_level": "L2",
+  "hook_id": "quality-gate",
+  "hook_script": "quality-gate.js",
+  "payload": {
+    "hook_event_name": "PostToolUse",
+    "tool_name": "write",
+    "tool_input": {}
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_echoes_input": true
+  }
+}

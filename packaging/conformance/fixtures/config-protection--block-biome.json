@@ -1,0 +1,20 @@
+{
+  "description": "config-protection blocks an edit to biome.json (protected Biome config)",
+  "policy_class": "config-protection",
+  "canonical_event": "preToolUse",
+  "conformance_level": "L2",
+  "hook_id": "config-protection",
+  "hook_script": "config-protection.js",
+  "payload": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "edit",
+    "tool_input": {
+      "file_path": "biome.json"
+    }
+  },
+  "expected": {
+    "exit_code": 2,
+    "stderr_contains": ["BLOCKED", "biome.json"],
+    "stdout_is_empty": true
+  }
+}

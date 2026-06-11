@@ -34,6 +34,57 @@ const runtimeBundles: Record<Runtime, string> = {
   pi: "pi",
 };
 
+// Stable marker present in every Flow Agents claude-code hook command.
+// Used by scope-collision detection to identify an existing flow-agents install.
+export const COLLISION_MARKER = "claude-hook-adapter.js";
+
+/**
+ * Check whether a user-level Claude Code settings file already contains
+ * Flow Agents hook commands. If it does, print a WARNING explaining that
+ * Claude Code merges user-level and project-level settings and runs ALL
+ * matching hooks, so having flow-agents in both places causes duplicate
+ * hook execution (double telemetry, double policy enforcement).
+ *
+ * The check does NOT block the install; it is advisory only.
+ *
+ * @param userSettingsFile Path to inspect (defaults to $HOME/.claude/settings.json;
+ *   overridable via FLOW_AGENTS_USER_CLAUDE_SETTINGS env var for testability).
+ * @returns true if a collision was detected, false otherwise.
+ */
+export function checkScopeCollision(userSettingsFile?: string): boolean {
+  const filePath = userSettingsFile
+    ?? process.env["FLOW_AGENTS_USER_CLAUDE_SETTINGS"]
+    ?? path.join(os.homedir(), ".claude", "settings.json");
+  if (!fs.existsSync(filePath)) return false;
+  let text: string;
+  try {
+    text = fs.readFileSync(filePath, "utf8");
+  } catch {
+    return false;
+  }
+  if (!text.includes(COLLISION_MARKER)) return false;
+  console.warn(
+    `\nWARNING: Flow Agents scope collision detected.\n` +
+    `  ${filePath}\n` +
+    `already contains Flow Agents hook commands (marker: ${COLLISION_MARKER}).\n` +
+    `\n` +
+    `Claude Code merges user-level (~/.claude/settings.json) and project-level\n` +
+    `(.claude/settings.json) settings, then runs ALL matching hooks from both files.\n` +
+    `Installing Flow Agents at the project level while it is also present at the\n` +
+    `user level will cause duplicate hook execution: telemetry events are recorded\n` +
+    `twice and policy hooks (workflow-steering, config-protection, quality-gate,\n` +
+    `stop-goal-fit) run twice per event.\n` +
+    `\n` +
+    `To resolve:\n` +
+    `  - Remove the hooks section from ${filePath} and rely solely on the\n` +
+    `    project-level .claude/settings.json installed by flow-agents init, OR\n` +
+    `  - Remove the project-level install and keep only the user-level one.\n` +
+    `\n` +
+    `The install will continue; resolve the collision before running Claude Code.\n`
+  );
+  return true;
+}
+
 function usage(): void {
   console.error(`usage: flow-agents init [options]
 
@@ -88,7 +139,7 @@ async function questionHidden(prompt: string): Promise<string> {
     let value = "";
     const onData = (buffer: Buffer) => {
       const text = buffer.toString("utf8");
-      if (text === "\u0003") {
+      if (text === "") {
         stdout.write("\n");
         process.exit(130);
       }
@@ -99,7 +150,7 @@ async function questionHidden(prompt: string): Promise<string> {
         resolve(value);
         return;
       }
-      if (text === "\u007f") {
+      if (text === "") {
         value = value.slice(0, -1);
         return;
       }
@@ -237,12 +288,169 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   const headless = argv.includes("--yes") || argv.includes("--headless") || !process.stdin.isTTY;
   try {
     const options = headless ? headlessOptions(argv) : await interactiveOptions(argv);
+    // Scope-collision check for claude-code: Claude Code merges user-level
+    // (~/.claude/settings.json) and project-level (.claude/settings.json) settings
+    // and runs ALL matching hooks from both files. If a user-level settings file
+    // already contains flow-agents hooks, installing at the project level will
+    // cause duplicate hook execution. We warn but do not block.
+    //
+    // Codex note: Codex hooks live in .codex/hooks.json (project-level only).
+    // There is no well-known user-level codex hooks file in our install paths,
+    // so no collision check is needed for codex.
+    if (options.runtime === "claude-code") {
+      checkScopeCollision();
+    }
     const bundle = ensureBundle(options.runtime);
     const installed = installBundle(bundle, options);
     if (installed !== 0) return installed;
     return activateKits(options);
   } catch (error) {
     console.error(`flow-agents init: ${(error as Error).message}`);
+    return 2;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Dogfood subcommand
+//
+// `flow-agents dogfood --runtime claude-code [--dest PATH]`
+//
+// Writes only the hook-wiring artifacts for the specified runtime into the
+// target directory (default: cwd). Unlike a full install, dogfood:
+//   - Does NOT rsync the full bundle (no agents/skills duplication).
+//   - Reads the generated settings/config from dist/<runtime>/ so the output
+//     cannot drift from what the bundle generates (DRY guarantee).
+//   - For claude-code: OMITS permissions.defaultMode and
+//     skipDangerousModePermissionPrompt (permissive defaults are for installed
+//     workspaces, not source repos).
+//   - Runs the same scope-collision warning as init.
+// ---------------------------------------------------------------------------
+
+function dogfoodUsage(): void {
+  console.error(`usage: flow-agents dogfood [options]
+
+Options:
+  --runtime claude-code|codex|opencode|pi   (required)
+  --dest PATH                               (default: cwd)
+  --yes, --headless
+`);
+}
+
+type DogfoodRuntime = "claude-code" | "codex" | "opencode" | "pi";
+
+function normalizeDogfoodRuntime(value: string | undefined): DogfoodRuntime | undefined {
+  if (!value) return undefined;
+  if (value === "claude" || value === "claude-code") return "claude-code";
+  if (value === "codex" || value === "opencode" || value === "pi") return value;
+  throw new Error(`dogfood: unsupported runtime '${value}'; expected claude-code, codex, opencode, or pi`);
+}
+
+/**
+ * Write the claude-code hook-wiring artifacts into dest.
+ * Reads dist/claude-code/.claude/settings.json (generated by build-bundles),
+ * strips the permissive-mode permission keys (defaultMode, skipDangerousModePermissionPrompt),
+ * and writes .claude/settings.json to dest.
+ */
+function dogfoodClaudeCode(bundleRoot: string, dest: string): void {
+  const sourcePath = path.join(bundleRoot, ".claude", "settings.json");
+  if (!fs.existsSync(sourcePath)) throw new Error(`dogfood: bundle settings missing: ${sourcePath}`);
+  const settings = JSON.parse(fs.readFileSync(sourcePath, "utf8")) as Record<string, unknown>;
+  // Remove permissive defaults that are only appropriate for installed workspaces.
+  // These keys must not be present in the source repo's .claude/settings.json.
+  delete settings["permissions"];
+  delete settings["skipDangerousModePermissionPrompt"];
+  const outDir = path.join(dest, ".claude");
+  fs.mkdirSync(outDir, { recursive: true });
+  fs.writeFileSync(path.join(outDir, "settings.json"), `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+}
+
+/**
+ * Write the codex hook-wiring artifacts into dest.
+ * Reads dist/codex/.codex/hooks.json and writes .codex/hooks.json to dest.
+ * The monolithic .codex/config.toml is not written here because it contains
+ * workspace settings (approvals_reviewer, features) that would override the
+ * developer's existing codex configuration. Only the hooks file is written.
+ */
+function dogfoodCodex(bundleRoot: string, dest: string): void {
+  const sourcePath = path.join(bundleRoot, ".codex", "hooks.json");
+  if (!fs.existsSync(sourcePath)) throw new Error(`dogfood: bundle hooks.json missing: ${sourcePath}`);
+  const hooks = fs.readFileSync(sourcePath, "utf8");
+  const outDir = path.join(dest, ".codex");
+  fs.mkdirSync(outDir, { recursive: true });
+  fs.writeFileSync(path.join(outDir, "hooks.json"), hooks, "utf8");
+}
+
+/**
+ * Write the opencode hook-wiring artifacts into dest.
+ * Reads dist/opencode/.opencode/plugins/flow-agents.js and opencode.json,
+ * and writes them into dest. These are the minimal hook-wiring files; the
+ * full skill/agent tree is not copied.
+ */
+function dogfoodOpencode(bundleRoot: string, dest: string): void {
+  const pluginSource = path.join(bundleRoot, ".opencode", "plugins", "flow-agents.js");
+  const configSource = path.join(bundleRoot, "opencode.json");
+  if (!fs.existsSync(pluginSource)) throw new Error(`dogfood: bundle plugin missing: ${pluginSource}`);
+  const pluginDir = path.join(dest, ".opencode", "plugins");
+  fs.mkdirSync(pluginDir, { recursive: true });
+  fs.copyFileSync(pluginSource, path.join(pluginDir, "flow-agents.js"));
+  // Write opencode.json only if it does not already exist to avoid clobbering
+  // any workspace-specific opencode configuration.
+  const destConfig = path.join(dest, "opencode.json");
+  if (!fs.existsSync(destConfig) && fs.existsSync(configSource)) {
+    fs.copyFileSync(configSource, destConfig);
+  }
+}
+
+/**
+ * Write the pi hook-wiring artifacts into dest.
+ * Reads dist/pi/.pi/extensions/flow-agents.ts and writes it to dest.
+ * The extension is the only hook-wiring file needed for pi.
+ */
+function dogfoodPi(bundleRoot: string, dest: string): void {
+  const extSource = path.join(bundleRoot, ".pi", "extensions", "flow-agents.ts");
+  if (!fs.existsSync(extSource)) throw new Error(`dogfood: bundle extension missing: ${extSource}`);
+  const extDir = path.join(dest, ".pi", "extensions");
+  fs.mkdirSync(extDir, { recursive: true });
+  fs.copyFileSync(extSource, path.join(extDir, "flow-agents.ts"));
+}
+
+export async function mainDogfood(argv = process.argv.slice(2)): Promise<number> {
+  if (argv.includes("--help") || argv.includes("-h")) {
+    dogfoodUsage();
+    return 0;
+  }
+  const args = parseArgs(argv);
+  try {
+    const runtimeRaw = flagString(args.flags, "runtime");
+    const runtime = normalizeDogfoodRuntime(runtimeRaw);
+    if (!runtime) {
+      console.error("dogfood: --runtime is required (claude-code, codex, opencode, or pi)");
+      dogfoodUsage();
+      return 2;
+    }
+    const dest = path.resolve(flagString(args.flags, "dest") ?? process.cwd());
+
+    // Ensure the bundle for the requested runtime is built.
+    const bundleRuntime: Runtime = runtime as Runtime;
+    const bundleRoot = ensureBundle(bundleRuntime);
+
+    // Scope-collision check: warn if user-level claude settings already has flow-agents.
+    // Codex: no user-level hooks file in our install paths — skip with note above.
+    if (runtime === "claude-code") {
+      checkScopeCollision();
+    }
+
+    // Write only the hook-wiring artifacts, not the full bundle.
+    fs.mkdirSync(dest, { recursive: true });
+    if (runtime === "claude-code") dogfoodClaudeCode(bundleRoot, dest);
+    else if (runtime === "codex") dogfoodCodex(bundleRoot, dest);
+    else if (runtime === "opencode") dogfoodOpencode(bundleRoot, dest);
+    else if (runtime === "pi") dogfoodPi(bundleRoot, dest);
+
+    console.log(`Flow Agents dogfood hooks wired for ${runtime} in ${dest}`);
+    return 0;
+  } catch (error) {
+    console.error(`flow-agents dogfood: ${(error as Error).message}`);
     return 2;
   }
 }
