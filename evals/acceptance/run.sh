@@ -12,7 +12,7 @@ run_one() {
 }
 
 case "$TARGET" in
-  kiro|claude|codex)
+  kiro|claude|codex|opencode|pi)
     run_one "$TARGET"
     ;;
   all)
@@ -20,10 +20,12 @@ case "$TARGET" in
     run_one kiro || status=1
     run_one claude || status=1
     run_one codex || status=1
+    run_one opencode || status=1
+    run_one pi || status=1
     exit "$status"
     ;;
   *)
-    echo "Usage: bash evals/acceptance/run.sh [all|kiro|claude|codex]"
+    echo "Usage: bash evals/acceptance/run.sh [all|kiro|claude|codex|opencode|pi]"
     exit 1
     ;;
 esac
