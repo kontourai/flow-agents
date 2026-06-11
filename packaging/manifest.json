@@ -168,6 +168,65 @@
         "from": "write files",
         "to": "write files"
       }
+    ],
+    "opencode": [
+      {
+        "from": "Claude Code",
+        "to": "opencode"
+      },
+      {
+        "from": "todo tool",
+        "to": "todo tool"
+      },
+      {
+        "from": "delegate to a specialist agent",
+        "to": "delegate to a subagent"
+      },
+      {
+        "from": "run shell commands",
+        "to": "run shell commands"
+      },
+      {
+        "from": "read files",
+        "to": "read files"
+      },
+      {
+        "from": "write files",
+        "to": "write files"
+      }
+    ],
+    "pi": [
+      {
+        "from": "Claude Code",
+        "to": "pi"
+      },
+      {
+        "from": "todo tool",
+        "to": "todo tool"
+      },
+      {
+        "from": "delegate to a specialist agent",
+        "to": "delegate to a subagent"
+      },
+      {
+        "from": "run shell commands",
+        "to": "run shell commands"
+      },
+      {
+        "from": "read files",
+        "to": "read files"
+      },
+      {
+        "from": "write files",
+        "to": "write files"
+      }
     ]
+  },
+  "opencode": {
+    "task_dir": ".flow-agents",
+    "default_agent_mode": "subagent"
+  },
+  "pi": {
+    "task_dir": ".flow-agents"
   }
 }

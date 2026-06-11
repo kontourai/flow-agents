@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flow-agents.dev/schemas/flow-agents-settings.schema.json",
+  "title": "Flow Agents Settings",
+  "description": "Per-repo policy configuration for Flow Agents features.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "const": "1.0" },
+    "utteranceCheck": { "$ref": "#/$defs/utteranceCheckPolicy" }
+  },
+  "$defs": {
+    "utteranceCheckPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "description": "Policy for utterance evidence coverage checking via @kontourai/survey.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether utterance checking is active for this repo. Default: false."
+        },
+        "mode": {
+          "enum": ["report", "strict"],
+          "description": "report = badges only, never blocks. strict = exit 2 on disputed/rejected/unsupported (routes hook back). Default when enabled: report."
+        },
+        "extractor": {
+          "enum": ["reference", "anthropic"],
+          "description": "Extractor used to split utterances into factual statements. reference = pattern-based (no API key needed). anthropic = model-backed via @kontourai/survey/anthropic (requires ANTHROPIC_API_KEY). Default: reference."
+        },
+        "bundlePath": {
+          "type": "string",
+          "description": "Path to a trust bundle JSON file for claim resolution. Relative paths are resolved from the repo root. Omit to use an empty bundle (all statements resolve as unsupported)."
+        },
+        "model": {
+          "type": "string",
+          "description": "Model identifier for anthropic extractor (e.g. claude-haiku-4-5). Only used when extractor is anthropic."
+        },
+        "agentId": {
+          "type": "string",
+          "description": "Agent identifier for provenance in the trust report. Default: flow-agents-hook."
+        }
+      }
+    }
+  }
+}

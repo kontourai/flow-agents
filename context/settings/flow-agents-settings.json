@@ -1,0 +1,7 @@
+{
+  "$schema": "../../schemas/flow-agents-settings.schema.json",
+  "schema_version": "1.0",
+  "utteranceCheck": {
+    "enabled": false
+  }
+}

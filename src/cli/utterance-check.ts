@@ -60,6 +60,10 @@ interface SurveyMod {
   referenceUtteranceExtractor: SurveyExtractor;
 }
 
+interface AnthropicSurveyMod {
+  createAnthropicUtteranceExtractor: (options?: { model?: string; apiKey?: string }) => SurveyExtractor;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -76,6 +80,9 @@ function usage(): void {
       "  --utterance TEXT      Utterance text to check (required unless --not-configured).",
       "  --bundle-path FILE    Trust bundle JSON file. Omit for an empty bundle (all unsupported).",
       "  --agent-id ID         Agent identifier for provenance (default: flow-agents-utterance-check).",
+      "  --extractor NAME      Extractor to use: 'reference' (default, pattern-based) or 'anthropic'",
+      "                        (model-backed, requires ANTHROPIC_API_KEY and @kontourai/survey/anthropic).",
+      "  --model MODEL         Model for the anthropic extractor (e.g. claude-haiku-4-5).",
       "  --not-configured      Skip survey call; output not_configured without error.",
       "  --strict              Exit non-zero when any badge is disputed, rejected, or unsupported.",
       "  --help                Show this help.",
@@ -116,6 +123,45 @@ async function loadSurvey(): Promise<SurveyMod | undefined> {
   }
 }
 
+/**
+ * Dynamically import @kontourai/survey/anthropic and create the Anthropic extractor.
+ * Fails open with a clear not_configured message when the key or peer dep is missing.
+ */
+async function loadAnthropicExtractor(model?: string): Promise<SurveyExtractor | { notConfigured: true; reason: string }> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return {
+      notConfigured: true,
+      reason:
+        "anthropic extractor requires ANTHROPIC_API_KEY to be set. " +
+        "Set the environment variable or switch extractor to 'reference'.",
+    };
+  }
+  try {
+    const pkg = "@kontourai/survey/anthropic";
+    const mod = await (Function("m", "return import(m)")(pkg) as Promise<unknown>) as AnthropicSurveyMod;
+    if (typeof mod.createAnthropicUtteranceExtractor !== "function") {
+      return {
+        notConfigured: true,
+        reason:
+          "@kontourai/survey/anthropic does not export createAnthropicUtteranceExtractor. " +
+          "Update @kontourai/survey to a version that supports the anthropic extractor.",
+      };
+    }
+    const opts: { model?: string; apiKey?: string } = { apiKey };
+    if (model) opts.model = model;
+    return mod.createAnthropicUtteranceExtractor(opts);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      notConfigured: true,
+      reason:
+        `@kontourai/survey/anthropic is not available: ${msg}. ` +
+        "Install @kontourai/survey with the anthropic subpath export, or switch extractor to 'reference'.",
+    };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Core check logic
 // ---------------------------------------------------------------------------
@@ -131,6 +177,8 @@ async function runCheck(argv: string[]): Promise<number> {
   const agentId = flagString(flags, "agent-id") ?? "flow-agents-utterance-check";
   const notConfigured = flagBool(flags, "not-configured");
   const strict = flagBool(flags, "strict");
+  const extractorName = flagString(flags, "extractor") ?? "reference";
+  const model = flagString(flags, "model");
 
   if (notConfigured) {
     const report: UtteranceReport = {
@@ -181,9 +229,31 @@ async function runCheck(argv: string[]): Promise<number> {
 
   const { surveyAgentUtterance, referenceUtteranceExtractor } = survey;
 
+  // Resolve which extractor to use.
+  let extractor: SurveyExtractor;
+  if (extractorName === "anthropic") {
+    const anthropicResult = await loadAnthropicExtractor(model);
+    if ("notConfigured" in anthropicResult) {
+      // Fail open: emit not_configured with a clear reason rather than erroring.
+      const report: UtteranceReport = {
+        status: "not_configured",
+        agent_id: agentId,
+        utterance_excerpt: excerptText(utterance),
+        statements: [],
+        summary: anthropicResult.reason,
+      };
+      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+      process.stderr.write(`[UtteranceCheck] not_configured: ${anthropicResult.reason}\n`);
+      return 0;
+    }
+    extractor = anthropicResult;
+  } else {
+    extractor = referenceUtteranceExtractor;
+  }
+
   let trustReport: SurveyTrustReport;
   try {
-    trustReport = await surveyAgentUtterance(utterance, referenceUtteranceExtractor, {
+    trustReport = await surveyAgentUtterance(utterance, extractor, {
       bundle,
       agentId,
     });

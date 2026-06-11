@@ -54,6 +54,10 @@ renamed, or changes category, update the table and the validator together.
 | `run-hook.js` | hook runner | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_goal_fit_hook.sh`, `evals/integration/test_workflow_steering_hook.sh` | Applies profile/disable flags, traversal checks, and hook execution. |
 | `config-protection.js` | policy hook | `evals/integration/test_hook_category_behaviors.sh` | Blocks unsafe runtime config edits. |
 | `governance-audit.sh` | policy hook | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_telemetry.sh` | Emits governance/Veritas audit context when configured. |
+| `opencode-hook-adapter.js` | runtime adapter | `evals/integration/test_bundle_install.sh` | Translates opencode plugin events into the shared hook runner contract. |
+| `opencode-telemetry-hook.js` | telemetry shim | `evals/integration/test_bundle_install.sh` | Captures opencode plugin telemetry and fails open. |
+| `pi-hook-adapter.js` | runtime adapter | `evals/integration/test_bundle_install.sh` | Translates pi extension events into the shared hook runner contract. |
+| `pi-telemetry-hook.js` | telemetry shim | `evals/integration/test_bundle_install.sh` | Captures pi extension telemetry and fails open. |
 | `post-edit-accumulator.js` | policy hook | `evals/integration/test_hook_category_behaviors.sh` | Tracks edited files across a turn for later quality hooks. |
 | `quality-gate.js` | policy hook | `evals/integration/test_hook_category_behaviors.sh` | Runs configured quality checks as hook policy. |
 | `report-only-guard.js` | policy hook | `evals/integration/test_hook_category_behaviors.sh` | Protects report-only specialist roles from production edits. |

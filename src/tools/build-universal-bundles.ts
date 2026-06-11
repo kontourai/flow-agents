@@ -332,6 +332,242 @@ function buildCodex(agents: Agent[]): void {
   writeText(path.join(bundle, "install.sh"), installScript("Codex", "/path/to/workspace"));
   fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
 }
+function exportOpencodeAgent(spec: Agent): string {
+  // Determine agent mode: orchestrator-like agents -> primary, others -> subagent
+  const primaryAgents = new Set(["dev"]);
+  const mode = primaryAgents.has(spec.name) ? "primary" : "subagent";
+  const prompt = appendExportNote(sanitizeText(spec.prompt, "opencode", "<bundle-root>"), "Kiro hook wiring and JSON-only runtime fields were omitted. If this agent mentions Kiro-specific scheduler or hook behavior, treat that as optional operational guidance rather than a hard dependency.");
+  const lines: string[] = ["---"];
+  lines.push(`description: ${String(spec.description ?? "").trim()}`);
+  lines.push(`mode: ${mode}`);
+  lines.push(`model: ${mapped("claude_model_map", spec.model)}`);
+  lines.push("---");
+  lines.push("");
+  lines.push(prompt);
+  return lines.join("\n");
+}
+function exportOpencodePlugin(): string {
+  // Generate the Flow Agents opencode plugin.
+  // opencode plugins are auto-loaded from .opencode/plugins/*.js at startup.
+  //
+  // NOTE: opencode has no direct user-prompt-submit hook. For prompt-submit
+  // workflow steering, we wire the steering command behind session.created
+  // (for session-start steering context) and tool.execute.before (for
+  // policy). This is the closest reasonable approximation — documented here
+  // as an honest gap matching the codex live-hook-influence caveat pattern.
+  return `/**
+ * Flow Agents opencode plugin.
+ *
+ * Auto-loaded from .opencode/plugins/flow-agents.js at opencode startup.
+ * Delegates policy and telemetry decisions to shared scripts in scripts/hooks/
+ * using the same payload contract as the claude/codex adapters.
+ *
+ * EVENT MAPPING NOTE: opencode has no direct user-prompt-submit hook.
+ * Workflow steering (workflow-steering.js) is wired to session.created
+ * (session-start context) and tool.execute.before (per-tool policy).
+ * This approximates the UserPromptSubmit behavior in other runtimes but
+ * cannot intercept mid-session user messages before they are processed.
+ * This is an accepted gap documented here analogously to the codex
+ * live-hook-influence caveat.
+ */
+
+import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
+
+export const FlowAgentsPlugin = async ({ project, client, $, directory, worktree }) => {
+  const root = directory || process.cwd();
+
+  function runAdapter(adapterScript, ...args) {
+    const adapterPath = join(root, 'scripts', 'hooks', adapterScript);
+    const result = spawnSync(process.execPath, [adapterPath, ...args], {
+      encoding: 'utf8',
+      cwd: root,
+      env: { ...process.env, FLOW_AGENTS_HOOK_RUNTIME: 'opencode' },
+      timeout: 30000,
+    });
+    try {
+      return JSON.parse(result.stdout || '{}');
+    } catch {
+      return { allow: true };
+    }
+  }
+
+  function runTelemetry(eventName) {
+    const telemetryPath = join(root, 'scripts', 'hooks', 'opencode-telemetry-hook.js');
+    spawnSync(process.execPath, [telemetryPath, eventName, 'dev'], {
+      encoding: 'utf8',
+      cwd: root,
+      env: { ...process.env, FLOW_AGENTS_TELEMETRY_RUNTIME: 'opencode' },
+      timeout: 10000,
+    });
+  }
+
+  return {
+    'session.created': async (_input, _output) => {
+      runTelemetry('session.created');
+      // Wire workflow steering on session start for context injection
+      runAdapter('opencode-hook-adapter.js', 'session.created', 'workflow-steering', 'workflow-steering.js', 'default');
+    },
+    'tool.execute.before': async (input, output) => {
+      runTelemetry('tool.execute.before');
+      const policyResult = runAdapter('opencode-hook-adapter.js', 'tool.execute.before', 'config-protection', 'config-protection.js', 'default');
+      if (policyResult && policyResult.allow === false) {
+        throw new Error(policyResult.reason || 'Blocked by Flow Agents hook policy.');
+      }
+    },
+    'tool.execute.after': async (input, output) => {
+      runTelemetry('tool.execute.after');
+      runAdapter('opencode-hook-adapter.js', 'tool.execute.after', 'quality-gate', 'quality-gate.js', 'default');
+    },
+    'session.idle': async (_input, _output) => {
+      runTelemetry('session.idle');
+      runAdapter('opencode-hook-adapter.js', 'session.idle', 'stop-goal-fit', 'stop-goal-fit.js', 'default');
+    },
+    'session.error': async (_input, _output) => {
+      runTelemetry('session.error');
+    },
+    'session.compacted': async (_input, _output) => {
+      runTelemetry('session.compacted');
+    },
+    'permission.asked': async (_input, _output) => {
+      runTelemetry('permission.asked');
+    },
+    'file.edited': async (_input, _output) => {
+      runTelemetry('file.edited');
+    },
+  };
+};
+`;
+}
+function exportOpencodeConfig(): string {
+  return `${JSON.stringify({
+    instructions: "This workspace uses Flow Agents. See AGENTS.md for conventions, skills, and workflow guidance.",
+  }, null, 2)}\n`;
+}
+function buildOpencode(agents: Agent[]): void {
+  const bundle = path.join(dist, "opencode");
+  resetDir(bundle);
+  copySharedContent(bundle, "opencode", "<bundle-root>");
+  writeText(path.join(bundle, manifest.opencode.task_dir, ".gitkeep"), "");
+  for (const spec of agents) {
+    writeText(path.join(bundle, ".opencode/agents", `${spec.name}.md`), exportOpencodeAgent(spec));
+  }
+  for (const skill of fs.readdirSync(path.join(root, "skills"))) {
+    const skillPath = path.join(root, "skills", skill, "SKILL.md");
+    if (fs.existsSync(skillPath)) writeText(path.join(bundle, ".opencode/skills", skill, "SKILL.md"), sanitizeText(readText(skillPath), "opencode", "<bundle-root>"));
+  }
+  writeText(path.join(bundle, ".opencode/plugins/flow-agents.js"), exportOpencodePlugin());
+  writeText(path.join(bundle, "opencode.json"), exportOpencodeConfig());
+  writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("opencode", agents, manifest.opencode.task_dir));
+  writeText(path.join(bundle, "README.md"), exportTargetReadme("opencode", "bash install.sh /path/to/workspace"));
+  writeText(path.join(bundle, "install.sh"), installScript("opencode", "/path/to/workspace"));
+  fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
+}
+function exportPiExtension(): string {
+  // Generate the Flow Agents pi extension.
+  // pi extensions are auto-discovered from .pi/extensions/*.ts (needs project trust).
+  // pi has no named-subagent registry; agents are not exported. The extension
+  // provides workflow steering (via before_agent_start context injection),
+  // tool-call policy (via tool_call event), and telemetry delegation to shared scripts.
+  return `/**
+ * Flow Agents pi extension.
+ *
+ * Auto-discovered from .pi/extensions/flow-agents.ts at startup (needs project trust).
+ * Delegates policy and telemetry to shared scripts/hooks/ using spawnSync,
+ * mirroring the payload contract used by the claude/codex adapters.
+ *
+ * NOTE: pi has no named-subagent registry. Agents are not exported for pi.
+ * Rely on AGENTS.md + skills + this extension for workflow guidance.
+ */
+
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
+
+export default function (pi: ExtensionAPI) {
+  const root = process.cwd();
+
+  function runAdapter(adapterScript: string, eventName: string, hookId: string, relScript: string): { allow: boolean; context?: string; reason?: string } {
+    const adapterPath = join(root, "scripts", "hooks", adapterScript);
+    const payload = JSON.stringify({ hook_event_name: eventName, cwd: root });
+    const result = spawnSync(process.execPath, [adapterPath, eventName, hookId, relScript, "default"], {
+      input: payload,
+      encoding: "utf8",
+      cwd: root,
+      env: { ...process.env, FLOW_AGENTS_HOOK_RUNTIME: "pi" },
+      timeout: 30000,
+    });
+    try {
+      return JSON.parse(result.stdout || "{}") as { allow: boolean; context?: string; reason?: string };
+    } catch {
+      return { allow: true };
+    }
+  }
+
+  function runTelemetry(eventName: string): void {
+    const telemetryPath = join(root, "scripts", "hooks", "pi-telemetry-hook.js");
+    const payload = JSON.stringify({ hook_event_name: eventName, cwd: root });
+    spawnSync(process.execPath, [telemetryPath, eventName, "dev"], {
+      input: payload,
+      encoding: "utf8",
+      cwd: root,
+      env: { ...process.env, FLOW_AGENTS_TELEMETRY_RUNTIME: "pi" },
+      timeout: 10000,
+    });
+  }
+
+  pi.on("session_start", async (_event, _ctx) => {
+    runTelemetry("session_start");
+  });
+
+  pi.on("before_agent_start", async (event, _ctx) => {
+    runTelemetry("before_agent_start");
+    // Inject workflow steering context at agent start
+    const result = runAdapter("pi-hook-adapter.js", "before_agent_start", "workflow-steering", "workflow-steering.js");
+    if (result.context) {
+      return {
+        systemPrompt: event.systemPrompt + "\n\n" + result.context,
+      };
+    }
+  });
+
+  pi.on("tool_call", async (event, _ctx) => {
+    runTelemetry("tool_call");
+    const result = runAdapter("pi-hook-adapter.js", "tool_call", "config-protection", "config-protection.js");
+    if (result && result.allow === false) {
+      return { block: true, reason: result.reason || "Blocked by Flow Agents hook policy." };
+    }
+  });
+
+  pi.on("tool_result", async (_event, _ctx) => {
+    runTelemetry("tool_result");
+    runAdapter("pi-hook-adapter.js", "tool_result", "quality-gate", "quality-gate.js");
+  });
+
+  pi.on("session_shutdown", async (_event, _ctx) => {
+    runTelemetry("session_shutdown");
+    runAdapter("pi-hook-adapter.js", "session_shutdown", "stop-goal-fit", "stop-goal-fit.js");
+  });
+}
+`;
+}
+function buildPi(agents: Agent[]): void {
+  const bundle = path.join(dist, "pi");
+  resetDir(bundle);
+  copySharedContent(bundle, "pi", "<bundle-root>");
+  writeText(path.join(bundle, manifest.pi.task_dir, ".gitkeep"), "");
+  // pi has no named-subagent registry; agents are left canonical/unexported.
+  // Skills are exported to .pi/skills/ (direct .md files supported in that dir).
+  for (const skill of fs.readdirSync(path.join(root, "skills"))) {
+    const skillPath = path.join(root, "skills", skill, "SKILL.md");
+    if (fs.existsSync(skillPath)) writeText(path.join(bundle, ".pi/skills", skill, "SKILL.md"), sanitizeText(readText(skillPath), "pi", "<bundle-root>"));
+  }
+  writeText(path.join(bundle, ".pi/extensions/flow-agents.ts"), exportPiExtension());
+  writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("pi", agents, manifest.pi.task_dir));
+  writeText(path.join(bundle, "README.md"), exportTargetReadme("pi", "bash install.sh /path/to/workspace"));
+  writeText(path.join(bundle, "install.sh"), installScript("pi", "/path/to/workspace"));
+  fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
+}
 function buildCatalog(agents: Agent[]): Record<string, unknown> {
   const kitsCatalog = path.join(root, "kits/catalog.json");
   return {
@@ -350,6 +586,8 @@ export function main(): number {
   buildKiro(agents);
   buildClaudeCode(agents);
   buildCodex(agents);
+  buildOpencode(agents);
+  buildPi(agents);
   writeText(path.join(dist, "catalog.json"), `${JSON.stringify(buildCatalog(agents), null, 2)}\n`);
   writeText(path.join(dist, "README.md"), "# Universal Bundles\n\nRun `npm run build:bundles` from the repo root to regenerate these bundles.\n");
   console.log("Built bundles:");
@@ -357,6 +595,8 @@ export function main(): number {
   console.log(" - dist/kiro");
   console.log(" - dist/claude-code");
   console.log(" - dist/codex");
+  console.log(" - dist/opencode");
+  console.log(" - dist/pi");
   if (printDiagnostics && dropDiagnostics.length) {
     console.error("Export sanitization diagnostics:");
     for (const item of dropDiagnostics) console.error(` - ${item}`);

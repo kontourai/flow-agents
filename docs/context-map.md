@@ -50,6 +50,7 @@ Machine-readable workflow state lives beside Markdown artifacts in `.flow-agents
 | Schema | Title | ID |
 | --- | --- | --- |
 | backlog-provider-settings.schema.json | Flow Agents Backlog Provider Settings | https://flow-agents.dev/schemas/backlog-provider-settings.schema.json |
+| flow-agents-settings.schema.json | Flow Agents Settings | https://flow-agents.dev/schemas/flow-agents-settings.schema.json |
 | workflow-acceptance.schema.json | Flow Agents Workflow Acceptance | https://flow-agents.dev/schemas/workflow-acceptance.schema.json |
 | workflow-critique.schema.json | Flow Agents Workflow Critique | https://flow-agents.dev/schemas/workflow-critique.schema.json |
 | workflow-evidence.schema.json | Flow Agents Workflow Evidence | https://flow-agents.dev/schemas/workflow-evidence.schema.json |

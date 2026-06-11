@@ -40,6 +40,10 @@ CODEX_LEGACY_CONSOLE_DEST="$TMPDIR_EVAL/codex-legacy-console-workspace"
 CODEX_BAD_CONSOLE_DEST="$TMPDIR_EVAL/codex-bad-console-workspace"
 BASE_INIT_DEST="$TMPDIR_EVAL/base-init-workspace"
 CODEX_INIT_DEST="$TMPDIR_EVAL/codex-init-workspace"
+OPENCODE_DEST="$TMPDIR_EVAL/opencode-workspace"
+OPENCODE_CONSOLE_DEST="$TMPDIR_EVAL/opencode-console-workspace"
+OPENCODE_CORE_DEST="$TMPDIR_EVAL/opencode-core-workspace"
+PI_DEST="$TMPDIR_EVAL/pi-workspace"
 CONSOLE_TOKEN_FILE="$TMPDIR_EVAL/console-token"
 printf 'test-token\n' > "$CONSOLE_TOKEN_FILE"
 chmod 600 "$CONSOLE_TOKEN_FILE" 2>/dev/null || true
@@ -110,6 +114,30 @@ if node "$ROOT_DIR/build/src/cli.js" init --runtime codex --dest "$CODEX_INIT_DE
   _pass "flow-agents init headless Codex install succeeded"
 else
   _fail "flow-agents init headless Codex install failed"
+fi
+
+if (cd "$ROOT_DIR/dist/opencode" && bash install.sh "$OPENCODE_DEST" >/dev/null); then
+  _pass "opencode install succeeded"
+else
+  _fail "opencode install failed"
+fi
+
+if (cd "$ROOT_DIR/dist/opencode" && bash install.sh "$OPENCODE_CONSOLE_DEST" --telemetry-sink local-kontour-console --console-token-file "$CONSOLE_TOKEN_FILE" --console-tenant tenant-oc >/dev/null); then
+  _pass "opencode install with Console telemetry config succeeded"
+else
+  _fail "opencode install with Console telemetry config failed"
+fi
+
+if node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --dest "$OPENCODE_CORE_DEST" --yes >/dev/null; then
+  _pass "flow-agents init headless opencode install succeeded"
+else
+  _fail "flow-agents init headless opencode install failed"
+fi
+
+if (cd "$ROOT_DIR/dist/pi" && bash install.sh "$PI_DEST" >/dev/null); then
+  _pass "pi install succeeded"
+else
+  _fail "pi install failed"
 fi
 
 USER_SKILLS_DIR="$CODEX_CORE_DEST/.codex/sk""ills/user-skill"
@@ -217,6 +245,14 @@ if [[ -f "$BASE_INIT_DEST/AGENTS.md" ]] \
   _pass "flow-agents init default installs base AGENTS.md workspace contract"
 else
   _fail "flow-agents init default did not install base AGENTS.md workspace contract"
+fi
+
+if rg -F -q "console_telemetry_url=$LOCAL_KONTOUR_CONSOLE_URL" "$OPENCODE_CONSOLE_DEST/scripts/telemetry/telemetry.conf" \
+  && rg -q '^console_telemetry_token=test-token$' "$OPENCODE_CONSOLE_DEST/scripts/telemetry/telemetry.conf" \
+  && rg -q '^console_tenant_id=tenant-oc$' "$OPENCODE_CONSOLE_DEST/scripts/telemetry/telemetry.conf"; then
+  _pass "opencode install persists Console telemetry config"
+else
+  _fail "opencode install did not persist Console telemetry config"
 fi
 
 for dir in "$KIRO_DEST" "$BASE_DEST" "$CLAUDE_DEST" "$CODEX_DEST"; do
@@ -341,7 +377,7 @@ else
   _fail "installed Kiro agent JSON parse failed"
 fi
 
-if rg -n '/Users/[^/]+/\.flow-agents|~/\.flow-agents' "$KIRO_DEST" "$BASE_DEST" "$CLAUDE_DEST" "$CODEX_DEST" --glob '!**/evals/**' >/tmp/installed-bundle-leaks.txt 2>/dev/null; then
+if rg -n '/Users/[^/]+/\.flow-agents|~/\.flow-agents' "$KIRO_DEST" "$BASE_DEST" "$CLAUDE_DEST" "$CODEX_DEST" "$OPENCODE_DEST" "$PI_DEST" --glob '!**/evals/**' >/tmp/installed-bundle-leaks.txt 2>/dev/null; then
   _fail "installed bundles contain machine-local absolute paths (see /tmp/installed-bundle-leaks.txt)"
 else
   _pass "installed bundles are free of machine-local absolute paths"
@@ -357,6 +393,18 @@ if [[ -f "$CODEX_DEST/.flow-agents/.gitkeep" ]]; then
   _pass "Codex task dir scaffold installed"
 else
   _fail "Codex task dir scaffold missing"
+fi
+
+if [[ -f "$OPENCODE_DEST/.flow-agents/.gitkeep" ]]; then
+  _pass "opencode task dir scaffold installed"
+else
+  _fail "opencode task dir scaffold missing"
+fi
+
+if [[ -f "$PI_DEST/.flow-agents/.gitkeep" ]]; then
+  _pass "pi task dir scaffold installed"
+else
+  _fail "pi task dir scaffold missing"
 fi
 
 if rg -q 'claude-hook-adapter\.js.*stop-goal-fit\.js' "$CLAUDE_DEST/.claude/settings.json" \
@@ -416,6 +464,38 @@ then
   _pass "installed bundles wire prompt-submit workflow steering across Claude Code, Codex, and Kiro"
 else
   _fail "installed bundles do not wire prompt-submit workflow steering consistently"
+fi
+
+if [[ -f "$OPENCODE_DEST/.opencode/plugins/flow-agents.js" ]]   && node - "$OPENCODE_DEST/.opencode/plugins/flow-agents.js" <<'NODE'
+const fs = require("node:fs");
+const text = fs.readFileSync(process.argv[2], "utf8");
+if (!text.includes("opencode-hook-adapter.js")) throw new Error("opencode plugin missing opencode-hook-adapter.js");
+if (!text.includes("opencode-telemetry-hook.js")) throw new Error("opencode plugin missing opencode-telemetry-hook.js");
+if (!text.includes("workflow-steering.js")) throw new Error("opencode plugin missing workflow-steering.js");
+if (!text.includes("stop-goal-fit.js")) throw new Error("opencode plugin missing stop-goal-fit.js");
+if (!text.includes("config-protection.js")) throw new Error("opencode plugin missing config-protection.js");
+console.log("ok");
+NODE
+then
+  _pass "opencode install wires Flow Agents plugin with policy hooks"
+else
+  _fail "opencode install missing or mis-wired Flow Agents plugin"
+fi
+
+if [[ -f "$PI_DEST/.pi/extensions/flow-agents.ts" ]]   && node - "$PI_DEST/.pi/extensions/flow-agents.ts" <<'NODE'
+const fs = require("node:fs");
+const text = fs.readFileSync(process.argv[2], "utf8");
+if (!text.includes("pi-hook-adapter.js")) throw new Error("pi extension missing pi-hook-adapter.js");
+if (!text.includes("pi-telemetry-hook.js")) throw new Error("pi extension missing pi-telemetry-hook.js");
+if (!text.includes("workflow-steering.js")) throw new Error("pi extension missing workflow-steering.js");
+if (!text.includes("stop-goal-fit.js")) throw new Error("pi extension missing stop-goal-fit.js");
+if (!text.includes("config-protection.js")) throw new Error("pi extension missing config-protection.js");
+console.log("ok");
+NODE
+then
+  _pass "pi install wires Flow Agents extension with policy hooks"
+else
+  _fail "pi install missing or mis-wired Flow Agents extension"
 fi
 
 KIRO_WORKSPACE="$TMPDIR_EVAL/kiro-workspace"
@@ -504,6 +584,125 @@ else
   _fail "installed prompt-submit workflow-steering commands did not execute consistently"
 fi
 
+# Execute the opencode plugin's workflow-steering command path directly
+OPENCODE_WORKSPACE="$TMPDIR_EVAL/opencode-exec-workspace"
+mkdir -p "$OPENCODE_WORKSPACE"
+if node - "$OPENCODE_DEST" "$OPENCODE_WORKSPACE" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+const [opencodeDest, opencodeWorkspace] = process.argv.slice(2);
+const state = {
+  schema_version: "1.0",
+  task_slug: "opencode-hook-demo",
+  status: "not_verified",
+  phase: "verification",
+  updated_at: "2026-06-01T00:00:00Z",
+  next_action: { status: "needs_user", summary: "Opencode hook test.", target_phase: "goal_fit" },
+};
+const critique = {
+  schema_version: "1.0",
+  task_slug: "opencode-hook-demo",
+  status: "fail",
+  required: true,
+  updated_at: "2026-06-01T00:01:00Z",
+  critiques: [{ id: "oc-review", reviewer: "tool-code-reviewer", reviewed_at: "2026-06-01T00:01:00Z", verdict: "fail", summary: "Blocking.", findings: [{ id: "oc-open", severity: "high", status: "open", description: "Open finding." }] }],
+};
+function writeFixture(root) {
+  const taskDir = path.join(root, ".flow-agents/opencode-hook-demo");
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, "state.json"), JSON.stringify(state), "utf8");
+  fs.writeFileSync(path.join(taskDir, "critique.json"), JSON.stringify(critique), "utf8");
+  fs.mkdirSync(path.join(root, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(root, "docs/context-map.md"), "# Context Map\n", "utf8");
+}
+function runOpencodeAdapter(bundleDest, cwd) {
+  const adapterPath = path.join(bundleDest, "scripts", "hooks", "opencode-hook-adapter.js");
+  const payload = JSON.stringify({ hook_event_name: "UserPromptSubmit", cwd });
+  const result = spawnSync(process.execPath, [adapterPath, "UserPromptSubmit", "workflow-steering", "workflow-steering.js", "default"], {
+    input: payload,
+    cwd,
+    env: { ...process.env, SA_HOOK_PROFILE: "standard", FLOW_AGENTS_HOOK_RUNTIME: "opencode" },
+    encoding: "utf8",
+    timeout: 30000,
+  });
+  if (result.status !== 0) throw new Error("opencode adapter failed: rc=" + result.status + " stderr=" + result.stderr);
+  const out = JSON.parse(result.stdout || "{}");
+  const ctx = out.context || "";
+  if (!ctx.includes("WORKFLOW STATE ATTENTION")) throw new Error("opencode adapter did not emit workflow attention: stdout=" + result.stdout + " stderr=" + result.stderr);
+  if (!ctx.includes("STATE: opencode-hook-demo is status:not_verified phase:verification")) throw new Error("opencode adapter missed state guidance: " + ctx);
+  if (!ctx.includes("CRITIQUE: required critique is status:fail")) throw new Error("opencode adapter missed critique guidance: " + ctx);
+}
+writeFixture(opencodeWorkspace);
+runOpencodeAdapter(opencodeDest, opencodeWorkspace);
+console.log("ok");
+NODE
+then
+  _pass "opencode installed hook adapter executes workflow-steering commands correctly"
+else
+  _fail "opencode installed hook adapter did not execute workflow-steering commands correctly"
+fi
+
+# Execute the pi extension's hook adapter command path directly
+PI_WORKSPACE="$TMPDIR_EVAL/pi-exec-workspace"
+mkdir -p "$PI_WORKSPACE"
+if node - "$PI_DEST" "$PI_WORKSPACE" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+const [piDest, piWorkspace] = process.argv.slice(2);
+const state = {
+  schema_version: "1.0",
+  task_slug: "pi-hook-demo",
+  status: "not_verified",
+  phase: "verification",
+  updated_at: "2026-06-01T00:00:00Z",
+  next_action: { status: "needs_user", summary: "Pi hook test.", target_phase: "goal_fit" },
+};
+const critique = {
+  schema_version: "1.0",
+  task_slug: "pi-hook-demo",
+  status: "fail",
+  required: true,
+  updated_at: "2026-06-01T00:01:00Z",
+  critiques: [{ id: "pi-review", reviewer: "tool-code-reviewer", reviewed_at: "2026-06-01T00:01:00Z", verdict: "fail", summary: "Blocking.", findings: [{ id: "pi-open", severity: "high", status: "open", description: "Open finding." }] }],
+};
+function writeFixture(root) {
+  const taskDir = path.join(root, ".flow-agents/pi-hook-demo");
+  fs.mkdirSync(taskDir, { recursive: true });
+  fs.writeFileSync(path.join(taskDir, "state.json"), JSON.stringify(state), "utf8");
+  fs.writeFileSync(path.join(taskDir, "critique.json"), JSON.stringify(critique), "utf8");
+  fs.mkdirSync(path.join(root, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(root, "docs/context-map.md"), "# Context Map\n", "utf8");
+}
+function runPiAdapter(bundleDest, cwd) {
+  const adapterPath = path.join(bundleDest, "scripts", "hooks", "pi-hook-adapter.js");
+  const payload = JSON.stringify({ hook_event_name: "UserPromptSubmit", cwd });
+  const result = spawnSync(process.execPath, [adapterPath, "UserPromptSubmit", "workflow-steering", "workflow-steering.js", "default"], {
+    input: payload,
+    cwd,
+    env: { ...process.env, SA_HOOK_PROFILE: "standard", FLOW_AGENTS_HOOK_RUNTIME: "pi" },
+    encoding: "utf8",
+    timeout: 30000,
+  });
+  if (result.status !== 0) throw new Error("pi adapter failed: rc=" + result.status + " stderr=" + result.stderr);
+  const out = JSON.parse(result.stdout || "{}");
+  const ctx = out.context || "";
+  if (!ctx.includes("WORKFLOW STATE ATTENTION")) throw new Error("pi adapter did not emit workflow attention: stdout=" + result.stdout + " stderr=" + result.stderr);
+  if (!ctx.includes("STATE: pi-hook-demo is status:not_verified phase:verification")) throw new Error("pi adapter missed state guidance: " + ctx);
+  if (!ctx.includes("CRITIQUE: required critique is status:fail")) throw new Error("pi adapter missed critique guidance: " + ctx);
+}
+writeFixture(piWorkspace);
+runPiAdapter(piDest, piWorkspace);
+console.log("ok");
+NODE
+then
+  _pass "pi installed hook adapter executes workflow-steering commands correctly"
+else
+  _fail "pi installed hook adapter did not execute workflow-steering commands correctly"
+fi
+
+
 echo ""
 echo "--- Pack Filtering ---"
 CODEX_AGENTS_DIR="$CODEX_CORE_DEST/.codex/ag""ents"
@@ -531,6 +730,32 @@ if [[ -f "$CODEX_AGENTS_DIR/user-agent.toml" && -d "$USER_SKILLS_DIR" ]]; then
   _pass "Codex core-pack install preserves unknown user files"
 else
   _fail "Codex core-pack install removed unknown user files"
+fi
+
+# Pack filtering for opencode
+OPENCODE_AGENTS_DIR="$OPENCODE_CORE_DEST/.opencode/agents"
+if (cd "$ROOT_DIR/dist/opencode" && FLOW_AGENTS_PACKS=core bash install.sh "$OPENCODE_CORE_DEST" >/dev/null); then
+  _pass "opencode core-pack filtered install succeeded"
+else
+  _fail "opencode core-pack filtered install failed"
+fi
+
+if [[ -d "$OPENCODE_AGENTS_DIR/tool-planner.md" ]] || [[ -f "$OPENCODE_AGENTS_DIR/tool-planner.md" ]]; then
+  _pass "opencode core-pack install keeps core agents"
+else
+  _fail "opencode core-pack agent filtering failed (tool-planner.md missing)"
+fi
+
+if [[ -d "$OPENCODE_CORE_DEST/.opencode/skills/plan-work" && ! -d "$OPENCODE_CORE_DEST/.opencode/skills/deliver" ]]; then
+  _pass "opencode core-pack install keeps core skills and prunes optional skills"
+else
+  _fail "opencode core-pack skill filtering failed"
+fi
+
+if [[ -f "$OPENCODE_CORE_DEST/.flow-agents/installed-packs.json" ]]; then
+  _pass "opencode core-pack install records selected packs"
+else
+  _fail "opencode core-pack install did not record selected packs"
 fi
 
 echo ""

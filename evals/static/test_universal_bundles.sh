@@ -57,7 +57,7 @@ fi
 
 echo ""
 echo "--- Bundle Layout ---"
-for dir in "$DIST_DIR/kiro" "$DIST_DIR/claude-code" "$DIST_DIR/codex"; do
+for dir in "$DIST_DIR/kiro" "$DIST_DIR/claude-code" "$DIST_DIR/codex" "$DIST_DIR/opencode" "$DIST_DIR/pi"; do
   if [[ -d "$dir" ]]; then
     _pass "$(basename "$dir") bundle exists"
   else
@@ -80,6 +80,8 @@ codex_agents=$(find "$DIST_DIR/codex/.codex/agents" -maxdepth 1 -name '*.toml' 2
 [[ "$kiro_agents" == "$source_agents" ]] && _pass "Kiro agent count matches source ($kiro_agents)" || _fail "Kiro agent count mismatch: source=$source_agents dist=$kiro_agents"
 [[ "$claude_agents" == "$source_agents" ]] && _pass "Claude agent count matches source ($claude_agents)" || _fail "Claude agent count mismatch: source=$source_agents dist=$claude_agents"
 [[ "$codex_agents" == "$expected_codex_agents" ]] && _pass "Codex agent count matches source minus manifest exclusions ($codex_agents)" || _fail "Codex agent count mismatch: expected=$expected_codex_agents dist=$codex_agents"
+opencode_agents=$(find "$DIST_DIR/opencode/.opencode/agents" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
+[[ "$opencode_agents" == "$source_agents" ]] && _pass "opencode agent count matches source ($opencode_agents)" || _fail "opencode agent count mismatch: source=$source_agents dist=$opencode_agents"
 
 echo ""
 echo "--- Kiro JSON ---"
@@ -227,8 +229,117 @@ else
 fi
 
 echo ""
+echo "--- opencode Export Shape ---"
+if node - "$DIST_DIR/opencode/.opencode/agents" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const required = new Set(["description", "mode", "model"]);
+const validModes = new Set(["subagent", "primary", "all"]);
+for (const name of fs.readdirSync(process.argv[2]).filter((file) => file.endsWith(".md"))) {
+  const text = fs.readFileSync(path.join(process.argv[2], name), "utf8");
+  if (!text.startsWith("---\n")) throw new Error(`${name}: missing frontmatter start`);
+  const parts = text.split("\n---\n");
+  if (parts.length < 2) throw new Error(`${name}: missing frontmatter end`);
+  const fmLines = parts[0].replace("---\n", "").split(/\r?\n/).filter((line) => line.includes(":"));
+  const keys = new Set(fmLines.map((line) => line.split(":", 1)[0].trim()));
+  const missing = [...required].filter((key) => !keys.has(key));
+  if (missing.length) throw new Error(`${name}: missing frontmatter keys ${missing.join(", ")}`);
+  const modeMatch = fmLines.find((line) => line.trim().startsWith("mode:"));
+  if (modeMatch) {
+    const mode = modeMatch.split(":", 2)[1].trim();
+    if (!validModes.has(mode)) throw new Error(`${name}: invalid mode value: ${mode}`);
+  }
+  if (!parts.slice(1).join("\n---\n").trim()) throw new Error(`${name}: empty body`);
+}
+console.log("ok");
+NODE
+then
+  _pass "opencode agent markdown has valid YAML frontmatter with description, mode, model"
+else
+  _fail "opencode agent markdown frontmatter/shape check failed"
+fi
+
+if [[ -f "$DIST_DIR/opencode/.opencode/plugins/flow-agents.js" ]]; then
+  _pass "opencode bundle includes Flow Agents plugin"
+else
+  _fail "opencode bundle missing .opencode/plugins/flow-agents.js"
+fi
+
+if [[ -f "$DIST_DIR/opencode/opencode.json" ]]; then
+  if node - "$DIST_DIR/opencode/opencode.json" <<'NODE'
+const fs = require("node:fs");
+const data = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!data || typeof data !== "object") throw new Error("opencode.json must be an object");
+console.log("ok");
+NODE
+  then
+    _pass "opencode.json is valid JSON"
+  else
+    _fail "opencode.json is invalid"
+  fi
+else
+  _fail "opencode bundle missing opencode.json"
+fi
+
+if [[ -d "$DIST_DIR/opencode/.opencode/skills" ]] && [[ $(find "$DIST_DIR/opencode/.opencode/skills" -name "SKILL.md" | wc -l | tr -d ' ') -gt 0 ]]; then
+  _pass "opencode bundle includes skills in .opencode/skills/"
+else
+  _fail "opencode bundle missing skills in .opencode/skills/"
+fi
+
+echo ""
+echo "--- pi Export Shape ---"
+if [[ -f "$DIST_DIR/pi/.pi/extensions/flow-agents.ts" ]]; then
+  _pass "pi bundle includes Flow Agents extension"
+else
+  _fail "pi bundle missing .pi/extensions/flow-agents.ts"
+fi
+
+if [[ -d "$DIST_DIR/pi/.pi/skills" ]] && [[ $(find "$DIST_DIR/pi/.pi/skills" -name "SKILL.md" | wc -l | tr -d ' ') -gt 0 ]]; then
+  _pass "pi bundle includes skills in .pi/skills/"
+else
+  _fail "pi bundle missing skills in .pi/skills/"
+fi
+
+if node - "$DIST_DIR/pi/.pi/extensions/flow-agents.ts" <<'NODE'
+const fs = require("node:fs");
+const text = fs.readFileSync(process.argv[2], "utf8");
+if (!text.includes("pi-hook-adapter.js")) throw new Error("pi extension does not reference pi-hook-adapter.js");
+if (!text.includes("pi-telemetry-hook.js")) throw new Error("pi extension does not reference pi-telemetry-hook.js");
+if (!text.includes("workflow-steering.js")) throw new Error("pi extension missing workflow-steering.js reference");
+if (!text.includes("config-protection.js")) throw new Error("pi extension missing config-protection.js reference");
+if (!text.includes("stop-goal-fit.js")) throw new Error("pi extension missing stop-goal-fit.js reference");
+if (!text.includes("before_agent_start")) throw new Error("pi extension missing before_agent_start event handler");
+if (!text.includes("tool_call")) throw new Error("pi extension missing tool_call event handler");
+console.log("ok");
+NODE
+then
+  _pass "pi extension references correct hook adapters and event handlers"
+else
+  _fail "pi extension is missing required hook adapter or event handler references"
+fi
+
+if node - "$DIST_DIR/opencode/.opencode/plugins/flow-agents.js" <<'NODE'
+const fs = require("node:fs");
+const text = fs.readFileSync(process.argv[2], "utf8");
+if (!text.includes("opencode-hook-adapter.js")) throw new Error("opencode plugin does not reference opencode-hook-adapter.js");
+if (!text.includes("opencode-telemetry-hook.js")) throw new Error("opencode plugin does not reference opencode-telemetry-hook.js");
+if (!text.includes("workflow-steering.js")) throw new Error("opencode plugin missing workflow-steering.js reference");
+if (!text.includes("config-protection.js")) throw new Error("opencode plugin missing config-protection.js reference");
+if (!text.includes("stop-goal-fit.js")) throw new Error("opencode plugin missing stop-goal-fit.js reference");
+if (!text.includes("session.created")) throw new Error("opencode plugin missing session.created event handler");
+if (!text.includes("tool.execute.before")) throw new Error("opencode plugin missing tool.execute.before event handler");
+console.log("ok");
+NODE
+then
+  _pass "opencode plugin references correct hook adapters and event handlers"
+else
+  _fail "opencode plugin is missing required hook adapter or event handler references"
+fi
+
+echo ""
 echo "--- Shared Task Dirs ---"
-for dir in "$DIST_DIR/claude-code/.flow-agents" "$DIST_DIR/codex/.flow-agents"; do
+for dir in "$DIST_DIR/claude-code/.flow-agents" "$DIST_DIR/codex/.flow-agents" "$DIST_DIR/opencode/.flow-agents" "$DIST_DIR/pi/.flow-agents"; do
   if [[ -d "$dir" ]]; then
     _pass "$(realpath "$dir" 2>/dev/null || echo "$dir") exists"
   else

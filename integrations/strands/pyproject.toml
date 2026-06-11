@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "flow-agents-strands"
+version = "0.0.1"
+description = "Flow Agents framework adapter for AWS Strands Agents — telemetry, policy gates, and workflow steering via the Strands hook surface."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+keywords = ["flow-agents", "strands", "aws", "agents", "telemetry", "hooks"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+# No runtime dependencies — strands-agents is optional
+dependencies = []
+
+[project.optional-dependencies]
+# Install the real Strands SDK when you want to wire into a live Agent
+strands = [
+    "strands-agents>=0.1.0",
+]
+# Development / test extras
+dev = [
+    "strands-agents>=0.1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["flow_agents_strands*"]

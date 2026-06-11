@@ -117,6 +117,10 @@ Use fix-bug. Reproduce the problem, diagnose root cause, implement the fix, and 
     <strong>Developer Reference</strong>
     <span>The generated repo map: commands, agents, skills, scripts, and contracts.</span>
   </a>
+  <a class="doc-card" href="spec/runtime-hook-surface.html">
+    <strong>Runtime Hook Surface</strong>
+    <span>Canonical event taxonomy, policy classes, conformance levels, and host mapping tables for adapter authors.</span>
+  </a>
 </div>
 
 ## The Kontour family

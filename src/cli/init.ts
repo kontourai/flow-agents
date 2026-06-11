@@ -9,7 +9,7 @@ import { activateCodexLocal } from "../runtime-adapters.js";
 import { main as buildBundles } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
 
-type Runtime = "base" | "codex" | "claude-code" | "kiro";
+type Runtime = "base" | "codex" | "claude-code" | "kiro" | "opencode" | "pi";
 type TelemetrySink = "local-files" | "local-kontour-console" | "kontour-hosted-console" | "user-hosted-console" | "kontour-cloud" | "hosted-kontour-console";
 
 type InitOptions = {
@@ -30,13 +30,15 @@ const runtimeBundles: Record<Runtime, string> = {
   codex: "codex",
   "claude-code": "claude-code",
   kiro: "kiro",
+  opencode: "opencode",
+  pi: "pi",
 };
 
 function usage(): void {
   console.error(`usage: flow-agents init [options]
 
 Options:
-  --runtime base|codex|claude-code|kiro
+  --runtime base|codex|claude-code|kiro|opencode|pi
   --dest PATH
   --telemetry-sink local-files|local-kontour-console|kontour-hosted-console|user-hosted-console
   --console-url URL
@@ -52,8 +54,8 @@ Options:
 function normalizeRuntime(value: string | undefined): Runtime | undefined {
   if (!value) return undefined;
   if (value === "claude") return "claude-code";
-  if (value === "base" || value === "codex" || value === "claude-code" || value === "kiro") return value;
-  throw new Error(`unknown runtime '${value}'; expected base, codex, claude-code, or kiro`);
+  if (value === "base" || value === "codex" || value === "claude-code" || value === "kiro" || value === "opencode" || value === "pi") return value;
+  throw new Error(`unknown runtime '${value}'; expected base, codex, claude-code, kiro, opencode, or pi`);
 }
 
 function normalizeTelemetrySink(value: string): TelemetrySink {

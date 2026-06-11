@@ -62,6 +62,10 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/run-hook.js", { category: "hook runner", requiredNeedles: ["isHookEnabled", "Path traversal rejected"] }],
   ["scripts/hooks/config-protection.js", { category: "policy hook", requiredNeedles: ["Config Protection Hook"] }],
   ["scripts/hooks/governance-audit.sh", { category: "policy hook", requiredNeedles: ["governance-audit.sh", "audit_emit"] }],
+  ["scripts/hooks/opencode-hook-adapter.js", { category: "runtime adapter", requiredNeedles: ["opencode", "run-hook.js"] }],
+  ["scripts/hooks/opencode-telemetry-hook.js", { category: "telemetry shim", requiredNeedles: ["opencode", "telemetry"] }],
+  ["scripts/hooks/pi-hook-adapter.js", { category: "runtime adapter", requiredNeedles: ["pi", "run-hook.js"] }],
+  ["scripts/hooks/pi-telemetry-hook.js", { category: "telemetry shim", requiredNeedles: ["pi", "telemetry"] }],
   ["scripts/hooks/post-edit-accumulator.js", { category: "policy hook", requiredNeedles: ["Post-Edit"] }],
   ["scripts/hooks/pre-commit-quality.js", { category: "repo guardrail hook", requiredNeedles: ["staged"] }],
   ["scripts/hooks/quality-gate.js", { category: "policy hook", requiredNeedles: ["Quality"] }],
@@ -95,7 +99,7 @@ const requiredUsageFeedbackFiles = [
 const fixtureOwnershipSelfAuditRefs = new Set([
   "evals/integration/test_fixture_retirement_audit.sh",
 ]);
-const pythonInventoryExcludes = new Set([".git", ".flow-agents", "node_modules", ".venv", "dist", "__pycache__", ".pytest_cache", ".cache", "build"]);
+const pythonInventoryExcludes = new Set([".git", ".flow-agents", "node_modules", ".venv", "dist", "__pycache__", ".pytest_cache", ".cache", "build", "integrations"]);
 const pythonCommandScanRoots = ["README.md", "docs", "context", "skills", "prompts", "agents", "evals", "scripts", "packaging", "package.json"];
 const allowedPythonCommandFiles = [
   /^agents\/tool-explore-deps\.json$/,

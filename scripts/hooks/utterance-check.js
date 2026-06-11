@@ -7,19 +7,31 @@
  * agent context when concerning statements (unsupported/disputed/rejected) are
  * found.
  *
- * Disabled by default. Enable with:
- *   FLOW_AGENTS_UTTERANCE_CHECK_ENABLED=true
+ * Activation is driven by per-repo policy in context/settings/flow-agents-settings.json:
  *
- * Hook category: PostToolUse / Stop (non-blocking, always exits 0).
+ *   {
+ *     "schema_version": "1.0",
+ *     "utteranceCheck": {
+ *       "enabled": true,
+ *       "mode": "report",         // "report" (default) or "strict"
+ *       "extractor": "reference", // "reference" (default) or "anthropic"
+ *       "bundlePath": "path/to/trust.bundle.json",
+ *       "model": "claude-haiku-4-5",
+ *       "agentId": "my-agent"
+ *     }
+ *   }
  *
- * Strict mode (blocks Stop when concerning badges present):
+ * Environment variable override (force-on / force-off):
+ *   FLOW_AGENTS_UTTERANCE_CHECK_ENABLED=true   — force on regardless of config
+ *   FLOW_AGENTS_UTTERANCE_CHECK_ENABLED=false  — force off regardless of config
+ *
+ * Other env vars still accepted as overrides (take precedence over config):
  *   FLOW_AGENTS_UTTERANCE_CHECK_STRICT=true
- *
- * Bundle path (optional trust bundle for claim resolution):
  *   FLOW_AGENTS_UTTERANCE_CHECK_BUNDLE_PATH=/path/to/bundle.json
- *
- * Agent ID (for provenance):
  *   FLOW_AGENTS_UTTERANCE_CHECK_AGENT_ID=my-agent
+ *   FLOW_AGENTS_UTTERANCE_CHECK_EXTRACTOR=anthropic
+ *
+ * Hook category: PostToolUse / Stop (non-blocking in report mode, always fails open).
  */
 
 'use strict';
@@ -33,12 +45,32 @@ const CLI_TIMEOUT_MS = 30000;
 // Maximum utterance text to pass to the CLI to keep stdin under MAX_STDIN.
 const MAX_UTTERANCE_CHARS = 8192;
 
+const SETTINGS_REL_PATH = path.join('context', 'settings', 'flow-agents-settings.json');
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function parseJson(raw) {
   try { return JSON.parse(raw || '{}'); } catch { return {}; }
+}
+
+/**
+ * Walk up from startDir to find the repo root.
+ * Identified by having .git or AGENTS.md present.
+ */
+function findRepoRoot(startDir) {
+  let dir = path.resolve(startDir || process.cwd());
+  const root = path.parse(dir).root;
+  for (let depth = 0; depth < 40; depth++) {
+    if (fs.existsSync(path.join(dir, '.git')) || fs.existsSync(path.join(dir, 'AGENTS.md'))) {
+      return dir;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir || dir === root) break;
+    dir = parent;
+  }
+  return path.resolve(startDir || process.cwd());
 }
 
 /**
@@ -60,6 +92,76 @@ function findPackageRoot(startDir) {
   }
   // Fallback: assume hooks dir is scripts/hooks/, so root is two levels up.
   return path.resolve(__dirname, '..', '..');
+}
+
+/**
+ * Load per-repo utteranceCheck policy from context/settings/flow-agents-settings.json.
+ * Returns the utteranceCheck object (may be empty/undefined) or null if not found.
+ */
+function loadRepoConfig(repoRoot) {
+  const settingsPath = path.join(repoRoot, SETTINGS_REL_PATH);
+  try {
+    if (!fs.existsSync(settingsPath)) return null;
+    const raw = fs.readFileSync(settingsPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed.utteranceCheck === 'object' ? parsed.utteranceCheck : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve effective hook policy, merging repo config with env var overrides.
+ * Priority (highest first): env var overrides > repo config > built-in defaults.
+ */
+function resolvePolicy(repoRoot) {
+  const repoConfig = loadRepoConfig(repoRoot) || {};
+
+  // Env var override: FLOW_AGENTS_UTTERANCE_CHECK_ENABLED forces on/off.
+  const envEnabled = process.env.FLOW_AGENTS_UTTERANCE_CHECK_ENABLED;
+  let enabled;
+  if (envEnabled === 'true') {
+    enabled = true;
+  } else if (envEnabled === 'false') {
+    enabled = false;
+  } else {
+    // Primary switch is the repo config; default is disabled.
+    enabled = repoConfig.enabled === true;
+  }
+
+  if (!enabled) return { enabled: false };
+
+  // mode: repo config → default "report"
+  let mode = repoConfig.mode === 'strict' ? 'strict' : 'report';
+  // Env var override for strict
+  if (String(process.env.FLOW_AGENTS_UTTERANCE_CHECK_STRICT || '').toLowerCase() === 'true') {
+    mode = 'strict';
+  }
+
+  // extractor: repo config → default "reference"
+  let extractor = repoConfig.extractor === 'anthropic' ? 'anthropic' : 'reference';
+  // Env var override for extractor
+  const envExtractor = process.env.FLOW_AGENTS_UTTERANCE_CHECK_EXTRACTOR;
+  if (envExtractor === 'anthropic') extractor = 'anthropic';
+  else if (envExtractor === 'reference') extractor = 'reference';
+
+  // bundlePath: env var override > repo config
+  let bundlePath = process.env.FLOW_AGENTS_UTTERANCE_CHECK_BUNDLE_PATH || repoConfig.bundlePath || '';
+  // Resolve repo-relative bundle paths
+  if (bundlePath && !path.isAbsolute(bundlePath)) {
+    bundlePath = path.join(repoRoot, bundlePath);
+  }
+
+  // agentId: env var override > repo config
+  const agentId =
+    process.env.FLOW_AGENTS_UTTERANCE_CHECK_AGENT_ID ||
+    repoConfig.agentId ||
+    'flow-agents-hook';
+
+  // model: repo config only (no env var for now)
+  const model = repoConfig.model || '';
+
+  return { enabled, mode, extractor, bundlePath, agentId, model };
 }
 
 /**
@@ -101,11 +203,14 @@ function safeOneLineExcerpt(text, max = 120) {
 // ---------------------------------------------------------------------------
 
 function run(rawInput) {
-  const enabled = String(process.env.FLOW_AGENTS_UTTERANCE_CHECK_ENABLED || '').toLowerCase() === 'true';
-  if (!enabled) return rawInput;
-
   let input;
   try { input = JSON.parse(rawInput || '{}'); } catch { return rawInput; }
+
+  // Resolve repo root from hook input (Claude Code passes cwd in event).
+  const repoRoot = findRepoRoot(input.cwd || process.cwd());
+  const policy = resolvePolicy(repoRoot);
+
+  if (!policy.enabled) return rawInput;
 
   const utteranceText = extractUtteranceText(input);
   if (!utteranceText) return rawInput;
@@ -127,19 +232,16 @@ function run(rawInput) {
 
   const cliArgs = ['utterance-check', 'check', '--utterance', utterance];
 
-  const bundlePath = process.env.FLOW_AGENTS_UTTERANCE_CHECK_BUNDLE_PATH;
-  if (bundlePath) cliArgs.push('--bundle-path', bundlePath);
-
-  const agentId = process.env.FLOW_AGENTS_UTTERANCE_CHECK_AGENT_ID || 'flow-agents-hook';
-  cliArgs.push('--agent-id', agentId);
-
-  const strict = String(process.env.FLOW_AGENTS_UTTERANCE_CHECK_STRICT || '').toLowerCase() === 'true';
-  if (strict) cliArgs.push('--strict');
+  if (policy.bundlePath) cliArgs.push('--bundle-path', policy.bundlePath);
+  cliArgs.push('--agent-id', policy.agentId);
+  if (policy.extractor === 'anthropic') cliArgs.push('--extractor', 'anthropic');
+  if (policy.model) cliArgs.push('--model', policy.model);
+  if (policy.mode === 'strict') cliArgs.push('--strict');
 
   const result = spawnSync(process.execPath, [cliPath, ...cliArgs], {
     encoding: 'utf8',
     timeout: CLI_TIMEOUT_MS,
-    cwd: packageRoot,
+    cwd: repoRoot,
     env: { ...process.env },
   });
 
@@ -189,7 +291,7 @@ function run(rawInput) {
   const event = input.hook_event_name || '';
   const guidance = '\n\n---\n' + lines.join('\n') + '\n---';
 
-  if (strict && result.status === 2) {
+  if (policy.mode === 'strict' && result.status === 2) {
     return {
       stdout: rawInput,
       stderr: lines.join('\n'),
@@ -222,4 +324,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { run, extractUtteranceText, findPackageRoot };
+module.exports = { run, extractUtteranceText, findPackageRoot, findRepoRoot, loadRepoConfig, resolvePolicy };

@@ -107,10 +107,13 @@ export function main(argv = process.argv.slice(2)): number {
   removed += pruneNamedDirs(rootDir, "skills", allPackMembers(packs, "skills"), selected.skills, dryRun);
   removed += pruneNamedDirs(rootDir, ".claude/skills", allPackMembers(packs, "skills"), selected.skills, dryRun);
   removed += pruneNamedDirs(rootDir, ".codex/skills", allPackMembers(packs, "skills"), selected.skills, dryRun);
+  removed += pruneNamedDirs(rootDir, ".opencode/skills", allPackMembers(packs, "skills"), selected.skills, dryRun);
+  removed += pruneNamedDirs(rootDir, ".pi/skills", allPackMembers(packs, "skills"), selected.skills, dryRun);
   removed += pruneNamedDirs(rootDir, "powers", allPackMembers(packs, "powers"), selected.powers, dryRun);
   removed += pruneAgentFiles(rootDir, "agents", ".json", allPackMembers(packs, "agents"), selected.agents, dryRun);
   removed += pruneAgentFiles(rootDir, ".claude/agents", ".md", allPackMembers(packs, "agents"), selected.agents, dryRun);
   removed += pruneAgentFiles(rootDir, ".codex/agents", ".toml", allPackMembers(packs, "agents"), selected.agents, dryRun);
+  removed += pruneAgentFiles(rootDir, ".opencode/agents", ".md", allPackMembers(packs, "agents"), selected.agents, dryRun);
   const summary = {
     selected_packs: [...selectedNames].sort(),
     removed_entries: removed,

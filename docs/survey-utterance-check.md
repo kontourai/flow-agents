@@ -4,72 +4,206 @@ title: Survey Utterance Check Integration
 
 # Survey Utterance Check Integration
 
-Flow Agents can optionally check agent utterances for evidence coverage using `@kontourai/survey`. This integration is disabled by default and intentionally optional — ordinary Flow Agents workflows do not require Survey.
+When an agent says something factual — "test coverage is 92%", "the API is backward-compatible", "no breaking changes in this release" — that claim either has evidence behind it or it doesn't. The utterance check feature bridges Flow Agents hooks to `@kontourai/survey` so that every factual statement in an agent response is compared against a trust bundle and tagged with a badge. Statements with no backing evidence are flagged inline so the agent can acknowledge the gap rather than assert silently.
 
-The guiding rule mirrors the Veritas boundary: Flow Agents owns the hook wiring and badge guidance format; Survey owns the extraction, claim resolution, and trust report semantics.
+This document explains how to enable and configure the feature, what the workflow looks like end to end, and what to watch out for.
 
-## Background: ADR 0003 §9
+---
 
-ADR 0003 §9 designates agent-utterance extraction as a **Survey producer profile** — Survey pointed at agent prose instead of web sources. Each factual statement in agent output is extracted as a candidate claim and run through Survey's Inquiry pipeline. Flow Agents supplies the enforcement point (hooks) that ADR 0003 calls out. This integration is step 6 of the ADR sequencing and depends on the Inquiry pipeline already existing in Survey.
+## What actually happens
 
-## User-Facing Story
+Here is a concrete walkthrough from agent response to badge guidance:
 
-```text
-Agent: "The test coverage for auth-service is 92%. All critical paths have been verified."
+```
+Agent says: "The test coverage for auth-service is 92%.
+             All critical paths have been verified."
 
-Flow Agents (hook active):
-1. Captures the agent's response text from the PostToolUse event.
-2. Invokes the utterance-check CLI adapter with the response text.
-3. @kontourai/survey extracts factual statements: coverage:92%, paths:verified.
-4. Survey resolves each statement against the configured trust bundle.
-5. Statements without matching claims resolve as "unsupported".
-6. Flow Agents injects badge guidance into the agent context:
-   UTTERANCE CHECK: 2 statement(s) lack evidence coverage.
-   - [unsupported] "test coverage for auth-service is 92%"
-   - [unsupported] "All critical paths have been verified"
+Flow Agents hook (PostToolUse):
+  1. Captures the agent response text from the PostToolUse event.
+  2. Invokes the utterance-check CLI with the response text and your trust bundle.
+
+@kontourai/survey (inside the CLI):
+  3. Extractor splits the response into factual statements:
+       - "test coverage for auth-service is 92%"
+       - "All critical paths have been verified"
+  4. Each statement is resolved against the trust bundle.
+  5. Neither statement has a matching verified claim → both resolve as "unsupported".
+
+Flow Agents hook injects guidance into the agent context:
+  UTTERANCE CHECK: 2 statement(s) in this response lack evidence coverage.
+  Summary: unsupported:2
+    - [unsupported] "test coverage for auth-service is 92%"
+    - [unsupported] "All critical paths have been verified"
+  Evidence note: unsupported = no matching claim in the trust bundle; ...
 ```
 
-The agent sees honest gap disclosure rather than silent pass-through.
+The agent sees honest gap disclosure rather than silent pass-through. It can then cite sources, note the gap explicitly, or record a coverage claim via `@kontourai/survey`.
 
-## Ownership Split
+---
 
-| Area | Flow Agents Owns | Survey Owns |
-| --- | --- | --- |
-| Hook wiring | PostToolUse/Stop hook, badge guidance format, enable/disable flags | None |
-| Extraction | Invoking the CLI adapter | Statement extraction, extractor interface |
-| Resolution | Passing the trust bundle path | Inquiry pipeline, claim resolution |
-| Output | Guidance text injected into agent context | UtteranceTrustReport with per-statement badges |
-| Packaging | Optional hook activation, CLI adapter | @kontourai/survey npm package |
+## Deciding between report and strict mode
 
-Flow Agents does not own trust claim models, inquiry semantics, or extractor implementations. Survey's `referenceUtteranceExtractor` is the default extractor; production use should inject `createAnthropicUtteranceExtractor` from `@kontourai/survey/anthropic` for model-backed extraction.
+The hook has two modes:
 
-## Enabling the Hook
+| Mode | Effect |
+|------|--------|
+| `report` (default) | Appends badge guidance to the agent context. Never blocks. Agent decides next step. |
+| `strict` | If any statement is `unsupported`, `disputed`, or `rejected`, the hook exits 2, which routes the Stop event back to the agent for revision. |
 
-The hook is disabled by default. Set environment variables before starting the agent session:
+Use **report** when you want visibility without gate behavior — good for exploratory sessions, onboarding, or repos where the trust bundle is still being built out. Use **strict** when you want the agent to revise or cite sources before completing a turn — appropriate for regulated workflows, production deployments, or repos with a well-populated bundle.
+
+The empty-bundle caveat: if you enable the hook without a `bundlePath`, every factual statement the extractor finds will resolve as `unsupported` because there are no claims to match against. In strict mode this means every response with factual statements will be blocked. Make sure you either provide a `bundlePath` or use report mode until you have a bundle.
+
+---
+
+## The trust bundle
+
+The trust bundle is a JSON file with a `claims` array. It is the authoritative record of what is considered evidenced for your codebase. Two practical sources:
+
+- **Veritas-generated bundle**: if your repo uses `@veritas/veritas`, it can produce a `trust.bundle.json` from `.veritas/evidence`. Point `bundlePath` at that output.
+- **Surface report**: the `@kontourai/surface` package can generate a trust bundle from a surface verification run. If your repo runs surface checks, look for the generated bundle in the surface output directory (e.g. `dist/trust-bundle.json` or a named artifact).
+- **Hand-authored bundle**: a minimal bundle is just `{ "claims": [] }`. Add claims incrementally as you record evidence.
+
+An empty or missing bundle means everything is unsupported. That is not necessarily wrong — it is an honest starting state — but it is only useful in report mode.
+
+---
+
+## Choosing an extractor
+
+The extractor is responsible for splitting the agent utterance into discrete factual statements. Two are available:
+
+| Extractor | How it works | Requirements |
+|-----------|-------------|--------------|
+| `reference` (default) | Pattern-based heuristics. Fast, no API call, no key needed. Works offline. Lower recall on complex prose. | `@kontourai/survey` installed |
+| `anthropic` | Model-backed extraction via `@kontourai/survey/anthropic`. Higher recall, understands context and nuance, can split compound claims. | `@kontourai/survey` + `@anthropic-ai/sdk` installed, `ANTHROPIC_API_KEY` set |
+
+For most exploratory use, `reference` is sufficient. Switch to `anthropic` when you find the reference extractor is missing statements that matter for your domain.
+
+The `anthropic` extractor fails open: if `ANTHROPIC_API_KEY` is missing or `@anthropic-ai/sdk` is not installed, the CLI emits `status: "not_configured"` (with a clear explanation in `summary`) and exits 0. The hook treats this as a silent pass-through. You will see a message in stderr explaining what is missing, but the hook will not block.
+
+---
+
+## Per-repo configuration
+
+The canonical way to enable utterance checking is a `context/settings/flow-agents-settings.json` file in the consumer repo. This is a peer to `context/settings/backlog-provider-settings.json` — the same directory, the same convention.
+
+**Minimal example (report mode, reference extractor):**
+
+```json
+{
+  "$schema": "../../node_modules/@kontourai/flow-agents/schemas/flow-agents-settings.schema.json",
+  "schema_version": "1.0",
+  "utteranceCheck": {
+    "enabled": true,
+    "mode": "report",
+    "extractor": "reference"
+  }
+}
+```
+
+**With a trust bundle and anthropic extractor:**
+
+```json
+{
+  "$schema": "../../node_modules/@kontourai/flow-agents/schemas/flow-agents-settings.schema.json",
+  "schema_version": "1.0",
+  "utteranceCheck": {
+    "enabled": true,
+    "mode": "report",
+    "extractor": "anthropic",
+    "bundlePath": ".veritas/trust.bundle.json",
+    "model": "claude-haiku-4-5",
+    "agentId": "surface-agent"
+  }
+}
+```
+
+**Strict mode:**
+
+```json
+{
+  "$schema": "../../node_modules/@kontourai/flow-agents/schemas/flow-agents-settings.schema.json",
+  "schema_version": "1.0",
+  "utteranceCheck": {
+    "enabled": true,
+    "mode": "strict",
+    "extractor": "anthropic",
+    "bundlePath": "dist/trust-bundle.json"
+  }
+}
+```
+
+Config field reference:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | boolean | `false` | Whether utterance checking is active for this repo. |
+| `mode` | `"report"` \| `"strict"` | `"report"` | How to handle concerning badges. See above. |
+| `extractor` | `"reference"` \| `"anthropic"` | `"reference"` | Extractor to use. See above. |
+| `bundlePath` | string | — | Repo-relative or absolute path to the trust bundle JSON. Omit to use an empty bundle. |
+| `model` | string | — | Model for the anthropic extractor. Only used when `extractor` is `"anthropic"`. |
+| `agentId` | string | `"flow-agents-hook"` | Agent identifier for provenance in the trust report. |
+
+---
+
+## Environment variable overrides
+
+For one-off sessions or CI pipelines, you can override the config with environment variables. These take precedence over `flow-agents-settings.json`.
+
+| Variable | Effect |
+|----------|--------|
+| `FLOW_AGENTS_UTTERANCE_CHECK_ENABLED=true\|false` | Force the hook on or off, overriding the config `enabled` field. |
+| `FLOW_AGENTS_UTTERANCE_CHECK_STRICT=true` | Force strict mode. |
+| `FLOW_AGENTS_UTTERANCE_CHECK_BUNDLE_PATH=/path/to/bundle.json` | Override `bundlePath`. |
+| `FLOW_AGENTS_UTTERANCE_CHECK_AGENT_ID=my-agent` | Override `agentId`. |
+| `FLOW_AGENTS_UTTERANCE_CHECK_EXTRACTOR=anthropic\|reference` | Override `extractor`. |
+
+**When the config file is absent and no env vars are set**, the hook is disabled. This is the safe default — existing repos are not affected until they opt in.
+
+---
+
+## Registering the hook
+
+Add the utterance check to a Claude Code session via `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/hooks/claude-hook-adapter.js PostToolUse post:utterance-check utterance-check.js standard,strict"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Or run the hook directly (Kiro/Codex convention, exit 2 blocks):
 
 ```bash
-export FLOW_AGENTS_UTTERANCE_CHECK_ENABLED=true
-
-# Optional: path to a trust bundle JSON file for claim resolution
-export FLOW_AGENTS_UTTERANCE_CHECK_BUNDLE_PATH=/path/to/trust-bundle.json
-
-# Optional: agent identifier for provenance
-export FLOW_AGENTS_UTTERANCE_CHECK_AGENT_ID=my-codex-session
-
-# Optional: strict mode — blocks Stop when concerning badges are present
-export FLOW_AGENTS_UTTERANCE_CHECK_STRICT=true
+node scripts/hooks/run-hook.js post:utterance-check utterance-check.js standard,strict
 ```
 
-The hook runs through the standard `run-hook.js` runner and respects `SA_DISABLED_HOOKS` and `SA_HOOK_PROFILE`.
+The hook reads `context/settings/flow-agents-settings.json` relative to the repo root it detects from the hook event `cwd` or `process.cwd()`. No configuration needed in the hook command itself.
 
-## CLI Adapter Contract
+---
+
+## CLI reference
 
 The utterance check CLI is available as:
 
 ```bash
 node build/src/cli.js utterance-check check \
   --utterance "The coverage is 92% and all tests pass." \
-  --bundle-path .surface/trust-bundle.json \
+  --bundle-path .veritas/trust.bundle.json \
+  --extractor anthropic \
+  --model claude-haiku-4-5 \
   --agent-id my-session
 ```
 
@@ -79,6 +213,8 @@ Options:
   --utterance TEXT      Utterance text to check (required unless --not-configured).
   --bundle-path FILE    Trust bundle JSON file. Omit for an empty bundle (all unsupported).
   --agent-id ID         Agent identifier for provenance (default: flow-agents-utterance-check).
+  --extractor NAME      'reference' (default) or 'anthropic'.
+  --model MODEL         Model for the anthropic extractor (e.g. claude-haiku-4-5).
   --not-configured      Skip survey call; output not_configured without error.
   --strict              Exit non-zero when any badge is disputed, rejected, or unsupported.
   --help                Show this help.
@@ -109,83 +245,64 @@ The CLI outputs a JSON report to stdout:
 Badge values:
 
 | Badge | Meaning |
-| --- | --- |
-| `verified` | Matched a claim with verified status |
-| `assumed` | Matched a claim with assumed status |
-| `stale` | Matched a claim that is stale |
-| `disputed` | Matched a claim with conflicting evidence |
-| `rejected` | Matched a claim that was rejected |
-| `unsupported` | No matching claim in the trust bundle |
+|-------|---------|
+| `verified` | Matched a claim with verified status. |
+| `assumed` | Matched a claim with assumed status. |
+| `stale` | Matched a claim that is stale. |
+| `disputed` | Matched a claim with conflicting evidence. |
+| `rejected` | Matched a claim that was rejected. |
+| `unsupported` | No matching claim in the trust bundle. |
 
-Exit codes: `0` = pass, `1` = survey unavailable, `2` = strict mode with concerning badges, `3` = usage error.
+Exit codes: `0` = pass, `0` = anthropic not_configured (fail open), `1` = survey unavailable, `2` = strict mode with concerning badges, `3` = usage error.
 
-When `@kontourai/survey` is not installed, the CLI outputs `status: "not_configured"` and exits `1`. The hook treats `not_configured` as a silent pass-through.
+---
 
-## Registering the Hook
+## Installing dependencies
 
-Add the utterance check to a Claude Code session via `.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": ".*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node scripts/hooks/claude-hook-adapter.js PostToolUse post:utterance-check utterance-check.js standard,strict"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-Or run the hook directly (Kiro/Codex convention, exit 2 blocks):
+The CLI adapter uses dynamic imports so flow-agents itself does not list `@kontourai/survey` as a dependency. Install in the target workspace:
 
 ```bash
-node scripts/hooks/run-hook.js post:utterance-check utterance-check.js standard,strict
-```
-
-## Installing @kontourai/survey
-
-The CLI adapter uses a dynamic import so flow-agents itself does not list `@kontourai/survey` as a dependency. Install it in the target workspace:
-
-```bash
+# Reference extractor only (default)
 npm install @kontourai/survey
-```
 
-For model-backed extraction (production-quality, requires `@anthropic-ai/sdk`):
-
-```bash
+# Anthropic extractor (model-backed)
 npm install @kontourai/survey @anthropic-ai/sdk
 ```
 
-Then inject the Anthropic extractor by extending the CLI adapter or creating a wrapper script that calls `surveyAgentUtterance` with `createAnthropicUtteranceExtractor`.
+---
 
-## Non-Goals
+## Ownership split
+
+| Area | Flow Agents owns | Survey owns |
+|------|-----------------|-------------|
+| Hook wiring | PostToolUse/Stop hook, badge guidance format, config loading | None |
+| Extraction | Invoking the CLI, extractor selection, fail-open handling | Statement extraction, extractor interface, anthropic integration |
+| Resolution | Passing the trust bundle path | Inquiry pipeline, claim resolution |
+| Output | Guidance text injected into agent context | UtteranceTrustReport with per-statement badges |
+| Config | Per-repo `flow-agents-settings.json`, env var overrides | None |
+
+Flow Agents does not own trust claim models, inquiry semantics, or extractor implementations.
+
+---
+
+## Non-goals
 
 - Do not make `@kontourai/survey` a mandatory dependency of flow-agents.
 - Do not copy Survey's extraction or inquiry schemas into flow-agents.
 - Do not auto-register the hook in the default pack; it is opt-in only.
-- Do not make the hook blocking without explicit `--strict` / `FLOW_AGENTS_UTTERANCE_CHECK_STRICT=true`.
+- Do not make the hook blocking without explicit `mode: "strict"` or the env override.
 - Do not silently decide anything. The hook injects guidance; the agent decides next steps.
 
-## Current Integration Shape
+---
+
+## Current integration shape
 
 The integration delivers:
 
-1. `src/cli/utterance-check.ts` — TypeScript CLI adapter. Accepts utterance text, optional bundle path, and agent ID. Dynamically imports `@kontourai/survey`. Outputs a JSON badge report to stdout and human-readable guidance to stderr. Mirrors the `veritas-governance` adapter pattern.
+1. `src/cli/utterance-check.ts` — TypeScript CLI adapter. Accepts utterance text, optional bundle path, agent ID, extractor name, and model. Dynamically imports `@kontourai/survey` (and optionally `@kontourai/survey/anthropic`). Outputs a JSON badge report to stdout and human-readable guidance to stderr.
 
-2. `scripts/hooks/utterance-check.js` — CJS hook script. PostToolUse/Stop, non-blocking by default. Reads agent output text from the hook event, invokes the CLI adapter when `FLOW_AGENTS_UTTERANCE_CHECK_ENABLED=true`, and injects badge guidance into the agent context. Always fails open.
+2. `scripts/hooks/utterance-check.js` — CJS hook script. PostToolUse/Stop, non-blocking in report mode. Reads per-repo policy from `context/settings/flow-agents-settings.json`, uses env vars as overrides. Resolves repo root from hook event `cwd`. Always fails open.
 
-The forward path (out of scope for this slice):
-
-- Register the hook in a dedicated `survey` pack for opt-in activation.
-- Support injecting the Anthropic extractor via `FLOW_AGENTS_UTTERANCE_CHECK_EXTRACTOR=anthropic`.
-- Surface badge results as evidence sidecar entries (linking utterance coverage to workflow evidence).
-- Auto-propose new claim mappings from unsupported statements via the Survey mapping proposer.
+3. `schemas/flow-agents-settings.schema.json` — JSON Schema for the per-repo settings file.
 
 Survey source and API details: https://github.com/kontourai/survey
