@@ -34,6 +34,10 @@ gem install --user-install jekyll -v 3.9.5 jekyll-optional-front-matter \
 Set `FLOW_CLI_ROOT` to a Flow checkout or installed `@kontourai/flow` package
 root to enable full Flow Definition validation in `npm run validate:source`.
 
+## Releases
+
+Releases are automated with release-please: merges to main accumulate into a release PR, and merging it tags the version and dispatches the npm publish workflow. Use conventional commit prefixes (feat:, fix:, docs:, chore:) so version inference works.
+
 ## Validation
 
 - `npm run validate:source` — source-tree integrity (paths, packs, manifests)
