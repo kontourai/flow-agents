@@ -1,0 +1,18 @@
+{
+  "description": "config-protection allows when no file path is present in tool_input",
+  "policy_class": "config-protection",
+  "canonical_event": "preToolUse",
+  "conformance_level": "L2",
+  "hook_id": "config-protection",
+  "hook_script": "config-protection.js",
+  "payload": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "write",
+    "tool_input": {}
+  },
+  "expected": {
+    "exit_code": 0,
+    "stderr_is_empty": true,
+    "stdout_echoes_input": true
+  }
+}

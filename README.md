@@ -2,48 +2,78 @@
 
 # Kontour Flow Agents
 
-**The discipline of Kontour Flow, inside the agent tools you already use.**
+**A portable process-discipline layer for agentic work — canonical policies, evidence, and telemetry that compile to whatever hook surface a host exposes.**
 
 [![npm version](https://img.shields.io/npm/v/%40kontourai%2Fflow-agents)](https://www.npmjs.com/package/@kontourai/flow-agents)
 [![CI](https://github.com/kontourai/flow-agents/actions/workflows/ci.yml/badge.svg)](https://github.com/kontourai/flow-agents/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node >= 22](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](package.json)
 
-[Documentation](https://kontourai.github.io/flow-agents/) · [Workflow Guide](docs/workflow-usage-guide.md) · [System Guidebook](docs/agent-system-guidebook.md) · [Kontour Flow](https://kontourai.github.io/flow/)
+[Documentation](https://kontourai.github.io/flow-agents/) · [Workflow Guide](docs/workflow-usage-guide.md) · [System Guidebook](docs/agent-system-guidebook.md) · [Runtime Hook Spec](docs/spec/runtime-hook-surface.md) · [Kontour Flow](https://kontourai.github.io/flow/)
 
 </div>
 
 ---
 
-Coding agents are powerful and forgetful. They plan well, then drift. They skip verification when context gets crowded. They call partial work done, and after a compaction nobody — including the agent — can say where the work actually stands.
+Agents are powerful and forgetful. They plan well, then drift. They skip verification when context gets crowded. They call partial work done, and after a compaction nobody — including the agent — can say where the work actually stands.
 
-Flow Agents wraps Codex, Claude Code, Kiro, and CI agents in an operating layer that makes long-running work inspectable: workflow skills that route requests into the right procedure, durable sidecar state that survives compaction and handoff, hooks that catch stop-short behavior, evidence gates before release decisions, and learning loops that feed corrections back into the system. [Kontour Flow](https://kontourai.github.io/flow/) owns the gate semantics underneath; Flow Agents makes that enforcement native inside agent harnesses.
+Flow Agents addresses this with a process-discipline layer that sits between the user and the agent: four canonical policy classes (workflow steering, quality gate, stop-goal-fit, config protection), durable sidecar state that survives compaction and handoff, evidence gates before release decisions, and telemetry that feeds corrections back into the system. [Kontour Flow](https://kontourai.github.io/flow/) owns the gate semantics underneath; Flow Agents compiles those policies to whatever hook surface a host exposes — coding-agent harnesses today, agent frameworks next.
 
 **You ask for outcomes. The system supplies the path, the state, the checks, and the proof.**
 
 ## What you get
 
-- **One workflow across runtimes** — the same `idea → backlog → plan → build → review → verify → evidence → release → learning` path installs into Codex, Claude Code, and Kiro without rewriting it per tool.
+- **One workflow across runtimes** — the same `idea → backlog → plan → build → review → verify → evidence → release → learning` path installs into Claude Code, Codex, Kiro, opencode, and pi without rewriting it per tool.
 - **Workflow skills** — `idea-to-backlog`, `pull-work`, `plan-work`, `execute-plan`, `review-work`, `verify-work`, `evidence-gate`, `release-readiness`, `learning-review`, and orchestrators like `deliver` and `fix-bug` that chain them.
 - **Durable workflow state** — schema-validated sidecars under `.flow-agents/` record acceptance criteria, evidence, critique, handoff, and learning, so any session can resume from recorded state instead of chat memory.
-- **Stop-short protection** — runtime hooks check sidecar state and route the agent back when required evidence is missing, instead of letting it summarize past the gap.
+- **Four canonical policies** — workflow steering (phase reminders at each turn), quality gate (per-file checks after edits), stop-goal-fit (evidence check before the agent stops), and config protection (veto writes to linter/formatter configs). Each policy class has a canonical script under `scripts/hooks/` and compiles to the host's native hook format.
 - **Evidence over confidence** — important work ends with tests, browser checks, CI results, review findings, governance reports, or an explicit `NOT_VERIFIED` gap. Optional [Veritas](docs/veritas-integration.md) integration attaches repo-governance evidence without making it mandatory.
-- **Evals that keep the bundle honest** — static, integration, and behavioral eval lanes validate the skills, contracts, fixtures, and hook influence as the bundle evolves.
+- **Evals that keep the bundle honest** — 77 integration and 36 static bundle assertions validate the skills, contracts, fixtures, and hook influence as the bundle evolves.
+
+## Flow Agents as a process-discipline layer
+
+The four canonical policy classes are defined in the [Runtime Hook Surface spec](docs/spec/runtime-hook-surface.md) using a runtime-neutral vocabulary. Adapters translate them to whatever hook surface a host exposes:
+
+| Policy Class | What it does | Hook trigger |
+| --- | --- | --- |
+| Workflow steering | Injects phase-transition reminders so the agent does not lose track of where it is in the delivery pipeline | `userPromptSubmit` |
+| Quality gate | Runs format and lint checks immediately after edit tool calls | `postToolUse` |
+| Stop-goal-fit | Warns (or blocks) when the agent is about to stop but required evidence is missing | `stop` |
+| Config protection | Vetoes writes to linter and formatter configuration files | `preToolUse` |
+
+The spec defines three conformance levels: **L0** (telemetry only), **L1** (steering + stop-goal-fit warning), and **L2** (all four policies with blocking). Claude Code and Codex are the current L2 reference implementations.
+
+## Runtime and support matrix
+
+| Tier | Runtime | Ships | Tested | Conformance |
+| --- | --- | --- | --- | --- |
+| **Core harness** | Claude Code | install + hooks + bundle | 77 integration + 36 static assertions | L2 — reference implementation |
+| **Core harness** | Codex | install + hooks + bundle | 77 integration + 36 static assertions | L2 — reference implementation |
+| **Core harness** | Kiro | install + hooks + bundle | included in bundle assertions | L2 |
+| **Core harness** | opencode | `.opencode/agents/`, `.opencode/skills/`, `.opencode/plugins/flow-agents.js`, `opencode.json` | included in bundle assertions | L1 — no prompt-submit hook; steering wired to `session.created` + `tool.execute.before` |
+| **Core harness** | pi | `.pi/extensions/flow-agents.ts`, `.pi/skills/`, `AGENTS.md` | included in bundle assertions | L1 — no stop hook; stop-goal-fit unavailable |
+| **Official framework adapter** | AWS Strands (Python) | `integrations/strands/` — `flow-agents-strands` PyPI package | 50 unit tests (no Strands SDK required) | Spike/preview — see [integrations/strands/README.md](integrations/strands/README.md) |
+| **Conformance-certified** | Community / third-party | Self-certify using the conformance kit | — | Conformance kit in development; not yet shipped |
+
+Honest gaps are documented in the artifacts: opencode has no native `prompt.submit`-equivalent event; Codex live hook influence is limited to installed-command and protocol coverage; pi has no `permissionRequest` equivalent and no stop hook. The [Runtime Hook Surface spec](docs/spec/runtime-hook-surface.md) names every gap explicitly.
 
 ## Install
 
 ```bash
-# guided install into your workspace
+# guided install into your workspace (auto-detects runtime)
 npx @kontourai/flow-agents init --dest /path/to/workspace
 
 # headless, for CI or scripts
 npx @kontourai/flow-agents init --dest /path/to/workspace --telemetry-sink local-files --yes
 
-# with runtime-specific wiring and kit activation
+# runtime-specific wiring
+npx @kontourai/flow-agents init --runtime claude-code --dest /path/to/workspace --yes
 npx @kontourai/flow-agents init --runtime codex --dest /path/to/workspace --activate-kits --yes
+npx @kontourai/flow-agents init --runtime opencode --dest /path/to/workspace --yes
+npx @kontourai/flow-agents init --runtime pi --dest /path/to/workspace --yes
 ```
 
-Working from a checkout (for contributors) is the same flow: `npm install && npm run build`, then `node build/src/cli.js init --dest /path/to/workspace`.
+Working from a checkout (for contributors): `npm install && npm run build`, then `node build/src/cli.js init --dest /path/to/workspace`.
 
 The installer copies the bundled agents, skills, context, scripts, evals, Flow Kit assets, and the Flow Agents-owned `console.telemetry.json` descriptor into the target workspace. Telemetry writes to local files by default; optional sinks mirror it to a local, hosted, or self-hosted Kontour Console (`--telemetry-sink local-kontour-console | kontour-hosted-console | user-hosted-console --console-url …`).
 
@@ -74,6 +104,19 @@ Use fix-bug. Reproduce the issue, diagnose root cause, plan the fix, implement i
 ```
 
 The [Workflow Usage Guide](docs/workflow-usage-guide.md) walks every stage with example prompts and expected behavior; the [Agent System Guidebook](docs/agent-system-guidebook.md) is the plain-language map of how the pieces fit.
+
+## Framework adapters
+
+The same canonical policies that wire into coding-agent harnesses via file-based hook scripts can also wire into agent frameworks as in-process language-native packages.
+
+`integrations/strands/` contains `flow-agents-strands`, a Python package implementing a Strands `HookProvider` that:
+- emits the canonical telemetry taxonomy (`agentSpawn`, `preToolUse`, `postToolUse`, `stop`, etc.) to the same JSONL format as the harness adapters
+- enforces config protection via `BeforeToolCallEvent` cancellation (the Strands equivalent of a blocking `preToolUse` hook)
+- injects workflow steering context at agent construction via `steering_context()`
+
+This is a spike/preview — 50 unit tests pass without requiring the Strands SDK, and the README documents 7 limitations honestly. It demonstrates that the policy engine is not harness-specific.
+
+The [Runtime Hook Surface spec](docs/spec/runtime-hook-surface.md) documents the full framework adapter mapping, including VoltAgent, LangGraph, and OpenAI Agents SDK hook surfaces, and the minimum viable adapter pseudocode.
 
 ## Where Flow Agents fits
 

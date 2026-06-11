@@ -1,0 +1,16 @@
+{
+  "description": "workflow-steering passes through (exit 0, stdout echoes input) when cwd has no active workflow state",
+  "policy_class": "workflow-steering",
+  "canonical_event": "userPromptSubmit",
+  "conformance_level": "L1",
+  "hook_id": "workflow-steering",
+  "hook_script": "workflow-steering.js",
+  "payload": {
+    "hook_event_name": "UserPromptSubmit",
+    "cwd": "/tmp"
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_echoes_input": true
+  }
+}

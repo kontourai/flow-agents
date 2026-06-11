@@ -1,0 +1,20 @@
+{
+  "description": "config-protection blocks a write to .eslintrc.json (protected ESLint config)",
+  "policy_class": "config-protection",
+  "canonical_event": "preToolUse",
+  "conformance_level": "L2",
+  "hook_id": "config-protection",
+  "hook_script": "config-protection.js",
+  "payload": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "write",
+    "tool_input": {
+      "path": "/repo/.eslintrc.json"
+    }
+  },
+  "expected": {
+    "exit_code": 2,
+    "stderr_contains": ["BLOCKED"],
+    "stdout_is_empty": true
+  }
+}

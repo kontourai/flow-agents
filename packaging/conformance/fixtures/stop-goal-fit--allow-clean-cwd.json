@@ -1,0 +1,17 @@
+{
+  "description": "stop-goal-fit passes (exit 0, no warnings) when cwd has no .flow-agents workflow artifacts",
+  "policy_class": "stop-goal-fit",
+  "canonical_event": "stop",
+  "conformance_level": "L1",
+  "hook_id": "stop-goal-fit",
+  "hook_script": "stop-goal-fit.js",
+  "payload": {
+    "hook_event_name": "Stop",
+    "cwd": "/tmp"
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_echoes_input": true,
+    "stderr_is_empty": true
+  }
+}
