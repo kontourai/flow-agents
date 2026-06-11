@@ -59,6 +59,7 @@ renamed, or changes category, update the table and the validator together.
 | `report-only-guard.js` | policy hook | `evals/integration/test_hook_category_behaviors.sh` | Protects report-only specialist roles from production edits. |
 | `stop-format-typecheck.js` | policy hook | `evals/integration/test_hook_category_behaviors.sh` | Runs stop-time format/typecheck feedback. |
 | `stop-goal-fit.js` | policy hook | `evals/integration/test_goal_fit_hook.sh` | Warns when a workflow is about to stop short of Goal Fit. |
+| `utterance-check.js` | policy hook | `evals/integration/test_utterance_check.sh` | Optionally checks agent utterances for evidence coverage using @kontourai/survey (disabled by default; opt-in via FLOW_AGENTS_UTTERANCE_CHECK_ENABLED). |
 | `workflow-steering.js` | policy hook | `evals/integration/test_workflow_steering_hook.sh` | Provides workflow guidance from current artifact state. |
 | `pre-commit-quality.js` | repo guardrail hook | `evals/integration/test_hook_category_behaviors.sh` | Supports repository Git hook checks, not installed runtime hooks. |
 | `desktop-notify.sh` | local notification helper | `evals/integration/test_hook_category_behaviors.sh` | Optional local desktop notification helper. |

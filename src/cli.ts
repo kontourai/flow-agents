@@ -19,6 +19,7 @@ import { main as validateSource } from "./tools/validate-source-tree.js";
 import { main as validatePackage } from "./tools/validate-package.js";
 import { main as validateHookInfluence } from "./cli/validate-hook-influence.js";
 import { main as runtimeAdapter } from "./cli/runtime-adapter.js";
+import { main as utteranceCheck } from "./cli/utterance-check.js";
 
 const availableCommands = new Map<string, (argv: string[]) => number | Promise<number>>([
   ["build-bundles", () => buildBundles()],
@@ -33,6 +34,7 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["publish-change", publishChange],
   ["pull-work-provider", pullWorkProvider],
   ["runtime-adapter", runtimeAdapter],
+  ["utterance-check", utteranceCheck],
   ["telemetry-doctor", telemetryDoctor],
   ["usage-feedback", usageFeedback],
   ["veritas-governance", veritasGovernance],
@@ -58,6 +60,7 @@ const aliases = new Map<string, string>([
   ["flow-agents-usage-feedback", "usage-feedback"],
   ["flow-agents-veritas-governance", "veritas-governance"],
   ["flow-agents-validate-hook-influence", "validate-hook-influence"],
+  ["flow-agents-utterance-check", "utterance-check"],
   ["flow-agents-validate-source", "validate-source"],
   ["flow-agents-workflow-artifact-cleanup-audit", "workflow-artifact-cleanup-audit"],
 ]);

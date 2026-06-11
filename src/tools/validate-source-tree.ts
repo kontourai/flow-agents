@@ -68,6 +68,7 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/report-only-guard.js", { category: "policy hook", requiredNeedles: ["Report-Only Guard Hook"] }],
   ["scripts/hooks/stop-format-typecheck.js", { category: "policy hook", requiredNeedles: ["Stop Hook", "typecheck"] }],
   ["scripts/hooks/stop-goal-fit.js", { category: "policy hook", requiredNeedles: ["Stop Hook", "Goal Fit"] }],
+  ["scripts/hooks/utterance-check.js", { category: "policy hook", requiredNeedles: ["Utterance Check Hook", "FLOW_AGENTS_UTTERANCE_CHECK_ENABLED"] }],
   ["scripts/hooks/workflow-steering.js", { category: "policy hook", requiredNeedles: ["Workflow Steering Hook"] }],
   ["scripts/hooks/desktop-notify.sh", { category: "local notification helper", requiredNeedles: ["desktop-notify.sh", "osascript"] }],
   ["scripts/hooks/lib/audit-transport.sh", { category: "shared hook library", requiredNeedles: ["audit_emit"] }],
