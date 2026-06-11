@@ -1,0 +1,23 @@
+# Keeps pinned dependencies current; the runtime-compat workflow separately
+# canaries LATEST runtime binaries and framework SDKs on a weekly cron.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      dev-dependencies:
+        dependency-type: development
+  - package-ecosystem: npm
+    directory: "/integrations/strands-ts"
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: "/integrations/strands"
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

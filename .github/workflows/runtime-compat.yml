@@ -1,0 +1,118 @@
+name: Runtime Compatibility
+
+# Weekly canary against the LATEST released versions of supported host
+# runtimes and framework SDKs. Catches upstream drift (config schema changes,
+# plugin/extension API changes, SDK breaking releases) before users do.
+#
+# Report-only: failures open/refresh a tracking issue; they do not block CI.
+# Live model loops are out of scope here (no provider credentials in CI) —
+# coverage is install + config acceptance + plugin/extension load + the
+# mechanical hook chain, which is where every upstream break found so far
+# (opencode config schema, plugin spawn semantics, pi extension parsing)
+# would have surfaced.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  harness-canary:
+    name: Harness canary (${{ matrix.runtime }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runtime: opencode
+            install: npm install -g opencode-ai@latest
+            version: opencode --version
+          - runtime: pi
+            install: npm install -g @earendil-works/pi-coding-agent@latest
+            version: pi --version
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - name: Install latest ${{ matrix.runtime }}
+        run: |
+          ${{ matrix.install }}
+          ${{ matrix.version }}
+
+      - name: Build bundles
+        run: npm run build:bundles
+
+      - name: Mechanical hook chain (lifecycle suite)
+        run: bash evals/integration/test_bundle_lifecycle.sh
+
+      - name: Live harness (binary-gated, provider assertions skip)
+        run: bash evals/acceptance/test_${{ matrix.runtime }}_harness.sh
+
+  framework-sdk-canary:
+    name: Framework SDK canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Root install + build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Strands TS adapter against latest @strands-agents/sdk
+        run: |
+          cd integrations/strands-ts
+          npm view @strands-agents/sdk version
+          npm test
+          npm run conformance
+
+      - name: Strands Python adapter against latest strands-agents
+        run: |
+          python3 -m venv /tmp/sdk-canary
+          /tmp/sdk-canary/bin/pip install -q strands-agents
+          /tmp/sdk-canary/bin/pip show strands-agents | head -2
+          cd integrations/strands
+          /tmp/sdk-canary/bin/python -m unittest discover
+
+  report:
+    name: Open tracking issue on failure
+    runs-on: ubuntu-latest
+    needs: [harness-canary, framework-sdk-canary]
+    if: failure()
+    steps:
+      - name: Create or comment on tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TITLE="Runtime compatibility canary failed ($(date -u +%Y-%m-%d))"
+          BODY="The weekly runtime/SDK canary failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          One or more of: latest opencode, latest pi, latest @strands-agents/sdk, latest strands-agents (Python) broke install, hook-chain, harness, adapter tests, or conformance. Triage the run logs and either fix the adapter or document the gap in the conformance declaration."
+          EXISTING=$(gh issue list --repo "${{ github.repository }}" --search "Runtime compatibility canary failed in:title state:open" --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --repo "${{ github.repository }}" --body "$BODY"
+          else
+            gh issue create --repo "${{ github.repository }}" --title "$TITLE" --body "$BODY" --label upstream-drift
+          fi
