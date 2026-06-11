@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.2
+
+- Source validation resolves the Flow CLI at `dist/cli.js` (with a
+  `src/cli.js` fallback), and the source-and-static CI lane installs
+  `@kontourai/flow` so kit Flow Definitions are validated by the real
+  Flow CLI.
+- The publish workflow builds the bundle explicitly before `npm publish`.
+- Docs routing between the System Guidebook and the Workflow Usage Guide;
+  duplicated development walkthrough removed.
+- README and Pages home advertise the npm install with the version badge;
+  pre-release caveats removed; Kontour family table links product pages
+  and gains a Survey row.
+- Fixes phantom skill references, a stale pack list, and path accuracy in
+  the docs.
+
 ## 0.1.1
 
 ### Documentation And Site
