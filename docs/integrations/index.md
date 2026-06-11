@@ -46,3 +46,9 @@ The <a href="../spec/runtime-hook-surface.html">Runtime Hook Surface spec</a> de
     <span>Canonical event taxonomy, four policy classes, conformance levels L0/L1/L2, mapping tables, and the engine contract for adapter authors.</span>
   </a>
 </div>
+
+---
+
+## TypeScript native-import adapter
+
+`integrations/strands-ts/` (`@kontourai/flow-agents-strands`) is the first native-import consumer of the policy engine contract. It binds the `config-protection.js` `run()` function directly — no subprocess on the hot path. Achieves **L2** conformance. See `integrations/strands-ts/README.md` and the [Framework Adapter](framework-adapter.html) page for the full comparison with the Python adapter.

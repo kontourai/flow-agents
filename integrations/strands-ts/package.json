@@ -1,0 +1,53 @@
+{
+  "name": "@kontourai/flow-agents-strands",
+  "version": "0.0.1",
+  "description": "Native-import TypeScript adapter for AWS Strands Agents — wires Flow Agents policy engine directly into Strands hook callbacks without spawning a subprocess.",
+  "keywords": [
+    "agents",
+    "ai-agents",
+    "strands",
+    "flow-agents",
+    "hooks",
+    "telemetry",
+    "policy"
+  ],
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kontourai/flow-agents.git",
+    "directory": "integrations/strands-ts"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
+    }
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "files": [
+    "dist/",
+    "bin/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "npx tsc -p tsconfig.json",
+    "typecheck": "npx tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/test/test-*.js",
+    "conformance:self": "node ../../packaging/conformance/run-conformance.js --self",
+    "conformance": "node ../../packaging/conformance/run-conformance.js --adapter-cmd \"node bin/conformance-shim.mjs\" --level L2"
+  },
+  "peerDependencies": {
+    "@strands-agents/sdk": ">=1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@strands-agents/sdk": {
+      "optional": true
+    }
+  },
+  "devDependencies": {}
+}

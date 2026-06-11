@@ -221,3 +221,55 @@ python3 -m unittest discover
 - `integrations/strands/README.md` — spike README with quickstart and full limitations list
 - <a href="../spec/runtime-hook-surface.html">Runtime Hook Surface spec §6.2</a> — framework adapter contract and minimum viable adapter pseudocode
 - <a href="conformance.html">Conformance</a> — how to self-certify using the conformance kit
+
+---
+
+## TypeScript native-import adapter (`integrations/strands-ts/`)
+
+`@kontourai/flow-agents-strands` is the first **native-import** consumer of the policy engine contract. Where the Python adapter spawns a subprocess for each `BeforeToolCallEvent` policy check, the TS adapter calls `config-protection.js`'s exported `run()` function directly — zero subprocess overhead on the hot path.
+
+### Key differences from the Python adapter
+
+| | Python adapter | TypeScript adapter |
+|--|----------------|-------------------|
+| Engine binding | subprocess (`node run-hook.js …`) | `require("config-protection.js").run()` — in-process |
+| Strands SDK | `register_hooks(registry)` → `registry.add_callback` | `registerHooks(registry)` → `registry.addCallback` |
+| Cancel signal | `event.cancel_tool = reason` | `event.cancel = reason` (TS variant) |
+| Conformance | L0 + config-protection | L2 (all four policy classes via shim) |
+| Test framework | stdlib unittest (Python) | node:test (no extra deps) |
+
+### Constructing FlowAgentsHooks (TypeScript)
+
+```typescript
+import { FlowAgentsHooks } from "@kontourai/flow-agents-strands";
+
+const hooks = new FlowAgentsHooks({
+  workspace: ".",        // root of your project
+  agentName: "my-agent",
+  // engineRoot: "/path/to/flow-agents"  // optional: explicit engine path
+});
+```
+
+### Event mapping
+
+The TS adapter exports `STRANDS_TO_CANONICAL` matching the Python adapter's dict:
+
+| Strands TS Event | Canonical event |
+|------------------|-----------------|
+| `BeforeInvocationEvent` | `userPromptSubmit` |
+| `AfterInvocationEvent` | `stop` |
+| `BeforeToolCallEvent` | `preToolUse` |
+| `AfterToolCallEvent` | `postToolUse` |
+| `AgentInitializedEvent` | `agentSpawn` |
+
+### Conformance
+
+The TS adapter achieves **L2** via `bin/conformance-shim.mjs`:
+
+```bash
+node packaging/conformance/run-conformance.js \
+  --adapter-cmd "node integrations/strands-ts/bin/conformance-shim.mjs" \
+  --level L2
+```
+
+12/12 fixtures pass. See `integrations/strands-ts/README.md` for the full conformance declaration and limitations.
