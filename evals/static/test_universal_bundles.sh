@@ -286,6 +286,25 @@ else
   _fail "opencode bundle missing opencode.json"
 fi
 
+# Generated hook artifacts must PARSE in their host language. The pi live
+# smoke (2026-06-11) caught the generator emitting an unterminated string
+# (template-literal escaping) that pi's loader rejected at startup.
+if node --check "$DIST_DIR/opencode/.opencode/plugins/flow-agents.js" 2>/dev/null; then
+  _pass "generated opencode plugin parses as JavaScript"
+else
+  _fail "generated opencode plugin has a JavaScript syntax error"
+fi
+
+# Semantic errors (TS2xxx: unresolved modules/types) are expected without the
+# host's node_modules; only syntax-class errors (TS1xxx) mean a broken artifact.
+PI_TS_SYNTAX_ERRORS=$(npx tsc --ignoreConfig --noEmit --noResolve --skipLibCheck --target esnext --module esnext \
+    "$DIST_DIR/pi/.pi/extensions/flow-agents.ts" 2>&1 | grep -c "error TS1" || true)
+if [[ "$PI_TS_SYNTAX_ERRORS" -eq 0 ]]; then
+  _pass "generated pi extension parses as TypeScript (no TS1xxx syntax errors)"
+else
+  _fail "generated pi extension has $PI_TS_SYNTAX_ERRORS TypeScript syntax errors"
+fi
+
 if [[ -d "$DIST_DIR/opencode/.opencode/skills" ]] && [[ $(find "$DIST_DIR/opencode/.opencode/skills" -name "SKILL.md" | wc -l | tr -d ' ') -gt 0 ]]; then
   _pass "opencode bundle includes skills in .opencode/skills/"
 else

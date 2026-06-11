@@ -552,7 +552,7 @@ export default function (pi: ExtensionAPI) {
     const result = runAdapter("pi-hook-adapter.js", "before_agent_start", "workflow-steering", "workflow-steering.js");
     if (result.context) {
       return {
-        systemPrompt: event.systemPrompt + "\n\n" + result.context,
+        systemPrompt: event.systemPrompt + "\\n\\n" + result.context,
       };
     }
   });
