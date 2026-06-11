@@ -270,12 +270,17 @@ if [[ -f "$DIST_DIR/opencode/opencode.json" ]]; then
 const fs = require("node:fs");
 const data = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 if (!data || typeof data !== "object") throw new Error("opencode.json must be an object");
+// opencode's config schema rejects non-array `instructions` and aborts
+// startup (caught by live acceptance smoke 2026-06-11). Pin the constraint.
+if ("instructions" in data && !Array.isArray(data.instructions)) {
+  throw new Error("opencode.json instructions must be an array of file paths when present");
+}
 console.log("ok");
 NODE
   then
-    _pass "opencode.json is valid JSON"
+    _pass "opencode.json is valid JSON and schema-safe (instructions array-or-absent)"
   else
-    _fail "opencode.json is invalid"
+    _fail "opencode.json is invalid or violates opencode config schema"
   fi
 else
   _fail "opencode bundle missing opencode.json"

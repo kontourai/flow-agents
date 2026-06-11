@@ -440,8 +440,12 @@ export const FlowAgentsPlugin = async ({ project, client, $, directory, worktree
 `;
 }
 function exportOpencodeConfig(): string {
+  // opencode's config schema requires `instructions` to be an ARRAY of
+  // instruction file paths/globs (a bare string fails validation and aborts
+  // startup). AGENTS.md is loaded natively by opencode, so the config stays
+  // minimal rather than double-including it.
   return `${JSON.stringify({
-    instructions: "This workspace uses Flow Agents. See AGENTS.md for conventions, skills, and workflow guidance.",
+    $schema: "https://opencode.ai/config.json",
   }, null, 2)}\n`;
 }
 function buildOpencode(agents: Agent[]): void {
