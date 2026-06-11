@@ -36,7 +36,10 @@ const runtimeBundles: Record<Runtime, string> = {
 
 // Stable marker present in every Flow Agents claude-code hook command.
 // Used by scope-collision detection to identify an existing flow-agents install.
-export const COLLISION_MARKER = "claude-hook-adapter.js";
+// Marker must be distinctive to Flow Agents generated settings. Sibling
+// products from the same lineage ship identically named hook scripts such
+// as claude-hook-adapter.js, so script filenames are NOT a safe marker.
+export const COLLISION_MARKER = "Recording Flow Agents telemetry";
 
 /**
  * Check whether a user-level Claude Code settings file already contains
