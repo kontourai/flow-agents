@@ -1,0 +1,29 @@
+{
+  "description": "workflow-steering injects STATE hint (exit 0, stdout contains STATE:) for blocked workflow state at UserPromptSubmit",
+  "policy_class": "workflow-steering",
+  "canonical_event": "userPromptSubmit",
+  "conformance_level": "L1",
+  "hook_id": "workflow-steering",
+  "hook_script": "workflow-steering.js",
+  "payload": {
+    "hook_event_name": "UserPromptSubmit",
+    "cwd": "__TEMP_WORKSPACE__"
+  },
+  "workspace_setup": {
+    "AGENTS.md": "# Test Repo\n",
+    ".flow-agents/my-task/state.json": {
+      "task_slug": "my-task",
+      "status": "blocked",
+      "phase": "execute",
+      "next_action": {
+        "summary": "Needs decision from user",
+        "status": "needs_user",
+        "target_phase": "verify"
+      }
+    }
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_contains": ["STATE:", "my-task", "blocked"]
+  }
+}

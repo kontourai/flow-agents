@@ -1,0 +1,23 @@
+{
+  "description": "stop-goal-fit blocks (exit 2) in FLOW_AGENTS_GOAL_FIT_STRICT=true mode for an active delivery artifact missing DOD and Goal Fit Gate",
+  "policy_class": "stop-goal-fit",
+  "canonical_event": "stop",
+  "conformance_level": "L2",
+  "hook_id": "stop-goal-fit",
+  "hook_script": "stop-goal-fit.js",
+  "payload": {
+    "hook_event_name": "Stop",
+    "cwd": "__TEMP_WORKSPACE__"
+  },
+  "workspace_setup": {
+    "AGENTS.md": "# Test Repo\n",
+    ".flow-agents/my-task/my-task--deliver.md": "# My Task\n\nbranch: main\nstatus: executing\ntype: deliver\n\n## Plan\n\nWork TBD.\n"
+  },
+  "env": {
+    "FLOW_AGENTS_GOAL_FIT_STRICT": "true"
+  },
+  "expected": {
+    "exit_code": 2,
+    "stderr_contains": ["status:executing"]
+  }
+}

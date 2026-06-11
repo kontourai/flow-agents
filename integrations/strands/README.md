@@ -93,20 +93,32 @@ The JSON record shape matches `build_base_event()` in `telemetry.sh`:
 
 ## Policy gates
 
-The config-protection policy from `scripts/hooks/config-protection.js` is
-reimplemented in pure Python (`flow_agents_strands/policy.py`).
+The config-protection policy binds to the canonical Node.js engine
+(`scripts/hooks/run-hook.js → config-protection.js`) via subprocess, consuming
+the engine contract (contract_version "1.0") rather than reimplementing it.
 
-**Why pure Python rather than shelling out to the JS script?**
+**How it works:**
 
-1. Strands is a Python runtime; a mandatory Node.js subprocess would add an
-   external dependency with no gain.
-2. The `PROTECTED_FILES` list is a closed constant with no runtime config
-   reads, so faithfully translating it to Python is safe and auditable.
-3. A synchronous Python gate cannot deadlock the agent loop the way a
-   subprocess timeout can inside a hook callback.
+1. On `BeforeToolCallEvent`, if the tool name is a write-like tool, the gate
+   serialises the event to the canonical JSON payload and spawns:
+   `node run-hook.js config-protection config-protection.js`
+2. The engine exits 2 (block) or 0 (allow). Exit code 2 causes `event.cancel_tool`
+   to be set to the block reason from stderr.
+3. All other exit codes fail-open (do not block the agent).
+
+**Fallback when Node.js is unavailable:**
+
+If `node` is not on PATH or the engine script (`run-hook.js`) cannot be located,
+the gate degrades to a built-in Python implementation of the same logic and emits
+a `RuntimeWarning`. The pure-Python implementation mirrors `PROTECTED_FILES` from
+`config-protection.js` exactly. See §Limitations for the degradation contract.
+
+**Custom protected_files:** if you pass a custom `frozenset` to `PolicyGate`,
+Python evaluation is used directly (the engine subprocess cannot receive a
+runtime-custom set). This is intended for tests and local override only.
 
 On `BeforeToolCallEvent`, if the tool name is a write-like tool and the target
-file is in `PROTECTED_FILES`, `event.cancel_tool` is set to the block reason.
+file is in the protected set, `event.cancel_tool` is set to the block reason.
 Strands will cancel the call and surface the message as the tool result.
 
 ---
@@ -187,7 +199,15 @@ Tests use stdlib `unittest` only — no pytest, no strands-agents required.
 
 ## Limitations (honest spike notes)
 
-1. **Steering seam**: Strands does not allow mutating the system prompt from
+1. **Node.js subprocess dependency**: The primary policy binding spawns a Node.js
+   subprocess for each `BeforeToolCallEvent` that involves a write-like tool. If
+   `node` is not on PATH or the `@kontourai/flow-agents` package is not installed,
+   the gate degrades gracefully to the built-in Python fallback with a one-time
+   `RuntimeWarning`. The Python fallback uses the same `PROTECTED_FILES` constant
+   as the engine and is auditable. To force the subprocess path, set
+   `FLOW_AGENTS_ENGINE_PATH` to the absolute path of `run-hook.js`.
+
+2. **Steering seam**: Strands does not allow mutating the system prompt from
    `BeforeInvocationEvent`.  The workaround (`steering_context()` at Agent
    construction) is a one-shot snapshot; it does not re-evaluate on every turn
    the way the JS hook does at `UserPromptSubmit`.  Productization would
@@ -195,36 +215,35 @@ Tests use stdlib `unittest` only — no pytest, no strands-agents required.
    or upstream SDK support for mutable system-prompt context in the invocation
    event.
 
-2. **session.usage event omitted**: The JS harness emits a `session.usage`
+3. **session.usage event omitted**: The JS harness emits a `session.usage`
    event on stop with token counts pulled from the transcript.  The Strands
    `AfterInvocationEvent` does not (yet) expose token-usage data in the hook
    payload, so this event is not emitted.  Productization would need to read
    usage from the agent's response object and attach it here.
 
-3. **No analytics channel**: The harness adapters write to two channels
+4. **No analytics channel**: The harness adapters write to two channels
    (full + analytics) with different redaction profiles.  This spike writes
    only to the `full` channel.  Adding analytics is straightforward: a second
    `TelemetrySink` instance pointed at `analytics.jsonl` with the analytics
    redact list applied.
 
-4. **No Console/HTTP sink**: The bash transport supports POSTing events to a
+5. **No Console/HTTP sink**: The bash transport supports POSTing events to a
    Console endpoint.  This adapter writes JSONL only.  Adding HTTP transport
    would mean replicating the `console_telemetry_emit()` logic in Python or
    calling `transport.sh` as a subprocess.
 
-5. **Runtime version is "unknown"**: The harness adapters run
+6. **Runtime version is "unknown"**: The harness adapters run
    `<runtime> --version` to populate `agent.version`.  Strands does not
    expose its version through the hook event; `importlib.metadata` could
    provide the SDK version as a proxy.
 
-6. **No subagent / delegation event**: The Strands SDK does not have a
+7. **No subagent / delegation event**: The Strands SDK does not have a
    built-in InvokeSubagents tool; the delegation telemetry path is not wired.
 
-7. **Quality-gate policy omitted**: `quality-gate.js` invokes ruff/biome
+8. **Quality-gate policy omitted**: `quality-gate.js` invokes ruff/biome
    after edits.  This is omitted from the spike because it requires executing
    external formatters and has no clear Strands analogue yet.
 
----
 
 ## What productization would require
 

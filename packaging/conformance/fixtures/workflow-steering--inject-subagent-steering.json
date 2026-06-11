@@ -1,0 +1,25 @@
+{
+  "description": "workflow-steering injects EXECUTION COMPLETE hint after tool-worker subagent call completes",
+  "policy_class": "workflow-steering",
+  "canonical_event": "postToolUse",
+  "conformance_level": "L1",
+  "hook_id": "workflow-steering",
+  "hook_script": "workflow-steering.js",
+  "payload": {
+    "hook_event_name": "PostToolUse",
+    "tool_name": "mcp",
+    "tool_input": {
+      "command": "InvokeSubagents",
+      "content": {
+        "subagents": [
+          { "agent_name": "tool-worker" }
+        ]
+      }
+    },
+    "cwd": "/tmp"
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_contains": ["EXECUTION COMPLETE"]
+  }
+}

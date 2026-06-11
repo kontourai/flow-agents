@@ -1,0 +1,4 @@
+{
+  "description": "Flow Agents conformance kit — standalone runner with no npm deps",
+  "type": "commonjs"
+}

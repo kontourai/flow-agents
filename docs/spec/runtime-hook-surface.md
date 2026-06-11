@@ -359,3 +359,114 @@ policy_coverage:
 - `scripts/hooks/` — canonical policy implementations.
 - `src/tools/build-universal-bundles.ts` — bundle generation logic including hook command patterns.
 - `evals/fixtures/hook-influence/cases.json` — behavioral cases that define expected agent responses to hook guidance.
+
+---
+
+## 8. Engine Contract (contract_version "1.0")
+
+This section is the versioned public contract for the Flow Agents policy engine. Third-party adapters bind to this contract. Breaking changes will increment the major version and be announced via CHANGELOG.
+
+### 8.1 Invocation forms
+
+**Form 1 — Subprocess CLI** (the standard form, used by all current adapters):
+
+```
+echo '<JSON payload>' | node scripts/hooks/run-hook.js <hookId> <scriptRelativePath> [profilesCsv]
+```
+
+- `hookId`: an identifier string for the hook (e.g., `config-protection`). Used for profile/disable checks.
+- `scriptRelativePath`: path relative to `scripts/hooks/` (e.g., `config-protection.js`).
+- `profilesCsv`: comma-separated profile names that must include the current `SA_HOOK_PROFILE` value (default `standard`). Hooks not in the allowed profiles are skipped (fail-open).
+- Payload is read from stdin. Max 1 MiB (`SA_HOOK_INPUT_MAX_BYTES`). If truncated, `SA_HOOK_INPUT_TRUNCATED=1` is set.
+
+**Form 2 — Native import** (for TypeScript/Node.js adapters, preferred for performance):
+
+```javascript
+const { run } = require('./scripts/hooks/config-protection.js');
+const output = run(rawJsonString, { truncated: false, maxStdin: 1024 * 1024 });
+// output: string (pass-through) | { exitCode, stderr?, stdout? } (structured)
+```
+
+All four policy scripts export `module.exports = { run }`.
+
+**Version query** (additive, backward-compatible):
+
+```
+node scripts/hooks/run-hook.js --contract-version
+# → {"contract_version":"1.0","runner":"run-hook.js"}
+```
+
+### 8.2 Payload schema per canonical event
+
+All payloads are a single JSON object on stdin. Required and optional fields:
+
+| Canonical event | Required fields | Optional fields |
+|----------------|-----------------|-----------------|
+| `preToolUse` | `hook_event_name` | `tool_name`, `tool_input.path`, `tool_input.file_path`, `cwd` |
+| `postToolUse` | `hook_event_name` | `tool_name`, `tool_input.path`, `tool_input.file_path`, `tool_response`, `cwd` |
+| `userPromptSubmit` | `hook_event_name` | `tool_input` (for subagent calls), `cwd` |
+| `stop` | `hook_event_name` | `cwd`, `stop_reason` |
+
+`hook_event_name` is the **host-native** event name (e.g., `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`) or may be omitted — policy scripts read the canonical fields (`tool_input.path`, `cwd`) directly and do not require the event name field for their decisions.
+
+### 8.3 Decision schema (stdout / exit code)
+
+| Exit code | Semantics | Stdout |
+|-----------|-----------|--------|
+| `0` | **Allow** — policy has no objection | Echo of raw input JSON (or input + appended guidance for steering) |
+| `2` | **Block** — policy vetoes the action | Empty or irrelevant (adapters use stderr message for the block reason) |
+| other | **Error** — hook runtime failure | Treat as allow (fail-open). Never block agent work on hook errors. |
+
+For steering/quality hooks that return guidance, the output format is:
+
+```
+<original input JSON>\n\n---\n<guidance text>\n---
+```
+
+For structured `run()` responses (native import form), the return value is:
+- A string: treated as the full stdout replacement.
+- `{ exitCode, stderr?, stdout? }`: `exitCode` drives allow/block; `stderr` is written to stderr; `stdout` overrides stdout (if absent, raw input is echoed on allow).
+
+### 8.4 Fail-open vs. fail-closed rules per policy class
+
+| Policy class | Default mode | Fail-open on error? | Blocking capable? |
+|-------------|-------------|--------------------|--------------------|
+| config-protection | Fail-closed (exit 2 on protected file) | Yes — hook runtime errors exit 0 | Yes (preToolUse) |
+| quality-gate | Fail-open (exit 0 always) | Yes | No |
+| stop-goal-fit | Fail-open by default; fail-closed with `FLOW_AGENTS_GOAL_FIT_STRICT=true` | Yes — hook runtime errors exit 0 | Yes (stop, strict mode only) |
+| workflow-steering | Fail-open (exit 0 always) | Yes | No |
+
+**Telemetry**: Always fail-open. Hook runtime errors in telemetry scripts must never block agent work.
+
+**Truncated payloads**: config-protection exits 2 (block) when `SA_HOOK_INPUT_TRUNCATED=1`, because it cannot safely evaluate an incomplete payload. All other policies fail-open on truncated input.
+
+### 8.5 Environment variables consumed by the engine
+
+| Variable | Values | Consumed by |
+|----------|--------|-------------|
+| `SA_HOOK_PROFILE` | `minimal` \| `standard` (default) \| `strict` | `run-hook.js` |
+| `SA_DISABLED_HOOKS` | Comma-separated hook IDs | `run-hook.js` |
+| `SA_HOOK_INPUT_TRUNCATED` | `0` or `1` | `config-protection.js` |
+| `SA_HOOK_INPUT_MAX_BYTES` | Integer string | `config-protection.js` |
+| `SA_QUALITY_GATE_FIX` | `true` / `false` | `quality-gate.js` |
+| `SA_QUALITY_GATE_STRICT` | `true` / `false` | `quality-gate.js` |
+| `FLOW_AGENTS_GOAL_FIT_STRICT` | `true` / `false` | `stop-goal-fit.js` |
+| `FLOW_AGENTS_REQUIRE_SIDECARS` | `true` / `false` | `stop-goal-fit.js` |
+| `FLOW_AGENTS_REQUIRE_CRITIQUE` | `true` / `false` | `stop-goal-fit.js` |
+| `FLOW_AGENTS_HOOK_RUNTIME` | `claude-code`, `codex`, etc. | Hook adapters (forwarded to scripts) |
+
+### 8.6 Self-certification via the conformance kit
+
+The `packaging/conformance/` directory contains golden fixtures and a test runner. To self-certify:
+
+```bash
+# Verify the canonical engine reaches L2 (required to pass):
+node packaging/conformance/run-conformance.js --self
+
+# Test a third-party adapter at L1:
+node packaging/conformance/run-conformance.js \
+  --adapter-cmd "node /path/to/your-adapter.js" \
+  --level L1
+```
+
+See `packaging/conformance/README.md` for the full fixture inventory and declaration format.

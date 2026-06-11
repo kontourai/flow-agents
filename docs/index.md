@@ -4,12 +4,12 @@ title: Kontour Flow Agents
 
 # Flow Agents
 
-<p class="home-lede">Coding agents are powerful and forgetful. Flow Agents wraps Codex, Claude Code, Kiro, and CI agents in an operating layer that keeps long-running work inspectable — from idea to release readiness — so you ask for outcomes and the system supplies the path, the state, the checks, and the proof.</p>
+<p class="home-lede">A portable process-discipline layer for agentic work: canonical policies, evidence, and telemetry that compile to whatever hook surface a host exposes — coding-agent harnesses today, agent frameworks next. Flow Agents keeps work inspectable from idea to release readiness so you ask for outcomes and the system supplies the path, the state, the checks, and the proof.</p>
 
 <div class="value-grid">
   <section>
-    <strong>Stay on the path</strong>
-    <span>Turn loose requests into shaped work, plans, implementation waves, review, verification, evidence, and release decisions — the same workflow in every supported runtime.</span>
+    <strong>Four canonical policies</strong>
+    <span>Workflow steering, quality gate, stop-goal-fit, and config protection — each a canonical script under <code>scripts/hooks/</code> that compiles to the host's native hook format. Claude Code and Codex are the L2 reference implementations.</span>
   </section>
   <section>
     <strong>Survive context loss</strong>
@@ -41,7 +41,29 @@ flowchart LR
   Evidence -->|not verified| Plan
 ```
 
-Flow Agents adds the operating layer around the model: skills choose the right workflow, sidecars preserve state, hooks catch stop-short behavior, and evals keep the bundle honest as it changes. The gate semantics underneath — definitions, runs, evidence, route-back — belong to <a href="https://kontourai.github.io/flow/">Kontour Flow</a>; Flow Agents makes that enforcement native inside agent harnesses.
+Flow Agents adds the operating layer around the model: skills choose the right workflow, sidecars preserve state, hooks enforce the four canonical policies, and evals keep the bundle honest as it changes. The gate semantics underneath — definitions, runs, evidence, route-back — belong to <a href="https://kontourai.github.io/flow/">Kontour Flow</a>; Flow Agents compiles those policies to whatever hook surface a host exposes.
+
+## Process-discipline layer
+
+The four canonical policy classes are defined in the <a href="spec/runtime-hook-surface.html">Runtime Hook Surface spec</a> using a runtime-neutral vocabulary. Adapters translate them to the host's native hook format at three conformance levels: <strong>L0</strong> (telemetry only), <strong>L1</strong> (steering + stop-goal-fit warning), and <strong>L2</strong> (all four policies with blocking capability).
+
+### Runtime and support matrix
+
+| Tier | Runtime | Ships | Conformance |
+| --- | --- | --- | --- |
+| Core harness | Claude Code | install + hooks + bundle | L2 — reference implementation |
+| Core harness | Codex | install + hooks + bundle | L2 — reference implementation |
+| Core harness | Kiro | install + hooks + bundle | L2 |
+| Core harness | opencode | agents, skills, plugin, opencode.json | L1 — no prompt-submit hook |
+| Core harness | pi | extension, skills, AGENTS.md | L1 — no stop hook |
+| Official framework adapter | AWS Strands (Python) | `integrations/strands/` spike/preview | L0 + config protection via cancellation |
+| Conformance-certified | Community / third-party | Self-certify | Conformance kit in development |
+
+Documented gaps: opencode has no native `prompt.submit`-equivalent event; pi has no stop hook; Codex live hook influence on model context is limited. The <a href="spec/runtime-hook-surface.html">Runtime Hook Surface spec</a> names every gap explicitly using the canonical event taxonomy.
+
+## Framework adapters
+
+The same canonical policies wire into agent frameworks as in-process language-native packages. `integrations/strands/` contains `flow-agents-strands`, a Python `HookProvider` that emits the canonical telemetry taxonomy and enforces config protection via `BeforeToolCallEvent` cancellation — 50 unit tests, no Strands SDK required. This is a spike/preview. See <a href="spec/runtime-hook-surface.html">the spec</a> for the full framework adapter mapping and minimum viable adapter pseudocode.
 
 ## Quick Start
 
@@ -49,6 +71,13 @@ Flow Agents adds the operating layer around the model: skills choose the right w
 npx @kontourai/flow-agents init --dest /path/to/workspace
 ```
 
+Runtime-specific installs:
+
+```bash
+npx @kontourai/flow-agents init --runtime claude-code --dest /path/to/workspace --yes
+npx @kontourai/flow-agents init --runtime opencode --dest /path/to/workspace --yes
+npx @kontourai/flow-agents init --runtime pi --dest /path/to/workspace --yes
+```
 
 Then ask for the workflow you want, in plain language:
 
@@ -76,6 +105,14 @@ Use fix-bug. Reproduce the problem, diagnose root cause, implement the fix, and 
   <a class="doc-card" href="skills-map.html">
     <strong>Workflow Map</strong>
     <span>See the core skills, gates, artifacts, and route-back behavior.</span>
+  </a>
+  <a class="doc-card" href="spec/runtime-hook-surface.html">
+    <strong>Runtime Hook Surface</strong>
+    <span>Canonical event taxonomy, four policy classes, conformance levels L0/L1/L2, and host mapping tables for adapter authors.</span>
+  </a>
+  <a class="doc-card" href="vision.html">
+    <strong>Vision and Direction</strong>
+    <span>Where Flow Agents is going: kits beyond coding, TypeScript framework adapters, and Kontour Console as the unifying telemetry surface.</span>
   </a>
   <a class="doc-card" href="north-star.html">
     <strong>North Star</strong>
@@ -117,9 +154,9 @@ Use fix-bug. Reproduce the problem, diagnose root cause, implement the fix, and 
     <strong>Developer Reference</strong>
     <span>The generated repo map: commands, agents, skills, scripts, and contracts.</span>
   </a>
-  <a class="doc-card" href="spec/runtime-hook-surface.html">
-    <strong>Runtime Hook Surface</strong>
-    <span>Canonical event taxonomy, policy classes, conformance levels, and host mapping tables for adapter authors.</span>
+  <a class="doc-card" href="integrations/index.html">
+    <strong>Integration Examples</strong>
+    <span>Worked examples for harness runtimes (Claude Code, opencode, pi), framework adapters (AWS Strands), and third-party self-certification with the conformance kit.</span>
   </a>
 </div>
 
