@@ -372,14 +372,28 @@ function exportOpencodePlugin(): string {
  */
 
 import { spawnSync } from 'node:child_process';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
+
+// opencode runs plugins inside its own compiled (Bun-based) binary, so
+// process.execPath points at opencode itself — spawning it with a script
+// path silently does nothing (caught by live acceptance smoke 2026-06-11).
+// Resolve a real node binary instead; fall back to PATH lookup.
+const NODE_BIN = basename(process.execPath).startsWith('node') ? process.execPath : 'node';
 
 export const FlowAgentsPlugin = async ({ project, client, $, directory, worktree }) => {
   const root = directory || process.cwd();
 
-  function runAdapter(adapterScript, ...args) {
+  // The hook scripts read the event payload from stdin; an empty stdin makes
+  // the telemetry pipeline silently skip the emit (fail-open), so every spawn
+  // must pass a payload (caught by live acceptance smoke 2026-06-11).
+  function hookPayload(eventName, detail) {
+    return JSON.stringify({ hook_event_name: eventName, cwd: root, ...(detail || {}) });
+  }
+
+  function runAdapter(adapterScript, eventName, detail, ...args) {
     const adapterPath = join(root, 'scripts', 'hooks', adapterScript);
-    const result = spawnSync(process.execPath, [adapterPath, ...args], {
+    const result = spawnSync(NODE_BIN, [adapterPath, eventName, ...args], {
+      input: hookPayload(eventName, detail),
       encoding: 'utf8',
       cwd: root,
       env: { ...process.env, FLOW_AGENTS_HOOK_RUNTIME: 'opencode' },
@@ -392,9 +406,10 @@ export const FlowAgentsPlugin = async ({ project, client, $, directory, worktree
     }
   }
 
-  function runTelemetry(eventName) {
+  function runTelemetry(eventName, detail) {
     const telemetryPath = join(root, 'scripts', 'hooks', 'opencode-telemetry-hook.js');
-    spawnSync(process.execPath, [telemetryPath, eventName, 'dev'], {
+    spawnSync(NODE_BIN, [telemetryPath, eventName, 'dev'], {
+      input: hookPayload(eventName, detail),
       encoding: 'utf8',
       cwd: root,
       env: { ...process.env, FLOW_AGENTS_TELEMETRY_RUNTIME: 'opencode' },
@@ -406,22 +421,24 @@ export const FlowAgentsPlugin = async ({ project, client, $, directory, worktree
     'session.created': async (_input, _output) => {
       runTelemetry('session.created');
       // Wire workflow steering on session start for context injection
-      runAdapter('opencode-hook-adapter.js', 'session.created', 'workflow-steering', 'workflow-steering.js', 'default');
+      runAdapter('opencode-hook-adapter.js', 'session.created', null, 'workflow-steering', 'workflow-steering.js', 'default');
     },
     'tool.execute.before': async (input, output) => {
-      runTelemetry('tool.execute.before');
-      const policyResult = runAdapter('opencode-hook-adapter.js', 'tool.execute.before', 'config-protection', 'config-protection.js', 'default');
+      const detail = { tool: input && input.tool, args: output && output.args };
+      runTelemetry('tool.execute.before', detail);
+      const policyResult = runAdapter('opencode-hook-adapter.js', 'tool.execute.before', detail, 'config-protection', 'config-protection.js', 'default');
       if (policyResult && policyResult.allow === false) {
         throw new Error(policyResult.reason || 'Blocked by Flow Agents hook policy.');
       }
     },
     'tool.execute.after': async (input, output) => {
-      runTelemetry('tool.execute.after');
-      runAdapter('opencode-hook-adapter.js', 'tool.execute.after', 'quality-gate', 'quality-gate.js', 'default');
+      const detail = { tool: input && input.tool };
+      runTelemetry('tool.execute.after', detail);
+      runAdapter('opencode-hook-adapter.js', 'tool.execute.after', detail, 'quality-gate', 'quality-gate.js', 'default');
     },
     'session.idle': async (_input, _output) => {
       runTelemetry('session.idle');
-      runAdapter('opencode-hook-adapter.js', 'session.idle', 'stop-goal-fit', 'stop-goal-fit.js', 'default');
+      runAdapter('opencode-hook-adapter.js', 'session.idle', null, 'stop-goal-fit', 'stop-goal-fit.js', 'default');
     },
     'session.error': async (_input, _output) => {
       runTelemetry('session.error');
@@ -486,7 +503,12 @@ function exportPiExtension(): string {
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { join, basename } from "node:path";
+
+// pi may run extensions under a non-node runtime (Bun), where process.execPath
+// is not a node binary and spawning it with a script path silently fails.
+// Same failure class the opencode live smoke caught on 2026-06-11.
+const NODE_BIN = basename(process.execPath).startsWith("node") ? process.execPath : "node";
 
 export default function (pi: ExtensionAPI) {
   const root = process.cwd();
@@ -494,7 +516,7 @@ export default function (pi: ExtensionAPI) {
   function runAdapter(adapterScript: string, eventName: string, hookId: string, relScript: string): { allow: boolean; context?: string; reason?: string } {
     const adapterPath = join(root, "scripts", "hooks", adapterScript);
     const payload = JSON.stringify({ hook_event_name: eventName, cwd: root });
-    const result = spawnSync(process.execPath, [adapterPath, eventName, hookId, relScript, "default"], {
+    const result = spawnSync(NODE_BIN, [adapterPath, eventName, hookId, relScript, "default"], {
       input: payload,
       encoding: "utf8",
       cwd: root,
@@ -511,7 +533,7 @@ export default function (pi: ExtensionAPI) {
   function runTelemetry(eventName: string): void {
     const telemetryPath = join(root, "scripts", "hooks", "pi-telemetry-hook.js");
     const payload = JSON.stringify({ hook_event_name: eventName, cwd: root });
-    spawnSync(process.execPath, [telemetryPath, eventName, "dev"], {
+    spawnSync(NODE_BIN, [telemetryPath, eventName, "dev"], {
       input: payload,
       encoding: "utf8",
       cwd: root,

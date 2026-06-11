@@ -591,6 +591,49 @@ else
 fi
 
 echo ""
+echo "--- opencode Plugin Hook Chain (end-to-end telemetry persistence) ---"
+# Execute the REAL generated plugin module under node, invoke its handlers,
+# and assert telemetry events persist inside the workspace .telemetry/ —
+# not the workspace PARENT. Pins three live-smoke findings (2026-06-11):
+#   1. spawning process.execPath fails under non-node hosts (NODE_BIN guard)
+#   2. empty stdin makes the telemetry pipeline silently skip the emit
+#   3. TELEMETRY_DATA_DIR escaping to the workspace parent (../../.. depth bug)
+CHAIN_WS="$TMPDIR_EVAL/plugin-chain-opencode"
+(cd "$ROOT_DIR/dist/opencode" && bash install.sh "$CHAIN_WS" >/dev/null 2>&1) || true
+rm -rf "$CHAIN_WS/.telemetry" "$TMPDIR_EVAL/.telemetry"
+
+if (cd "$CHAIN_WS" && node --input-type=module -e "
+const mod = await import('./.opencode/plugins/flow-agents.js');
+const hooks = await mod.FlowAgentsPlugin({ project: {}, client: {}, \$: null, directory: process.cwd(), worktree: process.cwd() });
+await hooks['session.created']({}, {});
+await hooks['tool.execute.before']({ tool: 'edit', sessionID: 's1', callID: 'c1' }, { args: { filePath: 'README.md' } });
+" 2>/dev/null); then
+  _pass "opencode plugin: module loads and handlers execute under node"
+else
+  _fail "opencode plugin: module load or handler execution failed"
+fi
+
+# The telemetry emit is detached (disowned) and can take a few seconds to
+# land; poll rather than fixed-sleep.
+for _i in 1 2 3 4 5 6 7 8 9 10; do
+  [[ -s "$CHAIN_WS/.telemetry/full.jsonl" ]] && break
+  sleep 1
+done
+if [[ -s "$CHAIN_WS/.telemetry/full.jsonl" ]] && node -e "
+  require('fs').readFileSync('$CHAIN_WS/.telemetry/full.jsonl','utf8').trim().split('\n').map(JSON.parse);
+" 2>/dev/null; then
+  _pass "opencode plugin: handlers persisted telemetry events in workspace .telemetry/"
+else
+  _fail "opencode plugin: no telemetry events persisted in workspace .telemetry/"
+fi
+
+if [[ ! -e "$TMPDIR_EVAL/.telemetry" ]]; then
+  _pass "opencode plugin: telemetry did not leak into the workspace parent directory"
+else
+  _fail "opencode plugin: telemetry leaked into workspace parent (.telemetry escape)"
+fi
+
+echo ""
 echo "==========================="
 total=$((pass + fail))
 echo "Results: ${pass}/${total} passed, ${fail} failed"
