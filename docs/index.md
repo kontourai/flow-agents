@@ -106,6 +106,14 @@ Use fix-bug. Reproduce the problem, diagnose root cause, implement the fix, and 
     <strong>Workflow Map</strong>
     <span>See the core skills, gates, artifacts, and route-back behavior.</span>
   </a>
+  <a class="doc-card" href="kit-authoring-guide.html">
+    <strong>Kit Authoring Guide</strong>
+    <span>Build your own Flow Kit from scratch: directory layout, kit.json, a flow file, validation, local install, and activation.</span>
+  </a>
+  <a class="doc-card" href="flow-kit-repository-contract.html">
+    <strong>Flow Kit Repository Contract</strong>
+    <span>Full validation rules, registry schema, activation diagnostics, and the install/update/force semantics.</span>
+  </a>
   <a class="doc-card" href="spec/runtime-hook-surface.html">
     <strong>Runtime Hook Surface</strong>
     <span>Canonical event taxonomy, four policy classes, conformance levels L0/L1/L2, and host mapping tables for adapter authors.</span>

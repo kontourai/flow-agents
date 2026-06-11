@@ -45,17 +45,29 @@ The spec defines three conformance levels: **L0** (telemetry only), **L1** (stee
 
 ## Runtime and support matrix
 
-| Tier | Runtime | Ships | Tested | Conformance |
-| --- | --- | --- | --- | --- |
-| **Core harness** | Claude Code | install + hooks + bundle | 77 integration + 36 static assertions | L2 — reference implementation |
-| **Core harness** | Codex | install + hooks + bundle | 77 integration + 36 static assertions | L2 — reference implementation |
-| **Core harness** | Kiro | install + hooks + bundle | included in bundle assertions | L2 |
-| **Core harness** | opencode | `.opencode/agents/`, `.opencode/skills/`, `.opencode/plugins/flow-agents.js`, `opencode.json` | included in bundle assertions | L1 — no prompt-submit hook; steering wired to `session.created` + `tool.execute.before` |
-| **Core harness** | pi | `.pi/extensions/flow-agents.ts`, `.pi/skills/`, `AGENTS.md` | included in bundle assertions | L1 — no stop hook; stop-goal-fit unavailable |
-| **Official framework adapter** | AWS Strands (Python) | `integrations/strands/` — `flow-agents-strands` PyPI package | 50 unit tests (no Strands SDK required) | Spike/preview — see [integrations/strands/README.md](integrations/strands/README.md) |
-| **Conformance-certified** | Community / third-party | Self-certify using the conformance kit | — | Conformance kit in development; not yet shipped |
+L2 means all four policy classes with blocking; L1 means steering and stop-goal-fit warning only (no quality gate or blocking config protection). The [Runtime Hook Surface spec](docs/spec/runtime-hook-surface.md) defines the levels and names every hook-surface gap explicitly.
 
-Honest gaps are documented in the artifacts: opencode has no native `prompt.submit`-equivalent event; Codex live hook influence is limited to installed-command and protocol coverage; pi has no `permissionRequest` equivalent and no stop hook. The [Runtime Hook Surface spec](docs/spec/runtime-hook-surface.md) names every gap explicitly.
+**Full support — L2 (all four policies, blocking)**
+
+| Runtime | Ships | Tested |
+| --- | --- | --- |
+| Claude Code | install + hooks + bundle | 77 integration + 36 static assertions — reference implementation |
+| Codex | install + hooks + bundle | 77 integration + 36 static assertions — reference implementation |
+| Kiro | install + hooks + bundle | included in bundle assertions |
+
+**Partial support — L1 (steering + stop-goal-fit warning)**
+
+| Runtime | Ships | Gap | Tested |
+| --- | --- | --- | --- |
+| opencode | `.opencode/agents/`, `.opencode/skills/`, `.opencode/plugins/flow-agents.js`, `opencode.json` | No prompt-submit hook; steering wired to `session.created` + `tool.execute.before` | included in bundle assertions |
+| pi | `.pi/extensions/flow-agents.ts`, `.pi/skills/`, `AGENTS.md` | No stop hook; stop-goal-fit unavailable | included in bundle assertions |
+
+**Other**
+
+| Tier | Runtime | Ships | Tested |
+| --- | --- | --- | --- |
+| Official framework adapter | AWS Strands (Python) | `integrations/strands/` — `flow-agents-strands` PyPI package | 50 unit tests (no Strands SDK required) — spike/preview, see [integrations/strands/README.md](integrations/strands/README.md) |
+| Conformance-certified | Community / third-party | Self-certify using the conformance kit | Conformance kit in development; not yet shipped |
 
 ## Install
 
@@ -77,7 +89,7 @@ Working from a checkout (for contributors): `npm install && npm run build`, then
 
 The installer copies the bundled agents, skills, context, scripts, evals, Flow Kit assets, and the Flow Agents-owned `console.telemetry.json` descriptor into the target workspace. Telemetry writes to local files by default; optional sinks mirror it to a local, hosted, or self-hosted Kontour Console (`--telemetry-sink local-kontour-console | kontour-hosted-console | user-hosted-console --console-url …`).
 
-The low-level bundle installer remains available when you already have a generated bundle checkout:
+`bash install.sh` is the low-level option for CI pipelines or scripts that already have a generated bundle checkout (e.g. from a pinned `git clone` of this repo). Prefer `npx @kontourai/flow-agents init` for normal workspace setup — it fetches the latest published bundle and auto-detects the runtime:
 
 ```bash
 bash install.sh /path/to/workspace --telemetry-sink local-kontour-console
@@ -92,18 +104,25 @@ Use Builder Kit shape for this feature idea and create executable GitHub issues.
 ```
 
 ```text
-Use pull-work, select the next ready issue, and hand it to plan-work.
-```
-
-```text
 Use deliver for this issue. Plan it, execute it, verify it, and stop if evidence is missing.
 ```
 
-```text
-Use fix-bug. Reproduce the issue, diagnose root cause, plan the fix, implement it, and verify the regression path.
+The [Workflow Usage Guide](docs/workflow-usage-guide.md) has example prompts and expected behavior for every stage — `pull-work`, `plan-work`, `execute-plan`, `review-work`, `verify-work`, `fix-bug`, `release-readiness`, and more. The [Agent System Guidebook](docs/agent-system-guidebook.md) is the plain-language map of how the pieces fit.
+
+## Flow Kits
+
+A Flow Kit is a portable workflow bundle: a `kit.json` manifest, one or more Flow Definitions, and optional skills, docs, adapters, evals, and assets — all validated and installed as a unit. Kits are the extension model for Flow Agents: they let you package a workflow once and deploy it into any workspace through the same path as the built-in workflows.
+
+**Builder Kit** is the first Kontour-authored kit. It ships with `builder.shape` (shape a problem into slices and fileable work items) and `builder.build` (pull ready work through design probing, planning, execution, verification, PR readiness, merge readiness, and learning). Builder Kit is installed automatically by `npx @kontourai/flow-agents init`.
+
+Install a local kit:
+
+```bash
+npx @kontourai/flow-agents flow-kit install-local path/to/my-kit --dest /path/to/workspace
 ```
 
-The [Workflow Usage Guide](docs/workflow-usage-guide.md) walks every stage with example prompts and expected behavior; the [Agent System Guidebook](docs/agent-system-guidebook.md) is the plain-language map of how the pieces fit.
+- [Kit Authoring Guide](docs/kit-authoring-guide.md) — build your own kit from scratch: directory layout, `kit.json`, a flow file, validation, install, and activation.
+- [Flow Kit Repository Contract](docs/flow-kit-repository-contract.md) — the full validation rules, registry schema, and activation diagnostics.
 
 ## Framework adapters
 
