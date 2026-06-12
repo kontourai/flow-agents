@@ -133,3 +133,105 @@ and adapter infrastructure remain the foundation.
 - Multi-user concurrency
 - Store migrations
 - Personal-KB import (parked as I11)
+
+---
+
+## Similarity Detectors
+
+The `synthesize` and `consolidate` flows accept a pluggable `similarityDetector` option. A
+detector has the signature:
+
+```js
+async (concept: Record, candidates: Record[], store: KnowledgeStoreAdapter) => string[]
+```
+
+It receives the target concept, all compiled candidates, and the store; it returns the IDs of
+candidates that are similar enough to form a cluster. The `KnowledgeFlowRunner` uses the cluster
+as its evidence base — an empty cluster throws `MISSING_EVIDENCE` at the detect-cluster gate.
+
+### Choosing a detector
+
+| Detector | Best for | Tradeoff |
+|---|---|---|
+| `defaultSimilarityDetector` (built-in) | Fast, zero-config. Works well when records share a structured category taxonomy and inter-record wikilinks. | Relies on category prefixes and link-overlap (Jaccard ≥ 0.10). Misses semantic similarity across category boundaries. |
+| `createVectorSimilarityDetector` | Semantic clustering. Finds similar records regardless of how they were categorised. | Requires an embedding backend (ollama by default). Adds latency proportional to cluster size. |
+
+### Vector detector — ollama embedding
+
+The vector adapter lives at `adapters/similarity-vector/index.js`. It is zero-dependency and
+calls ollama's `/api/embed` endpoint via the built-in `fetch`.
+
+```js
+import { createVectorSimilarityDetector } from './adapters/similarity-vector/index.js';
+
+// Default: uses ollama at localhost:11434 with nomic-embed-text
+const detector = createVectorSimilarityDetector();
+
+// Or customise host, model, and threshold:
+const detector = createVectorSimilarityDetector({
+  host: 'http://localhost:11434',
+  model: 'nomic-embed-text',
+  threshold: 0.60,              // cosine similarity cutoff
+});
+
+// Pass to synthesize:
+await runner.synthesize(conceptId, {
+  proposedBody: '...',
+  rationale: '...',
+  similarityDetector: detector,
+});
+```
+
+**Starting ollama:**
+
+```bash
+ollama serve &
+ollama pull nomic-embed-text   # 274 MB, one-time pull
+```
+
+**Threshold guidance:**
+
+The default threshold of `0.60` is validated against `nomic-embed-text` (768-dim). Empirical
+scores observed in the eval suite:
+
+| Pair | Score |
+|---|---|
+| Semantically similar API design texts | ~0.77 |
+| Semantically unrelated (API vs. bread baking) | ~0.41 |
+
+A threshold of `0.60` cleanly separates these two classes. If your domain records are more
+homogeneous (narrow vocabulary, very similar boilerplate) you may need to raise the threshold
+to `0.70–0.80` to avoid over-clustering.
+
+### Fail-closed rationale
+
+The vector detector throws an `Error` with `code="EMBED_FAILURE"` rather than returning `[]`
+when the embedding call fails (network error, HTTP error, malformed response, wrong vector
+count). This is intentional.
+
+A detector that silently returns `[]` on infrastructure failure is indistinguishable from one
+that found no similar records. The result is a misleading `MISSING_EVIDENCE` at the detect-cluster
+gate, which looks like "this concept has no sources" rather than "the embedding service is down".
+
+Failing closed makes the infrastructure problem visible immediately, at the right level, with a
+clear error code. Operators can catch `EMBED_FAILURE` separately from `MISSING_EVIDENCE` and
+route them to different alerting channels.
+
+### Injecting a custom embed function
+
+For tests or alternative providers (OpenAI, Cohere, etc.), pass `embed` directly:
+
+```js
+const detector = createVectorSimilarityDetector({
+  embed: async (texts) => {
+    // texts: string[] — one per record (title + "\n" + body by default)
+    // must return: number[][] — one vector per input text
+    const response = await myEmbeddingAPI.embed(texts);
+    return response.vectors;
+  },
+  threshold: 0.70,
+});
+```
+
+The `embed` function is called once per `synthesize`/`consolidate` call with all texts in a
+single batch (concept first, then candidates).
