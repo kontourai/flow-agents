@@ -694,6 +694,419 @@ export class KnowledgeFlowRunner {
 
     return { conceptId, proposerId, cluster, decision, telemetryEvents: events };
   }
+  // -------------------------------------------------------------------------
+  // knowledge.consolidate flow
+  //   Steps: related-event → propose → evidence-gate → apply-or-reject → done
+  //   Gate: evidence-gate — proposal carries source refs; no direct snapshot
+  //         mutation (AC1); rejection leaves snapshot unchanged (AC2 reject path).
+  //         apply-gate    — apply or reject via store ops only.
+  //                         apply creates a new snapshot and supersedes the prior
+  //                         one(s); superseded snapshots remain queryable (AC2/R3).
+  //
+  // Machinery reuse: consolidate shares the same propose→evidence-gate→
+  // apply-or-reject gate pattern as synthesize. The propose op is called on the
+  // snapshot record (store contract §A.5 supersede enforces supersede-not-delete).
+  // -------------------------------------------------------------------------
+
+  /**
+   * Execute the consolidate flow: detect compiled records linked to a snapshot
+   * topic, create a consolidation proposal (never a direct mutation), gate the
+   * evidence, then apply or reject.
+   *
+   * On apply:
+   *   1. A new snapshot record is created with the proposed body and full
+   *      provenance (source_ids referencing every contributing compiled record).
+   *   2. The store supersede op links the new snapshot to any prior snapshot(s)
+   *      for the same topic — prior snapshots are NEVER deleted (R3).
+   *   3. Returns the new snapshot id plus a supersedes chain for traceability.
+   *
+   * On reject:
+   *   The snapshot state is unchanged (byte-identical, AC1/AC2).
+   *
+   * @param {string|object} snapshotIdOrTopic
+   *   - string: ID of an existing snapshot record to consolidate against.
+   *   - object topicSelector: { topic } — snapshot located by topic tag.
+   *     If no snapshot exists for the topic yet, a new one will be created on apply.
+   * @param {object} [options]
+   *   - proposedBody: string        — the proposed snapshot body (required)
+   *   - rationale: string           — reason for the consolidation (required for apply)
+   *   - decision: "apply"|"reject"  — gate decision (default "apply")
+   *   - rejectReason: string        — reason for rejection (required when decision="reject")
+   *   - agent: string               — override agent name
+   *   - session_id: string          — session id
+   *   - note: string                — provenance note
+   *   - category: string            — category for new snapshot (required when creating)
+   *   - similarityDetector: fn      — pluggable detector (same interface as synthesize R3)
+   * @returns {Promise<{
+   *   snapshotId: string,
+   *   proposerId: string,
+   *   cluster: string[],
+   *   decision: "apply"|"reject",
+   *   newSnapshotId: string|null,
+   *   supersededIds: string[],
+   *   telemetryEvents: object[]
+   * }>}
+   */
+  async consolidate(snapshotIdOrTopic, options = {}) {
+    const events = [];
+    const agent = options.agent || this._agent;
+
+    // ── Step: related-event ────────────────────────────────────────────────
+    // Resolve snapshot target; locate related compiled records via detector.
+
+    const detector = options.similarityDetector || defaultSimilarityDetector;
+
+    // Resolve the snapshot record (or find it by topic tag).
+    // If no snapshot yet exists and decision=apply, we will create one.
+    let snapshotId = null;
+    let existingSnapshot = null;
+    let topic = null;
+    let category = options.category || null;
+
+    if (typeof snapshotIdOrTopic === "string") {
+      snapshotId = snapshotIdOrTopic;
+      existingSnapshot = await this._store.get(snapshotId);
+      if (!existingSnapshot) {
+        throw missingEvidenceError(`consolidate: snapshot not found: ${snapshotId}`);
+      }
+      if (existingSnapshot.type !== "snapshot") {
+        throw missingEvidenceError(
+          `consolidate: record ${snapshotId} is type="${existingSnapshot.type}", expected "snapshot"`
+        );
+      }
+      // Extract topic from tags (stored as "topic:<value>")
+      const topicTag = (existingSnapshot.tags || []).find((t) => t.startsWith("topic:"));
+      topic = topicTag ? topicTag.slice(6) : existingSnapshot.category;
+      category = category || existingSnapshot.category;
+    } else if (snapshotIdOrTopic && typeof snapshotIdOrTopic === "object") {
+      const sel = snapshotIdOrTopic;
+      topic = sel.topic || sel.category;
+      if (!topic) {
+        throw missingEvidenceError(
+          "consolidate: topicSelector must include a topic or category field"
+        );
+      }
+      // Find existing snapshot by topic tag
+      const allSnapshots = await this._store.listByType("snapshot");
+      const matches = allSnapshots.filter((s) => {
+        const topicTag = (s.tags || []).find((t) => t.startsWith("topic:"));
+        const snapshotTopic = topicTag ? topicTag.slice(6) : s.category;
+        return snapshotTopic === topic;
+      });
+      if (matches.length > 0) {
+        // Use the most recently created snapshot (no superseded-by log entry = current)
+        const current = matches.find((s) => {
+          const log = s.mutation_log || [];
+          return !log.some((e) => e.op === "superseded-by");
+        }) || matches[matches.length - 1];
+        existingSnapshot = current;
+        snapshotId = current.id;
+      }
+      // If no existing snapshot, we will create one on apply
+      category = category || sel.category || topic.replace(/[^a-z0-9.]/g, "-") || "general";
+    } else {
+      throw missingEvidenceError(
+        "consolidate: snapshotIdOrTopic must be a string id or topicSelector object"
+      );
+    }
+
+    // ── Gate: related-event-gate ───────────────────────────────────────────
+    // Run similarity detection to find compiled records related to the topic.
+    // We use a concept-like proxy to run the similarity detector: a synthetic
+    // object with the same category as the snapshot.
+
+    const snapshotProxy = existingSnapshot || {
+      id: "__probe__",
+      type: "snapshot",
+      category: category || "general",
+      tags: [`topic:${topic}`],
+      links: [],
+    };
+
+    const relatedGateIn = this._telemetry.emitGate(
+      "knowledge.consolidate",
+      "related-event-gate",
+      {
+        flow: "knowledge.consolidate",
+        gate: "related-event-gate",
+        snapshot_id: snapshotId,
+        topic,
+        snapshot_category: snapshotProxy.category,
+      }
+    );
+    events.push(relatedGateIn);
+
+    // Run the detector: pass all compiled records as candidates
+    const allCompiled = await this._store.listByType("compiled");
+    const cluster = await detector(snapshotProxy, allCompiled, this._store);
+
+    if (!Array.isArray(cluster) || cluster.length === 0) {
+      throw missingEvidenceError(
+        "related-event-gate: no compiled records related to snapshot topic found; " +
+        "consolidation requires at least one related source"
+      );
+    }
+
+    const relatedGateOut = this._telemetry.emitGateResult(
+      "knowledge.consolidate",
+      "related-event-gate",
+      {
+        snapshot_id: snapshotId,
+        topic,
+        cluster_ids: cluster,
+        cluster_size: cluster.length,
+      }
+    );
+    events.push(relatedGateOut);
+
+    // ── Step: propose ──────────────────────────────────────────────────────
+    // The proposing record is the first compiled record in the cluster.
+    // We use the store's propose op — never a direct snapshot mutation (AC1).
+    //
+    // When the snapshot does not exist yet (first consolidation for the topic),
+    // we create a placeholder snapshot record to attach the proposal to.
+
+    if (!options.proposedBody || !options.proposedBody.trim()) {
+      throw missingEvidenceError("consolidate: options.proposedBody is required");
+    }
+
+    // Ensure a snapshot record exists to propose against
+    if (!snapshotId) {
+      // Create a placeholder snapshot (empty body) so propose has a target
+      const topicTag = `topic:${topic}`;
+      snapshotId = await this._store.create({
+        type: "snapshot",
+        title: `Snapshot: ${topic}`,
+        body: "(pending consolidation)",
+        category: category || "general",
+        tags: [topicTag],
+        provenance: {
+          agent,
+          note: `Placeholder created for first consolidation of topic: ${topic}`,
+          ...(options.session_id ? { session_id: options.session_id } : {}),
+        },
+      });
+      existingSnapshot = await this._store.get(snapshotId);
+    }
+
+    const proposerId = cluster[0];
+
+    const proposeGateIn = this._telemetry.emitGate(
+      "knowledge.consolidate",
+      "propose-gate",
+      {
+        flow: "knowledge.consolidate",
+        gate: "propose-gate",
+        snapshot_id: snapshotId,
+        proposer_id: proposerId,
+        source_ids: cluster,
+      }
+    );
+    events.push(proposeGateIn);
+
+    // Create proposal via store propose op (not direct mutation — AC1)
+    // We repurpose the propose/apply/reject ops: snapshot acts as the "concept"
+    // target here. The contract allows propose/apply/reject against concept-type
+    // records, but snapshots are a distinct type. We call propose directly on
+    // the store's propose method with the snapshot's id.
+    await this._store.propose(snapshotId, proposerId, {
+      agent,
+      proposal: options.proposedBody,
+      ...(options.note ? { note: options.note } : {}),
+    });
+
+    const proposeGateOut = this._telemetry.emitGateResult(
+      "knowledge.consolidate",
+      "propose-gate",
+      {
+        snapshot_id: snapshotId,
+        proposer_id: proposerId,
+        source_ids: cluster,
+        proposal_recorded: true,
+      }
+    );
+    events.push(proposeGateOut);
+
+    // ── Step: evidence-gate ────────────────────────────────────────────────
+    // Verify proposal carries source refs and all source records exist.
+
+    const evidenceGateIn = this._telemetry.emitGate(
+      "knowledge.consolidate",
+      "evidence-gate",
+      {
+        flow: "knowledge.consolidate",
+        gate: "evidence-gate",
+        snapshot_id: snapshotId,
+        proposer_id: proposerId,
+        source_ids: cluster,
+      }
+    );
+    events.push(evidenceGateIn);
+
+    // Enforce: source_ids must be non-empty
+    if (!cluster || cluster.length === 0) {
+      throw missingEvidenceError(
+        "evidence-gate: proposal must carry at least one source_id reference"
+      );
+    }
+
+    // Enforce: every source record must exist
+    for (const srcId of cluster) {
+      const ref = await this._store.get(srcId);
+      if (!ref) {
+        throw missingEvidenceError(
+          `evidence-gate: source record ${srcId} does not exist in store`
+        );
+      }
+    }
+
+    // Enforce: proposer must have a "proposes" link to the snapshot
+    const { forward } = await this._store.getLinks(proposerId);
+    const hasProposesLink = forward.some(
+      (l) => l.target_id === snapshotId && l.kind === "proposes"
+    );
+    if (!hasProposesLink) {
+      throw missingEvidenceError(
+        `evidence-gate: proposer ${proposerId} must have a "proposes" link to snapshot ${snapshotId}`
+      );
+    }
+
+    const evidenceGateOut = this._telemetry.emitGateResult(
+      "knowledge.consolidate",
+      "evidence-gate",
+      {
+        snapshot_id: snapshotId,
+        proposer_id: proposerId,
+        source_ids: cluster,
+        sources_verified: cluster.length,
+        proposes_link_verified: true,
+      }
+    );
+    events.push(evidenceGateOut);
+
+    // ── Step: apply-or-reject ──────────────────────────────────────────────
+    // Gate decision: "apply" (default) or "reject"
+
+    const decision = options.decision || "apply";
+
+    const applyGateIn = this._telemetry.emitGate(
+      "knowledge.consolidate",
+      "apply-gate",
+      {
+        flow: "knowledge.consolidate",
+        gate: "apply-gate",
+        snapshot_id: snapshotId,
+        proposer_id: proposerId,
+        decision,
+      }
+    );
+    events.push(applyGateIn);
+
+    let newSnapshotId = null;
+    let supersededIds = [];
+
+    if (decision === "apply") {
+      if (!options.rationale || !options.rationale.trim()) {
+        throw missingEvidenceError(
+          "apply-gate: options.rationale is required when decision=apply"
+        );
+      }
+
+      // Collect all prior (non-superseded) snapshots for the same topic,
+      // so we can supersede them after creating the new snapshot.
+      const allSnapshots = await this._store.listByType("snapshot");
+      const priorSnapshotIds = allSnapshots
+        .filter((s) => {
+          if (s.id === snapshotId) return false; // we'll include the placeholder below
+          const topicTag = (s.tags || []).find((t) => t.startsWith("topic:"));
+          const snapshotTopic = topicTag ? topicTag.slice(6) : s.category;
+          return snapshotTopic === topic;
+        })
+        .map((s) => s.id);
+
+      // The placeholder snapshot (created above or passed in) is also superseded
+      // unless it already has content (i.e., was the prior live snapshot).
+      const placeholderSnapshot = await this._store.get(snapshotId);
+      const isPlaceholder =
+        placeholderSnapshot && placeholderSnapshot.body === "(pending consolidation)";
+
+      // Create the new definitive snapshot with the proposed body
+      const topicTag = `topic:${topic}`;
+      const sourceLinks = cluster.map((cid) => ({ target_id: cid, kind: "source" }));
+
+      newSnapshotId = await this._store.create({
+        type: "snapshot",
+        title: `Snapshot: ${topic}`,
+        body: options.proposedBody,
+        category: existingSnapshot?.category || category || "general",
+        tags: [topicTag],
+        links: sourceLinks,
+        provenance: {
+          agent,
+          source_ids: cluster,
+          note: options.rationale,
+          ...(options.session_id ? { session_id: options.session_id } : {}),
+        },
+      });
+
+      // Collect all snapshot IDs that this new snapshot supersedes
+      supersededIds = [
+        ...(isPlaceholder ? [snapshotId] : [snapshotId]),
+        ...priorSnapshotIds,
+      ];
+      // Deduplicate
+      supersededIds = [...new Set(supersededIds)];
+
+      // Supersede all prior snapshots — NEVER deletes them (R3)
+      if (supersededIds.length > 0) {
+        await this._store.supersede(newSnapshotId, supersededIds, {
+          agent,
+          rationale: options.rationale,
+          ...(options.note ? { note: options.note } : {}),
+        });
+      }
+    } else if (decision === "reject") {
+      if (!options.rejectReason || !options.rejectReason.trim()) {
+        throw missingEvidenceError(
+          "apply-gate: options.rejectReason is required when decision=reject"
+        );
+      }
+      // Reject: snapshot body remains unchanged (AC1)
+      await this._store.reject(snapshotId, proposerId, {
+        agent,
+        reason: options.rejectReason,
+      });
+    } else {
+      throw missingEvidenceError(
+        `apply-gate: decision must be "apply" or "reject"; got: ${decision}`
+      );
+    }
+
+    const applyGateOut = this._telemetry.emitGateResult(
+      "knowledge.consolidate",
+      "apply-gate",
+      {
+        snapshot_id: snapshotId,
+        proposer_id: proposerId,
+        decision,
+        source_ids: cluster,
+        new_snapshot_id: newSnapshotId,
+        superseded_ids: supersededIds,
+      }
+    );
+    events.push(applyGateOut);
+
+    return {
+      snapshotId,
+      proposerId,
+      cluster,
+      decision,
+      newSnapshotId,
+      supersededIds,
+      telemetryEvents: events,
+    };
+  }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -747,6 +1160,20 @@ export async function synthesize(
 ) {
   const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
   return runner.synthesize(conceptIdOrSelector, synthOpts);
+}
+
+/**
+ * Module-level consolidate: creates an ephemeral runner using the provided store.
+ *
+ * @param {string|object} snapshotIdOrTopic
+ * @param {object} options  (merged into consolidate options + runner options)
+ */
+export async function consolidate(
+  snapshotIdOrTopic,
+  { store, workspace, agent, sessionId, ...consolidateOpts } = {}
+) {
+  const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
+  return runner.consolidate(snapshotIdOrTopic, consolidateOpts);
 }
 
 export default KnowledgeFlowRunner;

@@ -397,3 +397,130 @@ mutation_log:
 
 Files are stored as `<store_root>/records/<id>.md`. The graph index lives at
 `<store_root>/graph-index.json`.
+
+---
+
+## Addendum A — Snapshot Record Semantics (S6)
+
+### A.1 Snapshot Type Decision
+
+A `snapshot` is a **distinct record type** (not a concept subtype). Rationale: snapshots have
+unique semantics that differ from concept records in three ways:
+
+1. **Topic binding** — a snapshot is always bound to a topic (category or explicit topic string),
+   whereas a concept is an independent named idea.
+2. **Supersedes relationship** — snapshots participate in a directed supersedes chain; concepts do
+   not. A snapshot "supersedes" its predecessors, preserving them for provenance while establishing
+   the current view.
+3. **Consolidation lifecycle** — snapshots are produced by the `knowledge.consolidate` flow and
+   carry evidence of which compiled records contributed to the latest decisions. Concepts carry
+   definitions; snapshots carry bounded decision summaries.
+
+Adding `snapshot` as a fourth top-level type is the smallest, clearest extension: it extends the
+`type` discriminant, adds one link kind, and adds one mutation op — all self-contained.
+
+### A.2 Extended Type Discriminant
+
+The `type` field on the common envelope (§1.1) now accepts four values:
+
+| Type | Description |
+|---|---|
+| `"raw"` | Unprocessed source material (§1.2). |
+| `"compiled"` | Normalized, editor-reviewed distillation (§1.3). |
+| `"concept"` | Named idea, term, or principle (§1.4). |
+| `"snapshot"` | Bounded decision summary for a topic (§A.3). |
+
+### A.3 `snapshot` Record
+
+A snapshot record holds the current consolidated decisions for a topic. It is produced and
+updated only through the `knowledge.consolidate` flow.
+
+- `body`: structured markdown summarising the latest known decisions, open items, and context for
+  the topic.
+- `topic` (in `provenance.note` or a dedicated field — default adapter stores it in `tags[0]`
+  prefixed `topic:`) — the topic string this snapshot covers. Must be non-empty.
+- Must link (via `links`) to the compiled records that contributed to the latest consolidation
+  using link kind `"source"`.
+- May link to superseded predecessor snapshots using link kind `"supersedes"`.
+- Carries `provenance.source_ids` referencing every compiled record that contributed to the
+  current body.
+
+### A.4 Extended Link Kinds
+
+| Kind | Direction | Meaning |
+|---|---|---|
+| `"source"` | compiled → raw | (existing) |
+| `"example"` | concept → compiled | (existing) |
+| `"related"` | any → any | (existing) |
+| `"refines"` | compiled → compiled | (existing) |
+| `"proposes"` | any → concept | (existing) |
+| `"supersedes"` | snapshot → snapshot | New snapshot supersedes an older snapshot for the same topic. |
+
+### A.5 `supersede` Mutation Operation
+
+The `supersede` op marks one or more existing records as superseded by a newer record.
+It NEVER deletes records. Superseded records remain fully queryable with their provenance intact.
+
+**Required fields:**
+
+| Field | Location | Description |
+|---|---|---|
+| `new_id` | argument | ID of the record that supersedes. |
+| `superseded_ids` | argument | Non-empty array of IDs that are being superseded. |
+| `agent` | evidence | Agent performing the supersede operation. |
+| `rationale` | evidence | Non-empty string explaining why the new record supersedes the old ones. |
+
+**Rejection conditions:**
+- `new_id` does not exist.
+- `superseded_ids` is empty.
+- Any id in `superseded_ids` does not exist.
+- Missing `agent` in evidence.
+- Missing or empty `rationale` in evidence.
+
+**Post-conditions:**
+- For each id in `superseded_ids`, a link of kind `"supersedes"` from `new_id` to that id is added
+  to the graph index.
+- A mutation log entry (op=`"supersede"`) is appended to the record at `new_id`.
+- A mutation log entry (op=`"superseded-by"`) is appended to each record in `superseded_ids`,
+  recording which record supersedes them (`new_id`).
+- The superseded records are NOT deleted. Their `body`, `links`, and provenance remain intact.
+- After `supersede`, a `get(superseded_id)` MUST still return the full record.
+- Superseded records can be discovered via `getLinks(superseded_id).reverse` — they will have a
+  reverse link of kind `"supersedes"` pointing from `new_id`.
+
+**Supersede-not-delete invariant:**
+> Calling `supersede` MUST NOT remove any record. No mutation op in this contract deletes records.
+> This is a hard invariant; adapters MUST enforce it. A retention policy hook for physical archival
+> is a future concern and is explicitly out of scope for this version.
+
+### A.6 Adapter Contract Extension
+
+The adapter interface (§8) is extended with one method:
+
+```ts
+interface KnowledgeStoreAdapter {
+  // ... existing methods ...
+  supersede(newId: string, supersededIds: string[], evidence: SupersedeEvidence): Promise<void>;
+  listByType(type: "raw" | "compiled" | "concept" | "snapshot"): Promise<Record[]>;
+}
+```
+
+`SupersedeEvidence`:
+```ts
+interface SupersedeEvidence {
+  agent: string;
+  rationale: string;
+  note?: string;
+}
+```
+
+### A.7 Snapshot Queryability Guarantee
+
+Superseded snapshots MUST remain queryable:
+- `get(id)` returns the full record (body, links, provenance, mutation_log).
+- `listByType("snapshot")` returns ALL snapshots, including superseded ones.
+- The caller can determine supersession status by inspecting `getLinks(id).reverse` for entries
+  with `kind === "supersedes"`.
+
+There is no `"archived"` or `"deleted"` status field; the supersession chain is expressed entirely
+through links and mutation log entries.

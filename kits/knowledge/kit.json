@@ -3,7 +3,7 @@
   "id": "knowledge",
   "name": "Knowledge Kit",
   "product_name": "Knowledge Kit",
-  "description": "A Flow Kit for durable, gated knowledge storage. Provides a store contract with defined record types, mutation operations, and provenance rules — plus a default adapter backed by markdown files, YAML frontmatter, wikilinks, and a graph index.",
+  "description": "A Flow Kit for durable, gated knowledge storage. Provides a store contract with defined record types, mutation operations, and provenance rules \u2014 plus a default adapter backed by markdown files, YAML frontmatter, wikilinks, and a graph index.",
   "flows": [
     {
       "id": "knowledge.store-contract",
@@ -13,17 +13,22 @@
     {
       "id": "knowledge.ingest",
       "path": "flows/ingest.flow.json",
-      "description": "Ingest raw captures: capture → classify → route. Gate on classify requires category + type='raw' classification evidence per the store contract create op."
+      "description": "Ingest raw captures: capture \u2192 classify \u2192 route. Gate on classify requires category + type='raw' classification evidence per the store contract create op."
     },
     {
       "id": "knowledge.compile",
       "path": "flows/compile.flow.json",
-      "description": "Compile classified raws into durable notes: select-raws → compile → link. Gate on compile requires provenance refs to every consumed raw record."
+      "description": "Compile classified raws into durable notes: select-raws \u2192 compile \u2192 link. Gate on compile requires provenance refs to every consumed raw record."
     },
     {
       "id": "knowledge.synthesize",
       "path": "flows/synthesize.flow.json",
-      "description": "Synthesize compiled sources into concept summaries: detect-cluster → propose → evidence-gate → apply-or-reject. Mutation-gate policy: no summary mutates without an approved proposal carrying source refs; rejection leaves store untouched."
+      "description": "Synthesize compiled sources into concept summaries: detect-cluster \u2192 propose \u2192 evidence-gate \u2192 apply-or-reject. Mutation-gate policy: no summary mutates without an approved proposal carrying source refs; rejection leaves store untouched."
+    },
+    {
+      "id": "knowledge.consolidate",
+      "path": "flows/consolidate.flow.json",
+      "description": "Consolidate related compiled records into a living decision snapshot: related-event trigger -> consolidation proposal -> evidence gate -> apply-or-reject. Creates or updates a snapshot record; supersedes prior snapshots via supersede op (never deletes). Reuses S3 mutation-gate machinery."
     }
   ],
   "docs": [
@@ -45,7 +50,7 @@
     {
       "id": "knowledge.flow-runner",
       "path": "adapters/flow-runner/index.js",
-      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links; synthesize(conceptId | topicSelector, options) → concept summary proposal with mutation gate. Emits canonical telemetry events at gate points."
+      "description": "Executable flow logic: capture(rawText, meta) \u2192 classified raw record; compile(rawIds[]) \u2192 compiled record with provenance links; synthesize(conceptId | topicSelector, options) \u2192 concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) \u2192 decision snapshot consolidation with supersede-not-delete. Emits canonical telemetry events at gate points."
     }
   ],
   "evals": [
@@ -62,7 +67,12 @@
     {
       "id": "knowledge.synthesis-suite",
       "path": "evals/synthesis/suite.test.js",
-      "description": "Eval cases for synthesize: AC1 (similar source → proposal not mutation), AC2 (rejection leaves concept byte-identical), AC3 (apply updates with provenance to all contributing sources), pluggable-similarity interface test, gate telemetry."
+      "description": "Eval cases for synthesize: AC1 (similar source \u2192 proposal not mutation), AC2 (rejection leaves concept byte-identical), AC3 (apply updates with provenance to all contributing sources), pluggable-similarity interface test, gate telemetry."
+    },
+    {
+      "id": "knowledge.consolidation-suite",
+      "path": "evals/consolidation/suite.test.js",
+      "description": "Eval cases for consolidate: AC1 (related event -> proposal, not mutation); AC2 (apply updates exactly ONE snapshot, links supersedes refs, superseded sources still queryable); AC3 fixture (decision changed across 3 events -> snapshot reflects ONLY latest decision, provenance to all 3); supersede-not-delete invariant; gate telemetry; contract suite extensions for snapshot semantics."
     }
   ]
 }

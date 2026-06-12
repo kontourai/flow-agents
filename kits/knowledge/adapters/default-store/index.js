@@ -291,7 +291,7 @@ function removeLinksFromGraph(graph, sourceId) {
 // Validation helpers
 // ---------------------------------------------------------------------------
 
-const VALID_TYPES = new Set(["raw", "compiled", "concept"]);
+const VALID_TYPES = new Set(["raw", "compiled", "concept", "snapshot"]);
 const CATEGORY_SEGMENT_RE = /^[a-z0-9_-]+$/;
 
 function validateCategory(cat) {
@@ -349,7 +349,7 @@ export class DefaultKnowledgeStore {
     // Required field enforcement
     if (!input.type) throw missingEvidenceError("create: missing required field: type");
     if (!VALID_TYPES.has(input.type))
-      throw missingEvidenceError(`create: type must be raw, compiled, or concept; got: ${input.type}`);
+      throw missingEvidenceError(`create: type must be raw, compiled, concept, or snapshot; got: ${input.type}`);
     if (!input.title || !input.title.trim())
       throw missingEvidenceError("create: missing required field: title");
     if (!input.body && input.body !== "")
@@ -526,8 +526,8 @@ export class DefaultKnowledgeStore {
 
     const concept = this._readRecord(conceptId);
     if (!concept) throw notFoundError(conceptId);
-    if (concept.type !== "concept")
-      throw missingEvidenceError(`propose: concept_id must reference a concept record; got type: ${concept.type}`);
+    if (concept.type !== "concept" && concept.type !== "snapshot")
+      throw missingEvidenceError(`propose: concept_id must reference a concept or snapshot record; got type: ${concept.type}`);
 
     const proposer = this._readRecord(proposerId);
     if (!proposer) throw notFoundError(proposerId);
@@ -594,8 +594,8 @@ export class DefaultKnowledgeStore {
 
     const concept = this._readRecord(conceptId);
     if (!concept) throw notFoundError(conceptId);
-    if (concept.type !== "concept")
-      throw missingEvidenceError(`apply: concept_id must reference a concept record; got type: ${concept.type}`);
+    if (concept.type !== "concept" && concept.type !== "snapshot")
+      throw missingEvidenceError(`apply: concept_id must reference a concept or snapshot record; got type: ${concept.type}`);
 
     const proposer = this._readRecord(proposerId);
     if (!proposer) throw notFoundError(proposerId);
@@ -637,8 +637,8 @@ export class DefaultKnowledgeStore {
 
     const concept = this._readRecord(conceptId);
     if (!concept) throw notFoundError(conceptId);
-    if (concept.type !== "concept")
-      throw missingEvidenceError(`reject: concept_id must reference a concept record; got type: ${concept.type}`);
+    if (concept.type !== "concept" && concept.type !== "snapshot")
+      throw missingEvidenceError(`reject: concept_id must reference a concept or snapshot record; got type: ${concept.type}`);
 
     const proposer = this._readRecord(proposerId);
     if (!proposer) throw notFoundError(proposerId);
@@ -666,6 +666,98 @@ export class DefaultKnowledgeStore {
     };
     this._writeRecord(updatedConcept);
   }
+
+
+  // -------------------------------------------------------------------------
+  // supersede
+  // -------------------------------------------------------------------------
+
+  async supersede(newId, supersededIds, evidence) {
+    if (!evidence?.agent)
+      throw missingEvidenceError("supersede: missing required evidence field: agent");
+    if (!evidence?.rationale || !evidence.rationale.trim())
+      throw missingEvidenceError("supersede: missing required evidence field: rationale");
+    if (!supersededIds || supersededIds.length === 0)
+      throw missingEvidenceError("supersede: supersededIds must be a non-empty array");
+
+    const newRecord = this._readRecord(newId);
+    if (!newRecord) throw notFoundError(newId);
+
+    // Verify all superseded records exist
+    for (const sid of supersededIds) {
+      const rec = this._readRecord(sid);
+      if (!rec) throw notFoundError(sid);
+    }
+
+    const now = this._now();
+
+    // Add supersedes links from newId to each superseded record
+    const supersededLinks = supersededIds.map((sid) => ({
+      target_id: sid,
+      kind: "supersedes",
+    }));
+
+    // Update newId record: add supersedes links + mutation log entry
+    const existingLinks = newRecord.links || [];
+    const key = (l) => `${l.target_id}::${l.kind}`;
+    const seen = new Set(existingLinks.map(key));
+    const newLinks = [...existingLinks];
+    for (const l of supersededLinks) {
+      if (!seen.has(key(l))) {
+        newLinks.push(l);
+        seen.add(key(l));
+      }
+    }
+
+    const updatedNew = {
+      ...newRecord,
+      links: newLinks,
+      updated_at: now,
+      mutation_log: [
+        ...(newRecord.mutation_log || []),
+        {
+          op: "supersede",
+          at: now,
+          agent: evidence.agent,
+          rationale: evidence.rationale,
+          ...(evidence.note ? { note: evidence.note } : {}),
+          evidence: { superseded_count: supersededIds.length },
+        },
+      ],
+    };
+
+    const graph = loadGraph(this._graphPath);
+    removeLinksFromGraph(graph, newId);
+    addLinksToGraph(graph, newId, newLinks);
+    saveGraph(this._graphPath, graph);
+
+    this._writeRecord(updatedNew);
+
+    // Append superseded-by mutation log entry to each superseded record
+    // Records are NOT deleted — supersede-not-delete invariant
+    for (const sid of supersededIds) {
+      const supersededRec = this._readRecord(sid);
+      if (!supersededRec) continue; // already verified above; defensive
+      const updatedSuperseded = {
+        ...supersededRec,
+        // updated_at NOT changed — the record content is not mutated
+        mutation_log: [
+          ...(supersededRec.mutation_log || []),
+          {
+            op: "superseded-by",
+            at: now,
+            agent: evidence.agent,
+            new_id: newId,
+            rationale: evidence.rationale,
+            ...(evidence.note ? { note: evidence.note } : {}),
+            evidence: { superseded_by_id: newId },
+          },
+        ],
+      };
+      this._writeRecord(updatedSuperseded);
+    }
+  }
+
 
   // -------------------------------------------------------------------------
   // get

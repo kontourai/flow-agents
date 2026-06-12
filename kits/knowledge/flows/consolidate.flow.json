@@ -1,0 +1,77 @@
+{
+  "id": "knowledge.consolidate",
+  "version": "1.0",
+  "steps": [
+    { "id": "related-event", "next": "propose" },
+    { "id": "propose", "next": "evidence-gate" },
+    { "id": "evidence-gate", "next": "apply-or-reject" },
+    { "id": "apply-or-reject", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "gates": {
+    "related-event-gate": {
+      "step": "related-event",
+      "expects": [
+        {
+          "id": "related-compiled-records-found",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "One or more compiled records linked to the snapshot's topic have been identified. The trigger fires when new compiled records matching the snapshot topic (by category or explicit topic tag) are present. The result is a cluster of compiled record IDs that form the consolidation input.",
+          "claim": {
+            "type": "knowledge.consolidate.trigger",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "propose-gate": {
+      "step": "propose",
+      "expects": [
+        {
+          "id": "consolidation-proposal-recorded",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "A consolidation proposal has been recorded. The proposal carries: the updated snapshot body (latest decisions), source_ids referencing every compiled record that contributed, and supersedes_ids referencing any prior snapshot(s) for the same topic. The snapshot record is NOT mutated at this step — only a consolidation proposal record and proposes link are created.",
+          "claim": {
+            "type": "knowledge.consolidate.proposal",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "evidence-gate": {
+      "step": "evidence-gate",
+      "expects": [
+        {
+          "id": "proposal-carries-source-refs",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "The consolidation proposal evidence includes source_ids referencing every compiled record that contributed to the proposed snapshot body. Gate rejects if source_ids is empty or any referenced record does not exist. Also verifies that the proposer record has a 'proposes' link to the snapshot target.",
+          "claim": {
+            "type": "knowledge.consolidate.evidence",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "apply-gate": {
+      "step": "apply-or-reject",
+      "expects": [
+        {
+          "id": "consolidation-gate-decision",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "A gate decision (apply or reject) has been recorded. If applied: snapshot body is updated via the store update op with the proposed body; supersede op links the new snapshot to any prior snapshots for the same topic; all superseded snapshots remain queryable with provenance intact. If rejected: the snapshot body is byte-identical to its pre-proposal state.",
+          "claim": {
+            "type": "knowledge.consolidate.gate-decision",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    }
+  }
+}
