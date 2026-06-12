@@ -174,6 +174,81 @@ describe("entity extractor: defaultEntityExtractor", () => {
 });
 
 // ---------------------------------------------------------------------------
+// §2b Entity extractor: trailing-punctuation regression (issue #48)
+// ---------------------------------------------------------------------------
+describe("entity extractor: trailing-punctuation regression (#48)", () => {
+  test("last-entry-with-trailing-period: role not folded into name", async () => {
+    // 'Lee Wong (Acme procurement).' — trailing period on last entry
+    // Before fix: name='Lee Wong (Acme procurement).', role=undefined
+    // After fix:  name='Lee Wong', role='Acme procurement'
+    const record = {
+      body: "Attendees: Dana Smith (Acme VP Eng), Lee Wong (Acme procurement).",
+    };
+    const mentions = await defaultEntityExtractor(record);
+    assert.equal(mentions.length, 2, "two mentions extracted");
+    const lee = mentions.find((m) => m.name === "Lee Wong");
+    assert.ok(lee, "Lee Wong found with correct name (not 'Lee Wong Acme procurement')");
+    assert.ok(lee.role, "Lee Wong has role");
+    assert.ok(lee.role.includes("Acme procurement"), "role is 'Acme procurement'");
+  });
+
+  test("last-entry-no-period: baseline still works without trailing period", async () => {
+    const record = {
+      body: "Attendees: Dana Smith (Acme VP Eng), Lee Wong (Acme procurement)",
+    };
+    const mentions = await defaultEntityExtractor(record);
+    const lee = mentions.find((m) => m.name === "Lee Wong");
+    assert.ok(lee, "Lee Wong found");
+    assert.equal(lee.role, "Acme procurement", "role correct without trailing period");
+  });
+
+  test("single-attendee line with trailing period", async () => {
+    const record = {
+      body: "Attendees: Lee Wong (Acme procurement).",
+    };
+    const mentions = await defaultEntityExtractor(record);
+    assert.equal(mentions.length, 1, "one mention");
+    const lee = mentions[0];
+    assert.equal(lee.name, "Lee Wong", "name is 'Lee Wong'");
+    assert.equal(lee.role, "Acme procurement", "role is 'Acme procurement'");
+  });
+
+  test("single-attendee line without trailing period", async () => {
+    const record = {
+      body: "Attendees: Lee Wong (Acme procurement)",
+    };
+    const mentions = await defaultEntityExtractor(record);
+    assert.equal(mentions.length, 1, "one mention");
+    assert.equal(mentions[0].name, "Lee Wong");
+    assert.equal(mentions[0].role, "Acme procurement");
+  });
+
+  test("role containing comma: 'Lee Wong (Acme, procurement).'", async () => {
+    // Commas inside the parenthetical are part of the role, not entry separators
+    const record = {
+      body: "Attendees: Lee Wong (Acme, procurement).",
+    };
+    const mentions = await defaultEntityExtractor(record);
+    assert.equal(mentions.length, 1, "one mention despite comma in role");
+    const lee = mentions[0];
+    assert.equal(lee.name, "Lee Wong", "name correct");
+    assert.ok(lee.role.includes("Acme"), "role includes Acme");
+    assert.ok(lee.role.includes("procurement"), "role includes procurement");
+  });
+
+  test("role containing periods: 'Dr. Lee Wong (Acme Sr. Eng.)'", async () => {
+    const record = {
+      body: "Attendees: Dr. Lee Wong (Acme Sr. Eng.)",
+    };
+    const mentions = await defaultEntityExtractor(record);
+    assert.equal(mentions.length, 1, "one mention");
+    const lee = mentions[0];
+    assert.equal(lee.name, "Dr. Lee Wong", "name with title prefix correct");
+    assert.ok(lee.role.includes("Acme Sr. Eng"), "role with internal periods correct");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // §3 Name resolution helpers
 // ---------------------------------------------------------------------------
 describe("name resolution: exact match and possible-duplicate", () => {
