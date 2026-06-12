@@ -1,6 +1,13 @@
 # Universal Agent Bundle (Claude Code)
 
-This bundle was generated from the canonical source in this repo. Treat the repo root as the source of truth and regenerate the bundle instead of editing exported agent files by hand.
+This bundle was generated from the canonical source in this repo. Treat the repo root as the source of truth and regenerate the bundle instead of editing exported agent files by hand. (Exception: the "Repository Conventions" section below is source-repo-specific, maintained by hand, and intentionally absent from generated bundles.)
+
+## Repository Conventions (source repo only)
+
+- **Commit messages drive releases.** Releases are automated with release-please: `feat:` bumps minor, `fix:` bumps patch, `feat!:`/`BREAKING CHANGE` bumps major; `docs:`/`chore:`/`test:`/`refactor:` don't bump. Commits without a conventional prefix are invisible to version inference — use one. Details: CONTRIBUTING.md ("Releases").
+- **Never hand-edit release PRs** (`release-please--branches--*`); they are regenerated on every push to main.
+- **Evidence hygiene:** issue/PR permalinks must pin a real commit SHA (`git rev-parse`, never typed by hand); claims about behavior need command/test evidence.
+- `.flow-agents/` runtime artifacts stay untracked; durable records belong in docs/, issues, or tracked source.
 
 ## Shared Conventions
 

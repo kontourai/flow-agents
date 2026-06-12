@@ -286,6 +286,16 @@ else
   _fail "opencode bundle missing opencode.json"
 fi
 
+# Root AGENTS.md carries a hand-maintained "Repository Conventions" section
+# (commit/release rules for agents working in THIS repo). The rest of the
+# file mirrors generated bundle output; this pin prevents a regeneration
+# sync from silently dropping the repo-specific section.
+if grep -q "## Repository Conventions (source repo only)" "$ROOT_DIR/AGENTS.md" 2>/dev/null && grep -q "release-please" "$ROOT_DIR/AGENTS.md" 2>/dev/null; then
+  _pass "root AGENTS.md retains the Repository Conventions section"
+else
+  _fail "root AGENTS.md is missing the Repository Conventions section (regeneration clobbered it?)"
+fi
+
 # Generated hook artifacts must PARSE in their host language. The pi live
 # smoke (2026-06-11) caught the generator emitting an unterminated string
 # (template-literal escaping) that pi's loader rejected at startup.
