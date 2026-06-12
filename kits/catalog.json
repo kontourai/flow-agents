@@ -6,6 +6,12 @@
       "name": "Builder Kit",
       "path": "kits/builder",
       "description": "Flow-backed shaping, planning, build, verification, merge readiness, pull request readiness, and learning workflows."
+    },
+    {
+      "id": "knowledge",
+      "name": "Knowledge Kit",
+      "path": "kits/knowledge",
+      "description": "Store contract with record types (raw/compiled/concept), mutation operations with required provenance, default markdown+frontmatter+wikilink+graph-index adapter, and a parameterized contract test suite."
     }
   ]
 }

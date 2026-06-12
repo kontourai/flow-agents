@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "id": "knowledge",
+  "name": "Knowledge Kit",
+  "product_name": "Knowledge Kit",
+  "description": "A Flow Kit for durable, gated knowledge storage. Provides a store contract with defined record types, mutation operations, and provenance rules — plus a default adapter backed by markdown files, YAML frontmatter, wikilinks, and a graph index.",
+  "flows": [
+    {
+      "id": "knowledge.store-contract",
+      "path": "flows/store-contract.flow.json",
+      "description": "Gate that requires contract-suite evidence before a store implementation is accepted."
+    }
+  ],
+  "docs": [
+    {
+      "id": "knowledge.readme",
+      "path": "docs/README.md"
+    },
+    {
+      "id": "knowledge.store-contract-doc",
+      "path": "docs/store-contract.md"
+    }
+  ],
+  "adapters": [
+    {
+      "id": "knowledge.default-store",
+      "path": "adapters/default-store/index.js",
+      "description": "Default store adapter: markdown files + YAML frontmatter + wikilinks + JSON graph index."
+    }
+  ],
+  "evals": [
+    {
+      "id": "knowledge.contract-suite",
+      "path": "evals/contract-suite/suite.test.js",
+      "description": "Parameterized contract test suite for any Knowledge Kit store adapter."
+    }
+  ]
+}

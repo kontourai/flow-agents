@@ -1,0 +1,48 @@
+{
+  "id": "knowledge.store-contract",
+  "version": "1.0",
+  "steps": [
+    { "id": "verify-contract", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "gates": {
+    "verify-contract-gate": {
+      "step": "verify-contract",
+      "expects": [
+        {
+          "id": "contract-suite-passed",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "The contract test suite has passed 100% against the target adapter, verifying round-trip integrity, required-evidence enforcement, and graph-index consistency.",
+          "claim": {
+            "type": "knowledge.store-contract.suite-result",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        },
+        {
+          "id": "mutation-provenance-enforced",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "Every mutation operation (create, update, link, propose, apply, reject) rejects requests missing required provenance fields, as verified by the contract suite.",
+          "claim": {
+            "type": "knowledge.store-contract.provenance-enforcement",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        },
+        {
+          "id": "round-trip-integrity",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "Records round-trip raw to stored to queried with category and links intact, as verified by the contract suite.",
+          "claim": {
+            "type": "knowledge.store-contract.round-trip",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    }
+  }
+}
