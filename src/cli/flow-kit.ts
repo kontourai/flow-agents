@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
 import { assertPathContained, copyDir, isoNow, readJson, walkFiles, writeJson } from "../lib/fs.js";
-import { assertKitRepository } from "../flow-kit/validate.js";
+import { assertKitRepository, deriveKitTargets } from "../flow-kit/validate.js";
 import { activateCodexLocal, activateStrandsLocal } from "../runtime-adapters.js";
 
 const REGISTRY_REL = path.join("kits", "local", "installed-kits.json");
@@ -132,13 +132,51 @@ function activate(argv: string[]): number {
   return Array.isArray(result.errors) && result.errors.length ? 1 : 0;
 }
 
+/**
+ * inspect <kit-dir> [--json]
+ *
+ * Derives conformance level (K0/K1/K2) and consumer targets from a kit's
+ * observable asset classes. Exits 1 if the kit fails core container validation.
+ * Outputs stable JSON suitable for use by catalog tooling and CI.
+ *
+ * K-levels (issue #52):
+ *   K0  valid core Flow Kit container — gates evaluable agentlessly by any Flow consumer.
+ *   K1  K0 + Flow Agents extension assets present (skills/docs/adapters/evals/assets).
+ *   K2  K1 + evals present (live evidence layer).
+ *
+ * Consumer targets derived from observable asset classes:
+ *   flow          always present at K0 (any Flow consumer: gates/definition-of-done)
+ *   flow-agents   present at K1+ (Flow Agents extension activated)
+ *   <namespace>   unknown top-level keys list verbatim as third-party consumer targets
+ */
+function inspect(argv: string[]): number {
+  const args = parseArgs(argv);
+  const kitDir = path.resolve(args.positionals[0] ?? ".");
+  const manifestPath = path.join(kitDir, "kit.json");
+  if (!fs.existsSync(manifestPath)) {
+    console.error(`inspect: kit.json not found at ${manifestPath}`);
+    return 1;
+  }
+  let manifest: Record<string, unknown>;
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
+  } catch (err) {
+    console.error(`inspect: invalid JSON in ${manifestPath}: ${(err as Error).message}`);
+    return 1;
+  }
+  const result = deriveKitTargets(manifest);
+  console.log(JSON.stringify(result, null, 2));
+  return result.conformance.k0 ? 0 : 1;
+}
+
 export function main(argv = process.argv.slice(2)): number {
   const [command, ...rest] = argv;
   if (command === "install-local") return installLocal(rest);
   if (command === "list") return list(rest);
   if (command === "status") return status(rest);
   if (command === "activate") return activate(rest);
-  console.error("usage: flow-kit <install-local|list|status|activate> ...");
+  if (command === "inspect") return inspect(rest);
+  console.error("usage: flow-kit <install-local|list|status|activate|inspect> ...");
   return 2;
 }
 

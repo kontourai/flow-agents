@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "id": "k0-flows-only",
+  "name": "K0 Flows-Only Kit",
+  "description": "A kit with only Flow Definitions — K0 conformance, consumable by any Flow consumer.",
+  "flows": [
+    {
+      "id": "k0-flows-only.review",
+      "path": "flows/review.flow.json",
+      "description": "Review gate evaluable agentlessly."
+    }
+  ]
+}

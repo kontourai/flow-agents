@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "id": "third-party-extension",
+  "name": "Third-Party Extension Kit",
+  "description": "A kit with a third-party extension namespace — targets include the third-party consumer.",
+  "flows": [
+    {
+      "id": "third-party-extension.review",
+      "path": "flows/review.flow.json",
+      "description": "Review flow."
+    }
+  ],
+  "my-platform.widgets": [
+    {
+      "id": "third-party-extension.widget-one",
+      "path": "flows/review.flow.json"
+    }
+  ]
+}

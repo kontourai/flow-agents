@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "id": "k1-agent-extension",
+  "name": "K1 Agent Extension Kit",
+  "description": "A kit with Flow Definitions and agent extension docs — K1 conformance.",
+  "flows": [
+    {
+      "id": "k1-agent-extension.build",
+      "path": "flows/build.flow.json",
+      "description": "Build flow with agent docs."
+    }
+  ],
+  "docs": [
+    {
+      "id": "k1-agent-extension.readme",
+      "path": "docs/README.md",
+      "description": "Agent guidance documentation."
+    }
+  ]
+}
