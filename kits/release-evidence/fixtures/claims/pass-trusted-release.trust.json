@@ -1,0 +1,22 @@
+{
+  "schema_version": "0.1",
+  "artifact_type": "trust-report",
+  "subject": "ci/release-evidence-gate",
+  "producer": "ci/release-evidence-probe",
+  "status": "trusted",
+  "issued_at": "2026-06-12T00:00:00.000Z",
+  "authority_traces": [
+    "github:main"
+  ],
+  "claims": [
+    {
+      "type": "release.evidence",
+      "subject": "ci/release-evidence-gate",
+      "status": "trusted",
+      "issued_at": "2026-06-12T00:00:00.000Z"
+    }
+  ],
+  "integrity": {
+    "verified": true
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "id": "release-evidence",
+  "name": "Release Evidence Kit",
+  "description": "A minimal flows-only Flow Kit for proving agentless gate evaluation over surface claims in CI. One gate expects a trusted release.evidence claim; CI attaches a claim file and calls flow evaluate.",
+  "flows": [
+    {
+      "id": "release-evidence",
+      "path": "flows/release-evidence.flow.json",
+      "description": "Single-gate flow that requires a trusted release.evidence claim before the gate-check step can pass."
+    }
+  ]
+}
