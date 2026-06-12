@@ -211,6 +211,85 @@ The split keeps ownership clean:
 - Flow authors, installs, and validates the container shape. Any tool that understands Flow Kits can install any kit without knowing about Flow Agents.
 - Flow Agents extends the container for agent-specific assets without modifying the core contract. Third-party kit authors who don't need skills or adapters never have to know about the extension layer.
 
+## K-levels: kit conformance and consumer-target badges
+
+Every Flow Agents Kit declares assets in a manifest. The K-level system classifies what consumers can do with a kit based on observable asset classes — no extra declaration needed for the level itself. Levels derive from what is present.
+
+### Conformance levels
+
+| Level | What is present | Who can consume it |
+|---|---|---|
+| **K0** | Valid core Flow Kit container: `schema_version`, `id`, `name`, `flows` (non-empty). | Any Flow consumer: gates and definition-of-done are evaluable agentlessly in CI or without an agent framework. |
+| **K1** | K0 + at least one Flow Agents extension field present (`skills`, `docs`, `adapters`, `evals`, or `assets`). | Flow Agents (>= installed version) can activate the kit in at least one agent harness or framework. |
+| **K2** | K1 + `evals` present with at least one entry. | Live evidence layer: eval suites run against an adapter and produce verifiable output records. |
+
+Every kit published by Kontour is K0 or higher. K0 is the minimum bar — a kit that fails K0 is not distributable.
+
+### The degradation invariant
+
+Every Flow Agents Kit **must remain a valid core Flow Kit container when agent-extension fields are ignored**. This is the degradation invariant:
+
+- Strip `skills`, `docs`, `adapters`, `evals`, and `assets` from a kit's `kit.json`.
+- The remaining manifest must satisfy the Flow Kit container contract (`schema_version`, `id`, `name`, `flows` non-empty, no `..` traversal).
+- This invariant is enforced by the kit validator (`npm run validate:source -- --kit <dir>`).
+
+Why this matters: any Flow consumer (CI gate runner, definition-of-done checker, release audit tool) can evaluate a kit's gates without knowing about Flow Agents. The kit's flow definitions carry the definition-of-done independently of whether an agent ever runs.
+
+### Consumer-target derivation
+
+Consumer targets are **derived** from observable asset classes — no declaration is required for standard targets:
+
+| Observable state | Derived target |
+|---|---|
+| K0 (flows present) | `flow` — any Flow consumer (gate evaluation, definition-of-done) |
+| K1 (agent extension assets present) | `flow-agents` — Flow Agents activates the kit |
+| Unknown top-level key(s) | Listed verbatim as third-party consumer target(s) |
+
+Unknown top-level keys are permitted by the container spec's `additionalProperties: true` rule. A third-party tool built on Flow can extend a kit with its own namespace (e.g. `"my-platform.widgets": [...]`) — the key becomes a derived consumer-target badge without requiring any pre-registration.
+
+Version constraints (e.g. minimum `flow-agents` version) are the only case where a declaration is needed beyond what derivation can reach.
+
+**Marketplace listing format**: `Works with: Flow (gates-only) | Flow Agents | <Consumer X>`
+
+### Evidence layering: Surface and Veritas
+
+Kit gates reference evidence using `"kind": "surface.claim"`. This is **Flow-native vocabulary**: Flow is built on Surface, so Surface claims are the expected evidence substrate at the Flow level. Surface claims are not a Flow Agents coupling.
+
+Veritas is an **optional claim family** — a developer-repo specialization for evidence that has been through a trust pipeline. Kits may be opinionated about requiring Veritas-class evidence. Builder Kit requiring Veritas-class evidence is the kit's own policy choice, defined by Kontour as the kit author, not a platform requirement. Other kits may not require Veritas at all.
+
+Layering summary:
+
+- **Surface** = claim substrate (Flow-level, always available)
+- **Veritas** = optional claim kind, kit-opinionated (Builder Kit requires it; others need not)
+
+### Inspecting a kit's K-level
+
+Use the `inspect` subcommand to derive a kit's conformance level and consumer targets:
+
+```bash
+npm run flow-kit -- inspect path/to/my-kit
+```
+
+Output is stable JSON:
+
+```json
+{
+  "kit_id": "my-kit",
+  "kit_name": "My Kit",
+  "conformance": {
+    "k0": true,
+    "k1": true,
+    "k2": false
+  },
+  "targets": ["flow", "flow-agents"],
+  "third_party_extensions": []
+}
+```
+
+Exit code 0 when the kit is at least K0 (valid core container); exit code 1 when K0 validation fails.
+
+The `inspect` command is read-only and safe to run before install.
+
 ## Direction
 
 Flow Kits are designed to be shareable workflow units — authored once, carried across teams and workspaces. The intended growth path is distribution from git remotes and a curated Kontour kit catalog of Kontour-authored kits covering work modes beyond software delivery. Today install is local-path only; remote fetch is explicitly a non-goal in this version.

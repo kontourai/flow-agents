@@ -1,0 +1,26 @@
+{
+  "id": "k2-with-evals.synthesize",
+  "version": "1.0",
+  "steps": [
+    { "id": "synthesize", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "gates": {
+    "synthesize-gate": {
+      "step": "synthesize",
+      "expects": [
+        {
+          "id": "synthesis-evidence",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "Synthesis evidence with provenance refs.",
+          "claim": {
+            "type": "k2.synthesize.evidence",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "id": "k1-agent-extension.build",
+  "version": "1.0",
+  "steps": [
+    { "id": "build", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "gates": {
+    "build-gate": {
+      "step": "build",
+      "expects": [
+        {
+          "id": "build-evidence",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "Build evidence recorded.",
+          "claim": {
+            "type": "k1.build.evidence",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    }
+  }
+}

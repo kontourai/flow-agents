@@ -1,0 +1,26 @@
+{
+  "id": "k0-flows-only.review",
+  "version": "1.0",
+  "steps": [
+    { "id": "review", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "gates": {
+    "review-gate": {
+      "step": "review",
+      "expects": [
+        {
+          "id": "review-finding",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "Review finding recorded.",
+          "claim": {
+            "type": "k0.review.finding",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    }
+  }
+}

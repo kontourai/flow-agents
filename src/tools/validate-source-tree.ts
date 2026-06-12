@@ -85,6 +85,7 @@ const fixtureOwnerPolicies = new Map<string, { owners: string[]; classification:
   ["evals/fixtures/builder-kit-workflow-state", { owners: ["evals/static/test_workflow_skills.sh"], classification: "Builder Kit workflow-state fixtures" }],
   ["evals/fixtures/console-learning-projection", { owners: ["evals/integration/test_console_learning_projection.sh"], classification: "console learning projection fixtures" }],
   ["evals/fixtures/flow-kit-repository", { owners: ["evals/integration/test_flow_kit_repository.sh", "evals/integration/test_local_flow_kit_install.sh", "evals/integration/test_runtime_adapter_activation.sh", "evals/static/test_workflow_skills.sh"], classification: "Flow Kit repository contract fixtures" }],
+  ["evals/fixtures/kit-conformance-levels", { owners: ["evals/integration/test_kit_conformance_levels.sh"], classification: "K-level conformance and consumer-target derivation fixtures" }],
   ["evals/fixtures/hook-influence", { owners: ["evals/integration/test_hook_influence_cases.sh", "evals/static/test_workflow_skills.sh", "scripts/validate-hook-influence-cases.js"], classification: "hook influence behavioral cases" }],
   ["evals/fixtures/pull-work-provider", { owners: ["evals/integration/test_pull_work_provider.sh"], classification: "work item provider normalization fixtures" }],
   ["evals/fixtures/pull-work-wip-shepherding", { owners: ["evals/static/test_workflow_skills.sh"], classification: "WIP shepherding state fixtures" }],
