@@ -10,8 +10,13 @@
  * where PersonMention = { name: string, role?: string, org?: string }
  *
  * Default implementation: AttendeeLineExtractor
- *   - Parses "Attendees:" lines: comma-separated entries with optional
- *     parenthetical role/org: "Dana Smith (Acme VP Eng), Lee Wong"
+ *   - Parses "Attendees:" lines: entries separated by top-level commas (commas
+ *     inside parentheticals are NOT treated as entry separators).
+ *   - Each entry may carry an optional parenthetical role/org:
+ *     "Dana Smith (Acme VP Eng), Lee Wong (Acme, procurement)."
+ *   - Trailing sentence punctuation after the last ')' is stripped so that
+ *     end-of-line entries like 'Lee Wong (Acme procurement).' parse correctly
+ *     (fix for issue #48 — trailing period folded role into name).
  *   - Also extracts explicit [[wikilinks]] from the body (name = link target)
  *   - NO freeform NLP — conservative by design (R2)
  *
@@ -27,13 +32,51 @@ const ENTRY_WITH_ROLE_RE = /^([^(]+?)\s*\(([^)]+)\)\s*$/;
 const WIKILINK_RE = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
 
 /**
+ * Split an attendee list on top-level commas (commas inside parentheticals
+ * are NOT treated as entry separators).
+ * "Dana Smith (Acme VP Eng), Lee Wong (Acme, procurement)." →
+ *   ["Dana Smith (Acme VP Eng)", "Lee Wong (Acme, procurement)."]
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+function splitAttendeeEntries(text) {
+  const entries = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "(") depth++;
+    else if (text[i] === ")") depth--;
+    else if (text[i] === "," && depth === 0) {
+      const entry = text.slice(start, i).trim();
+      if (entry) entries.push(entry);
+      start = i + 1;
+    }
+  }
+  const last = text.slice(start).trim();
+  if (last) entries.push(last);
+  return entries;
+}
+
+/**
  * Parse one attendee entry: "Dana Smith (Acme VP Eng)" or "Lee Wong"
  * Returns { name, role?, org? }
+ *
+ * Strips trailing sentence punctuation only when it appears after a closing ')'
+ * to handle end-of-line cases like 'Lee Wong (Acme procurement).' without
+ * accidentally removing trailing periods that are part of abbreviated names
+ * like 'Dana S.'.
  */
 function parseAttendeeEntry(entry) {
   const trimmed = entry.trim();
-  const match = trimmed.match(ENTRY_WITH_ROLE_RE);
-  if (!match) return { name: trimmed };
+  // Only strip trailing punctuation when it appears after a closing ')'.
+  // This handles 'Lee Wong (Acme procurement).' (issue #48) while leaving
+  // 'Dana S.' intact so the abbreviated-name form is preserved.
+  const normalized = /\)\s*[.,;:!?]+\s*$/.test(trimmed)
+    ? trimmed.replace(/[.,;:!?]+$/, "")
+    : trimmed;
+  const match = normalized.match(ENTRY_WITH_ROLE_RE);
+  if (!match) return { name: normalized };
 
   const name = match[1].trim();
   const roleOrgText = match[2].trim();
@@ -64,7 +107,7 @@ export async function defaultEntityExtractor(record) {
   const attendeesMatch = body.match(ATTENDEES_LINE_RE);
   if (attendeesMatch) {
     const entriesText = attendeesMatch[1];
-    const entries = entriesText.split(",").map((e) => e.trim()).filter(Boolean);
+    const entries = splitAttendeeEntries(entriesText);
     for (const entry of entries) {
       const mention = parseAttendeeEntry(entry);
       if (mention.name && !mentions.has(mention.name)) {
