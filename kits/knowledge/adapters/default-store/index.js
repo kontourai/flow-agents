@@ -301,7 +301,7 @@ function removeLinksFromGraph(graph, sourceId) {
 // Validation helpers
 // ---------------------------------------------------------------------------
 
-const VALID_TYPES = new Set(["raw", "compiled", "concept", "snapshot"]);
+const VALID_TYPES = new Set(["raw", "compiled", "concept", "snapshot", "person"]);
 const VALID_STATUSES = new Set(["active", "implemented", "retired"]);
 const CATEGORY_SEGMENT_RE = /^[a-z0-9_-]+$/;
 
@@ -367,7 +367,7 @@ export class DefaultKnowledgeStore {
     // Required field enforcement
     if (!input.type) throw missingEvidenceError("create: missing required field: type");
     if (!VALID_TYPES.has(input.type))
-      throw missingEvidenceError(`create: type must be raw, compiled, concept, or snapshot; got: ${input.type}`);
+      throw missingEvidenceError(`create: type must be one of raw, compiled, concept, snapshot, person; got: ${input.type}`);
     if (!input.title || !input.title.trim())
       throw missingEvidenceError("create: missing required field: title");
     if (!input.body && input.body !== "")

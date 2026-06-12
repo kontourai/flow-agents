@@ -89,9 +89,16 @@ export class ObsidianKnowledgeStore {
    * "sources" — a domain kit may choose e.g. "meetings").
    */
   _computeRelPath(category, title, id, pathIndex, type) {
-    let catDir = category.replace(/\./g, "/");
-    if (type === "raw" || type === "compiled") {
-      catDir = `${catDir}/${this._sourcesDir}`;
+    let catDir;
+    if (type === "person") {
+      // Person records always go to the top-level people/ folder regardless of
+      // category — they are cross-cutting entities, not domain-specific notes.
+      catDir = "people";
+    } else {
+      catDir = category.replace(/\./g, "/");
+      if (type === "raw" || type === "compiled") {
+        catDir = `${catDir}/${this._sourcesDir}`;
+      }
     }
     const baseSlug = this._slugify(title);
     let slug = baseSlug;
@@ -279,6 +286,10 @@ export class ObsidianKnowledgeStore {
 
     if (record.type === "raw") {
       sections.push(`> [!note]- Raw Notes\n> ${record.body.replace(/\n/g, "\n> ")}`);
+    } else if (record.type === "person") {
+      // Person cards: lead with the body (role/org prose), then People links,
+      // then Appears In backlinks to sources, then Related.
+      sections.push(record.body);
     } else {
       // compiled / concept / snapshot: insight as readable body
       sections.push(record.body);
@@ -286,6 +297,18 @@ export class ObsidianKnowledgeStore {
 
     if (sourceLinks.length > 0) {
       sections.push(`## Sources\n\n${wikiLinks(sourceLinks)}`);
+    }
+
+    // Person cards: render appears-in links (backlinks to raw+compiled records)
+    const appearsInLinks = links.filter((l) => l.kind === "appears-in");
+    if (record.type === "person" && appearsInLinks.length > 0) {
+      sections.push(`## Appears In\n\n${wikiLinks(appearsInLinks)}`);
+    }
+
+    // Compiled/person records: render people links (links to person cards)
+    const peopleLinks = links.filter((l) => l.kind === "person");
+    if (peopleLinks.length > 0) {
+      sections.push(`## People\n\n${wikiLinks(peopleLinks)}`);
     }
 
     if (relatedLinks.length > 0) {
@@ -325,7 +348,7 @@ export class ObsidianKnowledgeStore {
   async create(input) {
     if (!input.type) throw missingEvidenceError("create: missing required field: type");
     if (!VALID_TYPES.has(input.type))
-      throw missingEvidenceError(`create: type must be raw, compiled, concept, or snapshot; got: ${input.type}`);
+      throw missingEvidenceError(`create: type must be one of raw, compiled, concept, snapshot, person; got: ${input.type}`);
     if (!input.title || !input.title.trim())
       throw missingEvidenceError("create: missing required field: title");
     if (!input.body && input.body !== "")

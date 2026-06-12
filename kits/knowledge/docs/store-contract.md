@@ -648,3 +648,75 @@ Retired records MUST remain reachable from:
 
 There is no deletion of records. Physical purge (if ever needed) is a separate, future policy
 hook not defined in this version.
+
+---
+
+## Addendum C — Person Record Type (Entity Cards)
+
+### C.1 `person` Record Type
+
+A `person` record is a first-class entity card for a named individual mentioned in the knowledge base.
+It participates fully in links, the graph index, and status lifecycle like any other record type.
+
+| Field | Notes |
+|---|---|
+| `type` | `"person"` |
+| `title` | The person's full name. Used for exact-match resolution. |
+| `body` | Structured prose with role and/or org: `**Role/Org:** <text>`. Merged on apply during card union. |
+| `tags` | May include `alias:<name>` entries for alternative names (nicknames, initials). |
+| `category` | Dot-separated category. The Obsidian adapter ignores this for routing — person records always land in `people/`. |
+
+### C.2 Link Kinds Extended
+
+| Kind | Direction | Meaning |
+|---|---|---|
+| `"appears-in"` | person → raw\|compiled | Person was mentioned in that record. |
+| `"person"` | compiled → person | Compiled record references a person card. |
+
+### C.3 Obsidian Adapter Layout
+
+The Obsidian store adapter (`adapters/obsidian-store`) places person records under a
+top-level `people/` folder regardless of category, so person cards are vault-global entities.
+
+```
+<storeRoot>/
+  people/
+    dana-smith.md
+    lee-wong.md
+  <category-as-path>/
+    <title-slug>.md      (concept, snapshot)
+    <sourcesDir>/
+      <title-slug>.md   (raw, compiled)
+```
+
+Person cards render an **Appears In** section listing all `appears-in` links as Obsidian wikilinks.
+Notes that reference people render a **People** section listing `person` links.
+
+### C.4 Alias Storage
+
+Aliases are stored in the `tags` array using the prefix `alias:`:
+
+```yaml
+tags: [alias:Dana S., alias:D. Smith]
+```
+
+Resolution checks both `title` and all `alias:*` tags for exact normalised-name match.
+
+### C.5 Entity Extraction (Flow Runner)
+
+The `KnowledgeFlowRunner.extractEntities(compiledId, options)` method:
+
+1. Runs the extractor (default: `defaultEntityExtractor`) against the compiled record and its source raws.
+2. For each mention, resolves via exact-name match (incl. aliases) or creates a new person card.
+3. Near-matches (same surname + initial) create a **separate** card with a `related` link labelled
+   `possible-duplicate` — no auto-merge.
+4. Writes bidirectional links: `person → raw+compiled` (kind `appears-in`) and `compiled → person` (kind `person`).
+
+### C.6 Card Merge
+
+Card merge uses the existing `propose → apply/reject` gate:
+
+- `KnowledgeFlowRunner.mergePerson(primaryId, duplicateId, options)`
+- **apply**: unions body, adds `alias:<duplicate title>` tag to primary, unions `appears-in` links, calls
+  `store.supersede(primaryId, [duplicateId])` to archive the duplicate (supersede-not-delete invariant).
+- **reject**: both cards remain byte-identical.

@@ -308,7 +308,7 @@ export function removeLinksFromGraph(graph, sourceId) {
 // Validation helpers
 // ---------------------------------------------------------------------------
 
-export const VALID_TYPES = new Set(["raw", "compiled", "concept", "snapshot"]);
+export const VALID_TYPES = new Set(["raw", "compiled", "concept", "snapshot", "person"]);
 export const VALID_STATUSES = new Set(["active", "implemented", "retired"]);
 const CATEGORY_SEGMENT_RE = /^[a-z0-9_-]+$/;
 
