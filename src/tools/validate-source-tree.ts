@@ -274,7 +274,7 @@ function validateKits(reporter: Reporter): void {
   if (!Array.isArray(kits)) return;
   const localCli = flowCliPath;
   if (flowSchemaPath && fs.existsSync(flowSchemaPath)) console.log(fs.existsSync(localCli) ? `info: validating kit Flow Definitions with Flow CLI at ${localCli}` : `warning: Flow validator unavailable; source-tree check only verifies Flow Definition top-level shape`);
-  else console.log("warning: Flow schema not configured; source-tree check only verifies Flow Definition top-level shape. Set FLOW_CLI_ROOT to enable Flow CLI validation.");
+  else console.log("warning: Flow schema not configured; source-tree check only verifies Flow Definition top-level shape. Set FLOW_CLI_ROOT to enable Flow CLI validation. Container validation (kit.json core fields) will delegate to 'flow validate-kit' from @kontourai/flow when FLOW_CLI_ROOT is available.");
   kits.forEach((entry: any, index: number) => {
     const kitText = typeof entry === "string" ? entry : ["path", "directory", "dir", "id", "name"].map((key) => entry?.[key]).find((value) => typeof value === "string" && value);
     if (!kitText) { reporter.fail(`${rel(kitsCatalogPath)}: kits[${index}] missing path, directory, dir, id, or name`); return; }
