@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.0.0](https://github.com/kontourai/flow-agents/compare/v0.4.0...v1.0.0) (2026-06-12)
+
+
+### Features
+
+* agentless Flow Kit gate evaluation proof (issue [#52](https://github.com/kontourai/flow-agents/issues/52) item 3) ([f7857ec](https://github.com/kontourai/flow-agents/commit/f7857ec8ba69d614b0c3c70548d724f7a97c164a))
+* agentless Flow Kit gate evaluation proof (issue [#52](https://github.com/kontourai/flow-agents/issues/52) item 3) ([86c881f](https://github.com/kontourai/flow-agents/commit/86c881f579a08ab75787cd32e401f83b77952c39))
+* config-protection blocks git hook-skip flags ([#41](https://github.com/kontourai/flow-agents/issues/41)) ([6d9e981](https://github.com/kontourai/flow-agents/commit/6d9e9810b3d4e60fe172ade340e61dbe4053d0c9))
+* K-level conformance, degradation invariant, and consumer-target derivation ([#52](https://github.com/kontourai/flow-agents/issues/52) items 1+2) ([d5c332a](https://github.com/kontourai/flow-agents/commit/d5c332a3f4400eb29e9f8fd4e845ec34cf30ae0b))
+* K-level conformance, degradation invariant, and consumer-target derivation (issue [#52](https://github.com/kontourai/flow-agents/issues/52) items 1+2) ([6ac62eb](https://github.com/kontourai/flow-agents/commit/6ac62eb4cec195baca3d039b398f29e45e5d62de))
+* **knowledge-kit:** obsidian layout — insights at node root, sources nested; dimension frontmatter ([5d6489b](https://github.com/kontourai/flow-agents/commit/5d6489b6dc30eacc3a4d0c51487c1a7d3a004f00))
+* **knowledge-kit:** Obsidian store adapter — file-is-the-record spike ([#43](https://github.com/kontourai/flow-agents/issues/43)) ([83d9ff4](https://github.com/kontourai/flow-agents/commit/83d9ff43c2e1d59ac8d3235ae7250fc43be47725))
+* **knowledge-kit:** Obsidian store adapter spike — file-is-the-record RATIFIED ([#43](https://github.com/kontourai/flow-agents/issues/43)) ([467c8dc](https://github.com/kontourai/flow-agents/commit/467c8dc60180a5f6bf15b30a4f0e29e486803fb8))
+* **knowledge-kit:** person entity cards with backlinks + gated resolution ([#48](https://github.com/kontourai/flow-agents/issues/48)) ([9456cef](https://github.com/kontourai/flow-agents/commit/9456cef3b55c639bd50a9aeaea675bef425ea0be))
+* **knowledge-kit:** person entity cards with backlinks + gated resolution ([#48](https://github.com/kontourai/flow-agents/issues/48)) ([ac5ccb0](https://github.com/kontourai/flow-agents/commit/ac5ccb08e40bb6adadd35ff165a617be29e8d23a))
+
+
+### Fixes
+
+* **entity-extractor:** parse trailing-period last-entry correctly ([76abd87](https://github.com/kontourai/flow-agents/commit/76abd87ce2e6bfa3650c3d20de7309d498a446f8))
+* **entity-extractor:** parse trailing-period last-entry correctly ([#48](https://github.com/kontourai/flow-agents/issues/48)) ([ac64fc1](https://github.com/kontourai/flow-agents/commit/ac64fc1cb3151af9032948ac463337da3eeaf907))
+
+
+### Documentation
+
+* elevate Flow Kits as the authorable-ecosystem pillar ([#45](https://github.com/kontourai/flow-agents/issues/45)) ([fa81820](https://github.com/kontourai/flow-agents/commit/fa8182089c4e3c404e3020c6d516be93353a897b))
+* elevate Flow Kits as the authorable-ecosystem pillar ([#45](https://github.com/kontourai/flow-agents/issues/45)) ([7ffa44e](https://github.com/kontourai/flow-agents/commit/7ffa44ea8be799e709b41d4ac4220948e3819fb8))
+* kit container/extension layering — container contract is Flow-owned ([#50](https://github.com/kontourai/flow-agents/issues/50)) ([33d6ec0](https://github.com/kontourai/flow-agents/commit/33d6ec0bf0fefd9095c19dc76b995ee7dd8079fb))
+* kit container/extension layering — container contract is Flow-owned ([#50](https://github.com/kontourai/flow-agents/issues/50)) ([fd87366](https://github.com/kontourai/flow-agents/commit/fd873663d64e205e1a8c2b898b913a56d410591f))
+
+
+### Maintenance
+
+* cut v1.0.0 ([5f88ac5](https://github.com/kontourai/flow-agents/commit/5f88ac51598fe3f13b16360572ff851b822013a2))
+
 ## [0.4.0](https://github.com/kontourai/flow-agents/compare/v0.3.0...v0.4.0) (2026-06-12)
 
 
