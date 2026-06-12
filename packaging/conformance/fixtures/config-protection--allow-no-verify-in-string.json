@@ -1,0 +1,20 @@
+{
+  "description": "config-protection allows a command whose string content merely mentions the bypass flag",
+  "policy_class": "config-protection",
+  "canonical_event": "preToolUse",
+  "conformance_level": "L2",
+  "hook_id": "config-protection",
+  "hook_script": "config-protection.js",
+  "payload": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "gh issue create --body \"git commit --no-verify is blocked by the hook\""
+    }
+  },
+  "expected": {
+    "exit_code": 0,
+    "stderr_is_empty": true,
+    "stdout_echoes_input": true
+  }
+}

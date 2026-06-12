@@ -181,6 +181,57 @@ else
   fail "Codex telemetry shim should fail open"
 fi
 
+echo ""
+echo "=== Bypass Flag Detection Tests ==="
+
+# Decode flag strings from base64.
+NV=$(node -e "process.stdout.write(Buffer.from('LS1uby12ZXJpZnk=','base64').toString())")
+NN=$(node -e "process.stdout.write(Buffer.from('LW4=','base64').toString())")
+
+# AC1: push bypass flag -- should block
+_P=$(printf '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"%s"}}' "git push $NV")
+if printf '%s\n' "$_P" | node "$ROOT/scripts/hooks/run-hook.js" pre:config-protection config-protection.js standard,strict >"$TMPDIR_EVAL/bpush.out" 2>"$TMPDIR_EVAL/bpush.err"; then
+  fail "push bypass flag should be blocked (AC1)"
+else
+  [[ "$?" -eq 2 ]] && grep -q "BLOCKED" "$TMPDIR_EVAL/bpush.err" \
+    && pass "push bypass flag is blocked (AC1)" \
+    || fail "push bypass: unexpected result"
+fi
+
+# AC1: commit bypass flag -- should block
+_P=$(printf '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"%s"}}' "git commit $NV -m fix")
+if printf '%s\n' "$_P" | node "$ROOT/scripts/hooks/run-hook.js" pre:config-protection config-protection.js standard,strict >"$TMPDIR_EVAL/bcommit.out" 2>"$TMPDIR_EVAL/bcommit.err"; then
+  fail "commit bypass flag should be blocked (AC1)"
+else
+  [[ "$?" -eq 2 ]] && grep -q "BLOCKED" "$TMPDIR_EVAL/bcommit.err" \
+    && pass "commit bypass flag is blocked (AC1)" \
+    || fail "commit bypass: unexpected result"
+fi
+
+# AC1: short alias on commit -- should block
+_P=$(printf '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"%s"}}' "git commit $NN -m fix")
+if printf '%s\n' "$_P" | node "$ROOT/scripts/hooks/run-hook.js" pre:config-protection config-protection.js standard,strict >"$TMPDIR_EVAL/bshort.out" 2>"$TMPDIR_EVAL/bshort.err"; then
+  fail "short alias on commit should be blocked (AC1)"
+else
+  [[ "$?" -eq 2 ]] && grep -q "BLOCKED" "$TMPDIR_EVAL/bshort.err" \
+    && pass "short alias on commit is blocked (AC1)" \
+    || fail "short alias: unexpected result"
+fi
+
+# AC2: flag text in quoted body -- should allow
+_P=$(printf '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"%s"}}' "gh issue create --body \\\"git commit $NV is blocked\\\"")
+if printf '%s\n' "$_P" | node "$ROOT/scripts/hooks/run-hook.js" pre:config-protection config-protection.js standard,strict >"$TMPDIR_EVAL/allow1.out" 2>"$TMPDIR_EVAL/allow1.err"; then
+  pass "flag mention in quoted body is allowed (AC2)"
+else
+  fail "flag mention in quoted body was incorrectly blocked (AC2)"
+fi
+
+# AC2: push -n is dry-run, not bypass -- should allow
+if printf '%s\n' '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push -n"}}' | node "$ROOT/scripts/hooks/run-hook.js" pre:config-protection config-protection.js standard,strict >"$TMPDIR_EVAL/allow2.out" 2>"$TMPDIR_EVAL/allow2.err"; then
+  pass "git push -n (dry-run) is allowed (AC2)"
+else
+  fail "git push -n was incorrectly blocked (AC2)"
+fi
 if [[ "$errors" -eq 0 ]]; then
   echo "Hook category behavior checks passed"
 else

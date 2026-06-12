@@ -1,0 +1,23 @@
+{
+  "description": "config-protection blocks a Bash command carrying the bypass flag in actual flag position",
+  "policy_class": "config-protection",
+  "canonical_event": "preToolUse",
+  "conformance_level": "L2",
+  "hook_id": "config-protection",
+  "hook_script": "config-protection.js",
+  "payload": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Bash",
+    "tool_input": {
+      "command": "git commit --no-verify -m fix"
+    }
+  },
+  "expected": {
+    "exit_code": 2,
+    "stderr_contains": [
+      "BLOCKED",
+      "verification hooks"
+    ],
+    "stdout_is_empty": true
+  }
+}
