@@ -28,3 +28,4 @@ evals/results/reports/
 # OS/editor noise
 .DS_Store
 *.log
+.kontour/
