@@ -49,8 +49,15 @@ export class ObsidianKnowledgeStore {
   /**
    * @param {{ storeRoot: string }} options
    */
-  constructor({ storeRoot }) {
+  constructor({ storeRoot, sourcesDir = "sources", dimensions = [] }) {
     if (!storeRoot) throw new Error("storeRoot is required");
+    this._sourcesDir = sourcesDir;
+    // Named dimensions for category segments AFTER the first (domain) segment,
+    // written into frontmatter as derived fields so vault views can filter on
+    // them (e.g. dimensions: ["territory","customer","initiative"] turns
+    // category sales.east.acme.renewal into territory: east, customer: acme,
+    // initiative: renewal). Domain kits supply the names; core stays neutral.
+    this._dimensions = dimensions;
     this._root = path.resolve(storeRoot);
     // Link graph (required by suite §13): { schema_version, forward, reverse }
     this._graphPath = path.join(this._root, "graph-index.json");
@@ -74,9 +81,18 @@ export class ObsidianKnowledgeStore {
   /**
    * Compute a unique relative path for a record, respecting collision suffix.
    * Category dots → directory separators: "eng.api" → "eng/api".
+   *
+   * Layout rule: insight records (snapshot, concept) live at the category
+   * node root so a human browsing the tree sees the living overviews first;
+   * source-level records (raw, compiled) nest one level down in a sources
+   * subfolder (name configurable via constructor `sourcesDir`, default
+   * "sources" — a domain kit may choose e.g. "meetings").
    */
-  _computeRelPath(category, title, id, pathIndex) {
-    const catDir = category.replace(/\./g, "/");
+  _computeRelPath(category, title, id, pathIndex, type) {
+    let catDir = category.replace(/\./g, "/");
+    if (type === "raw" || type === "compiled") {
+      catDir = `${catDir}/${this._sourcesDir}`;
+    }
     const baseSlug = this._slugify(title);
     let slug = baseSlug;
     let suffix = 2;
@@ -152,7 +168,7 @@ export class ObsidianKnowledgeStore {
       targetRelPath = existingEntry.path;
     } else if (existingEntry) {
       // Existing active record — check if path needs to change (title changed)
-      const newRelPath = this._computeRelPath(record.category, record.title, record.id, pathIndex);
+      const newRelPath = this._computeRelPath(record.category, record.title, record.id, pathIndex, record.type);
       if (newRelPath !== existingEntry.path) {
         // Move: delete old file, register new path
         const oldAbs = path.join(this._root, existingEntry.path);
@@ -166,7 +182,7 @@ export class ObsidianKnowledgeStore {
       }
     } else {
       // New record
-      const newRelPath = this._computeRelPath(record.category, record.title, record.id, pathIndex);
+      const newRelPath = this._computeRelPath(record.category, record.title, record.id, pathIndex, record.type);
       pathIndex.by_id[record.id] = { path: newRelPath, archived: false };
       pathIndex.by_path[newRelPath] = record.id;
       targetRelPath = newRelPath;
@@ -174,8 +190,16 @@ export class ObsidianKnowledgeStore {
 
     // Render: all contract fields in frontmatter; human body below
     const { body, ...frontmatterFields } = record;
+    // Derived dimension fields (territory: east, customer: acme, ...) from
+    // category segments after the domain segment — presentation-only, never
+    // read back as contract fields (id/category remain canonical).
+    const derived = {};
+    if (this._dimensions.length && record.category) {
+      const segs = record.category.split(".").slice(1);
+      this._dimensions.forEach((name, i) => { if (segs[i]) derived[name] = segs[i]; });
+    }
     // Store body in frontmatter so round-trip is lossless
-    const frontmatter = { ...frontmatterFields, body };
+    const frontmatter = { ...frontmatterFields, ...derived, body };
     const obsidianBody = this._renderObsidianBody(record, pathIndex);
     const text = `---\n${serializeYaml(frontmatter)}\n---\n\n${obsidianBody}`;
 
@@ -241,9 +265,14 @@ export class ObsidianKnowledgeStore {
     const wikiLinks = (linkList) =>
       linkList
         .map((l) => {
+          // Skip unresolvable targets (bad/missing id) rather than emitting
+          // a literal [[undefined]] into the note.
+          if (!l.target_id) return null;
           const slug = this._idToFilename(l.target_id, pathIndex);
+          if (!slug) return null;
           return l.label ? `[[${slug}|${l.label}]]` : `[[${slug}]]`;
         })
+        .filter(Boolean)
         .join(", ");
 
     const sections = [];
