@@ -49,8 +49,15 @@ export class ObsidianKnowledgeStore {
   /**
    * @param {{ storeRoot: string }} options
    */
-  constructor({ storeRoot }) {
+  constructor({ storeRoot, sourcesDir = "sources", dimensions = [] }) {
     if (!storeRoot) throw new Error("storeRoot is required");
+    this._sourcesDir = sourcesDir;
+    // Named dimensions for category segments AFTER the first (domain) segment,
+    // written into frontmatter as derived fields so vault views can filter on
+    // them (e.g. dimensions: ["territory","customer","initiative"] turns
+    // category sales.east.acme.renewal into territory: east, customer: acme,
+    // initiative: renewal). Domain kits supply the names; core stays neutral.
+    this._dimensions = dimensions;
     this._root = path.resolve(storeRoot);
     // Link graph (required by suite §13): { schema_version, forward, reverse }
     this._graphPath = path.join(this._root, "graph-index.json");
@@ -74,9 +81,25 @@ export class ObsidianKnowledgeStore {
   /**
    * Compute a unique relative path for a record, respecting collision suffix.
    * Category dots → directory separators: "eng.api" → "eng/api".
+   *
+   * Layout rule: insight records (snapshot, concept) live at the category
+   * node root so a human browsing the tree sees the living overviews first;
+   * source-level records (raw, compiled) nest one level down in a sources
+   * subfolder (name configurable via constructor `sourcesDir`, default
+   * "sources" — a domain kit may choose e.g. "meetings").
    */
-  _computeRelPath(category, title, id, pathIndex) {
-    const catDir = category.replace(/\./g, "/");
+  _computeRelPath(category, title, id, pathIndex, type) {
+    let catDir;
+    if (type === "person") {
+      // Person records always go to the top-level people/ folder regardless of
+      // category — they are cross-cutting entities, not domain-specific notes.
+      catDir = "people";
+    } else {
+      catDir = category.replace(/\./g, "/");
+      if (type === "raw" || type === "compiled") {
+        catDir = `${catDir}/${this._sourcesDir}`;
+      }
+    }
     const baseSlug = this._slugify(title);
     let slug = baseSlug;
     let suffix = 2;
@@ -152,7 +175,7 @@ export class ObsidianKnowledgeStore {
       targetRelPath = existingEntry.path;
     } else if (existingEntry) {
       // Existing active record — check if path needs to change (title changed)
-      const newRelPath = this._computeRelPath(record.category, record.title, record.id, pathIndex);
+      const newRelPath = this._computeRelPath(record.category, record.title, record.id, pathIndex, record.type);
       if (newRelPath !== existingEntry.path) {
         // Move: delete old file, register new path
         const oldAbs = path.join(this._root, existingEntry.path);
@@ -166,7 +189,7 @@ export class ObsidianKnowledgeStore {
       }
     } else {
       // New record
-      const newRelPath = this._computeRelPath(record.category, record.title, record.id, pathIndex);
+      const newRelPath = this._computeRelPath(record.category, record.title, record.id, pathIndex, record.type);
       pathIndex.by_id[record.id] = { path: newRelPath, archived: false };
       pathIndex.by_path[newRelPath] = record.id;
       targetRelPath = newRelPath;
@@ -174,8 +197,16 @@ export class ObsidianKnowledgeStore {
 
     // Render: all contract fields in frontmatter; human body below
     const { body, ...frontmatterFields } = record;
+    // Derived dimension fields (territory: east, customer: acme, ...) from
+    // category segments after the domain segment — presentation-only, never
+    // read back as contract fields (id/category remain canonical).
+    const derived = {};
+    if (this._dimensions.length && record.category) {
+      const segs = record.category.split(".").slice(1);
+      this._dimensions.forEach((name, i) => { if (segs[i]) derived[name] = segs[i]; });
+    }
     // Store body in frontmatter so round-trip is lossless
-    const frontmatter = { ...frontmatterFields, body };
+    const frontmatter = { ...frontmatterFields, ...derived, body };
     const obsidianBody = this._renderObsidianBody(record, pathIndex);
     const text = `---\n${serializeYaml(frontmatter)}\n---\n\n${obsidianBody}`;
 
@@ -241,15 +272,24 @@ export class ObsidianKnowledgeStore {
     const wikiLinks = (linkList) =>
       linkList
         .map((l) => {
+          // Skip unresolvable targets (bad/missing id) rather than emitting
+          // a literal [[undefined]] into the note.
+          if (!l.target_id) return null;
           const slug = this._idToFilename(l.target_id, pathIndex);
+          if (!slug) return null;
           return l.label ? `[[${slug}|${l.label}]]` : `[[${slug}]]`;
         })
+        .filter(Boolean)
         .join(", ");
 
     const sections = [];
 
     if (record.type === "raw") {
       sections.push(`> [!note]- Raw Notes\n> ${record.body.replace(/\n/g, "\n> ")}`);
+    } else if (record.type === "person") {
+      // Person cards: lead with the body (role/org prose), then People links,
+      // then Appears In backlinks to sources, then Related.
+      sections.push(record.body);
     } else {
       // compiled / concept / snapshot: insight as readable body
       sections.push(record.body);
@@ -257,6 +297,18 @@ export class ObsidianKnowledgeStore {
 
     if (sourceLinks.length > 0) {
       sections.push(`## Sources\n\n${wikiLinks(sourceLinks)}`);
+    }
+
+    // Person cards: render appears-in links (backlinks to raw+compiled records)
+    const appearsInLinks = links.filter((l) => l.kind === "appears-in");
+    if (record.type === "person" && appearsInLinks.length > 0) {
+      sections.push(`## Appears In\n\n${wikiLinks(appearsInLinks)}`);
+    }
+
+    // Compiled/person records: render people links (links to person cards)
+    const peopleLinks = links.filter((l) => l.kind === "person");
+    if (peopleLinks.length > 0) {
+      sections.push(`## People\n\n${wikiLinks(peopleLinks)}`);
     }
 
     if (relatedLinks.length > 0) {
@@ -296,7 +348,7 @@ export class ObsidianKnowledgeStore {
   async create(input) {
     if (!input.type) throw missingEvidenceError("create: missing required field: type");
     if (!VALID_TYPES.has(input.type))
-      throw missingEvidenceError(`create: type must be raw, compiled, concept, or snapshot; got: ${input.type}`);
+      throw missingEvidenceError(`create: type must be one of raw, compiled, concept, snapshot, person; got: ${input.type}`);
     if (!input.title || !input.title.trim())
       throw missingEvidenceError("create: missing required field: title");
     if (!input.body && input.body !== "")

@@ -35,6 +35,12 @@
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { KnowledgeTelemetry } from "./telemetry.js";
+import {
+  defaultEntityExtractor,
+  normalizeName,
+  isExactMatch,
+  isPossibleDuplicate,
+} from "./entity-extractor.js";
 
 // ---------------------------------------------------------------------------
 // Error helpers
@@ -1383,11 +1389,324 @@ export class KnowledgeFlowRunner {
     };
   }
 
+
+  // -------------------------------------------------------------------------
+  // knowledge.compile — entity extraction step (R2)
+  //
+  // Called after compile() to extract person mentions from the compiled record,
+  // resolve/create person cards, and write bidirectional links:
+  //   - Person card → raw + compiled (kind: appears-in)
+  //   - Compiled record → person cards (kind: person)
+  //
+  // EntityExtractor interface (same pattern as SimilarityDetector — R3):
+  //   async (record: Record) => PersonMention[]
+  //   PersonMention: { name: string, role?: string, org?: string }
+  // -------------------------------------------------------------------------
+
+  /**
+   * Extract person entities from a compiled record and its source raws, then
+   * create or update person cards with bidirectional links.
+   *
+   * @param {string} compiledId   - ID of the compiled record to process
+   * @param {object} [options]
+   *   - entityExtractor: fn   — pluggable extractor (default: defaultEntityExtractor)
+   *   - agent: string         — override agent name
+   * @returns {Promise<{
+   *   compiledId: string,
+   *   personCards: Array<{ cardId, name, created, duplicate }>,
+   *   linkCount: number
+   * }>}
+   */
+  async extractEntities(compiledId, options = {}) {
+    const agent = options.agent || this._agent;
+    const extractor = options.entityExtractor || defaultEntityExtractor;
+
+    const compiled = await this._store.get(compiledId);
+    if (!compiled) throw new Error(`extractEntities: compiled record not found: ${compiledId}`);
+
+    // Gather mentions from the compiled record
+    const mentions = await extractor(compiled);
+
+    // Also gather mentions from all source raw records
+    const sourceLinks = (compiled.links || []).filter((l) => l.kind === "source");
+    const seenNames = new Set(mentions.map((m) => normalizeName(m.name)));
+    for (const link of sourceLinks) {
+      const raw = await this._store.get(link.target_id);
+      if (!raw) continue;
+      const rawMentions = await extractor(raw);
+      for (const m of rawMentions) {
+        const norm = normalizeName(m.name);
+        if (!seenNames.has(norm)) {
+          seenNames.add(norm);
+          mentions.push(m);
+        }
+      }
+    }
+
+    const personCardResults = [];
+    const category = compiled.category || "people";
+
+    for (const mention of mentions) {
+      // Resolve or create the person card
+      const result = await resolvePersonCard(this._store, mention, category, agent);
+      const { cardId, created, duplicate } = result;
+
+      // Build link sets for both sides
+      const cardRecord = await this._store.get(cardId);
+      const compiledRecord = await this._store.get(compiledId);
+
+      // Person card → compiled (appears-in) — skip if already linked
+      const cardLinks = cardRecord.links || [];
+      const hasCompiledLink = cardLinks.some(
+        (l) => l.target_id === compiledId && l.kind === "appears-in"
+      );
+      if (!hasCompiledLink) {
+        await this._store.link(
+          cardId,
+          [{ target_id: compiledId, kind: "appears-in" }],
+          { agent, note: `Person appears in compiled record` }
+        );
+      }
+
+      // Person card → each source raw (appears-in) — skip if already linked
+      for (const link of sourceLinks) {
+        const updatedCard = await this._store.get(cardId);
+        const hasRawLink = (updatedCard.links || []).some(
+          (l) => l.target_id === link.target_id && l.kind === "appears-in"
+        );
+        if (!hasRawLink) {
+          await this._store.link(
+            cardId,
+            [{ target_id: link.target_id, kind: "appears-in" }],
+            { agent, note: `Person appears in raw source` }
+          );
+        }
+      }
+
+      // Compiled record → person card (person link) — skip if already linked
+      const compLinks = compiledRecord.links || [];
+      const hasPersonLink = compLinks.some(
+        (l) => l.target_id === cardId && l.kind === "person"
+      );
+      if (!hasPersonLink) {
+        await this._store.link(
+          compiledId,
+          [{ target_id: cardId, kind: "person" }],
+          { agent, note: `Compiled record references person card` }
+        );
+      }
+
+      personCardResults.push({ cardId, name: mention.name, created, duplicate });
+    }
+
+    return {
+      compiledId,
+      personCards: personCardResults,
+      linkCount: personCardResults.length,
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // knowledge.merge-person flow (R3 / AC3)
+  //   Merge two person cards via the existing propose→apply/reject gate.
+  //   On apply: union aliases + links → supersede the duplicate (archive).
+  //   On reject: both cards remain byte-identical.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Merge a duplicate person card into a primary card via gated propose/apply.
+   *
+   * On apply:
+   *   1. Primary card body updated with unioned role text.
+   *   2. Aliases from the duplicate appended to primary's tags as "alias:Name".
+   *   3. All appears-in links from the duplicate are added to the primary.
+   *   4. The duplicate is superseded (archived) via store.supersede().
+   *
+   * On reject:
+   *   Both cards remain byte-identical (AC3).
+   *
+   * @param {string} primaryId    - ID of the primary person card to keep
+   * @param {string} duplicateId  - ID of the card being merged in
+   * @param {object} [options]
+   *   - decision: "apply"|"reject"  (default "apply")
+   *   - rationale: string           (required for apply)
+   *   - rejectReason: string        (required for reject)
+   *   - agent: string
+   * @returns {Promise<{ primaryId, duplicateId, decision }>}
+   */
+  async mergePerson(primaryId, duplicateId, options = {}) {
+    const agent = options.agent || this._agent;
+    const decision = options.decision || "apply";
+
+    const primary = await this._store.get(primaryId);
+    if (!primary) throw new Error(`mergePerson: primary card not found: ${primaryId}`);
+    if (primary.type !== "person") throw new Error(`mergePerson: primaryId must be a person record`);
+
+    const duplicate = await this._store.get(duplicateId);
+    if (!duplicate) throw new Error(`mergePerson: duplicate card not found: ${duplicateId}`);
+    if (duplicate.type !== "person") throw new Error(`mergePerson: duplicateId must be a person record`);
+
+    // propose: duplicate proposes a change to primary
+    await this._store.propose(primaryId, duplicateId, {
+      agent,
+      proposal: `Merge duplicate person card "${duplicate.title}" into "${primary.title}"`,
+    });
+
+    if (decision === "apply") {
+      if (!options.rationale || !options.rationale.trim()) {
+        throw new Error("mergePerson: options.rationale is required when decision=apply");
+      }
+
+      // Compute merged body: union role text
+      const mergedBodyLines = [];
+      if (primary.body && primary.body.trim()) mergedBodyLines.push(primary.body.trim());
+      if (duplicate.body && duplicate.body.trim() && duplicate.body.trim() !== primary.body.trim()) {
+        mergedBodyLines.push(duplicate.body.trim());
+      }
+      const mergedBody = mergedBodyLines.join("\n") || primary.title;
+
+      // Apply: update primary body
+      await this._store.apply(primaryId, duplicateId, {
+        agent,
+        new_body: mergedBody,
+        rationale: options.rationale,
+      });
+
+      // Add duplicate title as alias on primary
+      const primaryAfterApply = await this._store.get(primaryId);
+      const existingTags = primaryAfterApply.tags || [];
+      const aliasTag = `alias:${duplicate.title}`;
+      if (!existingTags.includes(aliasTag)) {
+        await this._store.update(primaryId, { tags: [...existingTags, aliasTag] }, {
+          agent,
+          note: `Added alias from merged duplicate: ${duplicate.title}`,
+        });
+      }
+
+      // Union appears-in links from duplicate to primary
+      const dupLinks = (duplicate.links || []).filter((l) => l.kind === "appears-in");
+      const primaryLinks = await this._store.getLinks(primaryId);
+      for (const link of dupLinks) {
+        const hasLink = primaryLinks.forward.some(
+          (l) => l.target_id === link.target_id && l.kind === "appears-in"
+        );
+        if (!hasLink) {
+          await this._store.link(primaryId, [{ target_id: link.target_id, kind: "appears-in" }], {
+            agent,
+            note: `Unioned from merged duplicate ${duplicateId}`,
+          });
+        }
+      }
+
+      // Supersede the duplicate (archives it — supersede-not-delete invariant)
+      await this._store.supersede(primaryId, [duplicateId], {
+        agent,
+        rationale: options.rationale,
+        note: `Merged duplicate person card into ${primaryId}`,
+      });
+    } else if (decision === "reject") {
+      if (!options.rejectReason || !options.rejectReason.trim()) {
+        throw new Error("mergePerson: options.rejectReason is required when decision=reject");
+      }
+      // Reject: both cards remain byte-identical
+      await this._store.reject(primaryId, duplicateId, {
+        agent,
+        reason: options.rejectReason,
+      });
+    } else {
+      throw new Error(`mergePerson: decision must be "apply" or "reject"; got: ${decision}`);
+    }
+
+    return { primaryId, duplicateId, decision };
+  }
+
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Resolve or create a person card for a given mention.
+ *
+ * Resolution rules (R3):
+ *  1. Exact normalised-name match (or alias match) → update existing card.
+ *  2. Possible duplicate (same surname + initial) → create new card + related
+ *     link of kind "related" with a possible-duplicate tag.
+ *  3. No match → create new card.
+ *
+ * @param {object} store       - KnowledgeStoreAdapter
+ * @param {object} mention     - { name, role? }
+ * @param {string} category    - category for new card
+ * @param {string} agent       - agent name
+ * @returns {Promise<{ cardId: string, created: boolean, duplicate: boolean }>}
+ */
+async function resolvePersonCard(store, mention, category, agent) {
+  const existing = await store.listByType("person");
+
+  // 1. Exact match (name or alias)
+  for (const card of existing) {
+    if (isExactMatch(card.title, mention.name)) {
+      return { cardId: card.id, created: false, duplicate: false };
+    }
+    // Check aliases tag: "alias:Some Name"
+    const aliases = (card.tags || [])
+      .filter((t) => t.startsWith("alias:"))
+      .map((t) => t.slice("alias:".length));
+    for (const alias of aliases) {
+      if (isExactMatch(alias, mention.name)) {
+        return { cardId: card.id, created: false, duplicate: false };
+      }
+    }
+  }
+
+  // 2. Possible duplicate check
+  let possibleDupId = null;
+  for (const card of existing) {
+    if (isPossibleDuplicate(mention.name, card.title)) {
+      possibleDupId = card.id;
+      break;
+    }
+    const aliases = (card.tags || [])
+      .filter((t) => t.startsWith("alias:"))
+      .map((t) => t.slice("alias:".length));
+    for (const alias of aliases) {
+      if (isPossibleDuplicate(mention.name, alias)) {
+        possibleDupId = card.id;
+        break;
+      }
+    }
+    if (possibleDupId) break;
+  }
+
+  // Build body: role/org as structured prose
+  const bodyLines = [];
+  if (mention.role) {
+    bodyLines.push(`**Role/Org:** ${mention.role}`);
+  }
+  const body = bodyLines.length > 0 ? bodyLines.join("\n") : mention.name;
+
+  // Create new person card
+  const cardId = await store.create({
+    type: "person",
+    title: mention.name,
+    body,
+    category,
+    tags: [],
+    provenance: { agent, note: `Auto-created from entity extraction` },
+  });
+
+  // If possible duplicate: add related link from new card to existing card
+  if (possibleDupId) {
+    await store.link(
+      cardId,
+      [{ target_id: possibleDupId, kind: "related", label: "possible-duplicate" }],
+      { agent, note: "Possible duplicate — same surname+initial; verify manually" }
+    );
+  }
+
+  return { cardId, created: true, duplicate: possibleDupId !== null };
+}
 
 function mostCommonCategory(records) {
   const counts = {};
@@ -1467,3 +1786,33 @@ export async function retire(
 }
 
 export default KnowledgeFlowRunner;
+
+/**
+ * Module-level extractEntities: creates an ephemeral runner using the provided store.
+ *
+ * @param {string} compiledId
+ * @param {object} options  (merged into extractEntities options + runner options)
+ */
+export async function extractEntities(
+  compiledId,
+  { store, workspace, agent, sessionId, ...extractOpts } = {}
+) {
+  const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
+  return runner.extractEntities(compiledId, extractOpts);
+}
+
+/**
+ * Module-level mergePerson: creates an ephemeral runner using the provided store.
+ *
+ * @param {string} primaryId
+ * @param {string} duplicateId
+ * @param {object} options
+ */
+export async function mergePerson(
+  primaryId,
+  duplicateId,
+  { store, workspace, agent, sessionId, ...mergeOpts } = {}
+) {
+  const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
+  return runner.mergePerson(primaryId, duplicateId, mergeOpts);
+}
