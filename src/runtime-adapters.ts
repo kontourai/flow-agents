@@ -86,7 +86,7 @@ export function readKitInventory(sourceRoot: string, dest: string): KitInventory
   const errors: string[] = [];
   const assets: KitAsset[] = [];
   const catalogPath = path.join(sourceRoot, "kits", "catalog.json");
-  if (!fs.existsSync(catalogPath)) errors.push(`${catalogPath}: missing Kit Catalog`);
+  if (!fs.existsSync(catalogPath)) warnings.push(`${catalogPath}: built-in Kit Catalog not found; skipping built-in kits (this is normal when running outside a flow-agents checkout)`);
   else {
     const catalog = readJson(catalogPath) as Record<string, unknown>;
     const kits = catalog.kits;
