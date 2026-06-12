@@ -82,7 +82,10 @@ function channelConfigValue(config: Config, channel: string, key: string, fallba
 
 function telemetryDataDir(dest: string): string {
   const configured = process.env.TELEMETRY_DATA_DIR;
-  return configured ? path.resolve(dest, configured) : path.resolve(dest, "..", ".telemetry");
+  // Must mirror scripts/telemetry/lib/config.sh: the sink lives INSIDE the
+  // workspace at <dest>/.telemetry. The previous "../.telemetry" duplicated
+  // the parent-escape bug fixed in config.sh on 2026-06-11.
+  return configured ? path.resolve(dest, configured) : path.resolve(dest, ".telemetry");
 }
 
 function deriveConsoleEndpoint(consoleUrl: string, explicitEndpoint: string): string {
