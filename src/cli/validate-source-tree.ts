@@ -27,4 +27,10 @@ export function main(argv = process.argv.slice(2)): number {
   return 0;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) process.exit(main());
+// Use process.exitCode (not process.exit) to allow stdout to be flushed before exit.
+// Resolve real paths to handle symlinks (e.g. /tmp -> /private/tmp on macOS).
+import * as _fsVST from "node:fs";
+import { fileURLToPath as _ftpVST } from "node:url";
+const _selfVST = (() => { try { return _fsVST.realpathSync(_ftpVST(import.meta.url)); } catch { return _ftpVST(import.meta.url); } })();
+const _argv1VST = (() => { try { return _fsVST.realpathSync(process.argv[1]); } catch { return process.argv[1]; } })();
+if (_selfVST === _argv1VST) { process.exitCode = main(); }
