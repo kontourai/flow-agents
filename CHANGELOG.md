@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1](https://github.com/kontourai/flow-agents/compare/v1.0.0...v1.0.1) (2026-06-12)
+
+
+### Fixes
+
+* resolve three kit-distribution blockers ([#55](https://github.com/kontourai/flow-agents/issues/55) [#56](https://github.com/kontourai/flow-agents/issues/56) [#57](https://github.com/kontourai/flow-agents/issues/57)) ([3350cb1](https://github.com/kontourai/flow-agents/commit/3350cb15f44bff92d8d9c57f447761d0e1a1b20c))
+* resolve three kit-distribution blockers ([#55](https://github.com/kontourai/flow-agents/issues/55), [#56](https://github.com/kontourai/flow-agents/issues/56), [#57](https://github.com/kontourai/flow-agents/issues/57)) ([13bf732](https://github.com/kontourai/flow-agents/commit/13bf732ff365efa84423e9ea46042e501d202db8))
+
 ## [1.0.0](https://github.com/kontourai/flow-agents/compare/v0.4.0...v1.0.0) (2026-06-12)
 
 
