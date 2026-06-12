@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.4.0](https://github.com/kontourai/flow-agents/compare/v0.3.0...v0.4.0) (2026-06-12)
+
+
+### Features
+
+* **knowledge-kit:** gated decision retirement + working-set exclusion (S7, [#37](https://github.com/kontourai/flow-agents/issues/37)) ([40ae3fb](https://github.com/kontourai/flow-agents/commit/40ae3fb483205da6cf349265a63245bd1bb4006b))
+* **knowledge-kit:** vector similarity detector — first drop-in (I10 unparked) ([a63c6d4](https://github.com/kontourai/flow-agents/commit/a63c6d4eb122d86cf14f018dc23651043be6449a))
+
+
+### Fixes
+
+* **ci:** author release PRs via kontour-release-bot app token ([#38](https://github.com/kontourai/flow-agents/issues/38)) ([6a2c937](https://github.com/kontourai/flow-agents/commit/6a2c9376df0c07458e54066108ec17e3c9548841))
+
+
+### Documentation
+
+* repo commit/release conventions in AGENTS.md, pinned by static check ([aecd896](https://github.com/kontourai/flow-agents/commit/aecd896fb2c4a86ebe51749c2257e7b41b9cbc21))
+
 ## [0.3.0](https://github.com/kontourai/flow-agents/compare/v0.2.0...v0.3.0) (2026-06-12)
 
 
