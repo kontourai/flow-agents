@@ -13,6 +13,7 @@
  *   - compile(rawIds[], options)        — compile flow: select → compile → link with provenance
  *   - synthesize(conceptId | topicSelector, options) — synthesize flow:
  *       detect-cluster → propose → evidence-gate → apply-or-reject
+ *   - retire(recordId, options)          — retire flow: identify → propose → evidence-gate → apply-or-reject
  *   - defaultSimilarityDetector         — pluggable similarity interface default (R3)
  *
  * Telemetry:
@@ -112,6 +113,9 @@ export async function defaultSimilarityDetector(concept, candidates, store) {
   const similar = [];
 
   for (const candidate of candidates) {
+    // Exclude retired records from the working set (Addendum B — R3)
+    if ((candidate.status || "active") === "retired") continue;
+
     // Check 1: category overlap (prefix match in either direction)
     const catMatch =
       candidate.category === concept.category ||
@@ -1107,6 +1111,278 @@ export class KnowledgeFlowRunner {
     };
   }
 
+  // -------------------------------------------------------------------------
+  // knowledge.retire flow  (Addendum B — S7)
+  //   Steps: identify → propose-retirement → evidence-gate → apply-or-reject → done
+  //   Gate: evidence-gate — proposal carries rationale/ref; no direct mutation (AC1).
+  //         apply-gate    — apply or reject via store retire op.
+  //                         rejection leaves record status byte-identical (AC2).
+  //
+  // Machinery reuse: retire shares the same propose→evidence-gate→apply-or-reject
+  // pattern as synthesize/consolidate. The store's retire op enforces the transition
+  // table; rejection leaves the record unchanged.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Execute the retire flow: identify the target record, create a retirement
+   * proposal (never a direct mutation), gate the evidence, then apply or reject.
+   *
+   * On apply:
+   *   The store retire op updates the record status to targetStatus and appends
+   *   a mutation log entry with the full evidence. The record is excluded from
+   *   default working-set queries (listByType, listByCategory, similarity
+   *   detection) unless includeRetired is true.
+   *
+   * On reject:
+   *   The record status is byte-identical to its pre-proposal state.
+   *
+   * @param {string} recordId
+   *   ID of the record to retire.
+   * @param {object} [options]
+   *   - targetStatus: "implemented"|"retired"  — target status (required)
+   *   - rationale: string                      — why retiring (required)
+   *   - implementedByRef: string               — ref when targetStatus="implemented" (required)
+   *   - supersededByRef: string                — optional ref to superseding artifact
+   *   - decision: "apply"|"reject"             — gate decision (default "apply")
+   *   - rejectReason: string                   — reason for rejection (required when decision="reject")
+   *   - agent: string                          — override agent name
+   *   - session_id: string                     — session id
+   *   - note: string                           — provenance note
+   * @returns {Promise<{
+   *   recordId: string,
+   *   targetStatus: string,
+   *   decision: "apply"|"reject",
+   *   previousStatus: string,
+   *   proposerId: string,
+   *   telemetryEvents: object[]
+   * }>}
+   */
+  async retire(recordId, options = {}) {
+    const events = [];
+    const agent = options.agent || this._agent;
+
+    // ── Step: identify ─────────────────────────────────────────────────────
+    if (!recordId || typeof recordId !== "string") {
+      throw missingEvidenceError("retire: recordId must be a non-empty string");
+    }
+
+    const targetStatus = options.targetStatus;
+    if (targetStatus !== "implemented" && targetStatus !== "retired") {
+      throw missingEvidenceError(
+        'retire: options.targetStatus must be "implemented" or "retired"'
+      );
+    }
+
+    if (!options.rationale || !options.rationale.trim()) {
+      throw missingEvidenceError("retire: options.rationale is required");
+    }
+
+    if (targetStatus === "implemented" && (!options.implementedByRef || !options.implementedByRef.trim())) {
+      throw missingEvidenceError(
+        'retire: options.implementedByRef is required when targetStatus is "implemented"'
+      );
+    }
+
+    const record = await this._store.get(recordId);
+    if (!record) {
+      throw missingEvidenceError(`retire: record not found: ${recordId}`);
+    }
+
+    const previousStatus = record.status || "active";
+
+    // Validate transition early (surface errors at identify-gate, not at apply-gate)
+    const VALID_TRANSITIONS = {
+      active:      new Set(["implemented", "retired"]),
+      implemented: new Set(["retired"]),
+      retired:     new Set(),
+    };
+    const allowed = VALID_TRANSITIONS[previousStatus] || new Set();
+    if (!allowed.has(targetStatus)) {
+      throw missingEvidenceError(
+        `retire: invalid transition from "${previousStatus}" to "${targetStatus}"`
+      );
+    }
+
+    // Emit identify gate entry
+    const identifyGateIn = this._telemetry.emitGate("knowledge.retire", "identify-gate", {
+      flow: "knowledge.retire",
+      gate: "identify-gate",
+      record_id: recordId,
+      record_type: record.type,
+      current_status: previousStatus,
+      target_status: targetStatus,
+    });
+    events.push(identifyGateIn);
+
+    const identifyGateOut = this._telemetry.emitGateResult("knowledge.retire", "identify-gate", {
+      record_id: recordId,
+      record_type: record.type,
+      current_status: previousStatus,
+      target_status: targetStatus,
+      transition_valid: true,
+    });
+    events.push(identifyGateOut);
+
+    // ── Step: propose-retirement ───────────────────────────────────────────
+    // We reuse the store's propose op against the record itself.
+    // The record acts as the "concept" target; a transient proposer raw record
+    // carries the retirement proposal and proposes link.
+
+    const proposeGateIn = this._telemetry.emitGate(
+      "knowledge.retire",
+      "propose-retirement-gate",
+      {
+        flow: "knowledge.retire",
+        gate: "propose-retirement-gate",
+        record_id: recordId,
+        target_status: targetStatus,
+        rationale: options.rationale,
+      }
+    );
+    events.push(proposeGateIn);
+
+    // Create a transient proposer record to hold the retirement proposal
+    const proposerBody =
+      `Retirement proposal for record ${recordId}.
+` +
+      `Target status: ${targetStatus}
+` +
+      `Rationale: ${options.rationale}
+` +
+      (options.implementedByRef ? `Implemented-by: ${options.implementedByRef}
+` : "") +
+      (options.supersededByRef ? `Superseded-by: ${options.supersededByRef}
+` : "");
+
+    const proposerId = await this._store.create({
+      type: "raw",
+      title: `Retirement proposal: ${record.title}`,
+      body: proposerBody,
+      category: record.category,
+      provenance: {
+        agent,
+        note: `Retirement proposal for ${recordId}`,
+        ...(options.session_id ? { session_id: options.session_id } : {}),
+      },
+    });
+
+    // Attach the proposal via the store's propose op (not direct mutation — AC1)
+    await this._store.propose(recordId, proposerId, {
+      agent,
+      proposal: options.rationale,
+      ...(options.note ? { note: options.note } : {}),
+    });
+
+    const proposeGateOut = this._telemetry.emitGateResult(
+      "knowledge.retire",
+      "propose-retirement-gate",
+      {
+        record_id: recordId,
+        proposer_id: proposerId,
+        target_status: targetStatus,
+        proposal_recorded: true,
+      }
+    );
+    events.push(proposeGateOut);
+
+    // ── Step: evidence-gate ────────────────────────────────────────────────
+    // Verify the proposal carries required evidence and the transition is valid.
+
+    const evidenceGateIn = this._telemetry.emitGate("knowledge.retire", "evidence-gate", {
+      flow: "knowledge.retire",
+      gate: "evidence-gate",
+      record_id: recordId,
+      proposer_id: proposerId,
+      target_status: targetStatus,
+    });
+    events.push(evidenceGateIn);
+
+    // Enforce: proposer must have a "proposes" link to the record
+    const { forward } = await this._store.getLinks(proposerId);
+    const hasProposesLink = forward.some(
+      (l) => l.target_id === recordId && l.kind === "proposes"
+    );
+    if (!hasProposesLink) {
+      throw missingEvidenceError(
+        `evidence-gate: proposer ${proposerId} must have a "proposes" link to record ${recordId}`
+      );
+    }
+
+    // Enforce: target record still exists
+    const targetRecord = await this._store.get(recordId);
+    if (!targetRecord) {
+      throw missingEvidenceError(
+        `evidence-gate: target record ${recordId} does not exist`
+      );
+    }
+
+    const evidenceGateOut = this._telemetry.emitGateResult("knowledge.retire", "evidence-gate", {
+      record_id: recordId,
+      proposer_id: proposerId,
+      target_status: targetStatus,
+      proposes_link_verified: true,
+      target_record_verified: true,
+    });
+    events.push(evidenceGateOut);
+
+    // ── Step: apply-or-reject ──────────────────────────────────────────────
+    const decision = options.decision || "apply";
+
+    const applyGateIn = this._telemetry.emitGate("knowledge.retire", "apply-gate", {
+      flow: "knowledge.retire",
+      gate: "apply-gate",
+      record_id: recordId,
+      proposer_id: proposerId,
+      target_status: targetStatus,
+      decision,
+    });
+    events.push(applyGateIn);
+
+    if (decision === "apply") {
+      // Apply via store retire op — transitions status, appends mutation log (AC1)
+      await this._store.retire(recordId, targetStatus, {
+        agent,
+        rationale: options.rationale,
+        ...(options.implementedByRef ? { implementedByRef: options.implementedByRef } : {}),
+        ...(options.supersededByRef ? { supersededByRef: options.supersededByRef } : {}),
+        ...(options.note ? { note: options.note } : {}),
+      });
+    } else if (decision === "reject") {
+      if (!options.rejectReason || !options.rejectReason.trim()) {
+        throw missingEvidenceError(
+          "apply-gate: options.rejectReason is required when decision=reject"
+        );
+      }
+      // Reject via store reject op — record status remains untouched (AC2)
+      await this._store.reject(recordId, proposerId, {
+        agent,
+        reason: options.rejectReason,
+      });
+    } else {
+      throw missingEvidenceError(
+        `apply-gate: decision must be "apply" or "reject"; got: ${decision}`
+      );
+    }
+
+    const applyGateOut = this._telemetry.emitGateResult("knowledge.retire", "apply-gate", {
+      record_id: recordId,
+      proposer_id: proposerId,
+      target_status: targetStatus,
+      decision,
+      previous_status: previousStatus,
+    });
+    events.push(applyGateOut);
+
+    return {
+      recordId,
+      targetStatus,
+      decision,
+      previousStatus,
+      proposerId,
+      telemetryEvents: events,
+    };
+  }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -1174,6 +1450,20 @@ export async function consolidate(
 ) {
   const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
   return runner.consolidate(snapshotIdOrTopic, consolidateOpts);
+}
+
+/**
+ * Module-level retire: creates an ephemeral runner using the provided store.
+ *
+ * @param {string} recordId
+ * @param {object} options  (merged into retire options + runner options)
+ */
+export async function retire(
+  recordId,
+  { store, workspace, agent, sessionId, ...retireOpts } = {}
+) {
+  const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
+  return runner.retire(recordId, retireOpts);
 }
 
 export default KnowledgeFlowRunner;

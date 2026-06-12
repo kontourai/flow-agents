@@ -218,11 +218,20 @@ export function createVectorSimilarityDetector(options = {}) {
       return [];
     }
 
+    // Exclude retired records from the working set (Addendum B — R3)
+    const activeCandidates = candidates.filter(
+      (c) => (c.status || "active") !== "retired"
+    );
+
+    if (activeCandidates.length === 0) {
+      return [];
+    }
+
     const conceptText = extractText(concept);
 
-    // Build the batch: concept first, then all candidates.
+    // Build the batch: concept first, then all active candidates.
     // One round-trip minimises latency and keeps the batch API simple.
-    const allTexts = [conceptText, ...candidates.map(extractText)];
+    const allTexts = [conceptText, ...activeCandidates.map(extractText)];
 
     // Embedding call — throws EMBED_FAILURE on any infrastructure error.
     const embeddings = await embedFn(allTexts);
@@ -232,7 +241,7 @@ export function createVectorSimilarityDetector(options = {}) {
     // scoring 0 and being excluded) — throw EMBED_FAILURE instead.
     if (!Array.isArray(embeddings) || embeddings.length !== allTexts.length) {
       const err = new Error(
-        `EMBED_FAILURE: embed function returned ${Array.isArray(embeddings) ? embeddings.length : typeof embeddings} vector(s) but expected ${allTexts.length} (1 concept + ${candidates.length} candidates)`
+        `EMBED_FAILURE: embed function returned ${Array.isArray(embeddings) ? embeddings.length : typeof embeddings} vector(s) but expected ${allTexts.length} (1 concept + ${activeCandidates.length} active candidates)`
       );
       err.code = 'EMBED_FAILURE';
       throw err;
@@ -241,11 +250,11 @@ export function createVectorSimilarityDetector(options = {}) {
     const conceptVec = embeddings[0];
     const similar = [];
 
-    for (let i = 0; i < candidates.length; i++) {
+    for (let i = 0; i < activeCandidates.length; i++) {
       const candidateVec = embeddings[i + 1];
       const score = cosineSimilarity(conceptVec, candidateVec);
       if (score >= threshold) {
-        similar.push(candidates[i].id);
+        similar.push(activeCandidates[i].id);
       }
     }
 

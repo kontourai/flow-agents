@@ -252,7 +252,11 @@ describe("AC2 — rejection leaves concept BYTE-IDENTICAL", () => {
       "AC2: concept body is byte-identical after rejection"
     );
 
-    // Also verify the body string in the raw file bytes has not changed
+    // Also verify the body section in the markdown file is unchanged.
+    // Note: the mutation log now correctly serializes evidence (including the
+    // proposal text in the propose log entry). We verify the BODY field is
+    // unchanged, not the entire file — the mutation log is allowed to contain
+    // the proposal text as historical evidence.
     const fileContent = fs.readFileSync(
       path.join(dir, "records", `${conceptId}.md`),
       "utf8"
@@ -261,9 +265,12 @@ describe("AC2 — rejection leaves concept BYTE-IDENTICAL", () => {
       fileContent.includes("Initial definition of API design principles."),
       "AC2: original body text is present in the backing file after rejection"
     );
+    // The body section (after the final ---) must not contain the rejected proposal.
+    // Split on the closing frontmatter delimiter to get just the body portion.
+    const bodySection = fileContent.split("\n---\n").slice(-1)[0] || "";
     assert.ok(
-      !fileContent.includes("Rejected body — should never appear in concept."),
-      "AC2: proposed body text is NOT present in the backing file after rejection"
+      !bodySection.includes("Rejected body — should never appear in concept."),
+      "AC2: proposed body text is NOT in the markdown body section after rejection"
     );
   });
 

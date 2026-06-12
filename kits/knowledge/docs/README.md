@@ -24,6 +24,15 @@ See [`store-contract.md`](store-contract.md) for the full specification. Quick r
 | `raw` | Unprocessed source material — excerpts, transcripts, URLs with notes. |
 | `compiled` | Normalized, editor-reviewed distillations of raw records. |
 | `concept` | Named ideas or principles that other records reference. |
+| `snapshot` | Bounded decision summary for a topic (Addendum A). |
+
+**Record status lifecycle**
+
+| Status | Meaning | Default |
+|---|---|---|
+| `active` | Live, part of the working set. | Yes (records without status field are treated as active). |
+| `implemented` | Decision was shipped; transitional state before archival. | No |
+| `retired` | Excluded from default working-set queries; history preserved. | No |
 
 **Mutation operations**
 
@@ -35,6 +44,8 @@ See [`store-contract.md`](store-contract.md) for the full specification. Quick r
 | `propose` | `agent`, `proposal` (non-empty) |
 | `apply` | `agent`, `new_body` (non-empty), `rationale` (non-empty) |
 | `reject` | `agent`, `reason` (non-empty) |
+| `supersede` | `agent`, `rationale` (non-empty), non-empty `supersededIds` array |
+| `retire` | `agent`, `rationale` (non-empty), `implementedByRef` (when `targetStatus="implemented"`) |
 
 Every mutation throws with `error.code === "MISSING_EVIDENCE"` when required evidence is absent.
 
@@ -124,6 +135,86 @@ The kit ships one flow:
 is accepted: contract-suite pass, provenance-enforcement pass, and round-trip integrity pass.
 S2 will add pipeline flows for raw ingestion, compilation, and concept management; this flow
 and adapter infrastructure remain the foundation.
+
+---
+
+## Decision Lifecycle — Retiring Records (S7)
+
+Implemented or obsolete records can be retired from the working set via the `knowledge.retire`
+flow. Retirement is **non-destructive**: the record body, links, and creation provenance remain
+intact; the record is simply excluded from the default working set.
+
+### Status transitions
+
+| From | To | Evidence required |
+|---|---|---|
+| `active` | `implemented` | `rationale` (non-empty) + `implementedByRef` (non-empty ref to implementing artifact) |
+| `active` | `retired` | `rationale` (non-empty) |
+| `implemented` | `retired` | `rationale` (non-empty) |
+| `retired` | *(any)* | Invalid — `retired` is terminal |
+
+### Working-set exclusion
+
+Retired records are excluded from:
+
+- `listByType(type)` — default query
+- `listByCategory(category, options)` — default query
+- `defaultSimilarityDetector` — default cluster candidates
+- `createVectorSimilarityDetector` — vector cluster candidates
+
+Add `{ includeRetired: true }` to any query to restore retired records.
+
+`get(id)` **always** returns the full record regardless of status.
+
+### Using the retire flow
+
+```js
+import { KnowledgeFlowRunner } from './adapters/flow-runner/index.js';
+
+const runner = new KnowledgeFlowRunner({ store, workspace });
+
+// Retire a compiled decision record that was implemented
+const result = await runner.retire(compiledId, {
+  targetStatus: 'implemented',
+  rationale: 'REST API shipped in v1.0 (PR #42).',
+  implementedByRef: 'https://github.com/org/repo/pull/42',
+  decision: 'apply',
+});
+
+// Retire an obsolete concept record
+await runner.retire(conceptId, {
+  targetStatus: 'retired',
+  rationale: 'Superseded by new architecture decision in ADR-007.',
+  decision: 'apply',
+});
+
+// Reject a retirement proposal (status unchanged)
+await runner.retire(recordId, {
+  targetStatus: 'retired',
+  rationale: 'Proposing retirement.',
+  decision: 'reject',
+  rejectReason: 'Still needed for reference.',
+});
+```
+
+### Accessing retired records with provenance
+
+```js
+// Always works — returns full record including retirement evidence
+const record = await store.get(retiredId);
+console.log(record.status);           // "retired"
+console.log(record.mutation_log);     // includes retire entry with rationale
+
+// Query all retired records of a type
+const allCompiled = await store.listByType('compiled', { includeRetired: true });
+
+// Get history from snapshot provenance
+const snapshot = await store.get(snapshotId);
+for (const srcId of snapshot.provenance.source_ids) {
+  const src = await store.get(srcId);   // works even if src is retired
+  console.log(src.id, src.status);
+}
+```
 
 ---
 

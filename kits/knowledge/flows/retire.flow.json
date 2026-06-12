@@ -1,0 +1,77 @@
+{
+  "id": "knowledge.retire",
+  "version": "1.0",
+  "steps": [
+    { "id": "identify", "next": "propose-retirement" },
+    { "id": "propose-retirement", "next": "evidence-gate" },
+    { "id": "evidence-gate", "next": "apply-or-reject" },
+    { "id": "apply-or-reject", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "gates": {
+    "identify-gate": {
+      "step": "identify",
+      "expects": [
+        {
+          "id": "target-record-found",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "The record to be retired has been identified and is in a retirable status (active or implemented). The record ID and current status are surfaced for the proposal step.",
+          "claim": {
+            "type": "knowledge.retire.identify",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "propose-retirement-gate": {
+      "step": "propose-retirement",
+      "expects": [
+        {
+          "id": "retirement-proposal-recorded",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "A retirement proposal has been recorded. The proposal carries: the target status (implemented or retired), the retirement rationale, and — when targetStatus is 'implemented' — an implementedByRef pointing to the implementing artifact (commit SHA, PR URL, issue number, etc.). The record is NOT mutated at this step — only a retirement proposal record and proposes link are created.",
+          "claim": {
+            "type": "knowledge.retire.proposal",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "evidence-gate": {
+      "step": "evidence-gate",
+      "expects": [
+        {
+          "id": "retirement-evidence-valid",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "The retirement proposal evidence is valid: rationale is non-empty; implementedByRef is non-empty when targetStatus is 'implemented'; the target record exists and is in a state that allows the requested transition (active→implemented, active→retired, implemented→retired). Gate rejects if any required evidence field is missing or the transition is invalid.",
+          "claim": {
+            "type": "knowledge.retire.evidence",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "apply-gate": {
+      "step": "apply-or-reject",
+      "expects": [
+        {
+          "id": "retirement-gate-decision",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "A gate decision (apply or reject) has been recorded. If applied: the record status is updated to the target status via the store retire op; the retirement evidence (rationale, implementedByRef, supersededByRef) is appended to the mutation log; the record body, links, and provenance remain intact; the record is excluded from default working-set queries (listByType, listByCategory, similarity detection). If rejected: the record status is byte-identical to its pre-proposal state.",
+          "claim": {
+            "type": "knowledge.retire.gate-decision",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    }
+  }
+}

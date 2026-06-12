@@ -167,9 +167,19 @@ function serializeYaml(obj, indent = 0) {
             const entries = Object.entries(item).filter(([, v]) => v !== undefined && v !== null);
             if (entries.length === 0) { lines.push(`${pad}  - {}`); continue; }
             const [firstKey, firstVal] = entries[0];
-            lines.push(`${pad}  - ${firstKey}: ${yamlScalar(firstVal)}`);
+            if (typeof firstVal === "object" && firstVal !== null && !Array.isArray(firstVal)) {
+              lines.push(`${pad}  - ${firstKey}:`);
+              lines.push(serializeYaml(firstVal, indent + 6));
+            } else {
+              lines.push(`${pad}  - ${firstKey}: ${yamlScalar(firstVal)}`);
+            }
             for (const [k, v] of entries.slice(1)) {
-              lines.push(`${pad}    ${k}: ${yamlScalar(v)}`);
+              if (typeof v === "object" && v !== null && !Array.isArray(v)) {
+                lines.push(`${pad}    ${k}:`);
+                lines.push(serializeYaml(v, indent + 6));
+              } else {
+                lines.push(`${pad}    ${k}: ${yamlScalar(v)}`);
+              }
             }
           } else {
             lines.push(`${pad}  - ${yamlScalar(item)}`);
@@ -292,7 +302,15 @@ function removeLinksFromGraph(graph, sourceId) {
 // ---------------------------------------------------------------------------
 
 const VALID_TYPES = new Set(["raw", "compiled", "concept", "snapshot"]);
+const VALID_STATUSES = new Set(["active", "implemented", "retired"]);
 const CATEGORY_SEGMENT_RE = /^[a-z0-9_-]+$/;
+
+// Status transition table: from → allowed targets
+const VALID_STATUS_TRANSITIONS = {
+  active:      new Set(["implemented", "retired"]),
+  implemented: new Set(["retired"]),
+  retired:     new Set(),  // terminal — no further transitions
+};
 
 function validateCategory(cat) {
   if (!cat || typeof cat !== "string") return false;
@@ -376,6 +394,7 @@ export class DefaultKnowledgeStore {
       title: input.title,
       category: input.category,
       tags: input.tags || [],
+      status: "active",
       created_at: now,
       updated_at: now,
       provenance: {
@@ -526,8 +545,7 @@ export class DefaultKnowledgeStore {
 
     const concept = this._readRecord(conceptId);
     if (!concept) throw notFoundError(conceptId);
-    if (concept.type !== "concept" && concept.type !== "snapshot")
-      throw missingEvidenceError(`propose: concept_id must reference a concept or snapshot record; got type: ${concept.type}`);
+    // Any record type may receive a proposal (retire flow uses this for all types)
 
     const proposer = this._readRecord(proposerId);
     if (!proposer) throw notFoundError(proposerId);
@@ -594,8 +612,7 @@ export class DefaultKnowledgeStore {
 
     const concept = this._readRecord(conceptId);
     if (!concept) throw notFoundError(conceptId);
-    if (concept.type !== "concept" && concept.type !== "snapshot")
-      throw missingEvidenceError(`apply: concept_id must reference a concept or snapshot record; got type: ${concept.type}`);
+    // Any record type may be the apply target
 
     const proposer = this._readRecord(proposerId);
     if (!proposer) throw notFoundError(proposerId);
@@ -637,8 +654,7 @@ export class DefaultKnowledgeStore {
 
     const concept = this._readRecord(conceptId);
     if (!concept) throw notFoundError(conceptId);
-    if (concept.type !== "concept" && concept.type !== "snapshot")
-      throw missingEvidenceError(`reject: concept_id must reference a concept or snapshot record; got type: ${concept.type}`);
+    // Any record type may be the reject target
 
     const proposer = this._readRecord(proposerId);
     if (!proposer) throw notFoundError(proposerId);
@@ -760,6 +776,59 @@ export class DefaultKnowledgeStore {
 
 
   // -------------------------------------------------------------------------
+  // retire  (Addendum B — S7)
+  // -------------------------------------------------------------------------
+
+  async retire(id, targetStatus, evidence) {
+    if (!evidence?.agent)
+      throw missingEvidenceError("retire: missing required evidence field: agent");
+    if (!evidence?.rationale || !evidence.rationale.trim())
+      throw missingEvidenceError("retire: missing required evidence field: rationale");
+    if (targetStatus !== "implemented" && targetStatus !== "retired")
+      throw missingEvidenceError(
+        `retire: targetStatus must be "implemented" or "retired"; got: ${targetStatus}`
+      );
+    if (targetStatus === "implemented" && (!evidence.implementedByRef || !evidence.implementedByRef.trim()))
+      throw missingEvidenceError(
+        'retire: implementedByRef is required when targetStatus is "implemented"'
+      );
+
+    const record = this._readRecord(id);
+    if (!record) throw notFoundError(id);
+
+    const currentStatus = record.status || "active";
+    const allowed = VALID_STATUS_TRANSITIONS[currentStatus];
+    if (!allowed || !allowed.has(targetStatus)) {
+      throw missingEvidenceError(
+        `retire: invalid transition from "${currentStatus}" to "${targetStatus}"`
+      );
+    }
+
+    const now = this._now();
+    const updated = {
+      ...record,
+      status: targetStatus,
+      updated_at: now,
+      mutation_log: [
+        ...(record.mutation_log || []),
+        {
+          op: "retire",
+          at: now,
+          agent: evidence.agent,
+          ...(evidence.note ? { note: evidence.note } : {}),
+          evidence: {
+            targetStatus,
+            rationale: evidence.rationale,
+            ...(evidence.implementedByRef ? { implementedByRef: evidence.implementedByRef } : {}),
+            ...(evidence.supersededByRef ? { supersededByRef: evidence.supersededByRef } : {}),
+          },
+        },
+      ],
+    };
+    this._writeRecord(updated);
+  }
+
+  // -------------------------------------------------------------------------
   // get
   // -------------------------------------------------------------------------
 
@@ -785,20 +854,32 @@ export class DefaultKnowledgeStore {
 
   async listByCategory(category, options = {}) {
     const records = this._allRecords();
+    const includeRetired = options.includeRetired === true;
     if (options.prefix) {
       return records.filter(
-        (r) => r.category === category || r.category.startsWith(`${category}.`)
+        (r) =>
+          (r.category === category || r.category.startsWith(`${category}.`)) &&
+          (includeRetired || (r.status || "active") !== "retired")
       );
     }
-    return records.filter((r) => r.category === category);
+    return records.filter(
+      (r) =>
+        r.category === category &&
+        (includeRetired || (r.status || "active") !== "retired")
+    );
   }
 
   // -------------------------------------------------------------------------
   // listByType
   // -------------------------------------------------------------------------
 
-  async listByType(type) {
-    return this._allRecords().filter((r) => r.type === type);
+  async listByType(type, options = {}) {
+    const includeRetired = options.includeRetired === true;
+    return this._allRecords().filter(
+      (r) =>
+        r.type === type &&
+        (includeRetired || (r.status || "active") !== "retired")
+    );
   }
 
   // -------------------------------------------------------------------------

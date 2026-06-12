@@ -3,7 +3,7 @@
   "id": "knowledge",
   "name": "Knowledge Kit",
   "product_name": "Knowledge Kit",
-  "description": "A Flow Kit for durable, gated knowledge storage. Provides a store contract with defined record types, mutation operations, and provenance rules — plus a default adapter backed by markdown files, YAML frontmatter, wikilinks, and a graph index.",
+  "description": "A Flow Kit for durable, gated knowledge storage. Provides a store contract with defined record types, mutation operations, and provenance rules \u2014 plus a default adapter backed by markdown files, YAML frontmatter, wikilinks, and a graph index.",
   "flows": [
     {
       "id": "knowledge.store-contract",
@@ -13,22 +13,27 @@
     {
       "id": "knowledge.ingest",
       "path": "flows/ingest.flow.json",
-      "description": "Ingest raw captures: capture → classify → route. Gate on classify requires category + type='raw' classification evidence per the store contract create op."
+      "description": "Ingest raw captures: capture \u2192 classify \u2192 route. Gate on classify requires category + type='raw' classification evidence per the store contract create op."
     },
     {
       "id": "knowledge.compile",
       "path": "flows/compile.flow.json",
-      "description": "Compile classified raws into durable notes: select-raws → compile → link. Gate on compile requires provenance refs to every consumed raw record."
+      "description": "Compile classified raws into durable notes: select-raws \u2192 compile \u2192 link. Gate on compile requires provenance refs to every consumed raw record."
     },
     {
       "id": "knowledge.synthesize",
       "path": "flows/synthesize.flow.json",
-      "description": "Synthesize compiled sources into concept summaries: detect-cluster → propose → evidence-gate → apply-or-reject. Mutation-gate policy: no summary mutates without an approved proposal carrying source refs; rejection leaves store untouched."
+      "description": "Synthesize compiled sources into concept summaries: detect-cluster \u2192 propose \u2192 evidence-gate \u2192 apply-or-reject. Mutation-gate policy: no summary mutates without an approved proposal carrying source refs; rejection leaves store untouched."
     },
     {
       "id": "knowledge.consolidate",
       "path": "flows/consolidate.flow.json",
       "description": "Consolidate related compiled records into a living decision snapshot: related-event trigger -> consolidation proposal -> evidence gate -> apply-or-reject. Creates or updates a snapshot record; supersedes prior snapshots via supersede op (never deletes). Reuses S3 mutation-gate machinery."
+    },
+    {
+      "id": "knowledge.retire",
+      "path": "flows/retire.flow.json",
+      "description": "Retire implemented or obsolete records from the working set via gated lifecycle: identify \u2192 propose-retirement \u2192 evidence-gate \u2192 apply-or-reject. Evidence required: retirement rationale + implementedByRef (when targeting 'implemented' status) or supersededByRef (optional, for 'retired'). Rejection leaves record status byte-identical. Retired records remain fully queryable with provenance via includeRetired flag."
     }
   ],
   "docs": [
@@ -50,7 +55,7 @@
     {
       "id": "knowledge.flow-runner",
       "path": "adapters/flow-runner/index.js",
-      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links; synthesize(conceptId | topicSelector, options) → concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) → decision snapshot consolidation with supersede-not-delete. Emits canonical telemetry events at gate points."
+      "description": "Executable flow logic: capture(rawText, meta) \u2192 classified raw record; compile(rawIds[]) \u2192 compiled record with provenance links; synthesize(conceptId | topicSelector, options) \u2192 concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) \u2192 decision snapshot consolidation with supersede-not-delete; retire(recordId, options) \u2192 gated status lifecycle transition (active\u2192implemented\u2192retired) with working-set exclusion. Emits canonical telemetry events at gate points."
     },
     {
       "id": "knowledge.similarity-vector",
@@ -72,7 +77,7 @@
     {
       "id": "knowledge.synthesis-suite",
       "path": "evals/synthesis/suite.test.js",
-      "description": "Eval cases for synthesize: AC1 (similar source → proposal not mutation), AC2 (rejection leaves concept byte-identical), AC3 (apply updates with provenance to all contributing sources), pluggable-similarity interface test, gate telemetry."
+      "description": "Eval cases for synthesize: AC1 (similar source \u2192 proposal not mutation), AC2 (rejection leaves concept byte-identical), AC3 (apply updates with provenance to all contributing sources), pluggable-similarity interface test, gate telemetry."
     },
     {
       "id": "knowledge.consolidation-suite",
@@ -82,7 +87,12 @@
     {
       "id": "knowledge.similarity-vector-suite",
       "path": "evals/similarity-vector/suite.test.js",
-      "description": "Eval cases for the vector similarity adapter: unit tests (cosineSimilarity math, injectable embed, threshold, fail-closed), drop-in proof (runner.synthesize with injected embed produces valid proposals), and live-gated tests (real ollama nomic-embed-text round-trip — skipped when ollama unavailable)."
+      "description": "Eval cases for the vector similarity adapter: unit tests (cosineSimilarity math, injectable embed, threshold, fail-closed), drop-in proof (runner.synthesize with injected embed produces valid proposals), and live-gated tests (real ollama nomic-embed-text round-trip \u2014 skipped when ollama unavailable)."
+    },
+    {
+      "id": "knowledge.retirement-suite",
+      "path": "evals/retirement/suite.test.js",
+      "description": "Eval cases for retire: AC1 (retirement only via approved proposal with rationale/ref, transition table enforcement); AC2 (retired excluded from listByType/listByCategory/similarity defaults, returned with includeRetired flag, provenance intact via get()); AC3 (consolidation after retirement reflects pruned working set; retired record still reachable from snapshot provenance history); rejection leaves status byte-identical; gate telemetry."
     }
   ]
 }

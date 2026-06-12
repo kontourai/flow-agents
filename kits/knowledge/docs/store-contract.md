@@ -524,3 +524,127 @@ Superseded snapshots MUST remain queryable:
 
 There is no `"archived"` or `"deleted"` status field; the supersession chain is expressed entirely
 through links and mutation log entries.
+
+---
+
+## Addendum B — Record Status Lifecycle (S7)
+
+### B.1 Status Field
+
+Every record envelope (§1.1) gains an optional `status` field:
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `status` | `"active"` \| `"implemented"` \| `"retired"` | no | `"active"` | Lifecycle status of the record. Records without a status field are treated as `"active"`. |
+
+`status` is a mutable field but MUST only change via the `retire` mutation op (§B.4).
+Direct field updates via the `update` op MUST NOT change `status`; `update` MUST ignore `status` if
+supplied in the fields argument.
+
+### B.2 Allowed Status Transitions
+
+| From | To | Op | Required Evidence |
+|---|---|---|---|
+| `"active"` | `"implemented"` | `retire` | `implementedByRef` (non-empty, references the implementing artifact/commit/PR) |
+| `"active"` | `"retired"` | `retire` | `rationale` (non-empty, explains obsolescence) |
+| `"implemented"` | `"retired"` | `retire` | `rationale` (non-empty) |
+
+No other transitions are permitted. Attempting an invalid transition MUST throw with
+`error.code === "MISSING_EVIDENCE"` and a human-readable `message`.
+
+Records in `"retired"` status have no further transitions — they are terminal.
+
+### B.3 Working-Set Exclusion
+
+Records with `status === "retired"` are EXCLUDED from the default working set:
+
+- `listByType(type)` returns only non-retired records by default.
+- `listByCategory(category, options?)` returns only non-retired records by default.
+- `defaultSimilarityDetector` considers only non-retired compiled records as candidates.
+- The vector similarity detector (`createVectorSimilarityDetector`) considers only non-retired
+  compiled records as candidates.
+
+All four filtering surfaces accept an `includeRetired: true` option (or equivalent flag on the
+similarity detector) to restore retired records to the result set.
+
+Retired records remain **fully queryable with provenance**:
+- `get(id)` always returns the full record regardless of status.
+- `listByType(type, { includeRetired: true })` returns all records of that type.
+- `listByCategory(category, { includeRetired: true })` returns all matching records.
+- The record's `mutation_log` carries the full retirement evidence.
+
+### B.4 `retire` Mutation Operation
+
+The `retire` op transitions a record from `"active"` or `"implemented"` to the target status.
+It NEVER deletes the record. The record body, links, and provenance remain intact.
+
+**Required fields:**
+
+| Field | Location | Description |
+|---|---|---|
+| `id` | argument | ID of the record to retire. |
+| `targetStatus` | argument | Target status: `"implemented"` or `"retired"`. |
+| `agent` | evidence | Agent performing the retirement. |
+| `rationale` | evidence | Non-empty string explaining why the record is being retired. Required for all target statuses. |
+
+**Conditional evidence fields:**
+
+| Field | Location | Condition | Description |
+|---|---|---|---|
+| `implementedByRef` | evidence | `targetStatus === "implemented"` | Non-empty reference to the implementing artifact (commit SHA, PR URL, issue number, etc.). |
+| `supersededByRef` | evidence | optional for `targetStatus === "retired"` | Reference to a superseding record or artifact. |
+
+**Rejection conditions:**
+- Record with `id` does not exist.
+- `targetStatus` is not `"implemented"` or `"retired"`.
+- Current status transition is invalid (see §B.2).
+- `rationale` is missing or empty.
+- `targetStatus === "implemented"` and `implementedByRef` is missing or empty.
+- Missing `agent` in evidence.
+
+**Post-conditions:**
+- Record `status` is updated to `targetStatus`.
+- Record `updated_at` is refreshed.
+- A mutation log entry (op=`"retire"`) is appended, carrying `targetStatus`, `rationale`,
+  and any supplied `implementedByRef` / `supersededByRef`.
+- The record body, `links`, and creation `provenance` are NOT changed.
+- `get(id)` returns the full record with the updated status.
+- `listByType(type)` (without `includeRetired`) no longer returns this record if
+  `targetStatus === "retired"`.
+
+### B.5 Adapter Contract Extension
+
+The adapter interface (§8) is extended:
+
+```ts
+interface KnowledgeStoreAdapter {
+  // ... existing methods ...
+  retire(id: string, targetStatus: "implemented" | "retired", evidence: RetireEvidence): Promise<void>;
+  listByType(type: RecordType, options?: { includeRetired?: boolean }): Promise<Record[]>;
+  listByCategory(category: string, options?: { prefix?: boolean; includeRetired?: boolean }): Promise<Record[]>;
+}
+```
+
+`RetireEvidence`:
+```ts
+interface RetireEvidence {
+  agent: string;
+  rationale: string;
+  implementedByRef?: string;   // required when targetStatus === "implemented"
+  supersededByRef?: string;    // optional
+  note?: string;
+}
+```
+
+### B.6 Provenance and History Guarantee
+
+Retired records MUST remain reachable from:
+- `get(id)` — always returns the full record.
+- `listByType(type, { includeRetired: true })` and `listByCategory(category, { includeRetired: true })`.
+- Snapshot `provenance.source_ids` — any snapshot that included the record in its cluster before
+  retirement retains the reference intact. The retired record can be retrieved via `get(sourceId)`.
+- The retirement `mutation_log` entry carries the full evidence of why and when the record was
+  retired and by whom.
+
+There is no deletion of records. Physical purge (if ever needed) is a separate, future policy
+hook not defined in this version.

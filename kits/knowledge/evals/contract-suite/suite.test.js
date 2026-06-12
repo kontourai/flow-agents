@@ -411,12 +411,17 @@ describe("Knowledge Kit Store Contract Suite", () => {
       );
     });
 
-    test("rejects non-concept concept_id", async () => {
-      const notConcept = await store.create({ type: "raw", title: "NC", body: "nc", category: "test", provenance: { agent: "tester" } });
+    test("propose accepts any record type as target (Addendum B: retire flow needs non-concept targets)", async () => {
+      // Addendum B (S7) extends propose to accept any record type as the target,
+      // enabling the retire flow to attach proposals to compiled/raw/snapshot records.
+      const rawTarget = await store.create({ type: "raw", title: "NC", body: "nc", category: "test", provenance: { agent: "tester" } });
       const pid = await store.create({ type: "raw", title: "P3", body: "p", category: "test", provenance: { agent: "tester" } });
-      await assertMissingEvidence(
-        () => store.propose(notConcept, pid, { agent: "tester", proposal: "change" }),
-        "propose non-concept target"
+      // Should NOT throw — all record types are valid proposal targets
+      await store.propose(rawTarget, pid, { agent: "tester", proposal: "retirement proposal" });
+      const { forward } = await store.getLinks(pid);
+      assert.ok(
+        forward.some((l) => l.target_id === rawTarget && l.kind === "proposes"),
+        "propose on raw record creates proposes link (Addendum B extension)"
       );
     });
 
