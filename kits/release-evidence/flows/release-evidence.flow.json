@@ -1,0 +1,38 @@
+{
+  "id": "release-evidence",
+  "version": "1.0",
+  "steps": [
+    {
+      "id": "gate-check",
+      "next": null
+    }
+  ],
+  "gates": {
+    "release-evidence-gate": {
+      "step": "gate-check",
+      "expects": [
+        {
+          "id": "release-claim-present",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "A trusted release.evidence claim must be attached before this gate can pass.",
+          "explore_hint": "Attach a trust-report JSON file with claim type release.evidence and status trusted.",
+          "claim": {
+            "type": "release.evidence",
+            "accepted_statuses": [
+              "trusted"
+            ]
+          }
+        }
+      ],
+      "on_route_back": {
+        "missing_evidence": "gate-check",
+        "default": "gate-check"
+      },
+      "route_back_policy": {
+        "max_attempts": 3,
+        "on_exceeded": "block"
+      }
+    }
+  }
+}

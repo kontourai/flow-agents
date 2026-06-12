@@ -1,0 +1,173 @@
+name: Kit Gates Demo (Agentless)
+
+# Proves that Flow Kit gates can be evaluated over claim files in CI with no
+# agent in the loop. The workflow runs:
+#   flow validate-definition   — validates the Flow Definition in the kit
+#   flow validate-kit          — validates kit.json container (requires
+#                                @kontourai/flow >= 0.1.21; merged in source
+#                                PR #67 but not yet in the published package
+#                                as of 0.1.20 — step is continue-on-error)
+#   flow start                 — creates a Flow run
+#   flow attach-evidence --trust-artifact — attaches a claim file to the gate
+#   flow evaluate --exit-code  — evaluates gate; exits 1 when gate does not pass
+#
+# Two jobs exercise one passing and one failing claim fixture:
+#   pass-case: trusted claim → evaluate exits 0 → job succeeds
+#   fail-case: rejected claim → evaluate exits 1 → workflow asserts the
+#              failure is detected (non-zero exit) rather than silently ignored
+#
+# Triggered on: workflow_dispatch or PR touching kits/release-evidence/** or
+# this workflow file.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "kits/release-evidence/**"
+      - ".github/workflows/kit-gates-demo.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  pass-case:
+    name: Gate pass — trusted release.evidence claim
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+
+      - name: Install Flow CLI
+        # Mirrors the FLOW_CLI_ROOT install pattern used in ci.yml.
+        run: |
+          mkdir -p .flow-cli
+          cd .flow-cli
+          printf '{"name":"flow-cli-host","private":true}\n' > package.json
+          npm install --no-save @kontourai/flow
+        env:
+          FLOW_CLI_ROOT: ${{ github.workspace }}/.flow-cli/node_modules/@kontourai/flow
+
+      - name: Validate Flow Definition (available in published CLI)
+        run: |
+          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
+            validate-definition \
+            kits/release-evidence/flows/release-evidence.flow.json \
+            --json
+
+      - name: Validate kit container (requires @kontourai/flow >= next release after 0.1.20)
+        # validate-kit is merged in kontourai/flow source (PR #67) but not yet
+        # published to npm as of v0.1.20. continue-on-error: true until the
+        # next release ships. Remove continue-on-error once >= 0.1.21 is on npm.
+        continue-on-error: true
+        run: |
+          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
+            validate-kit kits/release-evidence
+
+      - name: Init Flow workspace and start run
+        run: |
+          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js init
+          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
+            start kits/release-evidence/flows/release-evidence.flow.json \
+            --run-id gate-pass-demo
+
+      - name: Attach trusted release.evidence claim
+        run: |
+          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
+            attach-evidence gate-pass-demo \
+            --gate release-evidence-gate \
+            --file kits/release-evidence/fixtures/claims/pass-trusted-release.trust.json \
+            --trust-artifact
+
+      - name: Evaluate gate — trusted claim must produce pass and exit 0
+        run: |
+          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
+            evaluate gate-pass-demo --exit-code
+
+      - name: Show run status
+        if: always()
+        run: |
+          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
+            status gate-pass-demo --format summary
+
+  fail-case:
+    name: Gate fail — rejected claim (failure MUST be detected)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+
+      - name: Install Flow CLI
+        run: |
+          mkdir -p .flow-cli
+          cd .flow-cli
+          printf '{"name":"flow-cli-host","private":true}\n' > package.json
+          npm install --no-save @kontourai/flow
+        env:
+          FLOW_CLI_ROOT: ${{ github.workspace }}/.flow-cli/node_modules/@kontourai/flow
+
+      - name: Validate Flow Definition
+        run: |
+          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
+            validate-definition \
+            kits/release-evidence/flows/release-evidence.flow.json \
+            --json
+
+      - name: Validate kit container (requires @kontourai/flow >= next release after 0.1.20)
+        continue-on-error: true
+        run: |
+          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
+            validate-kit kits/release-evidence
+
+      - name: Init Flow workspace and start run
+        run: |
+          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js init
+          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
+            start kits/release-evidence/flows/release-evidence.flow.json \
+            --run-id gate-fail-demo
+
+      - name: Attach rejected release.evidence claim
+        run: |
+          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
+            attach-evidence gate-fail-demo \
+            --gate release-evidence-gate \
+            --file kits/release-evidence/fixtures/claims/fail-rejected-release.trust.json \
+            --trust-artifact
+
+      - name: Evaluate gate — rejected claim must produce non-pass and exit 1
+        # --exit-code makes the CLI exit 1 when the gate does not pass.
+        # continue-on-error: true captures the outcome without failing the job here.
+        id: evaluate_fail
+        continue-on-error: true
+        run: |
+          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
+            evaluate gate-fail-demo --exit-code
+
+      - name: Assert failure was detected (gate must NOT pass a rejected claim)
+        # If evaluate exited 0 (outcome == success), the gate incorrectly
+        # accepted a rejected claim — false negative in gate evaluation.
+        run: |
+          if [ "${{ steps.evaluate_fail.outcome }}" = "success" ]; then
+            echo "ERROR: gate passed a rejected claim — false negative in gate evaluation"
+            exit 1
+          fi
+          echo "PASS: gate correctly did not pass the rejected claim (outcome=${{ steps.evaluate_fail.outcome }})"
+
+      - name: Show run status
+        if: always()
+        run: |
+          node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
+            status gate-fail-demo --format summary
