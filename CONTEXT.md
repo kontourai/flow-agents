@@ -75,7 +75,7 @@ A reusable procedure Flow Agents can invoke to carry out part of a work mode. Sk
 
 ### Flow Kit
 
-An installable, authorable bundle of Flow-backed workflows and optional supporting assets, such as Flow Definitions, docs, skills, adapters, provider contracts, and evals. Flow Kits are runtime-neutral: skills are one supported asset type, not a requirement.
+Flow's distribution unit for portable workflow bundles. A Flow Kit has two layers: (1) the **container** (owned by Kontour Flow) — a `kit.json` manifest with `schema_version`, `id`, `name`, and a non-empty `flows` list, plus optional `description` and `product_name`; and (2) the **agent extension** (owned by Flow Agents) — optional `skills`, `docs`, `adapters`, `evals`, and `assets` fields that make it a Flow Agents Kit. The container contract permits unknown top-level fields so consumers can extend it without breaking core validation. A kit with only core container fields is a valid Flow Kit; adding Flow Agents extension fields makes it a Flow Agents Kit.
 _Avoid_: Pack, plugin, marketplace package
 
 ### Flow Kit Repository
