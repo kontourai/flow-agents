@@ -19,6 +19,10 @@ title: Kontour Flow Agents
     <strong>Evidence over confidence</strong>
     <span>Hooks catch stop-short behavior, and important work ends with tests, browser checks, CI results, review findings, or an explicit <code>NOT_VERIFIED</code> gap — never just a confident summary.</span>
   </section>
+  <section>
+    <strong>Flow Kits — workflow + output shape</strong>
+    <span>A kit bundles a workflow and its opinionated output shape as a validated, installable unit. Two reference kits ship today: Builder Kit (shaping → delivery pipeline) and Knowledge Kit (gated store with five pipeline flows, pluggable adapters, and an Obsidian rendering layer). <a href="kit-authoring-guide.html">Author your own</a> using the same path.</span>
+  </section>
 </div>
 
 ## How it works
@@ -114,13 +118,17 @@ Use fix-bug. Reproduce the problem, diagnose root cause, implement the fix, and 
     <strong>Flow Kit Repository Contract</strong>
     <span>Full validation rules, registry schema, activation diagnostics, and the install/update/force semantics.</span>
   </a>
+  <a class="doc-card" href="knowledge-kit.html">
+    <strong>Knowledge Kit</strong>
+    <span>Gated knowledge storage with five pipeline flows, a representation-neutral store contract, default and Obsidian adapters, 198 tests, and a parameterized contract suite any adapter can run.</span>
+  </a>
   <a class="doc-card" href="spec/runtime-hook-surface.html">
     <strong>Runtime Hook Surface</strong>
     <span>Canonical event taxonomy, four policy classes, conformance levels L0/L1/L2, and host mapping tables for adapter authors.</span>
   </a>
   <a class="doc-card" href="vision.html">
     <strong>Vision and Direction</strong>
-    <span>Where Flow Agents is going: kits beyond coding, TypeScript framework adapters, and Kontour Console as the unifying telemetry surface.</span>
+    <span>The kits-as-ecosystem arc (authoring today → domain kits → registry → marketplace), TypeScript framework adapters, and Kontour Console as the unifying telemetry surface.</span>
   </a>
   <a class="doc-card" href="north-star.html">
     <strong>North Star</strong>

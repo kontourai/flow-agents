@@ -111,9 +111,15 @@ The [Workflow Usage Guide](docs/workflow-usage-guide.md) has example prompts and
 
 ## Flow Kits
 
-A Flow Kit is a portable workflow bundle: a `kit.json` manifest, one or more Flow Definitions, and optional skills, docs, adapters, evals, and assets — all validated and installed as a unit. Kits are the extension model for Flow Agents: they let you package a workflow once and deploy it into any workspace through the same path as the built-in workflows.
+A Flow Kit bundles a workflow AND its opinionated output shape into a single validated unit: a `kit.json` manifest (schema version 1.0), one or more Flow Definitions, and optional skills, docs, adapters, evals, and assets. Authoring a kit means deciding not just _what_ an agent does but _how the result is rendered_ — the same pipeline produces different representations depending on which store adapter is active. Kits are the extension model for Flow Agents: validated by the `flow-kit` CLI, installed through a single command, and activatable into any workspace that runs Flow Agents.
 
-**Builder Kit** is the first Kontour-authored kit. It ships with `builder.shape` (shape a problem into slices and fileable work items) and `builder.build` (pull ready work through design probing, planning, execution, verification, PR readiness, merge readiness, and learning). Builder Kit is installed automatically by `npx @kontourai/flow-agents init`.
+**Builder Kit** — ships with `builder.shape` (shape a problem into slices and fileable work items) and `builder.build` (pull ready work through design probing, planning, execution, verification, PR readiness, merge readiness, and learning). Installed automatically by `npx @kontourai/flow-agents init`.
+
+**Knowledge Kit** — a Flow Kit for durable, gated knowledge storage. It ships a store contract with four record types (`raw`, `compiled`, `concept`, `snapshot`), five pipeline flows (`ingest`, `compile`, `synthesize`, `consolidate`, `retire`), and a mutation policy of propose→evidence-gate→apply/reject with supersede-not-delete. All mutations require provenance; nothing is silently overwritten or deleted. Ships with 198 tests.
+
+The output-shape story is the core reason kits matter. The Knowledge Kit store contract is representation-neutral: two adapters ship today. The **default adapter** stores records as flat markdown files with YAML frontmatter and a JSON graph index. The **Obsidian adapter** renders the same workflow into the shape a human already thinks in — one canonical note per record, category→folder hierarchy, configurable frontmatter dimensions (e.g. territory/customer/initiative as filterable fields), living overview notes with sources nested below, and superseded records moved to an `archive/` folder rather than deleted. Same flows, same mutation gates, different rendering layer. (The Obsidian adapter is shipped; layout/dimensions refinements and person/entity card support are in development.)
+
+The Knowledge Kit is also LIVE-proven: the default adapter passes the parameterized contract suite; keyless operation is validated via a Strands agent + local ollama acceptance harness; vector similarity clustering uses ollama embeddings (`nomic-embed-text`) with a pluggable detector interface.
 
 Install a local kit:
 
@@ -123,6 +129,9 @@ npx @kontourai/flow-agents flow-kit install-local path/to/my-kit --dest /path/to
 
 - [Kit Authoring Guide](docs/kit-authoring-guide.md) — build your own kit from scratch: directory layout, `kit.json`, a flow file, validation, install, and activation.
 - [Flow Kit Repository Contract](docs/flow-kit-repository-contract.md) — the full validation rules, registry schema, and activation diagnostics.
+- [Knowledge Kit docs](kits/knowledge/docs/README.md) — store contract, record types, mutation ops, similarity detectors, and the Obsidian adapter.
+
+**Direction** (not shipped): domain kits that compose this substrate — a Sales Kit (territory/customer/initiative schema with side-effect adapters for CRM logging), a Research Kit (transcript capture→compile→recall). Distribution follows sequencing: authoring tooling and covetable reference kits first, then a registry, then a marketplace. No marketplace claims are shipped.
 
 ## Framework adapters
 

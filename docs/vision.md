@@ -16,6 +16,28 @@ One official framework adapter spike exists: `integrations/strands/` is a Python
 
 ---
 
+## Flow Kits as an authorable ecosystem
+
+### What ships today
+
+Kit authoring is shipped. The `kit.json` contract at schema version 1.0 is validated by the `flow-kit` CLI before any install. The [Kit Authoring Guide](kit-authoring-guide.html) walks from an empty directory to a validated, locally installed kit. Two reference kits ship in `kits/`:
+
+**Builder Kit** packages the full `idea → backlog → plan → build → review → verify → evidence → release → learning` pipeline as two flows (`builder.shape`, `builder.build`). It installs automatically.
+
+**Knowledge Kit** packages durable gated knowledge storage: a store contract with four record types, five pipeline flows (`ingest`, `compile`, `synthesize`, `consolidate`, `retire`), and a mutation policy of propose→evidence-gate→apply/reject with supersede-not-delete. It ships with 198 tests, a parameterized contract suite that any adapter can run against, and a vector similarity detector (ollama embeddings, pluggable interface).
+
+The output-shape story is the reason kit authoring matters beyond workflow reuse. The Knowledge Kit store contract is representation-neutral — the pipeline is identical, but the rendering layer is swapped by adapter. Today two adapters ship: the default adapter (flat markdown records with YAML frontmatter and a JSON graph index) and the Obsidian adapter (one human-canonical note per record, category→folder hierarchy, configurable frontmatter dimensions, living overviews, superseded notes in `archive/` not deleted). Authors who choose the Obsidian adapter get the same gated workflow rendered into the shape they already think in. That is what kit authoring unlocks: packaging both the process discipline and the output opinion as a deployable unit. (The Obsidian adapter is shipped; layout/dimensions refinements and person/entity card support are in development.)
+
+### Direction: the sequenced path to a kit ecosystem
+
+The items below are direction, not committed delivery dates. They record the intended shape of where this work goes.
+
+**Domain kits composing the substrate.** The store contract, mutation gate, and adapter model are not knowledge-specific. The next intended kits compose this substrate for specific domains: a Sales Kit (territory/customer/initiative schema, flows for managing account snapshots, side-effect adapters for CRM event logging) and a Research Kit (transcript capture→compile→recall with configurable similarity thresholds). Both are direction — not shipped.
+
+**Distribution, sequenced.** A registry of validated kits and a marketplace for kit distribution are the intended end-state. The sequencing is explicit: authoring tooling and covetable reference kits first (shipped), then a registry (direction), then a marketplace (direction). Claims of a shipped marketplace or registry are not warranted.
+
+---
+
 ## Direction
 
 The items below are direction, not committed delivery dates. They record the intended shape of where this work goes.
