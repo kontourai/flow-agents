@@ -355,6 +355,15 @@ function exportOpencodePlugin(): string {
   // (for session-start steering context) and tool.execute.before (for
   // policy). This is the closest reasonable approximation — documented here
   // as an honest gap matching the codex live-hook-influence caveat pattern.
+  //
+  // KNOWN GAP (verified 2026-06-11, opencode v1.16.2): session.created is NOT
+  // delivered to plugin event handlers in opencode  (non-interactive) mode.
+  // The session IS created server-side but the event fires before the plugin
+  // hook dispatch loop is active. As a result, agentSpawn telemetry (session.start)
+  // is never emitted in run-mode sessions — only tool.invoke/tool.result appear.
+  // This is an opencode runtime limitation, not a bug in this plugin.
+  // Session.start telemetry carries L1 conformance but is unavailable in run mode.
+  // See docs/spec/runtime-hook-surface.md opencode mapping row for the full gap note.
   return `/**
  * Flow Agents opencode plugin.
  *
@@ -369,6 +378,13 @@ function exportOpencodePlugin(): string {
  * cannot intercept mid-session user messages before they are processed.
  * This is an accepted gap documented here analogously to the codex
  * live-hook-influence caveat.
+ *
+ * KNOWN GAP: session.created is NOT delivered to plugin handlers in opencode
+ * run (non-interactive) mode (verified v1.16.2, 2026-06-11). agentSpawn
+ * telemetry (session.start) is therefore absent from run-mode sessions.
+ * tool.invoke and tool.result events (L1) are still recorded normally.
+ * This is an opencode runtime limitation; no workaround is available without
+ * a different hook surface. See docs/spec/runtime-hook-surface.md for details.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -547,7 +563,8 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", async (event, _ctx) => {
-    runTelemetry("before_agent_start");
+    // Telemetry for agentSpawn is emitted by session_start above; do not repeat it here
+    // to avoid duplicate session.start events in the telemetry log.
     // Inject workflow steering context at agent start
     const result = runAdapter("pi-hook-adapter.js", "before_agent_start", "workflow-steering", "workflow-steering.js");
     if (result.context) {

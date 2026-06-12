@@ -207,7 +207,7 @@ The following tables show the canonical Flow Agents events and their correspondi
 
 | Canonical Event | Claude Code | Codex | Kiro | opencode | pi |
 | --- | --- | --- | --- | --- | --- |
-| `agentSpawn` | `SessionStart` | `SessionStart` | `SessionStart` | `session.created` | `session_start` |
+| `agentSpawn` | `SessionStart` | `SessionStart` | `SessionStart` | `session.created` (interactive mode only — NOT delivered to plugin hooks in `run`/non-interactive mode; verified v1.16.2) | `session_start` |
 | `userPromptSubmit` | `UserPromptSubmit` | `UserPromptSubmit` | `UserPromptSubmit` | No native equivalent | `input` (closest; fires on user input, not confirmed submission) |
 | `preToolUse` | `PreToolUse` | `PreToolUse` | `PreToolUse` | `tool.execute.before` | `tool_call` (blockable) |
 | `permissionRequest` | `PermissionRequest` | `PermissionRequest` | No native equivalent | No native equivalent | No native equivalent |
@@ -333,7 +333,9 @@ Each adapter must include a conformance declaration in its adapter documentation
 conformance_level: L1
 host: opencode
 event_coverage:
-  agentSpawn: session.created (full fidelity)
+  agentSpawn: session.created — delivered in interactive mode; NOT delivered to plugin
+    hooks in run (non-interactive) mode (verified v1.16.2, 2026-06-11). agentSpawn
+    telemetry is absent from run-mode sessions; tool.invoke/tool.result are present.
   userPromptSubmit: no native equivalent — workflow steering unavailable at turn boundary
   preToolUse: tool.execute.before (full fidelity, blocking available)
   postToolUse: tool.execute.after (full fidelity)
@@ -342,10 +344,14 @@ event_coverage:
   subagentStart: no native equivalent
   subagentStop: no native equivalent
 policy_coverage:
-  workflow_steering: partial — injected at session.created only, not at each turn
+  workflow_steering: partial — injected at session.created only (interactive mode); unavailable in run mode
   quality_gate: wired at tool.execute.after
   stop_goal_fit: degraded — session.idle does not reliably fire at completion
   config_protection: wired at tool.execute.before (blocking)
+named_gaps:
+  session.created_run_mode: In opencode run mode, session.created is not delivered
+    to plugin hooks. This is an opencode runtime limitation with no known workaround
+    at the plugin API level. agentSpawn telemetry is NOT_VERIFIED for run-mode sessions.
 ```
 
 ---

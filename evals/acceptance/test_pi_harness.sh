@@ -81,6 +81,21 @@ process.exit(0);
   else
     _fail "pi telemetry missing one or more required event types (session.start, tool.invoke, tool.result, session.end)"
   fi
+
+  # Assert session.start appears exactly once (guards against before_agent_start double-emit).
+  if [[ -f "$telemetry_file" ]] && \
+    node -e "
+const fs = require('fs');
+const lines = fs.readFileSync('$telemetry_file', 'utf8').trim().split('\n');
+const types = lines.map(l => { try { return JSON.parse(l).event_type; } catch(e) { return ''; } });
+const count = types.filter(t => t === 'session.start').length;
+if (count !== 1) { process.stderr.write('session.start count=' + count + ' (expected exactly 1)\n'); process.exit(1); }
+process.exit(0);
+" 2>/dev/null; then
+    _pass "pi telemetry: session.start appears exactly once (no double-emit)"
+  else
+    _fail "pi telemetry: session.start count is not 1 (double-emit or missing)"
+  fi
 fi
 
 PARENT_TELEMETRY="$(dirname "$TMP_WORK")/.telemetry"
