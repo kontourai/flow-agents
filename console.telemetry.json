@@ -9,7 +9,9 @@
       "id": "flow-agents-workflow-state",
       "label": "Workflow state",
       "root": "product:flow-agents:.flow-agents",
-      "files": ["state.json"],
+      "files": [
+        "state.json"
+      ],
       "attributes": {
         "taskSlug": "task_slug",
         "repo": "repo",
@@ -30,7 +32,9 @@
       "id": "flow-agents-acceptance",
       "label": "Acceptance criteria",
       "root": "product:flow-agents:.flow-agents",
-      "files": ["acceptance.json"],
+      "files": [
+        "acceptance.json"
+      ],
       "attributes": {
         "taskSlug": "task_slug",
         "repo": "repo",
@@ -47,7 +51,9 @@
       "id": "flow-agents-evidence",
       "label": "Verification evidence",
       "root": "product:flow-agents:.flow-agents",
-      "files": ["evidence.json"],
+      "files": [
+        "evidence.json"
+      ],
       "attributes": {
         "taskSlug": "task_slug",
         "repo": "repo",
@@ -67,7 +73,9 @@
       "id": "flow-agents-handoffs",
       "label": "Handoffs",
       "root": "product:flow-agents:.flow-agents",
-      "files": ["handoff.json"],
+      "files": [
+        "handoff.json"
+      ],
       "attributes": {
         "taskSlug": "task_slug",
         "repo": "repo",
@@ -87,7 +95,9 @@
       "id": "flow-agents-learning",
       "label": "Learning records",
       "root": "product:flow-agents:.flow-agents",
-      "files": ["learning.json"],
+      "files": [
+        "learning.json"
+      ],
       "attributes": {
         "taskSlug": "task_slug",
         "repo": "repo",
@@ -101,22 +111,75 @@
     }
   ],
   "facets": [
-    { "id": "skills", "label": "Skills", "attribute": "skill", "limit": 16 },
-    { "id": "tools", "label": "Tools", "attribute": "toolName", "limit": 16 },
-    { "id": "flows", "label": "Flows", "attribute": "flow", "limit": 16 },
-    { "id": "repositories", "label": "Repositories", "attribute": "repo", "limit": 16 },
-    { "id": "projects", "label": "Projects", "attribute": "project", "limit": 16 },
-    { "id": "runtimes", "label": "Runtimes", "attribute": "runtime", "limit": 12 },
-    { "id": "agents", "label": "Agents", "attribute": "agent", "limit": 16 },
-    { "id": "models", "label": "Models", "attribute": "model", "limit": 16 },
-    { "id": "statuses", "label": "Statuses", "attribute": "status", "limit": 12 },
-    { "id": "outcomes", "label": "Outcomes", "attribute": "outcome", "limit": 12 }
+    {
+      "id": "skills",
+      "label": "Skills",
+      "attribute": "skill",
+      "limit": 16
+    },
+    {
+      "id": "tools",
+      "label": "Tools",
+      "attribute": "toolName",
+      "limit": 16
+    },
+    {
+      "id": "flows",
+      "label": "Flows",
+      "attribute": "flow",
+      "limit": 16
+    },
+    {
+      "id": "repositories",
+      "label": "Repositories",
+      "attribute": "repo",
+      "limit": 16
+    },
+    {
+      "id": "projects",
+      "label": "Projects",
+      "attribute": "project",
+      "limit": 16
+    },
+    {
+      "id": "runtimes",
+      "label": "Runtimes",
+      "attribute": "runtime",
+      "limit": 12
+    },
+    {
+      "id": "agents",
+      "label": "Agents",
+      "attribute": "agent",
+      "limit": 16
+    },
+    {
+      "id": "models",
+      "label": "Models",
+      "attribute": "model",
+      "limit": 16
+    },
+    {
+      "id": "statuses",
+      "label": "Statuses",
+      "attribute": "status",
+      "limit": 12
+    },
+    {
+      "id": "outcomes",
+      "label": "Outcomes",
+      "attribute": "outcome",
+      "limit": 12
+    }
   ],
   "flows": [
     {
       "id": "builder.shape",
       "label": "Builder shape",
-      "match": { "attribute": "flow", "includes": "builder.shape" },
+      "match": {
+        "attribute": "flow",
+        "includes": "builder.shape"
+      },
       "titleAttribute": "title",
       "detailAttributes": {
         "Project": "project",
@@ -135,7 +198,10 @@
     {
       "id": "builder.build",
       "label": "Builder build",
-      "match": { "attribute": "flow", "includes": "builder.build" },
+      "match": {
+        "attribute": "flow",
+        "includes": "builder.build"
+      },
       "titleAttribute": "title",
       "detailAttributes": {
         "Project": "project",
@@ -154,22 +220,51 @@
     {
       "id": "delivery",
       "label": "Delivery workflows",
-      "match": { "attribute": "skill", "includes": "deliver" },
+      "match": {
+        "attribute": "skill",
+        "includes": "deliver"
+      },
       "titleAttribute": "title",
       "limit": 10
     },
     {
       "id": "verification",
       "label": "Verification workflows",
-      "match": { "attribute": "skill", "includes": "verify-work" },
+      "match": {
+        "attribute": "skill",
+        "includes": "verify-work"
+      },
       "titleAttribute": "title",
       "limit": 10
     },
     {
       "id": "review",
       "label": "Review workflows",
-      "match": { "attribute": "skill", "includes": "review-work" },
+      "match": {
+        "attribute": "skill",
+        "includes": "review-work"
+      },
       "titleAttribute": "title",
+      "limit": 10
+    },
+    {
+      "id": "knowledge",
+      "label": "Knowledge flows",
+      "match": {
+        "attribute": "flow",
+        "includes": "knowledge."
+      },
+      "titleAttribute": "title",
+      "detailAttributes": {
+        "Project": "project",
+        "Repository": "repo",
+        "Task": "taskSlug",
+        "Status": "status",
+        "Outcome": "outcome",
+        "Agent": "agent",
+        "Runtime": "runtime",
+        "Observed": "observedAt"
+      },
       "limit": 10
     }
   ]

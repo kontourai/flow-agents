@@ -45,6 +45,10 @@ The <a href="../spec/runtime-hook-surface.html">Runtime Hook Surface spec</a> de
     <strong>Runtime Hook Surface Spec</strong>
     <span>Canonical event taxonomy, four policy classes, conformance levels L0/L1/L2, mapping tables, and the engine contract for adapter authors.</span>
   </a>
+  <a class="doc-card" href="knowledge-kit-live.html">
+    <strong>Knowledge Kit Live Example</strong>
+    <span>End-to-end proof of the Knowledge Kit ingest + compile flows against a real Strands agent (OllamaModel / qwen3:1.7b). No API key required. Includes acceptance test with telemetry and provenance assertions.</span>
+  </a>
 </div>
 
 ---
