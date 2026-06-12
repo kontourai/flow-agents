@@ -1,0 +1,60 @@
+{
+  "id": "knowledge.ingest",
+  "version": "1.0",
+  "steps": [
+    { "id": "capture", "next": "classify" },
+    { "id": "classify", "next": "route" },
+    { "id": "route", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "gates": {
+    "capture-gate": {
+      "step": "capture",
+      "expects": [
+        {
+          "id": "raw-text-received",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "Raw text and metadata have been received and are non-empty.",
+          "claim": {
+            "type": "knowledge.ingest.capture",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "classify-gate": {
+      "step": "classify",
+      "expects": [
+        {
+          "id": "classification-recorded",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "The raw record has been classified and stored with a non-empty category and type='raw', satisfying the store contract's create op provenance requirements.",
+          "claim": {
+            "type": "knowledge.ingest.classification",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "route-gate": {
+      "step": "route",
+      "expects": [
+        {
+          "id": "routing-decision",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "A routing decision has been recorded for the classified raw record (e.g. queue for compile, discard, or hold).",
+          "claim": {
+            "type": "knowledge.ingest.routing",
+            "subject": "decision",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    }
+  }
+}

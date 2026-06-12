@@ -1,0 +1,60 @@
+{
+  "id": "knowledge.compile",
+  "version": "1.0",
+  "steps": [
+    { "id": "select-raws", "next": "compile" },
+    { "id": "compile", "next": "link" },
+    { "id": "link", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "gates": {
+    "select-raws-gate": {
+      "step": "select-raws",
+      "expects": [
+        {
+          "id": "raw-ids-selected",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "One or more raw record IDs have been selected for compilation. Each ID must resolve to an existing raw record in the store.",
+          "claim": {
+            "type": "knowledge.compile.selection",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "compile-gate": {
+      "step": "compile",
+      "expects": [
+        {
+          "id": "compiled-record-provenance",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "The compiled record has been created with provenance.source_ids listing every consumed raw ID, and source links (kind='source') from the compiled record to each raw record — satisfying the store contract's compiled record requirements.",
+          "claim": {
+            "type": "knowledge.compile.provenance",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "link-gate": {
+      "step": "link",
+      "expects": [
+        {
+          "id": "provenance-refs-resolve",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "Every provenance ref in the compiled record resolves to a retrievable raw record via the store's get() operation. The graph index reflects all source links.",
+          "claim": {
+            "type": "knowledge.compile.link-integrity",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    }
+  }
+}

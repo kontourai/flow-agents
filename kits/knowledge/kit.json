@@ -9,6 +9,16 @@
       "id": "knowledge.store-contract",
       "path": "flows/store-contract.flow.json",
       "description": "Gate that requires contract-suite evidence before a store implementation is accepted."
+    },
+    {
+      "id": "knowledge.ingest",
+      "path": "flows/ingest.flow.json",
+      "description": "Ingest raw captures: capture → classify → route. Gate on classify requires category + type='raw' classification evidence per the store contract create op."
+    },
+    {
+      "id": "knowledge.compile",
+      "path": "flows/compile.flow.json",
+      "description": "Compile classified raws into durable notes: select-raws → compile → link. Gate on compile requires provenance refs to every consumed raw record."
     }
   ],
   "docs": [
@@ -26,6 +36,11 @@
       "id": "knowledge.default-store",
       "path": "adapters/default-store/index.js",
       "description": "Default store adapter: markdown files + YAML frontmatter + wikilinks + JSON graph index."
+    },
+    {
+      "id": "knowledge.flow-runner",
+      "path": "adapters/flow-runner/index.js",
+      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links. Emits canonical telemetry events at gate points."
     }
   ],
   "evals": [
@@ -33,6 +48,11 @@
       "id": "knowledge.contract-suite",
       "path": "evals/contract-suite/suite.test.js",
       "description": "Parameterized contract test suite for any Knowledge Kit store adapter."
+    },
+    {
+      "id": "knowledge.ingest-compile-suite",
+      "path": "evals/ingest-compile/suite.test.js",
+      "description": "Eval cases for ingest (AC-mapped), compile provenance gate, telemetry emission, and ref resolution."
     }
   ]
 }
