@@ -164,6 +164,53 @@ For conflicts on re-install: if you install a different source with an existing 
 
 See the [Flow Kit Repository Contract](flow-kit-repository-contract.md) for the full validation rules, registry schema, activation diagnostics, and the install/update/force semantics.
 
+## Layering: container vs. agent extension
+
+A Flow Agents Kit is built on two distinct layers. Understanding the split helps you know which rules come from Flow and which come from Flow Agents.
+
+### Layer 1: the Flow Kit container (Flow-owned)
+
+The **container contract** is owned by [Kontour Flow](https://kontourai.github.io/flow/flow-kit-container). It governs:
+
+- `kit.json` required fields: `schema_version` ("1.0"), `id` (kebab-case), `name`, `flows` (non-empty list with `path` entries).
+- Optional core fields: `description`, `product_name`.
+- Path rules: all declared paths must be relative, must not contain `..`, and must resolve inside the kit directory.
+- The **extension model**: unknown top-level fields are consumer extensions; core validation ignores-but-permits them.
+
+Container validation is surfaced in Flow's CLI as `flow validate-kit <kit-dir>`. Flow Agents delegates container validation to Flow when `FLOW_CLI_ROOT` is configured; without it, Flow Agents applies the same rules internally.
+
+For the authoritative container spec and JSON Schema, see [kontourai/flow#67](https://github.com/kontourai/flow/pull/67) (the spec PR) and the published `schemas/flow-kit-container.schema.json` in the `@kontourai/flow` package.
+
+### Layer 2: the Flow Agents agent extension (Flow Agents-owned)
+
+The **agent extension** is owned by Flow Agents. It defines the optional asset classes that turn a Flow Kit into a **Flow Agents Kit**:
+
+| Extension field | Asset type |
+|---|---|
+| `skills` | Reusable agent skill procedures |
+| `docs` | Documentation assets |
+| `adapters` | Runtime or framework adapters |
+| `evals` | Evaluation suites |
+| `assets` | General supporting assets |
+
+Each extension field is an optional array of entries with `id`, `path`, and optional `description`. Extension fields are validated by Flow Agents using the same path rules as the container layer (relative, no `..`, must exist). Unknown extension entries are recorded as `skipped_assets` during activation rather than treated as errors.
+
+### When a kit "is" a Flow Agents Kit
+
+A kit is a **Flow Agents Kit** when it satisfies both layers:
+
+1. It passes Flow Kit container validation (valid `kit.json` with core fields and at least one `flows` entry).
+2. It optionally declares one or more Flow Agents extension fields (`skills`, `docs`, `adapters`, `evals`, `assets`).
+
+A kit with only core fields (no extension fields) is a valid Flow Kit and is also a valid Flow Agents Kit — it just installs and activates only its Flow Definitions.
+
+### Why two layers?
+
+The split keeps ownership clean:
+
+- Flow authors, installs, and validates the container shape. Any tool that understands Flow Kits can install any kit without knowing about Flow Agents.
+- Flow Agents extends the container for agent-specific assets without modifying the core contract. Third-party kit authors who don't need skills or adapters never have to know about the extension layer.
+
 ## Direction
 
 Flow Kits are designed to be shareable workflow units — authored once, carried across teams and workspaces. The intended growth path is distribution from git remotes and a curated Kontour kit catalog of Kontour-authored kits covering work modes beyond software delivery. Today install is local-path only; remote fetch is explicitly a non-goal in this version.
