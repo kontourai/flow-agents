@@ -26,6 +26,8 @@
  *   // All methods callable; registerHooks() is a no-op without the SDK.
  */
 
+import fs from "node:fs";
+import path from "node:path";
 import { TelemetrySink } from "./telemetry.js";
 import { PolicyGate } from "./policy.js";
 
@@ -59,6 +61,81 @@ export interface StrandsEvent {
 }
 
 // ---------------------------------------------------------------------------
+// Kit flow discovery (Issue #32, Decision Q3: option (a))
+//
+// activateStrandsLocal (src/runtime-adapters.ts) writes kit flow files to
+// .flow-agents/runtime/strands/flows/<kit-id>/<asset-id>.flow.json.
+// steeringContext() reads those files and surfaces their id + description
+// so the agent is aware of available workflow guidance without the hooks
+// needing to know anything about the catalog layout.
+// ---------------------------------------------------------------------------
+
+interface KitFlowEntry {
+  kitId: string;
+  assetId: string;
+  description: string;
+}
+
+function findRepoRoot(start: string): string {
+  let current = path.resolve(start);
+  for (let i = 0; i < 40; i++) {
+    if (
+      fs.existsSync(path.join(current, ".git")) ||
+      fs.existsSync(path.join(current, "AGENTS.md"))
+    ) {
+      return current;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return path.resolve(start);
+}
+
+function readKitFlows(flowAgentsDir: string): KitFlowEntry[] {
+  const flowsDir = path.join(flowAgentsDir, "runtime", "strands", "flows");
+  if (!fs.existsSync(flowsDir)) return [];
+  const results: KitFlowEntry[] = [];
+
+  function walkDir(dir: string): void {
+    for (const name of fs.readdirSync(dir).sort()) {
+      const full = path.join(dir, name);
+      const stat = fs.statSync(full);
+      if (stat.isDirectory()) {
+        walkDir(full);
+      } else if (name.endsWith(".flow.json")) {
+        try {
+          const payload = JSON.parse(fs.readFileSync(full, "utf8")) as Record<string, unknown>;
+          const stemName = name.replace(/\.flow\.json$/, "");
+          const assetId = typeof payload.id === "string" ? payload.id : stemName;
+          const description = typeof payload.description === "string" ? payload.description : "";
+          // kit_id is the directory component between flows/ and the file
+          const rel = path.relative(flowsDir, full);
+          const relParts = rel.split(path.sep);
+          const kitId = relParts.length >= 2 ? relParts[0] : "";
+          results.push({ kitId, assetId, description });
+        } catch {
+          // Malformed file — skip silently (fail-open)
+        }
+      }
+    }
+  }
+
+  walkDir(flowsDir);
+  return results;
+}
+
+function buildKitFlowsHint(flows: KitFlowEntry[]): string {
+  if (flows.length === 0) return "";
+  const lines = ["KIT FLOWS: the following kit flows are activated for this workspace:"];
+  for (const flow of flows) {
+    const desc = flow.description ? ` — ${flow.description.slice(0, 120)}` : "";
+    lines.push(`  • ${flow.assetId}${desc}`);
+  }
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // FlowAgentsHooks options
 // ---------------------------------------------------------------------------
 
@@ -85,9 +162,12 @@ export interface FlowAgentsHooksOptions {
 export class FlowAgentsHooks {
   private readonly sink: TelemetrySink;
   private readonly policyGate: PolicyGate;
+  private readonly _workspace: string;
   private _sessionStartMs: number | null = null;
 
   constructor(options: FlowAgentsHooksOptions = {}) {
+    this._workspace = findRepoRoot(options.workspace ?? process.cwd());
+
     this.sink = new TelemetrySink({
       sinkPath: options.sinkPath,
       workspace: options.workspace,
@@ -98,6 +178,30 @@ export class FlowAgentsHooks {
     this.policyGate = new PolicyGate({
       engineRoot: options.engineRoot,
     });
+  }
+
+  // --------------------------------------------------------------------------
+  // Steering context — available without strands-agents installed (Issue #32 AC2)
+  // --------------------------------------------------------------------------
+
+  /**
+   * Return workflow-steering context text for the current workspace.
+   *
+   * Includes activated kit flows discovered from the strands-local runtime
+   * path (.flow-agents/runtime/strands/flows/) written by
+   * `flow-kit activate --adapter strands-local`.
+   *
+   * Callers should prepend this to the Agent's system prompt:
+   *
+   *   const hooks = new FlowAgentsHooks({ workspace: "." });
+   *   const agent = new Agent({ systemPrompt: basePrompt + hooks.steeringContext() });
+   */
+  steeringContext(): string {
+    const flowAgentsDir = path.join(this._workspace, ".flow-agents");
+    const flows = readKitFlows(flowAgentsDir);
+    const kitFlowsHint = buildKitFlowsHint(flows);
+    if (!kitFlowsHint) return "";
+    return "\n\n---\n" + kitFlowsHint + "\n---";
   }
 
   // --------------------------------------------------------------------------

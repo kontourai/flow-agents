@@ -152,3 +152,38 @@ export function activateCodexLocal(sourceRoot: string, dest: string): Record<str
   generated.push({ asset_class: "activation-manifest", path: relPath(dest, manifestPath), kit_id: "runtime", asset_id: "codex-local.activation", source_path: manifestPath.split(path.sep).join("/") });
   return { selected_adapter: "codex-local", supported_asset_classes: ["flows"], generated_runtime_files: generated, skipped_assets: skipped, warnings: inventory.warnings, errors: inventory.errors };
 }
+
+// Decision Q3 (Issue #32): Option (a) — new adapter id "strands-local" rather than
+// loading kit flows inside FlowAgentsHooks. Rationale: activation is a workspace-prep
+// concern (reads catalog + installed kits, writes runtime files, produces diagnostics).
+// Keeping it in the CLI adapter layer maximises reuse of readKitInventory and safeSegment,
+// mirrors the codex-local pattern exactly, and keeps framework adapters free of catalog-
+// layout knowledge. The Strands steering layer then reads the written runtime files.
+export function activateStrandsLocal(sourceRoot: string, dest: string): Record<string, unknown> {
+  const inventory = readKitInventory(sourceRoot, dest);
+  // Runtime flows land at .flow-agents/runtime/strands/flows/<kit-id>/<asset-id>.flow.json
+  // so the Strands steering context can glob for *.flow.json under this path.
+  const runtimeDir = path.join(dest, ".flow-agents", "runtime", "strands");
+  const generated: Record<string, string>[] = [];
+  const skipped: Record<string, string | null>[] = [];
+  for (const asset of inventory.assets) {
+    if (asset.asset_class !== "flows") {
+      skipped.push({ asset_class: asset.asset_class, path: asset.relative_path, kit_id: asset.kit_id, asset_id: asset.asset_id, reason: "asset class is diagnostic-only for strands-local" });
+      continue;
+    }
+    if (!asset.asset_id) {
+      skipped.push({ asset_class: asset.asset_class, path: asset.relative_path, kit_id: asset.kit_id, asset_id: null, reason: "flow asset is missing an id" });
+      continue;
+    }
+    const output = path.join(runtimeDir, "flows", safeSegment(asset.kit_id), `${safeSegment(asset.asset_id)}.flow.json`);
+    fs.mkdirSync(path.dirname(output), { recursive: true });
+    fs.copyFileSync(asset.source_path, output);
+    generated.push({ asset_class: asset.asset_class, path: relPath(dest, output), kit_id: asset.kit_id, asset_id: asset.asset_id, source_path: asset.source_path.split(path.sep).join("/") });
+  }
+  fs.mkdirSync(runtimeDir, { recursive: true });
+  const manifest = { schema_version: "1.0", adapter: "strands-local", supported_asset_classes: ["flows"], generated_runtime_files: generated, skipped_assets: skipped, warnings: inventory.warnings, errors: inventory.errors };
+  const manifestPath = path.join(runtimeDir, "activation.json");
+  writeJson(manifestPath, manifest);
+  generated.push({ asset_class: "activation-manifest", path: relPath(dest, manifestPath), kit_id: "runtime", asset_id: "strands-local.activation", source_path: manifestPath.split(path.sep).join("/") });
+  return { selected_adapter: "strands-local", supported_asset_classes: ["flows"], generated_runtime_files: generated, skipped_assets: skipped, warnings: inventory.warnings, errors: inventory.errors };
+}

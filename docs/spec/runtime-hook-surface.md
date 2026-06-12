@@ -476,3 +476,50 @@ node packaging/conformance/run-conformance.js \
 ```
 
 See `packaging/conformance/README.md` for the full fixture inventory and declaration format.
+
+---
+
+## 9. Framework-Path Kit Activation (strands-local adapter)
+
+**Added**: Issue #32 — Knowledge Kit S4: framework-path kit activation.
+
+### 9.1 Decision record (Q3)
+
+Kit flow activation for Strands workspaces is implemented as a new runtime adapter id (`strands-local`) in `src/runtime-adapters.ts`, not as kit-flow loading inside `FlowAgentsHooks`. This keeps the `FlowAgentsHooks` class free of catalog-layout knowledge and reuses the `readKitInventory` + `safeSegment` helpers from the `codex-local` path.
+
+The CLI command is:
+
+```bash
+flow-kit activate --adapter strands-local [--dest DIR] [--source-root DIR]
+```
+
+This writes activated flow files to `.flow-agents/runtime/strands/flows/<kit-id>/<asset-id>.flow.json` and produces a parity-diagnostic `activation.json` (same schema as codex-local: `schema_version`, `adapter`, `supported_asset_classes`, `generated_runtime_files`, `skipped_assets`, `warnings`, `errors`).
+
+### 9.2 Steering context surfacing (AC2)
+
+`FlowAgentsHooks.steering_context()` (Python) and `FlowAgentsHooks.steeringContext()` (TypeScript) read the runtime flow files written by `strands-local` activation and include a `KIT FLOWS:` section in the steering context text. This section lists each activated kit flow by id and description so the agent is aware of available workflow guidance without the hooks needing to know the catalog layout at construction time.
+
+**Python usage** (see ):
+
+```
+hooks = FlowAgentsHooks(workspace=".")
+system_prompt = base_prompt + hooks.steering_context()
+# steering_context() includes KIT FLOWS section if .flow-agents/runtime/strands/flows/ is populated
+```
+
+**TypeScript usage**:
+
+```typescript
+const hooks = new FlowAgentsHooks({ workspace: "." });
+const systemPrompt = basePrompt + hooks.steeringContext();
+// steeringContext() includes KIT FLOWS section if .flow-agents/runtime/strands/flows/ is populated
+```
+
+### 9.3 Co-existence with codex-local
+
+The `codex-local` and `strands-local` runtime directories are independent:
+
+- `codex-local` writes to `.flow-agents/runtime/codex/`
+- `strands-local` writes to `.flow-agents/runtime/strands/`
+
+Running either adapter does not affect the other's runtime directory. Both adapters skip non-flow asset classes (skills, docs, adapters, evals, assets) with `reason: "asset class is diagnostic-only for <adapter>"`.

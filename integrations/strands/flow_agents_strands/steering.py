@@ -77,6 +77,37 @@ def _safe_text(value: Any, max_length: int = 240) -> str:
     return text[: max_length - 3] + "..."
 
 
+def _read_strands_kit_flows(flow_agents_dir: Path) -> List[Dict[str, Any]]:
+    """
+    Scan .flow-agents/runtime/strands/flows/ for activated kit flow files.
+
+    Returns a list of dicts with keys: kit_id, asset_id, description.
+    Files are expected to be JSON with at least an "id" field (and optional
+    "description"). The path structure is flows/<kit-id>/<asset-id>.flow.json,
+    produced by activateStrandsLocal in src/runtime-adapters.ts (Issue #32,
+    Decision Q3: option (a) — new adapter id writes runtime files here so
+    the steering layer can discover them without knowing the catalog layout).
+    """
+    flows_dir = flow_agents_dir / "runtime" / "strands" / "flows"
+    if not flows_dir.exists():
+        return []
+    results: List[Dict[str, Any]] = []
+    for flow_file in sorted(flows_dir.rglob("*.flow.json")):
+        payload = _read_json(flow_file)
+        if payload is None:
+            continue
+        asset_id = payload.get("id") or flow_file.stem.replace(".flow", "")
+        description = payload.get("description") or ""
+        # Infer kit_id from the directory component between flows/ and the file
+        try:
+            rel_parts = flow_file.relative_to(flows_dir).parts
+            kit_id = rel_parts[0] if len(rel_parts) >= 2 else ""
+        except ValueError:
+            kit_id = ""
+        results.append({"kit_id": kit_id, "asset_id": asset_id, "description": description})
+    return results
+
+
 class SteeringContext:
     """
     Loads Flow Agents workflow-steering context from .flow-agents/ state files.
@@ -90,7 +121,8 @@ class SteeringContext:
         """
         Return a steering text string (possibly empty) for the current
         workflow state.  Mirrors the stateSteering() + contextMapSteering()
-        output from workflow-steering.js.
+        output from workflow-steering.js, and also surfaces activated kit
+        flows from the strands-local runtime path (Issue #32 AC2).
         """
         parts: List[str] = []
 
@@ -101,6 +133,10 @@ class SteeringContext:
         ctx_hint = self._context_map_steering()
         if ctx_hint:
             parts.append(ctx_hint)
+
+        kit_flows_hint = self._kit_flows_steering()
+        if kit_flows_hint:
+            parts.append(kit_flows_hint)
 
         if not parts:
             return ""
@@ -170,3 +206,20 @@ class SteeringContext:
             "If structure, commands, schemas, skills, agents, or packs changed, "
             "run `npm run context-map -- --check`."
         )
+
+    def _kit_flows_steering(self) -> str:
+        """
+        Surface activated kit flows from the strands-local runtime path.
+
+        Reads .flow-agents/runtime/strands/flows/ (written by `flow-kit activate
+        --adapter strands-local`) and emits a brief hint listing active kit flows
+        by id and description so the agent is aware of available workflow guidance.
+        """
+        flows = _read_strands_kit_flows(self._flow_agents_dir)
+        if not flows:
+            return ""
+        lines = ["KIT FLOWS: the following kit flows are activated for this workspace:"]
+        for flow in flows:
+            desc = f" — {_safe_text(flow['description'], 120)}" if flow.get("description") else ""
+            lines.append(f"  • {flow['asset_id']}{desc}")
+        return "\n".join(lines)

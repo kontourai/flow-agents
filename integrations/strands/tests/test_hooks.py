@@ -302,3 +302,91 @@ class TestFlowAgentsHooksSteeringContext(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestSteeringContextKitFlows(unittest.TestCase):
+    """
+    Verify steering context surfaces activated kit flows from the strands-local
+    runtime path — Issue #32 AC2.
+
+    Fixture: a fake .flow.json file written to the path that activateStrandsLocal
+    produces (.flow-agents/runtime/strands/flows/<kit-id>/<asset-id>.flow.json).
+    """
+
+    def _write_fake_flow(self, workspace: Path, kit_id: str, asset_id: str, description: str = "") -> None:
+        flows_dir = workspace / ".flow-agents" / "runtime" / "strands" / "flows" / kit_id
+        flows_dir.mkdir(parents=True, exist_ok=True)
+        flow_file = flows_dir / f"{asset_id.replace('.', '-')}.flow.json"
+        payload = {"id": asset_id, "description": description}
+        flow_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_kit_flows_empty_when_no_runtime_dir(self):
+        """No runtime dir → no kit flows hint in steering context."""
+        from flow_agents_strands.steering import SteeringContext
+        with tempfile.TemporaryDirectory() as d:
+            ctx = SteeringContext(workspace=d)
+            result = ctx.load()
+            self.assertNotIn("KIT FLOWS", result)
+
+    def test_kit_flows_surfaced_when_runtime_flow_files_exist(self):
+        """Fake runtime flow file → kit flow id appears in steering context (AC2)."""
+        from flow_agents_strands.steering import SteeringContext
+        with tempfile.TemporaryDirectory() as d:
+            ws = Path(d)
+            self._write_fake_flow(ws, "builder", "builder.shape", "Shape a problem.")
+            ctx = SteeringContext(workspace=d)
+            result = ctx.load()
+            self.assertIn("KIT FLOWS", result)
+            self.assertIn("builder.shape", result)
+
+    def test_kit_flows_includes_description(self):
+        """Description from flow JSON appears in steering context."""
+        from flow_agents_strands.steering import SteeringContext
+        with tempfile.TemporaryDirectory() as d:
+            ws = Path(d)
+            self._write_fake_flow(ws, "builder", "builder.build", "Build a feature end-to-end.")
+            ctx = SteeringContext(workspace=d)
+            result = ctx.load()
+            self.assertIn("Build a feature end-to-end.", result)
+
+    def test_kit_flows_multiple_flows_all_listed(self):
+        """Multiple kit flows all appear in steering context."""
+        from flow_agents_strands.steering import SteeringContext
+        with tempfile.TemporaryDirectory() as d:
+            ws = Path(d)
+            self._write_fake_flow(ws, "builder", "builder.shape", "Shape.")
+            self._write_fake_flow(ws, "builder", "builder.build", "Build.")
+            ctx = SteeringContext(workspace=d)
+            result = ctx.load()
+            self.assertIn("builder.shape", result)
+            self.assertIn("builder.build", result)
+
+    def test_kit_flows_malformed_json_skipped(self):
+        """Malformed flow JSON does not crash steering; other flows still appear."""
+        from flow_agents_strands.steering import SteeringContext
+        with tempfile.TemporaryDirectory() as d:
+            ws = Path(d)
+            self._write_fake_flow(ws, "builder", "builder.shape", "Shape.")
+            # Write a malformed flow file
+            bad_dir = ws / ".flow-agents" / "runtime" / "strands" / "flows" / "builder"
+            bad_dir.mkdir(parents=True, exist_ok=True)
+            (bad_dir / "bad.flow.json").write_text("{ not valid json", encoding="utf-8")
+            ctx = SteeringContext(workspace=d)
+            result = ctx.load()
+            # builder.shape should still appear; no crash
+            self.assertIn("builder.shape", result)
+
+    def test_hooks_steering_context_surfaces_kit_flows(self):
+        """FlowAgentsHooks.steering_context() surfaces kit flows (AC2 via hooks layer)."""
+        with tempfile.TemporaryDirectory() as d:
+            ws = Path(d)
+            flows_dir = ws / ".flow-agents" / "runtime" / "strands" / "flows" / "builder"
+            flows_dir.mkdir(parents=True)
+            (flows_dir / "builder-shape.flow.json").write_text(
+                json.dumps({"id": "builder.shape", "description": "Shape a problem."}),
+                encoding="utf-8",
+            )
+            from flow_agents_strands import FlowAgentsHooks
+            hooks = FlowAgentsHooks(sink_path=d, workspace=d)
+            ctx = hooks.steering_context()
+            self.assertIn("KIT FLOWS", ctx)
+            self.assertIn("builder.shape", ctx)

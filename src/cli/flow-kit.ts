@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
 import { assertPathContained, copyDir, isoNow, readJson, walkFiles, writeJson } from "../lib/fs.js";
 import { assertKitRepository } from "../flow-kit/validate.js";
-import { activateCodexLocal } from "../runtime-adapters.js";
+import { activateCodexLocal, activateStrandsLocal } from "../runtime-adapters.js";
 
 const REGISTRY_REL = path.join("kits", "local", "installed-kits.json");
 const REPOSITORIES_REL = path.join("kits", "local", "repositories");
@@ -112,16 +112,22 @@ function status(argv: string[]): number {
   return 0;
 }
 
+// Available adapters for the activate subcommand (Issue #32: added strands-local).
+const AVAILABLE_ADAPTERS = ["codex-local", "strands-local"];
+
 function activate(argv: string[]): number {
   const args = parseArgs(argv);
   const dest = path.resolve(flagString(args.flags, "dest", ".") ?? ".");
   const sourceRoot = path.resolve(flagString(args.flags, "source-root", path.resolve(path.dirname(process.argv[1]), "..")) ?? ".");
   const adapter = flagString(args.flags, "adapter");
-  if (adapter && adapter !== "codex-local") {
-    console.log(JSON.stringify({ selected_adapter: null, available_adapters: ["codex-local"], supported_asset_classes: [], generated_runtime_files: [], skipped_assets: [], warnings: [], errors: [`unknown runtime adapter '${adapter}'; available adapters: codex-local`] }, null, 2));
+  if (adapter && !AVAILABLE_ADAPTERS.includes(adapter)) {
+    console.log(JSON.stringify({ selected_adapter: null, available_adapters: AVAILABLE_ADAPTERS, supported_asset_classes: [], generated_runtime_files: [], skipped_assets: [], warnings: [], errors: [`unknown runtime adapter '${adapter}'; available adapters: ${AVAILABLE_ADAPTERS.join(", ")}`] }, null, 2));
     return 2;
   }
-  const result = activateCodexLocal(sourceRoot, dest);
+  // Default to codex-local for backward compatibility; strands-local is opt-in via --adapter.
+  const result = adapter === "strands-local"
+    ? activateStrandsLocal(sourceRoot, dest)
+    : activateCodexLocal(sourceRoot, dest);
   console.log(JSON.stringify(result, null, 2));
   return Array.isArray(result.errors) && result.errors.length ? 1 : 0;
 }
