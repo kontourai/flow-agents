@@ -1,0 +1,77 @@
+{
+  "id": "knowledge.synthesize",
+  "version": "1.0",
+  "steps": [
+    { "id": "detect-cluster", "next": "propose" },
+    { "id": "propose", "next": "evidence-gate" },
+    { "id": "evidence-gate", "next": "apply-or-reject" },
+    { "id": "apply-or-reject", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "gates": {
+    "detect-cluster-gate": {
+      "step": "detect-cluster",
+      "expects": [
+        {
+          "id": "similar-sources-found",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "At least one compiled record similar to the target concept has been identified via the similarity detector. Similarity v1 uses category match + link-overlap heuristic. The result is a cluster of source record IDs to synthesize from.",
+          "claim": {
+            "type": "knowledge.synthesize.cluster",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "propose-gate": {
+      "step": "propose",
+      "expects": [
+        {
+          "id": "proposal-recorded",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "A proposal carrying source refs (proposer_id + source_ids in evidence) has been recorded via the store propose op. The concept body is NOT modified at this step — only a proposes link and mutation log entry are created.",
+          "claim": {
+            "type": "knowledge.synthesize.proposal",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "evidence-gate": {
+      "step": "evidence-gate",
+      "expects": [
+        {
+          "id": "proposal-carries-source-refs",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "The proposal evidence includes source_ids referencing every compiled record that contributed to the proposed summary. Gate rejects if source_ids is empty or any referenced record does not exist.",
+          "claim": {
+            "type": "knowledge.synthesize.evidence",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "apply-gate": {
+      "step": "apply-or-reject",
+      "expects": [
+        {
+          "id": "mutation-gate-decision",
+          "kind": "surface.claim",
+          "required": true,
+          "description": "A gate decision (apply or reject) has been recorded. If applied: concept body is updated via the store apply op with rationale and all contributing source_ids in provenance. If rejected: the store reject op is called, the concept body is byte-identical to its pre-proposal state, and only a rejection log entry is appended.",
+          "claim": {
+            "type": "knowledge.synthesize.gate-decision",
+            "subject": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    }
+  }
+}

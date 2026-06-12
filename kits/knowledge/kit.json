@@ -19,6 +19,11 @@
       "id": "knowledge.compile",
       "path": "flows/compile.flow.json",
       "description": "Compile classified raws into durable notes: select-raws → compile → link. Gate on compile requires provenance refs to every consumed raw record."
+    },
+    {
+      "id": "knowledge.synthesize",
+      "path": "flows/synthesize.flow.json",
+      "description": "Synthesize compiled sources into concept summaries: detect-cluster → propose → evidence-gate → apply-or-reject. Mutation-gate policy: no summary mutates without an approved proposal carrying source refs; rejection leaves store untouched."
     }
   ],
   "docs": [
@@ -40,7 +45,7 @@
     {
       "id": "knowledge.flow-runner",
       "path": "adapters/flow-runner/index.js",
-      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links. Emits canonical telemetry events at gate points."
+      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links; synthesize(conceptId | topicSelector, options) → concept summary proposal with mutation gate. Emits canonical telemetry events at gate points."
     }
   ],
   "evals": [
@@ -53,6 +58,11 @@
       "id": "knowledge.ingest-compile-suite",
       "path": "evals/ingest-compile/suite.test.js",
       "description": "Eval cases for ingest (AC-mapped), compile provenance gate, telemetry emission, and ref resolution."
+    },
+    {
+      "id": "knowledge.synthesis-suite",
+      "path": "evals/synthesis/suite.test.js",
+      "description": "Eval cases for synthesize: AC1 (similar source → proposal not mutation), AC2 (rejection leaves concept byte-identical), AC3 (apply updates with provenance to all contributing sources), pluggable-similarity interface test, gate telemetry."
     }
   ]
 }
