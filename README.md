@@ -71,6 +71,8 @@ L2 means all four policy classes with blocking; L1 means steering and stop-goal-
 
 ## Install
 
+Requires Node.js 22 or newer.
+
 ```bash
 # guided install into your workspace (auto-detects runtime)
 npx @kontourai/flow-agents init --dest /path/to/workspace
