@@ -63,9 +63,7 @@ jobs:
 
       - name: Validate kit container (requires @kontourai/flow >= next release after 0.1.20)
         # validate-kit is merged in kontourai/flow source (PR #67) but not yet
-        # published to npm as of v0.1.20. continue-on-error: true until the
-        # next release ships. Remove continue-on-error once >= 0.1.21 is on npm.
-        continue-on-error: true
+        # validate-kit ships in @kontourai/flow >= 0.2.0 (published 2026-06-12).
         run: |
           node .flow-cli/node_modules/@kontourai/flow/dist/cli.js \
             validate-kit kits/release-evidence
