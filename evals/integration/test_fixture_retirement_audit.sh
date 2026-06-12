@@ -21,9 +21,9 @@ json_query() {
   node -e 'const fs=require("fs"); let cur=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); for (const part of process.argv[2].split(".")) cur=Array.isArray(cur) ? cur[Number(part)] : cur[part]; console.log(cur);' "$1" "$2"
 }
 
-[[ "$(json_query "$TMPDIR_EVAL/audit.json" "totals.scanned")" == "10" ]] && pass "audit scans all fixture groups" || fail "audit scans all fixture groups"
+[[ "$(json_query "$TMPDIR_EVAL/audit.json" "totals.scanned")" == "11" ]] && pass "audit scans all fixture groups" || fail "audit scans all fixture groups"
 [[ "$(json_query "$TMPDIR_EVAL/audit.json" "totals.retire_candidates")" == "0" ]] && pass "audit finds no unowned retire candidates" || fail "audit finds no unowned retire candidates"
-[[ "$(json_query "$TMPDIR_EVAL/audit.json" "totals.kept")" == "10" ]] && pass "audit keeps all owned fixture groups" || fail "audit keeps all owned fixture groups"
+[[ "$(json_query "$TMPDIR_EVAL/audit.json" "totals.kept")" == "11" ]] && pass "audit keeps all owned fixture groups" || fail "audit keeps all owned fixture groups"
 
 node - "$TMPDIR_EVAL/audit.json" <<'NODE'
 const fs = require("node:fs");
