@@ -99,14 +99,35 @@ bash install.sh /path/to/workspace --telemetry-sink local-kontour-console
 
 ## Use it
 
-After installing, ask the agent for the workflow you want — in plain language:
+After installing, ask the agent for the workflow you want — in plain language.
+
+### Builder Kit quick start
+
+The Builder Kit installs automatically and gives your agent two gated flows: `builder.shape` turns a raw idea into slices and executable work items; `builder.build` takes a selected work item through design probe, planning, execution, verification, PR readiness, merge readiness, and learning.
+
+Shape an idea:
 
 ```text
-Use Builder Kit shape for this feature idea and create executable GitHub issues.
+Use Builder Kit shape. I want to add a progress indicator to the CLI output
+so users can see what step the installer is on. Shape this into an executable
+work item and stop at the backlog gate.
 ```
 
+Build it:
+
 ```text
-Use deliver for this issue. Plan it, execute it, verify it, and stop if evidence is missing.
+Use deliver for the issue you just filed. Pull it, probe the design, plan it,
+implement it, verify it, and stop if any evidence is missing.
+```
+
+Each step has an evidence gate. The agent either presents the expected evidence and advances, or blocks and explains what is missing — it does not produce a confident summary and proceed on partial work. Session state is written to `.flow-agents/<slug>/` and survives context loss or compaction.
+
+For a full walkthrough — what each gate checks, what you observe, and how to invoke individual skills — read the [Builder Kit Quick Start](docs/getting-started.md).
+
+For bugs:
+
+```text
+Use fix-bug. Reproduce the problem, diagnose root cause, implement the fix, and verify the regression path.
 ```
 
 The [Workflow Usage Guide](docs/workflow-usage-guide.md) has example prompts and expected behavior for every stage — `pull-work`, `plan-work`, `execute-plan`, `review-work`, `verify-work`, `fix-bug`, `release-readiness`, and more. The [Agent System Guidebook](docs/agent-system-guidebook.md) is the plain-language map of how the pieces fit.

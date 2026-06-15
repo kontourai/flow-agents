@@ -71,23 +71,30 @@ The same canonical policies wire into agent frameworks as in-process language-na
 
 ## Quick Start
 
-```bash
-npx @kontourai/flow-agents init --dest /path/to/workspace
-```
-
-Runtime-specific installs:
+Install into your workspace in one command:
 
 ```bash
-npx @kontourai/flow-agents init --runtime claude-code --dest /path/to/workspace --yes
-npx @kontourai/flow-agents init --runtime opencode --dest /path/to/workspace --yes
-npx @kontourai/flow-agents init --runtime pi --dest /path/to/workspace --yes
+npx @kontourai/flow-agents init --runtime <your-agent> --dest .
 ```
 
-Then ask for the workflow you want, in plain language:
+Where `--runtime` is `claude-code`, `codex`, `kiro`, `opencode`, or `pi`. The Builder Kit installs automatically and gives your agent two gated flows: `builder.shape` (idea → slices → filed work items) and `builder.build` (selected work item → design probe → plan → execute → verify → PR → learn).
+
+Ask your agent to shape an idea:
 
 ```text
-Use deliver for this GitHub issue. Plan it, implement it, review it, verify it, and stop if evidence is missing.
+Use Builder Kit shape. I want to add a progress indicator to the CLI output
+so users can see what step the installer is on. Shape this into an executable
+work item and stop at the backlog gate.
 ```
+
+Then build it:
+
+```text
+Use deliver for the issue you just filed. Pull it, probe the design, plan it,
+implement it, verify it, and stop if any evidence is missing.
+```
+
+Each step has an evidence gate. The agent cannot proceed past a gate without the expected evidence — it either presents it or blocks and explains what is missing. See the <a href="getting-started.html">Builder Kit Quick Start</a> for a full two-minute walkthrough with worked examples and an explanation of what you observe at each gate.
 
 For bugs:
 
@@ -98,6 +105,10 @@ Use fix-bug. Reproduce the problem, diagnose root cause, implement the fix, and 
 ## Explore the docs
 
 <div class="doc-grid">
+  <a class="doc-card" href="getting-started.html">
+    <strong>Builder Kit Quick Start</strong>
+    <span>Zero to a running, gated build flow in two minutes: install, shape an idea into a work item, build it through the builder.shape and builder.build flows, and see what the evidence gates do.</span>
+  </a>
   <a class="doc-card" href="workflow-usage-guide.html">
     <strong>Workflow Usage Guide</strong>
     <span>Every stage from shaping ideas to learning review, with example prompts and expected behavior.</span>
