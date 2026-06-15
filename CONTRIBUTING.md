@@ -45,4 +45,34 @@ Releases are automated with release-please: merges to main accumulate into a rel
 - `bash evals/ci/run-baseline.sh` — deterministic CI baseline
 - `npm run check:content-boundary` — no private/internal content leaks
 
+## Runtime integrations must be live-validated
+
+Static and integration evals that only assert "the artifact exists / parses as
+JSON / the helper script runs" are **not sufficient** for generated host
+artifacts. During the 0.3.0 program, six defects shipped green across 113+
+assertions and were caught only by executing the artifact in (or as) its real
+host. A new runtime integration MUST ship:
+
+1. **Parse-gates** for every generated artifact, in its host language (e.g.
+   `node --check` for a JS plugin, `tsc` syntax check for a TS extension) — a
+   file that doesn't parse in its host helps no one, no matter how valid its
+   JSON wrapper is.
+2. **A mechanical hook-chain execution test** — actually run the generated
+   hook/plugin handlers with realistic payloads and assert the downstream
+   effects (telemetry written, policy decision returned), not just that the
+   files are wired.
+3. **A binary-gated live acceptance harness** — install into a temp workspace,
+   run the real host binary if present (skip cleanly if not), and assert
+   observable behavior end-to-end. See `evals/acceptance/test_opencode_harness.sh`,
+   `test_pi_harness.sh`, and `test_knowledge_kit_live.sh` for the pattern.
+
+Integration tests must also be wired into a CI lane in `evals/ci/run-baseline.sh`
+(and a matching `--check` step in `.github/workflows/ci.yml`) — a test that
+runs via the `evals/run.sh` glob but is absent from the curated CI lanes gates
+nothing. Tests that create temp dirs must canonicalize them (`pwd -P`) so
+macOS (`/tmp` → `/private/tmp`) and Linux behave identically.
+
+Adapters SHOULD also document fail-open vs fail-closed per policy class. See
+`docs/spec/runtime-hook-surface.md`.
+
 All projects are Apache-2.0.

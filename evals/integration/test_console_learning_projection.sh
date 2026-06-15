@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/evals/lib/node.sh"
 
 FIXTURE_DIR="$ROOT/evals/fixtures/console-learning-projection"
-TMPDIR_EVAL="$(mktemp -d /private/tmp/eval-console-learning-projection.XXXXXX)"
+TMPDIR_EVAL="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/eval-console-learning-projection.XXXXXX")" && pwd -P)"
 ARTIFACT_ROOT="$TMPDIR_EVAL/artifacts"
 KONTOUR_ROOT="$TMPDIR_EVAL/.kontour"
 GENERATED_AT="2026-06-06T20:00:00Z"
