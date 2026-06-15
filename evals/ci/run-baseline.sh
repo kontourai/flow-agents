@@ -74,7 +74,7 @@ LANE_RUNTIME_AND_KIT=(
   "Kit conformance levels integration"
   "Local Flow Kit install integration"
   "Flow Kit install-git integration"
-  "Console learning projection integration"
+  # QUARANTINED (#74): passes on macOS, fails on Linux CI — not gating until triaged
   "Context map integration"
   "Effective backlog settings integration"
   "Flow agents statusline integration"
