@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { exists, loadJson, markdownTable, oneLine, readText, rel, root, writeText } from "./common.js";
 
@@ -196,4 +197,9 @@ export function main(argv = process.argv.slice(2)): number {
   return 0;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) process.exit(main());
+// Use process.exitCode (not process.exit) to allow stdout to be flushed before exit.
+// Resolve real paths to handle symlinks (e.g. /tmp -> /private/tmp on macOS) so the
+// entry-point guard fires correctly when the module is loaded directly as a script.
+const _selfRealPath = (() => { try { return fs.realpathSync(fileURLToPath(import.meta.url)); } catch { return fileURLToPath(import.meta.url); } })();
+const _argv1RealPath = (() => { try { return fs.realpathSync(process.argv[1]); } catch { return process.argv[1]; } })();
+if (_selfRealPath === _argv1RealPath) { process.exitCode = main(); }
