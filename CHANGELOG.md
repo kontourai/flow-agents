@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.2.0](https://github.com/kontourai/flow-agents/compare/v1.1.0...v1.2.0) (2026-06-15)
+
+
+### Features
+
+* **#62:** move Builder Kit skills into kits/builder, add Knowledge Kit skill, remove orphans ([3822e07](https://github.com/kontourai/flow-agents/commit/3822e075e9cd488f46124179ebf9a8459825b9c6))
+* **#62:** move Builder Kit skills into kits/builder, Knowledge Kit skill, remove orphans ([31f63ca](https://github.com/kontourai/flow-agents/commit/31f63ca18019d51438accd3b5f1e03cb5f2873f2))
+* delegate container validation to @kontourai/flow; rename flow-kit → flow-agents kit ([d39e909](https://github.com/kontourai/flow-agents/commit/d39e9090dad220a8159d2148d5a1effb2460ac9f))
+* delegate container validation to @kontourai/flow; rename flow-kit → flow-agents kit (ADR 0008) ([4343e84](https://github.com/kontourai/flow-agents/commit/4343e845a992858c9441258bedbbf3c7302a8532))
+
+
+### Fixes
+
+* **ci:** install repo deps before building bundles in runtime-compat canary ([#76](https://github.com/kontourai/flow-agents/issues/76)) ([f8947aa](https://github.com/kontourai/flow-agents/commit/f8947aab5723ba9325372ea4054458ce21875bee))
+* lazy-load @kontourai/flow in validate.ts so list/status/activate work without it ([99beebb](https://github.com/kontourai/flow-agents/commit/99beebb58f02dba374b35ae5e3df229cb39ea8d0))
+
+
+### Documentation
+
+* add ADR 0007 flow/skill/kit/tool boundary + skill audit ([20b5c7b](https://github.com/kontourai/flow-agents/commit/20b5c7b272e7ad7985640e70b6be71733cec9995))
+* add Builder Kit quick-start guide and update index/README Quick Start ([2e89bf0](https://github.com/kontourai/flow-agents/commit/2e89bf08968a6f45a26ceddcddf5a66bf77d3f44))
+* ADR 0007 flow/skill/kit/tool boundary + skill audit ([a1dde52](https://github.com/kontourai/flow-agents/commit/a1dde52eb3b051a0eab5712395f0266c7428ae0f))
+* Builder Kit quick-start guide (zero to gated build flow) ([83237f7](https://github.com/kontourai/flow-agents/commit/83237f77812917d49c86547db87986d6dbfdbfd9))
+* fold orphan rulings into ADR 0007, add ADR 0008 kit-operation boundary ([d547edc](https://github.com/kontourai/flow-agents/commit/d547edc954ea9d9a12039003d41401802f994097))
+* mark ADRs 0007 + 0008 Accepted (decisions reached in 2026-06-15 design conversation) ([3eb7636](https://github.com/kontourai/flow-agents/commit/3eb7636c1c4f866fd119195936ec856425573dda))
+
 ## [1.1.0](https://github.com/kontourai/flow-agents/compare/v1.0.1...v1.1.0) (2026-06-15)
 
 
