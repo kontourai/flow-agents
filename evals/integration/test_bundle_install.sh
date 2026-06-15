@@ -714,8 +714,11 @@ else
   _fail "Codex core-pack agent filtering failed"
 fi
 
-if [[ -d "$CODEX_CORE_DEST/.codex/skills/plan-work" && ! -d "$CODEX_CORE_DEST/.codex/skills/deliver" ]]; then
-  _pass "Codex core-pack install keeps core skills and prunes optional skills"
+# Kit-owned skills (plan-work, deliver) are always present regardless of pack filter.
+# Pack filtering only prunes skills declared in packs.json (the tool-skills).
+# The development-pack tool-skill agentic-engineering should be pruned in a core-only install.
+if [[ -d "$CODEX_CORE_DEST/.codex/skills/plan-work" && -d "$CODEX_CORE_DEST/.codex/skills/deliver" && ! -d "$CODEX_CORE_DEST/.codex/skills/agentic-engineering" ]]; then
+  _pass "Codex core-pack install: kit-skills present, dev-only tool-skill pruned"
 else
   _fail "Codex core-pack skill filtering failed"
 fi
@@ -746,8 +749,11 @@ else
   _fail "opencode core-pack agent filtering failed (tool-planner.md missing)"
 fi
 
-if [[ -d "$OPENCODE_CORE_DEST/.opencode/skills/plan-work" && ! -d "$OPENCODE_CORE_DEST/.opencode/skills/deliver" ]]; then
-  _pass "opencode core-pack install keeps core skills and prunes optional skills"
+# Kit-owned skills (plan-work, deliver) are always present regardless of pack filter.
+# Pack filtering only prunes skills declared in packs.json (the tool-skills).
+# The development-pack tool-skill agentic-engineering should be pruned in a core-only install.
+if [[ -d "$OPENCODE_CORE_DEST/.opencode/skills/plan-work" && -d "$OPENCODE_CORE_DEST/.opencode/skills/deliver" && ! -d "$OPENCODE_CORE_DEST/.opencode/skills/agentic-engineering" ]]; then
+  _pass "opencode core-pack install: kit-skills present, dev-only tool-skill pruned"
 else
   _fail "opencode core-pack skill filtering failed"
 fi

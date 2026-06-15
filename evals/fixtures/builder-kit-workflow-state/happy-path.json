@@ -49,8 +49,8 @@
     "planning_readiness": "ready",
     "expected_modified_files": [
       "context/contracts/builder-kit-workflow-state-contract.md",
-      "skills/design-probe/SKILL.md",
-      "skills/pickup-probe/SKILL.md"
+      "kits/builder/skills/design-probe/SKILL.md",
+      "kits/builder/skills/pickup-probe/SKILL.md"
     ],
     "conflict_risks": [
       "workflow guidance shared with downstream Builder Kit automation"

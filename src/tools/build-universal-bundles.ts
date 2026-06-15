@@ -12,6 +12,57 @@ const textExtensions = new Set([".css", ".html", ".js", ".json", ".md", ".sh", "
 const dropDiagnostics: string[] = [];
 const printDiagnostics = !["0", "false", "no"].includes(String(process.env.FLOW_AGENTS_EXPORT_DIAGNOSTICS ?? "1").toLowerCase());
 
+/**
+ * Collect all skill source paths across skills/ and kit-owned skills.
+ * Returns an array of {name, src} pairs where name is the install name
+ * (same as the directory name) and src is the absolute SKILL.md path.
+ * Kit-owned skills are discovered by reading kit.json `skills` arrays;
+ * each entry's `path` is resolved relative to the kit directory.
+ */
+function collectAllSkills(): Array<{ name: string; src: string }> {
+  const results: Array<{ name: string; src: string }> = [];
+  const seen = new Set<string>();
+
+  // 1. Top-level skills/ directory (tools pending reclassification).
+  const skillsDir = path.join(root, "skills");
+  if (fs.existsSync(skillsDir)) {
+    for (const skill of fs.readdirSync(skillsDir).sort()) {
+      const skillPath = path.join(skillsDir, skill, "SKILL.md");
+      if (fs.existsSync(skillPath) && !seen.has(skill)) {
+        seen.add(skill);
+        results.push({ name: skill, src: skillPath });
+      }
+    }
+  }
+
+  // 2. Kit-owned skills declared in kits/<kit>/kit.json `skills` arrays.
+  const kitsDir = path.join(root, "kits");
+  if (fs.existsSync(kitsDir)) {
+    for (const kitName of fs.readdirSync(kitsDir).sort()) {
+      const kitJson = path.join(kitsDir, kitName, "kit.json");
+      if (!fs.existsSync(kitJson)) continue;
+      let kitManifest: Record<string, unknown>;
+      try { kitManifest = loadJson<Record<string, unknown>>(kitJson); } catch { continue; }
+      const skills = Array.isArray(kitManifest["skills"]) ? kitManifest["skills"] as unknown[] : [];
+      for (const entry of skills) {
+        if (typeof entry !== "object" || entry === null) continue;
+        const skillEntry = entry as Record<string, unknown>;
+        const relPath = typeof skillEntry["path"] === "string" ? skillEntry["path"] : null;
+        if (!relPath) continue;
+        // Derive install name from the directory containing SKILL.md (one level up).
+        const absPath = path.resolve(path.join(kitsDir, kitName), relPath);
+        const skillName = path.basename(path.dirname(absPath));
+        if (fs.existsSync(absPath) && !seen.has(skillName)) {
+          seen.add(skillName);
+          results.push({ name: skillName, src: absPath });
+        }
+      }
+    }
+  }
+
+  return results.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 function resetDir(dir: string): void {
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(dir, { recursive: true });
@@ -302,9 +353,8 @@ function buildClaudeCode(agents: Agent[]): void {
   copySharedContent(bundle, "claude-code", "<bundle-root>");
   writeText(path.join(bundle, manifest.claude_code.task_dir, ".gitkeep"), "");
   for (const spec of agents) writeText(path.join(bundle, ".claude/agents", `${spec.name}.md`), exportClaudeAgent(spec));
-  for (const skill of fs.readdirSync(path.join(root, "skills"))) {
-    const skillPath = path.join(root, "skills", skill, "SKILL.md");
-    if (fs.existsSync(skillPath)) writeText(path.join(bundle, ".claude/skills", skill, "SKILL.md"), sanitizeText(readText(skillPath), "claude-code", "<bundle-root>"));
+  for (const { name, src } of collectAllSkills()) {
+    writeText(path.join(bundle, ".claude/skills", name, "SKILL.md"), sanitizeText(readText(src), "claude-code", "<bundle-root>"));
   }
   writeText(path.join(bundle, ".claude/settings.json"), exportClaudeSettings());
   writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Claude Code", agents, manifest.claude_code.task_dir));
@@ -324,9 +374,8 @@ function buildCodex(agents: Agent[]): void {
   for (const [profileName, profile] of Object.entries(manifest.codex.profiles ?? {})) writeText(path.join(bundle, ".codex", `${profileName}.config.toml`), exportCodexProfileConfig(profile as Record<string, unknown>, settings));
   writeText(path.join(bundle, ".codex/hooks.json"), exportCodexHooks());
   for (const spec of targetAgents) writeText(path.join(bundle, ".codex/agents", `${spec.name}.toml`), exportCodexAgent(spec));
-  for (const skill of fs.readdirSync(path.join(root, "skills"))) {
-    const skillPath = path.join(root, "skills", skill, "SKILL.md");
-    if (fs.existsSync(skillPath)) writeText(path.join(bundle, ".codex/skills", skill, "SKILL.md"), sanitizeText(readText(skillPath), "codex", "<bundle-root>"));
+  for (const { name, src } of collectAllSkills()) {
+    writeText(path.join(bundle, ".codex/skills", name, "SKILL.md"), sanitizeText(readText(src), "codex", "<bundle-root>"));
   }
   writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Codex", targetAgents, manifest.codex.task_dir));
   writeText(path.join(bundle, "README.md"), exportTargetReadme("Codex", "bash install.sh /path/to/workspace"));
@@ -490,9 +539,8 @@ function buildOpencode(agents: Agent[]): void {
   for (const spec of agents) {
     writeText(path.join(bundle, ".opencode/agents", `${spec.name}.md`), exportOpencodeAgent(spec));
   }
-  for (const skill of fs.readdirSync(path.join(root, "skills"))) {
-    const skillPath = path.join(root, "skills", skill, "SKILL.md");
-    if (fs.existsSync(skillPath)) writeText(path.join(bundle, ".opencode/skills", skill, "SKILL.md"), sanitizeText(readText(skillPath), "opencode", "<bundle-root>"));
+  for (const { name, src } of collectAllSkills()) {
+    writeText(path.join(bundle, ".opencode/skills", name, "SKILL.md"), sanitizeText(readText(src), "opencode", "<bundle-root>"));
   }
   writeText(path.join(bundle, ".opencode/plugins/flow-agents.js"), exportOpencodePlugin());
   writeText(path.join(bundle, "opencode.json"), exportOpencodeConfig());
@@ -602,9 +650,8 @@ function buildPi(agents: Agent[]): void {
   writeText(path.join(bundle, manifest.pi.task_dir, ".gitkeep"), "");
   // pi has no named-subagent registry; agents are left canonical/unexported.
   // Skills are exported to .pi/skills/ (direct .md files supported in that dir).
-  for (const skill of fs.readdirSync(path.join(root, "skills"))) {
-    const skillPath = path.join(root, "skills", skill, "SKILL.md");
-    if (fs.existsSync(skillPath)) writeText(path.join(bundle, ".pi/skills", skill, "SKILL.md"), sanitizeText(readText(skillPath), "pi", "<bundle-root>"));
+  for (const { name, src } of collectAllSkills()) {
+    writeText(path.join(bundle, ".pi/skills", name, "SKILL.md"), sanitizeText(readText(src), "pi", "<bundle-root>"));
   }
   writeText(path.join(bundle, ".pi/extensions/flow-agents.ts"), exportPiExtension());
   writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("pi", agents, manifest.pi.task_dir));
@@ -617,7 +664,7 @@ function buildCatalog(agents: Agent[]): Record<string, unknown> {
   return {
     source_root: ".",
     agents: agents.slice().sort((a, b) => a.name.localeCompare(b.name)).map((spec) => spec.name),
-    skills: fs.readdirSync(path.join(root, "skills")).filter((name) => fs.existsSync(path.join(root, "skills", name, "SKILL.md"))).sort(),
+    skills: collectAllSkills().map(({ name }) => name),
     powers: fs.readdirSync(path.join(root, "powers")).filter((name) => fs.existsSync(path.join(root, "powers", name, "mcp.json"))).sort(),
     packs: packs.packs ?? [],
     kits: fs.existsSync(kitsCatalog) ? loadJson<Record<string, unknown>>(kitsCatalog).kits ?? [] : [],

@@ -217,7 +217,7 @@ Provider-neutral marker example:
       "planned_at": "2026-06-03T03:23:14Z",
       "planning_artifact_ref": ".flow-agents/example/example--idea-to-backlog.md",
       "planning_scope_refs": [
-        "skills/idea-to-backlog/SKILL.md",
+        "kits/builder/skills/idea-to-backlog/SKILL.md",
         "context/contracts/work-item-contract.md"
       ]
     }

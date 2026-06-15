@@ -52,19 +52,19 @@ require_status() {
 
 echo "=== Workflow Skill Contract Checks ==="
 
-IDEA="$ROOT/skills/idea-to-backlog/SKILL.md"
-BUILDER_SHAPE="$ROOT/skills/builder-shape/SKILL.md"
-PULL="$ROOT/skills/pull-work/SKILL.md"
-DESIGN_PROBE="$ROOT/skills/design-probe/SKILL.md"
-PICKUP_PROBE="$ROOT/skills/pickup-probe/SKILL.md"
-EVIDENCE="$ROOT/skills/evidence-gate/SKILL.md"
-RELEASE="$ROOT/skills/release-readiness/SKILL.md"
-LEARNING="$ROOT/skills/learning-review/SKILL.md"
-DELIVER="$ROOT/skills/deliver/SKILL.md"
-PLAN_WORK="$ROOT/skills/plan-work/SKILL.md"
-EXECUTE_PLAN="$ROOT/skills/execute-plan/SKILL.md"
-REVIEW_WORK="$ROOT/skills/review-work/SKILL.md"
-VERIFY_WORK="$ROOT/skills/verify-work/SKILL.md"
+IDEA="$ROOT/kits/builder/skills/idea-to-backlog/SKILL.md"
+BUILDER_SHAPE="$ROOT/kits/builder/skills/builder-shape/SKILL.md"
+PULL="$ROOT/kits/builder/skills/pull-work/SKILL.md"
+DESIGN_PROBE="$ROOT/kits/builder/skills/design-probe/SKILL.md"
+PICKUP_PROBE="$ROOT/kits/builder/skills/pickup-probe/SKILL.md"
+EVIDENCE="$ROOT/kits/builder/skills/evidence-gate/SKILL.md"
+RELEASE="$ROOT/kits/builder/skills/release-readiness/SKILL.md"
+LEARNING="$ROOT/kits/builder/skills/learning-review/SKILL.md"
+DELIVER="$ROOT/kits/builder/skills/deliver/SKILL.md"
+PLAN_WORK="$ROOT/kits/builder/skills/plan-work/SKILL.md"
+EXECUTE_PLAN="$ROOT/kits/builder/skills/execute-plan/SKILL.md"
+REVIEW_WORK="$ROOT/kits/builder/skills/review-work/SKILL.md"
+VERIFY_WORK="$ROOT/kits/builder/skills/verify-work/SKILL.md"
 MAP="$ROOT/docs/skills-map.md"
 ROOT_CONTEXT="$ROOT/CONTEXT.md"
 CONTEXT_MAP="$ROOT/docs/context-map.md"
@@ -146,6 +146,7 @@ while IFS= read -r guidance_surface; do
 done < <(
   {
     find "$ROOT/skills" -type f -name '*.md'
+    find "$ROOT/kits" -path "*/skills/*/SKILL.md" -type f
     find "$ROOT/context/contracts" -maxdepth 1 -type f -name '*.md'
     find "$ROOT/agents" -maxdepth 1 -type f -name '*.json'
     printf '%s\n' "$ROOT/packaging/manifest.json"
@@ -553,7 +554,7 @@ echo ""
 echo "--- builder-shape ---"
 require_text "$BUILDER_SHAPE" '^name: "builder-shape"$' "frontmatter name"
 require_text "$BUILDER_SHAPE" 'Builder Kit `shape` flow' "defines Builder Kit shape product surface"
-require_text "$BUILDER_SHAPE" 'skills/idea-to-backlog/SKILL.md' "delegates to idea-to-backlog"
+require_text "$BUILDER_SHAPE" 'kits/builder/skills/idea-to-backlog/SKILL.md' "delegates to idea-to-backlog"
 require_text "$BUILDER_SHAPE" 'kits/builder/flows/shape.flow.json' "links Builder Kit Flow Definition"
 require_text "$BUILDER_SHAPE" 'raw idea.*current conversation context|current conversation context.*raw idea' "accepts raw idea or conversation context"
 require_text "$BUILDER_SHAPE" 'Probe/alignment' "uses Probe alignment language"
@@ -1102,7 +1103,6 @@ require_text "$PACKS_MANIFEST" '"name": "core"' "pack manifest defines core pack
 require_text "$PACKS_MANIFEST" '"default": true' "pack manifest defines default pack"
 require_text "$PACKS_MANIFEST" '"name": "development"' "pack manifest defines development pack"
 require_text "$PACKS_MANIFEST" '"eval-rebuild"' "pack manifest includes eval-rebuild"
-require_text "$PACKS_MANIFEST" '"explore"' "pack manifest includes explore"
 require_text "$ROOT/scripts/build-universal-bundles.js" 'FLOW_AGENTS_PACKS' "bundle installer supports pack filtering"
 require_text "$ROOT/evals/integration/test_bundle_install.sh" 'core-pack install keeps core agents' "bundle install test covers pack filtering"
 require_text "$CONTEXT_MAP" 'Context Loading Rules' "context map includes loading rules"

@@ -54,8 +54,8 @@
     "planning_readiness": "completed",
     "expected_modified_files": [
       "context/contracts/builder-kit-workflow-state-contract.md",
-      "skills/design-probe/SKILL.md",
-      "skills/pickup-probe/SKILL.md",
+      "kits/builder/skills/design-probe/SKILL.md",
+      "kits/builder/skills/pickup-probe/SKILL.md",
       "evals/fixtures/builder-kit-workflow-state/happy-path.json",
       "evals/fixtures/builder-kit-workflow-state/mid-work-resume.json"
     ],

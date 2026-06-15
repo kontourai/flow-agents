@@ -301,6 +301,28 @@ function validateAgentPaths(reporter: Reporter, manifest: any): void {
   }
 }
 function validateLegacyRefs(reporter: Reporter): void {
+  // Collect all kit-owned asset relative paths so legacy-ref scanning can skip matches
+  // that are subpaths of kit-owned assets. E.g. legacyRefRe matches "skills/plan-work/SKILL.md"
+  // within "kits/builder/skills/plan-work/SKILL.md"; the kit declares and validates these.
+  const kitOwnedSubPaths = new Set<string>();
+  const kitsDir = path.join(root, "kits");
+  if (fs.existsSync(kitsDir)) {
+    for (const kitName of fs.readdirSync(kitsDir)) {
+      const kitJson = path.join(kitsDir, kitName, "kit.json");
+      if (!fs.existsSync(kitJson)) continue;
+      try {
+        const kitManifest = loadJson<Record<string, unknown>>(kitJson);
+        for (const section of ["skills", "docs", "adapters", "evals", "assets"]) {
+          const entries = Array.isArray(kitManifest[section]) ? kitManifest[section] as unknown[] : [];
+          for (const entry of entries) {
+            if (typeof entry !== "object" || entry === null) continue;
+            const relPath = (entry as Record<string, unknown>)["path"];
+            if (typeof relPath === "string" && relPath) kitOwnedSubPaths.add(relPath);
+          }
+        }
+      } catch { /* skip invalid kit.json */ }
+    }
+  }
   for (const file of walkFiles(path.join(root, "evals")).sort()) {
     if (!textRefExtensions.has(path.extname(file))) continue;
     const parts = path.relative(path.join(root, "evals"), file).split(path.sep);
@@ -310,6 +332,10 @@ function validateLegacyRefs(reporter: Reporter): void {
       const ref = match[0].replace(/[.,)'"\]]+$/, "");
       if (/[{}$]/.test(ref)) continue;
       if (ref.split(/[\\/]/).includes("node_modules")) continue;
+      // Skip refs that are declared kit-owned asset paths or their parent directories
+      // (e.g. "skills/plan-work/SKILL.md" or "skills/plan-work" matched inside
+      // "kits/builder/skills/plan-work/SKILL.md" in eval files).
+      if (kitOwnedSubPaths.has(ref) || [...kitOwnedSubPaths].some((p) => p.startsWith(ref + "/"))) continue;
       const candidates = [path.join(root, ref), ...(ref.startsWith("evals/") ? [] : [path.join(root, "evals", ref)])];
       if (!candidates.some(fs.existsSync)) reporter.fail(`${rel(file)}: references missing source path: ${ref}`);
     }

@@ -91,3 +91,22 @@ Corrected final count:
 | `explore` | Implies missing flow: a "codebase-onboarding" or "repository-exploration" flow with discrete steps (structure, entry points, dependencies, patterns, docs accuracy). Alternatively, `explore` is a multi-step capability the agent uses across many flow phases — in which case it is more accurately a TOOL (raw codebase-reading capability orchestrated across subagents) than a flow-step skill. | **REMOVED** (2026-06-15). Reclassified as a tool (parallel codebase-reading capability). Preserved intent: seed of a possible future `codebase-onboarding` flow — see ADR 0007. |
 | `feedback-loop` | Implies missing flow: or more precisely, it overlaps with the `verify` step of `builder.build` without being the canonical method for it. The skill is used as a lightweight per-task verification inside `execute-plan`. If the builder build flow added a sub-step or explicit "local-verify" step between `execute` and the formal `verify` gate, `feedback-loop` would map there. Otherwise, it should be subsumed into `verify-work` or reclassified as support tooling. | **REMOVED** (2026-06-15). Subsumed: concern now handled by `verify-work` plus flow route-back. |
 | `frontend-design` | Implies missing flow: a "frontend" or "UI-kit" flow with steps for design direction, implementation, and visual verification. Alternatively, the design guidelines could be packaged as a context resource injected into `execute-plan`/`tool-worker` rather than as a separate "skill." If it stays a skill, it belongs in a hypothetical UI Kit that owns a `frontend.build` flow with design and verify steps. | **REMOVED** (2026-06-15). Preserved intent: "plan-work but for UI" — seed of a possible future UI/Frontend Kit with design + visual-verify steps. Revisit if a UI kit is built. |
+
+---
+
+## Implementation Record (Issue #62, 2026-06-15)
+
+The dispositions in this audit table were implemented in PR #62:
+
+- **16 KIT-SKILLS moved to Builder Kit:** `builder-shape`, `deliver`, `design-probe`, `evidence-gate`, `execute-plan`, `fix-bug`, `idea-to-backlog`, `learning-review`, `pickup-probe`, `plan-work`, `pull-work`, `release-readiness`, `review-work`, `tdd-workflow`, `verify-work` — moved from `skills/<name>/` to `kits/builder/skills/<name>/` and declared in `kits/builder/kit.json` `skills` array.
+- **1 KIT-SKILL moved to Knowledge Kit:** `knowledge-capture` — moved to `kits/knowledge/skills/knowledge-capture/` and declared in `kits/knowledge/kit.json` `skills` array.
+- **4 ORPHANS deleted:** `context-budget`, `explore`, `feedback-loop`, `frontend-design` — removed per Brian's 2026-06-15 ruling above.
+- **6 TOOLs left in place:** `agentic-engineering`, `browser-test`, `dependency-update`, `eval-rebuild`, `github-cli`, `search-first` — remain in `skills/` pending separate reclassification. See `skills/README.md`.
+
+**Structural changes:**
+- `src/tools/build-universal-bundles.ts`: `collectAllSkills()` function added; bundle builders now collect skills from both `skills/` (tool-skills) and kit-declared `skills` arrays. Runtime bundles (`.claude/skills/`, `.codex/skills/`, etc.) include all kit-owned skills unchanged.
+- `src/tools/generate-context-map.ts`: `allSkillPaths()` function added; context map generation now includes kit-owned skills.
+- `src/tools/validate-source-tree.ts`: `validateLegacyRefs()` updated to skip legacy-ref matches that resolve as declared kit-owned asset subpaths.
+- `packaging/packs.json`: Skill entries limited to the 6 remaining tool-skills in `skills/`. Kit-owned skills are no longer listed in packs (they're always included in the bundle as kit assets).
+- `flow-kit inspect kits/builder` now reports `k1: true` (skills present).
+- `flow-kit inspect kits/knowledge` now reports `k1: true` (skills present).
