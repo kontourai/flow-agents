@@ -45,10 +45,10 @@ flow_agents_node() {
       node "$FLOW_AGENTS_EVAL_ROOT/build/src/cli/validate-source-tree.js" "$@"
       return
       ;;
-    */scripts/flow-kit.js|scripts/flow-kit.js)
+    */scripts/kit.js|scripts/kit.js)
       shift
       flow_agents_build_ts || return
-      node "$FLOW_AGENTS_EVAL_ROOT/build/src/cli/flow-kit.js" "$@"
+      node "$FLOW_AGENTS_EVAL_ROOT/build/src/cli/kit.js" "$@"
       return
       ;;
     */scripts/effective-backlog-settings.js|scripts/effective-backlog-settings.js)

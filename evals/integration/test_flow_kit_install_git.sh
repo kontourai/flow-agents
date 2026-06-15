@@ -14,7 +14,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 pass() { echo "  ✓ $1"; }
 fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 
-CLI="$ROOT/scripts/flow-kit.js"
+CLI="$ROOT/scripts/kit.js"
 VALID_SRC="$ROOT/evals/fixtures/flow-kit-repository/valid-local-kit"
 DEST="$TMP_DIR/install-dest"
 mkdir -p "$DEST"
@@ -33,7 +33,7 @@ echo "  (fixture repo: $FILE_URL)"
 
 # --- Test 1: basic install-git from file:// URL ---
 install_out="$TMP_DIR/install-git.out"
-if flow_agents_node "$CLI" install-git "$FILE_URL" --dest "$DEST" >"$install_out" 2>&1; then
+if flow_agents_node "$CLI" install "$FILE_URL" --dest "$DEST" >"$install_out" 2>&1; then
   pass "install-git from file:// URL succeeds"
 else
   fail "install-git from file:// URL failed"
@@ -72,7 +72,7 @@ fi
 # --- Test 2: idempotent re-install from same URL ---
 idempotent_out="$TMP_DIR/idempotent.out"
 registry_hash_before="$(shasum -a 256 "$REGISTRY" | awk '{print $1}')"
-if flow_agents_node "$CLI" install-git "$FILE_URL" --dest "$DEST" >"$idempotent_out" 2>&1 \
+if flow_agents_node "$CLI" install "$FILE_URL" --dest "$DEST" >"$idempotent_out" 2>&1 \
   && grep -q "already installed" "$idempotent_out" \
   && [[ "$registry_hash_before" == "$(shasum -a 256 "$REGISTRY" | awk '{print $1}')" ]]; then
   pass "install-git same-URL reinstall is idempotent"
@@ -93,7 +93,7 @@ cp -R "$VALID_SRC" "$FIXTURE_WORKING2"
 git clone -q --bare "$FIXTURE_WORKING2" "$FIXTURE_REPO2"
 FILE_URL2="file://$FIXTURE_REPO2"
 
-if flow_agents_node "$CLI" install-git "${FILE_URL2}#v1.0" --dest "$DEST2" >"$ref_out" 2>&1; then
+if flow_agents_node "$CLI" install "${FILE_URL2}#v1.0" --dest "$DEST2" >"$ref_out" 2>&1; then
   pass "install-git with #ref fragment succeeds"
 else
   fail "install-git with #ref fragment failed"
@@ -119,7 +119,7 @@ fi
 ref_flag_out="$TMP_DIR/ref-flag.out"
 DEST3="$TMP_DIR/dest-with-ref-flag"
 mkdir -p "$DEST3"
-if flow_agents_node "$CLI" install-git "$FILE_URL2" --ref v1.0 --dest "$DEST3" >"$ref_flag_out" 2>&1; then
+if flow_agents_node "$CLI" install "$FILE_URL2" --ref v1.0 --dest "$DEST3" >"$ref_flag_out" 2>&1; then
   pass "install-git with --ref flag succeeds"
 else
   fail "install-git with --ref flag failed"
@@ -128,7 +128,7 @@ fi
 
 # --- Test 5: missing git URL exits non-zero ---
 missing_url_out="$TMP_DIR/missing-url.out"
-if flow_agents_node "$CLI" install-git --dest "$DEST" >"$missing_url_out" 2>&1; then
+if flow_agents_node "$CLI" install --dest "$DEST" >"$missing_url_out" 2>&1; then
   fail "install-git with no URL should exit non-zero"
   sed -n '1,40p' "$missing_url_out"
 else
@@ -137,7 +137,7 @@ fi
 
 # --- Test 6: invalid git URL exits non-zero ---
 invalid_url_out="$TMP_DIR/invalid-url.out"
-if flow_agents_node "$CLI" install-git "file:///nonexistent-repo-that-does-not-exist" --dest "$DEST" >"$invalid_url_out" 2>&1; then
+if flow_agents_node "$CLI" install "file:///nonexistent-repo-that-does-not-exist" --dest "$DEST" >"$invalid_url_out" 2>&1; then
   fail "install-git with invalid URL should exit non-zero"
   sed -n '1,40p' "$invalid_url_out"
 else

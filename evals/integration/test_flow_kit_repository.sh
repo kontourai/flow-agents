@@ -55,15 +55,15 @@ echo "=== Flow Kit Repository Fixture Checks ==="
 expect_pass "valid-local-kit"
 expect_fail "invalid-schema-version" '\.schema_version must be "1\.0"'
 expect_fail "invalid-missing-schema-version" '\.schema_version must be "1\.0"'
-expect_fail "invalid-id" '\.id must be a stable kebab-case string'
-expect_fail "invalid-missing-id" '\.id must be a stable kebab-case string'
+expect_fail "invalid-id" '\.id must be a kebab-case string'
+expect_fail "invalid-missing-id" '\.id must be a kebab-case string'
 expect_fail "invalid-name" '\.name must be a non-empty string'
 expect_fail "invalid-missing-flow" 'flows\[0\]\.path points at missing Flow Definition'
 expect_fail "invalid-absolute-path" 'flows\[0\]\.path must be relative'
-expect_fail "invalid-traversal" "flows\\[0\\]\\.path must stay inside the kit directory"
+expect_fail "invalid-traversal" "flows\\[0\\]\\.path must not contain"
 expect_fail "invalid-malformed-json" 'invalid JSON'
 expect_fail "invalid-asset-section" '\.docs must be a list'
-expect_fail "invalid-duplicate-flow" "flows\\[1\\]\\.id duplicates"
+expect_fail "invalid-duplicate-flow" "flows\\[1\\]\\.path duplicates"
 
 echo ""
 echo "=== Builder Kit Shared Validation Check ==="

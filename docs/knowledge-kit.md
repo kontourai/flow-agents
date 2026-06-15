@@ -4,7 +4,7 @@ title: Knowledge Kit
 
 # Knowledge Kit
 
-The Knowledge Kit is a Flow Kit for durable, gated knowledge storage. It packages a store contract, five pipeline flows, pluggable store adapters, and a parameterized contract test suite — all validated and installed through the standard `flow-kit` path.
+The Knowledge Kit is a Flow Kit for durable, gated knowledge storage. It packages a store contract, five pipeline flows, pluggable store adapters, and a parameterized contract test suite — all validated and installed through the `flow-agents kit` path.
 
 ## What it ships
 
@@ -44,7 +44,7 @@ The vector detector is fail-closed: infrastructure failures throw `EMBED_FAILURE
 
 ```bash
 # Install the kit into a workspace
-npx @kontourai/flow-agents flow-kit install-local kits/knowledge --dest /path/to/workspace
+npx @kontourai/flow-agents kit install kits/knowledge --dest /path/to/workspace
 
 # Run the contract suite against the default adapter
 node --test kits/knowledge/evals/contract-suite/suite.test.js

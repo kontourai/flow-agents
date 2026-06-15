@@ -189,7 +189,7 @@ export class FlowAgentsHooks {
    *
    * Includes activated kit flows discovered from the strands-local runtime
    * path (.flow-agents/runtime/strands/flows/) written by
-   * `flow-kit activate --adapter strands-local`.
+   * `flow-agents kit activate --adapter strands-local`.
    *
    * Callers should prepend this to the Agent's system prompt:
    *
