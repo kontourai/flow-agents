@@ -5,7 +5,7 @@ title: "ADR 0007: Flow / Skill / Kit / Tool Boundary"
 # ADR 0007: Flow / Skill / Kit / Tool Boundary
 
 **Date:** 2026-06-15  
-**Status:** Proposed
+**Status:** Accepted
 
 ---
 

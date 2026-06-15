@@ -5,7 +5,7 @@ title: "ADR 0008: Kit Operation Boundary"
 # ADR 0008: Kit Operation Boundary
 
 **Date:** 2026-06-15  
-**Status:** Proposed
+**Status:** Accepted
 
 ---
 
