@@ -26,6 +26,24 @@ CHECKS=(
   "Flow Kit repository integration|bash evals/integration/test_flow_kit_repository.sh"
   "Runtime adapter activation integration|bash evals/integration/test_runtime_adapter_activation.sh"
   "Bundle install integration|bash evals/integration/test_bundle_install.sh"
+  "Bundle lifecycle integration|bash evals/integration/test_bundle_lifecycle.sh"
+  "Activate npx context integration|bash evals/integration/test_activate_npx_context.sh"
+  "Kit conformance levels integration|bash evals/integration/test_kit_conformance_levels.sh"
+  "Local Flow Kit install integration|bash evals/integration/test_local_flow_kit_install.sh"
+  "Flow Kit install-git integration|bash evals/integration/test_flow_kit_install_git.sh"
+  "Console learning projection integration|bash evals/integration/test_console_learning_projection.sh"
+  "Context map integration|bash evals/integration/test_context_map.sh"
+  "Effective backlog settings integration|bash evals/integration/test_effective_backlog_settings.sh"
+  "Flow agents statusline integration|bash evals/integration/test_flow_agents_statusline.sh"
+  "Telemetry contract integration|bash evals/integration/test_telemetry.sh"
+  "Telemetry doctor integration|bash evals/integration/test_telemetry_doctor.sh"
+  "Utterance check integration|bash evals/integration/test_utterance_check.sh"
+  "Pull work provider integration|bash evals/integration/test_pull_work_provider.sh"
+  "Usage feedback import integration|bash evals/integration/test_usage_feedback_import.sh"
+  "Usage feedback outcomes integration|bash evals/integration/test_usage_feedback_outcomes.sh"
+  "Usage feedback report integration|bash evals/integration/test_usage_feedback_report.sh"
+  "Usage feedback dashboard integration|bash evals/integration/test_usage_feedback_dashboard.sh"
+  "Usage feedback global integration|bash evals/integration/test_usage_feedback_global.sh"
 )
 
 LANE_SOURCE_AND_STATIC=(
@@ -51,6 +69,27 @@ LANE_RUNTIME_AND_KIT=(
   "Flow Kit repository integration"
   "Runtime adapter activation integration"
   "Bundle install integration"
+  "Bundle lifecycle integration"
+  "Activate npx context integration"
+  "Kit conformance levels integration"
+  "Local Flow Kit install integration"
+  "Flow Kit install-git integration"
+  "Console learning projection integration"
+  "Context map integration"
+  "Effective backlog settings integration"
+  "Flow agents statusline integration"
+  "Telemetry contract integration"
+  "Telemetry doctor integration"
+  "Utterance check integration"
+  "Pull work provider integration"
+)
+
+LANE_USAGE_FEEDBACK=(
+  "Usage feedback import integration"
+  "Usage feedback outcomes integration"
+  "Usage feedback report integration"
+  "Usage feedback dashboard integration"
+  "Usage feedback global integration"
 )
 
 slugify() {
@@ -77,6 +116,9 @@ lane_labels() {
       ;;
     runtime-and-kit)
       printf '%s\n' "${LANE_RUNTIME_AND_KIT[@]}"
+      ;;
+    usage-feedback)
+      printf '%s\n' "${LANE_USAGE_FEEDBACK[@]}"
       ;;
     *)
       echo "Unknown CI baseline lane: $(active_lane)" >&2
@@ -265,7 +307,7 @@ case "${1:-}" in
     ;;
   --lane)
     if [[ -z "${2:-}" ]]; then
-      echo "Usage: $0 --lane <source-and-static|workflow-contracts|runtime-and-kit>" >&2
+      echo "Usage: $0 --lane <source-and-static|workflow-contracts|runtime-and-kit|usage-feedback>" >&2
       exit 2
     fi
     FLOW_AGENTS_CI_LANE="$2"

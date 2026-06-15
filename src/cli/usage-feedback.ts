@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 
 const VALID_RESULTS = new Set(["success", "partial", "failure", "not_verified"]);
@@ -415,4 +416,8 @@ export function main(argv = process.argv.slice(2)): number {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) process.exit(main());
+// Resolve real paths to handle symlinks (e.g. /tmp -> /private/tmp on macOS) so the
+// entry-point guard fires correctly when the module is loaded directly as a script.
+const _selfRealPath = (() => { try { return fs.realpathSync(fileURLToPath(import.meta.url)); } catch { return fileURLToPath(import.meta.url); } })();
+const _argv1RealPath = (() => { try { return fs.realpathSync(process.argv[1]); } catch { return process.argv[1]; } })();
+if (_selfRealPath === _argv1RealPath) process.exit(main());
