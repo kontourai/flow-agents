@@ -126,31 +126,47 @@ function safeSegment(value: string): string {
   return value.replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "") || "asset";
 }
 
+// Asset classes that are directly activated (copied to the runtime directory) by both adapters.
+// flows: gate definitions read by the adapter's flow-routing layer.
+// skills: agent guidance markdown copied to skills/<kit-id>/ for agent discovery.
+// docs: documentation markdown copied to docs/<kit-id>/ for agent reference.
+const ACTIVATED_ASSET_CLASSES = new Set(["flows", "skills", "docs"]);
+
 export function activateCodexLocal(sourceRoot: string, dest: string): Record<string, unknown> {
   const inventory = readKitInventory(sourceRoot, dest);
   const runtimeDir = path.join(dest, ".flow-agents", "runtime", "codex");
   const generated: Record<string, string>[] = [];
   const skipped: Record<string, string | null>[] = [];
   for (const asset of inventory.assets) {
-    if (asset.asset_class !== "flows") {
-      skipped.push({ asset_class: asset.asset_class, path: asset.relative_path, kit_id: asset.kit_id, asset_id: asset.asset_id, reason: "asset class is diagnostic-only for codex-local" });
-      continue;
+    if (asset.asset_class === "flows") {
+      if (!asset.asset_id) {
+        skipped.push({ asset_class: asset.asset_class, path: asset.relative_path, kit_id: asset.kit_id, asset_id: null, reason: "flow asset is missing an id" });
+        continue;
+      }
+      const output = path.join(runtimeDir, "flows", safeSegment(asset.kit_id), `${safeSegment(asset.asset_id)}.flow.json`);
+      fs.mkdirSync(path.dirname(output), { recursive: true });
+      fs.copyFileSync(asset.source_path, output);
+      generated.push({ asset_class: asset.asset_class, path: relPath(dest, output), kit_id: asset.kit_id, asset_id: asset.asset_id, source_path: asset.source_path.split(path.sep).join("/") });
+    } else if (asset.asset_class === "skills" || asset.asset_class === "docs") {
+      // Copy skills and docs to runtime/<adapter>/<class>/<kit-id>/<filename> so the
+      // agent's guidance index (AGENTS.md) can reference them and they are co-located
+      // with flow definitions for the same kit.
+      const filename = path.basename(asset.source_path);
+      const output = path.join(runtimeDir, asset.asset_class, safeSegment(asset.kit_id), filename);
+      fs.mkdirSync(path.dirname(output), { recursive: true });
+      fs.copyFileSync(asset.source_path, output);
+      generated.push({ asset_class: asset.asset_class, path: relPath(dest, output), kit_id: asset.kit_id, asset_id: asset.asset_id ?? "", source_path: asset.source_path.split(path.sep).join("/") });
+    } else {
+      skipped.push({ asset_class: asset.asset_class, path: asset.relative_path, kit_id: asset.kit_id, asset_id: asset.asset_id, reason: "asset class is not activated by codex-local" });
     }
-    if (!asset.asset_id) {
-      skipped.push({ asset_class: asset.asset_class, path: asset.relative_path, kit_id: asset.kit_id, asset_id: null, reason: "flow asset is missing an id" });
-      continue;
-    }
-    const output = path.join(runtimeDir, "flows", safeSegment(asset.kit_id), `${safeSegment(asset.asset_id)}.flow.json`);
-    fs.mkdirSync(path.dirname(output), { recursive: true });
-    fs.copyFileSync(asset.source_path, output);
-    generated.push({ asset_class: asset.asset_class, path: relPath(dest, output), kit_id: asset.kit_id, asset_id: asset.asset_id, source_path: asset.source_path.split(path.sep).join("/") });
   }
   fs.mkdirSync(runtimeDir, { recursive: true });
-  const manifest = { schema_version: "1.0", adapter: "codex-local", supported_asset_classes: ["flows"], generated_runtime_files: generated, skipped_assets: skipped, warnings: inventory.warnings, errors: inventory.errors };
+  const supportedClasses = Array.from(ACTIVATED_ASSET_CLASSES);
+  const manifest = { schema_version: "1.0", adapter: "codex-local", supported_asset_classes: supportedClasses, generated_runtime_files: generated, skipped_assets: skipped, warnings: inventory.warnings, errors: inventory.errors };
   const manifestPath = path.join(runtimeDir, "activation.json");
   writeJson(manifestPath, manifest);
   generated.push({ asset_class: "activation-manifest", path: relPath(dest, manifestPath), kit_id: "runtime", asset_id: "codex-local.activation", source_path: manifestPath.split(path.sep).join("/") });
-  return { selected_adapter: "codex-local", supported_asset_classes: ["flows"], generated_runtime_files: generated, skipped_assets: skipped, warnings: inventory.warnings, errors: inventory.errors };
+  return { selected_adapter: "codex-local", supported_asset_classes: supportedClasses, generated_runtime_files: generated, skipped_assets: skipped, warnings: inventory.warnings, errors: inventory.errors };
 }
 
 // Decision Q3 (Issue #32): Option (a) — new adapter id "strands-local" rather than
@@ -163,27 +179,39 @@ export function activateStrandsLocal(sourceRoot: string, dest: string): Record<s
   const inventory = readKitInventory(sourceRoot, dest);
   // Runtime flows land at .flow-agents/runtime/strands/flows/<kit-id>/<asset-id>.flow.json
   // so the Strands steering context can glob for *.flow.json under this path.
+  // Runtime skills land at .flow-agents/runtime/strands/skills/<kit-id>/<filename> and
+  // docs at .flow-agents/runtime/strands/docs/<kit-id>/<filename> for system-prompt injection.
   const runtimeDir = path.join(dest, ".flow-agents", "runtime", "strands");
   const generated: Record<string, string>[] = [];
   const skipped: Record<string, string | null>[] = [];
   for (const asset of inventory.assets) {
-    if (asset.asset_class !== "flows") {
-      skipped.push({ asset_class: asset.asset_class, path: asset.relative_path, kit_id: asset.kit_id, asset_id: asset.asset_id, reason: "asset class is diagnostic-only for strands-local" });
-      continue;
+    if (asset.asset_class === "flows") {
+      if (!asset.asset_id) {
+        skipped.push({ asset_class: asset.asset_class, path: asset.relative_path, kit_id: asset.kit_id, asset_id: null, reason: "flow asset is missing an id" });
+        continue;
+      }
+      const output = path.join(runtimeDir, "flows", safeSegment(asset.kit_id), `${safeSegment(asset.asset_id)}.flow.json`);
+      fs.mkdirSync(path.dirname(output), { recursive: true });
+      fs.copyFileSync(asset.source_path, output);
+      generated.push({ asset_class: asset.asset_class, path: relPath(dest, output), kit_id: asset.kit_id, asset_id: asset.asset_id, source_path: asset.source_path.split(path.sep).join("/") });
+    } else if (asset.asset_class === "skills" || asset.asset_class === "docs") {
+      // Mirror the codex-local layout: strands/<class>/<kit-id>/<filename>.
+      // The Strands system-prompt injection layer can glob for all *.md files under
+      // .flow-agents/runtime/strands/skills/ to include agent guidance in the context.
+      const filename = path.basename(asset.source_path);
+      const output = path.join(runtimeDir, asset.asset_class, safeSegment(asset.kit_id), filename);
+      fs.mkdirSync(path.dirname(output), { recursive: true });
+      fs.copyFileSync(asset.source_path, output);
+      generated.push({ asset_class: asset.asset_class, path: relPath(dest, output), kit_id: asset.kit_id, asset_id: asset.asset_id ?? "", source_path: asset.source_path.split(path.sep).join("/") });
+    } else {
+      skipped.push({ asset_class: asset.asset_class, path: asset.relative_path, kit_id: asset.kit_id, asset_id: asset.asset_id, reason: "asset class is not activated by strands-local" });
     }
-    if (!asset.asset_id) {
-      skipped.push({ asset_class: asset.asset_class, path: asset.relative_path, kit_id: asset.kit_id, asset_id: null, reason: "flow asset is missing an id" });
-      continue;
-    }
-    const output = path.join(runtimeDir, "flows", safeSegment(asset.kit_id), `${safeSegment(asset.asset_id)}.flow.json`);
-    fs.mkdirSync(path.dirname(output), { recursive: true });
-    fs.copyFileSync(asset.source_path, output);
-    generated.push({ asset_class: asset.asset_class, path: relPath(dest, output), kit_id: asset.kit_id, asset_id: asset.asset_id, source_path: asset.source_path.split(path.sep).join("/") });
   }
   fs.mkdirSync(runtimeDir, { recursive: true });
-  const manifest = { schema_version: "1.0", adapter: "strands-local", supported_asset_classes: ["flows"], generated_runtime_files: generated, skipped_assets: skipped, warnings: inventory.warnings, errors: inventory.errors };
+  const supportedClasses = Array.from(ACTIVATED_ASSET_CLASSES);
+  const manifest = { schema_version: "1.0", adapter: "strands-local", supported_asset_classes: supportedClasses, generated_runtime_files: generated, skipped_assets: skipped, warnings: inventory.warnings, errors: inventory.errors };
   const manifestPath = path.join(runtimeDir, "activation.json");
   writeJson(manifestPath, manifest);
   generated.push({ asset_class: "activation-manifest", path: relPath(dest, manifestPath), kit_id: "runtime", asset_id: "strands-local.activation", source_path: manifestPath.split(path.sep).join("/") });
-  return { selected_adapter: "strands-local", supported_asset_classes: ["flows"], generated_runtime_files: generated, skipped_assets: skipped, warnings: inventory.warnings, errors: inventory.errors };
+  return { selected_adapter: "strands-local", supported_asset_classes: supportedClasses, generated_runtime_files: generated, skipped_assets: skipped, warnings: inventory.warnings, errors: inventory.errors };
 }

@@ -12,7 +12,7 @@ This guide walks you from an empty directory to a validated, locally installed k
 
 - **Kit** — a directory with a root `kit.json` manifest and the assets it declares. The manifest is the contract; Flow Agents validates it before anything is copied.
 - **Flow Definition** — a `.flow.json` file that declares steps, gates, and expected evidence. Validation of the Flow Definition semantics belongs to [Kontour Flow](https://kontourai.github.io/flow/); the kit contract delegates to it.
-- **Activation** — the step that reads the installed kit and writes runtime-local files into your workspace. Today the `codex-local` adapter is the only adapter, and it activates only Flow Definition assets.
+- **Activation** — the step that reads the installed kit and writes runtime-local files into your workspace. Both `codex-local` and `strands-local` adapters activate Flow Definitions, skills, and docs. See the Activate section for the full asset-class table.
 
 ## Directory layout
 
@@ -54,7 +54,7 @@ Required fields:
 | `name` | Non-empty display name |
 | `flows` | Non-empty list; each entry must have `id` and `path` |
 
-Optional fields: `product_name`, `description`, `skills`, `docs`, `adapters`, `evals`, `assets`. Optional fields list relative asset paths or objects with `id`, `path`, and optional `description`. They are declared for provenance but only Flow Definition assets are activated today; others appear in diagnostics as `skipped_assets`.
+Optional fields: `product_name`, `description`, `skills`, `docs`, `adapters`, `evals`, `assets`. Optional fields list relative asset paths or objects with `id`, `path`, and optional `description`. `skills` and `docs` assets are activated by both adapters alongside flows. `adapters`, `evals`, and `assets` appear in diagnostics as `skipped_assets` (see the Activate section for the full per-adapter table).
 
 ## Minimal flow file
 
@@ -140,7 +140,24 @@ After installing, run activate to write runtime-local files into the workspace:
 npx @kontourai/flow-agents flow-kit activate --dest /path/to/workspace --format json
 ```
 
-The `codex-local` adapter is selected automatically. It writes Flow Definition copies under `.flow-agents/runtime/codex/flows/<kit-id>/` and an `activation.json` manifest. Declared `skills`, `docs`, `adapters`, `evals`, and `assets` are recorded as `skipped_assets` — they are not an error, just not activated yet.
+The `codex-local` adapter is selected automatically. To activate for Strands, pass `--adapter strands-local`.
+
+### What each adapter activates
+
+Each adapter copies declared assets into `.flow-agents/runtime/<adapter>/` and produces an `activation.json` manifest. The table below shows which asset classes are activated today:
+
+| Asset class | `codex-local` | `strands-local` | Notes |
+|---|---|---|---|
+| `flows` | Activated — `.flow-agents/runtime/codex/flows/<kit-id>/<asset-id>.flow.json` | Activated — `.flow-agents/runtime/strands/flows/<kit-id>/<asset-id>.flow.json` | Gate definitions read by each adapter's flow-routing layer. |
+| `skills` | Activated — `.flow-agents/runtime/codex/skills/<kit-id>/<filename>` | Activated — `.flow-agents/runtime/strands/skills/<kit-id>/<filename>` | Agent guidance markdown. For codex-local, reference these paths from AGENTS.md. For strands-local, the Strands steering layer can glob for `*.md` under `skills/` during system-prompt injection. |
+| `docs` | Activated — `.flow-agents/runtime/codex/docs/<kit-id>/<filename>` | Activated — `.flow-agents/runtime/strands/docs/<kit-id>/<filename>` | Documentation assets. Co-located with skill files for easy reference. |
+| `adapters` | `skipped_assets` | `skipped_assets` | Framework or runtime adapter code — not copied by the activation layer. |
+| `evals` | `skipped_assets` | `skipped_assets` | Evaluation suites — not run or copied during activation. |
+| `assets` | `skipped_assets` | `skipped_assets` | General supporting assets — not copied during activation. |
+
+Assets in `skipped_assets` are recorded in `activation.json` for diagnostics but are not an error. They are not activated because no activation path is defined for those classes in the current adapters.
+
+Flows with a missing `id` field in `kit.json` are also placed in `skipped_assets` with an explicit reason.
 
 When installing through `npx @kontourai/flow-agents init` with the Codex runtime, pass `--activate-kits` to run activation as part of init:
 

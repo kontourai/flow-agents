@@ -43,31 +43,68 @@ const data = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const dest = process.argv[3];
 const catalog = process.argv[4];
 if (data.selected_adapter !== "codex-local") throw new Error(`unexpected selected_adapter: ${data.selected_adapter}`);
-if (JSON.stringify(data.supported_asset_classes) !== JSON.stringify(["flows"])) throw new Error(`unexpected supported_asset_classes: ${data.supported_asset_classes}`);
+
+// supported_asset_classes now includes skills and docs (Issue #58)
+const supported = data.supported_asset_classes;
+for (const expected of ["flows", "skills", "docs"]) {
+  if (!supported.includes(expected)) throw new Error(`supported_asset_classes missing ${expected}: ${JSON.stringify(supported)}`);
+}
+
+// generated_runtime_files: flows activated (builder, mixed), skill activated (mixed.skill), activation manifest
 const ids = new Set(data.generated_runtime_files.map((item) => item.asset_id));
 for (const expected of ["builder.shape", "builder.build", "mixed.runtime", "codex-local.activation"]) {
   if (!ids.has(expected)) throw new Error(`missing generated asset: ${expected}`);
 }
+// mixed kit skill should now be in generated_runtime_files, not skipped
+if (!ids.has("mixed.skill")) throw new Error("missing generated asset: mixed.skill (skills should be activated now)");
+// mixed kit doc should now be in generated_runtime_files, not skipped
+if (!ids.has("mixed.docs")) throw new Error("missing generated asset: mixed.docs (docs should be activated now)");
+
+// All generated files must exist on disk
 for (const item of data.generated_runtime_files) {
   const generatedPath = path.join(dest, item.path);
   if (!fs.existsSync(generatedPath)) throw new Error(`generated file missing: ${generatedPath}`);
   if (path.resolve(catalog) === path.resolve(generatedPath)) throw new Error("activation generated over kits/catalog.json");
 }
-const classes = new Set(data.skipped_assets.map((item) => item.asset_class));
-for (const expected of ["skills", "docs", "adapters", "evals", "assets"]) {
-  if (!classes.has(expected)) throw new Error(`missing skipped asset class: ${expected}`);
+
+// Skills must be written to .flow-agents/runtime/codex/skills/<kit-id>/
+const skillFiles = data.generated_runtime_files.filter((item) => item.asset_class === "skills");
+if (!skillFiles.length) throw new Error("no skills in generated_runtime_files");
+for (const item of skillFiles) {
+  if (!item.path.includes(".flow-agents/runtime/codex/skills/")) {
+    throw new Error(`skill not under codex skills dir: ${item.path}`);
+  }
+  if (!fs.existsSync(path.join(dest, item.path))) throw new Error(`skill file missing on disk: ${item.path}`);
+}
+
+// Docs must be written to .flow-agents/runtime/codex/docs/<kit-id>/
+const docFiles = data.generated_runtime_files.filter((item) => item.asset_class === "docs");
+if (!docFiles.length) throw new Error("no docs in generated_runtime_files");
+for (const item of docFiles) {
+  if (!item.path.includes(".flow-agents/runtime/codex/docs/")) {
+    throw new Error(`doc not under codex docs dir: ${item.path}`);
+  }
+}
+
+// skipped_assets should NOT contain skills or docs any more
+const skippedClasses = new Set(data.skipped_assets.map((item) => item.asset_class));
+if (skippedClasses.has("skills")) throw new Error("skills should not be in skipped_assets after activation fix");
+if (skippedClasses.has("docs")) throw new Error("docs should not be in skipped_assets after activation fix");
+
+// adapters, evals, assets still skipped (not activated by codex-local)
+for (const expected of ["adapters", "evals", "assets"]) {
+  if (!skippedClasses.has(expected)) throw new Error(`missing skipped asset class: ${expected}`);
 }
 for (const item of data.skipped_assets) {
   for (const key of ["asset_class", "path", "kit_id", "asset_id", "reason"]) {
     if (!(key in item)) throw new Error(`skipped asset missing ${key}: ${JSON.stringify(item)}`);
   }
-  if (!item.reason.includes("diagnostic-only")) throw new Error(`unexpected skip reason: ${item.reason}`);
 }
 if (!fs.existsSync(path.join(dest, ".flow-agents/runtime/codex/activation.json"))) throw new Error("runtime activation manifest missing");
 console.log("ok");
 NODE
 then
-  pass "diagnostics report default adapter, generated files, and skipped unsupported assets"
+  pass "diagnostics report default adapter, generated files (flows+skills+docs), and correct skipped_assets (adapters, evals, assets only)"
 else
   fail "activation diagnostics are incomplete"
   sed -n '1,220p' "$OUT"
@@ -108,6 +145,14 @@ STRANDS_DEST="$TMP_DIR/strands-dest"
 STRANDS_OUT="$TMP_DIR/strands-activation.json"
 mkdir -p "$STRANDS_DEST"
 
+# Install the mixed kit into strands dest so we can assert skills land there too
+if flow_agents_node "$CLI" install-local "$MIXED_SRC" --dest "$STRANDS_DEST" >"$TMP_DIR/strands-install.out" 2>&1; then
+  pass "mixed local kit installs into strands temp destination"
+else
+  fail "mixed local kit install failed (strands dest)"
+  sed -n '1,160p' "$TMP_DIR/strands-install.out"
+fi
+
 # Use the builder kit (stable fixture) — activate for strands-local from the repo source root
 if flow_agents_node "$CLI" activate --dest "$STRANDS_DEST" --source-root "$ROOT" --adapter strands-local --format json >"$STRANDS_OUT" 2>&1; then
   pass "strands-local activation succeeds"
@@ -125,24 +170,57 @@ const catalog = process.argv[4];
 
 // Verify selected_adapter
 if (data.selected_adapter !== "strands-local") throw new Error(`expected strands-local, got: ${data.selected_adapter}`);
-if (JSON.stringify(data.supported_asset_classes) !== JSON.stringify(["flows"])) throw new Error(`unexpected supported_asset_classes: ${JSON.stringify(data.supported_asset_classes)}`);
+
+// supported_asset_classes now includes skills and docs (Issue #58)
+const supported = data.supported_asset_classes;
+for (const expected of ["flows", "skills", "docs"]) {
+  if (!supported.includes(expected)) throw new Error(`supported_asset_classes missing ${expected}: ${JSON.stringify(supported)}`);
+}
 
 // Verify builder kit flows are generated (builder kit is in catalog.json)
 const ids = new Set(data.generated_runtime_files.map((item) => item.asset_id));
 for (const expected of ["builder.shape", "builder.build", "strands-local.activation"]) {
   if (!ids.has(expected)) throw new Error(`missing generated asset: ${expected}`);
 }
+// mixed kit skill should be in generated_runtime_files
+if (!ids.has("mixed.skill")) throw new Error("missing generated asset: mixed.skill (skills should be activated by strands-local)");
+// mixed kit doc should be in generated_runtime_files
+if (!ids.has("mixed.docs")) throw new Error("missing generated asset: mixed.docs (docs should be activated by strands-local)");
 
 // Verify generated runtime files actually exist on disk
 for (const item of data.generated_runtime_files) {
   if (item.asset_class === "activation-manifest") continue;
   const generatedPath = path.join(dest, item.path);
   if (!fs.existsSync(generatedPath)) throw new Error(`generated file missing: ${generatedPath}`);
-  // Verify runtime files are under .flow-agents/runtime/strands/flows/
-  if (!item.path.includes(".flow-agents/runtime/strands/flows/")) {
-    throw new Error(`generated path not under strands runtime dir: ${item.path}`);
+  // Verify flow files are under .flow-agents/runtime/strands/flows/
+  if (item.asset_class === "flows" && !item.path.includes(".flow-agents/runtime/strands/flows/")) {
+    throw new Error(`generated flow path not under strands runtime dir: ${item.path}`);
   }
 }
+
+// Skills must be written to .flow-agents/runtime/strands/skills/<kit-id>/
+const skillFiles = data.generated_runtime_files.filter((item) => item.asset_class === "skills");
+if (!skillFiles.length) throw new Error("no skills in generated_runtime_files for strands-local");
+for (const item of skillFiles) {
+  if (!item.path.includes(".flow-agents/runtime/strands/skills/")) {
+    throw new Error(`skill not under strands skills dir: ${item.path}`);
+  }
+  if (!fs.existsSync(path.join(dest, item.path))) throw new Error(`skill file missing on disk: ${item.path}`);
+}
+
+// Docs must be written to .flow-agents/runtime/strands/docs/<kit-id>/
+const docFiles = data.generated_runtime_files.filter((item) => item.asset_class === "docs");
+if (!docFiles.length) throw new Error("no docs in generated_runtime_files for strands-local");
+for (const item of docFiles) {
+  if (!item.path.includes(".flow-agents/runtime/strands/docs/")) {
+    throw new Error(`doc not under strands docs dir: ${item.path}`);
+  }
+}
+
+// skipped_assets should NOT contain skills or docs
+const skippedClasses = new Set(data.skipped_assets.map((item) => item.asset_class));
+if (skippedClasses.has("skills")) throw new Error("skills should not be in skipped_assets for strands-local");
+if (skippedClasses.has("docs")) throw new Error("docs should not be in skipped_assets for strands-local");
 
 // Verify activation.json written at strands runtime dir
 const manifestPath = path.join(dest, ".flow-agents/runtime/strands/activation.json");
@@ -156,14 +234,8 @@ for (const item of manifest.skipped_assets) {
   for (const key of ["asset_class", "path", "kit_id", "asset_id", "reason"]) {
     if (!(key in item)) throw new Error(`skipped asset missing ${key}: ${JSON.stringify(item)}`);
   }
-  if (!item.reason.includes("diagnostic-only")) throw new Error(`unexpected skip reason: ${item.reason}`);
 }
 
-// Non-flow asset classes should appear in skipped_assets
-const skippedClasses = new Set(manifest.skipped_assets.map((item) => item.asset_class));
-// builder kit has flows only; skipped_assets check requires a kit with non-flow assets,
-// which the codex-local path already validates via mixed-runtime-kit above.
-// Here we just confirm the field structure is present.
 if (!Array.isArray(data.skipped_assets)) throw new Error("result skipped_assets is not an array");
 
 // Catalog not mutated
@@ -174,7 +246,7 @@ if (path.resolve(catalog) === path.resolve(path.join(dest, ".flow-agents/runtime
 console.log("ok");
 NODE
 then
-  pass "strands-local: runtime flow files, activation.json, and skipped_assets present with correct structure"
+  pass "strands-local: runtime flow+skill+doc files, activation.json, and skipped_assets present with correct structure"
 else
   fail "strands-local: activation diagnostics incomplete or incorrect"
   sed -n '1,220p' "$STRANDS_OUT"
@@ -206,6 +278,55 @@ then
 else
   fail "co-existence check failed"
   sed -n '1,220p' "$TMP_DIR/codex-after-strands.json"
+fi
+
+# -------------------------------------------------------------------------
+# Skill activation with a kit that has NO skills (builder kit — flows only)
+# -------------------------------------------------------------------------
+
+echo ""
+echo "=== Skills: kit-with-no-skills activates cleanly ==="
+
+NO_SKILLS_DEST="$TMP_DIR/no-skills-dest"
+NO_SKILLS_OUT="$TMP_DIR/no-skills-activation.json"
+mkdir -p "$NO_SKILLS_DEST"
+
+if flow_agents_node "$CLI" activate --dest "$NO_SKILLS_DEST" --source-root "$ROOT" --format json >"$NO_SKILLS_OUT" 2>&1; then
+  pass "activation succeeds for source-root with no skills (builder kit only)"
+else
+  fail "activation failed for kit with no skills"
+  sed -n '1,220p' "$NO_SKILLS_OUT"
+fi
+
+if node - "$NO_SKILLS_OUT" "$NO_SKILLS_DEST" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+// Use builder-only source root (no installed local kits, built-in kits only)
+const data = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const dest = process.argv[3];
+if (data.selected_adapter !== "codex-local") throw new Error(`expected codex-local, got: ${data.selected_adapter}`);
+// builder kit has no skills or docs — skills dir should not exist (or be empty)
+const skillsDir = path.join(dest, ".flow-agents/runtime/codex/skills");
+// It's fine if the dir doesn't exist; builder kit has no skills
+const docsDir = path.join(dest, ".flow-agents/runtime/codex/docs");
+// builder kit has no docs either
+// No skills or docs in skipped_assets (none declared)
+const skippedClasses = new Set(data.skipped_assets.map((item) => item.asset_class));
+// builder kit only has flows — no skills or docs — so neither should appear in skipped
+if (skippedClasses.has("skills")) throw new Error("builder kit (no skills) should not have skills in skipped_assets");
+if (skippedClasses.has("docs")) throw new Error("builder kit (no docs) should not have docs in skipped_assets");
+// Flows must still be activated
+const ids = new Set(data.generated_runtime_files.map((item) => item.asset_id));
+if (!ids.has("builder.shape")) throw new Error("missing builder.shape flow");
+if (!ids.has("builder.build")) throw new Error("missing builder.build flow");
+if (!fs.existsSync(path.join(dest, ".flow-agents/runtime/codex/activation.json"))) throw new Error("activation.json missing");
+console.log("ok");
+NODE
+then
+  pass "kit with no skills activates cleanly — flows activated, no skills or docs in skipped_assets"
+else
+  fail "kit with no skills activation check failed"
+  sed -n '1,220p' "$NO_SKILLS_OUT"
 fi
 
 echo ""
