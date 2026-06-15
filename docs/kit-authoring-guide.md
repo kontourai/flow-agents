@@ -112,7 +112,7 @@ npm run validate:source --
 Once validation passes, install the kit into a target workspace:
 
 ```bash
-npx @kontourai/flow-agents flow-kit install-local path/to/my-kit --dest /path/to/workspace
+npx @kontourai/flow-agents kit install path/to/my-kit --dest /path/to/workspace
 ```
 
 `--dest` is the installed Flow Agents bundle root. When omitted the command uses the current directory. From a contributor checkout of this repository, the equivalent form is `npm run flow-kit -- <command>`.
@@ -120,8 +120,8 @@ npx @kontourai/flow-agents flow-kit install-local path/to/my-kit --dest /path/to
 Confirm the install:
 
 ```bash
-npx @kontourai/flow-agents flow-kit list --dest /path/to/workspace
-npx @kontourai/flow-agents flow-kit status my-kit --dest /path/to/workspace
+npx @kontourai/flow-agents kit list --dest /path/to/workspace
+npx @kontourai/flow-agents kit status my-kit --dest /path/to/workspace
 ```
 
 `list` prints one summary line per installed kit. `status` prints JSON provenance including the SHA256 content hash and `installed` or `missing` state.
@@ -129,7 +129,7 @@ npx @kontourai/flow-agents flow-kit status my-kit --dest /path/to/workspace
 To replace an existing install after you update the kit source:
 
 ```bash
-npx @kontourai/flow-agents flow-kit install-local path/to/my-kit --dest /path/to/workspace --update
+npx @kontourai/flow-agents kit install path/to/my-kit --dest /path/to/workspace --update
 ```
 
 ## Activate
@@ -137,7 +137,7 @@ npx @kontourai/flow-agents flow-kit install-local path/to/my-kit --dest /path/to
 After installing, run activate to write runtime-local files into the workspace:
 
 ```bash
-npx @kontourai/flow-agents flow-kit activate --dest /path/to/workspace --format json
+npx @kontourai/flow-agents kit activate --dest /path/to/workspace --format json
 ```
 
 The `codex-local` adapter is selected automatically. To activate for Strands, pass `--adapter strands-local`.
@@ -194,7 +194,7 @@ The **container contract** is owned by [Kontour Flow](https://kontourai.github.i
 - Path rules: all declared paths must be relative, must not contain `..`, and must resolve inside the kit directory.
 - The **extension model**: unknown top-level fields are consumer extensions; core validation ignores-but-permits them.
 
-Container validation is surfaced in Flow's CLI as `flow validate-kit <kit-dir>`. Flow Agents delegates container validation to Flow when `FLOW_CLI_ROOT` is configured; without it, Flow Agents applies the same rules internally.
+Container validation is surfaced in Flow's CLI as `flow kit validate <kit-dir>`. Flow Agents delegates core container validation to `@kontourai/flow`'s `validateKitContainer` library function; the contract lives once, in Flow.
 
 For the authoritative container spec and JSON Schema, see [kontourai/flow#67](https://github.com/kontourai/flow/pull/67) (the spec PR) and the published `schemas/flow-kit-container.schema.json` in the `@kontourai/flow` package.
 
@@ -284,7 +284,7 @@ Layering summary:
 Use the `inspect` subcommand to derive a kit's conformance level and consumer targets:
 
 ```bash
-npm run flow-kit -- inspect path/to/my-kit
+npm run kit -- inspect path/to/my-kit
 ```
 
 Output is stable JSON:
@@ -310,3 +310,22 @@ The `inspect` command is read-only and safe to run before install.
 ## Direction
 
 Flow Kits are designed to be shareable workflow units — authored once, carried across teams and workspaces. The intended growth path is distribution from git remotes and a curated Kontour kit catalog of Kontour-authored kits covering work modes beyond software delivery. Today install is local-path only; remote fetch is explicitly a non-goal in this version.
+
+## Migration: flow-kit → flow-agents kit
+
+The standalone `flow-kit` binary was removed in this release. The `flow-agents kit` subcommand is the replacement.
+
+| Old command | New command |
+|---|---|
+| `flow-kit install-local <path>` | `flow-agents kit install <path>` |
+| `flow-kit install-git <url>` | `flow-agents kit install <url>` |
+| `flow-kit activate` | `flow-agents kit activate` |
+| `flow-kit inspect <dir>` | `flow-agents kit inspect <dir>` |
+| `flow-kit list` | `flow-agents kit list` |
+| `flow-kit status <id>` | `flow-agents kit status <id>` |
+| `npx @kontourai/flow-agents flow-kit ...` | `npx @kontourai/flow-agents kit ...` |
+| `npm run flow-kit -- ...` | `npm run kit -- ...` |
+
+`install-local` and `install-git` are unified into a single `install` command. The source argument auto-detects whether it is a local path or a git URL (http://, https://, git+, ssh://, file://).
+
+Running the old `flow-kit` command will produce a "command not found" error from your shell — there is no alias or shim. Update any scripts or CI configurations that call `flow-kit` to use `flow-agents kit`.

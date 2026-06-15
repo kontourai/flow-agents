@@ -146,7 +146,7 @@ if jq -e '
   $ext.routing.deferred == 1 and
   ($ext.routing.targets | sort) == ["eval", "skill"] and
   ($ext.routing.statuses | sort) == ["deferred", "open"] and
-  ($ext.routing.refs | sort) == ["github:kontourai/flow-agents#96", "skills/learning-review/SKILL.md"] and
+  ($ext.routing.refs | sort) == ["github:kontourai/flow-agents#96", "kits/builder/skills/learning-review/SKILL.md"] and
   $ext.correction.needed == true and
   $ext.correction.type == "workflow" and
   $ext.correction.recurrence_key == "console-learning-projection.recurrence-metadata" and

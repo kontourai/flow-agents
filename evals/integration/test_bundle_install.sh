@@ -310,20 +310,20 @@ NODE
 done
 
 for dir in "$KIRO_DEST" "$BASE_DEST" "$CLAUDE_DEST" "$CODEX_DEST"; do
-  if [[ -f "$dir/scripts/flow-kit.js" ]] \
-    && node "$dir/scripts/flow-kit.js" list --dest "$dir" >/tmp/flow-kit-list.out 2>&1 \
-    && node "$dir/scripts/flow-kit.js" status --dest "$dir" >/tmp/flow-kit-status.out 2>&1 \
-    && rg -q 'No local Flow Kits installed' /tmp/flow-kit-list.out \
-    && rg -q 'No local Flow Kits installed' /tmp/flow-kit-status.out; then
+  if [[ -f "$dir/scripts/kit.js" ]] \
+    && node "$dir/scripts/kit.js" list --dest "$dir" >/tmp/kit-list.out 2>&1 \
+    && node "$dir/scripts/kit.js" status --dest "$dir" >/tmp/kit-status.out 2>&1 \
+    && rg -q 'No local Flow Kits installed' /tmp/kit-list.out \
+    && rg -q 'No local Flow Kits installed' /tmp/kit-status.out; then
     _pass "$dir includes local Flow Kit CLI and empty list/status works"
   else
     _fail "$dir local Flow Kit CLI list/status smoke failed"
   fi
 done
 
-if [[ -f "$CODEX_DEST/scripts/flow-kit.js" ]] \
+if [[ -f "$CODEX_DEST/scripts/kit.js" ]] \
   && [[ -f "$CODEX_DEST/build/src/runtime-adapters.js" ]] \
-  && node "$CODEX_DEST/scripts/flow-kit.js" activate --dest "$CODEX_DEST" --format json >/tmp/codex-runtime-activation.json 2>&1 \
+  && node "$CODEX_DEST/scripts/kit.js" activate --dest "$CODEX_DEST" --format json >/tmp/codex-runtime-activation.json 2>&1 \
   && node - "$CODEX_DEST" /tmp/codex-runtime-activation.json <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
@@ -344,7 +344,6 @@ then
   _pass "Codex installed bundle activates Builder Kit through codex-local"
 else
   _fail "Codex installed bundle runtime activation failed"
-  sed -n '1,180p' /tmp/codex-runtime-activation.json 2>/dev/null || true
 fi
 
 if node - "$KIRO_DEST" "$BASE_DEST" "$CLAUDE_DEST" "$CODEX_DEST" <<'NODE'
@@ -714,8 +713,11 @@ else
   _fail "Codex core-pack agent filtering failed"
 fi
 
-if [[ -d "$CODEX_CORE_DEST/.codex/skills/plan-work" && ! -d "$CODEX_CORE_DEST/.codex/skills/deliver" ]]; then
-  _pass "Codex core-pack install keeps core skills and prunes optional skills"
+# Kit-owned skills (plan-work, deliver) are always present regardless of pack filter.
+# Pack filtering only prunes skills declared in packs.json (the tool-skills).
+# The development-pack tool-skill agentic-engineering should be pruned in a core-only install.
+if [[ -d "$CODEX_CORE_DEST/.codex/skills/plan-work" && -d "$CODEX_CORE_DEST/.codex/skills/deliver" && ! -d "$CODEX_CORE_DEST/.codex/skills/agentic-engineering" ]]; then
+  _pass "Codex core-pack install: kit-skills present, dev-only tool-skill pruned"
 else
   _fail "Codex core-pack skill filtering failed"
 fi
@@ -746,8 +748,11 @@ else
   _fail "opencode core-pack agent filtering failed (tool-planner.md missing)"
 fi
 
-if [[ -d "$OPENCODE_CORE_DEST/.opencode/skills/plan-work" && ! -d "$OPENCODE_CORE_DEST/.opencode/skills/deliver" ]]; then
-  _pass "opencode core-pack install keeps core skills and prunes optional skills"
+# Kit-owned skills (plan-work, deliver) are always present regardless of pack filter.
+# Pack filtering only prunes skills declared in packs.json (the tool-skills).
+# The development-pack tool-skill agentic-engineering should be pruned in a core-only install.
+if [[ -d "$OPENCODE_CORE_DEST/.opencode/skills/plan-work" && -d "$OPENCODE_CORE_DEST/.opencode/skills/deliver" && ! -d "$OPENCODE_CORE_DEST/.opencode/skills/agentic-engineering" ]]; then
+  _pass "opencode core-pack install: kit-skills present, dev-only tool-skill pruned"
 else
   _fail "opencode core-pack skill filtering failed"
 fi

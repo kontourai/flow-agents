@@ -23,11 +23,11 @@ npm run validate:source --
 Installed Flow Agents bundles include a local-only install command for Flow Kit repositories that already exist on disk:
 
 ```bash
-npm run flow-kit -- install-local path/to/local-kit --dest /path/to/installed-flow-agents
-npm run flow-kit -- list --dest /path/to/installed-flow-agents
-npm run flow-kit -- status --dest /path/to/installed-flow-agents
-npm run flow-kit -- status example-kit --dest /path/to/installed-flow-agents
-npm run flow-kit -- activate --dest /path/to/installed-flow-agents --format json
+npm run kit -- install path/to/local-kit --dest /path/to/installed-flow-agents
+npm run kit -- list --dest /path/to/installed-flow-agents
+npm run kit -- status --dest /path/to/installed-flow-agents
+npm run kit -- status example-kit --dest /path/to/installed-flow-agents
+npm run kit -- activate --dest /path/to/installed-flow-agents --format json
 ```
 
 `--dest` is the installed bundle or workspace root. When omitted, the command uses the current working directory. Tests and automation should pass a temp destination; the command does not need to write to a user home directory.

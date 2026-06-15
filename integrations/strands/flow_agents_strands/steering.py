@@ -211,7 +211,7 @@ class SteeringContext:
         """
         Surface activated kit flows from the strands-local runtime path.
 
-        Reads .flow-agents/runtime/strands/flows/ (written by `flow-kit activate
+        Reads .flow-agents/runtime/strands/flows/ (written by `flow-agents kit activate
         --adapter strands-local`) and emits a brief hint listing active kit flows
         by id and description so the agent is aware of available workflow guidance.
         """

@@ -490,7 +490,7 @@ Kit flow activation for Strands workspaces is implemented as a new runtime adapt
 The CLI command is:
 
 ```bash
-flow-kit activate --adapter strands-local [--dest DIR] [--source-root DIR]
+flow-agents kit activate --adapter strands-local [--dest DIR] [--source-root DIR]
 ```
 
 This writes activated flow files to `.flow-agents/runtime/strands/flows/<kit-id>/<asset-id>.flow.json` and produces a parity-diagnostic `activation.json` (same schema as codex-local: `schema_version`, `adapter`, `supported_asset_classes`, `generated_runtime_files`, `skipped_assets`, `warnings`, `errors`).

@@ -2,7 +2,7 @@
 import { basename } from "node:path";
 import { main as effectiveBacklogSettings } from "./cli/effective-backlog-settings.js";
 import { main as consoleLearningProjection } from "./cli/console-learning-projection.js";
-import { main as flowKit } from "./cli/flow-kit.js";
+import { main as kit } from "./cli/kit.js";
 import { main as fixtureRetirementAudit } from "./cli/fixture-retirement-audit.js";
 import { main as init } from "./cli/init.js";
 import { main as promoteWorkflowArtifact } from "./cli/promote-workflow-artifact.js";
@@ -28,7 +28,7 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["effective-backlog-settings", effectiveBacklogSettings],
   ["filter-installed-packs", filterInstalledPacks],
   ["fixture-retirement-audit", fixtureRetirementAudit],
-  ["flow-kit", flowKit],
+  ["kit", kit],
   ["init", init],
   ["promote-workflow-artifact", promoteWorkflowArtifact],
   ["publish-change", publishChange],
@@ -51,7 +51,7 @@ const aliases = new Map<string, string>([
   ["flow-agents-effective-backlog-settings", "effective-backlog-settings"],
   ["flow-agents-filter-installed-packs", "filter-installed-packs"],
   ["flow-agents-fixture-retirement-audit", "fixture-retirement-audit"],
-  ["flow-agents-flow-kit", "flow-kit"],
+  ["flow-agents-kit", "kit"],
   ["flow-agents-promote-workflow-artifact", "promote-workflow-artifact"],
   ["flow-agents-publish-change", "publish-change"],
   ["flow-agents-pull-work-provider", "pull-work-provider"],

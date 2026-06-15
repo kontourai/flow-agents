@@ -14,7 +14,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 pass() { echo "  ✓ $1"; }
 fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 
-CLI="$ROOT/scripts/flow-kit.js"
+CLI="$ROOT/scripts/kit.js"
 MIXED_SRC="$ROOT/evals/fixtures/flow-kit-repository/mixed-runtime-kit"
 
 echo "=== activate npx-context Checks (Issue #57) ==="
@@ -27,7 +27,7 @@ mkdir -p "$DEST"
 
 # Install a kit into the destination workspace first.
 install_out="$TMP_DIR/install.out"
-if flow_agents_node "$CLI" install-local "$MIXED_SRC" --dest "$DEST" >"$install_out" 2>&1; then
+if flow_agents_node "$CLI" install "$MIXED_SRC" --dest "$DEST" >"$install_out" 2>&1; then
   pass "mixed-runtime-kit installs into workspace"
 else
   fail "install failed (prerequisite step)"
