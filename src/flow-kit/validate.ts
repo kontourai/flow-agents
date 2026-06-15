@@ -1,8 +1,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { validateKitContainer } from "@kontourai/flow";
 import { readJson } from "../lib/fs.js";
 
-const ASSET_CLASSES = ["flows", "skills", "docs", "adapters", "evals", "assets"] as const;
+// Extension-only asset classes: validated by Flow Agents. Flows are validated by @kontourai/flow.
+const EXTENSION_ASSET_CLASSES = ["skills", "docs", "adapters", "evals", "assets"] as const;
 
 // Core container fields owned by kontourai/flow (flow-kit-container.schema.json).
 // agent-extension fields are skills, docs, adapters, evals, assets.
@@ -34,42 +36,21 @@ export interface KitTargetsResult {
 }
 
 /**
- * Validates that the manifest satisfies the core Flow Kit container contract
- * (as specified by kontourai/flow PR #67) with all agent-extension fields stripped.
- * Returns a list of violation messages (empty = valid).
+ * Delegates core Flow Kit container validation to @kontourai/flow's validateKitContainer.
+ * The container contract lives once, in Flow. Returns a list of violation messages (empty = valid).
  *
  * The degradation invariant: every Flow Agents Kit MUST remain a valid core
  * Flow Kit container when agent-extension fields are ignored.
+ *
+ * @param kitDir  Real kit directory path for file-existence checks on flows[].path entries.
+ *                Pass the actual kit directory when available; pass "" for structural-only checks.
  */
-export function validateCoreContainer(manifest: Record<string, unknown>, label: string): string[] {
-  const errors: string[] = [];
-  if (manifest.schema_version !== "1.0") {
-    errors.push(`${label}: .schema_version must be "1.0"`);
-  }
-  if (typeof manifest.id !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(manifest.id)) {
-    errors.push(`${label}: .id must be a stable kebab-case string`);
-  }
-  if (typeof manifest.name !== "string" || !manifest.name.trim()) {
-    errors.push(`${label}: .name must be a non-empty string`);
-  }
-  if (!Array.isArray(manifest.flows) || manifest.flows.length === 0) {
-    errors.push(`${label}: .flows must be a non-empty list`);
-  } else {
-    manifest.flows.forEach((entry: unknown, index: number) => {
-      if (typeof entry !== "object" || entry === null) {
-        errors.push(`${label}: flows[${index}] must be an object`);
-        return;
-      }
-      const flow = entry as Record<string, unknown>;
-      if (typeof flow.id !== "string" || !flow.id) {
-        errors.push(`${label}: flows[${index}].id must be a string`);
-      }
-      if (typeof flow.path !== "string" || !flow.path) {
-        errors.push(`${label}: flows[${index}].path must be a string`);
-      }
-    });
-  }
-  return errors;
+function delegateCoreContainerValidation(kitDir: string, manifest: Record<string, unknown>): string[] {
+  const result = validateKitContainer(kitDir, manifest);
+  if (result.valid) return [];
+  return result.diagnostics
+    .filter((d) => d.severity === "error")
+    .map((d) => `${d.path}: ${d.message}`);
 }
 
 /**
@@ -83,12 +64,17 @@ export function validateCoreContainer(manifest: Record<string, unknown>, label: 
  *  - targets.flow: always present when K0 (any Flow consumer can evaluate gates).
  *  - targets.flow-agents: present when K1 (agent extension assets activate in >=1 harness).
  *  - third-party: any top-level keys that are not core fields and not Flow Agents extension classes.
+ *
+ * @param manifest  The kit.json manifest object.
+ * @param kitDir    Kit directory for flow file-existence checks. Defaults to "" (structural-only).
+ *                  Pass the real kit directory from `inspect` to get authoritative K0 validation.
  */
-export function deriveKitTargets(manifest: Record<string, unknown>): KitTargetsResult {
+export function deriveKitTargets(manifest: Record<string, unknown>, kitDir = ""): KitTargetsResult {
   const kitId = typeof manifest.id === "string" ? manifest.id : "<unknown>";
   const kitName = typeof manifest.name === "string" ? manifest.name : "<unknown>";
 
-  const coreErrors = validateCoreContainer(manifest, "kit.json");
+  // Delegate core container validation to @kontourai/flow.
+  const coreErrors = delegateCoreContainerValidation(kitDir, manifest);
   const k0 = coreErrors.length === 0;
 
   const hasAgentExtension = AGENT_EXTENSION_CLASSES.size > 0 &&
@@ -129,25 +115,17 @@ export function validateKitRepository(kitDir: string): string[] {
     errors.push(`${manifestPath}: invalid JSON: ${(error as Error).message}`);
     return errors;
   }
-  if (manifest.schema_version !== "1.0") errors.push(`${manifestPath}: .schema_version must be "1.0"`);
-  if (typeof manifest.id !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(manifest.id)) {
-    errors.push(`${manifestPath}: .id must be a stable kebab-case string`);
-  }
-  if (typeof manifest.name !== "string" || !manifest.name.trim()) errors.push(`${manifestPath}: .name must be a non-empty string`);
 
-  // Degradation invariant: every Flow Agents Kit must remain a valid core Flow Kit container
-  // when agent-extension fields are stripped. Strip extensions and re-validate core contract.
-  const coreManifest: Record<string, unknown> = {};
-  for (const key of Object.keys(manifest)) {
-    if (CORE_CONTAINER_FIELDS.has(key)) coreManifest[key] = manifest[key];
-  }
-  const coreErrors = validateCoreContainer(coreManifest, manifestPath);
-  for (const err of coreErrors) {
-    // Deduplicate: only add if not already covered by top-level checks above.
-    if (!errors.some((existing) => existing === err)) errors.push(err);
-  }
+  // Delegate core container validation (schema_version, id, name, flows including file
+  // existence) to @kontourai/flow — the container contract lives once, in Flow.
+  // This enforces the degradation invariant: a Flow Agents Kit must remain a valid
+  // core Flow Kit container when extension fields are stripped.
+  const coreErrors = delegateCoreContainerValidation(kitDir, manifest);
+  for (const err of coreErrors) errors.push(err);
 
-  for (const section of ASSET_CLASSES) {
+  // Flow Agents extension validation: skills, docs, adapters, evals, assets.
+  // Flows are validated above by @kontourai/flow; only extension classes are checked here.
+  for (const section of EXTENSION_ASSET_CLASSES) {
     const entries = manifest[section];
     if (entries === undefined) continue;
     if (!Array.isArray(entries)) {
@@ -182,8 +160,7 @@ export function validateKitRepository(kitDir: string): string[] {
         return;
       }
       if (!fs.existsSync(resolved)) {
-        const noun = section === "flows" ? "Flow Definition" : "asset";
-        errors.push(`${manifestPath}: ${section}[${index}].path points at missing ${noun}: ${rel}`);
+        errors.push(`${manifestPath}: ${section}[${index}].path points at missing asset: ${rel}`);
       }
     });
   }

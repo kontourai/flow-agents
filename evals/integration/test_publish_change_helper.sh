@@ -112,7 +112,7 @@ status=$?
 
 for risk in runtime schema package hook security; do
   case "$risk" in
-    runtime) path="scripts/flow-kit.js" ;;
+    runtime) path="scripts/kit.js" ;;
     schema) path="schemas/workflow-evidence.schema.json" ;;
     package) path="package.json" ;;
     hook) path="scripts/hooks/quality-gate.js" ;;

@@ -23,7 +23,7 @@ run_inspect() {
   local output="$2"
   # Route through the main CLI to avoid import.meta.url path-resolution issues.
   flow_agents_build_ts 2>/dev/null
-  node "$FLOW_AGENTS_EVAL_ROOT/build/src/cli.js" flow-kit inspect "$kit_dir" >"$output" 2>&1
+  node "$FLOW_AGENTS_EVAL_ROOT/build/src/cli.js" kit inspect "$kit_dir" >"$output" 2>&1
 }
 
 # ===================================================================

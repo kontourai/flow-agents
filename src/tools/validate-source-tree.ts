@@ -37,7 +37,7 @@ const publicScriptWrappers = new Map<string, { target: string; significantLines:
   ] }],
   ["scripts/filter-installed-packs.js", { target: "../build/src/tools/filter-installed-packs.js", significantLines: ['import("../build/src/tools/filter-installed-packs.js").then(({ main }) => process.exit(main(process.argv.slice(2))));'] }],
   ["scripts/generate-context-map.js", { target: "../build/src/tools/generate-context-map.js", significantLines: ['import("../build/src/tools/generate-context-map.js").then(({ main }) => process.exit(main(process.argv.slice(2))));'] }],
-  ["scripts/flow-kit.js", { target: "../build/src/cli/flow-kit.js", significantLines: ['import("../build/src/cli/flow-kit.js").then(({ main }) => process.exit(main()));'] }],
+  ["scripts/kit.js", { target: "../build/src/cli/kit.js", significantLines: ['import("../build/src/cli/kit.js").then(({ main }) => process.exit(main()));'] }],
   ["scripts/pull-work-provider.js", { target: "../build/src/cli/pull-work-provider.js", significantLines: ['import("../build/src/cli/pull-work-provider.js").then(({ main }) => process.exit(main()));'] }],
   ["scripts/effective-backlog-settings.js", { target: "../build/src/cli/effective-backlog-settings.js", significantLines: ['import("../build/src/cli/effective-backlog-settings.js").then(({ main }) => process.exit(main()));'] }],
   ["scripts/publish-change-helper.js", { target: "../build/src/cli/publish-change-helper.js", significantLines: ['import("../build/src/cli/publish-change-helper.js").then(({ main }) => process.exit(main()));'] }],

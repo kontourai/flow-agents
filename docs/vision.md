@@ -20,7 +20,7 @@ One official framework adapter spike exists: `integrations/strands/` is a Python
 
 ### What ships today
 
-Kit authoring is shipped. The `kit.json` contract at schema version 1.0 is validated by the `flow-kit` CLI before any install. The [Kit Authoring Guide](kit-authoring-guide.html) walks from an empty directory to a validated, locally installed kit. Two reference kits ship in `kits/`:
+Kit authoring is shipped. The `kit.json` contract at schema version 1.0 is validated by the `flow-agents kit` CLI before any install. The [Kit Authoring Guide](kit-authoring-guide.html) walks from an empty directory to a validated, locally installed kit. Two reference kits ship in `kits/`:
 
 **Builder Kit** packages the full `idea → backlog → plan → build → review → verify → evidence → release → learning` pipeline as two flows (`builder.shape`, `builder.build`). It installs automatically.
 

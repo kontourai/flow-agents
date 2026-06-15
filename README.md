@@ -113,7 +113,7 @@ The [Workflow Usage Guide](docs/workflow-usage-guide.md) has example prompts and
 
 ## Flow Kits
 
-A Flow Kit bundles a workflow AND its opinionated output shape into a single validated unit: a `kit.json` manifest (schema version 1.0), one or more Flow Definitions, and optional skills, docs, adapters, evals, and assets. Authoring a kit means deciding not just _what_ an agent does but _how the result is rendered_ — the same pipeline produces different representations depending on which store adapter is active. Kits are the extension model for Flow Agents: validated by the `flow-kit` CLI, installed through a single command, and activatable into any workspace that runs Flow Agents.
+A Flow Kit bundles a workflow AND its opinionated output shape into a single validated unit: a `kit.json` manifest (schema version 1.0), one or more Flow Definitions, and optional skills, docs, adapters, evals, and assets. Authoring a kit means deciding not just _what_ an agent does but _how the result is rendered_ — the same pipeline produces different representations depending on which store adapter is active. Kits are the extension model for Flow Agents: validated and installed through the `flow-agents kit` CLI, and activatable into any workspace that runs Flow Agents.
 
 **Builder Kit** — ships with `builder.shape` (shape a problem into slices and fileable work items) and `builder.build` (pull ready work through design probing, planning, execution, verification, PR readiness, merge readiness, and learning). Installed automatically by `npx @kontourai/flow-agents init`.
 
@@ -126,7 +126,7 @@ The Knowledge Kit is also LIVE-proven: the default adapter passes the parameteri
 Install a local kit:
 
 ```bash
-npx @kontourai/flow-agents flow-kit install-local path/to/my-kit --dest /path/to/workspace
+npx @kontourai/flow-agents kit install path/to/my-kit --dest /path/to/workspace
 ```
 
 - [Kit Authoring Guide](docs/kit-authoring-guide.md) — build your own kit from scratch: directory layout, `kit.json`, a flow file, validation, install, and activation.

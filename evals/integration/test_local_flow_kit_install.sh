@@ -12,7 +12,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 pass() { echo "  ✓ $1"; }
 fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 
-CLI="$ROOT/scripts/flow-kit.js"
+CLI="$ROOT/scripts/kit.js"
 VALID_SRC="$ROOT/evals/fixtures/flow-kit-repository/valid-local-kit"
 INVALID_SRC="$ROOT/evals/fixtures/flow-kit-repository/invalid-missing-flow"
 DEST="$TMP_DIR/install-dest"
@@ -23,7 +23,7 @@ mkdir -p "$DEST"
 echo "=== Local Flow Kit Install Checks ==="
 
 install_output="$TMP_DIR/install.out"
-if flow_agents_node "$CLI" install-local "$VALID_SRC" --dest "$DEST" >"$install_output" 2>&1; then
+if flow_agents_node "$CLI" install "$VALID_SRC" --dest "$DEST" >"$install_output" 2>&1; then
   pass "valid local kit installs into temp destination"
 else
   fail "valid local kit install failed"
@@ -52,7 +52,7 @@ fi
 
 registry_hash_before_invalid="$(shasum -a 256 "$REGISTRY" | awk '{print $1}')"
 invalid_output="$TMP_DIR/invalid.out"
-if flow_agents_node "$CLI" install-local "$INVALID_SRC" --dest "$DEST" >"$invalid_output" 2>&1; then
+if flow_agents_node "$CLI" install "$INVALID_SRC" --dest "$DEST" >"$invalid_output" 2>&1; then
   fail "invalid local kit install should fail"
   sed -n '1,160p' "$invalid_output"
 elif rg -q 'Flow Kit repository validation failed' "$invalid_output" \
@@ -65,7 +65,7 @@ fi
 
 registry_hash_before_idempotent="$(shasum -a 256 "$REGISTRY" | awk '{print $1}')"
 idempotent_output="$TMP_DIR/idempotent.out"
-if flow_agents_node "$CLI" install-local "$VALID_SRC" --dest "$DEST" >"$idempotent_output" 2>&1 \
+if flow_agents_node "$CLI" install "$VALID_SRC" --dest "$DEST" >"$idempotent_output" 2>&1 \
   && rg -q "already installed" "$idempotent_output" \
   && [[ "$registry_hash_before_idempotent" == "$(shasum -a 256 "$REGISTRY" | awk '{print $1}')" ]]; then
   pass "same-source reinstall is idempotent"
@@ -79,7 +79,7 @@ cp -R "$VALID_SRC" "$CONFLICT_SRC"
 printf '\nconflict copy\n' >> "$CONFLICT_SRC/docs/README.md"
 conflict_output="$TMP_DIR/conflict.out"
 registry_hash_before_conflict="$(shasum -a 256 "$REGISTRY" | awk '{print $1}')"
-if flow_agents_node "$CLI" install-local "$CONFLICT_SRC" --dest "$DEST" >"$conflict_output" 2>&1; then
+if flow_agents_node "$CLI" install "$CONFLICT_SRC" --dest "$DEST" >"$conflict_output" 2>&1; then
   fail "different source with existing kit id should conflict"
   sed -n '1,160p' "$conflict_output"
 elif rg -q 'conflict: kit' "$conflict_output" \
@@ -91,7 +91,7 @@ else
 fi
 
 force_conflict_output="$TMP_DIR/force-conflict.out"
-if flow_agents_node "$CLI" install-local "$CONFLICT_SRC" --dest "$DEST" --force >"$force_conflict_output" 2>&1; then
+if flow_agents_node "$CLI" install "$CONFLICT_SRC" --dest "$DEST" --force >"$force_conflict_output" 2>&1; then
   fail "--force should not replace a different-source duplicate id"
   sed -n '1,160p' "$force_conflict_output"
 elif rg -q 'conflict: kit' "$force_conflict_output" \
@@ -103,7 +103,7 @@ else
 fi
 
 update_output="$TMP_DIR/update.out"
-if flow_agents_node "$CLI" install-local "$CONFLICT_SRC" --dest "$DEST" --update >"$update_output" 2>&1 \
+if flow_agents_node "$CLI" install "$CONFLICT_SRC" --dest "$DEST" --update >"$update_output" 2>&1 \
   && rg -q "updated local kit" "$update_output" \
   && rg -q "$CONFLICT_SRC" "$REGISTRY"; then
   pass "explicit update replaces duplicate id source"

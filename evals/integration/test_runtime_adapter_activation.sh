@@ -12,7 +12,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 pass() { echo "  ✓ $1"; }
 fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 
-CLI="$ROOT/scripts/flow-kit.js"
+CLI="$ROOT/scripts/kit.js"
 DEST="$TMP_DIR/runtime-dest"
 MIXED_SRC="$ROOT/evals/fixtures/flow-kit-repository/mixed-runtime-kit"
 OUT="$TMP_DIR/activation.json"
@@ -22,7 +22,7 @@ mkdir -p "$DEST"
 
 echo "=== Runtime Adapter Activation Checks ==="
 
-if flow_agents_node "$CLI" install-local "$MIXED_SRC" --dest "$DEST" >"$TMP_DIR/install.out" 2>&1; then
+if flow_agents_node "$CLI" install "$MIXED_SRC" --dest "$DEST" >"$TMP_DIR/install.out" 2>&1; then
   pass "mixed local kit installs into temp destination"
 else
   fail "mixed local kit install failed"
@@ -146,7 +146,7 @@ STRANDS_OUT="$TMP_DIR/strands-activation.json"
 mkdir -p "$STRANDS_DEST"
 
 # Install the mixed kit into strands dest so we can assert skills land there too
-if flow_agents_node "$CLI" install-local "$MIXED_SRC" --dest "$STRANDS_DEST" >"$TMP_DIR/strands-install.out" 2>&1; then
+if flow_agents_node "$CLI" install "$MIXED_SRC" --dest "$STRANDS_DEST" >"$TMP_DIR/strands-install.out" 2>&1; then
   pass "mixed local kit installs into strands temp destination"
 else
   fail "mixed local kit install failed (strands dest)"

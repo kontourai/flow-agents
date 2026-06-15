@@ -108,5 +108,5 @@ The dispositions in this audit table were implemented in PR #62:
 - `src/tools/generate-context-map.ts`: `allSkillPaths()` function added; context map generation now includes kit-owned skills.
 - `src/tools/validate-source-tree.ts`: `validateLegacyRefs()` updated to skip legacy-ref matches that resolve as declared kit-owned asset subpaths.
 - `packaging/packs.json`: Skill entries limited to the 6 remaining tool-skills in `skills/`. Kit-owned skills are no longer listed in packs (they're always included in the bundle as kit assets).
-- `flow-kit inspect kits/builder` now reports `k1: true` (skills present).
-- `flow-kit inspect kits/knowledge` now reports `k1: true` (skills present).
+- `flow-agents kit inspect kits/builder` now reports `k1: true` (skills present).
+- `flow-agents kit inspect kits/knowledge` now reports `k1: true` (skills present).

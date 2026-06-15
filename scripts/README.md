@@ -11,7 +11,7 @@ These files are stable launchers for TypeScript code compiled under `build/src/`
 | `build-universal-bundles.js` | `build/src/tools/build-universal-bundles.js` |
 | `filter-installed-packs.js` | `build/src/tools/filter-installed-packs.js` |
 | `generate-context-map.js` | `build/src/tools/generate-context-map.js` |
-| `flow-kit.js` | `build/src/cli/flow-kit.js` |
+| `kit.js` | `build/src/cli/kit.js` |
 | `pull-work-provider.js` | `build/src/cli/pull-work-provider.js` |
 | `effective-backlog-settings.js` | `build/src/cli/effective-backlog-settings.js` |
 | `publish-change-helper.js` | `build/src/cli/publish-change-helper.js` |
