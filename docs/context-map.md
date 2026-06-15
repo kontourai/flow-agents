@@ -65,18 +65,18 @@ Primary tools: `npm run workflow:sidecar`, `npm run workflow:validate-artifacts`
 
 | Skill | Source | When To Load |
 | --- | --- | --- |
-| deliver | skills/deliver/SKILL.md | Delivery workflow — selected work to delivered code. Ensures pull-work + pickup-probe preflight, then chains plan-work → execute-plan → review-work → verify-work → loop on failure without requiring user interaction between cleanly determ... |
-| evidence-gate | skills/evidence-gate/SKILL.md | Evaluate whether completed work is trustworthy enough for human review, merge, or release. Use after implementation, verify-work, provider checks, CI, or remediation to map acceptance criteria to evidence, inspect scope integrity, classi... |
-| execute-plan | skills/execute-plan/SKILL.md | Parallel execution primitive — plan artifact path to implemented code via tool-worker (x4). Reads plan directly. Updates session file between waves. |
-| fix-bug | skills/fix-bug/SKILL.md | Bug fix orchestrator — diagnose → plan-work → execute-plan → review-work → verify-work → loop. Diagnosis phase is unique to bugs, then chains the same primitives. |
-| idea-to-backlog | skills/idea-to-backlog/SKILL.md | Turn raw product or technical ideas into shaped, prioritized, executable GitHub issue backlog. Use for idea intake, ideation, product shaping, spike/prototype decisions, PRD-like feature briefs, prioritization, and backlog creation befor... |
-| learning-review | skills/learning-review/SKILL.md | Capture post-merge, post-deploy, or post-incident learnings and feed them back into backlog, workflow skills, tests, docs, or knowledge. Use after release readiness, post-deploy checks, retrospectives, failed gates, or repeated workflow... |
-| plan-work | skills/plan-work/SKILL.md | Code planning primitive — goal + directory to structured execution plan. Delegates to tool-planner. No resume, no ideation. |
-| pull-work | skills/pull-work/SKILL.md | Select ready GitHub issues from the executable backlog and prepare them for implementation. Use when choosing what to work on next, reviewing a kanban-style issue board, enforcing WIP limits, grouping issues, deciding worktree isolation,... |
-| release-readiness | skills/release-readiness/SKILL.md | Decide whether evidence-backed work is ready to merge, release, deploy, or hold. Use after evidence-gate PASS, before merge/release/deploy, and for post-deploy verification planning. |
-| review-work | skills/review-work/SKILL.md | Review primitive - run report-only code, security, dependency, architecture/standards, and IaC/policy critique before verification; records findings through the critique artifact/sink, currently critique.json locally. |
-| tdd-workflow | skills/tdd-workflow/SKILL.md | Test-driven development — RED → GREEN → REFACTOR with git checkpoints. Wraps plan-work → execute-plan → review-work → verify-work with test-first constraints and coverage gates. |
-| verify-work | skills/verify-work/SKILL.md | Verification primitive — session file path to structured evidence verdict via tool-verifier + tool-playwright. Reads acceptance criteria from plan artifact. |
+| deliver | kits/builder/skills/deliver/SKILL.md | Delivery workflow — selected work to delivered code. Ensures pull-work + pickup-probe preflight, then chains plan-work → execute-plan → review-work → verify-work → loop on failure without requiring user interaction between cleanly determ... |
+| evidence-gate | kits/builder/skills/evidence-gate/SKILL.md | Evaluate whether completed work is trustworthy enough for human review, merge, or release. Use after implementation, verify-work, provider checks, CI, or remediation to map acceptance criteria to evidence, inspect scope integrity, classi... |
+| execute-plan | kits/builder/skills/execute-plan/SKILL.md | Parallel execution primitive — plan artifact path to implemented code via tool-worker (x4). Reads plan directly. Updates session file between waves. |
+| fix-bug | kits/builder/skills/fix-bug/SKILL.md | Bug fix orchestrator — diagnose → plan-work → execute-plan → review-work → verify-work → loop. Diagnosis phase is unique to bugs, then chains the same primitives. |
+| idea-to-backlog | kits/builder/skills/idea-to-backlog/SKILL.md | Turn raw product or technical ideas into shaped, prioritized, executable GitHub issue backlog. Use for idea intake, ideation, product shaping, spike/prototype decisions, PRD-like feature briefs, prioritization, and backlog creation befor... |
+| learning-review | kits/builder/skills/learning-review/SKILL.md | Capture post-merge, post-deploy, or post-incident learnings and feed them back into backlog, workflow skills, tests, docs, or knowledge. Use after release readiness, post-deploy checks, retrospectives, failed gates, or repeated workflow... |
+| plan-work | kits/builder/skills/plan-work/SKILL.md | Code planning primitive — goal + directory to structured execution plan. Delegates to tool-planner. No resume, no ideation. |
+| pull-work | kits/builder/skills/pull-work/SKILL.md | Select ready GitHub issues from the executable backlog and prepare them for implementation. Use when choosing what to work on next, reviewing a kanban-style issue board, enforcing WIP limits, grouping issues, deciding worktree isolation,... |
+| release-readiness | kits/builder/skills/release-readiness/SKILL.md | Decide whether evidence-backed work is ready to merge, release, deploy, or hold. Use after evidence-gate PASS, before merge/release/deploy, and for post-deploy verification planning. |
+| review-work | kits/builder/skills/review-work/SKILL.md | Review primitive - run report-only code, security, dependency, architecture/standards, and IaC/policy critique before verification; records findings through the critique artifact/sink, currently critique.json locally. |
+| tdd-workflow | kits/builder/skills/tdd-workflow/SKILL.md | Test-driven development — RED → GREEN → REFACTOR with git checkpoints. Wraps plan-work → execute-plan → review-work → verify-work with test-first constraints and coverage gates. |
+| verify-work | kits/builder/skills/verify-work/SKILL.md | Verification primitive — session file path to structured evidence verdict via tool-verifier + tool-playwright. Reads acceptance criteria from plan artifact. |
 
 ## Support Skills
 
@@ -84,17 +84,13 @@ Primary tools: `npm run workflow:sidecar`, `npm run workflow:validate-artifacts`
 | --- | --- | --- |
 | agentic-engineering | skills/agentic-engineering/SKILL.md | Eval-first execution, task decomposition, and cost-aware model routing for AI-driven development workflows. |
 | browser-test | skills/browser-test/SKILL.md | Headless browser automation via Playwright — screenshots, accessibility checks, form filling, UI testing, DOM inspection. |
-| builder-shape | skills/builder-shape/SKILL.md | Invoke Builder Kit shape from a raw idea or the current conversation context without requiring the user to name idea-to-backlog. Delegates shaping to idea-to-backlog, records the Builder Kit Flow Definition link, and stops at the backlog... |
-| context-budget | skills/context-budget/SKILL.md | Audit token overhead across Flow Agents bundles — agent specs, skills, context files, MCP servers. Produces budget report with per-component breakdown and optimization suggestions. |
+| builder-shape | kits/builder/skills/builder-shape/SKILL.md | Invoke Builder Kit shape from a raw idea or the current conversation context without requiring the user to name idea-to-backlog. Delegates shaping to idea-to-backlog, records the Builder Kit Flow Definition link, and stops at the backlog... |
 | dependency-update | skills/dependency-update/SKILL.md | Analyze and upgrade project dependencies — latest versions, security vulnerabilities, actionable update plan across all package managers. |
-| design-probe | skills/design-probe/SKILL.md | Generic one-question-at-a-time design probing interview for turning unclear goals, designs, or workflow states into shared understanding before planning or execution. |
+| design-probe | kits/builder/skills/design-probe/SKILL.md | Generic one-question-at-a-time design probing interview for turning unclear goals, designs, or workflow states into shared understanding before planning or execution. |
 | eval-rebuild | skills/eval-rebuild/SKILL.md | Project-specific build and install commands for the eval feedback loop. Injected into eval-builder agent. Replace this skill for different build systems. |
-| explore | skills/explore/SKILL.md | Parallel codebase exploration — fans out subagents to map structure, entry points, dependencies, patterns, config, and tests in one pass. |
-| feedback-loop | skills/feedback-loop/SKILL.md | Verify implementation actually works. Visual changes → Playwright; integration changes → commands/tests. Run after completing builds. |
-| frontend-design | skills/frontend-design/SKILL.md | Create distinctive, production-grade frontend interfaces with high design quality. Use this skill when the user asks to build web components, pages, or applications. Generates creative, polished code that avoids generic AI aesthetics. |
 | github-cli | skills/github-cli/SKILL.md | Interact with GitHub via gh CLI — PRs, issues, repos, releases, workflows, gists. |
-| knowledge-capture | skills/knowledge-capture/SKILL.md | Save durable knowledge, lightweight pointers, user corrections, decisions, lessons, relationship context, or source references into the knowledge base. Use when the user says save, remember, capture, file this, bookmark context, or when... |
-| pickup-probe | skills/pickup-probe/SKILL.md | Builder Kit work-item/docs/provider-grounded Probe specialization used at the design-probe flow step before plan-work. |
+| knowledge-capture | kits/knowledge/skills/knowledge-capture/SKILL.md | Save durable knowledge, lightweight pointers, user corrections, decisions, lessons, relationship context, or source references into the knowledge base. Use when the user says save, remember, capture, file this, bookmark context, or when... |
+| pickup-probe | kits/builder/skills/pickup-probe/SKILL.md | Builder Kit work-item/docs/provider-grounded Probe specialization used at the design-probe flow step before plan-work. |
 | search-first | skills/search-first/SKILL.md | Research-before-coding workflow. Search for existing tools, libraries, and patterns before writing custom code. |
 
 ## Agents
@@ -129,8 +125,8 @@ Pack composition is defined in `packaging/packs.json`. The current builder expor
 
 | Pack | Default | Skills | Agents | Powers | Purpose |
 | --- | --- | --- | --- | --- | --- |
-| core | yes | 9 | 5 | 1 | Small default surface for reliable coding and workflow execution. |
-| development | no | 17 | 9 | 1 | Development workflow depth for backlog, release, dependency, GitHub, TDD, and frontend work. |
+| core | yes | 2 | 5 | 1 | Small default surface for reliable coding and workflow execution. |
+| development | no | 4 | 9 | 1 | Development workflow depth for backlog, release, dependency, GitHub, TDD, and frontend work. |
 
 ## Current Workflow State
 

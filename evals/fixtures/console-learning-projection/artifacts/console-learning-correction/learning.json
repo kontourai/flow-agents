@@ -28,7 +28,7 @@
           "target": "skill",
           "action": "Update workflow learning guidance after release.",
           "status": "deferred",
-          "ref": "skills/learning-review/SKILL.md"
+          "ref": "kits/builder/skills/learning-review/SKILL.md"
         }
       ],
       "correction": {

@@ -74,15 +74,45 @@ function repoShape(manifest: Record<string, unknown>): string[][] {
   return rows;
 }
 
+/** Collect all skill {name, absPath} pairs from skills/ and kit-owned skills. */
+function allSkillPaths(): Array<{ name: string; absPath: string }> {
+  const results: Array<{ name: string; absPath: string }> = [];
+  const seen = new Set<string>();
+  const skillsDir = path.join(root, "skills");
+  if (exists(skillsDir)) {
+    for (const name of fs.readdirSync(skillsDir).sort()) {
+      const absPath = path.join(skillsDir, name, "SKILL.md");
+      if (exists(absPath) && !seen.has(name)) { seen.add(name); results.push({ name, absPath }); }
+    }
+  }
+  const kitsDir = path.join(root, "kits");
+  if (exists(kitsDir)) {
+    for (const kitName of fs.readdirSync(kitsDir).sort()) {
+      const kitJson = path.join(kitsDir, kitName, "kit.json");
+      if (!exists(kitJson)) continue;
+      let kitManifest: Record<string, unknown>;
+      try { kitManifest = loadJson<Record<string, unknown>>(kitJson); } catch { continue; }
+      const skills = Array.isArray(kitManifest["skills"]) ? kitManifest["skills"] as unknown[] : [];
+      for (const entry of skills) {
+        if (typeof entry !== "object" || entry === null) continue;
+        const skillEntry = entry as Record<string, unknown>;
+        const relPath = typeof skillEntry["path"] === "string" ? skillEntry["path"] : null;
+        if (!relPath) continue;
+        const absPath = path.resolve(path.join(kitsDir, kitName), relPath);
+        const skillName = path.basename(path.dirname(absPath));
+        if (exists(absPath) && !seen.has(skillName)) { seen.add(skillName); results.push({ name: skillName, absPath }); }
+      }
+    }
+  }
+  return results.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 function listSkillRows(): [string[][], string[][]] {
   const workflowRows: string[][] = [];
   const supportRows: string[][] = [];
-  const skillsDir = path.join(root, "skills");
-  for (const name of fs.readdirSync(skillsDir).sort()) {
-    const skillPath = path.join(skillsDir, name, "SKILL.md");
-    if (!exists(skillPath)) continue;
-    const meta = frontmatter(readText(skillPath));
-    const row = [meta.name ?? name, rel(skillPath), oneLine(meta.description ?? "")];
+  for (const { name, absPath } of allSkillPaths()) {
+    const meta = frontmatter(readText(absPath));
+    const row = [meta.name ?? name, rel(absPath), oneLine(meta.description ?? "")];
     if (workflowSkills.has(row[0])) workflowRows.push(row);
     else supportRows.push(row);
   }

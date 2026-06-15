@@ -43,7 +43,7 @@ Separate these into distinct ideas, use Probe/alignment questions if the outcome
 
 Expected behavior:
 
-- delegate shaping to `skills/idea-to-backlog/SKILL.md`
+- delegate shaping to `kits/builder/skills/idea-to-backlog/SKILL.md`
 - link the artifact to the Builder Kit Flow Definition at `kits/builder/flows/shape.flow.json`
 - inventory each distinct idea separately
 - classify each idea
