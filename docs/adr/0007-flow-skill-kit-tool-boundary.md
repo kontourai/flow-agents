@@ -93,7 +93,7 @@ The sharing model under active consideration is an npm-dependency model: Kit B d
 
 - The `skills/` directory contains a mix of Kit-skills, tools, and orphans. The audit table in `docs/adr/0007-skill-audit.md` maps each skill to one of those three classifications.
 - Skills that are tools (`agentic-engineering`, `browser-test`, `dependency-update`, `eval-rebuild`, `github-cli`, `search-first`) should eventually migrate to agent system prompts, harness context, or be removed from `skills/` entirely. No move is made in this ADR.
-- Orphans (`context-budget`, `explore`, `feedback-loop`, `frontend-design`) each imply either a missing flow or a reclassification. They are recorded here as requiring triage; no skill is moved.
+- Orphans (`context-budget`, `explore`, `feedback-loop`, `frontend-design`) each implied either a missing flow or a reclassification. All four were ruled on 2026-06-15 (see "Orphan Rulings — 2026-06-15" below); all are REMOVED, with preserved intents recorded.
 
 ### Builder Kit Fix (Issue #62) Becomes Mechanical
 
@@ -112,6 +112,19 @@ For each orphan, one of these outcomes is required:
 3. **Accept scope drift.** If the orphan does not belong in this repo's skill layer, remove it.
 
 No orphan should remain permanently in `skills/` without a documented triage outcome.
+
+### Orphan Rulings — 2026-06-15
+
+Brian ruled on all four orphans on 2026-06-15. All four are **REMOVED** for now; preserved intents are recorded below so the rationale is not lost.
+
+| Orphan Skill | Ruling | Preserved Intent |
+| --- | --- | --- |
+| `explore` | **REMOVED** — reclassified as a tool: parallel codebase-reading capability. | The original aim was multi-angle codebase capture (dependencies, security, runnability/testability, business logic, patterns). This preserved intent is the seed of a possible future `codebase-onboarding` flow if that capability is ever wanted as a first-class kit flow. |
+| `feedback-loop` | **REMOVED** — subsumed. Its "did the change work locally" concern is now handled by `verify-work` plus the flow route-back capability. | No separate preserved intent; the concern is covered. |
+| `context-budget` | **REMOVED** — agent self-maintenance; relates conceptually to `learning-review`. Not a flow-step skill. | Conceptually adjacent to `learning-review`; could inform a future self-maintenance flow, but is not a flow-step skill under the current model. |
+| `frontend-design` | **REMOVED** for now. | "Plan-work but for UI" — the seed of a possible future UI/Frontend Kit with design + visual-verify steps. Revisit if a UI kit is ever built. |
+
+These rulings do not change this ADR's status. The ADR remains **Proposed** pending Brian's separate confirmation of the whole document.
 
 ### Knowledge Kit Boundary
 
