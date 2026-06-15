@@ -196,6 +196,58 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check bundle-install-integration
 
+      - name: Bundle lifecycle integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check bundle-lifecycle-integration
+
+      - name: Activate npx context integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check activate-npx-context-integration
+
+      - name: Kit conformance levels integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check kit-conformance-levels-integration
+
+      - name: Local Flow Kit install integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check local-flow-kit-install-integration
+
+      - name: Flow Kit install-git integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check flow-kit-install-git-integration
+
+      - name: Console learning projection integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check console-learning-projection-integration
+
+      - name: Context map integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check context-map-integration
+
+      - name: Effective backlog settings integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check effective-backlog-settings-integration
+
+      - name: Flow agents statusline integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check flow-agents-statusline-integration
+
+      - name: Telemetry contract integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check telemetry-contract-integration
+
+      - name: Telemetry doctor integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check telemetry-doctor-integration
+
+      - name: Utterance check integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check utterance-check-integration
+
+      - name: Pull work provider integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check pull-work-provider-integration
+
       - name: Finalize CI evidence
         if: always()
         run: bash evals/ci/run-baseline.sh --finalize
@@ -206,5 +258,66 @@ jobs:
         with:
           name: flow-agents-ci-runtime-and-kit
           path: evals/results/ci-baseline/runtime-and-kit/
+          if-no-files-found: warn
+          retention-days: 14
+
+  usage-feedback:
+    name: Usage Feedback
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLOW_AGENTS_CI_LANE: usage-feedback
+      FLOW_AGENTS_CI_RESULTS_DIR: evals/results/ci-baseline/usage-feedback
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install shell tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq ripgrep
+
+      - name: Initialize CI evidence
+        run: bash evals/ci/run-baseline.sh --init
+
+      - name: Usage feedback import integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check usage-feedback-import-integration
+
+      - name: Usage feedback outcomes integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check usage-feedback-outcomes-integration
+
+      - name: Usage feedback report integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check usage-feedback-report-integration
+
+      - name: Usage feedback dashboard integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check usage-feedback-dashboard-integration
+
+      - name: Usage feedback global integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check usage-feedback-global-integration
+
+      - name: Finalize CI evidence
+        if: always()
+        run: bash evals/ci/run-baseline.sh --finalize
+
+      - name: Upload CI evidence artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: flow-agents-ci-usage-feedback
+          path: evals/results/ci-baseline/usage-feedback/
           if-no-files-found: warn
           retention-days: 14

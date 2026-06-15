@@ -162,14 +162,19 @@ find_check() {
 }
 
 find_active_check() {
+  # Look up the check by id-or-label without streaming active_checks through a
+  # process substitution.  Streaming and returning early from the consumer loop
+  # causes a SIGPIPE on the producer printf when pipefail is set, printing a
+  # spurious "write error: Broken pipe" on Linux even though every check passed.
+  # Instead: resolve via the pure-bash find_check, then confirm the label is
+  # present in the active lane.
   local requested="$1"
-  local row id label command
-  while IFS=$'\t' read -r id label command; do
-    if [[ "$requested" == "$id" || "$requested" == "$label" ]]; then
-      printf '%s\t%s\t%s\n' "$id" "$label" "$command"
-      return 0
-    fi
-  done < <(active_checks)
+  local row id label line
+  row="$(find_check "$requested")" || return 1
+  IFS=$'\t' read -r id label _ <<<"$row"
+  while IFS= read -r line; do
+    [[ "$line" == "$label" ]] && { printf '%s\n' "$row"; return 0; }
+  done <<<"$(lane_labels)"
   return 1
 }
 
