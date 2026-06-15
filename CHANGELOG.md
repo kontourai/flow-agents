@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.1.0](https://github.com/kontourai/flow-agents/compare/v1.0.1...v1.1.0) (2026-06-15)
+
+
+### Features
+
+* activate skills and docs in kit runtime adapters (fix [#58](https://github.com/kontourai/flow-agents/issues/58)) ([dc726fd](https://github.com/kontourai/flow-agents/commit/dc726fd1d56e79b5bda577985aa87befe3a1eb9d))
+* activate skills and docs in kit runtime adapters (fix [#58](https://github.com/kontourai/flow-agents/issues/58)) ([dc774e0](https://github.com/kontourai/flow-agents/commit/dc774e001b54f7a09f6ab81a6aafcf2ad8552b6d))
+
+
+### Fixes
+
+* apply realpathSync entry-guard to 7 remaining CLI/tool files ([c1b3272](https://github.com/kontourai/flow-agents/commit/c1b3272c623055662a63c5d11c6dbef5aabe1cf0))
+* apply realpathSync entry-guard to all 16 affected CLI/tool files (closes [#71](https://github.com/kontourai/flow-agents/issues/71)) ([8a676b0](https://github.com/kontourai/flow-agents/commit/8a676b0c9c91464d64755719ff778a13e298beb9))
+* apply realpathSync entry-guard to remaining 10 CLI/tool files ([159bb78](https://github.com/kontourai/flow-agents/commit/159bb785b6b28f99b0a3a5c95e0d4428512f4314))
+* use hosted console io preset ([5b4bb7b](https://github.com/kontourai/flow-agents/commit/5b4bb7bc86d154bcf4d529a62e398a2196b702cc))
+
 ## [1.0.1](https://github.com/kontourai/flow-agents/compare/v1.0.0...v1.0.1) (2026-06-12)
 
 
