@@ -60,7 +60,7 @@ function kitContentHash(root: string): string {
  *   validates the kit container with @kontourai/flow, then delegates to the install path.
  *   Supports an optional #ref fragment in the URL or a separate --ref flag.
  */
-function install(argv: string[]): number {
+async function install(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const source = args.positionals[0] ?? "";
   if (!source) {
@@ -73,17 +73,17 @@ function install(argv: string[]): number {
   const isGitUrl = /^(https?:\/\/|git\+|ssh:\/\/|file:\/\/)/.test(source) || source.endsWith(".git");
 
   if (isGitUrl) {
-    return installGitSource(source, argv);
+    return await installGitSource(source, argv);
   }
-  return installLocalSource(path.resolve(source), argv);
+  return await installLocalSource(path.resolve(source), argv);
 }
 
-function installLocalSource(source: string, argv: string[]): number {
+async function installLocalSource(source: string, argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const dest = path.resolve(flagString(args.flags, "dest", ".") ?? ".");
   let manifest: Record<string, unknown>;
   try {
-    manifest = assertKitRepository(source);
+    manifest = await assertKitRepository(source);
   } catch (error) {
     console.log("Flow Kit repository validation failed:");
     for (const diagnostic of ((error as Error & { diagnostics?: string[] }).diagnostics ?? [(error as Error).message])) console.log(` - ${diagnostic}`);
@@ -120,7 +120,7 @@ function installLocalSource(source: string, argv: string[]): number {
   return 0;
 }
 
-function installGitSource(rawUrl: string, argv: string[]): number {
+async function installGitSource(rawUrl: string, argv: string[]): Promise<number> {
   const args = parseArgs(argv);
 
   // Parse ref: #fragment in URL takes precedence over --ref flag.
@@ -156,7 +156,7 @@ function installGitSource(rawUrl: string, argv: string[]): number {
     // Validate the cloned kit using the same logic as install local.
     let manifest: Record<string, unknown>;
     try {
-      manifest = assertKitRepository(tmpBase);
+      manifest = await assertKitRepository(tmpBase);
     } catch (error) {
       console.log("Flow Kit repository validation failed:");
       for (const diagnostic of ((error as Error & { diagnostics?: string[] }).diagnostics ?? [(error as Error).message])) {
@@ -274,7 +274,7 @@ function activate(argv: string[]): number {
  *   flow-agents   present at K1+ (Flow Agents extension activated)
  *   <namespace>   unknown top-level keys list verbatim as third-party consumer targets
  */
-function inspect(argv: string[]): number {
+async function inspect(argv: string[]): Promise<number> {
   const args = parseArgs(argv);
   const kitDir = path.resolve(args.positionals[0] ?? ".");
   const manifestPath = path.join(kitDir, "kit.json");
@@ -290,21 +290,21 @@ function inspect(argv: string[]): number {
     return 1;
   }
   // Pass the real kitDir so @kontourai/flow can validate flow file existence for K0.
-  const result = deriveKitTargets(manifest, kitDir);
+  const result = await deriveKitTargets(manifest, kitDir);
   console.log(JSON.stringify(result, null, 2));
   return result.conformance.k0 ? 0 : 1;
 }
 
-export function main(argv = process.argv.slice(2)): number {
+export async function main(argv = process.argv.slice(2)): Promise<number> {
   const [command, ...rest] = argv;
-  if (command === "install") return install(rest);
+  if (command === "install") return await install(rest);
   // Legacy sub-subcommands forwarded for backward compatibility within the kit subcommand.
-  if (command === "install-local") return installLocalSource(path.resolve(rest[0] ?? ""), rest);
-  if (command === "install-git") return installGitSource(rest[0] ?? "", rest);
+  if (command === "install-local") return await installLocalSource(path.resolve(rest[0] ?? ""), rest);
+  if (command === "install-git") return await installGitSource(rest[0] ?? "", rest);
   if (command === "list") return list(rest);
   if (command === "status") return status(rest);
   if (command === "activate") return activate(rest);
-  if (command === "inspect") return inspect(rest);
+  if (command === "inspect") return await inspect(rest);
   console.error("usage: flow-agents kit <install|activate|inspect|list|status> ...");
   return 2;
 }
@@ -314,4 +314,4 @@ export function main(argv = process.argv.slice(2)): number {
 // entry-point guard fires correctly when the module is loaded directly as a script.
 const _selfRealPath = (() => { try { return fs.realpathSync(fileURLToPath(import.meta.url)); } catch { return fileURLToPath(import.meta.url); } })();
 const _argv1RealPath = (() => { try { return fs.realpathSync(process.argv[1]); } catch { return process.argv[1]; } })();
-if (_selfRealPath === _argv1RealPath) { process.exitCode = main(); }
+if (_selfRealPath === _argv1RealPath) { main().then((code) => { process.exitCode = code; }).catch((err) => { console.error(err); process.exitCode = 1; }); }

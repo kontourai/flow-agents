@@ -1,6 +1,5 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { validateKitContainer } from "@kontourai/flow";
 import { readJson } from "../lib/fs.js";
 
 // Extension-only asset classes: validated by Flow Agents. Flows are validated by @kontourai/flow.
@@ -35,6 +34,31 @@ export interface KitTargetsResult {
   third_party_extensions: string[];
 }
 
+// Lazy-loaded cache for validateKitContainer from @kontourai/flow.
+// list/status/activate are runtime ops that never call validation and must NOT load
+// @kontourai/flow (it is unresolvable in a standalone installed bundle).
+// Only validate/inspect (authoring ops) trigger this load.
+type ValidateKitContainerFn = (kitDir: string, manifest: Record<string, unknown>) => { valid: boolean; diagnostics: { severity: string; path: string; message: string }[] };
+let _validateKitContainerCache: ValidateKitContainerFn | null = null;
+
+async function loadValidateKitContainer(): Promise<ValidateKitContainerFn> {
+  if (_validateKitContainerCache) return _validateKitContainerCache;
+  let mod: { validateKitContainer?: unknown };
+  try {
+    mod = await import("@kontourai/flow") as { validateKitContainer?: unknown };
+  } catch (err) {
+    throw new Error(
+      "container validation requires @kontourai/flow; run from an npm-installed flow-agents workspace " +
+      `or use 'flow kit validate' (original error: ${(err as Error).message})`
+    );
+  }
+  if (typeof mod.validateKitContainer !== "function") {
+    throw new Error("@kontourai/flow did not export validateKitContainer");
+  }
+  _validateKitContainerCache = mod.validateKitContainer as ValidateKitContainerFn;
+  return _validateKitContainerCache;
+}
+
 /**
  * Delegates core Flow Kit container validation to @kontourai/flow's validateKitContainer.
  * The container contract lives once, in Flow. Returns a list of violation messages (empty = valid).
@@ -42,10 +66,15 @@ export interface KitTargetsResult {
  * The degradation invariant: every Flow Agents Kit MUST remain a valid core
  * Flow Kit container when agent-extension fields are ignored.
  *
+ * Loads @kontourai/flow lazily (on first call) so that runtime ops (list/status/activate)
+ * that never invoke validation can run in standalone installed bundles where
+ * @kontourai/flow is not present.
+ *
  * @param kitDir  Real kit directory path for file-existence checks on flows[].path entries.
  *                Pass the actual kit directory when available; pass "" for structural-only checks.
  */
-function delegateCoreContainerValidation(kitDir: string, manifest: Record<string, unknown>): string[] {
+async function delegateCoreContainerValidation(kitDir: string, manifest: Record<string, unknown>): Promise<string[]> {
+  const validateKitContainer = await loadValidateKitContainer();
   const result = validateKitContainer(kitDir, manifest);
   if (result.valid) return [];
   return result.diagnostics
@@ -69,12 +98,12 @@ function delegateCoreContainerValidation(kitDir: string, manifest: Record<string
  * @param kitDir    Kit directory for flow file-existence checks. Defaults to "" (structural-only).
  *                  Pass the real kit directory from `inspect` to get authoritative K0 validation.
  */
-export function deriveKitTargets(manifest: Record<string, unknown>, kitDir = ""): KitTargetsResult {
+export async function deriveKitTargets(manifest: Record<string, unknown>, kitDir = ""): Promise<KitTargetsResult> {
   const kitId = typeof manifest.id === "string" ? manifest.id : "<unknown>";
   const kitName = typeof manifest.name === "string" ? manifest.name : "<unknown>";
 
   // Delegate core container validation to @kontourai/flow.
-  const coreErrors = delegateCoreContainerValidation(kitDir, manifest);
+  const coreErrors = await delegateCoreContainerValidation(kitDir, manifest);
   const k0 = coreErrors.length === 0;
 
   const hasAgentExtension = AGENT_EXTENSION_CLASSES.size > 0 &&
@@ -105,7 +134,7 @@ export function deriveKitTargets(manifest: Record<string, unknown>, kitDir = "")
   };
 }
 
-export function validateKitRepository(kitDir: string): string[] {
+export async function validateKitRepository(kitDir: string): Promise<string[]> {
   const errors: string[] = [];
   const manifestPath = path.join(kitDir, "kit.json");
   let manifest: Record<string, unknown>;
@@ -120,7 +149,7 @@ export function validateKitRepository(kitDir: string): string[] {
   // existence) to @kontourai/flow — the container contract lives once, in Flow.
   // This enforces the degradation invariant: a Flow Agents Kit must remain a valid
   // core Flow Kit container when extension fields are stripped.
-  const coreErrors = delegateCoreContainerValidation(kitDir, manifest);
+  const coreErrors = await delegateCoreContainerValidation(kitDir, manifest);
   for (const err of coreErrors) errors.push(err);
 
   // Flow Agents extension validation: skills, docs, adapters, evals, assets.
@@ -167,8 +196,8 @@ export function validateKitRepository(kitDir: string): string[] {
   return errors;
 }
 
-export function assertKitRepository(kitDir: string): Record<string, unknown> {
-  const errors = validateKitRepository(kitDir);
+export async function assertKitRepository(kitDir: string): Promise<Record<string, unknown>> {
+  const errors = await validateKitRepository(kitDir);
   if (errors.length) {
     const error = new Error("Flow Kit repository validation failed") as Error & { diagnostics?: string[] };
     error.diagnostics = errors;

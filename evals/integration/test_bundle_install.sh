@@ -318,8 +318,6 @@ for dir in "$KIRO_DEST" "$BASE_DEST" "$CLAUDE_DEST" "$CODEX_DEST"; do
     _pass "$dir includes local Flow Kit CLI and empty list/status works"
   else
     _fail "$dir local Flow Kit CLI list/status smoke failed"
-    echo "    [debug] list.out: $(head -3 /tmp/kit-list.out 2>&1)"
-    echo "    [debug] status.out: $(head -3 /tmp/kit-status.out 2>&1)"
   fi
 done
 
@@ -346,8 +344,6 @@ then
   _pass "Codex installed bundle activates Builder Kit through codex-local"
 else
   _fail "Codex installed bundle runtime activation failed"
-  echo "    [debug] activation.json: $(head -c 600 /tmp/codex-runtime-activation.json 2>&1)"
-  sed -n '1,180p' /tmp/codex-runtime-activation.json 2>/dev/null || true
 fi
 
 if node - "$KIRO_DEST" "$BASE_DEST" "$CLAUDE_DEST" "$CODEX_DEST" <<'NODE'
