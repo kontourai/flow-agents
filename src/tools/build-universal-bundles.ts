@@ -439,6 +439,7 @@ function exportOpencodePlugin(): string {
 
 import { spawnSync } from 'node:child_process';
 import { join, basename } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
 
 // opencode runs plugins inside its own compiled (Bun-based) binary, so
 // process.execPath points at opencode itself — spawning it with a script
@@ -448,6 +449,19 @@ const NODE_BIN = basename(process.execPath).startsWith('node') ? process.execPat
 
 export const FlowAgentsPlugin = async ({ project, client, $, directory, worktree }) => {
   const root = directory || process.cwd();
+
+  // Deterministic load marker. opencode invokes this factory at startup but
+  // does not reliably surface plugin console output to its log file, and its
+  // internal "loading plugin" message was dropped in opencode 1.17.x. Write a
+  // marker into the workspace telemetry dir so acceptance tests can confirm the
+  // plugin loaded without depending on opencode internals. Best-effort only.
+  try {
+    const telemetryDir = join(root, '.telemetry');
+    mkdirSync(telemetryDir, { recursive: true });
+    writeFileSync(join(telemetryDir, 'opencode-plugin.loaded'), 'flow-agents');
+  } catch (_err) {
+    // Marker is diagnostic only; never block plugin load on a write failure.
+  }
 
   // The hook scripts read the event payload from stdin; an empty stdin makes
   // the telemetry pipeline silently skip the emit (fail-open), so every spawn
