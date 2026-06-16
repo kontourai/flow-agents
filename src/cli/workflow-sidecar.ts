@@ -3,21 +3,22 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
 type AnyObj = Record<string, any>;
 
-const statuses = new Set(["new", "planning", "planned", "in_progress", "blocked", "verifying", "verified", "needs_decision", "not_verified", "failed", "delivered", "accepted", "archived"]);
-const phases = ["idea", "backlog", "pickup", "planning", "execution", "verification", "goal_fit", "evidence", "release", "learning", "done"];
-const checkKinds = new Set(["build", "types", "lint", "test", "security", "diff", "browser", "runtime", "policy", "external"]);
-const checkStatuses = new Set(["pass", "fail", "not_verified", "skip"]);
-const verdicts = new Set(["pass", "partial", "fail", "not_verified"]);
+export const statuses = new Set(["new", "planning", "planned", "in_progress", "blocked", "verifying", "verified", "needs_decision", "not_verified", "failed", "delivered", "accepted", "archived"]);
+export const phases = ["idea", "backlog", "pickup", "planning", "execution", "verification", "goal_fit", "evidence", "release", "learning", "done"];
+export const checkKinds = new Set(["build", "types", "lint", "test", "security", "diff", "browser", "runtime", "policy", "external"]);
+export const checkStatuses = new Set(["pass", "fail", "not_verified", "skip"]);
+export const verdicts = new Set(["pass", "partial", "fail", "not_verified"]);
 
 function now(): string { return new Date().toISOString().replace(/\.\d{3}Z$/, "Z"); }
 function read(file: string): string { return fs.readFileSync(file, "utf8"); }
-function writeJson(file: string, payload: AnyObj): void { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`); }
+export function writeJson(file: string, payload: AnyObj): void { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`); }
 function printJson(payload: AnyObj): void { console.log(JSON.stringify(payload).replace(/":/g, '": ').replace(/,"/g, ', "')); }
-function loadJson(file: string, fallback: AnyObj = {}): AnyObj { return fs.existsSync(file) ? JSON.parse(read(file)) : { ...fallback }; }
-function appendJsonl(file: string, payload: AnyObj): void {
+export function loadJson(file: string, fallback: AnyObj = {}): AnyObj { return fs.existsSync(file) ? JSON.parse(read(file)) : { ...fallback }; }
+export function appendJsonl(file: string, payload: AnyObj): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const line = JSON.stringify(payload, Object.keys(payload).sort()).replace(/":/g, '": ').replace(/,"/g, ', "');
   fs.appendFileSync(file, `${line}\n`);
@@ -65,6 +66,20 @@ function getHachureValidator(): ReturnType<typeof tryLoadHachureValidator> {
   return _hachureValidator;
 }
 
+/**
+ * Validate a Hachure trust.bundle against the canonical trust-bundle schema.
+ * Returns `{ valid, errors, available }`. When the optional `hachure` dependency
+ * is not installed, validation is unavailable and this returns
+ * `{ valid: true, errors: [], available: false }` (fail-open) so callers can
+ * choose to treat unvalidated bundles as acceptable or gate on `available`.
+ * This is the same validator the sidecar writer uses for trust-backed evidence.
+ */
+export function validateTrustBundle(bundle: unknown): { valid: boolean; errors: string[]; available: boolean } {
+  const validate = getHachureValidator();
+  if (!validate) return { valid: true, errors: [], available: false };
+  return { ...validate(bundle), available: true };
+}
+
 function safeRepoIdentifier(value: string): string {
   const trimmed = value.trim().replace(/\.git$/, "");
   if (!trimmed || trimmed.length > 120) return "";
@@ -109,7 +124,7 @@ function repoIdentifier(): string {
   return safeRepoIdentifier(path.basename(process.cwd())) || "workspace";
 }
 
-function sidecarBase(slug: string): AnyObj {
+export function sidecarBase(slug: string): AnyObj {
   return { schema_version: "1.0", task_slug: slug, repo: repoIdentifier() };
 }
 
@@ -377,7 +392,7 @@ function hasNonEmptyString(value: unknown): boolean {
 function hasPositiveInteger(value: unknown): boolean {
   return Number.isInteger(value) && Number(value) >= 1;
 }
-function validateEvidenceRef(ref: AnyObj, label: string): AnyObj {
+export function validateEvidenceRef(ref: AnyObj, label: string): AnyObj {
   if (!["source", "command", "artifact", "provider", "external"].includes(ref.kind)) die(`${label} entry kind must be one of: source, command, artifact, provider, external`);
   for (const key of Object.keys(ref)) if (!["kind", "url", "file", "line_start", "line_end", "excerpt", "summary"].includes(key)) die(`${label} entries contain unsupported field: ${key}`);
   if (ref.url !== undefined && !hasNonEmptyString(ref.url)) die(`${label} entry url must be a non-empty string`);
@@ -393,7 +408,7 @@ function validateEvidenceRef(ref: AnyObj, label: string): AnyObj {
   if ((ref.kind === "provider" || ref.kind === "external") && !hasNonEmptyString(ref.url)) die(`${label} ${ref.kind} refs require url`);
   return ref;
 }
-function normalizeEvidenceRefs(raw: unknown, label: string): AnyObj[] {
+export function normalizeEvidenceRefs(raw: unknown, label: string): AnyObj[] {
   if (!Array.isArray(raw)) die(`${label} must be an array`);
   return raw.map((ref) => {
     if (typeof ref === "string") die(`${label} entries must be structured evidence reference objects; legacy string refs are not supported`);
@@ -401,7 +416,7 @@ function normalizeEvidenceRefs(raw: unknown, label: string): AnyObj[] {
     return validateEvidenceRef({ ...ref as AnyObj }, label);
   });
 }
-function normalizeCheck(raw: AnyObj): AnyObj {
+export function normalizeCheck(raw: AnyObj): AnyObj {
   const check = { ...raw };
   if (!check.id || !check.kind || !check.status || !check.summary) die("check requires id, kind, status, and summary");
   if (!checkKinds.has(check.kind)) die("kind must be one of: build, types, lint, test, security, diff, browser, runtime, policy, external");
@@ -484,7 +499,7 @@ function validateAcceptanceEvidenceRefs(dir: string): void {
     if (criterion.evidence_refs !== undefined) normalizeEvidenceRefs(criterion.evidence_refs, `acceptance.criteria[${index}].evidence_refs`);
   });
 }
-function writeState(dir: string, slug: string, status: string, phase: string, timestamp: string, summary: string, next = "continue"): void {
+export function writeState(dir: string, slug: string, status: string, phase: string, timestamp: string, summary: string, next = "continue"): void {
   writeJson(path.join(dir, "state.json"), { ...loadJson(path.join(dir, "state.json")), ...sidecarBase(slug), status, phase, updated_at: timestamp, artifact_paths: relArtifacts(dir), next_action: { status: next, summary } });
 }
 function recordEvidence(p: ReturnType<typeof parseArgs>): number {
@@ -537,7 +552,7 @@ function advanceState(p: ReturnType<typeof parseArgs>): number {
   return 0;
 }
 
-function normalizeFinding(raw: AnyObj): AnyObj {
+export function normalizeFinding(raw: AnyObj): AnyObj {
   if (raw.file_refs !== undefined && !Array.isArray(raw.file_refs)) die("file_refs must be an array");
   return raw;
 }
@@ -594,7 +609,7 @@ function recordRelease(p: ReturnType<typeof parseArgs>): number {
   writeState(dir, slug, "delivered", "release", payload.updated_at, stateSummary);
   return 0;
 }
-function validateLearningCorrection(record: AnyObj): void {
+export function validateLearningCorrection(record: AnyObj): void {
   const correction = record.correction;
   if (correction === undefined) return;
   if (!correction || typeof correction !== "object" || Array.isArray(correction)) die("correction must be an object");
@@ -624,7 +639,7 @@ function validateLearningPrevention(prevention: unknown): void {
   if (typeof value.status !== "string" || value.status.length === 0) die("correction.prevention.status is required");
   if (!["open", "completed", "accepted", "deferred", "rejected"].includes(value.status)) die("correction.prevention.status must be one of: open, completed, accepted, deferred, rejected");
 }
-function normalizeLearning(raw: AnyObj, timestamp: string): AnyObj {
+export function normalizeLearning(raw: AnyObj, timestamp: string): AnyObj {
   if (!Array.isArray(raw.source_refs)) die("source_refs must be an array");
   if (!Array.isArray(raw.facts)) die("facts must be an array");
   if (!Array.isArray(raw.routing)) die("routing must be an array");
@@ -731,4 +746,11 @@ async function main(): Promise<number> {
   });
 }
 
-main().then((code) => process.exit(code)).catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); });
+// Run the CLI only when executed directly, not when imported as a library.
+// Resolve real paths to handle symlinks (e.g. /tmp -> /private/tmp on macOS) so the
+// entry-point guard fires correctly when the module is loaded directly as a script.
+const _selfRealPath = (() => { try { return fs.realpathSync(fileURLToPath(import.meta.url)); } catch { return fileURLToPath(import.meta.url); } })();
+const _argv1RealPath = (() => { try { return fs.realpathSync(process.argv[1]); } catch { return process.argv[1]; } })();
+if (_selfRealPath === _argv1RealPath) {
+  main().then((code) => process.exit(code)).catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); });
+}

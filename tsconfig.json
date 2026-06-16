@@ -8,6 +8,7 @@
     "types": ["node"],
     "rootDir": ".",
     "outDir": "build",
+    "declaration": true,
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,

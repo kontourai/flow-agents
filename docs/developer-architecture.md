@@ -108,6 +108,20 @@ flowchart TB
 
 **Current state:** The durable handoff surface is a pair of human-readable Markdown artifacts and machine-readable JSON sidecars under `.flow-agents/<slug>/`. Verification, critique, release, and learning records are explicit artifacts rather than hidden chat memory.
 
+**Programmatic API (for native hosts):** The canonical sidecar writer/validator is importable as a library, not only via the `flow-agents-workflow-sidecar` CLI. A host that records workflow evidence natively should import the package root rather than reimplement validated read / merge / write:
+
+```js
+import {
+  validateTrustBundle,   // Hachure trust.bundle validation (the writer's validator)
+  normalizeCheck,        // validate + normalize an evidence check (throws on invalid)
+  normalizeLearning,     // validate + normalize a learning record
+  validateEvidenceRef,   // validate a structured evidence reference
+  readSidecar, writeSidecar, sidecarBase, writeState,
+} from "@kontourai/flow-agents";
+```
+
+This is the same code the CLI runs; importing it does not execute the CLI. The sidecar JSON Schemas under `schemas/` remain the normative shape.
+
 **Future direction:** Durable workflow state should converge toward Kontour Resource Contracts with versioned identity, desired state, observed status, and condition summaries. That convergence should preserve local files and provider-backed records as first-class surfaces.
 
 ## Local Workflow Roles
