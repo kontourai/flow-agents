@@ -16,11 +16,19 @@
  * storage — body is parsed back from the rendered markdown on read.
  *
  * Body render/parse inverse:
- *   raw    → `> [!note]- Raw Notes\n> {body lines}`
- *            parse: strip callout header line, remove `> ` prefix from each line
- *   others → body rendered verbatim, followed by optional ## Sources /
- *            ## Appears In / ## People / ## Related sections
- *            parse: content before the first of those H2 headings, trimmed
+ *   ALL types → an invisible sentinel `<!-- kit:body-end -->` is emitted on
+ *               its own line immediately after the body text.  Obsidian renders
+ *               HTML comments as nothing so it is invisible to vault readers.
+ *               On read, everything before the sentinel (trimmed) is the body.
+ *               There is NO body-content constraint — bodies may freely contain
+ *               any markdown, including `## Sources`, `## Related`, etc.
+ *   raw    → body is additionally wrapped in a callout block for readability:
+ *              > [!note]- Raw Notes
+ *              > {body lines}
+ *            The sentinel follows the callout block.
+ *            Parse: strip callout wrapper, then split on sentinel.
+ *   others → body verbatim, then sentinel, then optional ## sections.
+ *            Parse: everything before the sentinel, trimmed.
  *
  * Category dots map to directory segments: "eng.api" → "eng/api/".
  * Filename: slugified title, collision-suffixed (-2, -3, …).
@@ -55,9 +63,11 @@ import {
 // Body render / parse constants
 // ---------------------------------------------------------------------------
 
-// Heading prefix used to delimit the appended sections in rendered notes.
-// The body content lives BEFORE the first of these headings.
-const SECTION_HEADINGS = new Set(["## Sources", "## Appears In", "## People", "## Related"]);
+// Invisible sentinel emitted between the body and the generated structural
+// sections in every rendered note.  Obsidian renders HTML comments as nothing
+// so vault readers never see it.  On read, everything before this sentinel
+// (trimmed) is the canonical body — no heading-text collision possible.
+const BODY_END_SENTINEL = "<!-- kit:body-end -->";
 
 // Callout header line emitted for raw records
 const RAW_CALLOUT_HEADER = "> [!note]- Raw Notes";
@@ -157,31 +167,39 @@ export class ObsidianKnowledgeStore {
    * Parse the record body back from the rendered Obsidian markdown section
    * (the text after the frontmatter fence).
    *
-   * raw records:
-   *   Rendered as:
-   *     > [!note]- Raw Notes
-   *     > line1
-   *     > line2
-   *   Parsed by stripping the header line and the `> ` prefix from body lines.
-   *   This is a perfect inverse since the callout prefix is our controlled marker.
+   * All record types use the invisible sentinel BODY_END_SENTINEL
+   * (`<!-- kit:body-end -->`) as the exclusive delimiter between the body
+   * and any appended structural sections.  The sentinel appears on its own
+   * line immediately after the body text; everything before it (trimmed) is
+   * the canonical body.  This is collision-proof: body text may freely contain
+   * any markdown, including lines like `## Sources` or `## Related`.
    *
-   * compiled / concept / snapshot / person records:
-   *   Rendered as the body verbatim, followed by optional ## Sources /
-   *   ## Appears In / ## People / ## Related sections.
-   *   Parsed by extracting everything before the first of those H2 headings
-   *   and trimming trailing whitespace — an exact inverse as long as the body
-   *   itself does not start a line with one of those exact heading strings.
+   * raw records additionally wrap the body in a callout block for human
+   * readability.  The sentinel appears after the closing callout line.
+   * Parse: strip the callout (header line + `> ` prefix), then split on
+   * the sentinel to recover the exact original body.
    *
    * @param {string} type  - record type
    * @param {string} renderedText  - text after the frontmatter fence (raw markdown)
    * @returns {string}
    */
   _parseBodyFromRendered(type, renderedText) {
+    // Split on the sentinel first — the body is always everything before it,
+    // regardless of type.  For raw records we still need to strip the callout
+    // wrapper from within that portion.
+    const sentinelIdx = renderedText.indexOf(BODY_END_SENTINEL);
+    const bodySection = sentinelIdx === -1
+      ? renderedText          // sentinel missing (legacy note): fall back to full text
+      : renderedText.slice(0, sentinelIdx);
+
     if (type === "raw") {
-      // renderedText starts with the callout header then callout-prefixed body lines
-      const lines = renderedText.split("\n");
+      // bodySection is the callout block:
+      //   > [!note]- Raw Notes
+      //   > line1
+      //   > line2
+      // Strip the header line and the `> ` prefix from each body line.
+      const lines = bodySection.split("\n");
       // First line is the callout header — skip it
-      // Remaining lines: strip the `> ` prefix (or `>` alone for empty lines)
       const bodyLines = [];
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i];
@@ -190,29 +208,16 @@ export class ObsidianKnowledgeStore {
         } else if (line === ">") {
           bodyLines.push("");
         } else {
-          // Safety: if a line doesn't start with `> `, stop (shouldn't happen)
+          // Safety: non-callout line stops the block (should not occur in
+          // well-formed notes written by this adapter).
           break;
         }
       }
       return bodyLines.join("\n");
     }
 
-    // For all other types: body is the text before the first appended section heading.
-    // Split on newlines, find the first line that matches a section heading exactly.
-    const lines = renderedText.split("\n");
-    let cutLine = lines.length;
-    for (let i = 0; i < lines.length; i++) {
-      if (SECTION_HEADINGS.has(lines[i])) {
-        // The separator between body and the section heading is one blank line;
-        // trim that blank line too by moving cut back past any trailing blank lines.
-        cutLine = i;
-        while (cutLine > 0 && lines[cutLine - 1].trim() === "") {
-          cutLine--;
-        }
-        break;
-      }
-    }
-    return lines.slice(0, cutLine).join("\n").trimEnd();
+    // compiled / concept / snapshot / person: body is verbatim before sentinel
+    return bodySection.trimEnd();
   }
 
   // -------------------------------------------------------------------------
@@ -353,10 +358,19 @@ export class ObsidianKnowledgeStore {
    * The body content IS the canonical storage — parsing this rendered text
    * back via _parseBodyFromRendered() must return the original body exactly.
    *
-   * render/parse contract (per type):
-   *   raw    → callout block; parsed by stripping header + `> ` prefix
-   *   others → body verbatim first, then optional ## sections; parsed by
-   *            trimming from the first ## section heading line
+   * render/parse contract:
+   *   ALL types → emit BODY_END_SENTINEL (<!-- kit:body-end -->) on its own
+   *               line immediately after the body content and before any
+   *               generated ## sections.  The sentinel is invisible in Obsidian
+   *               (HTML comments are not rendered) and cannot be confused with
+   *               any user-supplied body text.
+   *
+   *   raw    → body is wrapped in a callout block for human readability:
+   *              > [!note]- Raw Notes
+   *              > {body lines}
+   *            The sentinel immediately follows the callout block.
+   *
+   *   others → body verbatim, then sentinel, then optional ## sections.
    */
   _renderObsidianBody(record, pathIndex) {
     const links = record.links || [];
@@ -376,42 +390,43 @@ export class ObsidianKnowledgeStore {
         .filter(Boolean)
         .join(", ");
 
-    const sections = [];
-
+    // bodyPart: the portion of the rendered note containing the record body
+    // (possibly wrapped in a callout for raw records).
+    let bodyPart;
     if (record.type === "raw") {
       // Callout block: header line + body lines each prefixed with `> `.
       // _parseBodyFromRendered strips these back to recover the exact body.
-      sections.push(`${RAW_CALLOUT_HEADER}\n> ${record.body.replace(/\n/g, "\n> ")}`);
-    } else if (record.type === "person") {
-      // Person cards: lead with the body (role/org prose), then People links,
-      // then Appears In backlinks to sources, then Related.
-      sections.push(record.body);
+      bodyPart = `${RAW_CALLOUT_HEADER}\n> ${record.body.replace(/\n/g, "\n> ")}`;
     } else {
-      // compiled / concept / snapshot: insight as readable body
-      sections.push(record.body);
+      // compiled / concept / snapshot / person: body verbatim
+      bodyPart = record.body;
     }
 
+    // Sentinel immediately follows the body part, on its own line.
+    // Everything between the frontmatter fence and this sentinel is the body.
+    const parts = [`${bodyPart}\n${BODY_END_SENTINEL}`];
+
     if (sourceLinks.length > 0) {
-      sections.push(`## Sources\n\n${wikiLinks(sourceLinks)}`);
+      parts.push(`## Sources\n\n${wikiLinks(sourceLinks)}`);
     }
 
     // Person cards: render appears-in links (backlinks to raw+compiled records)
     const appearsInLinks = links.filter((l) => l.kind === "appears-in");
     if (record.type === "person" && appearsInLinks.length > 0) {
-      sections.push(`## Appears In\n\n${wikiLinks(appearsInLinks)}`);
+      parts.push(`## Appears In\n\n${wikiLinks(appearsInLinks)}`);
     }
 
     // Compiled/person records: render people links (links to person cards)
     const peopleLinks = links.filter((l) => l.kind === "person");
     if (peopleLinks.length > 0) {
-      sections.push(`## People\n\n${wikiLinks(peopleLinks)}`);
+      parts.push(`## People\n\n${wikiLinks(peopleLinks)}`);
     }
 
     if (relatedLinks.length > 0) {
-      sections.push(`## Related\n\n${wikiLinks(relatedLinks)}`);
+      parts.push(`## Related\n\n${wikiLinks(relatedLinks)}`);
     }
 
-    return sections.join("\n\n");
+    return parts.join("\n\n");
   }
 
   // -------------------------------------------------------------------------
