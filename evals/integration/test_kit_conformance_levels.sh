@@ -164,7 +164,7 @@ run_inspect "$ROOT/kits/builder" "$out" || true
 if node -e "
 const d = require('fs').readFileSync('$out', 'utf8');
 const r = JSON.parse(d);
-const required = ['kit_id','kit_name','conformance','targets','third_party_extensions'];
+const required = ['kit_id','kit_name','conformance','targets','third_party_extensions','trust'];
 for (const k of required) {
   if (!(k in r)) throw new Error('missing key: ' + k);
 }
@@ -196,6 +196,60 @@ if [[ "$k0" == "true" ]]; then
   pass "knowledge kit: agent extension fields stripped, core container valid (degradation invariant)"
 else
   fail "knowledge kit: degradation invariant violated — k0 should be true"
+  cat "$out"
+fi
+
+# ===================================================================
+echo ""
+echo "=== 8. Trust axis: first-party allowlist (builder and knowledge) ==="
+# ===================================================================
+
+for kit_name in builder knowledge; do
+  out="$TMP_DIR/trust-${kit_name}.out"
+  run_inspect "$ROOT/kits/$kit_name" "$out" || true
+  trust=$(node -e "const d=require('fs').readFileSync('$out','utf8'); console.log(JSON.parse(d).trust)" 2>/dev/null)
+  if [[ "$trust" == "first-party" ]]; then
+    pass "$kit_name kit trust: first-party (in Kontour allowlist)"
+  else
+    fail "$kit_name kit trust: expected first-party, got '$trust'"
+    cat "$out"
+  fi
+done
+
+# ===================================================================
+echo ""
+echo "=== 9. Trust axis: unverified for third-party and fixture kits ==="
+# ===================================================================
+
+for fixture in k0-flows-only k1-agent-extension k2-with-evals third-party-extension; do
+  out="$TMP_DIR/trust-${fixture}.out"
+  run_inspect "$ROOT/evals/fixtures/kit-conformance-levels/$fixture" "$out" || true
+  trust=$(node -e "const d=require('fs').readFileSync('$out','utf8'); console.log(JSON.parse(d).trust)" 2>/dev/null)
+  if [[ "$trust" == "unverified" ]]; then
+    pass "$fixture fixture trust: unverified (not in first-party allowlist)"
+  else
+    fail "$fixture fixture trust: expected unverified, got '$trust'"
+    cat "$out"
+  fi
+done
+
+# ===================================================================
+echo ""
+echo "=== 10. Trust field present in inspect JSON schema ==="
+# ===================================================================
+
+out="$TMP_DIR/trust-schema.out"
+run_inspect "$ROOT/kits/builder" "$out" || true
+if node -e "
+const d = require('fs').readFileSync('$out', 'utf8');
+const r = JSON.parse(d);
+if (!('trust' in r)) throw new Error('missing key: trust');
+const valid = ['first-party', 'verified', 'unverified'];
+if (!valid.includes(r.trust)) throw new Error('trust must be one of: ' + valid.join(', ') + '; got: ' + r.trust);
+" 2>/dev/null; then
+  pass "inspect JSON output includes trust field with valid value"
+else
+  fail "inspect JSON output is missing trust field or has invalid value"
   cat "$out"
 fi
 
