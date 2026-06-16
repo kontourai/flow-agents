@@ -57,6 +57,20 @@ Canonical hook scripts in `scripts/hooks/` use the following exit code contract 
 
 Adapters translate these exit codes into the host-native response format. The `claude-hook-adapter.js` and `codex-hook-adapter.js` wrappers perform this translation, and all errors fail open so hook runtime failures never block agent work.
 
+### Block Reason Channel
+
+A block (exit `2` → deny) is only useful if the agent learns *why* it was blocked and how to proceed. When a policy blocks, the hook script writes a human-readable reason — for example, config-protection's "Fix the source code … instead of weakening the config." The adapter **must surface that reason to the model** through the host's native deny-reason mechanism, **not only to a log or stderr**, where it dies before the agent sees it. A deny without a model-visible reason makes the agent retry the same blocked action instead of self-correcting.
+
+| Host surface | Model-facing reason channel |
+| --- | --- |
+| Claude Code | `hookSpecificOutput.permissionDecisionReason` (preToolUse); `reason` (stop) |
+| Codex | `hookSpecificOutput.permissionDecisionReason` (preToolUse); `reason` (stop) |
+| opencode | the thrown error message on the blocked `tool.execute.before` (surfaced as the tool result) |
+| pi | the `reason` field of the `{ block: true, reason }` tool-call result |
+| Native pre-dispatch host (e.g. an orchestration layer) | the blocked call's tool-result text |
+
+The reason text is the canonical steering message: it should tell the agent what to do *instead* (edit the source, not the generated artifact), so the agent can self-correct on the next turn. An adapter that denies the call but drops the reason to a log only is a **conformance gap** — record it in the adapter's conformance declaration.
+
 ---
 
 ## 2. Policy Classes
@@ -136,7 +150,7 @@ Flow Agents currently ships four canonical policy classes. Each policy class has
 - `SA_HOOK_INPUT_TRUNCATED` env var — whether input was truncated (truncated payloads are blocked unconditionally)
 - Protected file set: `.eslintrc*`, `eslint.config.*`, `.prettierrc*`, `prettier.config.*`, `biome.json`, `biome.jsonc`, `.ruff.toml`, `ruff.toml`, `.shellcheckrc`, `.stylelintrc*`, `.markdownlint*`
 
-**Decision contract**: Blocking (exits 2) when the target file basename is in the protected set. Writes a descriptive message to stderr directing the agent to fix source instead. Exits 0 (allow) otherwise.
+**Decision contract**: Blocking (exits 2) when the target file basename is in the protected set. Writes a descriptive message directing the agent to fix source instead, which the adapter surfaces to the model as the deny reason (see [Block Reason Channel](#block-reason-channel)). Exits 0 (allow) otherwise.
 
 **Degradation when host lacks trigger**: If the host has no `preToolUse`-equivalent blocking hook, config protection cannot veto tool calls. The agent may modify linter configs without interception. Log the gap as `preToolUse: no native blocking equivalent — config-protection policy unavailable`.
 
@@ -190,6 +204,7 @@ The adapter implements L1 plus all blocking policy classes.
 **Required**:
 - L1 steering and stop telemetry.
 - Config protection fires on `preToolUse` and can block (exit 2 translates to a deny response).
+- Every block surfaces its reason to the model through the host's deny-reason channel (see [Block Reason Channel](#block-reason-channel)), not only to a log.
 - Quality gate fires on `postToolUse`.
 - Stop-goal-fit fires on `stop` with `FLOW_AGENTS_GOAL_FIT_STRICT` configurable (default may be warning mode; strict mode must be possible to enable).
 
