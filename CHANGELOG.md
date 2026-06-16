@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.3.0](https://github.com/kontourai/flow-agents/compare/v1.2.0...v1.3.0) (2026-06-16)
+
+
+### Features
+
+* add kit TRUST axis to inspect output — orthogonal to K-levels (issue [#79](https://github.com/kontourai/flow-agents/issues/79)) ([2a353d1](https://github.com/kontourai/flow-agents/commit/2a353d17ffb1da8b0fc23f442f52aa0676a1fabe))
+* add TRUST axis to kit inspect — orthogonal to K-level capability (issue [#79](https://github.com/kontourai/flow-agents/issues/79)) ([02ac699](https://github.com/kontourai/flow-agents/commit/02ac699227c4071c16c936c3e01e5fd013466baf))
+* **knowledge:** rendered-body-as-storage in Obsidian adapter ([baef40f](https://github.com/kontourai/flow-agents/commit/baef40f46f4016ba8b6c8afd1c61b91cade1de12))
+* **knowledge:** rendered-body-as-storage in Obsidian adapter ([0a31c32](https://github.com/kontourai/flow-agents/commit/0a31c3233ee8772b000cb42dbef0a3fdc38ccf1c))
+* migrate gate evidence from surface.claim to Hachure trust.bundle ([#97](https://github.com/kontourai/flow-agents/issues/97)) ([8ed43c4](https://github.com/kontourai/flow-agents/commit/8ed43c46c2a6887d32cd850bc8b2d97e7829f825))
+
+
+### Fixes
+
+* **#74:** console-learning test cross-platform + un-quarantine; docs([#39](https://github.com/kontourai/flow-agents/issues/39)): live-validation rule ([89b2bdb](https://github.com/kontourai/flow-agents/commit/89b2bdb44f3fa5ea629135f7e93410eee92efb1c))
+* **#74:** un-quarantine console-learning test — passes 12/12 on Linux CI ([#89](https://github.com/kontourai/flow-agents/issues/89)) ([371ecd2](https://github.com/kontourai/flow-agents/commit/371ecd22cbd8e80b6404cbdd2825d4a94fb6573c))
+* **#75:** assert opencode plugin load via factory marker file ([#96](https://github.com/kontourai/flow-agents/issues/96)) ([6c09288](https://github.com/kontourai/flow-agents/commit/6c092883bc4b2fd5a893431991ab75921f8b080b))
+* acceptance harnesses poll for all required telemetry events (canary flake [#75](https://github.com/kontourai/flow-agents/issues/75)) ([a27b4ff](https://github.com/kontourai/flow-agents/commit/a27b4ff48c88908419ef079c447d8a9930aa707a))
+* acceptance harnesses skip (not fail) when no telemetry produced — no-provider CI ([d9cba18](https://github.com/kontourai/flow-agents/commit/d9cba180ebcec9005bcd0c7b29f2608530c8acc3))
+* acceptance harnesses skip telemetry assertions when no provider (canary [#75](https://github.com/kontourai/flow-agents/issues/75)) ([dbd0e7b](https://github.com/kontourai/flow-agents/commit/dbd0e7b77444ed5df93fb47a59d2704460742367))
+* acceptance harnesses wait for ALL required telemetry events, not just file existence ([d9c86c0](https://github.com/kontourai/flow-agents/commit/d9c86c0987d42ab1f6c5c411884bcf1912bd8fab))
+* **ci:** pin @kontourai/flow to ~1.2.0 ([#95](https://github.com/kontourai/flow-agents/issues/95)) ([fd97803](https://github.com/kontourai/flow-agents/commit/fd97803c97ade926b1985c42b1693d8e9890f9f1))
+* **knowledge:** collision-proof body delimiter in Obsidian adapter ([4e2560c](https://github.com/kontourai/flow-agents/commit/4e2560cec3b0b8c2660879d059ce29f0cc88184a))
+* **stop-goal-fit:** invoke built validator directly; skip on env errors ([#92](https://github.com/kontourai/flow-agents/issues/92)) ([7b3d520](https://github.com/kontourai/flow-agents/commit/7b3d5208497f3cc8d4f8137d21f16408f9d2689e))
+
 ## [1.2.0](https://github.com/kontourai/flow-agents/compare/v1.1.0...v1.2.0) (2026-06-15)
 
 
