@@ -21,7 +21,7 @@ wait_for_telemetry() {
   local file="$1"
   local i=0
   while [[ $i -lt 150 ]]; do
-    [[ -s "$file" ]] && return 0
+    if [[ -s "$file" ]] && grep -q '"tool.invoke"' "$file" 2>/dev/null && grep -q '"tool.result"' "$file" 2>/dev/null; then return 0; fi
     sleep 0.1
     i=$((i + 1))
   done
