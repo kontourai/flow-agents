@@ -11,7 +11,25 @@
  *     graph-index.json                     (link graph — required by suite §13)
  *     .graph-index.json                    (path index — id→{path,archived})
  *
- * Frontmatter carries ALL contract fields; body rendered for Obsidian readability.
+ * Frontmatter carries all contract fields EXCEPT `body`.
+ * The rendered note body below the frontmatter fence IS the canonical body
+ * storage — body is parsed back from the rendered markdown on read.
+ *
+ * Body render/parse inverse:
+ *   ALL types → an invisible sentinel `<!-- kit:body-end -->` is emitted on
+ *               its own line immediately after the body text.  Obsidian renders
+ *               HTML comments as nothing so it is invisible to vault readers.
+ *               On read, everything before the sentinel (trimmed) is the body.
+ *               There is NO body-content constraint — bodies may freely contain
+ *               any markdown, including `## Sources`, `## Related`, etc.
+ *   raw    → body is additionally wrapped in a callout block for readability:
+ *              > [!note]- Raw Notes
+ *              > {body lines}
+ *            The sentinel follows the callout block.
+ *            Parse: strip callout wrapper, then split on sentinel.
+ *   others → body verbatim, then sentinel, then optional ## sections.
+ *            Parse: everything before the sentinel, trimmed.
+ *
  * Category dots map to directory segments: "eng.api" → "eng/api/".
  * Filename: slugified title, collision-suffixed (-2, -3, …).
  * Superseded records MOVE to archive/ (supersede-not-delete invariant).
@@ -40,6 +58,19 @@ import {
   VALID_STATUS_TRANSITIONS,
   validateCategory,
 } from "../shared/codec.js";
+
+// ---------------------------------------------------------------------------
+// Body render / parse constants
+// ---------------------------------------------------------------------------
+
+// Invisible sentinel emitted between the body and the generated structural
+// sections in every rendered note.  Obsidian renders HTML comments as nothing
+// so vault readers never see it.  On read, everything before this sentinel
+// (trimmed) is the canonical body — no heading-text collision possible.
+const BODY_END_SENTINEL = "<!-- kit:body-end -->";
+
+// Callout header line emitted for raw records
+const RAW_CALLOUT_HEADER = "> [!note]- Raw Notes";
 
 // ---------------------------------------------------------------------------
 // ObsidianKnowledgeStore
@@ -129,6 +160,67 @@ export class ObsidianKnowledgeStore {
   }
 
   // -------------------------------------------------------------------------
+  // Body render / parse (render+parse must be an exact inverse for body)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Parse the record body back from the rendered Obsidian markdown section
+   * (the text after the frontmatter fence).
+   *
+   * All record types use the invisible sentinel BODY_END_SENTINEL
+   * (`<!-- kit:body-end -->`) as the exclusive delimiter between the body
+   * and any appended structural sections.  The sentinel appears on its own
+   * line immediately after the body text; everything before it (trimmed) is
+   * the canonical body.  This is collision-proof: body text may freely contain
+   * any markdown, including lines like `## Sources` or `## Related`.
+   *
+   * raw records additionally wrap the body in a callout block for human
+   * readability.  The sentinel appears after the closing callout line.
+   * Parse: strip the callout (header line + `> ` prefix), then split on
+   * the sentinel to recover the exact original body.
+   *
+   * @param {string} type  - record type
+   * @param {string} renderedText  - text after the frontmatter fence (raw markdown)
+   * @returns {string}
+   */
+  _parseBodyFromRendered(type, renderedText) {
+    // Split on the sentinel first — the body is always everything before it,
+    // regardless of type.  For raw records we still need to strip the callout
+    // wrapper from within that portion.
+    const sentinelIdx = renderedText.indexOf(BODY_END_SENTINEL);
+    const bodySection = sentinelIdx === -1
+      ? renderedText          // sentinel missing (legacy note): fall back to full text
+      : renderedText.slice(0, sentinelIdx);
+
+    if (type === "raw") {
+      // bodySection is the callout block:
+      //   > [!note]- Raw Notes
+      //   > line1
+      //   > line2
+      // Strip the header line and the `> ` prefix from each body line.
+      const lines = bodySection.split("\n");
+      // First line is the callout header — skip it
+      const bodyLines = [];
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (line.startsWith("> ")) {
+          bodyLines.push(line.slice(2));
+        } else if (line === ">") {
+          bodyLines.push("");
+        } else {
+          // Safety: non-callout line stops the block (should not occur in
+          // well-formed notes written by this adapter).
+          break;
+        }
+      }
+      return bodyLines.join("\n");
+    }
+
+    // compiled / concept / snapshot / person: body is verbatim before sentinel
+    return bodySection.trimEnd();
+  }
+
+  // -------------------------------------------------------------------------
   // Record I/O
   // -------------------------------------------------------------------------
 
@@ -142,17 +234,19 @@ export class ObsidianKnowledgeStore {
   }
 
   /**
-   * Read a record by id. Returns the full record object (all fields from
-   * frontmatter, with `body` included) or null if not found.
+   * Read a record by id. Returns the full record object with `body` parsed
+   * from the rendered note body (the canonical storage), or null if not found.
    */
   _readRecord(id, pathIndex) {
     const absPath = this._getAbsPath(id, pathIndex);
     if (!absPath || !fs.existsSync(absPath)) return null;
     const text = fs.readFileSync(absPath, "utf8");
-    const { meta } = parseMarkdown(text);
+    const { meta, body: renderedText } = parseMarkdown(text);
     if (!meta.id) return null;
-    // body is stored in frontmatter as meta.body
-    return { ...meta };
+    // Reconstruct the record body from the rendered markdown section.
+    // `meta` no longer contains `body` — the rendered text is the source of truth.
+    const body = this._parseBodyFromRendered(meta.type, renderedText);
+    return { ...meta, body };
   }
 
   /**
@@ -160,8 +254,8 @@ export class ObsidianKnowledgeStore {
    *
    * - On first write: computes slug path, registers in path index.
    * - On update with title change: renames file (old deleted, new path used).
-   * - All contract fields stored in YAML frontmatter.
-   * - Below the frontmatter: Obsidian-readable human body for the note type.
+   * - All contract fields EXCEPT `body` stored in YAML frontmatter.
+   * - `body` is encoded in the rendered Obsidian markdown section below the fence.
    */
   _writeRecord(record, pathIndex) {
     const ownedIndex = !pathIndex;
@@ -195,7 +289,7 @@ export class ObsidianKnowledgeStore {
       targetRelPath = newRelPath;
     }
 
-    // Render: all contract fields in frontmatter; human body below
+    // Frontmatter: all contract fields EXCEPT `body` (body is in the rendered section).
     const { body, ...frontmatterFields } = record;
     // Derived dimension fields (territory: east, customer: acme, ...) from
     // category segments after the domain segment — presentation-only, never
@@ -205,8 +299,7 @@ export class ObsidianKnowledgeStore {
       const segs = record.category.split(".").slice(1);
       this._dimensions.forEach((name, i) => { if (segs[i]) derived[name] = segs[i]; });
     }
-    // Store body in frontmatter so round-trip is lossless
-    const frontmatter = { ...frontmatterFields, ...derived, body };
+    const frontmatter = { ...frontmatterFields, ...derived };
     const obsidianBody = this._renderObsidianBody(record, pathIndex);
     const text = `---\n${serializeYaml(frontmatter)}\n---\n\n${obsidianBody}`;
 
@@ -262,7 +355,22 @@ export class ObsidianKnowledgeStore {
 
   /**
    * Render the human-readable Obsidian body below the frontmatter fence.
-   * This is decorative — the canonical data lives in frontmatter.
+   * The body content IS the canonical storage — parsing this rendered text
+   * back via _parseBodyFromRendered() must return the original body exactly.
+   *
+   * render/parse contract:
+   *   ALL types → emit BODY_END_SENTINEL (<!-- kit:body-end -->) on its own
+   *               line immediately after the body content and before any
+   *               generated ## sections.  The sentinel is invisible in Obsidian
+   *               (HTML comments are not rendered) and cannot be confused with
+   *               any user-supplied body text.
+   *
+   *   raw    → body is wrapped in a callout block for human readability:
+   *              > [!note]- Raw Notes
+   *              > {body lines}
+   *            The sentinel immediately follows the callout block.
+   *
+   *   others → body verbatim, then sentinel, then optional ## sections.
    */
   _renderObsidianBody(record, pathIndex) {
     const links = record.links || [];
@@ -282,40 +390,43 @@ export class ObsidianKnowledgeStore {
         .filter(Boolean)
         .join(", ");
 
-    const sections = [];
-
+    // bodyPart: the portion of the rendered note containing the record body
+    // (possibly wrapped in a callout for raw records).
+    let bodyPart;
     if (record.type === "raw") {
-      sections.push(`> [!note]- Raw Notes\n> ${record.body.replace(/\n/g, "\n> ")}`);
-    } else if (record.type === "person") {
-      // Person cards: lead with the body (role/org prose), then People links,
-      // then Appears In backlinks to sources, then Related.
-      sections.push(record.body);
+      // Callout block: header line + body lines each prefixed with `> `.
+      // _parseBodyFromRendered strips these back to recover the exact body.
+      bodyPart = `${RAW_CALLOUT_HEADER}\n> ${record.body.replace(/\n/g, "\n> ")}`;
     } else {
-      // compiled / concept / snapshot: insight as readable body
-      sections.push(record.body);
+      // compiled / concept / snapshot / person: body verbatim
+      bodyPart = record.body;
     }
 
+    // Sentinel immediately follows the body part, on its own line.
+    // Everything between the frontmatter fence and this sentinel is the body.
+    const parts = [`${bodyPart}\n${BODY_END_SENTINEL}`];
+
     if (sourceLinks.length > 0) {
-      sections.push(`## Sources\n\n${wikiLinks(sourceLinks)}`);
+      parts.push(`## Sources\n\n${wikiLinks(sourceLinks)}`);
     }
 
     // Person cards: render appears-in links (backlinks to raw+compiled records)
     const appearsInLinks = links.filter((l) => l.kind === "appears-in");
     if (record.type === "person" && appearsInLinks.length > 0) {
-      sections.push(`## Appears In\n\n${wikiLinks(appearsInLinks)}`);
+      parts.push(`## Appears In\n\n${wikiLinks(appearsInLinks)}`);
     }
 
     // Compiled/person records: render people links (links to person cards)
     const peopleLinks = links.filter((l) => l.kind === "person");
     if (peopleLinks.length > 0) {
-      sections.push(`## People\n\n${wikiLinks(peopleLinks)}`);
+      parts.push(`## People\n\n${wikiLinks(peopleLinks)}`);
     }
 
     if (relatedLinks.length > 0) {
-      sections.push(`## Related\n\n${wikiLinks(relatedLinks)}`);
+      parts.push(`## Related\n\n${wikiLinks(relatedLinks)}`);
     }
 
-    return sections.join("\n\n");
+    return parts.join("\n\n");
   }
 
   // -------------------------------------------------------------------------
