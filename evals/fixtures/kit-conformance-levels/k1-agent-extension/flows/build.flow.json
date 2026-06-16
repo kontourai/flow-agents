@@ -11,12 +11,12 @@
       "expects": [
         {
           "id": "build-evidence",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "Build evidence recorded.",
-          "claim": {
-            "type": "k1.build.evidence",
-            "subject": "artifact",
+          "bundle_claim": {
+            "claimType": "k1.build.evidence",
+            "subjectType": "artifact",
             "accepted_statuses": ["trusted", "accepted"]
           }
         }

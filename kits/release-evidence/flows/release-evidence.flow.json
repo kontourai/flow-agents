@@ -13,12 +13,12 @@
       "expects": [
         {
           "id": "release-claim-present",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "A trusted release.evidence claim must be attached before this gate can pass.",
           "explore_hint": "Attach a trust-report JSON file with claim type release.evidence and status trusted.",
-          "claim": {
-            "type": "release.evidence",
+          "bundle_claim": {
+            "claimType": "release.evidence",
             "accepted_statuses": [
               "trusted"
             ]

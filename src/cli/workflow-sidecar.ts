@@ -2,6 +2,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
 
 type AnyObj = Record<string, any>;
 
@@ -23,6 +24,46 @@ function appendJsonl(file: string, payload: AnyObj): void {
 }
 function die(message: string): never { throw new Error(message); }
 function slugify(value: string, fallback: string): string { return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || fallback; }
+
+// Optional Hachure trust-bundle validation. No-ops gracefully when hachure is not installed.
+// Install hachure (^0.4.0) as an optional dependency to enable schema validation.
+function tryLoadHachureValidator(): ((bundle: unknown) => { valid: boolean; errors: string[] }) | null {
+  try {
+    const _require = createRequire(import.meta.url);
+    const hachureDir = path.dirname(_require.resolve("hachure"));
+    const schemasDir = path.join(hachureDir, "schemas");
+    const Ajv = _require("ajv/dist/2020");
+    const schemas: Record<string, any> = {};
+    for (const file of fs.readdirSync(schemasDir)) {
+      if (!file.endsWith(".schema.json")) continue;
+      schemas[file] = JSON.parse(fs.readFileSync(path.join(schemasDir, file), "utf8"));
+    }
+    const ajv = new Ajv({ strict: false, allErrors: true });
+    for (const [filename, schema] of Object.entries(schemas)) {
+      if (filename === "trust-bundle.schema.json") continue;
+      ajv.addSchema(schema, filename);
+    }
+    const trustBundleSchema = schemas["trust-bundle.schema.json"];
+    if (!trustBundleSchema) return null;
+    const validate = ajv.compile(trustBundleSchema);
+    return (bundle: unknown) => {
+      const valid = validate(bundle);
+      if (valid) return { valid: true, errors: [] };
+      const errors = ((validate as any).errors ?? []).map((err: any) => {
+        const loc = err.instancePath || err.schemaPath || "";
+        return `${loc} ${err.message ?? "invalid"}`.trim();
+      });
+      return { valid: false, errors };
+    };
+  } catch {
+    return null;
+  }
+}
+let _hachureValidator: ReturnType<typeof tryLoadHachureValidator> | undefined;
+function getHachureValidator(): ReturnType<typeof tryLoadHachureValidator> {
+  if (_hachureValidator === undefined) _hachureValidator = tryLoadHachureValidator();
+  return _hachureValidator;
+}
 
 function safeRepoIdentifier(value: string): string {
   const trimmed = value.trim().replace(/\.git$/, "");
@@ -372,11 +413,27 @@ function normalizeCheck(raw: AnyObj): AnyObj {
 }
 function normalizeSurfaceRefs(refs: any): AnyObj[] {
   if (!Array.isArray(refs)) die("surface_trust_refs must be an array");
+  const hachureValidate = getHachureValidator();
   return refs.map((ref) => {
     const keys = JSON.stringify(ref).match(/"([^"]+)":/g) ?? [];
     for (const key of keys.map((k) => k.slice(1, -2))) if (key.toLowerCase().includes("veritas")) die(`unsupported field in Surface trust ref: ${key}`);
     const out = { ...ref };
-    if (!["TrustReport", "Trust Snapshot"].includes(out.artifact_kind)) die("artifact_kind must be one of");
+    // trust.bundle is the canonical Hachure-aligned artifact kind; TrustReport/Trust Snapshot are legacy aliases
+    if (!["trust.bundle", "TrustReport", "Trust Snapshot"].includes(out.artifact_kind)) die("artifact_kind must be one of: trust.bundle, TrustReport, Trust Snapshot");
+    // When hachure is installed, validate the referenced trust artifact if it is a local file
+    if (hachureValidate && out.artifact_ref && typeof out.artifact_ref === "string" && fs.existsSync(out.artifact_ref)) {
+      try {
+        const bundle = JSON.parse(fs.readFileSync(out.artifact_ref, "utf8"));
+        const result = hachureValidate(bundle);
+        if (!result.valid) {
+          const errorSummary = result.errors.slice(0, 3).join("; ");
+          die(`trust.bundle artifact at ${out.artifact_ref} failed Hachure schema validation: ${errorSummary}`);
+        }
+      } catch (err) {
+        if (err instanceof Error && err.message.includes("failed Hachure schema validation")) throw err;
+        // File read or parse errors are not re-thrown: the artifact_ref validation path is advisory
+      }
+    }
     const status = deriveSurfaceStatus(out);
     if (out.status === "pass" && status !== "pass") die("surface_trust_refs contradicts Surface trust facts");
     return out;
@@ -394,15 +451,16 @@ function surfaceCheckFromArtifact(file: string, index: number): AnyObj {
   const lower = JSON.stringify(raw).toLowerCase();
   let ref: AnyObj;
   if (lower.includes("provider") && lower.includes("absent")) {
-    ref = { artifact_kind: "TrustReport", artifact_ref: file, gate_id: "provider.unavailable", claim_type: "surface.claim", claim_status: "unknown", subject: "builder-kit", freshness: { status: "unknown", summary: "No trust provider is configured" }, authority: { producer: "unknown", summary: "No trust provider is configured" }, integrity: { status: "unknown", summary: "Unknown" }, status: "not_verified", summary: "No trust provider is configured" };
+    ref = { artifact_kind: "trust.bundle", artifact_ref: file, gate_id: "provider.unavailable", claim_type: "builder.trust.bundle", claim_status: "unknown", subject: "builder-kit", freshness: { status: "unknown", summary: "No trust provider is configured" }, authority: { producer: "unknown", summary: "No trust provider is configured" }, integrity: { status: "unknown", summary: "Unknown" }, status: "not_verified", summary: "No trust provider is configured" };
   } else if (lower.includes("artifact") && lower.includes("absent")) {
-    ref = { artifact_kind: "TrustReport", artifact_ref: file, gate_id: "artifact.unavailable", claim_type: "surface.claim", claim_status: "unknown", subject: "builder-kit", freshness: { status: "unknown", summary: "Artifact not readable" }, authority: { producer: "unknown", summary: "Artifact not readable" }, integrity: { status: "unknown", summary: "Artifact not readable" }, status: "not_verified", summary: "artifact not readable" };
+    ref = { artifact_kind: "trust.bundle", artifact_ref: file, gate_id: "artifact.unavailable", claim_type: "builder.trust.bundle", claim_status: "unknown", subject: "builder-kit", freshness: { status: "unknown", summary: "Artifact not readable" }, authority: { producer: "unknown", summary: "Artifact not readable" }, integrity: { status: "unknown", summary: "Artifact not readable" }, status: "not_verified", summary: "artifact not readable" };
   } else {
     const claimStatus = lower.includes("rejected") ? "rejected" : "accepted";
     const freshness = lower.includes("stale") ? "stale" : "fresh";
     const producer = lower.includes("missing-authority") ? "unknown" : "surface-local";
     const integrity = lower.includes("mismatch") ? "mismatch" : "matched";
-    ref = { artifact_kind: file.includes("snapshot") ? "Trust Snapshot" : "TrustReport", artifact_ref: file, gate_id: "builder.surface.claim", claim_type: "surface.claim", claim_status: claimStatus, subject: "builder-kit", freshness: { status: freshness, summary: freshness === "fresh" ? "fresh" : "not currently verifiable" }, authority: { producer, summary: producer === "unknown" ? "missing authority" : "Local Surface trust producer." }, integrity: { status: integrity, summary: integrity === "matched" ? "matched" : "integrity mismatch" } };
+    // Use trust.bundle as the canonical Hachure-aligned artifact_kind for all trust-backed evidence refs
+    ref = { artifact_kind: "trust.bundle", artifact_ref: file, gate_id: "builder.trust.bundle", claim_type: "builder.trust.bundle", claim_status: claimStatus, subject: "builder-kit", freshness: { status: freshness, summary: freshness === "fresh" ? "fresh" : "not currently verifiable" }, authority: { producer, summary: producer === "unknown" ? "missing authority" : "Local Surface trust producer." }, integrity: { status: integrity, summary: integrity === "matched" ? "matched" : "integrity mismatch" } };
     ref.status = deriveSurfaceStatus(ref);
     ref.summary = ref.status === "pass" ? "accepted" : ref.status === "not_verified" ? "not currently verifiable" : (claimStatus === "rejected" ? "rejected" : producer === "unknown" ? "missing authority" : "integrity mismatch");
   }

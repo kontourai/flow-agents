@@ -74,12 +74,12 @@ A Flow Definition at minimum needs `id`, `version`, `steps`, and `gates`. Steps 
       "expects": [
         {
           "id": "review-finding",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "The change was reviewed and findings were recorded.",
-          "claim": {
-            "type": "my-kit.review.finding",
-            "subject": "artifact",
+          "bundle_claim": {
+            "claimType": "my-kit.review.finding",
+            "subjectType": "artifact",
             "accepted_statuses": ["trusted", "accepted"]
           }
         }
@@ -270,7 +270,7 @@ Version constraints (e.g. minimum `flow-agents` version) are the only case where
 
 ### Evidence layering: Surface and Veritas
 
-Kit gates reference evidence using `"kind": "surface.claim"`. This is **Flow-native vocabulary**: Flow is built on Surface, so Surface claims are the expected evidence substrate at the Flow level. Surface claims are not a Flow Agents coupling.
+Kit gates reference evidence using `"kind": "trust.bundle"` with a `bundle_claim` selector (`claimType`, optional `subjectType`, `accepted_statuses`). This is **Flow-native vocabulary** in the Hachure open trust-bundle format: Flow is built on Surface, so trust bundles are the expected evidence substrate at the Flow level, validated against Hachure's `trust-bundle.schema.json`. They are not a Flow Agents coupling. (Earlier Flow releases used `kind: "surface.claim"` with a `claim` selector; Flow 1.3.0 replaced that with `trust.bundle`, kontourai/flow#84.)
 
 Veritas is an **optional claim family** — a developer-repo specialization for evidence that has been through a trust pipeline. Kits may be opinionated about requiring Veritas-class evidence. Builder Kit requiring Veritas-class evidence is the kit's own policy choice, defined by Kontour as the kit author, not a platform requirement. Other kits may not require Veritas at all.
 

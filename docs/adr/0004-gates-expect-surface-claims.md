@@ -1,15 +1,15 @@
 ---
-title: ADR 0004: Gates Expect Surface Claims
+title: ADR 0004: Gates Expect Hachure Trust Bundles
 ---
 
-# ADR 0004: Gates Expect Surface Claims
+# ADR 0004: Gates Expect Hachure Trust Bundles
 
-Flow-backed kits will model rich gate evidence as claim expectations rather than provider-specific requirements. A gate expectation can require `kind: "surface.claim"`, a Surface claim type such as `repo.policy_compliance`, accepted trust statuses such as `verified`, and whether the expectation blocks the transition; project or runtime config maps claim types to trusted Surface producers and authority traces. This lets the Builder Kit use repo governance, command checks, CI, human decisions, or future producers without naming a specific provider in the Flow Definition.
+Flow-backed kits will model rich gate evidence as claim expectations using the Hachure trust.bundle format rather than provider-specific requirements. A gate expectation can require `kind: "trust.bundle"`, a domain claim type such as `builder.verify.tests`, accepted trust statuses such as `verified`, and whether the expectation blocks the transition; project or runtime config maps claim types to trusted Surface producers and authority traces. This lets the Builder Kit use repo governance, command checks, CI, human decisions, or future producers without naming a specific provider in the Flow Definition.
 
-**Status**: Accepted
+**Status**: Accepted (updated: vocabulary aligned to Hachure trust.bundle in hachure-align)
 
-**Considered Options**: Provider-aware gate rules were rejected because they would make Flow Definitions know too much about individual tools. Plain evidence strings such as `tests` or `veritas` were rejected because they cannot represent claim type, accepted status, producer authority, transparency gaps, or project-level enforcement overrides cleanly.
+**Considered Options**: Provider-aware gate rules were rejected because they would make Flow Definitions know too much about individual tools. Plain evidence strings such as `tests` or `veritas` were rejected because they cannot represent claim type, accepted status, producer authority, transparency gaps, or project-level enforcement overrides cleanly. An earlier version used `kind: "surface.claim"` and `artifact_kind: "TrustReport"/"Trust Snapshot"` — those have been renamed to `kind: "trust.bundle"` and `artifact_kind: "trust.bundle"` to align with the Hachure schema standard that Flow now ships.
 
-**Consequences**: Trusted producer mappings belong upstream in Flow project configuration, not Flow Agents runtime configuration. Flow Agents can help author, install, and adapt that configuration for agent runtimes, but CI, framework agents, local CLIs, and humans should all evaluate gates against the same Flow-owned authority model.
+**Consequences**: Trusted producer mappings belong upstream in Flow project configuration, not Flow Agents runtime configuration. Flow Agents can help author, install, and adapt that configuration for agent runtimes, but CI, framework agents, local CLIs, and humans should all evaluate gates against the same Flow-owned authority model. When hachure is installed as an optional dependency, referenced trust artifacts are validated against hachure's trust-bundle.schema.json at evidence-recording time.
 
-**Initial Shape**: Gate expectations should use `expects` entries with `id`, `kind: "surface.claim"`, `required`, `claim.type`, optional `claim.subject`, `claim.accepted_statuses`, `description`, and optional `explore_hint`. The Builder Kit should use intuitive subject strings such as `flow-run`, `flow-step`, `work-item`, `change`, `pull-request`, `release`, `decision`, and `artifact`, while the schema remains open to other subject values.
+**Initial Shape**: Gate expectations should use `expects` entries with `id`, `kind: "trust.bundle"`, `required`, `claim.type`, optional `claim.subject`, `claim.accepted_statuses`, `description`, and optional `explore_hint`. The Builder Kit should use intuitive subject strings such as `flow-run`, `flow-step`, `work-item`, `change`, `pull-request`, `release`, `decision`, and `artifact`, while the schema remains open to other subject values.

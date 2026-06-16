@@ -6,7 +6,7 @@ title: Workflow Eval Strategy
 
 The Builder Kit workflow system now has concrete skill contracts for `idea-to-backlog`, `pull-work`, `plan-work`, `review-work`, `deliver`, `evidence-gate`, `release-readiness`, and `learning-review`, plus shared workflow contracts in `context/contracts/`. Evals should prove both the written contracts and the agent behavior around gates, artifacts, worktrees, Goal Fit, release readiness, final acceptance docs, and learning feedback.
 
-Flow Agents evals prove coordination, install, runtime adapter behavior, and artifact discipline. They should not redefine Flow gate authority: Flow Definitions use typed `expects` entries, Surface claim gates use `kind: "surface.claim"`, and Flow project config owns trusted producer mappings plus gate overrides.
+Flow Agents evals prove coordination, install, runtime adapter behavior, and artifact discipline. They should not redefine Flow gate authority: Flow Definitions use typed `expects` entries, trust-bundle gates use `kind: "trust.bundle"`, and Flow project config owns trusted producer mappings plus gate overrides.
 
 ## Goals
 
@@ -161,7 +161,7 @@ Surface trust artifact attachment is covered by deterministic schema, runtime, a
 bash evals/integration/test_workflow_sidecar_writer.sh
 ```
 
-That eval exercises Builder Kit `surface.claim` evidence using provider-neutral TrustReport / Trust Snapshot fixtures for accepted, rejected, stale, missing-authority, integrity-mismatch, provider-absent, and artifact-absent cases. It proves Flow Agents can record compact Surface claim evidence in `evidence.json` and report pass, fail, or `NOT_VERIFIED` gaps without requiring provider-specific fields.
+That eval exercises Builder Kit `trust.bundle` evidence using provider-neutral Hachure trust.bundle fixtures for accepted, rejected, stale, missing-authority, integrity-mismatch, provider-absent, and artifact-absent cases. It proves Flow Agents can record compact Surface claim evidence in `evidence.json` and report pass, fail, or `NOT_VERIFIED` gaps without requiring provider-specific fields.
 
 This coverage does not redefine Flow gate authority. Flow Definitions continue to express expectations, Flow project config owns trusted producer mappings and gate overrides, and Flow gate authority remains outside the local report writer. Runtime/provider gaps should be recorded as `NOT_VERIFIED` when a configured Surface claim path cannot be checked; ordinary Builder Kit workflows remain valid when no trust provider or trust artifact is configured.
 

@@ -1,11 +1,11 @@
 {
   "schema_version": "1.0",
   "scenario": "artifact_absent",
-  "artifact_kind": "TrustReport",
+  "artifact_kind": "trust.bundle",
   "artifact_ref": "surface-trust://fixtures/missing-trust-report.json",
   "gate": {
     "id": "implementation-plan",
-    "kind": "surface.claim"
+    "kind": "trust.bundle"
   },
   "claim": {
     "type": "builder.plan.implementation",

@@ -11,12 +11,12 @@
       "expects": [
         {
           "id": "review-finding",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "Review finding recorded.",
-          "claim": {
-            "type": "k0.review.finding",
-            "subject": "artifact",
+          "bundle_claim": {
+            "claimType": "k0.review.finding",
+            "subjectType": "artifact",
             "accepted_statuses": ["trusted", "accepted"]
           }
         }

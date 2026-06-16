@@ -13,12 +13,12 @@
       "expects": [
         {
           "id": "raw-ids-selected",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "One or more raw record IDs have been selected for compilation. Each ID must resolve to an existing raw record in the store.",
-          "claim": {
-            "type": "knowledge.compile.selection",
-            "subject": "artifact",
+          "bundle_claim": {
+            "claimType": "knowledge.compile.selection",
+            "subjectType": "artifact",
             "accepted_statuses": ["trusted", "accepted"]
           }
         }
@@ -29,12 +29,12 @@
       "expects": [
         {
           "id": "compiled-record-provenance",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "The compiled record has been created with provenance.source_ids listing every consumed raw ID, and source links (kind='source') from the compiled record to each raw record — satisfying the store contract's compiled record requirements.",
-          "claim": {
-            "type": "knowledge.compile.provenance",
-            "subject": "artifact",
+          "bundle_claim": {
+            "claimType": "knowledge.compile.provenance",
+            "subjectType": "artifact",
             "accepted_statuses": ["trusted", "accepted"]
           }
         }
@@ -45,12 +45,12 @@
       "expects": [
         {
           "id": "provenance-refs-resolve",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "Every provenance ref in the compiled record resolves to a retrievable raw record via the store's get() operation. The graph index reflects all source links.",
-          "claim": {
-            "type": "knowledge.compile.link-integrity",
-            "subject": "artifact",
+          "bundle_claim": {
+            "claimType": "knowledge.compile.link-integrity",
+            "subjectType": "artifact",
             "accepted_statuses": ["trusted", "accepted"]
           }
         }
