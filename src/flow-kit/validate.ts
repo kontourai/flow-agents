@@ -24,6 +24,47 @@ export interface KitConformanceLevel {
   k2: boolean;
 }
 
+/**
+ * Kit trust level — WHO vouches for a kit, orthogonal to the K-level capability axis.
+ *
+ * - "first-party": the kit is authored and published by Kontour (kontourai); its id is in the
+ *   FIRST_PARTY_KIT_IDS allowlist maintained in this repository. These kits are built, tested,
+ *   and distributed with the flow-agents package.
+ * - "verified": reserved for a future third-party verification process (e.g. self-certification
+ *   via the conformance kit + cryptographic attestation / Veritas claims). Not yet implemented.
+ * - "unverified": default for all kits not in the first-party allowlist. This says nothing about
+ *   the kit's quality — it only means Kontour has not vouched for it.
+ *
+ * The v2 path for "verified": cryptographic signing / attestation against the conformance kit
+ * and Veritas claims substrate is the natural next step and is intentionally deferred.
+ */
+export type KitTrustLevel = "first-party" | "verified" | "unverified";
+
+/**
+ * Allowlist of kit IDs that Kontour authors, tests, and ships with the flow-agents package.
+ *
+ * Criteria for inclusion:
+ *   1. The kit directory lives under kits/ in the kontourai/flow-agents repository.
+ *   2. The kit is published by @kontourai (npm package @kontourai/flow-agents).
+ *   3. Kontour owns and maintains the kit's content and release lifecycle.
+ *
+ * To add a new first-party kit: add its id here AND ensure it lives under kits/ in this repo.
+ * Third-party forks or community kits published elsewhere are NOT first-party, even if they
+ * share a similar id — first-party is tied to provenance in this specific repository.
+ */
+export const FIRST_PARTY_KIT_IDS: ReadonlySet<string> = new Set(["builder", "knowledge"]);
+
+/**
+ * Derive the trust level for a kit id.
+ *
+ * v1 determination: allowlist check against FIRST_PARTY_KIT_IDS.
+ * "verified" is reserved for future third-party verification (not yet granted to any kit).
+ */
+export function deriveKitTrust(kitId: string): KitTrustLevel {
+  if (FIRST_PARTY_KIT_IDS.has(kitId)) return "first-party";
+  return "unverified";
+}
+
 export interface KitTargetsResult {
   kit_id: string;
   kit_name: string;
@@ -32,6 +73,11 @@ export interface KitTargetsResult {
   targets: KitTargetConsumer[];
   /** Extension field namespaces that are not Flow or Flow Agents-owned. */
   third_party_extensions: string[];
+  /**
+   * Trust level: who vouches for this kit. Orthogonal to the K-level capability axis.
+   * "first-party" = Kontour-published; "verified" = reserved (future); "unverified" = default.
+   */
+  trust: KitTrustLevel;
 }
 
 // Lazy-loaded cache for validateKitContainer from @kontourai/flow.
@@ -83,7 +129,7 @@ async function delegateCoreContainerValidation(kitDir: string, manifest: Record<
 }
 
 /**
- * Derives the consumer-target level (K0/K1/K2) and target audience list from
+ * Derives the consumer-target level (K0/K1/K2), target audience list, and trust level from
  * observable asset classes in the kit manifest. Does not require file I/O.
  *
  * Derivation rules (from kontourai/flow-agents#52 and Brian's layering review):
@@ -93,6 +139,10 @@ async function delegateCoreContainerValidation(kitDir: string, manifest: Record<
  *  - targets.flow: always present when K0 (any Flow consumer can evaluate gates).
  *  - targets.flow-agents: present when K1 (agent extension assets activate in >=1 harness).
  *  - third-party: any top-level keys that are not core fields and not Flow Agents extension classes.
+ *
+ * Trust derivation (from kontourai/flow-agents#79):
+ *  - "first-party": kit id is in FIRST_PARTY_KIT_IDS (Kontour-authored kits in this repo).
+ *  - "unverified": all other kits (default; "verified" is reserved for a future process).
  *
  * @param manifest  The kit.json manifest object.
  * @param kitDir    Kit directory for flow file-existence checks. Defaults to "" (structural-only).
@@ -125,12 +175,16 @@ export async function deriveKitTargets(manifest: Record<string, unknown>, kitDir
   if (k1) targets.push("flow-agents");
   for (const ns of thirdPartyExtensions) targets.push(ns);
 
+  // Derive trust level orthogonally to the K-level capability axis.
+  const trust = deriveKitTrust(kitId);
+
   return {
     kit_id: kitId,
     kit_name: kitName,
     conformance: { k0, k1, k2 },
     targets,
     third_party_extensions: thirdPartyExtensions,
+    trust,
   };
 }
 
