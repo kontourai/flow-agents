@@ -473,6 +473,150 @@ else
   _fail "promoted doc is missing source or acceptance sections"
 fi
 
+# --- npm-install regression: validator-environment errors must not block goal-fit ---
+# Simulate the npm-installed condition: build/ is present (always shipped in package files)
+# but tsc is absent from PATH, so `npm run workflow:validate-artifacts` (which rebuilds)
+# would fail. The fix directly invokes node build/.../validate-workflow-artifacts.js instead.
+
+NPM_INSTALL_REPO="$TMPDIR_EVAL/npm-install-repo"
+mkdir -p "$NPM_INSTALL_REPO/.flow-agents/npm-install-task"
+printf '# Test Repo\n' > "$NPM_INSTALL_REPO/AGENTS.md"
+
+cat > "$NPM_INSTALL_REPO/.flow-agents/npm-install-task/npm-install-task--deliver.md" <<'MARKDOWN'
+# npm install test task
+
+branch: main
+worktree: main
+created: 2026-06-01
+status: delivered
+type: deliver
+
+## Definition Of Done
+- **User outcome:** Something works.
+- **Acceptance criteria:**
+  - [x] Thing works - Evidence: tested
+
+## Goal Fit Gate
+- [x] Original user goal restated
+- [x] Every acceptance criterion has evidence
+
+## Verification Report
+
+### Verdict: PASS
+
+## Final Acceptance
+
+- [ ] CI passed
+MARKDOWN
+
+cat > "$NPM_INSTALL_REPO/.flow-agents/npm-install-task/state.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "npm-install-task",
+  "status": "delivered",
+  "phase": "done",
+  "updated_at": "2026-06-01T00:00:00Z",
+  "next_action": { "status": "done", "summary": "Local delivery complete." }
+}
+JSON
+
+cat > "$NPM_INSTALL_REPO/.flow-agents/npm-install-task/acceptance.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "npm-install-task",
+  "criteria": [
+    {
+      "id": "thing-works",
+      "description": "Thing works.",
+      "status": "pass",
+      "evidence_refs": [
+        { "kind": "artifact", "file": "npm-install-task--deliver.md", "summary": "Delivery artifact." }
+      ]
+    }
+  ],
+  "goal_fit": { "status": "pass", "summary": "User outcome achieved." }
+}
+JSON
+
+cat > "$NPM_INSTALL_REPO/.flow-agents/npm-install-task/evidence.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "npm-install-task",
+  "verdict": "pass",
+  "checks": [
+    { "id": "build", "kind": "test", "status": "pass", "summary": "Build passed." }
+  ],
+  "not_verified_gaps": []
+}
+JSON
+
+cat > "$NPM_INSTALL_REPO/.flow-agents/npm-install-task/handoff.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "npm-install-task",
+  "summary": "Local delivery complete.",
+  "current_state_ref": "state.json",
+  "next_steps": [],
+  "blockers": [],
+  "warnings": []
+}
+JSON
+
+# Part 1 of fix: invoke the already-built validator directly (no tsc).
+# Poison tsc so that any call to it fails; confirm the hook does not call it
+# and validates clean sidecars successfully.
+FAKE_TSC_DIR="$TMPDIR_EVAL/fake-tsc"
+mkdir -p "$FAKE_TSC_DIR"
+printf '#!/usr/bin/env bash\necho "error TS5023: tsc should not be called" >&2\nexit 1\n' > "$FAKE_TSC_DIR/tsc"
+chmod +x "$FAKE_TSC_DIR/tsc"
+
+if PATH="$FAKE_TSC_DIR:$PATH" FLOW_AGENTS_GOAL_FIT_STRICT=true FLOW_AGENTS_REQUIRE_SIDECARS=true \
+     node "$ROOT/scripts/hooks/stop-goal-fit.js" \
+     >"$TMPDIR_EVAL/npm-install-valid.out" 2>"$TMPDIR_EVAL/npm-install-valid.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$NPM_INSTALL_REPO"}
+JSON
+then
+  _pass "strict hook with poisoned tsc uses built validator and does not block valid sidecars"
+else
+  _fail "strict hook should not block valid sidecars even with tsc absent: $(cat "$TMPDIR_EVAL/npm-install-valid.err")"
+fi
+
+if ! rg -q 'tsc: command not found\|TS5023\|tsc should not be called' "$TMPDIR_EVAL/npm-install-valid.err"; then
+  _pass "hook does not emit tsc error noise when using built validator"
+else
+  _fail "hook leaked tsc error into goal-fit output"
+fi
+
+# Part 2 of fix: when the validator cannot run at all (build/ absent and npm fails),
+# the hook must skip cleanly — never block in strict mode due to an env error.
+mv "$ROOT/build" "$ROOT/build-absent"
+
+SPAWN_FAIL_DIR="$TMPDIR_EVAL/spawn-fail"
+mkdir -p "$SPAWN_FAIL_DIR"
+printf '#!/usr/bin/env bash\necho "npm ERR! tsc: command not found" >&2\nexit 127\n' > "$SPAWN_FAIL_DIR/npm"
+chmod +x "$SPAWN_FAIL_DIR/npm"
+
+if PATH="$SPAWN_FAIL_DIR:$PATH" FLOW_AGENTS_GOAL_FIT_STRICT=true FLOW_AGENTS_REQUIRE_SIDECARS=true \
+     node "$ROOT/scripts/hooks/stop-goal-fit.js" \
+     >"$TMPDIR_EVAL/npm-install-env-err.out" 2>"$TMPDIR_EVAL/npm-install-env-err.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$NPM_INSTALL_REPO"}
+JSON
+then
+  _pass "strict hook does not block when validator environment fails (build/ absent, tsc missing)"
+else
+  _fail "strict hook must not block when validator env fails: $(cat "$TMPDIR_EVAL/npm-install-env-err.err")"
+fi
+
+if rg -q 'sidecar validation skipped' "$TMPDIR_EVAL/npm-install-env-err.err"; then
+  _pass "hook emits sidecar validation skipped warning for environment errors"
+else
+  _fail "hook did not emit 'sidecar validation skipped' for environment errors"
+fi
+
+# Restore build/ so subsequent evals are unaffected.
+mv "$ROOT/build-absent" "$ROOT/build"
+
+
 if [[ "$errors" -eq 0 ]]; then
   echo "Goal Fit hook integration passed."
   exit 0
