@@ -11,7 +11,17 @@
  *     graph-index.json                     (link graph — required by suite §13)
  *     .graph-index.json                    (path index — id→{path,archived})
  *
- * Frontmatter carries ALL contract fields; body rendered for Obsidian readability.
+ * Frontmatter carries all contract fields EXCEPT `body`.
+ * The rendered note body below the frontmatter fence IS the canonical body
+ * storage — body is parsed back from the rendered markdown on read.
+ *
+ * Body render/parse inverse:
+ *   raw    → `> [!note]- Raw Notes\n> {body lines}`
+ *            parse: strip callout header line, remove `> ` prefix from each line
+ *   others → body rendered verbatim, followed by optional ## Sources /
+ *            ## Appears In / ## People / ## Related sections
+ *            parse: content before the first of those H2 headings, trimmed
+ *
  * Category dots map to directory segments: "eng.api" → "eng/api/".
  * Filename: slugified title, collision-suffixed (-2, -3, …).
  * Superseded records MOVE to archive/ (supersede-not-delete invariant).
@@ -40,6 +50,17 @@ import {
   VALID_STATUS_TRANSITIONS,
   validateCategory,
 } from "../shared/codec.js";
+
+// ---------------------------------------------------------------------------
+// Body render / parse constants
+// ---------------------------------------------------------------------------
+
+// Heading prefix used to delimit the appended sections in rendered notes.
+// The body content lives BEFORE the first of these headings.
+const SECTION_HEADINGS = new Set(["## Sources", "## Appears In", "## People", "## Related"]);
+
+// Callout header line emitted for raw records
+const RAW_CALLOUT_HEADER = "> [!note]- Raw Notes";
 
 // ---------------------------------------------------------------------------
 // ObsidianKnowledgeStore
@@ -129,6 +150,72 @@ export class ObsidianKnowledgeStore {
   }
 
   // -------------------------------------------------------------------------
+  // Body render / parse (render+parse must be an exact inverse for body)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Parse the record body back from the rendered Obsidian markdown section
+   * (the text after the frontmatter fence).
+   *
+   * raw records:
+   *   Rendered as:
+   *     > [!note]- Raw Notes
+   *     > line1
+   *     > line2
+   *   Parsed by stripping the header line and the `> ` prefix from body lines.
+   *   This is a perfect inverse since the callout prefix is our controlled marker.
+   *
+   * compiled / concept / snapshot / person records:
+   *   Rendered as the body verbatim, followed by optional ## Sources /
+   *   ## Appears In / ## People / ## Related sections.
+   *   Parsed by extracting everything before the first of those H2 headings
+   *   and trimming trailing whitespace — an exact inverse as long as the body
+   *   itself does not start a line with one of those exact heading strings.
+   *
+   * @param {string} type  - record type
+   * @param {string} renderedText  - text after the frontmatter fence (raw markdown)
+   * @returns {string}
+   */
+  _parseBodyFromRendered(type, renderedText) {
+    if (type === "raw") {
+      // renderedText starts with the callout header then callout-prefixed body lines
+      const lines = renderedText.split("\n");
+      // First line is the callout header — skip it
+      // Remaining lines: strip the `> ` prefix (or `>` alone for empty lines)
+      const bodyLines = [];
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (line.startsWith("> ")) {
+          bodyLines.push(line.slice(2));
+        } else if (line === ">") {
+          bodyLines.push("");
+        } else {
+          // Safety: if a line doesn't start with `> `, stop (shouldn't happen)
+          break;
+        }
+      }
+      return bodyLines.join("\n");
+    }
+
+    // For all other types: body is the text before the first appended section heading.
+    // Split on newlines, find the first line that matches a section heading exactly.
+    const lines = renderedText.split("\n");
+    let cutLine = lines.length;
+    for (let i = 0; i < lines.length; i++) {
+      if (SECTION_HEADINGS.has(lines[i])) {
+        // The separator between body and the section heading is one blank line;
+        // trim that blank line too by moving cut back past any trailing blank lines.
+        cutLine = i;
+        while (cutLine > 0 && lines[cutLine - 1].trim() === "") {
+          cutLine--;
+        }
+        break;
+      }
+    }
+    return lines.slice(0, cutLine).join("\n").trimEnd();
+  }
+
+  // -------------------------------------------------------------------------
   // Record I/O
   // -------------------------------------------------------------------------
 
@@ -142,17 +229,19 @@ export class ObsidianKnowledgeStore {
   }
 
   /**
-   * Read a record by id. Returns the full record object (all fields from
-   * frontmatter, with `body` included) or null if not found.
+   * Read a record by id. Returns the full record object with `body` parsed
+   * from the rendered note body (the canonical storage), or null if not found.
    */
   _readRecord(id, pathIndex) {
     const absPath = this._getAbsPath(id, pathIndex);
     if (!absPath || !fs.existsSync(absPath)) return null;
     const text = fs.readFileSync(absPath, "utf8");
-    const { meta } = parseMarkdown(text);
+    const { meta, body: renderedText } = parseMarkdown(text);
     if (!meta.id) return null;
-    // body is stored in frontmatter as meta.body
-    return { ...meta };
+    // Reconstruct the record body from the rendered markdown section.
+    // `meta` no longer contains `body` — the rendered text is the source of truth.
+    const body = this._parseBodyFromRendered(meta.type, renderedText);
+    return { ...meta, body };
   }
 
   /**
@@ -160,8 +249,8 @@ export class ObsidianKnowledgeStore {
    *
    * - On first write: computes slug path, registers in path index.
    * - On update with title change: renames file (old deleted, new path used).
-   * - All contract fields stored in YAML frontmatter.
-   * - Below the frontmatter: Obsidian-readable human body for the note type.
+   * - All contract fields EXCEPT `body` stored in YAML frontmatter.
+   * - `body` is encoded in the rendered Obsidian markdown section below the fence.
    */
   _writeRecord(record, pathIndex) {
     const ownedIndex = !pathIndex;
@@ -195,7 +284,7 @@ export class ObsidianKnowledgeStore {
       targetRelPath = newRelPath;
     }
 
-    // Render: all contract fields in frontmatter; human body below
+    // Frontmatter: all contract fields EXCEPT `body` (body is in the rendered section).
     const { body, ...frontmatterFields } = record;
     // Derived dimension fields (territory: east, customer: acme, ...) from
     // category segments after the domain segment — presentation-only, never
@@ -205,8 +294,7 @@ export class ObsidianKnowledgeStore {
       const segs = record.category.split(".").slice(1);
       this._dimensions.forEach((name, i) => { if (segs[i]) derived[name] = segs[i]; });
     }
-    // Store body in frontmatter so round-trip is lossless
-    const frontmatter = { ...frontmatterFields, ...derived, body };
+    const frontmatter = { ...frontmatterFields, ...derived };
     const obsidianBody = this._renderObsidianBody(record, pathIndex);
     const text = `---\n${serializeYaml(frontmatter)}\n---\n\n${obsidianBody}`;
 
@@ -262,7 +350,13 @@ export class ObsidianKnowledgeStore {
 
   /**
    * Render the human-readable Obsidian body below the frontmatter fence.
-   * This is decorative — the canonical data lives in frontmatter.
+   * The body content IS the canonical storage — parsing this rendered text
+   * back via _parseBodyFromRendered() must return the original body exactly.
+   *
+   * render/parse contract (per type):
+   *   raw    → callout block; parsed by stripping header + `> ` prefix
+   *   others → body verbatim first, then optional ## sections; parsed by
+   *            trimming from the first ## section heading line
    */
   _renderObsidianBody(record, pathIndex) {
     const links = record.links || [];
@@ -285,7 +379,9 @@ export class ObsidianKnowledgeStore {
     const sections = [];
 
     if (record.type === "raw") {
-      sections.push(`> [!note]- Raw Notes\n> ${record.body.replace(/\n/g, "\n> ")}`);
+      // Callout block: header line + body lines each prefixed with `> `.
+      // _parseBodyFromRendered strips these back to recover the exact body.
+      sections.push(`${RAW_CALLOUT_HEADER}\n> ${record.body.replace(/\n/g, "\n> ")}`);
     } else if (record.type === "person") {
       // Person cards: lead with the body (role/org prose), then People links,
       // then Appears In backlinks to sources, then Related.
