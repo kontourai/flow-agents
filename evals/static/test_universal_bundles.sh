@@ -411,6 +411,21 @@ else
   _fail "catalog metadata check failed"
 fi
 
+# Block Reason Channel (#100): the generated opencode/pi adapters must carry the
+# policy reason into their block path so the model learns why it was blocked.
+# claude/codex deny translation is covered in test_hook_category_behaviors.sh.
+BUILDER_SRC="$ROOT_DIR/src/tools/build-universal-bundles.ts"
+if grep -q "throw new Error(policyResult.reason" "$BUILDER_SRC"; then
+  _pass "opencode adapter surfaces the block reason to the model (thrown error)"
+else
+  _fail "opencode adapter block path dropped the policy reason"
+fi
+if grep -q "reason: result.reason" "$BUILDER_SRC"; then
+  _pass "pi adapter surfaces the block reason to the model (block result reason)"
+else
+  _fail "pi adapter block path dropped the policy reason"
+fi
+
 echo ""
 echo "==========================="
 total=$((pass + fail))

@@ -63,9 +63,16 @@ if node "$ROOT/scripts/hooks/claude-hook-adapter.js" PreToolUse pre:config-prote
 {"hook_event_name":"PreToolUse","tool_input":{"path":"prettier.config.js"}}
 JSON
 then
+  claude_reason="$(run_json "$TMPDIR_EVAL/claude-block.json" "hookSpecificOutput.permissionDecisionReason")"
   if [[ "$(run_json "$TMPDIR_EVAL/claude-block.json" "continue")" == "false" ]] \
     && [[ "$(run_json "$TMPDIR_EVAL/claude-block.json" "hookSpecificOutput.permissionDecision")" == "deny" ]]; then
     pass "Claude runtime adapter translates PreToolUse policy block"
+    # Block Reason Channel: the deny must carry the steering reason to the model.
+    if [[ "$claude_reason" == *"Fix the source"* ]]; then
+      pass "Claude block surfaces the steer-to-source reason to the model"
+    else
+      fail "Claude block reason did not reach the model channel (permissionDecisionReason): $claude_reason"
+    fi
   else
     fail "Claude runtime adapter block contract mismatch"
   fi
@@ -77,8 +84,15 @@ if node "$ROOT/scripts/hooks/codex-hook-adapter.js" pre:config-protection config
 {"hook_event_name":"PreToolUse","tool_input":{"path":"biome.json"}}
 JSON
 then
+  codex_reason="$(run_json "$TMPDIR_EVAL/codex-block.json" "hookSpecificOutput.permissionDecisionReason")"
   if [[ "$(run_json "$TMPDIR_EVAL/codex-block.json" "hookSpecificOutput.permissionDecision")" == "deny" ]]; then
     pass "Codex runtime adapter translates PreToolUse policy block"
+    # Block Reason Channel: the deny must carry the steering reason to the model.
+    if [[ "$codex_reason" == *"Fix the source"* ]]; then
+      pass "Codex block surfaces the steer-to-source reason to the model"
+    else
+      fail "Codex block reason did not reach the model channel (permissionDecisionReason): $codex_reason"
+    fi
   else
     fail "Codex runtime adapter block contract mismatch"
   fi
