@@ -73,11 +73,16 @@ for _attempt in 1 2; do
   grep -q '"tool.invoke"' "$TMP_WORK/.telemetry/full.jsonl" 2>/dev/null && break
 done
 
-LATEST_LOG="$(ls -t ~/.local/share/opencode/log/*.log 2>/dev/null | head -1 || true)"
-if [[ -n "$LATEST_LOG" ]] && grep -q "plugins/flow-agents.js loading plugin" "$LATEST_LOG" 2>/dev/null; then
-  _pass "opencode log confirms flow-agents plugin loaded"
+# Confirm load via the plugin's own marker file (written by the FlowAgentsPlugin
+# factory at startup). This replaces grepping opencode's internal
+# "plugins/flow-agents.js loading plugin" message, which opencode 1.17.x dropped
+# and which opencode does not reliably surface to its log file — a stale-assertion
+# false failure (#75). The factory runs regardless of provider, so this load
+# signal is independent of whether a model turn completes.
+if [[ -f "$TMP_WORK/.telemetry/opencode-plugin.loaded" ]]; then
+  _pass "flow-agents plugin loaded (factory marker present)"
 else
-  _fail "opencode log did not confirm flow-agents plugin loaded"
+  _fail "flow-agents plugin did not load (factory marker absent)"
 fi
 
 telemetry_file="$TMP_WORK/.telemetry/full.jsonl"
