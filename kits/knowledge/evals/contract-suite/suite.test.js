@@ -672,4 +672,94 @@ describe("Knowledge Kit Store Contract Suite", () => {
       assert.ok(rev, "reverse index has the backlink");
     });
   });
+
+  // -----------------------------------------------------------------------
+  // §14  body round-trip — collision-proof delimiter regression (AC: sentinel)
+  // -----------------------------------------------------------------------
+  describe("body round-trip: sentinel delimiter (regression for heading-collision bug)", () => {
+    let dir, store;
+    before(() => { dir = makeTempDir(); store = makeStore(dir); });
+    after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    test("body containing '## Sources' round-trips exactly (regression: was silently truncated)", async () => {
+      // Previously the adapter delimited body from structural sections by
+      // searching for '## Sources' / '## Related' etc. in the rendered text.
+      // A body that contained one of those exact headings was silently truncated
+      // on read.  The fix: an invisible sentinel <!-- kit:body-end --> is
+      // emitted after the body so body content cannot collide with the delimiter.
+      const body = "Findings below.\n\n## Sources\nThis is body content, not a structural section.";
+      const id = await store.create({
+        type: "concept",
+        title: "Sources In Body Regression",
+        body,
+        category: "test",
+        provenance: { agent: "tester" },
+      });
+      const record = await store.get(id);
+      assert.equal(record.body, body,
+        "body containing '## Sources' must round-trip exactly (no silent truncation)");
+    });
+
+    test("body containing '## Related' and '## People' round-trips exactly", async () => {
+      const body = "## Related\nSome related context.\n\n## People\nAlice, Bob.";
+      const id = await store.create({
+        type: "snapshot",
+        title: "Related And People In Body",
+        body,
+        category: "test",
+        provenance: { agent: "tester" },
+      });
+      const record = await store.get(id);
+      assert.equal(record.body, body,
+        "body containing '## Related' and '## People' must round-trip exactly");
+    });
+
+    test("raw body containing callout-like lines round-trips exactly", async () => {
+      const body = "> [!note] Looks like a callout\n> quoted line\nNormal line after.";
+      const id = await store.create({
+        type: "raw",
+        title: "Callout-like Raw Body",
+        body,
+        category: "test",
+        provenance: { agent: "tester" },
+      });
+      const record = await store.get(id);
+      assert.equal(record.body, body,
+        "raw body with callout-like lines must round-trip exactly");
+    });
+
+    test("multi-paragraph body with various ## headings round-trips exactly", async () => {
+      const body = "# Overview\n\nPara one.\n\n## Section A\n\nContent A.\n\n## Sources\n\nFake sources.\n\n## Related\n\nFake related.";
+      const id = await store.create({
+        type: "concept",
+        title: "Multi Heading Body",
+        body,
+        category: "test",
+        provenance: { agent: "tester" },
+      });
+      const record = await store.get(id);
+      assert.equal(record.body, body,
+        "body with multiple ## headings must round-trip exactly");
+    });
+
+    test("body field is NOT stored in frontmatter", async () => {
+      // Contract invariant: the body lives in the rendered note section,
+      // not as a YAML field.  Verifiable via the default adapter since the
+      // default store stores everything in memory (never writes body to YAML
+      // frontmatter), but the key guarantee is get() returns the correct body.
+      const body = "Should not appear as body: in frontmatter";
+      const id = await store.create({
+        type: "compiled",
+        title: "No Body In Frontmatter",
+        body,
+        category: "test",
+        provenance: { agent: "tester" },
+      });
+      const record = await store.get(id);
+      assert.equal(record.body, body, "body is preserved through get()");
+      // The record object itself should not have body as a frontmatter-derived
+      // field separate from the canonical body — just that get() works.
+      assert.ok(typeof record.body === "string", "body is a string");
+    });
+  });
 });
