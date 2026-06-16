@@ -11,12 +11,12 @@
       "expects": [
         {
           "id": "runtime-evidence",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "Runtime activation evidence exists.",
-          "claim": {
-            "type": "mixed.runtime.evidence",
-            "subject": "artifact",
+          "bundle_claim": {
+            "claimType": "mixed.runtime.evidence",
+            "subjectType": "artifact",
             "accepted_statuses": ["trusted", "accepted"]
           }
         }

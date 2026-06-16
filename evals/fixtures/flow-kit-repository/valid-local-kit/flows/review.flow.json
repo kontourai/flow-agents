@@ -11,12 +11,12 @@
       "expects": [
         {
           "id": "review-evidence",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "Review evidence has been recorded.",
-          "claim": {
-            "type": "example.review.evidence",
-            "subject": "artifact",
+          "bundle_claim": {
+            "claimType": "example.review.evidence",
+            "subjectType": "artifact",
             "accepted_statuses": ["trusted", "accepted"]
           }
         }

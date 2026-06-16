@@ -1075,17 +1075,17 @@ const flow = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const expectations = Object.values(flow.gates || {}).flatMap((gate) => gate.expects || []);
 if (!expectations.length) throw new Error("no Builder Kit gate expectations found");
 for (const expectation of expectations) {
-  if (expectation.kind !== "surface.claim") throw new Error(`${expectation.id || "<unknown>"} is not a surface.claim expectation`);
-  if (!expectation.claim?.type || !expectation.claim?.accepted_statuses) throw new Error(`${expectation.id || "<unknown>"} is missing claim type or accepted statuses`);
+  if (expectation.kind !== "trust.bundle") throw new Error(`${expectation.id || "<unknown>"} is not a trust.bundle expectation`);
+  if (!expectation.bundle_claim?.claimType || !expectation.bundle_claim?.accepted_statuses) throw new Error(`${expectation.id || "<unknown>"} is missing bundle_claim claimType or accepted statuses`);
 }
 const flowText = JSON.stringify(flow).toLowerCase();
 for (const term of ["veritas", "trust_provider", "trust-provider", "provider_name", "provider_ref", "veritas_policy", "veritas_readiness"]) {
   if (flowText.includes(term)) throw new Error(`provider-specific trust field leaked into Builder Kit build flow: ${term}`);
 }
 NODE
-  pass "Builder build flow keeps provider-neutral surface.claim expectations"
+  pass "Builder build flow keeps provider-neutral trust.bundle expectations"
 else
-  fail "Builder build flow keeps provider-neutral surface.claim expectations"
+  fail "Builder build flow keeps provider-neutral trust.bundle expectations"
 fi
 require_text "$MAP" 'pull-work' "map includes pull-work"
 require_text "$MAP" 'pickup Probe before planning' "map documents pickup Probe before planning"

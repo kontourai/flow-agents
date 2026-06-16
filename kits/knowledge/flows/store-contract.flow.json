@@ -11,34 +11,34 @@
       "expects": [
         {
           "id": "contract-suite-passed",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "The contract test suite has passed 100% against the target adapter, verifying round-trip integrity, required-evidence enforcement, and graph-index consistency.",
-          "claim": {
-            "type": "knowledge.store-contract.suite-result",
-            "subject": "artifact",
+          "bundle_claim": {
+            "claimType": "knowledge.store-contract.suite-result",
+            "subjectType": "artifact",
             "accepted_statuses": ["trusted", "accepted"]
           }
         },
         {
           "id": "mutation-provenance-enforced",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "Every mutation operation (create, update, link, propose, apply, reject) rejects requests missing required provenance fields, as verified by the contract suite.",
-          "claim": {
-            "type": "knowledge.store-contract.provenance-enforcement",
-            "subject": "artifact",
+          "bundle_claim": {
+            "claimType": "knowledge.store-contract.provenance-enforcement",
+            "subjectType": "artifact",
             "accepted_statuses": ["trusted", "accepted"]
           }
         },
         {
           "id": "round-trip-integrity",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "Records round-trip raw to stored to queried with category and links intact, as verified by the contract suite.",
-          "claim": {
-            "type": "knowledge.store-contract.round-trip",
-            "subject": "artifact",
+          "bundle_claim": {
+            "claimType": "knowledge.store-contract.round-trip",
+            "subjectType": "artifact",
             "accepted_statuses": ["trusted", "accepted"]
           }
         }

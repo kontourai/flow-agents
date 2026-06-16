@@ -19,12 +19,12 @@
       "expects": [
         {
           "id": "selected-work",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "A ready work item is selected with scope and acceptance context.",
-          "claim": {
-            "type": "builder.pull-work.selected",
-            "subject": "work-item",
+          "bundle_claim": {
+            "claimType": "builder.pull-work.selected",
+            "subjectType": "work-item",
             "accepted_statuses": ["trusted", "accepted"]
           }
         }
@@ -35,23 +35,23 @@
       "expects": [
         {
           "id": "pickup-probe-readiness",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "Pickup Probe evidence is recorded before planning: goal fit and scope, blockers and dependencies, dependency freshness, acceptance criteria quality, provider state, risk, stop-short risks, planning readiness, decisions, unresolved questions, accepted gaps, probe_status, probe_artifact_ref, grouping decision, expected modified files, and conflict risks.",
-          "claim": {
-            "type": "builder.design-probe.pickup-readiness",
-            "subject": "work-item",
+          "bundle_claim": {
+            "claimType": "builder.design-probe.pickup-readiness",
+            "subjectType": "work-item",
             "accepted_statuses": ["trusted", "accepted"]
           }
         },
         {
           "id": "probe-decisions-or-accepted-gaps",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "Planning is blocked until pickup Probe decisions are captured in the pull-work or plan handoff artifact, or unresolved questions are explicitly recorded as accepted gaps. Stale broad continuation language after a merge is not sufficient for planning newly selected work.",
-          "claim": {
-            "type": "builder.design-probe.decisions",
-            "subject": "decision",
+          "bundle_claim": {
+            "claimType": "builder.design-probe.decisions",
+            "subjectType": "decision",
             "accepted_statuses": ["trusted", "accepted"]
           }
         }
@@ -62,12 +62,12 @@
       "expects": [
         {
           "id": "implementation-plan",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "The implementation plan names files, changes, acceptance evidence, and sequencing.",
-          "claim": {
-            "type": "builder.plan.implementation",
-            "subject": "artifact",
+          "bundle_claim": {
+            "claimType": "builder.plan.implementation",
+            "subjectType": "artifact",
             "accepted_statuses": ["trusted", "accepted"]
           }
         }
@@ -78,12 +78,12 @@
       "expects": [
         {
           "id": "implementation-scope",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "The implementation scope records changed files and excludes unrelated work.",
-          "claim": {
-            "type": "builder.execute.scope",
-            "subject": "change",
+          "bundle_claim": {
+            "claimType": "builder.execute.scope",
+            "subjectType": "change",
             "accepted_statuses": ["trusted", "accepted"]
           }
         }
@@ -105,24 +105,24 @@
       "expects": [
         {
           "id": "tests-evidence",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "Relevant tests or checks have evidence tied to the implemented change.",
-          "claim": {
-            "type": "builder.verify.tests",
-            "subject": "flow-step",
+          "bundle_claim": {
+            "claimType": "builder.verify.tests",
+            "subjectType": "flow-step",
             "accepted_statuses": ["trusted", "accepted"]
           }
         },
         {
           "id": "policy-compliance",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": false,
           "description": "Policy compliance evidence is attached when policy gates apply.",
           "explore_hint": "Use as advisory evidence for scope, security, privacy, release, or repository policy checks.",
-          "claim": {
-            "type": "builder.verify.policy-compliance",
-            "subject": "artifact",
+          "bundle_claim": {
+            "claimType": "builder.verify.policy-compliance",
+            "subjectType": "artifact",
             "accepted_statuses": ["trusted", "accepted", "advisory"]
           }
         }
@@ -144,12 +144,12 @@
       "expects": [
         {
           "id": "merge-readiness",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "The change is ready for merge review based on scope, evidence, and unresolved risks.",
-          "claim": {
-            "type": "builder.merge-ready.readiness",
-            "subject": "change",
+          "bundle_claim": {
+            "claimType": "builder.merge-ready.readiness",
+            "subjectType": "change",
             "accepted_statuses": ["trusted", "accepted"]
           }
         }
@@ -160,12 +160,12 @@
       "expects": [
         {
           "id": "pull-request-opened",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "A pull request exists with linked work, implementation summary, and verification evidence.",
-          "claim": {
-            "type": "builder.pr-open.pull-request",
-            "subject": "pull-request",
+          "bundle_claim": {
+            "claimType": "builder.pr-open.pull-request",
+            "subjectType": "pull-request",
             "accepted_statuses": ["trusted", "accepted"]
           }
         }
@@ -176,12 +176,12 @@
       "expects": [
         {
           "id": "ci-merge-readiness",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "CI and review status support a merge-ready decision.",
-          "claim": {
-            "type": "builder.merge-ready-ci.readiness",
-            "subject": "pull-request",
+          "bundle_claim": {
+            "claimType": "builder.merge-ready-ci.readiness",
+            "subjectType": "pull-request",
             "accepted_statuses": ["trusted", "accepted"]
           }
         }
@@ -192,23 +192,23 @@
       "expects": [
         {
           "id": "decision-evidence",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "Durable decision evidence from the build is recorded.",
-          "claim": {
-            "type": "builder.learn.decisions",
-            "subject": "decision",
+          "bundle_claim": {
+            "claimType": "builder.learn.decisions",
+            "subjectType": "decision",
             "accepted_statuses": ["trusted", "accepted"]
           }
         },
         {
           "id": "learning-evidence",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "Learning evidence from delivery is recorded for future work.",
-          "claim": {
-            "type": "builder.learn.evidence",
-            "subject": "release",
+          "bundle_claim": {
+            "claimType": "builder.learn.evidence",
+            "subjectType": "release",
             "accepted_statuses": ["trusted", "accepted"]
           }
         }

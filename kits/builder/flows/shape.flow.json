@@ -13,79 +13,79 @@
       "expects": [
         {
           "id": "shaped-problem",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "The problem is stated in terms a builder can act on.",
-          "claim": {
-            "type": "builder.shape.problem",
-            "subject": "decision",
+          "bundle_claim": {
+            "claimType": "builder.shape.problem",
+            "subjectType": "decision",
             "accepted_statuses": ["trusted", "accepted"]
           }
         },
         {
           "id": "shaped-outcome",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "The intended outcome is explicit enough to evaluate later.",
-          "claim": {
-            "type": "builder.shape.outcome",
-            "subject": "flow-run",
+          "bundle_claim": {
+            "claimType": "builder.shape.outcome",
+            "subjectType": "flow-run",
             "accepted_statuses": ["trusted", "accepted"]
           }
         },
         {
           "id": "shaped-constraints",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "Constraints that affect implementation are captured.",
-          "claim": {
-            "type": "builder.shape.constraints",
-            "subject": "decision",
+          "bundle_claim": {
+            "claimType": "builder.shape.constraints",
+            "subjectType": "decision",
             "accepted_statuses": ["trusted", "accepted"]
           }
         },
         {
           "id": "shaped-non-goals",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "Non-goals are named so the build stays scoped.",
-          "claim": {
-            "type": "builder.shape.non-goals",
-            "subject": "decision",
+          "bundle_claim": {
+            "claimType": "builder.shape.non-goals",
+            "subjectType": "decision",
             "accepted_statuses": ["trusted", "accepted"]
           }
         },
         {
           "id": "shaped-success",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "Success criteria are concrete enough for verification.",
-          "claim": {
-            "type": "builder.shape.success",
-            "subject": "artifact",
+          "bundle_claim": {
+            "claimType": "builder.shape.success",
+            "subjectType": "artifact",
             "accepted_statuses": ["trusted", "accepted"]
           }
         },
         {
           "id": "shaped-risk",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "Material delivery risks are recorded before breakdown.",
-          "claim": {
-            "type": "builder.shape.risk",
-            "subject": "decision",
+          "bundle_claim": {
+            "claimType": "builder.shape.risk",
+            "subjectType": "decision",
             "accepted_statuses": ["trusted", "accepted"]
           }
         },
         {
           "id": "open-decisions",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": false,
           "description": "Open decisions are recorded when the shape is not fully settled.",
           "explore_hint": "Attach when unresolved choices could affect slices or issue boundaries.",
-          "claim": {
-            "type": "builder.shape.open-decisions",
-            "subject": "decision",
+          "bundle_claim": {
+            "claimType": "builder.shape.open-decisions",
+            "subjectType": "decision",
             "accepted_statuses": ["trusted", "accepted", "advisory"]
           }
         }
@@ -96,12 +96,12 @@
       "expects": [
         {
           "id": "slices-defined",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "The shaped work is split into independently useful slices.",
-          "claim": {
-            "type": "builder.breakdown.slices",
-            "subject": "work-item",
+          "bundle_claim": {
+            "claimType": "builder.breakdown.slices",
+            "subjectType": "work-item",
             "accepted_statuses": ["trusted", "accepted"]
           }
         }
@@ -112,12 +112,12 @@
       "expects": [
         {
           "id": "work-items-filed",
-          "kind": "surface.claim",
+          "kind": "trust.bundle",
           "required": true,
           "description": "Work items are filed or otherwise recorded with enough context to pull later.",
-          "claim": {
-            "type": "builder.file-issues.work-items",
-            "subject": "work-item",
+          "bundle_claim": {
+            "claimType": "builder.file-issues.work-items",
+            "subjectType": "work-item",
             "accepted_statuses": ["trusted", "accepted"]
           }
         }

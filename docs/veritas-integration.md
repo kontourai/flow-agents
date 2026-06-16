@@ -106,9 +106,9 @@ If Veritas is unavailable and the workflow expected it, record `not_verified` in
 
 ## Builder Kit Trust Evidence
 
-Builder Kit gates stay provider-neutral. The Builder Kit Flow Definition names gate expectations as `kind: "surface.claim"` and declares the claim type, subject, accepted statuses, and blocking behavior. It does not name Veritas or any other trust producer.
+Builder Kit gates stay provider-neutral. The Builder Kit Flow Definition names gate expectations as `kind: "trust.bundle"` (the Hachure-aligned gate kind) and declares the claim type, subject, accepted statuses, and blocking behavior. It does not name Veritas or any other trust producer.
 
-When a trust-backed path is configured, Flow Agents may attach a compact Surface-shaped reference to the Builder Kit evidence gate. The reference points at a TrustReport or Trust Snapshot, carries the related gate id, Surface claim type, claim status, artifact ref, integrity summary, authority or trusted-producer summary, subject, and freshness state, and then maps to the normal Flow gate result. Flow owns the gate authority decision, route reason, trusted producer mapping, and accepted gap behavior. Surface owns the portable trust state represented by the Surface claim and the TrustReport / Trust Snapshot. A Probe can request or clarify the evidence needed before planning or before a later Builder Kit gate retries.
+When a trust-backed path is configured, Flow Agents may attach a compact Hachure trust.bundle reference to the Builder Kit evidence gate. The reference uses `artifact_kind: "trust.bundle"` (the Hachure-aligned canonical value), carries the related gate id, domain claim type, claim status, artifact ref, integrity summary, authority or trusted-producer summary, subject, and freshness state, and then maps to the normal Flow gate result. When the `hachure` optional dependency is installed, referenced artifacts are validated against hachure's trust-bundle.schema.json at evidence-recording time. Flow owns the gate authority decision, route reason, trusted producer mapping, and accepted gap behavior. Surface owns the portable trust state represented by the Surface claim and the TrustReport / Trust Snapshot. A Probe can request or clarify the evidence needed before planning or before a later Builder Kit gate retries.
 
 Veritas is only one optional producer of those artifacts. A local Veritas readiness run can emit native Veritas evidence and, when configured, point Flow Agents at a Surface-shaped TrustReport or Trust Snapshot. Flow Agents records the reference; it does not copy Veritas rule models, readiness semantics, or provider-native fields into Builder Kit gates.
 
@@ -116,8 +116,8 @@ Provider and artifact absence are explicit:
 
 - If no trust provider is configured, ordinary Builder Kit activation, planning, verification, and evidence gates continue to work through the existing Flow Kit path.
 - If a trust-backed path was requested but no provider is configured, the trust check records `not_verified` with a clear gap instead of blocking unrelated Builder Kit usage.
-- If a provider is configured but the expected TrustReport or Trust Snapshot is absent or unreadable, only the requested trust-backed evidence check records `not_verified`; it does not silently pass and it does not make Veritas mandatory.
-- If a TrustReport or Trust Snapshot is present but has a rejected, stale, expired, missing-authority, or integrity-mismatched Surface claim, the Builder Kit evidence gate routes through the normal `fail` or `not_verified` path.
+- If a provider is configured but the expected Hachure trust.bundle artifact is absent or unreadable, only the requested trust-backed evidence check records `not_verified`; it does not silently pass and it does not make Veritas mandatory.
+- If a Hachure trust.bundle artifact is present but has a rejected, stale, expired, missing-authority, or integrity-mismatched claim, the Builder Kit evidence gate routes through the normal `fail` or `not_verified` path.
 
 ## Adoption Gate
 

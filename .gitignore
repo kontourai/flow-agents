@@ -29,3 +29,6 @@ evals/results/reports/
 .DS_Store
 *.log
 .kontour/
+
+# Local Flow CLI install for source-tree validation (CI recreates it)
+.flow-cli/

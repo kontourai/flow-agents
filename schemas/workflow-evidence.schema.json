@@ -239,7 +239,8 @@
               "properties": {
                 "artifact_kind": {
                   "type": "string",
-                  "enum": ["TrustReport", "Trust Snapshot"]
+                  "description": "Hachure-aligned artifact kind. trust.bundle is the canonical value; TrustReport and Trust Snapshot are legacy aliases.",
+                  "enum": ["trust.bundle", "TrustReport", "Trust Snapshot"]
                 },
                 "artifact_ref": {
                   "type": "string",

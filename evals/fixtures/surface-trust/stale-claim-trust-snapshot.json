@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "artifact_kind": "Trust Snapshot",
+  "artifact_kind": "trust.bundle",
   "artifact_ref": "surface-trust://fixtures/stale-claim-trust-snapshot.json",
   "subject": {
     "type": "flow-step",
@@ -8,7 +8,7 @@
   },
   "gate": {
     "id": "tests-evidence",
-    "kind": "surface.claim"
+    "kind": "trust.bundle"
   },
   "claim": {
     "type": "builder.verify.tests",

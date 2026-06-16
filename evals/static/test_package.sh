@@ -211,8 +211,8 @@ for (const gateId of ["verify-gate", "merge-ready-gate"]) {
 const expectations = Object.values(flow.gates || {}).flatMap((gate) => gate.expects || []);
 if (!expectations.length) throw new Error("Builder build flow should declare gate expectations");
 for (const expectation of expectations) {
-  if (expectation.kind !== "surface.claim") throw new Error(`${expectation.id || "<unknown>"} should remain a surface.claim expectation`);
-  if (!expectation.claim?.type || !expectation.claim?.accepted_statuses) throw new Error(`${expectation.id || "<unknown>"} should declare claim type and accepted statuses`);
+  if (expectation.kind !== "trust.bundle") throw new Error(`${expectation.id || "<unknown>"} should remain a trust.bundle expectation`);
+  if (!expectation.bundle_claim?.claimType || !expectation.bundle_claim?.accepted_statuses) throw new Error(`${expectation.id || "<unknown>"} should declare bundle_claim claimType and accepted statuses`);
 }
 const flowText = JSON.stringify(flow).toLowerCase();
 for (const term of ["veritas", "trust_provider", "trust-provider", "provider_name", "provider_ref", "veritas_policy", "veritas_readiness"]) {
@@ -221,7 +221,7 @@ for (const term of ["veritas", "trust_provider", "trust-provider", "provider_nam
 console.log("ok");
 NODE
   then
-    _pass "installed Builder Kit build flow keeps provider-neutral surface.claim gates"
+    _pass "installed Builder Kit build flow keeps provider-neutral trust.bundle gates"
   else
     _fail "installed Builder Kit build flow route-back or provider-neutral gate policy missing or wrong"
   fi
