@@ -218,6 +218,9 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check flow-kit-install-git-integration
 
+      - name: Console learning projection integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check console-learning-projection-integration
 
       - name: Context map integration
         continue-on-error: true

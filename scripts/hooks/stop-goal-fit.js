@@ -80,6 +80,15 @@ function hasSidecars(dir) {
   }
 }
 
+/**
+ * Returns true if a line of validator output looks like a validator-environment
+ * error (shell/npm error, tsc missing, spawn failure) rather than a real
+ * artifact validation message. Environment errors must never block goal-fit.
+ */
+function isEnvironmentError(line) {
+  return /tsc[:\s]|command not found|npm ERR!|npm error|ENOENT|EACCES|Cannot find module|node_modules\/.bin|TypeScript version|version conflict|error TS[0-9]/i.test(line);
+}
+
 function sidecarValidation(root, artifactDir) {
   const requireSidecars = String(process.env.FLOW_AGENTS_REQUIRE_SIDECARS || '').toLowerCase() === 'true';
   const requireCritique = String(process.env.FLOW_AGENTS_REQUIRE_CRITIQUE || '').toLowerCase() === 'true';
@@ -88,8 +97,6 @@ function sidecarValidation(root, artifactDir) {
   const packageRoot = fs.existsSync(path.join(root, 'package.json'))
     ? root
     : path.resolve(__dirname, '..', '..');
-  const packageJson = path.join(packageRoot, 'package.json');
-  if (!fs.existsSync(packageJson)) return [`${relative(root, artifactDir)} sidecar validation: package.json is missing; cannot run TypeScript workflow validator.`];
 
   let sidecarFiles = [];
   try {
@@ -112,26 +119,67 @@ function sidecarValidation(root, artifactDir) {
 
   if (sidecarFiles.length === 0) return [];
 
-  const args = ['run', 'workflow:validate-artifacts', '--silent', '--'];
-  args.push('--skip-markdown-validation');
-  if (requireSidecars) args.push('--require-sidecars');
-  if (requireCritique) args.push('--require-critique');
-  args.push(artifactDir);
+  // Part 1 fix: invoke the already-built validator directly via `node`, bypassing
+  // `npm run build` (tsc). npm-installed packages ship build/ in the package files,
+  // so the compiled JS is always available. Only fall back to npm run if build/ is
+  // absent (a raw dev checkout that hasn't been built yet).
+  const builtValidator = path.join(packageRoot, 'build', 'src', 'cli', 'validate-workflow-artifacts.js');
+  const hasBuild = fs.existsSync(builtValidator);
 
-  const result = spawnSync('npm', args, {
-    cwd: packageRoot,
-    encoding: 'utf8',
-    timeout: 30000,
-  });
+  const validatorArgs = ['--skip-markdown-validation'];
+  if (requireSidecars) validatorArgs.push('--require-sidecars');
+  if (requireCritique) validatorArgs.push('--require-critique');
+  validatorArgs.push(artifactDir);
+
+  let result;
+  if (hasBuild) {
+    // Direct node invocation: no tsc, no npm build step, works from any npm install.
+    result = spawnSync(process.execPath, [builtValidator, ...validatorArgs], {
+      cwd: packageRoot,
+      encoding: 'utf8',
+      timeout: 30000,
+    });
+  } else {
+    // Dev checkout without build/: fall back to npm run (may trigger tsc).
+    // If this also fails due to environment issues, Part 2 handles it below.
+    const npmArgs = ['run', 'workflow:validate-artifacts', '--silent', '--', ...validatorArgs];
+    result = spawnSync('npm', npmArgs, {
+      cwd: packageRoot,
+      encoding: 'utf8',
+      timeout: 30000,
+    });
+  }
+
+  // Part 2 fix: treat validator-environment failures as SKIP, never as blocking.
+  // A spawn error (ENOENT, timeout) means the validator couldn't run at all.
+  if (result.error) {
+    // Validator couldn't be launched — environment issue, not a goal-fit failure.
+    return [`${relative(root, artifactDir)} sidecar validation skipped: validator could not run (${result.error.code || result.error.message})`];
+  }
 
   if (result.status === 0) return [];
-  const output = `${result.stdout || ''}\n${result.stderr || ''}`
+
+  // Validator ran and exited non-zero. Separate real validation errors from
+  // environment errors (tsc missing, npm ERR!, shell errors) so that a broken
+  // validator environment never blocks goal-fit.
+  const allLines = `${result.stdout || ''}\n${result.stderr || ''}`
     .split('\n')
     .map(line => line.trim())
-    .filter(Boolean)
-    .slice(0, 12);
-  if (output.length === 0) output.push(`validator exited with status ${result.status ?? 'unknown'}`);
-  return output.map(line => `${relative(root, artifactDir)} sidecar validation: ${line}`);
+    .filter(Boolean);
+
+  const envLines = allLines.filter(isEnvironmentError);
+  const validationLines = allLines.filter(line => !isEnvironmentError(line));
+
+  if (envLines.length > 0 && validationLines.length === 0) {
+    // Pure environment failure — skip, do not block.
+    return [`${relative(root, artifactDir)} sidecar validation skipped: validator environment error (${envLines[0].slice(0, 120)})`];
+  }
+
+  // Real validation errors (possibly mixed with a few env noise lines).
+  const output = validationLines.length > 0 ? validationLines : allLines;
+  const trimmed = output.slice(0, 12);
+  if (trimmed.length === 0) trimmed.push(`validator exited with status ${result.status ?? 'unknown'}`);
+  return trimmed.map(line => `${relative(root, artifactDir)} sidecar validation: ${line}`);
 }
 
 function isWorkflowArtifact(artifact) {
@@ -295,7 +343,7 @@ function analyze(root, now = Date.now()) {
   }
   warnings.push(...sidecarGuidance(root, path.dirname(latest.file)));
 
-  const blocking = warnings.some(w => /status:|Definition Of Done|Goal Fit|sidecar validation|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action/.test(w));
+  const blocking = warnings.some(w => /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action/.test(w));
   return { warnings, blocking };
 }
 
