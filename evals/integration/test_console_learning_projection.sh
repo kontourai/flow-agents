@@ -24,6 +24,10 @@ _fail() { echo "  ✗ $1"; fail=$((fail + 1)); }
 
 echo "=== Layer 2: Console Learning Projection ==="
 echo ""
+echo "DEBUG: TMPDIR_EVAL=$TMPDIR_EVAL"
+echo "DEBUG: uname=$(uname -s) $(uname -r)"
+echo "DEBUG: shasum=$(command -v shasum 2>/dev/null || echo NOT_FOUND) sha256sum=$(command -v sha256sum 2>/dev/null || echo NOT_FOUND)"
+echo ""
 
 mkdir -p "$ARTIFACT_ROOT"
 cp -R "$FIXTURE_DIR/artifacts/." "$ARTIFACT_ROOT/"
@@ -35,6 +39,8 @@ else
 fi
 
 find "$ARTIFACT_ROOT" -name learning.json -type f -print0 | sort -z | xargs -0 shasum -a 256 >"$TMPDIR_EVAL/before.sha"
+echo "DEBUG: before.sha contents:"
+cat "$TMPDIR_EVAL/before.sha"
 
 cp "$PROJECTION" "$TMPDIR_EVAL/projection-first.json" 2>/dev/null || true
 if node "$ROOT/build/src/cli.js" console-learning-projection \
@@ -47,20 +53,34 @@ if node "$ROOT/build/src/cli.js" console-learning-projection \
   --json >"$TMPDIR_EVAL/run.json" 2>"$TMPDIR_EVAL/run.err"; then
   _pass "CLI writes projection from fixture artifact root"
 else
+  echo "DEBUG: CLI stderr: $(cat "$TMPDIR_EVAL/run.err" 2>/dev/null)"
+  echo "DEBUG: KONTOUR_ROOT=$KONTOUR_ROOT"
+  echo "DEBUG: KONTOUR_ROOT lstat: $(ls -la "$KONTOUR_ROOT" 2>/dev/null || echo 'does not exist yet')"
+  echo "DEBUG: parent dir lstat: $(ls -la "$(dirname "$KONTOUR_ROOT")" 2>/dev/null)"
+  echo "DEBUG: TMPDIR_EVAL symlink check: $(ls -la "$TMPDIR_EVAL" 2>/dev/null)"
   _fail "CLI failed: $(cat "$TMPDIR_EVAL/run.err" 2>/dev/null)"
 fi
 
 if [[ -f "$PROJECTION" ]]; then
   _pass "projection file exists at expected producer and scope path"
 else
+  echo "DEBUG: PROJECTION path=$PROJECTION"
+  echo "DEBUG: KONTOUR_ROOT contents: $(find "$KONTOUR_ROOT" -type f 2>/dev/null || echo 'empty or missing')"
   _fail "projection file missing at $PROJECTION"
 fi
+
+echo "DEBUG: run.json contents:"
+cat "$TMPDIR_EVAL/run.json" 2>/dev/null || echo "DEBUG: run.json missing"
 
 if jq -e --arg path "$PROJECTION" \
   '.scanned_learning_file_count == 2 and .emitted_learning_count == 2 and .destination == $path and .producer == "flow-agents-learning" and .scope == {"kind":"repo","id":"fixture-repo"} and .dry_run == false' \
   "$TMPDIR_EVAL/run.json" >/dev/null 2>&1; then
   _pass "JSON summary reports scanned files, emitted learnings, scope, producer, and destination"
 else
+  echo "DEBUG: JSON summary check FAILED"
+  echo "DEBUG: Expected .destination=$PROJECTION"
+  echo "DEBUG: Actual run.json:"
+  cat "$TMPDIR_EVAL/run.json"
   _fail "JSON summary missing expected command result"
 fi
 
@@ -76,6 +96,13 @@ if node "$ROOT/build/src/cli.js" console-learning-projection \
   if cmp -s "$TMPDIR_EVAL/projection-first.json" "$PROJECTION"; then
     _pass "projection output is byte-stable with fixed generated-at"
   else
+    echo "DEBUG: byte-stability FAILED"
+    echo "DEBUG: projection-first.json:"
+    cat "$TMPDIR_EVAL/projection-first.json"
+    echo "DEBUG: projection after second run:"
+    cat "$PROJECTION"
+    echo "DEBUG: diff:"
+    diff "$TMPDIR_EVAL/projection-first.json" "$PROJECTION" || true
     _fail "projection output changed across fixed-timestamp runs"
   fi
 else
@@ -83,9 +110,18 @@ else
 fi
 
 find "$ARTIFACT_ROOT" -name learning.json -type f -print0 | sort -z | xargs -0 shasum -a 256 >"$TMPDIR_EVAL/after.sha"
+echo "DEBUG: after.sha contents:"
+cat "$TMPDIR_EVAL/after.sha"
 if cmp -s "$TMPDIR_EVAL/before.sha" "$TMPDIR_EVAL/after.sha"; then
   _pass "source learning.json files are byte-for-byte unchanged"
 else
+  echo "DEBUG: shasum non-mutation check FAILED"
+  echo "DEBUG: before.sha:"
+  cat "$TMPDIR_EVAL/before.sha"
+  echo "DEBUG: after.sha:"
+  cat "$TMPDIR_EVAL/after.sha"
+  echo "DEBUG: diff:"
+  diff "$TMPDIR_EVAL/before.sha" "$TMPDIR_EVAL/after.sha" || true
   _fail "source learning.json checksum changed after projection command"
 fi
 
@@ -107,6 +143,24 @@ if jq -e --arg generated "$GENERATED_AT" '
 ' "$PROJECTION" >/dev/null 2>&1; then
   _pass "projection envelope includes Console schema, scope, producer, and direct snapshot provenance"
 else
+  echo "DEBUG: projection envelope check FAILED"
+  echo "DEBUG: PROJECTION=$PROJECTION"
+  echo "DEBUG: projection file contents:"
+  cat "$PROJECTION" 2>/dev/null || echo "DEBUG: file missing"
+  echo "DEBUG: jq error output:"
+  jq -e --arg generated "$GENERATED_AT" '
+    .schema == "kontour.console.projection" and
+    .version == "0.1" and
+    .generatedAt == $generated and
+    .scope == {"kind":"repo","id":"fixture-repo"} and
+    .producer == {"id":"flow-agents-learning","product":"flow-agents"} and
+    .derivedFrom.mode == "direct_snapshot" and
+    .derivedFrom.eventHistory == "unavailable" and
+    .derivedFrom.directSnapshot.emittedAt == $generated and
+    .derivedFrom.directSnapshot.producer == {"id":"flow-agents-learning","product":"flow-agents"} and
+    .derivedFrom.directSnapshot.sourceRef == {"product":"flow-agents","kind":"workflow-learning","id":".flow-agents/*/learning.json","label":"Local workflow learning sidecars"} and
+    (.learnings | length) == 2
+  ' "$PROJECTION" 2>&1 || true
   _fail "projection envelope is missing required Console contract fields"
 fi
 
@@ -118,6 +172,9 @@ if jq -e '
 ' "$PROJECTION" >/dev/null 2>&1; then
   _pass "learnings are inert and output has no authoritative fields or invalid top-level refs/links"
 else
+  echo "DEBUG: inert-learnings check FAILED"
+  echo "DEBUG: projection learnings sample:"
+  jq '.learnings[0]' "$PROJECTION" 2>/dev/null || true
   _fail "projection contains authority fields, invalid refs/links, or non-inert learnings"
 fi
 
@@ -131,6 +188,9 @@ if jq -e '
 ' "$PROJECTION" >/dev/null 2>&1; then
   _pass "learning ids and subject/source refs include task context while preserving raw record ids"
 else
+  echo "DEBUG: learning ids/refs check FAILED"
+  echo "DEBUG: learnings in projection:"
+  jq '.learnings | map({id, subjectRef, sourceRef, record_id: .extensions["flow-agents"].record_id})' "$PROJECTION" 2>/dev/null || true
   _fail "learning ids or subject/source refs do not correlate to source records"
 fi
 
@@ -156,6 +216,9 @@ if jq -e '
 ' "$PROJECTION" >/dev/null 2>&1; then
   _pass "correction-needed extension carries routing, correction, recurrence, and source path details"
 else
+  echo "DEBUG: correction-needed extension check FAILED"
+  echo "DEBUG: correction-needed learning extension:"
+  jq '.learnings[] | select(.sourceRef.id == "console-learning-correction/record-correction-needed") | .extensions["flow-agents"]' "$PROJECTION" 2>/dev/null || echo "DEBUG: learning not found or projection missing"
   _fail "correction-needed extension missing required Flow Agents details"
 fi
 
@@ -176,6 +239,9 @@ if jq -e '
 ' "$PROJECTION" >/dev/null 2>&1; then
   _pass "non-correction open-route extension carries routing and correction state"
 else
+  echo "DEBUG: open-route extension check FAILED"
+  echo "DEBUG: open-route learning extension:"
+  jq '.learnings[] | select(.sourceRef.id == "console-learning-open-route/record-open-route") | .extensions["flow-agents"]' "$PROJECTION" 2>/dev/null || echo "DEBUG: learning not found or projection missing"
   _fail "non-correction open-route extension missing required Flow Agents details"
 fi
 
