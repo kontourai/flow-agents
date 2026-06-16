@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "artifact_kind": "TrustReport",
+  "artifact_kind": "trust.bundle",
   "artifact_ref": "surface-trust://fixtures/integrity-mismatch-trust-report.json",
   "subject": {
     "type": "artifact",
@@ -8,7 +8,7 @@
   },
   "gate": {
     "id": "implementation-plan",
-    "kind": "surface.claim"
+    "kind": "trust.bundle"
   },
   "claim": {
     "type": "builder.plan.implementation",

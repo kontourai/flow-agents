@@ -49,7 +49,7 @@
     },
     {
       "id": "flow-agents-evidence",
-      "label": "Verification evidence",
+      "label": "Verification evidence (trust-backed refs use Hachure trust.bundle format when present)",
       "root": "product:flow-agents:.flow-agents",
       "files": [
         "evidence.json"

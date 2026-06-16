@@ -49,7 +49,7 @@ Governance tools such as Veritas belong at the Evidence boundary. Flow Agents sh
 
 ## Flow Kit Coordination
 
-Flow owns Flow Definition semantics: gates use typed `expects` entries, Surface requirements use `kind: "surface.claim"`, and project configuration owns trusted producer mappings plus gate overrides. Flow Agents should author, install, adapt, and control those assets for local runtimes; it should not become the authority source for claim trust or override semantics.
+Flow owns Flow Definition semantics: gates use typed `expects` entries, Surface requirements use `kind: "trust.bundle"` (the Hachure-aligned gate kind), and project configuration owns trusted producer mappings plus gate overrides. Flow Agents should author, install, adapt, and control those assets for local runtimes; it should not become the authority source for claim trust or override semantics.
 
 The Kit Catalog is the Flow Agents index of installable Flow Kits. A Flow Kit can contain Flow Definitions, skills, docs, adapters, and evals, but the catalog points at those assets instead of defining gate behavior itself. Builder Kit is the first Kontour-authored kit and proves the path from shaping through build, verification, merge readiness, and learning.
 
@@ -65,7 +65,7 @@ Builder Kit vocabulary should be used in public and internal guidance:
 - Builder Kit: the coding/building kit shipped by this repo.
 - Probe: question-driven design and context challenge step, surfaced as `design-probe`.
 
-Builder Kit evidence gates can reference Surface trust state without naming a provider. A trust-backed gate may attach a TrustReport or Trust Snapshot ref for the relevant Surface claim, while Flow keeps authority over gate evaluation, trusted producer mapping, and route-back behavior. Surface remains the portable trust-state layer, and Veritas remains an optional producer rather than a required Builder Kit dependency.
+Builder Kit evidence gates can reference Surface trust state without naming a provider. A trust-backed gate may attach a Hachure trust.bundle ref for the relevant Surface claim, while Flow keeps authority over gate evaluation, trusted producer mapping, and route-back behavior. Surface remains the portable trust-state layer, and Veritas remains an optional producer rather than a required Builder Kit dependency.
 
 ## Placement Rules
 

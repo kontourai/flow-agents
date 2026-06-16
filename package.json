@@ -134,5 +134,8 @@
   },
   "dependencies": {
     "@kontourai/flow": "~1.2.0"
+  },
+  "optionalDependencies": {
+    "hachure": "^0.4.0"
   }
 }

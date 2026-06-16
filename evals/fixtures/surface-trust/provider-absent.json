@@ -1,11 +1,11 @@
 {
   "schema_version": "1.0",
   "scenario": "provider_absent",
-  "artifact_kind": "Trust Snapshot",
+  "artifact_kind": "trust.bundle",
   "artifact_ref": null,
   "gate": {
     "id": "selected-work",
-    "kind": "surface.claim"
+    "kind": "trust.bundle"
   },
   "claim": {
     "type": "builder.pull-work.selected",

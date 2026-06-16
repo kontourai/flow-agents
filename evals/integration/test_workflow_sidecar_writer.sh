@@ -544,22 +544,22 @@ else
   _fail "existing invalid acceptance ref rejection was not fail-closed: $(cat "$TMPDIR_EVAL/invalid-acceptance-ref.out" "$TMPDIR_EVAL/invalid-acceptance-ref.err")"
 fi
 
-SURFACE_CHECK='{"id":"surface-trust-fixture","kind":"policy","status":"pass","summary":"Surface trust evidence passed.","surface_trust_refs":[{"artifact_kind":"TrustReport","artifact_ref":"trust/report.json","gate_id":"builder.surface.claim","claim_type":"surface.claim","claim_status":"accepted","subject":"builder-kit","freshness":{"status":"fresh","summary":"Issued during this workflow."},"authority":{"producer":"surface-local","summary":"Local Surface trust producer."},"integrity":{"status":"matched","summary":"Artifact digest matched expected subject and gate.","digest":"sha256:abc123"},"status":"pass","summary":"Accepted Surface claim."}]}'
+SURFACE_CHECK='{"id":"surface-trust-fixture","kind":"policy","status":"pass","summary":"Hachure trust.bundle evidence passed.","surface_trust_refs":[{"artifact_kind":"trust.bundle","artifact_ref":"trust/report.json","gate_id":"builder.trust.bundle","claim_type":"builder.trust.bundle","claim_status":"accepted","subject":"builder-kit","freshness":{"status":"fresh","summary":"Issued during this workflow."},"authority":{"producer":"surface-local","summary":"Local Surface trust producer."},"integrity":{"status":"matched","summary":"Artifact digest matched expected subject and gate.","digest":"sha256:abc123"},"status":"pass","summary":"Accepted trust.bundle claim."}]}'
 if flow_agents_node "$WRITER" record-evidence "$ARTIFACT_DIR" \
   --verdict pass \
   --check-json "$SURFACE_CHECK" \
   --timestamp "2026-05-09T00:01:05Z" >"$TMPDIR_EVAL/surface-evidence.out" 2>"$TMPDIR_EVAL/surface-evidence.err" \
   && rg -q '"surface_trust_refs"' "$ARTIFACT_DIR/evidence.json" \
-  && rg -q '"artifact_kind": "TrustReport"' "$ARTIFACT_DIR/evidence.json" \
+  && rg -q '"artifact_kind": "trust.bundle"' "$ARTIFACT_DIR/evidence.json" \
   && ! rg -q 'veritas' "$ARTIFACT_DIR/evidence.json"; then
-  _pass "sidecar writer records provider-neutral Surface trust refs"
+  _pass "sidecar writer records Hachure-aligned trust.bundle refs"
 else
-  _fail "sidecar writer did not record Surface trust refs: $(cat "$TMPDIR_EVAL/surface-evidence.out" "$TMPDIR_EVAL/surface-evidence.err")"
+  _fail "sidecar writer did not record Hachure-aligned trust.bundle refs: $(cat "$TMPDIR_EVAL/surface-evidence.out" "$TMPDIR_EVAL/surface-evidence.err")"
 fi
 
 if flow_agents_node "$WRITER" record-evidence "$ARTIFACT_DIR" \
   --verdict pass \
-  --check-json '{"id":"surface-trust-native-field","kind":"policy","status":"pass","summary":"Should fail.","surface_trust_refs":[{"artifact_kind":"Trust Snapshot","artifact_ref":"trust/snapshot.json","gate_id":"builder.surface.claim","claim_type":"surface.claim","claim_status":"accepted","subject":"builder-kit","freshness":{"status":"fresh","summary":"Fresh."},"authority":{"producer":"surface-local","summary":"Producer exists.","veritas_policy":"native-field"},"integrity":{"status":"matched","summary":"Matched."},"status":"pass"}]}' >"$TMPDIR_EVAL/surface-invalid.out" 2>&1; then
+  --check-json '{"id":"surface-trust-native-field","kind":"policy","status":"pass","summary":"Should fail.","surface_trust_refs":[{"artifact_kind":"trust.bundle","artifact_ref":"trust/snapshot.json","gate_id":"builder.trust.bundle","claim_type":"builder.trust.bundle","claim_status":"accepted","subject":"builder-kit","freshness":{"status":"fresh","summary":"Fresh."},"authority":{"producer":"surface-local","summary":"Producer exists.","veritas_policy":"native-field"},"integrity":{"status":"matched","summary":"Matched."},"status":"pass"}]}' >"$TMPDIR_EVAL/surface-invalid.out" 2>&1; then
   _fail "sidecar writer should reject provider-specific Surface trust fields"
 elif rg -q 'unsupported field' "$TMPDIR_EVAL/surface-invalid.out"; then
   _pass "sidecar writer rejects provider-specific Surface trust fields"
@@ -581,10 +581,10 @@ check_contradictory_surface_ref() {
   fi
 }
 
-check_contradictory_surface_ref "rejected-pass" '{"artifact_kind":"TrustReport","artifact_ref":"trust/report.json","gate_id":"builder.surface.claim","claim_type":"surface.claim","claim_status":"rejected","subject":"builder-kit","freshness":{"status":"fresh","summary":"Fresh."},"authority":{"producer":"surface-local","summary":"Producer exists."},"integrity":{"status":"matched","summary":"Matched."},"status":"pass"}'
-check_contradictory_surface_ref "stale-pass" '{"artifact_kind":"TrustReport","artifact_ref":"trust/report.json","gate_id":"builder.surface.claim","claim_type":"surface.claim","claim_status":"accepted","subject":"builder-kit","freshness":{"status":"stale","summary":"Stale."},"authority":{"producer":"surface-local","summary":"Producer exists."},"integrity":{"status":"matched","summary":"Matched."},"status":"pass"}'
-check_contradictory_surface_ref "missing-authority-pass" '{"artifact_kind":"TrustReport","artifact_ref":"trust/report.json","gate_id":"builder.surface.claim","claim_type":"surface.claim","claim_status":"accepted","subject":"builder-kit","freshness":{"status":"fresh","summary":"Fresh."},"authority":{"producer":"unknown","summary":"Producer missing."},"integrity":{"status":"matched","summary":"Matched."},"status":"pass"}'
-check_contradictory_surface_ref "integrity-mismatch-pass" '{"artifact_kind":"TrustReport","artifact_ref":"trust/report.json","gate_id":"builder.surface.claim","claim_type":"surface.claim","claim_status":"accepted","subject":"builder-kit","freshness":{"status":"fresh","summary":"Fresh."},"authority":{"producer":"surface-local","summary":"Producer exists."},"integrity":{"status":"mismatch","summary":"Mismatch."},"status":"pass"}'
+check_contradictory_surface_ref "rejected-pass" '{"artifact_kind":"trust.bundle","artifact_ref":"trust/report.json","gate_id":"builder.trust.bundle","claim_type":"builder.trust.bundle","claim_status":"rejected","subject":"builder-kit","freshness":{"status":"fresh","summary":"Fresh."},"authority":{"producer":"surface-local","summary":"Producer exists."},"integrity":{"status":"matched","summary":"Matched."},"status":"pass"}'
+check_contradictory_surface_ref "stale-pass" '{"artifact_kind":"trust.bundle","artifact_ref":"trust/report.json","gate_id":"builder.trust.bundle","claim_type":"builder.trust.bundle","claim_status":"accepted","subject":"builder-kit","freshness":{"status":"stale","summary":"Stale."},"authority":{"producer":"surface-local","summary":"Producer exists."},"integrity":{"status":"matched","summary":"Matched."},"status":"pass"}'
+check_contradictory_surface_ref "missing-authority-pass" '{"artifact_kind":"trust.bundle","artifact_ref":"trust/report.json","gate_id":"builder.trust.bundle","claim_type":"builder.trust.bundle","claim_status":"accepted","subject":"builder-kit","freshness":{"status":"fresh","summary":"Fresh."},"authority":{"producer":"unknown","summary":"Producer missing."},"integrity":{"status":"matched","summary":"Matched."},"status":"pass"}'
+check_contradictory_surface_ref "integrity-mismatch-pass" '{"artifact_kind":"trust.bundle","artifact_ref":"trust/report.json","gate_id":"builder.trust.bundle","claim_type":"builder.trust.bundle","claim_status":"accepted","subject":"builder-kit","freshness":{"status":"fresh","summary":"Fresh."},"authority":{"producer":"surface-local","summary":"Producer exists."},"integrity":{"status":"mismatch","summary":"Mismatch."},"status":"pass"}'
 
 SURFACE_FIXTURE_DIR="$ROOT/evals/fixtures/surface-trust"
 check_surface_fixture() {
