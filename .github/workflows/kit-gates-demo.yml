@@ -50,7 +50,9 @@ jobs:
           mkdir -p .flow-cli
           cd .flow-cli
           printf '{"name":"flow-cli-host","private":true}\n' > package.json
-          npm install --no-save @kontourai/flow
+          # Pinned to ~1.2.0: flow 1.3.0 replaced surface.claim with trust.bundle
+          # (kontourai/flow#84), a breaking change flow-agents has not yet migrated to.
+          npm install --no-save @kontourai/flow@~1.2.0
         env:
           FLOW_CLI_ROOT: ${{ github.workspace }}/.flow-cli/node_modules/@kontourai/flow
 
@@ -113,7 +115,9 @@ jobs:
           mkdir -p .flow-cli
           cd .flow-cli
           printf '{"name":"flow-cli-host","private":true}\n' > package.json
-          npm install --no-save @kontourai/flow
+          # Pinned to ~1.2.0: flow 1.3.0 replaced surface.claim with trust.bundle
+          # (kontourai/flow#84), a breaking change flow-agents has not yet migrated to.
+          npm install --no-save @kontourai/flow@~1.2.0
         env:
           FLOW_CLI_ROOT: ${{ github.workspace }}/.flow-cli/node_modules/@kontourai/flow
 
