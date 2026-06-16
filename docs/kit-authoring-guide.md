@@ -299,13 +299,106 @@ Output is stable JSON:
     "k2": false
   },
   "targets": ["flow", "flow-agents"],
-  "third_party_extensions": []
+  "third_party_extensions": [],
+  "trust": "unverified"
 }
 ```
 
 Exit code 0 when the kit is at least K0 (valid core container); exit code 1 when K0 validation fails.
 
 The `inspect` command is read-only and safe to run before install.
+
+## Trust axis: who vouches for a kit
+
+The **trust axis** is a separate, orthogonal classification from the K-level capability axis. It answers the question "who vouches for this kit?" rather than "what does this kit contain?".
+
+### Two orthogonal axes
+
+Every kit carries two independent badges:
+
+| Axis | Values | Question answered |
+|---|---|---|
+| **Capability** (K-level) | K0 / K1 / K2 | What does the kit CONTAIN? (derived from assets) |
+| **Trust** | first-party / verified / unverified | WHO vouches for it? (derived from provenance) |
+
+A K2 kit can be `unverified`. A K0 kit can be `first-party`. The levels are independent.
+
+**Marketplace listing format**: `Works with: Flow (gates-only) | K1 | ✓ First-party`
+
+### Trust levels
+
+| Level | Meaning | How it is assigned (v1) |
+|---|---|---|
+| `first-party` | Kontour authored, tested, and ships this kit in the `@kontourai/flow-agents` package. | Kit id is in the internal FIRST_PARTY_KIT_IDS allowlist in `src/flow-kit/validate.ts`. |
+| `verified` | Reserved for a future third-party verification process. | Not yet implemented; the value is reserved but not granted to any kit today. |
+| `unverified` | Default for all kits not explicitly vouched for. | All other kits, including third-party community kits. |
+
+`unverified` says nothing about the quality of a kit — it only means Kontour has not vouched for it through one of the above channels.
+
+### First-party kits (v1)
+
+The first-party allowlist in v1 contains the kits authored by Kontour and distributed with the flow-agents package:
+
+- `builder` — Builder Kit (shape, build, and deliver work)
+- `knowledge` — Knowledge Kit (durable gated knowledge store)
+
+Criteria for a kit to be first-party:
+1. Its directory lives under `kits/` in the `kontourai/flow-agents` repository.
+2. It is published as part of the `@kontourai/flow-agents` npm package.
+3. Kontour owns and maintains the kit's content and release lifecycle.
+
+Third-party forks, community kits, or kits published under a different npm package are NOT first-party even if they share a similar id. First-party is tied to provenance in this specific repository and package.
+
+### Deferred: verified trust and cryptographic attestation (v2)
+
+The `verified` value is reserved for a future verification process. The intended v2 path:
+
+- Third-party kit authors can apply for `verified` status.
+- Verification evidence: the kit passes the conformance kit self-certification + a cryptographic signature or Veritas attestation.
+- The [conformance kit](https://github.com/kontourai/flow) and [Veritas claims](veritas-integration.md) are the natural substrate for this attestation layer.
+- The signature or attestation would be checked by `flow-agents kit inspect` at derivation time.
+
+v1 deliberately omits the signing/attestation mechanism and the verification process. The `verified` value is reserved so consuming tools can handle it when it arrives without a breaking schema change.
+
+### Inspecting trust
+
+The `trust` field appears in `flow-agents kit inspect` output alongside `conformance`:
+
+```bash
+npm run kit -- inspect kits/builder
+```
+
+```json
+{
+  "kit_id": "builder",
+  "kit_name": "Builder Kit",
+  "conformance": {
+    "k0": true,
+    "k1": true,
+    "k2": false
+  },
+  "targets": ["flow", "flow-agents"],
+  "third_party_extensions": [],
+  "trust": "first-party"
+}
+```
+
+A third-party kit inspected before verification:
+
+```json
+{
+  "kit_id": "my-custom-kit",
+  "kit_name": "My Custom Kit",
+  "conformance": {
+    "k0": true,
+    "k1": true,
+    "k2": false
+  },
+  "targets": ["flow", "flow-agents"],
+  "third_party_extensions": [],
+  "trust": "unverified"
+}
+```
 
 ## Direction
 
