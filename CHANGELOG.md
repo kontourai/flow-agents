@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.0](https://github.com/kontourai/flow-agents/compare/v1.3.0...v1.4.0) (2026-06-16)
+
+
+### Features
+
+* **#100:** require block reasons to reach the model ([#102](https://github.com/kontourai/flow-agents/issues/102)) ([5007c63](https://github.com/kontourai/flow-agents/commit/5007c63906aa78028477ffd2da31142ed4c3d0a8))
+* **#99:** export the workflow sidecar writer/validator as a library ([#101](https://github.com/kontourai/flow-agents/issues/101)) ([5baa294](https://github.com/kontourai/flow-agents/commit/5baa294486b09e0e64a9fb5a029155c53775f477))
+
 ## [1.3.0](https://github.com/kontourai/flow-agents/compare/v1.2.0...v1.3.0) (2026-06-16)
 
 
