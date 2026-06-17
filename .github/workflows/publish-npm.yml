@@ -6,6 +6,14 @@ on:
       - "v*"
   workflow_dispatch:
 
+# Serialize publish runs so a duplicate trigger (the release tag push and a
+# workflow_dispatch firing within seconds of each other) cannot race: the second
+# run waits for the first to finish, then the "Check Published Version" step sees
+# the version already on npm and skips — instead of E403'ing on a double publish.
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -101,4 +109,4 @@ jobs:
 
       - name: Publish public package
         if: steps.published.outputs.published != 'true'
-        run: npm publish --access public
+        run: npm publish --access public --provenance
