@@ -45,7 +45,7 @@ This skill owns orchestration between waves. The contracts own artifact continui
    - if traceability is missing, update the session file and/or send the plan back for refinement before delegation
 5. Set session file `status: executing` and use `npm run workflow:sidecar -- advance-state <artifact-dir> --status in_progress --phase execution --summary ... --next-action ...` when the repository provides it
 6. **Frontend design check:** If any tasks involve UI, CSS, layouts, components, or visual design, read the `frontend-design` skill and include its aesthetics guidelines in the tool-worker prompts for those tasks
-7. Fan out each wave to tool-worker subagents (up to 4 parallel):
+7. **Before fan-out, run the [Pre-Fan-Out Freshness Re-Check](#pre-fan-out-freshness-re-check) and re-ground if the plan is stale.** Then fan out each wave to tool-worker subagents (up to 4 parallel):
    - Delegate to the exact `tool-worker` role for every implementation worker. Do not spawn unnamed/default implementation agents.
    ```
    Each tool-worker gets:
@@ -68,6 +68,14 @@ This skill owns orchestration between waves. The contracts own artifact continui
 9. After all waves: set session file `status: executed` and update `state.json` / `handoff.json` with `advance-state`
 
 The orchestrator owns root `state.json` updates. Workers should receive the workflow artifact root explicitly and append agent events under that root instead of inferring the slug or rewriting shared sidecars.
+
+## Pre-Fan-Out Freshness Re-Check
+
+A plan can go stale between planning and execution — upstream may have advanced, or the plan may simply be old. `plan-work` and `pull-work` stamp and check `planned_base_sha` / `revision_freshness` at planning and pickup; this is the same check at the **execution boundary**, where stale plans actually cause wasted work (parallel workers building what already landed upstream). Run it before any worker starts.
+
+- **Always — cheap SHA tripwire.** Re-fetch the target ref and compare the current target SHA to the plan's `planned_base_sha` (per `context/contracts/planning-contract.md`). If the base moved **and** the newer commits/files intersect `planning_scope_refs`, the plan is stale: do not fan out. Route back to `plan-work` (or `pickup-probe` for provider-backed work) to re-ground against the current base — the same `revision_freshness: stale` rule plan-work and pull-work already enforce. Missing `planned_base_sha` is not fresh; record a `NOT_VERIFIED` gap and confirm the base before fan-out.
+- **On plan age — deeper re-survey.** If the plan is older than the staleness window (default ~1h; shorter for fast-moving scope), do the costlier relook the SHA diff cannot: re-survey what now exists in the target area (recently merged PRs, new modules, sibling work) for anything that already does what this plan proposes. If it already shipped upstream, stop and route back to `plan-work` rather than building a duplicate. The SHA tripwire is the precise signal; plan age is the backstop for landscape drift the diff can't see.
+- Record the re-check result (`fresh`, or re-grounded with the compared SHAs and route-back) in the session file before continuing. Worktree/isolation needs stay owned by `pull-work`'s file-overlap decision — don't re-derive them here.
 
 ## Session File Updates
 
