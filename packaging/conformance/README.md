@@ -84,11 +84,19 @@ Full payload/decision schema is documented in `docs/spec/runtime-hook-surface.md
 | `stop-goal-fit--allow-clean-cwd.json` | stop-goal-fit | stop | L1 | No warnings in clean workspace |
 | `stop-goal-fit--warn-active-delivery.json` | stop-goal-fit | stop | L1 | Warnings for active delivery without DOD/GoalFit |
 | `stop-goal-fit--block-strict-mode.json` | stop-goal-fit | stop | L2 | Exit 2 with FLOW_AGENTS_GOAL_FIT_STRICT=true |
+| `stop-goal-fit--block-mode.json` | stop-goal-fit | stop | L2 | Exit 2 with FLOW_AGENTS_GOAL_FIT_MODE=block |
+| `stop-goal-fit--off-mode.json` | stop-goal-fit | stop | L1 | Silent (exit 0, no stderr) with FLOW_AGENTS_GOAL_FIT_MODE=off |
 | `workflow-steering--allow-no-state.json` | workflow-steering | userPromptSubmit | L1 | Pass-through when no active workflow state |
 | `workflow-steering--inject-active-state.json` | workflow-steering | userPromptSubmit | L1 | Injects STATE hint for blocked task |
 | `workflow-steering--inject-subagent-steering.json` | workflow-steering | postToolUse | L1 | Injects EXECUTION COMPLETE hint after tool-worker |
+| `workflow-steering--reground-active-prompt.json` | workflow-steering | userPromptSubmit | L1 | Re-grounds an ordinary in_progress task (not just flagged states) |
+| `workflow-steering--reground-session-start.json` | workflow-steering | sessionStart | L1 | Re-grounds the active goal on SessionStart (survives compaction/resume) |
 
 Fixtures with `workspace_setup` create a temporary directory with the listed files before invoking the adapter, and clean it up afterward. The `cwd` field in those payloads is replaced with the temp directory path at runtime.
+
+### Goal-fit enforcement mode
+
+`stop-goal-fit` enforcement is controlled by `FLOW_AGENTS_GOAL_FIT_MODE` (`block` | `warn` | `off`); the legacy `FLOW_AGENTS_GOAL_FIT_STRICT=true` is honored as an alias for `block`. The canonical engine default is `warn`, so the conformance contract stays warning-by-default. Shipped L2 runtime configs (Claude Code, Codex) set `block` by default — overridable per-operator via the env var — so the installed product enforces while the engine default and these fixtures remain warn. In `block` mode the same goal-fit gap is refused up to `FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS` (default 3) consecutive times, then released to avoid trapping the agent on an unsatisfiable goal.
 
 ---
 
@@ -102,8 +110,8 @@ engine_contract_version: "1.0"
 runner_version: "run-conformance.js"
 test_date: 2026-06-11
 verdict: PASS
-fixture_count: 12
-fixtures_passed: 12
+fixture_count: 18
+fixtures_passed: 18
 gaps: []                       # List any declared gaps here
 ```
 

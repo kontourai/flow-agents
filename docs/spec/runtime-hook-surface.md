@@ -83,14 +83,14 @@ Flow Agents currently ships four canonical policy classes. Each policy class has
 
 **Canonical script**: `scripts/hooks/workflow-steering.js`
 
-**Canonical trigger event**: `userPromptSubmit` (ambient state guidance), `postToolUse` (after `InvokeSubagents` tool calls)
+**Canonical trigger event**: `userPromptSubmit` and `agentSpawn`/`SessionStart` (active-goal re-grounding), `postToolUse` (after `InvokeSubagents` tool calls)
 
 **Inputs consumed**:
 - `.flow-agents/<slug>/state.json` — current workflow phase and status
 - `.flow-agents/<slug>/critique.json` — open critique findings
 - `docs/context-map.md` — structure hint for repo navigation
 
-**Decision contract**: Non-blocking. Always exits 0. Appends steering text to the agent's context via `additionalContext` in the hook response. Does not block any action.
+**Decision contract**: Non-blocking. Always exits 0. Appends steering text to the agent's context via `additionalContext` in the hook response. Does not block any action. It re-grounds the active workflow goal (status, phase, recorded next step) at the start of every user turn — not only for flagged/blocked states — and on `SessionStart`, which fires after context compaction and on resume. This is the mechanism that keeps an in-flight goal alive across context loss instead of relying on the model voluntarily re-reading the sidecar.
 
 **Degradation when host lacks trigger**: If the host has no `userPromptSubmit`-equivalent hook, workflow steering is silent. The agent receives no ambient phase reminders at turn start. This is a capability loss, not a blocking failure. Log the gap in the adapter's conformance declaration as `userPromptSubmit: no native equivalent — steering context injection unavailable`.
 
@@ -129,11 +129,14 @@ Flow Agents currently ships four canonical policy classes. Each policy class has
 - `.flow-agents/<slug>/state.json` — workflow phase and next action
 - `.flow-agents/<slug>/evidence.json` — verification verdict and NOT_VERIFIED gaps
 - `.flow-agents/<slug>/critique.json` — critique status and open findings
-- `FLOW_AGENTS_GOAL_FIT_STRICT` env var — `true` to make blocking (exit 2) instead of warning-only (exit 0)
+- `FLOW_AGENTS_GOAL_FIT_MODE` env var — `block` | `warn` | `off` (the legacy `FLOW_AGENTS_GOAL_FIT_STRICT=true` is an alias for `block`)
+- `FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS` env var — consecutive-identical-block cap before the escape hatch releases (default 3)
 
 **Decision contract**:
-- Default mode: warning-only (exits 0). Writes guidance to stderr.
-- Strict mode (`FLOW_AGENTS_GOAL_FIT_STRICT=true`): blocking (exits 2) when the active workflow artifact has state, Definition Of Done, Goal Fit, or sidecar issues that classify as blocking.
+- `warn` (canonical engine default): exits 0, writes guidance to stderr. Non-blocking.
+- `block`: exits 2 when the active workflow artifact has state, Definition Of Done, Goal Fit, evidence, or sidecar issues that classify as blocking. Shipped L2 runtime configs (Claude Code, Codex) set `block` by default, overridable per-operator via the env var.
+- `off`: silent (exits 0, no stderr).
+- Escape hatch: in `block` mode the same goal-fit gap is refused up to `FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS` (default 3) consecutive times, then released (exit 0 with a loud notice) so a genuinely-unsatisfiable goal cannot trap the agent. A changing gap resets the streak.
 
 **Degradation when host lacks trigger**: If the host has no stop hook, stop-goal-fit cannot fire. The agent may complete without the check. Log the gap as `stop: no native equivalent — stop-goal-fit policy unavailable`.
 
@@ -206,7 +209,8 @@ The adapter implements L1 plus all blocking policy classes.
 - Config protection fires on `preToolUse` and can block (exit 2 translates to a deny response).
 - Every block surfaces its reason to the model through the host's deny-reason channel (see [Block Reason Channel](#block-reason-channel)), not only to a log.
 - Quality gate fires on `postToolUse`.
-- Stop-goal-fit fires on `stop` with `FLOW_AGENTS_GOAL_FIT_STRICT` configurable (default may be warning mode; strict mode must be possible to enable).
+- Stop-goal-fit fires on `stop` with `FLOW_AGENTS_GOAL_FIT_MODE` configurable. Shipped L2 configs default to `block`; the canonical engine default remains `warn`, and any mode must be operator-overridable.
+- Workflow steering additionally re-grounds the active goal on `agentSpawn`/`SessionStart` so an in-flight goal survives context compaction and resume.
 
 **Permitted gaps**: None. All four policy classes are wired. Any missing host trigger must be documented as a named gap in the adapter's conformance declaration.
 
@@ -454,7 +458,7 @@ For structured `run()` responses (native import form), the return value is:
 |-------------|-------------|--------------------|--------------------|
 | config-protection | Fail-closed (exit 2 on protected file) | Yes — hook runtime errors exit 0 | Yes (preToolUse) |
 | quality-gate | Fail-open (exit 0 always) | Yes | No |
-| stop-goal-fit | Fail-open by default; fail-closed with `FLOW_AGENTS_GOAL_FIT_STRICT=true` | Yes — hook runtime errors exit 0 | Yes (stop, strict mode only) |
+| stop-goal-fit | Engine default warn (fail-open); blocks in `FLOW_AGENTS_GOAL_FIT_MODE=block` (shipped L2 default) | Yes — hook runtime errors exit 0 | Yes (stop, block mode) |
 | workflow-steering | Fail-open (exit 0 always) | Yes | No |
 
 **Telemetry**: Always fail-open. Hook runtime errors in telemetry scripts must never block agent work.
@@ -471,7 +475,9 @@ For structured `run()` responses (native import form), the return value is:
 | `SA_HOOK_INPUT_MAX_BYTES` | Integer string | `config-protection.js` |
 | `SA_QUALITY_GATE_FIX` | `true` / `false` | `quality-gate.js` |
 | `SA_QUALITY_GATE_STRICT` | `true` / `false` | `quality-gate.js` |
-| `FLOW_AGENTS_GOAL_FIT_STRICT` | `true` / `false` | `stop-goal-fit.js` |
+| `FLOW_AGENTS_GOAL_FIT_MODE` | `block` / `warn` / `off` | `stop-goal-fit.js` |
+| `FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS` | Integer string (default 3) | `stop-goal-fit.js` |
+| `FLOW_AGENTS_GOAL_FIT_STRICT` | `true` / `false` (legacy alias for mode=block) | `stop-goal-fit.js` |
 | `FLOW_AGENTS_REQUIRE_SIDECARS` | `true` / `false` | `stop-goal-fit.js` |
 | `FLOW_AGENTS_REQUIRE_CRITIQUE` | `true` / `false` | `stop-goal-fit.js` |
 | `FLOW_AGENTS_HOOK_RUNTIME` | `claude-code`, `codex`, etc. | Hook adapters (forwarded to scripts) |

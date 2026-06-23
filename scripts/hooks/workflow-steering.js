@@ -3,7 +3,11 @@
  * Workflow Steering Hook
  *
  * Injects phase-transition reminders after use_subagent calls complete and
- * ambient workflow-state reminders at the start of the next user turn.
+ * re-grounds the active workflow state at the start of every user turn and on
+ * SessionStart. SessionStart fires after context compaction and on resume, so
+ * re-injecting the goal/phase/next-step there is what makes an in-flight goal
+ * survive context loss instead of relying on the model voluntarily re-reading
+ * the sidecar.
  *
  * Non-blocking — always exits 0.
  */
@@ -217,9 +221,16 @@ function run(rawInput) {
       shouldAppendWorkflowContext = hints.length > 0;
     }
 
-    if (event === 'UserPromptSubmit' && current && stateNeedsAmbientSteering(current.payload)) {
-      hints.push('WORKFLOW STATE ATTENTION: current sidecars show unresolved workflow state at turn start.');
-      shouldAppendWorkflowContext = true;
+    if ((event === 'UserPromptSubmit' || event === 'SessionStart') && current) {
+      const stateHint = stateSteering(root);
+      if (stateHint) {
+        hints.push(stateNeedsAmbientSteering(current.payload)
+          ? 'WORKFLOW STATE ATTENTION: current sidecars show unresolved workflow state at turn start.'
+          : 'WORKFLOW STATE: an active task is in progress — re-ground the recorded goal and resume the next step before doing anything else.');
+        hints.push(stateHint);
+        const contextHint = contextMapSteering(root);
+        if (contextHint) hints.push(contextHint);
+      }
     }
 
     if (shouldAppendWorkflowContext) {

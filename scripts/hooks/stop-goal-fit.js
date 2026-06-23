@@ -4,9 +4,16 @@
  *
  * The hook reads .flow-agents artifacts, looks for the most recent active
  * delivery/session file, and reports missing Definition Of Done, Goal Fit, or
- * Final Acceptance state. It is warning-only by default. Set
- * FLOW_AGENTS_GOAL_FIT_STRICT=true to return exit code 2 when local goal fit is
- * incomplete.
+ * Final Acceptance state.
+ *
+ * Enforcement is controlled by FLOW_AGENTS_GOAL_FIT_MODE:
+ *   - block: return exit code 2 (blocks the Stop) when local goal fit is incomplete.
+ *   - warn:  return exit code 0 but still emit the guidance on stderr (default).
+ *   - off:   stay silent.
+ * The legacy FLOW_AGENTS_GOAL_FIT_STRICT=true is honored as an alias for block.
+ * The canonical engine default is warn; shipped runtime configs (e.g. Claude
+ * Code at L2) set block so the installed product enforces while the engine
+ * default and conformance contract stay warn.
  */
 
 'use strict';
@@ -347,21 +354,90 @@ function analyze(root, now = Date.now()) {
   return { warnings, blocking };
 }
 
+/**
+ * Resolve the enforcement mode. FLOW_AGENTS_GOAL_FIT_MODE (block|warn|off) wins;
+ * the legacy FLOW_AGENTS_GOAL_FIT_STRICT=true maps to block; otherwise the
+ * canonical engine default is warn.
+ */
+function resolveGoalFitMode() {
+  const explicit = String(process.env.FLOW_AGENTS_GOAL_FIT_MODE || '').trim().toLowerCase();
+  if (explicit === 'block' || explicit === 'warn' || explicit === 'off') return explicit;
+  const strict = String(process.env.FLOW_AGENTS_GOAL_FIT_STRICT || '').toLowerCase() === 'true';
+  return strict ? 'block' : 'warn';
+}
+
+/**
+ * Escape hatch: cap how many times block mode may refuse the SAME goal-fit gap
+ * in a row, so a genuinely-unsatisfiable goal cannot trap the agent forever.
+ * After this many consecutive identical blocks the hook releases (exit 0) with a
+ * loud notice. Configurable via FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS (default 3).
+ */
+function resolveMaxBlocks() {
+  const raw = Number.parseInt(process.env.FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS || '', 10);
+  return Number.isInteger(raw) && raw > 0 ? raw : 3;
+}
+
+function blockStreakFile(root) {
+  return path.join(root, '.flow-agents', '.goal-fit-block-streak.json');
+}
+
+function reasonsHash(warnings) {
+  const text = (warnings || []).join('\n');
+  let h = 5381;
+  for (let i = 0; i < text.length; i += 1) h = ((h << 5) + h + text.charCodeAt(i)) >>> 0;
+  return String(h);
+}
+
+function clearBlockStreak(root) {
+  try { fs.rmSync(blockStreakFile(root), { force: true }); } catch { /* best effort */ }
+}
+
+function bumpBlockStreak(root, hash) {
+  const file = blockStreakFile(root);
+  const prev = readJsonFile(file) || {};
+  const count = prev.hash === hash ? (Number(prev.count) || 0) + 1 : 1;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ hash, count }));
+  } catch { /* best effort */ }
+  return count;
+}
+
 function run(rawInput) {
   const input = parseJson(rawInput);
   const root = findRepoRoot(input.cwd || process.cwd());
+  const mode = resolveGoalFitMode();
+  if (mode === 'off') return rawInput;
   const result = analyze(root);
-  if (result.warnings.length === 0) return rawInput;
+  if (result.warnings.length === 0) {
+    clearBlockStreak(root);
+    return rawInput;
+  }
 
   const message = [
     '[Hook] Goal Fit warning:',
     ...result.warnings.map(w => ` - ${w}`),
   ].join('\n');
-  const strict = String(process.env.FLOW_AGENTS_GOAL_FIT_STRICT || '').toLowerCase() === 'true';
+
+  if (mode !== 'block' || !result.blocking) {
+    clearBlockStreak(root);
+    return { stdout: rawInput, stderr: message, exitCode: 0 };
+  }
+
+  const maxBlocks = resolveMaxBlocks();
+  const count = bumpBlockStreak(root, reasonsHash(result.warnings));
+  if (count >= maxBlocks) {
+    clearBlockStreak(root);
+    return {
+      stdout: rawInput,
+      stderr: `${message}\n[Hook] Goal Fit block RELEASED after ${count} consecutive identical blocks (FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=${maxBlocks}): the same gap persists, surfacing to the human instead of looping.`,
+      exitCode: 0,
+    };
+  }
   return {
     stdout: rawInput,
-    stderr: message,
-    exitCode: strict && result.blocking ? 2 : 0,
+    stderr: `${message}\n[Hook] Goal Fit BLOCK ${count}/${maxBlocks}.`,
+    exitCode: 2,
   };
 }
 
@@ -382,4 +458,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { analyze, run, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine };
+module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine };

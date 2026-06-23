@@ -1,0 +1,24 @@
+{
+  "description": "stop-goal-fit stays silent (exit 0, no stderr) when FLOW_AGENTS_GOAL_FIT_MODE=off even for an active incomplete delivery artifact",
+  "policy_class": "stop-goal-fit",
+  "canonical_event": "stop",
+  "conformance_level": "L1",
+  "hook_id": "stop-goal-fit",
+  "hook_script": "stop-goal-fit.js",
+  "payload": {
+    "hook_event_name": "Stop",
+    "cwd": "__TEMP_WORKSPACE__"
+  },
+  "workspace_setup": {
+    "AGENTS.md": "# Test Repo\n",
+    ".flow-agents/my-task/my-task--deliver.md": "# My Task\n\nbranch: main\nstatus: executing\ntype: deliver\n\n## Plan\n\nWork TBD.\n"
+  },
+  "env": {
+    "FLOW_AGENTS_GOAL_FIT_MODE": "off"
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_echoes_input": true,
+    "stderr_is_empty": true
+  }
+}

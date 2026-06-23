@@ -181,8 +181,9 @@ function generatedAgentsSummary(agents: Agent[]): string {
 function exportRootAgentsMd(label: string, agents: Agent[], taskDir: string): string {
   return `# Universal Agent Bundle (${label})\n\nThis bundle was generated from the canonical source in this repo. Treat the repo root as the source of truth and regenerate the bundle instead of editing exported agent files by hand.\n\n## Shared Conventions\n\n- \`skills/\`, \`context/\`, \`powers/\`, \`prompts/\`, \`scripts/\`, and \`evals/\` were copied from the canonical source.\n- Cross-session task artifacts should live under \`${taskDir}\`.\n- Kiro-only hook wiring was stripped from exported non-Kiro agents to keep the package portable.\n\n## Exported Agents\n\n${generatedAgentsSummary(agents)}\n`;
 }
-function exportTargetReadme(label: string, installHint: string): string {
-  return `# ${label} Bundle\n\nGenerated from the canonical source in this repository.\n\n## Install\n\n\`\`\`bash\n${installHint}\n\`\`\`\n\nOptional pack filtering is available at install time with \`FLOW_AGENTS_PACKS\`.\nThe default pack is always included:\n\n\`\`\`bash\nFLOW_AGENTS_PACKS=development,knowledge ${installHint}\n\`\`\`\n\n## Contents\n\n- Harness-specific agents\n- Shared skills\n- Shared context, powers, prompts, scripts, and evals\n`;
+const CODEX_LIVE_HOOKS_README = `\n## Running with hooks active (live)\n\n\`install.sh\` lays the bundle into a workspace, but a live Codex session needs a \`CODEX_HOME\` that has both the bundle's hooks/scripts AND your real credentials. Use the dedicated installer, which flattens the config to the home root and copies your auth from \`~/.codex\`:\n\n\`\`\`bash\nbash scripts/install-codex-home.sh "$HOME/.flow-agents/codex"\nCODEX_HOME="$HOME/.flow-agents/codex" codex exec --dangerously-bypass-hook-trust -C /path/to/project "<prompt>"\n\`\`\`\n\nThe goal-fit Stop hook then enforces by default (\`FLOW_AGENTS_GOAL_FIT_MODE=block\`); set it to \`warn\` or \`off\` to override.\n`;
+function exportTargetReadme(label: string, installHint: string, extra = ""): string {
+  return `# ${label} Bundle\n\nGenerated from the canonical source in this repository.\n\n## Install\n\n\`\`\`bash\n${installHint}\n\`\`\`\n\nOptional pack filtering is available at install time with \`FLOW_AGENTS_PACKS\`.\nThe default pack is always included:\n\n\`\`\`bash\nFLOW_AGENTS_PACKS=development,knowledge ${installHint}\n\`\`\`\n\n## Contents\n\n- Harness-specific agents\n- Shared skills\n- Shared context, powers, prompts, scripts, and evals\n${extra}`;
 }
 
 function mapClaudeTools(allowedTools: unknown): string[] {
@@ -255,8 +256,8 @@ function shellHook(command: string, timeout = 10, statusMessage?: string): Recor
 function claudeTelemetry(event: string): string {
   return `bash -lc 'root="\${CLAUDE_PROJECT_DIR:-$(pwd)}"; node "$root/scripts/hooks/claude-telemetry-hook.js" ${event} dev'`;
 }
-function claudePolicy(event: string, script: string): string {
-  return `bash -lc 'root="\${CLAUDE_PROJECT_DIR:-$(pwd)}"; node "$root/scripts/hooks/claude-hook-adapter.js" ${event} ${script.replace(/\.js$/, "")} ${script} default'`;
+function claudePolicy(event: string, script: string, envPrefix = ""): string {
+  return `bash -lc 'root="\${CLAUDE_PROJECT_DIR:-$(pwd)}"; ${envPrefix}node "$root/scripts/hooks/claude-hook-adapter.js" ${event} ${script.replace(/\.js$/, "")} ${script} default'`;
 }
 function codexRoot(scriptPath: string): string {
   return `root="\${CODEX_HOME:-}"; if [ -z "$root" ] || [ ! -f "$root/${scriptPath}" ]; then root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); fi`;
@@ -265,15 +266,20 @@ function codexTelemetry(event: string): string {
   if (event === "PermissionRequest") return `bash -lc '${codexRoot("scripts/telemetry/telemetry.sh")}; bash "$root/scripts/telemetry/telemetry.sh" permissionRequest dev'`;
   return `bash -lc '${codexRoot("scripts/hooks/codex-telemetry-hook.js")}; node "$root/scripts/hooks/codex-telemetry-hook.js" ${event} dev'`;
 }
-function codexPolicy(script: string): string {
-  return `bash -lc '${codexRoot("scripts/hooks/codex-hook-adapter.js")}; node "$root/scripts/hooks/codex-hook-adapter.js" ${script.replace(/\.js$/, "")} ${script} default'`;
+function codexPolicy(script: string, envPrefix = ""): string {
+  return `bash -lc '${codexRoot("scripts/hooks/codex-hook-adapter.js")}; ${envPrefix}node "$root/scripts/hooks/codex-hook-adapter.js" ${script.replace(/\.js$/, "")} ${script} default'`;
 }
+// Shipped L2 runtimes enforce goal fit by default (mode=block), while remaining
+// operator-overridable via the FLOW_AGENTS_GOAL_FIT_MODE environment variable.
+// The canonical engine default stays warn so the conformance contract is honest.
+const GOAL_FIT_MODE_PREFIX = 'FLOW_AGENTS_GOAL_FIT_MODE="${FLOW_AGENTS_GOAL_FIT_MODE:-block}" ';
 function exportClaudeSettings(): string {
   const hooks: Record<string, Array<Record<string, unknown>>> = {};
   for (const event of ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop", "SessionEnd"]) {
     hooks[event] = [{ hooks: [shellHook(claudeTelemetry(event), 10, "Recording Flow Agents telemetry")] }];
   }
-  hooks.Stop.push({ hooks: [shellHook(claudePolicy("Stop", "stop-goal-fit.js"), 30, "Running Flow Agents hook policy")] });
+  hooks.Stop.push({ hooks: [shellHook(claudePolicy("Stop", "stop-goal-fit.js", GOAL_FIT_MODE_PREFIX), 30, "Running Flow Agents hook policy")] });
+  hooks.SessionStart.push({ hooks: [shellHook(claudePolicy("SessionStart", "workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
   hooks.UserPromptSubmit.push({ hooks: [shellHook(claudePolicy("UserPromptSubmit", "workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
   hooks.PostToolUse.push({ hooks: [shellHook(claudePolicy("PostToolUse", "quality-gate.js"), 30, "Running Flow Agents hook policy")] });
   hooks.PreToolUse.push({ hooks: [shellHook(claudePolicy("PreToolUse", "config-protection.js"), 30, "Running Flow Agents hook policy")] });
@@ -289,7 +295,8 @@ function exportCodexHooks(): string {
   for (const event of ["SessionStart", "UserPromptSubmit", "PreToolUse", "PermissionRequest", "PostToolUse", "Stop"]) {
     hooks[event] = [{ hooks: [shellHook(codexTelemetry(event), 10, "Recording Flow Agents telemetry")] }];
   }
-  hooks.Stop.push({ hooks: [shellHook(codexPolicy("stop-goal-fit.js"), 30, "Running Flow Agents hook policy")] });
+  hooks.Stop.push({ hooks: [shellHook(codexPolicy("stop-goal-fit.js", GOAL_FIT_MODE_PREFIX), 30, "Running Flow Agents hook policy")] });
+  hooks.SessionStart.push({ hooks: [shellHook(codexPolicy("workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
   hooks.UserPromptSubmit.push({ hooks: [shellHook(codexPolicy("workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
   return `${JSON.stringify({ hooks }, null, 2)}\n`;
 }
@@ -378,7 +385,7 @@ function buildCodex(agents: Agent[]): void {
     writeText(path.join(bundle, ".codex/skills", name, "SKILL.md"), sanitizeText(readText(src), "codex", "<bundle-root>"));
   }
   writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Codex", targetAgents, manifest.codex.task_dir));
-  writeText(path.join(bundle, "README.md"), exportTargetReadme("Codex", "bash install.sh /path/to/workspace"));
+  writeText(path.join(bundle, "README.md"), exportTargetReadme("Codex", "bash install.sh /path/to/workspace", CODEX_LIVE_HOOKS_README));
   writeText(path.join(bundle, "install.sh"), installScript("Codex", "/path/to/workspace"));
   fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
 }

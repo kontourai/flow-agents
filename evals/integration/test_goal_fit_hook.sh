@@ -5,6 +5,12 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/evals/lib/node.sh"
 
+# These checks exercise the block mechanism repeatedly against the same workspace
+# as independent assertions, not a single continuous loop. Disable the block
+# escape hatch here so the streak counter never trips; test_goal_fit_escape_hatch.sh
+# covers the release-after-N behavior on its own.
+export FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=100000
+
 TMPDIR_EVAL="$(mktemp -d)"
 errors=0
 

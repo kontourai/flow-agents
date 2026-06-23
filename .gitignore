@@ -32,3 +32,8 @@ evals/results/reports/
 
 # Local Flow CLI install for source-tree validation (CI recreates it)
 .flow-cli/
+
+# Demo recordings are regenerable test outputs (vhs tape / asciinema + prove-teeth) — don't commit the binaries.
+# A finalized README/docs gif is committed deliberately under docs/assets/, not the raw evals/acceptance/ output.
+evals/acceptance/*.mp4
+evals/acceptance/*.gif

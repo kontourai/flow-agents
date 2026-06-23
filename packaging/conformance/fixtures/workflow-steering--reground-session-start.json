@@ -1,0 +1,30 @@
+{
+  "description": "workflow-steering re-grounds the active goal on SessionStart (which fires after context compaction and on resume), so the goal/phase/next-step survive context loss",
+  "policy_class": "workflow-steering",
+  "canonical_event": "sessionStart",
+  "conformance_level": "L1",
+  "hook_id": "workflow-steering",
+  "hook_script": "workflow-steering.js",
+  "payload": {
+    "hook_event_name": "SessionStart",
+    "cwd": "__TEMP_WORKSPACE__",
+    "source": "compact"
+  },
+  "workspace_setup": {
+    "AGENTS.md": "# Test Repo\n",
+    ".flow-agents/build-feature/state.json": {
+      "task_slug": "build-feature",
+      "status": "in_progress",
+      "phase": "execution",
+      "next_action": {
+        "summary": "Wire the auth middleware and add tests.",
+        "status": "in_progress",
+        "target_phase": "verification"
+      }
+    }
+  },
+  "expected": {
+    "exit_code": 0,
+    "stdout_contains": ["WORKFLOW STATE:", "STATE:", "build-feature"]
+  }
+}
