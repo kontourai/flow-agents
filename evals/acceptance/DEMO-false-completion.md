@@ -132,3 +132,13 @@ and resolves scripts from `$CODEX_HOME/scripts/`). That capability already exist
 `scripts/install-codex-home.sh` flattens `.codex/` to the home root and copies your auth —
 producing a home that works with live hooks (verified). The only real gap was
 discoverability, now fixed by documenting it in the generated Codex bundle `README.md`.
+
+---
+
+## Regenerating the recording
+
+The `.mp4`/`.gif` under `evals/acceptance/` are gitignored — they're regenerable outputs, not source. To rebuild:
+- vhs: `vhs evals/acceptance/demo.tape`
+- asciinema cast: `bash evals/acceptance/demo-cast.sh`
+
+A finalized README/docs gif is committed deliberately under `docs/assets/` (curated), not the raw `evals/acceptance/` capture.
