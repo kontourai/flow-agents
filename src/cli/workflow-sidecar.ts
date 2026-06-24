@@ -1442,6 +1442,50 @@ ${panelJs}
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─── flow-agents#137 / ADR 0011: wire Surface's MCP to surface trust reports ──
+// Flow Agents produces the bundle; Surface's MCP projects it. `--mode print` is the
+// zero-write default (output the snippet). `enable`/`disable` edit a runtime JSON MCP
+// config (e.g. Claude Code `.mcp.json`) via a *conventional managed key* — idempotent,
+// reversible, and only ever our own entry (never auto-injected; opt-in only).
+const TRUST_MCP_SERVER = "flow-agents-surface-trust";
+function trustMcpRegistration(): AnyObj {
+  // No static `--input` (a single file can't follow many per-task bundles or a moving
+  // current); the skill passes the active task's bundle as a per-call `path` arg.
+  return { command: "npx", args: ["-y", "@kontourai/surface", "mcp"] };
+}
+function trustMcp(p: ReturnType<typeof parseArgs>): number {
+  const mode = opt(p, "mode", "print");
+  if (mode === "print") {
+    console.log(JSON.stringify({ mcpServers: { [TRUST_MCP_SERVER]: trustMcpRegistration() } }, null, 2));
+    process.stderr.write(`\n# Paste the above into your runtime MCP config (e.g. .mcp.json). Flow Agents does NOT write it for you unless you run: trust-mcp --mode enable\n`);
+    process.stderr.write(`# To view a task's trust inline, call surface_summary with path=<.flow-agents/<slug>/trust.bundle>.\n`);
+    return 0;
+  }
+  if (mode !== "enable" && mode !== "disable") die("trust-mcp --mode must be print|enable|disable");
+  const configPath = path.resolve(opt(p, "config", ".mcp.json"));
+  let config: AnyObj = {};
+  try { config = JSON.parse(fs.readFileSync(configPath, "utf8")); } catch { config = {}; }
+  if (typeof config !== "object" || config === null || Array.isArray(config)) die(`${configPath} is not a JSON object — refusing to edit`);
+  if (!config.mcpServers || typeof config.mcpServers !== "object" || Array.isArray(config.mcpServers)) config.mcpServers = {};
+  if (mode === "enable") {
+    config.mcpServers[TRUST_MCP_SERVER] = trustMcpRegistration();
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+    console.log(`enabled ${TRUST_MCP_SERVER} in ${configPath} (remove with: trust-mcp --mode disable)`);
+    return 0;
+  }
+  // disable: remove only our own conventional entry; leave everything else untouched.
+  if (Object.prototype.hasOwnProperty.call(config.mcpServers, TRUST_MCP_SERVER)) {
+    delete config.mcpServers[TRUST_MCP_SERVER];
+    fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+    console.log(`disabled ${TRUST_MCP_SERVER} in ${configPath}`);
+  } else {
+    console.log(`${TRUST_MCP_SERVER} not present in ${configPath} — nothing to remove`);
+  }
+  return 0;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 
 async function main(): Promise<number> {
   const p = parseArgs(process.argv.slice(2));
@@ -1462,6 +1506,7 @@ async function main(): Promise<number> {
       case "dogfood-pass": return dogfoodPass(p);
       case "gate-review": return gateReview(p);
       case "render-trust-panel": return renderTrustPanel(p);
+      case "trust-mcp": return trustMcp(p);
       default: die(`unknown command: ${p.command}`);
     }
   });

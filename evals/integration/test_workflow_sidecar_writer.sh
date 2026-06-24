@@ -2289,6 +2289,41 @@ else
   _fail "render-trust-panel failed: $(cat "$TMPDIR_EVAL/tb-panel.out" "$TMPDIR_EVAL/tb-panel.err")"
 fi
 
+# ─── AC5: trust-mcp wiring (flow-agents#137) — zero-write print + opt-in, reversible enable/disable ──
+TB_MCP_CFG="$TMPDIR_EVAL/mcp/.mcp.json"
+mkdir -p "$(dirname "$TB_MCP_CFG")"
+echo '{"mcpServers":{"other":{"command":"x","args":[]}}}' > "$TB_MCP_CFG"
+if flow_agents_node "$WRITER" trust-mcp >"$TMPDIR_EVAL/tb-mcp-print.out" 2>/dev/null \
+  && rg -q "flow-agents-surface-trust" "$TMPDIR_EVAL/tb-mcp-print.out" \
+  && flow_agents_node "$WRITER" trust-mcp --mode enable --config "$TB_MCP_CFG" >/dev/null 2>&1 \
+  && flow_agents_node "$WRITER" trust-mcp --mode enable --config "$TB_MCP_CFG" >/dev/null 2>&1; then
+  if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/tb-mcp.err"
+import { readFileSync } from 'node:fs';
+const s = (JSON.parse(readFileSync('${TB_MCP_CFG}','utf8')).mcpServers) || {};
+if (!s['flow-agents-surface-trust']) { process.stderr.write('enable did not add our server\n'); process.exit(1); }
+if (!s['other']) { process.stderr.write('enable clobbered an existing server\n'); process.exit(1); }
+if (Object.keys(s).length !== 2) { process.stderr.write('enable not idempotent (count ' + Object.keys(s).length + ')\n'); process.exit(1); }
+NODEOF
+  then
+    flow_agents_node "$WRITER" trust-mcp --mode disable --config "$TB_MCP_CFG" >/dev/null 2>&1
+    if node --input-type=module <<NODEOF 2>>"$TMPDIR_EVAL/tb-mcp.err"
+import { readFileSync } from 'node:fs';
+const s = (JSON.parse(readFileSync('${TB_MCP_CFG}','utf8')).mcpServers) || {};
+if (s['flow-agents-surface-trust']) { process.stderr.write('disable left our server\n'); process.exit(1); }
+if (!s['other']) { process.stderr.write('disable removed an existing server\n'); process.exit(1); }
+NODEOF
+    then
+      _pass "trust-mcp: zero-write print; enable idempotent + preserves existing; disable removes only ours"
+    else
+      _fail "trust-mcp disable assertion failed: $(cat "$TMPDIR_EVAL/tb-mcp.err")"
+    fi
+  else
+    _fail "trust-mcp enable assertion failed: $(cat "$TMPDIR_EVAL/tb-mcp.err")"
+  fi
+else
+  _fail "trust-mcp print/enable invocation failed"
+fi
+
 
 # ─── AC3: statusFunctionVersion conformance ───────────────────────────────────
 # Assert the statusFunctionVersion embedded in the emitted trust.bundle source
