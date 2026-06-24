@@ -107,6 +107,6 @@ The dispositions in this audit table were implemented in PR #62:
 - `src/tools/build-universal-bundles.ts`: `collectAllSkills()` function added; bundle builders now collect skills from both `skills/` (tool-skills) and kit-declared `skills` arrays. Runtime bundles (`.claude/skills/`, `.codex/skills/`, etc.) include all kit-owned skills unchanged.
 - `src/tools/generate-context-map.ts`: `allSkillPaths()` function added; context map generation now includes kit-owned skills.
 - `src/tools/validate-source-tree.ts`: `validateLegacyRefs()` updated to skip legacy-ref matches that resolve as declared kit-owned asset subpaths.
-- `packaging/packs.json`: Skill entries limited to the 6 remaining tool-skills in `skills/`. Kit-owned skills are no longer listed in packs (they're always included in the bundle as kit assets).
+- The legacy `packaging/` pack-composition manifest (since removed): at the time of this audit, its skill entries were limited to the 6 remaining tool-skills in `skills/`, and kit-owned skills were already excluded (they ship as kit assets). That whole composition layer was later removed outright; the standalone `skills/`/`agents/`/`powers/` base always installs and Kits carry depth through the Kit Catalog.
 - `flow-agents kit inspect kits/builder` now reports `k1: true` (skills present).
 - `flow-agents kit inspect kits/knowledge` now reports `k1: true` (skills present).

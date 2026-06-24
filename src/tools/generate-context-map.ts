@@ -11,7 +11,7 @@ const dirDescriptions: Record<string, string> = {
   context: "Shared contracts, routing notes, templates, and reusable guidance.",
   docs: "Long-lived project documentation and GitHub Pages content.",
   evals: "Static, integration, install, and behavioral eval fixtures.",
-  powers: "Optional MCP/tool integration packs.",
+  powers: "Optional MCP/tool capability bundles.",
   prompts: "Reusable prompt entry points.",
   schemas: "JSON Schema contracts for machine-readable workflow artifacts.",
   scripts: "Build, validation, hook, telemetry, workflow, and import/export utilities.",
@@ -142,18 +142,6 @@ function powers(): string[][] {
   return fs.readdirSync(dir).sort().flatMap((name) => exists(path.join(dir, name, "POWER.md")) ? [[name, rel(path.join(dir, name, "POWER.md"))]] : []);
 }
 
-function packs(): string[][] {
-  const data = loadJson<{ packs?: Array<Record<string, unknown>> }>(path.join(root, "packaging/packs.json"));
-  return (data.packs ?? []).map((pack) => [
-    String(pack.name ?? ""),
-    pack.default ? "yes" : "no",
-    String(Array.isArray(pack.skills) ? pack.skills.length : 0),
-    String(Array.isArray(pack.agents) ? pack.agents.length : 0),
-    String(Array.isArray(pack.powers) ? pack.powers.length : 0),
-    oneLine(String(pack.description ?? "")),
-  ]);
-}
-
 function latestRuntimeStates(includeRuntime: boolean): string[] {
   if (!includeRuntime) {
     return [
@@ -193,9 +181,6 @@ function render(includeRuntime: boolean): string {
     "## Support Skills", "", ...markdownTable(["Skill", "Source", "When To Load"], supportRows), "",
     "## Agents", "", ...markdownTable(["Agent", "Model", "Tools", "Role"], agents()), "",
     "## Optional Powers", "", ...markdownTable(["Power", "Source"], powers()), "",
-    "## Packs", "",
-    "Pack composition is defined in `packaging/packs.json`. The current builder exports pack metadata in bundle catalogs, and generated install scripts support opt-in `FLOW_AGENTS_PACKS` filtering while leaving all packs installed by default.", "",
-    ...markdownTable(["Pack", "Default", "Skills", "Agents", "Powers", "Purpose"], packs()), "",
     "## Current Workflow State", "", ...latestRuntimeStates(includeRuntime), "",
     "## Context Loading Rules", "",
     "- For delivery work, load `deliver`, then the specific primitive skill for the current phase.",

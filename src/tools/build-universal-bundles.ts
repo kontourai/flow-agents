@@ -7,7 +7,6 @@ import { loadJson, readText, root, walkFiles, writeText } from "./common.js";
 type Agent = Record<string, unknown> & { name: string; prompt: string };
 const dist = process.env.FLOW_AGENTS_DIST_DIR ? path.resolve(process.env.FLOW_AGENTS_DIST_DIR) : path.join(root, "dist");
 const manifest = loadJson<Record<string, any>>(path.join(root, "packaging/manifest.json"));
-const packs = loadJson<Record<string, any>>(path.join(root, "packaging/packs.json"));
 const textExtensions = new Set([".css", ".html", ".js", ".json", ".md", ".sh", ".toml", ".txt", ".yaml", ".yml", ".ts"]);
 const dropDiagnostics: string[] = [];
 const printDiagnostics = !["0", "false", "no"].includes(String(process.env.FLOW_AGENTS_EXPORT_DIAGNOSTICS ?? "1").toLowerCase());
@@ -183,7 +182,7 @@ function exportRootAgentsMd(label: string, agents: Agent[], taskDir: string): st
 }
 const CODEX_LIVE_HOOKS_README = `\n## Running with hooks active (live)\n\n\`install.sh\` lays the bundle into a workspace, but a live Codex session needs a \`CODEX_HOME\` that has both the bundle's hooks/scripts AND your real credentials. Use the dedicated installer, which flattens the config to the home root and copies your auth from \`~/.codex\`:\n\n\`\`\`bash\nbash scripts/install-codex-home.sh "$HOME/.flow-agents/codex"\nCODEX_HOME="$HOME/.flow-agents/codex" codex exec --dangerously-bypass-hook-trust -C /path/to/project "<prompt>"\n\`\`\`\n\nThe goal-fit Stop hook then enforces by default (\`FLOW_AGENTS_GOAL_FIT_MODE=block\`); set it to \`warn\` or \`off\` to override.\n`;
 function exportTargetReadme(label: string, installHint: string, extra = ""): string {
-  return `# ${label} Bundle\n\nGenerated from the canonical source in this repository.\n\n## Install\n\n\`\`\`bash\n${installHint}\n\`\`\`\n\nOptional pack filtering is available at install time with \`FLOW_AGENTS_PACKS\`.\nThe default pack is always included:\n\n\`\`\`bash\nFLOW_AGENTS_PACKS=development,knowledge ${installHint}\n\`\`\`\n\n## Contents\n\n- Harness-specific agents\n- Shared skills\n- Shared context, powers, prompts, scripts, and evals\n${extra}`;
+  return `# ${label} Bundle\n\nGenerated from the canonical source in this repository.\n\n## Install\n\n\`\`\`bash\n${installHint}\n\`\`\`\n\nThe install ships the full standalone base (skills, agents, powers) plus the\nFlow Kits. Kit depth is activated through the Kit Catalog, not at install time.\n\n## Contents\n\n- Harness-specific agents\n- Shared skills\n- Shared context, powers, prompts, scripts, and evals\n${extra}`;
 }
 
 function mapClaudeTools(allowedTools: unknown): string[] {
@@ -319,9 +318,7 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
   }
   for (const dir of manifest.optional_copy_dirs ?? []) copyTree(path.join(root, dir), path.join(targetRoot, dir), targetName, token);
   writeText(path.join(targetRoot, "build/package.json"), `${JSON.stringify({ type: "module" }, null, 2)}\n`);
-  const filterBuilt = path.join(root, "build/src/tools/filter-installed-packs.js");
   const commonBuilt = path.join(root, "build/src/tools/common.js");
-  if (fs.existsSync(filterBuilt)) writeText(path.join(targetRoot, "scripts/filter-installed-packs.mjs"), readText(filterBuilt).replace("./common.js", "./common.mjs"));
   if (fs.existsSync(commonBuilt)) writeText(path.join(targetRoot, "scripts/common.mjs"), readText(commonBuilt));
   copyTree(path.join(root, "build/src"), path.join(targetRoot, "build/src"), targetName, token);
 }
@@ -331,7 +328,7 @@ function installScript(label: string, defaultDestDisplay: string, token?: string
   const destRequired = !destFallbackShell;
   const requiredCheck = destRequired ? `if [[ -z "$DEST" ]]; then\n  usage\n  exit 2\nfi\n` : "";
   const usageDest = destRequired ? "/path/to/workspace" : defaultDestDisplay;
-  return `#!/usr/bin/env bash\nset -euo pipefail\n\nusage() {\n  cat >&2 <<'EOF'\nusage: bash install.sh ${usageDest} [options]\n\nOptions:\n  --telemetry-sink NAME   local-files, local-kontour-console,\n                          kontour-hosted-console, user-hosted-console,\n                          or legacy aliases. May be repeated.\n  --console-url URL       Persist Console telemetry base URL.\n  --console-endpoint URL  Persist full Console telemetry records endpoint URL.\n  --console-token-file PATH\n                          Read Console telemetry bearer token from a file.\n  --console-tenant ID     Persist Console tenant identifier.\nEOF\n}\n\nDEST=""\nDEST_SET=0\nCONSOLE_CONFIG_ARGS=()\nwhile [[ $# -gt 0 ]]; do\n  case "$1" in\n    --telemetry-sink|--telemetry-sinks|--console-url|--console-endpoint|--console-endpoint-url|--console-token-file|--console-tenant|--console-tenant-id)\n      [[ $# -ge 2 ]] || { echo "install.sh: $1 requires a value" >&2; exit 2; }\n      CONSOLE_CONFIG_ARGS+=("$1" "$2")\n      shift 2\n      ;;\n    --help|-h)\n      usage\n      exit 0\n      ;;\n    -*)\n      echo "install.sh: unknown option: $1" >&2\n      usage\n      exit 2\n      ;;\n    *)\n      if [[ "$DEST_SET" -eq 1 ]]; then\n        echo "install.sh: unexpected argument: $1" >&2\n        usage\n        exit 2\n      fi\n      DEST="$1"\n      DEST_SET=1\n      shift\n      ;;\n  esac\ndone${destFallback}\n${requiredCheck}SRC="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"\n\nmkdir -p "$DEST"\nrsync -a ${token ? "--delete " : ""}"$SRC"/ "$DEST"/\nif [[ -n "\${FLOW_AGENTS_PACKS:-}" ]]; then\n  node "$DEST/scripts/filter-installed-packs.mjs" "$DEST" --packs "$FLOW_AGENTS_PACKS"\nfi${replaceBlock}\nif [[ \${#CONSOLE_CONFIG_ARGS[@]} -gt 0 || -n "\${FLOW_AGENTS_TELEMETRY_SINK:-}" || -n "\${FLOW_AGENTS_TELEMETRY_SINKS:-}" || -n "\${FLOW_AGENTS_CONSOLE_URL:-}" || -n "\${CONSOLE_TELEMETRY_URL:-}" || -n "\${CONSOLE_URL:-}" || -n "\${FLOW_AGENTS_CONSOLE_TOKEN_FILE:-}" || -n "\${CONSOLE_TELEMETRY_TOKEN_FILE:-}" ]]; then\n  bash "$DEST/scripts/telemetry/install-console-config.sh" "$DEST/scripts/telemetry/telemetry.conf" "\${CONSOLE_CONFIG_ARGS[@]}"\nfi\necho "Installed ${label} bundle ${token ? "to" : "into"} $DEST"\n`;
+  return `#!/usr/bin/env bash\nset -euo pipefail\n\nusage() {\n  cat >&2 <<'EOF'\nusage: bash install.sh ${usageDest} [options]\n\nOptions:\n  --telemetry-sink NAME   local-files, local-kontour-console,\n                          kontour-hosted-console, user-hosted-console,\n                          or legacy aliases. May be repeated.\n  --console-url URL       Persist Console telemetry base URL.\n  --console-endpoint URL  Persist full Console telemetry records endpoint URL.\n  --console-token-file PATH\n                          Read Console telemetry bearer token from a file.\n  --console-tenant ID     Persist Console tenant identifier.\nEOF\n}\n\nDEST=""\nDEST_SET=0\nCONSOLE_CONFIG_ARGS=()\nwhile [[ $# -gt 0 ]]; do\n  case "$1" in\n    --telemetry-sink|--telemetry-sinks|--console-url|--console-endpoint|--console-endpoint-url|--console-token-file|--console-tenant|--console-tenant-id)\n      [[ $# -ge 2 ]] || { echo "install.sh: $1 requires a value" >&2; exit 2; }\n      CONSOLE_CONFIG_ARGS+=("$1" "$2")\n      shift 2\n      ;;\n    --help|-h)\n      usage\n      exit 0\n      ;;\n    -*)\n      echo "install.sh: unknown option: $1" >&2\n      usage\n      exit 2\n      ;;\n    *)\n      if [[ "$DEST_SET" -eq 1 ]]; then\n        echo "install.sh: unexpected argument: $1" >&2\n        usage\n        exit 2\n      fi\n      DEST="$1"\n      DEST_SET=1\n      shift\n      ;;\n  esac\ndone${destFallback}\n${requiredCheck}SRC="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"\n\nmkdir -p "$DEST"\nrsync -a ${token ? "--delete " : ""}"$SRC"/ "$DEST"/${replaceBlock}\nif [[ \${#CONSOLE_CONFIG_ARGS[@]} -gt 0 || -n "\${FLOW_AGENTS_TELEMETRY_SINK:-}" || -n "\${FLOW_AGENTS_TELEMETRY_SINKS:-}" || -n "\${FLOW_AGENTS_CONSOLE_URL:-}" || -n "\${CONSOLE_TELEMETRY_URL:-}" || -n "\${CONSOLE_URL:-}" || -n "\${FLOW_AGENTS_CONSOLE_TOKEN_FILE:-}" || -n "\${CONSOLE_TELEMETRY_TOKEN_FILE:-}" ]]; then\n  bash "$DEST/scripts/telemetry/install-console-config.sh" "$DEST/scripts/telemetry/telemetry.conf" "\${CONSOLE_CONFIG_ARGS[@]}"\nfi\necho "Installed ${label} bundle ${token ? "to" : "into"} $DEST"\n`;
 }
 
 function buildBase(agents: Agent[]): void {
@@ -691,7 +688,6 @@ function buildCatalog(agents: Agent[]): Record<string, unknown> {
     agents: agents.slice().sort((a, b) => a.name.localeCompare(b.name)).map((spec) => spec.name),
     skills: collectAllSkills().map(({ name }) => name),
     powers: fs.readdirSync(path.join(root, "powers")).filter((name) => fs.existsSync(path.join(root, "powers", name, "mcp.json"))).sort(),
-    packs: packs.packs ?? [],
     kits: fs.existsSync(kitsCatalog) ? loadJson<Record<string, unknown>>(kitsCatalog).kits ?? [] : [],
   };
 }

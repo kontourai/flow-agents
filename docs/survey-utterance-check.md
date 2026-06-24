@@ -289,7 +289,7 @@ Flow Agents does not own trust claim models, inquiry semantics, or extractor imp
 
 - Do not make `@kontourai/survey` a mandatory dependency of flow-agents.
 - Do not copy Survey's extraction or inquiry schemas into flow-agents.
-- Do not auto-register the hook in the default pack; it is opt-in only.
+- Do not auto-register the hook in the standalone base; it is opt-in only.
 - Do not make the hook blocking without explicit `mode: "strict"` or the env override.
 - Do not silently decide anything. The hook injects guidance; the agent decides next steps.
 

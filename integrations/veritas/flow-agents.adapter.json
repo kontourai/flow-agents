@@ -96,8 +96,7 @@
         "label": "bundle packaging",
         "patterns": [
           "packaging/",
-          "src/tools/build-universal-bundles.ts",
-          "src/tools/filter-installed-packs.ts"
+          "src/tools/build-universal-bundles.ts"
         ],
         "boundary": "advisory",
         "owners": [

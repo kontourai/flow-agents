@@ -8,6 +8,6 @@ Flow Agents will use **Flow Kit** as the product and implementation term for ins
 
 **Status**: Accepted
 
-**Considered Options**: Keeping "pack" was familiar from the current `packaging/packs.json`, but it was too generic and carried plugin-marketplace baggage. Keeping "pack" internally while using "kit" publicly was rejected because the repository is unpublished and a split vocabulary would make the migration harder to understand.
+**Considered Options**: Keeping "pack" was familiar from the then-current `packaging/` pack-composition layer, but it was too generic and carried plugin-marketplace baggage. Keeping "pack" internally while using "kit" publicly was rejected because the repository is unpublished and a split vocabulary would make the migration harder to understand. (That legacy composition layer was subsequently removed outright; the standalone base always installs and Kits carry depth through the Kit Catalog.)
 
 **Consequences**: Flow Agents will use `kits/catalog.json` as the Kit Catalog. The first real kit will live under `kits/builder/` with its own `kit.json` and Flow Definitions under `kits/builder/flows/`. The Builder Kit must be installable through the same compliance path as future external Flow Kit repositories.

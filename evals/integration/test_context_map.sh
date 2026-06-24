@@ -38,10 +38,8 @@ for expected in \
   'Support Skills' \
   'Agents' \
   'Optional Powers' \
-  'Packs' \
   'Context Loading Rules' \
   'npm run context-map:check' \
-  'packaging/packs.json' \
   'workflow-release.schema.json' \
   'workflow-learning.schema.json' \
   'plan-work' \

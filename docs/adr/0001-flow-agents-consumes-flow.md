@@ -41,7 +41,7 @@ Flow Agents owns:
 - provider settings
 - runtime adapters
 - native harness hooks
-- useful Flow-backed workflow packs
+- useful Flow-backed workflow Kits
 - Console views for agent users
 - local-first setup and runtime exports
 

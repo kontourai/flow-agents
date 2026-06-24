@@ -27,7 +27,7 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
                                 # canonical workflow bundle content
   kits/                        # Flow Kit catalog and bundled kit assets
   schemas/                     # JSON sidecar and provider schemas
-  packaging/                   # bundle/export manifests and pack definitions
+  packaging/                   # bundle/export manifests and packaging rules
   evals/                       # eval harness, fixtures, static checks, integration checks
   docs/                        # durable docs and GitHub Pages source
   integrations/                # optional external integration config
@@ -56,7 +56,7 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
 | `evals/` | canonical eval source plus ignored results | Harness, cases, fixtures, static checks, integration checks. | `evals/results/*.json`, reports, and CI logs are generated output unless intentionally tracked fixtures. | Do not remove fixtures without reference proof; generated results can be local cleanup candidates. |
 | `integrations/` | optional integration source | Integration config shipped with the repo. | Source; local run state belongs under ignored runtime roots. | Keep optional and adapter-driven. |
 | `kits/` | canonical Flow Kit source | Kit Catalog and bundled Builder Kit assets. | Exported and validated by Flow Kit commands. | Preserve catalog paths and validation coverage. |
-| `packaging/` | canonical packaging source | Manifest, pack definitions, and packaging docs. | Drives generated bundles under `dist/`. | Update before changing export shape. |
+| `packaging/` | canonical packaging source | Manifest, export rules, and packaging docs. | Drives generated bundles under `dist/`. | Update before changing export shape. |
 | `powers/` | canonical source | Optional MCP/tool capability bundles. | Exported where supported. | Keep activation guidance separate from credentials. |
 | `prompts/` | canonical source | Saved prompt entry points. | Exported where supported. | Promote stable procedures into skills when needed. |
 | `schemas/` | canonical source | JSON schemas for sidecars and provider/resource records. | Used by validators and workflow tooling. | Schema changes require artifact validation. |

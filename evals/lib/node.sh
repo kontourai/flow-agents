@@ -21,12 +21,6 @@ flow_agents_node() {
       node "$FLOW_AGENTS_EVAL_ROOT/build/src/cli.js" context-map "$@"
       return
       ;;
-    */scripts/filter-installed-packs.js|scripts/filter-installed-packs.js)
-      shift
-      flow_agents_build_ts || return
-      node "$FLOW_AGENTS_EVAL_ROOT/build/src/cli.js" filter-installed-packs "$@"
-      return
-      ;;
     workflow-sidecar)
       shift
       flow_agents_build_ts || return

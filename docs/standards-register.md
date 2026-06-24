@@ -57,8 +57,8 @@ Flow Agents may need local schemas for reliability glue that existing standards 
 | Critique record | Reviewer passes, findings, severity, and resolution state for critique loops | `.flow-agents/<slug>/critique.json` | Draft schema: `schemas/workflow-critique.schema.json` |
 | Release readiness | Merge, release, deploy, hold, rollback, docs, and operational readiness decisions | `.flow-agents/<slug>/release.json` | Draft schema: `schemas/workflow-release.schema.json` |
 | Learning record | Repeated failure, correction, pattern, and recommended system update | `.flow-agents/<slug>/learning.json` or `.telemetry/outcomes.jsonl` | Draft schema: `schemas/workflow-learning.schema.json` |
-| Context map | Compact project map: structure, commands, conventions, test strategy, packs, and recent state | Generated under `.flow-agents/` or configurable cache | Planned |
-| Pack manifest | Core and optional pack composition for a target install | `packaging/packs.json` plus generated export catalog metadata | Draft manifest: `packaging/packs.json` |
+| Context map | Compact project map: structure, commands, conventions, test strategy, Kits, and recent state | Generated under `.flow-agents/` or configurable cache | Planned |
+| Kit Catalog | Product-facing catalog of Flow Kits and their activation, layered over the always-installed standalone base | `kits/catalog.json` plus generated export catalog metadata | Catalog: `kits/catalog.json` |
 | Governance adapter | Optional bridge from Flow Agents evidence gates to tools such as Veritas | `context/contracts/governance-adapter-contract.md` | Draft contract |
 
 These formats should be treated as contracts once introduced. Breaking changes require schema version bumps and migration notes.
@@ -93,4 +93,4 @@ Before merging a new schema, file format, or artifact:
 - Is the new format schema-described?
 - Is there a human-readable representation?
 - Can another tool consume or export it?
-- Does this belong in core or an optional pack?
+- Does this belong in the standalone base or an opinionated Flow Kit?
