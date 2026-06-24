@@ -32,7 +32,7 @@ KIRO_DEST="$TMPDIR_EVAL/kiro-home"
 BASE_DEST="$TMPDIR_EVAL/base-workspace"
 CLAUDE_DEST="$TMPDIR_EVAL/claude-workspace"
 CODEX_DEST="$TMPDIR_EVAL/codex-workspace"
-CODEX_CORE_DEST="$TMPDIR_EVAL/codex-core-workspace"
+CODEX_FULL_DEST="$TMPDIR_EVAL/codex-full-workspace"
 CODEX_CONSOLE_DEST="$TMPDIR_EVAL/codex-console-workspace"
 CODEX_HOSTED_CONSOLE_DEST="$TMPDIR_EVAL/codex-hosted-console-workspace"
 CODEX_USER_HOSTED_CONSOLE_DEST="$TMPDIR_EVAL/codex-user-hosted-console-workspace"
@@ -42,7 +42,7 @@ BASE_INIT_DEST="$TMPDIR_EVAL/base-init-workspace"
 CODEX_INIT_DEST="$TMPDIR_EVAL/codex-init-workspace"
 OPENCODE_DEST="$TMPDIR_EVAL/opencode-workspace"
 OPENCODE_CONSOLE_DEST="$TMPDIR_EVAL/opencode-console-workspace"
-OPENCODE_CORE_DEST="$TMPDIR_EVAL/opencode-core-workspace"
+OPENCODE_FULL_DEST="$TMPDIR_EVAL/opencode-full-workspace"
 PI_DEST="$TMPDIR_EVAL/pi-workspace"
 CONSOLE_TOKEN_FILE="$TMPDIR_EVAL/console-token"
 printf 'test-token\n' > "$CONSOLE_TOKEN_FILE"
@@ -128,7 +128,7 @@ else
   _fail "opencode install with Console telemetry config failed"
 fi
 
-if node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --dest "$OPENCODE_CORE_DEST" --yes >/dev/null; then
+if node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --dest "$OPENCODE_FULL_DEST" --yes >/dev/null; then
   _pass "flow-agents init headless opencode install succeeded"
 else
   _fail "flow-agents init headless opencode install failed"
@@ -140,32 +140,17 @@ else
   _fail "pi install failed"
 fi
 
-USER_SKILLS_DIR="$CODEX_CORE_DEST/.codex/sk""ills/user-skill"
-mkdir -p "$CODEX_CORE_DEST/.codex/ag""ents" "$USER_SKILLS_DIR"
-printf 'name = "user-agent"\n' > "$CODEX_CORE_DEST/.codex/ag""ents/user-agent.toml"
+USER_SKILLS_DIR="$CODEX_FULL_DEST/.codex/sk""ills/user-skill"
+mkdir -p "$CODEX_FULL_DEST/.codex/ag""ents" "$USER_SKILLS_DIR"
+printf 'name = "user-agent"\n' > "$CODEX_FULL_DEST/.codex/ag""ents/user-agent.toml"
 printf '# user skill\n' > "$USER_SKILLS_DIR/SKILL.md"
 
-if (cd "$ROOT_DIR/dist/codex" && FLOW_AGENTS_PACKS=core bash install.sh "$CODEX_CORE_DEST" >/dev/null); then
-  _pass "Codex core-pack filtered install succeeded"
+# A fresh install ships the full standalone base (no pack filtering). Pre-existing
+# unknown user files must be preserved across the rsync install.
+if (cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_FULL_DEST" >/dev/null); then
+  _pass "Codex full install succeeded"
 else
-  _fail "Codex core-pack filtered install failed"
-fi
-
-FILTER_ATTACK_DEST="$TMPDIR_EVAL/filter-attack"
-mkdir -p "$FILTER_ATTACK_DEST/packaging" "$FILTER_ATTACK_DEST/skills"
-cat > "$FILTER_ATTACK_DEST/packaging/packs.json" <<'JSON'
-{
-  "schema_version": "1.0",
-  "packs": [
-    { "name": "core", "default": true, "skills": ["safe"], "agents": [], "powers": [] },
-    { "name": "extra", "skills": ["../escape"], "agents": [], "powers": [] }
-  ]
-}
-JSON
-if node "$ROOT_DIR/build/src/tools/filter-installed-packs.js" "$FILTER_ATTACK_DEST" --packs core >"$TMPDIR_EVAL/filter-attack.out" 2>"$TMPDIR_EVAL/filter-attack.err"; then
-  _fail "pack filter accepted unsafe metadata traversal"
-else
-  _pass "pack filter rejects unsafe metadata traversal before deletion"
+  _fail "Codex full install failed"
 fi
 
 echo ""
@@ -179,7 +164,7 @@ for dir in \
   "$CODEX_DEST/.codex/agents" \
   "$CODEX_DEST/.codex/skills" \
   "$CODEX_DEST/.flow-agents" \
-  "$CODEX_CORE_DEST/.flow-agents"; do
+  "$CODEX_FULL_DEST/.flow-agents"; do
   if [[ -d "$dir" ]]; then
     _pass "$dir exists"
   else
@@ -703,64 +688,43 @@ fi
 
 
 echo ""
-echo "--- Pack Filtering ---"
-CODEX_AGENTS_DIR="$CODEX_CORE_DEST/.codex/ag""ents"
-CORE_AGENT="$CODEX_AGENTS_DIR/tool-planner.toml"
-OPTIONAL_AGENT="$CODEX_AGENTS_DIR/dev.toml"
-if [[ -f "$CORE_AGENT" && ! -f "$OPTIONAL_AGENT" ]]; then
-  _pass "Codex core-pack install keeps core agents and prunes optional agents"
+echo "--- Full Standalone Base Install ---"
+# There is no pack layer: a fresh install ships the complete standalone base.
+# Both the neutral toolbox agents (tool-planner) and the deeper agents (dev) are
+# present, and kit-owned skills (plan-work, deliver) plus standalone skills
+# (agentic-engineering) all install together.
+# Codex excludes the dev orchestrator agent (manifest.codex.excluded_agents), so
+# assert the neutral toolbox agent plus a deeper agent that codex does ship.
+CODEX_AGENTS_DIR="$CODEX_FULL_DEST/.codex/ag""ents"
+if [[ -f "$CODEX_AGENTS_DIR/tool-planner.toml" && -f "$CODEX_AGENTS_DIR/tool-security-reviewer.toml" ]]; then
+  _pass "Codex full install ships the complete agent base"
 else
-  _fail "Codex core-pack agent filtering failed"
+  _fail "Codex full install is missing base agents"
 fi
 
-# Kit-owned skills (plan-work, deliver) are always present regardless of pack filter.
-# Pack filtering only prunes skills declared in packs.json (the tool-skills).
-# The development-pack tool-skill agentic-engineering should be pruned in a core-only install.
-if [[ -d "$CODEX_CORE_DEST/.codex/skills/plan-work" && -d "$CODEX_CORE_DEST/.codex/skills/deliver" && ! -d "$CODEX_CORE_DEST/.codex/skills/agentic-engineering" ]]; then
-  _pass "Codex core-pack install: kit-skills present, dev-only tool-skill pruned"
+if [[ -d "$CODEX_FULL_DEST/.codex/skills/plan-work" && -d "$CODEX_FULL_DEST/.codex/skills/deliver" && -d "$CODEX_FULL_DEST/.codex/skills/agentic-engineering" ]]; then
+  _pass "Codex full install ships kit-skills and standalone skills together"
 else
-  _fail "Codex core-pack skill filtering failed"
-fi
-
-if [[ -f "$CODEX_CORE_DEST/.flow-agents/installed-packs.json" ]]; then
-  _pass "Codex core-pack install records selected packs"
-else
-  _fail "Codex core-pack install did not record selected packs"
+  _fail "Codex full install is missing skills"
 fi
 
 if [[ -f "$CODEX_AGENTS_DIR/user-agent.toml" && -d "$USER_SKILLS_DIR" ]]; then
-  _pass "Codex core-pack install preserves unknown user files"
+  _pass "Codex full install preserves unknown user files"
 else
-  _fail "Codex core-pack install removed unknown user files"
+  _fail "Codex full install removed unknown user files"
 fi
 
-# Pack filtering for opencode
-OPENCODE_AGENTS_DIR="$OPENCODE_CORE_DEST/.opencode/agents"
-if (cd "$ROOT_DIR/dist/opencode" && FLOW_AGENTS_PACKS=core bash install.sh "$OPENCODE_CORE_DEST" >/dev/null); then
-  _pass "opencode core-pack filtered install succeeded"
+OPENCODE_AGENTS_DIR="$OPENCODE_FULL_DEST/.opencode/agents"
+if [[ -f "$OPENCODE_AGENTS_DIR/tool-planner.md" && -f "$OPENCODE_AGENTS_DIR/dev.md" ]]; then
+  _pass "opencode full install ships the complete agent base"
 else
-  _fail "opencode core-pack filtered install failed"
+  _fail "opencode full install is missing base agents"
 fi
 
-if [[ -d "$OPENCODE_AGENTS_DIR/tool-planner.md" ]] || [[ -f "$OPENCODE_AGENTS_DIR/tool-planner.md" ]]; then
-  _pass "opencode core-pack install keeps core agents"
+if [[ -d "$OPENCODE_FULL_DEST/.opencode/skills/plan-work" && -d "$OPENCODE_FULL_DEST/.opencode/skills/deliver" && -d "$OPENCODE_FULL_DEST/.opencode/skills/agentic-engineering" ]]; then
+  _pass "opencode full install ships kit-skills and standalone skills together"
 else
-  _fail "opencode core-pack agent filtering failed (tool-planner.md missing)"
-fi
-
-# Kit-owned skills (plan-work, deliver) are always present regardless of pack filter.
-# Pack filtering only prunes skills declared in packs.json (the tool-skills).
-# The development-pack tool-skill agentic-engineering should be pruned in a core-only install.
-if [[ -d "$OPENCODE_CORE_DEST/.opencode/skills/plan-work" && -d "$OPENCODE_CORE_DEST/.opencode/skills/deliver" && ! -d "$OPENCODE_CORE_DEST/.opencode/skills/agentic-engineering" ]]; then
-  _pass "opencode core-pack install: kit-skills present, dev-only tool-skill pruned"
-else
-  _fail "opencode core-pack skill filtering failed"
-fi
-
-if [[ -f "$OPENCODE_CORE_DEST/.flow-agents/installed-packs.json" ]]; then
-  _pass "opencode core-pack install records selected packs"
-else
-  _fail "opencode core-pack install did not record selected packs"
+  _fail "opencode full install is missing skills"
 fi
 
 echo ""

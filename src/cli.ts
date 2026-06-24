@@ -14,7 +14,6 @@ import { main as veritasGovernance } from "./cli/veritas-governance.js";
 import { main as workflowArtifactCleanupAudit } from "./cli/workflow-artifact-cleanup-audit.js";
 import { main as buildBundles } from "./tools/build-universal-bundles.js";
 import { main as contextMap } from "./tools/generate-context-map.js";
-import { main as filterInstalledPacks } from "./tools/filter-installed-packs.js";
 import { main as validateSource } from "./tools/validate-source-tree.js";
 import { main as validatePackage } from "./tools/validate-package.js";
 import { main as validateHookInfluence } from "./cli/validate-hook-influence.js";
@@ -26,7 +25,6 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["console-learning-projection", consoleLearningProjection],
   ["context-map", contextMap],
   ["effective-backlog-settings", effectiveBacklogSettings],
-  ["filter-installed-packs", filterInstalledPacks],
   ["fixture-retirement-audit", fixtureRetirementAudit],
   ["kit", kit],
   ["init", init],
@@ -49,7 +47,6 @@ const aliases = new Map<string, string>([
   ["flow-agents-console-learning-projection", "console-learning-projection"],
   ["flow-agents-context-map", "context-map"],
   ["flow-agents-effective-backlog-settings", "effective-backlog-settings"],
-  ["flow-agents-filter-installed-packs", "filter-installed-packs"],
   ["flow-agents-fixture-retirement-audit", "fixture-retirement-audit"],
   ["flow-agents-kit", "kit"],
   ["flow-agents-promote-workflow-artifact", "promote-workflow-artifact"],

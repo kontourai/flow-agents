@@ -51,13 +51,6 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 mkdir -p "$DEST"
 rsync -a "$SRC"/ "$DEST"/
-if [[ -n "${FLOW_AGENTS_PACKS:-}" ]]; then
-  FILTER_SCRIPT="$DEST/scripts/filter-installed-packs.mjs"
-  if [[ ! -f "$FILTER_SCRIPT" ]]; then
-    FILTER_SCRIPT="$DEST/scripts/filter-installed-packs.js"
-  fi
-  node "$FILTER_SCRIPT" "$DEST" --packs "$FLOW_AGENTS_PACKS"
-fi
 if [[ ${#CONSOLE_CONFIG_ARGS[@]} -gt 0 || -n "${FLOW_AGENTS_TELEMETRY_SINK:-}" || -n "${FLOW_AGENTS_TELEMETRY_SINKS:-}" || -n "${FLOW_AGENTS_CONSOLE_URL:-}" || -n "${CONSOLE_TELEMETRY_URL:-}" || -n "${CONSOLE_URL:-}" || -n "${FLOW_AGENTS_CONSOLE_TOKEN_FILE:-}" || -n "${CONSOLE_TELEMETRY_TOKEN_FILE:-}" ]]; then
   bash "$DEST/scripts/telemetry/install-console-config.sh" "$DEST/scripts/telemetry/telemetry.conf" "${CONSOLE_CONFIG_ARGS[@]}"
 fi

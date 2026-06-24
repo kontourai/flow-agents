@@ -22,7 +22,6 @@ type InitOptions = {
   consoleTokenValue?: string;
   consoleTenant?: string;
   telemetrySinks: TelemetrySink[];
-  packs?: string;
   activateKits: boolean;
 };
 
@@ -100,7 +99,6 @@ Options:
   --console-endpoint URL
   --console-token-file PATH
   --console-tenant ID
-  --packs LIST
   --activate-kits
   --yes, --headless
 `);
@@ -212,7 +210,6 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
       consoleTokenValue: consoleTokenValue?.trim() || undefined,
       consoleTenant: consoleTenant?.trim() || undefined,
       telemetrySinks,
-      packs: flagString(args.flags, "packs"),
       activateKits: runtime === "codex" && parseYesNo(activateAnswer, activateDefault),
     };
   } finally {
@@ -231,7 +228,6 @@ function headlessOptions(argv: string[]): InitOptions {
     consoleTokenFile: flagString(args.flags, "console-token-file"),
     consoleTenant: flagString(args.flags, "console-tenant") ?? flagString(args.flags, "console-tenant-id"),
     telemetrySinks: telemetrySinksFromFlags(args.flags),
-    packs: flagString(args.flags, "packs"),
     activateKits: runtime === "codex" && flagBool(args.flags, "activate-kits"),
   };
 }
@@ -262,7 +258,6 @@ function installBundle(bundle: string, options: InitOptions): number {
   if (consoleTokenFile) args.push("--console-token-file", consoleTokenFile);
   if (options.consoleTenant) args.push("--console-tenant", options.consoleTenant);
   const env = { ...process.env };
-  if (options.packs) env.FLOW_AGENTS_PACKS = options.packs;
   const result = spawnSync("bash", args, { cwd: bundle, env, encoding: "utf8", stdio: "inherit" });
   if (tempTokenFile) fs.rmSync(path.dirname(tempTokenFile), { recursive: true, force: true });
   if (result.error) {

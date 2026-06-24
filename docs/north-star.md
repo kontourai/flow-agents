@@ -46,7 +46,7 @@ Flow Agents should only invent a format when no durable standard or Kontour foun
 
 Do not load the whole operating manual into every session.
 
-Flow Agents should expose small discovery metadata first, then load guidance only when it is useful. Skills, powers, workflow contracts, context packs, and references should be activated just in time.
+Flow Agents should expose small discovery metadata first, then load guidance only when it is useful. Skills, powers, workflow contracts, context bundles, and references should be activated just in time.
 
 ### Reliability Over Ceremony
 
@@ -148,7 +148,7 @@ The goal is not to add ceremony. The goal is to make agents more reliable while 
 | --- | --- | --- |
 | [x] | North star | Durable direction documented in `docs/north-star.md`. |
 | [x] | Layer taxonomy | Repo vocabulary clearly separates rules, skills, powers, agents, workflows, knowledge, and evidence. |
-| [x] | Core vs optional packs | Pack composition manifest exists and generated install scripts support opt-in `FLOW_AGENTS_PACKS` filtering while preserving all-pack installs by default. |
+| [x] | Neutral base vs Kit depth | The standalone `skills/`/`agents/`/`powers/` base always installs; opinion and depth live in Flow Kits surfaced through the Kit Catalog and activated on demand. |
 | [x] | Standards register | Supported standards and Flow Agents-owned formats are documented with adoption rules. |
 | [ ] | Structured workflow state | Draft schemas, contracts, validation, explicit current-session identity, delegation-safe agent event logs, sidecar writer commands, and direct workflow-skill writer instructions exist for state, acceptance, evidence, handoff, critique, release, and learning; automatic enforcement remains partial. |
 | [ ] | Context map | Generated repo/context map exists; workflow steering and core planner/worker/verifier agents now use it, but broader agent coverage remains. |
@@ -180,7 +180,7 @@ Tasks:
 
 - Document the public layers: rules, skills, powers, agents, workflows, knowledge, and evidence. **Done:** see https://github.com/kontourai/flow-agents/blob/main/docs/operating-layers.md.
 - Mark which directories are canonical source, generated exports, runtime state, and optional integrations.
-- Decide which workflow skills are part of the core pack and which are optional domain packs. **Started:** `packaging/packs.json` defines core and development packs.
+- Separate the neutral standalone base (always installed) from opinionated depth in Flow Kits. **Done:** the `skills/`/`agents/`/`powers/` base always ships; Kits carry depth through the Kit Catalog.
 - Add a standards register that lists each external standard, how Flow Agents uses it, and what Flow Agents-owned schemas still exist. **Done:** see https://github.com/kontourai/flow-agents/blob/main/docs/standards-register.md.
 - Add a "do not invent without checking standards" rule to contributor docs.
 
@@ -214,7 +214,7 @@ Exit criteria:
 
 Tasks:
 
-- Generate a compact context map for each repo: structure, commands, test strategy, key conventions, recent workflow state, and available packs. **Started:** `npm run context-map --` writes `docs/context-map.md` and supports drift checks.
+- Generate a compact context map for each repo: structure, commands, test strategy, key conventions, recent workflow state, and available Kits. **Started:** `npm run context-map --` writes `docs/context-map.md` and supports drift checks.
 - Extend hooks so they can surface file-specific, workflow-specific, or evidence-specific guidance without loading whole docs. **Started:** workflow steering now emits ambient reminders after non-subagent tools when sidecars show `not_verified`, `needs_decision`, `blocked`, `failed`, or `needs_user`.
 - Add skill discovery metadata that lets agents choose a skill from a short summary, then progressively load the body.
 - Add missing-evidence prompts: when a workflow is about to stop without proof, show the specific gate that failed. **Started:** the Goal Fit stop hook now reads `state.json`, `evidence.json`, and `critique.json` to report unfinished phase, next action, failed checks, `NOT_VERIFIED` gaps, and open critique findings.

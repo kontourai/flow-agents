@@ -89,14 +89,14 @@ If a proposed artifact seems to belong to multiple layers, split it. For example
 - workflow state for a specific update task
 - evidence for the scan result
 
-## Core Surface And Kit Filtering
+## Neutral Base And Kit Depth
 
-The default Flow Agents surface should remain small. Flow Kits add workflow depth without making every installation carry every concept. The current install implementation still has legacy composition metadata under `packaging/`; treat that as compatibility/build mechanics while the Kit Catalog becomes the product-facing vocabulary.
+Every install ships the full standalone base: the `skills/`, `agents/`, and `powers/` directories are the neutral multi-framework toolbox, always present. Flow Kits add workflow depth and opinion on top of that base, surfaced through the Kit Catalog — the product-facing vocabulary — and activated when a workflow needs them. `packaging/` holds the cross-harness export manifest and build mechanics only; it no longer carries any install-time composition layer.
 
 Do not duplicate full membership lists in prose. Update the canonical kit and packaging metadata, then regenerate the Context Map for the current skill, agent, power, and Flow Kit counts:
 https://github.com/kontourai/flow-agents/blob/main/docs/context-map.md
 
-Kit boundaries should be validated by usage data, context budget impact, and whether users can predict what will load before making install filtering the default behavior.
+Kit boundaries should be validated by usage data, context budget impact, and whether users can predict what the Kit Catalog will activate.
 
 ## Design Checks
 

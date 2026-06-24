@@ -126,7 +126,7 @@ The important source areas are:
 | `context/contracts/` | Shared workflow contracts for planning, execution, verification, delivery, sandboxing, and governance adapters. |
 | `scripts/` | Build, validation, hook, telemetry, and sidecar tooling. |
 | `evals/` | Static, behavioral, integration, and bundle-install tests. |
-| `packaging/` | Pack definitions and cross-runtime export rules. |
+| `packaging/` | Cross-runtime export manifest and packaging rules. |
 | `docs/` | Durable explanation of the operating model and roadmap. |
 
 Flow Agents currently carries local workflow sidecars and hooks while Flow is being separated into its own Kontour product layer. The intended boundary is that Flow owns generic steps, gates, transitions, Flow Runs, exceptions, and Flow Reports; Flow Agents owns the agent-facing modes, skills, provider settings, runtime adapters, and Console experience that make those flows useful.
@@ -248,18 +248,11 @@ The repo has tests for:
 
 The intended pattern is that every important workflow rule gets a test at the lowest useful layer: static checks for text contracts, integration checks for scripts and hooks, and behavioral evals for runtime agent behavior when practical.
 
-### Packs
+### Neutral base and Kits
 
-Packs keep the global surface understandable.
+Every install ships the full standalone base — the `skills/`, `agents/`, and `powers/` directories are the neutral multi-framework toolbox, always present and never filtered at install time.
 
-`packaging/packs.json` groups capabilities into sets. Currently defined:
-
-- `core`
-- `development`
-
-Future packs (knowledge, AWS, experimental) are deferred until another producer proof shows repeated friction.
-
-All-pack installs remain the default today. `FLOW_AGENTS_PACKS` lets users opt into a smaller installed surface, and domain depth belongs in packs so a global setup can be narrowed without changing the source bundle.
+Opinion and depth live in Flow Kits (builder, knowledge, release-evidence), surfaced through the Kit Catalog and activated when a workflow needs them. The Kit Catalog is the product-facing vocabulary; the standalone base is the doer's toolbox.
 
 ## How A Request Flows
 
@@ -383,7 +376,7 @@ The next useful improvements are:
 
 - stronger live behavioral evals that prove hook output changes agent behavior across every runtime, not only that hooks emit guidance
 - richer guide examples for non-code knowledge workflows
-- clearer pack selection guidance for global installs
+- clearer Kit Catalog activation guidance for global installs
 - a Veritas advisory-readiness spike through the optional governance adapter boundary
 - a self-validation loop that automatically proposes docs, eval, or skill updates after repeated workflow friction
 

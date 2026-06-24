@@ -9,7 +9,6 @@ These files are stable launchers for TypeScript code compiled under `build/src/`
 | Wrapper | Compiled implementation |
 | --- | --- |
 | `build-universal-bundles.js` | `build/src/tools/build-universal-bundles.js` |
-| `filter-installed-packs.js` | `build/src/tools/filter-installed-packs.js` |
 | `generate-context-map.js` | `build/src/tools/generate-context-map.js` |
 | `kit.js` | `build/src/cli/kit.js` |
 | `pull-work-provider.js` | `build/src/cli/pull-work-provider.js` |

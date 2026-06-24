@@ -30,7 +30,7 @@ The user sees a clear result: pass, fail, hold, or not verified. The implementat
 
 | Area | Flow Agents Owns | Veritas Owns |
 | --- | --- | --- |
-| Workflow | Agent-facing workflow packs, harness hooks, sidecars, release decisions, learning loops | None |
+| Workflow | Agent-facing workflow skills, harness hooks, sidecars, release decisions, learning loops | None |
 | Flow | Process steps, gates, transitions, Flow Runs, exceptions, and Flow Reports | None |
 | Governance | When to ask for governance evidence | Repo standards, authority settings, evidence checks |
 | Evidence | `evidence.json`, `standard_refs`, `external_evidence`, acceptance mapping | Native Veritas reports and rule results |
@@ -157,7 +157,7 @@ Current local configuration in this repo is limited to:
 ## Non-Goals
 
 - Do not vendor Veritas source into Flow Agents.
-- Do not make Veritas mandatory for the core pack.
+- Do not make Veritas mandatory for the standalone base.
 - Do not duplicate Veritas policy schemas inside Flow Agents.
 - Do not make knowledge, meeting, or sales workflows depend on development governance tooling.
 - Do not bootstrap `.veritas/repo-map.json` from Flow Agents in this slice. Native Veritas repository setup remains future Veritas-owned or adapter-owned work.

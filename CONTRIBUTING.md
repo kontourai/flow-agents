@@ -9,11 +9,11 @@ Agents. This file is the footnote for people developing the product itself.
 
 - keep the core product generic — no machine-specific paths, usernames, or
   private workspace assumptions in tracked source
-- the public bundle ships the `core` and `development` packs; keep new work
-  inside that scope
+- the public bundle ships the full standalone base (skills, agents, powers) plus
+  the Flow Kits; keep new work inside that scope
 - prefer install/use clarity over maintainer cleverness
-- update the relevant docs, `packaging/packs.json`, and `packaging/manifest.json`
-  whenever you add or remove a skill, agent, or power
+- update the relevant docs, `kits/catalog.json`, and `packaging/manifest.json`
+  whenever you add or remove a skill, agent, power, or kit
 - keep `docs/context-map.md` current with `npm run context-map`
 - run `npm run build && npm run validate:source && bash evals/ci/run-baseline.sh`
   before opening a PR

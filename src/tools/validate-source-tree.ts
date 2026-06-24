@@ -11,7 +11,6 @@ class Reporter {
   check(condition: boolean, message: string): void { if (!condition) this.fail(message); }
 }
 const manifestPath = path.join(root, "packaging/manifest.json");
-const packsPath = path.join(root, "packaging/packs.json");
 const kitsCatalogPath = path.join(root, "kits/catalog.json");
 const flowRoot = process.env.FLOW_CLI_ROOT ? path.resolve(process.env.FLOW_CLI_ROOT) : "";
 const flowSchemaPath = flowRoot ? path.join(flowRoot, "schemas", "flow-definition.schema.json") : "";
@@ -32,10 +31,8 @@ const mirroredFiles = new Map<string, { mirror: string; allowedDifferences: Arra
 ]);
 const publicScriptWrappers = new Map<string, { target: string; significantLines: string[] }>([
   ["scripts/build-universal-bundles.js", { target: "../build/src/tools/build-universal-bundles.js", significantLines: [
-    "// Supports FLOW_AGENTS_PACKS through the TypeScript bundle builder.",
     'import("../build/src/tools/build-universal-bundles.js").then(({ main }) => process.exit(main()));',
   ] }],
-  ["scripts/filter-installed-packs.js", { target: "../build/src/tools/filter-installed-packs.js", significantLines: ['import("../build/src/tools/filter-installed-packs.js").then(({ main }) => process.exit(main(process.argv.slice(2))));'] }],
   ["scripts/generate-context-map.js", { target: "../build/src/tools/generate-context-map.js", significantLines: ['import("../build/src/tools/generate-context-map.js").then(({ main }) => process.exit(main(process.argv.slice(2))));'] }],
   ["scripts/kit.js", { target: "../build/src/cli/kit.js", significantLines: ['import("../build/src/cli/kit.js").then(({ main }) => main().then((code) => process.exit(code)));'] }],
   ["scripts/pull-work-provider.js", { target: "../build/src/cli/pull-work-provider.js", significantLines: ['import("../build/src/cli/pull-work-provider.js").then(({ main }) => process.exit(main()));'] }],
@@ -176,36 +173,6 @@ function validateManifest(reporter: Reporter, manifest: any, agentNames: Set<str
   }
   for (const dir of manifest.optional_copy_dirs ?? []) if (!fs.existsSync(path.join(root, dir))) console.log(`warning: ${rel(manifestPath)} optional_copy_dirs entry absent: ${dir}`);
   for (const agent of manifest.codex?.excluded_agents ?? []) reporter.check(agentNames.has(agent), `${rel(manifestPath)}: codex excluded agent '${agent}' does not exist`);
-}
-function validatePacksManifest(reporter: Reporter, agentNames: Set<string>): void {
-  const data = tryLoadJson(packsPath, reporter);
-  if (!data || typeof data !== "object") return;
-  reporter.check(data.schema_version === "1.0", `${rel(packsPath)}: schema_version must be 1.0`);
-  reporter.check(Array.isArray(data.packs) && data.packs.length > 0, `${rel(packsPath)}: packs must be a non-empty list`);
-  const skillNames = new Set(fs.readdirSync(path.join(root, "skills")).filter((name) => fs.existsSync(path.join(root, "skills", name, "SKILL.md"))));
-  const powerNames = new Set(fs.readdirSync(path.join(root, "powers")).filter((name) => fs.existsSync(path.join(root, "powers", name, "POWER.md"))));
-  const names = new Set<string>(); const defaults = new Set<string>(); const assigned = { skills: new Set<string>(), agents: new Set<string>(), powers: new Set<string>() };
-  (Array.isArray(data.packs) ? data.packs : []).forEach((pack: any, index: number) => {
-    const name = pack?.name;
-    if (typeof name !== "string" || !/^[a-z][a-z0-9-]*$/.test(name)) { reporter.fail(`${rel(packsPath)}: packs[${index}].name must be a kebab-case string`); return; }
-    if (names.has(name)) reporter.fail(`${rel(packsPath)}: duplicate pack name '${name}'`);
-    names.add(name); if (pack.default === true) defaults.add(name);
-    reporter.check(typeof pack.description === "string" && !!pack.description, `${rel(packsPath)}: pack '${name}' missing description`);
-    for (const [field, available] of [["skills", skillNames], ["agents", agentNames], ["powers", powerNames]] as const) {
-      const values = pack[field] ?? [];
-      reporter.check(Array.isArray(values), `${rel(packsPath)}: pack '${name}' .${field} must be a list`);
-      const seen = new Set<string>();
-      for (const value of Array.isArray(values) ? values : []) {
-        if (typeof value !== "string") { reporter.fail(`${rel(packsPath)}: pack '${name}' .${field} entry is not a string`); continue; }
-        if (seen.has(value)) reporter.fail(`${rel(packsPath)}: pack '${name}' has duplicate ${field} entry '${value}'`);
-        seen.add(value); assigned[field].add(value);
-        reporter.check(available.has(value), `${rel(packsPath)}: pack '${name}' references missing ${field.slice(0, -1)} '${value}'`);
-      }
-    }
-  });
-  reporter.check(defaults.has("core"), `${rel(packsPath)}: core pack must be default`);
-  const missingSkills = [...skillNames].filter((name) => !assigned.skills.has(name)).sort();
-  reporter.check(missingSkills.length === 0, `${rel(packsPath)}: skills missing from all packs: ${missingSkills.join(", ")}`);
 }
 function safeLocalPath(baseDir: string, pathText: unknown, label: string, reporter: Reporter): string | undefined {
   if (typeof pathText !== "string" || !pathText) { reporter.fail(`${label} must be a non-empty relative path`); return undefined; }
@@ -503,7 +470,6 @@ export function main(argv = process.argv.slice(2)): number {
   validateAgentCards(reporter, agentNames);
   validatePowers(reporter);
   validateManifest(reporter, manifest, agentNames);
-  validatePacksManifest(reporter, agentNames);
   validateKits(reporter);
   validateAgentPaths(reporter, manifest);
   validateLegacyRefs(reporter);
