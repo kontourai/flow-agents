@@ -1428,7 +1428,16 @@ ${panelJs}
 `;
   const out = opt(p, "out") || path.join(dir!, "trust-panel.html");
   fs.writeFileSync(out, html);
+  // Also emit the derived report as a first-class artifact — the universal input for
+  // Surface's hosted Snapshot Viewer and a bare `<surface-trust-panel src=…>` (the HTML
+  // above already embeds it). Suppress with --no-report.
+  let reportOut = "";
+  if (!p.flags.has("no-report")) {
+    reportOut = opt(p, "report-out") || path.join(dir!, "trust-report.json");
+    fs.writeFileSync(reportOut, `${JSON.stringify(report, null, 2)}\n`);
+  }
   console.log(out);
+  if (reportOut) console.log(reportOut);
   return 0;
 }
 // ─────────────────────────────────────────────────────────────────────────────

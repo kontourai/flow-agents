@@ -2270,6 +2270,7 @@ fi
 # ─── AC4: render-trust-panel projects the bundle to a standalone Surface Trust Panel (ADR 0010 Phase 3) ──
 if [[ -f "$TB_CAPTURE_DIR/trust.bundle" ]] && flow_agents_node "$WRITER" render-trust-panel "$TB_CAPTURE_DIR" --out "$TB_CAPTURE_DIR/trust-panel.html" >"$TMPDIR_EVAL/tb-panel.out" 2>"$TMPDIR_EVAL/tb-panel.err"; then
   PANEL="$TB_CAPTURE_DIR/trust-panel.html"
+  REPORT="$TB_CAPTURE_DIR/trust-report.json"
   if [[ -f "$PANEL" ]] \
     && rg -q "<surface-trust-panel" "$PANEL" \
     && rg -q "customElements.define" "$PANEL" \
@@ -2277,6 +2278,12 @@ if [[ -f "$TB_CAPTURE_DIR/trust.bundle" ]] && flow_agents_node "$WRITER" render-
     _pass "render-trust-panel: standalone Trust Panel HTML with inlined Surface element + disputed claim from the derived report"
   else
     _fail "render-trust-panel output missing panel element / inlined JS / disputed claim"
+  fi
+  # report artifact: the derived TrustReport (universal input for Surface's Snapshot Viewer / bare element)
+  if [[ -f "$REPORT" ]] && rg -q '"status": "disputed"' "$REPORT" && rg -q '"claims"' "$REPORT"; then
+    _pass "render-trust-panel: also emits trust-report.json (derived report with the disputed claim)"
+  else
+    _fail "render-trust-panel did not emit a valid trust-report.json: $(head -c 200 "$REPORT" 2>/dev/null)"
   fi
 else
   _fail "render-trust-panel failed: $(cat "$TMPDIR_EVAL/tb-panel.out" "$TMPDIR_EVAL/tb-panel.err")"
