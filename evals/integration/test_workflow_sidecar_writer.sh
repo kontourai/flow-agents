@@ -2232,6 +2232,41 @@ else
   _fail "trust.bundle critique claim fidelity setup failed: $(cat "$TMPDIR_EVAL/tb-critique-pass.out" "$TMPDIR_EVAL/tb-critique-pass.err")"
 fi
 
+# ─── AC3: capture authoritative over claimed status + policies present (ADR 0010 maximal) ──
+TB_CAPTURE_DIR="$TMPDIR_EVAL/repo/.flow-agents/trust-bundle-capture"
+mkdir -p "$TB_CAPTURE_DIR"
+cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_CAPTURE_DIR/trust-bundle-capture--deliver.md"
+flow_agents_node "$WRITER" init-plan "$TB_CAPTURE_DIR/trust-bundle-capture--deliver.md" \
+  --source-request "Capture-authoritative trust bundle fixture." \
+  --summary "Capture-authoritative trust bundle fixture." \
+  --next-action "Seed a claimed-pass check whose command actually failed in the capture log." \
+  --timestamp "2026-05-09T00:00:00Z" >"$TMPDIR_EVAL/tb-capture-init.out" 2>"$TMPDIR_EVAL/tb-capture-init.err"
+# Deterministic capture log: the command FAILED (exit 1), recorded before record-evidence.
+printf '%s\n' '{"command":"npm test","observedResult":"fail","exitCode":1}' > "$TB_CAPTURE_DIR/command-log.jsonl"
+if flow_agents_node "$WRITER" record-evidence "$TB_CAPTURE_DIR" \
+  --verdict pass \
+  --check-json '{"id":"tb-capture-check","kind":"test","status":"pass","summary":"Claimed pass.","command":"npm test"}' \
+  --timestamp "2026-05-09T00:01:00Z" >"$TMPDIR_EVAL/tb-capture-evidence.out" 2>"$TMPDIR_EVAL/tb-capture-evidence.err" \
+  && [[ -f "$TB_CAPTURE_DIR/trust.bundle" ]]; then
+  if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/tb-capture-assert.err"
+import { readFileSync } from 'node:fs';
+const bundle = JSON.parse(readFileSync('${TB_CAPTURE_DIR}/trust.bundle', 'utf8'));
+const claim = bundle.claims.find((c) => c.subjectId && c.subjectId.endsWith('/tb-capture-check'));
+if (!claim) { process.stderr.write('missing claim for /tb-capture-check\n'); process.exit(1); }
+if (claim.status !== 'disputed') { process.stderr.write('claimed-pass check with captured FAIL had status ' + claim.status + ', expected disputed (capture authoritative)\n'); process.exit(1); }
+if (!Array.isArray(bundle.policies) || bundle.policies.length === 0) { process.stderr.write('bundle.policies empty — expected a verification policy per claimType\n'); process.exit(1); }
+const ev = bundle.evidence.find((e) => e.claimId === claim.id);
+if (!ev || !ev.execution || ev.execution.isError !== true) { process.stderr.write('capture evidence with execution.isError=true missing\n'); process.exit(1); }
+NODEOF
+  then
+    _pass "trust.bundle capture authoritative: claimed-pass + captured-fail → disputed; policies present; execution evidence folded in"
+  else
+    _fail "trust.bundle capture-authoritative assertion failed: $(cat "$TMPDIR_EVAL/tb-capture-assert.err")"
+  fi
+else
+  _fail "trust.bundle capture-authoritative setup failed: $(cat "$TMPDIR_EVAL/tb-capture-evidence.out" "$TMPDIR_EVAL/tb-capture-evidence.err")"
+fi
+
 
 # ─── AC3: statusFunctionVersion conformance ───────────────────────────────────
 # Assert the statusFunctionVersion embedded in the emitted trust.bundle source
