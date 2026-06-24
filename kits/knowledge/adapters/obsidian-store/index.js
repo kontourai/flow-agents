@@ -142,6 +142,32 @@ export class ObsidianKnowledgeStore {
     }
   }
 
+  /**
+   * Resolve a store-relative path from the persisted path index.
+   *
+   * The path index is local metadata, but it may be tampered with.  Never feed
+   * an indexed path directly to fs/path helpers without this containment check.
+   */
+  _resolveStorePath(relPath) {
+    if (typeof relPath !== "string" || !relPath) {
+      throw new Error("Invalid store path in path index");
+    }
+    if (path.isAbsolute(relPath)) {
+      throw new Error(`Path index entry escapes store root: ${relPath}`);
+    }
+
+    const absPath = path.resolve(this._root, relPath);
+    const relativeToRoot = path.relative(this._root, absPath);
+    if (
+      relativeToRoot === ".."
+      || relativeToRoot.startsWith(`..${path.sep}`)
+      || path.isAbsolute(relativeToRoot)
+    ) {
+      throw new Error(`Path index entry escapes store root: ${relPath}`);
+    }
+    return absPath;
+  }
+
   // -------------------------------------------------------------------------
   // Path index I/O
   // -------------------------------------------------------------------------
@@ -230,7 +256,7 @@ export class ObsidianKnowledgeStore {
   _getAbsPath(id, pathIndex) {
     const entry = (pathIndex || this._loadPathIndex()).by_id[id];
     if (!entry) return null;
-    return path.join(this._root, entry.path);
+    return this._resolveStorePath(entry.path);
   }
 
   /**
@@ -266,24 +292,28 @@ export class ObsidianKnowledgeStore {
 
     if (existingEntry && existingEntry.archived) {
       // Archived record — keep in archive path (supersede-not-delete writes back there)
+      this._resolveStorePath(existingEntry.path);
       targetRelPath = existingEntry.path;
     } else if (existingEntry) {
       // Existing active record — check if path needs to change (title changed)
       const newRelPath = this._computeRelPath(record.category, record.title, record.id, pathIndex, record.type);
+      this._resolveStorePath(newRelPath);
       if (newRelPath !== existingEntry.path) {
         // Move: delete old file, register new path
-        const oldAbs = path.join(this._root, existingEntry.path);
+        const oldAbs = this._resolveStorePath(existingEntry.path);
         if (fs.existsSync(oldAbs)) fs.unlinkSync(oldAbs);
         delete pathIndex.by_path[existingEntry.path];
         pathIndex.by_id[record.id] = { path: newRelPath, archived: false };
         pathIndex.by_path[newRelPath] = record.id;
         targetRelPath = newRelPath;
       } else {
+        this._resolveStorePath(existingEntry.path);
         targetRelPath = existingEntry.path;
       }
     } else {
       // New record
       const newRelPath = this._computeRelPath(record.category, record.title, record.id, pathIndex, record.type);
+      this._resolveStorePath(newRelPath);
       pathIndex.by_id[record.id] = { path: newRelPath, archived: false };
       pathIndex.by_path[newRelPath] = record.id;
       targetRelPath = newRelPath;
@@ -303,7 +333,7 @@ export class ObsidianKnowledgeStore {
     const obsidianBody = this._renderObsidianBody(record, pathIndex);
     const text = `---\n${serializeYaml(frontmatter)}\n---\n\n${obsidianBody}`;
 
-    const absPath = path.join(this._root, targetRelPath);
+    const absPath = this._resolveStorePath(targetRelPath);
     fs.mkdirSync(path.dirname(absPath), { recursive: true });
     fs.writeFileSync(absPath, text, "utf8");
 
@@ -326,10 +356,10 @@ export class ObsidianKnowledgeStore {
     }
 
     const archiveRelPath = `archive/${entry.path}`;
-    const archiveAbs = path.join(this._root, archiveRelPath);
+    const archiveAbs = this._resolveStorePath(archiveRelPath);
     fs.mkdirSync(path.dirname(archiveAbs), { recursive: true });
 
-    const currentAbs = path.join(this._root, entry.path);
+    const currentAbs = this._resolveStorePath(entry.path);
     if (fs.existsSync(currentAbs)) fs.renameSync(currentAbs, archiveAbs);
 
     delete pathIndex.by_path[entry.path];
@@ -350,7 +380,7 @@ export class ObsidianKnowledgeStore {
   _idToFilename(id, pathIndex) {
     const entry = pathIndex.by_id[id];
     if (!entry) return id;
-    return path.basename(entry.path, ".md");
+    return path.basename(this._resolveStorePath(entry.path), ".md");
   }
 
   /**
