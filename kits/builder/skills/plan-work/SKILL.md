@@ -33,7 +33,18 @@ Before delegating to tool-planner, check if the goal can be solved with existing
 2. If the goal involves adding new capabilities, invoke the search-first skill
 3. Pass research findings to tool-planner as additional context
 
-Skip this step if the goal is purely about modifying existing code (bug fixes, refactors).
+**Survey existing concepts before designing new ones.** Before the plan introduces a new
+artifact, schema, type, data shape, status, or derivation/algorithm, check what the project's
+**dependencies and contracts already define** — not just the local codebase. Inspect exported
+types, schemas, and builders from dependencies (e.g. `@kontourai/*` packages and vendored
+schemas) and the resource/data contracts under `context/contracts/`. Prefer **consuming the
+canonical concept over inventing a parallel one**: follow existing patterns, understand the
+dependency surface, and leverage existing concepts. If a planned shape resembles a dependency's
+existing concept, consume theirs and record which one. This operationalizes the consume-never-fork
+guardrail of ADR 0008 and ADR 0010 at planning time — the cheapest place to catch a fork.
+
+Skip the codebase-similarity search for pure bug-fix/refactor goals, but still apply the
+survey-existing-concepts check whenever the plan would add a new shape or algorithm.
 
 ## Input
 
