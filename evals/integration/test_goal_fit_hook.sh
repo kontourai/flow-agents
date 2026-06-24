@@ -44,8 +44,10 @@ else
   _fail "goal-fit hook should not block by default"
 fi
 
-if rg -q 'status:executing' "$TMPDIR_EVAL/stderr.txt" && rg -q 'Definition Of Done' "$TMPDIR_EVAL/stderr.txt" && rg -q 'Goal Fit Gate' "$TMPDIR_EVAL/stderr.txt"; then
-  _pass "goal-fit hook reports active incomplete delivery"
+# Wave 3 (ADR 0010 2c): Builder heading checks removed; only the ACTIVE_STATUSES signal fires now.
+# The Definition Of Done and Goal Fit Gate heading checks were removed from analyze().
+if rg -q 'status:executing' "$TMPDIR_EVAL/stderr.txt"; then
+  _pass "goal-fit hook reports active incomplete delivery (status signal via ACTIVE_STATUSES)"
 else
   _fail "goal-fit hook did not report active incomplete delivery"
 fi
@@ -101,6 +103,41 @@ Build: PASS
 - [ ] CI/relevant checks passed
 - [ ] Long-lived docs updated with why/how the feature was built
 MARKDOWN
+
+# Adjustment A (2c): Seed a state.json (terminal: done) and an acceptance.json with
+# pending criteria so the sidecar-driven Final Acceptance hygiene check fires.
+# The markdown-based uncheckedInSection(Final Acceptance) check was removed; the
+# acceptance.json pending-criteria check in missingBundleOrStateSignal is its replacement.
+cat > "$REPO/.flow-agents/feedback-loop/state.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "feedback-loop",
+  "status": "delivered",
+  "phase": "done",
+  "updated_at": "2026-05-04T00:00:00Z",
+  "next_action": { "status": "done", "summary": "Local delivery complete." }
+}
+JSON
+
+cat > "$REPO/.flow-agents/feedback-loop/acceptance.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "feedback-loop",
+  "criteria": [
+    {
+      "id": "ci-passed",
+      "description": "CI/relevant checks passed",
+      "status": "pending"
+    },
+    {
+      "id": "docs-updated",
+      "description": "Long-lived docs updated with why/how the feature was built",
+      "status": "pending"
+    }
+  ],
+  "goal_fit": { "status": "pass", "summary": "User-facing workflow was exercised or documented." }
+}
+JSON
 
 if FLOW_AGENTS_GOAL_FIT_STRICT=true node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/final.out" 2>"$TMPDIR_EVAL/final.err" <<JSON
 {"hook_event_name":"Stop","cwd":"$REPO"}
@@ -434,8 +471,8 @@ then
   _fail "strict goal-fit hook should block Markdown/sidecar contradictions"
 else
   status=$?
-  if [[ "$status" -eq 2 ]] && rg -q 'Markdown PASS contradicts evidence.json verdict fail' "$TMPDIR_EVAL/sidecar-contradiction.err"; then
-    _pass "strict goal-fit hook blocks Markdown/sidecar contradictions"
+  if [[ "$status" -eq 2 ]] && rg -q 'evidence verdict:fail' "$TMPDIR_EVAL/sidecar-contradiction.err"; then
+    _pass "strict goal-fit hook blocks sidecar evidence verdict fail (markdownVerdict check removed; sidecar path covers it)"
   else
     _fail "strict contradiction hook returned unexpected result: status=$status output=$(cat "$TMPDIR_EVAL/sidecar-contradiction.err")"
   fi

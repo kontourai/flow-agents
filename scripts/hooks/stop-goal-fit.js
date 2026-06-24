@@ -42,7 +42,8 @@ const ACTIVE_STATUSES = new Set([
   'blocked',
   'partial',
 ]);
-const DELIVERY_TYPES = new Set(['deliver', 'delivery', 'fix-bug', 'execute-plan', 'verify-work']);
+// WORKFLOW_SESSION_TYPES: used for artifact identification only, not for verdict production.
+const WORKFLOW_SESSION_TYPES = new Set(['deliver', 'delivery', 'fix-bug', 'execute-plan', 'verify-work']);
 const SIDECAR_NAMES = new Set(['state.json', 'acceptance.json', 'evidence.json', 'handoff.json']);
 const OPTIONAL_SIDECAR_NAMES = new Set(['critique.json']);
 
@@ -211,7 +212,7 @@ function isWorkflowArtifact(artifact) {
   if (!artifact) return false;
   if (artifact.role === 'plan' || artifact.role === 'review') return false;
   if (artifact.file.endsWith('-plan.md') || artifact.file.endsWith('-review.md')) return false;
-  if (DELIVERY_TYPES.has(artifact.type)) return true;
+  if (WORKFLOW_SESSION_TYPES.has(artifact.type)) return true;
   return /--(deliver|fix-bug|execute-plan|verify-work)\b/.test(path.basename(artifact.file));
 }
 
@@ -652,13 +653,6 @@ async function bundleEnforcement(artifactDir) {
   return warnings;
 }
 
-function markdownVerdict(text) {
-  const verdict = (/###\s+Verdict:\s*([A-Za-z_ -]+)/i.exec(text) || [])[1]
-    || (/^Build:\s*\[?([A-Za-z_ -]+)\]?/im.exec(text) || [])[1]
-    || '';
-  return normalizedStatus(verdict).replace(/[^a-z_ -].*$/, '').trim();
-}
-
 /**
  * Scope to the session's current task when .flow-agents/current.json points at
  * one (mirroring evidence-capture.js). Returns the slug dir, or null to fall back
@@ -687,6 +681,48 @@ function isPreExecution(artifactDir, markdownStatus) {
   return PRE_EXECUTION_STATUSES.has(normalizedStatus(markdownStatus));
 }
 
+
+// ─── Wave 2c: no-bundle/no-state fallback gate ────────────────────────────────
+// Sessions that have NEITHER a trust.bundle NOR a state.json fall through
+// both bundleEnforcement (no bundle) and sidecarGuidance (no state). Without the
+// old markdown heading checks this would create a silent ungated-session path.
+// If a trust.bundle exists, bundleEnforcement handles it. If state.json exists,
+// sidecarGuidance handles it. The gap: a session with only a markdown artifact.
+//
+// Adjustment A (sidecar-driven Final Acceptance): when acceptance.json has
+// pending criteria and the task state shows delivered, emit the Final Acceptance
+// hygiene warning from the sidecar rather than markdown template parsing.
+function missingBundleOrStateSignal(artifactDir) {
+  const warnings = [];
+  const hasBundle = fs.existsSync(path.join(artifactDir, 'trust.bundle'));
+  const state = readJsonFile(path.join(artifactDir, 'state.json'));
+
+  if (!hasBundle && !state) {
+    // Neither trust.bundle nor state.json: session is untracked by sidecar path.
+    // Emit a NOT_VERIFIED warning so execution-phase sessions remain gated.
+    const base = path.basename(artifactDir);
+    warnings.push(`${base} NOT_VERIFIED — no trust.bundle or state.json found; run 'workflow-sidecar record-evidence' to build the evidence record before delivery.`);
+    return warnings;
+  }
+
+  // Adjustment A: sidecar-driven Final Acceptance hygiene.
+  // When the task is delivered but acceptance.json still has pending criteria,
+  // emit the Final Acceptance reminder from the sidecar (not markdown parsing).
+  const acceptance = readJsonFile(path.join(artifactDir, 'acceptance.json'));
+  if (acceptance && Array.isArray(acceptance.criteria)) {
+    const pendingCriteria = acceptance.criteria.filter(c => {
+      const s = normalizedStatus(c && c.status);
+      return s === 'pending' || s === 'not_started' || s === '' || s === 'unknown';
+    });
+    if (pendingCriteria.length > 0) {
+      const base = path.basename(artifactDir);
+      warnings.push(`${base} Final Acceptance: ${pendingCriteria.length} acceptance criterion/criteria still pending; complete CI/merge/docs before final delivery.`);
+    }
+  }
+
+  return warnings;
+}
+
 async function analyze(root, now = Date.now()) {
   const flowAgentsDir = path.join(root, '.flow-agents');
   // Scope to the session's current task when current.json names one, so an
@@ -711,33 +747,15 @@ async function analyze(root, now = Date.now()) {
     warnings.push(`${relPath} is still status:${status} (${ageMinutes}m old). Do not final-answer as complete unless the next step is explicit.`);
   }
 
-  if (!hasHeading(latest.text, 'Definition Of Done')) {
-    warnings.push(`${relPath} is missing ## Definition Of Done, so the user-facing finish line is not explicit.`);
-  }
-
-  if (!hasHeading(latest.text, 'Goal Fit Gate')) {
-    warnings.push(`${relPath} is missing ## Goal Fit Gate, so local acceptance has not been checked.`);
-  } else {
-    for (const item of uncheckedInSection(latest.text, 'Goal Fit Gate').slice(0, 6)) {
-      warnings.push(`${relPath} Goal Fit unchecked: ${item}`);
-    }
-  }
-
-  if (status === 'delivered' && hasHeading(latest.text, 'Final Acceptance')) {
-    const uncheckedFinal = uncheckedInSection(latest.text, 'Final Acceptance');
-    if (uncheckedFinal.length > 0) {
-      warnings.push(`${relPath} local delivery is marked delivered, but Final Acceptance still has ${uncheckedFinal.length} open item(s) for CI/merge/docs promotion.`);
-    }
-  }
+  // Builder heading completeness checks (hasHeading DOD/Goal Fit Gate) removed in ADR 0010 2c.
+  // Verdict is now bundle-driven via bundleEnforcement + sidecarGuidance.
+  // Sessions with neither trust.bundle nor state.json are caught by missingBundleOrStateSignal.
 
   warnings.push(...sidecarValidation(root, path.dirname(latest.file)));
-  const evidence = readJsonFile(path.join(path.dirname(latest.file), 'evidence.json'));
-  if (evidence && markdownVerdict(latest.text) === 'pass' && normalizedStatus(evidence.verdict) === 'fail') {
-    warnings.push(`${relPath} Markdown PASS contradicts evidence.json verdict fail.`);
-  }
   warnings.push(...sidecarGuidance(root, path.dirname(latest.file)));
   warnings.push(...captureCrossReference(root, path.dirname(latest.file)));
   warnings.push(...(await bundleEnforcement(path.dirname(latest.file))));
+  warnings.push(...missingBundleOrStateSignal(path.dirname(latest.file)));
 
   // A pre-execution task (not started) OR a terminal task (which is itself a
   // completion *claim*) must not block on mere incompleteness — but a FALSE claim
