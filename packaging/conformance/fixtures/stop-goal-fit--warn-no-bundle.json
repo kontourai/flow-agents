@@ -1,0 +1,23 @@
+{
+  "description": "stop-goal-fit emits NOT_VERIFIED — warning (exit 2 in block mode) when a delivery session has neither trust.bundle nor state.json",
+  "policy_class": "stop-goal-fit",
+  "canonical_event": "stop",
+  "conformance_level": "L2",
+  "hook_id": "stop-goal-fit",
+  "hook_script": "stop-goal-fit.js",
+  "payload": {
+    "hook_event_name": "Stop",
+    "cwd": "__TEMP_WORKSPACE__"
+  },
+  "workspace_setup": {
+    "AGENTS.md": "# Test Repo\n",
+    ".flow-agents/my-task/my-task--deliver.md": "# My Task\n\nbranch: main\nstatus: executing\ntype: deliver\n\n## Plan\n\nWork in progress — no sidecars yet.\n"
+  },
+  "env": {
+    "FLOW_AGENTS_GOAL_FIT_MODE": "block"
+  },
+  "expected": {
+    "exit_code": 2,
+    "stderr_contains": ["NOT_VERIFIED —", "trust.bundle"]
+  }
+}

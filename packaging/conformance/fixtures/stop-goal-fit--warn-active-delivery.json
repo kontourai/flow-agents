@@ -1,5 +1,5 @@
 {
-  "description": "stop-goal-fit warns (exit 0, stderr has warnings) for an active delivery artifact missing DOD and Goal Fit Gate",
+  "description": "stop-goal-fit warns (exit 0, stderr has warnings) for an active delivery artifact; validates the warn mode status signal fires without Builder heading checks",
   "policy_class": "stop-goal-fit",
   "canonical_event": "stop",
   "conformance_level": "L1",
@@ -13,9 +13,12 @@
     "AGENTS.md": "# Test Repo\n",
     ".flow-agents/my-task/my-task--deliver.md": "# My Task\n\nbranch: main\nstatus: executing\ntype: deliver\n\n## Plan\n\nWork TBD.\n"
   },
+  "env": {
+    "FLOW_AGENTS_GOAL_FIT_MODE": "warn"
+  },
   "expected": {
     "exit_code": 0,
     "stdout_echoes_input": true,
-    "stderr_contains": ["status:executing", "Definition Of Done", "Goal Fit Gate"]
+    "stderr_contains": ["status:executing"]
   }
 }
