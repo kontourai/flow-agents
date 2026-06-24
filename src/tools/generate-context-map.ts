@@ -17,7 +17,7 @@ const dirDescriptions: Record<string, string> = {
   scripts: "Build, validation, hook, telemetry, workflow, and import/export utilities.",
   skills: "On-demand capability instructions and workflow primitives.",
 };
-const workflowSkills = new Set(["idea-to-backlog", "pull-work", "plan-work", "execute-plan", "review-work", "verify-work", "evidence-gate", "release-readiness", "learning-review", "deliver", "fix-bug", "tdd-workflow"]);
+const workflowSkills = new Set(["idea-to-backlog", "pull-work", "plan-work", "execute-plan", "review-work", "verify-work", "evidence-gate", "gate-review", "release-readiness", "learning-review", "deliver", "fix-bug", "tdd-workflow"]);
 const commands = [
   ["Source tree", "npm run validate:source"],
   ["Static suite", "bash evals/run.sh static"],

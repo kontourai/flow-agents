@@ -79,10 +79,86 @@ export function validateTrustBundle(bundle: unknown): { valid: boolean; errors: 
   if (!validate) return { valid: true, errors: [], available: false };
   return { ...validate(bundle), available: true };
 }
+// Validate a single InquiryRecord against the hachure inquiry-record.schema.json.
+// Uses a separate AJV instance compiled against that schema (not the trust-bundle schema).
+let _hachureInquiryRecordValidator: ((record: unknown) => { valid: boolean; errors: string[] }) | null | undefined;
+function getHachureInquiryRecordValidator(): ((record: unknown) => { valid: boolean; errors: string[] }) | null {
+  if (_hachureInquiryRecordValidator !== undefined) return _hachureInquiryRecordValidator;
+  try {
+    const _require = createRequire(import.meta.url);
+    const hachureDir = path.dirname(_require.resolve("hachure"));
+    const schemasDir = path.join(hachureDir, "schemas");
+    const Ajv = _require("ajv/dist/2020");
+    const schemas: Record<string, any> = {};
+    for (const file of fs.readdirSync(schemasDir)) {
+      if (!file.endsWith(".schema.json")) continue;
+      schemas[file] = JSON.parse(fs.readFileSync(path.join(schemasDir, file), "utf8"));
+    }
+    const inquiryRecordSchema = schemas["inquiry-record.schema.json"];
+    if (!inquiryRecordSchema) { _hachureInquiryRecordValidator = null; return null; }
+    const ajv = new Ajv({ strict: false, allErrors: true });
+    for (const [filename, schema] of Object.entries(schemas)) {
+      if (filename === "inquiry-record.schema.json") continue;
+      ajv.addSchema(schema, filename);
+    }
+    const validate = ajv.compile(inquiryRecordSchema);
+    _hachureInquiryRecordValidator = (record: unknown) => {
+      const valid = validate(record);
+      if (valid) return { valid: true, errors: [] };
+      const errors = ((validate as any).errors ?? []).map((err: any) => {
+        const loc = err.instancePath || err.schemaPath || "";
+        return `${loc} ${err.message ?? "invalid"}`.trim();
+      });
+      return { valid: false, errors };
+    };
+    return _hachureInquiryRecordValidator;
+  } catch {
+    _hachureInquiryRecordValidator = null;
+    return null;
+  }
+}
+/**
+ * Validate a record against the canonical hachure inquiry-record.schema.json
+ * (https://kontourai.io/schemas/surface/inquiry-record.schema.json).
+ * Returns `{ valid, errors, available }`. Fail-open when hachure is not installed.
+ */
+export function validateInquiryRecord(record: unknown): { valid: boolean; errors: string[]; available: boolean } {
+  const validate = getHachureInquiryRecordValidator();
+  if (!validate) return { valid: true, errors: [], available: false };
+  return { ...validate(record), available: true };
+}
 // ─── @kontourai/surface status derivation ────────────────────────────────────
 // Surface is ESM-only; this module builds to CJS. Load Surface via a fail-open
 // cached dynamic import(). If Surface cannot be loaded, bundle writes are
 // skipped entirely — no hand-rolled fork fallback.
+//
+// SurfaceInquiry / SurfaceInquiryRecord — minimal local shapes mirroring the
+// canonical Surface Inquiry / InquiryRecord types. Using Record-based typing
+// keeps this module free of a direct ESM import at compile time.
+type SurfaceInquiry = {
+  id: string;
+  question: string;
+  askedBy: string;
+  askedAt: string;
+  target?: { subjectType: string; subjectId: string; fieldOrBehavior: string; qualifiers?: Record<string, string> };
+  metadata?: Record<string, unknown>;
+};
+type SurfaceInquiryRecord = {
+  id: string;
+  inquiry: SurfaceInquiry;
+  outcome: "matched" | "derived" | "unsupported";
+  resolutionPath: {
+    claimIds: string[];
+    ruleId?: string;
+    ruleVersion?: string;
+    identityLinkIds?: string[];
+    transitiveRuleIds?: string[];
+  };
+  answer?: { value: unknown; status: string };
+  inputSnapshot: Array<{ claimId: string; status: string }>;
+  statusFunctionVersion: string;
+  resolvedAt: string;
+};
 type SurfaceModule = {
   deriveClaimStatus: (args: {
     claim: Record<string, unknown>;
@@ -93,6 +169,11 @@ type SurfaceModule = {
   }) => { status: string; policyId: string | undefined };
   generateClaimId: (subjectId: string, surface: string, fieldOrBehavior: string) => string;
   statusFunctionVersion: string;
+  resolveInquiry: (
+    bundle: Record<string, unknown>,
+    inquiry: SurfaceInquiry,
+    options?: { now?: Date },
+  ) => SurfaceInquiryRecord;
 };
 let _surfaceModule: SurfaceModule | null | undefined; // undefined = not tried yet; null = unavailable
 async function tryLoadSurface(): Promise<SurfaceModule | null> {
@@ -899,6 +980,364 @@ async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
   return 0;
 }
 
+// ─── Gate Review — Canonical InquiryRecord output ────────────────────────────
+// Reads trust.bundle + gate block signal, classifies gate fires/misses (as
+// correct / false_block / missed_block), and emits gate-review.inquiries.json
+// as an array of canonical Surface InquiryRecords. ADVISORY ONLY — #119.
+// Never modifies scripts/hooks/. Consumes Surface.resolveInquiry; no fork.
+
+/** Shape of a claim from the trust.bundle */
+export interface TrustClaim {
+  id: string;
+  subjectType: string;
+  subjectId: string;
+  surface: string;
+  claimType: string;
+  fieldOrBehavior: string;
+  value: string;
+  createdAt: string;
+  updatedAt: string;
+  status: "verified" | "disputed" | "assumed" | "proposed" | "rejected" | "stale" | "unknown";
+}
+
+/** Shape of the trust.bundle file */
+export interface BundleFile {
+  schemaVersion: number;
+  source: string;
+  claims: TrustClaim[];
+  evidence: AnyObj[];
+  events: AnyObj[];
+  policies: AnyObj[];
+}
+
+/** The gate block signal read from .flow-agents/.goal-fit-block-streak.json */
+export interface GateBlockSignal {
+  /** True when the streak file exists AND count >= 1 */
+  blocked: boolean;
+  /** The hash from the streak file (for rationale citation) */
+  hash: string | null;
+  /** The consecutive block count */
+  count: number;
+}
+
+/**
+ * The gate-review calibration verdict, stored in InquiryRecord.answer.value.
+ * This is gate-review's value-add over the canonical InquiryRecord outcome.
+ */
+export type GateCalibration = "correct" | "false_block" | "missed_block";
+
+/**
+ * Read the gate block signal from .flow-agents/.goal-fit-block-streak.json
+ * (written by scripts/hooks/stop-goal-fit.js when block mode fires).
+ * The file sits at <artifact-root>/.goal-fit-block-streak.json — one level
+ * above the session artifact dir. Fail-open: returns { blocked: false } when
+ * the file is absent or unreadable.
+ *
+ * @param artifactRoot  The .flow-agents root dir (parent of session slug dir).
+ */
+export function readGateBlockSignal(artifactRoot: string): GateBlockSignal {
+  const streakFile = path.join(artifactRoot, ".goal-fit-block-streak.json");
+  try {
+    if (!fs.existsSync(streakFile)) return { blocked: false, hash: null, count: 0 };
+    const raw = JSON.parse(fs.readFileSync(streakFile, "utf8"));
+    const count = Number(raw?.count ?? 0);
+    const hash = typeof raw?.hash === "string" ? raw.hash : null;
+    return { blocked: count >= 1, hash, count };
+  } catch {
+    return { blocked: false, hash: null, count: 0 };
+  }
+}
+
+/**
+ * Derive the gate-review calibration from a resolved InquiryRecord and the
+ * block signal.  Pure function — no I/O.
+ *
+ * Mapping (mirrors SKILL.md Bundle-Claim to Classification table):
+ *   outcome="matched", status="disputed"|"rejected", blocked=true  → correct
+ *   outcome="matched", status="verified"|"assumed",  blocked=true  → false_block
+ *   outcome="matched", status="assumed",             blocked=true  → false_block
+ *   outcome="matched", status="stale"|"unknown",     blocked=false → missed_block
+ *   outcome="matched", status="proposed",            any          → missed_block
+ *   outcome="unsupported" (absent claim),            any          → missed_block
+ *   outcome="derived",   satisfied=true,             any          → correct/false_block by blocked flag
+ *   fallthrough                                                    → missed_block
+ */
+export function deriveGateCalibration(
+  outcome: "matched" | "derived" | "unsupported",
+  answerStatus: string | undefined,
+  blocked: boolean,
+): GateCalibration {
+  if (outcome === "unsupported") return "missed_block";
+  if (outcome === "matched" || outcome === "derived") {
+    const s = answerStatus ?? "unknown";
+    if (blocked) {
+      if (s === "disputed" || s === "rejected") return "correct";
+      if (s === "verified" || s === "assumed") return "false_block";
+      // stale/unknown/proposed while blocked — gate fired without solid evidence
+      return "false_block";
+    } else {
+      // Not blocked
+      if (s === "stale" || s === "unknown" || s === "proposed") return "missed_block";
+      // verified/assumed and no block — correct (no block warranted, none issued)
+      return "correct";
+    }
+  }
+  return "missed_block";
+}
+
+/**
+ * Compose the advisory proposed-fix string for a gate-review finding.
+ * Pure function — no I/O.
+ */
+export function gateAdvisoryFix(
+  calibration: GateCalibration,
+  claimId: string,
+  answerStatus: string | undefined,
+): string {
+  const s = answerStatus ?? "unknown";
+  if (calibration === "correct") {
+    return `No gate change needed — block was warranted. Resolve the failure in claim \`${claimId}\` (status: \`${s}\`) and re-run gate-review to confirm the gate clears.`;
+  }
+  if (calibration === "false_block") {
+    return `Investigate why the gate blocked when claim \`${claimId}\` has status \`${s}\`. Check whether stop-goal-fit evaluated a stale bundle snapshot or whether the block trigger was unrelated to bundle claims. If the block was spurious, add a freshness check to the gate evaluation loop.`;
+  }
+  // missed_block
+  if (s === "stale") {
+    return `Refresh the stale claim \`${claimId}\` by re-running the evidence capture step, then re-run gate-review to confirm the gate fires on updated data.`;
+  }
+  if (s === "absent") {
+    return `Ensure \`workflow-sidecar record-evidence\` writes a bundle claim for \`${claimId}\` before \`stop-goal-fit\` evaluates. Currently no claim exists in the bundle — the gate has nothing to evaluate.`;
+  }
+  return `Ensure \`workflow-sidecar record-evidence\` writes a definitive event for claim \`${claimId}\` (currently \`${s}\`) before \`stop-goal-fit\` evaluates. The gate had no resolved evidence to act on.`;
+}
+
+/**
+ * Build a schema-conformant InquiryRecord for the hachure inquiry-record.schema.json.
+ * Strips Surface-internal fields (identityLinkIds, transitiveRuleIds) from
+ * resolutionPath that are valid in the TS type but not in the JSON schema.
+ * Sets answer.value to the gate-review value-add: { calibration, advisoryFix, gateFired, sessionSlug }.
+ */
+function toSchemaInquiryRecord(
+  raw: SurfaceInquiryRecord,
+  calibration: GateCalibration,
+  advisoryFix: string,
+  blocked: boolean,
+  slug: string,
+): AnyObj {
+  const resolutionPath: AnyObj = { claimIds: raw.resolutionPath.claimIds };
+  if (raw.resolutionPath.ruleId !== undefined) resolutionPath["ruleId"] = raw.resolutionPath.ruleId;
+  if (raw.resolutionPath.ruleVersion !== undefined) resolutionPath["ruleVersion"] = raw.resolutionPath.ruleVersion;
+  const record: AnyObj = {
+    id: raw.id,
+    inquiry: raw.inquiry,
+    outcome: raw.outcome,
+    resolutionPath,
+    inputSnapshot: raw.inputSnapshot,
+    statusFunctionVersion: raw.statusFunctionVersion,
+    resolvedAt: raw.resolvedAt,
+  };
+  // answer carries the canonical trust status AND gate-review's value-add advisory fix.
+  // answer.status = derived TrustStatus from the resolved claim (or "unknown" when absent).
+  // answer.value = { calibration, advisoryFix, gateFired, sessionSlug } — gate-review advisory.
+  const answerStatus = raw.answer?.status ?? "unknown";
+  record["answer"] = {
+    status: answerStatus,
+    value: {
+      calibration,
+      advisoryFix,
+      gateFired: blocked,
+      sessionSlug: slug,
+    },
+  };
+  return record;
+}
+
+/**
+ * Build an array of canonical InquiryRecords for all gate-fire and missed-block
+ * candidates in the bundle, using Surface's resolveInquiry.  Returns null when
+ * Surface is unavailable (caller skips the output file — no fork fallback).
+ *
+ * @param bundle              Parsed trust.bundle (BundleFile shape)
+ * @param blockSignal         Result of readGateBlockSignal()
+ * @param slug                Task slug (used in inquiry ids and session_slug)
+ * @param expectedCriterionIds Optional list of expected criterion IDs to check
+ *                            for absent claims (missed_block detection).
+ * @param surface             Loaded Surface module (must have resolveInquiry)
+ * @param now                 Optional timestamp override for deterministic tests
+ */
+export function buildGateInquiryRecords(
+  bundle: BundleFile,
+  blockSignal: GateBlockSignal,
+  slug: string,
+  expectedCriterionIds: string[],
+  surface: SurfaceModule,
+  now?: Date,
+): AnyObj[] {
+  const records: AnyObj[] = [];
+  let idx = 0;
+  const askedAt = (now ?? new Date()).toISOString();
+  const bundleRecord = bundle as unknown as Record<string, unknown>;
+  const claims = Array.isArray(bundle?.claims) ? bundle.claims : [];
+
+  // Build a set of subjectIds already covered by bundle claims
+  const claimSubjectIds = new Set<string>(claims.map((c) => c.subjectId));
+
+  // ── Step 1: resolve each bundle claim via resolveInquiry ──────────────────
+  for (const claim of claims) {
+    idx += 1;
+    const inquiryId = `${slug}-gr-${idx}`;
+    const inquiry: SurfaceInquiry = {
+      id: inquiryId,
+      question: `Was gate action on claim ${claim.id} (status: ${claim.status}) justified given the trust state?`,
+      askedBy: "gate-review",
+      askedAt,
+      target: {
+        subjectType: claim.subjectType,
+        subjectId: claim.subjectId,
+        fieldOrBehavior: claim.fieldOrBehavior,
+      },
+      metadata: { sessionSlug: slug, claimId: claim.id, blocked: blockSignal.blocked },
+    };
+    const rawRecord = surface.resolveInquiry(bundleRecord, inquiry, { now });
+    const calibration = deriveGateCalibration(rawRecord.outcome, rawRecord.answer?.status, blockSignal.blocked);
+    const advisoryFix = gateAdvisoryFix(calibration, claim.id, rawRecord.answer?.status ?? claim.status);
+    records.push(toSchemaInquiryRecord(rawRecord, calibration, advisoryFix, blockSignal.blocked, slug));
+  }
+
+  // ── Step 2: resolve absent expected criteria (missed_block candidates) ────
+  for (const criterionId of expectedCriterionIds) {
+    const subjectId = `${slug}/${criterionId}`;
+    // Skip if there's already a bundle claim for this criterion
+    if (claimSubjectIds.has(subjectId) || claimSubjectIds.has(criterionId)) continue;
+    idx += 1;
+    const inquiryId = `${slug}-gr-${idx}`;
+    const inquiry: SurfaceInquiry = {
+      id: inquiryId,
+      question: `Was acceptance criterion "${criterionId}" claimed in the trust.bundle before gate evaluation?`,
+      askedBy: "gate-review",
+      askedAt,
+      target: {
+        subjectType: "workflow-check",
+        subjectId,
+        fieldOrBehavior: criterionId,
+      },
+      metadata: { sessionSlug: slug, criterionId, blocked: blockSignal.blocked, expectedCriterion: true },
+    };
+    const rawRecord = surface.resolveInquiry(bundleRecord, inquiry, { now });
+    // outcome will be "unsupported" since no claim matches the absent criterion
+    const calibration = deriveGateCalibration(rawRecord.outcome, rawRecord.answer?.status, blockSignal.blocked);
+    const advisoryFix = gateAdvisoryFix(calibration, subjectId, "absent");
+    records.push(toSchemaInquiryRecord(rawRecord, calibration, advisoryFix, blockSignal.blocked, slug));
+  }
+
+  // ── Step 3: if still empty (no claims, no expected criteria), emit one record
+  if (records.length === 0) {
+    idx += 1;
+    const inquiryId = `${slug}-gr-${idx}`;
+    const inquiry: SurfaceInquiry = {
+      id: inquiryId,
+      question: `Does the trust.bundle for session "${slug}" contain any claims for gate evaluation?`,
+      askedBy: "gate-review",
+      askedAt,
+      // No target — natural-language-only inquiry → resolveInquiry returns "unsupported"
+      metadata: { sessionSlug: slug, blocked: blockSignal.blocked, reason: "empty-bundle" },
+    };
+    const rawRecord = surface.resolveInquiry(bundleRecord, inquiry, { now });
+    const advisoryFix = `Ensure \`workflow-sidecar record-evidence\` writes at least one claim to the trust.bundle for session \`${slug}\` before gate-review is invoked.`;
+    records.push(toSchemaInquiryRecord(rawRecord, "missed_block", advisoryFix, blockSignal.blocked, slug));
+  }
+
+  return records;
+}
+
+/**
+ * gate-review <artifact-dir>
+ *
+ * Reads the session's trust.bundle and the gate block signal, classifies each
+ * gate fire or suspected miss using Surface's resolveInquiry, and emits
+ * gate-review.inquiries.json as an array of canonical InquiryRecords.
+ * ADVISORY ONLY — never modifies scripts/hooks/. Issue #119.
+ *
+ * The block signal is read from <artifact-root>/.goal-fit-block-streak.json,
+ * written by scripts/hooks/stop-goal-fit.js when block mode fires. The file
+ * lives one level above the session slug dir (the .flow-agents root).
+ *
+ * If @kontourai/surface is unavailable, logs a warning and returns 0
+ * (fail-open — no bespoke fork fallback).
+ */
+async function gateReview(p: ReturnType<typeof parseArgs>): Promise<number> {
+  const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
+  if (!fs.existsSync(dir)) die(`artifact directory does not exist: ${dir}`);
+  const slug = taskSlugFor(dir, opt(p, "task-slug"));
+
+  // Locate trust.bundle — required per SKILL.md contract
+  const bundlePath = path.join(dir, "trust.bundle");
+  if (!fs.existsSync(bundlePath)) {
+    process.stderr.write(`[gate-review] trust.bundle absent at ${bundlePath} — NOT_VERIFIED. Build ADR 0010 Phase 1 first.\n`);
+    return 1;
+  }
+
+  // Load Surface (ESM, fail-open)
+  const surface = await tryLoadSurface();
+  if (!surface || typeof surface.resolveInquiry !== "function") {
+    process.stderr.write(`[gate-review] @kontourai/surface unavailable or missing resolveInquiry — gate-review skipped (no fork fallback)\n`);
+    return 0;
+  }
+
+  const bundle: BundleFile = JSON.parse(fs.readFileSync(bundlePath, "utf8"));
+
+  // Read gate block signal from .flow-agents root (one level above session dir)
+  const artifactRoot = path.dirname(dir);
+  const blockSignal = readGateBlockSignal(artifactRoot);
+
+  // Load acceptance.json to enumerate expected criterion IDs (optional, fail-open)
+  const acceptancePath = path.join(dir, "acceptance.json");
+  const acceptance = fs.existsSync(acceptancePath)
+    ? (loadJson(acceptancePath) as AnyObj)
+    : null;
+  const expectedCriterionIds: string[] = Array.isArray(acceptance?.criteria)
+    ? (acceptance!.criteria as AnyObj[]).map((c: AnyObj) => String(c.id ?? "")).filter(Boolean)
+    : [];
+
+  const records = buildGateInquiryRecords(bundle, blockSignal, slug, expectedCriterionIds, surface);
+
+  // Validate each record against the hachure inquiry-record.schema.json (fail-open)
+  const validator = getHachureInquiryRecordValidator();
+  let schemaValid = true;
+  const validationErrors: string[] = [];
+  for (const record of records) {
+    if (validator) {
+      const result = validator(record);
+      if (!result.valid) {
+        schemaValid = false;
+        validationErrors.push(...result.errors.map((e) => `${record["id"] ?? "?"}: ${e}`));
+      }
+    }
+  }
+  if (!schemaValid) {
+    process.stderr.write(`[gate-review] InquiryRecord schema validation errors:\n${validationErrors.join("\n")}\n`);
+  }
+
+  const outputPath = path.join(dir, "gate-review.inquiries.json");
+  writeJson(outputPath, records);
+
+  // Build summary counts by calibration
+  const counts: Record<string, number> = {};
+  for (const r of records) {
+    const cal = (r["answer"] as AnyObj | undefined)?.["value"]?.["calibration"] ?? "unknown";
+    counts[cal] = (counts[cal] ?? 0) + 1;
+  }
+  const summary = Object.entries(counts)
+    .filter(([, n]) => n > 0)
+    .map(([k, n]) => `${k}=${n}`)
+    .join(", ");
+  const schemaTag = validator ? (schemaValid ? " schema:valid" : " schema:INVALID") : " schema:unavailable";
+  console.log(`gate-review: ${records.length} InquiryRecord(s) [${summary}]${schemaTag} → ${outputPath}`);
+  return 0;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+
 async function main(): Promise<number> {
   const p = parseArgs(process.argv.slice(2));
   if (!p.command) die("workflow-sidecar command is required");
@@ -916,6 +1355,7 @@ async function main(): Promise<number> {
       case "record-release": return recordRelease(p);
       case "record-learning": return recordLearning(p);
       case "dogfood-pass": return dogfoodPass(p);
+      case "gate-review": return gateReview(p);
       default: die(`unknown command: ${p.command}`);
     }
   });
