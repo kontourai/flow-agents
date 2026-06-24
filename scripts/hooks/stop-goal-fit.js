@@ -244,6 +244,25 @@ function readJsonFile(file) {
   }
 }
 
+// ─── ADR 0010 Phase 2b: re-derive-at-gate via Surface (fail-open) ─────────────
+// Surface (@kontourai/surface) is ESM-only; stop-goal-fit.js is CJS.
+// Load it via a fail-open dynamic import(), cached after the first attempt.
+// If Surface cannot be loaded (package absent, env mismatch), we fall back to
+// the stored claim.status check from #133 — no regression for environments that
+// lack @kontourai/surface. The module is never written to disk.
+let _surfaceModule; // undefined = not tried yet; null = unavailable
+async function tryLoadSurface() {
+  if (_surfaceModule !== undefined) return _surfaceModule;
+  try {
+    const m = await import('@kontourai/surface');
+    _surfaceModule = m;
+    return _surfaceModule;
+  } catch {
+    _surfaceModule = null;
+    return null;
+  }
+}
+
 function safeOneLine(value, maxLength = 220) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   if (text.length <= maxLength) return text;
@@ -559,16 +578,74 @@ function captureCrossReference(root, artifactDir) {
 // each claim's Surface-derived status — including capture-authoritative results
 // (a claimed-pass whose captured command FAILED is already `disputed` here). A
 // high-impact `disputed` claim is the canonical false-completion signal; we gate
-// on the bundle the producers already emit, not on bespoke markdown. Synchronous
-// (reads the stored Surface-derived status); re-derive-at-gate is a later hardening.
-function bundleEnforcement(artifactDir) {
+// on the bundle the producers already emit, not on bespoke markdown.
+//
+// ADR 0010 Phase 2b: re-derive-at-gate hardening.
+// We re-derive each claim's status from the bundle's own evidence/events/policies
+// via Surface's canonical deriveClaimStatus, so editing the stored `claim.status`
+// field does not bypass the gate. If the re-derived status is disputed/rejected
+// for a high/critical claim, we block. If the re-derived status DIFFERS from the
+// stored status (e.g. stored "verified" but evidence re-derives to "disputed"),
+// that mismatch is a strong tamper signal — block with an explicit warning.
+// Fail-open: if Surface is unavailable, fall back to the stored-status check.
+async function bundleEnforcement(artifactDir) {
   const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
   if (!bundle || !Array.isArray(bundle.claims)) return [];
+
+  const surface = await tryLoadSurface();
   const warnings = [];
+
+  const allEvidence = Array.isArray(bundle.evidence) ? bundle.evidence : [];
+  const allEvents = Array.isArray(bundle.events) ? bundle.events : [];
+  const allPolicies = Array.isArray(bundle.policies) ? bundle.policies : [];
+
   for (const claim of bundle.claims) {
+    if (!claim || typeof claim !== 'object') continue;
     const impact = String(claim.impactLevel || '').toLowerCase();
-    const status = String(claim.status || '').toLowerCase();
-    if ((impact === 'high' || impact === 'critical') && status === 'disputed') {
+    const storedStatus = String(claim.status || '').toLowerCase();
+    if (impact !== 'high' && impact !== 'critical') continue;
+
+    // Step 1: Re-derive status via Surface when available.
+    // This closes the gaming vector: editing the stored status field cannot bypass
+    // the gate because we recompute from evidence/events/policies.
+    let recomputedStatus = null; // null means re-derive was not attempted or threw
+    if (surface && typeof surface.deriveClaimStatus === 'function') {
+      const claimId = claim.id;
+      const claimEvidence = allEvidence.filter(ev => ev && ev.claimId === claimId);
+      const claimEvents = allEvents.filter(evt => evt && evt.claimId === claimId);
+      try {
+        const result = surface.deriveClaimStatus({
+          claim,
+          evidence: claimEvidence,
+          events: claimEvents,
+          policies: allPolicies,
+        });
+        recomputedStatus = result && typeof result.status === 'string' ? result.status.toLowerCase() : 'unknown';
+      } catch {
+        // deriveClaimStatus threw (e.g. schema mismatch) — fall back to stored status.
+        recomputedStatus = null;
+      }
+    }
+
+    // Step 2: Compute the effective blocking status.
+    // Use the STRICTER of stored vs recomputed so neither can be individually
+    // gamed: deleting evidence cannot clear a stored `disputed`, and flipping
+    // stored to "verified" cannot hide a recomputed `disputed`.
+    const effectiveDisputed = storedStatus === 'disputed' || storedStatus === 'rejected'
+      || recomputedStatus === 'disputed' || recomputedStatus === 'rejected';
+
+    if (!effectiveDisputed) continue; // neither stored nor recomputed is blocking
+
+    // Step 3: Emit the appropriate warning.
+    // Tamper-detection: stored "verified"/"assumed" but evidence re-derives to
+    // "disputed"/"rejected" — the stored status was likely altered to bypass the gate.
+    const isTampered = recomputedStatus !== null
+      && (storedStatus === 'verified' || storedStatus === 'assumed')
+      && (recomputedStatus === 'disputed' || recomputedStatus === 'rejected');
+
+    if (isTampered) {
+      warnings.push(`trust.bundle claim tampered: ${safeOneLine(claim.subjectId || claim.id, 80)} (${safeOneLine(claim.claimType, 48)}) — stored status "${storedStatus}" does not match recompute "${recomputedStatus}" (possible tampered bundle); caught false-completion.`);
+    } else {
       warnings.push(`trust.bundle claim disputed: ${safeOneLine(claim.subjectId || claim.id, 80)} (${safeOneLine(claim.claimType, 48)}) — Surface recompute shows not verified; caught false-completion.`);
     }
   }
@@ -610,7 +687,7 @@ function isPreExecution(artifactDir, markdownStatus) {
   return PRE_EXECUTION_STATUSES.has(normalizedStatus(markdownStatus));
 }
 
-function analyze(root, now = Date.now()) {
+async function analyze(root, now = Date.now()) {
   const flowAgentsDir = path.join(root, '.flow-agents');
   // Scope to the session's current task when current.json names one, so an
   // unrelated active workflow elsewhere in the repo does not gate this stop.
@@ -660,7 +737,7 @@ function analyze(root, now = Date.now()) {
   }
   warnings.push(...sidecarGuidance(root, path.dirname(latest.file)));
   warnings.push(...captureCrossReference(root, path.dirname(latest.file)));
-  warnings.push(...bundleEnforcement(path.dirname(latest.file)));
+  warnings.push(...(await bundleEnforcement(path.dirname(latest.file))));
 
   // A pre-execution task (not started) OR a terminal task (which is itself a
   // completion *claim*) must not block on mere incompleteness — but a FALSE claim
@@ -732,12 +809,12 @@ function bumpBlockStreak(root, hash) {
   return count;
 }
 
-function run(rawInput) {
+async function run(rawInput) {
   const input = parseJson(rawInput);
   const root = findRepoRoot(input.cwd || process.cwd());
   const mode = resolveGoalFitMode();
   if (mode === 'off') return rawInput;
-  const result = analyze(root);
+  const result = await analyze(root);
   if (result.warnings.length === 0) {
     clearBlockStreak(root);
     return rawInput;
@@ -777,13 +854,27 @@ if (require.main === module) {
     if (data.length < MAX_STDIN) data += chunk.substring(0, MAX_STDIN - data.length);
   });
   process.stdin.on('end', () => {
-    const output = run(data);
-    if (output && typeof output === 'object') {
-      if (output.stderr) process.stderr.write(output.stderr.endsWith('\n') ? output.stderr : `${output.stderr}\n`);
-      process.stdout.write(String(output.stdout ?? data));
-      process.exit(Number.isInteger(output.exitCode) ? output.exitCode : 0);
-    }
-    process.stdout.write(String(output));
+    // run() is now async (Surface load). We wrap in an async IIFE so the
+    // stdin/exit flow is preserved and errors are surfaced as warnings (fail-open).
+    (async () => {
+      let output;
+      try {
+        output = await run(data);
+      } catch (err) {
+        // Unexpected failure in the async gate path — fail-open, allow the Stop.
+        process.stderr.write(`[Hook] Goal Fit async error (fail-open): ${String(err && err.message || err)}\n`);
+        process.stdout.write(data);
+        process.exit(0);
+        return;
+      }
+      if (output && typeof output === 'object') {
+        if (output.stderr) process.stderr.write(output.stderr.endsWith('\n') ? output.stderr : `${output.stderr}\n`);
+        process.stdout.write(String(output.stdout ?? data));
+        process.exit(Number.isInteger(output.exitCode) ? output.exitCode : 0);
+        return;
+      }
+      process.stdout.write(String(output));
+    })();
   });
 }
 
