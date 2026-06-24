@@ -297,6 +297,241 @@ function sidecarGuidance(root, artifactDir) {
   return warnings;
 }
 
+// -----------------------------------------------------------------------
+// Capture-first evidence determinism (Part B)
+//
+// evidence.json is the MODEL transcribing what it thinks happened. The capture
+// hook (evidence-capture.js) writes the REAL command results to
+// command-log.jsonl at the source. Here at the Stop gate we cross-reference the
+// model's claimed-pass command checks against that captured truth, and only fall
+// back to re-running a TRUSTED command when the log has no execution for a
+// claimed-pass command (i.e. it was never actually run).
+// -----------------------------------------------------------------------
+
+function normalizeCommand(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Read command-log.jsonl into a map of normalized-command -> aggregate outcome.
+ * If the same command was run more than once, a single FAIL makes the aggregate
+ * a fail (a caught false-completion must not be masked by a later pass-claim).
+ */
+function readCommandLog(artifactDir) {
+  const file = path.join(artifactDir, 'command-log.jsonl');
+  let raw = '';
+  try { raw = fs.readFileSync(file, 'utf8'); } catch { return new Map(); }
+  const byCommand = new Map();
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let entry;
+    try { entry = JSON.parse(trimmed); } catch { continue; }
+    if (!entry || typeof entry.command !== 'string') continue;
+    const key = normalizeCommand(entry.command);
+    if (!key) continue;
+    const failed = entry.observedResult === 'fail' || (Number.isInteger(entry.exitCode) && entry.exitCode !== 0);
+    const prev = byCommand.get(key);
+    byCommand.set(key, {
+      ran: true,
+      failed: failed || (prev ? prev.failed : false),
+      exitCode: Number.isInteger(entry.exitCode) ? entry.exitCode : (prev ? prev.exitCode : null),
+    });
+  }
+  return byCommand;
+}
+
+/**
+ * Resolve a TRUSTED command to re-run for a claimed-pass check whose command was
+ * never captured. Priority (most trusted first):
+ *   (a) the command named by the matching acceptance criterion (acceptance.json
+ *       evidence_ref of kind "command", `excerpt`/`command`) — authored upfront.
+ *   (b) the project's declared manifest target — package.json scripts.{test,
+ *       build,lint}, Makefile target, cargo test, pyproject/tox, just/task.
+ *   (c) the model's free-form evidence.checks[].command — ONLY when
+ *       FLOW_AGENTS_GOAL_FIT_RECHECK=true (the RCE-risky opt-in path).
+ * Returns { argv, cwd, source } or null when nothing trusted resolves.
+ */
+function resolveTrustedCommand(root, artifactDir, check, acceptance) {
+  // (a) acceptance criterion command for the matching criterion.
+  const fromAcceptance = acceptanceCommandFor(check, acceptance);
+  if (fromAcceptance) return { argv: ['bash', '-lc', fromAcceptance], cwd: root, source: 'acceptance' };
+
+  // (b) declared manifest target. Map the check command/id to a declared script.
+  const declared = declaredManifestTarget(root, check);
+  if (declared) return { argv: declared.argv, cwd: declared.cwd || root, source: 'manifest' };
+
+  // (c) free-form model command — opt-in only.
+  if (String(process.env.FLOW_AGENTS_GOAL_FIT_RECHECK || '').toLowerCase() === 'true') {
+    const cmd = normalizeCommand(check && check.command);
+    if (cmd) return { argv: ['bash', '-lc', cmd], cwd: root, source: 'model-command (FLOW_AGENTS_GOAL_FIT_RECHECK)' };
+  }
+  return null;
+}
+
+function acceptanceCommandFor(check, acceptance) {
+  if (!acceptance || !Array.isArray(acceptance.criteria)) return null;
+  const checkId = normalizedStatus(check && check.id);
+  const checkCmd = normalizeCommand(check && check.command);
+  let firstCommand = null;
+  for (const criterion of acceptance.criteria) {
+    const refs = Array.isArray(criterion && criterion.evidence_refs) ? criterion.evidence_refs : [];
+    for (const ref of refs) {
+      if (!ref || typeof ref !== 'object' || ref.kind !== 'command') continue;
+      const refCmd = normalizeCommand(ref.excerpt || ref.command);
+      if (!refCmd) continue;
+      if (!firstCommand) firstCommand = refCmd;
+      // Strong match: the criterion id matches the check id, or the commands match.
+      const idMatch = checkId && normalizedStatus(criterion.id) === checkId;
+      if (idMatch || (checkCmd && refCmd === checkCmd)) return refCmd;
+    }
+  }
+  // No id/command match — only fall back to the first authored command when the
+  // check itself names no command (so we still have an upfront-trusted target).
+  return checkCmd ? null : firstCommand;
+}
+
+/**
+ * Map a claimed-pass command check to a project-declared, NAMED manifest target.
+ * Never allowlists arbitrary strings: we only run a target the project itself
+ * declared (npm script, Makefile target, cargo/tox/just/task). The check's
+ * command/id is used to pick WHICH declared target (test|build|lint), not to run
+ * the raw string. `veritas readiness` is just one such declared command — no
+ * special-casing.
+ */
+function declaredManifestTarget(root, check) {
+  const haystack = `${normalizeCommand(check && check.command)} ${normalizedStatus(check && check.id)} ${normalizedStatus(check && check.kind)}`.toLowerCase();
+  let want = null;
+  if (/\btest|spec|jest|vitest|pytest\b/.test(haystack)) want = 'test';
+  else if (/\bbuild|compile|bundle\b/.test(haystack)) want = 'build';
+  else if (/\blint|format|style|typecheck\b/.test(haystack)) want = 'lint';
+  if (!want) return null;
+
+  // package.json scripts.{test,build,lint}
+  const pkg = readJsonFile(path.join(root, 'package.json'));
+  if (pkg && pkg.scripts && typeof pkg.scripts === 'object') {
+    const scriptName = pkg.scripts[want] ? want
+      : want === 'lint' && pkg.scripts.typecheck ? 'typecheck'
+        : null;
+    if (scriptName) return { argv: ['npm', 'run', scriptName, '--silent'], cwd: root };
+  }
+  // Makefile target
+  const makefile = ['Makefile', 'makefile', 'GNUmakefile'].map(n => path.join(root, n)).find(p => fs.existsSync(p));
+  if (makefile) {
+    try {
+      const text = fs.readFileSync(makefile, 'utf8');
+      if (new RegExp(`^${want}\\s*:`, 'm').test(text)) return { argv: ['make', want], cwd: root };
+    } catch { /* ignore */ }
+  }
+  // cargo
+  if (want === 'test' && fs.existsSync(path.join(root, 'Cargo.toml'))) return { argv: ['cargo', 'test'], cwd: root };
+  if (want === 'build' && fs.existsSync(path.join(root, 'Cargo.toml'))) return { argv: ['cargo', 'build'], cwd: root };
+  // py ecosystem: tox / pyproject (declared test target)
+  if (want === 'test' && fs.existsSync(path.join(root, 'tox.ini'))) return { argv: ['tox'], cwd: root };
+  if (want === 'test' && fs.existsSync(path.join(root, 'pyproject.toml'))) return { argv: ['pytest'], cwd: root };
+  // just / task runners
+  for (const runner of [['just', 'justfile'], ['task', 'Taskfile.yml'], ['task', 'Taskfile.yaml']]) {
+    if (fs.existsSync(path.join(root, runner[1]))) return { argv: [runner[0], want], cwd: root };
+  }
+  return null;
+}
+
+function resolveBackstopTimeout() {
+  const raw = Number.parseInt(process.env.FLOW_AGENTS_GOAL_FIT_BACKSTOP_TIMEOUT_MS || '', 10);
+  return Number.isInteger(raw) && raw > 0 ? raw : 120000;
+}
+
+/**
+ * Whether the trusted backstop re-run may ride block mode. Default-on so a
+ * never-actually-run claimed-pass command is caught, but operator-disablable for
+ * latency via FLOW_AGENTS_GOAL_FIT_BACKSTOP=off (re-run becomes warn-only) or
+ * =skip (no re-run at all → record NOT_VERIFIED instead).
+ */
+function resolveBackstopMode() {
+  const v = String(process.env.FLOW_AGENTS_GOAL_FIT_BACKSTOP || '').trim().toLowerCase();
+  if (v === 'off' || v === 'warn' || v === 'skip' || v === 'block') return v === 'warn' ? 'off' : v;
+  return 'block';
+}
+
+function runBackstop(trusted) {
+  const result = spawnSync(trusted.argv[0], trusted.argv.slice(1), {
+    cwd: trusted.cwd,
+    encoding: 'utf8',
+    timeout: resolveBackstopTimeout(),
+    killSignal: 'SIGKILL',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (result.error) return { ran: false, error: result.error.code || result.error.message };
+  if (result.signal) return { ran: false, error: `killed (${result.signal})`, timedOut: result.signal === 'SIGKILL' || result.signal === 'SIGTERM' };
+  return { ran: true, passed: result.status === 0, exitCode: result.status };
+}
+
+/**
+ * Cross-reference each evidence.checks[] of kind:"command" claiming status:"pass"
+ * that carries a command against the capture log, with the trusted backstop as a
+ * thin fallback only when the log has no execution for that command.
+ *
+ * Emits warnings (which feed the existing block/MAX_BLOCKS machinery) when a
+ * claimed-pass command actually FAILED (log or backstop), and NOT_VERIFIED notes
+ * when nothing trusted can confirm it.
+ */
+function captureCrossReference(root, artifactDir) {
+  const evidence = readJsonFile(path.join(artifactDir, 'evidence.json'));
+  if (!evidence || !Array.isArray(evidence.checks)) return [];
+  const acceptance = readJsonFile(path.join(artifactDir, 'acceptance.json'));
+  const log = readCommandLog(artifactDir);
+  const base = relative(root, artifactDir);
+  const backstopMode = resolveBackstopMode();
+  const warnings = [];
+
+  const claimedPass = evidence.checks.filter(check => {
+    if (!check || typeof check !== 'object') return false;
+    const kind = normalizedStatus(check.kind);
+    const status = normalizedStatus(check.status);
+    return kind === 'command' && (status === 'pass' || status === 'passed') && normalizeCommand(check.command);
+  });
+
+  for (const check of claimedPass.slice(0, 8)) {
+    const cmd = normalizeCommand(check.command);
+    const id = safeOneLine(check.id || cmd, 80);
+    const logged = log.get(cmd);
+
+    if (logged && logged.ran) {
+      // (1) Cross-reference the capture log first.
+      if (logged.failed) {
+        const exit = Number.isInteger(logged.exitCode) ? ` (exitCode:${logged.exitCode})` : '';
+        warnings.push(`${base} evidence check ${id}: capture log CONTRADICTS claimed pass — command "${safeOneLine(cmd, 120)}" was recorded as FAIL${exit}. This is a caught false-completion.`);
+      }
+      // log shows it ran and passed → satisfied deterministically, no re-run.
+      continue;
+    }
+
+    // (2) Backstop: the log has NO execution for this claimed-pass command.
+    if (backstopMode === 'skip') {
+      warnings.push(`${base} evidence check ${id}: claimed pass but NOT_VERIFIED — command "${safeOneLine(cmd, 120)}" was never captured and backstop re-run is disabled (FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip).`);
+      continue;
+    }
+    const trusted = resolveTrustedCommand(root, artifactDir, check, acceptance);
+    if (!trusted) {
+      warnings.push(`${base} evidence check ${id}: claimed pass but NOT_VERIFIED — command "${safeOneLine(cmd, 120)}" was never captured and no trusted command (acceptance criterion / declared manifest target) resolves to re-run it. Set FLOW_AGENTS_GOAL_FIT_RECHECK=true to opt into re-running the model's free-form command.`);
+      continue;
+    }
+    const outcome = runBackstop(trusted);
+    if (!outcome.ran) {
+      warnings.push(`${base} evidence check ${id}: claimed pass but NOT_VERIFIED — trusted backstop (${trusted.source}) could not run (${safeOneLine(outcome.error, 80)}).`);
+      continue;
+    }
+    if (!outcome.passed) {
+      const note = `${base} evidence check ${id}: trusted backstop (${trusted.source}) re-run of "${trusted.argv.join(' ')}" FAILED with exit ${outcome.exitCode}, contradicting the claimed pass. This is a caught false-completion.`;
+      if (backstopMode === 'off') warnings.push(`${note} [backstop in warn mode — not blocking]`);
+      else warnings.push(note);
+    }
+    // backstop passed → claim deterministically confirmed by re-run, no warning.
+  }
+
+  return warnings;
+}
+
 function markdownVerdict(text) {
   const verdict = (/###\s+Verdict:\s*([A-Za-z_ -]+)/i.exec(text) || [])[1]
     || (/^Build:\s*\[?([A-Za-z_ -]+)\]?/im.exec(text) || [])[1]
@@ -349,8 +584,13 @@ function analyze(root, now = Date.now()) {
     warnings.push(`${relPath} Markdown PASS contradicts evidence.json verdict fail.`);
   }
   warnings.push(...sidecarGuidance(root, path.dirname(latest.file)));
+  warnings.push(...captureCrossReference(root, path.dirname(latest.file)));
 
-  const blocking = warnings.some(w => /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action/.test(w));
+  const blocking = warnings.some(w => {
+    // Capture cross-reference warn-mode notes never block (operator opted out).
+    if (/\[backstop in warn mode — not blocking\]/.test(w)) return false;
+    return /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —/.test(w);
+  });
   return { warnings, blocking };
 }
 
@@ -458,4 +698,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine };
+module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, readCommandLog, resolveTrustedCommand, declaredManifestTarget };
