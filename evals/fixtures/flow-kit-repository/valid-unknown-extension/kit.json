@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "id": "unknown-extension-kit",
+  "name": "Unknown Extension Kit",
+  "product_name": "Unknown Extension Kit",
+  "description": "A valid Flow Kit container with an arbitrary top-level extension field.",
+  "flows": [
+    {
+      "id": "unknown.extension.review",
+      "path": "flows/review.flow.json",
+      "description": "Review a small change."
+    }
+  ],
+  "third_party_extension": {
+    "provider": "example.vendor",
+    "path": "vendor/meta.json"
+  }
+}

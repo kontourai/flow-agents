@@ -53,6 +53,7 @@ expect_fail() {
 
 echo "=== Flow Kit Repository Fixture Checks ==="
 expect_pass "valid-local-kit"
+expect_pass "valid-unknown-extension"
 expect_fail "invalid-schema-version" '\.schema_version must be "1\.0"'
 expect_fail "invalid-missing-schema-version" '\.schema_version must be "1\.0"'
 expect_fail "invalid-id" '\.id must be a kebab-case string'
@@ -63,6 +64,7 @@ expect_fail "invalid-absolute-path" 'flows\[0\]\.path must be relative'
 expect_fail "invalid-traversal" "flows\\[0\\]\\.path must not contain"
 expect_fail "invalid-malformed-json" 'invalid JSON'
 expect_fail "invalid-asset-section" '\.docs must be a list'
+expect_fail "invalid-missing-extension-asset" 'docs\[0\]\.path points at missing asset'
 expect_fail "invalid-duplicate-flow" "flows\\[1\\]\\.path duplicates"
 
 echo ""
