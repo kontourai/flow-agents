@@ -61,13 +61,14 @@ The four canonical policy classes are defined in the <a href="spec/runtime-hook-
 | Core harness | opencode | agents, skills, plugin, opencode.json | L1 — no prompt-submit hook |
 | Core harness | pi | extension, skills, AGENTS.md | L1 — no stop hook |
 | Official framework adapter | AWS Strands (Python) | `integrations/strands/` spike/preview | L0 + config protection via cancellation |
+| Official framework adapter | AWS Strands (TypeScript) | `integrations/strands-ts/` native-import preview | shipped telemetry + native config protection; L2-targeted policies run through the conformance shim |
 | Conformance-certified | Community / third-party | Self-certify | Conformance kit in development |
 
-Documented gaps: opencode has no native `prompt.submit`-equivalent event; pi has no stop hook; Codex live hook influence on model context is limited. The <a href="spec/runtime-hook-surface.html">Runtime Hook Surface spec</a> names every gap explicitly using the canonical event taxonomy.
+Documented gaps: opencode has no native `prompt.submit`-equivalent event; pi has no stop hook; Codex live hook influence on model context is limited; Strands TS workflow steering, quality-gate, and stop-goal-fit coverage is conformance-shim-only. The <a href="spec/runtime-hook-surface.html">Runtime Hook Surface spec</a> names every gap explicitly using the canonical event taxonomy.
 
 ## Framework adapters
 
-The same canonical policies wire into agent frameworks as in-process language-native packages. `integrations/strands/` contains `flow-agents-strands`, a Python `HookProvider` that emits the canonical telemetry taxonomy and enforces config protection via `BeforeToolCallEvent` cancellation — 50 unit tests, no Strands SDK required. This is a spike/preview. See <a href="spec/runtime-hook-surface.html">the spec</a> for the full framework adapter mapping and minimum viable adapter pseudocode.
+The same canonical policies wire into agent frameworks as in-process language-native packages. `integrations/strands/` contains `flow-agents-strands`, a Python `HookProvider` that emits the canonical telemetry taxonomy and enforces config protection via `BeforeToolCallEvent` cancellation — 50 unit tests, no Strands SDK required. `integrations/strands-ts/` adds a native-import TypeScript preview with shipped telemetry callbacks and native config-protection blocking; workflow-steering, quality-gate, and stop-goal-fit policy coverage is exercised by the conformance shim only. See <a href="spec/runtime-hook-surface.html">the spec</a> for the full framework adapter mapping and minimum viable adapter pseudocode.
 
 ## Quick Start
 
