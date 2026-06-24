@@ -5,7 +5,7 @@ title: "ADR 0010: Workflow Trust State as a Hachure Trust Bundle"
 # ADR 0010: Workflow Trust State as a Hachure Trust Bundle
 
 **Date:** 2026-06-23
-**Status:** Accepted as direction (decided with Brian Anderson, 2026-06-23); implementation phased, not yet started.
+**Status:** Accepted. Phase 1 (emit) shipped (pre-existing); **maximal enrichment** (verification-policies + capture-authoritative evidence) and **Phase 2 core** (the gate enforces on the bundle's Surface-derived claim statuses) shipped. Remaining: Phase 2 hardening (re-derive-at-gate; `DELIVERY_TYPES`/markdown removal) + Phases 3–4.
 **Supersedes:** the interim markdown-de-coupling of ADR 0009 (see "Relationship to ADR 0009").
 
 ---
@@ -87,14 +87,23 @@ Each phase must keep `prove-capture-teeth` (8/8) and conformance (L2) green befo
 next begins.
 
 - **Phase 0 (today):** gate enforces on bespoke sidecars + the hygiene fixes (`08319f4`).
-- **Phase 1 — dual-write the bundle:** the `workflow-sidecar` writer *also* emits a
-  Hachure `trust.bundle` (local) for evidence/acceptance/critique/capture; validate it
-  against the hachure schema. Bespoke sidecars remain; the gate still reads them. No
-  behavior change. *Proof: capture/conformance unchanged.*
-- **Phase 2 — gate recomputes the bundle:** `stop-goal-fit` reads/recomputes the bundle
-  instead of bespoke sidecars + markdown. Drops `DELIVERY_TYPES` / markdown parsing
-  (subsumes ADR 0009). *Proof: capture/conformance green via bundle recompute; add
-  bundle-based fixtures.*
+- **Phase 1 — dual-write the bundle: ✅ SHIPPED.** `workflow-sidecar`'s
+  `buildTrustBundle`/`writeTrustBundle` emit a validated Hachure `trust.bundle` for
+  evidence/acceptance/critique, wired into `record-evidence`/`record-critique`/
+  `advance-state`. **Maximal enrichment (this PR):** a `VerificationPolicy` per claimType
+  and the `command-log` capture folded in as `execution` evidence — and capture is
+  *authoritative* (a claimed-pass whose captured command FAILED is `disputed` in the
+  bundle). *Proof: `test_workflow_sidecar_writer` AC3 + capture/conformance green.*
+- **Phase 2 — gate enforces on the bundle: ◑ CORE SHIPPED (this PR).** `stop-goal-fit`
+  reads the `trust.bundle` and blocks on any high-impact `disputed` claim (Surface-derived
+  status; a canonical false-completion signal — HARD_BLOCK at any phase, incl. terminal).
+  Additive: the capture cross-reference is preserved. *Proof: new conformance fixture
+  `stop-goal-fit--block-bundle-disputed-claim` (L2 21/21); prove-capture-teeth 8/8.*
+  **Remaining hardening:** (a) *re-derive at the gate* via Surface `buildTrustReport`
+  (needs an async hook restructure — today the gate reads the write-time Surface-derived
+  status); (b) *remove* the `DELIVERY_TYPES`/markdown parsing (subsumes ADR 0009) — the
+  capture proof seeds raw evidence+log and relies on markdown detection, so this is
+  reworked carefully, not ripped out.
 - **Phase 3 — Surface projection:** Surface projects the local bundle to the Trust Panel
   (local) and, behind the existing opt-in sink, to Console. Enforcement stays local.
   *Proof: panel renders; gate remains offline-independent.*

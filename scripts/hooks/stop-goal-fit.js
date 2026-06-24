@@ -554,6 +554,27 @@ function captureCrossReference(root, artifactDir) {
   return warnings;
 }
 
+// ─── ADR 0010 Phase 2: enforce on the canonical Hachure trust.bundle ──────────
+// The trust.bundle (emitted by workflow-sidecar via @kontourai/surface) carries
+// each claim's Surface-derived status — including capture-authoritative results
+// (a claimed-pass whose captured command FAILED is already `disputed` here). A
+// high-impact `disputed` claim is the canonical false-completion signal; we gate
+// on the bundle the producers already emit, not on bespoke markdown. Synchronous
+// (reads the stored Surface-derived status); re-derive-at-gate is a later hardening.
+function bundleEnforcement(artifactDir) {
+  const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
+  if (!bundle || !Array.isArray(bundle.claims)) return [];
+  const warnings = [];
+  for (const claim of bundle.claims) {
+    const impact = String(claim.impactLevel || '').toLowerCase();
+    const status = String(claim.status || '').toLowerCase();
+    if ((impact === 'high' || impact === 'critical') && status === 'disputed') {
+      warnings.push(`trust.bundle claim disputed: ${safeOneLine(claim.subjectId || claim.id, 80)} (${safeOneLine(claim.claimType, 48)}) — Surface recompute shows not verified; caught false-completion.`);
+    }
+  }
+  return warnings;
+}
+
 function markdownVerdict(text) {
   const verdict = (/###\s+Verdict:\s*([A-Za-z_ -]+)/i.exec(text) || [])[1]
     || (/^Build:\s*\[?([A-Za-z_ -]+)\]?/im.exec(text) || [])[1]
@@ -639,6 +660,7 @@ function analyze(root, now = Date.now()) {
   }
   warnings.push(...sidecarGuidance(root, path.dirname(latest.file)));
   warnings.push(...captureCrossReference(root, path.dirname(latest.file)));
+  warnings.push(...bundleEnforcement(path.dirname(latest.file)));
 
   // A pre-execution task (not started) OR a terminal task (which is itself a
   // completion *claim*) must not block on mere incompleteness — but a FALSE claim
@@ -765,4 +787,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, readCommandLog, resolveTrustedCommand, declaredManifestTarget };
+module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, readCommandLog, resolveTrustedCommand, declaredManifestTarget };

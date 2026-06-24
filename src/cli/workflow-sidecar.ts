@@ -224,7 +224,7 @@ function critiqueToEventStatus(verdict: string, findings: AnyObj[]): string | nu
  * @param acceptance Deserialized acceptance.json (or undefined)
  * @param critique   Deserialized critique.json (or undefined)
  */
-export async function buildTrustBundle(slug: string, timestamp: string, evidence?: AnyObj, acceptance?: AnyObj, critique?: AnyObj): Promise<AnyObj | null> {
+export async function buildTrustBundle(slug: string, timestamp: string, evidence?: AnyObj, acceptance?: AnyObj, critique?: AnyObj, commandLog?: AnyObj[]): Promise<AnyObj | null> {
   const surface = await tryLoadSurface();
   if (!surface) return null;
   const { deriveClaimStatus, generateClaimId, statusFunctionVersion } = surface;
@@ -234,7 +234,31 @@ export async function buildTrustBundle(slug: string, timestamp: string, evidence
   const events: AnyObj[] = [];
   const ts = timestamp || new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 
-  // Evidence checks → claims + evidence items + events
+  // One VerificationPolicy per distinct claimType, so status is policy-governed
+  // (not derived against an empty policy set). Maximal-fidelity per ADR 0010.
+  const policies = new Map<string, AnyObj>();
+  const ensurePolicy = (claimType: string, impactLevel: string, requiredEvidence: string[]): AnyObj => {
+    let p = policies.get(claimType);
+    if (!p) {
+      p = { id: `policy:${claimType}`, claimType, requiredEvidence, acceptanceCriteria: [`A verified verification event must support a ${claimType} claim.`], reviewAuthority: "system", validityRule: { kind: "manual" }, stalenessTriggers: [], conflictRules: [], impactLevel };
+      policies.set(claimType, p);
+    }
+    return p;
+  };
+
+  // Index the deterministic capture log by normalized command (a single FAIL wins),
+  // so a claimed-pass check whose command actually FAILED becomes authoritative here.
+  const captureByCommand = new Map<string, { observedResult: string; exitCode: number | null }>();
+  for (const entry of Array.isArray(commandLog) ? commandLog : []) {
+    if (!entry || typeof entry.command !== "string") continue;
+    const key = entry.command.replace(/\s+/g, " ").trim();
+    if (!key) continue;
+    const failed = entry.observedResult === "fail" || (Number.isInteger(entry.exitCode) && entry.exitCode !== 0);
+    const prev = captureByCommand.get(key);
+    captureByCommand.set(key, { observedResult: failed || (prev && prev.observedResult === "fail") ? "fail" : "pass", exitCode: Number.isInteger(entry.exitCode) ? entry.exitCode : (prev ? prev.exitCode : null) });
+  }
+
+  // Evidence checks → claims + evidence items + events. Capture is authoritative.
   const checks: AnyObj[] = Array.isArray(evidence?.checks) ? evidence!.checks : [];
   for (const check of checks) {
     if (!check.id) continue;
@@ -242,17 +266,29 @@ export async function buildTrustBundle(slug: string, timestamp: string, evidence
     const fieldOrBehavior = String(check.summary ?? check.id);
     const claimId = generateClaimId(subjectId, "flow-agents.workflow", fieldOrBehavior);
     const evId = `ev:${claimId}`;
-    const evStatus = checkStatusToEventStatus(String(check.status ?? ""));
+    const claimType = `workflow.check.${check.kind ?? "external"}`;
+    const policy = ensurePolicy(claimType, "high", ["test_output"]);
+
+    const cmd = typeof check.command === "string" ? check.command.replace(/\s+/g, " ").trim() : "";
+    const captured = cmd ? captureByCommand.get(cmd) : undefined;
+    const effectiveStatus = captured ? captured.observedResult : String(check.status ?? "");
+    const evStatus = checkStatusToEventStatus(effectiveStatus);
+
     const claimEvents: AnyObj[] = [];
     if (evStatus) {
       const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: "flow-agents/workflow-sidecar", method: "validation", evidenceIds: [evId], createdAt: ts, verifiedAt: ts };
       events.push(evt);
       claimEvents.push(evt);
     }
-    const evList: AnyObj[] = [{ id: evId, claimId, evidenceType: "test_output", method: "validation", sourceRef: `${slug}/evidence.json`, excerptOrSummary: fieldOrBehavior, observedAt: ts, collectedBy: "flow-agents/workflow-sidecar", passing: check.status === "pass" }];
-    evidenceItems.push(evList[0]);
-    const claimObj: AnyObj = { id: claimId, subjectType: "workflow-check", subjectId, surface: "flow-agents.workflow", claimType: `workflow.check.${check.kind ?? "external"}`, fieldOrBehavior, value: check.status, createdAt: ts, updatedAt: ts };
-    const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: evList as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [] });
+    const evItem: AnyObj = { id: evId, claimId, evidenceType: "test_output", method: "validation", sourceRef: `${slug}/evidence.json`, excerptOrSummary: fieldOrBehavior, observedAt: ts, collectedBy: "flow-agents/workflow-sidecar", passing: effectiveStatus === "pass" };
+    if (captured) {
+      evItem.sourceRef = `${slug}/command-log.jsonl`;
+      evItem.collectedBy = "flow-agents/evidence-capture";
+      evItem.execution = { runner: "bash", label: cmd, isError: captured.observedResult === "fail", ...(captured.exitCode != null ? { exitCode: captured.exitCode } : {}) };
+    }
+    evidenceItems.push(evItem);
+    const claimObj: AnyObj = { id: claimId, subjectType: "workflow-check", subjectId, surface: "flow-agents.workflow", claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id };
+    const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
     claims.push({ ...claimObj, status: derivedStatus });
   }
 
@@ -263,6 +299,8 @@ export async function buildTrustBundle(slug: string, timestamp: string, evidence
     const subjectId = `${slug}/${criterion.id}`;
     const fieldOrBehavior = String(criterion.description ?? criterion.id);
     const claimId = generateClaimId(subjectId, "flow-agents.workflow", fieldOrBehavior);
+    const claimType = "workflow.acceptance.criterion";
+    const policy = ensurePolicy(claimType, "high", []);
     const evStatus = criterionStatusToEventStatus(String(criterion.status ?? ""));
     const claimEvents: AnyObj[] = [];
     if (evStatus) {
@@ -270,8 +308,8 @@ export async function buildTrustBundle(slug: string, timestamp: string, evidence
       events.push(evt);
       claimEvents.push(evt);
     }
-    const claimObj: AnyObj = { id: claimId, subjectType: "workflow-acceptance-criterion", subjectId, surface: "flow-agents.workflow", claimType: "workflow.acceptance.criterion", fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts };
-    const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [] });
+    const claimObj: AnyObj = { id: claimId, subjectType: "workflow-acceptance-criterion", subjectId, surface: "flow-agents.workflow", claimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id };
+    const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
     claims.push({ ...claimObj, status: derivedStatus });
   }
 
@@ -282,6 +320,8 @@ export async function buildTrustBundle(slug: string, timestamp: string, evidence
     const subjectId = `${slug}/${c.id}`;
     const fieldOrBehavior = String(c.summary ?? c.verdict ?? c.id);
     const claimId = generateClaimId(subjectId, "flow-agents.workflow", fieldOrBehavior);
+    const claimType = "workflow.critique.review";
+    const policy = ensurePolicy(claimType, "medium", []);
     const evStatus = critiqueToEventStatus(String(c.verdict ?? ""), c.findings ?? []);
     const claimEvents: AnyObj[] = [];
     if (evStatus) {
@@ -289,8 +329,8 @@ export async function buildTrustBundle(slug: string, timestamp: string, evidence
       events.push(evt);
       claimEvents.push(evt);
     }
-    const claimObj: AnyObj = { id: claimId, subjectType: "workflow-critique", subjectId, surface: "flow-agents.workflow", claimType: "workflow.critique.review", fieldOrBehavior, value: c.verdict, createdAt: ts, updatedAt: ts };
-    const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [] });
+    const claimObj: AnyObj = { id: claimId, subjectType: "workflow-critique", subjectId, surface: "flow-agents.workflow", claimType, fieldOrBehavior, value: c.verdict, createdAt: ts, updatedAt: ts, impactLevel: "medium", verificationPolicyId: policy.id };
+    const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
     claims.push({ ...claimObj, status: derivedStatus });
   }
 
@@ -299,7 +339,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, evidence
     source: `flow-agents/workflow-sidecar;statusFunctionVersion=${statusFunctionVersion}`,
     claims,
     evidence: evidenceItems,
-    policies: [],
+    policies: [...policies.values()],
     events,
   };
 }
@@ -313,7 +353,14 @@ export async function buildTrustBundle(slug: string, timestamp: string, evidence
  */
 export async function writeTrustBundle(dir: string, slug: string, timestamp: string, evidence?: AnyObj, acceptance?: AnyObj, critique?: AnyObj): Promise<{ written: boolean; errors: string[] }> {
   try {
-    const bundle = await buildTrustBundle(slug, timestamp, evidence, acceptance, critique);
+    // Fold the deterministic capture log (PostToolUse evidence-capture) into the
+    // bundle so capture is authoritative over claimed status. Best-effort read.
+    let commandLog: AnyObj[] = [];
+    try {
+      const raw = fs.readFileSync(path.join(dir, "command-log.jsonl"), "utf8");
+      commandLog = raw.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { try { return JSON.parse(l) as AnyObj; } catch { return null; } }).filter((x): x is AnyObj => x !== null);
+    } catch { /* no capture log — fine */ }
+    const bundle = await buildTrustBundle(slug, timestamp, evidence, acceptance, critique, commandLog);
     if (!bundle) return { written: false, errors: [] }; // Surface unavailable — fail-open, skip write
     const result = validateTrustBundle(bundle);
     if (result.available && !result.valid) {
