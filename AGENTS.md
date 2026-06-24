@@ -14,6 +14,7 @@ This bundle was generated from the canonical source in this repo. Treat the repo
 - `skills/`, `context/`, `powers/`, `prompts/`, `scripts/`, and `evals/` were copied from the canonical source.
 - Cross-session task artifacts should live under `.flow-agents`.
 - Kiro-only hook wiring was stripped from exported non-Kiro agents to keep the package portable.
+- **Gate awareness:** `context/gate-awareness.md` — the three active gates (goal-fit/Stop, evidence-capture, reground), why a block is the system working, and how to diagnose a suspected missed block.
 
 ## Exported Agents
 
