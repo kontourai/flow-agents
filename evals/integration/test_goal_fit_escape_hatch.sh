@@ -53,7 +53,7 @@ c4=$(run_block "$TMPDIR_EVAL/b4.err")
 # A changing goal-fit gap must reset the streak (progress, not a stuck loop).
 printf '%s' "$PAYLOAD" | FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=3 node "$ROOT/scripts/hooks/stop-goal-fit.js" >/dev/null 2>/dev/null
 # mutate the artifact so the warning set differs
-printf '# Stuck\n\nbranch: main\nstatus: planning\ntype: deliver\n\n## Plan\n\nDifferent.\n' \
+printf '# Stuck\n\nbranch: main\nstatus: verifying\ntype: deliver\n\n## Plan\n\nDifferent.\n' \
   > "$REPO/.flow-agents/stuck/stuck--deliver.md"
 cd=$(run_block "$TMPDIR_EVAL/bd.err")
 [[ "$cd" -eq 2 ]] && rg -q 'BLOCK 1/3' "$TMPDIR_EVAL/bd.err" \

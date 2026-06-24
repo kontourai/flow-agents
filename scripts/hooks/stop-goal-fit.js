@@ -14,6 +14,12 @@
  * The canonical engine default is warn; shipped runtime configs (e.g. Claude
  * Code at L2) set block so the installed product enforces while the engine
  * default and conformance contract stay warn.
+ *
+ * Scope: the gate evaluates the session's current task (.flow-agents/current.json)
+ * when set, so an unrelated active workflow elsewhere in the repo does not gate
+ * this stop. It also never hard-blocks a pre-execution (not-yet-started) task on
+ * mere incompleteness — only genuine false-completion signals (a claimed pass the
+ * capture log or evidence.json contradicts) block before execution begins.
  */
 
 'use strict';
@@ -39,6 +45,18 @@ const ACTIVE_STATUSES = new Set([
 const DELIVERY_TYPES = new Set(['deliver', 'delivery', 'fix-bug', 'execute-plan', 'verify-work']);
 const SIDECAR_NAMES = new Set(['state.json', 'acceptance.json', 'evidence.json', 'handoff.json']);
 const OPTIONAL_SIDECAR_NAMES = new Set(['critique.json']);
+
+// A workflow that has not started execution is EXPECTED to be incomplete, so the
+// Stop gate must not hard-block on its missing DOD / Goal Fit / not-done state.
+// Only genuine false-completion signals block a pre-execution task; execution
+// onward gates fully.
+const PRE_EXECUTION_STATUSES = new Set(['new', 'planning', 'planned', 'backlog']);
+const PRE_EXECUTION_PHASES = new Set(['idea', 'backlog', 'pickup', 'planning']);
+
+// Terminal tasks are complete — they must never gate a stop or count as "active".
+// A stale current.json pointing at one, or a graveyard of finished states, must
+// not block an unrelated session.
+const TERMINAL_STATUSES = new Set(['done', 'delivered', 'accepted', 'archived', 'complete', 'completed']);
 
 function parseJson(raw) {
   try { return JSON.parse(raw || '{}'); } catch { return {}; }
@@ -247,8 +265,12 @@ function sidecarGuidance(root, artifactDir) {
     const status = normalizedStatus(state.status || 'unknown');
     const phase = normalizedStatus(state.phase || 'unknown');
     const next = state.next_action && typeof state.next_action === 'object' ? state.next_action : null;
-    if (!['done', 'delivered', 'archived', 'accepted', 'complete', 'completed'].includes(status)) {
-      const nextStatus = next ? normalizedStatus(next.status || 'unknown') : 'unknown';
+    const nextStatus = next ? normalizedStatus(next.status || 'unknown') : 'unknown';
+    // The agent's work is complete when the recorded next action is done — the
+    // gate must not block the agent for a remaining human/CI step (e.g. a verified
+    // task whose only next_action is "commit the migration").
+    const agentComplete = nextStatus === 'done';
+    if (!TERMINAL_STATUSES.has(status) && !agentComplete) {
       const nextSummary = next && next.summary ? `; next_action:${nextStatus} "${safeOneLine(next.summary)}"` : '';
       warnings.push(`${base} workflow state: status:${status} phase:${phase}${nextSummary}`);
     }
@@ -539,9 +561,41 @@ function markdownVerdict(text) {
   return normalizedStatus(verdict).replace(/[^a-z_ -].*$/, '').trim();
 }
 
+/**
+ * Scope to the session's current task when .flow-agents/current.json points at
+ * one (mirroring evidence-capture.js). Returns the slug dir, or null to fall back
+ * to scanning all of .flow-agents (newest-mtime).
+ */
+function preferredArtifactDir(flowAgentsDir) {
+  const current = readJsonFile(path.join(flowAgentsDir, 'current.json'));
+  if (!current) return null;
+  const slug = current.artifact_dir || current.active_slug;
+  if (typeof slug !== 'string' || !slug.trim()) return null;
+  const safe = slug.replace(/\.\.+/g, '').replace(/^[/\\]+/, '');
+  const dir = path.join(flowAgentsDir, safe);
+  return dir.startsWith(flowAgentsDir + path.sep) && fs.existsSync(dir) ? dir : null;
+}
+
+/**
+ * A task is pre-execution (work not yet started) when its state.json status/phase
+ * is still in the idea→planning band, or (no state.json) its markdown status is.
+ */
+function isPreExecution(artifactDir, markdownStatus) {
+  const state = readJsonFile(path.join(artifactDir, 'state.json'));
+  if (state) {
+    return PRE_EXECUTION_STATUSES.has(normalizedStatus(state.status))
+      || PRE_EXECUTION_PHASES.has(normalizedStatus(state.phase));
+  }
+  return PRE_EXECUTION_STATUSES.has(normalizedStatus(markdownStatus));
+}
+
 function analyze(root, now = Date.now()) {
-  const dirs = [path.join(root, '.flow-agents')];
-  const artifacts = dirs
+  const flowAgentsDir = path.join(root, '.flow-agents');
+  // Scope to the session's current task when current.json names one, so an
+  // unrelated active workflow elsewhere in the repo does not gate this stop.
+  const scoped = preferredArtifactDir(flowAgentsDir);
+  const searchDirs = scoped ? [scoped] : [flowAgentsDir];
+  const artifacts = searchDirs
     .flatMap(dir => walkMarkdown(dir))
     .map(readArtifact)
     .filter(isWorkflowArtifact)
@@ -586,12 +640,25 @@ function analyze(root, now = Date.now()) {
   warnings.push(...sidecarGuidance(root, path.dirname(latest.file)));
   warnings.push(...captureCrossReference(root, path.dirname(latest.file)));
 
+  // A pre-execution task (not started) OR a terminal task (which is itself a
+  // completion *claim*) must not block on mere incompleteness — but a FALSE claim
+  // (capture/evidence contradiction) still blocks at any phase. This is the whole
+  // point of the capture cross-reference: catch a task that falsely claims done.
+  const gateState = readJsonFile(path.join(path.dirname(latest.file), 'state.json'));
+  const taskStatus = gateState ? normalizedStatus(gateState.status) : normalizedStatus(status);
+  const preExecution = isPreExecution(path.dirname(latest.file), status);
+  const terminal = TERMINAL_STATUSES.has(taskStatus);
+  // Always-block: a claimed pass the capture log or evidence.json contradicts.
+  const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing/;
+  // Full gate (execution onward): also completeness/hygiene and not-done state.
+  const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —/;
+  const blockRe = (preExecution || terminal) ? HARD_BLOCK : FULL_BLOCK;
   const blocking = warnings.some(w => {
     // Capture cross-reference warn-mode notes never block (operator opted out).
     if (/\[backstop in warn mode — not blocking\]/.test(w)) return false;
-    return /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —/.test(w);
+    return blockRe.test(w);
   });
-  return { warnings, blocking };
+  return { warnings, blocking, preExecution };
 }
 
 /**
