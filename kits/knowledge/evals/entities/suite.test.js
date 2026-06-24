@@ -655,6 +655,46 @@ describe("AC4: Obsidian adapter — people/ folder and wikilink rendering", () =
         fs.rmSync(dir, { recursive: true, force: true });
       }
     });
+
+    test("AC4: Obsidian adapter rejects tampered path index escapes", async () => {
+      const parentDir = makeTempDir();
+      const dir = path.join(parentDir, "nested", "store");
+      const sentinelPath = path.join(parentDir, "escape.md");
+      const sentinelContent = "outside sentinel";
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(sentinelPath, sentinelContent, "utf8");
+
+        const store = new ObsidianStore({ storeRoot: dir });
+        const id = await store.create({
+          type: "person",
+          title: "Tampered Person",
+          body: "Test body",
+          category: "test",
+          provenance: { agent: "tester" },
+        });
+
+        const pathIndexPath = path.join(dir, ".graph-index.json");
+        fs.writeFileSync(pathIndexPath, JSON.stringify({
+          by_id: {
+            [id]: { path: "../../escape.md", archived: false },
+          },
+          by_path: {
+            "../../escape.md": id,
+          },
+        }, null, 2), "utf8");
+
+        await assert.rejects(
+          () => store.update(id, { title: "Should Not Write" }, { agent: "tester" }),
+          /escapes store root/
+        );
+
+        assert.equal(fs.readFileSync(sentinelPath, "utf8"), sentinelContent);
+        assert.equal(fs.existsSync(path.join(parentDir, "should-not-write.md")), false);
+      } finally {
+        fs.rmSync(parentDir, { recursive: true, force: true });
+      }
+    });
   }
 });
 
