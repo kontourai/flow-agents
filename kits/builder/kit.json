@@ -17,20 +17,85 @@
     }
   ],
   "skills": [
-    { "id": "builder.builder-shape", "path": "skills/builder-shape/SKILL.md", "description": "Invoke Builder Kit shape from a raw idea or the current conversation context." },
-    { "id": "builder.deliver", "path": "skills/deliver/SKILL.md", "description": "Delivery workflow — selected work to delivered code." },
-    { "id": "builder.design-probe", "path": "skills/design-probe/SKILL.md", "description": "One-question-at-a-time design probing interview." },
-    { "id": "builder.evidence-gate", "path": "skills/evidence-gate/SKILL.md", "description": "Evaluate whether completed work is trustworthy enough for human review, merge, or release." },
-    { "id": "builder.execute-plan", "path": "skills/execute-plan/SKILL.md", "description": "Parallel execution primitive — plan artifact path to implemented code." },
-    { "id": "builder.fix-bug", "path": "skills/fix-bug/SKILL.md", "description": "Bug fix orchestrator — diagnose, plan, execute, review, verify, loop." },
-    { "id": "builder.idea-to-backlog", "path": "skills/idea-to-backlog/SKILL.md", "description": "Turn raw ideas into shaped, prioritized, executable GitHub issue backlog." },
-    { "id": "builder.learning-review", "path": "skills/learning-review/SKILL.md", "description": "Capture post-merge learnings and feed them back into backlog, skills, tests, or knowledge." },
-    { "id": "builder.pickup-probe", "path": "skills/pickup-probe/SKILL.md", "description": "Builder Kit work-item/docs/provider-grounded Probe specialization before plan-work." },
-    { "id": "builder.plan-work", "path": "skills/plan-work/SKILL.md", "description": "Code planning primitive — goal + directory to structured execution plan." },
-    { "id": "builder.pull-work", "path": "skills/pull-work/SKILL.md", "description": "Select ready GitHub issues from the executable backlog for implementation." },
-    { "id": "builder.release-readiness", "path": "skills/release-readiness/SKILL.md", "description": "Decide whether evidence-backed work is ready to merge, release, deploy, or hold." },
-    { "id": "builder.review-work", "path": "skills/review-work/SKILL.md", "description": "Review primitive — code, security, dependency, architecture critique before verification." },
-    { "id": "builder.tdd-workflow", "path": "skills/tdd-workflow/SKILL.md", "description": "Test-driven development — RED, GREEN, REFACTOR with git checkpoints." },
-    { "id": "builder.verify-work", "path": "skills/verify-work/SKILL.md", "description": "Verification primitive — session file path to structured evidence verdict." }
+    {
+      "id": "builder.builder-shape",
+      "path": "skills/builder-shape/SKILL.md",
+      "description": "Invoke Builder Kit shape from a raw idea or the current conversation context."
+    },
+    {
+      "id": "builder.deliver",
+      "path": "skills/deliver/SKILL.md",
+      "description": "Delivery workflow — selected work to delivered code."
+    },
+    {
+      "id": "builder.design-probe",
+      "path": "skills/design-probe/SKILL.md",
+      "description": "One-question-at-a-time design probing interview."
+    },
+    {
+      "id": "builder.evidence-gate",
+      "path": "skills/evidence-gate/SKILL.md",
+      "description": "Evaluate whether completed work is trustworthy enough for human review, merge, or release."
+    },
+    {
+      "id": "builder.gate-review",
+      "path": "skills/gate-review/SKILL.md",
+      "description": "Enumerate gate fires and suspected misses from the session trust.bundle; classify as correct/false_block/missed_block; route findings to learning-review; propose advisory fixes."
+    },
+    {
+      "id": "builder.execute-plan",
+      "path": "skills/execute-plan/SKILL.md",
+      "description": "Parallel execution primitive — plan artifact path to implemented code."
+    },
+    {
+      "id": "builder.fix-bug",
+      "path": "skills/fix-bug/SKILL.md",
+      "description": "Bug fix orchestrator — diagnose, plan, execute, review, verify, loop."
+    },
+    {
+      "id": "builder.idea-to-backlog",
+      "path": "skills/idea-to-backlog/SKILL.md",
+      "description": "Turn raw ideas into shaped, prioritized, executable GitHub issue backlog."
+    },
+    {
+      "id": "builder.learning-review",
+      "path": "skills/learning-review/SKILL.md",
+      "description": "Capture post-merge learnings and feed them back into backlog, skills, tests, or knowledge."
+    },
+    {
+      "id": "builder.pickup-probe",
+      "path": "skills/pickup-probe/SKILL.md",
+      "description": "Builder Kit work-item/docs/provider-grounded Probe specialization before plan-work."
+    },
+    {
+      "id": "builder.plan-work",
+      "path": "skills/plan-work/SKILL.md",
+      "description": "Code planning primitive — goal + directory to structured execution plan."
+    },
+    {
+      "id": "builder.pull-work",
+      "path": "skills/pull-work/SKILL.md",
+      "description": "Select ready GitHub issues from the executable backlog for implementation."
+    },
+    {
+      "id": "builder.release-readiness",
+      "path": "skills/release-readiness/SKILL.md",
+      "description": "Decide whether evidence-backed work is ready to merge, release, deploy, or hold."
+    },
+    {
+      "id": "builder.review-work",
+      "path": "skills/review-work/SKILL.md",
+      "description": "Review primitive — code, security, dependency, architecture critique before verification."
+    },
+    {
+      "id": "builder.tdd-workflow",
+      "path": "skills/tdd-workflow/SKILL.md",
+      "description": "Test-driven development — RED, GREEN, REFACTOR with git checkpoints."
+    },
+    {
+      "id": "builder.verify-work",
+      "path": "skills/verify-work/SKILL.md",
+      "description": "Verification primitive — session file path to structured evidence verdict."
+    }
   ]
 }
