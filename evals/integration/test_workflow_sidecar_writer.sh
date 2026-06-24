@@ -2103,6 +2103,209 @@ else
   _fail "imported failing critique did not persist actionable finding"
 fi
 
+
+# ─── AC1: trust.bundle dual-write file existence and schema validity ──────────
+TB_SCHEMA_DIR="$TMPDIR_EVAL/repo/.flow-agents/trust-bundle-schema"
+mkdir -p "$TB_SCHEMA_DIR"
+cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_SCHEMA_DIR/trust-bundle-schema--deliver.md"
+flow_agents_node "$WRITER" init-plan "$TB_SCHEMA_DIR/trust-bundle-schema--deliver.md" \
+  --source-request "Trust bundle schema fixture." \
+  --summary "Trust bundle schema fixture." \
+  --next-action "Record evidence and verify trust.bundle." \
+  --timestamp "2026-05-09T00:00:00Z" >"$TMPDIR_EVAL/tb-schema-init.out" 2>"$TMPDIR_EVAL/tb-schema-init.err"
+
+if flow_agents_node "$WRITER" record-evidence "$TB_SCHEMA_DIR" \
+  --verdict pass \
+  --check-json '{"id":"tb-schema-check","kind":"test","status":"pass","summary":"Trust bundle schema fixture check passed."}' \
+  --timestamp "2026-05-09T00:01:00Z" >"$TMPDIR_EVAL/tb-schema-evidence.out" 2>"$TMPDIR_EVAL/tb-schema-evidence.err" \
+  && [[ -f "$TB_SCHEMA_DIR/trust.bundle" ]]; then
+  _pass "trust.bundle dual-write creates trust.bundle after record-evidence"
+else
+  _fail "trust.bundle dual-write did not create trust.bundle after record-evidence: $(cat "$TMPDIR_EVAL/tb-schema-evidence.out" "$TMPDIR_EVAL/tb-schema-evidence.err")"
+fi
+
+TB_BUNDLE_PATH="$TB_SCHEMA_DIR/trust.bundle"
+if [[ -f "$TB_BUNDLE_PATH" ]]; then
+  if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/tb-validate.err"
+import { readFileSync } from 'node:fs';
+import { validateTrustBundle } from '${ROOT}/build/src/cli/workflow-sidecar.js';
+const bundle = JSON.parse(readFileSync('${TB_BUNDLE_PATH}', 'utf8'));
+const result = validateTrustBundle(bundle);
+if (!result.available) { process.stderr.write('hachure unavailable: validateTrustBundle.available was false\n'); process.exit(2); }
+if (!result.valid) { process.stderr.write('schema invalid: ' + result.errors.join('; ') + '\n'); process.exit(1); }
+NODEOF
+  then
+    _pass "trust.bundle dual-write produces schema-valid bundle (available:true, valid:true)"
+  else
+    _fail "trust.bundle schema validation failed: $(cat "$TMPDIR_EVAL/tb-validate.err")"
+  fi
+fi
+
+# ─── AC2: claim status fidelity — pass→verified, fail→disputed ───────────────
+TB_FIDELITY_DIR="$TMPDIR_EVAL/repo/.flow-agents/trust-bundle-fidelity"
+mkdir -p "$TB_FIDELITY_DIR"
+cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_FIDELITY_DIR/trust-bundle-fidelity--deliver.md"
+flow_agents_node "$WRITER" init-plan "$TB_FIDELITY_DIR/trust-bundle-fidelity--deliver.md" \
+  --source-request "Trust bundle claim fidelity fixture." \
+  --summary "Trust bundle claim fidelity fixture." \
+  --next-action "Seed pass and fail checks to verify claim status mapping." \
+  --timestamp "2026-05-09T00:00:00Z" >"$TMPDIR_EVAL/tb-fidelity-init.out" 2>"$TMPDIR_EVAL/tb-fidelity-init.err"
+
+if flow_agents_node "$WRITER" record-evidence "$TB_FIDELITY_DIR" \
+  --verdict fail \
+  --check-json '{"id":"tb-pass-check","kind":"test","status":"pass","summary":"This check passed."}' \
+  --check-json '{"id":"tb-fail-check","kind":"test","status":"fail","summary":"This check failed."}' \
+  --timestamp "2026-05-09T00:01:00Z" >"$TMPDIR_EVAL/tb-fidelity-evidence.out" 2>"$TMPDIR_EVAL/tb-fidelity-evidence.err" \
+  && [[ -f "$TB_FIDELITY_DIR/trust.bundle" ]]; then
+  if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/tb-fidelity-check.err"
+import { readFileSync } from 'node:fs';
+const bundle = JSON.parse(readFileSync('${TB_FIDELITY_DIR}/trust.bundle', 'utf8'));
+const claims = bundle.claims;
+// Surface uses generateClaimId: search by subjectId (which encodes slug/checkId)
+const passClaim = claims.find((c) => c.subjectId && c.subjectId.endsWith('/tb-pass-check'));
+const failClaim = claims.find((c) => c.subjectId && c.subjectId.endsWith('/tb-fail-check'));
+if (!passClaim) { process.stderr.write('missing claim for subjectId ending with /tb-pass-check\n'); process.exit(1); }
+if (!failClaim) { process.stderr.write('missing claim for subjectId ending with /tb-fail-check\n'); process.exit(1); }
+if (passClaim.status !== 'verified') { process.stderr.write('pass check claim status was ' + passClaim.status + ', expected verified (Surface deriveClaimStatus)\n'); process.exit(1); }
+if (failClaim.status !== 'disputed') { process.stderr.write('fail check claim status was ' + failClaim.status + ', expected disputed (Surface deriveClaimStatus)\n'); process.exit(1); }
+// Assert at least one acceptance criterion claim exists (seeded by init-plan)
+const acClaims = claims.filter((c) => c.claimType === 'workflow.acceptance.criterion');
+if (acClaims.length === 0) { process.stderr.write('expected at least one workflow.acceptance.criterion claim but found none\n'); process.exit(1); }
+NODEOF
+  then
+    _pass "trust.bundle claim fidelity: pass check maps to verified, fail check maps to disputed, ac criterion claim present (Surface deriveClaimStatus)"
+  else
+    _fail "trust.bundle claim fidelity assertion failed: $(cat "$TMPDIR_EVAL/tb-fidelity-check.err")"
+  fi
+else
+  _fail "trust.bundle claim fidelity setup failed: $(cat "$TMPDIR_EVAL/tb-fidelity-evidence.out" "$TMPDIR_EVAL/tb-fidelity-evidence.err")"
+fi
+
+# ─── AC2: claim status fidelity — critique fail→disputed, pass→verified ──────
+TB_CRITIQUE_DIR="$TMPDIR_EVAL/repo/.flow-agents/trust-bundle-critique"
+mkdir -p "$TB_CRITIQUE_DIR"
+cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_CRITIQUE_DIR/trust-bundle-critique--deliver.md"
+flow_agents_node "$WRITER" init-plan "$TB_CRITIQUE_DIR/trust-bundle-critique--deliver.md" \
+  --source-request "Trust bundle critique claim fidelity fixture." \
+  --summary "Trust bundle critique claim fidelity fixture." \
+  --next-action "Record pass and fail critiques to verify claim status mapping." \
+  --timestamp "2026-05-09T00:00:00Z" >"$TMPDIR_EVAL/tb-critique-init.out" 2>"$TMPDIR_EVAL/tb-critique-init.err"
+flow_agents_node "$WRITER" record-evidence "$TB_CRITIQUE_DIR" \
+  --verdict pass \
+  --check-json '{"id":"tb-critique-setup","kind":"test","status":"pass","summary":"Critique fidelity setup passed."}' \
+  --timestamp "2026-05-09T00:01:00Z" >"$TMPDIR_EVAL/tb-critique-evidence.out" 2>"$TMPDIR_EVAL/tb-critique-evidence.err"
+
+# Record a failing critique (verdict fail → claim status disputed)
+flow_agents_node "$WRITER" record-critique "$TB_CRITIQUE_DIR" \
+  --id tb-fail-review \
+  --reviewer tool-code-reviewer \
+  --verdict fail \
+  --summary "Critique failed — blocking finding." \
+  --timestamp "2026-05-09T00:02:00Z" >"$TMPDIR_EVAL/tb-critique-fail.out" 2>"$TMPDIR_EVAL/tb-critique-fail.err" || true
+
+# Record a passing critique (verdict pass, no open findings → claim status verified)
+if flow_agents_node "$WRITER" record-critique "$TB_CRITIQUE_DIR" \
+  --id tb-pass-review \
+  --reviewer tool-code-reviewer \
+  --verdict pass \
+  --summary "Critique passed — no blocking findings." \
+  --timestamp "2026-05-09T00:02:30Z" >"$TMPDIR_EVAL/tb-critique-pass.out" 2>"$TMPDIR_EVAL/tb-critique-pass.err" \
+  && [[ -f "$TB_CRITIQUE_DIR/trust.bundle" ]]; then
+  if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/tb-critique-assert.err"
+import { readFileSync } from 'node:fs';
+const bundle = JSON.parse(readFileSync('${TB_CRITIQUE_DIR}/trust.bundle', 'utf8'));
+const claims = bundle.claims;
+// Surface uses generateClaimId: search by subjectId (which encodes slug/reviewId)
+const failCritique = claims.find((c) => c.subjectId && c.subjectId.endsWith('/tb-fail-review'));
+const passCritique = claims.find((c) => c.subjectId && c.subjectId.endsWith('/tb-pass-review'));
+if (!failCritique) { process.stderr.write('missing claim for subjectId ending with /tb-fail-review\n'); process.exit(1); }
+if (!passCritique) { process.stderr.write('missing claim for subjectId ending with /tb-pass-review\n'); process.exit(1); }
+if (failCritique.status !== 'disputed') { process.stderr.write('fail critique claim status was ' + failCritique.status + ', expected disputed (Surface deriveClaimStatus)\n'); process.exit(1); }
+if (passCritique.status !== 'verified') { process.stderr.write('pass critique claim status was ' + passCritique.status + ', expected verified (Surface deriveClaimStatus)\n'); process.exit(1); }
+NODEOF
+  then
+    _pass "trust.bundle claim fidelity: critique fail→disputed, critique pass→verified"
+  else
+    _fail "trust.bundle critique claim fidelity assertion failed: $(cat "$TMPDIR_EVAL/tb-critique-assert.err")"
+  fi
+else
+  _fail "trust.bundle critique claim fidelity setup failed: $(cat "$TMPDIR_EVAL/tb-critique-pass.out" "$TMPDIR_EVAL/tb-critique-pass.err")"
+fi
+
+
+# ─── AC3: statusFunctionVersion conformance ───────────────────────────────────
+# Assert the statusFunctionVersion embedded in the emitted trust.bundle source
+# field matches @kontourai/surface's exported statusFunctionVersion constant.
+# Also run hachure conformance vectors through Surface's deriveClaimStatus to
+# confirm our producer path produces canonical statuses.
+TB_CONF_DIR="$TMPDIR_EVAL/repo/.flow-agents/trust-bundle-conformance"
+mkdir -p "$TB_CONF_DIR"
+cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_CONF_DIR/trust-bundle-conformance--deliver.md"
+flow_agents_node "$WRITER" init-plan "$TB_CONF_DIR/trust-bundle-conformance--deliver.md"   --source-request "Conformance fixture."   --summary "Conformance fixture."   --next-action "Record evidence and check statusFunctionVersion."   --timestamp "2026-05-09T00:00:00Z" >"$TMPDIR_EVAL/tb-conf-init.out" 2>"$TMPDIR_EVAL/tb-conf-init.err"
+flow_agents_node "$WRITER" record-evidence "$TB_CONF_DIR"   --verdict pass   --check-json '{"id":"conf-check","kind":"test","status":"pass","summary":"Conformance check passed."}'   --timestamp "2026-05-09T00:01:00Z" >"$TMPDIR_EVAL/tb-conf-evidence.out" 2>"$TMPDIR_EVAL/tb-conf-evidence.err"
+
+if [[ -f "$TB_CONF_DIR/trust.bundle" ]]; then
+  if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/tb-sfv-check.err"
+import { readFileSync } from 'node:fs';
+import { statusFunctionVersion } from '@kontourai/surface';
+const bundle = JSON.parse(readFileSync('${TB_CONF_DIR}/trust.bundle', 'utf8'));
+// statusFunctionVersion is encoded in the source field as "...;statusFunctionVersion=<version>"
+const sourceMatch = (bundle.source || '').match(/statusFunctionVersion=(.+)$/);
+if (!sourceMatch) { process.stderr.write('bundle source does not contain statusFunctionVersion: ' + bundle.source + '\n'); process.exit(1); }
+const bundleSfv = sourceMatch[1];
+const surfaceSfv = String(statusFunctionVersion);
+if (bundleSfv !== surfaceSfv) {
+  process.stderr.write('bundle statusFunctionVersion ' + bundleSfv + ' does not match Surface statusFunctionVersion ' + surfaceSfv + '\n');
+  process.exit(1);
+}
+NODEOF
+  then
+    _pass "trust.bundle source encodes statusFunctionVersion matching Surface\'s canonical export"
+  else
+    _fail "trust.bundle statusFunctionVersion mismatch: $(cat "$TMPDIR_EVAL/tb-sfv-check.err")"
+  fi
+fi
+
+# Conformance vectors: assert Surface's deriveClaimStatus produces canonical statuses
+# for hachure's reference sf-*.json vectors (sf-verified-commit → verified, sf-disputed-blocking → disputed).
+HACHURE_CONF="$ROOT/node_modules/hachure/conformance"
+if [[ -d "$HACHURE_CONF" ]]; then
+  if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/tb-conf-vectors.err"
+import { readFileSync, readdirSync } from 'node:fs';
+import { deriveClaimStatus, statusFunctionVersion } from '@kontourai/surface';
+const confDir = '${HACHURE_CONF}';
+const vectors = readdirSync(confDir).filter(f => f.startsWith('sf-') && f.endsWith('.json'));
+let passed = 0; let failed = 0;
+for (const vec of vectors) {
+  const data = JSON.parse(readFileSync(confDir + '/' + vec, 'utf8'));
+  const { input, expect, now: nowStr } = data;
+  const now = nowStr ? new Date(nowStr) : new Date();
+  for (const [claimId, expectedStatus] of Object.entries(expect.statusByClaimId ?? {})) {
+    const claim = input.claims.find((c) => c.id === claimId);
+    if (!claim) { process.stderr.write('vector ' + vec + ': claim ' + claimId + ' not found\n'); failed++; continue; }
+    const evidence = (input.evidence || []).filter((e) => e.claimId === claimId);
+    const events = (input.events || []).filter((e) => e.claimId === claimId);
+    const policies = (input.policies || []);
+    const authorityTrace = (input.authorityTrace || []);
+    const result = deriveClaimStatus({ claim, evidence, events, policies, now, authorityTrace });
+    if (result.status !== expectedStatus) {
+      process.stderr.write('vector ' + vec + ' claim ' + claimId + ': got ' + result.status + ', expected ' + expectedStatus + '\n');
+      failed++;
+    } else {
+      passed++;
+    }
+  }
+}
+process.stderr.write('conformance vectors: ' + passed + ' passed, ' + failed + ' failed (statusFunctionVersion=' + statusFunctionVersion + ')\n');
+if (failed > 0) process.exit(1);
+NODEOF
+  then
+    _pass "hachure conformance vectors pass Surface deriveClaimStatus"
+  else
+    _fail "hachure conformance vectors failed: $(cat "$TMPDIR_EVAL/tb-conf-vectors.err")"
+  fi
+fi
+
 if [[ "$errors" -eq 0 ]]; then
   echo "Workflow sidecar writer integration passed."
   exit 0
