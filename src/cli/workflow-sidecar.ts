@@ -79,6 +79,175 @@ export function validateTrustBundle(bundle: unknown): { valid: boolean; errors: 
   if (!validate) return { valid: true, errors: [], available: false };
   return { ...validate(bundle), available: true };
 }
+// ─── @kontourai/surface status derivation ────────────────────────────────────
+// Surface is ESM-only; this module builds to CJS. Load Surface via a fail-open
+// cached dynamic import(). If Surface cannot be loaded, bundle writes are
+// skipped entirely — no hand-rolled fork fallback.
+type SurfaceModule = {
+  deriveClaimStatus: (args: {
+    claim: Record<string, unknown>;
+    evidence: Record<string, unknown>[];
+    events: Record<string, unknown>[];
+    policies: Record<string, unknown>[];
+    now?: Date;
+  }) => { status: string; policyId: string | undefined };
+  generateClaimId: (subjectId: string, surface: string, fieldOrBehavior: string) => string;
+  statusFunctionVersion: string;
+};
+let _surfaceModule: SurfaceModule | null | undefined; // undefined = not tried yet; null = unavailable
+async function tryLoadSurface(): Promise<SurfaceModule | null> {
+  if (_surfaceModule !== undefined) return _surfaceModule;
+  try {
+    const m = await import("@kontourai/surface");
+    _surfaceModule = m as unknown as SurfaceModule;
+    return _surfaceModule;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[trust-bundle] @kontourai/surface unavailable — bundle write skipped: ${message}\n`);
+    _surfaceModule = null;
+    return null;
+  }
+}
+
+/** Map a workflow check status to the Surface VerificationEvent status. */
+function checkStatusToEventStatus(status: string): string | null {
+  if (status === "pass") return "verified";
+  if (status === "fail") return "disputed";
+  if (status === "skip") return "assumed";
+  return null; // not_verified / unknown → no event → Surface returns "unknown"
+}
+/** Map an acceptance criterion status to the Surface VerificationEvent status. */
+function criterionStatusToEventStatus(status: string): string | null {
+  if (status === "pass") return "verified";
+  if (status === "fail") return "disputed";
+  if (status === "accepted_gap") return "assumed";
+  return null; // pending / not_verified → no event → Surface returns "unknown"
+}
+/** Map a critique verdict to the Surface VerificationEvent status. */
+function critiqueToEventStatus(verdict: string, findings: AnyObj[]): string | null {
+  if (verdict === "fail") return "disputed";
+  const hasOpenFinding = Array.isArray(findings) && findings.some((f: AnyObj) => f.status === "open");
+  if (verdict === "pass" && hasOpenFinding) return "disputed";
+  if (verdict === "pass") return "verified";
+  if (verdict === "comment") return "assumed";
+  return null; // not_verified or unknown → no event → Surface returns "unknown"
+}
+
+/**
+ * Build a Hachure trust.bundle object from the current bespoke sidecar state.
+ * Derives claim statuses using @kontourai/surface's canonical versioned function.
+ * Returns null when Surface is unavailable (caller skips the bundle write).
+ * @param slug       Task slug (used as subjectId prefix)
+ * @param timestamp  ISO-8601 timestamp for createdAt / updatedAt / observedAt
+ * @param evidence   Deserialized evidence.json (or undefined)
+ * @param acceptance Deserialized acceptance.json (or undefined)
+ * @param critique   Deserialized critique.json (or undefined)
+ */
+export async function buildTrustBundle(slug: string, timestamp: string, evidence?: AnyObj, acceptance?: AnyObj, critique?: AnyObj): Promise<AnyObj | null> {
+  const surface = await tryLoadSurface();
+  if (!surface) return null;
+  const { deriveClaimStatus, generateClaimId, statusFunctionVersion } = surface;
+
+  const claims: AnyObj[] = [];
+  const evidenceItems: AnyObj[] = [];
+  const events: AnyObj[] = [];
+  const ts = timestamp || new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+
+  // Evidence checks → claims + evidence items + events
+  const checks: AnyObj[] = Array.isArray(evidence?.checks) ? evidence!.checks : [];
+  for (const check of checks) {
+    if (!check.id) continue;
+    const subjectId = `${slug}/${check.id}`;
+    const fieldOrBehavior = String(check.summary ?? check.id);
+    const claimId = generateClaimId(subjectId, "flow-agents.workflow", fieldOrBehavior);
+    const evId = `ev:${claimId}`;
+    const evStatus = checkStatusToEventStatus(String(check.status ?? ""));
+    const claimEvents: AnyObj[] = [];
+    if (evStatus) {
+      const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: "flow-agents/workflow-sidecar", method: "validation", evidenceIds: [evId], createdAt: ts, verifiedAt: ts };
+      events.push(evt);
+      claimEvents.push(evt);
+    }
+    const evList: AnyObj[] = [{ id: evId, claimId, evidenceType: "test_output", method: "validation", sourceRef: `${slug}/evidence.json`, excerptOrSummary: fieldOrBehavior, observedAt: ts, collectedBy: "flow-agents/workflow-sidecar", passing: check.status === "pass" }];
+    evidenceItems.push(evList[0]);
+    const claimObj: AnyObj = { id: claimId, subjectType: "workflow-check", subjectId, surface: "flow-agents.workflow", claimType: `workflow.check.${check.kind ?? "external"}`, fieldOrBehavior, value: check.status, createdAt: ts, updatedAt: ts };
+    const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: evList as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [] });
+    claims.push({ ...claimObj, status: derivedStatus });
+  }
+
+  // Acceptance criteria → claims + events
+  const criteria: AnyObj[] = Array.isArray(acceptance?.criteria) ? acceptance!.criteria : [];
+  for (const criterion of criteria) {
+    if (!criterion.id) continue;
+    const subjectId = `${slug}/${criterion.id}`;
+    const fieldOrBehavior = String(criterion.description ?? criterion.id);
+    const claimId = generateClaimId(subjectId, "flow-agents.workflow", fieldOrBehavior);
+    const evStatus = criterionStatusToEventStatus(String(criterion.status ?? ""));
+    const claimEvents: AnyObj[] = [];
+    if (evStatus) {
+      const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: "flow-agents/workflow-sidecar", method: "validation", evidenceIds: [], createdAt: ts, verifiedAt: ts };
+      events.push(evt);
+      claimEvents.push(evt);
+    }
+    const claimObj: AnyObj = { id: claimId, subjectType: "workflow-acceptance-criterion", subjectId, surface: "flow-agents.workflow", claimType: "workflow.acceptance.criterion", fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts };
+    const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [] });
+    claims.push({ ...claimObj, status: derivedStatus });
+  }
+
+  // Critique entries → claims + events
+  const critiques: AnyObj[] = Array.isArray(critique?.critiques) ? critique!.critiques : [];
+  for (const c of critiques) {
+    if (!c.id) continue;
+    const subjectId = `${slug}/${c.id}`;
+    const fieldOrBehavior = String(c.summary ?? c.verdict ?? c.id);
+    const claimId = generateClaimId(subjectId, "flow-agents.workflow", fieldOrBehavior);
+    const evStatus = critiqueToEventStatus(String(c.verdict ?? ""), c.findings ?? []);
+    const claimEvents: AnyObj[] = [];
+    if (evStatus) {
+      const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: "flow-agents/workflow-sidecar", method: "validation", evidenceIds: [], createdAt: ts, verifiedAt: ts };
+      events.push(evt);
+      claimEvents.push(evt);
+    }
+    const claimObj: AnyObj = { id: claimId, subjectType: "workflow-critique", subjectId, surface: "flow-agents.workflow", claimType: "workflow.critique.review", fieldOrBehavior, value: c.verdict, createdAt: ts, updatedAt: ts };
+    const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [] });
+    claims.push({ ...claimObj, status: derivedStatus });
+  }
+
+  return {
+    schemaVersion: 3,
+    source: `flow-agents/workflow-sidecar;statusFunctionVersion=${statusFunctionVersion}`,
+    claims,
+    evidence: evidenceItems,
+    policies: [],
+    events,
+  };
+}
+
+/**
+ * Fail-open wrapper: builds (via Surface), validates, and writes a trust.bundle.
+ * ANY error is caught and logged to stderr — this function NEVER throws and
+ * NEVER affects the exit code of its caller. Bespoke sidecars must be written
+ * before calling this function. Returns { written: false } if Surface is
+ * unavailable (fail-open; does NOT fall back to hand-rolled status derivation).
+ */
+export async function writeTrustBundle(dir: string, slug: string, timestamp: string, evidence?: AnyObj, acceptance?: AnyObj, critique?: AnyObj): Promise<{ written: boolean; errors: string[] }> {
+  try {
+    const bundle = await buildTrustBundle(slug, timestamp, evidence, acceptance, critique);
+    if (!bundle) return { written: false, errors: [] }; // Surface unavailable — fail-open, skip write
+    const result = validateTrustBundle(bundle);
+    if (result.available && !result.valid) {
+      process.stderr.write(`[trust-bundle] schema validation failed: ${result.errors.join("; ")}\n`);
+      return { written: false, errors: result.errors };
+    }
+    writeJson(path.join(dir, "trust.bundle"), bundle);
+    return { written: true, errors: [] };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[trust-bundle] write failed: ${message}\n`);
+    return { written: false, errors: [message] };
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 function safeRepoIdentifier(value: string): string {
   const trimmed = value.trim().replace(/\.git$/, "");
@@ -191,9 +360,9 @@ function lockAcquisitionFailureMessage(command: string, lockDir: string, error: 
   ].join(" ");
 }
 
-async function withLock<T>(dir: string, create: boolean, command: string, body: () => T): Promise<T> {
+async function withLock<T>(dir: string, create: boolean, command: string, body: () => T | Promise<T>): Promise<T> {
   if (create) fs.mkdirSync(dir, { recursive: true });
-  if (!fs.existsSync(dir)) return body();
+  if (!fs.existsSync(dir)) return await body();
   const lockDir = path.join(dir, ".workflow-sidecar.lockdir");
   const staleMs = Number(process.env.FLOW_AGENTS_WORKFLOW_SIDECAR_STALE_LOCK_MS ?? 5 * 60 * 1000);
   const deadline = Date.now() + 30000;
@@ -221,7 +390,7 @@ async function withLock<T>(dir: string, create: boolean, command: string, body: 
   try {
     const delay = process.env.FLOW_AGENTS_WORKFLOW_SIDECAR_LOCK_DELAY;
     if (delay) await new Promise((resolve) => setTimeout(resolve, Number(delay) * 1000));
-    return body();
+    return await body();
   } finally {
     fs.rmSync(lockDir, { recursive: true, force: true });
   }
@@ -502,7 +671,7 @@ function validateAcceptanceEvidenceRefs(dir: string): void {
 export function writeState(dir: string, slug: string, status: string, phase: string, timestamp: string, summary: string, next = "continue"): void {
   writeJson(path.join(dir, "state.json"), { ...loadJson(path.join(dir, "state.json")), ...sidecarBase(slug), status, phase, updated_at: timestamp, artifact_paths: relArtifacts(dir), next_action: { status: next, summary } });
 }
-function recordEvidence(p: ReturnType<typeof parseArgs>): number {
+async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const verdict = opt(p, "verdict") || die("--verdict is required");
   if (!verdicts.has(verdict)) die("verdict must be one of: pass, partial, fail, not_verified");
@@ -515,6 +684,8 @@ function recordEvidence(p: ReturnType<typeof parseArgs>): number {
   updateAcceptance(dir, verdict);
   const stateStatus = verdict === "pass" ? "verified" : verdict === "fail" ? "failed" : "not_verified";
   writeState(dir, slug, stateStatus, "verification", opt(p, "timestamp", now()), "Evidence recorded.");
+  const ts = opt(p, "timestamp", now());
+  await writeTrustBundle(dir, slug, ts, loadJson(path.join(dir, "evidence.json")), loadJson(path.join(dir, "acceptance.json")));
   return 0;
 }
 
@@ -561,7 +732,7 @@ function critiqueStatus(critiques: AnyObj[], required: boolean): string {
   if (critiques.some((c) => c.verdict === "fail" || (Array.isArray(c.findings) && c.findings.some((f: AnyObj) => f.status === "open")))) return "fail";
   return "pass";
 }
-function recordCritique(p: ReturnType<typeof parseArgs>): number {
+async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const existing = loadJson(path.join(dir, "critique.json"), { critiques: [] });
@@ -569,6 +740,7 @@ function recordCritique(p: ReturnType<typeof parseArgs>): number {
   const critiques = [...(Array.isArray(existing.critiques) ? existing.critiques : []), critique];
   if (critique.verdict === "pass" && critique.findings.some((f: AnyObj) => f.status === "open")) die("required critique must pass");
   writeJson(path.join(dir, "critique.json"), { ...sidecarBase(slug), status: critiqueStatus(critiques, true), required: true, updated_at: critique.reviewed_at, critiques });
+  await writeTrustBundle(dir, slug, critique.reviewed_at, loadJson(path.join(dir, "evidence.json")), loadJson(path.join(dir, "acceptance.json")), loadJson(path.join(dir, "critique.json")));
   return 0;
 }
 function frontmatter(text: string, key: string): string {
@@ -577,7 +749,7 @@ function frontmatter(text: string, key: string): string {
   if (end < 0) return "";
   return new RegExp(`^${key}:\\s*(.+)$`, "m").exec(text.slice(0, end))?.[1]?.trim() ?? "";
 }
-function importCritique(p: ReturnType<typeof parseArgs>): number {
+async function importCritique(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const review = p.positional[1] || die("review artifact is required");
   const text = read(review);
@@ -592,7 +764,7 @@ function importCritique(p: ReturnType<typeof parseArgs>): number {
     findings.push({ id: slugify(title, `finding-${findings.length + 1}`), severity: (m.groups?.severity ?? "info").toLowerCase(), status: opt(p, "finding-status", verdict === "pass" ? "fixed" : "open"), description: title, file_refs: [m.groups?.target ?? review] });
   }
   const parsed = { ...p, positional: [dir], opts: { ...p.opts, id: [slugify(path.basename(review).replace(/\.md$/, ""), "review")], reviewer: ["tool-code-reviewer"], verdict: [verdict], summary: [`Imported critique from ${path.basename(review)}`], "finding-json": findings.map((f) => JSON.stringify(f)) }, flags: p.flags };
-  const result = recordCritique(parsed);
+  const result = await recordCritique(parsed);
   if (verdict !== "pass") die("required critique must pass");
   return result;
 }
@@ -647,7 +819,7 @@ export function normalizeLearning(raw: AnyObj, timestamp: string): AnyObj {
   validateLearningCorrection(raw);
   return { recorded_at: timestamp, ...raw };
 }
-function recordLearning(p: ReturnType<typeof parseArgs>): number {
+async function recordLearning(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const timestamp = opt(p, "timestamp", now());
@@ -657,6 +829,7 @@ function recordLearning(p: ReturnType<typeof parseArgs>): number {
   if (status === "learned" && records.some((r) => r.correction === undefined)) die("learning status learned requires every record to include correction.needed");
   writeJson(path.join(dir, "learning.json"), { ...sidecarBase(slug), status, updated_at: timestamp, records });
   writeState(dir, slug, "accepted", "learning", timestamp, opt(p, "summary"));
+  await writeTrustBundle(dir, slug, timestamp, loadJson(path.join(dir, "evidence.json")), loadJson(path.join(dir, "acceptance.json")), loadJson(path.join(dir, "critique.json")));
   return 0;
 }
 function evidenceClean(dir: string): boolean {
@@ -683,7 +856,7 @@ function assertExistingLearningValid(dir: string): void {
     if (data.status === "learned" && record.correction === undefined) die("learning status learned requires every record to include correction.needed");
   }
 }
-function dogfoodPass(p: ReturnType<typeof parseArgs>): number {
+async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
   const root = path.resolve(opt(p, "artifact-root", ".flow-agents"));
   const dir = path.resolve(opt(p, "artifact-dir") || currentDir(root) || "");
   requireArtifactDirUnderRoot(dir, root);
@@ -705,9 +878,9 @@ function dogfoodPass(p: ReturnType<typeof parseArgs>): number {
   const learningRecords = opts(p, "learning-record-json").map((v) => normalizeLearning(parseJson(v, "--learning-record-json"), opt(p, "timestamp", now())));
   if (opt(p, "learning-status") === "learned" && learningRecords.some((r) => r.routing.some((x: AnyObj) => x.status === "open"))) die("learned status cannot have open learning routing");
   if (opt(p, "learning-status") === "learned" && learningRecords.some((r) => r.correction === undefined)) die("learned status requires every learning record to include correction.needed");
-  if (opts(p, "check-json").length) recordEvidence({ ...p, positional: [dir], opts: { ...p.opts, verdict: [verdict] }, flags: p.flags });
-  if (p.flags.has("require-critique") && opt(p, "critique-id")) recordCritique({ ...p, positional: [dir], opts: { ...p.opts, id: [opt(p, "critique-id")], verdict: [opt(p, "critique-verdict", "pass")], summary: [opt(p, "critique-summary", opt(p, "summary"))] }, flags: p.flags });
-  if (learningRecords.length) recordLearning({ ...p, positional: [dir], opts: { ...p.opts, status: [opt(p, "learning-status", "learned")], "record-json": opts(p, "learning-record-json"), summary: [opt(p, "learning-summary", opt(p, "summary"))] }, flags: p.flags });
+  if (opts(p, "check-json").length) await recordEvidence({ ...p, positional: [dir], opts: { ...p.opts, verdict: [verdict] }, flags: p.flags });
+  if (p.flags.has("require-critique") && opt(p, "critique-id")) await recordCritique({ ...p, positional: [dir], opts: { ...p.opts, id: [opt(p, "critique-id")], verdict: [opt(p, "critique-verdict", "pass")], summary: [opt(p, "critique-summary", opt(p, "summary"))] }, flags: p.flags });
+  if (learningRecords.length) await recordLearning({ ...p, positional: [dir], opts: { ...p.opts, status: [opt(p, "learning-status", "learned")], "record-json": opts(p, "learning-record-json"), summary: [opt(p, "learning-summary", opt(p, "summary"))] }, flags: p.flags });
   if (opt(p, "release-decision")) {
     recordRelease({ ...p, positional: [dir], opts: { ...p.opts, decision: [opt(p, "release-decision")], scope: [opt(p, "release-scope")], summary: [opt(p, "release-summary", opt(p, "summary"))], "gate-json": ['{"name":"merge","status":"pass","summary":"Dogfood release gate passed."}'], "evidence-ref": ["evidence.json"], "docs-json": [`{"status":"updated","summary":"Docs updated.","refs":["${opt(p, "release-doc-ref", "docs/workflow-usage-guide.md")}"]}`] }, flags: p.flags });
     printJson({ release_decision: opt(p, "release-decision") });
@@ -720,6 +893,8 @@ function dogfoodPass(p: ReturnType<typeof parseArgs>): number {
     writeJson(path.join(dir, "handoff.json"), handoff);
   }
   writeState(dir, taskSlugFor(dir, opt(p, "task-slug")), stateStatus, "verification", opt(p, "timestamp", now()), opt(p, "summary"), verdict === "pass" ? "continue" : "blocked");
+  const _slug = taskSlugFor(dir, opt(p, "task-slug")); const _ts = opt(p, "timestamp", now());
+  await writeTrustBundle(dir, _slug, _ts, loadJson(path.join(dir, "evidence.json")), loadJson(path.join(dir, "acceptance.json")), loadJson(path.join(dir, "critique.json")));
   printJson({ state_status: stateStatus });
   return 0;
 }
