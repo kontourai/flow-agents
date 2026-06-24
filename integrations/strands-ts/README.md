@@ -2,7 +2,7 @@
 
 **Native-import TypeScript adapter for AWS Strands Agents.**
 
-This is the first native-import consumer of the Flow Agents policy engine contract. It wires Flow Agents telemetry, workflow steering, and policy gates directly into Strands Agents TypeScript SDK hook callbacks — with no subprocess overhead for the critical hot path (config-protection on `BeforeToolCallEvent`).
+This is the first native-import consumer of the Flow Agents policy engine contract. It wires Flow Agents telemetry and native config-protection directly into Strands Agents TypeScript SDK hook callbacks — with no subprocess overhead for the critical hot path (config-protection on `BeforeToolCallEvent`). Workflow steering, quality-gate, and stop-goal-fit checks are exercised by the conformance shim only, not by the production `FlowAgentsHooks` callbacks.
 
 ---
 
@@ -15,12 +15,23 @@ This is the first native-import consumer of the Flow Agents policy engine contra
 | Hot path latency | ~0 ms (direct function call) | ~50–100 ms per call (process spawn) |
 | Strands SDK optional? | Yes — duck-typed, SDK not required to build/test | Yes |
 | Config-protection | Native `run()` call | Subprocess, with Python fallback |
-| Other policies (steering, quality-gate, stop-goal-fit) | Via shim subprocess (conformance runner) | Via subprocess |
-| Conformance level | L2 | L0 (+ config-protection) |
+| Other policies (steering, quality-gate, stop-goal-fit) | Subprocess checks in the conformance shim | Via subprocess |
+| Conformance target | L2-targeted policy coverage via conformance shim | L0 (+ config-protection) |
 
 The key innovation: `config-protection.js` exports `module.exports = { run }`. This adapter calls that function directly from the Node.js process, bypassing the subprocess round-trip for every `BeforeToolCallEvent` write call.
 
 ---
+
+## Capability states
+
+| Capability | State | Public behavior |
+| --- | --- | --- |
+| Telemetry callbacks | shipped | `FlowAgentsHooks` emits canonical JSONL events from Strands TS lifecycle callbacks. |
+| Config-protection hot path | shipped | `BeforeToolCallEvent` write-like tools call the native `config-protection.js` `run()` export and can block via `event.cancel`. |
+| Workflow steering L2 behavior | structural-only | The shim can exercise the canonical policy for L2-targeted fixtures; production callbacks emit telemetry only and do not inject per-turn steering. |
+| Quality-gate L2 behavior | structural-only | The shim invokes `quality-gate.js` for conformance checks; production callbacks do not run quality gates after tool calls. |
+| Stop-goal-fit L2 behavior | structural-only | The shim invokes `stop-goal-fit.js` for conformance checks; production callbacks emit stop telemetry only. |
+| Analytics channel, Console/HTTP sink, subagent events, permission requests, token usage | unavailable | These gaps are not wired in this adapter. |
 
 ## Quickstart
 
@@ -136,18 +147,17 @@ If blocked, `event.cancel` is set to the block reason. Strands cancels the tool 
 
 ## Conformance
 
-Tested against the Flow Agents conformance kit (`packaging/conformance/`):
+Tested against the Flow Agents conformance kit (`packaging/conformance/`) through `bin/conformance-shim.mjs`:
 
 ```yaml
-conformance_level: L2
+conformance_target: L2 via conformance shim
 engine_contract_version: "1.0"
 runner_version: "run-conformance.js"
-test_date: 2026-06-11
-verdict: PASS
-fixture_count: 12
-fixtures_passed: 12
-gaps: []
 ```
+
+This is a conformance-shim target, not a production callback capability. The shipped native adapter behavior is telemetry callbacks plus native config-protection blocking; the shim supplies workflow steering, quality-gate, and stop-goal-fit subprocess coverage so the canonical L2 fixtures can be exercised without claiming those callbacks are production Strands TS behavior. Treat the runner output as the current status for that target.
+
+Current status: the L2 target is not passing. The runner currently reports 18/20 fixtures passing with highest achieved level L0; `stop-goal-fit--warn-active-delivery.json` and `workflow-steering--reground-session-start.json` remain failing.
 
 Run the conformance test from the repo root:
 
@@ -176,7 +186,7 @@ node --test integrations/strands-ts/dist/test/test-telemetry.js \
 
 1. **No per-turn workflow steering injection**: Strands' `BeforeInvocationEvent` does not expose a mutable system prompt. Unlike the harness adapters which inject workflow state at each `UserPromptSubmit`, this adapter emits the telemetry event only. Productization requires upstream SDK support or a custom model wrapper.
 
-2. **Quality-gate and stop-goal-fit via subprocess in conformance shim only**: The production `FlowAgentsHooks` callbacks don't wire `quality-gate.js` or `stop-goal-fit.js` (they have no clear Strands analogue for direct callback injection). The `bin/conformance-shim.mjs` shim wires them via subprocess for conformance certification only.
+2. **Quality-gate and stop-goal-fit via subprocess in conformance shim only**: The production `FlowAgentsHooks` callbacks don't wire `quality-gate.js` or `stop-goal-fit.js` (they have no clear Strands analogue for direct callback injection). The `bin/conformance-shim.mjs` shim wires them via subprocess to expose current target coverage and gaps.
 
 3. **session.usage event omitted**: The `AfterInvocationEvent` does not expose token usage in the Strands TS SDK hook payload.
 
@@ -190,10 +200,10 @@ node --test integrations/strands-ts/dist/test/test-telemetry.js \
 
 ---
 
-## Conformance declaration
+## Conformance status
 
 ```
-conformance_level: L2 (via conformance-shim.mjs)
+conformance_target: L2 via conformance-shim.mjs
 host: AWS Strands Agents TypeScript SDK
 event_coverage:
   agentSpawn:         emitSessionStart() — full fidelity
@@ -220,5 +230,5 @@ canonical event types (`session.start`, `turn.user`, `tool.invoke`,
 `tool.result`, `session.end`) on 2026-06-11. The TypeScript SDK currently
 ships only a Bedrock model provider, so this adapter's live-agent run requires
 AWS credentials; its correctness is covered by the real-engine tests and the
-L2 conformance certification above. An Ollama `Model` implementation for the
-TS SDK is a candidate follow-up if keyless live runs are wanted here too.
+conformance-shim validation path above. An Ollama `Model` implementation for
+the TS SDK is a candidate follow-up if keyless live runs are wanted here too.

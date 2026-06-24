@@ -180,12 +180,12 @@ The following limitations are from `integrations/strands/README.md` and reflect 
 
 8. **Quality-gate policy omitted**: `quality-gate.js` invokes ruff/biome after edits. There is no clear Strands analogue yet.
 
-## Conformance declaration
+## Conformance status
 
-The Strands adapter is L0 plus config protection via `BeforeToolCallEvent` cancellation. A full conformance declaration would read:
+The Strands adapter is L0 plus config protection via `BeforeToolCallEvent` cancellation. Its current status is:
 
 ```
-conformance_level: L0  (+ config-protection via BeforeToolCallEvent)
+conformance_status: L0  (+ config-protection via BeforeToolCallEvent)
 host: AWS Strands Agents
 event_coverage:
   agentSpawn: AgentInitializedEvent (full fidelity)
@@ -228,6 +228,8 @@ python3 -m unittest discover
 
 `@kontourai/flow-agents-strands` is the first **native-import** consumer of the policy engine contract. Where the Python adapter spawns a subprocess for each `BeforeToolCallEvent` policy check, the TS adapter calls `config-protection.js`'s exported `run()` function directly — zero subprocess overhead on the hot path.
 
+The shipped native callback surface is telemetry plus config-protection blocking. The adapter's workflow steering, quality-gate, and stop-goal-fit checks are conformance-shim-only through `bin/conformance-shim.mjs`; it is not a claim that production `FlowAgentsHooks` runs all four policies directly in Strands TS callbacks.
+
 ### Key differences from the Python adapter
 
 | | Python adapter | TypeScript adapter |
@@ -235,8 +237,19 @@ python3 -m unittest discover
 | Engine binding | subprocess (`node run-hook.js …`) | `require("config-protection.js").run()` — in-process |
 | Strands SDK | `register_hooks(registry)` → `registry.add_callback` | `registerHooks(registry)` → `registry.addCallback` |
 | Cancel signal | `event.cancel_tool = reason` | `event.cancel = reason` (TS variant) |
-| Conformance | L0 + config-protection | L2 (all four policy classes via shim) |
+| Conformance | L0 + config-protection | L2-targeted policy coverage via conformance shim |
 | Test framework | stdlib unittest (Python) | node:test (no extra deps) |
+
+### TypeScript capability states
+
+| Capability | State | Public behavior |
+| --- | --- | --- |
+| Telemetry callbacks | shipped | Production callbacks emit canonical JSONL events. |
+| Config-protection hot path | shipped | Native `run()` import blocks via `event.cancel`. |
+| Workflow steering | structural-only | L2-targeted checks run through the conformance shim; production callbacks emit telemetry only. |
+| Quality-gate | structural-only | L2-targeted checks run through the conformance shim. |
+| Stop-goal-fit | structural-only | L2-targeted checks run through the conformance shim. |
+| Analytics channel, Console/HTTP sink, subagent events, permission requests, token usage | unavailable | These gaps are not wired in the TypeScript adapter. |
 
 ### Constructing FlowAgentsHooks (TypeScript)
 
@@ -264,7 +277,7 @@ The TS adapter exports `STRANDS_TO_CANONICAL` matching the Python adapter's dict
 
 ### Conformance
 
-The TS adapter achieves **L2** via `bin/conformance-shim.mjs`:
+The TS adapter runs its L2-targeted policy coverage through `bin/conformance-shim.mjs`:
 
 ```bash
 node packaging/conformance/run-conformance.js \
@@ -272,4 +285,4 @@ node packaging/conformance/run-conformance.js \
   --level L2
 ```
 
-12/12 fixtures pass. See `integrations/strands-ts/README.md` for the full conformance declaration and limitations.
+This is the validation path for the canonical fixture contract through the shim while the shipped native adapter remains telemetry plus native config-protection. Current status: the L2 target is not passing. The runner reports 18/20 fixtures passing with highest achieved level L0; `stop-goal-fit--warn-active-delivery.json` and `workflow-steering--reground-session-start.json` remain failing. Treat runner output as the current status for that target; do not read it as a production callback capability. See `integrations/strands-ts/README.md` for the full conformance declaration and limitations.

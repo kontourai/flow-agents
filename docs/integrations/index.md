@@ -22,7 +22,7 @@ Flow Agents reaches host runtimes and agent frameworks through two distinct dist
 | L1 | L0 plus workflow steering and stop-goal-fit in warning mode |
 | L2 | L1 plus config protection (blocking) and quality gate — the reference level |
 
-Claude Code and Codex are L2 reference implementations. opencode is L1 (no prompt-submit hook). pi is L1 (no stop hook). The Strands adapter is L0 plus config protection via `BeforeToolCallEvent` cancellation.
+Claude Code and Codex are L2 reference implementations. opencode is L1 (no prompt-submit hook). pi is L1 (no stop hook). The Strands Python adapter is L0 plus config protection via `BeforeToolCallEvent` cancellation. The Strands TypeScript adapter ships telemetry callbacks plus native config protection; workflow steering, quality-gate, and stop-goal-fit policy coverage is available through the conformance shim only.
 
 The <a href="../spec/runtime-hook-surface.html">Runtime Hook Surface spec</a> defines the canonical event taxonomy, policy classes, conformance levels, and engine contract in full.
 
@@ -55,4 +55,4 @@ The <a href="../spec/runtime-hook-surface.html">Runtime Hook Surface spec</a> de
 
 ## TypeScript native-import adapter
 
-`integrations/strands-ts/` (`@kontourai/flow-agents-strands`) is the first native-import consumer of the policy engine contract. It binds the `config-protection.js` `run()` function directly — no subprocess on the hot path. Achieves **L2** conformance. See `integrations/strands-ts/README.md` and the [Framework Adapter](framework-adapter.html) page for the full comparison with the Python adapter.
+`integrations/strands-ts/` (`@kontourai/flow-agents-strands`) is the first native-import consumer of the policy engine contract. It binds the `config-protection.js` `run()` function directly — no subprocess on the hot path. Shipped native behavior is telemetry callbacks plus config-protection blocking; workflow steering, quality-gate, and stop-goal-fit run through the conformance shim rather than production Strands TS callbacks. See `integrations/strands-ts/README.md` and the [Framework Adapter](framework-adapter.html) page for the full comparison with the Python adapter.
