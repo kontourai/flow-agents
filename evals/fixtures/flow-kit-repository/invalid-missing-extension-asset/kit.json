@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "id": "missing-extension-asset-kit",
+  "name": "Missing Extension Asset Kit",
+  "product_name": "Missing Extension Asset Kit",
+  "description": "A valid Flow Kit container with a Flow Agents extension asset pointing at a missing file.",
+  "flows": [
+    {
+      "id": "missing.extension.asset.review",
+      "path": "flows/review.flow.json",
+      "description": "Review a small change."
+    }
+  ],
+  "docs": [
+    {
+      "id": "missing.docs",
+      "path": "docs/MISSING.md"
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { validateKitRepository as validateFlowKitRepository } from "../flow-kit/validate.js";
 import { loadJson, readText, rel, root, walkFiles } from "./common.js";
 
 class Reporter {
@@ -15,9 +15,6 @@ const kitsCatalogPath = path.join(root, "kits/catalog.json");
 const flowRoot = process.env.FLOW_CLI_ROOT ? path.resolve(process.env.FLOW_CLI_ROOT) : "";
 const flowSchemaPath = flowRoot ? path.join(flowRoot, "schemas", "flow-definition.schema.json") : "";
 const flowCliPath = flowRoot ? ["dist/cli.js", "src/cli.js"].map((candidate) => path.join(flowRoot, candidate)).find((candidate) => fs.existsSync(candidate)) ?? path.join(flowRoot, "dist/cli.js") : "";
-const kitIdRe = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*$/;
-const kitAssetSections = new Set(["skills", "docs", "adapters", "evals", "assets"]);
-const kitTopLevelKeys = new Set(["schema_version", "id", "name", "product_name", "description", "flows", ...kitAssetSections]);
 const textRefExtensions = new Set([".md", ".yaml", ".yml", ".json", ".sh", ".js", ".toml"]);
 const ignoredRefDirs = new Set(["node_modules", "__pycache__", ".pytest_cache", ".cache"]);
 const legacyRefRe = /(?<![A-Za-z0-9_.-])(?:agents|agent-cards|context|evals|lib|powers|prompts|scripts|skills)\/[A-Za-z0-9_./@:+-]+/g;
@@ -174,69 +171,14 @@ function validateManifest(reporter: Reporter, manifest: any, agentNames: Set<str
   for (const dir of manifest.optional_copy_dirs ?? []) if (!fs.existsSync(path.join(root, dir))) console.log(`warning: ${rel(manifestPath)} optional_copy_dirs entry absent: ${dir}`);
   for (const agent of manifest.codex?.excluded_agents ?? []) reporter.check(agentNames.has(agent), `${rel(manifestPath)}: codex excluded agent '${agent}' does not exist`);
 }
-function safeLocalPath(baseDir: string, pathText: unknown, label: string, reporter: Reporter): string | undefined {
-  if (typeof pathText !== "string" || !pathText) { reporter.fail(`${label} must be a non-empty relative path`); return undefined; }
-  if (path.isAbsolute(pathText)) { reporter.fail(`${label} must be relative; absolute paths are not allowed`); return undefined; }
-  if (pathText.split(/[\\/]/).includes("..")) { reporter.fail(`${label} must stay inside the kit directory; '..' path traversal is not allowed`); return undefined; }
-  return path.join(baseDir, pathText);
-}
-function validateFlowDefinitionShape(file: string, data: any, reporter: Reporter): void {
-  const localCli = flowCliPath;
-  if (fs.existsSync(localCli)) {
-    const result = spawnSync("node", [localCli, "validate-definition", file, "--json"], { encoding: "utf8" });
-    if (result.status !== 0) reporter.fail(`${rel(file)}: Flow validation failed: ${(result.stderr || result.stdout).trim()}`);
-    return;
-  }
-  if (!data || typeof data !== "object") { reporter.fail(`${rel(file)}: Flow Definition must be an object`); return; }
-  for (const key of ["id", "version", "steps", "gates"]) reporter.check(key in data, `${rel(file)}: missing .${key}`);
-}
-function validateKitRepository(kitDir: string, reporter: Reporter): void {
+async function validateKitRepository(kitDir: string, reporter: Reporter): Promise<void> {
   if (!fs.existsSync(kitDir) || !fs.statSync(kitDir).isDirectory()) { reporter.fail(`${rel(kitDir)}: kit directory does not exist`); return; }
   const kitJson = path.join(kitDir, "kit.json");
   reporter.check(fs.existsSync(kitJson), `${rel(kitDir)}: missing kit.json at repository root`);
   if (!fs.existsSync(kitJson)) return;
-  const data = tryLoadJson(kitJson, reporter);
-  if (!data || typeof data !== "object") return;
-  const unknownKeys = Object.keys(data).filter((key) => !kitTopLevelKeys.has(key)).sort();
-  if (unknownKeys.length) reporter.fail(`${rel(kitJson)}: unsupported fields ${unknownKeys.join(", ")}; remove them or add them to the Flow Kit Repository contract`);
-  reporter.check(data.schema_version === "1.0", `${rel(kitJson)}: .schema_version must be "1.0"`);
-  reporter.check(typeof data.id === "string" && kitIdRe.test(data.id), `${rel(kitJson)}: .id must be a stable kebab-case string`);
-  reporter.check(typeof data.name === "string" && !!data.name.trim(), `${rel(kitJson)}: .name must be a non-empty string`);
-  for (const section of [...kitAssetSections].sort()) if (section in data) {
-    if (!Array.isArray(data[section])) { reporter.fail(`${rel(kitJson)}: .${section} must be a list of relative asset paths or objects with path`); continue; }
-    const seenPaths = new Set<string>(); const seenIds = new Set<string>();
-    data[section].forEach((entry: any, index: number) => {
-      const pathValue = typeof entry === "string" ? entry : entry?.path;
-      const assetId = typeof entry === "object" ? entry.id : undefined;
-      if (typeof entry === "object") {
-        const unknown = Object.keys(entry).filter((key) => !["id", "path", "description"].includes(key)).sort();
-        if (unknown.length) reporter.fail(`${rel(kitJson)}: ${section}[${index}] has unsupported fields ${unknown.join(", ")}; use id, path, or description`);
-      }
-      if (assetId !== undefined && (typeof assetId !== "string" || !kitIdRe.test(assetId))) reporter.fail(`${rel(kitJson)}: ${section}[${index}].id must be a stable dot/kebab-case string`);
-      const assetPath = safeLocalPath(kitDir, pathValue, `${rel(kitJson)}: ${section}[${index}].path`, reporter);
-      if (!assetPath) return;
-      if (seenPaths.has(String(pathValue))) reporter.fail(`${rel(kitJson)}: ${section}[${index}].path duplicates '${pathValue}'; declare each asset once`);
-      seenPaths.add(String(pathValue));
-      if (typeof assetId === "string") { if (seenIds.has(assetId)) reporter.fail(`${rel(kitJson)}: ${section}[${index}].id duplicates '${assetId}'; use a unique asset id`); seenIds.add(assetId); }
-      reporter.check(fs.existsSync(assetPath), `${rel(kitJson)}: ${section}[${index}].path points at missing asset: ${pathValue}; add the file or remove the entry`);
-    });
-  }
-  if (!Array.isArray(data.flows) || !data.flows.length) { reporter.fail(`${rel(kitJson)}: .flows must be a non-empty list; add at least one Flow Definition entry`); return; }
-  const seenIds = new Set<string>(); const seenPaths = new Set<string>();
-  data.flows.forEach((flow: any, index: number) => {
-    if (!flow || typeof flow !== "object") { reporter.fail(`${rel(kitJson)}: flows[${index}] must be an object with id and path`); return; }
-    if (typeof flow.id !== "string" || !kitIdRe.test(flow.id)) reporter.fail(`${rel(kitJson)}: flows[${index}].id must be a stable dot/kebab-case string`);
-    else if (seenIds.has(flow.id)) reporter.fail(`${rel(kitJson)}: flows[${index}].id duplicates '${flow.id}'; use a unique Flow id`);
-    else seenIds.add(flow.id);
-    const flowPath = safeLocalPath(kitDir, flow.path, `${rel(kitJson)}: flows[${index}].path`, reporter);
-    if (!flowPath) return;
-    if (seenPaths.has(String(flow.path))) { reporter.fail(`${rel(kitJson)}: flows[${index}].path duplicates '${flow.path}'; declare each Flow Definition once`); return; }
-    seenPaths.add(String(flow.path));
-    reporter.check(fs.existsSync(flowPath), `${rel(kitJson)}: flows[${index}].path points at missing Flow Definition: ${flow.path}; add the file or fix the path`);
-    if (fs.existsSync(flowPath)) validateFlowDefinitionShape(flowPath, tryLoadJson(flowPath, reporter), reporter);
-  });
+  for (const error of await validateFlowKitRepository(kitDir)) reporter.fail(error);
 }
-function validateKits(reporter: Reporter): void {
+async function validateKits(reporter: Reporter): Promise<void> {
   reporter.check(fs.existsSync(path.join(root, "kits")), "kits directory missing");
   const catalog = tryLoadJson(kitsCatalogPath, reporter);
   const kits = catalog?.kits;
@@ -245,14 +187,14 @@ function validateKits(reporter: Reporter): void {
   const localCli = flowCliPath;
   if (flowSchemaPath && fs.existsSync(flowSchemaPath)) console.log(fs.existsSync(localCli) ? `info: validating kit Flow Definitions with Flow CLI at ${localCli}` : `warning: Flow validator unavailable; source-tree check only verifies Flow Definition top-level shape`);
   else console.log("warning: Flow schema not configured; source-tree check only verifies Flow Definition top-level shape. Set FLOW_CLI_ROOT to enable Flow CLI validation. Container validation (kit.json core fields) will delegate to 'flow validate-kit' from @kontourai/flow when FLOW_CLI_ROOT is available.");
-  kits.forEach((entry: any, index: number) => {
+  for (const [index, entry] of kits.entries()) {
     const kitText = typeof entry === "string" ? entry : ["path", "directory", "dir", "id", "name"].map((key) => entry?.[key]).find((value) => typeof value === "string" && value);
-    if (!kitText) { reporter.fail(`${rel(kitsCatalogPath)}: kits[${index}] missing path, directory, dir, id, or name`); return; }
+    if (!kitText) { reporter.fail(`${rel(kitsCatalogPath)}: kits[${index}] missing path, directory, dir, id, or name`); continue; }
     const kitRef = String(kitText).startsWith("kits/") ? path.join(root, kitText) : path.join(root, "kits", kitText);
     const kitDir = path.basename(kitRef) === "kit.json" ? path.dirname(kitRef) : kitRef;
     reporter.check(fs.existsSync(kitDir) && fs.statSync(kitDir).isDirectory(), `${rel(kitsCatalogPath)}: kits[${index}] points at missing kit folder: ${kitText}`);
-    validateKitRepository(kitDir, reporter);
-  });
+    await validateKitRepository(kitDir, reporter);
+  }
 }
 function validateAgentPaths(reporter: Reporter, manifest: any): void {
   for (const file of walkFiles(path.join(root, "agents")).filter((item) => item.endsWith(".json"))) {
@@ -451,7 +393,7 @@ function validateNoFirstPartyPythonCommands(reporter: Reporter): void {
     reporter.fail(`${relative}: direct first-party Python command reference is not allowed; use npm/flow-agents TypeScript commands`);
   }
 }
-export function main(argv = process.argv.slice(2)): number {
+export async function main(argv = process.argv.slice(2)): Promise<number> {
   const kitIndex = argv.indexOf("--kit");
   if (kitIndex >= 0) {
     const kitDir = argv[kitIndex + 1];
@@ -460,7 +402,7 @@ export function main(argv = process.argv.slice(2)): number {
     const localCli = flowCliPath;
     if (flowSchemaPath && fs.existsSync(flowSchemaPath) && fs.existsSync(localCli)) console.log(`info: validating kit Flow Definitions with Flow CLI at ${localCli}`);
     else console.log("warning: Flow validation surface unavailable; local kit check uses the minimal Flow Definition fallback");
-    validateKitRepository(path.resolve(kitDir), reporter);
+    await validateKitRepository(path.resolve(kitDir), reporter);
     if (reporter.errors.length) { console.log("Flow Kit repository validation failed:"); for (const error of reporter.errors) console.log(` - ${error}`); return 1; }
     console.log("Flow Kit repository validation passed."); return 0;
   }
@@ -470,7 +412,7 @@ export function main(argv = process.argv.slice(2)): number {
   validateAgentCards(reporter, agentNames);
   validatePowers(reporter);
   validateManifest(reporter, manifest, agentNames);
-  validateKits(reporter);
+  await validateKits(reporter);
   validateAgentPaths(reporter, manifest);
   validateLegacyRefs(reporter);
   validateMirrors(reporter);
@@ -490,4 +432,4 @@ export function main(argv = process.argv.slice(2)): number {
 // entry-point guard fires correctly when the module is loaded directly as a script.
 const _selfRealPath = (() => { try { return fs.realpathSync(fileURLToPath(import.meta.url)); } catch { return fileURLToPath(import.meta.url); } })();
 const _argv1RealPath = (() => { try { return fs.realpathSync(process.argv[1]); } catch { return process.argv[1]; } })();
-if (_selfRealPath === _argv1RealPath) { process.exitCode = main(); }
+if (_selfRealPath === _argv1RealPath) { main().then((code) => { process.exitCode = code; }); }
