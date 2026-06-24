@@ -5,7 +5,7 @@ title: "ADR 0010: Workflow Trust State as a Hachure Trust Bundle"
 # ADR 0010: Workflow Trust State as a Hachure Trust Bundle
 
 **Date:** 2026-06-23
-**Status:** Accepted. Phase 1 (emit) shipped (pre-existing); **maximal enrichment** (verification-policies + capture-authoritative evidence) and **Phase 2 core** (the gate enforces on the bundle's Surface-derived claim statuses) shipped. Remaining: Phase 2 hardening (re-derive-at-gate; `DELIVERY_TYPES`/markdown removal) + Phases 3–4.
+**Status:** Accepted. Phase 1 (emit) shipped (pre-existing); **maximal enrichment** (verification-policies + capture-authoritative evidence), **Phase 2 core** (the gate enforces on the bundle's Surface-derived claim statuses), and **Phase 3 local projection** (`render-trust-panel` emits a standalone Surface Trust Panel HTML) shipped. Remaining: Phase 2 hardening (re-derive-at-gate; `DELIVERY_TYPES`/markdown removal); Phase 3 Console sink; Phase 4 (retire bespoke sidecars).
 **Supersedes:** the interim markdown-de-coupling of ADR 0009 (see "Relationship to ADR 0009").
 
 ---
@@ -104,9 +104,12 @@ next begins.
   status); (b) *remove* the `DELIVERY_TYPES`/markdown parsing (subsumes ADR 0009) — the
   capture proof seeds raw evidence+log and relies on markdown detection, so this is
   reworked carefully, not ripped out.
-- **Phase 3 — Surface projection:** Surface projects the local bundle to the Trust Panel
-  (local) and, behind the existing opt-in sink, to Console. Enforcement stays local.
-  *Proof: panel renders; gate remains offline-independent.*
+- **Phase 3 — Surface projection: ◑ LOCAL SHIPPED (this PR).** `render-trust-panel <dir>`
+  derives the report (Surface `buildTrustReport`) and emits a **standalone HTML** embedding
+  Surface's dependency-free `<surface-trust-panel>` element — projection fully delegated to
+  Surface (consume-never-fork). Enforcement stays local/offline. *Proof:
+  `test_workflow_sidecar_writer` AC4.* **Remaining:** the **Console sink** (behind the
+  existing opt-in telemetry sink — local always, Console optional).
 - **Phase 4 — retire the bespoke sidecars** (keep `state.json` lifecycle only) once all
   producers/consumers/tests are on the bundle.
 

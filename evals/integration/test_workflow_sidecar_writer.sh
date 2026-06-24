@@ -2267,6 +2267,21 @@ else
   _fail "trust.bundle capture-authoritative setup failed: $(cat "$TMPDIR_EVAL/tb-capture-evidence.out" "$TMPDIR_EVAL/tb-capture-evidence.err")"
 fi
 
+# ─── AC4: render-trust-panel projects the bundle to a standalone Surface Trust Panel (ADR 0010 Phase 3) ──
+if [[ -f "$TB_CAPTURE_DIR/trust.bundle" ]] && flow_agents_node "$WRITER" render-trust-panel "$TB_CAPTURE_DIR" --out "$TB_CAPTURE_DIR/trust-panel.html" >"$TMPDIR_EVAL/tb-panel.out" 2>"$TMPDIR_EVAL/tb-panel.err"; then
+  PANEL="$TB_CAPTURE_DIR/trust-panel.html"
+  if [[ -f "$PANEL" ]] \
+    && rg -q "<surface-trust-panel" "$PANEL" \
+    && rg -q "customElements.define" "$PANEL" \
+    && rg -q '"status":"disputed"' "$PANEL"; then
+    _pass "render-trust-panel: standalone Trust Panel HTML with inlined Surface element + disputed claim from the derived report"
+  else
+    _fail "render-trust-panel output missing panel element / inlined JS / disputed claim"
+  fi
+else
+  _fail "render-trust-panel failed: $(cat "$TMPDIR_EVAL/tb-panel.out" "$TMPDIR_EVAL/tb-panel.err")"
+fi
+
 
 # ─── AC3: statusFunctionVersion conformance ───────────────────────────────────
 # Assert the statusFunctionVersion embedded in the emitted trust.bundle source

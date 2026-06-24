@@ -1384,6 +1384,55 @@ async function gateReview(p: ReturnType<typeof parseArgs>): Promise<number> {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─── ADR 0010 Phase 3: project the local trust.bundle to the Surface Trust Panel ──
+// Surface owns derivation (buildTrustReport) AND rendering (the dependency-free
+// <surface-trust-panel> element). Flow Agents only assembles a standalone HTML
+// shell — no trust logic or rendering reimplemented (consume-never-fork).
+
+/** Locate Surface's self-contained, dependency-free panel element (ESM, no require). */
+function loadSurfacePanelJs(): string {
+  let d = path.dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 12; i += 1) {
+    try { return fs.readFileSync(path.join(d, "node_modules/@kontourai/surface/dist/src/trust-panel/surface-trust-panel.js"), "utf8"); } catch { /* walk up */ }
+    const parent = path.dirname(d);
+    if (parent === d) break;
+    d = parent;
+  }
+  die("could not locate @kontourai/surface trust-panel element (dist/src/trust-panel/surface-trust-panel.js)");
+  return "";
+}
+
+async function renderTrustPanel(p: ReturnType<typeof parseArgs>): Promise<number> {
+  const root = path.resolve(opt(p, "artifact-root", ".flow-agents"));
+  const dir = p.positional[0] ? artifactDirFrom(p.positional[0]) : currentDir(root);
+  if (!dir) die("render-trust-panel requires a workflow dir or a recorded current session");
+  let bundle: AnyObj | null = null;
+  try { bundle = JSON.parse(fs.readFileSync(path.join(dir!, "trust.bundle"), "utf8")); } catch { bundle = null; }
+  if (!bundle) die(`no trust.bundle at ${path.join(dir!, "trust.bundle")} — run record-evidence first`);
+  const surface = (await import("@kontourai/surface")) as unknown as { buildTrustReport?: (b: unknown) => AnyObj };
+  if (typeof surface.buildTrustReport !== "function") die("@kontourai/surface buildTrustReport unavailable — cannot derive the trust report");
+  const report = surface.buildTrustReport!(bundle);
+  const panelJs = loadSurfacePanelJs();
+  const heading = `Flow Agents trust — ${String(path.basename(dir!)).replace(/[<>"&]/g, "")}`;
+  const reportJson = JSON.stringify(report).replace(/</g, "\\u003c");
+  const html = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${heading}</title></head>
+<body style="margin:0;padding:1.5rem;background:#f4f1e6">
+<script type="module">
+${panelJs}
+</script>
+<surface-trust-panel heading="${heading}"></surface-trust-panel>
+<script id="trust-report" type="application/json">${reportJson}</script>
+<script type="module">document.querySelector("surface-trust-panel").report = JSON.parse(document.getElementById("trust-report").textContent);</script>
+</body></html>
+`;
+  const out = opt(p, "out") || path.join(dir!, "trust-panel.html");
+  fs.writeFileSync(out, html);
+  console.log(out);
+  return 0;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 
 async function main(): Promise<number> {
   const p = parseArgs(process.argv.slice(2));
@@ -1403,6 +1452,7 @@ async function main(): Promise<number> {
       case "record-learning": return recordLearning(p);
       case "dogfood-pass": return dogfoodPass(p);
       case "gate-review": return gateReview(p);
+      case "render-trust-panel": return renderTrustPanel(p);
       default: die(`unknown command: ${p.command}`);
     }
   });
