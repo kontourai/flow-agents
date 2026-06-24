@@ -1,0 +1,27 @@
+{
+  "description": "stop-goal-fit blocks (exit 2) when evidence.json claims a command check passed but the deterministic capture log (command-log.jsonl) recorded that same command as FAIL — a caught false-completion",
+  "policy_class": "stop-goal-fit",
+  "canonical_event": "stop",
+  "conformance_level": "L2",
+  "hook_id": "stop-goal-fit",
+  "hook_script": "stop-goal-fit.js",
+  "payload": {
+    "hook_event_name": "Stop",
+    "cwd": "__TEMP_WORKSPACE__"
+  },
+  "workspace_setup": {
+    "AGENTS.md": "# Test Repo\n",
+    ".flow-agents/false-pass/false-pass--deliver.md": "# False Pass\n\nbranch: main\nstatus: delivered\ntype: deliver\n\n## Definition Of Done\n- [x] tests pass\n\n## Goal Fit Gate\n- [x] acceptance verified\n\n### Verdict: PASS\n",
+    ".flow-agents/false-pass/state.json": "{\"schema_version\":\"1.0\",\"task_slug\":\"false-pass\",\"status\":\"delivered\",\"phase\":\"done\",\"updated_at\":\"2026-06-23T00:00:00Z\",\"next_action\":{\"status\":\"done\",\"summary\":\"done\"}}",
+    ".flow-agents/false-pass/evidence.json": "{\"schema_version\":\"1.0\",\"task_slug\":\"false-pass\",\"verdict\":\"pass\",\"checks\":[{\"id\":\"unit-tests\",\"kind\":\"command\",\"status\":\"pass\",\"command\":\"npm test\",\"summary\":\"tests passed\"}]}",
+    ".flow-agents/false-pass/command-log.jsonl": "{\"command\":\"npm test\",\"observedResult\":\"fail\",\"exitCode\":1,\"capturedAt\":\"2026-06-23T00:00:00Z\",\"source\":\"postToolUse-capture\"}\n"
+  },
+  "env": {
+    "FLOW_AGENTS_GOAL_FIT_MODE": "block",
+    "FLOW_AGENTS_GOAL_FIT_BACKSTOP": "skip"
+  },
+  "expected": {
+    "exit_code": 2,
+    "stderr_contains": ["caught false-completion", "npm test"]
+  }
+}

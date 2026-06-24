@@ -35,7 +35,7 @@ const LEVEL_ORDER = ['L0', 'L1', 'L2'];
 const LEVEL_POLICY_CLASSES = {
   L0: new Set([]),               // L0: telemetry only — no policy fixtures required
   L1: new Set(['workflow-steering', 'stop-goal-fit']),
-  L2: new Set(['workflow-steering', 'stop-goal-fit', 'quality-gate', 'config-protection']),
+  L2: new Set(['workflow-steering', 'stop-goal-fit', 'quality-gate', 'config-protection', 'evidence-capture']),
 };
 
 // -----------------------------------------------------------------------

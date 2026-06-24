@@ -62,6 +62,7 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/codex-telemetry-hook.js", { category: "telemetry shim", requiredNeedles: ["codex", "telemetry"] }],
   ["scripts/hooks/run-hook.js", { category: "hook runner", requiredNeedles: ["isHookEnabled", "Path traversal rejected"] }],
   ["scripts/hooks/config-protection.js", { category: "policy hook", requiredNeedles: ["Config Protection Hook"] }],
+  ["scripts/hooks/evidence-capture.js", { category: "policy hook", requiredNeedles: ["Evidence Capture Hook"] }],
   ["scripts/hooks/governance-audit.sh", { category: "policy hook", requiredNeedles: ["governance-audit.sh", "audit_emit"] }],
   ["scripts/hooks/opencode-hook-adapter.js", { category: "runtime adapter", requiredNeedles: ["opencode", "run-hook.js"] }],
   ["scripts/hooks/opencode-telemetry-hook.js", { category: "telemetry shim", requiredNeedles: ["opencode", "telemetry"] }],

@@ -282,6 +282,7 @@ function exportClaudeSettings(): string {
   hooks.SessionStart.push({ hooks: [shellHook(claudePolicy("SessionStart", "workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
   hooks.UserPromptSubmit.push({ hooks: [shellHook(claudePolicy("UserPromptSubmit", "workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
   hooks.PostToolUse.push({ hooks: [shellHook(claudePolicy("PostToolUse", "quality-gate.js"), 30, "Running Flow Agents hook policy")] });
+  hooks.PostToolUse.push({ hooks: [shellHook(claudePolicy("PostToolUse", "evidence-capture.js"), 30, "Capturing Flow Agents command evidence")] });
   hooks.PreToolUse.push({ hooks: [shellHook(claudePolicy("PreToolUse", "config-protection.js"), 30, "Running Flow Agents hook policy")] });
   return `${JSON.stringify({
     statusLine: { type: "command", command: 'bash -lc \'root="${CLAUDE_PROJECT_DIR:-$(pwd)}"; node "$root/scripts/statusline/flow-agents-statusline.js"\'' },
@@ -298,6 +299,7 @@ function exportCodexHooks(): string {
   hooks.Stop.push({ hooks: [shellHook(codexPolicy("stop-goal-fit.js", GOAL_FIT_MODE_PREFIX), 30, "Running Flow Agents hook policy")] });
   hooks.SessionStart.push({ hooks: [shellHook(codexPolicy("workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
   hooks.UserPromptSubmit.push({ hooks: [shellHook(codexPolicy("workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
+  hooks.PostToolUse.push({ hooks: [shellHook(codexPolicy("evidence-capture.js"), 30, "Capturing Flow Agents command evidence")] });
   return `${JSON.stringify({ hooks }, null, 2)}\n`;
 }
 
@@ -522,6 +524,7 @@ export const FlowAgentsPlugin = async ({ project, client, $, directory, worktree
       const detail = { tool: input && input.tool };
       runTelemetry('tool.execute.after', detail);
       runAdapter('opencode-hook-adapter.js', 'tool.execute.after', detail, 'quality-gate', 'quality-gate.js', 'default');
+      runAdapter('opencode-hook-adapter.js', 'tool.execute.after', detail, 'evidence-capture', 'evidence-capture.js', 'default');
     },
     'session.idle': async (_input, _output) => {
       runTelemetry('session.idle');
@@ -655,6 +658,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("tool_result", async (_event, _ctx) => {
     runTelemetry("tool_result");
     runAdapter("pi-hook-adapter.js", "tool_result", "quality-gate", "quality-gate.js");
+    runAdapter("pi-hook-adapter.js", "tool_result", "evidence-capture", "evidence-capture.js");
   });
 
   pi.on("session_shutdown", async (_event, _ctx) => {

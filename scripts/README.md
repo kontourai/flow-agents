@@ -53,6 +53,7 @@ renamed, or changes category, update the table and the validator together.
 | `codex-telemetry-hook.js` | telemetry shim | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_telemetry.sh` | Captures Codex hook telemetry and fails open. |
 | `run-hook.js` | hook runner | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_goal_fit_hook.sh`, `evals/integration/test_workflow_steering_hook.sh` | Applies profile/disable flags, traversal checks, and hook execution. |
 | `config-protection.js` | policy hook | `evals/integration/test_hook_category_behaviors.sh` | Blocks unsafe runtime config edits. |
+| `evidence-capture.js` | policy hook | `evals/integration/test_evidence_capture_hook.sh` | Deterministically captures command executions to `.flow-agents/<slug>/command-log.jsonl` so evidence is machine-recorded, not model-claimed (cross-referenced by stop-goal-fit). |
 | `governance-audit.sh` | policy hook | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_telemetry.sh` | Emits governance/Veritas audit context when configured. |
 | `opencode-hook-adapter.js` | runtime adapter | `evals/integration/test_bundle_install.sh` | Translates opencode plugin events into the shared hook runner contract. |
 | `opencode-telemetry-hook.js` | telemetry shim | `evals/integration/test_bundle_install.sh` | Captures opencode plugin telemetry and fails open. |

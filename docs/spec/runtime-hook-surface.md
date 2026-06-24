@@ -75,7 +75,7 @@ The reason text is the canonical steering message: it should tell the agent what
 
 ## 2. Policy Classes
 
-Flow Agents currently ships four canonical policy classes. Each policy class has a canonical hook script under `scripts/hooks/` and may be wired to one or more canonical trigger events.
+Flow Agents currently ships five canonical policy classes. Each policy class has a canonical hook script under `scripts/hooks/` and may be wired to one or more canonical trigger events.
 
 ### 2.1 Workflow Steering
 
@@ -129,14 +129,32 @@ Flow Agents currently ships four canonical policy classes. Each policy class has
 - `.flow-agents/<slug>/state.json` — workflow phase and next action
 - `.flow-agents/<slug>/evidence.json` — verification verdict and NOT_VERIFIED gaps
 - `.flow-agents/<slug>/critique.json` — critique status and open findings
+- `.flow-agents/<slug>/command-log.jsonl` — the deterministic capture log written by the Evidence Capture policy (see §2.5); cross-referenced against `evidence.json` claimed-pass command checks
+- `.flow-agents/<slug>/acceptance.json` — acceptance criteria; a criterion's `command`-kind `evidence_ref` (`excerpt`) is the most-trusted backstop command
 - `FLOW_AGENTS_GOAL_FIT_MODE` env var — `block` | `warn` | `off` (the legacy `FLOW_AGENTS_GOAL_FIT_STRICT=true` is an alias for `block`)
 - `FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS` env var — consecutive-identical-block cap before the escape hatch releases (default 3)
+- `FLOW_AGENTS_GOAL_FIT_BACKSTOP` env var — `block` (default) | `off`/`warn` | `skip`; controls the capture backstop re-run (see Capture cross-reference below)
+- `FLOW_AGENTS_GOAL_FIT_BACKSTOP_TIMEOUT_MS` env var — per-backstop-command timeout in ms (default 120000; runaway commands are SIGKILL'd)
+- `FLOW_AGENTS_GOAL_FIT_RECHECK` env var — `true` opts into re-running the model's free-form `evidence.checks[].command` (the RCE-risky path; off by default)
 
 **Decision contract**:
 - `warn` (canonical engine default): exits 0, writes guidance to stderr. Non-blocking.
-- `block`: exits 2 when the active workflow artifact has state, Definition Of Done, Goal Fit, evidence, or sidecar issues that classify as blocking. Shipped L2 runtime configs (Claude Code, Codex) set `block` by default, overridable per-operator via the env var.
+- `block`: exits 2 when the active workflow artifact has state, Definition Of Done, Goal Fit, evidence, sidecar, or capture cross-reference issues that classify as blocking. Shipped L2 runtime configs (Claude Code, Codex) set `block` by default, overridable per-operator via the env var.
 - `off`: silent (exits 0, no stderr).
 - Escape hatch: in `block` mode the same goal-fit gap is refused up to `FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS` (default 3) consecutive times, then released (exit 0 with a loud notice) so a genuinely-unsatisfiable goal cannot trap the agent. A changing gap resets the streak.
+
+**Capture cross-reference (capture-first determinism)**: For each `evidence.checks[]` of `kind:"command"` claiming `status:"pass"` that carries a `command`, the gate cross-references the deterministic capture log (`command-log.jsonl`, §2.5) *before* trusting the model's claim:
+
+1. **Log shows the command ran and FAILED** → this is a caught false-completion → a blocking goal-fit gap (feeds the existing block/`MAX_BLOCKS` machinery).
+2. **Log shows the command ran and PASSED** → satisfied deterministically, with no re-run.
+3. **Log has NO execution for that claimed-pass command** (it was never actually run) → resolve a TRUSTED command to re-run as a thin backstop, in priority order:
+   - **(a) acceptance criterion** — the `command`-kind evidence ref of the matching `acceptance.json` criterion (authored upfront, most trusted).
+   - **(b) declared manifest target** — the project's own declared `package.json` `scripts.{test,build,lint}` (or `typecheck`), `Makefile` target, `cargo test`/`build`, `tox`/`pytest`, or `just`/`task` target. The NAMED declared target is run — never an arbitrary allowlisted string. (`veritas readiness` is just one such declared command — no special-casing.)
+   - **(c) model free-form command** — `evidence.checks[].command`, ONLY when `FLOW_AGENTS_GOAL_FIT_RECHECK=true` (opt-in; the RCE-risky path).
+
+   If the resolved backstop re-run fails, it is a caught false-completion. If NO trusted command resolves, the gate records `NOT_VERIFIED` — never a guess, never a silent pass, never auto-running an unlisted string.
+
+**Backstop guardrails**: each backstop command runs under a per-command timeout (`FLOW_AGENTS_GOAL_FIT_BACKSTOP_TIMEOUT_MS`, default 120s; runaway commands are killed). The trusted-source backstop (a/b) rides `block` mode by default but is operator-disablable for latency: `FLOW_AGENTS_GOAL_FIT_BACKSTOP=off` (re-run becomes warn-only, never blocks) or `=skip` (no re-run at all → record `NOT_VERIFIED`). The arbitrary-model-command backstop (c) is opt-in only via `FLOW_AGENTS_GOAL_FIT_RECHECK`.
 
 **Degradation when host lacks trigger**: If the host has no stop hook, stop-goal-fit cannot fire. The agent may complete without the check. Log the gap as `stop: no native equivalent — stop-goal-fit policy unavailable`.
 
@@ -156,6 +174,31 @@ Flow Agents currently ships four canonical policy classes. Each policy class has
 **Decision contract**: Blocking (exits 2) when the target file basename is in the protected set. Writes a descriptive message directing the agent to fix source instead, which the adapter surfaces to the model as the deny reason (see [Block Reason Channel](#block-reason-channel)). Exits 0 (allow) otherwise.
 
 **Degradation when host lacks trigger**: If the host has no `preToolUse`-equivalent blocking hook, config protection cannot veto tool calls. The agent may modify linter configs without interception. Log the gap as `preToolUse: no native blocking equivalent — config-protection policy unavailable`.
+
+### 2.5 Evidence Capture (capture-first determinism)
+
+**Intent**: Make evidence about what actually ran *machine-recorded at the source* rather than transcribed later by the model. `evidence.json` is the model's narration and can claim a test passed when it did not. The capture policy deterministically records every command/shell tool execution and its observed result to an append-only log, which the Stop-Goal-Fit gate (§2.3) cross-references against the model's claims. This makes re-running at the gate a thin backstop, not the primary check.
+
+**Canonical script**: `scripts/hooks/evidence-capture.js`
+
+**Canonical trigger event**: `postToolUse` (after command/shell tool calls)
+
+**Inputs consumed**:
+- `tool_name` + `tool_input.command` — identifies a command/shell execution (a command string present, with a command-shaped tool name; when no tool name is present but a command string is, it is still captured).
+- `tool_response` / `tool_output` / `error` — the host tool result (per §1, `postToolUse`); the source of the deterministically-observed outcome.
+- `.flow-agents/current.json` (`active_slug` / `artifact_dir`) then newest-mtime `state.json` — resolves the active artifact dir, the same way Workflow Steering and Stop-Goal-Fit do.
+
+**Output**: appends one JSON object per line to `.flow-agents/<slug>/command-log.jsonl`:
+
+```json
+{ "command": "npm test", "observedResult": "pass", "exitCode": 0, "capturedAt": "2026-06-23T00:00:00Z", "source": "postToolUse-capture" }
+```
+
+**Exit-code handling (deterministic observation only)**: a clean integer exit code is host-dependent. The policy extracts the real exit code where the host surfaces one (`tool_response`/`tool_output` `.exitCode`/`.exit_code`/`.status`/`.code`/`.returnCode`, or top-level equivalents) and sets `observedResult` to `pass` iff that code is `0`. When no clean integer exit code is present, `exitCode` is recorded as `null` and `observedResult` is inferred *only* from deterministic failure signals — a non-empty `error`, a `success:false`/`failed:true`/`is_error:true` flag, or a non-empty stderr with no stdout. Plain stdout text is never scanned for the words "error"/"fail"; the model's narration is never consulted.
+
+**Decision contract**: Non-blocking. Always exits 0 and echoes stdin. Idempotent/append-only. Fail-open on any error — a capture failure must never block the agent or corrupt the log. Only records when an active workflow artifact dir resolves (otherwise there is nothing to anchor the log to).
+
+**Degradation when host lacks trigger**: If the host has no `postToolUse` hook, command results are not captured. The Stop gate then has no capture log to cross-reference and falls back to its trusted backstop re-run (§2.3) for claimed-pass command checks. Log the gap as `postToolUse: no native equivalent — evidence capture unavailable; Stop gate relies on backstop re-run only`.
 
 ---
 
@@ -460,6 +503,7 @@ For structured `run()` responses (native import form), the return value is:
 | quality-gate | Fail-open (exit 0 always) | Yes | No |
 | stop-goal-fit | Engine default warn (fail-open); blocks in `FLOW_AGENTS_GOAL_FIT_MODE=block` (shipped L2 default) | Yes — hook runtime errors exit 0 | Yes (stop, block mode) |
 | workflow-steering | Fail-open (exit 0 always) | Yes | No |
+| evidence-capture | Fail-open (exit 0 always) | Yes — capture errors never block or corrupt the log | No |
 
 **Telemetry**: Always fail-open. Hook runtime errors in telemetry scripts must never block agent work.
 
@@ -478,6 +522,9 @@ For structured `run()` responses (native import form), the return value is:
 | `FLOW_AGENTS_GOAL_FIT_MODE` | `block` / `warn` / `off` | `stop-goal-fit.js` |
 | `FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS` | Integer string (default 3) | `stop-goal-fit.js` |
 | `FLOW_AGENTS_GOAL_FIT_STRICT` | `true` / `false` (legacy alias for mode=block) | `stop-goal-fit.js` |
+| `FLOW_AGENTS_GOAL_FIT_BACKSTOP` | `block` (default) / `off` (=`warn`) / `skip` | `stop-goal-fit.js` |
+| `FLOW_AGENTS_GOAL_FIT_BACKSTOP_TIMEOUT_MS` | Integer string (default 120000) | `stop-goal-fit.js` |
+| `FLOW_AGENTS_GOAL_FIT_RECHECK` | `true` / `false` (opt-in re-run of model free-form command) | `stop-goal-fit.js` |
 | `FLOW_AGENTS_REQUIRE_SIDECARS` | `true` / `false` | `stop-goal-fit.js` |
 | `FLOW_AGENTS_REQUIRE_CRITIQUE` | `true` / `false` | `stop-goal-fit.js` |
 | `FLOW_AGENTS_HOOK_RUNTIME` | `claude-code`, `codex`, etc. | Hook adapters (forwarded to scripts) |
