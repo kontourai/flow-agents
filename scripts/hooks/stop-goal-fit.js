@@ -880,9 +880,9 @@ async function bundleEnforcement(artifactDir) {
       && (recomputedStatus === 'disputed' || recomputedStatus === 'rejected');
 
     if (isTampered) {
-      warnings.push(`trust.bundle claim tampered: ${safeOneLine(claim.subjectId || claim.id, 80)} (${safeOneLine(claim.claimType, 48)}) — stored status "${storedStatus}" does not match recompute "${recomputedStatus}" (possible tampered bundle); caught false-completion.`);
+      warnings.push(`trust.bundle claim tampered: ${safeOneLine(claim.subjectId || claim.id, 80)} (${safeOneLine(claim.claimType, 48)}) — stored status "${storedStatus}" does not match recompute "${recomputedStatus}" (possible tampered bundle); caught false-completion. Run: npm run workflow:sidecar -- claim ${safeOneLine(claim.subjectId || claim.id, 80)} ${artifactDir}`);
     } else {
-      warnings.push(`trust.bundle claim disputed: ${safeOneLine(claim.subjectId || claim.id, 80)} (${safeOneLine(claim.claimType, 48)}) — Surface recompute shows not verified; caught false-completion.`);
+      warnings.push(`trust.bundle claim disputed: ${safeOneLine(claim.subjectId || claim.id, 80)} (${safeOneLine(claim.claimType, 48)}) — Surface recompute shows not verified; caught false-completion. Run: npm run workflow:sidecar -- claim ${safeOneLine(claim.subjectId || claim.id, 80)} ${artifactDir}`);
     }
   }
   return warnings;
