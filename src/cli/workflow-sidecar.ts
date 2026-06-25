@@ -177,6 +177,9 @@ type SurfaceModule = {
 };
 let _surfaceModule: SurfaceModule | null | undefined; // undefined = not tried yet; null = unavailable
 async function tryLoadSurface(): Promise<SurfaceModule | null> {
+  // Test/diagnostic seam: simulate a degraded environment where Surface is unavailable,
+  // to exercise the fail-loud (no silent data loss) path without disturbing node_modules.
+  if (process.env.FLOW_AGENTS_SURFACE_UNAVAILABLE === "1") return null;
   if (_surfaceModule !== undefined) return _surfaceModule;
   try {
     const m = await import("@kontourai/surface");
@@ -380,6 +383,18 @@ export async function writeTrustBundle(dir: string, slug: string, timestamp: str
     process.stderr.write(`[trust-bundle] write failed: ${message}\n`);
     return { written: false, errors: [message] };
   }
+}
+
+// Phase 4c safety: the trust.bundle is the ONLY store (bespoke sidecars retired), so a
+// fail-open write = SILENT DATA LOSS. Data-persisting writers must fail loudly when the
+// bundle was not written (Surface unavailable, validation, or I/O) instead of exiting 0
+// and dropping the record. (Was masked as a "flaky" concurrent-critique test.)
+function assertBundleWritten(result: { written: boolean; errors: string[] }): void {
+  if (result.written) return;
+  const reason = result.errors.length
+    ? result.errors.join("; ")
+    : "@kontourai/surface is unavailable — it is REQUIRED to persist the trust.bundle (bundle-only workspace, ADR 0010 Phase 4c). Install it (>= 1.2) and retry.";
+  die(`trust.bundle was NOT written — the record was not persisted: ${reason}`);
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -862,7 +877,7 @@ async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> 
   const _existingCriteria: AnyObj[] = Array.isArray(_existingAcceptance.criteria) ? _existingAcceptance.criteria : [];
   const _criteriaStatus = verdict === "pass" ? "pass" : verdict === "fail" ? "fail" : "not_verified";
   const _criteriaForBundle: AnyObj[] = _existingCriteria.map((c: AnyObj) => ({ ...c, status: _criteriaStatus }));
-  await writeTrustBundle(dir, slug, ts, checks, _criteriaForBundle, []);
+  assertBundleWritten(await writeTrustBundle(dir, slug, ts, checks, _criteriaForBundle, []));
   const stateStatus = verdict === "pass" ? "verified" : verdict === "fail" ? "failed" : "not_verified";
   writeState(dir, slug, stateStatus, "verification", ts, "Evidence recorded.");
   return 0;
@@ -922,7 +937,7 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   // Phase 4c: build bundle from raw inputs; read checks from trust.bundle (evidence.json no longer written).
   const _critiqueEvChecks: AnyObj[] = checksFromBundle(dir);
   const _critiqueAccCriteria: AnyObj[] = Array.isArray(loadJson(path.join(dir, "acceptance.json")).criteria) ? loadJson(path.join(dir, "acceptance.json")).criteria : [];
-  await writeTrustBundle(dir, slug, critique.reviewed_at, _critiqueEvChecks, _critiqueAccCriteria, critiques);
+  assertBundleWritten(await writeTrustBundle(dir, slug, critique.reviewed_at, _critiqueEvChecks, _critiqueAccCriteria, critiques));
   return 0;
 }
 function frontmatter(text: string, key: string): string {
@@ -1015,7 +1030,7 @@ async function recordLearning(p: ReturnType<typeof parseArgs>): Promise<number> 
   const _learningChecks: AnyObj[] = checksFromBundle(dir);
   const _learningCriteria: AnyObj[] = Array.isArray(loadJson(path.join(dir, "acceptance.json")).criteria) ? loadJson(path.join(dir, "acceptance.json")).criteria : [];
   const _learningCritiques: AnyObj[] = critiquesFromBundle(dir);
-  await writeTrustBundle(dir, slug, timestamp, _learningChecks, _learningCriteria, _learningCritiques);
+  assertBundleWritten(await writeTrustBundle(dir, slug, timestamp, _learningChecks, _learningCriteria, _learningCritiques));
   return 0;
 }
 function evidenceClean(dir: string): boolean {
