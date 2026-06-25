@@ -25,6 +25,20 @@ export function appendJsonl(file: string, payload: AnyObj): void {
 }
 function die(message: string): never { throw new Error(message); }
 function slugify(value: string, fallback: string): string { return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || fallback; }
+/** Derives a deterministic, filesystem-safe slug from a canonical work-item ref like `kontourai/flow-agents#161`.
+ * Format: `<owner>-<repo>-<id>` e.g. `kontourai-flow-agents-161`.
+ * Reuses slugify() for normalization. Validates that the id is a numeric GitHub issue number. */
+function workItemSlug(ref: string): string {
+  const hashIdx = ref.indexOf("#");
+  if (hashIdx < 0 || hashIdx === ref.length - 1) die("--work-item must be in owner/repo#id format");
+  const repoPath = ref.slice(0, hashIdx);
+  const id = ref.slice(hashIdx + 1);
+  if (!/^\d+$/.test(id)) die("--work-item id must be a numeric issue number");
+  const parts = repoPath.split("/");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) die("--work-item repo must be owner/repo format");
+  const [owner, repo] = parts;
+  return slugify(`${owner}-${repo}-${id}`, "work-item");
+}
 
 // Optional Hachure trust-bundle validation. No-ops gracefully when hachure is not installed.
 // Install hachure (^0.4.0) as an optional dependency to enable schema validation.
@@ -647,7 +661,7 @@ function initSidecars(dir: string, slug: string, sourceRequest: string, summary:
 
 function ensureSession(p: ReturnType<typeof parseArgs>): number {
   const root = path.resolve(opt(p, "artifact-root", ".flow-agents"));
-  const slug = opt(p, "task-slug") || die("--task-slug is required");
+  const slug = opt(p, "task-slug") || (opt(p, "work-item") ? workItemSlug(opt(p, "work-item")) : die("--task-slug is required (or pass --work-item to derive it)"));
   const dir = sessionDirFor(root, slug);
   fs.mkdirSync(dir, { recursive: true });
   const timestamp = opt(p, "timestamp", now());

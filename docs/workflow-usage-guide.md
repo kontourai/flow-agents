@@ -278,6 +278,34 @@ npm run workflow:sidecar -- init-plan .flow-agents/<slug>/<slug>--deliver.md \
   --next-action "<next step>"
 ```
 
+#### Deterministic slug from a work-item ref
+
+For issue-backed sessions, pass `--work-item <owner/repo#id>` instead of `--task-slug`. The
+derived slug has the format `<owner>-<repo>-<id>` — for example:
+
+```bash
+npm run workflow:sidecar -- ensure-session \
+  --work-item "kontourai/flow-agents#161" \
+  --source-request "Implement #161" \
+  --summary "Deterministic slug demo."
+# Creates .flow-agents/kontourai-flow-agents-161/
+```
+
+The slug is deterministic and idempotent: any agent or worktree that runs `ensure-session
+--work-item kontourai/flow-agents#161` will land in the same directory. This makes liveness
+collision-detection work correctly — the `subjectId` written to `liveness/events.jsonl` equals
+`workItemSlug(ref)` (i.e. `kontourai-flow-agents-161`), so a double-hold on the same issue is
+detectable via `liveness status --subject kontourai-flow-agents-161` (see
+[ADR 0012](adr/0012-agent-coordination-as-liveness-claims.md)).
+
+Rules:
+- `--task-slug` always wins when both flags are supplied (back-compat).
+- Omitting both flags still dies with `--task-slug is required`.
+- The `id` part after `#` must be a plain integer (GitHub issue number). Non-integer ids are
+  rejected.
+- Issue-backed sessions should prefer `--work-item` over hand-supplied `--task-slug` so that
+  liveness subjectId alignment is automatic.
+
 Reviewer Markdown artifacts can be imported into `critique.json`:
 
 ```bash
