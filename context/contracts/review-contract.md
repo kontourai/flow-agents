@@ -59,7 +59,7 @@ All reviewers are read-only reporters. They may inspect files, run read-only ana
 Attempt relevant perspectives and record findings:
 
 - Code quality: readability, naming, function/file size, error handling, duplication, maintainability
-- Failure handling: failure *return values* are acted on, not just exceptions; data-persisting operations fail loud, never fail-open — a silently-skipped write is data loss, not a degraded mode
+- Failure handling: callers act on failure *return values*, not just exceptions — flag fail-open on any data-persisting path (per the persistence-integrity invariant in the artifact contract)
 - Correctness risks: edge cases, unintended behavior, unsafe assumptions, missing tests
 - Standards fit: project conventions, local architecture, public contracts, documented decisions
 - Security: secrets, injection, XSS, path traversal, auth/authz, unsafe external calls, vulnerable dependencies
