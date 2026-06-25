@@ -2380,6 +2380,21 @@ else
   _fail "liveness lifecycle mismatch: held=[$LC_HELD] free=[$LC_FREE] off=$([ -f "$TB_OFF_ROOT/liveness/events.jsonl" ] && echo wrote || echo none)"
 fi
 
+# ─── AC8: bundle-writers fail LOUDLY when Surface unavailable — no silent data loss (#156) ──
+TB_FO_DIR="$TMPDIR_EVAL/repo/.flow-agents/failopen"
+mkdir -p "$TB_FO_DIR"
+cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_FO_DIR/failopen--deliver.md"
+flow_agents_node "$WRITER" init-plan "$TB_FO_DIR/failopen--deliver.md" --task-slug failopen --source-request x --summary y --next-action z --timestamp "2026-05-09T00:00:00Z" >/dev/null 2>&1
+flow_agents_node "$WRITER" record-evidence "$TB_FO_DIR" --verdict pass --check-json '{"id":"c1","kind":"test","status":"pass","summary":"s"}' --timestamp "2026-05-09T00:01:00Z" >/dev/null 2>&1
+# With Surface forced-unavailable, record-critique MUST fail (non-zero), not silently drop the critique.
+if FLOW_AGENTS_SURFACE_UNAVAILABLE=1 flow_agents_node "$WRITER" record-critique "$TB_FO_DIR" --id rev-fo --reviewer r --verdict pass --summary fo --timestamp "2026-05-09T00:02:00Z" >"$TMPDIR_EVAL/failopen.out" 2>&1; then
+  _fail "record-critique fail-opened (exit 0) when Surface unavailable — SILENT DATA LOSS: $(cat "$TMPDIR_EVAL/failopen.out")"
+elif grep -qiE "was NOT written|not persisted" "$TMPDIR_EVAL/failopen.out"; then
+  _pass "bundle-writers fail loudly (no silent data loss) when Surface unavailable (#156)"
+else
+  _fail "record-critique failed but without a clear not-persisted message: $(cat "$TMPDIR_EVAL/failopen.out")"
+fi
+
 
 # ─── AC3: statusFunctionVersion conformance ───────────────────────────────────
 # Assert the statusFunctionVersion embedded in the emitted trust.bundle source
