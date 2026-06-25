@@ -29,6 +29,8 @@ Attempt relevant phases and record evidence:
 
 If a tool or environment is unavailable, mark that phase `NOT_VERIFIED` with the reason. Do not skip silently.
 
+A flaky or intermittently-failing test is a real defect — a race, a fail-open, or nondeterminism — not noise. Root-cause it; never re-run to green or mark it `skip`/`pass` to move on. An operation that can pass without doing its job is a failure, not a flake.
+
 Provider-check gaps are risk-based:
 
 - Docs-only changes may use `SKIP` / `skip` for missing provider checks only when the report names the skipped check, explains why local docs evidence is enough, and the repository does not require the missing check.
