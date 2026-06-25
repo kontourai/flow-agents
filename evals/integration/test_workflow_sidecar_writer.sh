@@ -2347,20 +2347,37 @@ else
   _fail "trust-mcp print/enable invocation failed"
 fi
 
-# ─── AC6: agent coordination liveness (ADR 0012) — held / free-on-lapse / free-on-release ──
-TB_COORD_ROOT="$TMPDIR_EVAL/coord/.flow-agents"
-flow_agents_node "$WRITER" coord claim     held-subj  --actor agent-A --at "2026-06-25T11:50:00Z" --ttl 1800 --artifact-root "$TB_COORD_ROOT" >/dev/null 2>&1
-flow_agents_node "$WRITER" coord heartbeat held-subj  --actor agent-A --at "2026-06-25T11:58:00Z" --artifact-root "$TB_COORD_ROOT" >/dev/null 2>&1
-flow_agents_node "$WRITER" coord claim     stale-subj --actor agent-B --at "2026-06-25T11:00:00Z" --ttl 1800 --artifact-root "$TB_COORD_ROOT" >/dev/null 2>&1
-flow_agents_node "$WRITER" coord claim     rel-subj   --actor agent-C --at "2026-06-25T11:50:00Z" --ttl 1800 --artifact-root "$TB_COORD_ROOT" >/dev/null 2>&1
-flow_agents_node "$WRITER" coord release   rel-subj   --actor agent-C --at "2026-06-25T11:55:00Z" --artifact-root "$TB_COORD_ROOT" >/dev/null 2>&1
-COORD_OUT=$(flow_agents_node "$WRITER" coord status --now "2026-06-25T12:00:00Z" --artifact-root "$TB_COORD_ROOT" 2>/dev/null | grep -viE "unknown format")
-if echo "$COORD_OUT" | grep -qE "held-subj.*agent-A.*held" \
-  && echo "$COORD_OUT" | grep -qE "stale-subj.*agent-B.*free" \
-  && echo "$COORD_OUT" | grep -qE "rel-subj.*agent-C.*free"; then
-  _pass "coord: liveness claims recompute held / free(lapsed) / free(released) via Surface deriveTrustStatus (ADR 0012)"
+# ─── AC6: agent liveness (ADR 0012) — held / free-on-lapse / free-on-release ──
+TB_LIVENESS_ROOT="$TMPDIR_EVAL/liveness/.flow-agents"
+flow_agents_node "$WRITER" liveness claim     held-subj  --actor agent-A --at "2026-06-25T11:50:00Z" --ttl 1800 --artifact-root "$TB_LIVENESS_ROOT" >/dev/null 2>&1
+flow_agents_node "$WRITER" liveness heartbeat held-subj  --actor agent-A --at "2026-06-25T11:58:00Z" --artifact-root "$TB_LIVENESS_ROOT" >/dev/null 2>&1
+flow_agents_node "$WRITER" liveness claim     stale-subj --actor agent-B --at "2026-06-25T11:00:00Z" --ttl 1800 --artifact-root "$TB_LIVENESS_ROOT" >/dev/null 2>&1
+flow_agents_node "$WRITER" liveness claim     rel-subj   --actor agent-C --at "2026-06-25T11:50:00Z" --ttl 1800 --artifact-root "$TB_LIVENESS_ROOT" >/dev/null 2>&1
+flow_agents_node "$WRITER" liveness release   rel-subj   --actor agent-C --at "2026-06-25T11:55:00Z" --artifact-root "$TB_LIVENESS_ROOT" >/dev/null 2>&1
+LIVENESS_OUT=$(flow_agents_node "$WRITER" liveness status --now "2026-06-25T12:00:00Z" --artifact-root "$TB_LIVENESS_ROOT" 2>/dev/null | grep -viE "unknown format")
+if echo "$LIVENESS_OUT" | grep -qE "held-subj.*agent-A.*held" \
+  && echo "$LIVENESS_OUT" | grep -qE "stale-subj.*agent-B.*free" \
+  && echo "$LIVENESS_OUT" | grep -qE "rel-subj.*agent-C.*free"; then
+  _pass "liveness: liveness claims recompute held / free(lapsed) / free(released) via Surface deriveTrustStatus (ADR 0012)"
 else
-  _fail "coord status mismatch (expected held/free/free): $COORD_OUT"
+  _fail "liveness status mismatch (expected held/free/free): $LIVENESS_OUT"
+fi
+
+# ─── AC7: lifecycle-driven liveness (ADR 0012) — init-plan claims, advance-state releases (opt-in) ──
+TB_LC_ROOT="$TMPDIR_EVAL/liveness-lifecycle/.flow-agents"
+TB_LC_DIR="$TB_LC_ROOT/lc-task"; mkdir -p "$TB_LC_DIR"
+cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_LC_DIR/lc-task--deliver.md"
+FLOW_AGENTS_LIVENESS=on FLOW_AGENTS_ACTOR=agent-LC flow_agents_node "$WRITER" init-plan "$TB_LC_DIR/lc-task--deliver.md" --task-slug lc-task --source-request x --summary y --next-action z --timestamp "2026-06-25T11:50:00Z" >/dev/null 2>&1
+LC_HELD=$(flow_agents_node "$WRITER" liveness status --now "2026-06-25T12:00:00Z" --artifact-root "$TB_LC_ROOT" 2>/dev/null | grep -viE "unknown format")
+FLOW_AGENTS_LIVENESS=on FLOW_AGENTS_ACTOR=agent-LC flow_agents_node "$WRITER" advance-state "$TB_LC_DIR" --status delivered --phase done --task-slug lc-task --timestamp "2026-06-25T11:55:00Z" >/dev/null 2>&1
+LC_FREE=$(flow_agents_node "$WRITER" liveness status --now "2026-06-25T12:00:00Z" --artifact-root "$TB_LC_ROOT" 2>/dev/null | grep -viE "unknown format")
+TB_OFF_ROOT="$TMPDIR_EVAL/liveness-off/.flow-agents"; mkdir -p "$TB_OFF_ROOT/off-task"
+cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_OFF_ROOT/off-task/off-task--deliver.md"
+flow_agents_node "$WRITER" init-plan "$TB_OFF_ROOT/off-task/off-task--deliver.md" --task-slug off-task --source-request x --summary y --next-action z >/dev/null 2>&1
+if echo "$LC_HELD" | grep -qE "lc-task.*agent-LC.*held" && echo "$LC_FREE" | grep -qE "lc-task.*agent-LC.*free" && [ ! -f "$TB_OFF_ROOT/liveness/events.jsonl" ]; then
+  _pass "liveness lifecycle: init-plan claims (held), advance→delivered releases (free); opt-in respected (no events when disabled)"
+else
+  _fail "liveness lifecycle mismatch: held=[$LC_HELD] free=[$LC_FREE] off=$([ -f "$TB_OFF_ROOT/liveness/events.jsonl" ] && echo wrote || echo none)"
 fi
 
 
