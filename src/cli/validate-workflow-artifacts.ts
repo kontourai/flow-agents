@@ -376,7 +376,18 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
       for (const name of ["state.json", "acceptance.json", ...(evidenceRequired ? ["evidence.json"] : []), "handoff.json"]) {
         if (!fs.existsSync(path.join(dir, name))) issues.push({ path: path.join(dir, name), message: "required sidecar is missing" });
       }
-      if (requireCritique && !fs.existsSync(path.join(dir, "critique.json"))) issues.push({ path: path.join(dir, "critique.json"), message: "required sidecar is missing" });
+      // ADR 0010 Phase 4c: critique.json no longer written; trust.bundle carries critique claims. Accept either.
+      if (requireCritique && !fs.existsSync(path.join(dir, "critique.json")) && !fs.existsSync(path.join(dir, "trust.bundle"))) issues.push({ path: path.join(dir, "critique.json"), message: "required sidecar is missing" });
+      // ADR 0010 Phase 4c: validate critique claims in trust.bundle (sole verification artifact).
+      const trustBundlePath = path.join(dir, "trust.bundle");
+      if (requireCritique && fs.existsSync(trustBundlePath)) {
+        const { value: bundleValue } = readJson(trustBundlePath);
+        if (bundleValue) {
+          const claims = Array.isArray(bundleValue.claims) ? bundleValue.claims : [];
+          const critiqueClaims = claims.filter((c: any) => c && c.claimType === "workflow.critique.review");
+          if (critiqueClaims.some((c: any) => c.value === "fail" || c.status === "disputed")) issues.push({ path: trustBundlePath, message: "required critique must pass" });
+        }
+      }
       const acceptance = path.join(dir, "acceptance.json");
       if (deliver && fs.existsSync(acceptance)) {
         const expected = definitionAcceptanceCriteria(readText(deliver)).length;
