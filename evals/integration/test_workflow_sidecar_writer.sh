@@ -2153,8 +2153,8 @@ if [[ -f "$TB_BUNDLE_PATH" ]]; then
 import { readFileSync } from 'node:fs';
 import { validateTrustBundle } from '${ROOT}/build/src/cli/workflow-sidecar.js';
 const bundle = JSON.parse(readFileSync('${TB_BUNDLE_PATH}', 'utf8'));
-const result = validateTrustBundle(bundle);
-if (!result.available) { process.stderr.write('hachure unavailable: validateTrustBundle.available was false\n'); process.exit(2); }
+const result = await validateTrustBundle(bundle);
+if (!result.available) { process.stderr.write('surface unavailable: validateTrustBundle.available was false\n'); process.exit(2); }
 if (!result.valid) { process.stderr.write('schema invalid: ' + result.errors.join('; ') + '\n'); process.exit(1); }
 NODEOF
   then
