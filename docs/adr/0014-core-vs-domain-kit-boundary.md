@@ -6,6 +6,7 @@ title: "ADR 0014: Flow Agents core vs domain kits — the generic/kit boundary"
 
 **Date:** 2026-06-25
 **Status:** Proposed (decision owner: Brian Anderson). Defines the boundary; code moves are sequenced, not immediate.
+Revised after boundary review: `workflow-sidecar` confirmed **core** (the lifecycle engine, with only a few developer-leaning *defaults* to make kit-extensible); Builder Kit reframed as a **first-class pulled-out kit**; `knowledge`/`release-evidence` cited as already validating the substrate.
 
 ---
 
@@ -51,9 +52,20 @@ the implicit version conflates the generic operating layer with one domain kit.
 > **"Would a non-developer domain kit (e.g. `knowledge`, a Sales Kit) need this?"**
 > Yes → it is generic → **Flow Agents core.** No → it is developer-specific → **Builder Kit.**
 
-By this test today: `tool-worker`/`tool-code-reviewer`/`tool-verifier`, the code-review lanes,
-and the build/lint/test phases are **Builder Kit**. The lifecycle, the trust bundle, the gates,
-liveness, and the persistence/data-integrity invariants are **core**.
+By this test today: the `tool-*` agents (worker/code-reviewer/verifier/planner), the Builder
+*skills* (plan-work/execute-plan/review-work/verify-work), the code-review lanes, and the
+build/lint/test phases are **Builder Kit**. The lifecycle **engine** (`workflow-sidecar` — it
+writes the trust bundle, advances state, records evidence/claims, emits liveness), the trust
+substrate, the gates, liveness, and the persistence/data-integrity invariants are **core**.
+
+The only developer lean *inside* the core engine is in its **defaults**, not its mechanism: the
+code-specific `checkKinds` (`build`/`types`/`lint`/`test`/`browser`) and some vocabulary
+(`init-plan` reads developer-ish; it just means *open a tracked work-item from its defining
+artifact* — create its state/acceptance/handoff/trust.bundle and claim it via liveness). Those
+defaults should become **kit-extensible** (and the vocab can be neutralized, e.g. `init-plan` →
+`init-work`) — a small core cleanup, not a relocation. The engine is core; it is simply not yet
+*exercised* by a non-developer kit (`knowledge`/`release-evidence` took the lighter `flows`
+path), which is a validation gap, not a sign it is Builder-shaped.
 
 ### 3. Kits extend, never reimplement
 
@@ -85,10 +97,11 @@ the developer `review-contract`. **#170 is re-homed here**, not merged as-placed
   moat; a core that secretly assumes code-review/build/test undermines it for the next domain
   kit author. The clean test (§2) becomes a **standing design gate**, not a one-time cleanup.
 - **Re-homes #170** and tells us where future cross-cutting disciplines go.
-- **Sequences a real refactor** (later, coordinated): developer tools (`agents/`) and the
-  developer halves of the mixed contracts migrate toward `kits/builder/`; the generic invariants
-  consolidate in core. This touches code the Phase-4 agents are active in — **define now, move
-  later, coordinate** (don't let this ADR trigger a premature big-bang move).
+- **Builder Kit becomes a first-class, pulled-out kit** — the same shape `knowledge` already
+  has (its own `kit.json`, flows, skills, and now agents + contracts) — and an *independently
+  valuable* product, not a demo. The developer tools (`agents/`) and the developer halves of the
+  mixed contracts move into it; the generic invariants consolidate in core. This touches code the
+  Phase-4 agents are active in — **define now, move later, coordinate** (no premature big-bang).
 
 ## Alternatives Considered
 
@@ -98,22 +111,25 @@ the developer `review-contract`. **#170 is re-homed here**, not merged as-placed
   `kits/builder/` is large and conflicts with active Phase-4 work; the *definition* is cheap and
   must lead.
 - **Fully purify the core now (extract a grand generic verification/review framework).**
-  Rejected as **speculative generality** (the consume-never-fork sibling). With essentially one
-  rich domain kit (Builder) plus a thin one (`knowledge`), "generic" is partly a guess. Define
-  the *principle* now; let the precise core/kit line be **validated and refined by a second
-  substantial domain kit** (a Sales/Research spike is the real validator). Extract only the
-  invariants that are already obviously cross-domain (data integrity, evidence honesty,
-  nondeterminism, freshness).
+  Rejected as **speculative generality** (the consume-never-fork sibling). The *substrate*
+  (gates, Surface claims, flows) is **already proven domain-neutral** by shipping kits —
+  `knowledge` and `release-evidence` use it with no developer machinery. What is *not* yet
+  exercised by a non-developer kit is the **lifecycle engine** (`workflow-sidecar`); a
+  Sales/Research kit that actually uses `init-plan → advance-state → record-evidence → liveness`
+  is the real validator, and would surface which engine *defaults* (above) are developer-shaped.
+  Build it for a real use case, not as architecture theater. Extract only the invariants that are
+  already obviously cross-domain (data integrity, evidence honesty, nondeterminism, freshness).
 
 ## Product weigh-in (requested)
 
 1. **The boundary is the moat — treat the clean test as a gate.** Every time something lands in
    `agents/` or `context/`, ask "would the knowledge/Sales kit need it?" If no, it's a Builder
    Kit feature wearing a core costume.
-2. **A second real domain kit is the cheapest way to find the true core.** You can argue the
-   line forever on paper; one Research/Sales spike that has to *reuse* the lifecycle + trust +
-   gates will expose exactly which "core" pieces are secretly developer-shaped. Recommend a thin
-   spike before the big refactor — it de-risks the extraction.
+2. **Build out a non-developer kit that uses the lifecycle engine — it is the cheapest way to
+   find the true core.** The substrate is already validated; what isn't is `workflow-sidecar`
+   under a non-developer domain. A Sales/Research kit that *reuses* `init-plan → advance-state →
+   record-evidence → liveness` will expose which engine defaults are secretly developer-shaped
+   and de-risk the refactor — *if* there is a real use case (not architecture theater).
 3. **Ship the generic disciplines to the core invariant layer regardless** — data-integrity,
    evidence honesty, nondeterminism, freshness are cross-domain today; they should not wait on
    the full refactor.
