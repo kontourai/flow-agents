@@ -679,6 +679,7 @@ function initPlan(p: ReturnType<typeof parseArgs>): number {
   const dir = artifactDirFrom(artifact);
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   initSidecars(dir, slug, opt(p, "source-request"), opt(p, "summary"), opt(p, "next-action"), opt(p, "timestamp", now()), read(artifact));
+  livenessLifecycle(dir, slug, "claim", opt(p, "timestamp", now()));
   return 0;
 }
 
@@ -898,6 +899,7 @@ function advanceState(p: ReturnType<typeof parseArgs>): number {
   const timestamp = opt(p, "timestamp", now());
   writeState(dir, slug, status, phase, timestamp, opt(p, "summary"));
   writeJson(path.join(dir, "handoff.json"), { ...loadJson(path.join(dir, "handoff.json")), ...sidecarBase(slug), summary: opt(p, "summary"), current_state_ref: "state.json", next_steps: [opt(p, "next-action")].filter(Boolean), blockers: [], warnings: [] });
+  livenessLifecycle(dir, slug, LIVENESS_TERMINAL.has(status) ? "release" : "heartbeat", timestamp);
   return 0;
 }
 
@@ -1583,7 +1585,7 @@ function trustMcp(p: ReturnType<typeof parseArgs>): number {
 // heartbeat → held/stale/released), keyed by the work-item subjectId, appended to a
 // shared stream all agents read. Status is RECOMPUTED via Surface's deriveTrustStatus
 // (no forked logic). Advisory, not a lock. The liveness policy is a general archetype
-// (not coordination-specific) and is a candidate to graduate upstream into Surface.
+// (not use-case-specific) and is a candidate to graduate upstream into Surface.
 const LIVENESS_POLICY = {
   id: "policy:liveness.hold",
   claimType: "liveness.hold",
@@ -1596,25 +1598,42 @@ const LIVENESS_POLICY = {
   impactLevel: "medium",
 };
 
-function coordStreamFile(root: string): string { return path.join(root, "coordination", "events.jsonl"); }
-function appendCoordEvent(root: string, evt: AnyObj): void {
-  const file = coordStreamFile(root);
+function livenessStreamFile(root: string): string { return path.join(root, "liveness", "events.jsonl"); }
+function appendLivenessEvent(root: string, evt: AnyObj): void {
+  const file = livenessStreamFile(root);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.appendFileSync(file, `${JSON.stringify(evt)}\n`);
 }
-function readCoordEvents(root: string): AnyObj[] {
+function readLivenessEvents(root: string): AnyObj[] {
   let raw = "";
-  try { raw = fs.readFileSync(coordStreamFile(root), "utf8"); } catch { return []; }
+  try { raw = fs.readFileSync(livenessStreamFile(root), "utf8"); } catch { return []; }
   return raw.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { try { return JSON.parse(l) as AnyObj; } catch { return null; } }).filter((x): x is AnyObj => x !== null);
 }
-function coordStatusLabel(status: string): string {
+function livenessLabel(status: string): string {
   if (status === "verified") return "held";
   if (status === "stale" || status === "revoked") return "free"; // reclaimable: lapsed or released
   if (status === "superseded") return "superseded";
   return status;
 }
 
-async function coord(p: ReturnType<typeof parseArgs>): Promise<number> {
+// ─── ADR 0012 lifecycle-driven liveness (opt-in via FLOW_AGENTS_LIVENESS) ──────
+// init-plan claims the work-item; advance-state heartbeats (or releases on terminal),
+// so the workflow lifecycle itself maintains the liveness claim — no manual liveness calls.
+// Additive + fail-open: a liveness-emit failure never affects the workflow command.
+const LIVENESS_TERMINAL = new Set(["delivered", "accepted", "archived"]);
+function resolveLivenessActor(): string { return (process.env.FLOW_AGENTS_ACTOR || "").trim() || "local"; }
+function livenessEnabled(): boolean { const v = String(process.env.FLOW_AGENTS_LIVENESS || "").trim().toLowerCase(); return v === "on" || v === "1" || v === "true"; }
+function livenessLifecycle(taskDir: string, slug: string, kind: "claim" | "heartbeat" | "release", timestamp: string): void {
+  if (!livenessEnabled()) return;
+  try {
+    const root = path.dirname(taskDir); // .flow-agents/<slug> → .flow-agents (the shared liveness stream lives here)
+    const evt: AnyObj = { type: kind, subjectId: slug, actor: resolveLivenessActor(), at: timestamp, source: "lifecycle" };
+    if (kind === "claim") evt.ttlSeconds = 1800;
+    appendLivenessEvent(root, evt);
+  } catch { /* best-effort; liveness is advisory and must never break the workflow */ }
+}
+
+async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
   const root = path.resolve(opt(p, "artifact-root", ".flow-agents"));
   const action = p.positional[0] || "";
   const subjectId = p.positional[1] || "";
@@ -1622,11 +1641,11 @@ async function coord(p: ReturnType<typeof parseArgs>): Promise<number> {
   const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 
   if (action === "claim" || action === "heartbeat" || action === "release") {
-    if (!subjectId) die(`coord ${action} requires a subjectId`);
+    if (!subjectId) die(`liveness ${action} requires a subjectId`);
     const evt: AnyObj = { type: action, subjectId, actor, at: opt(p, "at") || nowIso };
     if (action === "claim") evt.ttlSeconds = Number.parseInt(opt(p, "ttl", "1800"), 10) || 1800;
-    appendCoordEvent(root, evt);
-    console.log(`coord ${action}: ${subjectId} by ${actor}`);
+    appendLivenessEvent(root, evt);
+    console.log(`liveness ${action}: ${subjectId} by ${actor}`);
     return 0;
   }
 
@@ -1637,7 +1656,7 @@ async function coord(p: ReturnType<typeof parseArgs>): Promise<number> {
     const now = opt(p, "now") ? new Date(opt(p, "now")) : new Date();
     // Group events by subjectId::actor — one liveness claim per holder of a subject.
     const groups = new Map<string, { subjectId: string; actor: string; ttlSeconds: number; created: string; updated: string; events: AnyObj[] }>();
-    for (const e of readCoordEvents(root)) {
+    for (const e of readLivenessEvents(root)) {
       if (!e.subjectId || !e.actor) continue;
       const key = `${e.subjectId}::${e.actor}`;
       let g = groups.get(key);
@@ -1650,16 +1669,16 @@ async function coord(p: ReturnType<typeof parseArgs>): Promise<number> {
     const rows: AnyObj[] = [];
     for (const g of groups.values()) {
       if (subjectFilter && g.subjectId !== subjectFilter) continue;
-      const claim: AnyObj = { id: `${g.subjectId}::${g.actor}`, subjectType: "work-item", subjectId: g.subjectId, surface: "flow.coordination", claimType: "liveness.hold", fieldOrBehavior: "held-by", value: g.actor, createdAt: g.created, updatedAt: g.updated, ttlSeconds: g.ttlSeconds, verificationPolicyId: LIVENESS_POLICY.id };
+      const claim: AnyObj = { id: `${g.subjectId}::${g.actor}`, subjectType: "work-item", subjectId: g.subjectId, surface: "flow.liveness", claimType: "liveness.hold", fieldOrBehavior: "held-by", value: g.actor, createdAt: g.created, updatedAt: g.updated, ttlSeconds: g.ttlSeconds, verificationPolicyId: LIVENESS_POLICY.id };
       const status = surface.deriveTrustStatus!({ claim, evidence: [], policy: LIVENESS_POLICY, events: g.events, now });
-      rows.push({ subjectId: g.subjectId, actor: g.actor, status, label: coordStatusLabel(status) });
+      rows.push({ subjectId: g.subjectId, actor: g.actor, status, label: livenessLabel(status) });
     }
     if (p.flags.has("json")) { console.log(JSON.stringify(rows, null, 2)); return 0; }
     for (const r of rows) console.log(`${r.subjectId}\t${r.actor}\t${r.label}`);
     return 0;
   }
 
-  die("coord action must be one of: claim | heartbeat | release | status");
+  die("liveness action must be one of: claim | heartbeat | release | status");
   return 1;
 }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1668,7 +1687,7 @@ async function coord(p: ReturnType<typeof parseArgs>): Promise<number> {
 async function main(): Promise<number> {
   const p = parseArgs(process.argv.slice(2));
   if (!p.command) die("workflow-sidecar command is required");
-  const lockRoot = ["ensure-session", "current", "dogfood-pass", "coord"].includes(p.command) ? path.resolve(opt(p, "artifact-root", ".flow-agents")) : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
+  const lockRoot = ["ensure-session", "current", "dogfood-pass", "liveness"].includes(p.command) ? path.resolve(opt(p, "artifact-root", ".flow-agents")) : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
   return withLock(lockRoot, ["ensure-session", "record-agent-event", "dogfood-pass"].includes(p.command), p.command, () => {
     switch (p.command) {
       case "ensure-session": return ensureSession(p);
@@ -1685,7 +1704,7 @@ async function main(): Promise<number> {
       case "gate-review": return gateReview(p);
       case "render-trust-panel": return renderTrustPanel(p);
       case "trust-mcp": return trustMcp(p);
-      case "coord": return coord(p);
+      case "liveness": return liveness(p);
       default: die(`unknown command: ${p.command}`);
     }
   });
