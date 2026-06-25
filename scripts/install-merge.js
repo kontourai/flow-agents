@@ -2,13 +2,20 @@
 /**
  * install-merge.js — Merge-aware installer for flow-agents config files.
  *
- * Usage (CLI):
+ * Usage (CLI — full merge):
  *   node scripts/install-merge.js \
  *     --config <path-to-settings.json-or-hooks.json> \
  *     --managed-hooks <path-to-flow-agents-hooks-snippet.json> \
  *     --version <version-string> \
  *     --install-record <path-to-install.json> \
- *     --runtime <claude-code|codex>
+ *     --runtime <claude-code|codex|opencode|pi|kiro|base>
+ *
+ * Usage (CLI — stamp only, no config merge):
+ *   node scripts/install-merge.js \
+ *     --stamp-only \
+ *     --version <version-string> \
+ *     --install-record <path-to-install.json> \
+ *     --runtime <pi|kiro|base|opencode>
  *
  * Design (per install-merge-aware--plan-work.md):
  *   (a) Read dest JSON (or {} if absent).
@@ -182,7 +189,13 @@ function mergeSettings(existing, managed) {
     }
   }
 
-  result.hooks = mergedHooks;
+  // Only write the hooks key if at least one side actually had a hooks key,
+  // OR if the merged result is non-empty. This prevents injecting a spurious
+  // empty "hooks": {} into configs that have no hooks (e.g. opencode.json).
+  const eitherHadHooks = "hooks" in existing || "hooks" in managed;
+  if (eitherHadHooks || Object.keys(mergedHooks).length > 0) {
+    result.hooks = mergedHooks;
+  }
   return result;
 }
 
@@ -268,19 +281,38 @@ if (require.main === module) {
   const args = process.argv.slice(2);
   const flags = {};
   for (let i = 0; i < args.length; i++) {
-    if (args[i].startsWith("--") && i + 1 < args.length) {
+    if (args[i] === "--stamp-only") {
+      flags["stamp-only"] = "1";
+    } else if (args[i].startsWith("--") && i + 1 < args.length) {
       flags[args[i].slice(2)] = args[i + 1];
       i++;
     }
   }
 
+  const stampOnly = flags["stamp-only"] === "1";
   const configPath = flags["config"];
   const managedHooksPath = flags["managed-hooks"];
   const version = flags["version"] || "unknown";
   const installRecordPath = flags["install-record"];
   const runtime = flags["runtime"] || "claude-code";
 
-  if (!configPath || !managedHooksPath || !installRecordPath) {
+  if (stampOnly) {
+    // Stamp-only mode: write install.json without merging any config file.
+    // Used by runtimes (pi, kiro, base) that do not have a shared config to merge.
+    if (!installRecordPath) {
+      process.stderr.write(
+        "usage: node install-merge.js --stamp-only --version <ver> --install-record <path> --runtime <runtime>\n"
+      );
+      process.exitCode = 2;
+    } else {
+      try {
+        writeInstallRecord(installRecordPath, version, runtime);
+      } catch (err) {
+        process.stderr.write(`install-merge: error: ${err.message}\n`);
+        process.exitCode = 1;
+      }
+    }
+  } else if (!configPath || !managedHooksPath || !installRecordPath) {
     process.stderr.write(
       "usage: node install-merge.js --config <path> --managed-hooks <path> --version <ver> --install-record <path> --runtime <runtime>\n"
     );
