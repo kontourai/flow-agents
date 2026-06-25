@@ -1519,13 +1519,97 @@ function trustMcp(p: ReturnType<typeof parseArgs>): number {
   }
   return 0;
 }
+// ─── ADR 0012: agent coordination as liveness claims (policy-centered) ──────────
+// A work-claim is a regular Hachure claim governed by a *liveness policy* (ttl +
+// heartbeat → held/stale/released), keyed by the work-item subjectId, appended to a
+// shared stream all agents read. Status is RECOMPUTED via Surface's deriveTrustStatus
+// (no forked logic). Advisory, not a lock. The liveness policy is a general archetype
+// (not coordination-specific) and is a candidate to graduate upstream into Surface.
+const LIVENESS_POLICY = {
+  id: "policy:liveness.hold",
+  claimType: "liveness.hold",
+  requiredEvidence: [] as string[],
+  acceptanceCriteria: ["A heartbeat within ttlSeconds holds the claim; a lapse or release frees it."],
+  reviewAuthority: "system",
+  validityRule: { kind: "duration", durationDays: 1 },
+  stalenessTriggers: [] as string[],
+  conflictRules: [] as string[],
+  impactLevel: "medium",
+};
+
+function coordStreamFile(root: string): string { return path.join(root, "coordination", "events.jsonl"); }
+function appendCoordEvent(root: string, evt: AnyObj): void {
+  const file = coordStreamFile(root);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, `${JSON.stringify(evt)}\n`);
+}
+function readCoordEvents(root: string): AnyObj[] {
+  let raw = "";
+  try { raw = fs.readFileSync(coordStreamFile(root), "utf8"); } catch { return []; }
+  return raw.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { try { return JSON.parse(l) as AnyObj; } catch { return null; } }).filter((x): x is AnyObj => x !== null);
+}
+function coordStatusLabel(status: string): string {
+  if (status === "verified") return "held";
+  if (status === "stale" || status === "revoked") return "free"; // reclaimable: lapsed or released
+  if (status === "superseded") return "superseded";
+  return status;
+}
+
+async function coord(p: ReturnType<typeof parseArgs>): Promise<number> {
+  const root = path.resolve(opt(p, "artifact-root", ".flow-agents"));
+  const action = p.positional[0] || "";
+  const subjectId = p.positional[1] || "";
+  const actor = opt(p, "actor", process.env.FLOW_AGENTS_ACTOR || "unknown");
+  const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+
+  if (action === "claim" || action === "heartbeat" || action === "release") {
+    if (!subjectId) die(`coord ${action} requires a subjectId`);
+    const evt: AnyObj = { type: action, subjectId, actor, at: opt(p, "at") || nowIso };
+    if (action === "claim") evt.ttlSeconds = Number.parseInt(opt(p, "ttl", "1800"), 10) || 1800;
+    appendCoordEvent(root, evt);
+    console.log(`coord ${action}: ${subjectId} by ${actor}`);
+    return 0;
+  }
+
+  if (action === "status") {
+    const surface = (await import("@kontourai/surface")) as unknown as { deriveTrustStatus?: (a: AnyObj) => string };
+    if (typeof surface.deriveTrustStatus !== "function") die("@kontourai/surface deriveTrustStatus unavailable — requires surface >= 1.2");
+    const subjectFilter = opt(p, "subject");
+    const now = opt(p, "now") ? new Date(opt(p, "now")) : new Date();
+    // Group events by subjectId::actor — one liveness claim per holder of a subject.
+    const groups = new Map<string, { subjectId: string; actor: string; ttlSeconds: number; created: string; updated: string; events: AnyObj[] }>();
+    for (const e of readCoordEvents(root)) {
+      if (!e.subjectId || !e.actor) continue;
+      const key = `${e.subjectId}::${e.actor}`;
+      let g = groups.get(key);
+      if (!g) { g = { subjectId: String(e.subjectId), actor: String(e.actor), ttlSeconds: 1800, created: String(e.at), updated: String(e.at), events: [] }; groups.set(key, g); }
+      g.updated = String(e.at);
+      if (e.type === "claim") { g.ttlSeconds = Number(e.ttlSeconds) || g.ttlSeconds; g.events.push({ id: `c:${key}:${e.at}`, claimId: key, status: "verified", actor: g.actor, method: "observation", evidenceIds: [], createdAt: e.at, verifiedAt: e.at }); }
+      else if (e.type === "heartbeat") { g.events.push({ id: `h:${key}:${e.at}`, claimId: key, status: "verified", actor: g.actor, method: "observation", evidenceIds: [], createdAt: e.at, verifiedAt: e.at }); }
+      else if (e.type === "release") { g.events.push({ id: `r:${key}:${e.at}`, claimId: key, status: "revoked", type: "invalidation", actor: g.actor, method: "observation", evidenceIds: [], createdAt: e.at, verifiedAt: e.at }); }
+    }
+    const rows: AnyObj[] = [];
+    for (const g of groups.values()) {
+      if (subjectFilter && g.subjectId !== subjectFilter) continue;
+      const claim: AnyObj = { id: `${g.subjectId}::${g.actor}`, subjectType: "work-item", subjectId: g.subjectId, surface: "flow.coordination", claimType: "liveness.hold", fieldOrBehavior: "held-by", value: g.actor, createdAt: g.created, updatedAt: g.updated, ttlSeconds: g.ttlSeconds, verificationPolicyId: LIVENESS_POLICY.id };
+      const status = surface.deriveTrustStatus!({ claim, evidence: [], policy: LIVENESS_POLICY, events: g.events, now });
+      rows.push({ subjectId: g.subjectId, actor: g.actor, status, label: coordStatusLabel(status) });
+    }
+    if (p.flags.has("json")) { console.log(JSON.stringify(rows, null, 2)); return 0; }
+    for (const r of rows) console.log(`${r.subjectId}\t${r.actor}\t${r.label}`);
+    return 0;
+  }
+
+  die("coord action must be one of: claim | heartbeat | release | status");
+  return 1;
+}
 // ─────────────────────────────────────────────────────────────────────────────
 
 
 async function main(): Promise<number> {
   const p = parseArgs(process.argv.slice(2));
   if (!p.command) die("workflow-sidecar command is required");
-  const lockRoot = ["ensure-session", "current", "dogfood-pass"].includes(p.command) ? path.resolve(opt(p, "artifact-root", ".flow-agents")) : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
+  const lockRoot = ["ensure-session", "current", "dogfood-pass", "coord"].includes(p.command) ? path.resolve(opt(p, "artifact-root", ".flow-agents")) : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
   return withLock(lockRoot, ["ensure-session", "record-agent-event", "dogfood-pass"].includes(p.command), p.command, () => {
     switch (p.command) {
       case "ensure-session": return ensureSession(p);
@@ -1542,6 +1626,7 @@ async function main(): Promise<number> {
       case "gate-review": return gateReview(p);
       case "render-trust-panel": return renderTrustPanel(p);
       case "trust-mcp": return trustMcp(p);
+      case "coord": return coord(p);
       default: die(`unknown command: ${p.command}`);
     }
   });
