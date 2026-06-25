@@ -42,7 +42,7 @@ function workItemSlug(ref: string): string {
 
 /**
  * Validate a Hachure trust.bundle using @kontourai/surface's canonical validator
- * (surface is the authoritative owner of trust-bundle schema validation per ADR 0010 / ADR 0014).
+ * (surface is the authoritative owner of trust-bundle schema validation per ADR 0010 / ADR 0015).
  * Returns `{ valid, errors, available }`. When @kontourai/surface is unavailable,
  * `available` is false and `valid` is true (fail-open) so callers can choose to treat
  * unvalidated bundles as acceptable or gate on `available`. Surface is REQUIRED for

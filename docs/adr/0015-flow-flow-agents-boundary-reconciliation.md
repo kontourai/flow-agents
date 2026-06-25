@@ -1,8 +1,8 @@
 ---
-title: "ADR 0014: Flow / Flow Agents Boundary Reconciliation"
+title: "ADR 0015: Flow / Flow Agents Boundary Reconciliation"
 ---
 
-# ADR 0014: Flow / Flow Agents Boundary Reconciliation
+# ADR 0015: Flow / Flow Agents Boundary Reconciliation
 
 **Date:** 2026-06-25
 **Status:** Accepted. Tier 0 (this ADR / issue #175) shipped.
