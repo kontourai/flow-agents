@@ -368,7 +368,12 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
     for (const dir of dirs) {
       const deliver = markdown.find((p) => path.dirname(p) === dir && p.includes("deliver") && !p.includes("plan") && !p.includes("review"));
       const delivered = deliver ? /status:\s*(delivered|accepted|archived)/i.test(readText(deliver)) : true;
-      for (const name of ["state.json", "acceptance.json", ...(delivered ? ["evidence.json"] : []), "handoff.json"]) {
+      // ADR 0010 Phase 4b: trust.bundle is the primary artifact at the delivered phase.
+      // evidence.json is OPTIONAL when trust.bundle is present (still schema-validated when present).
+      // Hard-fail on evidence.json absence only when no trust.bundle exists for a delivered session.
+      const hasTrustBundle = fs.existsSync(path.join(dir, "trust.bundle"));
+      const evidenceRequired = delivered && !hasTrustBundle;
+      for (const name of ["state.json", "acceptance.json", ...(evidenceRequired ? ["evidence.json"] : []), "handoff.json"]) {
         if (!fs.existsSync(path.join(dir, name))) issues.push({ path: path.join(dir, name), message: "required sidecar is missing" });
       }
       if (requireCritique && !fs.existsSync(path.join(dir, "critique.json"))) issues.push({ path: path.join(dir, "critique.json"), message: "required sidecar is missing" });

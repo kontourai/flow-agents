@@ -274,11 +274,167 @@ function normalizedStatus(value) {
   return safeOneLine(value, 80).toLowerCase();
 }
 
+// ─── ADR 0010 Phase 4b: bundle-first helpers for consumer migration ────────────
+// These helpers extract evidence/critique/acceptance data from the trust.bundle
+// when it is present, falling back to the bespoke sidecar for bundle-less sessions.
+// The sidecar content is IDENTICAL to the bundle projection (Phase 4a guarantee),
+// so consumer reads produce identical verdicts.
+
+/**
+ * Extract the effective "verdict" from trust.bundle workflow.check.* claims.
+ * Priority of non-pass statuses: fail > not_verified > partial > pass.
+ * Returns null when the bundle has no workflow check claims.
+ */
+function bundleEvidenceVerdict(claims) {
+  const checkClaims = claims.filter(c => c && typeof c.claimType === 'string' && c.claimType.startsWith('workflow.check.'));
+  if (checkClaims.length === 0) return null;
+  let worst = 'pass';
+  const PRIORITY = { fail: 4, failed: 4, not_verified: 3, 'not-verified': 3, partial: 2, pass: 1, skip: 0 };
+  for (const c of checkClaims) {
+    const v = normalizedStatus(c.value || 'pass');
+    if ((PRIORITY[v] || 0) > (PRIORITY[worst] || 0)) worst = v;
+  }
+  return worst;
+}
+
+/**
+ * Extract the check ID from a claim's subjectId (format: "${slug}/${checkId}").
+ * Returns the part after the first slash, or the full subjectId if no slash.
+ */
+function claimCheckId(subjectId) {
+  const s = String(subjectId || '');
+  const slash = s.indexOf('/');
+  return slash >= 0 ? s.slice(slash + 1) : s;
+}
+
+/**
+ * Build the list of blocking check-claims from trust.bundle (equivalent to
+ * evidence.json.checks filtered to non-pass status).
+ * Returns objects shaped like { id, status, summary } (summary from fieldOrBehavior).
+ */
+function bundleBlockingChecks(claims) {
+  return claims.filter(c => {
+    if (!c || typeof c.claimType !== 'string' || !c.claimType.startsWith('workflow.check.')) return false;
+    const v = normalizedStatus(c.value || '');
+    return v === 'fail' || v === 'failed' || v === 'not_verified' || v === 'not-verified';
+  }).map(c => ({
+    id: claimCheckId(c.subjectId),
+    status: c.value || 'unknown',
+    summary: c.fieldOrBehavior || '',
+  }));
+}
+
+/**
+ * Determine critique status from trust.bundle workflow.critique.review claims.
+ * Returns the "worst" value among critique claims, or null when none present.
+ */
+function bundleCritiqueStatus(claims) {
+  const critiqueClaims = claims.filter(c => c && c.claimType === 'workflow.critique.review');
+  if (critiqueClaims.length === 0) return null;
+  // A disputed or failed critique is blocking
+  for (const c of critiqueClaims) {
+    const v = normalizedStatus(c.value || '');
+    if (v === 'fail' || v === 'failed' || c.status === 'disputed' || c.status === 'rejected') return c.value || 'fail';
+  }
+  return 'pass';
+}
+
+/**
+ * Build the list of claimed-pass command checks from the trust.bundle's evidence[]
+ * (items with execution.label) and from workflow.check.command claims whose effective
+ * value is "pass" (never-captured claimed pass). Falls back to an empty list when
+ * the bundle has no evidence items.
+ *
+ * Returns objects shaped like { id, kind, status, command } — same shape as
+ * evidence.json.checks — so captureCrossReference's body logic is unchanged.
+ */
+function bundleClaimedPassCommandChecks(bundle) {
+  const allEvidence = Array.isArray(bundle.evidence) ? bundle.evidence : [];
+  const allClaims = Array.isArray(bundle.claims) ? bundle.claims : [];
+
+  // Build a map from claimId -> claim for fast lookup
+  const claimById = new Map();
+  for (const c of allClaims) {
+    if (c && c.id) claimById.set(c.id, c);
+  }
+
+  const checks = [];
+  const seen = new Set();
+
+  // (A) Evidence items with execution.label (command captures).
+  // These represent commands that actually ran — include them regardless of
+  // effective status so we can cross-reference against the live log.
+  for (const ev of allEvidence) {
+    if (!ev || !ev.execution || !ev.execution.label) continue;
+    const cmd = String(ev.execution.label || '').replace(/\s+/g, ' ').trim();
+    if (!cmd) continue;
+    const claim = claimById.get(ev.claimId);
+    if (!claim) continue;
+    if (!String(claim.claimType || '').startsWith('workflow.check.')) continue;
+    // Deduplicate by command
+    if (seen.has(cmd)) continue;
+    seen.add(cmd);
+    const id = claimCheckId(claim.subjectId);
+    // Use 'pass' as the nominal claimed status; cross-reference catches contradictions.
+    checks.push({ id, kind: 'command', status: 'pass', command: cmd });
+  }
+
+  // (B) Workflow.check.command claims with effective value "pass" but no capture
+  // (no evidence item with execution) — these are originally-claimed-pass checks
+  // that were never captured.
+  for (const c of allClaims) {
+    if (!c || c.claimType !== 'workflow.check.command') continue;
+    if (normalizedStatus(c.value || '') !== 'pass') continue;
+    // Check if this claim already has a capture evidence item (covered in (A))
+    const hasCapture = allEvidence.some(ev => ev && ev.claimId === c.id && ev.execution && ev.execution.label);
+    if (hasCapture) continue;
+    // No capture — use fieldOrBehavior as command identifier for backstop resolution.
+    const evItem = allEvidence.find(ev => ev && ev.claimId === c.id);
+    const cmd = evItem
+      ? normalizeCommand(evItem.excerptOrSummary || '')
+      : normalizeCommand(c.fieldOrBehavior || '');
+    const id = claimCheckId(c.subjectId);
+    if (!cmd) {
+      checks.push({ id, kind: 'command', status: 'pass', command: '' });
+      continue;
+    }
+    if (seen.has(cmd)) continue;
+    seen.add(cmd);
+    checks.push({ id, kind: 'command', status: 'pass', command: cmd });
+  }
+
+  return checks;
+}
+
+/**
+ * Extract pending acceptance criteria from trust.bundle workflow.acceptance.criterion claims.
+ * Returns the count of claims whose value is pending/not_started/empty/unknown.
+ * Returns null when the bundle has no acceptance criterion claims.
+ */
+function bundlePendingCriteriaCount(claims) {
+  const criteriaClaims = claims.filter(c => c && c.claimType === 'workflow.acceptance.criterion');
+  if (criteriaClaims.length === 0) return null;
+  const pending = criteriaClaims.filter(c => {
+    const v = normalizedStatus(c.value || '');
+    return v === 'pending' || v === 'not_started' || v === '' || v === 'unknown';
+  });
+  return pending.length;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ADR 0010 Phase 4b: sidecarGuidance — bundle-first evidence/critique reads.
+ * state.json reads are UNCHANGED (state.json stays as primary source).
+ * evidence.json verdict/checks: read from trust.bundle when present, fall back
+ *   to evidence.json for bundle-less sessions (no regression).
+ * not_verified_gaps: always from evidence.json (no bundle equivalent).
+ * critique status: read from trust.bundle when present, fall back to critique.json.
+ *   Finding details: still from critique.json when present (both bundle and sidecar paths).
+ */
 function sidecarGuidance(root, artifactDir) {
   const warnings = [];
   const state = readJsonFile(path.join(artifactDir, 'state.json'));
-  const evidence = readJsonFile(path.join(artifactDir, 'evidence.json'));
-  const critique = readJsonFile(path.join(artifactDir, 'critique.json'));
   const base = relative(root, artifactDir);
 
   if (state) {
@@ -301,38 +457,86 @@ function sidecarGuidance(root, artifactDir) {
     warnings.push(`${base} next action: ${safeOneLine(next.summary)}${next.target_phase ? ` (target phase: ${safeOneLine(next.target_phase, 80)})` : ''}`);
   }
 
-  if (evidence && normalizedStatus(evidence.verdict) && normalizedStatus(evidence.verdict) !== 'pass') {
-    warnings.push(`${base} evidence verdict:${safeOneLine(evidence.verdict, 40)}; do not deliver without accepted gap or new evidence.`);
+  // ── Evidence verdict + checks: bundle-first, fallback to evidence.json ────
+  const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
+  const bundleClaims = bundle && Array.isArray(bundle.claims) ? bundle.claims : null;
+
+  if (bundleClaims) {
+    // Phase 4b: read verdict and per-check signals from trust.bundle claims.
+    const verdict = bundleEvidenceVerdict(bundleClaims);
+    if (verdict && verdict !== 'pass' && verdict !== 'skip') {
+      warnings.push(`${base} evidence verdict:${safeOneLine(verdict, 40)}; do not deliver without accepted gap or new evidence.`);
+    }
+    const blockingChecks = bundleBlockingChecks(bundleClaims);
+    for (const check of blockingChecks.slice(0, 4)) {
+      const status = safeOneLine(check.status || 'unknown', 40);
+      warnings.push(`${base} evidence check ${safeOneLine(check.id || 'unknown', 80)} status:${status}: ${safeOneLine(check.summary)}`);
+    }
+  } else {
+    // Fallback: no bundle — read from evidence.json (existing behavior, no regression).
+    const evidence = readJsonFile(path.join(artifactDir, 'evidence.json'));
+    if (evidence && normalizedStatus(evidence.verdict) && normalizedStatus(evidence.verdict) !== 'pass') {
+      warnings.push(`${base} evidence verdict:${safeOneLine(evidence.verdict, 40)}; do not deliver without accepted gap or new evidence.`);
+    }
+    if (evidence && Array.isArray(evidence.checks)) {
+      const blockingChecks = evidence.checks.filter(check => {
+        const status = normalizedStatus(check && check.status);
+        return status === 'fail' || status === 'failed' || status === 'not_verified' || status === 'not-verified';
+      });
+      for (const check of blockingChecks.slice(0, 4)) {
+        const status = safeOneLine(check.status || 'unknown', 40);
+        warnings.push(`${base} evidence check ${safeOneLine(check.id || 'unknown', 80)} status:${status}: ${safeOneLine(check.summary)}`);
+      }
+    }
   }
+
+  // not_verified_gaps: always from evidence.json (no bundle equivalent).
+  const evidence = readJsonFile(path.join(artifactDir, 'evidence.json'));
   if (evidence && Array.isArray(evidence.not_verified_gaps) && evidence.not_verified_gaps.length > 0) {
     for (const gap of evidence.not_verified_gaps.slice(0, 3)) {
       warnings.push(`${base} evidence NOT_VERIFIED gap: ${safeOneLine(gap)}`);
     }
   }
-  if (evidence && Array.isArray(evidence.checks)) {
-    const blockingChecks = evidence.checks.filter(check => {
-      const status = normalizedStatus(check && check.status);
-      return status === 'fail' || status === 'failed' || status === 'not_verified' || status === 'not-verified';
-    });
-    for (const check of blockingChecks.slice(0, 4)) {
-      const status = safeOneLine(check.status || 'unknown', 40);
-      warnings.push(`${base} evidence check ${safeOneLine(check.id || 'unknown', 80)} status:${status}: ${safeOneLine(check.summary)}`);
-    }
-  }
 
-  if (critique && critique.required === true && normalizedStatus(critique.status) !== 'pass') {
-    warnings.push(`${base} critique status:${safeOneLine(critique.status || 'unknown', 40)}; required critique must pass or findings be accepted.`);
-    const critiques = Array.isArray(critique.critiques) ? critique.critiques : [];
-    let openCount = 0;
-    for (const review of critiques) {
-      const findings = Array.isArray(review && review.findings) ? review.findings : [];
-      for (const finding of findings) {
-        if (!finding || normalizedStatus(finding.status) !== 'open') continue;
-        warnings.push(`${base} critique open ${safeOneLine(finding.severity || 'unknown', 40)}: ${safeOneLine(finding.description)}`);
-        openCount += 1;
+  // ── Critique: bundle-first status, critique.json for finding details ──────
+  const critique = readJsonFile(path.join(artifactDir, 'critique.json'));
+
+  if (bundleClaims) {
+    // Phase 4b: read critique status from trust.bundle claims.
+    const critiqueStatusVal = bundleCritiqueStatus(bundleClaims);
+    const critiqueIsBlocking = critiqueStatusVal !== null && normalizedStatus(critiqueStatusVal) !== 'pass';
+    if (critiqueIsBlocking) {
+      warnings.push(`${base} critique status:${safeOneLine(critiqueStatusVal || 'unknown', 40)}; required critique must pass or findings be accepted.`);
+      // Finding details: still from critique.json when present (both paths use the same details source).
+      const critiques = critique && Array.isArray(critique.critiques) ? critique.critiques : [];
+      let openCount = 0;
+      for (const review of critiques) {
+        const findings = Array.isArray(review && review.findings) ? review.findings : [];
+        for (const finding of findings) {
+          if (!finding || normalizedStatus(finding.status) !== 'open') continue;
+          warnings.push(`${base} critique open ${safeOneLine(finding.severity || 'unknown', 40)}: ${safeOneLine(finding.description)}`);
+          openCount += 1;
+          if (openCount >= 3) break;
+        }
         if (openCount >= 3) break;
       }
-      if (openCount >= 3) break;
+    }
+  } else {
+    // Fallback: no bundle — read from critique.json (existing behavior, no regression).
+    if (critique && critique.required === true && normalizedStatus(critique.status) !== 'pass') {
+      warnings.push(`${base} critique status:${safeOneLine(critique.status || 'unknown', 40)}; required critique must pass or findings be accepted.`);
+      const critiques = Array.isArray(critique.critiques) ? critique.critiques : [];
+      let openCount = 0;
+      for (const review of critiques) {
+        const findings = Array.isArray(review && review.findings) ? review.findings : [];
+        for (const finding of findings) {
+          if (!finding || normalizedStatus(finding.status) !== 'open') continue;
+          warnings.push(`${base} critique open ${safeOneLine(finding.severity || 'unknown', 40)}: ${safeOneLine(finding.description)}`);
+          openCount += 1;
+          if (openCount >= 3) break;
+        }
+        if (openCount >= 3) break;
+      }
     }
   }
 
@@ -342,12 +546,16 @@ function sidecarGuidance(root, artifactDir) {
 // -----------------------------------------------------------------------
 // Capture-first evidence determinism (Part B)
 //
-// evidence.json is the MODEL transcribing what it thinks happened. The capture
-// hook (evidence-capture.js) writes the REAL command results to
-// command-log.jsonl at the source. Here at the Stop gate we cross-reference the
-// model's claimed-pass command checks against that captured truth, and only fall
-// back to re-running a TRUSTED command when the log has no execution for a
-// claimed-pass command (i.e. it was never actually run).
+// The trust.bundle (emitted by workflow-sidecar via @kontourai/surface) carries
+// capture-authoritative evidence items. The capture hook (evidence-capture.js)
+// writes REAL command results to command-log.jsonl at the source. Here at the
+// Stop gate we cross-reference claimed-pass command checks against that captured
+// truth, and only fall back to re-running a TRUSTED command when the log has no
+// execution for a claimed-pass command (i.e. it was never actually run).
+//
+// ADR 0010 Phase 4b: source the claimed-pass command checks from the bundle's
+// evidence[] (execution/command items) instead of evidence.json checks.
+// command-log.jsonl path UNCHANGED — it stays the capture truth source.
 // -----------------------------------------------------------------------
 
 function normalizeCommand(value) {
@@ -509,32 +717,40 @@ function runBackstop(trusted) {
 }
 
 /**
- * Cross-reference each evidence.checks[] of kind:"command" claiming status:"pass"
- * that carries a command against the capture log, with the trusted backstop as a
- * thin fallback only when the log has no execution for that command.
- *
- * Emits warnings (which feed the existing block/MAX_BLOCKS machinery) when a
- * claimed-pass command actually FAILED (log or backstop), and NOT_VERIFIED notes
- * when nothing trusted can confirm it.
+ * ADR 0010 Phase 4b: captureCrossReference — bundle-first command check sourcing.
+ * Sources the claimed-pass command checks from trust.bundle evidence[] (execution/
+ * command items) when the bundle is present, falling back to evidence.json checks
+ * for bundle-less sessions. command-log.jsonl UNCHANGED — it stays the capture
+ * truth source. The teeth (claimed-pass + captured-fail → block) are byte-identical.
  */
 function captureCrossReference(root, artifactDir) {
-  const evidence = readJsonFile(path.join(artifactDir, 'evidence.json'));
-  if (!evidence || !Array.isArray(evidence.checks)) return [];
+  const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
   const acceptance = readJsonFile(path.join(artifactDir, 'acceptance.json'));
   const log = readCommandLog(artifactDir);
   const base = relative(root, artifactDir);
   const backstopMode = resolveBackstopMode();
   const warnings = [];
 
-  const claimedPass = evidence.checks.filter(check => {
-    if (!check || typeof check !== 'object') return false;
-    const kind = normalizedStatus(check.kind);
-    const status = normalizedStatus(check.status);
-    return kind === 'command' && (status === 'pass' || status === 'passed') && normalizeCommand(check.command);
-  });
+  // Build the list of claimed-pass command checks — bundle-first, evidence.json fallback.
+  let claimedPass;
+  if (bundle && Array.isArray(bundle.claims)) {
+    // Phase 4b: source from trust.bundle evidence[] (execution/command items).
+    claimedPass = bundleClaimedPassCommandChecks(bundle);
+  } else {
+    // Fallback: no bundle — read from evidence.json (existing behavior, no regression).
+    const evidence = readJsonFile(path.join(artifactDir, 'evidence.json'));
+    if (!evidence || !Array.isArray(evidence.checks)) return [];
+    claimedPass = evidence.checks.filter(check => {
+      if (!check || typeof check !== 'object') return false;
+      const kind = normalizedStatus(check.kind);
+      const status = normalizedStatus(check.status);
+      return kind === 'command' && (status === 'pass' || status === 'passed') && normalizeCommand(check.command);
+    });
+  }
 
   for (const check of claimedPass.slice(0, 8)) {
     const cmd = normalizeCommand(check.command);
+    if (!cmd) continue;
     const id = safeOneLine(check.id || cmd, 80);
     const logged = log.get(cmd);
 
@@ -573,6 +789,8 @@ function captureCrossReference(root, artifactDir) {
 
   return warnings;
 }
+
+// ─── ADR 0010 Phase 2: enforce on the canonical Hachure trust.bundle ──────────
 
 // ─── ADR 0010 Phase 2: enforce on the canonical Hachure trust.bundle ──────────
 // The trust.bundle (emitted by workflow-sidecar via @kontourai/surface) carries
@@ -689,9 +907,10 @@ function isPreExecution(artifactDir, markdownStatus) {
 // If a trust.bundle exists, bundleEnforcement handles it. If state.json exists,
 // sidecarGuidance handles it. The gap: a session with only a markdown artifact.
 //
-// Adjustment A (sidecar-driven Final Acceptance): when acceptance.json has
-// pending criteria and the task state shows delivered, emit the Final Acceptance
-// hygiene warning from the sidecar rather than markdown template parsing.
+// ADR 0010 Phase 4b: Adjustment A (Final Acceptance hygiene):
+// When the task is delivered but acceptance criteria are still pending, emit the
+// Final Acceptance reminder. Read from trust.bundle claims when present; fall back
+// to acceptance.json for bundle-less sessions.
 function missingBundleOrStateSignal(artifactDir) {
   const warnings = [];
   const hasBundle = fs.existsSync(path.join(artifactDir, 'trust.bundle'));
@@ -705,18 +924,31 @@ function missingBundleOrStateSignal(artifactDir) {
     return warnings;
   }
 
-  // Adjustment A: sidecar-driven Final Acceptance hygiene.
-  // When the task is delivered but acceptance.json still has pending criteria,
-  // emit the Final Acceptance reminder from the sidecar (not markdown parsing).
-  const acceptance = readJsonFile(path.join(artifactDir, 'acceptance.json'));
-  if (acceptance && Array.isArray(acceptance.criteria)) {
-    const pendingCriteria = acceptance.criteria.filter(c => {
-      const s = normalizedStatus(c && c.status);
-      return s === 'pending' || s === 'not_started' || s === '' || s === 'unknown';
-    });
-    if (pendingCriteria.length > 0) {
+  // Adjustment A: Final Acceptance hygiene.
+  // When the task is delivered but acceptance criteria are still pending, emit the
+  // Final Acceptance reminder. Bundle-first; fall back to acceptance.json.
+  const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
+  const bundleClaims = bundle && Array.isArray(bundle.claims) ? bundle.claims : null;
+
+  if (bundleClaims) {
+    // Phase 4b: read pending criteria count from trust.bundle claims.
+    const pendingCount = bundlePendingCriteriaCount(bundleClaims);
+    if (pendingCount !== null && pendingCount > 0) {
       const base = path.basename(artifactDir);
-      warnings.push(`${base} Final Acceptance: ${pendingCriteria.length} acceptance criterion/criteria still pending; complete CI/merge/docs before final delivery.`);
+      warnings.push(`${base} Final Acceptance: ${pendingCount} acceptance criterion/criteria still pending; complete CI/merge/docs before final delivery.`);
+    }
+  } else {
+    // Fallback: no bundle — read from acceptance.json (existing behavior, no regression).
+    const acceptance = readJsonFile(path.join(artifactDir, 'acceptance.json'));
+    if (acceptance && Array.isArray(acceptance.criteria)) {
+      const pendingCriteria = acceptance.criteria.filter(c => {
+        const s = normalizedStatus(c && c.status);
+        return s === 'pending' || s === 'not_started' || s === '' || s === 'unknown';
+      });
+      if (pendingCriteria.length > 0) {
+        const base = path.basename(artifactDir);
+        warnings.push(`${base} Final Acceptance: ${pendingCriteria.length} acceptance criterion/criteria still pending; complete CI/merge/docs before final delivery.`);
+      }
     }
   }
 
