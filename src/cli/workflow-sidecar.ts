@@ -40,58 +40,37 @@ function workItemSlug(ref: string): string {
   return slugify(`${owner}-${repo}-${id}`, "work-item");
 }
 
-// Optional Hachure trust-bundle validation. No-ops gracefully when hachure is not installed.
-// Install hachure (^0.4.0) as an optional dependency to enable schema validation.
-function tryLoadHachureValidator(): ((bundle: unknown) => { valid: boolean; errors: string[] }) | null {
-  try {
-    const _require = createRequire(import.meta.url);
-    const hachureDir = path.dirname(_require.resolve("hachure"));
-    const schemasDir = path.join(hachureDir, "schemas");
-    const Ajv = _require("ajv/dist/2020");
-    const schemas: Record<string, any> = {};
-    for (const file of fs.readdirSync(schemasDir)) {
-      if (!file.endsWith(".schema.json")) continue;
-      schemas[file] = JSON.parse(fs.readFileSync(path.join(schemasDir, file), "utf8"));
-    }
-    const ajv = new Ajv({ strict: false, allErrors: true });
-    for (const [filename, schema] of Object.entries(schemas)) {
-      if (filename === "trust-bundle.schema.json") continue;
-      ajv.addSchema(schema, filename);
-    }
-    const trustBundleSchema = schemas["trust-bundle.schema.json"];
-    if (!trustBundleSchema) return null;
-    const validate = ajv.compile(trustBundleSchema);
-    return (bundle: unknown) => {
-      const valid = validate(bundle);
-      if (valid) return { valid: true, errors: [] };
-      const errors = ((validate as any).errors ?? []).map((err: any) => {
-        const loc = err.instancePath || err.schemaPath || "";
-        return `${loc} ${err.message ?? "invalid"}`.trim();
-      });
-      return { valid: false, errors };
-    };
-  } catch {
-    return null;
-  }
-}
-let _hachureValidator: ReturnType<typeof tryLoadHachureValidator> | undefined;
-function getHachureValidator(): ReturnType<typeof tryLoadHachureValidator> {
-  if (_hachureValidator === undefined) _hachureValidator = tryLoadHachureValidator();
-  return _hachureValidator;
-}
-
 /**
- * Validate a Hachure trust.bundle against the canonical trust-bundle schema.
- * Returns `{ valid, errors, available }`. When the optional `hachure` dependency
- * is not installed, validation is unavailable and this returns
- * `{ valid: true, errors: [], available: false }` (fail-open) so callers can
- * choose to treat unvalidated bundles as acceptable or gate on `available`.
- * This is the same validator the sidecar writer uses for trust-backed evidence.
+ * Validate a Hachure trust.bundle using @kontourai/surface's canonical validator
+ * (surface is the authoritative owner of trust-bundle schema validation per ADR 0010 / ADR 0014).
+ * Returns `{ valid, errors, available }`. When @kontourai/surface is unavailable,
+ * `available` is false and `valid` is true (fail-open) so callers can choose to treat
+ * unvalidated bundles as acceptable or gate on `available`. Surface is REQUIRED for
+ * bundle writes per ADR 0010 Phase 4c — `assertBundleWritten` enforces this on the
+ * write path. Surface's validator is equivalent-or-stronger than the prior hachure
+ * JSON-Schema validator: it validates the same structural constraints plus cross-reference
+ * integrity (evidence/event → claim references) that the JSON schema did not enforce.
  */
-export function validateTrustBundle(bundle: unknown): { valid: boolean; errors: string[]; available: boolean } {
-  const validate = getHachureValidator();
-  if (!validate) return { valid: true, errors: [], available: false };
-  return { ...validate(bundle), available: true };
+export async function validateTrustBundle(bundle: unknown): Promise<{ valid: boolean; errors: string[]; available: boolean }> {
+  // Use the already-loaded surface module when available (zero-cost re-entry after first load).
+  // When called standalone (fresh process, surface not yet loaded), attempt a one-shot import.
+  let surfaceValidate: ((input: unknown) => unknown) | undefined;
+  if (_surfaceModule !== undefined) {
+    // Module has been attempted: use cached result (null = unavailable).
+    surfaceValidate = _surfaceModule?.validateTrustBundle ?? undefined;
+  } else {
+    // Not yet attempted — load now for standalone callers (e.g. library consumers, tests).
+    const m = await tryLoadSurface();
+    surfaceValidate = m?.validateTrustBundle ?? undefined;
+  }
+  if (!surfaceValidate) return { valid: true, errors: [], available: false };
+  try {
+    surfaceValidate(bundle);
+    return { valid: true, errors: [], available: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { valid: false, errors: [message], available: true };
+  }
 }
 // Validate a single InquiryRecord against the hachure inquiry-record.schema.json.
 // Uses a separate AJV instance compiled against that schema (not the trust-bundle schema).
@@ -190,6 +169,8 @@ type SurfaceModule = {
   ) => SurfaceInquiryRecord;
   buildTrustReport: (bundle: Record<string, unknown>, options?: { now?: Date }) => Record<string, unknown>;
   buildDerivationDrilldown: (report: Record<string, unknown>, claimId: string) => Record<string, unknown>;
+  /** Canonical trust-bundle validator from @kontourai/surface. Throws on invalid input; returns TrustBundle on success. */
+  validateTrustBundle: (input: unknown) => Record<string, unknown>;
 };
 let _surfaceModule: SurfaceModule | null | undefined; // undefined = not tried yet; null = unavailable
 async function tryLoadSurface(): Promise<SurfaceModule | null> {
@@ -387,7 +368,7 @@ export async function writeTrustBundle(dir: string, slug: string, timestamp: str
     } catch { /* no capture log — fine */ }
     const bundle = await buildTrustBundle(slug, timestamp, checks, criteria, critiques, commandLog);
     if (!bundle) return { written: false, errors: [] }; // Surface unavailable — fail-open, skip write
-    const result = validateTrustBundle(bundle);
+    const result = await validateTrustBundle(bundle);
     if (result.available && !result.valid) {
       process.stderr.write(`[trust-bundle] schema validation failed: ${result.errors.join("; ")}\n`);
       return { written: false, errors: result.errors };
@@ -763,24 +744,29 @@ export function normalizeCheck(raw: AnyObj): AnyObj {
 }
 function normalizeSurfaceRefs(refs: any): AnyObj[] {
   if (!Array.isArray(refs)) die("surface_trust_refs must be an array");
-  const hachureValidate = getHachureValidator();
+  // Use the cached @kontourai/surface module for advisory inline validation of referenced
+  // trust.bundle files. Fail-open when surface is not yet loaded (surface loads on first
+  // bundle write via tryLoadSurface; normalizeSurfaceRefs may run before that).
+  const surfaceValidateFn = _surfaceModule?.validateTrustBundle ?? null;
   return refs.map((ref) => {
     const keys = JSON.stringify(ref).match(/"([^"]+)":/g) ?? [];
     for (const key of keys.map((k) => k.slice(1, -2))) if (key.toLowerCase().includes("veritas")) die(`unsupported field in Surface trust ref: ${key}`);
     const out = { ...ref };
     // trust.bundle is the canonical Hachure-aligned artifact kind; TrustReport/Trust Snapshot are legacy aliases
     if (!["trust.bundle", "TrustReport", "Trust Snapshot"].includes(out.artifact_kind)) die("artifact_kind must be one of: trust.bundle, TrustReport, Trust Snapshot");
-    // When hachure is installed, validate the referenced trust artifact if it is a local file
-    if (hachureValidate && out.artifact_ref && typeof out.artifact_ref === "string" && fs.existsSync(out.artifact_ref)) {
+    // When surface is loaded, validate the referenced trust artifact if it is a local file.
+    // Advisory: surface's throw-based validator wraps into a fail-loud error on schema failure.
+    if (surfaceValidateFn && out.artifact_ref && typeof out.artifact_ref === "string" && fs.existsSync(out.artifact_ref)) {
       try {
         const bundle = JSON.parse(fs.readFileSync(out.artifact_ref, "utf8"));
-        const result = hachureValidate(bundle);
-        if (!result.valid) {
-          const errorSummary = result.errors.slice(0, 3).join("; ");
-          die(`trust.bundle artifact at ${out.artifact_ref} failed Hachure schema validation: ${errorSummary}`);
-        }
+        surfaceValidateFn(bundle);
       } catch (err) {
-        if (err instanceof Error && err.message.includes("failed Hachure schema validation")) throw err;
+        if (err instanceof Error) {
+          // Re-throw schema validation failures (surface throws on invalid); swallow read/parse errors.
+          const msg = err.message;
+          const isSchemaError = !msg.startsWith("ENOENT") && !msg.startsWith("SyntaxError") && !msg.toLowerCase().startsWith("unexpected");
+          if (isSchemaError) die(`trust.bundle artifact at ${out.artifact_ref} failed schema validation: ${msg}`);
+        }
         // File read or parse errors are not re-thrown: the artifact_ref validation path is advisory
       }
     }
