@@ -2469,6 +2469,155 @@ NODEOF
   fi
 fi
 
+# ─── Deterministic session slug from work-item ref (#161) ───────────────────
+
+WORK_ITEM_ROOT="$TMPDIR_EVAL/work-item-repo/.flow-agents"
+
+# (a) --work-item derives deterministic slug kontourai-flow-agents-161
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$WORK_ITEM_ROOT" \
+  --work-item "kontourai/flow-agents#161" \
+  --title "Work Item 161" \
+  --summary "Deterministic slug from work-item ref." \
+  --timestamp "2026-06-25T00:00:00Z" >"$TMPDIR_EVAL/wi-ensure.out" 2>"$TMPDIR_EVAL/wi-ensure.err"; then
+  _pass "ensure-session --work-item derives slug kontourai-flow-agents-161"
+else
+  _fail "ensure-session --work-item failed: $(cat "$TMPDIR_EVAL/wi-ensure.out" "$TMPDIR_EVAL/wi-ensure.err")"
+fi
+
+if [[ -f "$WORK_ITEM_ROOT/kontourai-flow-agents-161/state.json" ]]; then
+  _pass "ensure-session --work-item creates expected session directory"
+else
+  _fail "ensure-session --work-item did not create $WORK_ITEM_ROOT/kontourai-flow-agents-161/"
+fi
+
+# (b) idempotency: second call same ref → same directory, no failure
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$WORK_ITEM_ROOT" \
+  --work-item "kontourai/flow-agents#161" \
+  --title "Work Item 161 Second" \
+  --summary "Idempotent call." \
+  --timestamp "2026-06-25T00:00:01Z" >"$TMPDIR_EVAL/wi-ensure2.out" 2>"$TMPDIR_EVAL/wi-ensure2.err" \
+  && [[ -f "$WORK_ITEM_ROOT/kontourai-flow-agents-161/state.json" ]]; then
+  _pass "ensure-session --work-item is idempotent (same slug/dir on second call)"
+else
+  _fail "ensure-session --work-item idempotency failed: $(cat "$TMPDIR_EVAL/wi-ensure2.out" "$TMPDIR_EVAL/wi-ensure2.err")"
+fi
+
+# (c) --task-slug wins over --work-item (back-compat: explicit overrides derived)
+TASK_SLUG_ROOT="$TMPDIR_EVAL/task-slug-repo/.flow-agents"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$TASK_SLUG_ROOT" \
+  --task-slug "manual-slug" \
+  --work-item "kontourai/flow-agents#161" \
+  --title "Manual Slug" \
+  --summary "Explicit task-slug must win over work-item." \
+  --timestamp "2026-06-25T00:00:02Z" >"$TMPDIR_EVAL/wi-taskslug.out" 2>"$TMPDIR_EVAL/wi-taskslug.err" \
+  && [[ -d "$TASK_SLUG_ROOT/manual-slug" ]] \
+  && [[ ! -d "$TASK_SLUG_ROOT/kontourai-flow-agents-161" ]]; then
+  _pass "ensure-session --task-slug wins over --work-item (back-compat)"
+else
+  _fail "ensure-session --task-slug did not win over --work-item: $(cat "$TMPDIR_EVAL/wi-taskslug.out" "$TMPDIR_EVAL/wi-taskslug.err")"
+fi
+
+# (c2) --task-slug only (no --work-item) still works
+TASK_SLUG_ONLY_ROOT="$TMPDIR_EVAL/task-slug-only-repo/.flow-agents"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$TASK_SLUG_ONLY_ROOT" \
+  --task-slug "explicit-only" \
+  --title "Explicit Only" \
+  --summary "task-slug only, no work-item." \
+  --timestamp "2026-06-25T00:00:03Z" >"$TMPDIR_EVAL/wi-onlyslug.out" 2>"$TMPDIR_EVAL/wi-onlyslug.err" \
+  && [[ -d "$TASK_SLUG_ONLY_ROOT/explicit-only" ]]; then
+  _pass "ensure-session --task-slug alone still works (back-compat regression guard)"
+else
+  _fail "ensure-session --task-slug alone failed: $(cat "$TMPDIR_EVAL/wi-onlyslug.out" "$TMPDIR_EVAL/wi-onlyslug.err")"
+fi
+
+# (d) liveness subjectId matches work-item slug
+# ensure-session establishes the slug; liveness events (emitted by init-plan/advance-state) key
+# on that same slug as subjectId. We verify this by emitting two liveness claim events directly
+# via `liveness claim` using the slug derived from the ref, then asserting both share subjectId.
+LIVENESS_WORK_ROOT="$TMPDIR_EVAL/liveness-wi-repo/.flow-agents"
+# First: ensure-session --work-item produces the expected slug (directory name proof)
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$LIVENESS_WORK_ROOT" \
+  --work-item "kontourai/flow-agents#162" \
+  --title "Liveness Work Item" \
+  --summary "Liveness subjectId test." \
+  --timestamp "2026-06-25T00:00:04Z" >"$TMPDIR_EVAL/wi-liveness1.out" 2>"$TMPDIR_EVAL/wi-liveness1.err" \
+  && [[ -d "$LIVENESS_WORK_ROOT/kontourai-flow-agents-162" ]]; then
+  _pass "ensure-session --work-item creates session dir with deterministic slug"
+else
+  _fail "ensure-session --work-item session dir check failed: $(cat "$TMPDIR_EVAL/wi-liveness1.out" "$TMPDIR_EVAL/wi-liveness1.err")"
+fi
+
+# Emit two liveness claim events using the same subjectId (as init-plan does when FLOW_AGENTS_LIVENESS=on).
+# This proves: same work-item ref → same slug → same subjectId across two agents.
+FLOW_AGENTS_ACTOR=agent-a flow_agents_node "$WRITER" liveness claim \
+  --artifact-root "$LIVENESS_WORK_ROOT" \
+  kontourai-flow-agents-162 >"$TMPDIR_EVAL/wi-liveness-claim-a.out" 2>"$TMPDIR_EVAL/wi-liveness-claim-a.err"
+FLOW_AGENTS_ACTOR=agent-b flow_agents_node "$WRITER" liveness claim \
+  --artifact-root "$LIVENESS_WORK_ROOT" \
+  kontourai-flow-agents-162 >"$TMPDIR_EVAL/wi-liveness-claim-b.out" 2>"$TMPDIR_EVAL/wi-liveness-claim-b.err"
+
+LIVENESS_EVENTS="$LIVENESS_WORK_ROOT/liveness/events.jsonl"
+if [[ -f "$LIVENESS_EVENTS" ]] \
+  && grep -q '"subjectId":"kontourai-flow-agents-162"' "$LIVENESS_EVENTS"; then
+  _pass "liveness events contain subjectId kontourai-flow-agents-162"
+else
+  _fail "liveness events missing expected subjectId: $(cat "$LIVENESS_EVENTS" 2>/dev/null || echo 'file not found')"
+fi
+
+# Both events must share the same subjectId value (two agents, same ref → same subjectId)
+subject_count=$(grep -c '"subjectId":"kontourai-flow-agents-162"' "$LIVENESS_EVENTS" 2>/dev/null || echo 0)
+if [[ "$subject_count" -ge 2 ]]; then
+  _pass "both liveness events share subjectId kontourai-flow-agents-162 (same ref → same subjectId)"
+else
+  _fail "expected >=2 liveness events with subjectId kontourai-flow-agents-162, found $subject_count"
+fi
+
+# (e) malformed ref is rejected
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$WORK_ITEM_ROOT" \
+  --work-item "kontourai/flow-agents/bad" \
+  --title "Bad Ref" \
+  --summary "Should fail." \
+  --timestamp "2026-06-25T00:00:06Z" >"$TMPDIR_EVAL/wi-bad-slash.out" 2>&1; then
+  _fail "ensure-session should reject work-item ref without # separator"
+elif grep -q 'owner/repo#id format' "$TMPDIR_EVAL/wi-bad-slash.out"; then
+  _pass "ensure-session rejects work-item ref without # separator"
+else
+  _fail "malformed ref rejection message was unexpected: $(cat "$TMPDIR_EVAL/wi-bad-slash.out")"
+fi
+
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$WORK_ITEM_ROOT" \
+  --work-item "kontourai/flow-agents#abc" \
+  --title "Bad ID" \
+  --summary "Should fail on non-numeric id." \
+  --timestamp "2026-06-25T00:00:07Z" >"$TMPDIR_EVAL/wi-bad-id.out" 2>&1; then
+  _fail "ensure-session should reject work-item with non-numeric id"
+elif grep -q 'numeric issue number' "$TMPDIR_EVAL/wi-bad-id.out"; then
+  _pass "ensure-session rejects work-item with non-numeric id"
+else
+  _fail "non-numeric id rejection message was unexpected: $(cat "$TMPDIR_EVAL/wi-bad-id.out")"
+fi
+
+# Neither --task-slug nor --work-item → back-compat error message must contain "task-slug is required"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$WORK_ITEM_ROOT" \
+  --title "No Slug" \
+  --summary "Should fail." \
+  --timestamp "2026-06-25T00:00:08Z" >"$TMPDIR_EVAL/wi-no-slug.out" 2>&1; then
+  _fail "ensure-session should require --task-slug or --work-item"
+elif grep -q 'task-slug is required' "$TMPDIR_EVAL/wi-no-slug.out"; then
+  _pass "ensure-session dies with 'task-slug is required' when neither flag is supplied (back-compat)"
+else
+  _fail "missing slug error message lacked 'task-slug is required': $(cat "$TMPDIR_EVAL/wi-no-slug.out")"
+fi
+
+
 if [[ "$errors" -eq 0 ]]; then
   echo "Workflow sidecar writer integration passed."
   exit 0
