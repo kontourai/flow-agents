@@ -24,6 +24,7 @@ const commands = [
   ["Integration suite", "bash evals/run.sh integration"],
   ["Workflow artifacts", "npm run workflow:validate-artifacts -- --require-sidecars --require-critique .flow-agents/<slug>"],
   ["Workflow sidecars", "npm run workflow:sidecar -- --help"],
+  ["Claim lookup", "npm run workflow:sidecar -- claim <id> <dir>"],
   ["Context map drift", "npm run context-map:check"],
   ["Bundle build", "npm run build:bundles"],
 ];

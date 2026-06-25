@@ -188,6 +188,8 @@ type SurfaceModule = {
     inquiry: SurfaceInquiry,
     options?: { now?: Date },
   ) => SurfaceInquiryRecord;
+  buildTrustReport: (bundle: Record<string, unknown>, options?: { now?: Date }) => Record<string, unknown>;
+  buildDerivationDrilldown: (report: Record<string, unknown>, claimId: string) => Record<string, unknown>;
 };
 let _surfaceModule: SurfaceModule | null | undefined; // undefined = not tried yet; null = unavailable
 async function tryLoadSurface(): Promise<SurfaceModule | null> {
@@ -1712,11 +1714,295 @@ async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─── Claim Lookup — pure helper (promotable to Surface #171) ─────────────────
+// buildClaimExplanation is a PURE function: report + bundle + id in, structured
+// explanation out. No fs, no CLI, no .flow-agents paths. Zero flow-agents
+// specifics inside it — it can be lifted to Surface unchanged (issue #171).
+
+export interface ClaimEvidenceItem {
+  evidenceType: string;
+  label: string;
+  execution: { runner: string; label: string; isError: boolean; exitCode: number | null } | null;
+  passing: boolean;
+  summary: string;
+}
+
+export interface ClaimExplanation {
+  found: boolean;
+  status: string;
+  value: string;
+  claimType: string;
+  evidence: ClaimEvidenceItem[];
+  policy: {
+    id: string;
+    requiredEvidence: string[];
+    requiredMethods?: string[];
+    acceptanceCriteria: string[];
+    reviewAuthority: string;
+  } | null;
+  why: {
+    directInputs: AnyObj[];
+    leafClaims: AnyObj[];
+    diagnostics: AnyObj[];
+    transparencyGaps: AnyObj[];
+    changeRecords: AnyObj[];
+  };
+}
+
+/**
+ * Build a structured explanation for a specific claim.
+ * PURE: report + bundle + id in, structured explanation out.
+ * No fs, no CLI, no .flow-agents paths. Promotable to Surface #171.
+ *
+ * @param report   TrustReport from buildTrustReport(bundle) — required for derived status
+ * @param bundle   Raw parsed trust.bundle (BundleFile shape)
+ * @param claimId  The claim id to explain
+ */
+export function buildClaimExplanation(
+  report: Record<string, unknown>,
+  bundle: Record<string, unknown>,
+  claimId: string,
+): ClaimExplanation {
+  const reportClaims = Array.isArray(report.claims) ? (report.claims as AnyObj[]) : [];
+  const reportClaim = reportClaims.find((c: AnyObj) => c.id === claimId);
+
+  if (!reportClaim) {
+    return {
+      found: false,
+      status: "unknown",
+      value: "",
+      claimType: "",
+      evidence: [],
+      policy: null,
+      why: { directInputs: [], leafClaims: [], diagnostics: [], transparencyGaps: [], changeRecords: [] },
+    };
+  }
+
+  const bundleClaims = Array.isArray(bundle.claims) ? (bundle.claims as AnyObj[]) : [];
+  const bundleClaim = bundleClaims.find((c: AnyObj) => c.id === claimId) ?? reportClaim;
+  const bundlePolicies = Array.isArray(bundle.policies) ? (bundle.policies as AnyObj[]) : [];
+  const bundleEvidence = Array.isArray(bundle.evidence) ? (bundle.evidence as AnyObj[]) : [];
+
+  // Governing policy — follow verificationPolicyId into bundle.policies[]
+  const verificationPolicyId = typeof bundleClaim.verificationPolicyId === "string" ? bundleClaim.verificationPolicyId : undefined;
+  const rawPolicy = verificationPolicyId ? bundlePolicies.find((p: AnyObj) => p.id === verificationPolicyId) : undefined;
+  const policy = rawPolicy
+    ? {
+        id: String(rawPolicy.id ?? ""),
+        requiredEvidence: Array.isArray(rawPolicy.requiredEvidence) ? (rawPolicy.requiredEvidence as string[]) : [],
+        requiredMethods: Array.isArray(rawPolicy.requiredMethods) ? (rawPolicy.requiredMethods as string[]) : undefined,
+        acceptanceCriteria: Array.isArray(rawPolicy.acceptanceCriteria) ? (rawPolicy.acceptanceCriteria as string[]) : [],
+        reviewAuthority: String(rawPolicy.reviewAuthority ?? ""),
+      }
+    : null;
+
+  // Evidence enhancement: pull evidence items for this claim, surface the execution block
+  const claimEvidenceItems = bundleEvidence.filter((ev: AnyObj) => ev && ev.claimId === claimId);
+  const evidence: ClaimEvidenceItem[] = claimEvidenceItems.map((ev: AnyObj) => {
+    const exec = ev.execution && typeof ev.execution === "object" ? (ev.execution as AnyObj) : null;
+    const execution = exec
+      ? {
+          runner: String(exec.runner ?? exec.label ?? ""),
+          label: String(exec.label ?? exec.runner ?? ""),
+          isError: Boolean(exec.isError ?? (typeof exec.exitCode === "number" && exec.exitCode !== 0)),
+          exitCode: typeof exec.exitCode === "number" ? exec.exitCode : null,
+        }
+      : null;
+    return {
+      evidenceType: String(ev.evidenceType ?? ev.type ?? "unknown"),
+      label: String(ev.label ?? ev.excerptOrSummary ?? ev.sourceRef ?? ev.id ?? ""),
+      execution,
+      passing: execution ? !execution.isError : String(ev.status ?? "") !== "disputed",
+      summary: String(ev.excerptOrSummary ?? ev.summary ?? ev.label ?? ""),
+    };
+  });
+
+  // Drilldown: extract from report structure (report.transparencyGaps, report.changeRecords)
+  const allGaps = Array.isArray(report.transparencyGaps) ? (report.transparencyGaps as AnyObj[]) : [];
+  const allChanges = Array.isArray(report.changeRecords) ? (report.changeRecords as AnyObj[]) : [];
+  const transparencyGaps = allGaps.filter((g: AnyObj) => g && g.claimId === claimId);
+  const changeRecords = allChanges.filter((c: AnyObj) => c && c.claimId === claimId);
+
+  return {
+    found: true,
+    status: String(reportClaim.status ?? "unknown"),
+    value: String(bundleClaim.value ?? reportClaim.value ?? ""),
+    claimType: String(bundleClaim.claimType ?? reportClaim.claimType ?? ""),
+    evidence,
+    policy,
+    why: {
+      directInputs: [],   // populated by buildDerivationDrilldown if non-leaf
+      leafClaims: [],
+      diagnostics: [],
+      transparencyGaps,
+      changeRecords,
+    },
+  };
+}
+
+/**
+ * claim <id> <dir>
+ *
+ * Look up a specific claim in the session's trust.bundle and print:
+ *   - Derived status and raw value
+ *   - Failing evidence items (with execution block: runner, exitCode, isError)
+ *   - Governing VerificationPolicy (how-to-verify)
+ *   - Derivation drilldown / transparency gaps (why it is in that state)
+ *
+ * --json  Emit the structured ClaimExplanation object instead of text.
+ *
+ * Usage: workflow-sidecar claim <claimId> <artifactDir>
+ */
+async function claimLookup(p: ReturnType<typeof parseArgs>): Promise<number> {
+  const claimId = p.positional[0] || die("claim id is required (first positional argument)");
+  const rawDir = p.positional[1] || die("artifact directory is required (second positional argument)");
+  const dir = path.resolve(rawDir);
+
+  const bundlePath = path.join(dir, "trust.bundle");
+  if (!fs.existsSync(bundlePath)) {
+    process.stderr.write(`[claim] no trust.bundle at ${bundlePath} — run record-evidence first
+`);
+    return 1;
+  }
+
+  const bundle: BundleFile = JSON.parse(fs.readFileSync(bundlePath, "utf8"));
+  const bundleClaims = Array.isArray(bundle.claims) ? bundle.claims : [];
+
+  const bundleClaim = bundleClaims.find((c) => c.id === claimId);
+  if (!bundleClaim) {
+    const available = bundleClaims.map((c) => c.id).join("\n  ");
+    process.stderr.write(`[claim] unknown claim id: ${claimId}
+Available claim ids:
+  ${available || "(none — bundle has no claims)"}
+`);
+    return 1;
+  }
+
+  // Load Surface via tryLoadSurface() (ESM, cached, fail-open pattern)
+  const surface = await tryLoadSurface();
+  if (!surface || typeof surface.buildTrustReport !== "function" || typeof surface.buildDerivationDrilldown !== "function") {
+    process.stderr.write(`[claim] @kontourai/surface unavailable or missing buildTrustReport/buildDerivationDrilldown
+`);
+    return 0; // fail-open, consistent with gate-review pattern
+  }
+
+  // Build TrustReport (required — buildDerivationDrilldown needs TrustReport, not TrustBundle)
+  const report = surface.buildTrustReport(bundle as unknown as Record<string, unknown>);
+
+  // Build the structured explanation (pure, promotable to #171)
+  const explanation = buildClaimExplanation(report, bundle as unknown as Record<string, unknown>, claimId);
+
+  // Enrich the why.directInputs/leafClaims/diagnostics from the drilldown
+  try {
+    const drilldown = surface.buildDerivationDrilldown(report, claimId) as AnyObj;
+    if (drilldown) {
+      explanation.why.directInputs = Array.isArray(drilldown.directInputs) ? drilldown.directInputs : [];
+      explanation.why.leafClaims = Array.isArray(drilldown.leafClaims) ? drilldown.leafClaims : [];
+      explanation.why.diagnostics = Array.isArray(drilldown.diagnostics) ? drilldown.diagnostics : [];
+    }
+  } catch {
+    // buildDerivationDrilldown threw (e.g. claim not in report) — proceed without drilldown
+  }
+
+  if (p.flags.has("json")) {
+    console.log(JSON.stringify(explanation, null, 2));
+    return 0;
+  }
+
+  // ── Human-readable output ───────────────────────────────────────────────────
+  const lines: string[] = [];
+  lines.push(`Claim:  ${claimId}`);
+  lines.push(`Status: ${explanation.status}   Value: ${explanation.value}`);
+  lines.push(`Type:   ${explanation.claimType}`);
+  lines.push("");
+
+  // Evidence section — failing items are the concrete "why disputed"
+  const failingEvidence = explanation.evidence.filter((ev) => !ev.passing);
+  const allEvidence = explanation.evidence;
+  if (allEvidence.length > 0) {
+    lines.push("Evidence:");
+    for (const ev of allEvidence) {
+      const passMark = ev.passing ? "pass" : "FAIL";
+      const execStr = ev.execution
+        ? ` [runner: ${ev.execution.runner}, exitCode: ${ev.execution.exitCode ?? "?"}, isError: ${ev.execution.isError}]`
+        : "";
+      lines.push(`  [${passMark}] ${ev.evidenceType}: ${ev.label || ev.summary}${execStr}`);
+    }
+    if (failingEvidence.length > 0) {
+      lines.push("");
+      lines.push(`Failing evidence (disputed because):`);
+      for (const ev of failingEvidence) {
+        const execStr = ev.execution
+          ? ` ${ev.execution.runner} exited ${ev.execution.exitCode ?? "?"} (isError: ${ev.execution.isError})`
+          : "";
+        lines.push(`  ${ev.evidenceType}: ${ev.label || ev.summary}${execStr}`);
+      }
+    }
+  } else {
+    lines.push("Evidence: (none recorded for this claim)");
+  }
+  lines.push("");
+
+  // Policy section — how-to-verify
+  if (explanation.policy) {
+    const pol = explanation.policy;
+    lines.push(`Governing Policy (${pol.id}):`);
+    lines.push(`  requiredEvidence:   [${pol.requiredEvidence.join(", ")}]`);
+    if (pol.requiredMethods && pol.requiredMethods.length > 0) {
+      lines.push(`  requiredMethods:    [${pol.requiredMethods.join(", ")}]`);
+    }
+    lines.push(`  acceptanceCriteria: [${pol.acceptanceCriteria.join(" | ")}]`);
+    lines.push(`  reviewAuthority:    ${pol.reviewAuthority}`);
+  } else {
+    lines.push("Governing Policy: (none — claim has no verificationPolicyId or policy not found in bundle)");
+  }
+  lines.push("");
+
+  // Why section — derivation drilldown + transparency gaps
+  lines.push("Derivation Drilldown:");
+  if (explanation.why.directInputs.length > 0) {
+    lines.push(`  Direct inputs: ${explanation.why.directInputs.length} claim(s)`);
+    for (const inp of explanation.why.directInputs) {
+      const inpStatus = typeof inp.claim === "object" && inp.claim ? String((inp.claim as AnyObj).status ?? "?") : "?";
+      lines.push(`    - ${inp.inputClaimId ?? "?"} (status: ${inpStatus})`);
+    }
+  } else {
+    lines.push("  Direct inputs: (none — leaf claim)");
+  }
+  if (explanation.why.leafClaims.length > 0) {
+    lines.push(`  Leaf claims: ${explanation.why.leafClaims.length} claim(s)`);
+  }
+  if (explanation.why.diagnostics.length > 0) {
+    lines.push(`  Diagnostics: ${explanation.why.diagnostics.length}`);
+    for (const d of explanation.why.diagnostics) {
+      lines.push(`    - ${d.type ?? "?"}: ${d.message ?? ""}`);
+    }
+  }
+  if (explanation.why.transparencyGaps.length > 0) {
+    lines.push(`  Transparency gaps: ${explanation.why.transparencyGaps.length}`);
+    for (const g of explanation.why.transparencyGaps) {
+      lines.push(`    - [${g.severity ?? "?"}] ${g.type ?? "?"}: ${g.message ?? ""}`);
+    }
+  } else {
+    lines.push("  Transparency gaps: (none)");
+  }
+  if (explanation.why.changeRecords.length > 0) {
+    lines.push(`  Change records: ${explanation.why.changeRecords.length}`);
+    for (const cr of explanation.why.changeRecords) {
+      lines.push(`    - ${cr.action ?? "?"} at ${cr.at ?? cr.createdAt ?? "?"}`);
+    }
+  }
+
+  console.log(lines.join("\n"));
+  return 0;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 
 async function main(): Promise<number> {
   const p = parseArgs(process.argv.slice(2));
   if (!p.command) die("workflow-sidecar command is required");
-  const lockRoot = ["ensure-session", "current", "dogfood-pass", "liveness"].includes(p.command) ? path.resolve(opt(p, "artifact-root", ".flow-agents")) : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
+  const lockRoot = ["ensure-session", "current", "dogfood-pass", "liveness"].includes(p.command) ? path.resolve(opt(p, "artifact-root", ".flow-agents")) : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.command === "claim" ? (p.positional[1] ? path.resolve(p.positional[1]) : "") : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
   return withLock(lockRoot, ["ensure-session", "record-agent-event", "dogfood-pass"].includes(p.command), p.command, () => {
     switch (p.command) {
       case "ensure-session": return ensureSession(p);
@@ -1734,6 +2020,7 @@ async function main(): Promise<number> {
       case "render-trust-panel": return renderTrustPanel(p);
       case "trust-mcp": return trustMcp(p);
       case "liveness": return liveness(p);
+      case "claim": return claimLookup(p);
       default: die(`unknown command: ${p.command}`);
     }
   });
