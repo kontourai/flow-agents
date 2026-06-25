@@ -651,6 +651,222 @@ else
   _fail "codex manual proof: user Stop hook or FA hooks missing after second install"
 fi
 
+
+
+# ─── opencode: Scenario OC1: User keys survive + $schema present + no empty hooks ─
+echo "=== Install Merge-Aware Tests (opencode) ==="
+echo ""
+echo "--- opencode Scenario OC1: User keys survive + \$schema present + no spurious empty hooks ---"
+
+OPENCODE_SEEDED="$TMPDIR_EVAL/opencode-seeded"
+mkdir -p "$OPENCODE_SEEDED"
+
+# Seed opencode.json with user keys (model + plugin)
+cat > "$OPENCODE_SEEDED/opencode.json" << 'JSON'
+{
+  "model": "x",
+  "plugin": ["user-thing"]
+}
+JSON
+
+(cd "$ROOT_DIR/dist/opencode" && bash install.sh "$OPENCODE_SEEDED" >/dev/null 2>&1)
+
+# Assert: user 'model' key survived
+if node - "$OPENCODE_SEEDED/opencode.json" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (s.model !== "x") throw new Error("user key 'model' was clobbered: " + JSON.stringify(s));
+console.log("ok");
+NODE
+then
+  _pass "opencode seeded: user key 'model' survived install"
+else
+  _fail "opencode seeded: user key 'model' was clobbered"
+fi
+
+# Assert: $schema present
+if node - "$OPENCODE_SEEDED/opencode.json" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (s["$schema"] !== "https://opencode.ai/config.json") throw new Error("\$schema missing or wrong: " + JSON.stringify(s));
+console.log("ok");
+NODE
+then
+  _pass "opencode seeded: \$schema present after install"
+else
+  _fail "opencode seeded: \$schema missing after install"
+fi
+
+# Assert: user 'plugin' array survived
+if node - "$OPENCODE_SEEDED/opencode.json" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!Array.isArray(s.plugin) || s.plugin[0] !== "user-thing") throw new Error("user key 'plugin' was clobbered: " + JSON.stringify(s));
+console.log("ok");
+NODE
+then
+  _pass "opencode seeded: user key 'plugin' survived install"
+else
+  _fail "opencode seeded: user key 'plugin' was clobbered"
+fi
+
+# Assert: no spurious empty hooks key
+if node - "$OPENCODE_SEEDED/opencode.json" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if ("hooks" in s) throw new Error("spurious empty 'hooks' key found: " + JSON.stringify(s));
+console.log("ok");
+NODE
+then
+  _pass "opencode seeded: no spurious empty 'hooks' key injected"
+else
+  _fail "opencode seeded: spurious empty 'hooks' key was injected"
+fi
+
+# Assert: idempotent (install again, same result)
+(cd "$ROOT_DIR/dist/opencode" && bash install.sh "$OPENCODE_SEEDED" >/dev/null 2>&1)
+if node - "$OPENCODE_SEEDED/opencode.json" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (s.model !== "x") throw new Error("user key clobbered on re-install");
+if (s["$schema"] !== "https://opencode.ai/config.json") throw new Error("\$schema missing after re-install");
+if ("hooks" in s) throw new Error("spurious hooks key on re-install: " + JSON.stringify(s));
+console.log("ok");
+NODE
+then
+  _pass "opencode seeded: second install is idempotent (user keys + \$schema stable, no hooks)"
+else
+  _fail "opencode seeded: second install changed the result"
+fi
+
+echo ""
+
+# ─── opencode: Scenario OC2: Manual proof ───────────────────────────────────────
+echo "--- opencode Scenario OC2: Manual proof — seed opencode.json with user keys ---"
+
+OPENCODE_PROOF="$TMPDIR_EVAL/opencode-proof"
+mkdir -p "$OPENCODE_PROOF"
+
+cat > "$OPENCODE_PROOF/opencode.json" << 'JSON'
+{"model":"x","plugin":["user-thing"]}
+JSON
+
+echo "BEFORE opencode install:"
+node -e "const s=JSON.parse(require('fs').readFileSync('$OPENCODE_PROOF/opencode.json','utf8')); console.log('  opencode.json:', JSON.stringify(s));"
+
+(cd "$ROOT_DIR/dist/opencode" && bash install.sh "$OPENCODE_PROOF" >/dev/null 2>&1)
+
+echo "AFTER opencode install:"
+node -e "
+const s=JSON.parse(require('fs').readFileSync('$OPENCODE_PROOF/opencode.json','utf8'));
+console.log('  opencode.json:', JSON.stringify(s));
+console.log('  user key model:', s.model);
+console.log('  \$schema:', s['\$schema']);
+console.log('  has hooks key:', 'hooks' in s);
+"
+
+echo ""
+
+# ─── Version Stamp Tests (opencode, pi, kiro) ─────────────────────────────────
+echo "=== Version Stamp Tests (opencode / pi / kiro / base) ==="
+echo ""
+
+echo "--- VS1: opencode install writes .flow-agents/install.json with runtime=opencode ---"
+
+OC_STAMP="$TMPDIR_EVAL/opencode-stamp"
+mkdir -p "$OC_STAMP"
+
+(cd "$ROOT_DIR/dist/opencode" && bash install.sh "$OC_STAMP" >/dev/null 2>&1)
+
+if node - "$OC_STAMP/.flow-agents/install.json" << 'NODE'
+const fs = require("node:fs");
+const record = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!record.version) throw new Error("install.json missing version");
+if (!record.installedAt) throw new Error("install.json missing installedAt");
+if (record.runtime !== "opencode") throw new Error("wrong runtime: " + record.runtime + " (expected opencode)");
+const d = new Date(record.installedAt);
+if (isNaN(d.getTime())) throw new Error("installedAt not valid ISO date: " + record.installedAt);
+console.log("ok: version=" + record.version + " runtime=" + record.runtime);
+NODE
+then
+  _pass "opencode install: .flow-agents/install.json written with runtime=opencode"
+else
+  _fail "opencode install: .flow-agents/install.json missing or wrong runtime"
+fi
+
+echo ""
+echo "--- VS2: pi install writes .flow-agents/install.json with runtime=pi ---"
+
+PI_STAMP="$TMPDIR_EVAL/pi-stamp"
+mkdir -p "$PI_STAMP"
+
+(cd "$ROOT_DIR/dist/pi" && bash install.sh "$PI_STAMP" >/dev/null 2>&1)
+
+if node - "$PI_STAMP/.flow-agents/install.json" << 'NODE'
+const fs = require("node:fs");
+const record = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!record.version) throw new Error("install.json missing version");
+if (!record.installedAt) throw new Error("install.json missing installedAt");
+if (record.runtime !== "pi") throw new Error("wrong runtime: " + record.runtime + " (expected pi)");
+const d = new Date(record.installedAt);
+if (isNaN(d.getTime())) throw new Error("installedAt not valid ISO date: " + record.installedAt);
+console.log("ok: version=" + record.version + " runtime=" + record.runtime);
+NODE
+then
+  _pass "pi install: .flow-agents/install.json written with runtime=pi"
+else
+  _fail "pi install: .flow-agents/install.json missing or wrong runtime"
+fi
+
+echo ""
+echo "--- VS3: kiro install writes .flow-agents/install.json with runtime=kiro ---"
+
+KIRO_STAMP="$TMPDIR_EVAL/kiro-stamp"
+mkdir -p "$KIRO_STAMP"
+
+(cd "$ROOT_DIR/dist/kiro" && bash install.sh "$KIRO_STAMP" >/dev/null 2>&1)
+
+if node - "$KIRO_STAMP/.flow-agents/install.json" << 'NODE'
+const fs = require("node:fs");
+const record = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!record.version) throw new Error("install.json missing version");
+if (!record.installedAt) throw new Error("install.json missing installedAt");
+if (record.runtime !== "kiro") throw new Error("wrong runtime: " + record.runtime + " (expected kiro)");
+const d = new Date(record.installedAt);
+if (isNaN(d.getTime())) throw new Error("installedAt not valid ISO date: " + record.installedAt);
+console.log("ok: version=" + record.version + " runtime=" + record.runtime);
+NODE
+then
+  _pass "kiro install: .flow-agents/install.json written with runtime=kiro"
+else
+  _fail "kiro install: .flow-agents/install.json missing or wrong runtime"
+fi
+
+echo ""
+echo "--- VS4: base install writes .flow-agents/install.json with runtime=base ---"
+
+BASE_STAMP="$TMPDIR_EVAL/base-stamp"
+mkdir -p "$BASE_STAMP"
+
+(cd "$ROOT_DIR/dist/base" && bash install.sh "$BASE_STAMP" >/dev/null 2>&1)
+
+if node - "$BASE_STAMP/.flow-agents/install.json" << 'NODE'
+const fs = require("node:fs");
+const record = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!record.version) throw new Error("install.json missing version");
+if (!record.installedAt) throw new Error("install.json missing installedAt");
+if (record.runtime !== "base") throw new Error("wrong runtime: " + record.runtime + " (expected base)");
+const d = new Date(record.installedAt);
+if (isNaN(d.getTime())) throw new Error("installedAt not valid ISO date: " + record.installedAt);
+console.log("ok: version=" + record.version + " runtime=" + record.runtime);
+NODE
+then
+  _pass "base install: .flow-agents/install.json written with runtime=base"
+else
+  _fail "base install: .flow-agents/install.json missing or wrong runtime"
+fi
+
+echo ""
 echo ""
 echo "==========================="
 total=$((pass + fail))

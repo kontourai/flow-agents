@@ -323,7 +323,7 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
   if (fs.existsSync(commonBuilt)) writeText(path.join(targetRoot, "scripts/common.mjs"), readText(commonBuilt));
   copyTree(path.join(root, "build/src"), path.join(targetRoot, "build/src"), targetName, token);
 }
-function installScript(label: string, defaultDestDisplay: string, token?: string, destFallbackShell?: string, mergeConfig?: { configRelPath: string; managedConfigRelPath: string; runtime: string; version: string }): string {
+function installScript(label: string, defaultDestDisplay: string, token?: string, destFallbackShell?: string, mergeConfig?: { configRelPath: string; managedConfigRelPath: string; runtime: string; version: string }, stampConfig?: { runtime: string; version: string }): string {
   const replaceBlock = token ? `\nexport DEST\nfind "$DEST" -type f \\( -name '*.json' -o -name '*.md' -o -name '*.sh' -o -name '*.js' -o -name '*.ts' -o -name '*.yaml' -o -name '*.yml' \\) -print0 | xargs -0 perl -0pi -e 's#${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}#$ENV{DEST}#g'` : "";
   const destFallback = destFallbackShell ? `\nif [[ -z "$DEST" ]]; then\n  DEST="${destFallbackShell}"\nfi` : "";
   const destRequired = !destFallbackShell;
@@ -331,6 +331,8 @@ function installScript(label: string, defaultDestDisplay: string, token?: string
   const usageDest = destRequired ? "/path/to/workspace" : defaultDestDisplay;
   const mergeBlock = mergeConfig
     ? `\nif command -v node >/dev/null 2>&1; then\n  node "$DEST/scripts/install-merge.js" --config "$DEST/${mergeConfig.configRelPath}" --managed-hooks "$SRC/${mergeConfig.managedConfigRelPath}" --version "${mergeConfig.version}" --install-record "$DEST/.flow-agents/install.json" --runtime "${mergeConfig.runtime}" || true\nfi`
+    : stampConfig
+    ? `\nif command -v node >/dev/null 2>&1; then\n  node "$DEST/scripts/install-merge.js" --stamp-only --version "${stampConfig.version}" --install-record "$DEST/.flow-agents/install.json" --runtime "${stampConfig.runtime}" || true\nfi`
     : "";
   return `#!/usr/bin/env bash\nset -euo pipefail\n\nusage() {\n  cat >&2 <<'EOF'\nusage: bash install.sh ${usageDest} [options]\n\nOptions:\n  --telemetry-sink NAME   local-files, local-kontour-console,\n                          kontour-hosted-console, user-hosted-console,\n                          or legacy aliases. May be repeated.\n  --console-url URL       Persist Console telemetry base URL.\n  --console-endpoint URL  Persist full Console telemetry records endpoint URL.\n  --console-token-file PATH\n                          Read Console telemetry bearer token from a file.\n  --console-tenant ID     Persist Console tenant identifier.\nEOF\n}\n\nDEST=""\nDEST_SET=0\nCONSOLE_CONFIG_ARGS=()\nwhile [[ $# -gt 0 ]]; do\n  case "$1" in\n    --telemetry-sink|--telemetry-sinks|--console-url|--console-endpoint|--console-endpoint-url|--console-token-file|--console-tenant|--console-tenant-id)\n      [[ $# -ge 2 ]] || { echo "install.sh: $1 requires a value" >&2; exit 2; }\n      CONSOLE_CONFIG_ARGS+=("$1" "$2")\n      shift 2\n      ;;\n    --help|-h)\n      usage\n      exit 0\n      ;;\n    -*)\n      echo "install.sh: unknown option: $1" >&2\n      usage\n      exit 2\n      ;;\n    *)\n      if [[ "$DEST_SET" -eq 1 ]]; then\n        echo "install.sh: unexpected argument: $1" >&2\n        usage\n        exit 2\n      fi\n      DEST="$1"\n      DEST_SET=1\n      shift\n      ;;\n  esac\ndone${destFallback}\n${requiredCheck}SRC="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"\n\nmkdir -p "$DEST"\nrsync -a ${token ? "--delete " : ""}${mergeConfig ? `--exclude="${mergeConfig.configRelPath}" ` : ""}"$SRC"/ "$DEST"/${replaceBlock}${mergeBlock}\nif [[ \${#CONSOLE_CONFIG_ARGS[@]} -gt 0 || -n "\${FLOW_AGENTS_TELEMETRY_SINK:-}" || -n "\${FLOW_AGENTS_TELEMETRY_SINKS:-}" || -n "\${FLOW_AGENTS_CONSOLE_URL:-}" || -n "\${CONSOLE_TELEMETRY_URL:-}" || -n "\${CONSOLE_URL:-}" || -n "\${FLOW_AGENTS_CONSOLE_TOKEN_FILE:-}" || -n "\${CONSOLE_TELEMETRY_TOKEN_FILE:-}" ]]; then\n  bash "$DEST/scripts/telemetry/install-console-config.sh" "$DEST/scripts/telemetry/telemetry.conf" "\${CONSOLE_CONFIG_ARGS[@]}"\nfi\necho "Installed ${label} bundle ${token ? "to" : "into"} $DEST"\n`;
 }
@@ -342,7 +344,7 @@ function buildBase(agents: Agent[]): void {
   writeText(path.join(bundle, ".flow-agents", ".gitkeep"), "");
   writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Base", agents, ".flow-agents"));
   writeText(path.join(bundle, "README.md"), exportTargetReadme("Base", "bash install.sh /path/to/workspace"));
-  writeText(path.join(bundle, "install.sh"), installScript("Base", "/path/to/workspace"));
+  writeText(path.join(bundle, "install.sh"), installScript("Base", "/path/to/workspace", undefined, undefined, undefined, { runtime: "base", version: pkgVersion }));
   fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
 }
 
@@ -354,7 +356,7 @@ function buildKiro(agents: Agent[]): void {
   for (const spec of agents) writeText(path.join(bundle, "agents", `${spec.name}.json`), sanitizeText(`${JSON.stringify(sanitizeAgentJson(spec), null, 2)}\n`, "kiro", token));
   writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Kiro", agents, ".flow-agents"));
   writeText(path.join(bundle, "README.md"), exportTargetReadme("Kiro", "bash install.sh $HOME/.flow-agents"));
-  writeText(path.join(bundle, "install.sh"), installScript("Kiro", "$HOME/.flow-agents", token, '${FLOW_AGENTS_DEST:-$HOME/.flow-agents}'));
+  writeText(path.join(bundle, "install.sh"), installScript("Kiro", "$HOME/.flow-agents", token, '${FLOW_AGENTS_DEST:-$HOME/.flow-agents}', undefined, { runtime: "kiro", version: pkgVersion }));
   fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
 }
 function buildClaudeCode(agents: Agent[]): void {
@@ -571,7 +573,7 @@ function buildOpencode(agents: Agent[]): void {
   writeText(path.join(bundle, "opencode.json"), exportOpencodeConfig());
   writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("opencode", agents, manifest.opencode.task_dir));
   writeText(path.join(bundle, "README.md"), exportTargetReadme("opencode", "bash install.sh /path/to/workspace"));
-  writeText(path.join(bundle, "install.sh"), installScript("opencode", "/path/to/workspace"));
+  writeText(path.join(bundle, "install.sh"), installScript("opencode", "/path/to/workspace", undefined, undefined, { configRelPath: "opencode.json", managedConfigRelPath: "opencode.json", runtime: "opencode", version: pkgVersion }));
   fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
 }
 function exportPiExtension(): string {
@@ -682,7 +684,7 @@ function buildPi(agents: Agent[]): void {
   writeText(path.join(bundle, ".pi/extensions/flow-agents.ts"), exportPiExtension());
   writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("pi", agents, manifest.pi.task_dir));
   writeText(path.join(bundle, "README.md"), exportTargetReadme("pi", "bash install.sh /path/to/workspace"));
-  writeText(path.join(bundle, "install.sh"), installScript("pi", "/path/to/workspace"));
+  writeText(path.join(bundle, "install.sh"), installScript("pi", "/path/to/workspace", undefined, undefined, undefined, { runtime: "pi", version: pkgVersion }));
   fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
 }
 function buildCatalog(agents: Agent[]): Record<string, unknown> {
