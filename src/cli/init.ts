@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -16,6 +17,7 @@ type TelemetrySink = "local-files" | "local-kontour-console" | "kontour-hosted-c
 type InitOptions = {
   runtime: Runtime;
   dest: string;
+  global?: boolean;
   consoleUrl?: string;
   consoleEndpoint?: string;
   consoleTokenFile?: string;
@@ -94,6 +96,9 @@ function usage(): void {
 Options:
   --runtime base|codex|claude-code|kiro|opencode|pi
   --dest PATH
+  --global              Target the runtime's global/user-level config path
+                        (claude-code: ~/.claude/settings.json; merge, not overwrite).
+                        Honors FLOW_AGENTS_USER_CLAUDE_SETTINGS for test isolation.
   --telemetry-sink local-files|local-kontour-console|kontour-hosted-console|user-hosted-console
   --console-url URL
   --console-endpoint URL
@@ -167,6 +172,17 @@ function defaultDest(runtime: Runtime): string {
   return process.cwd();
 }
 
+function globalDest(runtime: Runtime): string {
+  if (runtime === "claude-code") {
+    // Honor FLOW_AGENTS_USER_CLAUDE_SETTINGS for test isolation (same as checkScopeCollision).
+    const override = process.env["FLOW_AGENTS_USER_CLAUDE_SETTINGS"];
+    if (override) return path.dirname(override);
+    return path.join(os.homedir(), ".claude");
+  }
+  // For other runtimes, fall back to defaultDest (global paths not yet defined for opencode/pi/codex).
+  return defaultDest(runtime);
+}
+
 function parseYesNo(value: string, fallback: boolean): boolean {
   const normalized = value.trim().toLowerCase();
   if (!normalized) return fallback;
@@ -182,7 +198,9 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
     const runtimeDefault = normalizeRuntime(flagString(args.flags, "runtime")) ?? "base";
     const runtimeAnswer = flagString(args.flags, "runtime") ?? await rl.question(`Runtime [${runtimeDefault}]: `);
     const runtime = normalizeRuntime(runtimeAnswer.trim() || runtimeDefault) ?? runtimeDefault;
-    const destDefault = flagString(args.flags, "dest", defaultDest(runtime)) ?? defaultDest(runtime);
+    const isGlobal = flagBool(args.flags, "global");
+    const destBase = isGlobal ? globalDest(runtime) : defaultDest(runtime);
+    const destDefault = flagString(args.flags, "dest", destBase) ?? destBase;
     const destAnswer = flagString(args.flags, "dest") ?? await rl.question(`Install destination [${destDefault}]: `);
     const sinkDefault = telemetrySinksFromFlags(args.flags);
     const sinkAnswer = flagList(args.flags, "telemetry-sink").length || flagList(args.flags, "telemetry-sinks").length
@@ -203,6 +221,7 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
         : "no";
     return {
       runtime,
+      global: isGlobal,
       dest: path.resolve(destAnswer.trim() || destDefault),
       consoleUrl: consoleUrl?.trim() || undefined,
       consoleEndpoint: consoleEndpoint?.trim() || undefined,
@@ -220,9 +239,12 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
 function headlessOptions(argv: string[]): InitOptions {
   const args = parseArgs(argv);
   const runtime = normalizeRuntime(flagString(args.flags, "runtime")) ?? "base";
+  const isGlobal = flagBool(args.flags, "global");
+  const destBase = isGlobal ? globalDest(runtime) : defaultDest(runtime);
   return {
     runtime,
-    dest: path.resolve(flagString(args.flags, "dest", defaultDest(runtime)) ?? defaultDest(runtime)),
+    global: isGlobal,
+    dest: path.resolve(flagString(args.flags, "dest", destBase) ?? destBase),
     consoleUrl: flagString(args.flags, "console-url"),
     consoleEndpoint: flagString(args.flags, "console-endpoint") ?? flagString(args.flags, "console-endpoint-url"),
     consoleTokenFile: flagString(args.flags, "console-token-file"),
@@ -297,7 +319,53 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     // There is no well-known user-level codex hooks file in our install paths,
     // so no collision check is needed for codex.
     if (options.runtime === "claude-code") {
-      checkScopeCollision();
+      // Skip collision check when --global is set: the user is intentionally
+      // targeting the global settings, so the collision they'd create is expected.
+      if (!options.global) checkScopeCollision();
+    }
+    // --global for claude-code: merge only into the global/user-level settings dir.
+    // This writes only the hook-wiring config (merge into ~/.claude/settings.json),
+    // not the full workspace bundle. The global settings dir is the claude config root,
+    // so the settings.json lives directly in dest (not dest/.claude/).
+    if (options.global && options.runtime === "claude-code") {
+      const bundle = ensureBundle(options.runtime);
+      // For --global, dest is ~/.claude/ (the global settings dir).
+      // dogfoodClaudeCode writes to dest/.claude/settings.json — but for global,
+      // the settings.json lives at dest/settings.json (dest IS ~/.claude/).
+      // We use a special global-merge path: merge directly into dest/settings.json.
+      const sourcePath = path.join(bundle, ".claude", "settings.json");
+      if (!fs.existsSync(sourcePath)) {
+        console.error(`flow-agents init: bundle settings missing: ${sourcePath}`);
+        return 1;
+      }
+      const managed = JSON.parse(fs.readFileSync(sourcePath, "utf8")) as Record<string, unknown>;
+      // Remove permissive defaults (not appropriate for global user settings).
+      delete managed["permissions"];
+      delete managed["skipDangerousModePermissionPrompt"];
+      fs.mkdirSync(options.dest, { recursive: true });
+      const destSettingsPath = path.join(options.dest, "settings.json");
+      const installMergePath = path.join(root, "scripts", "install-merge.js");
+      const _require = createRequire(import.meta.url);
+      const { mergeSettings } = _require(installMergePath) as { mergeSettings: (a: Record<string, unknown>, b: Record<string, unknown>) => Record<string, unknown> };
+      let existing: Record<string, unknown> = {};
+      if (fs.existsSync(destSettingsPath)) {
+        try { existing = JSON.parse(fs.readFileSync(destSettingsPath, "utf8")) as Record<string, unknown>; } catch { existing = {}; }
+      }
+      const merged = mergeSettings(existing, managed);
+      const tmp = `${destSettingsPath}.tmp.${process.pid}`;
+      fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
+      fs.renameSync(tmp, destSettingsPath);
+      // Write version stamp.
+      const installRecordDir = path.join(options.dest, ".flow-agents");
+      fs.mkdirSync(installRecordDir, { recursive: true });
+      const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
+      const record = { version: pkgJson["version"] ?? "0.0.0", installedAt: new Date().toISOString(), runtime: "claude-code", global: true };
+      const recordPath = path.join(installRecordDir, "install.json");
+      const recordTmp = `${recordPath}.tmp.${process.pid}`;
+      fs.writeFileSync(recordTmp, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+      fs.renameSync(recordTmp, recordPath);
+      console.log(`Flow Agents global hooks merged for claude-code in ${options.dest}`);
+      return 0;
     }
     const bundle = ensureBundle(options.runtime);
     const installed = installBundle(bundle, options);
@@ -345,22 +413,44 @@ function normalizeDogfoodRuntime(value: string | undefined): DogfoodRuntime | un
 }
 
 /**
- * Write the claude-code hook-wiring artifacts into dest.
+ * Write the claude-code hook-wiring artifacts into dest using merge semantics.
  * Reads dist/claude-code/.claude/settings.json (generated by build-bundles),
- * strips the permissive-mode permission keys (defaultMode, skipDangerousModePermissionPrompt),
- * and writes .claude/settings.json to dest.
+ * strips the permissive-mode permission keys (defaultMode, skipDangerousModePermissionPrompt)
+ * from the managed bundle settings, then MERGES into any existing dest settings.json —
+ * preserving user keys, auth, and non-flow-agents hooks. Writes version stamp.
  */
 function dogfoodClaudeCode(bundleRoot: string, dest: string): void {
   const sourcePath = path.join(bundleRoot, ".claude", "settings.json");
   if (!fs.existsSync(sourcePath)) throw new Error(`dogfood: bundle settings missing: ${sourcePath}`);
-  const settings = JSON.parse(fs.readFileSync(sourcePath, "utf8")) as Record<string, unknown>;
+  const managed = JSON.parse(fs.readFileSync(sourcePath, "utf8")) as Record<string, unknown>;
   // Remove permissive defaults that are only appropriate for installed workspaces.
   // These keys must not be present in the source repo's .claude/settings.json.
-  delete settings["permissions"];
-  delete settings["skipDangerousModePermissionPrompt"];
+  delete managed["permissions"];
+  delete managed["skipDangerousModePermissionPrompt"];
   const outDir = path.join(dest, ".claude");
   fs.mkdirSync(outDir, { recursive: true });
-  fs.writeFileSync(path.join(outDir, "settings.json"), `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+  const destSettingsPath = path.join(outDir, "settings.json");
+  // Merge: read existing, strip FA hooks, append new FA hooks, preserve all other keys.
+  const installMergePath = path.join(root, "scripts", "install-merge.js");
+  const _require = createRequire(import.meta.url);
+  const { mergeSettings } = _require(installMergePath) as { mergeSettings: (a: Record<string, unknown>, b: Record<string, unknown>) => Record<string, unknown> };
+  let existing: Record<string, unknown> = {};
+  if (fs.existsSync(destSettingsPath)) {
+    try { existing = JSON.parse(fs.readFileSync(destSettingsPath, "utf8")) as Record<string, unknown>; } catch { existing = {}; }
+  }
+  const merged = mergeSettings(existing, managed);
+  const tmp = `${destSettingsPath}.tmp.${process.pid}`;
+  fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
+  fs.renameSync(tmp, destSettingsPath);
+  // Write version stamp.
+  const installRecordDir = path.join(dest, ".flow-agents");
+  fs.mkdirSync(installRecordDir, { recursive: true });
+  const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
+  const record = { version: pkgJson["version"] ?? "0.0.0", installedAt: new Date().toISOString(), runtime: "claude-code" };
+  const recordPath = path.join(installRecordDir, "install.json");
+  const recordTmp = `${recordPath}.tmp.${process.pid}`;
+  fs.writeFileSync(recordTmp, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  fs.renameSync(recordTmp, recordPath);
 }
 
 /**
