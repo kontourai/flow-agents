@@ -61,6 +61,7 @@ After CI passes and the work is merged, released, or otherwise accepted:
 - [ ] durable docs link back to the provider record, archived plan, or session artifact when useful
 - [ ] local `.flow-agents/` runtime artifacts remain untracked, and durable outcomes are promoted before merge to `main`
 - [ ] follow-up issues or learning-review items created for deferred work
+- [ ] **workspace cleaned up after a confirmed merge**: the merge is verified from the provider's own merge record (a merge commit / `mergedAt`), not a green check or a command exit code; then the isolated worktree is removed and the now-merged branch is deleted locally and on the remote, honoring the `worktree_lifecycle` (`retain_until: pr_merged`) recorded at selection. Never delete a branch or worktree before the merge is confirmed. A delivery is not complete while it leaves a stale worktree or merged branch behind.
 
 ## Distribution Rule
 
