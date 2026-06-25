@@ -469,3 +469,44 @@ Retrospective:
 ```text
 Use learning-review. Capture facts, decisions, gaps, follow-ups, and durable knowledge updates from this completed or failed workflow.
 ```
+
+## Resumable sessions
+
+When a session resumes (after context compaction, an agent restart, or a cross-session
+handoff), the workflow-steering hook emits a `RESUME:` block on `SessionStart` that
+gives the resuming agent immediate situational awareness without blocking or auto-deciding.
+
+The `RESUME:` block supplements the existing `STATE:` line and contains:
+
+- **Header** — `RESUME: <slug> status:<status> phase:<phase>` — quick orientation.
+- **Next action** — the full `next_action.summary` at 240 characters (not truncated to 80), so the agent can re-ground to the exact recorded next step.
+- **Plan** — path to the plan artifact (`<slug>--plan-work.md` from `state.json artifact_paths` or conventional fallback).
+- **Next step** — the first `handoff.json next_steps` entry.
+- **Blockers** — any recorded blockers from `handoff.json`, or "none".
+- **Trust** — `Trust: N verified / M disputed / T total` from reading `trust.bundle`. Each disputed or unknown claim is listed with its id and a copy-pasteable remedy command: `npm run workflow:sidecar -- claim <id> <dir>`.
+- **Liveness advisory** (when applicable) — `[LIVENESS WARNING: another agent appears live on this work: actor <X>, last seen <T>]` when the shared liveness stream (`.flow-agents/liveness/events.jsonl`, ADR 0012) contains a fresh claim or heartbeat from a different actor for the same slug. This is advisory only — the hook exits 0 regardless.
+- **Route hint** — `To continue: resume this work. Or run pull-work to assess WIP and start new/parallel work.` — always routes the resume-vs-parallel decision through `pull-work` rather than auto-taking it.
+
+The `RESUME:` block appears on `SessionStart` only. `UserPromptSubmit` and `PostToolUse`
+behavior is unchanged.
+
+All reads are fail-open: a missing `handoff.json`, `trust.bundle`, or liveness stream
+degrades gracefully — the section is omitted or shows "no data", and the hook never throws.
+
+The liveness freshness check is read-only (ADR 0012). Writing or excluding liveness claims
+is scoped to issue #151 (a later slice). The session-level event log (Layer 2) is also
+deferred.
+
+### Shared liveness helper
+
+The freshness logic is centralised in `scripts/hooks/lib/liveness-read.js` (pure CJS,
+zero dependencies). It exports:
+
+- `readLivenessEvents(streamPath)` — reads a `.flow-agents/liveness/events.jsonl` file
+  line-by-line, JSON-parses each, and tolerates malformed lines.
+- `freshHolders(events, slug, selfActor, nowMs)` — returns actors (excluding `selfActor`)
+  who hold a within-TTL claim or heartbeat on `subjectId === slug`.
+
+Both the hook (`scripts/hooks/workflow-steering.js`) and the compiled CLI
+(`build/src/cli/workflow-sidecar.js`) consume this helper so the TTL/freshness logic lives
+in one place.
