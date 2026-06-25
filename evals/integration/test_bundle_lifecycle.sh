@@ -213,8 +213,11 @@ echo "--- User-file Preservation Semantics ---"
 #   - rsync -a copies files from bundle to dest without --delete, so unknown user-
 #     owned files in dest are NOT removed.
 #   - rsync -a overwrites existing files that differ from the bundle source.
-#     This means: modified installed files ARE overwritten on re-install.
-#   - Summary: user-added files survive; user-modified installed files are reset.
+#     This means: modified installed skill/agent/script files ARE overwritten.
+#   - settings.json EXCEPTION (claude-code): install-merge.js runs after rsync and
+#     performs a merge-aware write, so user keys in settings.json SURVIVE re-install.
+#   - Summary: user-added files survive; modified skill/script files are reset;
+#     user keys in settings.json survive (merge semantics, not rsync overwrite).
 
 CLAUDE_USER="$TMPDIR_EVAL/user-claude"
 CODEX_USER="$TMPDIR_EVAL/user-codex"
@@ -250,6 +253,18 @@ USER_EDIT_MARKER="# USER EDIT - should be overwritten by re-install"
 [[ -f "$CLAUDE_INSTALLED_SKILL" ]] && echo "$USER_EDIT_MARKER" >> "$CLAUDE_INSTALLED_SKILL"
 [[ -f "$CODEX_INSTALLED_SKILL" ]] && echo "$USER_EDIT_MARKER" >> "$CODEX_INSTALLED_SKILL"
 [[ -f "$OPENCODE_INSTALLED_SKILL" ]] && echo "$USER_EDIT_MARKER" >> "$OPENCODE_INSTALLED_SKILL"
+
+# Insert a user key into claude-code settings.json to verify merge semantics survive re-install.
+# This key is not in the bundle — it must survive after re-install because settings.json
+# uses merge semantics (install-merge.js), not rsync overwrite.
+if [[ -f "$CLAUDE_USER/.claude/settings.json" ]]; then
+  node - "$CLAUDE_USER/.claude/settings.json" << 'NODEEOF'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+s["_lifecycleUserKey"] = "lifecycle-test-value";
+fs.writeFileSync(process.argv[2], JSON.stringify(s, null, 2) + "\n", "utf8");
+NODEEOF
+fi
 
 # Re-install from original bundles
 (cd "$ROOT_DIR/dist/claude-code" && bash install.sh "$CLAUDE_USER" >/dev/null 2>&1) || true
@@ -300,6 +315,28 @@ elif [[ ! -f "$OPENCODE_INSTALLED_SKILL" ]]; then
   _pass "opencode re-install: skill file absent (skipped overwrite check)"
 else
   _fail "opencode re-install: user edits to installed file persisted — rsync did NOT overwrite (unexpected)"
+fi
+
+# Assert: user key in settings.json SURVIVED re-install (merge semantics, not rsync overwrite).
+# This is the NEW split assertion: skills use rsync overwrite; settings.json uses merge.
+if [[ -f "$CLAUDE_USER/.claude/settings.json" ]] && node - "$CLAUDE_USER/.claude/settings.json" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (s["_lifecycleUserKey"] !== "lifecycle-test-value") {
+  throw new Error("user key lost after re-install: " + JSON.stringify(s["_lifecycleUserKey"]));
+}
+// Also assert FA hooks are still present (merge did not lose them)
+const hooks = s.hooks || {};
+const hasFA = Object.values(hooks).flat().some(
+  (g) => (g.hooks || []).some((h) => String(h.statusMessage || "").includes("Recording Flow Agents telemetry"))
+);
+if (!hasFA) throw new Error("FA hooks lost after re-install");
+console.log("ok");
+NODE
+then
+  _pass "claude-code re-install: user key in settings.json survived (merge semantics, not rsync overwrite)"
+else
+  _fail "claude-code re-install: user key in settings.json was clobbered (regression: rsync overwrote settings.json)"
 fi
 
 echo ""
