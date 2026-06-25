@@ -215,16 +215,19 @@ function critiqueToEventStatus(verdict: string, findings: AnyObj[]): string | nu
 }
 
 /**
- * Build a Hachure trust.bundle object from the current bespoke sidecar state.
+ * Build a Hachure trust.bundle from raw check/criterion/critique inputs.
+ * trust.bundle is the PRIMARY artifact (ADR 0010 Phase 4a producer inversion).
+ * Callers pass raw inputs directly — not bespoke-sidecar-shaped objects.
  * Derives claim statuses using @kontourai/surface's canonical versioned function.
  * Returns null when Surface is unavailable (caller skips the bundle write).
  * @param slug       Task slug (used as subjectId prefix)
  * @param timestamp  ISO-8601 timestamp for createdAt / updatedAt / observedAt
- * @param evidence   Deserialized evidence.json (or undefined)
- * @param acceptance Deserialized acceptance.json (or undefined)
- * @param critique   Deserialized critique.json (or undefined)
+ * @param checks     Normalized check objects (from record-evidence --check-json / --surface-trust-json)
+ * @param criteria   Acceptance criteria objects (from acceptance.json .criteria array)
+ * @param critiques  Critique objects (from critique.json .critiques array)
+ * @param commandLog Optional parsed command-log.jsonl entries (capture-authoritative fold)
  */
-export async function buildTrustBundle(slug: string, timestamp: string, evidence?: AnyObj, acceptance?: AnyObj, critique?: AnyObj, commandLog?: AnyObj[]): Promise<AnyObj | null> {
+export async function buildTrustBundle(slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], commandLog?: AnyObj[]): Promise<AnyObj | null> {
   const surface = await tryLoadSurface();
   if (!surface) return null;
   const { deriveClaimStatus, generateClaimId, statusFunctionVersion } = surface;
@@ -259,8 +262,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, evidence
   }
 
   // Evidence checks → claims + evidence items + events. Capture is authoritative.
-  const checks: AnyObj[] = Array.isArray(evidence?.checks) ? evidence!.checks : [];
-  for (const check of checks) {
+  for (const check of Array.isArray(checks) ? checks : []) {
     if (!check.id) continue;
     const subjectId = `${slug}/${check.id}`;
     const fieldOrBehavior = String(check.summary ?? check.id);
@@ -293,8 +295,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, evidence
   }
 
   // Acceptance criteria → claims + events
-  const criteria: AnyObj[] = Array.isArray(acceptance?.criteria) ? acceptance!.criteria : [];
-  for (const criterion of criteria) {
+  for (const criterion of Array.isArray(criteria) ? criteria : []) {
     if (!criterion.id) continue;
     const subjectId = `${slug}/${criterion.id}`;
     const fieldOrBehavior = String(criterion.description ?? criterion.id);
@@ -314,8 +315,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, evidence
   }
 
   // Critique entries → claims + events
-  const critiques: AnyObj[] = Array.isArray(critique?.critiques) ? critique!.critiques : [];
-  for (const c of critiques) {
+  for (const c of Array.isArray(critiques) ? critiques : []) {
     if (!c.id) continue;
     const subjectId = `${slug}/${c.id}`;
     const fieldOrBehavior = String(c.summary ?? c.verdict ?? c.id);
@@ -346,12 +346,18 @@ export async function buildTrustBundle(slug: string, timestamp: string, evidence
 
 /**
  * Fail-open wrapper: builds (via Surface), validates, and writes a trust.bundle.
+ * Accepts raw check/criterion/critique inputs directly (ADR 0010 Phase 4a).
+ * trust.bundle is written as the PRIMARY artifact; bespoke sidecars are the
+ * caller's responsibility to emit as back-compat projections AFTER this call.
  * ANY error is caught and logged to stderr — this function NEVER throws and
- * NEVER affects the exit code of its caller. Bespoke sidecars must be written
- * before calling this function. Returns { written: false } if Surface is
- * unavailable (fail-open; does NOT fall back to hand-rolled status derivation).
+ * NEVER affects the exit code of its caller.
+ * Returns { written: false } if Surface is unavailable (fail-open; does NOT
+ * fall back to hand-rolled status derivation).
+ * @param checks     Normalized check objects (same as buildTrustBundle)
+ * @param criteria   Acceptance criteria objects (same as buildTrustBundle)
+ * @param critiques  Critique objects (same as buildTrustBundle)
  */
-export async function writeTrustBundle(dir: string, slug: string, timestamp: string, evidence?: AnyObj, acceptance?: AnyObj, critique?: AnyObj): Promise<{ written: boolean; errors: string[] }> {
+export async function writeTrustBundle(dir: string, slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[]): Promise<{ written: boolean; errors: string[] }> {
   try {
     // Fold the deterministic capture log (PostToolUse evidence-capture) into the
     // bundle so capture is authoritative over claimed status. Best-effort read.
@@ -360,7 +366,7 @@ export async function writeTrustBundle(dir: string, slug: string, timestamp: str
       const raw = fs.readFileSync(path.join(dir, "command-log.jsonl"), "utf8");
       commandLog = raw.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { try { return JSON.parse(l) as AnyObj; } catch { return null; } }).filter((x): x is AnyObj => x !== null);
     } catch { /* no capture log — fine */ }
-    const bundle = await buildTrustBundle(slug, timestamp, evidence, acceptance, critique, commandLog);
+    const bundle = await buildTrustBundle(slug, timestamp, checks, criteria, critiques, commandLog);
     if (!bundle) return { written: false, errors: [] }; // Surface unavailable — fail-open, skip write
     const result = validateTrustBundle(bundle);
     if (result.available && !result.valid) {
@@ -808,12 +814,18 @@ async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> 
   if (!checks.length && opts(p, "surface-trust-json").length === 0) die("record-evidence requires at least one --check-json or --surface-trust-json");
   validateAcceptanceEvidenceRefs(dir);
   const payload = { ...sidecarBase(slug), verdict, checks, not_verified_gaps: opts(p, "gap") };
+  // Phase 4a inversion: build bundle from raw inputs FIRST; emit bespoke sidecars as back-compat projections after.
+  const ts = opt(p, "timestamp", now());
+  const _existingAcceptance = loadJson(path.join(dir, "acceptance.json"));
+  const _existingCriteria: AnyObj[] = Array.isArray(_existingAcceptance.criteria) ? _existingAcceptance.criteria : [];
+  const _criteriaStatus = verdict === "pass" ? "pass" : verdict === "fail" ? "fail" : "not_verified";
+  const _criteriaForBundle: AnyObj[] = _existingCriteria.map((c: AnyObj) => ({ ...c, status: _criteriaStatus }));
+  await writeTrustBundle(dir, slug, ts, checks, _criteriaForBundle, []);
+  // Back-compat projections: write evidence.json and update acceptance.json (same content as before)
   writeJson(path.join(dir, "evidence.json"), payload);
   updateAcceptance(dir, verdict);
   const stateStatus = verdict === "pass" ? "verified" : verdict === "fail" ? "failed" : "not_verified";
-  writeState(dir, slug, stateStatus, "verification", opt(p, "timestamp", now()), "Evidence recorded.");
-  const ts = opt(p, "timestamp", now());
-  await writeTrustBundle(dir, slug, ts, loadJson(path.join(dir, "evidence.json")), loadJson(path.join(dir, "acceptance.json")));
+  writeState(dir, slug, stateStatus, "verification", ts, "Evidence recorded.");
   return 0;
 }
 
@@ -867,8 +879,12 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   const critique = { id: opt(p, "id") || "review", reviewer: opt(p, "reviewer", "tool-code-reviewer"), reviewed_at: opt(p, "timestamp", now()), verdict: opt(p, "verdict", "pass"), summary: opt(p, "summary"), artifact_refs: opts(p, "artifact-ref"), findings: opts(p, "finding-json").map((v) => normalizeFinding(parseJson(v, "--finding-json"))) };
   const critiques = [...(Array.isArray(existing.critiques) ? existing.critiques : []), critique];
   if (critique.verdict === "pass" && critique.findings.some((f: AnyObj) => f.status === "open")) die("required critique must pass");
+  // Phase 4a inversion: build bundle from raw inputs FIRST; emit bespoke sidecar as back-compat projection after.
+  const _critiqueEvChecks: AnyObj[] = Array.isArray(loadJson(path.join(dir, "evidence.json")).checks) ? loadJson(path.join(dir, "evidence.json")).checks : [];
+  const _critiqueAccCriteria: AnyObj[] = Array.isArray(loadJson(path.join(dir, "acceptance.json")).criteria) ? loadJson(path.join(dir, "acceptance.json")).criteria : [];
+  await writeTrustBundle(dir, slug, critique.reviewed_at, _critiqueEvChecks, _critiqueAccCriteria, critiques);
+  // Back-compat projection: write critique.json (same content as before)
   writeJson(path.join(dir, "critique.json"), { ...sidecarBase(slug), status: critiqueStatus(critiques, true), required: true, updated_at: critique.reviewed_at, critiques });
-  await writeTrustBundle(dir, slug, critique.reviewed_at, loadJson(path.join(dir, "evidence.json")), loadJson(path.join(dir, "acceptance.json")), loadJson(path.join(dir, "critique.json")));
   return 0;
 }
 function frontmatter(text: string, key: string): string {
@@ -957,7 +973,11 @@ async function recordLearning(p: ReturnType<typeof parseArgs>): Promise<number> 
   if (status === "learned" && records.some((r) => r.correction === undefined)) die("learning status learned requires every record to include correction.needed");
   writeJson(path.join(dir, "learning.json"), { ...sidecarBase(slug), status, updated_at: timestamp, records });
   writeState(dir, slug, "accepted", "learning", timestamp, opt(p, "summary"));
-  await writeTrustBundle(dir, slug, timestamp, loadJson(path.join(dir, "evidence.json")), loadJson(path.join(dir, "acceptance.json")), loadJson(path.join(dir, "critique.json")));
+  // Phase 4a inversion: build bundle from raw inputs (re-read from on-disk sidecars).
+  const _learningChecks: AnyObj[] = Array.isArray(loadJson(path.join(dir, "evidence.json")).checks) ? loadJson(path.join(dir, "evidence.json")).checks : [];
+  const _learningCriteria: AnyObj[] = Array.isArray(loadJson(path.join(dir, "acceptance.json")).criteria) ? loadJson(path.join(dir, "acceptance.json")).criteria : [];
+  const _learningCritiques: AnyObj[] = Array.isArray(loadJson(path.join(dir, "critique.json")).critiques) ? loadJson(path.join(dir, "critique.json")).critiques : [];
+  await writeTrustBundle(dir, slug, timestamp, _learningChecks, _learningCriteria, _learningCritiques);
   return 0;
 }
 function evidenceClean(dir: string): boolean {
@@ -1022,7 +1042,11 @@ async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
   }
   writeState(dir, taskSlugFor(dir, opt(p, "task-slug")), stateStatus, "verification", opt(p, "timestamp", now()), opt(p, "summary"), verdict === "pass" ? "continue" : "blocked");
   const _slug = taskSlugFor(dir, opt(p, "task-slug")); const _ts = opt(p, "timestamp", now());
-  await writeTrustBundle(dir, _slug, _ts, loadJson(path.join(dir, "evidence.json")), loadJson(path.join(dir, "acceptance.json")), loadJson(path.join(dir, "critique.json")));
+  // Phase 4a inversion: build bundle from raw inputs (re-read from on-disk sidecars).
+  const _dogfoodChecks: AnyObj[] = Array.isArray(loadJson(path.join(dir, "evidence.json")).checks) ? loadJson(path.join(dir, "evidence.json")).checks : [];
+  const _dogfoodCriteria: AnyObj[] = Array.isArray(loadJson(path.join(dir, "acceptance.json")).criteria) ? loadJson(path.join(dir, "acceptance.json")).criteria : [];
+  const _dogfoodCritiques: AnyObj[] = Array.isArray(loadJson(path.join(dir, "critique.json")).critiques) ? loadJson(path.join(dir, "critique.json")).critiques : [];
+  await writeTrustBundle(dir, _slug, _ts, _dogfoodChecks, _dogfoodCriteria, _dogfoodCritiques);
   printJson({ state_status: stateStatus });
   return 0;
 }
@@ -1337,14 +1361,25 @@ async function gateReview(p: ReturnType<typeof parseArgs>): Promise<number> {
   const artifactRoot = path.dirname(dir);
   const blockSignal = readGateBlockSignal(artifactRoot);
 
-  // Load acceptance.json to enumerate expected criterion IDs (optional, fail-open)
-  const acceptancePath = path.join(dir, "acceptance.json");
-  const acceptance = fs.existsSync(acceptancePath)
-    ? (loadJson(acceptancePath) as AnyObj)
-    : null;
-  const expectedCriterionIds: string[] = Array.isArray(acceptance?.criteria)
-    ? (acceptance!.criteria as AnyObj[]).map((c: AnyObj) => String(c.id ?? "")).filter(Boolean)
+  // Enumerate expected criterion IDs: primary = bundle claims (workflow.acceptance.criterion),
+  // fallback = acceptance.json (back-compat for sessions without an up-to-date bundle).
+  const criterionClaims = Array.isArray(bundle.claims)
+    ? (bundle.claims as AnyObj[]).filter((c: AnyObj) => c.claimType === "workflow.acceptance.criterion")
     : [];
+  let expectedCriterionIds: string[];
+  if (criterionClaims.length > 0) {
+    // Extract the final segment of subjectId (e.g. "slug/AC1" → "AC1")
+    expectedCriterionIds = criterionClaims
+      .map((c: AnyObj) => String(c.subjectId ?? "").split("/").pop() ?? "")
+      .filter(Boolean);
+  } else {
+    // Fallback: read acceptance.json (back-compat for sessions without criterion claims)
+    const acceptancePath = path.join(dir, "acceptance.json");
+    const acceptance = fs.existsSync(acceptancePath) ? (loadJson(acceptancePath) as AnyObj) : null;
+    expectedCriterionIds = Array.isArray(acceptance?.criteria)
+      ? (acceptance!.criteria as AnyObj[]).map((c: AnyObj) => String(c.id ?? "")).filter(Boolean)
+      : [];
+  }
 
   const records = buildGateInquiryRecords(bundle, blockSignal, slug, expectedCriterionIds, surface);
 
