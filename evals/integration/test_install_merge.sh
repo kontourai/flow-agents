@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# test_install_merge.sh — Install merge-aware tests for claude-code
+# test_install_merge.sh — Install merge-aware tests for claude-code + codex
 #
-# Covers:
+# Covers (claude-code):
 #   1. Seeded-user-config: user keys + non-FA hook survive install (AC1).
 #   2. Version-stamped first install: .flow-agents/install.json written (AC2).
 #   3. Idempotent re-run: two consecutive installs produce identical settings.json (AC2).
@@ -9,7 +9,13 @@
 #   5. Global target: --global flag merges into FLOW_AGENTS_USER_CLAUDE_SETTINGS path (AC3).
 #   6. Fresh-install with no prior settings.json: same result as original behavior (AC4).
 #
-# Runtime scope: claude-code only (codex/opencode/pi/kiro deferred per plan).
+# Covers (codex):
+#   C1. Seeded codex hooks.json: user non-FA hook survives install.
+#   C2. Version-stamped first install: .flow-agents/install.json written with runtime=codex.
+#   C3. Idempotent re-run: two consecutive installs produce identical hooks.json.
+#   C4. Manual proof: user Stop hook survives + FA added + idempotent.
+#
+# Runtime scope: claude-code + codex. opencode/pi/kiro deferred per plan.
 # Self-cleaning: all temp dirs removed on exit.
 #
 set -euo pipefail
@@ -427,6 +433,222 @@ if [[ "$HOOKS_AFTER_FIRST" == "$HOOKS_AFTER_SECOND" ]]; then
   _pass "manual proof: second install is idempotent (hook count stable at $HOOKS_AFTER_FIRST)"
 else
   _fail "manual proof: hook count changed from first to second install"
+fi
+
+
+# ─── Codex: Scenario C1: Seeded user hooks + non-FA hook survive ──────────────
+echo "=== Install Merge-Aware Tests (codex) ==="
+echo ""
+echo "--- Codex Scenario C1: Seeded user hooks survive install ---"
+
+CODEX_SEEDED="$TMPDIR_EVAL/codex-seeded"
+mkdir -p "$CODEX_SEEDED/.codex"
+
+# Seed a hooks.json with a user non-FA hook in Stop
+cat > "$CODEX_SEEDED/.codex/hooks.json" << 'JSON'
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo user-codex-stop-hook",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
+JSON
+
+(cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_SEEDED" >/dev/null 2>&1)
+
+# Assert: FA telemetry hooks present
+if node - "$CODEX_SEEDED/.codex/hooks.json" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const hooks = s.hooks || {};
+const hasFA = Object.values(hooks).flat().some(
+  (g) => (g.hooks || []).some((h) => String(h.statusMessage || "").includes("Recording Flow Agents telemetry"))
+);
+if (!hasFA) throw new Error("Flow Agents telemetry hooks not found in codex hooks.json");
+console.log("ok");
+NODE
+then
+  _pass "codex seeded: FA telemetry hooks present after install"
+else
+  _fail "codex seeded: FA telemetry hooks missing after install"
+fi
+
+# Assert: user non-FA Stop hook survived
+if node - "$CODEX_SEEDED/.codex/hooks.json" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const stopGroups = (s.hooks || {}).Stop || [];
+const hasUserHook = stopGroups.some(
+  (g) => (g.hooks || []).some((h) => String(h.command || "").includes("echo user-codex-stop-hook"))
+);
+if (!hasUserHook) throw new Error("User codex Stop hook not found: " + JSON.stringify(stopGroups));
+console.log("ok");
+NODE
+then
+  _pass "codex seeded: non-FA user Stop hook survived install"
+else
+  _fail "codex seeded: non-FA user Stop hook was removed"
+fi
+
+echo ""
+
+# ─── Codex: Scenario C2: Version-stamped first install ───────────────────────
+echo "--- Codex Scenario C2: Version-stamped first install ---"
+
+CODEX_STAMP="$TMPDIR_EVAL/codex-stamp"
+mkdir -p "$CODEX_STAMP"
+
+(cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_STAMP" >/dev/null 2>&1)
+
+# Assert: .flow-agents/install.json exists with runtime=codex
+if node - "$CODEX_STAMP/.flow-agents/install.json" << 'NODE'
+const fs = require("node:fs");
+const record = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!record.version) throw new Error("install.json missing version");
+if (!record.installedAt) throw new Error("install.json missing installedAt");
+if (record.runtime !== "codex") throw new Error("install.json wrong runtime: " + record.runtime + " (expected codex)");
+const d = new Date(record.installedAt);
+if (isNaN(d.getTime())) throw new Error("installedAt not valid ISO date: " + record.installedAt);
+console.log("ok: version=" + record.version + " runtime=" + record.runtime);
+NODE
+then
+  _pass "codex first-install: .flow-agents/install.json written with version+runtime=codex+installedAt"
+else
+  _fail "codex first-install: .flow-agents/install.json missing or invalid or wrong runtime"
+fi
+
+echo ""
+
+# ─── Codex: Scenario C3: Idempotent re-run ───────────────────────────────────
+echo "--- Codex Scenario C3: Idempotent re-run ---"
+
+CODEX_IDEM="$TMPDIR_EVAL/codex-idem"
+mkdir -p "$CODEX_IDEM"
+
+(cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_IDEM" >/dev/null 2>&1)
+
+CODEX_HOOKS_BEFORE=$(node -e "
+  const s = JSON.parse(require('fs').readFileSync('$CODEX_IDEM/.codex/hooks.json','utf8'));
+  const hooks = s.hooks || {};
+  let count = 0;
+  for (const k of Object.keys(hooks)) count += (hooks[k] || []).length;
+  console.log(count);
+" 2>/dev/null || echo "0")
+
+(cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_IDEM" >/dev/null 2>&1)
+
+CODEX_HOOKS_AFTER=$(node -e "
+  const s = JSON.parse(require('fs').readFileSync('$CODEX_IDEM/.codex/hooks.json','utf8'));
+  const hooks = s.hooks || {};
+  let count = 0;
+  for (const k of Object.keys(hooks)) count += (hooks[k] || []).length;
+  console.log(count);
+" 2>/dev/null || echo "0")
+
+if [[ "$CODEX_HOOKS_BEFORE" == "$CODEX_HOOKS_AFTER" && -n "$CODEX_HOOKS_BEFORE" && "$CODEX_HOOKS_BEFORE" != "0" ]]; then
+  _pass "codex idempotent: re-install did not grow hooks (before=$CODEX_HOOKS_BEFORE after=$CODEX_HOOKS_AFTER)"
+else
+  _fail "codex idempotent: hook count changed (before=$CODEX_HOOKS_BEFORE after=$CODEX_HOOKS_AFTER)"
+fi
+
+echo ""
+
+# ─── Codex: Scenario C4: Manual proof ───────────────────────────────────────
+echo "--- Codex Scenario C4: Manual proof — user Stop hook survives, FA added, idempotent ---"
+
+CODEX_PROOF="$TMPDIR_EVAL/codex-proof"
+mkdir -p "$CODEX_PROOF/.codex"
+
+cat > "$CODEX_PROOF/.codex/hooks.json" << 'JSON'
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo user-codex-hook",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
+JSON
+
+echo "BEFORE codex install:"
+node -e "
+const s = JSON.parse(require('fs').readFileSync('$CODEX_PROOF/.codex/hooks.json','utf8'));
+console.log('  Stop hook count:', (s.hooks?.Stop || []).length);
+console.log('  User hook present:', (s.hooks?.Stop || []).some(g => (g.hooks||[]).some(h => h.command?.includes('echo user-codex-hook'))));
+"
+
+(cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_PROOF" >/dev/null 2>&1)
+
+echo "AFTER first codex install:"
+node -e "
+const s = JSON.parse(require('fs').readFileSync('$CODEX_PROOF/.codex/hooks.json','utf8'));
+const stopGroups = s.hooks?.Stop || [];
+console.log('  Stop hook count:', stopGroups.length);
+console.log('  User hook present:', stopGroups.some(g => (g.hooks||[]).some(h => h.command?.includes('echo user-codex-hook'))));
+console.log('  FA goal-fit hook present:', stopGroups.some(g => (g.hooks||[]).some(h => String(h.statusMessage||'').includes('Running Flow Agents hook policy'))));
+"
+
+(cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_PROOF" >/dev/null 2>&1)
+
+echo "AFTER second codex install (idempotence check):"
+CODEX_PROOF_HOOKS=$(node -e "
+const s = JSON.parse(require('fs').readFileSync('$CODEX_PROOF/.codex/hooks.json','utf8'));
+const hooks = s.hooks || {};
+let count = 0;
+for (const k of Object.keys(hooks)) count += (hooks[k] || []).length;
+console.log(count);
+" 2>/dev/null || echo "err")
+echo "  Total hook groups: $CODEX_PROOF_HOOKS"
+
+CODEX_PROOF_FIRST=$(node -e "
+const s = JSON.parse(require('fs').readFileSync('$CODEX_PROOF/.codex/hooks.json','utf8'));
+const hooks = s.hooks || {};
+let count = 0;
+for (const k of Object.keys(hooks)) count += (hooks[k] || []).length;
+console.log(count);
+" 2>/dev/null || echo "err")
+
+if [[ "$CODEX_PROOF_FIRST" == "$CODEX_PROOF_HOOKS" ]]; then
+  _pass "codex manual proof: second install is idempotent (hook count stable at $CODEX_PROOF_FIRST)"
+else
+  _fail "codex manual proof: hook count changed from first to second install"
+fi
+
+# Assert user hook survived second install
+if node - "$CODEX_PROOF/.codex/hooks.json" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const stopGroups = (s.hooks || {}).Stop || [];
+const hasUser = stopGroups.some(
+  (g) => (g.hooks || []).some((h) => String(h.command || "").includes("echo user-codex-hook"))
+);
+if (!hasUser) throw new Error("User codex hook not found after second install");
+const hasFA = stopGroups.some(
+  (g) => (g.hooks || []).some((h) => String(h.statusMessage || "").includes("Running Flow Agents hook policy"))
+);
+if (!hasFA) throw new Error("FA goal-fit hook missing from codex Stop after second install");
+console.log("ok");
+NODE
+then
+  _pass "codex manual proof: user Stop hook + FA hooks both present after second install"
+else
+  _fail "codex manual proof: user Stop hook or FA hooks missing after second install"
 fi
 
 echo ""

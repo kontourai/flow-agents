@@ -454,19 +454,41 @@ function dogfoodClaudeCode(bundleRoot: string, dest: string): void {
 }
 
 /**
- * Write the codex hook-wiring artifacts into dest.
- * Reads dist/codex/.codex/hooks.json and writes .codex/hooks.json to dest.
+ * Write the codex hook-wiring artifacts into dest using merge semantics.
+ * Reads dist/codex/.codex/hooks.json and MERGES into any existing dest hooks.json —
+ * preserving user non-FA hook groups. Writes version stamp.
  * The monolithic .codex/config.toml is not written here because it contains
  * workspace settings (approvals_reviewer, features) that would override the
- * developer's existing codex configuration. Only the hooks file is written.
+ * developer's existing codex configuration. Only the hooks file is merged.
  */
 function dogfoodCodex(bundleRoot: string, dest: string): void {
   const sourcePath = path.join(bundleRoot, ".codex", "hooks.json");
   if (!fs.existsSync(sourcePath)) throw new Error(`dogfood: bundle hooks.json missing: ${sourcePath}`);
-  const hooks = fs.readFileSync(sourcePath, "utf8");
+  const managed = JSON.parse(fs.readFileSync(sourcePath, "utf8")) as Record<string, unknown>;
   const outDir = path.join(dest, ".codex");
   fs.mkdirSync(outDir, { recursive: true });
-  fs.writeFileSync(path.join(outDir, "hooks.json"), hooks, "utf8");
+  const destHooksPath = path.join(outDir, "hooks.json");
+  // Merge: read existing, strip FA hook-groups, append new FA hook-groups, preserve user groups.
+  const installMergePath = path.join(root, "scripts", "install-merge.js");
+  const _require = createRequire(import.meta.url);
+  const { mergeSettings } = _require(installMergePath) as { mergeSettings: (a: Record<string, unknown>, b: Record<string, unknown>) => Record<string, unknown> };
+  let existing: Record<string, unknown> = {};
+  if (fs.existsSync(destHooksPath)) {
+    try { existing = JSON.parse(fs.readFileSync(destHooksPath, "utf8")) as Record<string, unknown>; } catch { existing = {}; }
+  }
+  const merged = mergeSettings(existing, managed);
+  const tmp = `${destHooksPath}.tmp.${process.pid}`;
+  fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
+  fs.renameSync(tmp, destHooksPath);
+  // Write version stamp.
+  const installRecordDir = path.join(dest, ".flow-agents");
+  fs.mkdirSync(installRecordDir, { recursive: true });
+  const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
+  const record = { version: pkgJson["version"] ?? "0.0.0", installedAt: new Date().toISOString(), runtime: "codex" };
+  const recordPath = path.join(installRecordDir, "install.json");
+  const recordTmp = `${recordPath}.tmp.${process.pid}`;
+  fs.writeFileSync(recordTmp, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  fs.renameSync(recordTmp, recordPath);
 }
 
 /**

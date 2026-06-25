@@ -389,7 +389,7 @@ function buildCodex(agents: Agent[]): void {
   }
   writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Codex", targetAgents, manifest.codex.task_dir));
   writeText(path.join(bundle, "README.md"), exportTargetReadme("Codex", "bash install.sh /path/to/workspace", CODEX_LIVE_HOOKS_README));
-  writeText(path.join(bundle, "install.sh"), installScript("Codex", "/path/to/workspace"));
+  writeText(path.join(bundle, "install.sh"), installScript("Codex", "/path/to/workspace", undefined, undefined, { configRelPath: ".codex/hooks.json", managedConfigRelPath: ".codex/hooks.json", runtime: "codex", version: pkgVersion }));
   fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
 }
 function exportOpencodeAgent(spec: Agent): string {
