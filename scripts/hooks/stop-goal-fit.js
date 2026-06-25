@@ -44,8 +44,9 @@ const ACTIVE_STATUSES = new Set([
 ]);
 // WORKFLOW_SESSION_TYPES: used for artifact identification only, not for verdict production.
 const WORKFLOW_SESSION_TYPES = new Set(['deliver', 'delivery', 'fix-bug', 'execute-plan', 'verify-work']);
-const SIDECAR_NAMES = new Set(['state.json', 'acceptance.json', 'evidence.json', 'handoff.json']);
-const OPTIONAL_SIDECAR_NAMES = new Set(['critique.json']);
+// Phase 4c: bundle-only. Required set = {state.json, handoff.json, trust.bundle}. Drop evidence.json/acceptance.json/critique.json.
+const SIDECAR_NAMES = new Set(['state.json', 'handoff.json', 'trust.bundle']);
+const OPTIONAL_SIDECAR_NAMES = new Set();
 
 // A workflow that has not started execution is EXPECTED to be incomplete, so the
 // Stop gate must not hard-block on its missing DOD / Goal Fit / not-done state.
@@ -136,7 +137,23 @@ function sidecarValidation(root, artifactDir) {
   if (requireSidecars || requireCritique) {
     const present = new Set(sidecarFiles.map(file => path.basename(file)));
     const requiredNames = new Set(requireSidecars ? SIDECAR_NAMES : []);
-    if (requireCritique) requiredNames.add('critique.json');
+    // Phase 4c: critique.json is no longer written; trust.bundle carries critique claims.
+    // FLOW_AGENTS_REQUIRE_CRITIQUE is satisfied by:
+    //   - critique.json (legacy, may not be in SIDECAR_NAMES but may still be on disk), OR
+    //   - trust.bundle that contains at least one workflow.critique.review claim.
+    if (requireCritique) {
+      // Check disk directly (critique.json is no longer in SIDECAR_NAMES so may not be in present)
+      const hasCritiqueJson = fs.existsSync(path.join(artifactDir, 'critique.json'));
+      const bundleFile = path.join(artifactDir, 'trust.bundle');
+      let hasBundleCritique = false;
+      if (fs.existsSync(bundleFile)) {
+        try {
+          const b = JSON.parse(fs.readFileSync(bundleFile, 'utf8'));
+          hasBundleCritique = Array.isArray(b.claims) && b.claims.some(c => c && c.claimType === 'workflow.critique.review');
+        } catch { /* fall through — no bundle critique */ }
+      }
+      if (!hasCritiqueJson && !hasBundleCritique) requiredNames.add('critique.json');
+    }
     const missing = [...requiredNames].filter(name => !present.has(name)).sort();
     if (missing.length > 0) {
       return missing.map(name => `${relative(root, path.join(artifactDir, name))} sidecar validation: required sidecar is missing`);
@@ -985,8 +1002,28 @@ async function analyze(root, now = Date.now()) {
 
   warnings.push(...sidecarValidation(root, path.dirname(latest.file)));
   warnings.push(...sidecarGuidance(root, path.dirname(latest.file)));
-  warnings.push(...captureCrossReference(root, path.dirname(latest.file)));
-  warnings.push(...(await bundleEnforcement(path.dirname(latest.file))));
+  const captureWarnings = captureCrossReference(root, path.dirname(latest.file));
+  warnings.push(...captureWarnings);
+  // Dedup: bundleEnforcement and captureCrossReference can both fire "caught false-completion"
+  // for the same disputed claim. Suppress the bundleEnforcement warning when captureCrossReference
+  // already reported the same check (same check-id extracted from the subjectId).
+  const captureCheckIds = new Set();
+  for (const w of captureWarnings) {
+    const m = /evidence check ([^\s:]+):/.exec(w);
+    if (m) captureCheckIds.add(m[1]);
+  }
+  const bundleWarnings = (await bundleEnforcement(path.dirname(latest.file))).filter(w => {
+    if (!captureCheckIds.size) return true;
+    // bundleEnforcement warns: "trust.bundle claim disputed: <subjectId> ..."
+    const m = /trust\.bundle claim (?:disputed|tampered): ([^\s(]+)/.exec(w);
+    if (!m) return true;
+    const subjectId = m[1];
+    // subjectId = "slug/checkId" — extract the checkId (last segment)
+    const checkId = subjectId.includes('/') ? subjectId.slice(subjectId.indexOf('/') + 1) : subjectId;
+    // If captureCrossReference already flagged this check, suppress the bundle warning.
+    return !captureCheckIds.has(checkId);
+  });
+  warnings.push(...bundleWarnings);
   warnings.push(...missingBundleOrStateSignal(path.dirname(latest.file)));
 
   // A pre-execution task (not started) OR a terminal task (which is itself a

@@ -5,7 +5,7 @@ title: "ADR 0010: Workflow Trust State as a Hachure Trust Bundle"
 # ADR 0010: Workflow Trust State as a Hachure Trust Bundle
 
 **Date:** 2026-06-23
-**Status:** Accepted. Phase 1 (emit) shipped (pre-existing); **maximal enrichment** (verification-policies + capture-authoritative evidence), **Phase 2 core** (the gate enforces on the bundle's Surface-derived claim statuses), **Phase 3 local projection** (`render-trust-panel` emits a standalone Surface Trust Panel HTML), and **Phase 2 hardening complete** (`DELIVERY_TYPES`/markdown removal done in sub-step 2c: `stop-goal-fit` verdict is now fully bundle-driven; Builder template heading checks removed; sidecar-driven Final Acceptance hygiene added). Remaining: Phase 3 Console sink; Phase 4 (retire bespoke sidecars).
+**Status:** Accepted. Phase 1 (emit) shipped (pre-existing); **maximal enrichment** (verification-policies + capture-authoritative evidence), **Phase 2 core** (the gate enforces on the bundle's Surface-derived claim statuses), **Phase 3 local projection** (`render-trust-panel` emits a standalone Surface Trust Panel HTML), and **Phase 2 hardening complete** (`DELIVERY_TYPES`/markdown removal done in sub-step 2c: `stop-goal-fit` verdict is now fully bundle-driven; Builder template heading checks removed; sidecar-driven Final Acceptance hygiene added). Phase 4 shipped: bespoke evidence.json/critique.json writes retired (ADR 0010 4c); trust.bundle is the sole verification artifact. Remaining: Phase 3 Console sink.
 **Supersedes:** the interim markdown-de-coupling of ADR 0009 (see "Relationship to ADR 0009").
 
 ---

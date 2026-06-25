@@ -784,15 +784,7 @@ function surfaceCheckFromArtifact(file: string, index: number): AnyObj {
   }
   return { id: `surface-trust-${index + 1}`, kind: "policy", status: ref.status, summary: ref.summary, surface_trust_refs: [ref] };
 }
-function updateAcceptance(dir: string, verdict: string): void {
-  const file = path.join(dir, "acceptance.json");
-  if (!fs.existsSync(file)) return;
-  const data = loadJson(file);
-  const status = verdict === "pass" ? "pass" : verdict === "fail" ? "fail" : "not_verified";
-  if (Array.isArray(data.criteria)) data.criteria = data.criteria.map((c: AnyObj) => ({ ...c, status }));
-  data.goal_fit = { ...(data.goal_fit ?? {}), status, summary: verdict === "pass" ? "Evidence passed." : "Evidence requires follow-up." };
-  writeJson(file, data);
-}
+
 function validateAcceptanceEvidenceRefs(dir: string): void {
   const file = path.join(dir, "acceptance.json");
   if (!fs.existsSync(file)) return;
@@ -805,6 +797,56 @@ function validateAcceptanceEvidenceRefs(dir: string): void {
 export function writeState(dir: string, slug: string, status: string, phase: string, timestamp: string, summary: string, next = "continue"): void {
   writeJson(path.join(dir, "state.json"), { ...loadJson(path.join(dir, "state.json")), ...sidecarBase(slug), status, phase, updated_at: timestamp, artifact_paths: relArtifacts(dir), next_action: { status: next, summary } });
 }
+// ─── Phase 4c: bundle-only helpers ───────────────────────────────────────────
+// After 4c, evidence.json and critique.json are no longer written.
+// Extract checks and critiques from the existing trust.bundle for callers that
+// need to rebuild the bundle (e.g. record-critique, record-learning).
+function checksFromBundle(dir: string): AnyObj[] {
+  const bundle = loadJson(path.join(dir, "trust.bundle"));
+  if (!Array.isArray(bundle.evidence)) return [];
+  const allClaims: AnyObj[] = Array.isArray(bundle.claims) ? bundle.claims : [];
+  const claimById = new Map<string, AnyObj>();
+  for (const c of allClaims) if (c && c.id) claimById.set(c.id, c);
+  const seen = new Set<string>();
+  const checks: AnyObj[] = [];
+  for (const ev of bundle.evidence) {
+    if (!ev || !ev.claimId) continue;
+    const claim = claimById.get(ev.claimId);
+    if (!claim || !String(claim.claimType || "").startsWith("workflow.check.")) continue;
+    if (seen.has(ev.claimId)) continue;
+    seen.add(ev.claimId);
+    const kind = claim.claimType.replace("workflow.check.", "") || "external";
+    const status = claim.value ?? "not_verified";
+    const check: AnyObj = { id: String(claim.subjectId || "").split("/").pop() || ev.claimId, kind, status, summary: claim.fieldOrBehavior || "" };
+    if (ev.execution && typeof ev.execution.label === "string") check.command = ev.execution.label;
+    if (ev.evidenceType) check.evidenceType = ev.evidenceType;
+    checks.push(check);
+  }
+  // Also include check claims that have no evidence item (surface_trust_refs style)
+  for (const claim of allClaims) {
+    if (!claim || !String(claim.claimType || "").startsWith("workflow.check.")) continue;
+    if (seen.has(claim.id)) continue;
+    seen.add(claim.id);
+    const kind = claim.claimType.replace("workflow.check.", "") || "external";
+    checks.push({ id: String(claim.subjectId || "").split("/").pop() || claim.id, kind, status: claim.value ?? "not_verified", summary: claim.fieldOrBehavior || "" });
+  }
+  return checks;
+}
+function critiquesFromBundle(dir: string): AnyObj[] {
+  const bundle = loadJson(path.join(dir, "trust.bundle"));
+  if (!Array.isArray(bundle.claims)) return [];
+  const critiqueClaims = bundle.claims.filter((c: AnyObj) => c && c.claimType === "workflow.critique.review");
+  return critiqueClaims.map((c: AnyObj) => ({
+    id: String(c.subjectId || "").split("/").pop() || c.id,
+    verdict: c.value ?? "not_verified",
+    summary: c.fieldOrBehavior || "",
+    findings: [],
+    reviewer: "tool-code-reviewer",
+    reviewed_at: c.updatedAt || c.createdAt || now(),
+    artifact_refs: [],
+  }));
+}
+// ─────────────────────────────────────────────────────────────────────────────
 async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const verdict = opt(p, "verdict") || die("--verdict is required");
@@ -813,17 +855,13 @@ async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> 
   const checks = [...opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"))), ...opts(p, "surface-trust-json").map(surfaceCheckFromArtifact)];
   if (!checks.length && opts(p, "surface-trust-json").length === 0) die("record-evidence requires at least one --check-json or --surface-trust-json");
   validateAcceptanceEvidenceRefs(dir);
-  const payload = { ...sidecarBase(slug), verdict, checks, not_verified_gaps: opts(p, "gap") };
-  // Phase 4a inversion: build bundle from raw inputs FIRST; emit bespoke sidecars as back-compat projections after.
+  // Phase 4c: bundle is the sole verification artifact — stop writing evidence.json and acceptance.json update.
   const ts = opt(p, "timestamp", now());
   const _existingAcceptance = loadJson(path.join(dir, "acceptance.json"));
   const _existingCriteria: AnyObj[] = Array.isArray(_existingAcceptance.criteria) ? _existingAcceptance.criteria : [];
   const _criteriaStatus = verdict === "pass" ? "pass" : verdict === "fail" ? "fail" : "not_verified";
   const _criteriaForBundle: AnyObj[] = _existingCriteria.map((c: AnyObj) => ({ ...c, status: _criteriaStatus }));
   await writeTrustBundle(dir, slug, ts, checks, _criteriaForBundle, []);
-  // Back-compat projections: write evidence.json and update acceptance.json (same content as before)
-  writeJson(path.join(dir, "evidence.json"), payload);
-  updateAcceptance(dir, verdict);
   const stateStatus = verdict === "pass" ? "verified" : verdict === "fail" ? "failed" : "not_verified";
   writeState(dir, slug, stateStatus, "verification", ts, "Evidence recorded.");
   return 0;
@@ -867,24 +905,22 @@ export function normalizeFinding(raw: AnyObj): AnyObj {
   if (raw.file_refs !== undefined && !Array.isArray(raw.file_refs)) die("file_refs must be an array");
   return raw;
 }
-function critiqueStatus(critiques: AnyObj[], required: boolean): string {
-  if (!required && critiques.length === 0) return "not_required";
-  if (critiques.some((c) => c.verdict === "fail" || (Array.isArray(c.findings) && c.findings.some((f: AnyObj) => f.status === "open")))) return "fail";
-  return "pass";
-}
+
 async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
-  const existing = loadJson(path.join(dir, "critique.json"), { critiques: [] });
+  // Phase 4c: accumulate existing critiques from trust.bundle (critique.json no longer written).
+  // Fall back to critique.json for legacy sessions that still have it on disk.
+  const existingCritiqueJson = loadJson(path.join(dir, "critique.json"), { critiques: [] });
+  const legacyCritiques: AnyObj[] = Array.isArray(existingCritiqueJson.critiques) ? existingCritiqueJson.critiques : [];
+  const bundleCritiques = legacyCritiques.length === 0 ? critiquesFromBundle(dir) : legacyCritiques;
   const critique = { id: opt(p, "id") || "review", reviewer: opt(p, "reviewer", "tool-code-reviewer"), reviewed_at: opt(p, "timestamp", now()), verdict: opt(p, "verdict", "pass"), summary: opt(p, "summary"), artifact_refs: opts(p, "artifact-ref"), findings: opts(p, "finding-json").map((v) => normalizeFinding(parseJson(v, "--finding-json"))) };
-  const critiques = [...(Array.isArray(existing.critiques) ? existing.critiques : []), critique];
+  const critiques = [...bundleCritiques, critique];
   if (critique.verdict === "pass" && critique.findings.some((f: AnyObj) => f.status === "open")) die("required critique must pass");
-  // Phase 4a inversion: build bundle from raw inputs FIRST; emit bespoke sidecar as back-compat projection after.
-  const _critiqueEvChecks: AnyObj[] = Array.isArray(loadJson(path.join(dir, "evidence.json")).checks) ? loadJson(path.join(dir, "evidence.json")).checks : [];
+  // Phase 4c: build bundle from raw inputs; read checks from trust.bundle (evidence.json no longer written).
+  const _critiqueEvChecks: AnyObj[] = checksFromBundle(dir);
   const _critiqueAccCriteria: AnyObj[] = Array.isArray(loadJson(path.join(dir, "acceptance.json")).criteria) ? loadJson(path.join(dir, "acceptance.json")).criteria : [];
   await writeTrustBundle(dir, slug, critique.reviewed_at, _critiqueEvChecks, _critiqueAccCriteria, critiques);
-  // Back-compat projection: write critique.json (same content as before)
-  writeJson(path.join(dir, "critique.json"), { ...sidecarBase(slug), status: critiqueStatus(critiques, true), required: true, updated_at: critique.reviewed_at, critiques });
   return 0;
 }
 function frontmatter(text: string, key: string): string {
@@ -973,14 +1009,25 @@ async function recordLearning(p: ReturnType<typeof parseArgs>): Promise<number> 
   if (status === "learned" && records.some((r) => r.correction === undefined)) die("learning status learned requires every record to include correction.needed");
   writeJson(path.join(dir, "learning.json"), { ...sidecarBase(slug), status, updated_at: timestamp, records });
   writeState(dir, slug, "accepted", "learning", timestamp, opt(p, "summary"));
-  // Phase 4a inversion: build bundle from raw inputs (re-read from on-disk sidecars).
-  const _learningChecks: AnyObj[] = Array.isArray(loadJson(path.join(dir, "evidence.json")).checks) ? loadJson(path.join(dir, "evidence.json")).checks : [];
+  // Phase 4c: build bundle from raw inputs; read checks/critiques from trust.bundle (bespoke sidecars no longer written).
+  const _learningChecks: AnyObj[] = checksFromBundle(dir);
   const _learningCriteria: AnyObj[] = Array.isArray(loadJson(path.join(dir, "acceptance.json")).criteria) ? loadJson(path.join(dir, "acceptance.json")).criteria : [];
-  const _learningCritiques: AnyObj[] = Array.isArray(loadJson(path.join(dir, "critique.json")).critiques) ? loadJson(path.join(dir, "critique.json")).critiques : [];
+  const _learningCritiques: AnyObj[] = critiquesFromBundle(dir);
   await writeTrustBundle(dir, slug, timestamp, _learningChecks, _learningCriteria, _learningCritiques);
   return 0;
 }
 function evidenceClean(dir: string): boolean {
+  // Phase 4c: read from trust.bundle (sole verification artifact); fall back to evidence.json for legacy sessions.
+  const bundle = loadJson(path.join(dir, "trust.bundle"));
+  if (Array.isArray(bundle.claims)) {
+    const checkClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => c && String(c.claimType || "").startsWith("workflow.check."));
+    if (checkClaims.length === 0) return false;
+    return checkClaims.every((c: AnyObj) => {
+      const v = String(c.value || "");
+      return v === "pass" || v === "skip";
+    });
+  }
+  // Legacy fallback: evidence.json
   const e = loadJson(path.join(dir, "evidence.json"), {});
   return e.verdict === "pass" && Array.isArray(e.checks) && e.checks.length > 0 && e.checks.every((c: AnyObj) => {
     if (!(c.status === "pass" || c.status === "skip")) return false;
@@ -988,6 +1035,17 @@ function evidenceClean(dir: string): boolean {
   });
 }
 function critiqueClean(dir: string): boolean {
+  // Phase 4c: read from trust.bundle (sole verification artifact); fall back to critique.json for legacy sessions.
+  const bundle = loadJson(path.join(dir, "trust.bundle"));
+  if (Array.isArray(bundle.claims)) {
+    const critiqueClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => c && c.claimType === "workflow.critique.review");
+    if (critiqueClaims.length === 0) return false; // no critique written yet
+    return critiqueClaims.every((c: AnyObj) => {
+      const v = String(c.value || "");
+      return v !== "fail" && c.status !== "disputed" && c.status !== "rejected";
+    });
+  }
+  // Legacy fallback: critique.json
   const c = loadJson(path.join(dir, "critique.json"), {});
   return c.status === "pass" && Array.isArray(c.critiques) && c.critiques.every((x: AnyObj) => x.verdict !== "fail" && (!Array.isArray(x.findings) || x.findings.every((f: AnyObj) => f.status !== "open" && (f.file_refs === undefined || Array.isArray(f.file_refs)))));
 }
@@ -1013,14 +1071,19 @@ async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
   if (verdict === "pass") {
     const checks = opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json")));
     if (checks.some((c) => c.status !== "pass" && c.status !== "skip")) die("clean evidence requires all non-skipped checks to pass");
-    if (fs.existsSync(path.join(dir, "evidence.json")) && !evidenceClean(dir)) die("cannot mark clean without passing evidence");
-    if (!fs.existsSync(path.join(dir, "evidence.json")) && checks.length === 0) die("cannot mark clean without passing evidence");
+    // Phase 4c: evidence check reads from trust.bundle (sole verification artifact); legacy evidence.json fallback in evidenceClean.
+    const _hasBundleEvidence = fs.existsSync(path.join(dir, "trust.bundle")) && evidenceClean(dir);
+    const _hasLegacyEvidence = fs.existsSync(path.join(dir, "evidence.json")) && evidenceClean(dir);
+    if (!_hasBundleEvidence && !_hasLegacyEvidence && fs.existsSync(path.join(dir, "trust.bundle"))) die("cannot mark clean without passing evidence");
+    if (!_hasBundleEvidence && !_hasLegacyEvidence && !fs.existsSync(path.join(dir, "trust.bundle")) && fs.existsSync(path.join(dir, "evidence.json"))) die("cannot mark clean without passing evidence");
+    if (!_hasBundleEvidence && !_hasLegacyEvidence && !fs.existsSync(path.join(dir, "trust.bundle")) && !fs.existsSync(path.join(dir, "evidence.json")) && checks.length === 0) die("cannot mark clean without passing evidence");
     if (p.flags.has("require-critique") || opt(p, "release-decision")) {
       const newCritiqueVerdict = opt(p, "critique-verdict", "pass");
       for (const value of opts(p, "finding-json")) normalizeFinding(parseJson(value, "--finding-json"));
       if (newCritiqueVerdict !== "pass") die(opt(p, "release-decision") ? "requires clean critique" : "requires clean critique before recording pass evidence");
       if (!opt(p, "critique-id") && !critiqueClean(dir)) die("requires passing critique");
-      if (fs.existsSync(path.join(dir, "critique.json")) && !critiqueClean(dir)) die(opt(p, "release-decision") ? "requires clean critique" : "requires clean critique before recording pass evidence");
+      // Phase 4c: if existing state has a dirty critique (in bundle or legacy critique.json), block even when adding a new critique-id.
+      if (!critiqueClean(dir) && (fs.existsSync(path.join(dir, "trust.bundle")) || fs.existsSync(path.join(dir, "critique.json")))) die(opt(p, "release-decision") ? "requires clean critique" : "requires clean critique before recording pass evidence");
     }
   }
   const learningRecords = opts(p, "learning-record-json").map((v) => normalizeLearning(parseJson(v, "--learning-record-json"), opt(p, "timestamp", now())));
@@ -1041,12 +1104,8 @@ async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
     writeJson(path.join(dir, "handoff.json"), handoff);
   }
   writeState(dir, taskSlugFor(dir, opt(p, "task-slug")), stateStatus, "verification", opt(p, "timestamp", now()), opt(p, "summary"), verdict === "pass" ? "continue" : "blocked");
-  const _slug = taskSlugFor(dir, opt(p, "task-slug")); const _ts = opt(p, "timestamp", now());
-  // Phase 4a inversion: build bundle from raw inputs (re-read from on-disk sidecars).
-  const _dogfoodChecks: AnyObj[] = Array.isArray(loadJson(path.join(dir, "evidence.json")).checks) ? loadJson(path.join(dir, "evidence.json")).checks : [];
-  const _dogfoodCriteria: AnyObj[] = Array.isArray(loadJson(path.join(dir, "acceptance.json")).criteria) ? loadJson(path.join(dir, "acceptance.json")).criteria : [];
-  const _dogfoodCritiques: AnyObj[] = Array.isArray(loadJson(path.join(dir, "critique.json")).critiques) ? loadJson(path.join(dir, "critique.json")).critiques : [];
-  await writeTrustBundle(dir, _slug, _ts, _dogfoodChecks, _dogfoodCriteria, _dogfoodCritiques);
+  // Phase 4c: bundle was already written by recordEvidence/recordCritique above (if called).
+  // If neither ran (e.g. verdict=fail with no check-json), re-build from bundle (no bespoke sidecars).
   printJson({ state_status: stateStatus });
   return 0;
 }
