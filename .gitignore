@@ -17,6 +17,7 @@ test-results/
 
 # Dependency installs and build caches
 node_modules/
+node_modules
 .venv/
 __pycache__/
 *.py[cod]
