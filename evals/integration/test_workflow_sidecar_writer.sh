@@ -2324,6 +2324,22 @@ else
   _fail "trust-mcp print/enable invocation failed"
 fi
 
+# ─── AC6: agent coordination liveness (ADR 0012) — held / free-on-lapse / free-on-release ──
+TB_COORD_ROOT="$TMPDIR_EVAL/coord/.flow-agents"
+flow_agents_node "$WRITER" coord claim     held-subj  --actor agent-A --at "2026-06-25T11:50:00Z" --ttl 1800 --artifact-root "$TB_COORD_ROOT" >/dev/null 2>&1
+flow_agents_node "$WRITER" coord heartbeat held-subj  --actor agent-A --at "2026-06-25T11:58:00Z" --artifact-root "$TB_COORD_ROOT" >/dev/null 2>&1
+flow_agents_node "$WRITER" coord claim     stale-subj --actor agent-B --at "2026-06-25T11:00:00Z" --ttl 1800 --artifact-root "$TB_COORD_ROOT" >/dev/null 2>&1
+flow_agents_node "$WRITER" coord claim     rel-subj   --actor agent-C --at "2026-06-25T11:50:00Z" --ttl 1800 --artifact-root "$TB_COORD_ROOT" >/dev/null 2>&1
+flow_agents_node "$WRITER" coord release   rel-subj   --actor agent-C --at "2026-06-25T11:55:00Z" --artifact-root "$TB_COORD_ROOT" >/dev/null 2>&1
+COORD_OUT=$(flow_agents_node "$WRITER" coord status --now "2026-06-25T12:00:00Z" --artifact-root "$TB_COORD_ROOT" 2>/dev/null | grep -viE "unknown format")
+if echo "$COORD_OUT" | grep -qE "held-subj.*agent-A.*held" \
+  && echo "$COORD_OUT" | grep -qE "stale-subj.*agent-B.*free" \
+  && echo "$COORD_OUT" | grep -qE "rel-subj.*agent-C.*free"; then
+  _pass "coord: liveness claims recompute held / free(lapsed) / free(released) via Surface deriveTrustStatus (ADR 0012)"
+else
+  _fail "coord status mismatch (expected held/free/free): $COORD_OUT"
+fi
+
 
 # ─── AC3: statusFunctionVersion conformance ───────────────────────────────────
 # Assert the statusFunctionVersion embedded in the emitted trust.bundle source
