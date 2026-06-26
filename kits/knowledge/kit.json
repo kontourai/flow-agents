@@ -39,6 +39,11 @@
       "id": "knowledge.audit-freshness",
       "path": "flows/audit-freshness.flow.json",
       "description": "Hygiene audit (optional, configurable): flag records past per-category staleness thresholds and propose archive/refresh for each. Read-only: collect → measure → flag-gate. Thresholds are per-category (dot-hierarchy longest-prefix, with optional default); a category with no threshold is skipped (opt-in). Each flag cites last-mutation (max of updated_at and latest mutation_log entry) + the threshold that fired + computed age. Forks no mutation path — the operator routes each flag through knowledge.retire (archive) or a fresh capture/compile (refresh)."
+    },
+    {
+      "id": "knowledge.detect-contradictions",
+      "path": "flows/detect-contradictions.flow.json",
+      "description": "Hygiene audit (optional, configurable): compare compiled records within a category and flag conflicting assertions with BOTH record ids. Read-only: collect → compare → flag-gate. Reuses the similarity adapter to scope comparisons to records about the same thing, then a pluggable contradiction fn (default: opposing-polarity heuristic) judges each similar pair. Auditing is opt-in per category. Each flag cites both record ids + shared category + the reason that fired. Forks no mutation path — the operator routes each flag through knowledge.retire (drop the stale assertion) or a fresh capture/compile/consolidate (reconcile)."
     }
   ],
   "docs": [
@@ -60,7 +65,7 @@
     {
       "id": "knowledge.flow-runner",
       "path": "adapters/flow-runner/index.js",
-      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links; synthesize(conceptId | topicSelector, options) → concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) → decision snapshot consolidation with supersede-not-delete; retire(recordId, options) → gated status lifecycle transition (active→implemented→retired) with working-set exclusion; auditFreshness(options) → read-only hygiene audit returning flags (last-mutation + threshold cited) proposing archive/refresh for records past per-category staleness thresholds. Emits canonical telemetry events at gate points."
+      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links; synthesize(conceptId | topicSelector, options) → concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) → decision snapshot consolidation with supersede-not-delete; retire(recordId, options) → gated status lifecycle transition (active→implemented→retired) with working-set exclusion; auditFreshness(options) → read-only hygiene audit returning flags (last-mutation + threshold cited) proposing archive/refresh for records past per-category staleness thresholds; detectContradictions(options) → read-only hygiene audit comparing compiled records within a category (similarity adapter scopes the comparison; pluggable contradiction fn judges each similar pair) returning flags that cite BOTH conflicting record ids + reason. Emits canonical telemetry events at gate points."
     },
     {
       "id": "knowledge.similarity-vector",
@@ -113,6 +118,11 @@
       "id": "knowledge.audit-freshness-suite",
       "path": "evals/audit-freshness/suite.test.js",
       "description": "Eval cases for audit-freshness (#106 hygiene #1): per-category threshold resolution (dot-hierarchy longest-prefix + default + opt-in skip); each flag cites last-mutation + threshold + age; boundary (age == threshold not flagged, age > threshold flagged); last-mutation derived from max(updated_at, latest mutation_log entry); retired records excluded; read-only invariant (no record mutated, no flag without evidence); proposed-action resolution; gate telemetry."
+    },
+    {
+      "id": "knowledge.detect-contradictions-suite",
+      "path": "evals/detect-contradictions/suite.test.js",
+      "description": "Eval cases for detect-contradictions (#106 hygiene #2): default opposing-polarity heuristic flags affirm-vs-negate over a shared subject; agreeing records not flagged; every flag cites BOTH record ids + category + reason; similarity scoping (an empty similarity detector yields no flags); pluggable contradiction fn overrides the default verdict; opt-in category scoping; cross-category pairs never formed; each unordered pair compared at most once; retired compiled records excluded; read-only invariant; gate telemetry; module-level export."
     }
   ],
   "skills": [

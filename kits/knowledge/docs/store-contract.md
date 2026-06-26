@@ -835,3 +835,85 @@ interface FreshnessFlag {
 records that had a resolvable threshold, `skipped` counts opt-out categories, and `flags` lists the
 stale records. Gate telemetry is emitted at `collect-gate` and `flag-gate`
 (`knowledge.audit-freshness`).
+
+## Addendum E — Contradiction Detection (Hygiene #2, #106)
+
+### E.1 Read-Only Maintenance Layer
+
+`knowledge.detect-contradictions` is the second of the Knowledge Kit's *maintenance* flows. Like
+`audit-freshness` (Addendum D) it is a **read-only** survey: it NEVER mutates a record. It returns
+*flags* identifying a conflicting pair; the operator routes each through an existing gated flow —
+`knowledge.retire` to drop the stale assertion, or a fresh `capture`/`compile`/`consolidate` to
+reconcile. The audit forks no new mutation path.
+
+Contradiction is domain-sensitive (what counts as a conflict in `radar` differs from `decisions`),
+so the audit is **optional and configurable**: it audits only the categories supplied in
+`categories` (or, when omitted, every category present in the compiled set), and it judges conflicts
+with a **pluggable contradiction fn**.
+
+### E.2 `detectContradictions` Flow-Runner Operation
+
+`KnowledgeFlowRunner.detectContradictions(options)` (also the module-level
+`detectContradictions({ store, ... })`) compares **compiled** records **within a category** and
+flags conflicting assertions. Comparison is two-staged and reuses the Kit's existing pluggable
+adapters (consume-never-fork):
+
+1. **Scope** with the `SimilarityDetector` (the same interface `synthesize` uses) — only records the
+   detector deems similar (about the same thing) are candidates. The vector similarity adapter drops
+   straight in.
+2. **Judge** with the `ContradictionDetector` — for each similar pair, decide whether the assertions
+   conflict.
+
+**Options:**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `categories` | `string[]` | all present | Categories to audit. Opt-in scoping; omit to audit every category in the compiled set. |
+| `similarityDetector` | `fn` | `defaultSimilarityDetector` | Pluggable `(record, candidates, store) => string[]` — scopes which pairs are compared. |
+| `contradictionDetector` | `fn` | `defaultContradictionDetector` | Pluggable `(recordA, recordB, store?) => null \| { reason }` — judges whether a pair conflicts. May be async. |
+| `agent` | `string` | runner agent | Agent recorded on the audit telemetry. |
+
+**Comparison scope:** retired records are excluded (the default `listByType` query drops them, and
+`retired` is terminal); records are grouped by exact category, so cross-category pairs are never
+formed; each unordered pair is compared at most once.
+
+### E.3 `ContradictionDetector` Interface and the Default
+
+```ts
+type ContradictionDetector = (
+  recordA: Record,
+  recordB: Record,
+  store?: KnowledgeStoreAdapter
+) => (null | { reason: string }) | Promise<null | { reason: string }>;
+```
+
+The two records passed in are already known to be *about the same thing* (the caller scopes by
+category + similarity). The detector's only job is to decide whether their assertions conflict.
+Return `null` for no conflict, or `{ reason }` carrying a human-readable explanation.
+
+The default (`defaultContradictionDetector`) is a deliberately conservative **opposing-polarity
+heuristic**: it splits each body into clauses, tags each affirmative or negative by the presence of
+a negation, and reports a conflict when one record AFFIRMS a clause whose salient content tokens
+contain those of a clause the other NEGATES (token-containment, not exact equality, so trailing
+detail on one side does not hide the conflict). It is intentionally replaceable — an embedding/NLI
+model is the obvious upgrade, injected the same way the vector similarity adapter is.
+
+### E.4 Flag Evidence Guarantee
+
+Every flag cites **both** conflicting record ids — a flag can never be emitted without them:
+
+```ts
+interface ContradictionFlag {
+  recordIdA: string;   // canonically ordered: recordIdA < recordIdB
+  recordIdB: string;
+  titleA: string;
+  titleB: string;
+  category: string;    // the shared category
+  reason: string;      // why the contradiction fn fired
+}
+```
+
+`detectContradictions` returns `{ audited, compared, flags, telemetryEvents }` where `audited`
+counts the in-scope compiled records, `compared` counts the similar pairs the contradiction fn
+judged, and `flags` lists the conflicting pairs. Gate telemetry is emitted at `collect-gate` and
+`flag-gate` (`knowledge.detect-contradictions`).

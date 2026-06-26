@@ -221,6 +221,111 @@ export async function defaultSimilarityDetector(concept, candidates, store) {
   return similar;
 }
 
+// ===========================================================================
+// Contradiction detection — pluggable interface  (knowledge.detect-contradictions — #106)
+// ===========================================================================
+
+/**
+ * Default contradiction detector: opposing-polarity heuristic.
+ *
+ * ContradictionDetector interface (mirrors SimilarityDetector — R3):
+ *   (recordA: Record, recordB: Record) => null | { reason: string }
+ *   Return `null` when the two records' assertions do NOT conflict, or an object
+ *   carrying a human-readable `reason` when they DO. May be async.
+ *
+ * The two records passed in are already known to be *about the same thing* (the
+ * caller scopes comparisons to a category and to records the similarity adapter
+ * deems similar). The detector's only job is to decide whether their assertions
+ * conflict — never to re-judge subject overlap.
+ *
+ * Default heuristic (v1, deliberately conservative):
+ *   Detects opposing polarity over a shared subject. Each record's body is split
+ *   into clauses; each clause is reduced to its set of salient content tokens
+ *   (stop-words and the negation tokens stripped) and tagged affirmative or
+ *   negative by whether it carries a negation. A contradiction is reported when
+ *   one record AFFIRMS a clause whose content tokens contain those of a clause
+ *   the other record NEGATES (e.g. "use REST for the public API" vs "do not use
+ *   REST"). Token-containment (not exact equality) is used so trailing detail on
+ *   one side does not hide the conflict. Returns the conflicting phrase as the
+ *   reason.
+ *
+ * This is intentionally simple and replaceable — the issue calls for a
+ * *pluggable* contradiction fn precisely because real contradiction detection is
+ * domain-sensitive (an embedding/NLI model is the obvious upgrade, injected the
+ * same way the vector similarity adapter is).
+ *
+ * @param {object} recordA
+ * @param {object} recordB
+ * @returns {{ reason: string } | null}
+ */
+const NEGATION_RE = /\b(?:not|never|no longer|don't|do not|doesn't|does not|isn't|is not|won't|will not|cannot|can't|avoid|stop|deprecated?|disallow(?:ed)?|forbidden?)\b/;
+
+const STOP_WORDS = new Set([
+  "we", "i", "you", "they", "it", "the", "a", "an", "should", "must", "will",
+  "shall", "to", "please", "for", "of", "and", "or", "is", "are", "be", "this",
+  "that", "with", "as", "on", "in", "at", "by", "all", "any", "our", "their",
+]);
+
+/**
+ * Reduce a record body into clauses, each tagged affirmative/negative by whether
+ * it carries a negation, with salient content tokens (stop-words + negation
+ * tokens stripped). Returned as { affirmed: Clause[], negated: Clause[] } where
+ * a Clause is { tokens: Set<string>, phrase: string }.
+ */
+function assertionClauses(body) {
+  const affirmed = [];
+  const negated = [];
+  for (const raw of String(body || "").toLowerCase().split(/[.;,\n!?]+/)) {
+    const clause = raw.trim();
+    if (!clause) continue;
+    const isNegated = NEGATION_RE.test(clause);
+    const phrase = clause.replace(NEGATION_RE, " ").replace(/\s+/g, " ").trim();
+    const tokens = new Set(
+      phrase
+        .replace(/[^a-z0-9 ]+/g, " ")
+        .split(/\s+/)
+        .filter((t) => t.length > 1 && !STOP_WORDS.has(t))
+    );
+    if (tokens.size === 0) continue;
+    (isNegated ? negated : affirmed).push({ tokens, phrase });
+  }
+  return { affirmed, negated };
+}
+
+// Every token of `inner` is present in `outer` (subset containment).
+function tokensContain(outer, inner) {
+  if (inner.size === 0) return false;
+  for (const t of inner) if (!outer.has(t)) return false;
+  return true;
+}
+
+export function defaultContradictionDetector(recordA, recordB) {
+  const a = assertionClauses(recordA.body);
+  const b = assertionClauses(recordB.body);
+
+  // A contradicts B when one AFFIRMS a clause whose content tokens contain those
+  // of a clause the other NEGATES (token-containment, either direction).
+  for (const aff of a.affirmed) {
+    for (const neg of b.negated) {
+      if (tokensContain(aff.tokens, neg.tokens)) {
+        return {
+          reason: `opposing assertions over "${neg.phrase}": ${recordA.id} affirms, ${recordB.id} negates`,
+        };
+      }
+    }
+  }
+  for (const aff of b.affirmed) {
+    for (const neg of a.negated) {
+      if (tokensContain(aff.tokens, neg.tokens)) {
+        return {
+          reason: `opposing assertions over "${neg.phrase}": ${recordB.id} affirms, ${recordA.id} negates`,
+        };
+      }
+    }
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // KnowledgeFlowRunner
 // ---------------------------------------------------------------------------
@@ -1684,6 +1789,166 @@ export class KnowledgeFlowRunner {
     return { audited, skipped, flags, telemetryEvents: events };
   }
 
+  // =========================================================================
+  // knowledge.detect-contradictions flow  (#106 hygiene #2)
+  //   Steps: collect → compare → flag-gate → done
+  //   Gates: collect-gate (comparison set), flag-gate (flags cite both ids)
+  // =========================================================================
+
+  /**
+   * Audit compiled records within a category for conflicting assertions and
+   * flag each conflicting pair with BOTH record ids. Read-only: mutates nothing.
+   *
+   * Comparison is two-staged and reuses the existing pluggable adapters
+   * (consume-never-fork):
+   *   1. SCOPE with the similarity adapter — only records the detector deems
+   *      similar (about the same thing) are candidates for contradiction. This
+   *      reuses the exact SimilarityDetector interface that `synthesize` uses, so
+   *      the vector similarity adapter drops straight in.
+   *   2. JUDGE with the pluggable contradiction fn — for each similar pair, the
+   *      ContradictionDetector decides whether the assertions conflict. The
+   *      default (defaultContradictionDetector) is an opposing-polarity heuristic;
+   *      callers inject a domain-specific fn (e.g. an NLI model) the same way.
+   *
+   * Which categories to audit is configurable and opt-in: a category is audited
+   * only when it appears in `categories` (or `categories` is omitted, in which
+   * case every category present in the collected compiled set is audited).
+   * Retired records are never compared — the default `listByType` query excludes
+   * them, and `retired` is terminal.
+   *
+   * @param {object} [options]
+   *   - categories: string[]                  — categories to audit (default: all present). Opt-in scoping.
+   *   - similarityDetector: fn                — pluggable detector (same interface as synthesize R3); default category/link heuristic
+   *   - contradictionDetector: fn            — pluggable (recordA, recordB) => null | { reason } ; default opposing-polarity heuristic
+   *   - agent: string                        — override agent name
+   * @returns {Promise<{
+   *   audited: number,
+   *   compared: number,
+   *   flags: Array<{
+   *     recordIdA: string, recordIdB: string,
+   *     titleA: string, titleB: string,
+   *     category: string, reason: string
+   *   }>,
+   *   telemetryEvents: object[]
+   * }>}
+   */
+  async detectContradictions(options = {}) {
+    const events = [];
+    const agent = options.agent || this._agent;
+    const similarityDetector = options.similarityDetector || defaultSimilarityDetector;
+    const contradictionDetector = options.contradictionDetector || defaultContradictionDetector;
+    const categoryFilter =
+      Array.isArray(options.categories) && options.categories.length
+        ? new Set(options.categories)
+        : null;
+
+    // ── Step: collect ────────────────────────────────────────────────────────
+    // Gather compiled records grouped by category (default query excludes
+    // retired records — retired is terminal, nothing to compare there).
+    const collectGateIn = this._telemetry.emitGate(
+      "knowledge.detect-contradictions",
+      "collect-gate",
+      {
+        flow: "knowledge.detect-contradictions",
+        gate: "collect-gate",
+        categories: categoryFilter ? [...categoryFilter] : "all",
+      }
+    );
+    events.push(collectGateIn);
+
+    const compiled = (await this._store.listByType("compiled")).filter(
+      (r) => (r.status || "active") !== "retired"
+    );
+
+    const byCategory = new Map();
+    for (const record of compiled) {
+      if (categoryFilter && !categoryFilter.has(record.category)) continue;
+      if (!byCategory.has(record.category)) byCategory.set(record.category, []);
+      byCategory.get(record.category).push(record);
+    }
+
+    const collectGateOut = this._telemetry.emitGateResult(
+      "knowledge.detect-contradictions",
+      "collect-gate",
+      {
+        categories_audited: byCategory.size,
+        collected: compiled.length,
+      }
+    );
+    events.push(collectGateOut);
+
+    // ── Step: compare + flag-gate ────────────────────────────────────────────
+    const flagGateIn = this._telemetry.emitGate(
+      "knowledge.detect-contradictions",
+      "flag-gate",
+      {
+        flow: "knowledge.detect-contradictions",
+        gate: "flag-gate",
+        categories_audited: byCategory.size,
+      }
+    );
+    events.push(flagGateIn);
+
+    const flags = [];
+    let audited = 0;
+    let compared = 0;
+    const seenPairs = new Set();
+
+    for (const [category, records] of byCategory) {
+      audited += records.length;
+      for (const record of records) {
+        // Stage 1: scope to similar records via the similarity adapter. The
+        // candidate set is the rest of this category's records.
+        const candidates = records.filter((r) => r.id !== record.id);
+        const similarIds = await similarityDetector(record, candidates, this._store);
+        const similarSet = new Set(similarIds);
+
+        // Stage 2: judge each similar pair with the contradiction fn.
+        for (const other of candidates) {
+          if (!similarSet.has(other.id)) continue;
+          // Compare each unordered pair exactly once.
+          const pairKey =
+            record.id < other.id ? `${record.id}|${other.id}` : `${other.id}|${record.id}`;
+          if (seenPairs.has(pairKey)) continue;
+          seenPairs.add(pairKey);
+          compared += 1;
+
+          const verdict = await contradictionDetector(record, other, this._store);
+          // A flag is emitted only with BOTH ids + a reason — the flag-gate
+          // requires the evidence, so a flag can never be emitted without it.
+          if (verdict && verdict.reason) {
+            const [idA, idB, recA, recB] =
+              record.id < other.id
+                ? [record.id, other.id, record, other]
+                : [other.id, record.id, other, record];
+            flags.push({
+              recordIdA: idA,
+              recordIdB: idB,
+              titleA: recA.title,
+              titleB: recB.title,
+              category,
+              reason: verdict.reason,
+            });
+          }
+        }
+      }
+    }
+
+    const flagGateOut = this._telemetry.emitGateResult(
+      "knowledge.detect-contradictions",
+      "flag-gate",
+      {
+        audited,
+        compared,
+        flagged: flags.length,
+        agent,
+      }
+    );
+    events.push(flagGateOut);
+
+    return { audited, compared, flags, telemetryEvents: events };
+  }
+
 
   // -------------------------------------------------------------------------
   // knowledge.compile — entity extraction step (R2)
@@ -2091,6 +2356,19 @@ export async function auditFreshness(
 ) {
   const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
   return runner.auditFreshness(auditOpts);
+}
+
+/**
+ * Module-level detect-contradictions: creates an ephemeral runner using the
+ * provided store. Read-only — mutates nothing. (#106 hygiene #2)
+ *
+ * @param {object} options  (merged into detectContradictions options + runner options)
+ */
+export async function detectContradictions(
+  { store, workspace, agent, sessionId, ...detectOpts } = {}
+) {
+  const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
+  return runner.detectContradictions(detectOpts);
 }
 
 export default KnowledgeFlowRunner;
