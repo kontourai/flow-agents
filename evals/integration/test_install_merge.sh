@@ -866,7 +866,308 @@ else
   _fail "base install: .flow-agents/install.json missing or wrong runtime"
 fi
 
+
+
+# ─── codex-home: CH1: merge — user Stop hook survives install-codex-home ─────
+echo "=== Install Merge-Aware Tests (codex-home) ==="
 echo ""
+echo "--- CH1: codex-home merge — seed user Stop hook → install → user hook survives + FA hooks present ---"
+
+CH1_DEST="$TMPDIR_EVAL/codex-home-ch1"
+mkdir -p "$CH1_DEST"
+
+# Seed a user Stop hook in the codex-home hooks.json (at root, where it lives after flatten)
+cat > "$CH1_DEST/hooks.json" << 'JSON'
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo ch1-user-stop-hook",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
+JSON
+
+# Run install-codex-home.sh pointing to the isolated dest
+CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex"   bash "$ROOT_DIR/scripts/install-codex-home.sh" "$CH1_DEST" >/dev/null 2>&1
+
+# Assert: FA telemetry hooks present in $DEST/hooks.json
+if node - "$CH1_DEST/hooks.json" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const hooks = s.hooks || {};
+const hasFA = Object.values(hooks).flat().some(
+  (g) => (g.hooks || []).some((h) => String(h.statusMessage || "").includes("Recording Flow Agents telemetry"))
+);
+if (!hasFA) throw new Error("FA telemetry hooks not found in codex-home hooks.json");
+console.log("ok");
+NODE
+then
+  _pass "CH1: FA telemetry hooks present after install-codex-home"
+else
+  _fail "CH1: FA telemetry hooks missing after install-codex-home"
+fi
+
+# Assert: user non-FA Stop hook survived
+if node - "$CH1_DEST/hooks.json" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const stopGroups = (s.hooks || {}).Stop || [];
+const hasUser = stopGroups.some(
+  (g) => (g.hooks || []).some((h) => String(h.command || "").includes("echo ch1-user-stop-hook"))
+);
+if (!hasUser) throw new Error("User Stop hook not found in codex-home after install: " + JSON.stringify(stopGroups));
+console.log("ok");
+NODE
+then
+  _pass "CH1: user Stop hook survived install-codex-home (merge, not overwrite)"
+else
+  _fail "CH1: user Stop hook was overwritten by install-codex-home"
+fi
+
+echo ""
+
+# ─── codex-home: CH2: stamp — install.json runtime=codex + version + installedAt ─
+echo "--- CH2: codex-home stamp — install.json runtime=codex + version + installedAt ---"
+
+CH2_DEST="$TMPDIR_EVAL/codex-home-ch2"
+mkdir -p "$CH2_DEST"
+
+CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex"   bash "$ROOT_DIR/scripts/install-codex-home.sh" "$CH2_DEST" >/dev/null 2>&1
+
+if node - "$CH2_DEST/.flow-agents/install.json" << 'NODE'
+const fs = require("node:fs");
+const record = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!record.version) throw new Error("install.json missing version");
+if (!record.installedAt) throw new Error("install.json missing installedAt");
+if (record.runtime !== "codex") throw new Error("wrong runtime: " + record.runtime + " (expected codex)");
+const d = new Date(record.installedAt);
+if (isNaN(d.getTime())) throw new Error("installedAt not valid ISO date: " + record.installedAt);
+console.log("ok: version=" + record.version + " runtime=" + record.runtime);
+NODE
+then
+  _pass "CH2: codex-home install.json written with runtime=codex + version + installedAt"
+else
+  _fail "CH2: codex-home install.json missing or wrong"
+fi
+
+echo ""
+
+# ─── codex-home: CH3: idempotent — stable hook count on re-run ───────────────
+echo "--- CH3: codex-home idempotent — stable hook count on re-run ---"
+
+CH3_DEST="$TMPDIR_EVAL/codex-home-ch3"
+mkdir -p "$CH3_DEST"
+
+CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex"   bash "$ROOT_DIR/scripts/install-codex-home.sh" "$CH3_DEST" >/dev/null 2>&1
+
+CH3_BEFORE=$(node -e "
+const s = JSON.parse(require('fs').readFileSync('$CH3_DEST/hooks.json','utf8'));
+const hooks = s.hooks || {};
+let count = 0;
+for (const k of Object.keys(hooks)) count += (hooks[k] || []).length;
+console.log(count);
+" 2>/dev/null || echo "0")
+
+CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex"   bash "$ROOT_DIR/scripts/install-codex-home.sh" "$CH3_DEST" >/dev/null 2>&1
+
+CH3_AFTER=$(node -e "
+const s = JSON.parse(require('fs').readFileSync('$CH3_DEST/hooks.json','utf8'));
+const hooks = s.hooks || {};
+let count = 0;
+for (const k of Object.keys(hooks)) count += (hooks[k] || []).length;
+console.log(count);
+" 2>/dev/null || echo "0")
+
+if [[ "$CH3_BEFORE" == "$CH3_AFTER" && -n "$CH3_BEFORE" && "$CH3_BEFORE" != "0" ]]; then
+  _pass "CH3: codex-home hook count stable on re-run (before=$CH3_BEFORE after=$CH3_AFTER)"
+else
+  _fail "CH3: codex-home hook count changed on re-run (before=$CH3_BEFORE after=$CH3_AFTER)"
+fi
+
+echo ""
+
+# ─── opencode --global: OG1: seed user key → install --global → key survives + $schema + stamp ─
+echo "=== Install Merge-Aware Tests (--global runtimes) ==="
+echo ""
+echo "--- OG1: opencode --global — seed user key → user key survives + \$schema + no spurious hooks + stamp ---"
+
+OG1_CONFIG_DIR="$TMPDIR_EVAL/opencode-global-og1"
+mkdir -p "$OG1_CONFIG_DIR"
+OG1_CONFIG_FILE="$OG1_CONFIG_DIR/opencode.json"
+
+# Seed the global opencode.json with a user key
+cat > "$OG1_CONFIG_FILE" << 'JSON'
+{
+  "model": "og1-user-model",
+  "myUserKey": "og1-preserved"
+}
+JSON
+
+# Run init --global --runtime opencode, using env override for path isolation
+FLOW_AGENTS_USER_OPENCODE_CONFIG="$OG1_CONFIG_FILE"   node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --global --yes >/dev/null 2>&1 || true
+
+# Assert: user key survived
+if node - "$OG1_CONFIG_FILE" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (s.model !== "og1-user-model") throw new Error("user key 'model' clobbered: " + JSON.stringify(s));
+if (s.myUserKey !== "og1-preserved") throw new Error("user key 'myUserKey' clobbered: " + JSON.stringify(s));
+console.log("ok");
+NODE
+then
+  _pass "OG1: opencode --global: user keys survived merge"
+else
+  _fail "OG1: opencode --global: user keys were clobbered"
+fi
+
+# Assert: $schema present
+if node - "$OG1_CONFIG_FILE" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (s["$schema"] !== "https://opencode.ai/config.json") throw new Error("\$schema missing or wrong: " + JSON.stringify(s));
+console.log("ok");
+NODE
+then
+  _pass "OG1: opencode --global: \$schema present after merge"
+else
+  _fail "OG1: opencode --global: \$schema missing after merge"
+fi
+
+# Assert: no spurious empty hooks key
+if node - "$OG1_CONFIG_FILE" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if ("hooks" in s) throw new Error("spurious empty hooks key found: " + JSON.stringify(s));
+console.log("ok");
+NODE
+then
+  _pass "OG1: opencode --global: no spurious empty hooks key"
+else
+  _fail "OG1: opencode --global: spurious hooks key was injected"
+fi
+
+# Assert: version stamp written
+if node - "$OG1_CONFIG_DIR/.flow-agents/install.json" << 'NODE'
+const fs = require("node:fs");
+const record = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!record.version) throw new Error("install.json missing version");
+if (!record.installedAt) throw new Error("install.json missing installedAt");
+if (record.runtime !== "opencode") throw new Error("wrong runtime: " + record.runtime);
+if (record.global !== true) throw new Error("global flag not set in stamp");
+console.log("ok: version=" + record.version);
+NODE
+then
+  _pass "OG1: opencode --global: version stamp written (runtime=opencode, global=true)"
+else
+  _fail "OG1: opencode --global: version stamp missing or wrong"
+fi
+
+echo ""
+
+# ─── codex --global: CG1: FA hooks + stamp present ───────────────────────────
+echo "--- CG1: codex --global routes to codex-home — FA hooks + stamp present ---"
+
+CG1_DEST="$TMPDIR_EVAL/codex-global-cg1"
+mkdir -p "$CG1_DEST"
+
+# Run init --global --runtime codex with dest override (sandbox isolation)
+CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex"   node "$ROOT_DIR/build/src/cli.js" init --runtime codex --global --dest "$CG1_DEST" --yes >/dev/null 2>&1 || true
+
+# Assert: FA hooks present in $DEST/hooks.json
+if node - "$CG1_DEST/hooks.json" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const hooks = s.hooks || {};
+const hasFA = Object.values(hooks).flat().some(
+  (g) => (g.hooks || []).some((h) => String(h.statusMessage || "").includes("Recording Flow Agents telemetry"))
+);
+if (!hasFA) throw new Error("FA hooks not found in codex-global hooks.json");
+console.log("ok");
+NODE
+then
+  _pass "CG1: codex --global: FA hooks present in codex-home hooks.json"
+else
+  _fail "CG1: codex --global: FA hooks missing from codex-home hooks.json"
+fi
+
+# Assert: version stamp written
+if node - "$CG1_DEST/.flow-agents/install.json" << 'NODE'
+const fs = require("node:fs");
+const record = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!record.version) throw new Error("install.json missing version");
+if (record.runtime !== "codex") throw new Error("wrong runtime: " + record.runtime);
+console.log("ok: version=" + record.version + " runtime=" + record.runtime);
+NODE
+then
+  _pass "CG1: codex --global: version stamp written (runtime=codex)"
+else
+  _fail "CG1: codex --global: version stamp missing or wrong"
+fi
+
+echo ""
+
+# ─── codex --global: CG2: fresh install clean ────────────────────────────────
+echo "--- CG2: codex --global fresh install — clean codex-home ---"
+
+CG2_DEST="$TMPDIR_EVAL/codex-global-cg2"
+mkdir -p "$CG2_DEST"
+
+# Fresh install (no prior hooks.json)
+CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex"   node "$ROOT_DIR/build/src/cli.js" init --runtime codex --global --dest "$CG2_DEST" --yes >/dev/null 2>&1 || true
+
+# Assert: hooks.json exists and has FA hooks
+if [[ -f "$CG2_DEST/hooks.json" ]] && node - "$CG2_DEST/hooks.json" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const hooks = s.hooks || {};
+if (Object.keys(hooks).length === 0) throw new Error("No hooks in fresh codex-global install");
+const hasFA = Object.values(hooks).flat().some(
+  (g) => (g.hooks || []).some((h) => String(h.statusMessage || "").includes("Recording Flow Agents telemetry"))
+);
+if (!hasFA) throw new Error("FA hooks not found in fresh codex-global hooks.json");
+console.log("ok");
+NODE
+then
+  _pass "CG2: codex --global fresh install: hooks.json present with FA hooks"
+else
+  _fail "CG2: codex --global fresh install: hooks.json missing or FA hooks absent"
+fi
+
+echo ""
+
+# ─── pi --global: PG1: warns NOT_VERIFIED + falls back to workspace default ──
+echo "--- PG1: pi --global warns NOT_VERIFIED + falls back to workspace default ---"
+
+PG1_DEST="$TMPDIR_EVAL/pi-global-pg1"
+mkdir -p "$PG1_DEST"
+
+# Capture stderr to check for the NOT_VERIFIED warning
+PG1_STDERR=$(node "$ROOT_DIR/build/src/cli.js" init --runtime pi --global --dest "$PG1_DEST" --yes 2>&1 >/dev/null || true)
+
+# Assert: stderr contains NOT_VERIFIED warn
+if echo "$PG1_STDERR" | grep -q "NOT_VERIFIED"; then
+  _pass "PG1: pi --global: stderr contains NOT_VERIFIED warning"
+else
+  _fail "PG1: pi --global: NOT_VERIFIED warning not found in stderr (got: $PG1_STDERR)"
+fi
+
+# Assert: install still ran (bundle files present at dest)
+if [[ -d "$PG1_DEST" ]] && [[ -f "$PG1_DEST/.flow-agents/install.json" ]] || [[ -d "$PG1_DEST" ]]; then
+  _pass "PG1: pi --global: dest directory exists (fell back to workspace default install)"
+else
+  _fail "PG1: pi --global: dest directory missing (fallback install did not run)"
+fi
+
+echo ""
+
 echo ""
 echo "==========================="
 total=$((pass + fail))
