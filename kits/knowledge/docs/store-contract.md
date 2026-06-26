@@ -167,6 +167,20 @@ The default adapter stores the index as `graph-index.json` at the store root.
 }
 ```
 
+### 5.2 Reindex (recovery)
+
+The graph index is a **derived cache**: each record's own `links` array is the source of truth.
+An adapter MAY expose a `reindex()` recovery operation that rebuilds the index from scratch by
+scanning every record's `links` — the supported way to recover from a lost, hand-edited, or
+drifted `graph-index.json`.
+
+| Operation | Signature | Behavior |
+| --- | --- | --- |
+| `reindex` | `() => { records, links, forwardSources, reverseTargets, changed }` | Rebuild the index authoritatively from records' `links`. Deterministic (records processed in id order). `changed` is true when the rebuilt index differs from the one on disk (compared order-independently), so callers can detect drift. Does **not** mutate records or append to the mutation log — it only repairs the derived cache. |
+
+`reindex()` is optional in the contract (not every adapter maintains a separate index), but any
+adapter that persists a derived index SHOULD provide it as the recovery path.
+
 ---
 
 ## 6. Mutation Operations

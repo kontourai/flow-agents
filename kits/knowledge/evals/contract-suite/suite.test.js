@@ -223,6 +223,60 @@ describe("Knowledge Kit Store Contract Suite", () => {
   // -----------------------------------------------------------------------
   // §3  links + graph index
   // -----------------------------------------------------------------------
+  describe("reindex: rebuild graph index from records (recovery, #106)", () => {
+    let dir, store;
+    before(() => { dir = makeTempDir(); store = makeStore(dir); });
+    after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    test("recovers a lost graph index from records' links", async (t) => {
+      if (typeof store.reindex !== "function") { t.skip("adapter has no reindex()"); return; }
+      const aId = await store.create({ type: "raw", title: "A", body: "a", category: "test", provenance: { agent: "tester" } });
+      const bId = await store.create({
+        type: "compiled", title: "B", body: `see [[${aId}]]`, category: "test",
+        provenance: { agent: "tester", source_ids: [aId] },
+      });
+      // Records are the source of truth; destroy the derived index.
+      fs.rmSync(path.join(dir, "graph-index.json"), { force: true });
+
+      const result = await store.reindex();
+      assert.equal(result.records, 2, "all records scanned");
+      assert.equal(result.changed, true, "rebuild after loss reports drift");
+
+      const { forward } = await store.getLinks(bId);
+      assert.ok(forward.some((l) => l.target_id === aId && l.kind === "related"),
+        "b → a edge recovered into the index");
+      const { reverse } = await store.getLinks(aId);
+      assert.ok(reverse.some((l) => l.source_id === bId), "reverse edge recovered");
+    });
+
+    test("is idempotent on a clean index (no spurious drift)", async (t) => {
+      if (typeof store.reindex !== "function") { t.skip("adapter has no reindex()"); return; }
+      await store.create({ type: "raw", title: "Solo", body: "x", category: "test", provenance: { agent: "tester" } });
+      await store.reindex();                // canonicalize
+      const second = await store.reindex(); // expect a no-op
+      assert.equal(second.changed, false, "reindex of a clean index reports no change");
+    });
+
+    test("detects and repairs a corrupted index", async (t) => {
+      if (typeof store.reindex !== "function") { t.skip("adapter has no reindex()"); return; }
+      const aId = await store.create({ type: "raw", title: "CA", body: "a", category: "test", provenance: { agent: "tester" } });
+      const bId = await store.create({
+        type: "compiled", title: "CB", body: `ref [[${aId}]]`, category: "test",
+        provenance: { agent: "tester", source_ids: [aId] },
+      });
+      // Corrupt: a bogus edge plus the real edge missing.
+      fs.writeFileSync(path.join(dir, "graph-index.json"),
+        JSON.stringify({ schema_version: "1.0", forward: { bogus: [{ target_id: "ghost", kind: "related" }] }, reverse: {} }));
+
+      const result = await store.reindex();
+      assert.equal(result.changed, true, "corruption reported as drift");
+      const { forward } = await store.getLinks(bId);
+      assert.ok(forward.some((l) => l.target_id === aId), "real edge restored");
+      const ghost = await store.getLinks("bogus");
+      assert.equal(ghost.forward.length, 0, "bogus edge purged");
+    });
+  });
+
   describe("links: graph index consistency", () => {
     let dir, store;
     before(() => { dir = makeTempDir(); store = makeStore(dir); });
