@@ -1622,9 +1622,19 @@ function appendLivenessEvent(root: string, evt: AnyObj): void {
   fs.appendFileSync(file, `${JSON.stringify(evt)}\n`);
 }
 function readLivenessEvents(root: string): AnyObj[] {
-  let raw = "";
-  try { raw = fs.readFileSync(livenessStreamFile(root), "utf8"); } catch { return []; }
-  return raw.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { try { return JSON.parse(l) as AnyObj; } catch { return null; } }).filter((x): x is AnyObj => x !== null);
+  // Delegate to the shared pure-CJS helper (scripts/hooks/lib/liveness-read.js).
+  // Using createRequire so the ESM sidecar can load a CJS module without bundling it.
+  try {
+    const _req = createRequire(import.meta.url);
+    const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/liveness-read.js");
+    const helper = _req(helperPath) as { readLivenessEvents: (p: string) => AnyObj[] };
+    return helper.readLivenessEvents(livenessStreamFile(root));
+  } catch {
+    // Fallback: read inline (keeps sidecar self-sufficient if helper is unavailable)
+    let raw = "";
+    try { raw = fs.readFileSync(livenessStreamFile(root), "utf8"); } catch { return []; }
+    return raw.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { try { return JSON.parse(l) as AnyObj; } catch { return null; } }).filter((x): x is AnyObj => x !== null);
+  }
 }
 function livenessLabel(status: string): string {
   if (status === "verified") return "held";

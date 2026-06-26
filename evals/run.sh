@@ -185,6 +185,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_workflow_steering_hook.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_session_resume_roundtrip.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_hook_influence_cases.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_flow_agents_statusline.sh" || result=1
