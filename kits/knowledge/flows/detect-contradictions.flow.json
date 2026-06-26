@@ -1,0 +1,44 @@
+{
+  "id": "knowledge.detect-contradictions",
+  "version": "1.0",
+  "steps": [
+    { "id": "collect", "next": "compare" },
+    { "id": "compare", "next": "flag-gate" },
+    { "id": "flag-gate", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "gates": {
+    "collect-gate": {
+      "step": "collect",
+      "expects": [
+        {
+          "id": "comparison-set-collected",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "The comparison set has been collected per category in scope: compiled records are listed by category (retired records are already excluded — retired is terminal, so there is nothing to compare there). Only the categories with a configured threshold (or a default) are audited; a category with no configured policy is skipped (contradiction detection is opt-in). The comparison is scoped to similar records within a category via the similarity adapter — contradictions only matter between records about the same thing. This is a read-only collection — no record is mutated.",
+          "bundle_claim": {
+            "claimType": "knowledge.detect-contradictions.collect",
+            "subjectType": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "flag-gate": {
+      "step": "flag-gate",
+      "expects": [
+        {
+          "id": "contradiction-flags-cite-both-ids",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Every contradiction flag cites its evidence: BOTH conflicting record ids (recordIdA + recordIdB), their shared category, and the reason returned by the contradiction fn that fired. A pair is flagged only when (1) the similarity adapter deems the two records similar (same subject) AND (2) the pluggable contradiction fn reports a conflict between their assertions. The contradiction fn is configurable per call; the default heuristic detects opposing polarity assertions over a shared subject. This step NEVER mutates a record — it only proposes. The operator routes each flag through an existing gated flow (knowledge.retire to drop the stale assertion, or a fresh capture/compile/consolidate to reconcile).",
+          "bundle_claim": {
+            "claimType": "knowledge.detect-contradictions.flags",
+            "subjectType": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    }
+  }
+}

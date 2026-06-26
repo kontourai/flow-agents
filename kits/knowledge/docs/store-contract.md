@@ -905,3 +905,132 @@ interface CategoryFinding {
 `surveyed` counts the records examined, `categories` counts the distinct category prefixes in the
 tree, and `findings` lists the sprawl. Gate telemetry is emitted at `survey-gate` and `propose-gate`
 (`knowledge.canonicalize-category`).
+
+## Addendum F — Glossary Sync (Hygiene #3, #106)
+
+### F.1 Keeping the Glossary in Sync with Canonical Docs
+
+`knowledge.glossary-sync` is a *maintenance* flow that keeps the **glossary** — the working set of
+`concept` records — in sync with the **canonical docs** that define those terms. The Kit can file
+concepts but, until this slice, had no way to (a) promote a term that a canonical doc defines but no
+concept yet captures (a **gap**), or (b) notice when a concept's definition has **drifted** from its
+canonical source (**out-of-date**).
+
+The flow surveys a **configurable** glossary source list (the issue's "glossary source list") and is
+**opt-in**: an empty/absent source list does nothing. It is **read-only by default** — it returns a
+classification plan and mutates nothing; `apply: true` enacts the plan through the **existing**
+concept-record ops (no forked mutation path).
+
+### F.2 `glossarySync` Flow-Runner Operation
+
+`KnowledgeFlowRunner.glossarySync(options)` (also module-level `glossarySync({ store, ... })`):
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `sources` | `Array<string \| { category, prefix? }>` | `[]` | The configurable glossary source list: each entry is a canonical-doc record id, or a category selector. An unknown id is rejected (the list is evidence). Empty → opt-in no-op. |
+| `termExtractor` | `(doc) => Array<{ term, definition }>` | `defaultTermExtractor` | Pluggable extractor; the default parses glossary-style lines (`**Term** — def`, `Term: def`, list items). |
+| `conceptCategory` | `string` | source doc's category | Category for matched/proposed concepts. |
+| `apply` | `boolean` | `false` | `false` → read-only plan. `true` → enact via store ops. |
+
+**Classification.** Each extracted term is matched against existing `concept` records by **normalized
+term** (case/space-insensitive title) within the resolved category:
+
+- **gap** — no concept captures the term.
+- **outdated** — a concept exists but its body has **drifted** from the canonical definition.
+  Drift is **whitespace-insensitive** (cosmetic reflow is not drift; substantive change is).
+- **current** — the concept matches the canonical definition.
+
+### F.3 Consume-Never-Fork Enactment
+
+In `apply` mode the plan is enacted through the existing gated ops, with the **canonical doc as the
+proposer** (it is the evidence for the definition) — no new mutation path is forked:
+
+- **gap** → `store.create(concept)` then `store.propose` + `store.apply` (doc → concept).
+- **outdated** → `store.propose` + `store.apply` on the existing concept (`new_body` = canonical).
+
+`glossarySync` returns `{ sourcesAudited, entries, gaps, outdated, current, applied, telemetryEvents }`.
+Every classified entry cites its evidence — the source doc id + title, the term, and the canonical
+definition (outdated entries also cite the drifted `currentBody`). Gate telemetry is emitted at
+`collect-gate`, `diff-gate`, and `propose-gate` (`knowledge.glossary-sync`).
+
+## Addendum G — Contradiction Detection (Hygiene #2, #106)
+
+### G.1 Read-Only Maintenance Layer
+
+`knowledge.detect-contradictions` is the second of the Knowledge Kit's *maintenance* flows. Like
+`audit-freshness` (Addendum D) it is a **read-only** survey: it NEVER mutates a record. It returns
+*flags* identifying a conflicting pair; the operator routes each through an existing gated flow —
+`knowledge.retire` to drop the stale assertion, or a fresh `capture`/`compile`/`consolidate` to
+reconcile. The audit forks no new mutation path.
+
+Contradiction is domain-sensitive (what counts as a conflict in `radar` differs from `decisions`),
+so the audit is **optional and configurable**: it audits only the categories supplied in
+`categories` (or, when omitted, every category present in the compiled set), and it judges conflicts
+with a **pluggable contradiction fn**.
+
+### G.2 `detectContradictions` Flow-Runner Operation
+
+`KnowledgeFlowRunner.detectContradictions(options)` (also the module-level
+`detectContradictions({ store, ... })`) compares **compiled** records **within a category** and
+flags conflicting assertions. Comparison is two-staged and reuses the Kit's existing pluggable
+adapters (consume-never-fork):
+
+1. **Scope** with the `SimilarityDetector` (the same interface `synthesize` uses) — only records the
+   detector deems similar (about the same thing) are candidates. The vector similarity adapter drops
+   straight in.
+2. **Judge** with the `ContradictionDetector` — for each similar pair, decide whether the assertions
+   conflict.
+
+**Options:**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `categories` | `string[]` | all present | Categories to audit. Opt-in scoping; omit to audit every category in the compiled set. |
+| `similarityDetector` | `fn` | `defaultSimilarityDetector` | Pluggable `(record, candidates, store) => string[]` — scopes which pairs are compared. |
+| `contradictionDetector` | `fn` | `defaultContradictionDetector` | Pluggable `(recordA, recordB, store?) => null \| { reason }` — judges whether a pair conflicts. May be async. |
+| `agent` | `string` | runner agent | Agent recorded on the audit telemetry. |
+
+**Comparison scope:** retired records are excluded (the default `listByType` query drops them, and
+`retired` is terminal); records are grouped by exact category, so cross-category pairs are never
+formed; each unordered pair is compared at most once.
+
+### G.3 `ContradictionDetector` Interface and the Default
+
+```ts
+type ContradictionDetector = (
+  recordA: Record,
+  recordB: Record,
+  store?: KnowledgeStoreAdapter
+) => (null | { reason: string }) | Promise<null | { reason: string }>;
+```
+
+The two records passed in are already known to be *about the same thing* (the caller scopes by
+category + similarity). The detector's only job is to decide whether their assertions conflict.
+Return `null` for no conflict, or `{ reason }` carrying a human-readable explanation.
+
+The default (`defaultContradictionDetector`) is a deliberately conservative **opposing-polarity
+heuristic**: it splits each body into clauses, tags each affirmative or negative by the presence of
+a negation, and reports a conflict when one record AFFIRMS a clause whose salient content tokens
+contain those of a clause the other NEGATES (token-containment, not exact equality, so trailing
+detail on one side does not hide the conflict). It is intentionally replaceable — an embedding/NLI
+model is the obvious upgrade, injected the same way the vector similarity adapter is.
+
+### G.4 Flag Evidence Guarantee
+
+Every flag cites **both** conflicting record ids — a flag can never be emitted without them:
+
+```ts
+interface ContradictionFlag {
+  recordIdA: string;   // canonically ordered: recordIdA < recordIdB
+  recordIdB: string;
+  titleA: string;
+  titleB: string;
+  category: string;    // the shared category
+  reason: string;      // why the contradiction fn fired
+}
+```
+
+`detectContradictions` returns `{ audited, compared, flags, telemetryEvents }` where `audited`
+counts the in-scope compiled records, `compared` counts the similar pairs the contradiction fn
+judged, and `flags` lists the conflicting pairs. Gate telemetry is emitted at `collect-gate` and
+`flag-gate` (`knowledge.detect-contradictions`).
