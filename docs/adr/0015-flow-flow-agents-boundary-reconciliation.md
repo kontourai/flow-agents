@@ -5,7 +5,7 @@ title: "ADR 0015: Flow / Flow Agents Boundary Reconciliation"
 # ADR 0015: Flow / Flow Agents Boundary Reconciliation
 
 **Date:** 2026-06-25
-**Status:** Accepted. Tier 0 (this ADR / issue #175) shipped.
+**Status:** Accepted. Tier 0 (#175) shipped; Tiers 1 (#176) & 2 (#177) closed-by-evaluation (not engine forks — see Reassessment); #178/#179 are deferred cross-package work.
 **Parent issue:** #174 (umbrella)
 
 ---
@@ -79,13 +79,17 @@ validation is skipped.
 
 The broader boundary reconciliation (issue #174) is phased:
 
-| Tier | Issue | Scope |
-| --- | --- | --- |
-| Tier 0 | #175 (this PR) | consume surface's `validateTrustBundle`; delete bespoke validator |
-| Tier 1 | #176 | gate-expectation engine: consume flow's gate evaluation kernel |
-| Tier 2 | #177 | run-state kernel: consume flow's run-state transition semantics |
-| promotes | #178 | promote durable boundary doc / flow-kit interop contract |
-| contracts | #179 | formal cross-package contracts / boundary tests |
+| Tier | Issue | Scope | Outcome |
+| --- | --- | --- | --- |
+| Tier 0 | #175 | consume surface's `validateTrustBundle`; delete bespoke validator | **DONE** — the one genuine fork removed |
+| Tier 1 | #176 | gate-expectation engine: consume flow's gate evaluation kernel | **CLOSED by evaluation** — the gate already consumes Surface (`deriveClaimStatus`) for re-derivation; residual logic is product-specific gate policy. Scoping it found+fixed a real anti-gaming regression (PR #196). |
+| Tier 2 | #177 | run-state kernel: consume flow's run-state transition semantics | **CLOSED by evaluation** — `state.json` is a product-specific lifecycle (11-phase builder enum, 13 statuses, no FlowDefinition), not a fork of flow's definition-driven run engine. Adoption = pure churn, zero engine logic removed. |
+| promotes | #178 | promote liveness / InquiryRecord / run-hook upstream | **Deferred — cross-package** (requires `flow`/`surface` source changes; not doable from this repo). |
+| contracts | #179 | extract generic vocabulary to flow contracts | **Deferred — cross-package.** |
+
+### Reassessment (post Tiers 1–2)
+
+Evaluating Tiers 1 and 2 with the same rigor as Tier 0 showed the original audit **overstated the "drift."** flow-agents already consumes the canonical engines where it matters — Surface for trust computation (`deriveClaimStatus`/`validateTrustBundle`), flow for kit-container validation (`validateKitContainer`). What looked like "parallel forks" (the gate-expectation logic, the run-state model) are **legitimate product-specific layers**: builder-kit gate policy and builder lifecycle, which flow has no opinion about and which adopting flow's definition-driven primitives would only reshape (churn), not simplify. The one real duplication (the trust-bundle validator, Tier 0) is removed. The remaining tiers (#178/#179) are upstream `flow`/`surface` work. From flow-agents' side, the boundary program is therefore essentially **resolved** — with a removed duplication, a restored anti-gaming property, and an honest, evidence-based boundary picture as the net result.
 
 ## Consequences
 
