@@ -1,0 +1,44 @@
+{
+  "id": "knowledge.audit-freshness",
+  "version": "1.0",
+  "steps": [
+    { "id": "collect", "next": "measure" },
+    { "id": "measure", "next": "flag-gate" },
+    { "id": "flag-gate", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "gates": {
+    "collect-gate": {
+      "step": "collect",
+      "expects": [
+        {
+          "id": "working-set-collected",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "The working set to audit has been collected: the configured record types are listed (retired records are already excluded — retired is terminal, so there is nothing to flag there). The per-category staleness thresholds and any default threshold are surfaced for the measure step. This is a read-only collection — no record is mutated.",
+          "bundle_claim": {
+            "claimType": "knowledge.audit-freshness.collect",
+            "subjectType": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "flag-gate": {
+      "step": "flag-gate",
+      "expects": [
+        {
+          "id": "freshness-flags-cite-evidence",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Every freshness flag cites its evidence: the record's last-mutation timestamp (the most recent of updated_at and the latest mutation_log entry), the staleness threshold that fired (matched category key + threshold in days), and the computed age in days. A flag is emitted only when the record's age strictly exceeds its resolved threshold; categories with no configured threshold (and no default) are skipped (auditing is opt-in). Each flag proposes an action (archive or refresh) for the operator to route through the existing gated flows (knowledge.retire to archive; a fresh capture/compile to refresh). This step NEVER mutates a record — it only proposes.",
+          "bundle_claim": {
+            "claimType": "knowledge.audit-freshness.flags",
+            "subjectType": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    }
+  }
+}
