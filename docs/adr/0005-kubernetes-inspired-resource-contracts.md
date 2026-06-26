@@ -10,6 +10,8 @@ Date: 2026-05-27
 
 Accepted
 
+> **Migration directive (ADR 0015 / 0016, 2026-06-26):** this contract's "existing sidecars need migration plans" guidance has since been made a concrete, accepted directive — the bespoke `workflow-sidecar` FSM is a parallel reimplementation of this Resource Contract and **retires** via ADR 0015's phased migration (`state.json → WorkflowRun.status`, etc.). The Resource Contract is the run/state model; the FSM is not a legitimate parallel layer. See ADR 0016 for the unified three-boundary model.
+
 ## Context
 
 Kontour products need durable records that humans, agents, runtime adapters, provider integrations, CLI tools, CI systems, evals, and future control planes can all inspect without relying on hidden chat context. Kubernetes, Tekton, and Argo have converged on versioned resource shapes with metadata, desired state, observed status, and status conditions; that shape is familiar, toolable, and a good fit for workflow state. OpenTelemetry GenAI conventions are also emerging for agent observability, so Kontour products should not invent isolated telemetry concepts where compatible conventions already exist.

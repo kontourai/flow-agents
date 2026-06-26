@@ -8,6 +8,8 @@ title: "ADR 0014: Flow Agents core vs domain kits — the generic/kit boundary"
 **Status:** Proposed (decision owner: Brian Anderson). Defines the boundary; code moves are sequenced, not immediate.
 Revised after boundary review: `workflow-sidecar` confirmed **core** (the lifecycle engine, with only a few developer-leaning *defaults* to make kit-extensible); Builder Kit reframed as a **first-class pulled-out kit**; `knowledge`/`release-evidence` cited as already validating the substrate.
 
+> **Superseded in part by ADR 0016 (2026-06-26).** The finding that the *bespoke `workflow-sidecar` FSM* is the legitimate core engine is superseded. The core does own a lifecycle **engine**, but per ADR 0016 + 0015 + #183 that engine must be the **FlowDefinition / Resource-Contract-driven** one — the bespoke FSM is a parallel reimplementation of ADR 0005 that retires via ADR 0015's migration. This ADR's boundary *principle* (the agent-blind "dividing test", core vs domain-kit) stands; only the "keep the FSM as core / tweak defaults" conclusion is replaced.
+
 ---
 
 ## Context
