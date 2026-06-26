@@ -126,6 +126,60 @@ function resolveAction(category, actions, defaultAction) {
 }
 
 // ---------------------------------------------------------------------------
+// Category-canonicalization helpers  (knowledge.canonicalize-category — #106)
+// ---------------------------------------------------------------------------
+
+/**
+ * The set of distinct dot-prefixes a category contributes, from its own full
+ * path down to (but NOT including) the empty root. `radar.signals.weak` yields
+ * `["radar", "radar.signals", "radar.signals.weak"]`. Used to build the
+ * category tree (which prefixes are *nodes*) and to find which prefixes hold a
+ * record directly vs. only via descendants.
+ *
+ * @param {string} category
+ * @returns {string[]}
+ */
+function categoryPrefixes(category) {
+  const segments = (category || "").split(".").filter(Boolean);
+  const out = [];
+  for (let i = 1; i <= segments.length; i += 1) {
+    out.push(segments.slice(0, i).join("."));
+  }
+  return out;
+}
+
+/**
+ * The immediate parent prefix of a category, or "" for a top-level category.
+ * `radar.signals.weak` → `radar.signals`; `radar` → "".
+ *
+ * @param {string} category
+ * @returns {string}
+ */
+function parentPrefix(category) {
+  const segments = (category || "").split(".").filter(Boolean);
+  if (segments.length <= 1) return "";
+  return segments.slice(0, -1).join(".");
+}
+
+/**
+ * Does a record count as "implemented-but-active" sprawl? A record is flagged
+ * when its status is still `"active"` yet it carries one of the operator-
+ * supplied "implemented" marker tags (e.g. `implemented`, `shipped`, `done`) —
+ * it should have transitioned to `implemented`/`retired` via `retire` but never
+ * did, so it lingers in the working set. Marker matching is case-insensitive.
+ *
+ * @param {object} record
+ * @param {Set<string>} markerSet  lower-cased implemented-marker tags
+ * @returns {boolean}
+ */
+function isImplementedButActive(record, markerSet) {
+  if (markerSet.size === 0) return false;
+  if ((record.status || "active") !== "active") return false;
+  const tags = Array.isArray(record.tags) ? record.tags : [];
+  return tags.some((t) => markerSet.has(String(t).toLowerCase()));
+}
+
+// ---------------------------------------------------------------------------
 // Classification heuristics
 // ---------------------------------------------------------------------------
 
@@ -1686,6 +1740,293 @@ export class KnowledgeFlowRunner {
 
 
   // -------------------------------------------------------------------------
+  // knowledge.canonicalize-category flow  (hygiene #4 — #106)
+  //   Steps: survey → assess → propose-gate → done
+  //   Gate: propose-gate — every category-sprawl finding cites its evidence
+  //         (the metric that fired + the offending category/record ids). No
+  //         finding is emitted without it.
+  //
+  // This is a READ-ONLY audit. It NEVER mutates a record. It surveys the
+  // category hierarchy of the working set and flags three kinds of sprawl the
+  // dogfooding surfaced (#106):
+  //   - orphan-prefix      — an intermediate prefix node that holds NO record
+  //                          directly yet has descendants, OR a prefix whose
+  //                          whole subtree is a single leaf record (a deep path
+  //                          carrying one record adds depth without branching
+  //                          value). Proposes flattening to the parent.
+  //   - too-many-leaves    — a parent prefix with more direct child leaf
+  //                          categories than the configured fan-out budget.
+  //                          Proposes regrouping under fewer leaves.
+  //   - implemented-active — a record still status:"active" but carrying an
+  //                          operator-supplied "implemented" marker tag; it
+  //                          should have transitioned via retire but lingers in
+  //                          the working set. Proposes retire.
+  //
+  // Each finding PROPOSES (flatten / regroup / retire); the operator routes it
+  // through the existing gated flows — knowledge.retire to retire, an `update`
+  // (recategorize) to flatten/regroup. The audit forks no new mutation path.
+  // Sprawl is domain-sensitive, so the checks are OPTIONAL and CONFIGURABLE: a
+  // disabled check (or an empty marker list) simply contributes no findings.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Audit the category hierarchy of the working set for sprawl and propose
+   * flattening / regrouping / retirement. Read-only: mutates nothing.
+   *
+   * Findings are of three kinds (each independently toggleable):
+   *   - `"orphan-prefix"`: an intermediate prefix node carrying no record
+   *     directly while it has descendants, or a prefix whose entire subtree is
+   *     exactly one leaf record. `proposedAction: "flatten"`.
+   *   - `"too-many-leaves"`: a parent prefix whose direct child leaf-category
+   *     count exceeds `maxLeavesPerParent`. `proposedAction: "regroup"`.
+   *   - `"implemented-active"`: a record still `status:"active"` carrying an
+   *     `implementedMarkers` tag. `proposedAction: "retire"`.
+   *
+   * @param {object} [options]
+   *   - maxLeavesPerParent: number   — fan-out budget; a parent with more direct
+   *                                     child leaf categories is flagged. Omit /
+   *                                     null to disable the leaf-count check.
+   *   - implementedMarkers: string[] — tag markers that mean "implemented"
+   *                                     (case-insensitive). Empty/omitted →
+   *                                     the implemented-active check is disabled.
+   *   - checkOrphanPrefixes: boolean — enable the orphan-prefix check (default true).
+   *   - types: string[]              — record types to survey
+   *                                     (default ["raw","compiled","concept","snapshot"]).
+   *   - agent: string                — override agent name.
+   * @returns {Promise<{
+   *   surveyed: number,
+   *   categories: number,
+   *   findings: Array<{
+   *     kind: "orphan-prefix"|"too-many-leaves"|"implemented-active",
+   *     category: string,
+   *     recordIds: string[],
+   *     metric: string,
+   *     evidence: object,
+   *     proposedAction: "flatten"|"regroup"|"retire"
+   *   }>,
+   *   telemetryEvents: object[]
+   * }>}
+   */
+  async canonicalizeCategory(options = {}) {
+    const events = [];
+    const agent = options.agent || this._agent;
+
+    const checkOrphanPrefixes = options.checkOrphanPrefixes !== false;
+    const maxLeavesPerParent =
+      typeof options.maxLeavesPerParent === "number"
+        ? options.maxLeavesPerParent
+        : null;
+    if (maxLeavesPerParent !== null && maxLeavesPerParent < 1) {
+      throw missingEvidenceError(
+        `canonicalize-category: maxLeavesPerParent must be >= 1; got: ${maxLeavesPerParent}`
+      );
+    }
+    const markerSet = new Set(
+      (Array.isArray(options.implementedMarkers) ? options.implementedMarkers : [])
+        .map((m) => String(m).toLowerCase())
+    );
+    const types = Array.isArray(options.types) && options.types.length
+      ? options.types
+      : ["raw", "compiled", "concept", "snapshot"];
+
+    // ── Step: survey ───────────────────────────────────────────────────────
+    // Gather the working set (default queries already exclude retired records —
+    // retired is terminal, so it is not category sprawl to flatten).
+    const surveyGateIn = this._telemetry.emitGate("knowledge.canonicalize-category", "survey-gate", {
+      flow: "knowledge.canonicalize-category",
+      gate: "survey-gate",
+      types,
+      check_orphan_prefixes: checkOrphanPrefixes,
+      max_leaves_per_parent: maxLeavesPerParent,
+      implemented_markers: [...markerSet],
+    });
+    events.push(surveyGateIn);
+
+    const seen = new Set();
+    const records = [];
+    for (const type of types) {
+      const recs = await this._store.listByType(type);
+      for (const r of recs) {
+        if (seen.has(r.id)) continue;
+        seen.add(r.id);
+        records.push(r);
+      }
+    }
+
+    // Build the category tree.
+    //   directIds[prefix]   — ids of records whose category IS exactly prefix.
+    //   subtreeIds[prefix]  — ids of records at prefix OR any descendant.
+    //   childLeaves[parent] — direct child leaf categories (a leaf = a category
+    //                         that is itself a record-bearing category with no
+    //                         deeper record-bearing descendant).
+    const directIds = new Map();
+    const subtreeIds = new Map();
+    const allCategories = new Set();
+    for (const r of records) {
+      const cat = r.category || "";
+      if (!directIds.has(cat)) directIds.set(cat, []);
+      directIds.get(cat).push(r.id);
+      for (const prefix of categoryPrefixes(cat)) {
+        allCategories.add(prefix);
+        if (!subtreeIds.has(prefix)) subtreeIds.set(prefix, []);
+        subtreeIds.get(prefix).push(r.id);
+      }
+    }
+
+    const surveyGateOut = this._telemetry.emitGateResult("knowledge.canonicalize-category", "survey-gate", {
+      surveyed: records.length,
+      categories: allCategories.size,
+    });
+    events.push(surveyGateOut);
+
+    // ── Step: assess + propose-gate ────────────────────────────────────────
+    const proposeGateIn = this._telemetry.emitGate("knowledge.canonicalize-category", "propose-gate", {
+      flow: "knowledge.canonicalize-category",
+      gate: "propose-gate",
+      surveyed: records.length,
+      categories: allCategories.size,
+    });
+    events.push(proposeGateIn);
+
+    const findings = [];
+
+    // (1) orphan-prefix: an intermediate prefix node with no direct record but
+    //     descendants, OR a prefix whose entire subtree is a single leaf record.
+    if (checkOrphanPrefixes) {
+      for (const prefix of allCategories) {
+        const direct = directIds.get(prefix) || [];
+        const subtree = subtreeIds.get(prefix) || [];
+        const hasDescendantRecord = subtree.length > direct.length;
+        // Only consider non-leaf (intermediate) prefixes for the "empty node"
+        // case — a prefix that has descendants but holds nothing itself. When
+        // the whole subtree is a SINGLE record, the deeper single-record-deep-path
+        // finding (emitted at the record-bearing leaf) already covers the whole
+        // chain — don't also report every empty ancestor of that lone record.
+        if (direct.length === 0 && hasDescendantRecord && subtree.length > 1) {
+          findings.push({
+            kind: "orphan-prefix",
+            category: prefix,
+            recordIds: [...subtree],
+            metric: "empty-intermediate-node",
+            evidence: {
+              directRecordCount: 0,
+              subtreeRecordCount: subtree.length,
+              parent: parentPrefix(prefix),
+              reason:
+                "Prefix holds no record directly; it only nests descendants. Flatten its subtree up to the parent.",
+            },
+            proposedAction: "flatten",
+          });
+        } else if (subtree.length === 1 && categoryPrefixes(prefix).length > 1) {
+          // A deep path (>1 segment) whose whole subtree is one record adds
+          // depth without branching value — flatten toward the parent. Only
+          // report this at the deepest such prefix that still owns the record
+          // directly (avoid double-reporting every ancestor of a lone record).
+          if (direct.length === 1) {
+            findings.push({
+              kind: "orphan-prefix",
+              category: prefix,
+              recordIds: [...subtree],
+              metric: "single-record-deep-path",
+              evidence: {
+                directRecordCount: 1,
+                subtreeRecordCount: 1,
+                depth: categoryPrefixes(prefix).length,
+                parent: parentPrefix(prefix),
+                reason:
+                  "A multi-segment category carries exactly one record and no siblings in its subtree — depth without branching value. Consider flattening to the parent.",
+              },
+              proposedAction: "flatten",
+            });
+          }
+        }
+      }
+    }
+
+    // (2) too-many-leaves: a parent prefix whose direct child leaf-category
+    //     count exceeds the fan-out budget. A "direct child leaf category" is a
+    //     record-bearing category exactly one segment deeper than the parent
+    //     with no record-bearing descendant of its own.
+    if (maxLeavesPerParent !== null) {
+      const childLeaves = new Map(); // parent → Set<childCategory>
+      for (const cat of allCategories) {
+        const direct = directIds.get(cat) || [];
+        const subtree = subtreeIds.get(cat) || [];
+        const isLeaf = direct.length > 0 && subtree.length === direct.length;
+        if (!isLeaf) continue;
+        const parent = parentPrefix(cat);
+        if (!parent) continue; // top-level leaves have no parent prefix to regroup under
+        if (!childLeaves.has(parent)) childLeaves.set(parent, new Set());
+        childLeaves.get(parent).add(cat);
+      }
+      for (const [parent, leaves] of childLeaves) {
+        if (leaves.size > maxLeavesPerParent) {
+          const leafList = [...leaves].sort();
+          const recordIds = [];
+          for (const leaf of leafList) {
+            for (const id of directIds.get(leaf) || []) recordIds.push(id);
+          }
+          findings.push({
+            kind: "too-many-leaves",
+            category: parent,
+            recordIds,
+            metric: "leaf-fan-out",
+            evidence: {
+              leafCount: leaves.size,
+              maxLeavesPerParent,
+              leaves: leafList,
+              reason:
+                "Parent prefix fans out to more direct leaf categories than the configured budget — regroup the leaves under fewer categories.",
+            },
+            proposedAction: "regroup",
+          });
+        }
+      }
+    }
+
+    // (3) implemented-active: a still-active record carrying an implemented marker.
+    if (markerSet.size > 0) {
+      for (const r of records) {
+        if (isImplementedButActive(r, markerSet)) {
+          const tags = Array.isArray(r.tags) ? r.tags : [];
+          const matched = tags.filter((t) => markerSet.has(String(t).toLowerCase()));
+          findings.push({
+            kind: "implemented-active",
+            category: r.category || "",
+            recordIds: [r.id],
+            metric: "implemented-marker-on-active",
+            evidence: {
+              recordId: r.id,
+              title: r.title,
+              status: r.status || "active",
+              matchedMarkers: matched,
+              reason:
+                "Record is still status:'active' but is tagged implemented — it should have transitioned via retire but lingers in the working set.",
+            },
+            proposedAction: "retire",
+          });
+        }
+      }
+    }
+
+    const proposeGateOut = this._telemetry.emitGateResult("knowledge.canonicalize-category", "propose-gate", {
+      surveyed: records.length,
+      categories: allCategories.size,
+      findings: findings.length,
+      agent,
+    });
+    events.push(proposeGateOut);
+
+    return {
+      surveyed: records.length,
+      categories: allCategories.size,
+      findings,
+      telemetryEvents: events,
+    };
+  }
+
+
+  // -------------------------------------------------------------------------
   // knowledge.compile — entity extraction step (R2)
   //
   // Called after compile() to extract person mentions from the compiled record,
@@ -2091,6 +2432,19 @@ export async function auditFreshness(
 ) {
   const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
   return runner.auditFreshness(auditOpts);
+}
+
+/**
+ * Module-level category-canonicalization audit: creates an ephemeral runner
+ * using the provided store. Read-only — mutates nothing. (#106 hygiene #4)
+ *
+ * @param {object} options  (merged into canonicalizeCategory options + runner options)
+ */
+export async function canonicalizeCategory(
+  { store, workspace, agent, sessionId, ...auditOpts } = {}
+) {
+  const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
+  return runner.canonicalizeCategory(auditOpts);
 }
 
 export default KnowledgeFlowRunner;
