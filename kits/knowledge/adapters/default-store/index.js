@@ -297,6 +297,16 @@ function removeLinksFromGraph(graph, sourceId) {
   delete graph.forward[sourceId];
 }
 
+// Order-independent canonical form of a graph index, for drift comparison.
+function canonicalGraph(graph) {
+  const norm = (obj) =>
+    Object.keys(obj || {}).sort().reduce((acc, k) => {
+      acc[k] = (obj[k] || []).map((e) => JSON.stringify(e)).sort();
+      return acc;
+    }, {});
+  return JSON.stringify({ forward: norm(graph.forward), reverse: norm(graph.reverse) });
+}
+
 // ---------------------------------------------------------------------------
 // Validation helpers
 // ---------------------------------------------------------------------------
@@ -880,6 +890,34 @@ export class DefaultKnowledgeStore {
         r.type === type &&
         (includeRetired || (r.status || "active") !== "retired")
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // reindex — rebuild graph-index.json from records' links (recovery path)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Rebuild the graph index authoritatively from the records' own `links`.
+   * Records are the source of truth; the index is a derived cache. Use this to
+   * recover from a lost, hand-edited, or drifted `graph-index.json` (issue #106).
+   * @returns {Promise<{records:number, links:number, forwardSources:number, reverseTargets:number, changed:boolean}>}
+   */
+  async reindex() {
+    const records = this._allRecords().sort((a, b) => a.id.localeCompare(b.id));
+    const rebuilt = emptyGraph();
+    for (const record of records) {
+      addLinksToGraph(rebuilt, record.id, Array.isArray(record.links) ? record.links : []);
+    }
+    const links = Object.values(rebuilt.forward).reduce((n, arr) => n + arr.length, 0);
+    const changed = canonicalGraph(loadGraph(this._graphPath)) !== canonicalGraph(rebuilt);
+    saveGraph(this._graphPath, rebuilt);
+    return {
+      records: records.length,
+      links,
+      forwardSources: Object.keys(rebuilt.forward).length,
+      reverseTargets: Object.keys(rebuilt.reverse).length,
+      changed,
+    };
   }
 
   // -------------------------------------------------------------------------
