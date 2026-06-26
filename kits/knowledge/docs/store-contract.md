@@ -663,6 +663,37 @@ Retired records MUST remain reachable from:
 There is no deletion of records. Physical purge (if ever needed) is a separate, future policy
 hook not defined in this version.
 
+### B.7 Proposal-Artifact Lifecycle (close-on-apply)
+
+A flow that gates a change through `propose` → `apply` mints a transient **proposal artifact**:
+a `raw` record (e.g. the `knowledge.retire` flow's `"Retirement proposal: <title>"` record) whose
+sole purpose is to carry the `"proposes"` link and the proposal text to the target.
+
+Once the proposal has been **applied**, that artifact is *spent*. It MUST NOT be left as an
+`active` record:
+
+- A lingering active artifact pollutes the default working set (`listByType` / `listByCategory`)
+  and is re-surfaced by hygiene sweeps.
+- Hand-retiring it spawns a double-prefixed twin
+  (`"Retirement proposal: Retirement proposal: …"`), because the retire flow mints a *new*
+  proposal artifact for the artifact itself (#106).
+
+**Rule.** On `apply` (and only on `apply`), the flow auto-closes the spent proposal artifact by
+**retiring it via the existing `retire` op** (§B.4) — `active → retired`. There is no separate
+"close" mutation; the close reuses `retire`. This close is:
+
+- **safe** — it touches only the named artifact, never the apply target;
+- **idempotent** — a no-op if the artifact is already retired/implemented (the §B.2 transition
+  table makes `retired` terminal, so a re-close is rejected and treated as a no-op);
+- **non-fatal** — the proposal has already been applied; a failure to close the artifact does not
+  fail the flow (it is surfaced on the result instead).
+
+**`reject` is unchanged.** A rejected proposal is *not* spent — the artifact remains `active` so the
+proposal can be revisited. Closing happens only on the apply path.
+
+Do not hand-retire proposal artifacts: applying the proposal closes them. The retire lifecycle
+expects the artifact to exist transiently and to be auto-closed on apply.
+
 ---
 
 ## Addendum C — Person Record Type (Entity Cards)
