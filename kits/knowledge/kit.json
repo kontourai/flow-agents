@@ -34,6 +34,11 @@
       "id": "knowledge.retire",
       "path": "flows/retire.flow.json",
       "description": "Retire implemented or obsolete records from the working set via gated lifecycle: identify → propose-retirement → evidence-gate → apply-or-reject. Evidence required: retirement rationale + implementedByRef (when targeting 'implemented' status) or supersededByRef (optional, for 'retired'). Rejection leaves record status byte-identical. Retired records remain fully queryable with provenance via includeRetired flag."
+    },
+    {
+      "id": "knowledge.audit-freshness",
+      "path": "flows/audit-freshness.flow.json",
+      "description": "Hygiene audit (optional, configurable): flag records past per-category staleness thresholds and propose archive/refresh for each. Read-only: collect → measure → flag-gate. Thresholds are per-category (dot-hierarchy longest-prefix, with optional default); a category with no threshold is skipped (opt-in). Each flag cites last-mutation (max of updated_at and latest mutation_log entry) + the threshold that fired + computed age. Forks no mutation path — the operator routes each flag through knowledge.retire (archive) or a fresh capture/compile (refresh)."
     }
   ],
   "docs": [
@@ -55,7 +60,7 @@
     {
       "id": "knowledge.flow-runner",
       "path": "adapters/flow-runner/index.js",
-      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links; synthesize(conceptId | topicSelector, options) → concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) → decision snapshot consolidation with supersede-not-delete; retire(recordId, options) → gated status lifecycle transition (active→implemented→retired) with working-set exclusion. Emits canonical telemetry events at gate points."
+      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links; synthesize(conceptId | topicSelector, options) → concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) → decision snapshot consolidation with supersede-not-delete; retire(recordId, options) → gated status lifecycle transition (active→implemented→retired) with working-set exclusion; auditFreshness(options) → read-only hygiene audit returning flags (last-mutation + threshold cited) proposing archive/refresh for records past per-category staleness thresholds. Emits canonical telemetry events at gate points."
     },
     {
       "id": "knowledge.similarity-vector",
@@ -103,6 +108,11 @@
       "id": "knowledge.entity-cards-suite",
       "path": "evals/entities/suite.test.js",
       "description": "Eval cases for person/entity cards (issue #48): AC1-AC4 — entity extraction from Attendees lines, exact-match resolution, possible-duplicate detection, merge via propose/apply/reject (union aliases+backlinks, supersede duplicate), Obsidian people/ folder rendering, and extended contract suite (person type validity) on both adapters."
+    },
+    {
+      "id": "knowledge.audit-freshness-suite",
+      "path": "evals/audit-freshness/suite.test.js",
+      "description": "Eval cases for audit-freshness (#106 hygiene #1): per-category threshold resolution (dot-hierarchy longest-prefix + default + opt-in skip); each flag cites last-mutation + threshold + age; boundary (age == threshold not flagged, age > threshold flagged); last-mutation derived from max(updated_at, latest mutation_log entry); retired records excluded; read-only invariant (no record mutated, no flag without evidence); proposed-action resolution; gate telemetry."
     }
   ],
   "skills": [

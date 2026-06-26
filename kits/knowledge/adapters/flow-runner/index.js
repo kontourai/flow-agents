@@ -53,6 +53,79 @@ function missingEvidenceError(message) {
 }
 
 // ---------------------------------------------------------------------------
+// Freshness-audit helpers  (knowledge.audit-freshness — #106)
+// ---------------------------------------------------------------------------
+
+/**
+ * The authoritative "last mutation" instant for a record: the most recent of
+ * the record's `updated_at` and its latest `mutation_log` entry `at`. Both are
+ * refreshed by every mutating op (store contract §1.1 / §4.2); taking the later
+ * of the two is robust even if an adapter lags one behind the other. Falls back
+ * to `created_at` when neither is present.
+ *
+ * @param {object} record
+ * @returns {string} ISO-8601 timestamp
+ */
+function lastMutationOf(record) {
+  const candidates = [];
+  if (record.updated_at) candidates.push(record.updated_at);
+  const log = Array.isArray(record.mutation_log) ? record.mutation_log : [];
+  for (const entry of log) {
+    if (entry && entry.at) candidates.push(entry.at);
+  }
+  if (candidates.length === 0) return record.created_at || record.updated_at || "";
+  // Lexicographic max works for ISO-8601 UTC timestamps.
+  return candidates.reduce((max, t) => (t > max ? t : max));
+}
+
+/**
+ * Resolve the staleness threshold for a category using dot-hierarchy
+ * longest-prefix matching: a record in `radar.signals.weak` prefers a
+ * `radar.signals` threshold over a `radar` one, then falls back to
+ * `defaultThresholdDays`. Returns `null` when no threshold applies (the
+ * category is then skipped — auditing is opt-in).
+ *
+ * @param {string} category
+ * @param {Record<string, number>} thresholds
+ * @param {number|null} defaultThresholdDays
+ * @returns {{ thresholdDays: number, matchedKey: string } | null}
+ */
+function resolveThreshold(category, thresholds, defaultThresholdDays) {
+  const segments = (category || "").split(".");
+  for (let i = segments.length; i > 0; i -= 1) {
+    const key = segments.slice(0, i).join(".");
+    if (Object.prototype.hasOwnProperty.call(thresholds, key)) {
+      return { thresholdDays: thresholds[key], matchedKey: key };
+    }
+  }
+  if (defaultThresholdDays !== null && defaultThresholdDays !== undefined) {
+    return { thresholdDays: defaultThresholdDays, matchedKey: "*" };
+  }
+  return null;
+}
+
+/**
+ * Resolve the proposed action ("archive" | "refresh") for a flagged record's
+ * category, using the same dot-hierarchy longest-prefix matching, falling back
+ * to `defaultAction`.
+ *
+ * @param {string} category
+ * @param {Record<string, "archive"|"refresh">} actions
+ * @param {"archive"|"refresh"} defaultAction
+ * @returns {"archive"|"refresh"}
+ */
+function resolveAction(category, actions, defaultAction) {
+  const segments = (category || "").split(".");
+  for (let i = segments.length; i > 0; i -= 1) {
+    const key = segments.slice(0, i).join(".");
+    if (Object.prototype.hasOwnProperty.call(actions, key)) {
+      return actions[key];
+    }
+  }
+  return defaultAction;
+}
+
+// ---------------------------------------------------------------------------
 // Classification heuristics
 // ---------------------------------------------------------------------------
 
@@ -1449,6 +1522,170 @@ export class KnowledgeFlowRunner {
 
 
   // -------------------------------------------------------------------------
+  // knowledge.audit-freshness flow  (hygiene #1 — #106)
+  //   Steps: collect → measure → flag-gate → done
+  //   Gate: flag-gate — every flag cites its evidence (last-mutation + the
+  //         threshold that fired). No flag is emitted without both.
+  //
+  // This is a READ-ONLY audit. It NEVER mutates a record. It surveys the
+  // working set, measures each record's age against a per-category staleness
+  // threshold, and returns flags proposing an action (archive / refresh). The
+  // operator routes each flag through the existing gated flows (knowledge.retire
+  // to archive; a fresh capture/compile to refresh) — the audit forks no new
+  // mutation path. Staleness is domain-sensitive (radar ≠ decisions), so the
+  // thresholds are OPTIONAL and CONFIGURABLE per category; a category with no
+  // threshold (and no default) is simply not audited (opt-in).
+  // -------------------------------------------------------------------------
+
+  /**
+   * Audit the working set for records past their per-category staleness
+   * threshold and propose archive/refresh for each. Read-only: mutates nothing.
+   *
+   * Threshold resolution is dot-hierarchy longest-prefix: a record in
+   * `radar.signals.weak` matches a `radar.signals` threshold before a `radar`
+   * one, falling back to `defaultThresholdDays` if neither is configured. A
+   * category that resolves to no threshold is skipped (opt-in auditing).
+   *
+   * "Last mutation" is the most recent of the record's `updated_at` and the
+   * latest `mutation_log` entry `at` — both are refreshed by every mutating op
+   * (store contract §1.1 / §4.2), so the later of the two is authoritative even
+   * if an adapter lags one.
+   *
+   * @param {object} [options]
+   *   - thresholds: { [category: string]: number }  — per-category staleness in days
+   *   - defaultThresholdDays: number                — fallback for unmatched categories (default: none → skip)
+   *   - actions: { [category: string]: "archive"|"refresh" } — per-category proposed action override
+   *   - defaultAction: "archive"|"refresh"          — fallback proposed action (default "refresh")
+   *   - types: string[]                             — record types to audit (default ["raw","compiled","concept","snapshot"])
+   *   - now: string|number|Date                     — reference "now" for age (default: current time; injectable for tests)
+   *   - agent: string                               — override agent name
+   * @returns {Promise<{
+   *   audited: number,
+   *   skipped: number,
+   *   flags: Array<{
+   *     recordId: string, title: string, type: string, category: string,
+   *     status: string, lastMutationAt: string, ageDays: number,
+   *     thresholdDays: number, matchedThresholdKey: string,
+   *     proposedAction: "archive"|"refresh"
+   *   }>,
+   *   telemetryEvents: object[]
+   * }>}
+   */
+  async auditFreshness(options = {}) {
+    const events = [];
+    const agent = options.agent || this._agent;
+
+    const thresholds = options.thresholds || {};
+    const defaultThresholdDays =
+      typeof options.defaultThresholdDays === "number"
+        ? options.defaultThresholdDays
+        : null;
+    const actions = options.actions || {};
+    const defaultAction = options.defaultAction || "refresh";
+    if (defaultAction !== "archive" && defaultAction !== "refresh") {
+      throw missingEvidenceError(
+        `audit-freshness: defaultAction must be "archive" or "refresh"; got: ${defaultAction}`
+      );
+    }
+    const types = Array.isArray(options.types) && options.types.length
+      ? options.types
+      : ["raw", "compiled", "concept", "snapshot"];
+
+    const nowMs = options.now !== undefined ? new Date(options.now).getTime() : Date.now();
+    if (Number.isNaN(nowMs)) {
+      throw missingEvidenceError(`audit-freshness: invalid "now" reference: ${options.now}`);
+    }
+
+    // ── Step: collect ──────────────────────────────────────────────────────
+    // Gather the working set (default queries already exclude retired records —
+    // retired is terminal, so there is nothing to flag there).
+    const collectGateIn = this._telemetry.emitGate("knowledge.audit-freshness", "collect-gate", {
+      flow: "knowledge.audit-freshness",
+      gate: "collect-gate",
+      types,
+      threshold_categories: Object.keys(thresholds),
+      default_threshold_days: defaultThresholdDays,
+    });
+    events.push(collectGateIn);
+
+    const seen = new Set();
+    const records = [];
+    for (const type of types) {
+      const recs = await this._store.listByType(type);
+      for (const r of recs) {
+        if (seen.has(r.id)) continue;
+        seen.add(r.id);
+        records.push(r);
+      }
+    }
+
+    const collectGateOut = this._telemetry.emitGateResult("knowledge.audit-freshness", "collect-gate", {
+      collected: records.length,
+    });
+    events.push(collectGateOut);
+
+    // ── Step: measure + flag-gate ──────────────────────────────────────────
+    const flagGateIn = this._telemetry.emitGate("knowledge.audit-freshness", "flag-gate", {
+      flow: "knowledge.audit-freshness",
+      gate: "flag-gate",
+      collected: records.length,
+    });
+    events.push(flagGateIn);
+
+    const flags = [];
+    let skipped = 0;
+    let audited = 0;
+
+    for (const record of records) {
+      const resolved = resolveThreshold(record.category, thresholds, defaultThresholdDays);
+      if (resolved === null) {
+        // No threshold configured for this category (and no default) → opt out.
+        skipped += 1;
+        continue;
+      }
+      audited += 1;
+
+      const lastMutationAt = lastMutationOf(record);
+      const lastMs = new Date(lastMutationAt).getTime();
+      // ageDays floored to whole days; an unparseable timestamp is treated as 0.
+      const ageDays = Number.isNaN(lastMs)
+        ? 0
+        : Math.floor((nowMs - lastMs) / 86_400_000);
+
+      // Flag only when STRICTLY past the threshold. Evidence (last-mutation +
+      // the threshold key/value that fired) is carried on every flag — the
+      // flag-gate requires both, so a flag can never be emitted without them.
+      if (ageDays > resolved.thresholdDays) {
+        const proposedAction =
+          resolveAction(record.category, actions, defaultAction);
+        flags.push({
+          recordId: record.id,
+          title: record.title,
+          type: record.type,
+          category: record.category,
+          status: record.status || "active",
+          lastMutationAt,
+          ageDays,
+          thresholdDays: resolved.thresholdDays,
+          matchedThresholdKey: resolved.matchedKey,
+          proposedAction,
+        });
+      }
+    }
+
+    const flagGateOut = this._telemetry.emitGateResult("knowledge.audit-freshness", "flag-gate", {
+      audited,
+      skipped,
+      flagged: flags.length,
+      agent,
+    });
+    events.push(flagGateOut);
+
+    return { audited, skipped, flags, telemetryEvents: events };
+  }
+
+
+  // -------------------------------------------------------------------------
   // knowledge.compile — entity extraction step (R2)
   //
   // Called after compile() to extract person mentions from the compiled record,
@@ -1841,6 +2078,19 @@ export async function retire(
 ) {
   const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
   return runner.retire(recordId, retireOpts);
+}
+
+/**
+ * Module-level audit-freshness: creates an ephemeral runner using the provided
+ * store. Read-only — mutates nothing.
+ *
+ * @param {object} options  (merged into auditFreshness options + runner options)
+ */
+export async function auditFreshness(
+  { store, workspace, agent, sessionId, ...auditOpts } = {}
+) {
+  const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
+  return runner.auditFreshness(auditOpts);
 }
 
 export default KnowledgeFlowRunner;

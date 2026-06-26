@@ -765,3 +765,73 @@ Card merge uses the existing `propose → apply/reject` gate:
 - **apply**: unions body, adds `alias:<duplicate title>` tag to primary, unions `appears-in` links, calls
   `store.supersede(primaryId, [duplicateId])` to archive the duplicate (supersede-not-delete invariant).
 - **reject**: both cards remain byte-identical.
+
+## Addendum D — Freshness Audit (Hygiene #1, #106)
+
+### D.1 Read-Only Maintenance Layer
+
+`knowledge.audit-freshness` is the first of the Knowledge Kit's *maintenance* flows. The Kit is
+strong at filing (ingest → compile → synthesize → consolidate → retire) but, until this slice, had
+no way to surface records that have gone stale. The audit is a **read-only** survey: it NEVER
+mutates a record. It returns *flags* proposing an action; the operator routes each flag through an
+existing gated flow — `knowledge.retire` to archive, or a fresh `capture`/`compile` to refresh. The
+audit forks no new mutation path.
+
+Staleness is domain-sensitive (a `radar` signal goes stale in days; a `decisions` record may stay
+canonical for a year), so the audit is **optional and configurable** — thresholds are supplied per
+call. A category with no configured threshold (and no default) is simply skipped: auditing is
+**opt-in**.
+
+### D.2 `auditFreshness` Flow-Runner Operation
+
+`KnowledgeFlowRunner.auditFreshness(options)` (also the module-level `auditFreshness({ store, ... })`):
+
+**Options:**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `thresholds` | `{ [category]: number }` | `{}` | Per-category staleness threshold in **days**. |
+| `defaultThresholdDays` | `number` | none | Fallback for categories not matched by `thresholds`. When absent, unmatched categories are skipped. |
+| `actions` | `{ [category]: "archive"\|"refresh" }` | `{}` | Per-category override of the proposed action. |
+| `defaultAction` | `"archive"\|"refresh"` | `"refresh"` | Proposed action when no per-category action matches. |
+| `types` | `string[]` | `["raw","compiled","concept","snapshot"]` | Record types to audit. |
+| `now` | `string\|number\|Date` | current time | Reference "now" for the age computation (injectable for tests). |
+| `agent` | `string` | runner agent | Agent recorded on the audit telemetry. |
+
+**Threshold / action resolution** is dot-hierarchy **longest-prefix**: a record in
+`radar.signals.weak` prefers a `radar.signals` entry over a `radar` one, then falls back to the
+default. The matched key is surfaced on each flag as `matchedThresholdKey` (`"*"` denotes the
+default).
+
+**Last mutation** is the most recent of the record's `updated_at` and its latest `mutation_log`
+entry `at` — both are refreshed by every mutating op (§1.1 / §4.2), so the later of the two is
+authoritative even if an adapter lags one. It falls back to `created_at` when neither is present.
+
+**Flagging:** a record is flagged only when its age in **whole days** *strictly exceeds* its
+resolved threshold (`ageDays > thresholdDays`). Retired records are never flagged — the default
+`listByType` query excludes them, and `retired` is terminal.
+
+### D.3 Flag Evidence Guarantee
+
+Every flag carries the evidence that produced it — a flag can never be emitted without citing both
+the last-mutation instant and the threshold that fired:
+
+```ts
+interface FreshnessFlag {
+  recordId: string;
+  title: string;
+  type: string;
+  category: string;
+  status: string;
+  lastMutationAt: string;       // ISO-8601 — the cited last mutation
+  ageDays: number;              // whole days since lastMutationAt
+  thresholdDays: number;        // the threshold that fired
+  matchedThresholdKey: string;  // category key the threshold matched ("*" = default)
+  proposedAction: "archive" | "refresh";
+}
+```
+
+`auditFreshness` returns `{ audited, skipped, flags, telemetryEvents }` where `audited` counts
+records that had a resolvable threshold, `skipped` counts opt-out categories, and `flags` lists the
+stale records. Gate telemetry is emitted at `collect-gate` and `flag-gate`
+(`knowledge.audit-freshness`).
