@@ -126,6 +126,82 @@ function resolveAction(category, actions, defaultAction) {
 }
 
 // ---------------------------------------------------------------------------
+// Glossary-sync helpers  (knowledge.glossary-sync — #106)
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize a glossary term for comparison/matching: trimmed, collapsed inner
+ * whitespace, lower-cased. Concept lookup is case/space-insensitive on the term
+ * so "API Gateway", "api  gateway", and "Api Gateway" all resolve to the same
+ * concept — terms are identity, not prose.
+ *
+ * @param {string} term
+ * @returns {string}
+ */
+function normalizeTerm(term) {
+  return String(term || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/**
+ * Compare a canonical definition against an existing concept body for the
+ * purpose of staleness detection. Whitespace-insensitive (leading/trailing +
+ * collapsed runs + trailing newline) so that cosmetic reflow is NOT treated as
+ * drift; any substantive difference is. Returns true when they are equivalent.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function definitionsEquivalent(a, b) {
+  const norm = (s) => String(s || "").trim().replace(/\s+/g, " ");
+  return norm(a) === norm(b);
+}
+
+/**
+ * Default term extractor: parse glossary-style entries out of a canonical doc's
+ * body. Pluggable — a caller may pass their own `termExtractor(doc) => entries`
+ * (e.g. to read a structured front-matter glossary). The default recognizes the
+ * two most common hand-written glossary line shapes, one entry per line:
+ *
+ *   - **Term** — definition        (bold term, em/en-dash or hyphen separator)
+ *   - Term: definition             (leading term, colon separator)
+ *   - - **Term**: definition       (markdown list item, either separator)
+ *
+ * A term must be 1–80 chars and a definition non-empty; lines that don't match
+ * are ignored (prose between entries is not a term). Duplicate terms within one
+ * doc keep the FIRST definition (canonical-doc order is authoritative).
+ *
+ * @param {object} doc  a canonical-source record ({ id, title, body, category, ... })
+ * @returns {Array<{ term: string, definition: string }>}
+ */
+function defaultTermExtractor(doc) {
+  const body = String(doc?.body || "");
+  const out = [];
+  const seen = new Set();
+  // Separator: em-dash, en-dash, or hyphen surrounded by spaces, OR a colon.
+  const SEP = "(?:\\s+[—–-]\\s+|:\\s+)";
+  // Bold term: **Term** SEP definition   (optionally a leading list marker)
+  const boldRe = new RegExp(`^\\s*(?:[-*]\\s+)?\\*\\*(.+?)\\*\\*${SEP}(.+)$`);
+  // Plain term: Term: definition   (colon only, to avoid eating prose dashes)
+  const plainRe = /^\s*(?:[-*]\s+)?([^:\n*][^:\n]{0,79}?):\s+(.+)$/;
+  for (const rawLine of body.split("\n")) {
+    const line = rawLine.replace(/\s+$/, "");
+    if (!line.trim()) continue;
+    let m = boldRe.exec(line);
+    if (!m) m = plainRe.exec(line);
+    if (!m) continue;
+    const term = m[1].trim();
+    const definition = m[2].trim();
+    if (!term || term.length > 80 || !definition) continue;
+    const key = normalizeTerm(term);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ term, definition });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Classification heuristics
 // ---------------------------------------------------------------------------
 
@@ -1686,6 +1762,276 @@ export class KnowledgeFlowRunner {
 
 
   // -------------------------------------------------------------------------
+  // knowledge.glossary-sync flow  (hygiene #3 — #106)
+  //   Steps: collect → extract → diff-gate → propose-gate → done
+  //   Gate: diff-gate    — every entry is classified (gap / outdated / current)
+  //                        and cites its evidence: the canonical source doc,
+  //                        the extracted term + definition, and (for outdated)
+  //                        the existing concept's drifted body. No entry is
+  //                        emitted without the source it came from.
+  //         propose-gate — when apply mode is on, every gap/outdated entry is
+  //                        routed through the EXISTING concept-record
+  //                        propose→apply ops (create → propose → apply), with
+  //                        the canonical doc as the proposer (it is the
+  //                        evidence). Forks no mutation path.
+  //
+  // Keeps the glossary (the working set of `concept` records) in sync with the
+  // canonical docs that DEFINE those terms. The Kit can file concepts but had no
+  // way to (a) promote a term that a canonical doc defines but no concept yet
+  // captures (a GAP), or (b) notice when a concept's definition has DRIFTED from
+  // its canonical source (OUT-OF-DATE). This flow surveys a CONFIGURABLE list of
+  // canonical source docs (the "glossary source list" — opt-in; empty list does
+  // nothing), extracts their term→definition entries with a PLUGGABLE extractor,
+  // diffs them against existing concept records, and surfaces a plan.
+  //
+  // Read-only by DEFAULT (returns the classification + a proposal plan, mutating
+  // nothing). With `apply: true` it consumes the existing store ops to enact the
+  // plan — never a forked mutation path:
+  //   - gap      → store.create(concept) then propose+apply from the source doc
+  //   - outdated → store.propose + store.apply on the existing concept
+  //   - current  → no-op
+  // -------------------------------------------------------------------------
+
+  /**
+   * Sync the glossary (concept records) against a configurable list of canonical
+   * source docs. Read-only by default; `apply: true` enacts the plan via the
+   * existing concept-record propose→apply ops (consume-never-fork).
+   *
+   * Each canonical doc is parsed into term→definition entries (pluggable
+   * `termExtractor`); each entry is classified against the existing concepts:
+   *   - "gap":      no concept captures the term  → propose a canonical definition
+   *   - "outdated": a concept exists but its body has drifted from the canonical
+   *                 definition → propose the update
+   *   - "current":  the concept already matches the canonical definition → no-op
+   *
+   * Matching is by normalized term (case/space-insensitive) within the resolved
+   * concept category. Drift is whitespace-insensitive: cosmetic reflow is not
+   * flagged, substantive change is.
+   *
+   * @param {object} [options]
+   *   - sources: Array<string | { category: string, prefix?: boolean }>
+   *       The CONFIGURABLE glossary source list. Each entry is either a record id
+   *       (a single canonical doc) or a category selector ({ category, prefix }).
+   *       Empty/absent → nothing is synced (opt-in).
+   *   - termExtractor: (doc) => Array<{ term, definition }>
+   *       Pluggable extractor; default parses glossary-style lines (defaultTermExtractor).
+   *   - conceptCategory: string
+   *       Category for matched/proposed concepts. Default: the source doc's own category.
+   *   - apply: boolean (default false)
+   *       false → read-only (returns the plan). true → enact via store ops.
+   *   - now / agent / session_id: passthrough provenance/telemetry.
+   * @returns {Promise<{
+   *   sourcesAudited: number,
+   *   entries: number,
+   *   gaps: GlossaryEntry[],
+   *   outdated: GlossaryEntry[],
+   *   current: GlossaryEntry[],
+   *   applied: Array<{ term: string, conceptId: string, action: "create"|"update" }>,
+   *   telemetryEvents: object[]
+   * }>}
+   *   where GlossaryEntry = { term, definition, sourceDocId, sourceDocTitle,
+   *     category, classification, conceptId?: string, currentBody?: string }
+   */
+  async glossarySync(options = {}) {
+    const events = [];
+    const agent = options.agent || this._agent;
+    const sources = Array.isArray(options.sources) ? options.sources : [];
+    const extractor =
+      typeof options.termExtractor === "function"
+        ? options.termExtractor
+        : defaultTermExtractor;
+    const applyMode = options.apply === true;
+
+    // ── Step: collect ────────────────────────────────────────────────────────
+    // Resolve the configurable glossary source list to concrete canonical docs.
+    // A source is either a record id or a { category, prefix } selector. Missing
+    // ids are surfaced as an error (the source list is evidence — a typo must not
+    // pass silently). Auditing is opt-in: an empty list collects nothing.
+    const collectGateIn = this._telemetry.emitGate("knowledge.glossary-sync", "collect-gate", {
+      flow: "knowledge.glossary-sync",
+      gate: "collect-gate",
+      source_count: sources.length,
+      apply: applyMode,
+    });
+    events.push(collectGateIn);
+
+    const docs = [];
+    const seenDocs = new Set();
+    for (const source of sources) {
+      let resolved = [];
+      if (typeof source === "string") {
+        const doc = await this._store.get(source);
+        if (!doc) {
+          throw missingEvidenceError(
+            `glossary-sync: source doc not found: ${source}`
+          );
+        }
+        resolved = [doc];
+      } else if (source && typeof source === "object" && source.category) {
+        resolved = await this._store.listByCategory(source.category, {
+          prefix: source.prefix === true,
+        });
+      } else {
+        throw missingEvidenceError(
+          "glossary-sync: each source must be a record id or a { category } selector"
+        );
+      }
+      for (const doc of resolved) {
+        if (seenDocs.has(doc.id)) continue;
+        seenDocs.add(doc.id);
+        docs.push(doc);
+      }
+    }
+
+    const collectGateOut = this._telemetry.emitGateResult("knowledge.glossary-sync", "collect-gate", {
+      sources_resolved: docs.length,
+    });
+    events.push(collectGateOut);
+
+    // ── Step: extract + diff-gate ────────────────────────────────────────────
+    // Extract term→definition entries from each canonical doc and classify each
+    // against the existing concept working set. Every classification cites the
+    // source doc it came from — the diff-gate requires that evidence.
+    const diffGateIn = this._telemetry.emitGate("knowledge.glossary-sync", "diff-gate", {
+      flow: "knowledge.glossary-sync",
+      gate: "diff-gate",
+      sources_resolved: docs.length,
+    });
+    events.push(diffGateIn);
+
+    const allConcepts = await this._store.listByType("concept");
+
+    const gaps = [];
+    const outdated = [];
+    const current = [];
+    let entryCount = 0;
+
+    for (const doc of docs) {
+      const extracted = extractor(doc) || [];
+      for (const { term, definition } of extracted) {
+        if (!term || !definition) continue;
+        entryCount += 1;
+        const category = options.conceptCategory || doc.category;
+        const normTerm = normalizeTerm(term);
+        // A concept "captures" the term when its normalized title matches the
+        // term within the resolved category (concepts are the glossary).
+        const match = allConcepts.find(
+          (c) =>
+            c.category === category && normalizeTerm(c.title) === normTerm
+        );
+
+        const base = {
+          term,
+          definition,
+          sourceDocId: doc.id,
+          sourceDocTitle: doc.title,
+          category,
+        };
+
+        if (!match) {
+          gaps.push({ ...base, classification: "gap" });
+        } else if (!definitionsEquivalent(match.body, definition)) {
+          outdated.push({
+            ...base,
+            classification: "outdated",
+            conceptId: match.id,
+            currentBody: match.body,
+          });
+        } else {
+          current.push({
+            ...base,
+            classification: "current",
+            conceptId: match.id,
+          });
+        }
+      }
+    }
+
+    const diffGateOut = this._telemetry.emitGateResult("knowledge.glossary-sync", "diff-gate", {
+      entries: entryCount,
+      gaps: gaps.length,
+      outdated: outdated.length,
+      current: current.length,
+    });
+    events.push(diffGateOut);
+
+    // ── Step: propose-gate ───────────────────────────────────────────────────
+    // Read-only by default: return the plan, mutate nothing. With apply=true,
+    // enact each gap/outdated entry through the EXISTING concept-record ops —
+    // the canonical source doc is the proposer (it is the evidence for the
+    // definition), so no new mutation path is forked.
+    const proposeGateIn = this._telemetry.emitGate("knowledge.glossary-sync", "propose-gate", {
+      flow: "knowledge.glossary-sync",
+      gate: "propose-gate",
+      apply: applyMode,
+      gaps: gaps.length,
+      outdated: outdated.length,
+    });
+    events.push(proposeGateIn);
+
+    const applied = [];
+    if (applyMode) {
+      for (const entry of gaps) {
+        // Create the concept (definition = canonical body), then record the
+        // canonical doc's authorship through propose→apply so the lineage is the
+        // same gated path every other concept mutation uses.
+        const conceptId = await this._store.create({
+          type: "concept",
+          title: entry.term,
+          body: entry.definition,
+          category: entry.category,
+          provenance: {
+            agent,
+            ...(options.session_id ? { session_id: options.session_id } : {}),
+            source_ids: [entry.sourceDocId],
+            note: `glossary-sync: canonical definition from ${entry.sourceDocId}`,
+          },
+        });
+        await this._store.propose(conceptId, entry.sourceDocId, {
+          agent,
+          proposal: `Canonical definition for "${entry.term}" from ${entry.sourceDocTitle}.`,
+        });
+        await this._store.apply(conceptId, entry.sourceDocId, {
+          agent,
+          new_body: entry.definition,
+          rationale: `glossary-sync: adopt canonical definition for "${entry.term}" from ${entry.sourceDocId}.`,
+        });
+        applied.push({ term: entry.term, conceptId, action: "create" });
+      }
+      for (const entry of outdated) {
+        await this._store.propose(entry.conceptId, entry.sourceDocId, {
+          agent,
+          proposal: `Update "${entry.term}" to the canonical definition from ${entry.sourceDocTitle}.`,
+        });
+        await this._store.apply(entry.conceptId, entry.sourceDocId, {
+          agent,
+          new_body: entry.definition,
+          rationale: `glossary-sync: refresh "${entry.term}" from canonical source ${entry.sourceDocId} (definition had drifted).`,
+        });
+        applied.push({ term: entry.term, conceptId: entry.conceptId, action: "update" });
+      }
+    }
+
+    const proposeGateOut = this._telemetry.emitGateResult("knowledge.glossary-sync", "propose-gate", {
+      applied: applied.length,
+      apply: applyMode,
+      agent,
+    });
+    events.push(proposeGateOut);
+
+    return {
+      sourcesAudited: docs.length,
+      entries: entryCount,
+      gaps,
+      outdated,
+      current,
+      applied,
+      telemetryEvents: events,
+    };
+  }
+
+
+  // -------------------------------------------------------------------------
   // knowledge.compile — entity extraction step (R2)
   //
   // Called after compile() to extract person mentions from the compiled record,
@@ -2091,6 +2437,20 @@ export async function auditFreshness(
 ) {
   const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
   return runner.auditFreshness(auditOpts);
+}
+
+/**
+ * Module-level glossary-sync: creates an ephemeral runner using the provided
+ * store. Read-only by default; pass `apply: true` to enact the plan via the
+ * existing concept-record propose→apply ops.
+ *
+ * @param {object} options  (merged into glossarySync options + runner options)
+ */
+export async function glossarySync(
+  { store, workspace, agent, sessionId, ...syncOpts } = {}
+) {
+  const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
+  return runner.glossarySync(syncOpts);
 }
 
 export default KnowledgeFlowRunner;

@@ -835,3 +835,50 @@ interface FreshnessFlag {
 records that had a resolvable threshold, `skipped` counts opt-out categories, and `flags` lists the
 stale records. Gate telemetry is emitted at `collect-gate` and `flag-gate`
 (`knowledge.audit-freshness`).
+
+## Addendum E — Glossary Sync (Hygiene #3, #106)
+
+### E.1 Keeping the Glossary in Sync with Canonical Docs
+
+`knowledge.glossary-sync` is a *maintenance* flow that keeps the **glossary** — the working set of
+`concept` records — in sync with the **canonical docs** that define those terms. The Kit can file
+concepts but, until this slice, had no way to (a) promote a term that a canonical doc defines but no
+concept yet captures (a **gap**), or (b) notice when a concept's definition has **drifted** from its
+canonical source (**out-of-date**).
+
+The flow surveys a **configurable** glossary source list (the issue's "glossary source list") and is
+**opt-in**: an empty/absent source list does nothing. It is **read-only by default** — it returns a
+classification plan and mutates nothing; `apply: true` enacts the plan through the **existing**
+concept-record ops (no forked mutation path).
+
+### E.2 `glossarySync` Flow-Runner Operation
+
+`KnowledgeFlowRunner.glossarySync(options)` (also module-level `glossarySync({ store, ... })`):
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `sources` | `Array<string \| { category, prefix? }>` | `[]` | The configurable glossary source list: each entry is a canonical-doc record id, or a category selector. An unknown id is rejected (the list is evidence). Empty → opt-in no-op. |
+| `termExtractor` | `(doc) => Array<{ term, definition }>` | `defaultTermExtractor` | Pluggable extractor; the default parses glossary-style lines (`**Term** — def`, `Term: def`, list items). |
+| `conceptCategory` | `string` | source doc's category | Category for matched/proposed concepts. |
+| `apply` | `boolean` | `false` | `false` → read-only plan. `true` → enact via store ops. |
+
+**Classification.** Each extracted term is matched against existing `concept` records by **normalized
+term** (case/space-insensitive title) within the resolved category:
+
+- **gap** — no concept captures the term.
+- **outdated** — a concept exists but its body has **drifted** from the canonical definition.
+  Drift is **whitespace-insensitive** (cosmetic reflow is not drift; substantive change is).
+- **current** — the concept matches the canonical definition.
+
+### E.3 Consume-Never-Fork Enactment
+
+In `apply` mode the plan is enacted through the existing gated ops, with the **canonical doc as the
+proposer** (it is the evidence for the definition) — no new mutation path is forked:
+
+- **gap** → `store.create(concept)` then `store.propose` + `store.apply` (doc → concept).
+- **outdated** → `store.propose` + `store.apply` on the existing concept (`new_body` = canonical).
+
+`glossarySync` returns `{ sourcesAudited, entries, gaps, outdated, current, applied, telemetryEvents }`.
+Every classified entry cites its evidence — the source doc id + title, the term, and the canonical
+definition (outdated entries also cite the drifted `currentBody`). Gate telemetry is emitted at
+`collect-gate`, `diff-gate`, and `propose-gate` (`knowledge.glossary-sync`).

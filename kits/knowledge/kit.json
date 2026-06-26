@@ -39,6 +39,11 @@
       "id": "knowledge.audit-freshness",
       "path": "flows/audit-freshness.flow.json",
       "description": "Hygiene audit (optional, configurable): flag records past per-category staleness thresholds and propose archive/refresh for each. Read-only: collect → measure → flag-gate. Thresholds are per-category (dot-hierarchy longest-prefix, with optional default); a category with no threshold is skipped (opt-in). Each flag cites last-mutation (max of updated_at and latest mutation_log entry) + the threshold that fired + computed age. Forks no mutation path — the operator routes each flag through knowledge.retire (archive) or a fresh capture/compile (refresh)."
+    },
+    {
+      "id": "knowledge.glossary-sync",
+      "path": "flows/glossary-sync.flow.json",
+      "description": "Hygiene sync (optional, configurable): keep the glossary (concept records) in sync with the canonical docs that define those terms. Read-only by default: collect → extract → diff-gate → propose-gate. Surveys a configurable glossary source list (record ids and/or category selectors — opt-in), extracts term→definition entries via a pluggable extractor, and classifies each against existing concepts: gap (no concept) → propose a canonical definition; outdated (concept body drifted from the canonical, whitespace-insensitive) → propose the update; current → no-op. Each entry cites its source doc. With apply=true it enacts the plan through the existing concept-record ops (create → propose → apply for gaps; propose → apply for drift) with the canonical doc as proposer — forks no mutation path."
     }
   ],
   "docs": [
@@ -60,7 +65,7 @@
     {
       "id": "knowledge.flow-runner",
       "path": "adapters/flow-runner/index.js",
-      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links; synthesize(conceptId | topicSelector, options) → concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) → decision snapshot consolidation with supersede-not-delete; retire(recordId, options) → gated status lifecycle transition (active→implemented→retired) with working-set exclusion; auditFreshness(options) → read-only hygiene audit returning flags (last-mutation + threshold cited) proposing archive/refresh for records past per-category staleness thresholds. Emits canonical telemetry events at gate points."
+      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links; synthesize(conceptId | topicSelector, options) → concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) → decision snapshot consolidation with supersede-not-delete; retire(recordId, options) → gated status lifecycle transition (active→implemented→retired) with working-set exclusion; auditFreshness(options) → read-only hygiene audit returning flags (last-mutation + threshold cited) proposing archive/refresh for records past per-category staleness thresholds; glossarySync(options) → read-only-by-default glossary hygiene that extracts term→definition entries from a configurable list of canonical docs and classifies each against existing concepts (gap/outdated/current), optionally enacting gaps+drift through the existing concept-record create→propose→apply ops. Emits canonical telemetry events at gate points."
     },
     {
       "id": "knowledge.similarity-vector",
@@ -113,6 +118,11 @@
       "id": "knowledge.audit-freshness-suite",
       "path": "evals/audit-freshness/suite.test.js",
       "description": "Eval cases for audit-freshness (#106 hygiene #1): per-category threshold resolution (dot-hierarchy longest-prefix + default + opt-in skip); each flag cites last-mutation + threshold + age; boundary (age == threshold not flagged, age > threshold flagged); last-mutation derived from max(updated_at, latest mutation_log entry); retired records excluded; read-only invariant (no record mutated, no flag without evidence); proposed-action resolution; gate telemetry."
+    },
+    {
+      "id": "knowledge.glossary-sync-suite",
+      "path": "evals/glossary-sync/suite.test.js",
+      "description": "Eval cases for glossary-sync (#106 hygiene #3): default term extraction from canonical docs (bold/colon glossary lines); classification — gap (no concept), outdated (concept body drifted, whitespace-insensitive), current (matches); case/space-insensitive term matching within the resolved concept category; configurable source list (record id + category selector, opt-in empty list, unknown source rejected); pluggable term extractor; read-only-by-default invariant (no record mutated without apply); apply mode enacts gaps via create→propose→apply and drift via propose→apply with the canonical doc as proposer (consume-never-fork, proposes-link + mutation-log evidence); gate telemetry."
     }
   ],
   "skills": [
