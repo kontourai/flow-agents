@@ -1,0 +1,44 @@
+{
+  "id": "knowledge.canonicalize-category",
+  "version": "1.0",
+  "steps": [
+    { "id": "survey", "next": "assess" },
+    { "id": "assess", "next": "propose-gate" },
+    { "id": "propose-gate", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "gates": {
+    "survey-gate": {
+      "step": "survey",
+      "expects": [
+        {
+          "id": "category-tree-surveyed",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "The category hierarchy of the working set has been surveyed: the configured record types are listed and their categories expanded into a prefix tree (retired records are already excluded — retired is terminal, so it is not sprawl to flatten). The enabled checks (orphan-prefix, leaf fan-out budget, implemented-marker tags) are surfaced for the assess step. This is a read-only survey — no record is mutated.",
+          "bundle_claim": {
+            "claimType": "knowledge.canonicalize-category.survey",
+            "subjectType": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "propose-gate": {
+      "step": "propose-gate",
+      "expects": [
+        {
+          "id": "sprawl-findings-cite-evidence",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Every category-sprawl finding cites its evidence: its kind (orphan-prefix | too-many-leaves | implemented-active), the offending category, the affected record ids, the metric that fired, and an evidence object explaining it (e.g. directRecordCount/subtreeRecordCount for an orphan prefix; leafCount vs the configured budget + the leaf list for too-many-leaves; the matched implemented markers + status for implemented-active). A finding is emitted only when its check is enabled and its condition holds; a disabled check (or an empty implemented-marker list) contributes nothing (the audit is optional + configurable). Each finding proposes an action (flatten | regroup | retire) for the operator to route through the existing gated flows (knowledge.retire to retire; an update/recategorize to flatten or regroup). This step NEVER mutates a record — it only proposes.",
+          "bundle_claim": {
+            "claimType": "knowledge.canonicalize-category.findings",
+            "subjectType": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    }
+  }
+}

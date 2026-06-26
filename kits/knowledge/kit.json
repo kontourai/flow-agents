@@ -39,6 +39,11 @@
       "id": "knowledge.audit-freshness",
       "path": "flows/audit-freshness.flow.json",
       "description": "Hygiene audit (optional, configurable): flag records past per-category staleness thresholds and propose archive/refresh for each. Read-only: collect → measure → flag-gate. Thresholds are per-category (dot-hierarchy longest-prefix, with optional default); a category with no threshold is skipped (opt-in). Each flag cites last-mutation (max of updated_at and latest mutation_log entry) + the threshold that fired + computed age. Forks no mutation path — the operator routes each flag through knowledge.retire (archive) or a fresh capture/compile (refresh)."
+    },
+    {
+      "id": "knowledge.canonicalize-category",
+      "path": "flows/canonicalize-category.flow.json",
+      "description": "Hygiene audit (optional, configurable): audit category sprawl and propose flattening/retirement. Read-only: survey → assess → propose-gate. Flags three sprawl kinds (each independently toggleable): orphan-prefix (an intermediate prefix node holding no record directly, or a deep path carrying a single record → flatten), too-many-leaves (a parent fanning out past the configured leaf budget → regroup), implemented-active (a still-active record carrying an operator-supplied implemented-marker tag → retire). Every finding cites its evidence (the metric that fired + offending category/record ids). Forks no mutation path — the operator routes each finding through knowledge.retire (retire) or an update/recategorize (flatten/regroup)."
     }
   ],
   "docs": [
@@ -60,7 +65,7 @@
     {
       "id": "knowledge.flow-runner",
       "path": "adapters/flow-runner/index.js",
-      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links; synthesize(conceptId | topicSelector, options) → concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) → decision snapshot consolidation with supersede-not-delete; retire(recordId, options) → gated status lifecycle transition (active→implemented→retired) with working-set exclusion; auditFreshness(options) → read-only hygiene audit returning flags (last-mutation + threshold cited) proposing archive/refresh for records past per-category staleness thresholds. Emits canonical telemetry events at gate points."
+      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links; synthesize(conceptId | topicSelector, options) → concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) → decision snapshot consolidation with supersede-not-delete; retire(recordId, options) → gated status lifecycle transition (active→implemented→retired) with working-set exclusion; auditFreshness(options) → read-only hygiene audit returning flags (last-mutation + threshold cited) proposing archive/refresh for records past per-category staleness thresholds; canonicalizeCategory(options) → read-only hygiene audit returning category-sprawl findings (orphan-prefix/too-many-leaves/implemented-active, each citing its metric + offending ids) proposing flatten/regroup/retire. Emits canonical telemetry events at gate points."
     },
     {
       "id": "knowledge.similarity-vector",
@@ -113,6 +118,11 @@
       "id": "knowledge.audit-freshness-suite",
       "path": "evals/audit-freshness/suite.test.js",
       "description": "Eval cases for audit-freshness (#106 hygiene #1): per-category threshold resolution (dot-hierarchy longest-prefix + default + opt-in skip); each flag cites last-mutation + threshold + age; boundary (age == threshold not flagged, age > threshold flagged); last-mutation derived from max(updated_at, latest mutation_log entry); retired records excluded; read-only invariant (no record mutated, no flag without evidence); proposed-action resolution; gate telemetry."
+    },
+    {
+      "id": "knowledge.canonicalize-category-suite",
+      "path": "evals/canonicalize-category/suite.test.js",
+      "description": "Eval cases for canonicalize-category (#106 hygiene #4): orphan-prefix detection (empty intermediate node + single-record deep path → flatten); too-many-leaves fan-out budget (boundary: count == budget not flagged, > budget flagged → regroup, lists the leaves); implemented-active (status:active + implemented-marker tag → retire, case-insensitive markers); every finding cites its metric + evidence + offending ids; each check is independently toggleable + opt-in (disabled check / empty markers → no findings); retired records excluded; read-only invariant (no record mutated); gate telemetry (survey-gate + propose-gate); module-level export."
     }
   ],
   "skills": [

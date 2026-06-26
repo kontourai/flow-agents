@@ -835,3 +835,73 @@ interface FreshnessFlag {
 records that had a resolvable threshold, `skipped` counts opt-out categories, and `flags` lists the
 stale records. Gate telemetry is emitted at `collect-gate` and `flag-gate`
 (`knowledge.audit-freshness`).
+
+## Addendum E — Category Canonicalization (Hygiene #4, #106)
+
+### E.1 Read-Only Category-Sprawl Audit
+
+`knowledge.canonicalize-category` is a *maintenance* flow, like the freshness audit (Addendum D): a
+**read-only** survey that NEVER mutates a record. Where freshness measures records against *time*,
+this audit measures the *shape of the category hierarchy*. As a Knowledge base grows by filing, its
+category tree degrades in concrete ways the dogfooding surfaced (#106) — orphan prefixes, parents
+that fan out into too many leaves, and records that were implemented but never retired. The audit
+returns *findings* proposing a fix; the operator routes each through an existing gated flow —
+`knowledge.retire` to retire, or an `update` (recategorize) to flatten/regroup. The audit forks no
+new mutation path.
+
+Sprawl is domain-sensitive (a flat radar feed differs from a deep decisions taxonomy), so each
+check is **optional and configurable**: a disabled check — or an empty implemented-marker list —
+contributes no findings. The audit is **opt-in** per check.
+
+### E.2 `canonicalizeCategory` Flow-Runner Operation
+
+`KnowledgeFlowRunner.canonicalizeCategory(options)` (also the module-level
+`canonicalizeCategory({ store, ... })`):
+
+**Options:**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `checkOrphanPrefixes` | `boolean` | `true` | Enable the orphan-prefix check. |
+| `maxLeavesPerParent` | `number` | none | Leaf fan-out budget; a parent with strictly more direct child leaf categories is flagged. Omit to disable the check. |
+| `implementedMarkers` | `string[]` | `[]` | Tag markers meaning "implemented" (case-insensitive). Empty → the implemented-active check is disabled. |
+| `types` | `string[]` | `["raw","compiled","concept","snapshot"]` | Record types to survey. |
+| `agent` | `string` | runner agent | Agent recorded on the audit telemetry. |
+
+**Finding kinds** (each independently toggleable):
+
+- **`orphan-prefix`** (`proposedAction: "flatten"`) — an intermediate prefix node that holds **no
+  record directly** while it has descendants (`metric: "empty-intermediate-node"`), OR a
+  multi-segment prefix whose **entire subtree is a single record** carried directly there
+  (`metric: "single-record-deep-path"`) — depth without branching value.
+- **`too-many-leaves`** (`proposedAction: "regroup"`) — a parent prefix whose count of direct child
+  **leaf** categories *strictly exceeds* `maxLeavesPerParent` (`metric: "leaf-fan-out"`). A leaf is
+  a record-bearing category with no record-bearing descendant. The finding lists the offending
+  leaves.
+- **`implemented-active`** (`proposedAction: "retire"`) — a record still `status:"active"` that
+  carries an `implementedMarkers` tag (`metric: "implemented-marker-on-active"`); it should have
+  transitioned via `retire` (§B.4) but lingers in the working set.
+
+Retired records are never flagged — the default `listByType` query excludes them, and `retired` is
+terminal (so it is not sprawl to flatten).
+
+### E.3 Finding Evidence Guarantee
+
+Every finding carries the evidence that produced it — a finding can never be emitted without citing
+the metric that fired and the offending category / record ids:
+
+```ts
+interface CategoryFinding {
+  kind: "orphan-prefix" | "too-many-leaves" | "implemented-active";
+  category: string;        // the offending category / parent prefix
+  recordIds: string[];     // the affected record ids
+  metric: string;          // the rule that fired
+  evidence: object;        // rule-specific (counts, leaf list, matched markers, reason)
+  proposedAction: "flatten" | "regroup" | "retire";
+}
+```
+
+`canonicalizeCategory` returns `{ surveyed, categories, findings, telemetryEvents }` where
+`surveyed` counts the records examined, `categories` counts the distinct category prefixes in the
+tree, and `findings` lists the sprawl. Gate telemetry is emitted at `survey-gate` and `propose-gate`
+(`knowledge.canonicalize-category`).
