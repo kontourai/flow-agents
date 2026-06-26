@@ -5,7 +5,7 @@ title: "ADR 0015: Flow / Flow Agents Boundary Reconciliation"
 # ADR 0015: Flow / Flow Agents Boundary Reconciliation
 
 **Date:** 2026-06-25
-**Status:** Accepted. Tier 0 (#175) shipped; Tiers 1 (#176) & 2 (#177) closed-by-evaluation (not engine forks — see Reassessment); #178/#179 are deferred cross-package work.
+**Status:** Accepted. Tier 0 (#175) shipped; Tier 1 (#176) closed-by-evaluation (+ a found anti-gaming fix, #196); Tier 2 (#177) **reopened and scoped** as the Resource Contract migration (the sidecar FSM IS a parallel reimplementation per ADR 0005 / #183 — see corrected Reassessment); #178/#179 are deferred cross-package work.
 **Parent issue:** #174 (umbrella)
 
 ---
@@ -83,13 +83,19 @@ The broader boundary reconciliation (issue #174) is phased:
 | --- | --- | --- | --- |
 | Tier 0 | #175 | consume surface's `validateTrustBundle`; delete bespoke validator | **DONE** — the one genuine fork removed |
 | Tier 1 | #176 | gate-expectation engine: consume flow's gate evaluation kernel | **CLOSED by evaluation** — the gate already consumes Surface (`deriveClaimStatus`) for re-derivation; residual logic is product-specific gate policy. Scoping it found+fixed a real anti-gaming regression (PR #196). |
-| Tier 2 | #177 | run-state kernel: consume flow's run-state transition semantics | **CLOSED by evaluation** — `state.json` is a product-specific lifecycle (11-phase builder enum, 13 statuses, no FlowDefinition), not a fork of flow's definition-driven run engine. Adoption = pure churn, zero engine logic removed. |
+| Tier 2 | #177 | run-state kernel → Resource Contract migration | **REOPENED AND SCOPED** — the cheap `FlowRunState` swap is still churn (original eval correct on that narrow point), but the sidecar FSM IS a parallel reimplementation of ADR 0005's Resource Contract (`state.json→WorkflowRun.status`, `acceptance.json→RunPlan.spec`, `evidence→conditions[].evidenceRefs`). The real convergence (Resource Contract + Flow Definitions, retiring the FSM, #183) is the accepted direction. Scoped as a phased migration (projection → FlowDefinition-backed advance-state → hooks → resume/evals → retire sidecars). `kits/builder/flows/build.flow.json` already exists; the FSM just doesn't consult it. |
 | promotes | #178 | promote liveness / InquiryRecord / run-hook upstream | **Deferred — cross-package** (requires `flow`/`surface` source changes; not doable from this repo). |
 | contracts | #179 | extract generic vocabulary to flow contracts | **Deferred — cross-package.** |
 
-### Reassessment (post Tiers 1–2)
+### Reassessment (post Tiers 1–2) — corrected
 
-Evaluating Tiers 1 and 2 with the same rigor as Tier 0 showed the original audit **overstated the "drift."** flow-agents already consumes the canonical engines where it matters — Surface for trust computation (`deriveClaimStatus`/`validateTrustBundle`), flow for kit-container validation (`validateKitContainer`). What looked like "parallel forks" (the gate-expectation logic, the run-state model) are **legitimate product-specific layers**: builder-kit gate policy and builder lifecycle, which flow has no opinion about and which adopting flow's definition-driven primitives would only reshape (churn), not simplify. The one real duplication (the trust-bundle validator, Tier 0) is removed. The remaining tiers (#178/#179) are upstream `flow`/`surface` work. From flow-agents' side, the boundary program is therefore essentially **resolved** — with a removed duplication, a restored anti-gaming property, and an honest, evidence-based boundary picture as the net result.
+**An earlier version of this Reassessment was too narrow and is corrected here.** It was right that Tier 1's gate computation already consumes Surface, and that a *cheap mechanical `FlowRunState` swap* (Tier 2's original framing) would be pure churn. But it wrongly concluded the sidecar FSM is a *legitimate product-specific layer* and that the program is "essentially resolved." That misses the larger issue documented in #183:
+
+`workflow-sidecar.ts`'s state model — the 11 phases, 13 statuses, bespoke `advanceState` guard, and per-session `state.json`/`handoff.json`/`acceptance.json`/`current.json` — **IS a parallel reimplementation of the Kontour Resource Contract (ADR 0005)** at the product level. ADR 0005 defines `WorkflowRun`/`RunPlan`/`SelectedScope`/`Gate` as the durable record shape for exactly this information; the sidecar FSM predates ADR 0005's acceptance and was never migrated. `docs/kontour-resource-contract.md`'s Compatibility Guidance already documents the mapping (`state.json→WorkflowRun.status`, `acceptance.json→RunPlan.spec`, `evidence→conditions[].evidenceRefs`, `handoff.json→WorkflowRun.status`) — i.e. it is a pre-ADR-0005 parallel implementation, not a deliberate product layer. Notably `kits/builder/flows/build.flow.json` (a Builder FlowDefinition, 10 steps / 9 gates) **already exists** — `advance-state` simply doesn't consult it.
+
+**Corrected outcome:** Tier 0 done (the one Surface-layer fork removed); Tier 1 closed-by-evaluation (+ the #196 anti-gaming fix); **Tier 2 reopened and scoped** as a phased Builder→Resource-Contract/Flow-Definition migration (see #177): Phase 1 projection layer → Phase 2 FlowDefinition-backed `advance-state` → Phase 3 hooks → Phase 4 resume/evals → Phase 5 retire sidecars → Phase 6 Flow kernel (deferred to #178). Per #183, Builder and Knowledge are the **same** abstraction (Resource Contract over `WorkflowRun`/`Gate`), so this is a prerequisite for new kit authors to have a stable target, not optional cleanup — and the Builder migration must coordinate with the parallel Knowledge work (which already ships Flow Definitions).
+
+**Invariant that must survive migration (#183 Finding 2):** `WorkflowRun.status.conditions` are writable summaries; the gate re-derives from Hachure claims via Surface; `conditions[].evidenceRefs` cite claim IDs. **Do not fuse Resource and claim** — the separation (a friendly mutable surface over an un-gameable derived core) is the architecture.
 
 ## Consequences
 
