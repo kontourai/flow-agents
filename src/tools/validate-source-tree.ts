@@ -283,6 +283,35 @@ function validatePublicScriptWrappers(reporter: Reporter): void {
     reporter.check(JSON.stringify(significantLines) === JSON.stringify(policy.significantLines), `${file}: public wrapper must match the exact thin launcher body for ${policy.target}`);
   }
 }
+function validateAdrNumbers(reporter: Reporter): void {
+  // Each ADR (a docs/adr file with an `# ADR NNNN:` heading) must own a unique
+  // number, and its filename prefix must match that number. Companion/index docs
+  // without an ADR heading (e.g. a numbered skill-audit tied to an ADR) are
+  // intentionally skipped. Guards against concurrent number collisions like the
+  // duplicate ADR 0014 from PRs #180/#172.
+  const adrDir = path.join(root, "docs/adr");
+  if (!fs.existsSync(adrDir)) return;
+  const byNumber = new Map<string, string[]>();
+  for (const file of walkFiles(adrDir)) {
+    if (path.extname(file) !== ".md") continue;
+    const heading = readText(file).match(/^#\s+ADR\s+(\d{4}):/m);
+    if (!heading) continue; // not an ADR decision doc
+    const num = heading[1];
+    reporter.check(
+      path.basename(file).startsWith(`${num}-`),
+      `${rel(file)}: ADR heading number ${num} does not match the filename prefix`,
+    );
+    const list = byNumber.get(num) ?? [];
+    list.push(rel(file));
+    byNumber.set(num, list);
+  }
+  for (const [num, files] of byNumber) {
+    reporter.check(
+      files.length === 1,
+      `docs/adr: duplicate ADR number ${num} — ${files.join(", ")}. ADR numbers must be unique; renumber one.`,
+    );
+  }
+}
 function validateHookInventory(reporter: Reporter): void {
   const readme = readText(path.join(root, "scripts/README.md"));
   const hookFiles = walkFiles(path.join(root, "scripts/hooks"))
@@ -420,6 +449,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   validateUsageFeedbackFiles(reporter);
   validatePublicScriptWrappers(reporter);
   validateHookInventory(reporter);
+  validateAdrNumbers(reporter);
   validateFixtureOwnership(reporter);
   validatePackageCommandSurface(reporter);
   validateNoFirstPartyPythonFiles(reporter);
