@@ -1171,3 +1171,148 @@ describe("store.retire — direct op tests", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// #106 — close-proposal: applying a retirement proposal auto-closes the spent
+// proposal artifact (no dangling active twin; double-prefixed twin never spawns)
+// ---------------------------------------------------------------------------
+
+describe("#106 — close-proposal: apply auto-retires the spent proposal artifact", () => {
+  // Helper: count non-retired records whose title marks them a retirement-proposal
+  // artifact (these are the dangling "Retirement proposal: …" records #106 is about).
+  function activeProposalArtifacts(store) {
+    return store
+      ._allRecords()
+      .filter(
+        (r) =>
+          (r.status || "active") !== "retired" &&
+          typeof r.title === "string" &&
+          r.title.startsWith("Retirement proposal")
+      );
+  }
+
+  test("after apply, the proposal artifact is retired and leaves no active twin; the change persisted", async () => {
+    const dir = makeTempDir();
+    try {
+      const { store, compiledId1 } = await buildFixture(dir);
+      const runner = makeRunner(store, dir);
+
+      const result = await runner.retire(compiledId1, {
+        targetStatus: "retired",
+        rationale: "Superseded by the versioning policy.",
+        decision: "apply",
+      });
+
+      // The applied change persisted: the target record is retired.
+      const target = await store.get(compiledId1);
+      assert.equal(target.status, "retired", "target record was retired (change persisted)");
+
+      // The spent proposal artifact is auto-closed (retired), not left active.
+      const artifact = await store.get(result.proposerId);
+      assert.ok(artifact, "proposal artifact still exists (closed, not deleted)");
+      assert.equal(
+        artifact.status,
+        "retired",
+        "spent proposal artifact is auto-retired after apply (#106)"
+      );
+      assert.equal(result.proposalClosed, true, "retire() reports the artifact was closed");
+
+      // No dangling active "Retirement proposal: …" twin remains.
+      assert.equal(
+        activeProposalArtifacts(store).length,
+        0,
+        "no active proposal-artifact twin remains after apply (#106)"
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a hygiene sweep over active records no longer spawns a double-prefixed twin", async () => {
+    const dir = makeTempDir();
+    try {
+      const { store, compiledId1 } = await buildFixture(dir);
+      const runner = makeRunner(store, dir);
+
+      // Retire a record (apply) — historically left an active proposal artifact.
+      await runner.retire(compiledId1, {
+        targetStatus: "retired",
+        rationale: "Superseded.",
+        decision: "apply",
+      });
+
+      // Simulate a hygiene sweep: retire every still-active proposal artifact.
+      // With the fix there are none, so the sweep is a no-op and no
+      // "Retirement proposal: Retirement proposal: …" twin can be born.
+      const before = activeProposalArtifacts(store);
+      for (const artifact of before) {
+        await runner.retire(artifact.id, {
+          targetStatus: "retired",
+          rationale: "Cleaning up dangling proposal artifact.",
+          decision: "apply",
+        });
+      }
+
+      const doublePrefixed = store
+        ._allRecords()
+        .filter(
+          (r) =>
+            typeof r.title === "string" &&
+            r.title.startsWith("Retirement proposal: Retirement proposal")
+        );
+      assert.equal(
+        doublePrefixed.length,
+        0,
+        "no double-prefixed 'Retirement proposal: Retirement proposal: …' twin exists (#106)"
+      );
+      assert.equal(
+        activeProposalArtifacts(store).length,
+        0,
+        "no active proposal artifacts remain after the sweep (#106)"
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("reject is unchanged — the proposal artifact stays active (proposal not spent)", async () => {
+    const dir = makeTempDir();
+    try {
+      const { store, compiledId1 } = await buildFixture(dir);
+      const runner = makeRunner(store, dir);
+
+      const before = await store.get(compiledId1);
+
+      const result = await runner.retire(compiledId1, {
+        targetStatus: "retired",
+        rationale: "Proposing retirement.",
+        decision: "reject",
+        rejectReason: "Not ready to retire this yet.",
+      });
+
+      // Target status is byte-identical (rejection does not mutate it).
+      const after = await store.get(compiledId1);
+      assert.equal(
+        after.status || "active",
+        before.status || "active",
+        "reject leaves target status unchanged"
+      );
+
+      // The proposal artifact remains active — the proposal was declined, not
+      // spent, so it is NOT auto-closed (close happens only on apply).
+      const artifact = await store.get(result.proposerId);
+      assert.equal(
+        artifact.status || "active",
+        "active",
+        "reject leaves the proposal artifact active (not closed)"
+      );
+      assert.equal(
+        result.proposalClosed,
+        false,
+        "retire(reject) does not report a closed artifact"
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

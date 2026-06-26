@@ -1118,6 +1118,55 @@ export class KnowledgeFlowRunner {
   }
 
   // -------------------------------------------------------------------------
+  // close-proposal primitive  (#106)
+  //
+  // A flow that gates a change through propose→apply mints a transient proposal
+  // *artifact* record (the proposer) solely to carry the "proposes" link + the
+  // proposal text. Once the proposal is APPLIED, that artifact is spent — it
+  // should not linger as an `active` record. Left active it shows up in
+  // working-set queries and hygiene sweeps, and re-retiring it spawns a
+  // double-prefixed "Retirement proposal: Retirement proposal: …" twin (#106).
+  //
+  // This closes a spent proposal artifact by retiring it via the store's
+  // existing `retire` op — no parallel mechanism. It is:
+  //   - safe:        only touches the named artifact; never the apply target.
+  //   - idempotent:  a no-op if the artifact is already retired/implemented.
+  //   - non-fatal:   a close failure never fails the (already-applied) flow.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Auto-retire a spent proposal artifact after its proposal has been applied.
+   *
+   * @param {string} artifactId  - ID of the transient proposer record to close.
+   * @param {object} [opts]
+   *   - agent: string   — agent recording the close (defaults to runner agent)
+   *   - rationale: string — close rationale (mutation-log evidence)
+   * @returns {Promise<{ closed: boolean, reason?: string }>}
+   */
+  async _closeProposalArtifact(artifactId, opts = {}) {
+    const agent = opts.agent || this._agent;
+    const artifact = await this._store.get(artifactId);
+    // Already gone or already closed — nothing to do (idempotent).
+    if (!artifact) return { closed: false, reason: "artifact not found" };
+    if ((artifact.status || "active") === "retired") {
+      return { closed: false, reason: "already retired" };
+    }
+    try {
+      await this._store.retire(artifactId, "retired", {
+        agent,
+        rationale:
+          opts.rationale ||
+          "Auto-closing spent proposal artifact after the proposal was applied (#106).",
+      });
+      return { closed: true };
+    } catch (err) {
+      // The proposal was already applied successfully; a failure to tidy up the
+      // artifact must not fail the flow. Surface it on the result instead.
+      return { closed: false, reason: err.message };
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // knowledge.retire flow  (Addendum B — S7)
   //   Steps: identify → propose-retirement → evidence-gate → apply-or-reject → done
   //   Gate: evidence-gate — proposal carries rationale/ref; no direct mutation (AC1).
@@ -1344,6 +1393,7 @@ export class KnowledgeFlowRunner {
     });
     events.push(applyGateIn);
 
+    let proposalClosed = false;
     if (decision === "apply") {
       // Apply via store retire op — transitions status, appends mutation log (AC1)
       await this._store.retire(recordId, targetStatus, {
@@ -1353,6 +1403,13 @@ export class KnowledgeFlowRunner {
         ...(options.supersededByRef ? { supersededByRef: options.supersededByRef } : {}),
         ...(options.note ? { note: options.note } : {}),
       });
+      // Close the spent retirement-proposal artifact so it does not linger as an
+      // active record (which would spawn a double-prefixed twin on re-retire). #106
+      const closeResult = await this._closeProposalArtifact(proposerId, {
+        agent,
+        rationale: `Auto-closing retirement-proposal artifact after retiring ${recordId} (#106).`,
+      });
+      proposalClosed = closeResult.closed;
     } else if (decision === "reject") {
       if (!options.rejectReason || !options.rejectReason.trim()) {
         throw missingEvidenceError(
@@ -1385,6 +1442,7 @@ export class KnowledgeFlowRunner {
       decision,
       previousStatus,
       proposerId,
+      proposalClosed,
       telemetryEvents: events,
     };
   }

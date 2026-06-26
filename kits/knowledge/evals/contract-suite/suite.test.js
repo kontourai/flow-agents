@@ -277,6 +277,63 @@ describe("Knowledge Kit Store Contract Suite", () => {
     });
   });
 
+  // -----------------------------------------------------------------------
+  // close-proposal: retire is the supported op for closing a spent proposal
+  // artifact on apply — active → retired, safely and idempotently (#106).
+  // -----------------------------------------------------------------------
+  describe("close-proposal: retire safely closes a proposal artifact (#106)", () => {
+    let dir, store;
+    before(() => { dir = makeTempDir(); store = makeStore(dir); });
+    after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    test("retire closes an active proposal artifact (active → retired), record intact", async () => {
+      // The transient proposal artifact a propose→apply flow mints is a `raw`
+      // record. Closing it on apply is done via the existing retire op.
+      const artifactId = await store.create({
+        type: "raw",
+        title: "Retirement proposal: Some record",
+        body: "Retirement proposal for record X.",
+        category: "ops.decisions",
+        provenance: { agent: "tester", note: "Retirement proposal for X" },
+      });
+      const before = await store.get(artifactId);
+      assert.equal(before.status || "active", "active", "artifact starts active");
+
+      await store.retire(artifactId, "retired", {
+        agent: "tester",
+        rationale: "Auto-closing spent proposal artifact after apply (#106).",
+      });
+
+      const after = await store.get(artifactId);
+      assert.equal(after.status, "retired", "artifact is closed (retired) after apply");
+      assert.ok(after, "artifact is retired, not deleted");
+      assert.equal(after.body, before.body, "artifact body intact (non-destructive close)");
+      const log = (after.mutation_log || []).find((e) => e.op === "retire");
+      assert.ok(log, "close is recorded as a retire mutation-log entry");
+    });
+
+    test("re-closing an already-retired artifact is rejected (terminal — safe, no twin)", async () => {
+      const artifactId = await store.create({
+        type: "raw",
+        title: "Retirement proposal: Already closed",
+        body: "spent",
+        category: "ops.decisions",
+        provenance: { agent: "tester" },
+      });
+      await store.retire(artifactId, "retired", { agent: "tester", rationale: "first close" });
+
+      // A second close must be rejected by the transition table (retired is
+      // terminal) — the flow treats this as a safe no-op rather than spawning
+      // a double-prefixed twin.
+      await assertMissingEvidence(
+        () => store.retire(artifactId, "retired", { agent: "tester", rationale: "second close" }),
+        "re-close of a retired artifact"
+      );
+      const after = await store.get(artifactId);
+      assert.equal(after.status, "retired", "artifact stays retired (idempotent close)");
+    });
+  });
+
   describe("links: graph index consistency", () => {
     let dir, store;
     before(() => { dir = makeTempDir(); store = makeStore(dir); });
