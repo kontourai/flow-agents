@@ -44,6 +44,16 @@
       "id": "knowledge.canonicalize-category",
       "path": "flows/canonicalize-category.flow.json",
       "description": "Hygiene audit (optional, configurable): audit category sprawl and propose flattening/retirement. Read-only: survey → assess → propose-gate. Flags three sprawl kinds (each independently toggleable): orphan-prefix (an intermediate prefix node holding no record directly, or a deep path carrying a single record → flatten), too-many-leaves (a parent fanning out past the configured leaf budget → regroup), implemented-active (a still-active record carrying an operator-supplied implemented-marker tag → retire). Every finding cites its evidence (the metric that fired + offending category/record ids). Forks no mutation path — the operator routes each finding through knowledge.retire (retire) or an update/recategorize (flatten/regroup)."
+    },
+    {
+      "id": "knowledge.glossary-sync",
+      "path": "flows/glossary-sync.flow.json",
+      "description": "Hygiene sync (optional, configurable): keep the glossary (concept records) in sync with the canonical docs that define those terms. Read-only by default: collect → extract → diff-gate → propose-gate. Surveys a configurable glossary source list (record ids and/or category selectors — opt-in), extracts term→definition entries via a pluggable extractor, and classifies each against existing concepts: gap (no concept) → propose a canonical definition; outdated (concept body drifted from the canonical, whitespace-insensitive) → propose the update; current → no-op. Each entry cites its source doc. With apply=true it enacts the plan through the existing concept-record ops (create → propose → apply for gaps; propose → apply for drift) with the canonical doc as proposer — forks no mutation path."
+    },
+    {
+      "id": "knowledge.detect-contradictions",
+      "path": "flows/detect-contradictions.flow.json",
+      "description": "Hygiene audit (optional, configurable): compare compiled records within a category and flag conflicting assertions with BOTH record ids. Read-only: collect → compare → flag-gate. Reuses the similarity adapter to scope comparisons to records about the same thing, then a pluggable contradiction fn (default: opposing-polarity heuristic) judges each similar pair. Auditing is opt-in per category. Each flag cites both record ids + shared category + the reason that fired. Forks no mutation path — the operator routes each flag through knowledge.retire (drop the stale assertion) or a fresh capture/compile/consolidate (reconcile)."
     }
   ],
   "docs": [
@@ -65,7 +75,7 @@
     {
       "id": "knowledge.flow-runner",
       "path": "adapters/flow-runner/index.js",
-      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links; synthesize(conceptId | topicSelector, options) → concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) → decision snapshot consolidation with supersede-not-delete; retire(recordId, options) → gated status lifecycle transition (active→implemented→retired) with working-set exclusion; auditFreshness(options) → read-only hygiene audit returning flags (last-mutation + threshold cited) proposing archive/refresh for records past per-category staleness thresholds; canonicalizeCategory(options) → read-only hygiene audit returning category-sprawl findings (orphan-prefix/too-many-leaves/implemented-active, each citing its metric + offending ids) proposing flatten/regroup/retire. Emits canonical telemetry events at gate points."
+      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links; synthesize(conceptId | topicSelector, options) → concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) → decision snapshot consolidation with supersede-not-delete; retire(recordId, options) → gated status lifecycle transition (active→implemented→retired) with working-set exclusion; auditFreshness(options) → read-only hygiene audit returning flags (last-mutation + threshold cited) proposing archive/refresh for records past per-category staleness thresholds; canonicalizeCategory(options) → read-only hygiene audit returning category-sprawl findings (orphan-prefix/too-many-leaves/implemented-active, each citing its metric + offending ids) proposing flatten/regroup/retire; glossarySync(options) → read-only-by-default glossary hygiene that extracts term→definition entries from a configurable list of canonical docs and classifies each against existing concepts (gap/outdated/current), optionally enacting gaps+drift through the existing concept-record create→propose→apply ops; detectContradictions(options) → read-only hygiene audit comparing compiled records within a category (similarity adapter scopes the comparison; pluggable contradiction fn judges each similar pair) returning flags that cite BOTH conflicting record ids + reason. Emits canonical telemetry events at gate points."
     },
     {
       "id": "knowledge.similarity-vector",
@@ -123,6 +133,16 @@
       "id": "knowledge.canonicalize-category-suite",
       "path": "evals/canonicalize-category/suite.test.js",
       "description": "Eval cases for canonicalize-category (#106 hygiene #4): orphan-prefix detection (empty intermediate node + single-record deep path → flatten); too-many-leaves fan-out budget (boundary: count == budget not flagged, > budget flagged → regroup, lists the leaves); implemented-active (status:active + implemented-marker tag → retire, case-insensitive markers); every finding cites its metric + evidence + offending ids; each check is independently toggleable + opt-in (disabled check / empty markers → no findings); retired records excluded; read-only invariant (no record mutated); gate telemetry (survey-gate + propose-gate); module-level export."
+    },
+    {
+      "id": "knowledge.glossary-sync-suite",
+      "path": "evals/glossary-sync/suite.test.js",
+      "description": "Eval cases for glossary-sync (#106 hygiene #3): default term extraction from canonical docs (bold/colon glossary lines); classification — gap (no concept), outdated (concept body drifted, whitespace-insensitive), current (matches); case/space-insensitive term matching within the resolved concept category; configurable source list (record id + category selector, opt-in empty list, unknown source rejected); pluggable term extractor; read-only-by-default invariant (no record mutated without apply); apply mode enacts gaps via create→propose→apply and drift via propose→apply with the canonical doc as proposer (consume-never-fork, proposes-link + mutation-log evidence); gate telemetry."
+    },
+    {
+      "id": "knowledge.detect-contradictions-suite",
+      "path": "evals/detect-contradictions/suite.test.js",
+      "description": "Eval cases for detect-contradictions (#106 hygiene #2): default opposing-polarity heuristic flags affirm-vs-negate over a shared subject; agreeing records not flagged; every flag cites BOTH record ids + category + reason; similarity scoping (an empty similarity detector yields no flags); pluggable contradiction fn overrides the default verdict; opt-in category scoping; cross-category pairs never formed; each unordered pair compared at most once; retired compiled records excluded; read-only invariant; gate telemetry; module-level export."
     }
   ],
   "skills": [
