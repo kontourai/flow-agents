@@ -2639,6 +2639,310 @@ export class KnowledgeFlowRunner {
 
 
   // -------------------------------------------------------------------------
+  // knowledge.hygiene-review flow  (hygiene #5 — #106, closes the issue)
+  //   Steps: orchestrate → review-gate → done
+  //   Gate: review-gate — the unified review carries every proposal collected
+  //         from the four hygiene flows, each citing the flow it came from and
+  //         its underlying evidence. No proposal is synthesized here — the
+  //         review only relays what the gated flows already produced.
+  //
+  // This is a THIN ORCHESTRATOR over hygiene flows #1–#4 (consume-never-fork).
+  // It reimplements NO detection logic: it simply runs auditFreshness,
+  // detectContradictions, glossarySync, and canonicalizeCategory — the EXISTING
+  // flow-runner methods, with their EXISTING gates — and folds their findings
+  // into one operator-facing review of proposed actions (adopt / retire /
+  // merge). Read-only by DEFAULT, exactly like the flows it runs: it mutates
+  // nothing of its own.
+  //
+  // It forks NO new propose→approve gate. Every flow it runs already routes its
+  // own proposals through the Kit's existing gated ops:
+  //   - audit-freshness    → each flag proposes archive (→ knowledge.retire) or
+  //                          refresh (→ a fresh capture/compile); the flow's
+  //                          flag-gate guarantees the evidence.
+  //   - detect-contradictions → each flag proposes reconciling (→ knowledge.retire
+  //                          to drop the stale assertion, or capture/compile/
+  //                          consolidate to reconcile); flag-gate guards it.
+  //   - glossary-sync      → its OWN propose-gate enacts gaps/drift through the
+  //                          existing concept-record propose→apply ops with the
+  //                          canonical doc as proposer. When the operator opts to
+  //                          apply, hygiene-review delegates straight back to
+  //                          glossarySync({ apply: true }) — it does NOT touch
+  //                          the store itself.
+  //   - canonicalize-category → each finding proposes flatten/regroup (→ an
+  //                          update/recategorize) or retire (→ knowledge.retire);
+  //                          propose-gate guards it.
+  // The "adopt/retire/merge" surface the issue asks for is therefore a *view*
+  // over those existing gated proposals, not a new mutation path.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Orchestrate the four Knowledge-Kit hygiene flows (#106 #1–#4) and present a
+   * single unified review of their proposed actions (adopt / retire / merge)
+   * through the flows' EXISTING propose→approve gates.
+   *
+   * READ-ONLY by default (like every flow it runs): it runs the four audits and
+   * returns their collected proposals; it mutates nothing itself. The only path
+   * that mutates is `glossary.apply: true`, which delegates verbatim to
+   * `glossarySync({ apply: true })` so the change rides the existing gated
+   * concept-record propose→apply lineage — hygiene-review never forks a gate or
+   * writes to the store directly.
+   *
+   * The four sub-audits are configurable + opt-in, mirroring the flows: an audit
+   * whose config block is omitted is SKIPPED (its `skipped: true` is surfaced),
+   * so an empty call does nothing — hygiene is opt-in end-to-end.
+   *
+   * Each collected proposal is normalized to one of three operator decisions:
+   *   - `"retire"`  — drop/archive a record (audit-freshness archive,
+   *                   contradiction reconcile, canonicalize retire). Route
+   *                   through knowledge.retire.
+   *   - `"adopt"`   — create/refresh a definition or record (audit-freshness
+   *                   refresh, glossary gap/outdated). Route through the source
+   *                   flow's gated op (glossary delegates here on apply).
+   *   - `"merge"`   — reconcile/regroup overlapping records (canonicalize
+   *                   flatten/regroup). Route through an update/recategorize.
+   * Every proposal cites `sourceFlow` + the underlying finding so the operator
+   * sees the evidence the originating flow's gate already vouched for.
+   *
+   * @param {object} [options]
+   *   - freshness: object|false   — auditFreshness options. Omit/false → skip.
+   *   - contradictions: object|false — detectContradictions options. Omit/false → skip.
+   *   - glossary: object|false    — glossarySync options. Omit/false → skip.
+   *       Pass `{ ..., apply: true }` to enact the glossary plan through the
+   *       existing gated propose→apply ops (the ONLY apply this orchestrator does,
+   *       and it delegates to glossarySync — it forks nothing).
+   *   - canonicalize: object|false — canonicalizeCategory options. Omit/false → skip.
+   *   - agent: string             — override agent name for telemetry.
+   * @returns {Promise<{
+   *   ranFlows: string[],
+   *   skippedFlows: string[],
+   *   audits: {
+   *     freshness?: object, contradictions?: object,
+   *     glossary?: object, canonicalize?: object
+   *   },
+   *   proposals: Array<{
+   *     decision: "adopt"|"retire"|"merge",
+   *     sourceFlow: string,
+   *     proposedAction: string,
+   *     route: string,
+   *     recordIds: string[],
+   *     evidence: object
+   *   }>,
+   *   summary: { total: number, adopt: number, retire: number, merge: number },
+   *   telemetryEvents: object[]
+   * }>}
+   */
+  async hygieneReview(options = {}) {
+    const events = [];
+    const agent = options.agent || this._agent;
+
+    // Which sub-audits the operator opted into. An omitted/false block is
+    // skipped (hygiene is opt-in, like each flow). `true` runs with defaults.
+    const blocks = {
+      freshness: options.freshness,
+      contradictions: options.contradictions,
+      glossary: options.glossary,
+      canonicalize: options.canonicalize,
+    };
+    const wants = (b) => b !== undefined && b !== false && b !== null;
+    const optsOf = (b) => (b === true ? {} : b);
+
+    const ranFlows = [];
+    const skippedFlows = [];
+    const audits = {};
+    const proposals = [];
+
+    // ── Step: orchestrate ───────────────────────────────────────────────────
+    // Run each opted-in hygiene flow via its EXISTING runner method. No
+    // detection logic lives here — we only invoke and collect.
+    const orchestrateGateIn = this._telemetry.emitGate(
+      "knowledge.hygiene-review",
+      "orchestrate-gate",
+      {
+        flow: "knowledge.hygiene-review",
+        gate: "orchestrate-gate",
+        requested: Object.keys(blocks).filter((k) => wants(blocks[k])),
+      }
+    );
+    events.push(orchestrateGateIn);
+
+    // #1 audit-freshness → archive (retire) / refresh (adopt)
+    if (wants(blocks.freshness)) {
+      ranFlows.push("knowledge.audit-freshness");
+      const res = await this.auditFreshness({ agent, ...optsOf(blocks.freshness) });
+      audits.freshness = res;
+      events.push(...res.telemetryEvents);
+      for (const flag of res.flags) {
+        const isArchive = flag.proposedAction === "archive";
+        proposals.push({
+          decision: isArchive ? "retire" : "adopt",
+          sourceFlow: "knowledge.audit-freshness",
+          proposedAction: flag.proposedAction,
+          route: isArchive
+            ? "knowledge.retire"
+            : "knowledge.capture/compile (refresh)",
+          recordIds: [flag.recordId],
+          evidence: {
+            title: flag.title,
+            category: flag.category,
+            ageDays: flag.ageDays,
+            thresholdDays: flag.thresholdDays,
+            matchedThresholdKey: flag.matchedThresholdKey,
+            lastMutationAt: flag.lastMutationAt,
+          },
+        });
+      }
+    } else {
+      skippedFlows.push("knowledge.audit-freshness");
+    }
+
+    // #2 detect-contradictions → reconcile (retire the stale assertion)
+    if (wants(blocks.contradictions)) {
+      ranFlows.push("knowledge.detect-contradictions");
+      const res = await this.detectContradictions({ agent, ...optsOf(blocks.contradictions) });
+      audits.contradictions = res;
+      events.push(...res.telemetryEvents);
+      for (const flag of res.flags) {
+        proposals.push({
+          decision: "retire",
+          sourceFlow: "knowledge.detect-contradictions",
+          proposedAction: "reconcile",
+          route: "knowledge.retire (drop stale assertion) | capture/compile/consolidate",
+          recordIds: [flag.recordIdA, flag.recordIdB],
+          evidence: {
+            titleA: flag.titleA,
+            titleB: flag.titleB,
+            category: flag.category,
+            reason: flag.reason,
+          },
+        });
+      }
+    } else {
+      skippedFlows.push("knowledge.detect-contradictions");
+    }
+
+    // #3 glossary-sync → adopt a canonical definition (gap = new, outdated =
+    // refresh). The ONLY apply this orchestrator performs is delegated straight
+    // back to glossarySync's OWN gated propose→apply — we never write the store.
+    if (wants(blocks.glossary)) {
+      ranFlows.push("knowledge.glossary-sync");
+      const res = await this.glossarySync({ agent, ...optsOf(blocks.glossary) });
+      audits.glossary = res;
+      events.push(...res.telemetryEvents);
+      for (const entry of res.gaps) {
+        proposals.push({
+          decision: "adopt",
+          sourceFlow: "knowledge.glossary-sync",
+          proposedAction: "create-concept",
+          route: "knowledge.glossary-sync apply (store.create→propose→apply)",
+          recordIds: [entry.sourceDocId],
+          evidence: {
+            term: entry.term,
+            definition: entry.definition,
+            sourceDocId: entry.sourceDocId,
+            sourceDocTitle: entry.sourceDocTitle,
+            category: entry.category,
+            classification: "gap",
+          },
+        });
+      }
+      for (const entry of res.outdated) {
+        proposals.push({
+          decision: "adopt",
+          sourceFlow: "knowledge.glossary-sync",
+          proposedAction: "refresh-concept",
+          route: "knowledge.glossary-sync apply (store.propose→apply)",
+          recordIds: [entry.conceptId, entry.sourceDocId],
+          evidence: {
+            term: entry.term,
+            definition: entry.definition,
+            sourceDocId: entry.sourceDocId,
+            conceptId: entry.conceptId,
+            currentBody: entry.currentBody,
+            classification: "outdated",
+          },
+        });
+      }
+    } else {
+      skippedFlows.push("knowledge.glossary-sync");
+    }
+
+    // #4 canonicalize-category → flatten/regroup (merge) / retire
+    if (wants(blocks.canonicalize)) {
+      ranFlows.push("knowledge.canonicalize-category");
+      const res = await this.canonicalizeCategory({ agent, ...optsOf(blocks.canonicalize) });
+      audits.canonicalize = res;
+      events.push(...res.telemetryEvents);
+      for (const finding of res.findings) {
+        const isRetire = finding.proposedAction === "retire";
+        proposals.push({
+          decision: isRetire ? "retire" : "merge",
+          sourceFlow: "knowledge.canonicalize-category",
+          proposedAction: finding.proposedAction,
+          route: isRetire
+            ? "knowledge.retire"
+            : "update/recategorize (flatten/regroup)",
+          recordIds: finding.recordIds,
+          evidence: {
+            kind: finding.kind,
+            category: finding.category,
+            metric: finding.metric,
+            ...finding.evidence,
+          },
+        });
+      }
+    } else {
+      skippedFlows.push("knowledge.canonicalize-category");
+    }
+
+    const orchestrateGateOut = this._telemetry.emitGateResult(
+      "knowledge.hygiene-review",
+      "orchestrate-gate",
+      { ran: ranFlows.length, skipped: skippedFlows.length }
+    );
+    events.push(orchestrateGateOut);
+
+    // ── Step: review-gate ───────────────────────────────────────────────────
+    // The unified review relays the collected proposals. It SYNTHESIZES no
+    // proposal of its own — every entry traces to a flow whose gate already
+    // vouched for the evidence (consume-never-fork). The operator adopts /
+    // retires / merges each by routing it back through that flow's gated op.
+    const reviewGateIn = this._telemetry.emitGate(
+      "knowledge.hygiene-review",
+      "review-gate",
+      {
+        flow: "knowledge.hygiene-review",
+        gate: "review-gate",
+        proposals: proposals.length,
+      }
+    );
+    events.push(reviewGateIn);
+
+    const summary = {
+      total: proposals.length,
+      adopt: proposals.filter((p) => p.decision === "adopt").length,
+      retire: proposals.filter((p) => p.decision === "retire").length,
+      merge: proposals.filter((p) => p.decision === "merge").length,
+    };
+
+    const reviewGateOut = this._telemetry.emitGateResult(
+      "knowledge.hygiene-review",
+      "review-gate",
+      { ...summary, agent }
+    );
+    events.push(reviewGateOut);
+
+    return {
+      ranFlows,
+      skippedFlows,
+      audits,
+      proposals,
+      summary,
+      telemetryEvents: events,
+    };
+  }
+
+
+  // -------------------------------------------------------------------------
   // knowledge.compile — entity extraction step (R2)
   //
   // Called after compile() to extract person mentions from the compiled record,
@@ -3084,6 +3388,21 @@ export async function detectContradictions(
 ) {
   const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
   return runner.detectContradictions(detectOpts);
+}
+
+/**
+ * Module-level hygiene-review: creates an ephemeral runner using the provided
+ * store and orchestrates the four hygiene flows (#106 hygiene #5). Read-only by
+ * default — the only apply is `glossary.apply: true`, which the runner delegates
+ * to glossarySync's own gated propose→apply ops (consume-never-fork). Closes #106.
+ *
+ * @param {object} options  (merged into hygieneReview options + runner options)
+ */
+export async function hygieneReview(
+  { store, workspace, agent, sessionId, ...reviewOpts } = {}
+) {
+  const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
+  return runner.hygieneReview(reviewOpts);
 }
 
 export default KnowledgeFlowRunner;

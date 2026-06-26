@@ -54,6 +54,11 @@
       "id": "knowledge.detect-contradictions",
       "path": "flows/detect-contradictions.flow.json",
       "description": "Hygiene audit (optional, configurable): compare compiled records within a category and flag conflicting assertions with BOTH record ids. Read-only: collect → compare → flag-gate. Reuses the similarity adapter to scope comparisons to records about the same thing, then a pluggable contradiction fn (default: opposing-polarity heuristic) judges each similar pair. Auditing is opt-in per category. Each flag cites both record ids + shared category + the reason that fired. Forks no mutation path — the operator routes each flag through knowledge.retire (drop the stale assertion) or a fresh capture/compile/consolidate (reconcile)."
+    },
+    {
+      "id": "knowledge.hygiene-review",
+      "path": "flows/hygiene-review.flow.json",
+      "description": "Hygiene orchestrator (#106 #5, closes the issue): a THIN, opt-in orchestrator over the four hygiene flows (audit-freshness, detect-contradictions, glossary-sync, canonicalize-category). orchestrate → review-gate. Runs each opted-in audit via its EXISTING flow-runner method + gates (reimplements no detection), folds their findings into one operator-facing review of proposed actions normalized to adopt / retire / merge, each citing its sourceFlow + the evidence its origin flow's gate already vouched. Read-only by default; forks NO propose→approve gate — the operator enacts each decision through the source flow's existing gated op (retire via knowledge.retire; adopt via capture/compile or glossary-sync apply; merge via update/recategorize). The only mutation it can trigger is glossary apply, delegated verbatim to knowledge.glossary-sync's propose→apply lineage (consume-never-fork)."
     }
   ],
   "docs": [
@@ -143,6 +148,11 @@
       "id": "knowledge.detect-contradictions-suite",
       "path": "evals/detect-contradictions/suite.test.js",
       "description": "Eval cases for detect-contradictions (#106 hygiene #2): default opposing-polarity heuristic flags affirm-vs-negate over a shared subject; agreeing records not flagged; every flag cites BOTH record ids + category + reason; similarity scoping (an empty similarity detector yields no flags); pluggable contradiction fn overrides the default verdict; opt-in category scoping; cross-category pairs never formed; each unordered pair compared at most once; retired compiled records excluded; read-only invariant; gate telemetry; module-level export."
+    },
+    {
+      "id": "knowledge.hygiene-review-suite",
+      "path": "evals/hygiene-review/suite.test.js",
+      "description": "Eval cases for hygiene-review (#106 hygiene #5, closes the issue): opt-in orchestration (omitted audit block is skipped; empty review does nothing); each opted-in audit runs via its existing flow-runner method and its findings are collected verbatim (no detection reimplemented); proposals are normalized to adopt/retire/merge and each cites its sourceFlow + evidence; thin-orchestrator/consume-never-fork invariants — read-only by default mutates no record, no new gate is forked, the only mutation (glossary apply:true) is delegated to glossarySync's own gated propose→apply (verified via proposes-link + mutation-log on the resulting concept); sub-flow telemetry is folded in plus hygiene-review's own orchestrate-gate + review-gate; module-level export delegates to the runner."
     }
   ],
   "skills": [
