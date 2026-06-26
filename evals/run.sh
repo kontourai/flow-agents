@@ -167,6 +167,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_goal_fit_escape_hatch.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_goal_fit_rederive.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_evidence_capture_hook.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_hook_category_behaviors.sh" || result=1

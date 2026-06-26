@@ -1005,23 +1005,27 @@ async function analyze(root, now = Date.now()) {
   const captureWarnings = captureCrossReference(root, path.dirname(latest.file));
   warnings.push(...captureWarnings);
   // Dedup: bundleEnforcement and captureCrossReference can both fire "caught false-completion"
-  // for the same disputed claim. Suppress the bundleEnforcement warning when captureCrossReference
-  // already reported the same check (same check-id extracted from the subjectId).
-  const captureCheckIds = new Set();
+  // for the same disputed claim. Suppress the bundleEnforcement warning ONLY when
+  // captureCrossReference already produced a hard-block warning ("caught false-completion")
+  // for the same check. NOT_VERIFIED / backstop-skip capture warnings must NOT suppress
+  // the bundle tamper/disputed signal — that mismatch is a re-derive block independent of
+  // whether the command was ever captured (anti-gaming guarantee, ADR 0010 Phase 2b).
+  const captureHardBlockIds = new Set();
   for (const w of captureWarnings) {
+    if (!/caught false-completion/.test(w)) continue; // only hard blocks suppress bundle warning
     const m = /evidence check ([^\s:]+):/.exec(w);
-    if (m) captureCheckIds.add(m[1]);
+    if (m) captureHardBlockIds.add(m[1]);
   }
   const bundleWarnings = (await bundleEnforcement(path.dirname(latest.file))).filter(w => {
-    if (!captureCheckIds.size) return true;
+    if (!captureHardBlockIds.size) return true;
     // bundleEnforcement warns: "trust.bundle claim disputed: <subjectId> ..."
     const m = /trust\.bundle claim (?:disputed|tampered): ([^\s(]+)/.exec(w);
     if (!m) return true;
     const subjectId = m[1];
     // subjectId = "slug/checkId" — extract the checkId (last segment)
     const checkId = subjectId.includes('/') ? subjectId.slice(subjectId.indexOf('/') + 1) : subjectId;
-    // If captureCrossReference already flagged this check, suppress the bundle warning.
-    return !captureCheckIds.has(checkId);
+    // If captureCrossReference already hard-blocked this check, suppress the bundle warning.
+    return !captureHardBlockIds.has(checkId);
   });
   warnings.push(...bundleWarnings);
   warnings.push(...missingBundleOrStateSignal(path.dirname(latest.file)));
