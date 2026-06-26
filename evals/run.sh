@@ -208,6 +208,8 @@ run_integration() {
   bash "$EVAL_DIR/integration/test_kit_conformance_levels.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_dual_emit_flow_step.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_enforcer_expects_driven.sh" || result=1
   return $result
 }
 

@@ -281,6 +281,25 @@ async function tryLoadSurface() {
   }
 }
 
+// ─── ADR 0016 Abstraction A P-c: flow-resolver integration ────────────────────
+// Load the compiled flow-resolver (build/src/lib/flow-resolver.js) via CJS
+// require behind the same hasBuild guard used for the validator. Fail-open:
+// returns null when build/ is absent, require throws, or current.json has no
+// active_flow_id / active_step_id. The caller (bundleEnforcement, sidecarGuidance)
+// treats null as "no active FlowDefinition" and falls back to the workflow.* path.
+function loadActiveFlowStep(flowAgentsDir) {
+  const packageRoot = path.resolve(__dirname, '..', '..');
+  const builtResolver = path.join(packageRoot, 'build', 'src', 'lib', 'flow-resolver.js');
+  if (!fs.existsSync(builtResolver)) return null; // hasBuild guard: no build/ yet
+  try {
+    const resolver = require(builtResolver);
+    if (typeof resolver.resolveActiveFlowStep !== 'function') return null;
+    return resolver.resolveActiveFlowStep(flowAgentsDir);
+  } catch {
+    return null; // require failed or resolver threw — fail-open
+  }
+}
+
 function safeOneLine(value, maxLength = 220) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   if (text.length <= maxLength) return text;
@@ -298,12 +317,20 @@ function normalizedStatus(value) {
 // so consumer reads produce identical verdicts.
 
 /**
- * Extract the effective "verdict" from trust.bundle workflow.check.* claims.
+ * Extract the effective "verdict" from trust.bundle workflow.check.* claims,
+ * or from declared claimTypes when a FlowDefinition is active (P-c extension).
  * Priority of non-pass statuses: fail > not_verified > partial > pass.
- * Returns null when the bundle has no workflow check claims.
+ * Returns null when the bundle has no matching claims.
+ *
+ * @param {Array} claims - trust.bundle claims array
+ * @param {Set<string>|null} [declaredClaimTypes] - optional set of declared claimTypes from gateExpects[]
  */
-function bundleEvidenceVerdict(claims) {
-  const checkClaims = claims.filter(c => c && typeof c.claimType === 'string' && c.claimType.startsWith('workflow.check.'));
+function bundleEvidenceVerdict(claims, declaredClaimTypes) {
+  const checkClaims = claims.filter(c => {
+    if (!c || typeof c.claimType !== 'string') return false;
+    if (c.claimType.startsWith('workflow.check.')) return true;
+    return declaredClaimTypes != null && declaredClaimTypes.has(c.claimType);
+  });
   if (checkClaims.length === 0) return null;
   let worst = 'pass';
   const PRIORITY = { fail: 4, failed: 4, not_verified: 3, 'not-verified': 3, partial: 2, pass: 1, skip: 0 };
@@ -328,10 +355,16 @@ function claimCheckId(subjectId) {
  * Build the list of blocking check-claims from trust.bundle (equivalent to
  * evidence.json.checks filtered to non-pass status).
  * Returns objects shaped like { id, status, summary } (summary from fieldOrBehavior).
+ *
+ * @param {Array} claims - trust.bundle claims array
+ * @param {Set<string>|null} [declaredClaimTypes] - optional set of declared claimTypes from gateExpects[]
  */
-function bundleBlockingChecks(claims) {
+function bundleBlockingChecks(claims, declaredClaimTypes) {
   return claims.filter(c => {
-    if (!c || typeof c.claimType !== 'string' || !c.claimType.startsWith('workflow.check.')) return false;
+    if (!c || typeof c.claimType !== 'string') return false;
+    const typeMatch = c.claimType.startsWith('workflow.check.')
+      || (declaredClaimTypes != null && declaredClaimTypes.has(c.claimType));
+    if (!typeMatch) return false;
     const v = normalizedStatus(c.value || '');
     return v === 'fail' || v === 'failed' || v === 'not_verified' || v === 'not-verified';
   }).map(c => ({
@@ -342,11 +375,19 @@ function bundleBlockingChecks(claims) {
 }
 
 /**
- * Determine critique status from trust.bundle workflow.critique.review claims.
+ * Determine critique status from trust.bundle workflow.critique.review claims,
+ * or from declared claimTypes when a FlowDefinition is active (P-c extension).
  * Returns the "worst" value among critique claims, or null when none present.
+ *
+ * @param {Array} claims - trust.bundle claims array
+ * @param {Set<string>|null} [declaredClaimTypes] - optional set of declared claimTypes from gateExpects[]
  */
-function bundleCritiqueStatus(claims) {
-  const critiqueClaims = claims.filter(c => c && c.claimType === 'workflow.critique.review');
+function bundleCritiqueStatus(claims, declaredClaimTypes) {
+  const critiqueClaims = claims.filter(c => {
+    if (!c || typeof c.claimType !== 'string') return false;
+    if (c.claimType === 'workflow.critique.review') return true;
+    return declaredClaimTypes != null && declaredClaimTypes.has(c.claimType);
+  });
   if (critiqueClaims.length === 0) return null;
   // A disputed or failed critique is blocking
   for (const c of critiqueClaims) {
@@ -364,8 +405,11 @@ function bundleCritiqueStatus(claims) {
  *
  * Returns objects shaped like { id, kind, status, command } — same shape as
  * evidence.json.checks — so captureCrossReference's body logic is unchanged.
+ *
+ * @param {object} bundle - trust.bundle object
+ * @param {Set<string>|null} [declaredClaimTypes] - optional set of declared claimTypes from gateExpects[]
  */
-function bundleClaimedPassCommandChecks(bundle) {
+function bundleClaimedPassCommandChecks(bundle, declaredClaimTypes) {
   const allEvidence = Array.isArray(bundle.evidence) ? bundle.evidence : [];
   const allClaims = Array.isArray(bundle.claims) ? bundle.claims : [];
 
@@ -387,7 +431,8 @@ function bundleClaimedPassCommandChecks(bundle) {
     if (!cmd) continue;
     const claim = claimById.get(ev.claimId);
     if (!claim) continue;
-    if (!String(claim.claimType || '').startsWith('workflow.check.')) continue;
+    const claimTypeStr = String(claim.claimType || '');
+    if (!claimTypeStr.startsWith('workflow.check.') && !(declaredClaimTypes != null && declaredClaimTypes.has(claimTypeStr))) continue;
     // Deduplicate by command
     if (seen.has(cmd)) continue;
     seen.add(cmd);
@@ -400,7 +445,10 @@ function bundleClaimedPassCommandChecks(bundle) {
   // (no evidence item with execution) — these are originally-claimed-pass checks
   // that were never captured.
   for (const c of allClaims) {
-    if (!c || c.claimType !== 'workflow.check.command') continue;
+    if (!c || typeof c.claimType !== 'string') continue;
+    const isCommandType = c.claimType === 'workflow.check.command'
+      || (declaredClaimTypes != null && declaredClaimTypes.has(c.claimType));
+    if (!isCommandType) continue;
     if (normalizedStatus(c.value || '') !== 'pass') continue;
     // Check if this claim already has a capture evidence item (covered in (A))
     const hasCapture = allEvidence.some(ev => ev && ev.claimId === c.id && ev.execution && ev.execution.label);
@@ -424,12 +472,20 @@ function bundleClaimedPassCommandChecks(bundle) {
 }
 
 /**
- * Extract pending acceptance criteria from trust.bundle workflow.acceptance.criterion claims.
+ * Extract pending acceptance criteria from trust.bundle workflow.acceptance.criterion claims,
+ * or from declared claimTypes when a FlowDefinition is active (P-c extension).
  * Returns the count of claims whose value is pending/not_started/empty/unknown.
- * Returns null when the bundle has no acceptance criterion claims.
+ * Returns null when the bundle has no matching claims.
+ *
+ * @param {Array} claims - trust.bundle claims array
+ * @param {Set<string>|null} [declaredClaimTypes] - optional set of declared claimTypes from gateExpects[]
  */
-function bundlePendingCriteriaCount(claims) {
-  const criteriaClaims = claims.filter(c => c && c.claimType === 'workflow.acceptance.criterion');
+function bundlePendingCriteriaCount(claims, declaredClaimTypes) {
+  const criteriaClaims = claims.filter(c => {
+    if (!c || typeof c.claimType !== 'string') return false;
+    if (c.claimType === 'workflow.acceptance.criterion') return true;
+    return declaredClaimTypes != null && declaredClaimTypes.has(c.claimType);
+  });
   if (criteriaClaims.length === 0) return null;
   const pending = criteriaClaims.filter(c => {
     const v = normalizedStatus(c.value || '');
@@ -448,8 +504,17 @@ function bundlePendingCriteriaCount(claims) {
  * not_verified_gaps: always from evidence.json (no bundle equivalent).
  * critique status: read from trust.bundle when present, fall back to critique.json.
  *   Finding details: still from critique.json when present (both bundle and sidecar paths).
+ *
+ * ADR 0016 P-c: when activeFlowStep is non-null, pass its declared claimTypes to
+ * bundle helpers so declared-type claims (e.g. builder.verify.tests) produce the
+ * same sidecar guidance signals as workflow.* claims.
  */
-function sidecarGuidance(root, artifactDir) {
+function sidecarGuidance(root, artifactDir, activeFlowStep) {
+  // Build the declared claimType set from the FlowDefinition gate expects[] (P-c).
+  // Null when no FlowDefinition is active (fallback: helpers use workflow.* prefix only).
+  const declaredClaimTypes = activeFlowStep && Array.isArray(activeFlowStep.gateExpects)
+    ? new Set(activeFlowStep.gateExpects.map(e => e && e.bundle_claim && e.bundle_claim.claimType).filter(Boolean))
+    : null;
   const warnings = [];
   const state = readJsonFile(path.join(artifactDir, 'state.json'));
   const base = relative(root, artifactDir);
@@ -480,11 +545,12 @@ function sidecarGuidance(root, artifactDir) {
 
   if (bundleClaims) {
     // Phase 4b: read verdict and per-check signals from trust.bundle claims.
-    const verdict = bundleEvidenceVerdict(bundleClaims);
+    // P-c: pass declaredClaimTypes so declared-type claims are included alongside workflow.*.
+    const verdict = bundleEvidenceVerdict(bundleClaims, declaredClaimTypes);
     if (verdict && verdict !== 'pass' && verdict !== 'skip') {
       warnings.push(`${base} evidence verdict:${safeOneLine(verdict, 40)}; do not deliver without accepted gap or new evidence.`);
     }
-    const blockingChecks = bundleBlockingChecks(bundleClaims);
+    const blockingChecks = bundleBlockingChecks(bundleClaims, declaredClaimTypes);
     for (const check of blockingChecks.slice(0, 4)) {
       const status = safeOneLine(check.status || 'unknown', 40);
       warnings.push(`${base} evidence check ${safeOneLine(check.id || 'unknown', 80)} status:${status}: ${safeOneLine(check.summary)}`);
@@ -520,7 +586,8 @@ function sidecarGuidance(root, artifactDir) {
 
   if (bundleClaims) {
     // Phase 4b: read critique status from trust.bundle claims.
-    const critiqueStatusVal = bundleCritiqueStatus(bundleClaims);
+    // P-c: pass declaredClaimTypes so declared-type critique claims are included.
+    const critiqueStatusVal = bundleCritiqueStatus(bundleClaims, declaredClaimTypes);
     const critiqueIsBlocking = critiqueStatusVal !== null && normalizedStatus(critiqueStatusVal) !== 'pass';
     if (critiqueIsBlocking) {
       warnings.push(`${base} critique status:${safeOneLine(critiqueStatusVal || 'unknown', 40)}; required critique must pass or findings be accepted.`);
@@ -824,7 +891,13 @@ function captureCrossReference(root, artifactDir) {
 // stored status (e.g. stored "verified" but evidence re-derives to "disputed"),
 // that mismatch is a strong tamper signal — block with an explicit warning.
 // Fail-open: if Surface is unavailable, fall back to the stored-status check.
-async function bundleEnforcement(artifactDir) {
+//
+// ADR 0016 P-c: when activeFlowStep is non-null, claim-selection uses the gate's
+// declared claimType set (gateExpects[].bundle_claim.claimType). When null, the
+// existing workflow.* prefix filter runs unchanged (fallback). The re-derivation
+// loop, tamper-detection, high/critical filter, and block/exit-2 logic are
+// STRUCTURALLY UNCHANGED — only WHICH claims are selected changes.
+async function bundleEnforcement(artifactDir, activeFlowStep) {
   const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
   if (!bundle || !Array.isArray(bundle.claims)) return [];
 
@@ -835,11 +908,30 @@ async function bundleEnforcement(artifactDir) {
   const allEvents = Array.isArray(bundle.events) ? bundle.events : [];
   const allPolicies = Array.isArray(bundle.policies) ? bundle.policies : [];
 
+  // P-c: claim-selection predicate.
+  // When activeFlowStep is non-null, select claims whose claimType is in the
+  // gate's declared set. When null, fall back to the existing workflow.* prefix
+  // filter so no-FlowDefinition sessions are unaffected.
+  const declaredClaimTypes = activeFlowStep && Array.isArray(activeFlowStep.gateExpects)
+    ? new Set(activeFlowStep.gateExpects.map(e => e && e.bundle_claim && e.bundle_claim.claimType).filter(Boolean))
+    : null;
+  const isSelectedClaim = (claim) => {
+    const ct = String(claim.claimType || '');
+    if (declaredClaimTypes != null) {
+      // Declared-type path: only process claims in the gate's expects[] set.
+      return declaredClaimTypes.has(ct);
+    }
+    // Fallback workflow.* path: existing behavior unchanged.
+    return ct.startsWith('workflow.');
+  };
+
   for (const claim of bundle.claims) {
     if (!claim || typeof claim !== 'object') continue;
     const impact = String(claim.impactLevel || '').toLowerCase();
     const storedStatus = String(claim.status || '').toLowerCase();
     if (impact !== 'high' && impact !== 'critical') continue;
+    // P-c: claim-selection — only process claims matching the active predicate.
+    if (!isSelectedClaim(claim)) continue;
 
     // Step 1: Re-derive status via Surface when available.
     // This closes the gaming vector: editing the stored status field cannot bypass
@@ -928,7 +1020,13 @@ function isPreExecution(artifactDir, markdownStatus) {
 // When the task is delivered but acceptance criteria are still pending, emit the
 // Final Acceptance reminder. Read from trust.bundle claims when present; fall back
 // to acceptance.json for bundle-less sessions.
-function missingBundleOrStateSignal(artifactDir) {
+//
+// ADR 0016 P-c: pass activeFlowStep so bundlePendingCriteriaCount includes declared types.
+function missingBundleOrStateSignal(artifactDir, activeFlowStep) {
+  // Build the declared claimType set from the FlowDefinition gate expects[] (P-c).
+  const declaredClaimTypes = activeFlowStep && Array.isArray(activeFlowStep.gateExpects)
+    ? new Set(activeFlowStep.gateExpects.map(e => e && e.bundle_claim && e.bundle_claim.claimType).filter(Boolean))
+    : null;
   const warnings = [];
   const hasBundle = fs.existsSync(path.join(artifactDir, 'trust.bundle'));
   const state = readJsonFile(path.join(artifactDir, 'state.json'));
@@ -949,7 +1047,8 @@ function missingBundleOrStateSignal(artifactDir) {
 
   if (bundleClaims) {
     // Phase 4b: read pending criteria count from trust.bundle claims.
-    const pendingCount = bundlePendingCriteriaCount(bundleClaims);
+    // P-c: pass declaredClaimTypes so declared-type acceptance claims are included.
+    const pendingCount = bundlePendingCriteriaCount(bundleClaims, declaredClaimTypes);
     if (pendingCount !== null && pendingCount > 0) {
       const base = path.basename(artifactDir);
       warnings.push(`${base} Final Acceptance: ${pendingCount} acceptance criterion/criteria still pending; complete CI/merge/docs before final delivery.`);
@@ -1000,8 +1099,12 @@ async function analyze(root, now = Date.now()) {
   // Verdict is now bundle-driven via bundleEnforcement + sidecarGuidance.
   // Sessions with neither trust.bundle nor state.json are caught by missingBundleOrStateSignal.
 
+  // ADR 0016 P-c: load the active FlowDefinition gate (fail-open: null when absent).
+  // Null → existing workflow.* fallback path unchanged. Non-null → expects[]-driven claim selection.
+  const activeFlowStep = loadActiveFlowStep(flowAgentsDir);
+
   warnings.push(...sidecarValidation(root, path.dirname(latest.file)));
-  warnings.push(...sidecarGuidance(root, path.dirname(latest.file)));
+  warnings.push(...sidecarGuidance(root, path.dirname(latest.file), activeFlowStep));
   const captureWarnings = captureCrossReference(root, path.dirname(latest.file));
   warnings.push(...captureWarnings);
   // Dedup: bundleEnforcement and captureCrossReference can both fire "caught false-completion"
@@ -1016,7 +1119,7 @@ async function analyze(root, now = Date.now()) {
     const m = /evidence check ([^\s:]+):/.exec(w);
     if (m) captureHardBlockIds.add(m[1]);
   }
-  const bundleWarnings = (await bundleEnforcement(path.dirname(latest.file))).filter(w => {
+  const bundleWarnings = (await bundleEnforcement(path.dirname(latest.file), activeFlowStep)).filter(w => {
     if (!captureHardBlockIds.size) return true;
     // bundleEnforcement warns: "trust.bundle claim disputed: <subjectId> ..."
     const m = /trust\.bundle claim (?:disputed|tampered): ([^\s(]+)/.exec(w);
@@ -1028,7 +1131,7 @@ async function analyze(root, now = Date.now()) {
     return !captureHardBlockIds.has(checkId);
   });
   warnings.push(...bundleWarnings);
-  warnings.push(...missingBundleOrStateSignal(path.dirname(latest.file)));
+  warnings.push(...missingBundleOrStateSignal(path.dirname(latest.file), activeFlowStep));
 
   // A pre-execution task (not started) OR a terminal task (which is itself a
   // completion *claim*) must not block on mere incompleteness — but a FALSE claim
@@ -1169,4 +1272,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, readCommandLog, resolveTrustedCommand, declaredManifestTarget };
+module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget };
