@@ -8,6 +8,8 @@ Flow-backed kits will model rich gate evidence as claim expectations using the H
 
 **Status**: Accepted (updated: vocabulary aligned to Hachure trust.bundle in hachure-align)
 
+> **Clarified by ADR 0016 (2026-06-26) on claim-taxonomy ownership.** The kit's FlowDefinition `expects[]` is **authoritative** for which claims each gate requires (it declares the kit-namespaced types, e.g. `builder.verify.tests`). The core derives the generic *kind* of an expectation from that metadata; it does not hardcode a claim namespace. Generic kinds are flow/core vocabulary; the binding of kinds → steps + accepted statuses is the kit's FlowDefinition.
+
 **Considered Options**: Provider-aware gate rules were rejected because they would make Flow Definitions know too much about individual tools. Plain evidence strings such as `tests` or `veritas` were rejected because they cannot represent claim type, accepted status, producer authority, transparency gaps, or project-level enforcement overrides cleanly. An earlier version used `kind: "surface.claim"` and `artifact_kind: "TrustReport"/"Trust Snapshot"` — those have been renamed to `kind: "trust.bundle"` and `artifact_kind: "trust.bundle"` to align with the Hachure schema standard that Flow now ships.
 
 **Consequences**: Trusted producer mappings belong upstream in Flow project configuration, not Flow Agents runtime configuration. Flow Agents can help author, install, and adapt that configuration for agent runtimes, but CI, framework agents, local CLIs, and humans should all evaluate gates against the same Flow-owned authority model. When hachure is installed as an optional dependency, referenced trust artifacts are validated against hachure's trust-bundle.schema.json at evidence-recording time.
