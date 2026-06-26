@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
-import { resolveActiveFlowStep, type ActiveFlowStep } from "../lib/flow-resolver.js";
+import { resolveActiveFlowStep, resolvePhaseMap, type ActiveFlowStep } from "../lib/flow-resolver.js";
 
 type AnyObj = Record<string, any>;
 
@@ -286,6 +286,25 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
   // The legacy claim uses the existing workflow.* claimType (suffix "-legacy") as
   // a backward-compat shadow. Both cite the same evidence. Status is derived by
   // Surface from that evidence (never hand-set).
+  //
+  // Per-gate producibility (ADR 0016 P-d):
+  //   (a) Already handled via subjectType=flow-step preference:
+  //       builder.verify.tests       (verify-gate, subjectType=flow-step)
+  //       builder.verify.policy-compliance (verify-gate, kind=policy match)
+  //   (b) Producible via fallback (non-decision, non-acceptance, first match):
+  //       builder.plan.implementation   (plan-gate, subjectType=artifact)
+  //       builder.execute.scope         (execute-gate, subjectType=change)
+  //       builder.merge-ready.readiness (merge-ready-gate, subjectType=change)
+  //       builder.merge-ready-ci.readiness (merge-ready-ci-gate, subjectType=pull-request)
+  //   (c) No natural producer — required:false in build.flow.json (ADR 0016 P-d plan):
+  //       builder.pull-work.selected        (pull-work-gate, subjectType=work-item)
+  //       builder.design-probe.pickup-readiness (design-probe-gate, subjectType=work-item)
+  //       builder.design-probe.decisions    (design-probe-gate, subjectType=decision)
+  //       builder.pr-open.pull-request      (pr-open-gate, subjectType=pull-request)
+  //       builder.learn.decisions           (learn-gate, subjectType=decision)
+  //       builder.learn.evidence            (learn-gate, subjectType=release)
+  //   For category (c): record-gate-claim subcommand allows skills to target a specific
+  //   expects[] entry by --expectation <id>, bypassing this semantic match entirely.
   function matchExpectsEntry(kind: "check" | "acceptance" | "critique", checkKindVal?: string): { claimType: string; subjectType: string } | null {
     if (!activeStep || activeStep.gateExpects.length === 0) return null;
     const expects = activeStep.gateExpects;
@@ -734,6 +753,54 @@ function validateAgentId(agent: string): string {
   return agent;
 }
 
+/**
+ * Find the repository root by walking upward from a starting directory to locate
+ * the nearest ancestor containing a kits/ subdirectory. Mirrors flow-resolver.ts
+ * findRepoRoot, but callable from workflow-sidecar.ts without re-importing the
+ * internal helper.
+ *
+ * ADR 0016 Abstraction A (P-d): used by advance-state and ensure-session to
+ * derive repoRoot for resolvePhaseMap calls.
+ */
+function findRepoRootFromDir(startDir: string): string {
+  let dir = startDir;
+  for (let i = 0; i < 16; i++) {
+    if (fs.existsSync(path.join(dir, "kits"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return process.cwd();
+}
+
+/**
+ * Resolve the first step id from a FlowDefinition's steps[] list.
+ * Returns null when the flow cannot be loaded or has no steps.
+ * Used by ensure-session to default active_step_id when --flow-id is
+ * provided without --step-id (Q2 decision, P-d Increment 1).
+ */
+function resolveFirstStep(flowId: string, repoRoot: string): string | null {
+  if (!flowId) return null;
+  const dotIdx = flowId.indexOf(".");
+  if (dotIdx < 1) return null;
+  const kitId = flowId.slice(0, dotIdx);
+  const flowName = flowId.slice(dotIdx + 1);
+  if (!kitId || !flowName) return null;
+  const override = process.env["FLOW_AGENTS_FLOW_DEFS_DIR"];
+  const flowFilePath = override
+    ? path.join(override, `${flowId}.flow.json`)
+    : path.join(repoRoot, "kits", kitId, "flows", `${flowName}.flow.json`);
+  try {
+    const raw = fs.readFileSync(flowFilePath, "utf8");
+    const flowDef = JSON.parse(raw) as { steps?: Array<{ id: string }> };
+    if (!flowDef || !Array.isArray(flowDef.steps) || flowDef.steps.length === 0) return null;
+    const first = flowDef.steps[0];
+    return (first && typeof first.id === "string" && first.id !== "done") ? first.id : null;
+  } catch {
+    return null;
+  }
+}
+
 function writeCurrent(root: string, dir: string, timestamp: string, owner: string, source: string, flowId?: string, stepId?: string): void {
   writeJson(path.join(root, "current.json"), {
     schema_version: "1.0",
@@ -805,8 +872,17 @@ function ensureSession(p: ReturnType<typeof parseArgs>): number {
   // ADR 0016 Abstraction A (P-a): optional --flow-id / --step-id flags persist FlowDefinition
   // routing keys into current.json for the producer (P-b) and enforcer (P-c) to consume.
   // When absent, behavior is unchanged — the workflow.* claim type path is used as before.
+  // P-d Increment 1 (Q2 decision): when --flow-id is given without --step-id, default
+  // active_step_id to the FIRST step in the FlowDefinition's steps[] list. This ensures
+  // ensure-session --flow-id builder.build produces a FlowDefinition-driven session even
+  // before the first advance-state call.
   const flowId = opt(p, "flow-id");
-  const stepId = opt(p, "step-id");
+  let stepId = opt(p, "step-id");
+  if (flowId && !stepId) {
+    const repoRoot = findRepoRootFromDir(dir);
+    const firstStep = resolveFirstStep(flowId, repoRoot);
+    if (firstStep) stepId = firstStep;
+  }
   writeCurrent(root, dir, timestamp, "workflow-sidecar", "ensure-session", flowId || undefined, stepId || undefined);
   console.log(dir);
   return 0;
@@ -1041,6 +1117,91 @@ function diagnostic(dir: string, code: string, summary: string): never {
   appendJsonl(path.join(dir, "transition-diagnostics.jsonl"), payload);
   die(`${code}: ${summary}`);
 }
+
+/**
+ * record-gate-claim — Generic gate-claim producer for skills (ADR 0016 P-d Increment 1).
+ *
+ * Allows a skill to record a claim that satisfies a SPECIFIC gate expectation at the
+ * active step. The caller passes:
+ *   --status <pass|fail|not_verified>  (required)
+ *   --summary <text>                   (required)
+ *   --expectation <id>                 (optional; auto-resolved when the gate has one entry)
+ *   --evidence-json <json>             (optional; structured evidence refs)
+ *
+ * The producer emits a check of kind="external" targeting the gate expectation's declared
+ * claimType + subjectType from the active step's expects[]. This populates the trust.bundle
+ * with a correctly-typed claim derived by Surface, suitable for gate enforcement.
+ *
+ * When the gate has exactly ONE expects[] entry, --expectation is optional (auto-resolve).
+ * When the gate has multiple entries, --expectation <id> is required.
+ *
+ * This is what Increment 2's 6 skills will call to satisfy the category (c) gates
+ * (pull-work.selected, design-probe.*, pr-open.pull-request, learn.*) once producers are added.
+ *
+ * Error cases:
+ *   - No active flow/step in current.json → die with actionable message
+ *   - --expectation not found in expects[] → die
+ *   - Multiple expects[] entries and --expectation omitted → die
+ *   - Surface unavailable → assertBundleWritten fails loud (no silent data loss)
+ */
+async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number> {
+  const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
+  const slug = taskSlugFor(dir, opt(p, "task-slug"));
+  const ts = opt(p, "timestamp", now());
+  const statusVal = opt(p, "status");
+  if (!["pass", "fail", "not_verified"].includes(statusVal)) die("--status must be one of: pass, fail, not_verified");
+  const summary = opt(p, "summary") || die("--summary is required");
+  const expectationId = opt(p, "expectation");
+
+  // Resolve the active flow step from current.json
+  const flowAgentsDir = path.dirname(dir);
+  const activeStep = resolveActiveFlowStep(flowAgentsDir);
+  if (!activeStep) die("record-gate-claim requires an active flow step in current.json (set via ensure-session --flow-id or advance-state --flow-definition)");
+
+  const expects = activeStep.gateExpects;
+  if (expects.length === 0) die(`record-gate-claim: active step "${activeStep.stepId}" gate "${activeStep.gateId}" has no expects[] entries`);
+
+  // Resolve the target expects entry
+  let targetExpectation: typeof expects[0] | undefined;
+  if (expectationId) {
+    targetExpectation = expects.find((e) => e.id === expectationId);
+    if (!targetExpectation) die(`record-gate-claim: --expectation "${expectationId}" not found in gate "${activeStep.gateId}" expects[]. Available: ${expects.map((e) => e.id).join(", ")}`);
+  } else if (expects.length === 1) {
+    targetExpectation = expects[0]!;
+  } else {
+    die(`record-gate-claim: gate "${activeStep.gateId}" has ${expects.length} expects[] entries; --expectation <id> is required. Available: ${expects.map((e) => e.id).join(", ")}`);
+  }
+
+  const { claimType, subjectType } = targetExpectation.bundle_claim;
+
+  // Build a synthetic external check that will be matched by matchExpectsEntry to produce
+  // a correctly-typed claim. We use kind="external" so it routes through the non-policy,
+  // non-flow-step fallback path. The subjectType on the resulting claim comes from the
+  // expects[] entry via matchExpectsEntry.
+  const checkId = expectationId || targetExpectation.id;
+  // Build a minimal "external" check. Do not include extra fields that normalizeCheck
+  // does not accept or that might appear in the trust.bundle payload.
+  const check: AnyObj = {
+    id: `gate-claim-${checkId}`,
+    kind: "external",
+    status: statusVal,
+    summary,
+  };
+
+  // Include structured evidence refs if provided
+  const evidenceRefs: AnyObj[] = opts(p, "evidence-ref-json").map((v) => validateEvidenceRef(parseJson(v, "--evidence-ref-json"), "--evidence-ref-json"));
+
+  if (evidenceRefs.length > 0) {
+    check.artifact_refs = evidenceRefs;
+  }
+
+  const checkNormalized = normalizeCheck(check);
+  // Log the targeted gate expectation for transparency (goes to stderr only)
+  process.stderr.write(`[record-gate-claim] targeting ${activeStep.stepId}/${activeStep.gateId}/${targetExpectation.id} → claimType=${claimType} subjectType=${subjectType}\n`);
+  assertBundleWritten(await writeTrustBundle(dir, slug, ts, [checkNormalized], [], []));
+  return 0;
+}
+
 function advanceState(p: ReturnType<typeof parseArgs>): number {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const status = opt(p, "status");
@@ -1067,6 +1228,19 @@ function advanceState(p: ReturnType<typeof parseArgs>): number {
   const timestamp = opt(p, "timestamp", now());
   writeState(dir, slug, status, phase, timestamp, opt(p, "summary"));
   writeJson(path.join(dir, "handoff.json"), { ...loadJson(path.join(dir, "handoff.json")), ...sidecarBase(slug), summary: opt(p, "summary"), current_state_ref: "state.json", next_steps: [opt(p, "next-action")].filter(Boolean), blockers: [], warnings: [] });
+  // ADR 0016 Abstraction A (P-d, Increment 1): when --flow-definition is provided,
+  // resolve the phase→step mapping from the FlowDefinition and write active_step_id
+  // into current.json. This is the single setter — no skill needs to call ensure-session
+  // --step-id individually. The repoRoot is derived by walking up from dir to find kits/.
+  if (flow) {
+    const root = path.resolve(opt(p, "artifact-root", path.dirname(dir)));
+    const repoRoot = findRepoRootFromDir(dir);
+    const phaseMap = resolvePhaseMap(flow, repoRoot);
+    const stepId = phaseMap?.[phase] ?? undefined;
+    if (stepId) {
+      writeCurrent(root, dir, timestamp, "workflow-sidecar", "advance-state", flow, stepId);
+    }
+  }
   livenessLifecycle(dir, slug, LIVENESS_TERMINAL.has(status) ? "release" : "heartbeat", timestamp);
   return 0;
 }
@@ -2157,6 +2331,7 @@ async function main(): Promise<number> {
       case "record-agent-event": return recordAgentEvent(p);
       case "init-plan": return initPlan(p);
       case "record-evidence": return recordEvidence(p);
+      case "record-gate-claim": return recordGateClaim(p);
       case "advance-state": return advanceState(p);
       case "record-critique": return recordCritique(p);
       case "import-critique": return importCritique(p);

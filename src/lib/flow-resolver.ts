@@ -46,6 +46,10 @@ type FlowGate = {
 type FlowDefinition = {
   id: string;
   version: string;
+  /** Kit-owned phase→step mapping (ADR 0016 Abstraction A P-d). Maps lifecycle phase names
+   *  (e.g. "execution") to step ids (e.g. "execute") so advance-state can write active_step_id
+   *  without hardcoding any vocabulary in the core. */
+  phase_map?: Record<string, string>;
   steps?: Array<{ id: string; next: string | null }>;
   gates?: Record<string, FlowGate>;
 };
@@ -93,6 +97,52 @@ export function resolveFlowStep(flowId: string, stepId: string, repoRoot: string
   }
 
   return null; // no gate matched the given stepId
+}
+
+
+/**
+ * Resolve the phase→step mapping from a FlowDefinition's phase_map field.
+ *
+ * Returns the phase_map object (e.g. {"execution":"execute","planning":"plan",...})
+ * or null when the flow file cannot be loaded, the phase_map field is absent, or
+ * the field is not a plain Record<string,string>.
+ *
+ * Pure and synchronous — no throws, fail-open on any error.
+ *
+ * @param flowId   e.g. "builder.build" — kitId is the prefix before the first ".".
+ * @param repoRoot Absolute path to the repository root (kits/ lives here).
+ *                 Honored only when FLOW_AGENTS_FLOW_DEFS_DIR is not set.
+ * @returns Record<string,string> phase→stepId map, or null on absence/error.
+ */
+export function resolvePhaseMap(flowId: string, repoRoot: string): Record<string, string> | null {
+  if (!flowId) return null;
+  const dotIdx = flowId.indexOf(".");
+  if (dotIdx < 1) return null;
+  const kitId = flowId.slice(0, dotIdx);
+  const flowName = flowId.slice(dotIdx + 1);
+  if (!kitId || !flowName) return null;
+
+  const override = process.env["FLOW_AGENTS_FLOW_DEFS_DIR"];
+  const flowFilePath = override
+    ? path.join(override, `${flowId}.flow.json`)
+    : path.join(repoRoot, "kits", kitId, "flows", `${flowName}.flow.json`);
+
+  let flowDef: FlowDefinition;
+  try {
+    const raw = fs.readFileSync(flowFilePath, "utf8");
+    flowDef = JSON.parse(raw) as FlowDefinition;
+  } catch {
+    return null; // ENOENT, permission error, or parse error → fail-open
+  }
+
+  if (!flowDef || typeof flowDef !== "object") return null;
+  const pm = flowDef.phase_map;
+  if (!pm || typeof pm !== "object" || Array.isArray(pm)) return null;
+  // Validate: all values must be strings
+  for (const v of Object.values(pm)) {
+    if (typeof v !== "string") return null;
+  }
+  return pm as Record<string, string>;
 }
 
 /**
