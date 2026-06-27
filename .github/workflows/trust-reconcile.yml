@@ -4,8 +4,15 @@
 # Phase 1: re-runs canonical verification FRESH in a clean CI environment that
 # the agent does not control, then reconciles a delivered checkpoint/bundle's
 # claimed passes against CI reality. Any divergence (claimed pass + CI fail,
-# claimed pass + laundering operator, claimed pass + command CI never ran) fails
-# the job with a clear diagnostic message.
+# claimed pass + laundering operator, claimed pass + command CI never ran,
+# checkpoint-only bundle, claim with no evidence) fails the job with a clear
+# diagnostic message.
+#
+# Canonical verify command: npm run trust-reconcile-verify
+#   = npm run build && npm run eval:static && npm run eval:integration
+#   This is the REAL verification this repo runs (build + static evals + integration
+#   evals), not a compile-only check. The script is declared in package.json so
+#   trust-reconcile.js auto-discovers it without needing TRUST_RECONCILE_COMMANDS.
 #
 # Phase 2 (additive): after the reconcile step PASSES, mint a signed in-toto
 # attestation over CI's own fresh results using Sigstore keyless signing
@@ -63,12 +70,18 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
+      - name: Install shell tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq ripgrep
+
       - name: Trust reconcile
         id: trust-reconcile
         run: node scripts/ci/trust-reconcile.js
-        # Default canonical command: npm run build (TypeScript compile).
-        # Override via TRUST_RECONCILE_COMMANDS, e.g.:
-        #   "npm run build,npm run typecheck"
+        # Canonical verify: auto-discovered from package.json scripts["trust-reconcile-verify"]
+        #   = npm run build && npm run eval:static && npm run eval:integration
+        # This runs the REAL verification (build + static + integration evals), NOT a
+        # compile-only check. Override via TRUST_RECONCILE_COMMANDS or --commands if needed.
         # Bundle auto-discovery: if delivery/trust.bundle or delivery/trust.checkpoint.json
         # exists in the checkout, CI reconciles per-command claimed passes against fresh
         # results automatically. When absent, only the fresh verify is enforced (fail-open).

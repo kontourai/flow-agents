@@ -7,19 +7,22 @@
  *
  *   Step 1  Re-run canonical verification FRESH. Real exit codes from CI. Authoritative.
  *   Step 2  If a delivered bundle is present, RECONCILE: for every evidence item
- *           asserting a command PASSED (evidence.passing === true + execution.label),
- *           look up CI's fresh result for that command.
- *           a. Claimed-pass + laundering operator (|| true, ; true, etc.) → DIVERGENCE
- *           b. Claimed-pass + CI FAIL                                       → DIVERGENCE
- *           c. Claimed-pass + CI never ran the command                      → DIVERGENCE
+ *           asserting a command PASSED (evidence.passing normalized to boolean + claims
+ *           asserting pass), look up CI's fresh result for that command.
+ *           a. Claimed-pass + laundering operator (|| ..., ; true, ; exit 0, etc.) → DIVERGENCE
+ *           b. Claimed-pass + CI FAIL                                               → DIVERGENCE
+ *           c. Claimed-pass + CI never ran the command                              → DIVERGENCE
+ *           d. workflow.check.command claim with no evidence (never captured)       → DIVERGENCE
+ *           e. checkpoint-only bundle (no evidence/claims) → DIVERGENCE (full bundle required)
  *
  * Exit codes:
  *   0 — fresh verify passed AND no divergence (or no bundle present)
- *   1 — fresh verify failed OR any divergence detected
+ *   1 — fresh verify failed OR any divergence detected OR compile-only fallback
  *
  * Fail-open on bundle absence: if no bundle is provided (and none auto-discovered at
  * delivery/trust.bundle or delivery/trust.checkpoint.json), only the fresh verify is
  * enforced. Fail-closed on divergence: any claimed-pass command CI cannot confirm blocks.
+ * Fail-closed on compile-only: if no comprehensive verify is configured, exits 1.
  *
  * Inputs (CLI args take precedence over env):
  *   --bundle <path>      Delivered trust.bundle (JSON) path. May also be a
@@ -37,9 +40,11 @@
  *   Checks delivery/trust.bundle, then delivery/trust.checkpoint.json under repo root.
  *   If neither exists, continues fail-open (fresh verify only).
  *
- * Default canonical commands (when no --commands or TRUST_RECONCILE_COMMANDS):
- *   Reads package.json scripts["trust-reconcile-verify"] if present, otherwise
- *   falls back to "npm run build".
+ * Canonical commands resolution (fail-closed on compile-only):
+ *   Priority: CLI --commands > TRUST_RECONCILE_COMMANDS env > package.json
+ *   scripts["trust-reconcile-verify"]. If NONE of those is configured, exits 1 with
+ *   "no comprehensive trust-reconcile-verify configured" — refuses to attest a
+ *   compile-only check.
  *
  * NOTE: This job is intended to be a REQUIRED status check in GitHub branch
  * protection (making it the un-disablable CI anchor). Enabling it as required is
@@ -63,19 +68,36 @@ function normalizeCmd(cmd) {
 }
 
 /**
+ * Normalize ev.passing to a boolean.
+ * Treats true / 1 / "true" / "pass" as passing.
+ * Prevents a claim from dodging reconciliation via a non-boolean value.
+ */
+function isPassingValue(v) {
+  return v === true || v === 1 || v === 'true' || v === 'pass';
+}
+
+/**
  * Returns true when a command string contains an exit-code-laundering operator.
- * These operators mask real exit codes: `|| true`, `|| :`, `; true`, `; exit 0`, `| true`.
- * A claimed-pass evidence item whose command uses one of these cannot be accepted
- * as a trustworthy pass — the real sub-command may have failed silently.
+ * These operators mask real exit codes so the real sub-command may have failed silently.
  *
- * Logic mirrored from scripts/hooks/stop-goal-fit.js hasLaunderingOperator (Fix D).
+ * Rules (applied to claimed verification commands only):
+ *   - ANY || operator — verify commands must not contain ||. This catches:
+ *     || exit 0, || echo ok, || /bin/true, || true, || :, etc.
+ *   - ; or newline followed by true / : / exit 0 — trailing success injection
+ *
+ * NOTE: Logic must stay identical to scripts/hooks/stop-goal-fit.js hasLaunderingOperator.
+ * Centralize into a shared module as a follow-up (coordinate-free duplication for now).
  */
 function hasLaunderingOperator(cmd) {
-  return /\|\|\s*true\b/.test(cmd)
-      || /\|\|\s*:\s*(?:$|\s|;)/.test(cmd)
-      || /;\s*true\b/.test(cmd)
-      || /;\s*exit\s+0\b/.test(cmd)
-      || /\|\s*true\b/.test(cmd);
+  // Flag ANY || operator — masks the exit code of the left-hand command.
+  if (/\|\|/.test(cmd)) return true;
+  // Flag ; or newline followed by true / : / exit 0
+  if (/[;\n]\s*true\b/.test(cmd)) return true;
+  if (/[;\n]\s*:\s*(?:$|\s|;|\n)/.test(cmd)) return true;
+  if (/[;\n]\s*exit\s+0\b/.test(cmd)) return true;
+  // Flag pipe to true (pipeline absorbs exit code)
+  if (/\|\s*true\b/.test(cmd)) return true;
+  return false;
 }
 
 /**
@@ -104,14 +126,14 @@ function runCommand(cmd, repoRoot) {
 
 /**
  * Parse the trust.bundle and extract every evidence item asserting a command PASSED.
- * Returns an array of { cmd, claimId, evId, claimType } objects.
+ * Returns an array of { cmd, claimId, evId, claimType, noEvidence? } objects.
  *
  * Source of truth: evidence[].execution.label is the command string recorded at
- * capture time. evidence[].passing === true means the agent claimed this command passed.
+ * capture time. evidence[].passing (normalized) means the agent claimed this passed.
  *
- * This mirrors the logic in bundleClaimedPassCommandChecks in stop-goal-fit.js, but
- * simplified for the CI reconciler: we only look at evidence items where passing===true
- * because we want to verify CLAIMED passes, not re-audit known failures.
+ * Also collects workflow.check.command claims (or any claim with value "pass") that
+ * have no matching evidence item — these represent never-captured claimed passes
+ * and will produce a not-run divergence (Part-B logic mirroring stop-goal-fit.js).
  */
 function getClaimedPassCommands(bundle) {
   const evidence = Array.isArray(bundle.evidence) ? bundle.evidence : [];
@@ -126,9 +148,10 @@ function getClaimedPassCommands(bundle) {
   const commands = [];
   const seen = new Set();
 
+  // (A) Evidence items with execution.label and a passing value
   for (const ev of evidence) {
     if (!ev || !ev.execution || !ev.execution.label) continue;
-    if (ev.passing !== true) continue; // only claimed-pass items
+    if (!isPassingValue(ev.passing)) continue; // only claimed-pass items
 
     const cmd = normalizeCmd(ev.execution.label);
     if (!cmd || seen.has(cmd)) continue;
@@ -138,6 +161,39 @@ function getClaimedPassCommands(bundle) {
     const claimType = claim ? String(claim.claimType || '') : '';
 
     commands.push({ cmd, claimId: ev.claimId, evId: ev.id, claimType });
+  }
+
+  // (B) Claims with claimType workflow.check.command (or any claim asserting pass)
+  // that have NO matching evidence item with execution.label — never-captured claimed passes.
+  const evidenceClaimIds = new Set(
+    evidence
+      .filter(ev => ev && ev.claimId && ev.execution && ev.execution.label)
+      .map(ev => ev.claimId)
+  );
+
+  for (const c of claims) {
+    if (!c || !c.id || typeof c.claimType !== 'string') continue;
+    // Require claimType === workflow.check.command OR any claim asserting pass with no evidence
+    const isCommandClaim = c.claimType === 'workflow.check.command';
+    const assertsPass = isPassingValue(c.value) || c.status === 'verified';
+    if (!isCommandClaim && !assertsPass) continue;
+    if (evidenceClaimIds.has(c.id)) continue; // already covered in (A)
+
+    // Use fieldOrBehavior or value as command identifier (may be non-executable — that's ok,
+    // the key is that no evidence captured this pass claim, so emit not-run divergence).
+    const rawCmd = c.fieldOrBehavior || c.value || '';
+    const cmd = normalizeCmd(rawCmd);
+    const synthetic = cmd || `[claim:${c.id}:${c.claimType}]`;
+    if (seen.has(synthetic)) continue;
+    seen.add(synthetic);
+
+    commands.push({
+      cmd: synthetic,
+      claimId: c.id,
+      evId: null,
+      claimType: c.claimType,
+      noEvidence: true,
+    });
   }
 
   return commands;
@@ -166,7 +222,11 @@ function parseArgs(argv) {
 
 /**
  * Resolve the list of canonical verify commands.
- * Priority: CLI --commands > TRUST_RECONCILE_COMMANDS env > package.json scripts key > default.
+ * Priority: CLI --commands > TRUST_RECONCILE_COMMANDS env > package.json scripts key.
+ *
+ * FAIL-CLOSED: if none of those is configured (only the bare "npm run build" default
+ * would apply), returns null — main() must exit 1 with a diagnostic message.
+ * A compile-only check is NOT sufficient for attestation.
  */
 function resolveCanonicalCommands(args, repoRoot) {
   if (args.commands.length > 0) return args.commands;
@@ -189,8 +249,9 @@ function resolveCanonicalCommands(args, repoRoot) {
     }
   } catch { /* ignore */ }
 
-  // Default: npm run build (TypeScript compilation validates the source tree)
-  return ['npm run build'];
+  // FAIL CLOSED: no comprehensive verify configured.
+  // Returning null signals to main() to exit 1 — refuse compile-only attestation.
+  return null;
 }
 
 /**
@@ -226,6 +287,17 @@ function main() {
     || null;
 
   const canonicalCommands = resolveCanonicalCommands(args, repoRoot);
+
+  // FAIL-CLOSED: no comprehensive verify configured — refuse compile-only attestation.
+  if (canonicalCommands === null) {
+    process.stderr.write(
+      '[trust-reconcile] FAILED — no comprehensive trust-reconcile-verify configured.\n' +
+      '[trust-reconcile] Refusing to attest a compile-only check.\n' +
+      '[trust-reconcile] Declare package.json scripts["trust-reconcile-verify"] or set TRUST_RECONCILE_COMMANDS.\n' +
+      '[trust-reconcile] Example: add "trust-reconcile-verify": "npm run build && npm run eval:static && npm run eval:integration"\n'
+    );
+    process.exit(1);
+  }
 
   process.stdout.write('[trust-reconcile] starting CI trust anchor reconcile\n');
   process.stdout.write(`[trust-reconcile] repo-root: ${repoRoot}\n`);
@@ -298,8 +370,18 @@ function main() {
     const hasClaims = Array.isArray(bundle.claims) && bundle.claims.length > 0;
 
     if (!hasEvidence && !hasClaims) {
-      // Appears to be a trust.checkpoint.json (lightweight envelope with checkpoint.statusByClaimId)
-      process.stdout.write('[trust-reconcile] bundle has no evidence/claims — checkpoint-level reconcile\n');
+      // Checkpoint-only bundle: no evidence/claims → DIVERGENCE.
+      // Cannot perform per-command reconcile without evidence. A full trust.bundle is
+      // required. (Auto-discovery always prefers delivery/trust.bundle over
+      // delivery/trust.checkpoint.json — this fires only when a checkpoint was
+      // explicitly provided or no full bundle exists alongside it.)
+      process.stderr.write('[trust-reconcile] checkpoint-only bundle detected: no evidence[] or claims[]\n');
+      issues.push({
+        type: 'checkpoint-bypass',
+        message: 'trust divergence: checkpoint-only bundle cannot be reconciled per-command; full trust.bundle required',
+      });
+
+      // Still check checkpoint statusByClaimId for explicit failures (belt-and-suspenders)
       const statusByClaimId = bundle.checkpoint && bundle.checkpoint.statusByClaimId;
       if (statusByClaimId && typeof statusByClaimId === 'object') {
         for (const [claimId, status] of Object.entries(statusByClaimId)) {
@@ -312,19 +394,30 @@ function main() {
         }
       }
     } else {
-      // Full bundle: extract claimed-pass commands from evidence items
+      // Full bundle: extract claimed-pass commands from evidence items + claims
       const claimedPasses = getClaimedPassCommands(bundle);
       process.stdout.write(`[trust-reconcile] found ${claimedPasses.length} claimed-pass command(s) in bundle\n`);
 
-      for (const { cmd } of claimedPasses) {
+      for (const { cmd, claimId, claimType, noEvidence } of claimedPasses) {
         const normalCmd = normalizeCmd(cmd);
+
+        // (d) Claims with no evidence are an immediate not-run divergence.
+        // A pass was claimed but never captured — CI cannot confirm it.
+        if (noEvidence) {
+          issues.push({
+            type: 'not-run',
+            cmd,
+            message: `trust divergence: claim '${claimId}' (claimType: ${claimType}) asserts pass but has no supporting evidence item — command never captured`,
+          });
+          continue;
+        }
 
         // (a) Laundering operator check — must come first (most specific signal)
         if (hasLaunderingOperator(cmd)) {
           issues.push({
             type: 'laundering',
             cmd,
-            message: `trust divergence: agent claimed '${cmd}' passed; command contains exit-code-laundering operator (|| true / ; true / etc.)`,
+            message: `trust divergence: agent claimed '${cmd}' passed; command contains exit-code-laundering operator (|| ... / ; true / ; exit 0 / etc.)`,
           });
           continue;
         }
