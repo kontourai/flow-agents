@@ -27,6 +27,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const crypto = require('crypto');
 
 const MAX_STDIN = 1024 * 1024;
 const ACTIVE_STATUSES = new Set([
@@ -675,6 +676,103 @@ function readCommandLog(artifactDir) {
   return byCommand;
 }
 
+// ─── Hash-chain integrity verification (Increment B2, tamper-EVIDENCE) ────────
+//
+// command-log.jsonl is the independent capture truth source. Each chained entry
+// carries a `_chain` block: {seq, prevHash, hash} where
+//   hash = sha256(prevHash + canonicalJson(record))
+// and canonicalJson is the record WITHOUT `_chain`, keys sorted alphabetically.
+//
+// HONEST FRAMING: this is tamper-EVIDENCE, not tamper-PROOF. An agent that
+// rewrites all hashes can still forge a valid chain. The real tamper-proof
+// boundary is the signed checkpoint (B1). This raises the local bar and catches
+// casual/accidental tampering and corruption.
+//
+// verifyCommandLogChain returns:
+//   "ok"     — all entries have _chain and every hash/linkage is valid.
+//   "legacy" — no _chain fields at all (pre-B2 log); treat as today, no
+//              integrity claim. Backward-compat: existing fixtures stay green.
+//   "broken" — a chained entry has a bad hash or bad linkage; the capture
+//              truth source appears altered/removed/reordered.
+//
+// The genesis prevHash constant must match evidence-capture.js CHAIN_GENESIS.
+const CHAIN_GENESIS_VERIFY = 'a3f9e2b7d5c84f1e6a0d2c3b9f7e1a4d8c6b5f2e9a0d3c7b1f4e8a2d6c0b9f3';
+
+/**
+ * Canonical JSON for chain verification: record WITHOUT `_chain`, keys sorted.
+ * Must be byte-identical to canonicalJsonForChain() in evidence-capture.js.
+ */
+function canonicalJsonForVerify(record) {
+  const keys = Object.keys(record).filter(k => k !== '_chain').sort();
+  const obj = {};
+  for (const k of keys) obj[k] = record[k];
+  return JSON.stringify(obj);
+}
+
+/**
+ * Verify the hash chain of command-log.jsonl.
+ * Returns { status, brokenAt } where:
+ *   status  = "ok" | "legacy" | "broken"
+ *   brokenAt = index (0-based) of the first broken entry, or null
+ */
+function verifyCommandLogChain(artifactDir) {
+  const file = path.join(artifactDir, 'command-log.jsonl');
+  let raw = '';
+  try { raw = fs.readFileSync(file, 'utf8'); } catch { return { status: 'legacy', brokenAt: null }; }
+
+  const lines = raw.split('\n').filter(l => l.trim());
+  if (lines.length === 0) return { status: 'legacy', brokenAt: null };
+
+  // Parse all entries, tolerating unparseable lines (they count as legacy/unchained).
+  const entries = [];
+  for (const line of lines) {
+    try {
+      const entry = JSON.parse(line);
+      if (entry && typeof entry === 'object') entries.push(entry);
+    } catch { /* skip malformed lines */ }
+  }
+  if (entries.length === 0) return { status: 'legacy', brokenAt: null };
+
+  // Classify: are there any chained entries?
+  const hasAnyChain = entries.some(e => e._chain && typeof e._chain.hash === 'string');
+  if (!hasAnyChain) return { status: 'legacy', brokenAt: null };
+
+  // Verify chain linkage. Legacy entries (no _chain) that precede the first
+  // chained entry are tolerated (mixed log during the upgrade transition).
+  // However, a chain entry following another chain entry must link correctly.
+  let prevHash = CHAIN_GENESIS_VERIFY;
+  let prevWasChained = false;
+  let chainedCount = 0;
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const chain = entry._chain;
+    if (!chain || typeof chain.hash !== 'string') {
+      // Legacy entry without _chain. If we have already seen a chained entry,
+      // a gap in the chain (a legacy entry in the middle) counts as broken
+      // (it could indicate a removed chained entry was replaced by a legacy one).
+      if (prevWasChained) return { status: 'broken', brokenAt: i };
+      // Before any chained entry: tolerate (legacy prefix).
+      continue;
+    }
+
+    // This is a chained entry. Verify hash.
+    const expectedHash = crypto.createHash('sha256')
+      .update(prevHash + canonicalJsonForVerify(entry), 'utf8')
+      .digest('hex');
+    if (chain.hash !== expectedHash) return { status: 'broken', brokenAt: i };
+
+    // Verify linkage: prevHash must match what this entry claims.
+    if (chain.prevHash !== prevHash) return { status: 'broken', brokenAt: i };
+
+    prevHash = chain.hash;
+    prevWasChained = true;
+    chainedCount += 1;
+  }
+
+  return { status: 'ok', brokenAt: null };
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * Resolve a TRUSTED command to re-run for a claimed-pass check whose command was
  * never captured. Priority (most trusted first):
@@ -815,6 +913,30 @@ function captureCrossReference(root, artifactDir) {
   const backstopMode = resolveBackstopMode();
   const warnings = [];
 
+  // ── Hash-chain integrity check ──────────────────────────────────────────────
+  // Verify command-log.jsonl before trusting its pass/fail signals. If the chain
+  // is broken (altered, removed, or reordered entries), the capture truth source
+  // is compromised: we must NOT trust its pass signals for claimed-pass checks.
+  //
+  // ok     → proceed normally (chain is valid, log is trustworthy).
+  // legacy → proceed normally (pre-B2 log, no chain to verify, existing behavior).
+  // broken → emit a loud warning and treat ALL claimed-pass commands relying on
+  //          this log as NOT_VERIFIED/blocking — do not let them sail through.
+  let chainBroken = false;
+  {
+    const chainResult = verifyCommandLogChain(artifactDir);
+    if (chainResult.status === 'broken') {
+      chainBroken = true;
+      const brokenIdx = chainResult.brokenAt !== null ? ` (entry ${chainResult.brokenAt})` : '';
+      warnings.push(
+        `${base} command-log integrity check FAILED — capture truth source appears tampered${brokenIdx}: ` +
+        'claimed-pass checks relying on it are NOT trusted. ' +
+        'This is tamper-EVIDENCE (hash-chain broken); alteration, removal, or reordering detected. ' +
+        'NOT_VERIFIED: cannot confirm or deny claimed passes.'
+      );
+    }
+  }
+
   // Build the list of claimed-pass command checks — bundle-first, evidence.json fallback.
   let claimedPass;
   if (bundle && Array.isArray(bundle.claims)) {
@@ -823,7 +945,7 @@ function captureCrossReference(root, artifactDir) {
   } else {
     // Fallback: no bundle — read from evidence.json (existing behavior, no regression).
     const evidence = readJsonFile(path.join(artifactDir, 'evidence.json'));
-    if (!evidence || !Array.isArray(evidence.checks)) return [];
+    if (!evidence || !Array.isArray(evidence.checks)) return warnings;
     claimedPass = evidence.checks.filter(check => {
       if (!check || typeof check !== 'object') return false;
       const kind = normalizedStatus(check.kind);
@@ -838,8 +960,10 @@ function captureCrossReference(root, artifactDir) {
     const id = safeOneLine(check.id || cmd, 80);
     const logged = log.get(cmd);
 
-    if (logged && logged.ran) {
-      // (1) Cross-reference the capture log first.
+    if (!chainBroken && logged && logged.ran) {
+      // (1) Cross-reference the capture log first (only when chain is intact).
+      // A broken chain means we cannot trust the log's pass signals — skip this
+      // shortcut and fall through to the backstop/NOT_VERIFIED path below.
       if (logged.failed) {
         const exit = Number.isInteger(logged.exitCode) ? ` (exitCode:${logged.exitCode})` : '';
         warnings.push(`${base} evidence check ${id}: capture log CONTRADICTS claimed pass — command "${safeOneLine(cmd, 120)}" was recorded as FAIL${exit}. This is a caught false-completion.`);
@@ -1142,9 +1266,9 @@ async function analyze(root, now = Date.now()) {
   const preExecution = isPreExecution(path.dirname(latest.file), status);
   const terminal = TERMINAL_STATUSES.has(taskStatus);
   // Always-block: a claimed pass the capture log or evidence.json contradicts.
-  const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing/;
+  const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED/;
   // Full gate (execution onward): also completeness/hygiene and not-done state.
-  const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —/;
+  const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED/;
   const blockRe = (preExecution || terminal) ? HARD_BLOCK : FULL_BLOCK;
   const blocking = warnings.some(w => {
     // Capture cross-reference warn-mode notes never block (operator opted out).
@@ -1272,4 +1396,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget };
+module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, verifyCommandLogChain, CHAIN_GENESIS_VERIFY };
