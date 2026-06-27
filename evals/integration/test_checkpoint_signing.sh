@@ -92,10 +92,9 @@ else
 fi
 
 # Verify the in-toto statement has correct predicateType and subject digest.
-# The subject digest is the sha256 of trust.checkpoint.json at the moment it was signed,
-# i.e. BEFORE the attestation field was added back (the attestation update is a second
-# write that happens after signing). To verify, we reconstruct the pre-attestation bytes:
-# remove the attestation key from the envelope and re-serialize in the same format.
+# ROUND-TRIP ASSERTION: after the fix, trust.checkpoint.json is the exact artifact
+# that was signed — no post-digest mutation. sha256(on-disk checkpoint) must equal
+# the subject digest in the in-toto statement.
 node - "$SESSION_DIR1" << 'NODE'
 const fs = require("fs");
 const path = require("path");
@@ -108,7 +107,7 @@ const sigPath = path.join(dir, "trust.checkpoint.sig.json");
 
 const errors = [];
 
-// Determine which attestation file exists
+// Determine which attestation statement file exists
 let statement;
 if (fs.existsSync(intotoPath)) {
   statement = JSON.parse(fs.readFileSync(intotoPath, "utf8"));
@@ -118,7 +117,7 @@ if (fs.existsSync(intotoPath)) {
   const payloadJson = Buffer.from(envelope.payload, "base64").toString("utf8");
   statement = JSON.parse(payloadJson);
 } else {
-  errors.push("no attestation file found");
+  errors.push("no attestation statement file found (neither intoto.json nor sig.json)");
   console.error("ERRORS:\n" + errors.join("\n"));
   process.exit(1);
 }
@@ -141,19 +140,24 @@ if (!Array.isArray(statement.subject) || statement.subject.length === 0) {
   if (sub.name !== "trust.checkpoint.json") {
     errors.push("subject[0].name expected 'trust.checkpoint.json', got " + sub.name);
   }
-  // The subject digest was computed BEFORE attestation was added to the envelope.
-  // Reconstruct the pre-attestation checkpoint bytes by removing the attestation key,
-  // then verifying the sha256 matches what the statement carries.
-  const checkpointEnv = JSON.parse(fs.readFileSync(checkpointPath, "utf8"));
-  const preAttestationEnv = { ...checkpointEnv };
-  delete preAttestationEnv.attestation;
-  // writeJson uses JSON.stringify(payload, null, 2) + "\n"
-  const preAttestationBytes = Buffer.from(JSON.stringify(preAttestationEnv, null, 2) + "\n", "utf8");
-  const expectedSha256 = crypto.createHash("sha256").update(preAttestationBytes).digest("hex");
-  if (!sub.digest || sub.digest.sha256 !== expectedSha256) {
-    errors.push("subject[0].digest.sha256 mismatch: expected (pre-attestation sha256) " + expectedSha256 + ", got " + (sub.digest && sub.digest.sha256));
+  // ROUND-TRIP ASSERTION: trust.checkpoint.json must be byte-identical to what was signed.
+  // No post-digest mutation is allowed, so the on-disk sha256 == signed subject digest.
+  const checkpointBytes = fs.readFileSync(checkpointPath);
+  const onDiskSha256 = crypto.createHash("sha256").update(checkpointBytes).digest("hex");
+  if (!sub.digest || sub.digest.sha256 !== onDiskSha256) {
+    errors.push("ROUND-TRIP FAIL: signed subject digest " + (sub.digest && sub.digest.sha256) +
+      " != sha256(on-disk trust.checkpoint.json) " + onDiskSha256 +
+      " — checkpoint was mutated after signing");
   } else {
-    console.log("subject digest matches sha256(trust.checkpoint.json pre-attestation) = " + expectedSha256.slice(0, 16) + "...");
+    console.log("ROUND-TRIP PASS: sha256(on-disk trust.checkpoint.json) == signed subject digest = " + onDiskSha256.slice(0, 16) + "...");
+  }
+
+  // REGRESSION GUARD: trust.checkpoint.json must NOT contain an attestation field.
+  const checkpointEnv = JSON.parse(checkpointBytes);
+  if ("attestation" in checkpointEnv) {
+    errors.push("trust.checkpoint.json must NOT contain attestation field — it breaks the digest");
+  } else {
+    console.log("trust.checkpoint.json has no attestation field (correct — digest is stable)");
   }
 }
 
@@ -176,39 +180,57 @@ if (errors.length > 0) {
 console.log("in-toto statement valid: predicateType=" + statement.predicateType + " subject=" + statement.subject[0].name);
 NODE
 if [[ $? -eq 0 ]]; then
-  _pass "in-toto statement: correct predicateType, subject name, and sha256 digest match"
+  _pass "in-toto statement: correct predicateType, subject name, ROUND-TRIP digest match, no attestation field in checkpoint"
 else
-  _fail "in-toto statement validation failed"
+  _fail "in-toto statement or round-trip digest assertion failed"
 fi
 
-# Verify the checkpoint envelope carries attestation
-node - "$SESSION_DIR1/trust.checkpoint.json" << 'NODE'
+# Verify the companion attestation file exists with correct shape.
+# trust.checkpoint.attestation.json carries the attestation pointer/status.
+# trust.checkpoint.json must NOT contain an attestation field (digest stability).
+node - "$SESSION_DIR1" << 'NODE'
 const fs = require("fs");
-const env = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const path = require("path");
+const dir = process.argv[2];
+const attestationPath = path.join(dir, "trust.checkpoint.attestation.json");
+const checkpointPath = path.join(dir, "trust.checkpoint.json");
 const errors = [];
-if (!env.attestation || typeof env.attestation !== "object") {
-  errors.push("attestation field missing from checkpoint envelope");
+
+// Companion file must exist
+if (!fs.existsSync(attestationPath)) {
+  errors.push("trust.checkpoint.attestation.json missing — attestation companion file not written");
 } else {
-  if (!["signed", "unsigned"].includes(env.attestation.status)) {
-    errors.push("attestation.status must be 'signed' or 'unsigned', got " + env.attestation.status);
+  const att = JSON.parse(fs.readFileSync(attestationPath, "utf8"));
+  if (!["signed", "unsigned"].includes(att.status)) {
+    errors.push("attestation.status must be 'signed' or 'unsigned', got " + att.status);
   }
-  if (typeof env.attestation.path !== "string" || !env.attestation.path) {
+  if (typeof att.path !== "string" || !att.path) {
     errors.push("attestation.path must be a non-empty string");
   }
-  if (env.attestation.status === "unsigned" && env.attestation.reason !== "no ambient signing identity") {
-    errors.push("attestation.reason expected 'no ambient signing identity', got " + env.attestation.reason);
+  if (att.status === "unsigned" && att.reason !== "no ambient signing identity") {
+    errors.push("attestation.reason expected 'no ambient signing identity', got " + att.reason);
+  }
+  if (errors.length === 0) {
+    console.log("trust.checkpoint.attestation.json: status=" + att.status + " path=" + att.path);
   }
 }
+
+// trust.checkpoint.json must NOT carry attestation (that would break the digest)
+const env = JSON.parse(fs.readFileSync(checkpointPath, "utf8"));
+if ("attestation" in env) {
+  errors.push("trust.checkpoint.json must NOT contain attestation field (breaks digest verification)");
+}
+
 if (errors.length > 0) {
-  console.error("ATTESTATION ERRORS:\n" + errors.join("\n"));
+  console.error("ATTESTATION COMPANION ERRORS:\n" + errors.join("\n"));
   process.exit(1);
 }
-console.log("attestation in envelope: status=" + env.attestation.status + " path=" + env.attestation.path);
+console.log("attestation companion file correct; trust.checkpoint.json has no attestation field");
 NODE
 if [[ $? -eq 0 ]]; then
-  _pass "trust.checkpoint.json envelope carries attestation field with correct shape"
+  _pass "trust.checkpoint.attestation.json has correct shape; trust.checkpoint.json has no attestation field"
 else
-  _fail "trust.checkpoint.json attestation field missing or malformed"
+  _fail "trust.checkpoint.attestation.json missing/malformed or trust.checkpoint.json has attestation field"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -256,22 +278,29 @@ else
   _fail "trust.checkpoint.json absent — seal did not complete"
 fi
 
-# In local (no OIDC), the unsigned path must be taken
-node - "$SESSION_DIR2/trust.checkpoint.json" << 'NODE'
+# In local (no OIDC), the unsigned path must be taken.
+# Attestation is now in the companion file, not in trust.checkpoint.json.
+node - "$SESSION_DIR2" << 'NODE'
 const fs = require("fs");
-const env = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-if (!env.attestation) { console.error("attestation missing from envelope"); process.exit(1); }
-// Local: either unsigned OR signed (if OIDC happens to be available in the test env)
-if (!["signed", "unsigned"].includes(env.attestation.status)) {
-  console.error("attestation.status must be signed or unsigned, got: " + env.attestation.status);
+const path = require("path");
+const dir = process.argv[2];
+const attestationPath = path.join(dir, "trust.checkpoint.attestation.json");
+if (!fs.existsSync(attestationPath)) {
+  console.error("trust.checkpoint.attestation.json missing from fail-open seal");
   process.exit(1);
 }
-console.log("fail-open seal: attestation.status=" + env.attestation.status);
+const att = JSON.parse(fs.readFileSync(attestationPath, "utf8"));
+// Local: either unsigned OR signed (if OIDC happens to be available in the test env)
+if (!["signed", "unsigned"].includes(att.status)) {
+  console.error("attestation.status must be signed or unsigned, got: " + att.status);
+  process.exit(1);
+}
+console.log("fail-open seal: attestation companion: status=" + att.status);
 NODE
 if [[ $? -eq 0 ]]; then
-  _pass "checkpoint envelope has valid attestation.status after fail-open seal"
+  _pass "trust.checkpoint.attestation.json has valid status after fail-open seal"
 else
-  _fail "checkpoint envelope attestation.status invalid after fail-open seal"
+  _fail "trust.checkpoint.attestation.json missing or invalid after fail-open seal"
 fi
 
 # Verify the SPECIFIC local behavior: unsigned path produces intoto.json when no OIDC
@@ -440,7 +469,7 @@ if (errors.length > 0) {
   process.exit(1);
 }
 const claimCount = Object.keys(env.checkpoint.statusByClaimId || {}).length;
-console.log("Increment A shape preserved: status=" + env.status + " claims=" + claimCount + " attestation=" + env.attestation?.status);
+console.log("Increment A shape preserved: status=" + env.status + " claims=" + claimCount + " (attestation in companion file)");
 NODE
 if [[ $? -eq 0 ]]; then
   _pass "Increment A checkpoint envelope shape preserved (additive — no regression)"
