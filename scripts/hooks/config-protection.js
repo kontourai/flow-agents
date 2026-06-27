@@ -364,14 +364,16 @@ function checkRedirectToProtected(command) {
         }
       }
 
-      // tee command: `tee [-a] [--] <file>`
+      // tee command: `tee [-a] [--] <file> [file2 ...]`
+      // tee accepts MULTIPLE output files — check ALL positional args, not just the first.
       if (t === 'tee') {
+        let pastDashDash = false;
         for (let j = i + 1; j < tokens.length; j++) {
           const arg = tokens[j];
-          if (arg === '--') { j++; if (j < tokens.length && matchesRedirectProtected(tokens[j])) return `tee to ${tokens[j]}`; break; }
-          if (arg.startsWith('-')) continue; // skip tee flags (-a, --append, etc.)
+          if (!pastDashDash && arg === '--') { pastDashDash = true; continue; }
+          if (!pastDashDash && arg.startsWith('-')) continue; // skip tee flags (-a, --append, etc.)
+          // Check every positional arg — no early break (tee writes to all of them).
           if (matchesRedirectProtected(arg)) return `tee to ${arg}`;
-          break; // first non-flag non-separator arg is the file; stop after it
         }
       }
     }

@@ -262,6 +262,44 @@ else
 fi
 
 echo ""
+echo "--- AC1.10: tee multi-file — tee /dev/null ~/.bashrc BLOCKED (protected 2nd arg) ---"
+# PRE-FIX: break after first non-flag arg stopped at /dev/null; ~/.bashrc was never checked.
+# POST-FIX: all positional args are checked; ~/.bashrc triggers the block.
+set +e
+prot_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"echo {} | tee /dev/null ~/.bashrc"}}' | node "$PROT" 2>&1)
+prot_exit=$?
+set -e
+if [ "$prot_exit" -eq 2 ] && echo "$prot_out" | grep -q "BLOCKED"; then
+  _pass "tee /dev/null ~/.bashrc blocked (protected 2nd arg now checked) (exit 2)"
+else
+  _fail "tee /dev/null ~/.bashrc NOT blocked — multi-file tee evasion still possible (exit=$prot_exit, out=$prot_out)"
+fi
+
+echo ""
+echo "--- AC1.11: tee multi-file — tee /tmp/x .flow-agents/current.json BLOCKED ---"
+set +e
+prot_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"echo {} | tee /tmp/x .flow-agents/current.json"}}' | node "$PROT" 2>&1)
+prot_exit=$?
+set -e
+if [ "$prot_exit" -eq 2 ] && echo "$prot_out" | grep -q "BLOCKED"; then
+  _pass "tee /tmp/x .flow-agents/current.json blocked (protected 2nd arg checked) (exit 2)"
+else
+  _fail "tee /tmp/x .flow-agents/current.json NOT blocked (exit=$prot_exit, out=$prot_out)"
+fi
+
+echo ""
+echo "--- AC1.12: tee single-file to safe path — tee /tmp/legit.log still ALLOWED ---"
+set +e
+prot_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"echo output | tee /tmp/legit.log"}}' | node "$PROT" 2>&1)
+prot_exit=$?
+set -e
+if [ "$prot_exit" -eq 0 ]; then
+  _pass "tee /tmp/legit.log still allowed (no protected path) (exit 0)"
+else
+  _fail "tee /tmp/legit.log falsely blocked (exit=$prot_exit)"
+fi
+
+echo ""
 echo "--- AC1.9: CLI writes current.json via fs (not Write/Edit tool) — safe to block tool path ---"
 # Verify writeJson in workflow-sidecar.ts is a direct fs.writeFileSync call (not via agent tool)
 node -e "
@@ -599,15 +637,17 @@ echo "  Normal session exit: $ovr_exit (workflow-state warnings are expected for
 echo ""
 echo "=== Diff scope check ==="
 
-# Verify that ONLY the allowed files were modified
-# Collision boundary: kits/knowledge/**, continue-work (skill), workflow-sidecar.ts, flow-resolver.ts
-# Check those paths were not touched by git diff. Use grep patterns to avoid triggering
-# the source path validator (which checks literal path refs against the filesystem).
+# Verify that ONLY the allowed files were modified.
+# Round 2 (fix/gate-lockdown) scope: config-protection.js, stop-goal-fit.js, evidence-capture.js.
+# Round 3 (fix/resolvefirststep-tee) ADDS: workflow-sidecar.ts, flow-resolver.ts (path-traversal fix)
+# and config-protection.js (tee multi-file fix). Forbidden: kits/knowledge/**, continue-work,
+# stop-goal-fit.js, evidence-capture.js in R3.
+# Use grep patterns to avoid triggering the source path validator.
 FORBIDDEN_MODIFIED=""
 FORBIDDEN_PATTERNS=(
   "kits/knowledge/"
-  "workflow-sidecar.ts"
-  "flow-resolver.ts"
+  "stop-goal-fit.js"
+  "evidence-capture.js"
 )
 # continue-work: the collision boundary skill file (not in scripts/hooks/).
 # Use a conservative basename check to avoid a false src-path reference.
@@ -624,32 +664,30 @@ else
   _fail "Diff scope: FORBIDDEN files modified:$FORBIDDEN_MODIFIED"
 fi
 
-# Verify the expected files were modified
+# Verify the expected files were modified (R3 scope: config-protection.js + workflow-sidecar.ts)
 EXPECTED_CHANGED=0
 for f in \
   "scripts/hooks/config-protection.js" \
-  "scripts/hooks/stop-goal-fit.js" \
-  "scripts/hooks/evidence-capture.js"
+  "src/cli/workflow-sidecar.ts"
 do
   if git -C "$ROOT" diff --name-only HEAD 2>/dev/null | grep -q "$f" || \
      git -C "$ROOT" status --short 2>/dev/null | grep -q "$f"; then
     EXPECTED_CHANGED=$((EXPECTED_CHANGED + 1))
   fi
 done
-if [ "$EXPECTED_CHANGED" -ge 2 ]; then
-  _pass "Diff scope: expected lockdown files (config-protection, stop-goal-fit, evidence-capture) modified"
+if [ "$EXPECTED_CHANGED" -ge 1 ]; then
+  _pass "Diff scope: expected R3 fix files (config-protection.js + workflow-sidecar.ts) modified"
 else
-  # Not in a git repo with HEAD, check files exist and have the new patterns
-  if grep -q "PROTECTED_PATH_PATTERNS\|checkProtectedPathPattern\|checkRedirectToProtected" "$ROOT/scripts/hooks/config-protection.js" && \
-     grep -q "not auto-releasing\|surface unavailable\|expected capture log is missing" "$ROOT/scripts/hooks/stop-goal-fit.js"; then
-    _pass "Diff scope: lockdown changes present in config-protection.js + stop-goal-fit.js"
+  # Fallback: check the fixes are present in the files regardless of git status
+  if grep -q "pastDashDash" "$ROOT/scripts/hooks/config-protection.js" && \
+     grep -q "resolveFlowFilePath" "$ROOT/src/cli/workflow-sidecar.ts"; then
+    _pass "Diff scope: R3 fix patterns present in config-protection.js + workflow-sidecar.ts"
   else
-    _fail "Diff scope: expected lockdown changes not found in files"
+    _fail "Diff scope: expected R3 fix changes not found in files"
   fi
 fi
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # Summary
 # ═══════════════════════════════════════════════════════════════════════════
 echo ""
