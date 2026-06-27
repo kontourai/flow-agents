@@ -462,8 +462,21 @@ echo "=== AC1 R6a — Laundering regex extended (R6 Fix 1) ==="
 
 echo ""
 echo "--- AC1.R6a.1: hasLaunderingOperator unit tests via require ---"
-node /private/tmp/claude-501/-Users-brian-dev-github-kontourai/1544f463-6be1-4e2b-b856-0be097483e58/scratchpad/launder_test.js 2>&1
+# Self-contained + portable: require hasLaunderingOperator from $ROOT (not a hardcoded
+# session-scratchpad / worktree path, which is not present in CI).
+_launder_js="$(mktemp -t launder_test.XXXXXX.js)"
+cat > "$_launder_js" <<JS
+const { hasLaunderingOperator } = require(process.env.ROOT + '/scripts/hooks/stop-goal-fit.js');
+const flag = ['npm test || exit 0', 'npm test || echo ok', 'npm test || /bin/true', 'npm test || true', 'npm test ; true', 'npm test ; exit 0'];
+const clean = ['npm test', 'npm run build && npm run eval:static', 'npm run lint'];
+let ok = true;
+for (const c of flag) { if (!hasLaunderingOperator(c)) { console.error('MISS (should flag): ' + c); ok = false; } }
+for (const c of clean) { if (hasLaunderingOperator(c)) { console.error('OVER-FLAG (should not): ' + c); ok = false; } }
+process.exit(ok ? 0 : 1);
+JS
+ROOT="$ROOT" node "$_launder_js" 2>&1
 launder_exit=$?
+rm -f "$_launder_js"
 if [ "$launder_exit" -eq 0 ]; then
   _pass "AC1.R6a: hasLaunderingOperator correctly flags new || forms and does not over-flag bare commands"
 else

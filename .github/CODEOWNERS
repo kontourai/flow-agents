@@ -11,6 +11,13 @@
 # CI definition + the anchor (an agent must not silently weaken enforcement)
 /.github/                       @briananderson1222
 /evals/ci/                      @briananderson1222
+/scripts/ci/                    @briananderson1222
+
+# The verification config the CI anchor depends on — an agent must not redefine
+# trust-reconcile-verify to a fake/laundered command or rewire the lane runner
+# without owner review (convergence red-team finding).
+/package.json                   @briananderson1222
+/evals/run.sh                   @briananderson1222
 
 # The anti-gaming gate + its enforcement hooks
 /scripts/hooks/stop-goal-fit.js     @briananderson1222

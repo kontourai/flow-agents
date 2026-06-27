@@ -313,6 +313,19 @@ function main() {
   // -------------------------------------------------------------------------
   process.stdout.write('\n[trust-reconcile] Step 1: re-running canonical verification fresh...\n');
 
+  // The canonical verify is the anchor's own truth source — it must not be
+  // exit-code-laundered (e.g. `npm run build || true`). If it is, the fresh run
+  // would report PASS regardless of the real result. Fail closed.
+  // (Residual: a wrapper script that exits 0 without `||` still evades — covered
+  // by the anti-gaming suite running in a required lane + CODEOWNERS on the verify
+  // config; noted honestly.)
+  for (const cmd of canonicalCommands) {
+    if (hasLaunderingOperator(cmd)) {
+      process.stderr.write(`[trust-reconcile] FAILED — canonical verify command is laundered ('${cmd}') — refusing to attest a result whose exit code is masked.\n`);
+      process.exit(1);
+    }
+  }
+
   /** @type {Map<string, {exitCode: number, passed: boolean}>} */
   const ciResults = new Map();
 
