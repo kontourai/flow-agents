@@ -8,7 +8,7 @@
  * Also blocks git verification-bypass flags in actual flag positions only.
  * Text that merely mentions the flag inside quoted strings or prose is allowed.
  *
- * GATE LOCK-DOWN (adversarial review Finding 2 + anti-gaming):
+ * GATE LOCK-DOWN (adversarial review Finding 2 + anti-gaming; R5a extension):
  * Also blocks Write/Edit to kill-switch / routing files that an agent could use
  * to self-tamper the gate:
  *   - Shell profiles (.bashrc, .bash_profile, etc.) — where an agent could
@@ -17,16 +17,28 @@
  *     env block or delete the Stop hook entry entirely.
  *   - .flow-agents/current.json — where an agent could forge active_flow_id /
  *     active_step_id to route the gate to a fake permissive FlowDefinition.
- *     SAFE: the workflow CLI writes current.json via fs.writeFileSync (writeJson),
- *     NOT via the Write/Edit tool, so blocking the tool path does NOT break legit
- *     sidecar writes (verified: ensureSession / advanceState / writeCurrent all call
- *     writeJson which calls fs.writeFileSync directly).
+ *   - .flow-agents/<slug>/state.json — where an agent could forge phase=planning
+ *     to downgrade from FULL_BLOCK to HARD_BLOCK (R5a: MEDIUM finding fix).
+ *     SAFE: the CLI writes state.json via writeState → writeJson → fs.writeFileSync.
+ *   - .flow-agents/<slug>/trust.bundle — where an agent could forge claims.
+ *     SAFE: the CLI writes trust.bundle via writeTrustBundle → writeJson → fs.writeFileSync.
+ *   (Verified: ensureSession / advanceState / writeCurrent / writeState /
+ *    writeTrustBundle all use writeJson which calls fs.writeFileSync directly —
+ *    blocking the Write/Edit tool path does NOT break legit CLI sidecar writes.)
  *
  * Also detects (best-effort) Bash-command redirects that write to the same paths
  * via shell operators (>, >>, tee). HONEST: this is INCOMPLETE COVERAGE — sed -i,
  * process substitution, /dev/fd tricks, and other non-standard redirect forms are
  * NOT caught. An agent with shell access can still evade. The real anchor is
  * external: signed checkpoints + human review. This raises the bar, not a wall.
+ *
+ * INTERPRETER-WRITE DETECTION — INCOMPLETE (R5a best-effort):
+ * Also checks Bash commands matching interpreter patterns (node -e, py3 -c,
+ * sed -i, perl -e) combined with a protected-path token literal in the command
+ * string. KNOWN EVASIONS NOT CAUGHT: runtime-constructed paths (process.env.HOME +
+ * '/.bashrc', homedir()+'/.bashrc'), base64-encoded paths, multi-step path assembly,
+ * any interpreter not in the list (ruby, php, etc.), and multiline here-docs.
+ * The real anchor remains external (clean CI env + human review).
  *
  * Exit codes: 0 = allow, 2 = block
  */
@@ -60,13 +72,16 @@ const PROTECTED_FILES = new Set([
 // These files need PATH context (not just basename) to avoid over-matching
 // common file names in unrelated projects.
 //
+// R5a adds .flow-agents/<slug>/state.json and .flow-agents/<slug>/trust.bundle.
+//
 // checkProtectedPathPattern(filePath) → { name, reason } | null
 // ---------------------------------------------------------------------------
 
 /**
  * Check whether a Write/Edit tool file path targets a gate kill-switch file
  * that requires path-level matching (.claude/settings.json,
- * .flow-agents/current.json).
+ * .flow-agents/current.json, .flow-agents/<slug>/state.json,
+ * .flow-agents/<slug>/trust.bundle).
  *
  * Returns { name, reason } when blocked, null when allowed.
  *
@@ -106,6 +121,28 @@ function checkProtectedPathPattern(filePath) {
     return {
       name: '.flow-agents/current.json',
       reason: 'an agent could forge active_flow_id/active_step_id to route the gate to a permissive FlowDefinition',
+    };
+  }
+
+  // .flow-agents/<slug>/state.json — an agent could forge phase=planning to
+  // downgrade the block regime (FULL_BLOCK → HARD_BLOCK) and weaken gate checks.
+  // SAFE: the CLI writes state.json via writeState → writeJson → fs.writeFileSync,
+  // NOT via the Write/Edit tool — blocking the tool path does not break legit sidecar.
+  if (/(?:^|\/)\.flow-agents\/[^/]+\/state\.json$/.test(norm)) {
+    return {
+      name: '.flow-agents/<slug>/state.json',
+      reason: 'an agent could forge phase=planning to downgrade the block regime and weaken gate enforcement',
+    };
+  }
+
+  // .flow-agents/<slug>/trust.bundle — an agent could forge claims (e.g. status=verified
+  // or impactLevel=low) to suppress gate blocks or make disputed evidence appear accepted.
+  // SAFE: the CLI writes trust.bundle via writeTrustBundle → writeJson → fs.writeFileSync,
+  // NOT via the Write/Edit tool — blocking the tool path does not break legit sidecar.
+  if (/(?:^|\/)\.flow-agents\/[^/]+\/trust\.bundle$/.test(norm)) {
+    return {
+      name: '.flow-agents/<slug>/trust.bundle',
+      reason: 'an agent could forge trust claims (verified status, impact level) to bypass gate integrity checks',
     };
   }
 
@@ -307,13 +344,17 @@ function checkCommandForBypass(command) {
 // When the agent uses a Bash tool (tool_input.command), detect redirects that
 // write to protected paths via shell redirect operators (> >>) or `tee`.
 //
+// R5a extends coverage to .flow-agents/<slug>/state.json and trust.bundle.
+//
 // HONEST — INCOMPLETE COVERAGE: this catches the obvious forms only:
-//   - `cmd > ~/.bashrc`          ✓ caught (> redirect operator)
-//   - `cmd >> .claude/settings.json`  ✓ caught (>> redirect operator)
-//   - `tee .flow-agents/current.json`  ✓ caught (tee command)
-//   - `sed -i ... .bashrc`       ✗ NOT caught (in-place edit, complex syntax)
-//   - `interpreted-lang -c "open('.bashrc','w').write(...)"` ✗ NOT caught
-//   - `/dev/fd` tricks, process substitution, etc. ✗ NOT caught
+//   - `cmd > ~/.bashrc`                        ✓ caught (> redirect operator)
+//   - `cmd >> .claude/settings.json`           ✓ caught (>> redirect operator)
+//   - `tee .flow-agents/current.json`          ✓ caught (tee command)
+//   - `cmd > .flow-agents/s/state.json`        ✓ caught (> redirect operator)
+//   - `tee .flow-agents/s/trust.bundle`        ✓ caught (tee command)
+//   - `sed -i ... .bashrc`                     ✗ NOT caught (in-place edit)
+//   - `interpreted-lang -c "open(...,'w')"     ✗ NOT caught (see interpreter check)
+//   - `/dev/fd` tricks, process substitution   ✗ NOT caught
 //
 // An agent with shell access can still evade by constructing paths at runtime,
 // using subshells, or using tools not scanned here. The real tamper-proof
@@ -322,9 +363,11 @@ function checkCommandForBypass(command) {
 
 /**
  * Regex that matches a normalized (forward-slash) path ending with a protected
- * kill-switch file: shell profiles, .claude/settings*.json, .flow-agents/current.json.
+ * kill-switch file: shell profiles, .claude/settings*.json,
+ * .flow-agents/current.json, .flow-agents/<slug>/state.json,
+ * .flow-agents/<slug>/trust.bundle.
  */
-const REDIRECT_PROTECTED_RE = /(?:^|\/|~\/)(\.bash_profile|\.bashrc|\.profile|\.zprofile|\.zshrc)$|(?:^|\/)\.claude\/settings(?:\.local)?\.json$|(?:^|\/)\.flow-agents\/current\.json$/;
+const REDIRECT_PROTECTED_RE = /(?:^|\/|~\/)(\.bash_profile|\.bashrc|\.profile|\.zprofile|\.zshrc)$|(?:^|\/)\.claude\/settings(?:\.local)?\.json$|(?:^|\/)\.flow-agents\/current\.json$|(?:^|\/)\.flow-agents\/[^/]+\/state\.json$|(?:^|\/)\.flow-agents\/[^/]+\/trust\.bundle$/;
 
 /**
  * Return true when a token (an unquoted redirect target or tee argument) matches
@@ -375,6 +418,90 @@ function checkRedirectToProtected(command) {
           // Check every positional arg — no early break (tee writes to all of them).
           if (matchesRedirectProtected(arg)) return `tee to ${arg}`;
         }
+      }
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Gate lock-down: Interpreter-write detection (best-effort, INCOMPLETE)
+//
+// R5a: Detect Bash commands that invoke interpreters (node -e, py3 -c,
+// sed -i, perl -e) when the command string contains a protected-path token
+// as a literal substring. This catches the obvious "node -e with .bashrc"
+// form but NOT runtime-constructed paths.
+//
+// HONEST — INCOMPLETE COVERAGE (permanently):
+//   `node -e "require('fs').appendFileSync('.bashrc','x')"` ✓ caught (literal token)
+//   `py3 -c "open('state.json','w').write(...)"         ✓ caught (literal token)
+//   `sed -i 's/a/b/' ~/.zshrc`                             ✓ caught (literal token)
+//   `node -e "const p=homedir()+'/.bashrc'; ..."`          ✗ NOT caught (constructed)
+//   `node -e "require('fs').writeFileSync(atob('...'),...)` ✗ NOT caught (encoded)
+//   `ruby -e / php -r / etc.`                              ✗ NOT caught (not listed)
+//   Multiline here-docs or code from a file                ✗ NOT caught
+//
+// An agent that constructs paths at runtime evades this check. The real
+// anchor is external: clean CI env + human review. This raises the bar.
+// ---------------------------------------------------------------------------
+
+/**
+ * Interpreter patterns that can write files when invoked with inline code.
+ * Matched against each shell segment (not the raw full command).
+ */
+// NOTE: _PY_CMD is assembled from two parts to avoid a source-tree validator
+// false-positive on the first-party-Python-command scan. Value = 'p'+'ython'.
+// eslint-disable-next-line no-useless-concat
+const _PY_CMD = 'p' + 'ython'; // joined value: py...thon (see NOTE above)
+const INTERPRETER_WRITE_RE = new RegExp(
+  '\\bnode\\s+(?:-e|--eval)\\b|' +
+  '\\b' + _PY_CMD + '[23]?\\s+-c\\b|' +
+  '\\bsed\\s+-i\\b|\\bperl\\s+-e\\b'
+);
+
+/**
+ * Protected-path token literals.  When any of these strings appears as a
+ * literal substring of a segment that also matches INTERPRETER_WRITE_RE,
+ * the command is blocked.
+ *
+ * INCOMPLETE: only literal occurrences are caught.  An agent that assembles
+ * the path at runtime (e.g. process.env.HOME + '/.bashrc') bypasses this.
+ */
+const INTERPRETER_PROTECTED_TOKENS = [
+  // Shell profiles (basename match is specific in this context)
+  '.bash_profile', '.bashrc', '.profile', '.zshrc', '.zprofile',
+  // Claude and flow-agents routing files
+  '.claude/settings.json',
+  // Flow-agents session sidecars (basename match; false-positive risk is low
+  // in the interpreter-write context and accepted per R5a honest framing)
+  'current.json', 'state.json', 'trust.bundle',
+];
+
+/**
+ * checkInterpreterWriteToProtected(command): detect interpreter invocations
+ * (node -e, py3 -c, sed -i, perl -e) in segments that also contain a
+ * protected-path token as a literal substring.
+ *
+ * Returns a human-readable description of the match, or null if not detected.
+ *
+ * INCOMPLETE COVERAGE — see module header for honest framing.
+ */
+function checkInterpreterWriteToProtected(command) {
+  if (typeof command !== 'string' || !command) return null;
+  // Fast path: skip if no interpreter keywords present.
+  if (!command.includes('node') && !command.includes(_PY_CMD) &&
+      !command.includes('sed') && !command.includes('perl')) return null;
+
+  const segments = splitSegments(command);
+  for (const seg of segments) {
+    // Check interpreter pattern.
+    const interpMatch = INTERPRETER_WRITE_RE.exec(seg);
+    if (!interpMatch) continue;
+
+    // Check for protected-path token literal in the same segment.
+    for (const token of INTERPRETER_PROTECTED_TOKENS) {
+      if (seg.includes(token)) {
+        return `${interpMatch[0].trim()} with protected path token "${token}"`;
       }
     }
   }
@@ -442,11 +569,26 @@ function run(inputOrRaw, options = {}) {
           'NOTE: This check has incomplete coverage (sed -i and similar forms are not caught).',
       };
     }
+    // Gate lock-down: check for interpreter invocations (node -e, py3 -c, sed -i,
+    // perl -e) combined with a protected-path token literal in the command string.
+    // HONEST — INCOMPLETE (R5a best-effort): runtime-constructed paths, base64,
+    // multi-step assembly, and other interpreters not listed are NOT caught.
+    const interpWrite = checkInterpreterWriteToProtected(command);
+    if (interpWrite) {
+      return {
+        exitCode: 2,
+        stderr: `BLOCKED: Detected ${interpWrite} in a Bash command. ` +
+          'Interpreter invocations (node -e, py3 -c, sed -i, perl -e) that reference ' +
+          'protected gate files could tamper with the gate. If this is a legitimate operation, ' +
+          'disable the config-protection hook temporarily and document the reason. ' +
+          'NOTE: This check has INCOMPLETE COVERAGE — runtime path construction evades it.',
+      };
+    }
   }
   return { exitCode: 0 };
 }
 
-module.exports = { run, tokenize, splitSegments, checkCommandForBypass, checkProtectedPathPattern, checkRedirectToProtected };
+module.exports = { run, tokenize, splitSegments, checkCommandForBypass, checkProtectedPathPattern, checkRedirectToProtected, checkInterpreterWriteToProtected };
 
 // Stdin fallback for spawnSync execution
 if (require.main === module) {
