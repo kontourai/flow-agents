@@ -9,7 +9,9 @@
 # diagnostic message.
 #
 # Canonical verify command: npm run trust-reconcile-verify
-#   = npm run build && npm run eval:static && npm run eval:integration
+#   = npm run build && npm run eval:static
+#   (integration + the anti-gaming regression suite run in ci.yml's required
+#    "Runtime and Kit" lane, not here — see evals/ci/antigaming-suite.sh)
 #   This is the REAL verification this repo runs (build + static evals + integration
 #   evals), not a compile-only check. The script is declared in package.json so
 #   trust-reconcile.js auto-discovers it without needing TRUST_RECONCILE_COMMANDS.
@@ -79,7 +81,9 @@ jobs:
         id: trust-reconcile
         run: node scripts/ci/trust-reconcile.js
         # Canonical verify: auto-discovered from package.json scripts["trust-reconcile-verify"]
-        #   = npm run build && npm run eval:static && npm run eval:integration
+        #   = npm run build && npm run eval:static
+#   (integration + the anti-gaming regression suite run in ci.yml's required
+#    "Runtime and Kit" lane, not here — see evals/ci/antigaming-suite.sh)
         # This runs the REAL verification (build + static + integration evals), NOT a
         # compile-only check. Override via TRUST_RECONCILE_COMMANDS or --commands if needed.
         # Bundle auto-discovery: if delivery/trust.bundle or delivery/trust.checkpoint.json
