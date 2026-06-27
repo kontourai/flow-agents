@@ -141,7 +141,7 @@
     "typescript": "^6.0.3"
   },
   "dependencies": {
-    "@kontourai/flow": "~1.3.0"
+    "@kontourai/flow": "~1.4.0"
   },
   "optionalDependencies": {
     "hachure": "^0.4.0",
