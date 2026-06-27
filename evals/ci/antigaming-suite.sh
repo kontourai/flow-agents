@@ -20,6 +20,7 @@ TESTS=(
   "evals/integration/test_captured_fail_reconciliation.sh"
   "evals/integration/test_command_log_integrity.sh"
   "evals/integration/test_command_log_fork_classification.sh"
+  "evals/integration/test_command_log_concurrency.sh"
   "evals/integration/test_resolvefirststep_security.sh"
   "evals/integration/test_enforcer_expects_driven.sh"
   "evals/integration/test_goal_fit_rederive.sh"
