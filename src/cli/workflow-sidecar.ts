@@ -2,6 +2,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
@@ -177,6 +178,29 @@ type SurfaceModule = {
   checkpointFromReport: (report: Record<string, unknown>) => Record<string, unknown>;
   /** Diff two derivations (prior checkpoint → later report) and emit freshness transition events. */
   diffFreshness: (prior: Record<string, unknown>, next: Record<string, unknown>) => Array<Record<string, unknown>>;
+  // ─── Increment B1: in-toto / Sigstore interop (consumed from Surface) ────────
+  /** Wrap a TrustBundle as an in-toto Statement v1. */
+  toInTotoStatement: (bundle: Record<string, unknown>, options: { subjects: Array<{ name: string; digest: Record<string, string> }> }) => {
+    _type: "https://in-toto.io/Statement/v1";
+    subject: Array<{ name: string; digest: Record<string, string> }>;
+    predicateType: "https://hachure.org/v1/bundle";
+    predicate: Record<string, unknown>;
+  };
+  /** Sign an in-toto Statement with Sigstore keyless signing. Returns null when no OIDC identity is available (fail-open). */
+  signStatementWithSigstore: (statement: {
+    _type: "https://in-toto.io/Statement/v1";
+    subject: Array<{ name: string; digest: Record<string, string> }>;
+    predicateType: "https://hachure.org/v1/bundle";
+    predicate: Record<string, unknown>;
+  }) => Promise<{
+    envelope: {
+      payloadType: "application/vnd.in-toto+json";
+      payload: string;
+      signatures: Array<{ keyid: string; sig: string }>;
+    };
+    sigstoreBundle: unknown;
+    assuranceLevel: "signed";
+  } | null>;
 };
 let _surfaceModule: SurfaceModule | null | undefined; // undefined = not tried yet; null = unavailable
 async function tryLoadSurface(): Promise<SurfaceModule | null> {
@@ -1391,6 +1415,14 @@ function resolveCommitSha(): string | null {
  *   - trust.bundle is absent (no evidence recorded yet)
  *   - Surface is unavailable (checkpointFromReport not found)
  * The caller wraps this in .catch() so it never breaks the parent command.
+ *
+ * Increment B1 — checkpoint signing at the release boundary:
+ * After the checkpoint is written, attempts Sigstore keyless signing (OIDC).
+ *   - CI/OIDC available:   writes trust.checkpoint.sig.json (cosign-verifiable DSSE envelope)
+ *                          and updates the envelope with attestation:{status:"signed",...}.
+ *   - Local (no OIDC):     writes trust.checkpoint.intoto.json (unsigned in-toto statement)
+ *                          and updates the envelope with attestation:{status:"unsigned",...}.
+ * Signing is ALWAYS fail-open — a signing failure never breaks the seal.
  */
 export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: string, status: string, phase: string): Promise<void> {
   const bundlePath = path.join(dir, "trust.bundle");
@@ -1409,6 +1441,7 @@ export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: s
     if (typeof stateRaw.work_item === "string") workItem = stateRaw.work_item;
   } catch { /* ignored */ }
 
+  const checkpointPath = path.join(dir, "trust.checkpoint.json");
   const envelope: AnyObj = {
     schema_version: "1.0",
     slug,
@@ -1419,7 +1452,102 @@ export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: s
     commit_sha: resolveCommitSha(),
     checkpoint,
   };
-  writeJson(path.join(dir, "trust.checkpoint.json"), envelope);
+  writeJson(checkpointPath, envelope);
+
+  // ─── Increment B1: sign the checkpoint at the release boundary ───────────────
+  // Additive: if surface lacks in-toto/sigstore primitives, skip silently.
+  // The .catch() at the call site already guards the parent command; this inner
+  // catch is defense-in-depth so signing never propagates an error upward.
+  await signCheckpointAttestation(dir, surface, bundle, checkpointPath, envelope).catch((err) => {
+    process.stderr.write(`[checkpoint-signing] signing skipped due to error: ${err instanceof Error ? err.message : String(err)}\n`);
+  });
+}
+
+/**
+ * Increment B1 — Sign the trust checkpoint with in-toto/Sigstore.
+ *
+ * Called from sealTrustCheckpoint AFTER trust.checkpoint.json is written.
+ * Computes the sha256 digest of the checkpoint file, builds an in-toto Statement
+ * (predicate = trust bundle), and attempts Sigstore keyless signing.
+ *
+ *   - Signed (CI/OIDC):  writes trust.checkpoint.sig.json (DSSE envelope, cosign-verifiable).
+ *   - Unsigned (local):  writes trust.checkpoint.intoto.json (unsigned statement).
+ *   - Always updates:    trust.checkpoint.json with attestation:{status,path,...}.
+ *
+ * NEVER throws — all errors are caught and surfaced as stderr warnings.
+ * Skips silently when Surface's toInTotoStatement / signStatementWithSigstore are absent.
+ *
+ * @param dir            Session artifact directory.
+ * @param surface        Loaded Surface module (may or may not have in-toto/sigstore exports).
+ * @param bundle         Parsed trust.bundle (becomes the in-toto predicate).
+ * @param checkpointPath Absolute path to the already-written trust.checkpoint.json.
+ * @param envelope       The envelope object that was written (mutated in-place then re-written).
+ */
+async function signCheckpointAttestation(
+  dir: string,
+  surface: SurfaceModule,
+  bundle: AnyObj,
+  checkpointPath: string,
+  envelope: AnyObj,
+): Promise<void> {
+  // Guard: both primitives must be present (consumed from Surface, never reimplemented).
+  if (typeof surface.toInTotoStatement !== "function" || typeof surface.signStatementWithSigstore !== "function") {
+    process.stderr.write("[checkpoint-signing] Surface in-toto/sigstore primitives unavailable — skipping attestation\n");
+    return;
+  }
+
+  // Step A: compute sha256 digest of trust.checkpoint.json (the SUBJECT).
+  // The checkpoint is self-evidencing — its digest is the external anchor.
+  const checkpointBytes = fs.readFileSync(checkpointPath);
+  const sha256hex = createHash("sha256").update(checkpointBytes).digest("hex");
+
+  // Step B: build the in-toto Statement.
+  //   subject  = the checkpoint file (what we are attesting TO)
+  //   predicate = the trust bundle   (what the checkpoint CONTAINS)
+  const subjects = [{ name: "trust.checkpoint.json", digest: { sha256: sha256hex } }];
+  const statement = surface.toInTotoStatement(bundle as Record<string, unknown>, { subjects });
+
+  // Step C: attempt Sigstore keyless signing (PRIMARY path).
+  // signStatementWithSigstore returns null when no ambient OIDC credential is available
+  // (local development, no ACTIONS_ID_TOKEN_REQUEST_URL). This is the expected local case.
+  let signed: { envelope: { payloadType: "application/vnd.in-toto+json"; payload: string; signatures: Array<{ keyid: string; sig: string }> }; sigstoreBundle: unknown; assuranceLevel: "signed" } | null = null;
+  try {
+    signed = await surface.signStatementWithSigstore(statement);
+  } catch (err) {
+    // signStatementWithSigstore may throw on unexpected failures (network error, config error);
+    // treat as fail-open: fall through to the unsigned path.
+    process.stderr.write(`[checkpoint-signing] signStatementWithSigstore threw: ${err instanceof Error ? err.message : String(err)}\n`);
+    signed = null;
+  }
+
+  let attestation: AnyObj;
+  if (signed) {
+    // CI/OIDC path: write the cosign-verifiable DSSE envelope.
+    const sigPath = path.join(dir, "trust.checkpoint.sig.json");
+    writeJson(sigPath, signed.envelope);
+    const keyid = signed.envelope.signatures[0]?.keyid ?? "";
+    attestation = {
+      status: "signed",
+      path: "trust.checkpoint.sig.json",
+      keyid,
+    };
+    process.stderr.write(`[checkpoint-signing] checkpoint signed with Sigstore — envelope written to ${sigPath}\n`);
+  } else {
+    // Local/unsigned path: write the unsigned in-toto statement for audit purposes.
+    const unsignedPath = path.join(dir, "trust.checkpoint.intoto.json");
+    writeJson(unsignedPath, statement);
+    attestation = {
+      status: "unsigned",
+      path: "trust.checkpoint.intoto.json",
+      reason: "no ambient signing identity",
+    };
+    process.stderr.write("[checkpoint-signing] no ambient OIDC identity — unsigned in-toto statement written (expected locally)\n");
+  }
+
+  // Step D: update trust.checkpoint.json with the attestation record.
+  // This makes the attestation path verifiable from the checkpoint itself.
+  envelope.attestation = attestation;
+  writeJson(checkpointPath, envelope);
 }
 
 /**
