@@ -904,8 +904,19 @@ function runBackstop(trusted) {
  * command items) when the bundle is present, falling back to evidence.json checks
  * for bundle-less sessions. command-log.jsonl UNCHANGED — it stays the capture
  * truth source. The teeth (claimed-pass + captured-fail → block) are byte-identical.
+ *
+ * ADR 0016 P-c (fix): accept activeFlowStep so declared-type sessions (e.g.
+ * builder.verify.tests) are visible to the cross-reference, closing the hole
+ * where captureCrossReference was the only capture consumer not threaded with
+ * the FlowDefinition. Mirrors the pattern in bundleEnforcement / sidecarGuidance.
  */
-function captureCrossReference(root, artifactDir) {
+function captureCrossReference(root, artifactDir, activeFlowStep) {
+  // Build the declared claimType set from the FlowDefinition gate expects[] (P-c).
+  // Null when no FlowDefinition is active (fallback: bundleClaimedPassCommandChecks
+  // uses workflow.check.* prefix only — no regression for non-FlowDefinition sessions).
+  const declaredClaimTypes = activeFlowStep && Array.isArray(activeFlowStep.gateExpects)
+    ? new Set(activeFlowStep.gateExpects.map(e => e && e.bundle_claim && e.bundle_claim.claimType).filter(Boolean))
+    : null;
   const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
   const acceptance = readJsonFile(path.join(artifactDir, 'acceptance.json'));
   const log = readCommandLog(artifactDir);
@@ -941,7 +952,7 @@ function captureCrossReference(root, artifactDir) {
   let claimedPass;
   if (bundle && Array.isArray(bundle.claims)) {
     // Phase 4b: source from trust.bundle evidence[] (execution/command items).
-    claimedPass = bundleClaimedPassCommandChecks(bundle);
+    claimedPass = bundleClaimedPassCommandChecks(bundle, declaredClaimTypes);
   } else {
     // Fallback: no bundle — read from evidence.json (existing behavior, no regression).
     const evidence = readJsonFile(path.join(artifactDir, 'evidence.json'));
@@ -1229,7 +1240,7 @@ async function analyze(root, now = Date.now()) {
 
   warnings.push(...sidecarValidation(root, path.dirname(latest.file)));
   warnings.push(...sidecarGuidance(root, path.dirname(latest.file), activeFlowStep));
-  const captureWarnings = captureCrossReference(root, path.dirname(latest.file));
+  const captureWarnings = captureCrossReference(root, path.dirname(latest.file), activeFlowStep);
   warnings.push(...captureWarnings);
   // Dedup: bundleEnforcement and captureCrossReference can both fire "caught false-completion"
   // for the same disputed claim. Suppress the bundleEnforcement warning ONLY when
