@@ -146,6 +146,27 @@ function checkProtectedPathPattern(filePath) {
     };
   }
 
+  // delivery/trust.bundle is the CI anchor read by trust-reconcile.js and
+  // used as the attestation subject in mint-attestation.js. An agent could
+  // copy a forged bundle here to corrupt the CI trust check.
+  // SAFE: publishDelivery writes via fs.copyFileSync (not Write/Edit tool).
+  // RESIDUAL: runtime-constructed paths and fs writes are unaffected.
+  if (/(?:^|\/)delivery\/trust\.bundle$/.test(norm)) {
+    return {
+      name: "delivery/trust.bundle",
+      reason: "an agent could write a forged bundle to corrupt the CI trust-reconcile anchor",
+    };
+  }
+
+  // delivery/trust.checkpoint.json -- the signed checkpoint companion.
+  // SAFE: publishDelivery writes via fs.copyFileSync, NOT via Write/Edit tool.
+  if (/(?:^|\/)delivery\/trust\.checkpoint\.json$/.test(norm)) {
+    return {
+      name: "delivery/trust.checkpoint.json",
+      reason: "an agent could forge a signed delivery by writing a tampered checkpoint",
+    };
+  }
+
   return null;
 }
 
@@ -367,7 +388,7 @@ function checkCommandForBypass(command) {
  * .flow-agents/current.json, .flow-agents/<slug>/state.json,
  * .flow-agents/<slug>/trust.bundle.
  */
-const REDIRECT_PROTECTED_RE = /(?:^|\/|~\/)(\.bash_profile|\.bashrc|\.profile|\.zprofile|\.zshrc)$|(?:^|\/)\.claude\/settings(?:\.local)?\.json$|(?:^|\/)\.flow-agents\/current\.json$|(?:^|\/)\.flow-agents\/[^/]+\/state\.json$|(?:^|\/)\.flow-agents\/[^/]+\/trust\.bundle$/;
+const REDIRECT_PROTECTED_RE = /(?:^|\/|~\/)(\.bash_profile|\.bashrc|\.profile|\.zprofile|\.zshrc)$|(?:^|\/)\.claude\/settings(?:\.local)?\.json$|(?:^|\/)\.flow-agents\/current\.json$|(?:^|\/)\.flow-agents\/[^/]+\/state\.json$|(?:^|\/)\.flow-agents\/[^/]+\/trust\.bundle$|(?:^|\/)delivery\/trust\.bundle$|(?:^|\/)delivery\/trust\.checkpoint\.json$/;
 
 /**
  * Return true when a token (an unquoted redirect target or tee argument) matches
@@ -475,6 +496,9 @@ const INTERPRETER_PROTECTED_TOKENS = [
   // Flow-agents session sidecars (basename match; false-positive risk is low
   // in the interpreter-write context and accepted per R5a honest framing)
   'current.json', 'state.json', 'trust.bundle',
+  // Delivery CI anchor paths. The existing trust.bundle token catches delivery/trust.bundle
+  // as a substring; explicit path added for clarity. trust.checkpoint.json is new.
+  'delivery/trust.bundle', 'delivery/trust.checkpoint.json',
 ];
 
 /**
@@ -503,6 +527,60 @@ function checkInterpreterWriteToProtected(command) {
       if (seg.includes(token)) {
         return `${interpMatch[0].trim()} with protected path token "${token}"`;
       }
+    }
+  }
+  return null;
+}
+
+/**
+ * Delivery-protected path regex: delivery/trust.bundle and delivery/trust.checkpoint.json.
+ * These are the CI anchor files whose contents must not be agent-forged.
+ * Used by checkCopyMoveToProtected to catch `cp x delivery/trust.bundle`.
+ */
+const DELIVERY_COPY_PROTECTED_RE = /(?:^|\/)delivery\/trust\.bundle$|(?:^|\/)delivery\/trust\.checkpoint\.json$/;
+
+/**
+ * Return true when a normalized token matches a delivery-protected path.
+ */
+function matchesDeliveryProtected(token) {
+  if (!token || typeof token !== "string") return false;
+  return DELIVERY_COPY_PROTECTED_RE.test(token.replace(/\\/g, "/"));
+}
+
+/**
+ * checkCopyMoveToProtected(command): detect cp/mv/install commands whose
+ * destination argument targets a delivery-protected path.
+ *
+ * Catches the plain-cp attack vector: `cp forged.json delivery/trust.bundle`
+ * is not a redirect and not an interpreter invocation, so those checks miss it.
+ * The destination is the LAST positional (non-flag) argument.
+ *
+ * INCOMPLETE COVERAGE: only cp, mv, install are checked. Other copy tools
+ * (rsync, scp, dd, etc.) and runtime-constructed path arguments are NOT caught.
+ * The real anchor remains external (clean CI env + human review). Bar-raiser only.
+ * RESIDUAL: publishDelivery uses fs.copyFileSync (not bash cp) -- unaffected.
+ */
+function checkCopyMoveToProtected(command) {
+  if (typeof command !== "string" || !command) return null;
+  if (!command.includes("cp") && !command.includes("mv") && !command.includes("install")) return null;
+  if (!command.includes("delivery/")) return null;
+
+  const segments = splitSegments(command);
+  for (const seg of segments) {
+    const tokens = tokenize(seg);
+    if (tokens.length < 2) continue;
+    const cmd = tokens[0];
+    if (cmd !== "cp" && cmd !== "mv" && cmd !== "install") continue;
+
+    const positional = [];
+    for (let i = 1; i < tokens.length; i++) {
+      if (!tokens[i].startsWith("-")) positional.push(tokens[i]);
+    }
+    if (positional.length === 0) continue;
+
+    const dest = positional[positional.length - 1];
+    if (matchesDeliveryProtected(dest)) {
+      return `${cmd} to ${dest} (delivery-protected path)`;
     }
   }
   return null;
@@ -584,11 +662,25 @@ function run(inputOrRaw, options = {}) {
           'NOTE: This check has INCOMPLETE COVERAGE — runtime path construction evades it.',
       };
     }
+    // Gate lock-down R6: detect cp/mv/install targeting delivery-protected paths.
+    // Catches the plain-cp attack: `cp forged.json delivery/trust.bundle`.
+    // INCOMPLETE: cp/mv/install only; rsync/scp/dd evade. Real anchor is external.
+    const copyMove = checkCopyMoveToProtected(command);
+    if (copyMove) {
+      return {
+        exitCode: 2,
+        stderr: `BLOCKED: Detected ${copyMove} in a Bash command. ` +
+          'Writing to delivery/trust.bundle or delivery/trust.checkpoint.json via cp/mv/install ' +
+          'could forge the CI trust anchor. The legitimate write path is the publishDelivery CLI ' +
+          '(fs.copyFileSync -- not the Write/Edit tool or bash cp). ' +
+          'NOTE: This check covers cp/mv/install only -- other copy tools may evade it.',
+      };
+    }
   }
   return { exitCode: 0 };
 }
 
-module.exports = { run, tokenize, splitSegments, checkCommandForBypass, checkProtectedPathPattern, checkRedirectToProtected, checkInterpreterWriteToProtected };
+module.exports = { run, tokenize, splitSegments, checkCommandForBypass, checkProtectedPathPattern, checkRedirectToProtected, checkInterpreterWriteToProtected, checkCopyMoveToProtected, matchesDeliveryProtected };
 
 // Stdin fallback for spawnSync execution
 if (require.main === module) {
