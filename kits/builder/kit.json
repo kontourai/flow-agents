@@ -23,6 +23,11 @@
       "description": "Invoke Builder Kit shape from a raw idea or the current conversation context."
     },
     {
+      "id": "builder.continue-work",
+      "path": "skills/continue-work/SKILL.md",
+      "description": "Advance a multi-slice work item to its next increment via a fresh-context handoff, routing the next slice through pull-work + pickup-probe."
+    },
+    {
       "id": "builder.deliver",
       "path": "skills/deliver/SKILL.md",
       "description": "Delivery workflow — selected work to delivered code."

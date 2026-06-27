@@ -60,6 +60,14 @@ fi
 
 mkdir -p "$DEST"
 
+# Stash the user's existing hooks.json (if any) BEFORE cleaning, so the merge
+# step below can preserve user hooks across re-installs.
+FA_USER_HOOKS_STASH=""
+if [[ -f "$DEST/hooks.json" ]]; then
+  FA_USER_HOOKS_STASH="$(mktemp /tmp/fa-user-hooks.XXXXXX.json)"
+  cp "$DEST/hooks.json" "$FA_USER_HOOKS_STASH"
+fi
+
 # This is an isolated generated Codex home. Clean generated bundle content before
 # overlaying so renamed/deleted source files do not survive across installs.
 rm -rf \
@@ -98,6 +106,37 @@ done
 
 chmod 700 "$DEST" 2>/dev/null || true
 [[ -f "$DEST/auth.json" ]] && chmod 600 "$DEST/auth.json" 2>/dev/null || true
+
+# Merge FA hooks into the flattened hooks.json, preserving any user hooks already present.
+# The managed-hooks source is the bundle's .codex/hooks.json (pre-flatten, always present in dist/codex/).
+# The rsync above wrote the FA hooks.json directly to $DEST/hooks.json.
+# If the user had a hooks.json before this install, use the stash as the "existing" config so
+# user-owned hook groups survive. Otherwise, $DEST/hooks.json is already correct (FA only).
+FA_VERSION="$(node -p "require('$ROOT_DIR/package.json').version" 2>/dev/null || echo unknown)"
+FA_MANAGED_HOOKS="$ROOT_DIR/dist/codex/.codex/hooks.json"
+if command -v node >/dev/null 2>&1 && [[ -f "$FA_MANAGED_HOOKS" ]]; then
+  if [[ -n "$FA_USER_HOOKS_STASH" && -f "$FA_USER_HOOKS_STASH" ]]; then
+    # Merge user's prior hooks (stash) with the current FA managed hooks.
+    node "$ROOT_DIR/scripts/install-merge.js" \
+      --config "$FA_USER_HOOKS_STASH" \
+      --managed-hooks "$FA_MANAGED_HOOKS" \
+      --version "$FA_VERSION" \
+      --install-record "$DEST/.flow-agents/install.json" \
+      --runtime "codex" || true
+    # Move the merged result into the destination.
+    cp "$FA_USER_HOOKS_STASH" "$DEST/hooks.json"
+    rm -f "$FA_USER_HOOKS_STASH"
+  else
+    # No prior user hooks: just write the version stamp (FA hooks are already correct from rsync).
+    node "$ROOT_DIR/scripts/install-merge.js" \
+      --config "$DEST/hooks.json" \
+      --managed-hooks "$FA_MANAGED_HOOKS" \
+      --version "$FA_VERSION" \
+      --install-record "$DEST/.flow-agents/install.json" \
+      --runtime "codex" || true
+  fi
+fi
+
 if [[ ${#CONSOLE_CONFIG_ARGS[@]} -gt 0 || -n "${FLOW_AGENTS_TELEMETRY_SINK:-}" || -n "${FLOW_AGENTS_TELEMETRY_SINKS:-}" || -n "${FLOW_AGENTS_CONSOLE_URL:-}" || -n "${CONSOLE_TELEMETRY_URL:-}" || -n "${CONSOLE_URL:-}" || -n "${FLOW_AGENTS_CONSOLE_TOKEN_FILE:-}" || -n "${CONSOLE_TELEMETRY_TOKEN_FILE:-}" ]]; then
   bash "$DEST/scripts/telemetry/install-console-config.sh" "$DEST/scripts/telemetry/telemetry.conf" "${CONSOLE_CONFIG_ARGS[@]}"
 fi

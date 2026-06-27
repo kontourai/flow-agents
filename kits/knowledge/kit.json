@@ -34,6 +34,31 @@
       "id": "knowledge.retire",
       "path": "flows/retire.flow.json",
       "description": "Retire implemented or obsolete records from the working set via gated lifecycle: identify → propose-retirement → evidence-gate → apply-or-reject. Evidence required: retirement rationale + implementedByRef (when targeting 'implemented' status) or supersededByRef (optional, for 'retired'). Rejection leaves record status byte-identical. Retired records remain fully queryable with provenance via includeRetired flag."
+    },
+    {
+      "id": "knowledge.audit-freshness",
+      "path": "flows/audit-freshness.flow.json",
+      "description": "Hygiene audit (optional, configurable): flag records past per-category staleness thresholds and propose archive/refresh for each. Read-only: collect → measure → flag-gate. Thresholds are per-category (dot-hierarchy longest-prefix, with optional default); a category with no threshold is skipped (opt-in). Each flag cites last-mutation (max of updated_at and latest mutation_log entry) + the threshold that fired + computed age. Forks no mutation path — the operator routes each flag through knowledge.retire (archive) or a fresh capture/compile (refresh)."
+    },
+    {
+      "id": "knowledge.canonicalize-category",
+      "path": "flows/canonicalize-category.flow.json",
+      "description": "Hygiene audit (optional, configurable): audit category sprawl and propose flattening/retirement. Read-only: survey → assess → propose-gate. Flags three sprawl kinds (each independently toggleable): orphan-prefix (an intermediate prefix node holding no record directly, or a deep path carrying a single record → flatten), too-many-leaves (a parent fanning out past the configured leaf budget → regroup), implemented-active (a still-active record carrying an operator-supplied implemented-marker tag → retire). Every finding cites its evidence (the metric that fired + offending category/record ids). Forks no mutation path — the operator routes each finding through knowledge.retire (retire) or an update/recategorize (flatten/regroup)."
+    },
+    {
+      "id": "knowledge.glossary-sync",
+      "path": "flows/glossary-sync.flow.json",
+      "description": "Hygiene sync (optional, configurable): keep the glossary (concept records) in sync with the canonical docs that define those terms. Read-only by default: collect → extract → diff-gate → propose-gate. Surveys a configurable glossary source list (record ids and/or category selectors — opt-in), extracts term→definition entries via a pluggable extractor, and classifies each against existing concepts: gap (no concept) → propose a canonical definition; outdated (concept body drifted from the canonical, whitespace-insensitive) → propose the update; current → no-op. Each entry cites its source doc. With apply=true it enacts the plan through the existing concept-record ops (create → propose → apply for gaps; propose → apply for drift) with the canonical doc as proposer — forks no mutation path."
+    },
+    {
+      "id": "knowledge.detect-contradictions",
+      "path": "flows/detect-contradictions.flow.json",
+      "description": "Hygiene audit (optional, configurable): compare compiled records within a category and flag conflicting assertions with BOTH record ids. Read-only: collect → compare → flag-gate. Reuses the similarity adapter to scope comparisons to records about the same thing, then a pluggable contradiction fn (default: opposing-polarity heuristic) judges each similar pair. Auditing is opt-in per category. Each flag cites both record ids + shared category + the reason that fired. Forks no mutation path — the operator routes each flag through knowledge.retire (drop the stale assertion) or a fresh capture/compile/consolidate (reconcile)."
+    },
+    {
+      "id": "knowledge.hygiene-review",
+      "path": "flows/hygiene-review.flow.json",
+      "description": "Hygiene orchestrator (#106 #5, closes the issue): a THIN, opt-in orchestrator over the four hygiene flows (audit-freshness, detect-contradictions, glossary-sync, canonicalize-category). orchestrate → review-gate. Runs each opted-in audit via its EXISTING flow-runner method + gates (reimplements no detection), folds their findings into one operator-facing review of proposed actions normalized to adopt / retire / merge, each citing its sourceFlow + the evidence its origin flow's gate already vouched. Read-only by default; forks NO propose→approve gate — the operator enacts each decision through the source flow's existing gated op (retire via knowledge.retire; adopt via capture/compile or glossary-sync apply; merge via update/recategorize). The only mutation it can trigger is glossary apply, delegated verbatim to knowledge.glossary-sync's propose→apply lineage (consume-never-fork)."
     }
   ],
   "docs": [
@@ -55,7 +80,7 @@
     {
       "id": "knowledge.flow-runner",
       "path": "adapters/flow-runner/index.js",
-      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links; synthesize(conceptId | topicSelector, options) → concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) → decision snapshot consolidation with supersede-not-delete; retire(recordId, options) → gated status lifecycle transition (active→implemented→retired) with working-set exclusion. Emits canonical telemetry events at gate points."
+      "description": "Executable flow logic: capture(rawText, meta) → classified raw record; compile(rawIds[]) → compiled record with provenance links; synthesize(conceptId | topicSelector, options) → concept summary proposal with mutation gate; consolidate(snapshotId | topicSelector, options) → decision snapshot consolidation with supersede-not-delete; retire(recordId, options) → gated status lifecycle transition (active→implemented→retired) with working-set exclusion; auditFreshness(options) → read-only hygiene audit returning flags (last-mutation + threshold cited) proposing archive/refresh for records past per-category staleness thresholds; canonicalizeCategory(options) → read-only hygiene audit returning category-sprawl findings (orphan-prefix/too-many-leaves/implemented-active, each citing its metric + offending ids) proposing flatten/regroup/retire; glossarySync(options) → read-only-by-default glossary hygiene that extracts term→definition entries from a configurable list of canonical docs and classifies each against existing concepts (gap/outdated/current), optionally enacting gaps+drift through the existing concept-record create→propose→apply ops; detectContradictions(options) → read-only hygiene audit comparing compiled records within a category (similarity adapter scopes the comparison; pluggable contradiction fn judges each similar pair) returning flags that cite BOTH conflicting record ids + reason. Emits canonical telemetry events at gate points."
     },
     {
       "id": "knowledge.similarity-vector",
@@ -103,6 +128,31 @@
       "id": "knowledge.entity-cards-suite",
       "path": "evals/entities/suite.test.js",
       "description": "Eval cases for person/entity cards (issue #48): AC1-AC4 — entity extraction from Attendees lines, exact-match resolution, possible-duplicate detection, merge via propose/apply/reject (union aliases+backlinks, supersede duplicate), Obsidian people/ folder rendering, and extended contract suite (person type validity) on both adapters."
+    },
+    {
+      "id": "knowledge.audit-freshness-suite",
+      "path": "evals/audit-freshness/suite.test.js",
+      "description": "Eval cases for audit-freshness (#106 hygiene #1): per-category threshold resolution (dot-hierarchy longest-prefix + default + opt-in skip); each flag cites last-mutation + threshold + age; boundary (age == threshold not flagged, age > threshold flagged); last-mutation derived from max(updated_at, latest mutation_log entry); retired records excluded; read-only invariant (no record mutated, no flag without evidence); proposed-action resolution; gate telemetry."
+    },
+    {
+      "id": "knowledge.canonicalize-category-suite",
+      "path": "evals/canonicalize-category/suite.test.js",
+      "description": "Eval cases for canonicalize-category (#106 hygiene #4): orphan-prefix detection (empty intermediate node + single-record deep path → flatten); too-many-leaves fan-out budget (boundary: count == budget not flagged, > budget flagged → regroup, lists the leaves); implemented-active (status:active + implemented-marker tag → retire, case-insensitive markers); every finding cites its metric + evidence + offending ids; each check is independently toggleable + opt-in (disabled check / empty markers → no findings); retired records excluded; read-only invariant (no record mutated); gate telemetry (survey-gate + propose-gate); module-level export."
+    },
+    {
+      "id": "knowledge.glossary-sync-suite",
+      "path": "evals/glossary-sync/suite.test.js",
+      "description": "Eval cases for glossary-sync (#106 hygiene #3): default term extraction from canonical docs (bold/colon glossary lines); classification — gap (no concept), outdated (concept body drifted, whitespace-insensitive), current (matches); case/space-insensitive term matching within the resolved concept category; configurable source list (record id + category selector, opt-in empty list, unknown source rejected); pluggable term extractor; read-only-by-default invariant (no record mutated without apply); apply mode enacts gaps via create→propose→apply and drift via propose→apply with the canonical doc as proposer (consume-never-fork, proposes-link + mutation-log evidence); gate telemetry."
+    },
+    {
+      "id": "knowledge.detect-contradictions-suite",
+      "path": "evals/detect-contradictions/suite.test.js",
+      "description": "Eval cases for detect-contradictions (#106 hygiene #2): default opposing-polarity heuristic flags affirm-vs-negate over a shared subject; agreeing records not flagged; every flag cites BOTH record ids + category + reason; similarity scoping (an empty similarity detector yields no flags); pluggable contradiction fn overrides the default verdict; opt-in category scoping; cross-category pairs never formed; each unordered pair compared at most once; retired compiled records excluded; read-only invariant; gate telemetry; module-level export."
+    },
+    {
+      "id": "knowledge.hygiene-review-suite",
+      "path": "evals/hygiene-review/suite.test.js",
+      "description": "Eval cases for hygiene-review (#106 hygiene #5, closes the issue): opt-in orchestration (omitted audit block is skipped; empty review does nothing); each opted-in audit runs via its existing flow-runner method and its findings are collected verbatim (no detection reimplemented); proposals are normalized to adopt/retire/merge and each cites its sourceFlow + evidence; thin-orchestrator/consume-never-fork invariants — read-only by default mutates no record, no new gate is forked, the only mutation (glossary apply:true) is delegated to glossarySync's own gated propose→apply (verified via proposes-link + mutation-log on the resulting concept); sub-flow telemetry is folded in plus hygiene-review's own orchestrate-gate + review-gate; module-level export delegates to the runner."
     }
   ],
   "skills": [

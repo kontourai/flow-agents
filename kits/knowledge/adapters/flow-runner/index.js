@@ -53,6 +53,209 @@ function missingEvidenceError(message) {
 }
 
 // ---------------------------------------------------------------------------
+// Freshness-audit helpers  (knowledge.audit-freshness — #106)
+// ---------------------------------------------------------------------------
+
+/**
+ * The authoritative "last mutation" instant for a record: the most recent of
+ * the record's `updated_at` and its latest `mutation_log` entry `at`. Both are
+ * refreshed by every mutating op (store contract §1.1 / §4.2); taking the later
+ * of the two is robust even if an adapter lags one behind the other. Falls back
+ * to `created_at` when neither is present.
+ *
+ * @param {object} record
+ * @returns {string} ISO-8601 timestamp
+ */
+function lastMutationOf(record) {
+  const candidates = [];
+  if (record.updated_at) candidates.push(record.updated_at);
+  const log = Array.isArray(record.mutation_log) ? record.mutation_log : [];
+  for (const entry of log) {
+    if (entry && entry.at) candidates.push(entry.at);
+  }
+  if (candidates.length === 0) return record.created_at || record.updated_at || "";
+  // Lexicographic max works for ISO-8601 UTC timestamps.
+  return candidates.reduce((max, t) => (t > max ? t : max));
+}
+
+/**
+ * Resolve the staleness threshold for a category using dot-hierarchy
+ * longest-prefix matching: a record in `radar.signals.weak` prefers a
+ * `radar.signals` threshold over a `radar` one, then falls back to
+ * `defaultThresholdDays`. Returns `null` when no threshold applies (the
+ * category is then skipped — auditing is opt-in).
+ *
+ * @param {string} category
+ * @param {Record<string, number>} thresholds
+ * @param {number|null} defaultThresholdDays
+ * @returns {{ thresholdDays: number, matchedKey: string } | null}
+ */
+function resolveThreshold(category, thresholds, defaultThresholdDays) {
+  const segments = (category || "").split(".");
+  for (let i = segments.length; i > 0; i -= 1) {
+    const key = segments.slice(0, i).join(".");
+    if (Object.prototype.hasOwnProperty.call(thresholds, key)) {
+      return { thresholdDays: thresholds[key], matchedKey: key };
+    }
+  }
+  if (defaultThresholdDays !== null && defaultThresholdDays !== undefined) {
+    return { thresholdDays: defaultThresholdDays, matchedKey: "*" };
+  }
+  return null;
+}
+
+/**
+ * Resolve the proposed action ("archive" | "refresh") for a flagged record's
+ * category, using the same dot-hierarchy longest-prefix matching, falling back
+ * to `defaultAction`.
+ *
+ * @param {string} category
+ * @param {Record<string, "archive"|"refresh">} actions
+ * @param {"archive"|"refresh"} defaultAction
+ * @returns {"archive"|"refresh"}
+ */
+function resolveAction(category, actions, defaultAction) {
+  const segments = (category || "").split(".");
+  for (let i = segments.length; i > 0; i -= 1) {
+    const key = segments.slice(0, i).join(".");
+    if (Object.prototype.hasOwnProperty.call(actions, key)) {
+      return actions[key];
+    }
+  }
+  return defaultAction;
+}
+
+// ---------------------------------------------------------------------------
+// Glossary-sync helpers  (knowledge.glossary-sync — #106)
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize a glossary term for comparison/matching: trimmed, collapsed inner
+ * whitespace, lower-cased. Concept lookup is case/space-insensitive on the term
+ * so "API Gateway", "api  gateway", and "Api Gateway" all resolve to the same
+ * concept — terms are identity, not prose.
+ *
+ * @param {string} term
+ * @returns {string}
+ */
+function normalizeTerm(term) {
+  return String(term || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/**
+ * Compare a canonical definition against an existing concept body for the
+ * purpose of staleness detection. Whitespace-insensitive (leading/trailing +
+ * collapsed runs + trailing newline) so that cosmetic reflow is NOT treated as
+ * drift; any substantive difference is. Returns true when they are equivalent.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function definitionsEquivalent(a, b) {
+  const norm = (s) => String(s || "").trim().replace(/\s+/g, " ");
+  return norm(a) === norm(b);
+}
+
+/**
+ * Default term extractor: parse glossary-style entries out of a canonical doc's
+ * body. Pluggable — a caller may pass their own `termExtractor(doc) => entries`
+ * (e.g. to read a structured front-matter glossary). The default recognizes the
+ * two most common hand-written glossary line shapes, one entry per line:
+ *
+ *   - **Term** — definition        (bold term, em/en-dash or hyphen separator)
+ *   - Term: definition             (leading term, colon separator)
+ *   - - **Term**: definition       (markdown list item, either separator)
+ *
+ * A term must be 1–80 chars and a definition non-empty; lines that don't match
+ * are ignored (prose between entries is not a term). Duplicate terms within one
+ * doc keep the FIRST definition (canonical-doc order is authoritative).
+ *
+ * @param {object} doc  a canonical-source record ({ id, title, body, category, ... })
+ * @returns {Array<{ term: string, definition: string }>}
+ */
+function defaultTermExtractor(doc) {
+  const body = String(doc?.body || "");
+  const out = [];
+  const seen = new Set();
+  // Separator: em-dash, en-dash, or hyphen surrounded by spaces, OR a colon.
+  const SEP = "(?:\\s+[—–-]\\s+|:\\s+)";
+  // Bold term: **Term** SEP definition   (optionally a leading list marker)
+  const boldRe = new RegExp(`^\\s*(?:[-*]\\s+)?\\*\\*(.+?)\\*\\*${SEP}(.+)$`);
+  // Plain term: Term: definition   (colon only, to avoid eating prose dashes)
+  const plainRe = /^\s*(?:[-*]\s+)?([^:\n*][^:\n]{0,79}?):\s+(.+)$/;
+  for (const rawLine of body.split("\n")) {
+    const line = rawLine.replace(/\s+$/, "");
+    if (!line.trim()) continue;
+    let m = boldRe.exec(line);
+    if (!m) m = plainRe.exec(line);
+    if (!m) continue;
+    const term = m[1].trim();
+    const definition = m[2].trim();
+    if (!term || term.length > 80 || !definition) continue;
+    const key = normalizeTerm(term);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ term, definition });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Category-canonicalization helpers  (knowledge.canonicalize-category — #106)
+// ---------------------------------------------------------------------------
+
+/**
+ * The set of distinct dot-prefixes a category contributes, from its own full
+ * path down to (but NOT including) the empty root. `radar.signals.weak` yields
+ * `["radar", "radar.signals", "radar.signals.weak"]`. Used to build the
+ * category tree (which prefixes are *nodes*) and to find which prefixes hold a
+ * record directly vs. only via descendants.
+ *
+ * @param {string} category
+ * @returns {string[]}
+ */
+function categoryPrefixes(category) {
+  const segments = (category || "").split(".").filter(Boolean);
+  const out = [];
+  for (let i = 1; i <= segments.length; i += 1) {
+    out.push(segments.slice(0, i).join("."));
+  }
+  return out;
+}
+
+/**
+ * The immediate parent prefix of a category, or "" for a top-level category.
+ * `radar.signals.weak` → `radar.signals`; `radar` → "".
+ *
+ * @param {string} category
+ * @returns {string}
+ */
+function parentPrefix(category) {
+  const segments = (category || "").split(".").filter(Boolean);
+  if (segments.length <= 1) return "";
+  return segments.slice(0, -1).join(".");
+}
+
+/**
+ * Does a record count as "implemented-but-active" sprawl? A record is flagged
+ * when its status is still `"active"` yet it carries one of the operator-
+ * supplied "implemented" marker tags (e.g. `implemented`, `shipped`, `done`) —
+ * it should have transitioned to `implemented`/`retired` via `retire` but never
+ * did, so it lingers in the working set. Marker matching is case-insensitive.
+ *
+ * @param {object} record
+ * @param {Set<string>} markerSet  lower-cased implemented-marker tags
+ * @returns {boolean}
+ */
+function isImplementedButActive(record, markerSet) {
+  if (markerSet.size === 0) return false;
+  if ((record.status || "active") !== "active") return false;
+  const tags = Array.isArray(record.tags) ? record.tags : [];
+  return tags.some((t) => markerSet.has(String(t).toLowerCase()));
+}
+
+// ---------------------------------------------------------------------------
 // Classification heuristics
 // ---------------------------------------------------------------------------
 
@@ -146,6 +349,111 @@ export async function defaultSimilarityDetector(concept, candidates, store) {
   }
 
   return similar;
+}
+
+// ===========================================================================
+// Contradiction detection — pluggable interface  (knowledge.detect-contradictions — #106)
+// ===========================================================================
+
+/**
+ * Default contradiction detector: opposing-polarity heuristic.
+ *
+ * ContradictionDetector interface (mirrors SimilarityDetector — R3):
+ *   (recordA: Record, recordB: Record) => null | { reason: string }
+ *   Return `null` when the two records' assertions do NOT conflict, or an object
+ *   carrying a human-readable `reason` when they DO. May be async.
+ *
+ * The two records passed in are already known to be *about the same thing* (the
+ * caller scopes comparisons to a category and to records the similarity adapter
+ * deems similar). The detector's only job is to decide whether their assertions
+ * conflict — never to re-judge subject overlap.
+ *
+ * Default heuristic (v1, deliberately conservative):
+ *   Detects opposing polarity over a shared subject. Each record's body is split
+ *   into clauses; each clause is reduced to its set of salient content tokens
+ *   (stop-words and the negation tokens stripped) and tagged affirmative or
+ *   negative by whether it carries a negation. A contradiction is reported when
+ *   one record AFFIRMS a clause whose content tokens contain those of a clause
+ *   the other record NEGATES (e.g. "use REST for the public API" vs "do not use
+ *   REST"). Token-containment (not exact equality) is used so trailing detail on
+ *   one side does not hide the conflict. Returns the conflicting phrase as the
+ *   reason.
+ *
+ * This is intentionally simple and replaceable — the issue calls for a
+ * *pluggable* contradiction fn precisely because real contradiction detection is
+ * domain-sensitive (an embedding/NLI model is the obvious upgrade, injected the
+ * same way the vector similarity adapter is).
+ *
+ * @param {object} recordA
+ * @param {object} recordB
+ * @returns {{ reason: string } | null}
+ */
+const NEGATION_RE = /\b(?:not|never|no longer|don't|do not|doesn't|does not|isn't|is not|won't|will not|cannot|can't|avoid|stop|deprecated?|disallow(?:ed)?|forbidden?)\b/;
+
+const STOP_WORDS = new Set([
+  "we", "i", "you", "they", "it", "the", "a", "an", "should", "must", "will",
+  "shall", "to", "please", "for", "of", "and", "or", "is", "are", "be", "this",
+  "that", "with", "as", "on", "in", "at", "by", "all", "any", "our", "their",
+]);
+
+/**
+ * Reduce a record body into clauses, each tagged affirmative/negative by whether
+ * it carries a negation, with salient content tokens (stop-words + negation
+ * tokens stripped). Returned as { affirmed: Clause[], negated: Clause[] } where
+ * a Clause is { tokens: Set<string>, phrase: string }.
+ */
+function assertionClauses(body) {
+  const affirmed = [];
+  const negated = [];
+  for (const raw of String(body || "").toLowerCase().split(/[.;,\n!?]+/)) {
+    const clause = raw.trim();
+    if (!clause) continue;
+    const isNegated = NEGATION_RE.test(clause);
+    const phrase = clause.replace(NEGATION_RE, " ").replace(/\s+/g, " ").trim();
+    const tokens = new Set(
+      phrase
+        .replace(/[^a-z0-9 ]+/g, " ")
+        .split(/\s+/)
+        .filter((t) => t.length > 1 && !STOP_WORDS.has(t))
+    );
+    if (tokens.size === 0) continue;
+    (isNegated ? negated : affirmed).push({ tokens, phrase });
+  }
+  return { affirmed, negated };
+}
+
+// Every token of `inner` is present in `outer` (subset containment).
+function tokensContain(outer, inner) {
+  if (inner.size === 0) return false;
+  for (const t of inner) if (!outer.has(t)) return false;
+  return true;
+}
+
+export function defaultContradictionDetector(recordA, recordB) {
+  const a = assertionClauses(recordA.body);
+  const b = assertionClauses(recordB.body);
+
+  // A contradicts B when one AFFIRMS a clause whose content tokens contain those
+  // of a clause the other NEGATES (token-containment, either direction).
+  for (const aff of a.affirmed) {
+    for (const neg of b.negated) {
+      if (tokensContain(aff.tokens, neg.tokens)) {
+        return {
+          reason: `opposing assertions over "${neg.phrase}": ${recordA.id} affirms, ${recordB.id} negates`,
+        };
+      }
+    }
+  }
+  for (const aff of b.affirmed) {
+    for (const neg of a.negated) {
+      if (tokensContain(aff.tokens, neg.tokens)) {
+        return {
+          reason: `opposing assertions over "${neg.phrase}": ${recordB.id} affirms, ${recordA.id} negates`,
+        };
+      }
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1118,6 +1426,55 @@ export class KnowledgeFlowRunner {
   }
 
   // -------------------------------------------------------------------------
+  // close-proposal primitive  (#106)
+  //
+  // A flow that gates a change through propose→apply mints a transient proposal
+  // *artifact* record (the proposer) solely to carry the "proposes" link + the
+  // proposal text. Once the proposal is APPLIED, that artifact is spent — it
+  // should not linger as an `active` record. Left active it shows up in
+  // working-set queries and hygiene sweeps, and re-retiring it spawns a
+  // double-prefixed "Retirement proposal: Retirement proposal: …" twin (#106).
+  //
+  // This closes a spent proposal artifact by retiring it via the store's
+  // existing `retire` op — no parallel mechanism. It is:
+  //   - safe:        only touches the named artifact; never the apply target.
+  //   - idempotent:  a no-op if the artifact is already retired/implemented.
+  //   - non-fatal:   a close failure never fails the (already-applied) flow.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Auto-retire a spent proposal artifact after its proposal has been applied.
+   *
+   * @param {string} artifactId  - ID of the transient proposer record to close.
+   * @param {object} [opts]
+   *   - agent: string   — agent recording the close (defaults to runner agent)
+   *   - rationale: string — close rationale (mutation-log evidence)
+   * @returns {Promise<{ closed: boolean, reason?: string }>}
+   */
+  async _closeProposalArtifact(artifactId, opts = {}) {
+    const agent = opts.agent || this._agent;
+    const artifact = await this._store.get(artifactId);
+    // Already gone or already closed — nothing to do (idempotent).
+    if (!artifact) return { closed: false, reason: "artifact not found" };
+    if ((artifact.status || "active") === "retired") {
+      return { closed: false, reason: "already retired" };
+    }
+    try {
+      await this._store.retire(artifactId, "retired", {
+        agent,
+        rationale:
+          opts.rationale ||
+          "Auto-closing spent proposal artifact after the proposal was applied (#106).",
+      });
+      return { closed: true };
+    } catch (err) {
+      // The proposal was already applied successfully; a failure to tidy up the
+      // artifact must not fail the flow. Surface it on the result instead.
+      return { closed: false, reason: err.message };
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // knowledge.retire flow  (Addendum B — S7)
   //   Steps: identify → propose-retirement → evidence-gate → apply-or-reject → done
   //   Gate: evidence-gate — proposal carries rationale/ref; no direct mutation (AC1).
@@ -1344,6 +1701,7 @@ export class KnowledgeFlowRunner {
     });
     events.push(applyGateIn);
 
+    let proposalClosed = false;
     if (decision === "apply") {
       // Apply via store retire op — transitions status, appends mutation log (AC1)
       await this._store.retire(recordId, targetStatus, {
@@ -1353,6 +1711,13 @@ export class KnowledgeFlowRunner {
         ...(options.supersededByRef ? { supersededByRef: options.supersededByRef } : {}),
         ...(options.note ? { note: options.note } : {}),
       });
+      // Close the spent retirement-proposal artifact so it does not linger as an
+      // active record (which would spawn a double-prefixed twin on re-retire). #106
+      const closeResult = await this._closeProposalArtifact(proposerId, {
+        agent,
+        rationale: `Auto-closing retirement-proposal artifact after retiring ${recordId} (#106).`,
+      });
+      proposalClosed = closeResult.closed;
     } else if (decision === "reject") {
       if (!options.rejectReason || !options.rejectReason.trim()) {
         throw missingEvidenceError(
@@ -1385,6 +1750,1193 @@ export class KnowledgeFlowRunner {
       decision,
       previousStatus,
       proposerId,
+      proposalClosed,
+      telemetryEvents: events,
+    };
+  }
+
+
+  // -------------------------------------------------------------------------
+  // knowledge.audit-freshness flow  (hygiene #1 — #106)
+  //   Steps: collect → measure → flag-gate → done
+  //   Gate: flag-gate — every flag cites its evidence (last-mutation + the
+  //         threshold that fired). No flag is emitted without both.
+  //
+  // This is a READ-ONLY audit. It NEVER mutates a record. It surveys the
+  // working set, measures each record's age against a per-category staleness
+  // threshold, and returns flags proposing an action (archive / refresh). The
+  // operator routes each flag through the existing gated flows (knowledge.retire
+  // to archive; a fresh capture/compile to refresh) — the audit forks no new
+  // mutation path. Staleness is domain-sensitive (radar ≠ decisions), so the
+  // thresholds are OPTIONAL and CONFIGURABLE per category; a category with no
+  // threshold (and no default) is simply not audited (opt-in).
+  // -------------------------------------------------------------------------
+
+  /**
+   * Audit the working set for records past their per-category staleness
+   * threshold and propose archive/refresh for each. Read-only: mutates nothing.
+   *
+   * Threshold resolution is dot-hierarchy longest-prefix: a record in
+   * `radar.signals.weak` matches a `radar.signals` threshold before a `radar`
+   * one, falling back to `defaultThresholdDays` if neither is configured. A
+   * category that resolves to no threshold is skipped (opt-in auditing).
+   *
+   * "Last mutation" is the most recent of the record's `updated_at` and the
+   * latest `mutation_log` entry `at` — both are refreshed by every mutating op
+   * (store contract §1.1 / §4.2), so the later of the two is authoritative even
+   * if an adapter lags one.
+   *
+   * @param {object} [options]
+   *   - thresholds: { [category: string]: number }  — per-category staleness in days
+   *   - defaultThresholdDays: number                — fallback for unmatched categories (default: none → skip)
+   *   - actions: { [category: string]: "archive"|"refresh" } — per-category proposed action override
+   *   - defaultAction: "archive"|"refresh"          — fallback proposed action (default "refresh")
+   *   - types: string[]                             — record types to audit (default ["raw","compiled","concept","snapshot"])
+   *   - now: string|number|Date                     — reference "now" for age (default: current time; injectable for tests)
+   *   - agent: string                               — override agent name
+   * @returns {Promise<{
+   *   audited: number,
+   *   skipped: number,
+   *   flags: Array<{
+   *     recordId: string, title: string, type: string, category: string,
+   *     status: string, lastMutationAt: string, ageDays: number,
+   *     thresholdDays: number, matchedThresholdKey: string,
+   *     proposedAction: "archive"|"refresh"
+   *   }>,
+   *   telemetryEvents: object[]
+   * }>}
+   */
+  async auditFreshness(options = {}) {
+    const events = [];
+    const agent = options.agent || this._agent;
+
+    const thresholds = options.thresholds || {};
+    const defaultThresholdDays =
+      typeof options.defaultThresholdDays === "number"
+        ? options.defaultThresholdDays
+        : null;
+    const actions = options.actions || {};
+    const defaultAction = options.defaultAction || "refresh";
+    if (defaultAction !== "archive" && defaultAction !== "refresh") {
+      throw missingEvidenceError(
+        `audit-freshness: defaultAction must be "archive" or "refresh"; got: ${defaultAction}`
+      );
+    }
+    const types = Array.isArray(options.types) && options.types.length
+      ? options.types
+      : ["raw", "compiled", "concept", "snapshot"];
+
+    const nowMs = options.now !== undefined ? new Date(options.now).getTime() : Date.now();
+    if (Number.isNaN(nowMs)) {
+      throw missingEvidenceError(`audit-freshness: invalid "now" reference: ${options.now}`);
+    }
+
+    // ── Step: collect ──────────────────────────────────────────────────────
+    // Gather the working set (default queries already exclude retired records —
+    // retired is terminal, so there is nothing to flag there).
+    const collectGateIn = this._telemetry.emitGate("knowledge.audit-freshness", "collect-gate", {
+      flow: "knowledge.audit-freshness",
+      gate: "collect-gate",
+      types,
+      threshold_categories: Object.keys(thresholds),
+      default_threshold_days: defaultThresholdDays,
+    });
+    events.push(collectGateIn);
+
+    const seen = new Set();
+    const records = [];
+    for (const type of types) {
+      const recs = await this._store.listByType(type);
+      for (const r of recs) {
+        if (seen.has(r.id)) continue;
+        seen.add(r.id);
+        records.push(r);
+      }
+    }
+
+    const collectGateOut = this._telemetry.emitGateResult("knowledge.audit-freshness", "collect-gate", {
+      collected: records.length,
+    });
+    events.push(collectGateOut);
+
+    // ── Step: measure + flag-gate ──────────────────────────────────────────
+    const flagGateIn = this._telemetry.emitGate("knowledge.audit-freshness", "flag-gate", {
+      flow: "knowledge.audit-freshness",
+      gate: "flag-gate",
+      collected: records.length,
+    });
+    events.push(flagGateIn);
+
+    const flags = [];
+    let skipped = 0;
+    let audited = 0;
+
+    for (const record of records) {
+      const resolved = resolveThreshold(record.category, thresholds, defaultThresholdDays);
+      if (resolved === null) {
+        // No threshold configured for this category (and no default) → opt out.
+        skipped += 1;
+        continue;
+      }
+      audited += 1;
+
+      const lastMutationAt = lastMutationOf(record);
+      const lastMs = new Date(lastMutationAt).getTime();
+      // ageDays floored to whole days; an unparseable timestamp is treated as 0.
+      const ageDays = Number.isNaN(lastMs)
+        ? 0
+        : Math.floor((nowMs - lastMs) / 86_400_000);
+
+      // Flag only when STRICTLY past the threshold. Evidence (last-mutation +
+      // the threshold key/value that fired) is carried on every flag — the
+      // flag-gate requires both, so a flag can never be emitted without them.
+      if (ageDays > resolved.thresholdDays) {
+        const proposedAction =
+          resolveAction(record.category, actions, defaultAction);
+        flags.push({
+          recordId: record.id,
+          title: record.title,
+          type: record.type,
+          category: record.category,
+          status: record.status || "active",
+          lastMutationAt,
+          ageDays,
+          thresholdDays: resolved.thresholdDays,
+          matchedThresholdKey: resolved.matchedKey,
+          proposedAction,
+        });
+      }
+    }
+
+    const flagGateOut = this._telemetry.emitGateResult("knowledge.audit-freshness", "flag-gate", {
+      audited,
+      skipped,
+      flagged: flags.length,
+      agent,
+    });
+    events.push(flagGateOut);
+
+    return { audited, skipped, flags, telemetryEvents: events };
+  }
+
+
+  // -------------------------------------------------------------------------
+  // knowledge.glossary-sync flow  (hygiene #3 — #106)
+  //   Steps: collect → extract → diff-gate → propose-gate → done
+  //   Gate: diff-gate    — every entry is classified (gap / outdated / current)
+  //                        and cites its evidence: the canonical source doc,
+  //                        the extracted term + definition, and (for outdated)
+  //                        the existing concept's drifted body. No entry is
+  //                        emitted without the source it came from.
+  //         propose-gate — when apply mode is on, every gap/outdated entry is
+  //                        routed through the EXISTING concept-record
+  //                        propose→apply ops (create → propose → apply), with
+  //                        the canonical doc as the proposer (it is the
+  //                        evidence). Forks no mutation path.
+  //
+  // Keeps the glossary (the working set of `concept` records) in sync with the
+  // canonical docs that DEFINE those terms. The Kit can file concepts but had no
+  // way to (a) promote a term that a canonical doc defines but no concept yet
+  // captures (a GAP), or (b) notice when a concept's definition has DRIFTED from
+  // its canonical source (OUT-OF-DATE). This flow surveys a CONFIGURABLE list of
+  // canonical source docs (the "glossary source list" — opt-in; empty list does
+  // nothing), extracts their term→definition entries with a PLUGGABLE extractor,
+  // diffs them against existing concept records, and surfaces a plan.
+  //
+  // Read-only by DEFAULT (returns the classification + a proposal plan, mutating
+  // nothing). With `apply: true` it consumes the existing store ops to enact the
+  // plan — never a forked mutation path:
+  //   - gap      → store.create(concept) then propose+apply from the source doc
+  //   - outdated → store.propose + store.apply on the existing concept
+  //   - current  → no-op
+  // -------------------------------------------------------------------------
+
+  /**
+   * Sync the glossary (concept records) against a configurable list of canonical
+   * source docs. Read-only by default; `apply: true` enacts the plan via the
+   * existing concept-record propose→apply ops (consume-never-fork).
+   *
+   * Each canonical doc is parsed into term→definition entries (pluggable
+   * `termExtractor`); each entry is classified against the existing concepts:
+   *   - "gap":      no concept captures the term  → propose a canonical definition
+   *   - "outdated": a concept exists but its body has drifted from the canonical
+   *                 definition → propose the update
+   *   - "current":  the concept already matches the canonical definition → no-op
+   *
+   * Matching is by normalized term (case/space-insensitive) within the resolved
+   * concept category. Drift is whitespace-insensitive: cosmetic reflow is not
+   * flagged, substantive change is.
+   *
+   * @param {object} [options]
+   *   - sources: Array<string | { category: string, prefix?: boolean }>
+   *       The CONFIGURABLE glossary source list. Each entry is either a record id
+   *       (a single canonical doc) or a category selector ({ category, prefix }).
+   *       Empty/absent → nothing is synced (opt-in).
+   *   - termExtractor: (doc) => Array<{ term, definition }>
+   *       Pluggable extractor; default parses glossary-style lines (defaultTermExtractor).
+   *   - conceptCategory: string
+   *       Category for matched/proposed concepts. Default: the source doc's own category.
+   *   - apply: boolean (default false)
+   *       false → read-only (returns the plan). true → enact via store ops.
+   *   - now / agent / session_id: passthrough provenance/telemetry.
+   * @returns {Promise<{
+   *   sourcesAudited: number,
+   *   entries: number,
+   *   gaps: GlossaryEntry[],
+   *   outdated: GlossaryEntry[],
+   *   current: GlossaryEntry[],
+   *   applied: Array<{ term: string, conceptId: string, action: "create"|"update" }>,
+   *   telemetryEvents: object[]
+   * }>}
+   *   where GlossaryEntry = { term, definition, sourceDocId, sourceDocTitle,
+   *     category, classification, conceptId?: string, currentBody?: string }
+   */
+  async glossarySync(options = {}) {
+    const events = [];
+    const agent = options.agent || this._agent;
+    const sources = Array.isArray(options.sources) ? options.sources : [];
+    const extractor =
+      typeof options.termExtractor === "function"
+        ? options.termExtractor
+        : defaultTermExtractor;
+    const applyMode = options.apply === true;
+
+    // ── Step: collect ────────────────────────────────────────────────────────
+    // Resolve the configurable glossary source list to concrete canonical docs.
+    // A source is either a record id or a { category, prefix } selector. Missing
+    // ids are surfaced as an error (the source list is evidence — a typo must not
+    // pass silently). Auditing is opt-in: an empty list collects nothing.
+    const collectGateIn = this._telemetry.emitGate("knowledge.glossary-sync", "collect-gate", {
+      flow: "knowledge.glossary-sync",
+      gate: "collect-gate",
+      source_count: sources.length,
+      apply: applyMode,
+    });
+    events.push(collectGateIn);
+
+    const docs = [];
+    const seenDocs = new Set();
+    for (const source of sources) {
+      let resolved = [];
+      if (typeof source === "string") {
+        const doc = await this._store.get(source);
+        if (!doc) {
+          throw missingEvidenceError(
+            `glossary-sync: source doc not found: ${source}`
+          );
+        }
+        resolved = [doc];
+      } else if (source && typeof source === "object" && source.category) {
+        resolved = await this._store.listByCategory(source.category, {
+          prefix: source.prefix === true,
+        });
+      } else {
+        throw missingEvidenceError(
+          "glossary-sync: each source must be a record id or a { category } selector"
+        );
+      }
+      for (const doc of resolved) {
+        if (seenDocs.has(doc.id)) continue;
+        seenDocs.add(doc.id);
+        docs.push(doc);
+      }
+    }
+
+    const collectGateOut = this._telemetry.emitGateResult("knowledge.glossary-sync", "collect-gate", {
+      sources_resolved: docs.length,
+    });
+    events.push(collectGateOut);
+
+    // ── Step: extract + diff-gate ────────────────────────────────────────────
+    // Extract term→definition entries from each canonical doc and classify each
+    // against the existing concept working set. Every classification cites the
+    // source doc it came from — the diff-gate requires that evidence.
+    const diffGateIn = this._telemetry.emitGate("knowledge.glossary-sync", "diff-gate", {
+      flow: "knowledge.glossary-sync",
+      gate: "diff-gate",
+      sources_resolved: docs.length,
+    });
+    events.push(diffGateIn);
+
+    const allConcepts = await this._store.listByType("concept");
+
+    const gaps = [];
+    const outdated = [];
+    const current = [];
+    let entryCount = 0;
+
+    for (const doc of docs) {
+      const extracted = extractor(doc) || [];
+      for (const { term, definition } of extracted) {
+        if (!term || !definition) continue;
+        entryCount += 1;
+        const category = options.conceptCategory || doc.category;
+        const normTerm = normalizeTerm(term);
+        // A concept "captures" the term when its normalized title matches the
+        // term within the resolved category (concepts are the glossary).
+        const match = allConcepts.find(
+          (c) =>
+            c.category === category && normalizeTerm(c.title) === normTerm
+        );
+
+        const base = {
+          term,
+          definition,
+          sourceDocId: doc.id,
+          sourceDocTitle: doc.title,
+          category,
+        };
+
+        if (!match) {
+          gaps.push({ ...base, classification: "gap" });
+        } else if (!definitionsEquivalent(match.body, definition)) {
+          outdated.push({
+            ...base,
+            classification: "outdated",
+            conceptId: match.id,
+            currentBody: match.body,
+          });
+        } else {
+          current.push({
+            ...base,
+            classification: "current",
+            conceptId: match.id,
+          });
+        }
+      }
+    }
+
+    const diffGateOut = this._telemetry.emitGateResult("knowledge.glossary-sync", "diff-gate", {
+      entries: entryCount,
+      gaps: gaps.length,
+      outdated: outdated.length,
+      current: current.length,
+    });
+    events.push(diffGateOut);
+
+    // ── Step: propose-gate ───────────────────────────────────────────────────
+    // Read-only by default: return the plan, mutate nothing. With apply=true,
+    // enact each gap/outdated entry through the EXISTING concept-record ops —
+    // the canonical source doc is the proposer (it is the evidence for the
+    // definition), so no new mutation path is forked.
+    const proposeGateIn = this._telemetry.emitGate("knowledge.glossary-sync", "propose-gate", {
+      flow: "knowledge.glossary-sync",
+      gate: "propose-gate",
+      apply: applyMode,
+      gaps: gaps.length,
+      outdated: outdated.length,
+    });
+    events.push(proposeGateIn);
+
+    const applied = [];
+    if (applyMode) {
+      for (const entry of gaps) {
+        // Create the concept (definition = canonical body), then record the
+        // canonical doc's authorship through propose→apply so the lineage is the
+        // same gated path every other concept mutation uses.
+        const conceptId = await this._store.create({
+          type: "concept",
+          title: entry.term,
+          body: entry.definition,
+          category: entry.category,
+          provenance: {
+            agent,
+            ...(options.session_id ? { session_id: options.session_id } : {}),
+            source_ids: [entry.sourceDocId],
+            note: `glossary-sync: canonical definition from ${entry.sourceDocId}`,
+          },
+        });
+        await this._store.propose(conceptId, entry.sourceDocId, {
+          agent,
+          proposal: `Canonical definition for "${entry.term}" from ${entry.sourceDocTitle}.`,
+        });
+        await this._store.apply(conceptId, entry.sourceDocId, {
+          agent,
+          new_body: entry.definition,
+          rationale: `glossary-sync: adopt canonical definition for "${entry.term}" from ${entry.sourceDocId}.`,
+        });
+        applied.push({ term: entry.term, conceptId, action: "create" });
+      }
+      for (const entry of outdated) {
+        await this._store.propose(entry.conceptId, entry.sourceDocId, {
+          agent,
+          proposal: `Update "${entry.term}" to the canonical definition from ${entry.sourceDocTitle}.`,
+        });
+        await this._store.apply(entry.conceptId, entry.sourceDocId, {
+          agent,
+          new_body: entry.definition,
+          rationale: `glossary-sync: refresh "${entry.term}" from canonical source ${entry.sourceDocId} (definition had drifted).`,
+        });
+        applied.push({ term: entry.term, conceptId: entry.conceptId, action: "update" });
+      }
+    }
+
+    const proposeGateOut = this._telemetry.emitGateResult("knowledge.glossary-sync", "propose-gate", {
+      applied: applied.length,
+      apply: applyMode,
+      agent,
+    });
+    events.push(proposeGateOut);
+
+    return {
+      sourcesAudited: docs.length,
+      entries: entryCount,
+      gaps,
+      outdated,
+      current,
+      applied,
+      telemetryEvents: events,
+    };
+  }
+
+
+  // =========================================================================
+  // knowledge.detect-contradictions flow  (#106 hygiene #2)
+  //   Steps: collect → compare → flag-gate → done
+  //   Gates: collect-gate (comparison set), flag-gate (flags cite both ids)
+  // =========================================================================
+
+  /**
+   * Audit compiled records within a category for conflicting assertions and
+   * flag each conflicting pair with BOTH record ids. Read-only: mutates nothing.
+   *
+   * Comparison is two-staged and reuses the existing pluggable adapters
+   * (consume-never-fork):
+   *   1. SCOPE with the similarity adapter — only records the detector deems
+   *      similar (about the same thing) are candidates for contradiction. This
+   *      reuses the exact SimilarityDetector interface that `synthesize` uses, so
+   *      the vector similarity adapter drops straight in.
+   *   2. JUDGE with the pluggable contradiction fn — for each similar pair, the
+   *      ContradictionDetector decides whether the assertions conflict. The
+   *      default (defaultContradictionDetector) is an opposing-polarity heuristic;
+   *      callers inject a domain-specific fn (e.g. an NLI model) the same way.
+   *
+   * Which categories to audit is configurable and opt-in: a category is audited
+   * only when it appears in `categories` (or `categories` is omitted, in which
+   * case every category present in the collected compiled set is audited).
+   * Retired records are never compared — the default `listByType` query excludes
+   * them, and `retired` is terminal.
+   *
+   * @param {object} [options]
+   *   - categories: string[]                  — categories to audit (default: all present). Opt-in scoping.
+   *   - similarityDetector: fn                — pluggable detector (same interface as synthesize R3); default category/link heuristic
+   *   - contradictionDetector: fn            — pluggable (recordA, recordB) => null | { reason } ; default opposing-polarity heuristic
+   *   - agent: string                        — override agent name
+   * @returns {Promise<{
+   *   audited: number,
+   *   compared: number,
+   *   flags: Array<{
+   *     recordIdA: string, recordIdB: string,
+   *     titleA: string, titleB: string,
+   *     category: string, reason: string
+   *   }>,
+   *   telemetryEvents: object[]
+   * }>}
+   */
+  async detectContradictions(options = {}) {
+    const events = [];
+    const agent = options.agent || this._agent;
+    const similarityDetector = options.similarityDetector || defaultSimilarityDetector;
+    const contradictionDetector = options.contradictionDetector || defaultContradictionDetector;
+    const categoryFilter =
+      Array.isArray(options.categories) && options.categories.length
+        ? new Set(options.categories)
+        : null;
+
+    // ── Step: collect ────────────────────────────────────────────────────────
+    // Gather compiled records grouped by category (default query excludes
+    // retired records — retired is terminal, nothing to compare there).
+    const collectGateIn = this._telemetry.emitGate(
+      "knowledge.detect-contradictions",
+      "collect-gate",
+      {
+        flow: "knowledge.detect-contradictions",
+        gate: "collect-gate",
+        categories: categoryFilter ? [...categoryFilter] : "all",
+      }
+    );
+    events.push(collectGateIn);
+
+    const compiled = (await this._store.listByType("compiled")).filter(
+      (r) => (r.status || "active") !== "retired"
+    );
+
+    const byCategory = new Map();
+    for (const record of compiled) {
+      if (categoryFilter && !categoryFilter.has(record.category)) continue;
+      if (!byCategory.has(record.category)) byCategory.set(record.category, []);
+      byCategory.get(record.category).push(record);
+    }
+
+    const collectGateOut = this._telemetry.emitGateResult(
+      "knowledge.detect-contradictions",
+      "collect-gate",
+      {
+        categories_audited: byCategory.size,
+        collected: compiled.length,
+      }
+    );
+    events.push(collectGateOut);
+
+    // ── Step: compare + flag-gate ────────────────────────────────────────────
+    const flagGateIn = this._telemetry.emitGate(
+      "knowledge.detect-contradictions",
+      "flag-gate",
+      {
+        flow: "knowledge.detect-contradictions",
+        gate: "flag-gate",
+        categories_audited: byCategory.size,
+      }
+    );
+    events.push(flagGateIn);
+
+    const flags = [];
+    let audited = 0;
+    let compared = 0;
+    const seenPairs = new Set();
+
+    for (const [category, records] of byCategory) {
+      audited += records.length;
+      for (const record of records) {
+        // Stage 1: scope to similar records via the similarity adapter. The
+        // candidate set is the rest of this category's records.
+        const candidates = records.filter((r) => r.id !== record.id);
+        const similarIds = await similarityDetector(record, candidates, this._store);
+        const similarSet = new Set(similarIds);
+
+        // Stage 2: judge each similar pair with the contradiction fn.
+        for (const other of candidates) {
+          if (!similarSet.has(other.id)) continue;
+          // Compare each unordered pair exactly once.
+          const pairKey =
+            record.id < other.id ? `${record.id}|${other.id}` : `${other.id}|${record.id}`;
+          if (seenPairs.has(pairKey)) continue;
+          seenPairs.add(pairKey);
+          compared += 1;
+
+          const verdict = await contradictionDetector(record, other, this._store);
+          // A flag is emitted only with BOTH ids + a reason — the flag-gate
+          // requires the evidence, so a flag can never be emitted without it.
+          if (verdict && verdict.reason) {
+            const [idA, idB, recA, recB] =
+              record.id < other.id
+                ? [record.id, other.id, record, other]
+                : [other.id, record.id, other, record];
+            flags.push({
+              recordIdA: idA,
+              recordIdB: idB,
+              titleA: recA.title,
+              titleB: recB.title,
+              category,
+              reason: verdict.reason,
+            });
+          }
+        }
+      }
+    }
+
+    const flagGateOut = this._telemetry.emitGateResult(
+      "knowledge.detect-contradictions",
+      "flag-gate",
+      {
+        audited,
+        compared,
+        flagged: flags.length,
+        agent,
+      }
+    );
+    events.push(flagGateOut);
+
+    return { audited, compared, flags, telemetryEvents: events };
+  }
+
+
+  // -------------------------------------------------------------------------
+  // knowledge.canonicalize-category flow  (hygiene #4 — #106)
+  //   Steps: survey → assess → propose-gate → done
+  //   Gate: propose-gate — every category-sprawl finding cites its evidence
+  //         (the metric that fired + the offending category/record ids). No
+  //         finding is emitted without it.
+  //
+  // This is a READ-ONLY audit. It NEVER mutates a record. It surveys the
+  // category hierarchy of the working set and flags three kinds of sprawl the
+  // dogfooding surfaced (#106):
+  //   - orphan-prefix      — an intermediate prefix node that holds NO record
+  //                          directly yet has descendants, OR a prefix whose
+  //                          whole subtree is a single leaf record (a deep path
+  //                          carrying one record adds depth without branching
+  //                          value). Proposes flattening to the parent.
+  //   - too-many-leaves    — a parent prefix with more direct child leaf
+  //                          categories than the configured fan-out budget.
+  //                          Proposes regrouping under fewer leaves.
+  //   - implemented-active — a record still status:"active" but carrying an
+  //                          operator-supplied "implemented" marker tag; it
+  //                          should have transitioned via retire but lingers in
+  //                          the working set. Proposes retire.
+  //
+  // Each finding PROPOSES (flatten / regroup / retire); the operator routes it
+  // through the existing gated flows — knowledge.retire to retire, an `update`
+  // (recategorize) to flatten/regroup. The audit forks no new mutation path.
+  // Sprawl is domain-sensitive, so the checks are OPTIONAL and CONFIGURABLE: a
+  // disabled check (or an empty marker list) simply contributes no findings.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Audit the category hierarchy of the working set for sprawl and propose
+   * flattening / regrouping / retirement. Read-only: mutates nothing.
+   *
+   * Findings are of three kinds (each independently toggleable):
+   *   - `"orphan-prefix"`: an intermediate prefix node carrying no record
+   *     directly while it has descendants, or a prefix whose entire subtree is
+   *     exactly one leaf record. `proposedAction: "flatten"`.
+   *   - `"too-many-leaves"`: a parent prefix whose direct child leaf-category
+   *     count exceeds `maxLeavesPerParent`. `proposedAction: "regroup"`.
+   *   - `"implemented-active"`: a record still `status:"active"` carrying an
+   *     `implementedMarkers` tag. `proposedAction: "retire"`.
+   *
+   * @param {object} [options]
+   *   - maxLeavesPerParent: number   — fan-out budget; a parent with more direct
+   *                                     child leaf categories is flagged. Omit /
+   *                                     null to disable the leaf-count check.
+   *   - implementedMarkers: string[] — tag markers that mean "implemented"
+   *                                     (case-insensitive). Empty/omitted →
+   *                                     the implemented-active check is disabled.
+   *   - checkOrphanPrefixes: boolean — enable the orphan-prefix check (default true).
+   *   - types: string[]              — record types to survey
+   *                                     (default ["raw","compiled","concept","snapshot"]).
+   *   - agent: string                — override agent name.
+   * @returns {Promise<{
+   *   surveyed: number,
+   *   categories: number,
+   *   findings: Array<{
+   *     kind: "orphan-prefix"|"too-many-leaves"|"implemented-active",
+   *     category: string,
+   *     recordIds: string[],
+   *     metric: string,
+   *     evidence: object,
+   *     proposedAction: "flatten"|"regroup"|"retire"
+   *   }>,
+   *   telemetryEvents: object[]
+   * }>}
+   */
+  async canonicalizeCategory(options = {}) {
+    const events = [];
+    const agent = options.agent || this._agent;
+
+    const checkOrphanPrefixes = options.checkOrphanPrefixes !== false;
+    const maxLeavesPerParent =
+      typeof options.maxLeavesPerParent === "number"
+        ? options.maxLeavesPerParent
+        : null;
+    if (maxLeavesPerParent !== null && maxLeavesPerParent < 1) {
+      throw missingEvidenceError(
+        `canonicalize-category: maxLeavesPerParent must be >= 1; got: ${maxLeavesPerParent}`
+      );
+    }
+    const markerSet = new Set(
+      (Array.isArray(options.implementedMarkers) ? options.implementedMarkers : [])
+        .map((m) => String(m).toLowerCase())
+    );
+    const types = Array.isArray(options.types) && options.types.length
+      ? options.types
+      : ["raw", "compiled", "concept", "snapshot"];
+
+    // ── Step: survey ───────────────────────────────────────────────────────
+    // Gather the working set (default queries already exclude retired records —
+    // retired is terminal, so it is not category sprawl to flatten).
+    const surveyGateIn = this._telemetry.emitGate("knowledge.canonicalize-category", "survey-gate", {
+      flow: "knowledge.canonicalize-category",
+      gate: "survey-gate",
+      types,
+      check_orphan_prefixes: checkOrphanPrefixes,
+      max_leaves_per_parent: maxLeavesPerParent,
+      implemented_markers: [...markerSet],
+    });
+    events.push(surveyGateIn);
+
+    const seen = new Set();
+    const records = [];
+    for (const type of types) {
+      const recs = await this._store.listByType(type);
+      for (const r of recs) {
+        if (seen.has(r.id)) continue;
+        seen.add(r.id);
+        records.push(r);
+      }
+    }
+
+    // Build the category tree.
+    //   directIds[prefix]   — ids of records whose category IS exactly prefix.
+    //   subtreeIds[prefix]  — ids of records at prefix OR any descendant.
+    //   childLeaves[parent] — direct child leaf categories (a leaf = a category
+    //                         that is itself a record-bearing category with no
+    //                         deeper record-bearing descendant).
+    const directIds = new Map();
+    const subtreeIds = new Map();
+    const allCategories = new Set();
+    for (const r of records) {
+      const cat = r.category || "";
+      if (!directIds.has(cat)) directIds.set(cat, []);
+      directIds.get(cat).push(r.id);
+      for (const prefix of categoryPrefixes(cat)) {
+        allCategories.add(prefix);
+        if (!subtreeIds.has(prefix)) subtreeIds.set(prefix, []);
+        subtreeIds.get(prefix).push(r.id);
+      }
+    }
+
+    const surveyGateOut = this._telemetry.emitGateResult("knowledge.canonicalize-category", "survey-gate", {
+      surveyed: records.length,
+      categories: allCategories.size,
+    });
+    events.push(surveyGateOut);
+
+    // ── Step: assess + propose-gate ────────────────────────────────────────
+    const proposeGateIn = this._telemetry.emitGate("knowledge.canonicalize-category", "propose-gate", {
+      flow: "knowledge.canonicalize-category",
+      gate: "propose-gate",
+      surveyed: records.length,
+      categories: allCategories.size,
+    });
+    events.push(proposeGateIn);
+
+    const findings = [];
+
+    // (1) orphan-prefix: an intermediate prefix node with no direct record but
+    //     descendants, OR a prefix whose entire subtree is a single leaf record.
+    if (checkOrphanPrefixes) {
+      for (const prefix of allCategories) {
+        const direct = directIds.get(prefix) || [];
+        const subtree = subtreeIds.get(prefix) || [];
+        const hasDescendantRecord = subtree.length > direct.length;
+        // Only consider non-leaf (intermediate) prefixes for the "empty node"
+        // case — a prefix that has descendants but holds nothing itself. When
+        // the whole subtree is a SINGLE record, the deeper single-record-deep-path
+        // finding (emitted at the record-bearing leaf) already covers the whole
+        // chain — don't also report every empty ancestor of that lone record.
+        if (direct.length === 0 && hasDescendantRecord && subtree.length > 1) {
+          findings.push({
+            kind: "orphan-prefix",
+            category: prefix,
+            recordIds: [...subtree],
+            metric: "empty-intermediate-node",
+            evidence: {
+              directRecordCount: 0,
+              subtreeRecordCount: subtree.length,
+              parent: parentPrefix(prefix),
+              reason:
+                "Prefix holds no record directly; it only nests descendants. Flatten its subtree up to the parent.",
+            },
+            proposedAction: "flatten",
+          });
+        } else if (subtree.length === 1 && categoryPrefixes(prefix).length > 1) {
+          // A deep path (>1 segment) whose whole subtree is one record adds
+          // depth without branching value — flatten toward the parent. Only
+          // report this at the deepest such prefix that still owns the record
+          // directly (avoid double-reporting every ancestor of a lone record).
+          if (direct.length === 1) {
+            findings.push({
+              kind: "orphan-prefix",
+              category: prefix,
+              recordIds: [...subtree],
+              metric: "single-record-deep-path",
+              evidence: {
+                directRecordCount: 1,
+                subtreeRecordCount: 1,
+                depth: categoryPrefixes(prefix).length,
+                parent: parentPrefix(prefix),
+                reason:
+                  "A multi-segment category carries exactly one record and no siblings in its subtree — depth without branching value. Consider flattening to the parent.",
+              },
+              proposedAction: "flatten",
+            });
+          }
+        }
+      }
+    }
+
+    // (2) too-many-leaves: a parent prefix whose direct child leaf-category
+    //     count exceeds the fan-out budget. A "direct child leaf category" is a
+    //     record-bearing category exactly one segment deeper than the parent
+    //     with no record-bearing descendant of its own.
+    if (maxLeavesPerParent !== null) {
+      const childLeaves = new Map(); // parent → Set<childCategory>
+      for (const cat of allCategories) {
+        const direct = directIds.get(cat) || [];
+        const subtree = subtreeIds.get(cat) || [];
+        const isLeaf = direct.length > 0 && subtree.length === direct.length;
+        if (!isLeaf) continue;
+        const parent = parentPrefix(cat);
+        if (!parent) continue; // top-level leaves have no parent prefix to regroup under
+        if (!childLeaves.has(parent)) childLeaves.set(parent, new Set());
+        childLeaves.get(parent).add(cat);
+      }
+      for (const [parent, leaves] of childLeaves) {
+        if (leaves.size > maxLeavesPerParent) {
+          const leafList = [...leaves].sort();
+          const recordIds = [];
+          for (const leaf of leafList) {
+            for (const id of directIds.get(leaf) || []) recordIds.push(id);
+          }
+          findings.push({
+            kind: "too-many-leaves",
+            category: parent,
+            recordIds,
+            metric: "leaf-fan-out",
+            evidence: {
+              leafCount: leaves.size,
+              maxLeavesPerParent,
+              leaves: leafList,
+              reason:
+                "Parent prefix fans out to more direct leaf categories than the configured budget — regroup the leaves under fewer categories.",
+            },
+            proposedAction: "regroup",
+          });
+        }
+      }
+    }
+
+    // (3) implemented-active: a still-active record carrying an implemented marker.
+    if (markerSet.size > 0) {
+      for (const r of records) {
+        if (isImplementedButActive(r, markerSet)) {
+          const tags = Array.isArray(r.tags) ? r.tags : [];
+          const matched = tags.filter((t) => markerSet.has(String(t).toLowerCase()));
+          findings.push({
+            kind: "implemented-active",
+            category: r.category || "",
+            recordIds: [r.id],
+            metric: "implemented-marker-on-active",
+            evidence: {
+              recordId: r.id,
+              title: r.title,
+              status: r.status || "active",
+              matchedMarkers: matched,
+              reason:
+                "Record is still status:'active' but is tagged implemented — it should have transitioned via retire but lingers in the working set.",
+            },
+            proposedAction: "retire",
+          });
+        }
+      }
+    }
+
+    const proposeGateOut = this._telemetry.emitGateResult("knowledge.canonicalize-category", "propose-gate", {
+      surveyed: records.length,
+      categories: allCategories.size,
+      findings: findings.length,
+      agent,
+    });
+    events.push(proposeGateOut);
+
+    return {
+      surveyed: records.length,
+      categories: allCategories.size,
+      findings,
+      telemetryEvents: events,
+    };
+  }
+
+
+  // -------------------------------------------------------------------------
+  // knowledge.hygiene-review flow  (hygiene #5 — #106, closes the issue)
+  //   Steps: orchestrate → review-gate → done
+  //   Gate: review-gate — the unified review carries every proposal collected
+  //         from the four hygiene flows, each citing the flow it came from and
+  //         its underlying evidence. No proposal is synthesized here — the
+  //         review only relays what the gated flows already produced.
+  //
+  // This is a THIN ORCHESTRATOR over hygiene flows #1–#4 (consume-never-fork).
+  // It reimplements NO detection logic: it simply runs auditFreshness,
+  // detectContradictions, glossarySync, and canonicalizeCategory — the EXISTING
+  // flow-runner methods, with their EXISTING gates — and folds their findings
+  // into one operator-facing review of proposed actions (adopt / retire /
+  // merge). Read-only by DEFAULT, exactly like the flows it runs: it mutates
+  // nothing of its own.
+  //
+  // It forks NO new propose→approve gate. Every flow it runs already routes its
+  // own proposals through the Kit's existing gated ops:
+  //   - audit-freshness    → each flag proposes archive (→ knowledge.retire) or
+  //                          refresh (→ a fresh capture/compile); the flow's
+  //                          flag-gate guarantees the evidence.
+  //   - detect-contradictions → each flag proposes reconciling (→ knowledge.retire
+  //                          to drop the stale assertion, or capture/compile/
+  //                          consolidate to reconcile); flag-gate guards it.
+  //   - glossary-sync      → its OWN propose-gate enacts gaps/drift through the
+  //                          existing concept-record propose→apply ops with the
+  //                          canonical doc as proposer. When the operator opts to
+  //                          apply, hygiene-review delegates straight back to
+  //                          glossarySync({ apply: true }) — it does NOT touch
+  //                          the store itself.
+  //   - canonicalize-category → each finding proposes flatten/regroup (→ an
+  //                          update/recategorize) or retire (→ knowledge.retire);
+  //                          propose-gate guards it.
+  // The "adopt/retire/merge" surface the issue asks for is therefore a *view*
+  // over those existing gated proposals, not a new mutation path.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Orchestrate the four Knowledge-Kit hygiene flows (#106 #1–#4) and present a
+   * single unified review of their proposed actions (adopt / retire / merge)
+   * through the flows' EXISTING propose→approve gates.
+   *
+   * READ-ONLY by default (like every flow it runs): it runs the four audits and
+   * returns their collected proposals; it mutates nothing itself. The only path
+   * that mutates is `glossary.apply: true`, which delegates verbatim to
+   * `glossarySync({ apply: true })` so the change rides the existing gated
+   * concept-record propose→apply lineage — hygiene-review never forks a gate or
+   * writes to the store directly.
+   *
+   * The four sub-audits are configurable + opt-in, mirroring the flows: an audit
+   * whose config block is omitted is SKIPPED (its `skipped: true` is surfaced),
+   * so an empty call does nothing — hygiene is opt-in end-to-end.
+   *
+   * Each collected proposal is normalized to one of three operator decisions:
+   *   - `"retire"`  — drop/archive a record (audit-freshness archive,
+   *                   contradiction reconcile, canonicalize retire). Route
+   *                   through knowledge.retire.
+   *   - `"adopt"`   — create/refresh a definition or record (audit-freshness
+   *                   refresh, glossary gap/outdated). Route through the source
+   *                   flow's gated op (glossary delegates here on apply).
+   *   - `"merge"`   — reconcile/regroup overlapping records (canonicalize
+   *                   flatten/regroup). Route through an update/recategorize.
+   * Every proposal cites `sourceFlow` + the underlying finding so the operator
+   * sees the evidence the originating flow's gate already vouched for.
+   *
+   * @param {object} [options]
+   *   - freshness: object|false   — auditFreshness options. Omit/false → skip.
+   *   - contradictions: object|false — detectContradictions options. Omit/false → skip.
+   *   - glossary: object|false    — glossarySync options. Omit/false → skip.
+   *       Pass `{ ..., apply: true }` to enact the glossary plan through the
+   *       existing gated propose→apply ops (the ONLY apply this orchestrator does,
+   *       and it delegates to glossarySync — it forks nothing).
+   *   - canonicalize: object|false — canonicalizeCategory options. Omit/false → skip.
+   *   - agent: string             — override agent name for telemetry.
+   * @returns {Promise<{
+   *   ranFlows: string[],
+   *   skippedFlows: string[],
+   *   audits: {
+   *     freshness?: object, contradictions?: object,
+   *     glossary?: object, canonicalize?: object
+   *   },
+   *   proposals: Array<{
+   *     decision: "adopt"|"retire"|"merge",
+   *     sourceFlow: string,
+   *     proposedAction: string,
+   *     route: string,
+   *     recordIds: string[],
+   *     evidence: object
+   *   }>,
+   *   summary: { total: number, adopt: number, retire: number, merge: number },
+   *   telemetryEvents: object[]
+   * }>}
+   */
+  async hygieneReview(options = {}) {
+    const events = [];
+    const agent = options.agent || this._agent;
+
+    // Which sub-audits the operator opted into. An omitted/false block is
+    // skipped (hygiene is opt-in, like each flow). `true` runs with defaults.
+    const blocks = {
+      freshness: options.freshness,
+      contradictions: options.contradictions,
+      glossary: options.glossary,
+      canonicalize: options.canonicalize,
+    };
+    const wants = (b) => b !== undefined && b !== false && b !== null;
+    const optsOf = (b) => (b === true ? {} : b);
+
+    const ranFlows = [];
+    const skippedFlows = [];
+    const audits = {};
+    const proposals = [];
+
+    // ── Step: orchestrate ───────────────────────────────────────────────────
+    // Run each opted-in hygiene flow via its EXISTING runner method. No
+    // detection logic lives here — we only invoke and collect.
+    const orchestrateGateIn = this._telemetry.emitGate(
+      "knowledge.hygiene-review",
+      "orchestrate-gate",
+      {
+        flow: "knowledge.hygiene-review",
+        gate: "orchestrate-gate",
+        requested: Object.keys(blocks).filter((k) => wants(blocks[k])),
+      }
+    );
+    events.push(orchestrateGateIn);
+
+    // #1 audit-freshness → archive (retire) / refresh (adopt)
+    if (wants(blocks.freshness)) {
+      ranFlows.push("knowledge.audit-freshness");
+      const res = await this.auditFreshness({ agent, ...optsOf(blocks.freshness) });
+      audits.freshness = res;
+      events.push(...res.telemetryEvents);
+      for (const flag of res.flags) {
+        const isArchive = flag.proposedAction === "archive";
+        proposals.push({
+          decision: isArchive ? "retire" : "adopt",
+          sourceFlow: "knowledge.audit-freshness",
+          proposedAction: flag.proposedAction,
+          route: isArchive
+            ? "knowledge.retire"
+            : "knowledge.capture/compile (refresh)",
+          recordIds: [flag.recordId],
+          evidence: {
+            title: flag.title,
+            category: flag.category,
+            ageDays: flag.ageDays,
+            thresholdDays: flag.thresholdDays,
+            matchedThresholdKey: flag.matchedThresholdKey,
+            lastMutationAt: flag.lastMutationAt,
+          },
+        });
+      }
+    } else {
+      skippedFlows.push("knowledge.audit-freshness");
+    }
+
+    // #2 detect-contradictions → reconcile (retire the stale assertion)
+    if (wants(blocks.contradictions)) {
+      ranFlows.push("knowledge.detect-contradictions");
+      const res = await this.detectContradictions({ agent, ...optsOf(blocks.contradictions) });
+      audits.contradictions = res;
+      events.push(...res.telemetryEvents);
+      for (const flag of res.flags) {
+        proposals.push({
+          decision: "retire",
+          sourceFlow: "knowledge.detect-contradictions",
+          proposedAction: "reconcile",
+          route: "knowledge.retire (drop stale assertion) | capture/compile/consolidate",
+          recordIds: [flag.recordIdA, flag.recordIdB],
+          evidence: {
+            titleA: flag.titleA,
+            titleB: flag.titleB,
+            category: flag.category,
+            reason: flag.reason,
+          },
+        });
+      }
+    } else {
+      skippedFlows.push("knowledge.detect-contradictions");
+    }
+
+    // #3 glossary-sync → adopt a canonical definition (gap = new, outdated =
+    // refresh). The ONLY apply this orchestrator performs is delegated straight
+    // back to glossarySync's OWN gated propose→apply — we never write the store.
+    if (wants(blocks.glossary)) {
+      ranFlows.push("knowledge.glossary-sync");
+      const res = await this.glossarySync({ agent, ...optsOf(blocks.glossary) });
+      audits.glossary = res;
+      events.push(...res.telemetryEvents);
+      for (const entry of res.gaps) {
+        proposals.push({
+          decision: "adopt",
+          sourceFlow: "knowledge.glossary-sync",
+          proposedAction: "create-concept",
+          route: "knowledge.glossary-sync apply (store.create→propose→apply)",
+          recordIds: [entry.sourceDocId],
+          evidence: {
+            term: entry.term,
+            definition: entry.definition,
+            sourceDocId: entry.sourceDocId,
+            sourceDocTitle: entry.sourceDocTitle,
+            category: entry.category,
+            classification: "gap",
+          },
+        });
+      }
+      for (const entry of res.outdated) {
+        proposals.push({
+          decision: "adopt",
+          sourceFlow: "knowledge.glossary-sync",
+          proposedAction: "refresh-concept",
+          route: "knowledge.glossary-sync apply (store.propose→apply)",
+          recordIds: [entry.conceptId, entry.sourceDocId],
+          evidence: {
+            term: entry.term,
+            definition: entry.definition,
+            sourceDocId: entry.sourceDocId,
+            conceptId: entry.conceptId,
+            currentBody: entry.currentBody,
+            classification: "outdated",
+          },
+        });
+      }
+    } else {
+      skippedFlows.push("knowledge.glossary-sync");
+    }
+
+    // #4 canonicalize-category → flatten/regroup (merge) / retire
+    if (wants(blocks.canonicalize)) {
+      ranFlows.push("knowledge.canonicalize-category");
+      const res = await this.canonicalizeCategory({ agent, ...optsOf(blocks.canonicalize) });
+      audits.canonicalize = res;
+      events.push(...res.telemetryEvents);
+      for (const finding of res.findings) {
+        const isRetire = finding.proposedAction === "retire";
+        proposals.push({
+          decision: isRetire ? "retire" : "merge",
+          sourceFlow: "knowledge.canonicalize-category",
+          proposedAction: finding.proposedAction,
+          route: isRetire
+            ? "knowledge.retire"
+            : "update/recategorize (flatten/regroup)",
+          recordIds: finding.recordIds,
+          evidence: {
+            kind: finding.kind,
+            category: finding.category,
+            metric: finding.metric,
+            ...finding.evidence,
+          },
+        });
+      }
+    } else {
+      skippedFlows.push("knowledge.canonicalize-category");
+    }
+
+    const orchestrateGateOut = this._telemetry.emitGateResult(
+      "knowledge.hygiene-review",
+      "orchestrate-gate",
+      { ran: ranFlows.length, skipped: skippedFlows.length }
+    );
+    events.push(orchestrateGateOut);
+
+    // ── Step: review-gate ───────────────────────────────────────────────────
+    // The unified review relays the collected proposals. It SYNTHESIZES no
+    // proposal of its own — every entry traces to a flow whose gate already
+    // vouched for the evidence (consume-never-fork). The operator adopts /
+    // retires / merges each by routing it back through that flow's gated op.
+    const reviewGateIn = this._telemetry.emitGate(
+      "knowledge.hygiene-review",
+      "review-gate",
+      {
+        flow: "knowledge.hygiene-review",
+        gate: "review-gate",
+        proposals: proposals.length,
+      }
+    );
+    events.push(reviewGateIn);
+
+    const summary = {
+      total: proposals.length,
+      adopt: proposals.filter((p) => p.decision === "adopt").length,
+      retire: proposals.filter((p) => p.decision === "retire").length,
+      merge: proposals.filter((p) => p.decision === "merge").length,
+    };
+
+    const reviewGateOut = this._telemetry.emitGateResult(
+      "knowledge.hygiene-review",
+      "review-gate",
+      { ...summary, agent }
+    );
+    events.push(reviewGateOut);
+
+    return {
+      ranFlows,
+      skippedFlows,
+      audits,
+      proposals,
+      summary,
       telemetryEvents: events,
     };
   }
@@ -1783,6 +3335,74 @@ export async function retire(
 ) {
   const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
   return runner.retire(recordId, retireOpts);
+}
+
+/**
+ * Module-level audit-freshness: creates an ephemeral runner using the provided
+ * store. Read-only — mutates nothing.
+ *
+ * @param {object} options  (merged into auditFreshness options + runner options)
+ */
+export async function auditFreshness(
+  { store, workspace, agent, sessionId, ...auditOpts } = {}
+) {
+  const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
+  return runner.auditFreshness(auditOpts);
+}
+
+/**
+ * Module-level category-canonicalization audit: creates an ephemeral runner
+ * using the provided store. Read-only — mutates nothing. (#106 hygiene #4)
+ *
+ * @param {object} options  (merged into canonicalizeCategory options + runner options)
+ */
+export async function canonicalizeCategory(
+  { store, workspace, agent, sessionId, ...auditOpts } = {}
+) {
+  const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
+  return runner.canonicalizeCategory(auditOpts);
+}
+
+/**
+ * Module-level glossary-sync: creates an ephemeral runner using the provided
+ * store. Read-only by default; pass `apply: true` to enact the plan via the
+ * existing concept-record propose→apply ops.
+ *
+ * @param {object} options  (merged into glossarySync options + runner options)
+ */
+export async function glossarySync(
+  { store, workspace, agent, sessionId, ...syncOpts } = {}
+) {
+  const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
+  return runner.glossarySync(syncOpts);
+}
+
+/**
+ * Module-level detect-contradictions: creates an ephemeral runner using the
+ * provided store. Read-only — mutates nothing. (#106 hygiene #2)
+ *
+ * @param {object} options  (merged into detectContradictions options + runner options)
+ */
+export async function detectContradictions(
+  { store, workspace, agent, sessionId, ...detectOpts } = {}
+) {
+  const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
+  return runner.detectContradictions(detectOpts);
+}
+
+/**
+ * Module-level hygiene-review: creates an ephemeral runner using the provided
+ * store and orchestrates the four hygiene flows (#106 hygiene #5). Read-only by
+ * default — the only apply is `glossary.apply: true`, which the runner delegates
+ * to glossarySync's own gated propose→apply ops (consume-never-fork). Closes #106.
+ *
+ * @param {object} options  (merged into hygieneReview options + runner options)
+ */
+export async function hygieneReview(
+  { store, workspace, agent, sessionId, ...reviewOpts } = {}
+) {
+  const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
+  return runner.hygieneReview(reviewOpts);
 }
 
 export default KnowledgeFlowRunner;

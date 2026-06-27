@@ -14,6 +14,7 @@ For practical operator instructions and copy/paste prompts, see https://github.c
 - `design-probe`: generic one-question-at-a-time probing interview; Builder Kit uses this step before planning when the build flow needs shared understanding or a pickup decision.
 - `pickup-probe`: Builder Kit specialization of `design-probe` for selected work items; records scope, provider state, WIP/conflict scans, risks, decisions, unresolved questions, accepted gaps, and planning readiness.
 - `plan-work` / `execute-plan` / `deliver`: Definition Of Done, execution orchestration, and local delivery closure.
+- `continue-work`: advance a multi-slice work item to its next increment via a fresh-context handoff; restores the durable record (resume surface), derives the next undone slice from the issue plus merged PRs, and routes that slice **through** `pull-work` + `pickup-probe` (never around the gate) before handing off fresh per ADR 0013.
 - `review-work`: report-only critique for quality, security triggers, architecture fit, and standards findings.
 - `verify-work`: behavior evidence mapped to acceptance criteria and Goal Fit.
 - `evidence-gate`: trust assessment for completed work: acceptance evidence, integrity checks, CI confidence, and next step.

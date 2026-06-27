@@ -20,6 +20,16 @@ The artifact root is local working memory unless a workflow explicitly promotes 
 - Do not commit local workflow runtime roots such as `.flow-agents/<slug>/` as durable policy unless a repository-specific contract explicitly says that artifact is promoted.
 - Do not commit local workflow runtime roots such as `.flow-agents/<slug>/`; final acceptance must promote durable content before merge.
 
+## Persistence Integrity
+
+Writing a durable artifact must **fail loud, never fail-open.** If a record (state, evidence, a
+trust.bundle, a claim) cannot be persisted — a missing dependency, a validation failure, an I/O
+error — the operation **fails with the reason**; it must not return success while silently
+dropping the write. A silently-skipped persist is **data loss**, not a degraded mode, and is
+invisible to the caller that depended on it. Callers act on persistence **return values**, not
+just thrown exceptions. (See #160: an ignored `{written:false}` from the bundle writer dropped
+records under concurrency.)
+
 ## Required Artifact Types
 
 ### Structured Sidecars

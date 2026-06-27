@@ -167,6 +167,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_goal_fit_escape_hatch.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_goal_fit_rederive.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_evidence_capture_hook.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_hook_category_behaviors.sh" || result=1
@@ -185,6 +187,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_workflow_steering_hook.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_session_resume_roundtrip.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_hook_influence_cases.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_flow_agents_statusline.sh" || result=1
@@ -202,6 +206,43 @@ run_integration() {
   bash "$EVAL_DIR/integration/test_bundle_lifecycle.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_kit_conformance_levels.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_dual_emit_flow_step.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_enforcer_expects_driven.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_phase_map_and_gate_claim.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_builder_step_producers.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_flowdef_session_history_preservation.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_flowdef_session_activation.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_trust_checkpoint.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_checkpoint_signing.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_gate_bypass_chain.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_command_log_integrity.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_gate_lockdown.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_resolvefirststep_security.sh" || result=1
+  bash "$EVAL_DIR/integration/test_captured_fail_reconciliation.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_trust_reconcile.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_reconcile_soundness.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_publish_delivery.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_mint_attestation.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_verify_cli.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/acceptance/prove-capture-teeth-declared.sh" || result=1
   return $result
 }
 

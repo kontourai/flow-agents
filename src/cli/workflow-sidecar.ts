@@ -2,8 +2,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+// ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
+import { resolveActiveFlowStep, resolveFlowFilePath, resolvePhaseMap, type ActiveFlowStep } from "../lib/flow-resolver.js";
 
 type AnyObj = Record<string, any>;
 
@@ -40,58 +43,37 @@ function workItemSlug(ref: string): string {
   return slugify(`${owner}-${repo}-${id}`, "work-item");
 }
 
-// Optional Hachure trust-bundle validation. No-ops gracefully when hachure is not installed.
-// Install hachure (^0.4.0) as an optional dependency to enable schema validation.
-function tryLoadHachureValidator(): ((bundle: unknown) => { valid: boolean; errors: string[] }) | null {
-  try {
-    const _require = createRequire(import.meta.url);
-    const hachureDir = path.dirname(_require.resolve("hachure"));
-    const schemasDir = path.join(hachureDir, "schemas");
-    const Ajv = _require("ajv/dist/2020");
-    const schemas: Record<string, any> = {};
-    for (const file of fs.readdirSync(schemasDir)) {
-      if (!file.endsWith(".schema.json")) continue;
-      schemas[file] = JSON.parse(fs.readFileSync(path.join(schemasDir, file), "utf8"));
-    }
-    const ajv = new Ajv({ strict: false, allErrors: true });
-    for (const [filename, schema] of Object.entries(schemas)) {
-      if (filename === "trust-bundle.schema.json") continue;
-      ajv.addSchema(schema, filename);
-    }
-    const trustBundleSchema = schemas["trust-bundle.schema.json"];
-    if (!trustBundleSchema) return null;
-    const validate = ajv.compile(trustBundleSchema);
-    return (bundle: unknown) => {
-      const valid = validate(bundle);
-      if (valid) return { valid: true, errors: [] };
-      const errors = ((validate as any).errors ?? []).map((err: any) => {
-        const loc = err.instancePath || err.schemaPath || "";
-        return `${loc} ${err.message ?? "invalid"}`.trim();
-      });
-      return { valid: false, errors };
-    };
-  } catch {
-    return null;
-  }
-}
-let _hachureValidator: ReturnType<typeof tryLoadHachureValidator> | undefined;
-function getHachureValidator(): ReturnType<typeof tryLoadHachureValidator> {
-  if (_hachureValidator === undefined) _hachureValidator = tryLoadHachureValidator();
-  return _hachureValidator;
-}
-
 /**
- * Validate a Hachure trust.bundle against the canonical trust-bundle schema.
- * Returns `{ valid, errors, available }`. When the optional `hachure` dependency
- * is not installed, validation is unavailable and this returns
- * `{ valid: true, errors: [], available: false }` (fail-open) so callers can
- * choose to treat unvalidated bundles as acceptable or gate on `available`.
- * This is the same validator the sidecar writer uses for trust-backed evidence.
+ * Validate a Hachure trust.bundle using @kontourai/surface's canonical validator
+ * (surface is the authoritative owner of trust-bundle schema validation per ADR 0010 / ADR 0015).
+ * Returns `{ valid, errors, available }`. When @kontourai/surface is unavailable,
+ * `available` is false and `valid` is true (fail-open) so callers can choose to treat
+ * unvalidated bundles as acceptable or gate on `available`. Surface is REQUIRED for
+ * bundle writes per ADR 0010 Phase 4c — `assertBundleWritten` enforces this on the
+ * write path. Surface's validator is equivalent-or-stronger than the prior hachure
+ * JSON-Schema validator: it validates the same structural constraints plus cross-reference
+ * integrity (evidence/event → claim references) that the JSON schema did not enforce.
  */
-export function validateTrustBundle(bundle: unknown): { valid: boolean; errors: string[]; available: boolean } {
-  const validate = getHachureValidator();
-  if (!validate) return { valid: true, errors: [], available: false };
-  return { ...validate(bundle), available: true };
+export async function validateTrustBundle(bundle: unknown): Promise<{ valid: boolean; errors: string[]; available: boolean }> {
+  // Use the already-loaded surface module when available (zero-cost re-entry after first load).
+  // When called standalone (fresh process, surface not yet loaded), attempt a one-shot import.
+  let surfaceValidate: ((input: unknown) => unknown) | undefined;
+  if (_surfaceModule !== undefined) {
+    // Module has been attempted: use cached result (null = unavailable).
+    surfaceValidate = _surfaceModule?.validateTrustBundle ?? undefined;
+  } else {
+    // Not yet attempted — load now for standalone callers (e.g. library consumers, tests).
+    const m = await tryLoadSurface();
+    surfaceValidate = m?.validateTrustBundle ?? undefined;
+  }
+  if (!surfaceValidate) return { valid: true, errors: [], available: false };
+  try {
+    surfaceValidate(bundle);
+    return { valid: true, errors: [], available: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { valid: false, errors: [message], available: true };
+  }
 }
 // Validate a single InquiryRecord against the hachure inquiry-record.schema.json.
 // Uses a separate AJV instance compiled against that schema (not the trust-bundle schema).
@@ -188,6 +170,37 @@ type SurfaceModule = {
     inquiry: SurfaceInquiry,
     options?: { now?: Date },
   ) => SurfaceInquiryRecord;
+  buildTrustReport: (bundle: Record<string, unknown>, options?: { now?: Date }) => Record<string, unknown>;
+  buildDerivationDrilldown: (report: Record<string, unknown>, claimId: string) => Record<string, unknown>;
+  /** Canonical trust-bundle validator from @kontourai/surface. Throws on invalid input; returns TrustBundle on success. */
+  validateTrustBundle: (input: unknown) => Record<string, unknown>;
+  /** Freeze a derivation checkpoint from a report. */
+  checkpointFromReport: (report: Record<string, unknown>) => Record<string, unknown>;
+  /** Diff two derivations (prior checkpoint → later report) and emit freshness transition events. */
+  diffFreshness: (prior: Record<string, unknown>, next: Record<string, unknown>) => Array<Record<string, unknown>>;
+  // ─── Increment B1: in-toto / Sigstore interop (consumed from Surface) ────────
+  /** Wrap a TrustBundle as an in-toto Statement v1. */
+  toInTotoStatement: (bundle: Record<string, unknown>, options: { subjects: Array<{ name: string; digest: Record<string, string> }> }) => {
+    _type: "https://in-toto.io/Statement/v1";
+    subject: Array<{ name: string; digest: Record<string, string> }>;
+    predicateType: "https://hachure.org/v1/bundle";
+    predicate: Record<string, unknown>;
+  };
+  /** Sign an in-toto Statement with Sigstore keyless signing. Returns null when no OIDC identity is available (fail-open). */
+  signStatementWithSigstore: (statement: {
+    _type: "https://in-toto.io/Statement/v1";
+    subject: Array<{ name: string; digest: Record<string, string> }>;
+    predicateType: "https://hachure.org/v1/bundle";
+    predicate: Record<string, unknown>;
+  }) => Promise<{
+    envelope: {
+      payloadType: "application/vnd.in-toto+json";
+      payload: string;
+      signatures: Array<{ keyid: string; sig: string }>;
+    };
+    sigstoreBundle: unknown;
+    assuranceLevel: "signed";
+  } | null>;
 };
 let _surfaceModule: SurfaceModule | null | undefined; // undefined = not tried yet; null = unavailable
 async function tryLoadSurface(): Promise<SurfaceModule | null> {
@@ -244,10 +257,17 @@ function critiqueToEventStatus(verdict: string, findings: AnyObj[]): string | nu
  * @param critiques  Critique objects (from critique.json .critiques array)
  * @param commandLog Optional parsed command-log.jsonl entries (capture-authoritative fold)
  */
-export async function buildTrustBundle(slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], commandLog?: AnyObj[]): Promise<AnyObj | null> {
+export async function buildTrustBundle(slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], commandLog?: AnyObj[], flowAgentsDir?: string): Promise<AnyObj | null> {
   const surface = await tryLoadSurface();
   if (!surface) return null;
   const { deriveClaimStatus, generateClaimId, statusFunctionVersion } = surface;
+
+  // ADR 0016 Abstraction A (P-b): resolve active flow step for dual-emit.
+  // When flowAgentsDir is provided AND current.json carries active_flow_id/active_step_id,
+  // each produced claim gets a DECLARED primary claim (kit-typed) plus a legacy shadow
+  // (workflow.* type, claimId suffix "-legacy") for backward compatibility. When null,
+  // only the existing workflow.* claims are produced (zero behavior change).
+  const activeStep: ActiveFlowStep | null = flowAgentsDir ? resolveActiveFlowStep(flowAgentsDir) : null;
 
   const claims: AnyObj[] = [];
   const evidenceItems: AnyObj[] = [];
@@ -278,6 +298,95 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     captureByCommand.set(key, { observedResult: failed || (prev && prev.observedResult === "fail") ? "fail" : "pass", exitCode: Number.isInteger(entry.exitCode) ? entry.exitCode : (prev ? prev.exitCode : null) });
   }
 
+  // ─── P-b dual-emit helper ──────────────────────────────────────────────────
+  // Semantic matching table (ADR 0016 Abstraction A P-b):
+  //   check (non-policy kind) → expects[] entry where claimType does NOT contain
+  //     "acceptance" AND subjectType is NOT "decision". Preference: subjectType=
+  //     "flow-step". Fallback: first non-decision, non-acceptance entry.
+  //   check (kind=policy)     → expects[] entry whose claimType contains
+  //     "compliance" or "policy". Fallback: same as non-policy.
+  //   acceptance criterion    → expects[] entry whose subjectType is "flow-step"
+  //     OR claimType contains "tests" OR "compliance". Fallback: first entry.
+  //   critique                → expects[] entry whose claimType contains "policy"
+  //     OR "compliance" AND subjectType is "artifact". Fallback: last entry.
+  //
+  // The DECLARED claim is primary (kit-typed claimType + subjectType).
+  // The legacy claim uses the existing workflow.* claimType (suffix "-legacy") as
+  // a backward-compat shadow. Both cite the same evidence. Status is derived by
+  // Surface from that evidence (never hand-set).
+  //
+  // Per-gate producibility (ADR 0016 P-d):
+  //   (a) Already handled via subjectType=flow-step preference:
+  //       builder.verify.tests       (verify-gate, subjectType=flow-step)
+  //       builder.verify.policy-compliance (verify-gate, kind=policy match)
+  //   (b) Producible via fallback (non-decision, non-acceptance, first match):
+  //       builder.plan.implementation   (plan-gate, subjectType=artifact)
+  //       builder.execute.scope         (execute-gate, subjectType=change)
+  //       builder.merge-ready.readiness (merge-ready-gate, subjectType=change)
+  //       builder.merge-ready-ci.readiness (merge-ready-ci-gate, subjectType=pull-request)
+  //   (c) No natural producer — required:false in build.flow.json (ADR 0016 P-d plan):
+  //       builder.pull-work.selected        (pull-work-gate, subjectType=work-item)
+  //       builder.design-probe.pickup-readiness (design-probe-gate, subjectType=work-item)
+  //       builder.design-probe.decisions    (design-probe-gate, subjectType=decision)
+  //       builder.pr-open.pull-request      (pr-open-gate, subjectType=pull-request)
+  //       builder.learn.decisions           (learn-gate, subjectType=decision)
+  //       builder.learn.evidence            (learn-gate, subjectType=release)
+  //   For category (c): record-gate-claim subcommand allows skills to target a specific
+  //   expects[] entry by --expectation <id>, bypassing this semantic match entirely.
+  function matchExpectsEntry(kind: "check" | "acceptance" | "critique", checkKindVal?: string, expectationId?: string): { claimType: string; subjectType: string } | null {
+    if (!activeStep || activeStep.gateExpects.length === 0) return null;
+    const expects = activeStep.gateExpects;
+    if (kind === "check") {
+      // ADR 0016 P-d Increment 2: when an explicit expectation id is given (from record-gate-claim
+      // --expectation), bypass heuristics and do exact lookup. This ensures multi-expects[] gates
+      // (learn-gate: decision + release; design-probe-gate: work-item + decision) produce the
+      // correct declared claimType rather than the heuristic-selected one.
+      if (expectationId) {
+        const exact = expects.find((e) => e.id === expectationId);
+        if (exact) return { claimType: exact.bundle_claim.claimType, subjectType: exact.bundle_claim.subjectType };
+      }
+      const isPolicy = checkKindVal === "policy";
+      if (isPolicy) {
+        const match = expects.find((e) => {
+          const ct = e.bundle_claim.claimType.toLowerCase();
+          return ct.includes("compliance") || ct.includes("policy");
+        });
+        if (match) return { claimType: match.bundle_claim.claimType, subjectType: match.bundle_claim.subjectType };
+      }
+      // Non-policy: prefer flow-step subjectType, exclude decision/acceptance entries
+      const preferred = expects.find((e) => {
+        const ct = e.bundle_claim.claimType.toLowerCase();
+        return e.bundle_claim.subjectType !== "decision" && !ct.includes("acceptance") && e.bundle_claim.subjectType === "flow-step";
+      });
+      if (preferred) return { claimType: preferred.bundle_claim.claimType, subjectType: preferred.bundle_claim.subjectType };
+      const fallback = expects.find((e) => {
+        const ct = e.bundle_claim.claimType.toLowerCase();
+        return e.bundle_claim.subjectType !== "decision" && !ct.includes("acceptance");
+      });
+      if (fallback) return { claimType: fallback.bundle_claim.claimType, subjectType: fallback.bundle_claim.subjectType };
+      return null;
+    }
+    if (kind === "acceptance") {
+      const match = expects.find((e) => {
+        const ct = e.bundle_claim.claimType.toLowerCase();
+        return e.bundle_claim.subjectType === "flow-step" || ct.includes("tests") || ct.includes("compliance");
+      });
+      if (match) return { claimType: match.bundle_claim.claimType, subjectType: match.bundle_claim.subjectType };
+      return { claimType: expects[0]!.bundle_claim.claimType, subjectType: expects[0]!.bundle_claim.subjectType };
+    }
+    if (kind === "critique") {
+      const match = expects.find((e) => {
+        const ct = e.bundle_claim.claimType.toLowerCase();
+        return e.bundle_claim.subjectType === "artifact" && (ct.includes("policy") || ct.includes("compliance"));
+      });
+      if (match) return { claimType: match.bundle_claim.claimType, subjectType: match.bundle_claim.subjectType };
+      const last = expects[expects.length - 1]!;
+      return { claimType: last.bundle_claim.claimType, subjectType: last.bundle_claim.subjectType };
+    }
+    return null;
+  }
+  // ────────────────────────────────────────────────────────────────────────────
+
   // Evidence checks → claims + evidence items + events. Capture is authoritative.
   for (const check of Array.isArray(checks) ? checks : []) {
     if (!check.id) continue;
@@ -285,8 +394,8 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const fieldOrBehavior = String(check.summary ?? check.id);
     const claimId = generateClaimId(subjectId, "flow-agents.workflow", fieldOrBehavior);
     const evId = `ev:${claimId}`;
-    const claimType = `workflow.check.${check.kind ?? "external"}`;
-    const policy = ensurePolicy(claimType, "high", ["test_output"]);
+    const legacyClaimType = `workflow.check.${check.kind ?? "external"}`;
+    const policy = ensurePolicy(legacyClaimType, "high", ["test_output"]);
 
     const cmd = typeof check.command === "string" ? check.command.replace(/\s+/g, " ").trim() : "";
     const captured = cmd ? captureByCommand.get(cmd) : undefined;
@@ -306,9 +415,22 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       evItem.execution = { runner: "bash", label: cmd, isError: captured.observedResult === "fail", ...(captured.exitCode != null ? { exitCode: captured.exitCode } : {}) };
     }
     evidenceItems.push(evItem);
-    const claimObj: AnyObj = { id: claimId, subjectType: "workflow-check", subjectId, surface: "flow-agents.workflow", claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id };
-    const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
-    claims.push({ ...claimObj, status: derivedStatus });
+
+    // P-d: declared-only when active flow/step present (shadow retired); no-flow path unchanged.
+    // When record-gate-claim sets _gate_claim_expectation_id, pass it for exact lookup (ADR 0016 P-d Increment 2).
+    const declared = matchExpectsEntry("check", check.kind, typeof check._gate_claim_expectation_id === "string" ? check._gate_claim_expectation_id : undefined);
+    if (declared) {
+      // Declared kit-typed claim only — no legacy shadow (ADR 0016 P-d).
+      const declaredPolicy = ensurePolicy(declared.claimType, "high", ["test_output"]);
+      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, surface: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id };
+      const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
+      claims.push({ ...declaredClaimObj, status: declaredStatus });
+    } else {
+      // No active flow step — only the workflow.* primary claim (legitimate no-flow fallback path).
+      const claimObj: AnyObj = { id: claimId, subjectType: "workflow-check", subjectId, surface: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id };
+      const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
+      claims.push({ ...claimObj, status: derivedStatus });
+    }
   }
 
   // Acceptance criteria → claims + events
@@ -317,8 +439,8 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const subjectId = `${slug}/${criterion.id}`;
     const fieldOrBehavior = String(criterion.description ?? criterion.id);
     const claimId = generateClaimId(subjectId, "flow-agents.workflow", fieldOrBehavior);
-    const claimType = "workflow.acceptance.criterion";
-    const policy = ensurePolicy(claimType, "high", []);
+    const legacyClaimType = "workflow.acceptance.criterion";
+    const policy = ensurePolicy(legacyClaimType, "high", []);
     const evStatus = criterionStatusToEventStatus(String(criterion.status ?? ""));
     const claimEvents: AnyObj[] = [];
     if (evStatus) {
@@ -326,9 +448,21 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       events.push(evt);
       claimEvents.push(evt);
     }
-    const claimObj: AnyObj = { id: claimId, subjectType: "workflow-acceptance-criterion", subjectId, surface: "flow-agents.workflow", claimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id };
-    const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
-    claims.push({ ...claimObj, status: derivedStatus });
+
+    // P-d: declared-only when active flow/step present (shadow retired); no-flow path unchanged.
+    const declared = matchExpectsEntry("acceptance");
+    if (declared) {
+      // Declared kit-typed claim only — no legacy shadow (ADR 0016 P-d).
+      const declaredPolicy = ensurePolicy(declared.claimType, "high", []);
+      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, surface: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id };
+      const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
+      claims.push({ ...declaredClaimObj, status: declaredStatus });
+    } else {
+      // No active flow step — only the workflow.* primary claim (legitimate no-flow fallback path).
+      const claimObj: AnyObj = { id: claimId, subjectType: "workflow-acceptance-criterion", subjectId, surface: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id };
+      const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
+      claims.push({ ...claimObj, status: derivedStatus });
+    }
   }
 
   // Critique entries → claims + events
@@ -337,8 +471,8 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const subjectId = `${slug}/${c.id}`;
     const fieldOrBehavior = String(c.summary ?? c.verdict ?? c.id);
     const claimId = generateClaimId(subjectId, "flow-agents.workflow", fieldOrBehavior);
-    const claimType = "workflow.critique.review";
-    const policy = ensurePolicy(claimType, "medium", []);
+    const legacyClaimType = "workflow.critique.review";
+    const policy = ensurePolicy(legacyClaimType, "medium", []);
     const evStatus = critiqueToEventStatus(String(c.verdict ?? ""), c.findings ?? []);
     const claimEvents: AnyObj[] = [];
     if (evStatus) {
@@ -346,9 +480,21 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       events.push(evt);
       claimEvents.push(evt);
     }
-    const claimObj: AnyObj = { id: claimId, subjectType: "workflow-critique", subjectId, surface: "flow-agents.workflow", claimType, fieldOrBehavior, value: c.verdict, createdAt: ts, updatedAt: ts, impactLevel: "medium", verificationPolicyId: policy.id };
-    const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
-    claims.push({ ...claimObj, status: derivedStatus });
+
+    // P-d: declared-only when active flow/step present (shadow retired); no-flow path unchanged.
+    const declared = matchExpectsEntry("critique");
+    if (declared) {
+      // Declared kit-typed claim only — no legacy shadow (ADR 0016 P-d).
+      const declaredPolicy = ensurePolicy(declared.claimType, "medium", []);
+      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, surface: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: c.verdict, createdAt: ts, updatedAt: ts, impactLevel: "medium", verificationPolicyId: declaredPolicy.id };
+      const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
+      claims.push({ ...declaredClaimObj, status: declaredStatus });
+    } else {
+      // No active flow step — only the workflow.* primary claim (legitimate no-flow fallback path).
+      const claimObj: AnyObj = { id: claimId, subjectType: "workflow-critique", subjectId, surface: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: c.verdict, createdAt: ts, updatedAt: ts, impactLevel: "medium", verificationPolicyId: policy.id };
+      const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
+      claims.push({ ...claimObj, status: derivedStatus });
+    }
   }
 
   return {
@@ -383,9 +529,21 @@ export async function writeTrustBundle(dir: string, slug: string, timestamp: str
       const raw = fs.readFileSync(path.join(dir, "command-log.jsonl"), "utf8");
       commandLog = raw.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { try { return JSON.parse(l) as AnyObj; } catch { return null; } }).filter((x): x is AnyObj => x !== null);
     } catch { /* no capture log — fine */ }
-    const bundle = await buildTrustBundle(slug, timestamp, checks, criteria, critiques, commandLog);
+    // ADR 0016 Abstraction A (P-d): pass the .flow-agents dir ONLY when current.json
+    // points to this session (scoped active-flow guard). If current.json.artifact_dir
+    // resolves to a different session, pass null — no active-flow claim mapping for this bundle.
+    const _flowAgentsDir = path.dirname(dir);
+    let _scopedFlowAgentsDir: string | undefined = undefined;
+    try {
+      const _currentRaw = JSON.parse(fs.readFileSync(path.join(_flowAgentsDir, "current.json"), "utf8")) as Record<string, unknown>;
+      const _artDir = typeof _currentRaw["artifact_dir"] === "string" ? _currentRaw["artifact_dir"] : null;
+      if (_artDir && path.resolve(_flowAgentsDir, _artDir) === path.resolve(dir)) {
+        _scopedFlowAgentsDir = _flowAgentsDir;
+      }
+    } catch { /* current.json absent or unreadable — no scoping */ }
+    const bundle = await buildTrustBundle(slug, timestamp, checks, criteria, critiques, commandLog, _scopedFlowAgentsDir);
     if (!bundle) return { written: false, errors: [] }; // Surface unavailable — fail-open, skip write
-    const result = validateTrustBundle(bundle);
+    const result = await validateTrustBundle(bundle);
     if (result.available && !result.valid) {
       process.stderr.write(`[trust-bundle] schema validation failed: ${result.errors.join("; ")}\n`);
       return { written: false, errors: result.errors };
@@ -610,7 +768,57 @@ function validateAgentId(agent: string): string {
   return agent;
 }
 
-function writeCurrent(root: string, dir: string, timestamp: string, owner: string, source: string): void {
+/**
+ * Find the repository root by walking upward from a starting directory to locate
+ * the nearest ancestor containing a kits/ subdirectory. Mirrors flow-resolver.ts
+ * findRepoRoot, but callable from workflow-sidecar.ts without re-importing the
+ * internal helper.
+ *
+ * ADR 0016 Abstraction A (P-d): used by advance-state and ensure-session to
+ * derive repoRoot for resolvePhaseMap calls.
+ */
+function findRepoRootFromDir(startDir: string): string {
+  let dir = startDir;
+  for (let i = 0; i < 16; i++) {
+    if (fs.existsSync(path.join(dir, "kits"))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return process.cwd();
+}
+
+/**
+ * Resolve the first step id from a FlowDefinition's steps[] list.
+ * Returns null when the flow cannot be loaded or has no steps.
+ * Used by ensure-session to default active_step_id when --flow-id is
+ * provided without --step-id (Q2 decision, P-d Increment 1).
+ */
+function resolveFirstStep(flowId: string, repoRoot: string): string | null {
+  if (!flowId) return null;
+  const dotIdx = flowId.indexOf(".");
+  if (dotIdx < 1) return null;
+  const kitId = flowId.slice(0, dotIdx);
+  const flowName = flowId.slice(dotIdx + 1);
+  if (!kitId || !flowName) return null;
+  // Use resolveFlowFilePath for SLUG_RE validation + path-containment check — the same
+  // defense used by resolveFlowStep and resolvePhaseMap (single implementation, DRY).
+  // Returns null for any traversal attempt (e.g. flowName="../../secret") so the
+  // caller gets a clean null return matching the existing null-contract.
+  const flowFilePath = resolveFlowFilePath(kitId, flowName, flowId, repoRoot);
+  if (!flowFilePath) return null;
+  try {
+    const raw = fs.readFileSync(flowFilePath, "utf8");
+    const flowDef = JSON.parse(raw) as { steps?: Array<{ id: string }> };
+    if (!flowDef || !Array.isArray(flowDef.steps) || flowDef.steps.length === 0) return null;
+    const first = flowDef.steps[0];
+    return (first && typeof first.id === "string" && first.id !== "done") ? first.id : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCurrent(root: string, dir: string, timestamp: string, owner: string, source: string, flowId?: string, stepId?: string): void {
   writeJson(path.join(root, "current.json"), {
     schema_version: "1.0",
     active_slug: path.basename(dir),
@@ -619,6 +827,11 @@ function writeCurrent(root: string, dir: string, timestamp: string, owner: strin
     owner,
     source,
     active_agents: [],
+    // ADR 0016 Abstraction A (P-a): optional FlowDefinition routing keys for the producer
+    // and enforcer. Both fields are optional and backward-compatible — sessions without a
+    // FlowDefinition omit them and fall through to the workflow.* claim type path.
+    ...(flowId ? { active_flow_id: flowId } : {}),
+    ...(stepId ? { active_step_id: stepId } : {}),
   });
 }
 function loadCurrent(root: string): AnyObj | null {
@@ -673,7 +886,21 @@ function ensureSession(p: ReturnType<typeof parseArgs>): number {
   if (!fs.existsSync(path.join(dir, "state.json")) || !fs.existsSync(path.join(dir, "acceptance.json")) || !fs.existsSync(path.join(dir, "handoff.json"))) {
     initSidecars(dir, slug, opt(p, "source-request"), opt(p, "summary"), opt(p, "next-action", "Continue."), timestamp, md);
   }
-  writeCurrent(root, dir, timestamp, "workflow-sidecar", "ensure-session");
+  // ADR 0016 Abstraction A (P-a): optional --flow-id / --step-id flags persist FlowDefinition
+  // routing keys into current.json for the producer (P-b) and enforcer (P-c) to consume.
+  // When absent, behavior is unchanged — the workflow.* claim type path is used as before.
+  // P-d Increment 1 (Q2 decision): when --flow-id is given without --step-id, default
+  // active_step_id to the FIRST step in the FlowDefinition's steps[] list. This ensures
+  // ensure-session --flow-id builder.build produces a FlowDefinition-driven session even
+  // before the first advance-state call.
+  const flowId = opt(p, "flow-id");
+  let stepId = opt(p, "step-id");
+  if (flowId && !stepId) {
+    const repoRoot = findRepoRootFromDir(dir);
+    const firstStep = resolveFirstStep(flowId, repoRoot);
+    if (firstStep) stepId = firstStep;
+  }
+  writeCurrent(root, dir, timestamp, "workflow-sidecar", "ensure-session", flowId || undefined, stepId || undefined);
   console.log(dir);
   return 0;
 }
@@ -761,24 +988,29 @@ export function normalizeCheck(raw: AnyObj): AnyObj {
 }
 function normalizeSurfaceRefs(refs: any): AnyObj[] {
   if (!Array.isArray(refs)) die("surface_trust_refs must be an array");
-  const hachureValidate = getHachureValidator();
+  // Use the cached @kontourai/surface module for advisory inline validation of referenced
+  // trust.bundle files. Fail-open when surface is not yet loaded (surface loads on first
+  // bundle write via tryLoadSurface; normalizeSurfaceRefs may run before that).
+  const surfaceValidateFn = _surfaceModule?.validateTrustBundle ?? null;
   return refs.map((ref) => {
     const keys = JSON.stringify(ref).match(/"([^"]+)":/g) ?? [];
     for (const key of keys.map((k) => k.slice(1, -2))) if (key.toLowerCase().includes("veritas")) die(`unsupported field in Surface trust ref: ${key}`);
     const out = { ...ref };
     // trust.bundle is the canonical Hachure-aligned artifact kind; TrustReport/Trust Snapshot are legacy aliases
     if (!["trust.bundle", "TrustReport", "Trust Snapshot"].includes(out.artifact_kind)) die("artifact_kind must be one of: trust.bundle, TrustReport, Trust Snapshot");
-    // When hachure is installed, validate the referenced trust artifact if it is a local file
-    if (hachureValidate && out.artifact_ref && typeof out.artifact_ref === "string" && fs.existsSync(out.artifact_ref)) {
+    // When surface is loaded, validate the referenced trust artifact if it is a local file.
+    // Advisory: surface's throw-based validator wraps into a fail-loud error on schema failure.
+    if (surfaceValidateFn && out.artifact_ref && typeof out.artifact_ref === "string" && fs.existsSync(out.artifact_ref)) {
       try {
         const bundle = JSON.parse(fs.readFileSync(out.artifact_ref, "utf8"));
-        const result = hachureValidate(bundle);
-        if (!result.valid) {
-          const errorSummary = result.errors.slice(0, 3).join("; ");
-          die(`trust.bundle artifact at ${out.artifact_ref} failed Hachure schema validation: ${errorSummary}`);
-        }
+        surfaceValidateFn(bundle);
       } catch (err) {
-        if (err instanceof Error && err.message.includes("failed Hachure schema validation")) throw err;
+        if (err instanceof Error) {
+          // Re-throw schema validation failures (surface throws on invalid); swallow read/parse errors.
+          const msg = err.message;
+          const isSchemaError = !msg.startsWith("ENOENT") && !msg.startsWith("SyntaxError") && !msg.toLowerCase().startsWith("unexpected");
+          if (isSchemaError) die(`trust.bundle artifact at ${out.artifact_ref} failed schema validation: ${msg}`);
+        }
         // File read or parse errors are not re-thrown: the artifact_ref validation path is advisory
       }
     }
@@ -831,7 +1063,41 @@ export function writeState(dir: string, slug: string, status: string, phase: str
 // After 4c, evidence.json and critique.json are no longer written.
 // Extract checks and critiques from the existing trust.bundle for callers that
 // need to rebuild the bundle (e.g. record-critique, record-learning).
-function checksFromBundle(dir: string): AnyObj[] {
+
+// ADR 0016 Abstraction A (Step 0 Q3 carry-forward): build the set of declared
+// claimTypes from the active flow step for the session at `dir`. When no active
+// flow is present (workflow.* sessions), returns an empty set so every existing
+// predicate is unchanged. When a FlowDefinition-driven session (builder.build)
+// is active, the set contains the kit-typed claimTypes (e.g. "builder.verify.tests",
+// "builder.verify.policy-compliance") so round-trip helpers broaden their filters
+// to include declared claims alongside the legacy workflow.* ones.
+//
+// Safety guard: current.json in the .flow-agents dir records the CURRENTLY ACTIVE
+// session via artifact_dir. If current.json points to a different session than `dir`
+// (e.g. another session was the last to call advance-state --flow-definition), we
+// return an empty set so declared-type predicates are NOT applied to the wrong session.
+// This prevents a cross-session active_flow_id from broadening claim filters for
+// unrelated sessions (which would cause spurious evidence/critique check behavior).
+function declaredClaimTypesFor(dir: string): Set<string> {
+  const flowAgentsDir = path.dirname(dir);
+  // Verify that current.json points to `dir` before reading active flow step.
+  // If it points to a different session, return empty set (zero behavior change).
+  const currentFile = path.join(flowAgentsDir, "current.json");
+  try {
+    const current = JSON.parse(fs.readFileSync(currentFile, "utf8")) as Record<string, unknown>;
+    const artDir = typeof current["artifact_dir"] === "string" ? current["artifact_dir"] : null;
+    if (!artDir) return new Set<string>();
+    const resolvedCurrent = path.resolve(flowAgentsDir, artDir);
+    if (path.resolve(dir) !== resolvedCurrent) return new Set<string>();
+  } catch {
+    return new Set<string>();
+  }
+  const activeStep = resolveActiveFlowStep(flowAgentsDir);
+  if (!activeStep || activeStep.gateExpects.length === 0) return new Set<string>();
+  return new Set<string>(activeStep.gateExpects.map((e) => e.bundle_claim.claimType));
+}
+
+function checksFromBundle(dir: string, declaredClaimTypes: Set<string> = new Set()): AnyObj[] {
   const bundle = loadJson(path.join(dir, "trust.bundle"));
   if (!Array.isArray(bundle.evidence)) return [];
   const allClaims: AnyObj[] = Array.isArray(bundle.claims) ? bundle.claims : [];
@@ -842,10 +1108,13 @@ function checksFromBundle(dir: string): AnyObj[] {
   for (const ev of bundle.evidence) {
     if (!ev || !ev.claimId) continue;
     const claim = claimById.get(ev.claimId);
-    if (!claim || !String(claim.claimType || "").startsWith("workflow.check.")) continue;
+    if (!claim) continue;
+    const ct = String(claim.claimType || "");
+    // ADR 0016 Step 0: broaden to include declared kit-typed claims alongside workflow.check.*
+    if (!ct.startsWith("workflow.check.") && !declaredClaimTypes.has(ct)) continue;
     if (seen.has(ev.claimId)) continue;
     seen.add(ev.claimId);
-    const kind = claim.claimType.replace("workflow.check.", "") || "external";
+    const kind = ct.startsWith("workflow.check.") ? (ct.replace("workflow.check.", "") || "external") : (ct.split(".").pop() || "external");
     const status = claim.value ?? "not_verified";
     const check: AnyObj = { id: String(claim.subjectId || "").split("/").pop() || ev.claimId, kind, status, summary: claim.fieldOrBehavior || "" };
     if (ev.execution && typeof ev.execution.label === "string") check.command = ev.execution.label;
@@ -854,18 +1123,28 @@ function checksFromBundle(dir: string): AnyObj[] {
   }
   // Also include check claims that have no evidence item (surface_trust_refs style)
   for (const claim of allClaims) {
-    if (!claim || !String(claim.claimType || "").startsWith("workflow.check.")) continue;
+    if (!claim) continue;
+    const ct = String(claim.claimType || "");
+    // ADR 0016 Step 0: broaden to include declared kit-typed claims alongside workflow.check.*
+    if (!ct.startsWith("workflow.check.") && !declaredClaimTypes.has(ct)) continue;
     if (seen.has(claim.id)) continue;
     seen.add(claim.id);
-    const kind = claim.claimType.replace("workflow.check.", "") || "external";
+    const kind = ct.startsWith("workflow.check.") ? (ct.replace("workflow.check.", "") || "external") : (ct.split(".").pop() || "external");
     checks.push({ id: String(claim.subjectId || "").split("/").pop() || claim.id, kind, status: claim.value ?? "not_verified", summary: claim.fieldOrBehavior || "" });
   }
   return checks;
 }
-function critiquesFromBundle(dir: string): AnyObj[] {
+function critiquesFromBundle(dir: string, declaredClaimTypes: Set<string> = new Set()): AnyObj[] {
   const bundle = loadJson(path.join(dir, "trust.bundle"));
   if (!Array.isArray(bundle.claims)) return [];
-  const critiqueClaims = bundle.claims.filter((c: AnyObj) => c && c.claimType === "workflow.critique.review");
+  // ADR 0016 Step 0: broaden to include declared kit-typed critique claims alongside workflow.critique.review.
+  // P-d: exclude claims that have evidence items (evidence = check claims, not critique claims).
+  // This prevents check-type declared claims (e.g. builder.verify.tests) from being read back
+  // as critiques when declaredClaimTypes includes all gate expects[] types.
+  const evidenceClaimIds = new Set<string>(
+    Array.isArray(bundle.evidence) ? bundle.evidence.map((e: AnyObj) => e?.claimId).filter((id: unknown): id is string => typeof id === "string") : []
+  );
+  const critiqueClaims = bundle.claims.filter((c: AnyObj) => c && (c.claimType === "workflow.critique.review" || declaredClaimTypes.has(c.claimType)) && !evidenceClaimIds.has(c.id));
   return critiqueClaims.map((c: AnyObj) => ({
     id: String(c.subjectId || "").split("/").pop() || c.id,
     verdict: c.value ?? "not_verified",
@@ -902,7 +1181,94 @@ function diagnostic(dir: string, code: string, summary: string): never {
   appendJsonl(path.join(dir, "transition-diagnostics.jsonl"), payload);
   die(`${code}: ${summary}`);
 }
-function advanceState(p: ReturnType<typeof parseArgs>): number {
+
+/**
+ * record-gate-claim — Generic gate-claim producer for skills (ADR 0016 P-d Increment 1).
+ *
+ * Allows a skill to record a claim that satisfies a SPECIFIC gate expectation at the
+ * active step. The caller passes:
+ *   --status <pass|fail|not_verified>  (required)
+ *   --summary <text>                   (required)
+ *   --expectation <id>                 (optional; auto-resolved when the gate has one entry)
+ *   --evidence-json <json>             (optional; structured evidence refs)
+ *
+ * The producer emits a check of kind="external" targeting the gate expectation's declared
+ * claimType + subjectType from the active step's expects[]. This populates the trust.bundle
+ * with a correctly-typed claim derived by Surface, suitable for gate enforcement.
+ *
+ * When the gate has exactly ONE expects[] entry, --expectation is optional (auto-resolve).
+ * When the gate has multiple entries, --expectation <id> is required.
+ *
+ * This is what Increment 2's 6 skills will call to satisfy the category (c) gates
+ * (pull-work.selected, design-probe.*, pr-open.pull-request, learn.*) once producers are added.
+ *
+ * Error cases:
+ *   - No active flow/step in current.json → die with actionable message
+ *   - --expectation not found in expects[] → die
+ *   - Multiple expects[] entries and --expectation omitted → die
+ *   - Surface unavailable → assertBundleWritten fails loud (no silent data loss)
+ */
+async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number> {
+  const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
+  const slug = taskSlugFor(dir, opt(p, "task-slug"));
+  const ts = opt(p, "timestamp", now());
+  const statusVal = opt(p, "status");
+  if (!["pass", "fail", "not_verified"].includes(statusVal)) die("--status must be one of: pass, fail, not_verified");
+  const summary = opt(p, "summary") || die("--summary is required");
+  const expectationId = opt(p, "expectation");
+
+  // Resolve the active flow step from current.json
+  const flowAgentsDir = path.dirname(dir);
+  const activeStep = resolveActiveFlowStep(flowAgentsDir);
+  if (!activeStep) die("record-gate-claim requires an active flow step in current.json (set via ensure-session --flow-id or advance-state --flow-definition)");
+
+  const expects = activeStep.gateExpects;
+  if (expects.length === 0) die(`record-gate-claim: active step "${activeStep.stepId}" gate "${activeStep.gateId}" has no expects[] entries`);
+
+  // Resolve the target expects entry
+  let targetExpectation: typeof expects[0] | undefined;
+  if (expectationId) {
+    targetExpectation = expects.find((e) => e.id === expectationId);
+    if (!targetExpectation) die(`record-gate-claim: --expectation "${expectationId}" not found in gate "${activeStep.gateId}" expects[]. Available: ${expects.map((e) => e.id).join(", ")}`);
+  } else if (expects.length === 1) {
+    targetExpectation = expects[0]!;
+  } else {
+    die(`record-gate-claim: gate "${activeStep.gateId}" has ${expects.length} expects[] entries; --expectation <id> is required. Available: ${expects.map((e) => e.id).join(", ")}`);
+  }
+
+  const { claimType, subjectType } = targetExpectation.bundle_claim;
+
+  // Build a synthetic external check that will be matched by matchExpectsEntry to produce
+  // a correctly-typed claim. We use kind="external" so it routes through the non-policy,
+  // non-flow-step fallback path. The subjectType on the resulting claim comes from the
+  // expects[] entry via matchExpectsEntry.
+  const checkId = expectationId || targetExpectation.id;
+  // Build a minimal "external" check. Include _gate_claim_expectation_id so that
+  // matchExpectsEntry can do an exact lookup for multi-expects[] gates (ADR 0016 P-d Increment 2).
+  // normalizeCheck preserves extra underscore-prefixed fields without stripping them.
+  const check: AnyObj = {
+    id: `gate-claim-${checkId}`,
+    kind: "external",
+    status: statusVal,
+    summary,
+    _gate_claim_expectation_id: targetExpectation.id,
+  };
+
+  // Include structured evidence refs if provided
+  const evidenceRefs: AnyObj[] = opts(p, "evidence-ref-json").map((v) => validateEvidenceRef(parseJson(v, "--evidence-ref-json"), "--evidence-ref-json"));
+
+  if (evidenceRefs.length > 0) {
+    check.artifact_refs = evidenceRefs;
+  }
+
+  const checkNormalized = normalizeCheck(check);
+  // Log the targeted gate expectation for transparency (goes to stderr only)
+  process.stderr.write(`[record-gate-claim] targeting ${activeStep.stepId}/${activeStep.gateId}/${targetExpectation.id} → claimType=${claimType} subjectType=${subjectType}\n`);
+  assertBundleWritten(await writeTrustBundle(dir, slug, ts, [checkNormalized], [], []));
+  return 0;
+}
+
+async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const status = opt(p, "status");
   const phase = opt(p, "phase");
@@ -928,7 +1294,26 @@ function advanceState(p: ReturnType<typeof parseArgs>): number {
   const timestamp = opt(p, "timestamp", now());
   writeState(dir, slug, status, phase, timestamp, opt(p, "summary"));
   writeJson(path.join(dir, "handoff.json"), { ...loadJson(path.join(dir, "handoff.json")), ...sidecarBase(slug), summary: opt(p, "summary"), current_state_ref: "state.json", next_steps: [opt(p, "next-action")].filter(Boolean), blockers: [], warnings: [] });
+  // ADR 0016 Abstraction A (P-d, Increment 1): when --flow-definition is provided,
+  // resolve the phase→step mapping from the FlowDefinition and write active_step_id
+  // into current.json. This is the single setter — no skill needs to call ensure-session
+  // --step-id individually. The repoRoot is derived by walking up from dir to find kits/.
+  if (flow) {
+    const root = path.resolve(opt(p, "artifact-root", path.dirname(dir)));
+    const repoRoot = findRepoRootFromDir(dir);
+    const phaseMap = resolvePhaseMap(flow, repoRoot);
+    const stepId = phaseMap?.[phase] ?? undefined;
+    if (stepId) {
+      writeCurrent(root, dir, timestamp, "workflow-sidecar", "advance-state", flow, stepId);
+    }
+  }
   livenessLifecycle(dir, slug, LIVENESS_TERMINAL.has(status) ? "release" : "heartbeat", timestamp);
+  // Trust checkpoint: when advancing to a terminal delivered status, seal the checkpoint.
+  if (status === "delivered") {
+    await sealTrustCheckpoint(dir, slug, timestamp, status, "release").catch(() => { /* best-effort; checkpoint seal must not break advance-state */ });
+    // Publish delivery bundle: best-effort copy to delivery/ for CI trust-reconcile.
+    await publishDelivery(dir, findRepoRootFromDir(dir)).catch(() => { /* best-effort; must not break advance-state */ });
+  }
   return 0;
 }
 
@@ -944,12 +1329,13 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   // Fall back to critique.json for legacy sessions that still have it on disk.
   const existingCritiqueJson = loadJson(path.join(dir, "critique.json"), { critiques: [] });
   const legacyCritiques: AnyObj[] = Array.isArray(existingCritiqueJson.critiques) ? existingCritiqueJson.critiques : [];
-  const bundleCritiques = legacyCritiques.length === 0 ? critiquesFromBundle(dir) : legacyCritiques;
+  const _dctCritique = declaredClaimTypesFor(dir);
+  const bundleCritiques = legacyCritiques.length === 0 ? critiquesFromBundle(dir, _dctCritique) : legacyCritiques;
   const critique = { id: opt(p, "id") || "review", reviewer: opt(p, "reviewer", "tool-code-reviewer"), reviewed_at: opt(p, "timestamp", now()), verdict: opt(p, "verdict", "pass"), summary: opt(p, "summary"), artifact_refs: opts(p, "artifact-ref"), findings: opts(p, "finding-json").map((v) => normalizeFinding(parseJson(v, "--finding-json"))) };
   const critiques = [...bundleCritiques, critique];
   if (critique.verdict === "pass" && critique.findings.some((f: AnyObj) => f.status === "open")) die("required critique must pass");
   // Phase 4c: build bundle from raw inputs; read checks from trust.bundle (evidence.json no longer written).
-  const _critiqueEvChecks: AnyObj[] = checksFromBundle(dir);
+  const _critiqueEvChecks: AnyObj[] = checksFromBundle(dir, _dctCritique);
   const _critiqueAccCriteria: AnyObj[] = Array.isArray(loadJson(path.join(dir, "acceptance.json")).criteria) ? loadJson(path.join(dir, "acceptance.json")).criteria : [];
   assertBundleWritten(await writeTrustBundle(dir, slug, critique.reviewed_at, _critiqueEvChecks, _critiqueAccCriteria, critiques));
   return 0;
@@ -979,7 +1365,7 @@ async function importCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   if (verdict !== "pass") die("required critique must pass");
   return result;
 }
-function recordRelease(p: ReturnType<typeof parseArgs>): number {
+async function recordRelease(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const decision = opt(p, "decision");
@@ -990,8 +1376,285 @@ function recordRelease(p: ReturnType<typeof parseArgs>): number {
   const stateSummary = opt(p, "summary").trim() || `Release readiness recorded for ${decision}.`;
   writeJson(path.join(dir, "release.json"), payload);
   writeState(dir, slug, "delivered", "release", payload.updated_at, stateSummary);
+  // Trust checkpoint: seal at the "delivered" moment (the natural terminal mark for record-release).
+  await sealTrustCheckpoint(dir, slug, payload.updated_at, "delivered", "release").catch(() => { /* best-effort; checkpoint seal must not break record-release */ });
+  // Publish delivery bundle: best-effort copy to delivery/ for CI trust-reconcile.
+  await publishDelivery(dir, findRepoRootFromDir(dir)).catch(() => { /* best-effort; must not break record-release */ });
   return 0;
 }
+
+// ─── Trust Checkpoint (Increment A) ──────────────────────────────────────────
+// Per-run frozen snapshot of verified trust state at completion. Written to
+// trust.checkpoint.json alongside the other workflow sidecars.
+// Surface owns the DerivationCheckpoint shape; flow-agents wraps it in an
+// ENVELOPE that adds per-run context surface does not carry.
+//
+// Envelope shape:
+//   {
+//     schema_version: "1.0",
+//     slug: string,
+//     work_item: string | null,
+//     status: string,
+//     phase: string,
+//     sealed_at: ISO-8601,
+//     commit_sha: string | null,
+//     checkpoint: DerivationCheckpoint   ← surface owns this
+//   }
+//
+// Idempotent: re-running advance-state / record-release to the same terminal
+// status overwrites with the latest snapshot.
+// Fail-open: if no trust.bundle exists, or Surface is unavailable, the write
+// is skipped gracefully (no error surfaced to the caller).
+
+/** Derive the current git HEAD sha — null if unavailable (not in a repo, git absent). */
+function resolveCommitSha(): string | null {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build and write trust.checkpoint.json for a completed run.
+ * Skips silently when:
+ *   - trust.bundle is absent (no evidence recorded yet)
+ *   - Surface is unavailable (checkpointFromReport not found)
+ * The caller wraps this in .catch() so it never breaks the parent command.
+ *
+ * Increment B1 — checkpoint signing at the release boundary:
+ * After the checkpoint is written, attempts Sigstore keyless signing (OIDC).
+ *   - CI/OIDC available:   writes trust.checkpoint.sig.json (cosign-verifiable DSSE envelope)
+ *                          and writes attestation:{status:"signed",...} to trust.checkpoint.attestation.json.
+ *   - Local (no OIDC):     writes trust.checkpoint.intoto.json (unsigned in-toto statement)
+ *                          and writes attestation:{status:"unsigned",...} to trust.checkpoint.attestation.json.
+ * Signing is ALWAYS fail-open — a signing failure never breaks the seal.
+ */
+export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: string, status: string, phase: string): Promise<void> {
+  const bundlePath = path.join(dir, "trust.bundle");
+  if (!fs.existsSync(bundlePath)) return; // no bundle — skip gracefully
+  const surface = await tryLoadSurface();
+  if (!surface || typeof surface.checkpointFromReport !== "function" || typeof surface.buildTrustReport !== "function") return; // Surface unavailable
+
+  const bundle = JSON.parse(fs.readFileSync(bundlePath, "utf8"));
+  const report = surface.buildTrustReport(bundle as Record<string, unknown>);
+  const checkpoint = surface.checkpointFromReport(report);
+
+  // Derive work_item from state.json if present (best-effort)
+  let workItem: string | null = null;
+  try {
+    const stateRaw = loadJson(path.join(dir, "state.json"));
+    if (typeof stateRaw.work_item === "string") workItem = stateRaw.work_item;
+  } catch { /* ignored */ }
+
+  const checkpointPath = path.join(dir, "trust.checkpoint.json");
+  const envelope: AnyObj = {
+    schema_version: "1.0",
+    slug,
+    work_item: workItem,
+    status,
+    phase,
+    sealed_at: sealedAt,
+    commit_sha: resolveCommitSha(),
+    checkpoint,
+  };
+  writeJson(checkpointPath, envelope);
+
+  // ─── Increment B1: sign the checkpoint at the release boundary ───────────────
+  // Additive: if surface lacks in-toto/sigstore primitives, skip silently.
+  // The .catch() at the call site already guards the parent command; this inner
+  // catch is defense-in-depth so signing never propagates an error upward.
+  await signCheckpointAttestation(dir, surface, bundle, checkpointPath).catch((err) => {
+    process.stderr.write(`[checkpoint-signing] signing skipped due to error: ${err instanceof Error ? err.message : String(err)}\n`);
+  });
+}
+
+/**
+ * Increment B1 — Sign the trust checkpoint with in-toto/Sigstore.
+ *
+ * Called from sealTrustCheckpoint AFTER trust.checkpoint.json is written.
+ * Computes the sha256 digest of the checkpoint file, builds an in-toto Statement
+ * (predicate = trust bundle), and attempts Sigstore keyless signing.
+ *
+ *   - Signed (CI/OIDC):  writes trust.checkpoint.sig.json (DSSE envelope, cosign-verifiable).
+ *   - Unsigned (local):  writes trust.checkpoint.intoto.json (unsigned statement).
+ *   - Always writes:     trust.checkpoint.attestation.json with attestation:{status,path,...}.
+ *                        trust.checkpoint.json is NOT modified after its digest is computed.
+ *
+ * NEVER throws — all errors are caught and surfaced as stderr warnings.
+ * Skips silently when Surface's toInTotoStatement / signStatementWithSigstore are absent.
+ *
+ * @param dir            Session artifact directory.
+ * @param surface        Loaded Surface module (may or may not have in-toto/sigstore exports).
+ * @param bundle         Parsed trust.bundle (becomes the in-toto predicate).
+ * @param checkpointPath Absolute path to the already-written trust.checkpoint.json.
+ */
+async function signCheckpointAttestation(
+  dir: string,
+  surface: SurfaceModule,
+  bundle: AnyObj,
+  checkpointPath: string,
+): Promise<void> {
+  // Guard: both primitives must be present (consumed from Surface, never reimplemented).
+  if (typeof surface.toInTotoStatement !== "function" || typeof surface.signStatementWithSigstore !== "function") {
+    process.stderr.write("[checkpoint-signing] Surface in-toto/sigstore primitives unavailable — skipping attestation\n");
+    return;
+  }
+
+  // Step A: compute sha256 digest of trust.checkpoint.json (the SUBJECT).
+  // The checkpoint is self-evidencing — its digest is the external anchor.
+  const checkpointBytes = fs.readFileSync(checkpointPath);
+  const sha256hex = createHash("sha256").update(checkpointBytes).digest("hex");
+
+  // Step B: build the in-toto Statement.
+  //   subject  = the checkpoint file (what we are attesting TO)
+  //   predicate = the trust bundle   (what the checkpoint CONTAINS)
+  const subjects = [{ name: "trust.checkpoint.json", digest: { sha256: sha256hex } }];
+  const statement = surface.toInTotoStatement(bundle as Record<string, unknown>, { subjects });
+
+  // Step C: attempt Sigstore keyless signing (PRIMARY path).
+  // signStatementWithSigstore returns null when no ambient OIDC credential is available
+  // (local development, no ACTIONS_ID_TOKEN_REQUEST_URL). This is the expected local case.
+  let signed: { envelope: { payloadType: "application/vnd.in-toto+json"; payload: string; signatures: Array<{ keyid: string; sig: string }> }; sigstoreBundle: unknown; assuranceLevel: "signed" } | null = null;
+  try {
+    signed = await surface.signStatementWithSigstore(statement);
+  } catch (err) {
+    // signStatementWithSigstore may throw on unexpected failures (network error, config error);
+    // treat as fail-open: fall through to the unsigned path.
+    process.stderr.write(`[checkpoint-signing] signStatementWithSigstore threw: ${err instanceof Error ? err.message : String(err)}\n`);
+    signed = null;
+  }
+
+  let attestation: AnyObj;
+  if (signed) {
+    // CI/OIDC path: write the cosign-verifiable DSSE envelope.
+    const sigPath = path.join(dir, "trust.checkpoint.sig.json");
+    writeJson(sigPath, signed.envelope);
+    const keyid = signed.envelope.signatures[0]?.keyid ?? "";
+    attestation = {
+      status: "signed",
+      path: "trust.checkpoint.sig.json",
+      keyid,
+    };
+    process.stderr.write(`[checkpoint-signing] checkpoint signed with Sigstore — envelope written to ${sigPath}\n`);
+  } else {
+    // Local/unsigned path: write the unsigned in-toto statement for audit purposes.
+    const unsignedPath = path.join(dir, "trust.checkpoint.intoto.json");
+    writeJson(unsignedPath, statement);
+    attestation = {
+      status: "unsigned",
+      path: "trust.checkpoint.intoto.json",
+      reason: "no ambient signing identity",
+    };
+    process.stderr.write("[checkpoint-signing] no ambient OIDC identity — unsigned in-toto statement written (expected locally)\n");
+  }
+
+  // Step D: write the attestation record to a SEPARATE companion file.
+  // trust.checkpoint.json is NOT modified — it must remain byte-identical to what was signed.
+  // The companion file carries the pointer/status; the subject-digest binding in the
+  // in-toto statement ties it back to the checkpoint without breaking the digest.
+  const attestationPath = path.join(dir, "trust.checkpoint.attestation.json");
+  writeJson(attestationPath, attestation);
+}
+
+/**
+ * seal-checkpoint <dir> [--timestamp <iso>]
+ *
+ * Explicit seal of the trust checkpoint for the given artifact dir.
+ * Equivalent to the seal that fires automatically at record-release / advance-state
+ * to delivered. Useful for the deliver skill or a human to seal explicitly without
+ * re-running advance-state.
+ *
+ * Usage: workflow-sidecar seal-checkpoint <artifactDir> [--timestamp <iso>]
+ */
+async function sealCheckpoint(p: ReturnType<typeof parseArgs>): Promise<number> {
+  const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
+  const slug = taskSlugFor(dir, opt(p, "task-slug"));
+  const timestamp = opt(p, "timestamp", now());
+  const stateRaw = loadJson(path.join(dir, "state.json"));
+  const status = typeof stateRaw.status === "string" ? stateRaw.status : "delivered";
+  const phase = typeof stateRaw.phase === "string" ? stateRaw.phase : "release";
+
+  const bundlePath = path.join(dir, "trust.bundle");
+  if (!fs.existsSync(bundlePath)) {
+    process.stderr.write(`[seal-checkpoint] no trust.bundle at ${bundlePath} — skipping (nothing to seal)
+`);
+    return 0;
+  }
+  await sealTrustCheckpoint(dir, slug, timestamp, status, phase);
+  const checkpointPath = path.join(dir, "trust.checkpoint.json");
+  if (fs.existsSync(checkpointPath)) {
+    console.log(checkpointPath);
+  } else {
+    process.stderr.write(`[seal-checkpoint] checkpoint was not written — @kontourai/surface may be unavailable
+`);
+  }
+  return 0;
+}
+
+// ─── Publish Delivery Bundle ──────────────────────────────────────────────────
+// Copies the session's trust.bundle (+ checkpoint companions) from the gitignored
+// session artifact dir (.flow-agents/<slug>/) to the committed delivery/ transport
+// path so the CI trust-reconcile job can reconcile it against fresh CI results.
+//
+// Fail-soft: if trust.bundle is absent (no evidence recorded yet), does nothing.
+// Idempotent: overwrites on re-delivery.
+// Called automatically from recordRelease and advanceState→delivered (best-effort).
+// Also exposed as the `publish-delivery <artifact-dir>` subcommand for explicit use.
+
+/**
+ * Publish the session's trust artifacts to the committed delivery/ path.
+ *
+ * Copies trust.bundle, trust.checkpoint.json, and (if present)
+ * trust.checkpoint.intoto.json / trust.checkpoint.sig.json from the
+ * session artifact dir to <repoRoot>/delivery/.
+ *
+ * Fail-soft: if trust.bundle is absent, returns without throwing.
+ * Idempotent: overwrites on re-delivery.
+ */
+export async function publishDelivery(dir: string, repoRoot: string): Promise<void> {
+  const bundleSrc = path.join(dir, "trust.bundle");
+  if (!fs.existsSync(bundleSrc)) return; // no bundle — skip gracefully
+
+  const deliveryDir = path.join(repoRoot, "delivery");
+  fs.mkdirSync(deliveryDir, { recursive: true });
+
+  // Required: trust.bundle (the CI anchor)
+  fs.copyFileSync(bundleSrc, path.join(deliveryDir, "trust.bundle"));
+
+  // Optional companions: checkpoint + signing artifacts
+  const companions = [
+    "trust.checkpoint.json",
+    "trust.checkpoint.intoto.json",
+    "trust.checkpoint.sig.json",
+  ];
+  for (const filename of companions) {
+    const src = path.join(dir, filename);
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, path.join(deliveryDir, filename));
+    }
+  }
+
+  process.stderr.write(`[publish-delivery] published trust.bundle and companions to ${deliveryDir}\n`);
+}
+
+/**
+ * publish-delivery <artifact-dir> [--repo-root <path>]
+ *
+ * Explicit publish of the session trust bundle to the committed delivery/ path.
+ * Equivalent to the publish that fires automatically at record-release /
+ * advance-state to delivered. Useful for the deliver skill or a human to
+ * publish explicitly.
+ *
+ * Usage: workflow-sidecar publish-delivery <artifactDir> [--repo-root <path>]
+ */
+async function publishDeliveryCmd(p: ReturnType<typeof parseArgs>): Promise<number> {
+  const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
+  const repoRoot = opt(p, "repo-root") || findRepoRootFromDir(dir);
+  await publishDelivery(dir, repoRoot);
+  return 0;
+}
+
 export function validateLearningCorrection(record: AnyObj): void {
   const correction = record.correction;
   if (correction === undefined) return;
@@ -1041,17 +1704,25 @@ async function recordLearning(p: ReturnType<typeof parseArgs>): Promise<number> 
   writeJson(path.join(dir, "learning.json"), { ...sidecarBase(slug), status, updated_at: timestamp, records });
   writeState(dir, slug, "accepted", "learning", timestamp, opt(p, "summary"));
   // Phase 4c: build bundle from raw inputs; read checks/critiques from trust.bundle (bespoke sidecars no longer written).
-  const _learningChecks: AnyObj[] = checksFromBundle(dir);
+  // ADR 0016 Step 0: pass declaredClaimTypes so declared builder.* claims survive the round-trip.
+  const _dctLearning = declaredClaimTypesFor(dir);
+  const _learningChecks: AnyObj[] = checksFromBundle(dir, _dctLearning);
   const _learningCriteria: AnyObj[] = Array.isArray(loadJson(path.join(dir, "acceptance.json")).criteria) ? loadJson(path.join(dir, "acceptance.json")).criteria : [];
-  const _learningCritiques: AnyObj[] = critiquesFromBundle(dir);
+  const _learningCritiques: AnyObj[] = critiquesFromBundle(dir, _dctLearning);
   assertBundleWritten(await writeTrustBundle(dir, slug, timestamp, _learningChecks, _learningCriteria, _learningCritiques));
   return 0;
 }
-function evidenceClean(dir: string): boolean {
+function evidenceClean(dir: string, declaredClaimTypes: Set<string> = new Set()): boolean {
   // Phase 4c: read from trust.bundle (sole verification artifact); fall back to evidence.json for legacy sessions.
+  // ADR 0016 Step 0: declaredClaimTypes broadens the filter to include kit-typed check claims
+  // (e.g. builder.verify.tests) in addition to workflow.check.* for FlowDefinition-driven sessions.
   const bundle = loadJson(path.join(dir, "trust.bundle"));
   if (Array.isArray(bundle.claims)) {
-    const checkClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => c && String(c.claimType || "").startsWith("workflow.check."));
+    const checkClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => {
+      if (!c) return false;
+      const ct = String(c.claimType || "");
+      return ct.startsWith("workflow.check.") || declaredClaimTypes.has(ct);
+    });
     if (checkClaims.length === 0) return false;
     return checkClaims.every((c: AnyObj) => {
       const v = String(c.value || "");
@@ -1065,11 +1736,13 @@ function evidenceClean(dir: string): boolean {
     return !Array.isArray(c.standard_refs) || c.standard_refs.every((r: AnyObj) => ["junit", "sarif", "coverage", "veritas"].includes(r.standard));
   });
 }
-function critiqueClean(dir: string): boolean {
+function critiqueClean(dir: string, declaredClaimTypes: Set<string> = new Set()): boolean {
   // Phase 4c: read from trust.bundle (sole verification artifact); fall back to critique.json for legacy sessions.
+  // ADR 0016 Step 0: declaredClaimTypes broadens the filter to include kit-typed critique claims
+  // (e.g. builder.verify.policy-compliance) in addition to workflow.critique.review.
   const bundle = loadJson(path.join(dir, "trust.bundle"));
   if (Array.isArray(bundle.claims)) {
-    const critiqueClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => c && c.claimType === "workflow.critique.review");
+    const critiqueClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => c && (c.claimType === "workflow.critique.review" || declaredClaimTypes.has(c.claimType)));
     if (critiqueClaims.length === 0) return false; // no critique written yet
     return critiqueClaims.every((c: AnyObj) => {
       const v = String(c.value || "");
@@ -1103,8 +1776,10 @@ async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
     const checks = opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json")));
     if (checks.some((c) => c.status !== "pass" && c.status !== "skip")) die("clean evidence requires all non-skipped checks to pass");
     // Phase 4c: evidence check reads from trust.bundle (sole verification artifact); legacy evidence.json fallback in evidenceClean.
-    const _hasBundleEvidence = fs.existsSync(path.join(dir, "trust.bundle")) && evidenceClean(dir);
-    const _hasLegacyEvidence = fs.existsSync(path.join(dir, "evidence.json")) && evidenceClean(dir);
+    // ADR 0016 Step 0: pass declaredClaimTypes so builder.* check/critique claims count as clean evidence.
+    const _dctDogfood = declaredClaimTypesFor(dir);
+    const _hasBundleEvidence = fs.existsSync(path.join(dir, "trust.bundle")) && evidenceClean(dir, _dctDogfood);
+    const _hasLegacyEvidence = fs.existsSync(path.join(dir, "evidence.json")) && evidenceClean(dir, _dctDogfood);
     if (!_hasBundleEvidence && !_hasLegacyEvidence && fs.existsSync(path.join(dir, "trust.bundle"))) die("cannot mark clean without passing evidence");
     if (!_hasBundleEvidence && !_hasLegacyEvidence && !fs.existsSync(path.join(dir, "trust.bundle")) && fs.existsSync(path.join(dir, "evidence.json"))) die("cannot mark clean without passing evidence");
     if (!_hasBundleEvidence && !_hasLegacyEvidence && !fs.existsSync(path.join(dir, "trust.bundle")) && !fs.existsSync(path.join(dir, "evidence.json")) && checks.length === 0) die("cannot mark clean without passing evidence");
@@ -1112,9 +1787,9 @@ async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
       const newCritiqueVerdict = opt(p, "critique-verdict", "pass");
       for (const value of opts(p, "finding-json")) normalizeFinding(parseJson(value, "--finding-json"));
       if (newCritiqueVerdict !== "pass") die(opt(p, "release-decision") ? "requires clean critique" : "requires clean critique before recording pass evidence");
-      if (!opt(p, "critique-id") && !critiqueClean(dir)) die("requires passing critique");
+      if (!opt(p, "critique-id") && !critiqueClean(dir, _dctDogfood)) die("requires passing critique");
       // Phase 4c: if existing state has a dirty critique (in bundle or legacy critique.json), block even when adding a new critique-id.
-      if (!critiqueClean(dir) && (fs.existsSync(path.join(dir, "trust.bundle")) || fs.existsSync(path.join(dir, "critique.json")))) die(opt(p, "release-decision") ? "requires clean critique" : "requires clean critique before recording pass evidence");
+      if (!critiqueClean(dir, _dctDogfood) && (fs.existsSync(path.join(dir, "trust.bundle")) || fs.existsSync(path.join(dir, "critique.json")))) die(opt(p, "release-decision") ? "requires clean critique" : "requires clean critique before recording pass evidence");
     }
   }
   const learningRecords = opts(p, "learning-record-json").map((v) => normalizeLearning(parseJson(v, "--learning-record-json"), opt(p, "timestamp", now())));
@@ -1534,9 +2209,30 @@ async function renderTrustPanel(p: ReturnType<typeof parseArgs>): Promise<number
   let bundle: AnyObj | null = null;
   try { bundle = JSON.parse(fs.readFileSync(path.join(dir!, "trust.bundle"), "utf8")); } catch { bundle = null; }
   if (!bundle) die(`no trust.bundle at ${path.join(dir!, "trust.bundle")} — run record-evidence first`);
-  const surface = (await import("@kontourai/surface")) as unknown as { buildTrustReport?: (b: unknown) => AnyObj };
+  const surface = (await import("@kontourai/surface")) as unknown as { buildTrustReport?: (b: unknown) => AnyObj; diffFreshness?: (prior: unknown, next: unknown) => Array<Record<string, unknown>> };
   if (typeof surface.buildTrustReport !== "function") die("@kontourai/surface buildTrustReport unavailable — cannot derive the trust report");
   const report = surface.buildTrustReport!(bundle);
+  // diffFreshness on resume: if a prior trust.checkpoint.json exists, surface the
+  // fresh→stale transitions so the user sees what has gone stale since the last seal.
+  const checkpointFile = path.join(dir!, "trust.checkpoint.json");
+  if (fs.existsSync(checkpointFile) && typeof surface.diffFreshness === "function") {
+    try {
+      const envelope: AnyObj = JSON.parse(fs.readFileSync(checkpointFile, "utf8"));
+      const priorCheckpoint = envelope.checkpoint;
+      if (priorCheckpoint && typeof priorCheckpoint === "object") {
+        const transitions = surface.diffFreshness(priorCheckpoint, report);
+        const staleTransitions = transitions.filter((t) => t["to"] === "stale");
+        if (staleTransitions.length > 0) {
+          const claimIds = staleTransitions.map((t) => String(t["claimId"] ?? "")).filter(Boolean);
+          process.stderr.write(`[trust-checkpoint] ${staleTransitions.length} claim(s) went stale since the last checkpoint (sealed ${String(envelope.sealed_at ?? "unknown")}):\n${claimIds.map((id) => `  - ${id}`).join("\n")}\n`);
+        } else {
+          process.stderr.write(`[trust-checkpoint] 0 claims went stale since the last checkpoint (sealed ${String(envelope.sealed_at ?? "unknown")}).\n`);
+        }
+      }
+    } catch {
+      /* diffFreshness is advisory — never block the panel render */
+    }
+  }
   const panelJs = loadSurfacePanelJs();
   const heading = `Flow Agents trust — ${String(path.basename(dir!)).replace(/[<>"&]/g, "")}`;
   const reportJson = JSON.stringify(report).replace(/</g, "\\u003c");
@@ -1634,9 +2330,19 @@ function appendLivenessEvent(root: string, evt: AnyObj): void {
   fs.appendFileSync(file, `${JSON.stringify(evt)}\n`);
 }
 function readLivenessEvents(root: string): AnyObj[] {
-  let raw = "";
-  try { raw = fs.readFileSync(livenessStreamFile(root), "utf8"); } catch { return []; }
-  return raw.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { try { return JSON.parse(l) as AnyObj; } catch { return null; } }).filter((x): x is AnyObj => x !== null);
+  // Delegate to the shared pure-CJS helper (scripts/hooks/lib/liveness-read.js).
+  // Using createRequire so the ESM sidecar can load a CJS module without bundling it.
+  try {
+    const _req = createRequire(import.meta.url);
+    const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/liveness-read.js");
+    const helper = _req(helperPath) as { readLivenessEvents: (p: string) => AnyObj[] };
+    return helper.readLivenessEvents(livenessStreamFile(root));
+  } catch {
+    // Fallback: read inline (keeps sidecar self-sufficient if helper is unavailable)
+    let raw = "";
+    try { raw = fs.readFileSync(livenessStreamFile(root), "utf8"); } catch { return []; }
+    return raw.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { try { return JSON.parse(l) as AnyObj; } catch { return null; } }).filter((x): x is AnyObj => x !== null);
+  }
 }
 function livenessLabel(status: string): string {
   if (status === "verified") return "held";
@@ -1712,11 +2418,295 @@ async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─── Claim Lookup — pure helper (promotable to Surface #171) ─────────────────
+// buildClaimExplanation is a PURE function: report + bundle + id in, structured
+// explanation out. No fs, no CLI, no .flow-agents paths. Zero flow-agents
+// specifics inside it — it can be lifted to Surface unchanged (issue #171).
+
+export interface ClaimEvidenceItem {
+  evidenceType: string;
+  label: string;
+  execution: { runner: string; label: string; isError: boolean; exitCode: number | null } | null;
+  passing: boolean;
+  summary: string;
+}
+
+export interface ClaimExplanation {
+  found: boolean;
+  status: string;
+  value: string;
+  claimType: string;
+  evidence: ClaimEvidenceItem[];
+  policy: {
+    id: string;
+    requiredEvidence: string[];
+    requiredMethods?: string[];
+    acceptanceCriteria: string[];
+    reviewAuthority: string;
+  } | null;
+  why: {
+    directInputs: AnyObj[];
+    leafClaims: AnyObj[];
+    diagnostics: AnyObj[];
+    transparencyGaps: AnyObj[];
+    changeRecords: AnyObj[];
+  };
+}
+
+/**
+ * Build a structured explanation for a specific claim.
+ * PURE: report + bundle + id in, structured explanation out.
+ * No fs, no CLI, no .flow-agents paths. Promotable to Surface #171.
+ *
+ * @param report   TrustReport from buildTrustReport(bundle) — required for derived status
+ * @param bundle   Raw parsed trust.bundle (BundleFile shape)
+ * @param claimId  The claim id to explain
+ */
+export function buildClaimExplanation(
+  report: Record<string, unknown>,
+  bundle: Record<string, unknown>,
+  claimId: string,
+): ClaimExplanation {
+  const reportClaims = Array.isArray(report.claims) ? (report.claims as AnyObj[]) : [];
+  const reportClaim = reportClaims.find((c: AnyObj) => c.id === claimId);
+
+  if (!reportClaim) {
+    return {
+      found: false,
+      status: "unknown",
+      value: "",
+      claimType: "",
+      evidence: [],
+      policy: null,
+      why: { directInputs: [], leafClaims: [], diagnostics: [], transparencyGaps: [], changeRecords: [] },
+    };
+  }
+
+  const bundleClaims = Array.isArray(bundle.claims) ? (bundle.claims as AnyObj[]) : [];
+  const bundleClaim = bundleClaims.find((c: AnyObj) => c.id === claimId) ?? reportClaim;
+  const bundlePolicies = Array.isArray(bundle.policies) ? (bundle.policies as AnyObj[]) : [];
+  const bundleEvidence = Array.isArray(bundle.evidence) ? (bundle.evidence as AnyObj[]) : [];
+
+  // Governing policy — follow verificationPolicyId into bundle.policies[]
+  const verificationPolicyId = typeof bundleClaim.verificationPolicyId === "string" ? bundleClaim.verificationPolicyId : undefined;
+  const rawPolicy = verificationPolicyId ? bundlePolicies.find((p: AnyObj) => p.id === verificationPolicyId) : undefined;
+  const policy = rawPolicy
+    ? {
+        id: String(rawPolicy.id ?? ""),
+        requiredEvidence: Array.isArray(rawPolicy.requiredEvidence) ? (rawPolicy.requiredEvidence as string[]) : [],
+        requiredMethods: Array.isArray(rawPolicy.requiredMethods) ? (rawPolicy.requiredMethods as string[]) : undefined,
+        acceptanceCriteria: Array.isArray(rawPolicy.acceptanceCriteria) ? (rawPolicy.acceptanceCriteria as string[]) : [],
+        reviewAuthority: String(rawPolicy.reviewAuthority ?? ""),
+      }
+    : null;
+
+  // Evidence enhancement: pull evidence items for this claim, surface the execution block
+  const claimEvidenceItems = bundleEvidence.filter((ev: AnyObj) => ev && ev.claimId === claimId);
+  const evidence: ClaimEvidenceItem[] = claimEvidenceItems.map((ev: AnyObj) => {
+    const exec = ev.execution && typeof ev.execution === "object" ? (ev.execution as AnyObj) : null;
+    const execution = exec
+      ? {
+          runner: String(exec.runner ?? exec.label ?? ""),
+          label: String(exec.label ?? exec.runner ?? ""),
+          isError: Boolean(exec.isError ?? (typeof exec.exitCode === "number" && exec.exitCode !== 0)),
+          exitCode: typeof exec.exitCode === "number" ? exec.exitCode : null,
+        }
+      : null;
+    return {
+      evidenceType: String(ev.evidenceType ?? ev.type ?? "unknown"),
+      label: String(ev.label ?? ev.excerptOrSummary ?? ev.sourceRef ?? ev.id ?? ""),
+      execution,
+      passing: execution ? !execution.isError : String(ev.status ?? "") !== "disputed",
+      summary: String(ev.excerptOrSummary ?? ev.summary ?? ev.label ?? ""),
+    };
+  });
+
+  // Drilldown: extract from report structure (report.transparencyGaps, report.changeRecords)
+  const allGaps = Array.isArray(report.transparencyGaps) ? (report.transparencyGaps as AnyObj[]) : [];
+  const allChanges = Array.isArray(report.changeRecords) ? (report.changeRecords as AnyObj[]) : [];
+  const transparencyGaps = allGaps.filter((g: AnyObj) => g && g.claimId === claimId);
+  const changeRecords = allChanges.filter((c: AnyObj) => c && c.claimId === claimId);
+
+  return {
+    found: true,
+    status: String(reportClaim.status ?? "unknown"),
+    value: String(bundleClaim.value ?? reportClaim.value ?? ""),
+    claimType: String(bundleClaim.claimType ?? reportClaim.claimType ?? ""),
+    evidence,
+    policy,
+    why: {
+      directInputs: [],   // populated by buildDerivationDrilldown if non-leaf
+      leafClaims: [],
+      diagnostics: [],
+      transparencyGaps,
+      changeRecords,
+    },
+  };
+}
+
+/**
+ * claim <id> <dir>
+ *
+ * Look up a specific claim in the session's trust.bundle and print:
+ *   - Derived status and raw value
+ *   - Failing evidence items (with execution block: runner, exitCode, isError)
+ *   - Governing VerificationPolicy (how-to-verify)
+ *   - Derivation drilldown / transparency gaps (why it is in that state)
+ *
+ * --json  Emit the structured ClaimExplanation object instead of text.
+ *
+ * Usage: workflow-sidecar claim <claimId> <artifactDir>
+ */
+async function claimLookup(p: ReturnType<typeof parseArgs>): Promise<number> {
+  const claimId = p.positional[0] || die("claim id is required (first positional argument)");
+  const rawDir = p.positional[1] || die("artifact directory is required (second positional argument)");
+  const dir = path.resolve(rawDir);
+
+  const bundlePath = path.join(dir, "trust.bundle");
+  if (!fs.existsSync(bundlePath)) {
+    process.stderr.write(`[claim] no trust.bundle at ${bundlePath} — run record-evidence first
+`);
+    return 1;
+  }
+
+  const bundle: BundleFile = JSON.parse(fs.readFileSync(bundlePath, "utf8"));
+  const bundleClaims = Array.isArray(bundle.claims) ? bundle.claims : [];
+
+  const bundleClaim = bundleClaims.find((c) => c.id === claimId);
+  if (!bundleClaim) {
+    const available = bundleClaims.map((c) => c.id).join("\n  ");
+    process.stderr.write(`[claim] unknown claim id: ${claimId}
+Available claim ids:
+  ${available || "(none — bundle has no claims)"}
+`);
+    return 1;
+  }
+
+  // Load Surface via tryLoadSurface() (ESM, cached, fail-open pattern)
+  const surface = await tryLoadSurface();
+  if (!surface || typeof surface.buildTrustReport !== "function" || typeof surface.buildDerivationDrilldown !== "function") {
+    process.stderr.write(`[claim] @kontourai/surface unavailable or missing buildTrustReport/buildDerivationDrilldown
+`);
+    return 0; // fail-open, consistent with gate-review pattern
+  }
+
+  // Build TrustReport (required — buildDerivationDrilldown needs TrustReport, not TrustBundle)
+  const report = surface.buildTrustReport(bundle as unknown as Record<string, unknown>);
+
+  // Build the structured explanation (pure, promotable to #171)
+  const explanation = buildClaimExplanation(report, bundle as unknown as Record<string, unknown>, claimId);
+
+  // Enrich the why.directInputs/leafClaims/diagnostics from the drilldown
+  try {
+    const drilldown = surface.buildDerivationDrilldown(report, claimId) as AnyObj;
+    if (drilldown) {
+      explanation.why.directInputs = Array.isArray(drilldown.directInputs) ? drilldown.directInputs : [];
+      explanation.why.leafClaims = Array.isArray(drilldown.leafClaims) ? drilldown.leafClaims : [];
+      explanation.why.diagnostics = Array.isArray(drilldown.diagnostics) ? drilldown.diagnostics : [];
+    }
+  } catch {
+    // buildDerivationDrilldown threw (e.g. claim not in report) — proceed without drilldown
+  }
+
+  if (p.flags.has("json")) {
+    console.log(JSON.stringify(explanation, null, 2));
+    return 0;
+  }
+
+  // ── Human-readable output ───────────────────────────────────────────────────
+  const lines: string[] = [];
+  lines.push(`Claim:  ${claimId}`);
+  lines.push(`Status: ${explanation.status}   Value: ${explanation.value}`);
+  lines.push(`Type:   ${explanation.claimType}`);
+  lines.push("");
+
+  // Evidence section — failing items are the concrete "why disputed"
+  const failingEvidence = explanation.evidence.filter((ev) => !ev.passing);
+  const allEvidence = explanation.evidence;
+  if (allEvidence.length > 0) {
+    lines.push("Evidence:");
+    for (const ev of allEvidence) {
+      const passMark = ev.passing ? "pass" : "FAIL";
+      const execStr = ev.execution
+        ? ` [runner: ${ev.execution.runner}, exitCode: ${ev.execution.exitCode ?? "?"}, isError: ${ev.execution.isError}]`
+        : "";
+      lines.push(`  [${passMark}] ${ev.evidenceType}: ${ev.label || ev.summary}${execStr}`);
+    }
+    if (failingEvidence.length > 0) {
+      lines.push("");
+      lines.push(`Failing evidence (disputed because):`);
+      for (const ev of failingEvidence) {
+        const execStr = ev.execution
+          ? ` ${ev.execution.runner} exited ${ev.execution.exitCode ?? "?"} (isError: ${ev.execution.isError})`
+          : "";
+        lines.push(`  ${ev.evidenceType}: ${ev.label || ev.summary}${execStr}`);
+      }
+    }
+  } else {
+    lines.push("Evidence: (none recorded for this claim)");
+  }
+  lines.push("");
+
+  // Policy section — how-to-verify
+  if (explanation.policy) {
+    const pol = explanation.policy;
+    lines.push(`Governing Policy (${pol.id}):`);
+    lines.push(`  requiredEvidence:   [${pol.requiredEvidence.join(", ")}]`);
+    if (pol.requiredMethods && pol.requiredMethods.length > 0) {
+      lines.push(`  requiredMethods:    [${pol.requiredMethods.join(", ")}]`);
+    }
+    lines.push(`  acceptanceCriteria: [${pol.acceptanceCriteria.join(" | ")}]`);
+    lines.push(`  reviewAuthority:    ${pol.reviewAuthority}`);
+  } else {
+    lines.push("Governing Policy: (none — claim has no verificationPolicyId or policy not found in bundle)");
+  }
+  lines.push("");
+
+  // Why section — derivation drilldown + transparency gaps
+  lines.push("Derivation Drilldown:");
+  if (explanation.why.directInputs.length > 0) {
+    lines.push(`  Direct inputs: ${explanation.why.directInputs.length} claim(s)`);
+    for (const inp of explanation.why.directInputs) {
+      const inpStatus = typeof inp.claim === "object" && inp.claim ? String((inp.claim as AnyObj).status ?? "?") : "?";
+      lines.push(`    - ${inp.inputClaimId ?? "?"} (status: ${inpStatus})`);
+    }
+  } else {
+    lines.push("  Direct inputs: (none — leaf claim)");
+  }
+  if (explanation.why.leafClaims.length > 0) {
+    lines.push(`  Leaf claims: ${explanation.why.leafClaims.length} claim(s)`);
+  }
+  if (explanation.why.diagnostics.length > 0) {
+    lines.push(`  Diagnostics: ${explanation.why.diagnostics.length}`);
+    for (const d of explanation.why.diagnostics) {
+      lines.push(`    - ${d.type ?? "?"}: ${d.message ?? ""}`);
+    }
+  }
+  if (explanation.why.transparencyGaps.length > 0) {
+    lines.push(`  Transparency gaps: ${explanation.why.transparencyGaps.length}`);
+    for (const g of explanation.why.transparencyGaps) {
+      lines.push(`    - [${g.severity ?? "?"}] ${g.type ?? "?"}: ${g.message ?? ""}`);
+    }
+  } else {
+    lines.push("  Transparency gaps: (none)");
+  }
+  if (explanation.why.changeRecords.length > 0) {
+    lines.push(`  Change records: ${explanation.why.changeRecords.length}`);
+    for (const cr of explanation.why.changeRecords) {
+      lines.push(`    - ${cr.action ?? "?"} at ${cr.at ?? cr.createdAt ?? "?"}`);
+    }
+  }
+
+  console.log(lines.join("\n"));
+  return 0;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 
 async function main(): Promise<number> {
   const p = parseArgs(process.argv.slice(2));
   if (!p.command) die("workflow-sidecar command is required");
-  const lockRoot = ["ensure-session", "current", "dogfood-pass", "liveness"].includes(p.command) ? path.resolve(opt(p, "artifact-root", ".flow-agents")) : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
+  const lockRoot = ["ensure-session", "current", "dogfood-pass", "liveness"].includes(p.command) ? path.resolve(opt(p, "artifact-root", ".flow-agents")) : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.command === "claim" ? (p.positional[1] ? path.resolve(p.positional[1]) : "") : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
   return withLock(lockRoot, ["ensure-session", "record-agent-event", "dogfood-pass"].includes(p.command), p.command, () => {
     switch (p.command) {
       case "ensure-session": return ensureSession(p);
@@ -1724,6 +2714,7 @@ async function main(): Promise<number> {
       case "record-agent-event": return recordAgentEvent(p);
       case "init-plan": return initPlan(p);
       case "record-evidence": return recordEvidence(p);
+      case "record-gate-claim": return recordGateClaim(p);
       case "advance-state": return advanceState(p);
       case "record-critique": return recordCritique(p);
       case "import-critique": return importCritique(p);
@@ -1734,6 +2725,9 @@ async function main(): Promise<number> {
       case "render-trust-panel": return renderTrustPanel(p);
       case "trust-mcp": return trustMcp(p);
       case "liveness": return liveness(p);
+      case "claim": return claimLookup(p);
+      case "seal-checkpoint": return sealCheckpoint(p);
+      case "publish-delivery": return publishDeliveryCmd(p);
       default: die(`unknown command: ${p.command}`);
     }
   });

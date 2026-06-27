@@ -16,6 +16,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { readLivenessEvents, freshHolders } = require('./lib/liveness-read');
 
 const STEERING = {
   'tool-planner': [
@@ -202,6 +203,118 @@ function contextMapSteering(root) {
   ].join(' ');
 }
 
+/**
+ * Compose the RESUME block for SessionStart.
+ *
+ * Reads trust.bundle, handoff.json, and the liveness stream beside state.json;
+ * all reads are fail-open (errors → skip that section, never throw).
+ *
+ * Returns a multi-line string starting with "RESUME: <slug> status:<s> phase:<p>"
+ * or '' if the current state has status 'done', 'archived', or 'accepted'.
+ *
+ * @param {string} root     Repository root
+ * @param {{ file: string, payload: object }} current  Latest active state entry
+ * @returns {string}
+ */
+function resumeSteering(root, current) {
+  try {
+    const state = current.payload;
+    const workflowDir = path.dirname(current.file);
+    const slug = state.task_slug || path.basename(workflowDir);
+    const next = state.next_action || {};
+
+    if (next.status === 'done' || state.status === 'archived' || state.status === 'accepted') return '';
+
+    const lines = [];
+
+    // Header line
+    lines.push(`RESUME: ${slug} status:${safeStateText(state.status, 60)} phase:${safeStateText(state.phase, 60)}`);
+
+    // Full next action (240-char display path, not the 80-char normalization)
+    const nextSummary = next.summary ? safeStateText(next.summary, 240) : 'none';
+    lines.push(`Next action: ${nextSummary}`);
+
+    // Plan artifact path
+    let planPath = 'not found';
+    try {
+      const artifactPaths = Array.isArray(state.artifact_paths) ? state.artifact_paths : [];
+      const planEntry = artifactPaths.find(p => typeof p === 'string' && p.endsWith('--plan-work.md'));
+      if (planEntry) {
+        planPath = planEntry;
+      } else {
+        const candidate = path.join(workflowDir, `${slug}--plan-work.md`);
+        if (fs.existsSync(candidate)) planPath = candidate;
+      }
+    } catch { /* skip */ }
+    lines.push(`Plan: ${planPath}`);
+
+    // Handoff: next_steps[0] and blockers
+    let nextStep = 'none';
+    let blockers = 'none';
+    try {
+      const handoff = readJson(path.join(workflowDir, 'handoff.json'));
+      if (handoff) {
+        const steps = Array.isArray(handoff.next_steps) ? handoff.next_steps : [];
+        if (steps.length > 0) nextStep = safeStateText(String(steps[0]), 240);
+        const bArr = Array.isArray(handoff.blockers) ? handoff.blockers : [];
+        if (bArr.length > 0) blockers = bArr.map(b => safeStateText(String(b), 120)).join(', ');
+      }
+    } catch { /* skip */ }
+    lines.push(`Next step: ${nextStep}`);
+    lines.push(`Blockers: ${blockers}`);
+
+    // Trust bundle
+    try {
+      const bundle = readJson(path.join(workflowDir, 'trust.bundle'));
+      if (bundle) {
+        const claims = Array.isArray(bundle.claims) ? bundle.claims : [];
+        let verified = 0;
+        let disputed = 0;
+        const unresolved = [];
+        for (const claim of claims) {
+          if (!claim || typeof claim !== 'object') continue;
+          const status = String(claim.status || '');
+          if (status === 'verified') {
+            verified++;
+          } else if (status === 'disputed' || status === 'unknown') {
+            disputed++;
+            unresolved.push(claim);
+          }
+        }
+        const total = claims.length;
+        lines.push(`Trust: ${verified} verified / ${disputed} disputed / ${total} total`);
+        for (const claim of unresolved) {
+          const id = safeStateText(String(claim.id || ''), 120);
+          const st = safeStateText(String(claim.status || ''), 30);
+          lines.push(`  - ${id} (${st}) → npm run workflow:sidecar -- claim ${id} ${workflowDir}`);
+        }
+      } else {
+        lines.push('Trust: no trust data available');
+      }
+    } catch { /* skip */ }
+
+    // Liveness advisory
+    try {
+      const livenessFile = path.join(root, '.flow-agents', 'liveness', 'events.jsonl');
+      const events = readLivenessEvents(livenessFile);
+      if (events.length > 0) {
+        const selfActor = (process.env.FLOW_AGENTS_ACTOR || '').trim() || 'local';
+        const holders = freshHolders(events, slug, selfActor, Date.now());
+        for (const h of holders) {
+          lines.push(`[LIVENESS WARNING: another agent appears live on this work: actor ${h.actor}, last seen ${h.lastAt}]`);
+        }
+      }
+    } catch { /* skip */ }
+
+    // Pull-work route hint
+    lines.push('To continue: resume this work. Or run pull-work to assess WIP and start new/parallel work.');
+
+    return lines.join('\n');
+  } catch {
+    return '';
+  }
+}
+
 function run(rawInput) {
   try {
     const input = JSON.parse(rawInput);
@@ -233,6 +346,12 @@ function run(rawInput) {
       }
     }
 
+    // SessionStart only: append the RESUME block for richer situational awareness
+    if (event === 'SessionStart' && current) {
+      const resumeBlock = resumeSteering(root, current);
+      if (resumeBlock) hints.push(resumeBlock);
+    }
+
     if (shouldAppendWorkflowContext) {
       const stateHint = stateSteering(root);
       if (stateHint) hints.push(stateHint);
@@ -258,4 +377,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { run, stateSteering, critiqueSteering, contextMapSteering, latestWorkflowState, findRepoRoot, safeStateText, stateNeedsAmbientSteering };
+module.exports = { run, stateSteering, critiqueSteering, contextMapSteering, latestWorkflowState, findRepoRoot, safeStateText, stateNeedsAmbientSteering, resumeSteering };

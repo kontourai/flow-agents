@@ -69,6 +69,7 @@ renamed, or changes category, update the table and the validator together.
 | `desktop-notify.sh` | local notification helper | `evals/integration/test_hook_category_behaviors.sh` | Optional local desktop notification helper. |
 | `lib/audit-transport.sh` | shared hook library | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_telemetry.sh` | Shared audit event transport functions. |
 | `lib/hook-flags.js` | shared hook library | `evals/integration/test_hook_category_behaviors.sh` | Shared profile/disable flag parsing. |
+| `lib/liveness-read.js` | shared hook library | `evals/integration/test_session_resume_roundtrip.sh` | Shared liveness event reader + freshness check (`readLivenessEvents`, `freshHolders`); consumed by the reground hook and `workflow-sidecar liveness status`. |
 | `lib/patterns.sh` | shared hook library | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_telemetry.sh` | Shared shell pattern constants. |
 | `lib/resolve-formatter.js` | shared hook library | `evals/integration/test_hook_category_behaviors.sh` | Shared formatter resolution helper. |
 

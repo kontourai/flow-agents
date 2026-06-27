@@ -223,6 +223,117 @@ describe("Knowledge Kit Store Contract Suite", () => {
   // -----------------------------------------------------------------------
   // §3  links + graph index
   // -----------------------------------------------------------------------
+  describe("reindex: rebuild graph index from records (recovery, #106)", () => {
+    let dir, store;
+    before(() => { dir = makeTempDir(); store = makeStore(dir); });
+    after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    test("recovers a lost graph index from records' links", async (t) => {
+      if (typeof store.reindex !== "function") { t.skip("adapter has no reindex()"); return; }
+      const aId = await store.create({ type: "raw", title: "A", body: "a", category: "test", provenance: { agent: "tester" } });
+      const bId = await store.create({
+        type: "compiled", title: "B", body: `see [[${aId}]]`, category: "test",
+        provenance: { agent: "tester", source_ids: [aId] },
+      });
+      // Records are the source of truth; destroy the derived index.
+      fs.rmSync(path.join(dir, "graph-index.json"), { force: true });
+
+      const result = await store.reindex();
+      assert.equal(result.records, 2, "all records scanned");
+      assert.equal(result.changed, true, "rebuild after loss reports drift");
+
+      const { forward } = await store.getLinks(bId);
+      assert.ok(forward.some((l) => l.target_id === aId && l.kind === "related"),
+        "b → a edge recovered into the index");
+      const { reverse } = await store.getLinks(aId);
+      assert.ok(reverse.some((l) => l.source_id === bId), "reverse edge recovered");
+    });
+
+    test("is idempotent on a clean index (no spurious drift)", async (t) => {
+      if (typeof store.reindex !== "function") { t.skip("adapter has no reindex()"); return; }
+      await store.create({ type: "raw", title: "Solo", body: "x", category: "test", provenance: { agent: "tester" } });
+      await store.reindex();                // canonicalize
+      const second = await store.reindex(); // expect a no-op
+      assert.equal(second.changed, false, "reindex of a clean index reports no change");
+    });
+
+    test("detects and repairs a corrupted index", async (t) => {
+      if (typeof store.reindex !== "function") { t.skip("adapter has no reindex()"); return; }
+      const aId = await store.create({ type: "raw", title: "CA", body: "a", category: "test", provenance: { agent: "tester" } });
+      const bId = await store.create({
+        type: "compiled", title: "CB", body: `ref [[${aId}]]`, category: "test",
+        provenance: { agent: "tester", source_ids: [aId] },
+      });
+      // Corrupt: a bogus edge plus the real edge missing.
+      fs.writeFileSync(path.join(dir, "graph-index.json"),
+        JSON.stringify({ schema_version: "1.0", forward: { bogus: [{ target_id: "ghost", kind: "related" }] }, reverse: {} }));
+
+      const result = await store.reindex();
+      assert.equal(result.changed, true, "corruption reported as drift");
+      const { forward } = await store.getLinks(bId);
+      assert.ok(forward.some((l) => l.target_id === aId), "real edge restored");
+      const ghost = await store.getLinks("bogus");
+      assert.equal(ghost.forward.length, 0, "bogus edge purged");
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // close-proposal: retire is the supported op for closing a spent proposal
+  // artifact on apply — active → retired, safely and idempotently (#106).
+  // -----------------------------------------------------------------------
+  describe("close-proposal: retire safely closes a proposal artifact (#106)", () => {
+    let dir, store;
+    before(() => { dir = makeTempDir(); store = makeStore(dir); });
+    after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    test("retire closes an active proposal artifact (active → retired), record intact", async () => {
+      // The transient proposal artifact a propose→apply flow mints is a `raw`
+      // record. Closing it on apply is done via the existing retire op.
+      const artifactId = await store.create({
+        type: "raw",
+        title: "Retirement proposal: Some record",
+        body: "Retirement proposal for record X.",
+        category: "ops.decisions",
+        provenance: { agent: "tester", note: "Retirement proposal for X" },
+      });
+      const before = await store.get(artifactId);
+      assert.equal(before.status || "active", "active", "artifact starts active");
+
+      await store.retire(artifactId, "retired", {
+        agent: "tester",
+        rationale: "Auto-closing spent proposal artifact after apply (#106).",
+      });
+
+      const after = await store.get(artifactId);
+      assert.equal(after.status, "retired", "artifact is closed (retired) after apply");
+      assert.ok(after, "artifact is retired, not deleted");
+      assert.equal(after.body, before.body, "artifact body intact (non-destructive close)");
+      const log = (after.mutation_log || []).find((e) => e.op === "retire");
+      assert.ok(log, "close is recorded as a retire mutation-log entry");
+    });
+
+    test("re-closing an already-retired artifact is rejected (terminal — safe, no twin)", async () => {
+      const artifactId = await store.create({
+        type: "raw",
+        title: "Retirement proposal: Already closed",
+        body: "spent",
+        category: "ops.decisions",
+        provenance: { agent: "tester" },
+      });
+      await store.retire(artifactId, "retired", { agent: "tester", rationale: "first close" });
+
+      // A second close must be rejected by the transition table (retired is
+      // terminal) — the flow treats this as a safe no-op rather than spawning
+      // a double-prefixed twin.
+      await assertMissingEvidence(
+        () => store.retire(artifactId, "retired", { agent: "tester", rationale: "second close" }),
+        "re-close of a retired artifact"
+      );
+      const after = await store.get(artifactId);
+      assert.equal(after.status, "retired", "artifact stays retired (idempotent close)");
+    });
+  });
+
   describe("links: graph index consistency", () => {
     let dir, store;
     before(() => { dir = makeTempDir(); store = makeStore(dir); });

@@ -167,6 +167,20 @@ The default adapter stores the index as `graph-index.json` at the store root.
 }
 ```
 
+### 5.2 Reindex (recovery)
+
+The graph index is a **derived cache**: each record's own `links` array is the source of truth.
+An adapter MAY expose a `reindex()` recovery operation that rebuilds the index from scratch by
+scanning every record's `links` — the supported way to recover from a lost, hand-edited, or
+drifted `graph-index.json`.
+
+| Operation | Signature | Behavior |
+| --- | --- | --- |
+| `reindex` | `() => { records, links, forwardSources, reverseTargets, changed }` | Rebuild the index authoritatively from records' `links`. Deterministic (records processed in id order). `changed` is true when the rebuilt index differs from the one on disk (compared order-independently), so callers can detect drift. Does **not** mutate records or append to the mutation log — it only repairs the derived cache. |
+
+`reindex()` is optional in the contract (not every adapter maintains a separate index), but any
+adapter that persists a derived index SHOULD provide it as the recovery path.
+
 ---
 
 ## 6. Mutation Operations
@@ -649,6 +663,37 @@ Retired records MUST remain reachable from:
 There is no deletion of records. Physical purge (if ever needed) is a separate, future policy
 hook not defined in this version.
 
+### B.7 Proposal-Artifact Lifecycle (close-on-apply)
+
+A flow that gates a change through `propose` → `apply` mints a transient **proposal artifact**:
+a `raw` record (e.g. the `knowledge.retire` flow's `"Retirement proposal: <title>"` record) whose
+sole purpose is to carry the `"proposes"` link and the proposal text to the target.
+
+Once the proposal has been **applied**, that artifact is *spent*. It MUST NOT be left as an
+`active` record:
+
+- A lingering active artifact pollutes the default working set (`listByType` / `listByCategory`)
+  and is re-surfaced by hygiene sweeps.
+- Hand-retiring it spawns a double-prefixed twin
+  (`"Retirement proposal: Retirement proposal: …"`), because the retire flow mints a *new*
+  proposal artifact for the artifact itself (#106).
+
+**Rule.** On `apply` (and only on `apply`), the flow auto-closes the spent proposal artifact by
+**retiring it via the existing `retire` op** (§B.4) — `active → retired`. There is no separate
+"close" mutation; the close reuses `retire`. This close is:
+
+- **safe** — it touches only the named artifact, never the apply target;
+- **idempotent** — a no-op if the artifact is already retired/implemented (the §B.2 transition
+  table makes `retired` terminal, so a re-close is rejected and treated as a no-op);
+- **non-fatal** — the proposal has already been applied; a failure to close the artifact does not
+  fail the flow (it is surfaced on the result instead).
+
+**`reject` is unchanged.** A rejected proposal is *not* spent — the artifact remains `active` so the
+proposal can be revisited. Closing happens only on the apply path.
+
+Do not hand-retire proposal artifacts: applying the proposal closes them. The retire lifecycle
+expects the artifact to exist transiently and to be auto-closed on apply.
+
 ---
 
 ## Addendum C — Person Record Type (Entity Cards)
@@ -720,3 +765,272 @@ Card merge uses the existing `propose → apply/reject` gate:
 - **apply**: unions body, adds `alias:<duplicate title>` tag to primary, unions `appears-in` links, calls
   `store.supersede(primaryId, [duplicateId])` to archive the duplicate (supersede-not-delete invariant).
 - **reject**: both cards remain byte-identical.
+
+## Addendum D — Freshness Audit (Hygiene #1, #106)
+
+### D.1 Read-Only Maintenance Layer
+
+`knowledge.audit-freshness` is the first of the Knowledge Kit's *maintenance* flows. The Kit is
+strong at filing (ingest → compile → synthesize → consolidate → retire) but, until this slice, had
+no way to surface records that have gone stale. The audit is a **read-only** survey: it NEVER
+mutates a record. It returns *flags* proposing an action; the operator routes each flag through an
+existing gated flow — `knowledge.retire` to archive, or a fresh `capture`/`compile` to refresh. The
+audit forks no new mutation path.
+
+Staleness is domain-sensitive (a `radar` signal goes stale in days; a `decisions` record may stay
+canonical for a year), so the audit is **optional and configurable** — thresholds are supplied per
+call. A category with no configured threshold (and no default) is simply skipped: auditing is
+**opt-in**.
+
+### D.2 `auditFreshness` Flow-Runner Operation
+
+`KnowledgeFlowRunner.auditFreshness(options)` (also the module-level `auditFreshness({ store, ... })`):
+
+**Options:**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `thresholds` | `{ [category]: number }` | `{}` | Per-category staleness threshold in **days**. |
+| `defaultThresholdDays` | `number` | none | Fallback for categories not matched by `thresholds`. When absent, unmatched categories are skipped. |
+| `actions` | `{ [category]: "archive"\|"refresh" }` | `{}` | Per-category override of the proposed action. |
+| `defaultAction` | `"archive"\|"refresh"` | `"refresh"` | Proposed action when no per-category action matches. |
+| `types` | `string[]` | `["raw","compiled","concept","snapshot"]` | Record types to audit. |
+| `now` | `string\|number\|Date` | current time | Reference "now" for the age computation (injectable for tests). |
+| `agent` | `string` | runner agent | Agent recorded on the audit telemetry. |
+
+**Threshold / action resolution** is dot-hierarchy **longest-prefix**: a record in
+`radar.signals.weak` prefers a `radar.signals` entry over a `radar` one, then falls back to the
+default. The matched key is surfaced on each flag as `matchedThresholdKey` (`"*"` denotes the
+default).
+
+**Last mutation** is the most recent of the record's `updated_at` and its latest `mutation_log`
+entry `at` — both are refreshed by every mutating op (§1.1 / §4.2), so the later of the two is
+authoritative even if an adapter lags one. It falls back to `created_at` when neither is present.
+
+**Flagging:** a record is flagged only when its age in **whole days** *strictly exceeds* its
+resolved threshold (`ageDays > thresholdDays`). Retired records are never flagged — the default
+`listByType` query excludes them, and `retired` is terminal.
+
+### D.3 Flag Evidence Guarantee
+
+Every flag carries the evidence that produced it — a flag can never be emitted without citing both
+the last-mutation instant and the threshold that fired:
+
+```ts
+interface FreshnessFlag {
+  recordId: string;
+  title: string;
+  type: string;
+  category: string;
+  status: string;
+  lastMutationAt: string;       // ISO-8601 — the cited last mutation
+  ageDays: number;              // whole days since lastMutationAt
+  thresholdDays: number;        // the threshold that fired
+  matchedThresholdKey: string;  // category key the threshold matched ("*" = default)
+  proposedAction: "archive" | "refresh";
+}
+```
+
+`auditFreshness` returns `{ audited, skipped, flags, telemetryEvents }` where `audited` counts
+records that had a resolvable threshold, `skipped` counts opt-out categories, and `flags` lists the
+stale records. Gate telemetry is emitted at `collect-gate` and `flag-gate`
+(`knowledge.audit-freshness`).
+
+## Addendum E — Category Canonicalization (Hygiene #4, #106)
+
+### E.1 Read-Only Category-Sprawl Audit
+
+`knowledge.canonicalize-category` is a *maintenance* flow, like the freshness audit (Addendum D): a
+**read-only** survey that NEVER mutates a record. Where freshness measures records against *time*,
+this audit measures the *shape of the category hierarchy*. As a Knowledge base grows by filing, its
+category tree degrades in concrete ways the dogfooding surfaced (#106) — orphan prefixes, parents
+that fan out into too many leaves, and records that were implemented but never retired. The audit
+returns *findings* proposing a fix; the operator routes each through an existing gated flow —
+`knowledge.retire` to retire, or an `update` (recategorize) to flatten/regroup. The audit forks no
+new mutation path.
+
+Sprawl is domain-sensitive (a flat radar feed differs from a deep decisions taxonomy), so each
+check is **optional and configurable**: a disabled check — or an empty implemented-marker list —
+contributes no findings. The audit is **opt-in** per check.
+
+### E.2 `canonicalizeCategory` Flow-Runner Operation
+
+`KnowledgeFlowRunner.canonicalizeCategory(options)` (also the module-level
+`canonicalizeCategory({ store, ... })`):
+
+**Options:**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `checkOrphanPrefixes` | `boolean` | `true` | Enable the orphan-prefix check. |
+| `maxLeavesPerParent` | `number` | none | Leaf fan-out budget; a parent with strictly more direct child leaf categories is flagged. Omit to disable the check. |
+| `implementedMarkers` | `string[]` | `[]` | Tag markers meaning "implemented" (case-insensitive). Empty → the implemented-active check is disabled. |
+| `types` | `string[]` | `["raw","compiled","concept","snapshot"]` | Record types to survey. |
+| `agent` | `string` | runner agent | Agent recorded on the audit telemetry. |
+
+**Finding kinds** (each independently toggleable):
+
+- **`orphan-prefix`** (`proposedAction: "flatten"`) — an intermediate prefix node that holds **no
+  record directly** while it has descendants (`metric: "empty-intermediate-node"`), OR a
+  multi-segment prefix whose **entire subtree is a single record** carried directly there
+  (`metric: "single-record-deep-path"`) — depth without branching value.
+- **`too-many-leaves`** (`proposedAction: "regroup"`) — a parent prefix whose count of direct child
+  **leaf** categories *strictly exceeds* `maxLeavesPerParent` (`metric: "leaf-fan-out"`). A leaf is
+  a record-bearing category with no record-bearing descendant. The finding lists the offending
+  leaves.
+- **`implemented-active`** (`proposedAction: "retire"`) — a record still `status:"active"` that
+  carries an `implementedMarkers` tag (`metric: "implemented-marker-on-active"`); it should have
+  transitioned via `retire` (§B.4) but lingers in the working set.
+
+Retired records are never flagged — the default `listByType` query excludes them, and `retired` is
+terminal (so it is not sprawl to flatten).
+
+### E.3 Finding Evidence Guarantee
+
+Every finding carries the evidence that produced it — a finding can never be emitted without citing
+the metric that fired and the offending category / record ids:
+
+```ts
+interface CategoryFinding {
+  kind: "orphan-prefix" | "too-many-leaves" | "implemented-active";
+  category: string;        // the offending category / parent prefix
+  recordIds: string[];     // the affected record ids
+  metric: string;          // the rule that fired
+  evidence: object;        // rule-specific (counts, leaf list, matched markers, reason)
+  proposedAction: "flatten" | "regroup" | "retire";
+}
+```
+
+`canonicalizeCategory` returns `{ surveyed, categories, findings, telemetryEvents }` where
+`surveyed` counts the records examined, `categories` counts the distinct category prefixes in the
+tree, and `findings` lists the sprawl. Gate telemetry is emitted at `survey-gate` and `propose-gate`
+(`knowledge.canonicalize-category`).
+
+## Addendum F — Glossary Sync (Hygiene #3, #106)
+
+### F.1 Keeping the Glossary in Sync with Canonical Docs
+
+`knowledge.glossary-sync` is a *maintenance* flow that keeps the **glossary** — the working set of
+`concept` records — in sync with the **canonical docs** that define those terms. The Kit can file
+concepts but, until this slice, had no way to (a) promote a term that a canonical doc defines but no
+concept yet captures (a **gap**), or (b) notice when a concept's definition has **drifted** from its
+canonical source (**out-of-date**).
+
+The flow surveys a **configurable** glossary source list (the issue's "glossary source list") and is
+**opt-in**: an empty/absent source list does nothing. It is **read-only by default** — it returns a
+classification plan and mutates nothing; `apply: true` enacts the plan through the **existing**
+concept-record ops (no forked mutation path).
+
+### F.2 `glossarySync` Flow-Runner Operation
+
+`KnowledgeFlowRunner.glossarySync(options)` (also module-level `glossarySync({ store, ... })`):
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `sources` | `Array<string \| { category, prefix? }>` | `[]` | The configurable glossary source list: each entry is a canonical-doc record id, or a category selector. An unknown id is rejected (the list is evidence). Empty → opt-in no-op. |
+| `termExtractor` | `(doc) => Array<{ term, definition }>` | `defaultTermExtractor` | Pluggable extractor; the default parses glossary-style lines (`**Term** — def`, `Term: def`, list items). |
+| `conceptCategory` | `string` | source doc's category | Category for matched/proposed concepts. |
+| `apply` | `boolean` | `false` | `false` → read-only plan. `true` → enact via store ops. |
+
+**Classification.** Each extracted term is matched against existing `concept` records by **normalized
+term** (case/space-insensitive title) within the resolved category:
+
+- **gap** — no concept captures the term.
+- **outdated** — a concept exists but its body has **drifted** from the canonical definition.
+  Drift is **whitespace-insensitive** (cosmetic reflow is not drift; substantive change is).
+- **current** — the concept matches the canonical definition.
+
+### F.3 Consume-Never-Fork Enactment
+
+In `apply` mode the plan is enacted through the existing gated ops, with the **canonical doc as the
+proposer** (it is the evidence for the definition) — no new mutation path is forked:
+
+- **gap** → `store.create(concept)` then `store.propose` + `store.apply` (doc → concept).
+- **outdated** → `store.propose` + `store.apply` on the existing concept (`new_body` = canonical).
+
+`glossarySync` returns `{ sourcesAudited, entries, gaps, outdated, current, applied, telemetryEvents }`.
+Every classified entry cites its evidence — the source doc id + title, the term, and the canonical
+definition (outdated entries also cite the drifted `currentBody`). Gate telemetry is emitted at
+`collect-gate`, `diff-gate`, and `propose-gate` (`knowledge.glossary-sync`).
+
+## Addendum G — Contradiction Detection (Hygiene #2, #106)
+
+### G.1 Read-Only Maintenance Layer
+
+`knowledge.detect-contradictions` is the second of the Knowledge Kit's *maintenance* flows. Like
+`audit-freshness` (Addendum D) it is a **read-only** survey: it NEVER mutates a record. It returns
+*flags* identifying a conflicting pair; the operator routes each through an existing gated flow —
+`knowledge.retire` to drop the stale assertion, or a fresh `capture`/`compile`/`consolidate` to
+reconcile. The audit forks no new mutation path.
+
+Contradiction is domain-sensitive (what counts as a conflict in `radar` differs from `decisions`),
+so the audit is **optional and configurable**: it audits only the categories supplied in
+`categories` (or, when omitted, every category present in the compiled set), and it judges conflicts
+with a **pluggable contradiction fn**.
+
+### G.2 `detectContradictions` Flow-Runner Operation
+
+`KnowledgeFlowRunner.detectContradictions(options)` (also the module-level
+`detectContradictions({ store, ... })`) compares **compiled** records **within a category** and
+flags conflicting assertions. Comparison is two-staged and reuses the Kit's existing pluggable
+adapters (consume-never-fork):
+
+1. **Scope** with the `SimilarityDetector` (the same interface `synthesize` uses) — only records the
+   detector deems similar (about the same thing) are candidates. The vector similarity adapter drops
+   straight in.
+2. **Judge** with the `ContradictionDetector` — for each similar pair, decide whether the assertions
+   conflict.
+
+**Options:**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `categories` | `string[]` | all present | Categories to audit. Opt-in scoping; omit to audit every category in the compiled set. |
+| `similarityDetector` | `fn` | `defaultSimilarityDetector` | Pluggable `(record, candidates, store) => string[]` — scopes which pairs are compared. |
+| `contradictionDetector` | `fn` | `defaultContradictionDetector` | Pluggable `(recordA, recordB, store?) => null \| { reason }` — judges whether a pair conflicts. May be async. |
+| `agent` | `string` | runner agent | Agent recorded on the audit telemetry. |
+
+**Comparison scope:** retired records are excluded (the default `listByType` query drops them, and
+`retired` is terminal); records are grouped by exact category, so cross-category pairs are never
+formed; each unordered pair is compared at most once.
+
+### G.3 `ContradictionDetector` Interface and the Default
+
+```ts
+type ContradictionDetector = (
+  recordA: Record,
+  recordB: Record,
+  store?: KnowledgeStoreAdapter
+) => (null | { reason: string }) | Promise<null | { reason: string }>;
+```
+
+The two records passed in are already known to be *about the same thing* (the caller scopes by
+category + similarity). The detector's only job is to decide whether their assertions conflict.
+Return `null` for no conflict, or `{ reason }` carrying a human-readable explanation.
+
+The default (`defaultContradictionDetector`) is a deliberately conservative **opposing-polarity
+heuristic**: it splits each body into clauses, tags each affirmative or negative by the presence of
+a negation, and reports a conflict when one record AFFIRMS a clause whose salient content tokens
+contain those of a clause the other NEGATES (token-containment, not exact equality, so trailing
+detail on one side does not hide the conflict). It is intentionally replaceable — an embedding/NLI
+model is the obvious upgrade, injected the same way the vector similarity adapter is.
+
+### G.4 Flag Evidence Guarantee
+
+Every flag cites **both** conflicting record ids — a flag can never be emitted without them:
+
+```ts
+interface ContradictionFlag {
+  recordIdA: string;   // canonically ordered: recordIdA < recordIdB
+  recordIdB: string;
+  titleA: string;
+  titleB: string;
+  category: string;    // the shared category
+  reason: string;      // why the contradiction fn fired
+}
+```
+
+`detectContradictions` returns `{ audited, compared, flags, telemetryEvents }` where `audited`
+counts the in-scope compiled records, `compared` counts the similar pairs the contradiction fn
+judged, and `flags` lists the conflicting pairs. Gate telemetry is emitted at `collect-gate` and
+`flag-gate` (`knowledge.detect-contradictions`).

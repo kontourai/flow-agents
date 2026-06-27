@@ -39,6 +39,7 @@ CHECKS=(
   "Telemetry doctor integration|bash evals/integration/test_telemetry_doctor.sh"
   "Utterance check integration|bash evals/integration/test_utterance_check.sh"
   "Pull work provider integration|bash evals/integration/test_pull_work_provider.sh"
+  "Anti-gaming and trust suite|bash evals/ci/antigaming-suite.sh"
   "Usage feedback import integration|bash evals/integration/test_usage_feedback_import.sh"
   "Usage feedback outcomes integration|bash evals/integration/test_usage_feedback_outcomes.sh"
   "Usage feedback report integration|bash evals/integration/test_usage_feedback_report.sh"
@@ -82,6 +83,7 @@ LANE_RUNTIME_AND_KIT=(
   "Telemetry doctor integration"
   "Utterance check integration"
   "Pull work provider integration"
+  "Anti-gaming and trust suite"
 )
 
 LANE_USAGE_FEEDBACK=(

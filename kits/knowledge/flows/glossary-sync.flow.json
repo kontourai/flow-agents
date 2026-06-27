@@ -1,0 +1,61 @@
+{
+  "id": "knowledge.glossary-sync",
+  "version": "1.0",
+  "steps": [
+    { "id": "collect", "next": "extract" },
+    { "id": "extract", "next": "diff-gate" },
+    { "id": "diff-gate", "next": "propose-gate" },
+    { "id": "propose-gate", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "gates": {
+    "collect-gate": {
+      "step": "collect",
+      "expects": [
+        {
+          "id": "glossary-sources-resolved",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "The configurable glossary source list has been resolved to concrete canonical docs. Each source is a record id or a { category, prefix } selector; a source id that does not exist fails the gate (the source list is evidence — a typo must not pass silently). Auditing is opt-in: an empty source list resolves to nothing and the flow does nothing.",
+          "bundle_claim": {
+            "claimType": "knowledge.glossary-sync.collect",
+            "subjectType": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "diff-gate": {
+      "step": "diff-gate",
+      "expects": [
+        {
+          "id": "entries-classified-cite-source",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Every term→definition entry extracted from a canonical doc (via the pluggable term extractor) is classified against the existing concept records and cites its evidence: the canonical source doc id + title, the extracted term and definition, and (for an outdated entry) the existing concept's drifted body. An entry is classified 'gap' when no concept captures the term, 'outdated' when a concept exists but its body has drifted from the canonical definition (whitespace-insensitive), or 'current' when they match. No entry is emitted without the source doc it came from. This step NEVER mutates a record — it only classifies.",
+          "bundle_claim": {
+            "claimType": "knowledge.glossary-sync.diff",
+            "subjectType": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "propose-gate": {
+      "step": "propose-gate",
+      "expects": [
+        {
+          "id": "gaps-and-drift-routed-through-existing-ops",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Read-only by default: the flow returns the classification plan (gaps / outdated / current) and mutates nothing. When apply mode is enabled, every gap and outdated entry is enacted through the EXISTING concept-record ops with the canonical source doc as the proposer (it is the evidence for the definition): a gap is store.create(concept) then propose+apply; an outdated concept is store.propose + store.apply with the canonical definition as new_body. No new mutation path is forked — the operator's adopt/refresh decision rides the same gated propose→apply lineage every other concept mutation uses.",
+          "bundle_claim": {
+            "claimType": "knowledge.glossary-sync.propose",
+            "subjectType": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    }
+  }
+}

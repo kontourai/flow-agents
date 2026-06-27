@@ -250,6 +250,13 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check pull-work-provider-integration
 
+      # The anti-gaming + trust regression suite runs in this REQUIRED lane so that
+      # weakening the gate / CI anchor / their protections (or removing a regression
+      # test) is caught and cannot merge. Convergence red-team (Round 5/7) closure.
+      - name: Anti-gaming and trust suite
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check anti-gaming-and-trust-suite
+
       - name: Finalize CI evidence
         if: always()
         run: bash evals/ci/run-baseline.sh --finalize

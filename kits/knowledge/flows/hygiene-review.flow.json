@@ -1,0 +1,43 @@
+{
+  "id": "knowledge.hygiene-review",
+  "version": "1.0",
+  "steps": [
+    { "id": "orchestrate", "next": "review-gate" },
+    { "id": "review-gate", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "gates": {
+    "orchestrate-gate": {
+      "step": "orchestrate",
+      "expects": [
+        {
+          "id": "sub-flows-run-via-existing-methods",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Each opted-in hygiene audit was run through its EXISTING flow-runner method and EXISTING gates — knowledge.audit-freshness, knowledge.detect-contradictions, knowledge.glossary-sync, knowledge.canonicalize-category — and its findings collected. This orchestrator reimplements NO detection logic and forks NO new gate: the freshness/contradiction/canonicalize flags arrive already vouched by their own flag-/propose-gates, and glossary entries arrive already classified by glossary-sync's diff-gate. Each audit is opt-in (mirroring the flows): an audit whose config block is omitted is skipped and surfaced as skipped, so an empty review does nothing. This step is read-only by default — like the flows it runs, it mutates no record of its own.",
+          "bundle_claim": {
+            "claimType": "knowledge.hygiene-review.orchestrate",
+            "subjectType": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "review-gate": {
+      "step": "review-gate",
+      "expects": [
+        {
+          "id": "proposals-route-through-existing-gates",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "The unified review presents every collected proposal as one of three operator decisions — adopt / retire / merge — and each proposal cites its sourceFlow plus the underlying evidence the originating flow's gate already guaranteed (no proposal is synthesized here). hygiene-review forks NO propose→approve gate of its own: the operator enacts each decision by routing it back through the source flow's EXISTING gated op — retire via knowledge.retire; adopt via a fresh capture/compile (audit-freshness refresh) or via glossary-sync apply (store.create→propose→apply for a gap, store.propose→apply for drift, canonical doc as proposer); merge via an update/recategorize. The ONLY mutation path this orchestrator can trigger is glossary apply, which it delegates verbatim to knowledge.glossary-sync's own propose→apply lineage — it never writes the store directly. Read-only by default (consume-never-fork).",
+          "bundle_claim": {
+            "claimType": "knowledge.hygiene-review.review",
+            "subjectType": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    }
+  }
+}

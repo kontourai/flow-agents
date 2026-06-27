@@ -96,9 +96,14 @@ function usage(): void {
 Options:
   --runtime base|codex|claude-code|kiro|opencode|pi
   --dest PATH
-  --global              Target the runtime's global/user-level config path
-                        (claude-code: ~/.claude/settings.json; merge, not overwrite).
-                        Honors FLOW_AGENTS_USER_CLAUDE_SETTINGS for test isolation.
+  --global              Target the runtime's global/user-level config path.
+                        claude-code: merges FA hooks into ~/.claude/settings.json.
+                          Honors FLOW_AGENTS_USER_CLAUDE_SETTINGS for test isolation.
+                        opencode: merges opencode.json into ~/.config/opencode/opencode.json
+                          (honors XDG_CONFIG_HOME; test isolation via FLOW_AGENTS_USER_OPENCODE_CONFIG).
+                        codex: runs install-codex-home.sh into ~/.flow-agents/codex
+                          (the isolated Codex HOME; hooks merged, not overwritten).
+                        pi: NOT_VERIFIED (no documented global dir); warns and falls back to workspace default.
   --telemetry-sink local-files|local-kontour-console|kontour-hosted-console|user-hosted-console
   --console-url URL
   --console-endpoint URL
@@ -179,7 +184,24 @@ function globalDest(runtime: Runtime): string {
     if (override) return path.dirname(override);
     return path.join(os.homedir(), ".claude");
   }
-  // For other runtimes, fall back to defaultDest (global paths not yet defined for opencode/pi/codex).
+  if (runtime === "opencode") {
+    // Honor FLOW_AGENTS_USER_OPENCODE_CONFIG (points to the opencode.json FILE) for test isolation,
+    // mirroring FLOW_AGENTS_USER_CLAUDE_SETTINGS for claude-code.
+    const override = process.env["FLOW_AGENTS_USER_OPENCODE_CONFIG"];
+    if (override) return path.dirname(override);
+    // Global opencode config: ~/.config/opencode/ (honor XDG_CONFIG_HOME when set, else ~/.config).
+    return path.join(process.env["XDG_CONFIG_HOME"] ?? path.join(os.homedir(), ".config"), "opencode");
+  }
+  if (runtime === "codex") {
+    // codex --global routes to the isolated Codex HOME at ~/.flow-agents/codex.
+    // This is the same path used by install-codex-home.sh; --dest overrides it for sandbox testing.
+    return path.join(os.homedir(), ".flow-agents", "codex");
+  }
+  if (runtime === "pi") {
+    // pi has no documented global config dir.
+    // NOT_VERIFIED: fall back to workspace default and warn caller.
+    return defaultDest(runtime);
+  }
   return defaultDest(runtime);
 }
 
@@ -366,6 +388,75 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       fs.renameSync(recordTmp, recordPath);
       console.log(`Flow Agents global hooks merged for claude-code in ${options.dest}`);
       return 0;
+    }
+    // --global for opencode: merge FA opencode.json into the global opencode config dir.
+    // Global path: ~/.config/opencode/opencode.json (honor XDG_CONFIG_HOME).
+    // Test isolation: FLOW_AGENTS_USER_OPENCODE_CONFIG points to the opencode.json FILE.
+    if (options.global && options.runtime === "opencode") {
+      const bundle = ensureBundle(options.runtime);
+      const sourcePath = path.join(bundle, "opencode.json");
+      if (!fs.existsSync(sourcePath)) {
+        console.error(`flow-agents init: bundle opencode.json missing: ${sourcePath}`);
+        return 1;
+      }
+      const managed = JSON.parse(fs.readFileSync(sourcePath, "utf8")) as Record<string, unknown>;
+      fs.mkdirSync(options.dest, { recursive: true });
+      // The global opencode.json lives directly at dest/opencode.json.
+      const destConfigPath = path.join(options.dest, "opencode.json");
+      const installMergePath = path.join(root, "scripts", "install-merge.js");
+      const _require = createRequire(import.meta.url);
+      const { mergeSettings } = _require(installMergePath) as { mergeSettings: (a: Record<string, unknown>, b: Record<string, unknown>) => Record<string, unknown> };
+      let existing: Record<string, unknown> = {};
+      if (fs.existsSync(destConfigPath)) {
+        try { existing = JSON.parse(fs.readFileSync(destConfigPath, "utf8")) as Record<string, unknown>; } catch { existing = {}; }
+      }
+      const merged = mergeSettings(existing, managed);
+      const tmp = `${destConfigPath}.tmp.${process.pid}`;
+      fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}
+`, "utf8");
+      fs.renameSync(tmp, destConfigPath);
+      // Write version stamp.
+      const installRecordDir = path.join(options.dest, ".flow-agents");
+      fs.mkdirSync(installRecordDir, { recursive: true });
+      const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
+      const record = { version: pkgJson["version"] ?? "0.0.0", installedAt: new Date().toISOString(), runtime: "opencode", global: true };
+      const recordPath = path.join(installRecordDir, "install.json");
+      const recordTmp = `${recordPath}.tmp.${process.pid}`;
+      fs.writeFileSync(recordTmp, `${JSON.stringify(record, null, 2)}
+`, "utf8");
+      fs.renameSync(recordTmp, recordPath);
+      console.log(`Flow Agents global config merged for opencode in ${options.dest}`);
+      return 0;
+    }
+    // --global for codex: run install-codex-home.sh to install into the isolated Codex HOME.
+    // The codex --global path is ~/.flow-agents/codex (the isolated home IS codex's global).
+    // Pass through telemetry/console args and honor --dest override for sandbox testing.
+    if (options.global && options.runtime === "codex") {
+      const codexHomeScript = path.join(root, "scripts", "install-codex-home.sh");
+      if (!fs.existsSync(codexHomeScript)) {
+        console.error(`flow-agents init: install-codex-home.sh missing: ${codexHomeScript}`);
+        return 1;
+      }
+      const scriptArgs: string[] = [options.dest];
+      for (const sink of options.telemetrySinks) scriptArgs.push("--telemetry-sink", sink);
+      if (options.consoleUrl) scriptArgs.push("--console-url", options.consoleUrl);
+      if (options.consoleEndpoint) scriptArgs.push("--console-endpoint", options.consoleEndpoint);
+      if (options.consoleTokenFile) scriptArgs.push("--console-token-file", options.consoleTokenFile);
+      if (options.consoleTenant) scriptArgs.push("--console-tenant", options.consoleTenant);
+      const result = spawnSync("bash", [codexHomeScript, ...scriptArgs], { env: { ...process.env }, encoding: "utf8", stdio: "inherit" });
+      if (result.error) {
+        console.error(`flow-agents init: unable to run install-codex-home.sh: ${result.error.message}`);
+        return 1;
+      }
+      return result.status ?? 1;
+    }
+    // --global for pi: NOT_VERIFIED (no documented global dir). Warn and fall through to workspace install.
+    if (options.global && options.runtime === "pi") {
+      console.warn(
+        `flow-agents init: NOT_VERIFIED: pi has no documented global config directory. ` +
+        `The --global flag for pi is not verified against pi documentation. ` +
+        `Falling back to workspace default destination: ${options.dest}`
+      );
     }
     const bundle = ensureBundle(options.runtime);
     const installed = installBundle(bundle, options);
