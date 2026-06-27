@@ -19,6 +19,7 @@ import { main as validatePackage } from "./tools/validate-package.js";
 import { main as validateHookInfluence } from "./cli/validate-hook-influence.js";
 import { main as runtimeAdapter } from "./cli/runtime-adapter.js";
 import { main as utteranceCheck } from "./cli/utterance-check.js";
+import { main as verify } from "./cli/verify.js";
 
 const availableCommands = new Map<string, (argv: string[]) => number | Promise<number>>([
   ["build-bundles", () => buildBundles()],
@@ -38,6 +39,7 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["veritas-governance", veritasGovernance],
   ["validate-package", validatePackage],
   ["validate-hook-influence", validateHookInfluence],
+  ["verify", verify],
   ["validate-source", validateSource],
   ["workflow-artifact-cleanup-audit", workflowArtifactCleanupAudit],
 ]);
