@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.1](https://github.com/kontourai/flow-agents/compare/v2.0.0...v2.0.1) (2026-06-27)
+
+
+### Fixes
+
+* carry KIT IDENTITY through the trust chain — stop flattening non-builder kits to "builder" ([#235](https://github.com/kontourai/flow-agents/issues/235)) ([02d2782](https://github.com/kontourai/flow-agents/commit/02d2782ca8d9158a018d0fc6c35adc6a34c827d5))
+* **gate:** classify concurrent-fork vs tamper; never hard-block a benign race ([#233](https://github.com/kontourai/flow-agents/issues/233)) ([e24743b](https://github.com/kontourai/flow-agents/commit/e24743b7dbff05df64e198e420e47841ce534df3))
+
 ## [2.0.0](https://github.com/kontourai/flow-agents/compare/v1.4.0...v2.0.0) (2026-06-27)
 
 
