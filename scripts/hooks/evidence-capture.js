@@ -62,9 +62,15 @@ const COMMAND_TOOL_NAME = /(^|[^a-z])(bash|shell|sh|exec|run|command|terminal|cm
 
 // ─── Hash-chain integrity (tamper-EVIDENCE) ───────────────────────────────────
 //
-// Genesis prevHash: a fixed sentinel used when the log is empty or the last
-// entry has no _chain field (legacy record). The value is sha256("flow-agents:
-// command-log:genesis"), computed once and hard-coded here for stability.
+// Genesis prevHash: a fixed arbitrary sentinel used when the log is empty or
+// the last entry has no _chain field (legacy record). This is NOT the SHA256 of
+// any specific input string — it is a fixed constant chosen for the original
+// implementation. (A previous comment incorrectly claimed it was
+// sha256("flow-agents:command-log:genesis"); that is wrong.)
+//
+// Writer (this file, CHAIN_GENESIS) and verifier (stop-goal-fit.js,
+// CHAIN_GENESIS_VERIFY) MUST use the same value. Do not change one without
+// changing the other — existing chained logs depend on this constant.
 //
 // HONEST FRAMING: this makes alteration DETECTABLE, not impossible. An agent
 // that rewrites all hashes can still forge the chain. The real tamper-proof
