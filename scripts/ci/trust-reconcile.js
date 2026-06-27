@@ -49,6 +49,10 @@
  * NOTE: This job is intended to be a REQUIRED status check in GitHub branch
  * protection (making it the un-disablable CI anchor). Enabling it as required is
  * a server-side branch-protection step — see .github/workflows/trust-reconcile.yml.
+ *
+ * Programmatic use:
+ *   const { runTrustReconcile } = require('./trust-reconcile.js');
+ *   const exitCode = runTrustReconcile({ bundle, commands, repoRoot });
  */
 
 'use strict';
@@ -271,22 +275,34 @@ function discoverBundle(repoRoot) {
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// Core reconcile function (exported for programmatic use)
 // ---------------------------------------------------------------------------
 
-function main() {
-  const args = parseArgs(process.argv.slice(2));
-  const repoRoot = path.resolve(
-    args.repoRoot || process.env.TRUST_RECONCILE_REPO_ROOT || process.cwd()
+/**
+ * Run the full trust reconcile logic and return an exit code.
+ *
+ * This is the same logic as the CLI entrypoint, extracted so it can be called
+ * programmatically (e.g. from the `flow-agents verify` CLI subcommand).
+ * All output is written directly to process.stdout/stderr.
+ *
+ * @param {object}        opts
+ * @param {string|null}   [opts.bundle]    - Explicit bundle path. null = env fallback + auto-discovery.
+ * @param {string[]}      [opts.commands]  - Canonical verify commands. [] = env + package.json fallback.
+ * @param {string|null}   [opts.repoRoot]  - Repo root path. null = TRUST_RECONCILE_REPO_ROOT env or cwd.
+ * @returns {number} Exit code: 0 = pass, 1 = fail/divergence.
+ */
+function runTrustReconcile({ bundle = null, commands = [], repoRoot = null } = {}) {
+  const resolvedRepoRoot = path.resolve(
+    repoRoot || process.env.TRUST_RECONCILE_REPO_ROOT || process.cwd()
   );
 
   // Resolve bundle path: explicit arg > env > auto-discovery > null (fail-open)
-  const bundlePath = args.bundle
+  const bundlePath = bundle
     || process.env.TRUST_RECONCILE_BUNDLE
-    || discoverBundle(repoRoot)
+    || discoverBundle(resolvedRepoRoot)
     || null;
 
-  const canonicalCommands = resolveCanonicalCommands(args, repoRoot);
+  const canonicalCommands = resolveCanonicalCommands({ commands: commands || [] }, resolvedRepoRoot);
 
   // FAIL-CLOSED: no comprehensive verify configured — refuse compile-only attestation.
   if (canonicalCommands === null) {
@@ -296,11 +312,11 @@ function main() {
       '[trust-reconcile] Declare package.json scripts["trust-reconcile-verify"] or set TRUST_RECONCILE_COMMANDS.\n' +
       '[trust-reconcile] Example: add "trust-reconcile-verify": "npm run build && npm run eval:static && npm run eval:integration"\n'
     );
-    process.exit(1);
+    return 1;
   }
 
   process.stdout.write('[trust-reconcile] starting CI trust anchor reconcile\n');
-  process.stdout.write(`[trust-reconcile] repo-root: ${repoRoot}\n`);
+  process.stdout.write(`[trust-reconcile] repo-root: ${resolvedRepoRoot}\n`);
   process.stdout.write(`[trust-reconcile] canonical commands: ${canonicalCommands.join(' | ')}\n`);
   if (bundlePath) {
     process.stdout.write(`[trust-reconcile] bundle: ${bundlePath}\n`);
@@ -322,7 +338,7 @@ function main() {
   for (const cmd of canonicalCommands) {
     if (hasLaunderingOperator(cmd)) {
       process.stderr.write(`[trust-reconcile] FAILED — canonical verify command is laundered ('${cmd}') — refusing to attest a result whose exit code is masked.\n`);
-      process.exit(1);
+      return 1;
     }
   }
 
@@ -331,7 +347,7 @@ function main() {
 
   for (const cmd of canonicalCommands) {
     process.stdout.write(`[trust-reconcile]   running: ${cmd}\n`);
-    const result = runCommand(cmd, repoRoot);
+    const result = runCommand(cmd, resolvedRepoRoot);
     const key = normalizeCmd(cmd);
     ciResults.set(key, { exitCode: result.exitCode, passed: result.passed });
 
@@ -376,7 +392,7 @@ function main() {
       bundle = JSON.parse(fs.readFileSync(bundlePath, 'utf8'));
     } catch (err) {
       process.stderr.write(`[trust-reconcile] failed to read bundle at ${bundlePath}: ${err.message}\n`);
-      process.exit(1);
+      return 1;
     }
 
     const hasEvidence = Array.isArray(bundle.evidence) && bundle.evidence.length > 0;
@@ -497,14 +513,33 @@ function main() {
       process.stdout.write(`[trust-reconcile] results write skipped (${err.message})\n`);
     }
 
-    process.exit(0);
+    return 0;
   }
 
   process.stderr.write(`\n[trust-reconcile] FAILED — ${issues.length} issue(s) detected:\n`);
   for (const issue of issues) {
     process.stderr.write(`  [${issue.type}] ${issue.message}\n`);
   }
-  process.exit(1);
+  return 1;
 }
 
-main();
+// ---------------------------------------------------------------------------
+// CLI entrypoint (direct script invocation)
+// ---------------------------------------------------------------------------
+
+function main() {
+  const args = parseArgs(process.argv.slice(2));
+  process.exit(runTrustReconcile({
+    bundle: args.bundle || null,
+    commands: args.commands,
+    repoRoot: args.repoRoot || null,
+  }));
+}
+
+// Export core function for programmatic use (e.g. flow-agents verify CLI subcommand).
+// The direct-CLI behavior is preserved: when run as a script, main() is called below.
+module.exports.runTrustReconcile = runTrustReconcile;
+
+if (require.main === module) {
+  main();
+}

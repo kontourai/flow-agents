@@ -240,6 +240,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_mint_attestation.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_verify_cli.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/acceptance/prove-capture-teeth-declared.sh" || result=1
   return $result
 }
