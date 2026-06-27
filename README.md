@@ -28,6 +28,7 @@ Flow Agents addresses this with a process-discipline layer that sits between the
 - **Durable workflow state** — schema-validated sidecars under `.flow-agents/` record acceptance criteria, evidence, critique, handoff, and learning, so any session can resume from recorded state instead of chat memory.
 - **Four canonical policies** — workflow steering (phase reminders at each turn), quality gate (per-file checks after edits), stop-goal-fit (evidence check before the agent stops), and config protection (veto writes to linter/formatter configs). Each policy class has a canonical script under `scripts/hooks/` and compiles to the host's native hook format.
 - **Evidence over confidence** — important work ends with tests, browser checks, CI results, review findings, governance reports, or an explicit `NOT_VERIFIED` gap. Optional [Veritas](docs/veritas-integration.md) integration attaches repo-governance evidence without making it mandatory.
+- **Verifiable, un-gameable "done"** — the agent can't mark work complete that isn't: the gate re-derives the verdict from independent evidence, an external CI anchor re-runs the verification fresh and fails the merge on any divergence, and CI mints a Sigstore-signed record of what shipped. See [Verifiable Trust — why "done" actually means done](docs/verifiable-trust.md).
 - **Evals that keep the bundle honest** — 77 integration and 36 static bundle assertions validate the skills, contracts, fixtures, and hook influence as the bundle evolves.
 
 ## Flow Agents as a process-discipline layer
