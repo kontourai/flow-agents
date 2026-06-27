@@ -124,6 +124,10 @@ export type ActiveFlowStep = {
 type FlowGate = {
   step: string;
   expects?: GateExpectation[];
+  /** Reason-to-step mapping for route-back transitions (e.g. {"implementation_defect": "execute"}). */
+  on_route_back?: Record<string, string>;
+  /** Policy governing route-back attempt limits. */
+  route_back_policy?: { max_attempts: number; on_exceeded: string };
 };
 
 /** Shape of a FlowDefinition JSON file. */
@@ -281,4 +285,85 @@ export function resolveActiveFlowStep(flowAgentsDir: string): ActiveFlowStep | n
   // Find repoRoot: walk up from flowAgentsDir to find kits/, fallback to cwd
   const repoRoot = findRepoRoot(path.dirname(flowAgentsDir));
   return resolveFlowStep(flowId, stepId, repoRoot);
+}
+
+/** The resolved route-back policy for a phase transition. */
+export type RouteBackPolicy = {
+  /** Maximum allowed route-back attempts for this transition key. */
+  maxAttempts: number;
+  /** Action when attempts are exceeded (e.g. "block"). */
+  onExceeded: string;
+  /** The step id whose gate declared this policy (e.g. "verify"). */
+  fromStepId: string;
+};
+
+/**
+ * Resolve the route-back policy for a phase transition, if the active FlowDefinition
+ * declares one on the source phase's gate.
+ *
+ * A route-back is a transition where the source phase's gate declares both
+ * `route_back_policy` and `on_route_back`, and the target phase maps to a step
+ * listed as a route-back target in `on_route_back` values.
+ *
+ * This is the FlowDefinition-driven replacement for the hardcoded
+ * `flow === "builder.build" && prev.phase === "verification" && phase === "execution"`
+ * guard in advance-state. Any flow that declares `route_back_policy` on a gate
+ * automatically gets route-back enforcement without code changes.
+ *
+ * @param flowId    e.g. "builder.build" — kitId is the prefix before the first ".".
+ * @param fromPhase Lifecycle phase leaving (e.g. "verification").
+ * @param toPhase   Lifecycle phase entering (e.g. "execution").
+ * @param repoRoot  Absolute path to the repository root (kits/ lives here).
+ * @returns RouteBackPolicy when the transition is a declared route-back, null otherwise.
+ */
+export function resolveRouteBackPolicy(
+  flowId: string,
+  fromPhase: string,
+  toPhase: string,
+  repoRoot: string,
+): RouteBackPolicy | null {
+  if (!flowId || !fromPhase || !toPhase) return null;
+  const dotIdx = flowId.indexOf(".");
+  if (dotIdx < 1) return null;
+  const kitId = flowId.slice(0, dotIdx);
+  const flowName = flowId.slice(dotIdx + 1);
+  if (!kitId || !flowName) return null;
+
+  const flowFilePath = resolveFlowFilePath(kitId, flowName, flowId, repoRoot);
+  if (!flowFilePath) return null;
+
+  let flowDef: FlowDefinition;
+  try {
+    const raw = fs.readFileSync(flowFilePath, "utf8");
+    flowDef = JSON.parse(raw) as FlowDefinition;
+  } catch {
+    return null; // ENOENT, permission error, or parse error — fail-open
+  }
+
+  if (!flowDef || typeof flowDef !== "object") return null;
+  const phaseMap = flowDef.phase_map;
+  if (!phaseMap || typeof phaseMap !== "object" || Array.isArray(phaseMap)) return null;
+
+  const fromStep = phaseMap[fromPhase];
+  const toStep = phaseMap[toPhase];
+  if (!fromStep || !toStep) return null; // phases not in this flow
+
+  if (!flowDef.gates) return null;
+  for (const gate of Object.values(flowDef.gates)) {
+    if (!gate || gate.step !== fromStep) continue;
+    if (!gate.route_back_policy || !gate.on_route_back) return null;
+    // Check if toStep is a valid route-back target declared in on_route_back
+    const routeBackTargets = Object.values(gate.on_route_back);
+    if (!routeBackTargets.includes(toStep)) return null;
+    const maxAttempts =
+      typeof gate.route_back_policy.max_attempts === "number"
+        ? gate.route_back_policy.max_attempts
+        : 3;
+    return {
+      maxAttempts,
+      onExceeded: gate.route_back_policy.on_exceeded ?? "block",
+      fromStepId: fromStep,
+    };
+  }
+  return null;
 }
