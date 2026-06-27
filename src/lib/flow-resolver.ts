@@ -55,7 +55,7 @@ function isAgentWritableDir(resolvedDir: string): boolean {
  * When the override is unsafe (points into .flow-agents), falls back silently
  * to the repoRoot/kits/ path so the resolver still works for legit flows.
  */
-function resolveFlowFilePath(
+export function resolveFlowFilePath(
   kitId: string,
   flowName: string,
   flowId: string,

@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
-import { resolveActiveFlowStep, resolvePhaseMap, type ActiveFlowStep } from "../lib/flow-resolver.js";
+import { resolveActiveFlowStep, resolveFlowFilePath, resolvePhaseMap, type ActiveFlowStep } from "../lib/flow-resolver.js";
 
 type AnyObj = Record<string, any>;
 
@@ -801,10 +801,12 @@ function resolveFirstStep(flowId: string, repoRoot: string): string | null {
   const kitId = flowId.slice(0, dotIdx);
   const flowName = flowId.slice(dotIdx + 1);
   if (!kitId || !flowName) return null;
-  const override = process.env["FLOW_AGENTS_FLOW_DEFS_DIR"];
-  const flowFilePath = override
-    ? path.join(override, `${flowId}.flow.json`)
-    : path.join(repoRoot, "kits", kitId, "flows", `${flowName}.flow.json`);
+  // Use resolveFlowFilePath for SLUG_RE validation + path-containment check — the same
+  // defense used by resolveFlowStep and resolvePhaseMap (single implementation, DRY).
+  // Returns null for any traversal attempt (e.g. flowName="../../secret") so the
+  // caller gets a clean null return matching the existing null-contract.
+  const flowFilePath = resolveFlowFilePath(kitId, flowName, flowId, repoRoot);
+  if (!flowFilePath) return null;
   try {
     const raw = fs.readFileSync(flowFilePath, "utf8");
     const flowDef = JSON.parse(raw) as { steps?: Array<{ id: string }> };
