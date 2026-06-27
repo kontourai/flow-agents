@@ -234,6 +234,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_trust_reconcile.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_publish_delivery.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/acceptance/prove-capture-teeth-declared.sh" || result=1
   return $result
 }

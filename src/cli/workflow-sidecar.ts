@@ -1311,6 +1311,8 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
   // Trust checkpoint: when advancing to a terminal delivered status, seal the checkpoint.
   if (status === "delivered") {
     await sealTrustCheckpoint(dir, slug, timestamp, status, "release").catch(() => { /* best-effort; checkpoint seal must not break advance-state */ });
+    // Publish delivery bundle: best-effort copy to delivery/ for CI trust-reconcile.
+    await publishDelivery(dir, findRepoRootFromDir(dir)).catch(() => { /* best-effort; must not break advance-state */ });
   }
   return 0;
 }
@@ -1376,6 +1378,8 @@ async function recordRelease(p: ReturnType<typeof parseArgs>): Promise<number> {
   writeState(dir, slug, "delivered", "release", payload.updated_at, stateSummary);
   // Trust checkpoint: seal at the "delivered" moment (the natural terminal mark for record-release).
   await sealTrustCheckpoint(dir, slug, payload.updated_at, "delivered", "release").catch(() => { /* best-effort; checkpoint seal must not break record-release */ });
+  // Publish delivery bundle: best-effort copy to delivery/ for CI trust-reconcile.
+  await publishDelivery(dir, findRepoRootFromDir(dir)).catch(() => { /* best-effort; must not break record-release */ });
   return 0;
 }
 
@@ -1585,6 +1589,69 @@ async function sealCheckpoint(p: ReturnType<typeof parseArgs>): Promise<number> 
     process.stderr.write(`[seal-checkpoint] checkpoint was not written — @kontourai/surface may be unavailable
 `);
   }
+  return 0;
+}
+
+// ─── Publish Delivery Bundle ──────────────────────────────────────────────────
+// Copies the session's trust.bundle (+ checkpoint companions) from the gitignored
+// session artifact dir (.flow-agents/<slug>/) to the committed delivery/ transport
+// path so the CI trust-reconcile job can reconcile it against fresh CI results.
+//
+// Fail-soft: if trust.bundle is absent (no evidence recorded yet), does nothing.
+// Idempotent: overwrites on re-delivery.
+// Called automatically from recordRelease and advanceState→delivered (best-effort).
+// Also exposed as the `publish-delivery <artifact-dir>` subcommand for explicit use.
+
+/**
+ * Publish the session's trust artifacts to the committed delivery/ path.
+ *
+ * Copies trust.bundle, trust.checkpoint.json, and (if present)
+ * trust.checkpoint.intoto.json / trust.checkpoint.sig.json from the
+ * session artifact dir to <repoRoot>/delivery/.
+ *
+ * Fail-soft: if trust.bundle is absent, returns without throwing.
+ * Idempotent: overwrites on re-delivery.
+ */
+export async function publishDelivery(dir: string, repoRoot: string): Promise<void> {
+  const bundleSrc = path.join(dir, "trust.bundle");
+  if (!fs.existsSync(bundleSrc)) return; // no bundle — skip gracefully
+
+  const deliveryDir = path.join(repoRoot, "delivery");
+  fs.mkdirSync(deliveryDir, { recursive: true });
+
+  // Required: trust.bundle (the CI anchor)
+  fs.copyFileSync(bundleSrc, path.join(deliveryDir, "trust.bundle"));
+
+  // Optional companions: checkpoint + signing artifacts
+  const companions = [
+    "trust.checkpoint.json",
+    "trust.checkpoint.intoto.json",
+    "trust.checkpoint.sig.json",
+  ];
+  for (const filename of companions) {
+    const src = path.join(dir, filename);
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, path.join(deliveryDir, filename));
+    }
+  }
+
+  process.stderr.write(`[publish-delivery] published trust.bundle and companions to ${deliveryDir}\n`);
+}
+
+/**
+ * publish-delivery <artifact-dir> [--repo-root <path>]
+ *
+ * Explicit publish of the session trust bundle to the committed delivery/ path.
+ * Equivalent to the publish that fires automatically at record-release /
+ * advance-state to delivered. Useful for the deliver skill or a human to
+ * publish explicitly.
+ *
+ * Usage: workflow-sidecar publish-delivery <artifactDir> [--repo-root <path>]
+ */
+async function publishDeliveryCmd(p: ReturnType<typeof parseArgs>): Promise<number> {
+  const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
+  const repoRoot = opt(p, "repo-root") || findRepoRootFromDir(dir);
+  await publishDelivery(dir, repoRoot);
   return 0;
 }
 
@@ -2660,6 +2727,7 @@ async function main(): Promise<number> {
       case "liveness": return liveness(p);
       case "claim": return claimLookup(p);
       case "seal-checkpoint": return sealCheckpoint(p);
+      case "publish-delivery": return publishDeliveryCmd(p);
       default: die(`unknown command: ${p.command}`);
     }
   });
