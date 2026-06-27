@@ -1,0 +1,64 @@
+# trust-reconcile.yml — CI trust anchor: Phase 1 (external anti-gaming anchor).
+#
+# This job re-runs canonical verification FRESH in a clean CI environment that
+# the agent does not control, then reconciles a delivered checkpoint/bundle's
+# claimed passes against CI reality. Any divergence (claimed pass + CI fail,
+# claimed pass + laundering operator, claimed pass + command CI never ran) fails
+# the job with a clear diagnostic message.
+#
+# Design: NEVER trusts agent-produced artifacts as a truth source. The bundle is
+# read only to DETECT DIVERGENCE — CI's fresh run is the only authoritative result.
+# The agent cannot self-declare success here: it cannot modify the CI environment,
+# pre-disable this job, or post-forge results after the check runs.
+#
+# THIS JOB IS INTENDED TO BE A REQUIRED STATUS CHECK (branch protection).
+# Enabling it as required is a server-side GitHub branch-protection configuration
+# step — it is not wired here by code. Once required, no PR can merge past it.
+#
+# Additive — NOT a gate-hook change. Does not modify scripts/hooks/*, kits/knowledge,
+# or continue-work. Mirrors the structure of .github/workflows/ci.yml.
+#
+# Phase-1b follow-up: wire the deliver skill to write trust.bundle to delivery/
+# automatically at delivery time so CI can reconcile per-command claimed passes.
+
+name: Trust Reconcile
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trust-reconcile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  trust-reconcile:
+    name: Trust Reconcile
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24"
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Trust reconcile
+        run: node scripts/ci/trust-reconcile.js
+        # Default canonical command: npm run build (TypeScript compile).
+        # Override via TRUST_RECONCILE_COMMANDS, e.g.:
+        #   "npm run build,npm run typecheck"
+        # Bundle auto-discovery: if delivery/trust.bundle or delivery/trust.checkpoint.json
+        # exists in the checkout, CI reconciles per-command claimed passes against fresh
+        # results automatically. When absent, only the fresh verify is enforced (fail-open).
