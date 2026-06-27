@@ -222,6 +222,8 @@ run_integration() {
   bash "$EVAL_DIR/integration/test_trust_checkpoint.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_checkpoint_signing.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_command_log_integrity.sh" || result=1
   return $result
 }
 
