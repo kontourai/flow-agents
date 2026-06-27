@@ -1419,9 +1419,9 @@ function resolveCommitSha(): string | null {
  * Increment B1 — checkpoint signing at the release boundary:
  * After the checkpoint is written, attempts Sigstore keyless signing (OIDC).
  *   - CI/OIDC available:   writes trust.checkpoint.sig.json (cosign-verifiable DSSE envelope)
- *                          and updates the envelope with attestation:{status:"signed",...}.
+ *                          and writes attestation:{status:"signed",...} to trust.checkpoint.attestation.json.
  *   - Local (no OIDC):     writes trust.checkpoint.intoto.json (unsigned in-toto statement)
- *                          and updates the envelope with attestation:{status:"unsigned",...}.
+ *                          and writes attestation:{status:"unsigned",...} to trust.checkpoint.attestation.json.
  * Signing is ALWAYS fail-open — a signing failure never breaks the seal.
  */
 export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: string, status: string, phase: string): Promise<void> {
@@ -1458,7 +1458,7 @@ export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: s
   // Additive: if surface lacks in-toto/sigstore primitives, skip silently.
   // The .catch() at the call site already guards the parent command; this inner
   // catch is defense-in-depth so signing never propagates an error upward.
-  await signCheckpointAttestation(dir, surface, bundle, checkpointPath, envelope).catch((err) => {
+  await signCheckpointAttestation(dir, surface, bundle, checkpointPath).catch((err) => {
     process.stderr.write(`[checkpoint-signing] signing skipped due to error: ${err instanceof Error ? err.message : String(err)}\n`);
   });
 }
@@ -1472,7 +1472,8 @@ export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: s
  *
  *   - Signed (CI/OIDC):  writes trust.checkpoint.sig.json (DSSE envelope, cosign-verifiable).
  *   - Unsigned (local):  writes trust.checkpoint.intoto.json (unsigned statement).
- *   - Always updates:    trust.checkpoint.json with attestation:{status,path,...}.
+ *   - Always writes:     trust.checkpoint.attestation.json with attestation:{status,path,...}.
+ *                        trust.checkpoint.json is NOT modified after its digest is computed.
  *
  * NEVER throws — all errors are caught and surfaced as stderr warnings.
  * Skips silently when Surface's toInTotoStatement / signStatementWithSigstore are absent.
@@ -1481,14 +1482,12 @@ export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: s
  * @param surface        Loaded Surface module (may or may not have in-toto/sigstore exports).
  * @param bundle         Parsed trust.bundle (becomes the in-toto predicate).
  * @param checkpointPath Absolute path to the already-written trust.checkpoint.json.
- * @param envelope       The envelope object that was written (mutated in-place then re-written).
  */
 async function signCheckpointAttestation(
   dir: string,
   surface: SurfaceModule,
   bundle: AnyObj,
   checkpointPath: string,
-  envelope: AnyObj,
 ): Promise<void> {
   // Guard: both primitives must be present (consumed from Surface, never reimplemented).
   if (typeof surface.toInTotoStatement !== "function" || typeof surface.signStatementWithSigstore !== "function") {
@@ -1544,10 +1543,12 @@ async function signCheckpointAttestation(
     process.stderr.write("[checkpoint-signing] no ambient OIDC identity — unsigned in-toto statement written (expected locally)\n");
   }
 
-  // Step D: update trust.checkpoint.json with the attestation record.
-  // This makes the attestation path verifiable from the checkpoint itself.
-  envelope.attestation = attestation;
-  writeJson(checkpointPath, envelope);
+  // Step D: write the attestation record to a SEPARATE companion file.
+  // trust.checkpoint.json is NOT modified — it must remain byte-identical to what was signed.
+  // The companion file carries the pointer/status; the subject-digest binding in the
+  // in-toto statement ties it back to the checkpoint without breaking the digest.
+  const attestationPath = path.join(dir, "trust.checkpoint.attestation.json");
+  writeJson(attestationPath, attestation);
 }
 
 /**
