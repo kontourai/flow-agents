@@ -215,11 +215,26 @@ Record the final local state with `advance-state`. Use `status: verified` only w
 After review, verification, evidence, and Goal Fit are clean for the same diff:
 
 1. Confirm the working tree contains only verified scope.
-2. Commit the verified diff.
-3. Push the branch.
-4. Open or update the provider change record with issue links, closing refs, evidence links, and verification summary, or record an explicit no-provider-change reason.
-5. Wait for provider checks/CI or record missing checks as `NOT_VERIFIED`.
-6. Record the gate claim for the Builder Kit `pr-open` step immediately after the PR is opened or updated:
+2. Publish the session trust bundle to `delivery/` so the CI trust-reconcile job can verify what the agent claimed. `record-release` (via the sidecar writer) does this automatically (best-effort). To publish or re-publish explicitly:
+
+   ```bash
+   npm run workflow:sidecar -- publish-delivery .flow-agents/<slug>
+   ```
+
+   Then force-stage the trust artifacts for the delivery commit. They are gitignored
+   by default (they are runtime artifacts written on every local delivery) — `-f`
+   commits them deliberately into THIS delivery PR so CI's trust-reconcile job can
+   reconcile the session's claims against fresh CI results:
+
+   ```bash
+   git add -f delivery/trust.bundle delivery/trust.checkpoint.json
+   ```
+
+3. Commit the verified diff, including the force-added `delivery/trust.bundle` and `delivery/trust.checkpoint.json`.
+4. Push the branch.
+5. Open or update the provider change record with issue links, closing refs, evidence links, and verification summary, or record an explicit no-provider-change reason.
+6. Wait for provider checks/CI or record missing checks as `NOT_VERIFIED`.
+7. Record the gate claim for the Builder Kit `pr-open` step immediately after the PR is opened or updated:
 
 ```bash
 npm run workflow:sidecar -- record-gate-claim .flow-agents/<slug> \
