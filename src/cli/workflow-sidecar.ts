@@ -1055,7 +1055,41 @@ export function writeState(dir: string, slug: string, status: string, phase: str
 // After 4c, evidence.json and critique.json are no longer written.
 // Extract checks and critiques from the existing trust.bundle for callers that
 // need to rebuild the bundle (e.g. record-critique, record-learning).
-function checksFromBundle(dir: string): AnyObj[] {
+
+// ADR 0016 Abstraction A (Step 0 Q3 carry-forward): build the set of declared
+// claimTypes from the active flow step for the session at `dir`. When no active
+// flow is present (workflow.* sessions), returns an empty set so every existing
+// predicate is unchanged. When a FlowDefinition-driven session (builder.build)
+// is active, the set contains the kit-typed claimTypes (e.g. "builder.verify.tests",
+// "builder.verify.policy-compliance") so round-trip helpers broaden their filters
+// to include declared claims alongside the legacy workflow.* ones.
+//
+// Safety guard: current.json in the .flow-agents dir records the CURRENTLY ACTIVE
+// session via artifact_dir. If current.json points to a different session than `dir`
+// (e.g. another session was the last to call advance-state --flow-definition), we
+// return an empty set so declared-type predicates are NOT applied to the wrong session.
+// This prevents a cross-session active_flow_id from broadening claim filters for
+// unrelated sessions (which would cause spurious evidence/critique check behavior).
+function declaredClaimTypesFor(dir: string): Set<string> {
+  const flowAgentsDir = path.dirname(dir);
+  // Verify that current.json points to `dir` before reading active flow step.
+  // If it points to a different session, return empty set (zero behavior change).
+  const currentFile = path.join(flowAgentsDir, "current.json");
+  try {
+    const current = JSON.parse(fs.readFileSync(currentFile, "utf8")) as Record<string, unknown>;
+    const artDir = typeof current["artifact_dir"] === "string" ? current["artifact_dir"] : null;
+    if (!artDir) return new Set<string>();
+    const resolvedCurrent = path.resolve(flowAgentsDir, artDir);
+    if (path.resolve(dir) !== resolvedCurrent) return new Set<string>();
+  } catch {
+    return new Set<string>();
+  }
+  const activeStep = resolveActiveFlowStep(flowAgentsDir);
+  if (!activeStep || activeStep.gateExpects.length === 0) return new Set<string>();
+  return new Set<string>(activeStep.gateExpects.map((e) => e.bundle_claim.claimType));
+}
+
+function checksFromBundle(dir: string, declaredClaimTypes: Set<string> = new Set()): AnyObj[] {
   const bundle = loadJson(path.join(dir, "trust.bundle"));
   if (!Array.isArray(bundle.evidence)) return [];
   const allClaims: AnyObj[] = Array.isArray(bundle.claims) ? bundle.claims : [];
@@ -1066,10 +1100,13 @@ function checksFromBundle(dir: string): AnyObj[] {
   for (const ev of bundle.evidence) {
     if (!ev || !ev.claimId) continue;
     const claim = claimById.get(ev.claimId);
-    if (!claim || !String(claim.claimType || "").startsWith("workflow.check.")) continue;
+    if (!claim) continue;
+    const ct = String(claim.claimType || "");
+    // ADR 0016 Step 0: broaden to include declared kit-typed claims alongside workflow.check.*
+    if (!ct.startsWith("workflow.check.") && !declaredClaimTypes.has(ct)) continue;
     if (seen.has(ev.claimId)) continue;
     seen.add(ev.claimId);
-    const kind = claim.claimType.replace("workflow.check.", "") || "external";
+    const kind = ct.startsWith("workflow.check.") ? (ct.replace("workflow.check.", "") || "external") : (ct.split(".").pop() || "external");
     const status = claim.value ?? "not_verified";
     const check: AnyObj = { id: String(claim.subjectId || "").split("/").pop() || ev.claimId, kind, status, summary: claim.fieldOrBehavior || "" };
     if (ev.execution && typeof ev.execution.label === "string") check.command = ev.execution.label;
@@ -1078,18 +1115,22 @@ function checksFromBundle(dir: string): AnyObj[] {
   }
   // Also include check claims that have no evidence item (surface_trust_refs style)
   for (const claim of allClaims) {
-    if (!claim || !String(claim.claimType || "").startsWith("workflow.check.")) continue;
+    if (!claim) continue;
+    const ct = String(claim.claimType || "");
+    // ADR 0016 Step 0: broaden to include declared kit-typed claims alongside workflow.check.*
+    if (!ct.startsWith("workflow.check.") && !declaredClaimTypes.has(ct)) continue;
     if (seen.has(claim.id)) continue;
     seen.add(claim.id);
-    const kind = claim.claimType.replace("workflow.check.", "") || "external";
+    const kind = ct.startsWith("workflow.check.") ? (ct.replace("workflow.check.", "") || "external") : (ct.split(".").pop() || "external");
     checks.push({ id: String(claim.subjectId || "").split("/").pop() || claim.id, kind, status: claim.value ?? "not_verified", summary: claim.fieldOrBehavior || "" });
   }
   return checks;
 }
-function critiquesFromBundle(dir: string): AnyObj[] {
+function critiquesFromBundle(dir: string, declaredClaimTypes: Set<string> = new Set()): AnyObj[] {
   const bundle = loadJson(path.join(dir, "trust.bundle"));
   if (!Array.isArray(bundle.claims)) return [];
-  const critiqueClaims = bundle.claims.filter((c: AnyObj) => c && c.claimType === "workflow.critique.review");
+  // ADR 0016 Step 0: broaden to include declared kit-typed critique claims alongside workflow.critique.review
+  const critiqueClaims = bundle.claims.filter((c: AnyObj) => c && (c.claimType === "workflow.critique.review" || declaredClaimTypes.has(c.claimType)));
   return critiqueClaims.map((c: AnyObj) => ({
     id: String(c.subjectId || "").split("/").pop() || c.id,
     verdict: c.value ?? "not_verified",
@@ -1268,12 +1309,13 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   // Fall back to critique.json for legacy sessions that still have it on disk.
   const existingCritiqueJson = loadJson(path.join(dir, "critique.json"), { critiques: [] });
   const legacyCritiques: AnyObj[] = Array.isArray(existingCritiqueJson.critiques) ? existingCritiqueJson.critiques : [];
-  const bundleCritiques = legacyCritiques.length === 0 ? critiquesFromBundle(dir) : legacyCritiques;
+  const _dctCritique = declaredClaimTypesFor(dir);
+  const bundleCritiques = legacyCritiques.length === 0 ? critiquesFromBundle(dir, _dctCritique) : legacyCritiques;
   const critique = { id: opt(p, "id") || "review", reviewer: opt(p, "reviewer", "tool-code-reviewer"), reviewed_at: opt(p, "timestamp", now()), verdict: opt(p, "verdict", "pass"), summary: opt(p, "summary"), artifact_refs: opts(p, "artifact-ref"), findings: opts(p, "finding-json").map((v) => normalizeFinding(parseJson(v, "--finding-json"))) };
   const critiques = [...bundleCritiques, critique];
   if (critique.verdict === "pass" && critique.findings.some((f: AnyObj) => f.status === "open")) die("required critique must pass");
   // Phase 4c: build bundle from raw inputs; read checks from trust.bundle (evidence.json no longer written).
-  const _critiqueEvChecks: AnyObj[] = checksFromBundle(dir);
+  const _critiqueEvChecks: AnyObj[] = checksFromBundle(dir, _dctCritique);
   const _critiqueAccCriteria: AnyObj[] = Array.isArray(loadJson(path.join(dir, "acceptance.json")).criteria) ? loadJson(path.join(dir, "acceptance.json")).criteria : [];
   assertBundleWritten(await writeTrustBundle(dir, slug, critique.reviewed_at, _critiqueEvChecks, _critiqueAccCriteria, critiques));
   return 0;
@@ -1365,17 +1407,25 @@ async function recordLearning(p: ReturnType<typeof parseArgs>): Promise<number> 
   writeJson(path.join(dir, "learning.json"), { ...sidecarBase(slug), status, updated_at: timestamp, records });
   writeState(dir, slug, "accepted", "learning", timestamp, opt(p, "summary"));
   // Phase 4c: build bundle from raw inputs; read checks/critiques from trust.bundle (bespoke sidecars no longer written).
-  const _learningChecks: AnyObj[] = checksFromBundle(dir);
+  // ADR 0016 Step 0: pass declaredClaimTypes so declared builder.* claims survive the round-trip.
+  const _dctLearning = declaredClaimTypesFor(dir);
+  const _learningChecks: AnyObj[] = checksFromBundle(dir, _dctLearning);
   const _learningCriteria: AnyObj[] = Array.isArray(loadJson(path.join(dir, "acceptance.json")).criteria) ? loadJson(path.join(dir, "acceptance.json")).criteria : [];
-  const _learningCritiques: AnyObj[] = critiquesFromBundle(dir);
+  const _learningCritiques: AnyObj[] = critiquesFromBundle(dir, _dctLearning);
   assertBundleWritten(await writeTrustBundle(dir, slug, timestamp, _learningChecks, _learningCriteria, _learningCritiques));
   return 0;
 }
-function evidenceClean(dir: string): boolean {
+function evidenceClean(dir: string, declaredClaimTypes: Set<string> = new Set()): boolean {
   // Phase 4c: read from trust.bundle (sole verification artifact); fall back to evidence.json for legacy sessions.
+  // ADR 0016 Step 0: declaredClaimTypes broadens the filter to include kit-typed check claims
+  // (e.g. builder.verify.tests) in addition to workflow.check.* for FlowDefinition-driven sessions.
   const bundle = loadJson(path.join(dir, "trust.bundle"));
   if (Array.isArray(bundle.claims)) {
-    const checkClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => c && String(c.claimType || "").startsWith("workflow.check."));
+    const checkClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => {
+      if (!c) return false;
+      const ct = String(c.claimType || "");
+      return ct.startsWith("workflow.check.") || declaredClaimTypes.has(ct);
+    });
     if (checkClaims.length === 0) return false;
     return checkClaims.every((c: AnyObj) => {
       const v = String(c.value || "");
@@ -1389,11 +1439,13 @@ function evidenceClean(dir: string): boolean {
     return !Array.isArray(c.standard_refs) || c.standard_refs.every((r: AnyObj) => ["junit", "sarif", "coverage", "veritas"].includes(r.standard));
   });
 }
-function critiqueClean(dir: string): boolean {
+function critiqueClean(dir: string, declaredClaimTypes: Set<string> = new Set()): boolean {
   // Phase 4c: read from trust.bundle (sole verification artifact); fall back to critique.json for legacy sessions.
+  // ADR 0016 Step 0: declaredClaimTypes broadens the filter to include kit-typed critique claims
+  // (e.g. builder.verify.policy-compliance) in addition to workflow.critique.review.
   const bundle = loadJson(path.join(dir, "trust.bundle"));
   if (Array.isArray(bundle.claims)) {
-    const critiqueClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => c && c.claimType === "workflow.critique.review");
+    const critiqueClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => c && (c.claimType === "workflow.critique.review" || declaredClaimTypes.has(c.claimType)));
     if (critiqueClaims.length === 0) return false; // no critique written yet
     return critiqueClaims.every((c: AnyObj) => {
       const v = String(c.value || "");
@@ -1427,8 +1479,10 @@ async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
     const checks = opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json")));
     if (checks.some((c) => c.status !== "pass" && c.status !== "skip")) die("clean evidence requires all non-skipped checks to pass");
     // Phase 4c: evidence check reads from trust.bundle (sole verification artifact); legacy evidence.json fallback in evidenceClean.
-    const _hasBundleEvidence = fs.existsSync(path.join(dir, "trust.bundle")) && evidenceClean(dir);
-    const _hasLegacyEvidence = fs.existsSync(path.join(dir, "evidence.json")) && evidenceClean(dir);
+    // ADR 0016 Step 0: pass declaredClaimTypes so builder.* check/critique claims count as clean evidence.
+    const _dctDogfood = declaredClaimTypesFor(dir);
+    const _hasBundleEvidence = fs.existsSync(path.join(dir, "trust.bundle")) && evidenceClean(dir, _dctDogfood);
+    const _hasLegacyEvidence = fs.existsSync(path.join(dir, "evidence.json")) && evidenceClean(dir, _dctDogfood);
     if (!_hasBundleEvidence && !_hasLegacyEvidence && fs.existsSync(path.join(dir, "trust.bundle"))) die("cannot mark clean without passing evidence");
     if (!_hasBundleEvidence && !_hasLegacyEvidence && !fs.existsSync(path.join(dir, "trust.bundle")) && fs.existsSync(path.join(dir, "evidence.json"))) die("cannot mark clean without passing evidence");
     if (!_hasBundleEvidence && !_hasLegacyEvidence && !fs.existsSync(path.join(dir, "trust.bundle")) && !fs.existsSync(path.join(dir, "evidence.json")) && checks.length === 0) die("cannot mark clean without passing evidence");
@@ -1436,9 +1490,9 @@ async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
       const newCritiqueVerdict = opt(p, "critique-verdict", "pass");
       for (const value of opts(p, "finding-json")) normalizeFinding(parseJson(value, "--finding-json"));
       if (newCritiqueVerdict !== "pass") die(opt(p, "release-decision") ? "requires clean critique" : "requires clean critique before recording pass evidence");
-      if (!opt(p, "critique-id") && !critiqueClean(dir)) die("requires passing critique");
+      if (!opt(p, "critique-id") && !critiqueClean(dir, _dctDogfood)) die("requires passing critique");
       // Phase 4c: if existing state has a dirty critique (in bundle or legacy critique.json), block even when adding a new critique-id.
-      if (!critiqueClean(dir) && (fs.existsSync(path.join(dir, "trust.bundle")) || fs.existsSync(path.join(dir, "critique.json")))) die(opt(p, "release-decision") ? "requires clean critique" : "requires clean critique before recording pass evidence");
+      if (!critiqueClean(dir, _dctDogfood) && (fs.existsSync(path.join(dir, "trust.bundle")) || fs.existsSync(path.join(dir, "critique.json")))) die(opt(p, "release-decision") ? "requires clean critique" : "requires clean critique before recording pass evidence");
     }
   }
   const learningRecords = opts(p, "learning-record-json").map((v) => normalizeLearning(parseJson(v, "--learning-record-json"), opt(p, "timestamp", now())));
