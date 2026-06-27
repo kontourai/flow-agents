@@ -16,6 +16,90 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+// ─── Security: Layer 1 traversal defense ─────────────────────────────────────
+//
+// Both kitId and flowName originate from agent-writable sources (active_flow_id
+// in current.json, and FLOW_AGENTS_FLOW_DEFS_DIR set by the runtime). A crafted
+// value like "builder.../../../.flow-agents/slug/fake-flow" produces:
+//   kitId = "builder"
+//   flowName = "../../../.flow-agents/slug/fake-flow"
+// which resolves OUTSIDE kits/ via path.join traversal.
+//
+// SLUG_RE closes this: it rejects any value containing path separators, dots,
+// or characters outside the safe identifier alphabet. Only [a-zA-Z0-9_-] is
+// allowed, making traversal sequences impossible.
+//
+// Belt-and-suspenders: after building the path we also confirm the resolved
+// absolute path stays inside the expected root directory.
+
+/** Strict slug pattern — allows only URL-safe identifier chars. */
+const SLUG_RE = /^[a-zA-Z0-9_-]+$/;
+
+/**
+ * Returns true when the given resolved absolute path falls within a .flow-agents
+ * directory (an agent-writable area). Used to reject FLOW_AGENTS_FLOW_DEFS_DIR
+ * overrides that point into agent-controlled storage.
+ */
+function isAgentWritableDir(resolvedDir: string): boolean {
+  return resolvedDir.split(path.sep).includes(".flow-agents");
+}
+
+/**
+ * Build and validate the FlowDefinition file path.
+ *
+ * Returns the validated absolute file path, or null when:
+ *  - kitId or flowName contains chars outside SLUG_RE (rejects traversal)
+ *  - FLOW_AGENTS_FLOW_DEFS_DIR resolves into a .flow-agents directory
+ *  - The resolved path escapes the expected root (belt-and-suspenders)
+ *
+ * When the override is unsafe (points into .flow-agents), falls back silently
+ * to the repoRoot/kits/ path so the resolver still works for legit flows.
+ */
+function resolveFlowFilePath(
+  kitId: string,
+  flowName: string,
+  flowId: string,
+  repoRoot: string,
+): string | null {
+  // Primary defense: reject any slug containing traversal chars or non-identifier chars.
+  if (!SLUG_RE.test(kitId) || !SLUG_RE.test(flowName)) return null;
+
+  const override = process.env["FLOW_AGENTS_FLOW_DEFS_DIR"];
+
+  let expectedRoot: string;
+  let flowFilePath: string;
+
+  if (override) {
+    const resolvedOverride = path.resolve(override);
+    if (isAgentWritableDir(resolvedOverride)) {
+      // Override targets an agent-writable .flow-agents path — reject it and
+      // fall back to the kit root.  The session will resolve the real kit flow.
+      expectedRoot = path.resolve(repoRoot, "kits");
+      flowFilePath = path.join(repoRoot, "kits", kitId, "flows", `${flowName}.flow.json`);
+    } else {
+      expectedRoot = resolvedOverride;
+      // flowId = kitId + "." + flowName; after slug validation this contains only
+      // [a-zA-Z0-9_-.] — no slashes, no traversal.
+      flowFilePath = path.join(resolvedOverride, `${flowId}.flow.json`);
+    }
+  } else {
+    expectedRoot = path.resolve(repoRoot, "kits");
+    flowFilePath = path.join(repoRoot, "kits", kitId, "flows", `${flowName}.flow.json`);
+  }
+
+  // Belt-and-suspenders: confirm the resolved path stays within the expected root.
+  // After slug validation this is theoretically unreachable, but defense-in-depth
+  // verifies the invariant rather than merely asserting it.
+  const resolvedPath = path.resolve(flowFilePath);
+  if (!resolvedPath.startsWith(expectedRoot + path.sep) && resolvedPath !== expectedRoot) {
+    return null; // traversal still detected — paranoid fallback
+  }
+
+  return resolvedPath;
+}
+
+// ─── Public types ─────────────────────────────────────────────────────────────
+
 /** A single gate expectation from a FlowDefinition expects[] entry. */
 export type GateExpectation = {
   id: string;
@@ -72,12 +156,14 @@ export function resolveFlowStep(flowId: string, stepId: string, repoRoot: string
   const flowName = flowId.slice(dotIdx + 1);
   if (!kitId || !flowName) return null;
 
-  // Determine the FlowDefinition file path.
-  // Honor FLOW_AGENTS_FLOW_DEFS_DIR for custom/override installs.
-  const override = process.env["FLOW_AGENTS_FLOW_DEFS_DIR"];
-  const flowFilePath = override
-    ? path.join(override, `${flowId}.flow.json`)
-    : path.join(repoRoot, "kits", kitId, "flows", `${flowName}.flow.json`);
+  // Layer 1 defense: validate stepId too — it is matched against gate.step values but
+  // still originates from agent-writable current.json active_step_id.
+  if (!SLUG_RE.test(stepId)) return null;
+
+  // Determine the FlowDefinition file path with slug validation + path containment check.
+  // Returns null for traversal attempts (e.g. flowName = "../../../.flow-agents/fake").
+  const flowFilePath = resolveFlowFilePath(kitId, flowName, flowId, repoRoot);
+  if (!flowFilePath) return null;
 
   let flowDef: FlowDefinition;
   try {
@@ -122,10 +208,9 @@ export function resolvePhaseMap(flowId: string, repoRoot: string): Record<string
   const flowName = flowId.slice(dotIdx + 1);
   if (!kitId || !flowName) return null;
 
-  const override = process.env["FLOW_AGENTS_FLOW_DEFS_DIR"];
-  const flowFilePath = override
-    ? path.join(override, `${flowId}.flow.json`)
-    : path.join(repoRoot, "kits", kitId, "flows", `${flowName}.flow.json`);
+  // Layer 1 defense: same slug validation + path containment as resolveFlowStep.
+  const flowFilePath = resolveFlowFilePath(kitId, flowName, flowId, repoRoot);
+  if (!flowFilePath) return null;
 
   let flowDef: FlowDefinition;
   try {

@@ -1050,15 +1050,25 @@ async function bundleEnforcement(artifactDir, activeFlowStep) {
   const declaredClaimTypes = activeFlowStep && Array.isArray(activeFlowStep.gateExpects)
     ? new Set(activeFlowStep.gateExpects.map(e => e && e.bundle_claim && e.bundle_claim.claimType).filter(Boolean))
     : null;
+
+  // SECURITY (Layer 2 — gate-bypass-chain fix): use UNION form instead of if/else.
+  // With the old if/else, an empty declaredClaimTypes (Set{}) from a fake flow with
+  // expects:[] caused isSelectedClaim to return false for EVERY claim — all
+  // bundleEnforcement checks were silently bypassed. The union form ensures workflow.*
+  // claims are ALWAYS enforced regardless of whether a FlowDefinition is active or what
+  // its expects[] contains. Declared claimTypes are added on top of the baseline.
   const isSelectedClaim = (claim) => {
     const ct = String(claim.claimType || '');
-    if (declaredClaimTypes != null) {
-      // Declared-type path: only process claims in the gate's expects[] set.
-      return declaredClaimTypes.has(ct);
-    }
-    // Fallback workflow.* path: existing behavior unchanged.
-    return ct.startsWith('workflow.');
+    // Union: workflow.* is always selected (baseline); declared types extend it.
+    return ct.startsWith('workflow.') || (declaredClaimTypes != null && declaredClaimTypes.has(ct));
   };
+
+  // Misconfiguration guard: an active FlowDefinition with zero expects[] is suspicious.
+  // Empty expects can indicate a tampered flow definition (the gate-bypass exploit).
+  // Emit a hard warning so operators see it regardless of session phase.
+  if (declaredClaimTypes !== null && declaredClaimTypes.size === 0) {
+    warnings.push(`gate misconfiguration: active FlowDefinition has empty expects[] (possible tampered flow definition or zero-expects bypass attempt); verify the flow definition is authentic before delivery.`);
+  }
 
   for (const claim of bundle.claims) {
     if (!claim || typeof claim !== 'object') continue;
@@ -1277,9 +1287,9 @@ async function analyze(root, now = Date.now()) {
   const preExecution = isPreExecution(path.dirname(latest.file), status);
   const terminal = TERMINAL_STATUSES.has(taskStatus);
   // Always-block: a claimed pass the capture log or evidence.json contradicts.
-  const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED/;
+  const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:/;
   // Full gate (execution onward): also completeness/hygiene and not-done state.
-  const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED/;
+  const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:/;
   const blockRe = (preExecution || terminal) ? HARD_BLOCK : FULL_BLOCK;
   const blocking = warnings.some(w => {
     // Capture cross-reference warn-mode notes never block (operator opted out).
