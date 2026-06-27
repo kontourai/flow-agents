@@ -676,6 +676,62 @@ function readCommandLog(artifactDir) {
   return byCommand;
 }
 
+/**
+ * Read command-log.jsonl into a map of normalized-command -> LATEST capture outcome.
+ * The LAST entry for each command wins (unlike readCommandLog which makes FAIL sticky).
+ * Used for the namespace-agnostic captured-FAIL reconciliation: we want to know what
+ * happened LAST for each command, so a genuine re-run-to-pass clears the FAIL.
+ * Do NOT use for captureCrossReference (which must keep FAIL sticky for claimed-pass checks).
+ */
+function readLatestCommandLog(artifactDir) {
+  const file = path.join(artifactDir, 'command-log.jsonl');
+  let raw = '';
+  try { raw = fs.readFileSync(file, 'utf8'); } catch { return new Map(); }
+  const byCommand = new Map();
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let entry;
+    try { entry = JSON.parse(trimmed); } catch { continue; }
+    if (!entry || typeof entry.command !== 'string') continue;
+    const key = normalizeCommand(entry.command);
+    if (!key) continue;
+    const failed = entry.observedResult === 'fail' || (Number.isInteger(entry.exitCode) && entry.exitCode !== 0);
+    // LAST entry wins — genuine re-run-to-pass overwrites the earlier FAIL.
+    byCommand.set(key, {
+      ran: true,
+      failed,
+      exitCode: Number.isInteger(entry.exitCode) ? entry.exitCode : null,
+    });
+  }
+  return byCommand;
+}
+
+// ─── Claim-status helpers for capturedFailReconciliation ─────────────────────
+
+/**
+ * Returns true when a claim's stored status+value asserts the command PASSED.
+ * Used to detect namespace-agnostic false-completions.
+ */
+function claimAssertsPass(status, value) {
+  const s = String(status || '').toLowerCase();
+  const v = String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return (s === 'verified' || s === 'assumed' || s === 'accepted' || s === 'trusted')
+    && (v === 'pass' || v === 'passed' || v === 'verified');
+}
+
+/**
+ * Returns true when a claim's stored status+value ACKNOWLEDGES a failure
+ * (the agent owned the failure rather than claiming pass).
+ */
+function claimAcknowledgesFailure(status, value) {
+  const s = String(status || '').toLowerCase();
+  const v = String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return s === 'disputed' || s === 'rejected' || s === 'failing' || s === 'failed'
+    || s === 'not_verified' || s === 'not-verified'
+    || v === 'fail' || v === 'failed' || v === 'not_verified' || v === 'failing';
+}
+
 // ─── Hash-chain integrity verification (Increment B2, tamper-EVIDENCE) ────────
 //
 // command-log.jsonl is the independent capture truth source. Each chained entry
@@ -949,12 +1005,22 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
         const postExecPhase = capturePhase && !PRE_EXECUTION_PHASES.has(capturePhase);
         const preExecStatus = !captureStatus || captureStatus === 'new' || PRE_EXECUTION_STATUSES.has(captureStatus);
         if (postExecPhase && !preExecStatus) {
-          warnings.push(
-            `${base} expected capture log is missing — possible deletion of the capture truth source; ` +
-            `phase:${capturePhase} status:${captureStatus} indicates commands should have run. ` +
-            'Cannot verify command execution deterministically. ' +
-            'Restore from a checkpoint or investigate.'
-          );
+          // Fix #216 over-block: only emit the missing-log warning when a command was
+          // actually EXPECTED to be captured — i.e., the trust.bundle evidence has at
+          // least one item with execution.label (concrete proof a command was meant to
+          // be captured). A no-command session (doc review, policy task advanced to
+          // verification without running shell commands) must NOT be blocked here.
+          // Note: `bundle` is already read at the top of captureCrossReference.
+          const captureEvidence = bundle && Array.isArray(bundle.evidence) ? bundle.evidence : [];
+          const hasExpectedCapture = captureEvidence.some(ev => ev && ev.execution && ev.execution.label);
+          if (hasExpectedCapture) {
+            warnings.push(
+              `${base} expected capture log is missing — possible deletion of the capture truth source; ` +
+              `phase:${capturePhase} status:${captureStatus} indicates commands should have run. ` +
+              'Cannot verify command execution deterministically. ' +
+              'Restore from a checkpoint or investigate.'
+            );
+          }
         }
       }
     }
@@ -1045,6 +1111,121 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
   return warnings;
 }
 
+/**
+ * Namespace-agnostic captured-FAIL reconciliation (AC1 — closes the allowlist bypass).
+ *
+ * The existing captureCrossReference only checks claims that pass the namespace
+ * allowlist (workflow.* prefix or declared gateExpects[]). A kit-typed claim
+ * (e.g. builder.verify.tests) whose command-log entry says FAIL can slip through
+ * when no active FlowDefinition declares that claimType.
+ *
+ * This function is namespace-agnostic: it builds the LATEST-capture-per-command map
+ * and for each command whose last capture is FAIL it checks:
+ *   (A) Any claim (ANY namespace) asserting pass for that command → false-completion HARD_BLOCK
+ *   (B) No claim acknowledges the failure (failing/disputed/not_verified) → unaccounted HARD_BLOCK
+ *
+ * Fires ONLY at a completing session (terminal/verified status).
+ * Mid-execution FAILs are expected; only completion-time FAILs need reconciliation.
+ *
+ * AC2 guarantees (no over-block):
+ *   - Does NOT fire mid-execution (completing guard).
+ *   - Fail-then-re-run-to-pass: latest is PASS → not in latestFails → no warning.
+ *   - Acknowledged failure: claim has failing/disputed status → ackClaims present → no warning.
+ *   - No-command session: no log → latestLog empty → no warning.
+ */
+function capturedFailReconciliation(root, artifactDir, taskStatus) {
+  // Only fire at completion — not mid-execution (fails are expected while working).
+  const completing = TERMINAL_STATUSES.has(taskStatus) || taskStatus === 'verified';
+  if (!completing) return [];
+
+  const latestLog = readLatestCommandLog(artifactDir);
+  if (latestLog.size === 0) return []; // No captures — nothing to reconcile
+
+  // Collect commands whose LATEST capture is FAIL.
+  const latestFails = new Map(); // cmd -> {failed:true, exitCode}
+  for (const [cmd, info] of latestLog) {
+    if (info.failed) latestFails.set(cmd, info);
+  }
+  if (latestFails.size === 0) return []; // All latest captures passed
+
+  const base = relative(root, artifactDir);
+  const warnings = [];
+
+  // Load the trust.bundle for claim/evidence analysis.
+  const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
+  const allClaims = bundle && Array.isArray(bundle.claims) ? bundle.claims : [];
+  const allEvidence = bundle && Array.isArray(bundle.evidence) ? bundle.evidence : [];
+
+  // Build: claimId → claim (for fast evidence→claim lookup)
+  const claimById = new Map();
+  for (const c of allClaims) {
+    if (c && c.id) claimById.set(c.id, c);
+  }
+
+  // For each FAIL-latest command, track what claims say about it.
+  // cmdAcc: cmd → {passClaims: [...], ackClaims: []}
+  const cmdAcc = new Map();
+  const initAcc = (cmd) => {
+    if (!cmdAcc.has(cmd)) cmdAcc.set(cmd, { passClaims: [], ackClaims: [] });
+    return cmdAcc.get(cmd);
+  };
+
+  // Path A: evidence items with execution.label link a claim to a specific command.
+  for (const ev of allEvidence) {
+    if (!ev || !ev.execution || !ev.execution.label) continue;
+    const cmd = normalizeCommand(ev.execution.label);
+    if (!cmd || !latestFails.has(cmd)) continue;
+    const claim = claimById.get(ev.claimId);
+    if (!claim) continue;
+    const acc = initAcc(cmd);
+    const s = String(claim.status || '').toLowerCase();
+    const v = normalizedStatus(claim.value || '');
+    if (claimAssertsPass(s, v)) acc.passClaims.push(claim);
+    if (claimAcknowledgesFailure(s, v)) acc.ackClaims.push(claim);
+  }
+
+  // Path B: claim.fieldOrBehavior resolves directly to the command (field-based resolution).
+  for (const c of allClaims) {
+    if (!c) continue;
+    const cmd = normalizeCommand(c.fieldOrBehavior || '');
+    if (!cmd || !latestFails.has(cmd)) continue;
+    const acc = initAcc(cmd);
+    const s = String(c.status || '').toLowerCase();
+    const v = normalizedStatus(c.value || '');
+    if (claimAssertsPass(s, v)) acc.passClaims.push(c);
+    if (claimAcknowledgesFailure(s, v)) acc.ackClaims.push(c);
+  }
+
+  // Evaluate each FAIL-latest command.
+  for (const [cmd, failInfo] of latestFails) {
+    const exit = Number.isInteger(failInfo.exitCode) ? failInfo.exitCode : null;
+    const exitStr = exit !== null ? ` (exit ${exit})` : '';
+    const acc = cmdAcc.get(cmd);
+
+    if (acc && acc.passClaims.length > 0) {
+      // Any-namespace claim asserts pass for a command whose latest capture is FAIL.
+      // This is the namespace-agnostic false-completion signal.
+      const claim = acc.passClaims[0];
+      warnings.push(
+        `${base} captured command '${safeOneLine(cmd, 120)}' last ran FAIL${exitStr} ` +
+        `but claim ${safeOneLine(claim.subjectId || claim.id, 80)} (${safeOneLine(claim.claimType, 48)}) ` +
+        `asserts pass — namespace-agnostic caught false-completion.`
+      );
+    } else if (!acc || acc.ackClaims.length === 0) {
+      // No claim acknowledges this failure — unaccounted captured FAIL at completion.
+      warnings.push(
+        `${base} captured command '${safeOneLine(cmd, 120)}' last ran FAIL${exitStr} ` +
+        `and is unaccounted at completion — ` +
+        `cannot complete with an unresolved captured failure. ` +
+        `Acknowledge the failure in evidence (mark as fail/disputed) or re-run the command to pass.`
+      );
+    }
+    // else: acc.ackClaims.length > 0 → acknowledged failure → OK, no warning
+  }
+
+  return warnings;
+}
+
 // ─── ADR 0010 Phase 2: enforce on the canonical Hachure trust.bundle ──────────
 
 // ─── ADR 0010 Phase 2: enforce on the canonical Hachure trust.bundle ──────────
@@ -1093,6 +1274,14 @@ async function bundleEnforcement(artifactDir, activeFlowStep) {
   // bundleEnforcement checks were silently bypassed. The union form ensures workflow.*
   // claims are ALWAYS enforced regardless of whether a FlowDefinition is active or what
   // its expects[] contains. Declared claimTypes are added on top of the baseline.
+  //
+  // AC3 two-part dependency (regression guard — see test_captured_fail_reconciliation.sh):
+  //   Part 1 (this union form): ensures bundleEnforcement always enforces workflow.* claims
+  //     regardless of declaredClaimTypes being null or empty Set.
+  //   Part 2 (empty-expects guard below): emits gate-misconfiguration HARD_BLOCK when
+  //     declaredClaimTypes is a non-null empty Set (active flow with expects:[]).
+  //   Both parts are required: Part 1 alone lets the empty-expects bypass slip through
+  //   without a loud signal; Part 2 alone without the union would silently pass 0 claims.
   const isSelectedClaim = (claim) => {
     const ct = String(claim.claimType || '');
     // Union: workflow.* is always selected (baseline); declared types extend it.
@@ -1289,9 +1478,9 @@ function missingBundleOrStateSignal(artifactDir, activeFlowStep) {
 //
 // Both are used in analyze() for blocking decisions AND in run() for the AC2
 // MAX_BLOCKS hard-block guard (preventing auto-release of hard blocks).
-const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:/;
+const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|unaccounted at completion/;
 // FULL_BLOCK adds: workflow-state hygiene, surface-unavailable fail-closed, missing log.
-const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing/;
+const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing|unaccounted at completion/;
 
 async function analyze(root, now = Date.now()) {
   const flowAgentsDir = path.join(root, '.flow-agents');
@@ -1363,6 +1552,12 @@ async function analyze(root, now = Date.now()) {
   const taskStatus = gateState ? normalizedStatus(gateState.status) : normalizedStatus(status);
   const preExecution = isPreExecution(path.dirname(latest.file), status);
   const terminal = TERMINAL_STATUSES.has(taskStatus);
+
+  // Namespace-agnostic captured-FAIL reconciliation (AC1 — closes the allowlist bypass).
+  // Must run AFTER taskStatus is resolved so the completing guard works correctly.
+  // Fires only at completion (terminal/verified); mid-execution FAILs are expected.
+  warnings.push(...capturedFailReconciliation(root, path.dirname(latest.file), taskStatus));
+
   // Use module-scope HARD_BLOCK / FULL_BLOCK (defined above analyze()).
   // pre-execution/terminal tasks: only HARD_BLOCK signals cause a block.
   // execution-onward tasks: FULL_BLOCK signals cause a block.
