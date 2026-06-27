@@ -103,6 +103,7 @@ The `tool-planner` prompt context must include the latest-base confirmation and 
    - `status: planning`, `type: plan-work`
    - Create or update `state.json` with phase `planning`
    - use `npm run workflow:sidecar -- ensure-session --source-request ... --summary ... --criterion ...` when the repository provides it; this also writes `.flow-agents/current.json`
+   - **Builder Kit build flow**: add `--flow-id builder.build` to the `ensure-session` call when `plan-work` is invoked from `deliver`, from the Builder Kit `build` flow, or from a pick-up-and-build request after `pull-work`. This activates the FlowDefinition-driven path so producers fire and gates enforce on builder.* claims. Do NOT add `--flow-id` for direct/ad-hoc primitive `plan-work` invocations that are not part of a builder-flow.
 2. Delegate to `tool-planner`:
    ```
    Goal: <goal>

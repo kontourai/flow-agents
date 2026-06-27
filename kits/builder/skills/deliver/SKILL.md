@@ -145,8 +145,11 @@ Create the session file with `status: planning`, `iteration: 0`. Use the sidecar
 npm run workflow:sidecar -- ensure-session \
   --source-request "<original request>" \
   --summary "<current delivery goal>" \
-  --criterion "<acceptance criterion>"
+  --criterion "<acceptance criterion>" \
+  --flow-id builder.build
 ```
+
+`--flow-id builder.build` activates the FlowDefinition-driven path for this session. Producers fire, gates enforce on builder.* claims, and `advance-state` sets `active_step_id` automatically via the `builder.build` phase_map. Keep this flag on all `deliver`-initiated sessions; do not remove it for direct ad-hoc requests that are not builder-flow pickup.
 
 ### 2. Plan (plan-work)
 

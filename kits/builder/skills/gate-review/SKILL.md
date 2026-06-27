@@ -19,6 +19,7 @@ Classify gate fires and suspected misses from the session's `trust.bundle` by ca
 - Classification vocabulary (`correct`, `false_block`, `missed_block`) aligns with `context/gate-awareness.md` sections "Judge Gate Correctness" and "Missed-Block Diagnostic".
 - Uses `@kontourai/surface`'s `resolveInquiry(bundle, inquiry)` to produce canonical `InquiryRecord` outputs per ADR 0003.
 - If `@kontourai/surface` is unavailable, logs a warning and skips output. No bespoke fork fallback.
+- **Builder Kit build flow**: gate-review operates on sessions created by `deliver` or `plan-work` with `--flow-id builder.build`. The session's trust.bundle contains both declared builder.* claims (e.g. `builder.verify.tests`) and legacy workflow.* shadow claims. Gate-review classifies all claims present in the bundle regardless of claimType prefix.
 
 ## Inputs
 
