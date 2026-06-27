@@ -500,11 +500,34 @@ echo "=== AC3.2 — Missing command log fail-closed ==="
 
 echo ""
 echo "--- AC3.2a: Post-execution session with command-log deleted → BLOCKS ---"
+echo "    (#216 fix: missing-log guard requires evidence.execution.label to distinguish"
+echo "     from a legit no-command session. This bundle has execution.label=npm-test.)"
 
 AC3D="$TMP/ac3-postexec"
 seed_repo_inprogress "$AC3D" "postex" "execution" "in_progress"
-write_clean_bundle "$AC3D/.flow-agents/postex/trust.bundle"
-# DO NOT write command-log.jsonl (simulates deletion)
+# Write a bundle with execution.label to indicate a command was expected to be captured.
+# This simulates a session where the agent ran commands (evidence.execution.label present)
+# but deleted command-log.jsonl. The #216 guard uses execution.label to distinguish this
+# from a legitimate no-command session (no execution.label → no missing-log warning).
+python3 - "$AC3D/.flow-agents/postex/trust.bundle" << 'PY'
+import json, sys
+bundle = {
+    "schemaVersion": 3, "source": "test",
+    "claims": [],
+    "evidence": [{
+        "id": "ev-captured", "claimId": None,
+        "evidenceType": "command_output", "method": "capture",
+        "sourceRef": "command-log.jsonl",
+        "excerptOrSummary": "npm test was expected to run (log deleted by attacker)",
+        "observedAt": "2026-06-27T00:00:00Z", "collectedBy": "agent",
+        "passing": True,
+        "execution": {"label": "npm test", "exitCode": 0}
+    }],
+    "policies": [], "events": []
+}
+json.dump(bundle, open(sys.argv[1], 'w'))
+PY
+# DO NOT write command-log.jsonl (simulates deletion of the capture truth source)
 
 set +e
 ac3_out=$(FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=100000 \

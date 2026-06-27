@@ -230,6 +230,7 @@ run_integration() {
   bash "$EVAL_DIR/integration/test_gate_lockdown.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_resolvefirststep_security.sh" || result=1
+  bash "$EVAL_DIR/integration/test_captured_fail_reconciliation.sh" || result=1
   echo ""
   bash "$EVAL_DIR/acceptance/prove-capture-teeth-declared.sh" || result=1
   return $result
