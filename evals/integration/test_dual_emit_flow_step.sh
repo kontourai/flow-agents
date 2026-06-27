@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
-# test_dual_emit_flow_step.sh — Integration eval for ADR 0016 Abstraction A P-b dual-emit.
+# test_dual_emit_flow_step.sh — Integration eval for ADR 0016 Abstraction A P-d declared-only.
 #
 # Proves:
 #   1. When current.json carries active_flow_id=builder.build / active_step_id=verify,
-#      record-evidence produces BOTH a builder.verify.tests (primary, declared) AND a
-#      workflow.check.* (legacy shadow, -legacy suffix) claim in trust.bundle, both
-#      citing the same evidence (same subjectId, same value).
+#      record-evidence produces ONLY the declared builder.verify.tests claim in trust.bundle.
+#      No -legacy shadow claim is emitted on FlowDefinition-driven sessions (P-d retired it).
 #   2. A policy-kind check under the same flow step produces builder.verify.policy-compliance
-#      as the declared claim type (semantic matching table).
-#   3. When current.json has NO active_flow_id/active_step_id, only the legacy workflow.*
-#      claims are produced (zero behavior change).
+#      as the declared claim type (semantic matching table). No -legacy shadow emitted.
+#   3. When current.json has NO active_flow_id/active_step_id, only the workflow.*
+#      primary claims are produced — the legitimate no-flow fallback path (unchanged).
 #   4. resolveFlowStep("builder.build","verify",ROOT) returns the verify gate's expects[];
 #      resolveFlowStep("knowledge.ingest","capture",ROOT) resolves the capture gate;
 #      unknown flow/step returns null (fail-open).
@@ -105,7 +104,7 @@ else
 fi
 
 echo ""
-echo "── P-b dual-emit: session WITH active_flow_id=builder.build / active_step_id=verify ──"
+echo "── P-d declared-only: session WITH active_flow_id=builder.build / active_step_id=verify ──"
 
 # Create a session with flow-id and step-id
 mkdir -p "$SESSION_ROOT"
@@ -114,8 +113,8 @@ if flow_agents_node "$WRITER" ensure-session \
   --task-slug dual-emit-test \
   --flow-id builder.build \
   --step-id verify \
-  --title "Dual Emit Test" \
-  --summary "Test dual-emit for ADR 0016 P-b." \
+  --title "Declared-Only Test" \
+  --summary "Test declared-only emit for ADR 0016 P-d." \
   --criterion "Tests pass" \
   --timestamp "2026-06-26T00:00:00Z" >"$TMP/ensure.out" 2>"$TMP/ensure.err"; then
   _pass "ensure-session with --flow-id/--step-id succeeds"
@@ -149,35 +148,34 @@ fi
 
 BUNDLE="$DUAL_DIR/trust.bundle"
 
-# Verify BOTH builder.verify.tests (declared primary) AND workflow.check.test (legacy shadow)
+# Verify ONLY builder.verify.tests (declared) is present; NO -legacy claim (P-d: shadow retired)
 if node -e "
 const fs = require('fs');
 const bundle = JSON.parse(fs.readFileSync('${BUNDLE}', 'utf8'));
 const claims = bundle.claims;
-// Primary declared claim
+// Declared claim must be present
 const declared = claims.find(c => c.claimType === 'builder.verify.tests');
 if (!declared) throw new Error('MISSING declared claim builder.verify.tests; got: ' + JSON.stringify(claims.map(c => c.claimType)));
 if (declared.subjectType !== 'flow-step') throw new Error('expected subjectType=flow-step, got ' + declared.subjectType);
 if (declared.value !== 'fail') throw new Error('expected value=fail, got ' + declared.value);
-// Legacy shadow claim
-const legacy = claims.find(c => c.claimType === 'workflow.check.test');
-if (!legacy) throw new Error('MISSING legacy claim workflow.check.test; claims: ' + JSON.stringify(claims.map(c => c.claimType)));
-if (!legacy.id.endsWith('-legacy')) throw new Error('legacy claim id should end with -legacy, got ' + legacy.id);
-// Both cite same subjectId
-if (declared.subjectId !== legacy.subjectId) throw new Error('subjectIds differ: ' + declared.subjectId + ' vs ' + legacy.subjectId);
-// Status derived by Surface — both should be disputed for fail evidence
+// Status derived by Surface — disputed for fail evidence
 if (declared.status !== 'disputed') throw new Error('declared claim status should be disputed, got ' + declared.status);
-if (legacy.status !== 'disputed') throw new Error('legacy claim status should be disputed, got ' + legacy.status);
+// NO -legacy claim should exist (shadow retired by P-d)
+const legacyClaims = claims.filter(c => c.id.endsWith('-legacy'));
+if (legacyClaims.length > 0) throw new Error('UNEXPECTED -legacy claims in flow-driven session: ' + JSON.stringify(legacyClaims.map(c => c.id)));
+// No workflow.check.* either (declared replaced it)
+const wfCheckClaim = claims.find(c => c.claimType === 'workflow.check.test');
+if (wfCheckClaim) throw new Error('UNEXPECTED workflow.check.test in flow-driven session (should be declared-only); id=' + wfCheckClaim.id);
 console.log('declared:', JSON.stringify({ claimType: declared.claimType, subjectType: declared.subjectType, status: declared.status, id: declared.id }));
-console.log('legacy:  ', JSON.stringify({ claimType: legacy.claimType, subjectType: legacy.subjectType, status: legacy.status, id: legacy.id }));
+console.log('no -legacy claims:', legacyClaims.length === 0);
 " 2>&1; then
-  _pass "dual-emit: builder.verify.tests (declared) AND workflow.check.test (legacy) both present, same subjectId, status derived"
+  _pass "declared-only: builder.verify.tests present, NO -legacy shadow, NO workflow.check.test in flow-driven session"
 else
-  _fail "dual-emit: declared/legacy claims not both present in trust.bundle"
+  _fail "declared-only: unexpected claims in trust.bundle for flow-driven session"
 fi
 
 echo ""
-echo "── P-b dual-emit: policy-kind check maps to builder.verify.policy-compliance ──"
+echo "── P-d declared-only: policy-kind check maps to builder.verify.policy-compliance ──"
 
 # Record a policy check with the same flow context
 if flow_agents_node "$WRITER" record-evidence "$DUAL_DIR" \
@@ -196,19 +194,22 @@ const claims = bundle.claims;
 // Declared claim for policy kind should be builder.verify.policy-compliance
 const policyDeclared = claims.find(c => c.claimType === 'builder.verify.policy-compliance');
 if (!policyDeclared) throw new Error('MISSING policy-compliance declared claim; got: ' + JSON.stringify(claims.map(c => c.claimType)));
-// Legacy shadow should be workflow.check.policy
+// NO -legacy shadow should exist for policy kind either (shadow retired by P-d)
 const policyLegacy = claims.find(c => c.claimType === 'workflow.check.policy' && c.id.endsWith('-legacy'));
-if (!policyLegacy) throw new Error('MISSING legacy workflow.check.policy claim; claims: ' + JSON.stringify(claims.map(c => c.claimType)));
+if (policyLegacy) throw new Error('UNEXPECTED legacy workflow.check.policy claim in flow-driven session; id=' + policyLegacy.id);
+// No standalone workflow.check.policy either
+const wfPolicyClaim = claims.find(c => c.claimType === 'workflow.check.policy');
+if (wfPolicyClaim) throw new Error('UNEXPECTED workflow.check.policy in flow-driven session (should be declared-only); id=' + wfPolicyClaim.id);
 console.log('policy declared:', JSON.stringify({ claimType: policyDeclared.claimType, subjectType: policyDeclared.subjectType, status: policyDeclared.status }));
-console.log('policy legacy:  ', JSON.stringify({ claimType: policyLegacy.claimType, status: policyLegacy.status }));
+console.log('no policy legacy:', policyLegacy === undefined);
 " 2>&1; then
-  _pass "dual-emit: policy-kind check maps to builder.verify.policy-compliance (declared) + workflow.check.policy (legacy)"
+  _pass "declared-only: policy-kind check maps to builder.verify.policy-compliance only (no -legacy shadow)"
 else
-  _fail "dual-emit: policy-kind semantic matching failed"
+  _fail "declared-only: policy-kind semantic matching failed or unexpected legacy claim present"
 fi
 
 echo ""
-echo "── P-b: session WITHOUT active_flow_id → only workflow.* claims (zero change) ──"
+echo "── P-d: session WITHOUT active_flow_id → only workflow.* primary claims (no-flow fallback, unchanged) ──"
 
 # Create a session WITHOUT flow keys
 if flow_agents_node "$WRITER" ensure-session \
@@ -270,8 +271,8 @@ fi
 echo ""
 echo "────────────────────────────────────────────"
 if [[ $errors -eq 0 ]]; then
-  echo "test_dual_emit_flow_step: all checks passed"
+  echo "test_dual_emit_flow_step (declared-only): all checks passed"
 else
-  echo "test_dual_emit_flow_step: $errors check(s) FAILED"
+  echo "test_dual_emit_flow_step (declared-only): $errors check(s) FAILED"
   exit 1
 fi

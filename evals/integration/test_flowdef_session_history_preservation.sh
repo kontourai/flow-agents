@@ -53,7 +53,7 @@ flow_agents_node "$WRITER" init-plan "$SESSION_DIR/$SLUG--deliver.md" \
   --source-request "Test" --summary "Testing" \
   --timestamp "2026-06-01T00:00:00Z" >/dev/null 2>&1
 
-# Record a passing check (produces builder.verify.tests declared claim + legacy shadow)
+# Record a passing check (produces ONLY builder.verify.tests declared claim — no legacy shadow, P-d)
 flow_agents_node "$WRITER" record-evidence "$SESSION_DIR" \
   --verdict pass \
   --check-json '{"id":"unit-tests","kind":"test","status":"pass","summary":"Unit tests pass"}' \
@@ -88,16 +88,24 @@ console.log('after record-critique: builder.verify.tests status=' + declared.sta
   && _pass "builder.verify.tests declared claim preserved after record-critique (no history loss)" \
   || _fail "builder.verify.tests declared claim LOST after record-critique (history loss)"
 
-# Also verify the critique claim itself is present
+# Also verify the critique claim itself is present.
+# In a flow-driven session (verify step), critique maps to the declared builder.verify.policy-compliance
+# (the critique heuristic matches: subjectType=artifact + claimType contains "compliance").
+# workflow.critique.review is emitted in no-flow sessions only (P-d: shadow retired).
 node -e "
 const fs = require('fs');
 const bundle = JSON.parse(fs.readFileSync('$SESSION_DIR/trust.bundle', 'utf8'));
-const crit = (bundle.claims || []).find(c => c.claimType === 'workflow.critique.review');
-if (!crit) throw new Error('MISSING workflow.critique.review after record-critique');
-console.log('critique claim: claimType=' + crit.claimType + ' value=' + crit.value);
+const claims = bundle.claims || [];
+// Declared critique claim for verify-step: builder.verify.policy-compliance
+const crit = claims.find(c => c.claimType === 'builder.verify.policy-compliance');
+if (!crit) throw new Error('MISSING builder.verify.policy-compliance critique claim after record-critique; claims: ' + claims.map(c=>c.claimType).join(', '));
+// Must NOT have workflow.critique.review in a flow-driven session (no shadow, P-d)
+const legacy = claims.find(c => c.claimType === 'workflow.critique.review');
+if (legacy) throw new Error('UNEXPECTED workflow.critique.review in flow-driven session (P-d retired shadow); id=' + legacy.id);
+console.log('declared critique claim: claimType=' + crit.claimType + ' value=' + crit.value);
 " 2>&1 \
-  && _pass "workflow.critique.review claim present after record-critique" \
-  || _fail "workflow.critique.review claim MISSING after record-critique"
+  && _pass "builder.verify.policy-compliance declared critique claim present (no workflow.critique.review shadow, P-d)" \
+  || _fail "declared critique claim MISSING or unexpected workflow.critique.review found after record-critique"
 
 # Now do record-learning (second round-trip)
 flow_agents_node "$WRITER" record-learning "$SESSION_DIR" \
@@ -209,7 +217,7 @@ flow_agents_node "$WRITER" record-critique "$DOGFOOD_DIR" \
   --timestamp "2026-06-01T20:02:00Z" >/dev/null 2>&1
 
 # dogfood-pass --verdict pass should succeed: evidenceClean=true (builder.verify.tests passes)
-# and critiqueClean=true (workflow.critique.review passes).
+# and critiqueClean=true (builder.verify.policy-compliance passes — declared critique for verify step).
 flow_agents_node "$WRITER" dogfood-pass \
   --artifact-root "$DOGFOOD_AROOT" \
   --artifact-dir "$DOGFOOD_DIR" \

@@ -60,7 +60,7 @@ Both were partly right. The core **owns a lifecycle engine** (0014) — but that
 - A clear target for the ADR-0015 migration: each phase moves a core mechanism from hardcoded behavior to FlowDefinition-driven behavior, within these boundaries.
 - The first remediation of Abstraction A is the gate enforcer: `stop-goal-fit` should evaluate the active kit's FlowDefinition `expects[]` (still re-deriving via Surface — the anti-gaming property is unchanged, only the *source of expectations* moves).
 - New kits become "write a FlowDefinition + skills + (optionally) a store adapter" — no engine work.
-- Requires reconciling the live taxonomy split (`workflow.*` enforced vs `builder.*`/`knowledge.*` declared); whether the per-step `expects[]` are produced today is a named follow-on investigation.
+- **P-d (dual-emit shadow retired):** FlowDefinition-driven sessions now emit ONLY the declared `builder.*` (or kit-namespaced) claim per gate — the `-legacy` workflow.* shadow is removed. The no-flow `workflow.*` primary path in `buildTrustBundle` is the LEGITIMATE home for standalone primitive use (not scaffolding); it is preserved unchanged. Full removal of the no-flow path would require forcing primitives through a default/minimal FlowDefinition — a separate future decision outside this cleanup.
 - Terminology: "core" is fixed to the flow-agents kit-agnostic execution layer; 0001/0009/0014/0015 usage aligns to it.
 
 ## References
