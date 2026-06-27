@@ -803,17 +803,30 @@ function canonicalJsonForVerify(record) {
 
 /**
  * Verify the hash chain of command-log.jsonl.
- * Returns { status, brokenAt } where:
- *   status  = "ok" | "legacy" | "broken"
+ * Returns { status, brokenAt, forkAt } where:
+ *   status  = "ok" | "legacy" | "broken" | "forked"
  *   brokenAt = index (0-based) of the first broken entry, or null
+ *   forkAt   = index (0-based) of the first concurrent-fork sibling, or null
+ *
+ * "forked" is a BENIGN concurrent-append race, not tampering: two PostToolUse
+ * captures appended off the same parent tip (e.g. parallel agents sharing one
+ * log) before the writer lock (flow-agents#232) serialized them. It is
+ * distinguished from "broken" because:
+ *   - every entry's hash is still self-consistent (no content was edited), and
+ *   - every entry's parent is reachable (nothing was reordered or removed);
+ *   - the only anomaly is a parent claimed by >1 capture-sourced sibling.
+ * Tamper — a content edit (self-hash mismatch), a reorder, or a deletion
+ * (unreachable parent) — still returns "broken". A fork cannot be used to
+ * launder a content edit: editing a record breaks its self-hash, which is
+ * checked before fork classification.
  */
 function verifyCommandLogChain(artifactDir) {
   const file = path.join(artifactDir, 'command-log.jsonl');
   let raw = '';
-  try { raw = fs.readFileSync(file, 'utf8'); } catch { return { status: 'legacy', brokenAt: null }; }
+  try { raw = fs.readFileSync(file, 'utf8'); } catch { return { status: 'legacy', brokenAt: null, forkAt: null }; }
 
   const lines = raw.split('\n').filter(l => l.trim());
-  if (lines.length === 0) return { status: 'legacy', brokenAt: null };
+  if (lines.length === 0) return { status: 'legacy', brokenAt: null, forkAt: null };
 
   // Parse all entries, tolerating unparseable lines (they count as legacy/unchained).
   const entries = [];
@@ -823,18 +836,25 @@ function verifyCommandLogChain(artifactDir) {
       if (entry && typeof entry === 'object') entries.push(entry);
     } catch { /* skip malformed lines */ }
   }
-  if (entries.length === 0) return { status: 'legacy', brokenAt: null };
+  if (entries.length === 0) return { status: 'legacy', brokenAt: null, forkAt: null };
 
   // Classify: are there any chained entries?
   const hasAnyChain = entries.some(e => e._chain && typeof e._chain.hash === 'string');
-  if (!hasAnyChain) return { status: 'legacy', brokenAt: null };
+  if (!hasAnyChain) return { status: 'legacy', brokenAt: null, forkAt: null };
 
-  // Verify chain linkage. Legacy entries (no _chain) that precede the first
-  // chained entry are tolerated (mixed log during the upgrade transition).
-  // However, a chain entry following another chain entry must link correctly.
-  let prevHash = CHAIN_GENESIS_VERIFY;
+  // Walk in file order. A chained entry is ACCEPTED when both:
+  //   (a) self-consistent: hash === sha256(prevHash + canonicalJson(record)),
+  //       so a content edit (e.g. flipping exitCode) without rehashing fails; and
+  //   (b) reachable: prevHash is genesis or the hash of any prior accepted entry.
+  // We track the SET of reachable hashes (not just the latest tip) so that
+  // concurrent-fork siblings — which share a still-reachable parent — are
+  // tolerated, while a reorder/deletion (parent not reachable) is caught.
+  const reachable = new Set([CHAIN_GENESIS_VERIFY]);
+  const parentSources = new Map(); // prevHash -> [source, ...] (fork detection)
   let prevWasChained = false;
-  let chainedCount = 0;
+  let forked = false;
+  let firstForkAt = null;
+
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
     const chain = entry._chain;
@@ -842,26 +862,43 @@ function verifyCommandLogChain(artifactDir) {
       // Legacy entry without _chain. If we have already seen a chained entry,
       // a gap in the chain (a legacy entry in the middle) counts as broken
       // (it could indicate a removed chained entry was replaced by a legacy one).
-      if (prevWasChained) return { status: 'broken', brokenAt: i };
+      if (prevWasChained) return { status: 'broken', brokenAt: i, forkAt: null };
       // Before any chained entry: tolerate (legacy prefix).
       continue;
     }
 
-    // This is a chained entry. Verify hash.
-    const expectedHash = crypto.createHash('sha256')
-      .update(prevHash + canonicalJsonForVerify(entry), 'utf8')
+    // (a) Self-consistency. A content edit without rehashing fails here.
+    if (typeof chain.prevHash !== 'string') return { status: 'broken', brokenAt: i, forkAt: null };
+    const selfHash = crypto.createHash('sha256')
+      .update(chain.prevHash + canonicalJsonForVerify(entry), 'utf8')
       .digest('hex');
-    if (chain.hash !== expectedHash) return { status: 'broken', brokenAt: i };
+    if (chain.hash !== selfHash) return { status: 'broken', brokenAt: i, forkAt: null };
 
-    // Verify linkage: prevHash must match what this entry claims.
-    if (chain.prevHash !== prevHash) return { status: 'broken', brokenAt: i };
+    // (b) Reachability. An unreachable parent means a reorder or a removed
+    // predecessor — structural tamper, not a benign concurrent append.
+    if (!reachable.has(chain.prevHash)) return { status: 'broken', brokenAt: i, forkAt: null };
 
-    prevHash = chain.hash;
+    // Fork detection: a parent claimed by more than one entry is a fork. It is
+    // benign only when EVERY sibling on that parent is a PostToolUse capture
+    // (two captures racing on the same tip). Any non-capture sibling on a
+    // shared parent is treated as tamper (conservative).
+    const sources = parentSources.get(chain.prevHash) || [];
+    sources.push(entry.source);
+    parentSources.set(chain.prevHash, sources);
+    if (sources.length > 1) {
+      if (!sources.every(s => s === 'postToolUse-capture')) {
+        return { status: 'broken', brokenAt: i, forkAt: null };
+      }
+      if (firstForkAt === null) firstForkAt = i;
+      forked = true;
+    }
+
+    reachable.add(chain.hash);
     prevWasChained = true;
-    chainedCount += 1;
   }
 
-  return { status: 'ok', brokenAt: null };
+  if (forked) return { status: 'forked', brokenAt: null, forkAt: firstForkAt };
+  return { status: 'ok', brokenAt: null, forkAt: null };
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1065,6 +1102,11 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
   //
   // ok     → proceed normally (chain is valid, log is trustworthy).
   // legacy → proceed normally (pre-B2 log, no chain to verify, existing behavior).
+  // forked → benign concurrent-append race (not tampering): emit a loud but
+  //          NON-blocking advisory and keep trusting the records. The capture
+  //          contradiction teeth still run (the records are genuine, just not
+  //          linearly ordered); the operator can re-linearize with the repair
+  //          tool. This is what stops honest parallel work from being trapped.
   // broken → emit a loud warning and treat ALL claimed-pass commands relying on
   //          this log as NOT_VERIFIED/blocking — do not let them sail through.
   let chainBroken = false;
@@ -1078,6 +1120,17 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
         'claimed-pass checks relying on it are NOT trusted. ' +
         'This is tamper-EVIDENCE (hash-chain broken); alteration, removal, or reordering detected. ' +
         'NOT_VERIFIED: cannot confirm or deny claimed passes.'
+      );
+    } else if (chainResult.status === 'forked') {
+      // NOT a hard block: this string must not match HARD_BLOCK/FULL_BLOCK. A
+      // concurrent fork is benign — no content was edited and nothing was
+      // removed — so honest parallel work proceeds. We surface it loudly and
+      // point at the deterministic repair.
+      const forkIdx = chainResult.forkAt !== null ? ` (entry ${chainResult.forkAt})` : '';
+      warnings.push(
+        `${base} command-log shows a concurrent-capture fork${forkIdx} — two PostToolUse captures appended off the same parent ` +
+        '(parallel writers before the writer lock). This is NOT tampering: every record is self-consistent and reachable. ' +
+        'Records remain trusted; re-linearize with: node scripts/repair-command-log.js <artifact-dir>'
       );
     }
   }
