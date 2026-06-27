@@ -695,7 +695,11 @@ function readCommandLog(artifactDir) {
 //   "broken" — a chained entry has a bad hash or bad linkage; the capture
 //              truth source appears altered/removed/reordered.
 //
-// The genesis prevHash constant must match evidence-capture.js CHAIN_GENESIS.
+// The genesis prevHash is a fixed arbitrary sentinel — NOT the SHA256 of any
+// specific input string. The comment in evidence-capture.js previously (and
+// incorrectly) claimed it was sha256("flow-agents:command-log:genesis"); it is not.
+// Writer (evidence-capture.js CHAIN_GENESIS) and verifier (CHAIN_GENESIS_VERIFY here)
+// MUST use the same value. Do not change one without changing the other.
 const CHAIN_GENESIS_VERIFY = 'a3f9e2b7d5c84f1e6a0d2c3b9f7e1a4d8c6b5f2e9a0d3c7b1f4e8a2d6c0b9f3';
 
 /**
@@ -924,6 +928,38 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
   const backstopMode = resolveBackstopMode();
   const warnings = [];
 
+  // AC3 fail-closed: detect a missing command log in a post-execution session.
+  // When state.json confirms the session is past the planning phase (commands should
+  // have run), but command-log.jsonl is absent, emit a FULL_BLOCK warning.
+  // A genuine pre-execution session (no commands expected yet) is NOT blocked —
+  // distinguished by requiring BOTH a non-pre-execution phase AND a non-pre-execution
+  // status (avoids blocking a freshly planned task that has state.json but no log yet).
+  //
+  // BAR-RAISER: an agent could forge state.json with a pre-execution phase to avoid
+  // this. The real anchor is external (signed checkpoints + human review).
+  {
+    const logFileMissing = !fs.existsSync(path.join(artifactDir, 'command-log.jsonl'));
+    if (logFileMissing) {
+      const captureState = readJsonFile(path.join(artifactDir, 'state.json'));
+      if (captureState) {
+        const capturePhase = normalizedStatus(captureState.phase || '');
+        const captureStatus = normalizedStatus(captureState.status || '');
+        // Post-execution: phase is set AND not a pre-execution phase (idea/backlog/pickup/planning).
+        // Also require status is not a pre-execution status (new/planning/planned/backlog).
+        const postExecPhase = capturePhase && !PRE_EXECUTION_PHASES.has(capturePhase);
+        const preExecStatus = !captureStatus || captureStatus === 'new' || PRE_EXECUTION_STATUSES.has(captureStatus);
+        if (postExecPhase && !preExecStatus) {
+          warnings.push(
+            `${base} expected capture log is missing — possible deletion of the capture truth source; ` +
+            `phase:${capturePhase} status:${captureStatus} indicates commands should have run. ` +
+            'Cannot verify command execution deterministically. ' +
+            'Restore from a checkpoint or investigate.'
+          );
+        }
+      }
+    }
+  }
+
   // ── Hash-chain integrity check ──────────────────────────────────────────────
   // Verify command-log.jsonl before trusting its pass/fail signals. If the chain
   // is broken (altered, removed, or reordered entries), the capture truth source
@@ -1068,6 +1104,32 @@ async function bundleEnforcement(artifactDir, activeFlowStep) {
   // Emit a hard warning so operators see it regardless of session phase.
   if (declaredClaimTypes !== null && declaredClaimTypes.size === 0) {
     warnings.push(`gate misconfiguration: active FlowDefinition has empty expects[] (possible tampered flow definition or zero-expects bypass attempt); verify the flow definition is authentic before delivery.`);
+  }
+
+  // AC3 fail-closed (high-assurance path): when @kontourai/surface is unavailable, we
+  // cannot re-derive claim status from evidence/events/policies. For high/critical-impact
+  // selected claims this means we silently trust the stored status field — exactly the
+  // vector re-derive-at-gate (ADR 0010 Phase 2b) was designed to close.
+  // Fail-closed: emit a FULL_BLOCK warning so operators see that re-derivation is absent.
+  // Low-impact-only bundles stay non-blocking (noise reduction for common dev sessions).
+  //
+  // BAR-RAISER, NOT AIRTIGHT: an agent that deletes/corrupts @kontourai/surface to force
+  // surface=null would trigger this path deliberately. The real anchor is external:
+  // signed checkpoints + human review. This raises the cost of the silent-trust vector.
+  if (!surface) {
+    const highImpactCount = bundle.claims.reduce((n, claim) => {
+      if (!claim || typeof claim !== 'object') return n;
+      const impact = String(claim.impactLevel || '').toLowerCase();
+      if (impact !== 'high' && impact !== 'critical') return n;
+      return isSelectedClaim(claim) ? n + 1 : n;
+    }, 0);
+    if (highImpactCount > 0) {
+      warnings.push(
+        `surface unavailable — ${highImpactCount} high/critical-impact claim(s) could not be re-derived at gate; ` +
+        'stored claim status is trusted without independent re-derivation (fail-closed: high-assurance path). ' +
+        'Ensure @kontourai/surface is installed and importable, or escalate for operator review.'
+      );
+    }
   }
 
   for (const claim of bundle.claims) {
@@ -1216,6 +1278,21 @@ function missingBundleOrStateSignal(artifactDir, activeFlowStep) {
   return warnings;
 }
 
+// ─── Gate severity classification regexes (module scope — used by analyze() and run()) ─
+//
+// HARD_BLOCK: always blocks, even for pre-execution and terminal tasks.
+//   Fires on genuine false-completion signals (a claimed pass the capture log or
+//   evidence.json contradicts), integrity failures, and gate misconfiguration.
+//
+// FULL_BLOCK: fires for execution-onward tasks (post-planning, non-terminal).
+//   Includes all HARD_BLOCK patterns plus completeness/hygiene and not-done state.
+//
+// Both are used in analyze() for blocking decisions AND in run() for the AC2
+// MAX_BLOCKS hard-block guard (preventing auto-release of hard blocks).
+const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:/;
+// FULL_BLOCK adds: workflow-state hygiene, surface-unavailable fail-closed, missing log.
+const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing/;
+
 async function analyze(root, now = Date.now()) {
   const flowAgentsDir = path.join(root, '.flow-agents');
   // Scope to the session's current task when current.json names one, so an
@@ -1286,10 +1363,9 @@ async function analyze(root, now = Date.now()) {
   const taskStatus = gateState ? normalizedStatus(gateState.status) : normalizedStatus(status);
   const preExecution = isPreExecution(path.dirname(latest.file), status);
   const terminal = TERMINAL_STATUSES.has(taskStatus);
-  // Always-block: a claimed pass the capture log or evidence.json contradicts.
-  const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:/;
-  // Full gate (execution onward): also completeness/hygiene and not-done state.
-  const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:/;
+  // Use module-scope HARD_BLOCK / FULL_BLOCK (defined above analyze()).
+  // pre-execution/terminal tasks: only HARD_BLOCK signals cause a block.
+  // execution-onward tasks: FULL_BLOCK signals cause a block.
   const blockRe = (preExecution || terminal) ? HARD_BLOCK : FULL_BLOCK;
   const blocking = warnings.some(w => {
     // Capture cross-reference warn-mode notes never block (operator opted out).
@@ -1372,6 +1448,26 @@ async function run(rawInput) {
   const maxBlocks = resolveMaxBlocks();
   const count = bumpBlockStreak(root, reasonsHash(result.warnings));
   if (count >= maxBlocks) {
+    // AC2: never auto-release a HARD block (caught false-completion, capture contradiction,
+    // tamper signal, gate misconfiguration, integrity failure). An agent burning through
+    // N identical hard blocks to escape via the streak counter must not work.
+    //
+    // BAR-RAISER, NOT AIRTIGHT: an agent with shell access can still reset the streak
+    // by deleting .flow-agents/.goal-fit-block-streak.json or by modifying the warning
+    // text so the hash changes. The real anchor is external (signed checkpoints + human
+    // review). This raises the cost of the burn-through-the-counter escape vector.
+    const isHardBlock = result.warnings.some(w => {
+      if (/\[backstop in warn mode — not blocking\]/.test(w)) return false;
+      return HARD_BLOCK.test(w);
+    });
+    if (isHardBlock) {
+      // Do NOT clear the streak — keep accumulating so the same hard block stays visible.
+      return {
+        stdout: rawInput,
+        stderr: `${message}\n[Hook] Goal Fit: max-blocks reached but the block is a caught false-completion / integrity failure — not auto-releasing; requires a real fix or operator override.`,
+        exitCode: 2,
+      };
+    }
     clearBlockStreak(root);
     return {
       stdout: rawInput,

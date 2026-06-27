@@ -227,6 +227,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_command_log_integrity.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_gate_lockdown.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/acceptance/prove-capture-teeth-declared.sh" || result=1
   return $result
 }
