@@ -218,6 +218,8 @@ run_integration() {
   bash "$EVAL_DIR/integration/test_flowdef_session_history_preservation.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_flowdef_session_activation.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_trust_checkpoint.sh" || result=1
   return $result
 }
 

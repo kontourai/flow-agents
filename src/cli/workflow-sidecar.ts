@@ -173,6 +173,10 @@ type SurfaceModule = {
   buildDerivationDrilldown: (report: Record<string, unknown>, claimId: string) => Record<string, unknown>;
   /** Canonical trust-bundle validator from @kontourai/surface. Throws on invalid input; returns TrustBundle on success. */
   validateTrustBundle: (input: unknown) => Record<string, unknown>;
+  /** Freeze a derivation checkpoint from a report. */
+  checkpointFromReport: (report: Record<string, unknown>) => Record<string, unknown>;
+  /** Diff two derivations (prior checkpoint → later report) and emit freshness transition events. */
+  diffFreshness: (prior: Record<string, unknown>, next: Record<string, unknown>) => Array<Record<string, unknown>>;
 };
 let _surfaceModule: SurfaceModule | null | undefined; // undefined = not tried yet; null = unavailable
 async function tryLoadSurface(): Promise<SurfaceModule | null> {
@@ -1238,7 +1242,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   return 0;
 }
 
-function advanceState(p: ReturnType<typeof parseArgs>): number {
+async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const status = opt(p, "status");
   const phase = opt(p, "phase");
@@ -1278,6 +1282,10 @@ function advanceState(p: ReturnType<typeof parseArgs>): number {
     }
   }
   livenessLifecycle(dir, slug, LIVENESS_TERMINAL.has(status) ? "release" : "heartbeat", timestamp);
+  // Trust checkpoint: when advancing to a terminal delivered status, seal the checkpoint.
+  if (status === "delivered") {
+    await sealTrustCheckpoint(dir, slug, timestamp, status, "release").catch(() => { /* best-effort; checkpoint seal must not break advance-state */ });
+  }
   return 0;
 }
 
@@ -1329,7 +1337,7 @@ async function importCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   if (verdict !== "pass") die("required critique must pass");
   return result;
 }
-function recordRelease(p: ReturnType<typeof parseArgs>): number {
+async function recordRelease(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const decision = opt(p, "decision");
@@ -1340,8 +1348,115 @@ function recordRelease(p: ReturnType<typeof parseArgs>): number {
   const stateSummary = opt(p, "summary").trim() || `Release readiness recorded for ${decision}.`;
   writeJson(path.join(dir, "release.json"), payload);
   writeState(dir, slug, "delivered", "release", payload.updated_at, stateSummary);
+  // Trust checkpoint: seal at the "delivered" moment (the natural terminal mark for record-release).
+  await sealTrustCheckpoint(dir, slug, payload.updated_at, "delivered", "release").catch(() => { /* best-effort; checkpoint seal must not break record-release */ });
   return 0;
 }
+
+// ─── Trust Checkpoint (Increment A) ──────────────────────────────────────────
+// Per-run frozen snapshot of verified trust state at completion. Written to
+// trust.checkpoint.json alongside the other workflow sidecars.
+// Surface owns the DerivationCheckpoint shape; flow-agents wraps it in an
+// ENVELOPE that adds per-run context surface does not carry.
+//
+// Envelope shape:
+//   {
+//     schema_version: "1.0",
+//     slug: string,
+//     work_item: string | null,
+//     status: string,
+//     phase: string,
+//     sealed_at: ISO-8601,
+//     commit_sha: string | null,
+//     checkpoint: DerivationCheckpoint   ← surface owns this
+//   }
+//
+// Idempotent: re-running advance-state / record-release to the same terminal
+// status overwrites with the latest snapshot.
+// Fail-open: if no trust.bundle exists, or Surface is unavailable, the write
+// is skipped gracefully (no error surfaced to the caller).
+
+/** Derive the current git HEAD sha — null if unavailable (not in a repo, git absent). */
+function resolveCommitSha(): string | null {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build and write trust.checkpoint.json for a completed run.
+ * Skips silently when:
+ *   - trust.bundle is absent (no evidence recorded yet)
+ *   - Surface is unavailable (checkpointFromReport not found)
+ * The caller wraps this in .catch() so it never breaks the parent command.
+ */
+export async function sealTrustCheckpoint(dir: string, slug: string, sealedAt: string, status: string, phase: string): Promise<void> {
+  const bundlePath = path.join(dir, "trust.bundle");
+  if (!fs.existsSync(bundlePath)) return; // no bundle — skip gracefully
+  const surface = await tryLoadSurface();
+  if (!surface || typeof surface.checkpointFromReport !== "function" || typeof surface.buildTrustReport !== "function") return; // Surface unavailable
+
+  const bundle = JSON.parse(fs.readFileSync(bundlePath, "utf8"));
+  const report = surface.buildTrustReport(bundle as Record<string, unknown>);
+  const checkpoint = surface.checkpointFromReport(report);
+
+  // Derive work_item from state.json if present (best-effort)
+  let workItem: string | null = null;
+  try {
+    const stateRaw = loadJson(path.join(dir, "state.json"));
+    if (typeof stateRaw.work_item === "string") workItem = stateRaw.work_item;
+  } catch { /* ignored */ }
+
+  const envelope: AnyObj = {
+    schema_version: "1.0",
+    slug,
+    work_item: workItem,
+    status,
+    phase,
+    sealed_at: sealedAt,
+    commit_sha: resolveCommitSha(),
+    checkpoint,
+  };
+  writeJson(path.join(dir, "trust.checkpoint.json"), envelope);
+}
+
+/**
+ * seal-checkpoint <dir> [--timestamp <iso>]
+ *
+ * Explicit seal of the trust checkpoint for the given artifact dir.
+ * Equivalent to the seal that fires automatically at record-release / advance-state
+ * to delivered. Useful for the deliver skill or a human to seal explicitly without
+ * re-running advance-state.
+ *
+ * Usage: workflow-sidecar seal-checkpoint <artifactDir> [--timestamp <iso>]
+ */
+async function sealCheckpoint(p: ReturnType<typeof parseArgs>): Promise<number> {
+  const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
+  const slug = taskSlugFor(dir, opt(p, "task-slug"));
+  const timestamp = opt(p, "timestamp", now());
+  const stateRaw = loadJson(path.join(dir, "state.json"));
+  const status = typeof stateRaw.status === "string" ? stateRaw.status : "delivered";
+  const phase = typeof stateRaw.phase === "string" ? stateRaw.phase : "release";
+
+  const bundlePath = path.join(dir, "trust.bundle");
+  if (!fs.existsSync(bundlePath)) {
+    process.stderr.write(`[seal-checkpoint] no trust.bundle at ${bundlePath} — skipping (nothing to seal)
+`);
+    return 0;
+  }
+  await sealTrustCheckpoint(dir, slug, timestamp, status, phase);
+  const checkpointPath = path.join(dir, "trust.checkpoint.json");
+  if (fs.existsSync(checkpointPath)) {
+    console.log(checkpointPath);
+  } else {
+    process.stderr.write(`[seal-checkpoint] checkpoint was not written — @kontourai/surface may be unavailable
+`);
+  }
+  return 0;
+}
+
 export function validateLearningCorrection(record: AnyObj): void {
   const correction = record.correction;
   if (correction === undefined) return;
@@ -1896,9 +2011,30 @@ async function renderTrustPanel(p: ReturnType<typeof parseArgs>): Promise<number
   let bundle: AnyObj | null = null;
   try { bundle = JSON.parse(fs.readFileSync(path.join(dir!, "trust.bundle"), "utf8")); } catch { bundle = null; }
   if (!bundle) die(`no trust.bundle at ${path.join(dir!, "trust.bundle")} — run record-evidence first`);
-  const surface = (await import("@kontourai/surface")) as unknown as { buildTrustReport?: (b: unknown) => AnyObj };
+  const surface = (await import("@kontourai/surface")) as unknown as { buildTrustReport?: (b: unknown) => AnyObj; diffFreshness?: (prior: unknown, next: unknown) => Array<Record<string, unknown>> };
   if (typeof surface.buildTrustReport !== "function") die("@kontourai/surface buildTrustReport unavailable — cannot derive the trust report");
   const report = surface.buildTrustReport!(bundle);
+  // diffFreshness on resume: if a prior trust.checkpoint.json exists, surface the
+  // fresh→stale transitions so the user sees what has gone stale since the last seal.
+  const checkpointFile = path.join(dir!, "trust.checkpoint.json");
+  if (fs.existsSync(checkpointFile) && typeof surface.diffFreshness === "function") {
+    try {
+      const envelope: AnyObj = JSON.parse(fs.readFileSync(checkpointFile, "utf8"));
+      const priorCheckpoint = envelope.checkpoint;
+      if (priorCheckpoint && typeof priorCheckpoint === "object") {
+        const transitions = surface.diffFreshness(priorCheckpoint, report);
+        const staleTransitions = transitions.filter((t) => t["to"] === "stale");
+        if (staleTransitions.length > 0) {
+          const claimIds = staleTransitions.map((t) => String(t["claimId"] ?? "")).filter(Boolean);
+          process.stderr.write(`[trust-checkpoint] ${staleTransitions.length} claim(s) went stale since the last checkpoint (sealed ${String(envelope.sealed_at ?? "unknown")}):\n${claimIds.map((id) => `  - ${id}`).join("\n")}\n`);
+        } else {
+          process.stderr.write(`[trust-checkpoint] 0 claims went stale since the last checkpoint (sealed ${String(envelope.sealed_at ?? "unknown")}).\n`);
+        }
+      }
+    } catch {
+      /* diffFreshness is advisory — never block the panel render */
+    }
+  }
   const panelJs = loadSurfacePanelJs();
   const heading = `Flow Agents trust — ${String(path.basename(dir!)).replace(/[<>"&]/g, "")}`;
   const reportJson = JSON.stringify(report).replace(/</g, "\\u003c");
@@ -2392,6 +2528,7 @@ async function main(): Promise<number> {
       case "trust-mcp": return trustMcp(p);
       case "liveness": return liveness(p);
       case "claim": return claimLookup(p);
+      case "seal-checkpoint": return sealCheckpoint(p);
       default: die(`unknown command: ${p.command}`);
     }
   });
