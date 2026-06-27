@@ -1,0 +1,22 @@
+# Code owners for security-critical paths — the anti-gaming trust gate, its
+# enforcement hooks, and the CI anchor. Changes here can weaken the gate, so they
+# require owner review.
+#
+# IMPORTANT: this file only takes effect once branch protection on `main` enables
+# "Require a pull request before merging" + "Require review from Code Owners".
+# Today main requires status checks + enforce_admins but NOT reviews — enabling
+# code-owner review is the remaining server-side step to close the
+# "agent weakens CI / the gate" residual (adversarial review Residual #1).
+
+# CI definition + the anchor (an agent must not silently weaken enforcement)
+/.github/                       @briananderson1222
+/evals/ci/                      @briananderson1222
+
+# The anti-gaming gate + its enforcement hooks
+/scripts/hooks/stop-goal-fit.js     @briananderson1222
+/scripts/hooks/config-protection.js @briananderson1222
+/scripts/hooks/evidence-capture.js  @briananderson1222
+
+# FlowDefinition resolution + the trust producer/checkpoint/signing the gate depends on
+/src/lib/flow-resolver.ts       @briananderson1222
+/src/cli/workflow-sidecar.ts    @briananderson1222
