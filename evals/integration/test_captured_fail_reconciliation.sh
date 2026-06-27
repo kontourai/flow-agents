@@ -552,6 +552,251 @@ fi
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Test 8: PROOF SCENARIO 1 — Status-gated dodge closed (Fix A: completing guard removed)
+#
+# PRE-FIX: capturedFailReconciliation had `if (!completing) return []`.
+# A non-terminal status (e.g. 'blocked') would skip the check entirely —
+# a kit-typed claim asserting pass for a FAIL command would SHIP.
+# POST-FIX: completing guard removed; the check runs on EVERY stop regardless
+# of state.json.status.
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "=== 8. PROOF SCENARIO 1 — Status-gated dodge closed (Fix A) ==="
+echo "    PRE-FIX: completing guard skipped reconciliation for non-terminal statuses"
+echo "    POST-FIX: guard removed → check runs on every stop (status-independent)"
+
+T8="$TMP/t8-status-dodge"
+mkdir -p "$T8/.flow-agents/status-dodge"
+printf '# Repo\n' > "$T8/AGENTS.md"
+# CRITICAL: status = 'blocked' (non-terminal — pre-fix would have returned [] here)
+printf '%s' '{"schema_version":"1.0","task_slug":"status-dodge","status":"blocked","phase":"executing","updated_at":"2026-06-27T00:00:00Z","next_action":{"status":"in_progress","summary":"running"}}' \
+  > "$T8/.flow-agents/status-dodge/state.json"
+cat > "$T8/.flow-agents/status-dodge/status-dodge--deliver.md" << 'MD'
+# status-dodge
+
+branch: main
+status: blocked
+type: deliver
+
+## Definition Of Done
+- [x] tests pass
+
+## Goal Fit Gate
+- [x] acceptance verified
+
+### Verdict: PASS
+MD
+
+# Bundle: kit-typed claim asserting pass for "npm test"
+python3 - "$T8/.flow-agents/status-dodge/trust.bundle" "status-dodge" << 'PY'
+import json, sys
+bundle_path, slug = sys.argv[1], sys.argv[2]
+bundle = {
+    "schemaVersion": 3, "source": "flow-agents/workflow-sidecar",
+    "claims": [{
+        "id": "c1", "subjectId": slug + "/tests", "subjectType": "flow-step",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "npm test",
+        "value": "pass", "impactLevel": "high", "status": "verified",
+        "createdAt": "2026-06-27T00:00:00Z", "updatedAt": "2026-06-27T00:00:00Z"
+    }],
+    "evidence": [{
+        "id": "ev1", "claimId": "c1",
+        "evidenceType": "command_output", "method": "capture",
+        "sourceRef": "command-log.jsonl",
+        "excerptOrSummary": "npm test passed (agent claimed)",
+        "observedAt": "2026-06-27T00:00:00Z", "collectedBy": "agent",
+        "passing": True,
+        "execution": {"label": "npm test", "exitCode": 0}
+    }],
+    "policies": [], "events": []
+}
+json.dump(bundle, open(bundle_path, 'w'))
+PY
+# command-log: "npm test" FAIL (latest capture is FAIL — the agent lied)
+write_fail_log "$T8/.flow-agents/status-dodge/command-log.jsonl"
+
+echo ""
+echo "--- 8a. PRE-FIX simulation (completing guard) ---"
+# Old code: `const completing = TERMINAL_STATUSES.has(taskStatus) || taskStatus === 'verified'`
+# With status='blocked', completing=false → return []  → gate blind
+node -e "
+const TERMINAL_STATUSES = new Set(['done','delivered','accepted','archived','complete','completed']);
+const taskStatus = 'blocked';
+const completing = TERMINAL_STATUSES.has(taskStatus) || taskStatus === 'verified';
+console.log('  completing (pre-fix logic):', completing, '(false → capturedFailReconciliation skipped → gate blind)');
+if (completing) { process.exit(1); }
+" 2>&1 && _pass "PRE-FIX: status=blocked → completing=false → reconciliation skipped → gate blind" \
+          || _fail "PRE-FIX simulation error"
+
+echo ""
+echo "--- 8b. POST-FIX: guard removed → blocks regardless of status ---"
+set +e
+t8_out="$(run_gate "$T8")"
+t8_exit=$?
+set -e
+echo "  POST-FIX exit: $t8_exit (expected 2, status=blocked, latest=FAIL, claim=pass)"
+if [ "$t8_exit" -eq 2 ]; then
+  _pass "PROOF 1: status-gated dodge closed — POST-FIX blocks (exit 2) regardless of status=blocked"
+else
+  _fail "PROOF 1 FAILED: status=blocked + FAIL + claim=pass should exit 2, got $t8_exit. output: ${t8_out:0:400}"
+fi
+if echo "$t8_out" | grep -q "caught false-completion\|namespace-agnostic"; then
+  _pass "PROOF 1: 'caught false-completion' emitted for status=blocked session"
+else
+  _fail "PROOF 1: expected 'caught false-completion' message not found. output: ${t8_out:0:400}"
+fi
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Test 9: PROOF SCENARIO 2 — Over-block removed (Fix B: Case B removed)
+#
+# PRE-FIX: Case B would HARD_BLOCK any captured FAIL with no matching claim —
+# including incidental commands (grep no-match exit 1, git diff --exit-code, etc.).
+# POST-FIX: Case B removed. Only Case A (claimed pass contradicts captured FAIL) blocks.
+# A genuine incidental failure with no claim is NOT blocked.
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "=== 9. PROOF SCENARIO 2 — Over-block removed (Fix B: Case B removed) ==="
+echo "    PRE-FIX: 'unaccounted at completion' HARD_BLOCK fired for ANY unaccounted FAIL"
+echo "    POST-FIX: Case B removed → incidental fails with no claim NOT blocked"
+
+T9="$TMP/t9-overblock"
+seed_delivered "$T9" "overblock-sess"
+printf '%s' '{"artifact_dir":"overblock-sess"}' > "$T9/.flow-agents/current.json"
+# Bundle: only "npm test" claim asserting pass (no claim about the grep incidental fail)
+write_kit_pass_bundle "$T9/.flow-agents/overblock-sess/trust.bundle" "overblock-sess"
+# Log: "npm test" PASS + incidental "grep --quiet somepattern AGENTS.md" FAIL (exit 1)
+printf '%s\n%s\n' \
+  '{"command":"npm test","observedResult":"pass","exitCode":0,"capturedAt":"2026-06-27T00:00:00Z","source":"postToolUse-capture"}' \
+  '{"command":"grep --quiet somepattern AGENTS.md","observedResult":"fail","exitCode":1,"capturedAt":"2026-06-27T00:00:01Z","source":"postToolUse-capture"}' \
+  > "$T9/.flow-agents/overblock-sess/command-log.jsonl"
+
+set +e
+t9_out="$(run_gate "$T9")"
+t9_exit=$?
+set -e
+echo "  POST-FIX exit: $t9_exit (expected 0 — incidental grep fail NOT a false-completion)"
+if [ "$t9_exit" -ne 2 ]; then
+  _pass "PROOF 2: over-block removed — incidental fail with no claim NOT blocked (exit $t9_exit)"
+else
+  if echo "$t9_out" | grep -q "unaccounted at completion"; then
+    _fail "PROOF 2 FAILED: 'unaccounted at completion' Case B still firing (should be removed). output: ${t9_out:0:400}"
+  else
+    _fail "PROOF 2 FAILED: blocked (exit 2) but NOT by unaccounted Case B — check output: ${t9_out:0:400}"
+  fi
+fi
+if echo "$t9_out" | grep -q "unaccounted at completion"; then
+  _fail "PROOF 2: 'unaccounted at completion' emitted (Case B must be removed)"
+else
+  _pass "PROOF 2: 'unaccounted at completion' NOT emitted (Case B confirmed removed)"
+fi
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Test 10: PROOF SCENARIO 3 — Fix-then-pass not blocked (Fix C: latest-wins)
+#
+# PRE-FIX: captureCrossReference used readCommandLog (sticky-FAIL), so a legit
+# fix-then-rerun-to-pass session would still be blocked.
+# POST-FIX: readLatestCommandLog is used; the LAST entry wins. A genuine re-run
+# that produces a PASS clears the block.
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "=== 10. PROOF SCENARIO 3 — Fix-then-pass not blocked (Fix C: latest-wins) ==="
+echo "    PRE-FIX: sticky-FAIL in captureCrossReference kept a FAIL block even after re-run"
+echo "    POST-FIX: latest-wins → re-run to PASS clears the block"
+
+T10="$TMP/t10-fixpass"
+seed_delivered "$T10" "fixpass-sess"
+printf '%s' '{"artifact_dir":"fixpass-sess"}' > "$T10/.flow-agents/current.json"
+write_kit_pass_bundle "$T10/.flow-agents/fixpass-sess/trust.bundle" "fixpass-sess"
+# Log: FAIL first, then PASS (genuine fix-then-re-run)
+printf '%s\n%s\n' \
+  '{"command":"npm test","observedResult":"fail","exitCode":1,"capturedAt":"2026-06-27T00:00:00Z","source":"postToolUse-capture"}' \
+  '{"command":"npm test","observedResult":"pass","exitCode":0,"capturedAt":"2026-06-27T00:00:01Z","source":"postToolUse-capture"}' \
+  > "$T10/.flow-agents/fixpass-sess/command-log.jsonl"
+
+set +e
+t10_out="$(run_gate "$T10")"
+t10_exit=$?
+set -e
+echo "  POST-FIX exit: $t10_exit (expected 0 — latest capture PASS clears the earlier FAIL)"
+if [ "$t10_exit" -ne 2 ]; then
+  _pass "PROOF 3: fix-then-pass NOT blocked — latest PASS clears earlier FAIL (exit $t10_exit)"
+else
+  _fail "PROOF 3 FAILED: fix-then-pass session should exit 0 but got exit 2. output: ${t10_out:0:400}"
+fi
+if echo "$t10_out" | grep -q "caught false-completion\|CONTRADICTS"; then
+  _fail "PROOF 3: false-completion incorrectly emitted for fix-then-pass. output: ${t10_out:0:400}"
+else
+  _pass "PROOF 3: no false-completion for fix-then-pass (latest PASS is the truth)"
+fi
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Test 11: PROOF SCENARIO 4 — Exit-code laundering flagged (Fix D)
+#
+# A claim asserts pass for "npm test || true" (captured exit 0 — because || true
+# masks the real exit code). This is not a trustworthy PASS signal.
+# POST-FIX: hasLaunderingOperator detects || true → HARD_BLOCK "exit-code-laundered".
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "=== 11. PROOF SCENARIO 4 — Exit-code laundering flagged (Fix D) ==="
+echo "    PRE-FIX: 'npm test || true' captured exit 0 → claimed pass → gate satisfied"
+echo "    POST-FIX: hasLaunderingOperator detects || true → 'exit-code-laundered' HARD_BLOCK"
+
+T11="$TMP/t11-laundering"
+seed_delivered "$T11" "laundering-sess"
+printf '%s' '{"artifact_dir":"laundering-sess"}' > "$T11/.flow-agents/current.json"
+# Bundle: claim asserting pass for "npm test || true" — command string has laundering operator
+python3 - "$T11/.flow-agents/laundering-sess/trust.bundle" "laundering-sess" << 'PY'
+import json, sys
+bundle_path, slug = sys.argv[1], sys.argv[2]
+bundle = {
+    "schemaVersion": 3, "source": "flow-agents/workflow-sidecar",
+    "claims": [{
+        "id": "c1", "subjectId": slug + "/tests", "subjectType": "flow-step",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "npm test || true",
+        "value": "pass", "impactLevel": "high", "status": "verified",
+        "createdAt": "2026-06-27T00:00:00Z", "updatedAt": "2026-06-27T00:00:00Z"
+    }],
+    "evidence": [{
+        "id": "ev1", "claimId": "c1",
+        "evidenceType": "command_output", "method": "capture",
+        "sourceRef": "command-log.jsonl",
+        "excerptOrSummary": "npm test || true: exit 0",
+        "observedAt": "2026-06-27T00:00:00Z", "collectedBy": "agent",
+        "passing": True,
+        "execution": {"label": "npm test || true", "exitCode": 0}
+    }],
+    "policies": [], "events": []
+}
+json.dump(bundle, open(bundle_path, 'w'))
+PY
+# Log: "npm test || true" captured as PASS (exit 0) — the laundering worked
+printf '%s\n' \
+  '{"command":"npm test || true","observedResult":"pass","exitCode":0,"capturedAt":"2026-06-27T00:00:00Z","source":"postToolUse-capture"}' \
+  > "$T11/.flow-agents/laundering-sess/command-log.jsonl"
+
+set +e
+t11_out="$(run_gate "$T11")"
+t11_exit=$?
+set -e
+echo "  POST-FIX exit: $t11_exit (expected 2 — || true laundering detected)"
+if [ "$t11_exit" -eq 2 ]; then
+  _pass "PROOF 4: exit-code laundering BLOCKED (exit 2) — 'npm test || true' not a trustworthy pass"
+else
+  _fail "PROOF 4 FAILED: laundering should exit 2 but got $t11_exit. output: ${t11_out:0:400}"
+fi
+if echo "$t11_out" | grep -q "exit-code-laundered\|laundering operators mask"; then
+  _pass "PROOF 4: 'exit-code-laundered' warning emitted"
+else
+  _fail "PROOF 4: expected 'exit-code-laundered' message not found. output: ${t11_out:0:400}"
+fi
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Summary
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
@@ -565,6 +810,10 @@ if [ "$errors" -eq 0 ]; then
   echo "  NO OVER-BLOCK: all 4 legitimate cases remain unblocked by new logic"
   echo "  #216 FIXED: no-command session NOT blocked by missing-log check"
   echo "  AC3: empty-expects regression caught by gate-misconfiguration HARD_BLOCK"
+  echo "  PROOF 1: Status-gated dodge closed (Fix A) — status=blocked + FAIL + claim=pass → exit 2"
+  echo "  PROOF 2: Over-block removed (Fix B) — incidental grep fail, no claim → exit 0"
+  echo "  PROOF 3: Fix-then-pass not blocked (Fix C) — FAIL then PASS + claim=pass → exit 0"
+  echo "  PROOF 4: Exit-code laundering flagged (Fix D) — 'npm test || true' claim → exit 2"
   exit 0
 fi
 echo "FAIL  test_captured_fail_reconciliation: $errors check(s) failed."
