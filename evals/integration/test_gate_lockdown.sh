@@ -453,6 +453,254 @@ console.log('Verified: state+trust written via writeJson->fs.writeFileSync (not 
           || _fail "Could not verify CLI fs write pattern for state/trust files"
 
 # ═══════════════════════════════════════════════════════════════════════════
+# AC1 R6a — Laundering regex extended (|| ANY + trailing ;/\n forms)
+# Round 6 Fix 1: hasLaunderingOperator now flags ANY || operator plus
+# extended trailing-; / newline forms (exit 0, /bin/true, :).
+# ═══════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== AC1 R6a — Laundering regex extended (R6 Fix 1) ==="
+
+echo ""
+echo "--- AC1.R6a.1: hasLaunderingOperator unit tests via require ---"
+node /private/tmp/claude-501/-Users-brian-dev-github-kontourai/1544f463-6be1-4e2b-b856-0be097483e58/scratchpad/launder_test.js 2>&1
+launder_exit=$?
+if [ "$launder_exit" -eq 0 ]; then
+  _pass "AC1.R6a: hasLaunderingOperator correctly flags new || forms and does not over-flag bare commands"
+else
+  _fail "AC1.R6a: hasLaunderingOperator unit tests failed"
+fi
+
+echo ""
+echo "--- AC1.R6a.2: Gate blocks npm test || exit 0 (claimed pass via laundered command) ---"
+R6LA="$TMP/r6la-laundering"
+seed_repo_inprogress "$R6LA" "launder-r6"
+python3 - "$R6LA/.flow-agents/launder-r6/trust.bundle" "launder-r6" "npm test || exit 0" << 'PY'
+import json, sys
+bp, slug, cmd = sys.argv[1], sys.argv[2], sys.argv[3]
+bundle = {
+    "schemaVersion": 3, "source": "flow-agents/workflow-sidecar",
+    "claims": [{"id":"c1","subjectId":slug+"/tests","subjectType":"flow-step",
+      "claimType":"builder.verify.tests","fieldOrBehavior":cmd,
+      "value":"pass","impactLevel":"high","status":"verified",
+      "createdAt":"2026-06-27T00:00:00Z","updatedAt":"2026-06-27T00:00:00Z"}],
+    "evidence": [{"id":"ev1","claimId":"c1","evidenceType":"command_output","method":"capture",
+      "sourceRef":"command-log.jsonl","excerptOrSummary":"exit 0 (laundered)",
+      "observedAt":"2026-06-27T00:00:00Z","collectedBy":"agent","passing":True,
+      "execution":{"label":cmd,"exitCode":0}}],
+    "policies":[],"events":[]
+}
+json.dump(bundle, open(bp, 'w'))
+PY
+printf '%s\n' '{"command":"npm test || exit 0","observedResult":"pass","exitCode":0,"capturedAt":"2026-06-27T00:00:00Z","source":"postToolUse-capture"}' \
+  > "$R6LA/.flow-agents/launder-r6/command-log.jsonl"
+
+set +e
+r6la_out=$(run_gate "$R6LA")
+r6la_exit=$?
+set -e
+if [ "$r6la_exit" -eq 2 ]; then
+  _pass "AC1.R6a.2: 'npm test || exit 0' claimed-pass BLOCKED (exit 2)"
+else
+  _fail "AC1.R6a.2: 'npm test || exit 0' should be blocked, got exit=$r6la_exit. out=${r6la_out:0:200}"
+fi
+if echo "$r6la_out" | grep -q "exit-code-laundered\|laundering"; then
+  _pass "AC1.R6a.2: laundering warning emitted"
+else
+  _fail "AC1.R6a.2: expected laundering warning not found. out=${r6la_out:0:200}"
+fi
+
+echo ""
+echo "--- AC1.R6a.3: Gate blocks npm test || echo ok (claimed pass via laundered command) ---"
+R6LB="$TMP/r6lb-laundering"
+seed_repo_inprogress "$R6LB" "launder-r6b"
+python3 - "$R6LB/.flow-agents/launder-r6b/trust.bundle" "launder-r6b" "npm test || echo ok" << 'PY'
+import json, sys
+bp, slug, cmd = sys.argv[1], sys.argv[2], sys.argv[3]
+bundle = {
+    "schemaVersion": 3, "source": "test",
+    "claims": [{"id":"c1","subjectId":slug+"/tests","subjectType":"flow-step",
+      "claimType":"builder.verify.tests","fieldOrBehavior":cmd,
+      "value":"pass","impactLevel":"high","status":"verified",
+      "createdAt":"2026-06-27T00:00:00Z","updatedAt":"2026-06-27T00:00:00Z"}],
+    "evidence": [{"id":"ev1","claimId":"c1","evidenceType":"command_output","method":"capture",
+      "sourceRef":"command-log.jsonl","excerptOrSummary":"exit 0",
+      "observedAt":"2026-06-27T00:00:00Z","collectedBy":"agent","passing":True,
+      "execution":{"label":cmd,"exitCode":0}}],
+    "policies":[],"events":[]
+}
+json.dump(bundle, open(bp, 'w'))
+PY
+printf '%s\n' '{"command":"npm test || echo ok","observedResult":"pass","exitCode":0,"capturedAt":"2026-06-27T00:00:00Z","source":"postToolUse-capture"}' \
+  > "$R6LB/.flow-agents/launder-r6b/command-log.jsonl"
+
+set +e
+r6lb_out=$(run_gate "$R6LB")
+r6lb_exit=$?
+set -e
+if [ "$r6lb_exit" -eq 2 ]; then
+  _pass "AC1.R6a.3: 'npm test || echo ok' claimed-pass BLOCKED (exit 2)"
+else
+  _fail "AC1.R6a.3: 'npm test || echo ok' should be blocked, got exit=$r6lb_exit"
+fi
+
+echo ""
+echo "--- AC1.R6a.4: Gate blocks npm test || /bin/true (claimed pass via laundered command) ---"
+R6LC="$TMP/r6lc-laundering"
+seed_repo_inprogress "$R6LC" "launder-r6c"
+python3 - "$R6LC/.flow-agents/launder-r6c/trust.bundle" "launder-r6c" "npm test || /bin/true" << 'PY'
+import json, sys
+bp, slug, cmd = sys.argv[1], sys.argv[2], sys.argv[3]
+bundle = {
+    "schemaVersion": 3, "source": "test",
+    "claims": [{"id":"c1","subjectId":slug+"/tests","subjectType":"flow-step",
+      "claimType":"builder.verify.tests","fieldOrBehavior":cmd,
+      "value":"pass","impactLevel":"high","status":"verified",
+      "createdAt":"2026-06-27T00:00:00Z","updatedAt":"2026-06-27T00:00:00Z"}],
+    "evidence": [{"id":"ev1","claimId":"c1","evidenceType":"command_output","method":"capture",
+      "sourceRef":"command-log.jsonl","excerptOrSummary":"exit 0",
+      "observedAt":"2026-06-27T00:00:00Z","collectedBy":"agent","passing":True,
+      "execution":{"label":cmd,"exitCode":0}}],
+    "policies":[],"events":[]
+}
+json.dump(bundle, open(bp, 'w'))
+PY
+printf '%s\n' '{"command":"npm test || /bin/true","observedResult":"pass","exitCode":0,"capturedAt":"2026-06-27T00:00:00Z","source":"postToolUse-capture"}' \
+  > "$R6LC/.flow-agents/launder-r6c/command-log.jsonl"
+
+set +e
+r6lc_out=$(run_gate "$R6LC")
+r6lc_exit=$?
+set -e
+if [ "$r6lc_exit" -eq 2 ]; then
+  _pass "AC1.R6a.4: 'npm test || /bin/true' claimed-pass BLOCKED (exit 2)"
+else
+  _fail "AC1.R6a.4: 'npm test || /bin/true' should be blocked, got exit=$r6lc_exit"
+fi
+
+echo ""
+echo "--- AC1.R6a.5: Bare 'npm test' with PASS log NOT blocked (no over-flag) ---"
+R6LD="$TMP/r6ld-legit"
+seed_repo_inprogress "$R6LD" "legit-r6"
+python3 - "$R6LD/.flow-agents/legit-r6/trust.bundle" "legit-r6" << 'PY'
+import json, sys
+bp, slug = sys.argv[1], sys.argv[2]
+bundle = {
+    "schemaVersion": 3, "source": "test",
+    "claims": [{"id":"c1","subjectId":slug+"/tests","subjectType":"flow-step",
+      "claimType":"builder.verify.tests","fieldOrBehavior":"npm test",
+      "value":"pass","impactLevel":"high","status":"verified",
+      "createdAt":"2026-06-27T00:00:00Z","updatedAt":"2026-06-27T00:00:00Z"}],
+    "evidence": [{"id":"ev1","claimId":"c1","evidenceType":"command_output","method":"capture",
+      "sourceRef":"command-log.jsonl","excerptOrSummary":"pass",
+      "observedAt":"2026-06-27T00:00:00Z","collectedBy":"agent","passing":True,
+      "execution":{"label":"npm test","exitCode":0}}],
+    "policies":[],"events":[]
+}
+json.dump(bundle, open(bp, 'w'))
+PY
+printf '%s\n' '{"command":"npm test","observedResult":"pass","exitCode":0,"capturedAt":"2026-06-27T00:00:00Z","source":"postToolUse-capture"}' \
+  > "$R6LD/.flow-agents/legit-r6/command-log.jsonl"
+
+set +e
+r6ld_out=$(run_gate "$R6LD")
+r6ld_exit=$?
+set -e
+if ! echo "$r6ld_out" | grep -q "exit-code-laundered\|laundering operators"; then
+  _pass "AC1.R6a.5: bare 'npm test' NOT falsely flagged as laundering (no over-block)"
+else
+  _fail "AC1.R6a.5: bare 'npm test' INCORRECTLY flagged as laundering. out=${r6ld_out:0:200}"
+fi
+echo "  (Bare npm test exit: $r6ld_exit -- workflow-state warnings are OK)"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# AC1 R6b — delivery/ path protection (R6 Fix 2)
+# ═══════════════════════════════════════════════════════════════════════════
+echo ""
+echo "=== AC1 R6b — delivery/ path protection (R6 Fix 2) ==="
+echo ""
+echo "  HONEST residual: runtime-constructed paths evade; publishDelivery CLI"
+echo "  uses fs.copyFileSync (not the Write/Edit tool or bash cp) -- unaffected."
+
+echo ""
+echo "--- AC1.23: Write/Edit to delivery/trust.bundle BLOCKED ---"
+set +e
+prot_out=$(echo '{"tool_name":"Write","tool_input":{"path":"/repo/delivery/trust.bundle"}}' | node "$PROT" 2>&1)
+prot_exit=$?
+set -e
+if [ "$prot_exit" -eq 2 ] && echo "$prot_out" | grep -q "BLOCKED"; then
+  _pass "AC1.23: Write to delivery/trust.bundle blocked (exit 2)"
+else
+  _fail "AC1.23: Write to delivery/trust.bundle NOT blocked (exit=$prot_exit)"
+fi
+
+echo ""
+echo "--- AC1.24: Write/Edit to delivery/trust.checkpoint.json BLOCKED ---"
+set +e
+prot_out=$(echo '{"tool_name":"Edit","tool_input":{"path":"delivery/trust.checkpoint.json"}}' | node "$PROT" 2>&1)
+prot_exit=$?
+set -e
+if [ "$prot_exit" -eq 2 ] && echo "$prot_out" | grep -q "BLOCKED"; then
+  _pass "AC1.24: Write to delivery/trust.checkpoint.json blocked (exit 2)"
+else
+  _fail "AC1.24: Write to delivery/trust.checkpoint.json NOT blocked (exit=$prot_exit)"
+fi
+
+echo ""
+echo "--- AC1.25: cp x delivery/trust.bundle BLOCKED (plain-cp attack) ---"
+set +e
+prot_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"cp forged.json delivery/trust.bundle"}}' | node "$PROT" 2>&1)
+prot_exit=$?
+set -e
+if [ "$prot_exit" -eq 2 ] && echo "$prot_out" | grep -q "BLOCKED"; then
+  _pass "AC1.25: cp forged.json delivery/trust.bundle blocked (exit 2)"
+else
+  _fail "AC1.25: cp to delivery/trust.bundle NOT blocked (exit=$prot_exit, out=$prot_out)"
+fi
+
+echo ""
+echo "--- AC1.26: > delivery/trust.bundle BLOCKED (shell redirect) ---"
+set +e
+prot_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"echo {} > delivery/trust.bundle"}}' | node "$PROT" 2>&1)
+prot_exit=$?
+set -e
+if [ "$prot_exit" -eq 2 ] && echo "$prot_out" | grep -q "BLOCKED"; then
+  _pass "AC1.26: redirect > delivery/trust.bundle blocked (exit 2)"
+else
+  _fail "AC1.26: redirect > delivery/trust.bundle NOT blocked (exit=$prot_exit)"
+fi
+
+echo ""
+echo "--- AC1.27: cp x src/foo.ts ALLOWED (no over-block on normal copy) ---"
+set +e
+prot_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"cp x src/foo.ts"}}' | node "$PROT" 2>&1)
+prot_exit=$?
+set -e
+if [ "$prot_exit" -eq 0 ]; then
+  _pass "AC1.27: cp x src/foo.ts allowed (exit 0) — no over-block"
+else
+  _fail "AC1.27: cp x src/foo.ts falsely blocked (exit=$prot_exit)"
+fi
+
+echo ""
+echo "--- AC1.28: publishDelivery uses fs.copyFileSync (not bash cp) — unaffected ---"
+node -e "
+const fs = require('fs');
+const src = fs.readFileSync('$ROOT/src/cli/workflow-sidecar.ts', 'utf8');
+const hasFscp = /fs\.copyFileSync.*delivery/.test(src) || /copyFileSync\(bundleSrc/.test(src);
+const noToolWrite = !/Write.*tool.*delivery/.test(src);
+if (!hasFscp) { console.error('ERROR: publishDelivery does not use fs.copyFileSync to delivery'); process.exit(1); }
+console.log('publishDelivery uses fs.copyFileSync to delivery/ (not bash cp or Write/Edit tool)');
+" 2>&1 && _pass "AC1.28: publishDelivery CLI uses fs.copyFileSync — not affected by bash-cp block" \
+          || _fail "AC1.28: could not verify publishDelivery write method"
+
+echo ""
+echo "  RESIDUAL gaps (honest):"
+echo "  - rsync, scp, dd targeting delivery/trust.bundle are NOT caught"
+echo "  - Runtime-constructed paths (e.g. path.join(dir, 'trust.bundle')) evade"
+echo "  - The real anchor is external: clean CI env + human review"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # AC2 — MAX_BLOCKS cannot release a HARD block
 # ═══════════════════════════════════════════════════════════════════════════
 echo ""
@@ -859,7 +1107,9 @@ if [ "$errors" -eq 0 ]; then
   echo "  AC1: Write/Edit to kill-switch files blocked; redirect check covers > >> tee"
   echo "       R5a: state.json+trust.bundle Write/Edit blocked; interpreter-write check"
   echo "       (node -e, python3 -c, sed -i, perl -e) for literal path tokens."
-  echo "       INCOMPLETE: process substitution, runtime path construction evade both checks"
+  echo "       R6a: hasLaunderingOperator extended -- ANY || flagged (|| exit 0, || echo ok, || /bin/true, etc.)"
+  echo "       R6b: delivery/trust.bundle + delivery/trust.checkpoint.json protected (Write/Edit + > + cp/mv blocked)"
+  echo "       INCOMPLETE: process substitution, runtime path construction, rsync/scp/dd evade"
   echo "  AC2: Hard blocks (false-completion, integrity failure) NOT auto-released by MAX_BLOCKS"
   echo "       INCOMPLETE: agent can reset streak by deleting .goal-fit-block-streak.json via Bash"
   echo "  AC3.1: surface-unavailable + high-impact → FULL_BLOCK warning; low-impact non-blocking"

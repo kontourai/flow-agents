@@ -735,17 +735,33 @@ function claimAcknowledgesFailure(status, value) {
 
 /**
  * Returns true when a command string contains an exit-code-neutralizing operator.
- * These operators mask the real exit code: '|| true', '|| :', '; true', '; exit 0', '| true'.
  * A claimed-pass check whose captured command uses one of these cannot be accepted as a
  * deterministic pass — the real sub-command may have failed silently.
+ *
+ * R6 extended logic (identical patterns used by scripts/ci/trust-reconcile.js — centralize
+ * as a follow-up if drift becomes a maintenance concern):
+ *   - ANY || operator is flagged. A legitimate verification command never needs || — its
+ *     only purpose in a verification command is to mask the real exit code (e.g.
+ *     `npm test || exit 0`, `npm test || echo ok`, `npm test || /bin/true`, `npm test || (exit 0)`).
+ *   - | true  (single pipe into true — always exits 0)
+ *   - Trailing ; or newline followed by: true  :  exit 0  /bin/true
+ *
  * Fix D: applied in captureCrossReference's satisfied path and capturedFailReconciliation.
  */
 function hasLaunderingOperator(cmd) {
-  return /\|\|\s*true\b/.test(cmd)
-      || /\|\|\s*:\s*(?:$|\s|;)/.test(cmd)
-      || /;\s*true\b/.test(cmd)
-      || /;\s*exit\s+0\b/.test(cmd)
-      || /\|\s*true\b/.test(cmd);
+  // ANY || in a claimed verification command is an exit-code mask.
+  // Legitimate verification commands never need || — its only purpose there is to
+  // suppress the real exit code (|| exit 0, || echo ok, || /bin/true, || (exit 0), etc.).
+  if (/\|\|/.test(cmd)) return true;
+  // | true  — single-pipe into true: `cmd | true` always exits 0 regardless of left-side exit code.
+  if (/\|\s*true\b/.test(cmd)) return true;
+  // Trailing ; or \n followed by exit-neutralizing commands (same threat, appended after the real cmd):
+  //   ; true    ; :    ; exit 0    ; /bin/true    (and \n variants)
+  if (/[;\n]\s*true\b/.test(cmd)) return true;
+  if (/[;\n]\s*:\s*(?:$|\s|;)/.test(cmd)) return true;
+  if (/[;\n]\s*exit\s+0\b/.test(cmd)) return true;
+  if (/[;\n]\s*\/bin\/true\b/.test(cmd)) return true;
+  return false;
 }
 
 // ─── Hash-chain integrity verification (Increment B2, tamper-EVIDENCE) ────────
@@ -1758,4 +1774,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, verifyCommandLogChain, CHAIN_GENESIS_VERIFY };
+module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator };
