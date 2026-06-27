@@ -388,31 +388,17 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     }
     evidenceItems.push(evItem);
 
-    // P-b: dual-emit when active flow/step present
+    // P-d: declared-only when active flow/step present (shadow retired); no-flow path unchanged.
     // When record-gate-claim sets _gate_claim_expectation_id, pass it for exact lookup (ADR 0016 P-d Increment 2).
     const declared = matchExpectsEntry("check", check.kind, typeof check._gate_claim_expectation_id === "string" ? check._gate_claim_expectation_id : undefined);
     if (declared) {
-      // Primary: declared kit-typed claim
+      // Declared kit-typed claim only — no legacy shadow (ADR 0016 P-d).
       const declaredPolicy = ensurePolicy(declared.claimType, "high", ["test_output"]);
       const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, surface: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
       claims.push({ ...declaredClaimObj, status: declaredStatus });
-      // Shadow: legacy workflow.* claim (claimId suffix "-legacy") for backward compat
-      const legacyClaimId = `${claimId}-legacy`;
-      const legacyEvItem = { ...evItem, id: `ev:${legacyClaimId}`, claimId: legacyClaimId };
-      evidenceItems.push(legacyEvItem);
-      const legacyEvStatus2 = checkStatusToEventStatus(effectiveStatus);
-      const legacyClaimEvents2: AnyObj[] = [];
-      if (legacyEvStatus2) {
-        const legacyEvt: AnyObj = { id: `evt:${legacyClaimId}`, claimId: legacyClaimId, status: legacyEvStatus2, actor: "flow-agents/workflow-sidecar", method: "validation", evidenceIds: [`ev:${legacyClaimId}`], createdAt: ts, verifiedAt: ts };
-        events.push(legacyEvt);
-        legacyClaimEvents2.push(legacyEvt);
-      }
-      const legacyClaimObj: AnyObj = { id: legacyClaimId, subjectType: "workflow-check", subjectId, surface: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id };
-      const { status: legacyStatus } = deriveClaimStatus({ claim: legacyClaimObj as Record<string, unknown>, evidence: [legacyEvItem] as Record<string, unknown>[], events: legacyClaimEvents2 as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
-      claims.push({ ...legacyClaimObj, status: legacyStatus });
     } else {
-      // No active flow step — only the legacy workflow.* claim (zero behavior change)
+      // No active flow step — only the workflow.* primary claim (legitimate no-flow fallback path).
       const claimObj: AnyObj = { id: claimId, subjectType: "workflow-check", subjectId, surface: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id };
       const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
       claims.push({ ...claimObj, status: derivedStatus });
@@ -435,25 +421,16 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       claimEvents.push(evt);
     }
 
-    // P-b: dual-emit when active flow/step present
+    // P-d: declared-only when active flow/step present (shadow retired); no-flow path unchanged.
     const declared = matchExpectsEntry("acceptance");
     if (declared) {
+      // Declared kit-typed claim only — no legacy shadow (ADR 0016 P-d).
       const declaredPolicy = ensurePolicy(declared.claimType, "high", []);
       const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, surface: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
       claims.push({ ...declaredClaimObj, status: declaredStatus });
-      // Legacy shadow
-      const legacyClaimId = `${claimId}-legacy`;
-      const legacyClaimEvents2: AnyObj[] = [];
-      if (evStatus) {
-        const legacyEvt: AnyObj = { id: `evt:${legacyClaimId}`, claimId: legacyClaimId, status: evStatus, actor: "flow-agents/workflow-sidecar", method: "validation", evidenceIds: [], createdAt: ts, verifiedAt: ts };
-        events.push(legacyEvt);
-        legacyClaimEvents2.push(legacyEvt);
-      }
-      const legacyClaimObj: AnyObj = { id: legacyClaimId, subjectType: "workflow-acceptance-criterion", subjectId, surface: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id };
-      const { status: legacyStatus } = deriveClaimStatus({ claim: legacyClaimObj as Record<string, unknown>, evidence: [], events: legacyClaimEvents2 as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
-      claims.push({ ...legacyClaimObj, status: legacyStatus });
     } else {
+      // No active flow step — only the workflow.* primary claim (legitimate no-flow fallback path).
       const claimObj: AnyObj = { id: claimId, subjectType: "workflow-acceptance-criterion", subjectId, surface: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id };
       const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
       claims.push({ ...claimObj, status: derivedStatus });
@@ -476,25 +453,16 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       claimEvents.push(evt);
     }
 
-    // P-b: dual-emit when active flow/step present
+    // P-d: declared-only when active flow/step present (shadow retired); no-flow path unchanged.
     const declared = matchExpectsEntry("critique");
     if (declared) {
+      // Declared kit-typed claim only — no legacy shadow (ADR 0016 P-d).
       const declaredPolicy = ensurePolicy(declared.claimType, "medium", []);
       const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, surface: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: c.verdict, createdAt: ts, updatedAt: ts, impactLevel: "medium", verificationPolicyId: declaredPolicy.id };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
       claims.push({ ...declaredClaimObj, status: declaredStatus });
-      // Legacy shadow
-      const legacyClaimId = `${claimId}-legacy`;
-      const legacyClaimEvents2: AnyObj[] = [];
-      if (evStatus) {
-        const legacyEvt: AnyObj = { id: `evt:${legacyClaimId}`, claimId: legacyClaimId, status: evStatus, actor: "flow-agents/workflow-sidecar", method: "validation", evidenceIds: [], createdAt: ts, verifiedAt: ts };
-        events.push(legacyEvt);
-        legacyClaimEvents2.push(legacyEvt);
-      }
-      const legacyClaimObj: AnyObj = { id: legacyClaimId, subjectType: "workflow-critique", subjectId, surface: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: c.verdict, createdAt: ts, updatedAt: ts, impactLevel: "medium", verificationPolicyId: policy.id };
-      const { status: legacyStatus } = deriveClaimStatus({ claim: legacyClaimObj as Record<string, unknown>, evidence: [], events: legacyClaimEvents2 as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
-      claims.push({ ...legacyClaimObj, status: legacyStatus });
     } else {
+      // No active flow step — only the workflow.* primary claim (legitimate no-flow fallback path).
       const claimObj: AnyObj = { id: claimId, subjectType: "workflow-critique", subjectId, surface: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: c.verdict, createdAt: ts, updatedAt: ts, impactLevel: "medium", verificationPolicyId: policy.id };
       const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
       claims.push({ ...claimObj, status: derivedStatus });
@@ -533,9 +501,19 @@ export async function writeTrustBundle(dir: string, slug: string, timestamp: str
       const raw = fs.readFileSync(path.join(dir, "command-log.jsonl"), "utf8");
       commandLog = raw.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { try { return JSON.parse(l) as AnyObj; } catch { return null; } }).filter((x): x is AnyObj => x !== null);
     } catch { /* no capture log — fine */ }
-    // ADR 0016 Abstraction A (P-b): pass the .flow-agents dir so buildTrustBundle can
-    // resolve the active flow step and dual-emit declared + legacy claims when present.
-    const bundle = await buildTrustBundle(slug, timestamp, checks, criteria, critiques, commandLog, path.dirname(dir));
+    // ADR 0016 Abstraction A (P-d): pass the .flow-agents dir ONLY when current.json
+    // points to this session (scoped active-flow guard). If current.json.artifact_dir
+    // resolves to a different session, pass null — no active-flow claim mapping for this bundle.
+    const _flowAgentsDir = path.dirname(dir);
+    let _scopedFlowAgentsDir: string | undefined = undefined;
+    try {
+      const _currentRaw = JSON.parse(fs.readFileSync(path.join(_flowAgentsDir, "current.json"), "utf8")) as Record<string, unknown>;
+      const _artDir = typeof _currentRaw["artifact_dir"] === "string" ? _currentRaw["artifact_dir"] : null;
+      if (_artDir && path.resolve(_flowAgentsDir, _artDir) === path.resolve(dir)) {
+        _scopedFlowAgentsDir = _flowAgentsDir;
+      }
+    } catch { /* current.json absent or unreadable — no scoping */ }
+    const bundle = await buildTrustBundle(slug, timestamp, checks, criteria, critiques, commandLog, _scopedFlowAgentsDir);
     if (!bundle) return { written: false, errors: [] }; // Surface unavailable — fail-open, skip write
     const result = await validateTrustBundle(bundle);
     if (result.available && !result.valid) {
@@ -1129,8 +1107,14 @@ function checksFromBundle(dir: string, declaredClaimTypes: Set<string> = new Set
 function critiquesFromBundle(dir: string, declaredClaimTypes: Set<string> = new Set()): AnyObj[] {
   const bundle = loadJson(path.join(dir, "trust.bundle"));
   if (!Array.isArray(bundle.claims)) return [];
-  // ADR 0016 Step 0: broaden to include declared kit-typed critique claims alongside workflow.critique.review
-  const critiqueClaims = bundle.claims.filter((c: AnyObj) => c && (c.claimType === "workflow.critique.review" || declaredClaimTypes.has(c.claimType)));
+  // ADR 0016 Step 0: broaden to include declared kit-typed critique claims alongside workflow.critique.review.
+  // P-d: exclude claims that have evidence items (evidence = check claims, not critique claims).
+  // This prevents check-type declared claims (e.g. builder.verify.tests) from being read back
+  // as critiques when declaredClaimTypes includes all gate expects[] types.
+  const evidenceClaimIds = new Set<string>(
+    Array.isArray(bundle.evidence) ? bundle.evidence.map((e: AnyObj) => e?.claimId).filter((id: unknown): id is string => typeof id === "string") : []
+  );
+  const critiqueClaims = bundle.claims.filter((c: AnyObj) => c && (c.claimType === "workflow.critique.review" || declaredClaimTypes.has(c.claimType)) && !evidenceClaimIds.has(c.id));
   return critiqueClaims.map((c: AnyObj) => ({
     id: String(c.subjectId || "").split("/").pop() || c.id,
     verdict: c.value ?? "not_verified",
