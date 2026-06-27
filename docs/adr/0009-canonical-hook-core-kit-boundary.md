@@ -7,6 +7,8 @@ title: "ADR 0009: Canonical Hook Core/Kit Boundary"
 **Date:** 2026-06-23
 **Status:** Accepted (decided with Brian Anderson, 2026-06-23)
 
+> **Extended/corrected by ADR 0016 (2026-06-26).** This ADR de-coupled the canonical hook from Builder skill/template *names* but left the hardcoded `workflow.*` claim taxonomy in the hook as "core contract." ADR 0016 (Abstraction A) corrects that: the gate enforcer must be **driven by the active kit's FlowDefinition `expects[]`**, not a hardcoded taxonomy. The hook's hardcoded `workflow.check.*`/`workflow.critique.review`/`workflow.acceptance.criterion` filtering is reclassified as a **violation to remediate** (same treatment this ADR gave `DELIVERY_TYPES`). The anti-gaming re-derivation via Surface is unchanged — only the *source* of the expectations moves to the FlowDefinition.
+
 ---
 
 ## Context

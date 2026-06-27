@@ -145,8 +145,11 @@ Create the session file with `status: planning`, `iteration: 0`. Use the sidecar
 npm run workflow:sidecar -- ensure-session \
   --source-request "<original request>" \
   --summary "<current delivery goal>" \
-  --criterion "<acceptance criterion>"
+  --criterion "<acceptance criterion>" \
+  --flow-id builder.build
 ```
+
+`--flow-id builder.build` activates the FlowDefinition-driven path for this session. Producers fire, gates enforce on builder.* claims, and `advance-state` sets `active_step_id` automatically via the `builder.build` phase_map. Keep this flag on all `deliver`-initiated sessions; do not remove it for direct ad-hoc requests that are not builder-flow pickup.
 
 ### 2. Plan (plan-work)
 
@@ -212,10 +215,36 @@ Record the final local state with `advance-state`. Use `status: verified` only w
 After review, verification, evidence, and Goal Fit are clean for the same diff:
 
 1. Confirm the working tree contains only verified scope.
-2. Commit the verified diff.
-3. Push the branch.
-4. Open or update the provider change record with issue links, closing refs, evidence links, and verification summary, or record an explicit no-provider-change reason.
-5. Wait for provider checks/CI or record missing checks as `NOT_VERIFIED`.
+2. Publish the session trust bundle to `delivery/` so the CI trust-reconcile job can verify what the agent claimed. `record-release` (via the sidecar writer) does this automatically (best-effort). To publish or re-publish explicitly:
+
+   ```bash
+   npm run workflow:sidecar -- publish-delivery .flow-agents/<slug>
+   ```
+
+   Then force-stage the trust artifacts for the delivery commit. They are gitignored
+   by default (they are runtime artifacts written on every local delivery) — `-f`
+   commits them deliberately into THIS delivery PR so CI's trust-reconcile job can
+   reconcile the session's claims against fresh CI results:
+
+   ```bash
+   git add -f delivery/trust.bundle delivery/trust.checkpoint.json
+   ```
+
+3. Commit the verified diff, including the force-added `delivery/trust.bundle` and `delivery/trust.checkpoint.json`.
+4. Push the branch.
+5. Open or update the provider change record with issue links, closing refs, evidence links, and verification summary, or record an explicit no-provider-change reason.
+6. Wait for provider checks/CI or record missing checks as `NOT_VERIFIED`.
+7. Record the gate claim for the Builder Kit `pr-open` step immediately after the PR is opened or updated:
+
+```bash
+npm run workflow:sidecar -- record-gate-claim .flow-agents/<slug> \
+  --expectation pull-request-opened \
+  --status pass \
+  --summary "PR opened: <pr-url>. Linked to <work-item-ref>, implementation summary and verification evidence attached." \
+  --evidence-ref-json '{"kind":"provider","url":"<pr-url>"}'
+```
+
+Use `--status fail` when the PR cannot be opened or when no provider change record is created and the reason is not an accepted no-provider-change path. Use `--status not_verified` when provider access is unavailable and the PR creation cannot be confirmed.
 
 Do not invoke `release-readiness` before this gate unless the user explicitly accepts a no-provider-change/no-push path and the reason is recorded in the session artifact. For GitHub, the first `ChangeProvider` adapter example is a PR with PR checks.
 

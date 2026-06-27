@@ -278,6 +278,34 @@ npm run workflow:sidecar -- init-plan .flow-agents/<slug>/<slug>--deliver.md \
   --next-action "<next step>"
 ```
 
+#### Deterministic slug from a work-item ref
+
+For issue-backed sessions, pass `--work-item <owner/repo#id>` instead of `--task-slug`. The
+derived slug has the format `<owner>-<repo>-<id>` — for example:
+
+```bash
+npm run workflow:sidecar -- ensure-session \
+  --work-item "kontourai/flow-agents#161" \
+  --source-request "Implement #161" \
+  --summary "Deterministic slug demo."
+# Creates .flow-agents/kontourai-flow-agents-161/
+```
+
+The slug is deterministic and idempotent: any agent or worktree that runs `ensure-session
+--work-item kontourai/flow-agents#161` will land in the same directory. This makes liveness
+collision-detection work correctly — the `subjectId` written to `liveness/events.jsonl` equals
+`workItemSlug(ref)` (i.e. `kontourai-flow-agents-161`), so a double-hold on the same issue is
+detectable via `liveness status --subject kontourai-flow-agents-161` (see
+[ADR 0012](adr/0012-agent-coordination-as-liveness-claims.md)).
+
+Rules:
+- `--task-slug` always wins when both flags are supplied (back-compat).
+- Omitting both flags still dies with `--task-slug is required`.
+- The `id` part after `#` must be a plain integer (GitHub issue number). Non-integer ids are
+  rejected.
+- Issue-backed sessions should prefer `--work-item` over hand-supplied `--task-slug` so that
+  liveness subjectId alignment is automatic.
+
 Reviewer Markdown artifacts can be imported into `critique.json`:
 
 ```bash
@@ -441,3 +469,44 @@ Retrospective:
 ```text
 Use learning-review. Capture facts, decisions, gaps, follow-ups, and durable knowledge updates from this completed or failed workflow.
 ```
+
+## Resumable sessions
+
+When a session resumes (after context compaction, an agent restart, or a cross-session
+handoff), the workflow-steering hook emits a `RESUME:` block on `SessionStart` that
+gives the resuming agent immediate situational awareness without blocking or auto-deciding.
+
+The `RESUME:` block supplements the existing `STATE:` line and contains:
+
+- **Header** — `RESUME: <slug> status:<status> phase:<phase>` — quick orientation.
+- **Next action** — the full `next_action.summary` at 240 characters (not truncated to 80), so the agent can re-ground to the exact recorded next step.
+- **Plan** — path to the plan artifact (`<slug>--plan-work.md` from `state.json artifact_paths` or conventional fallback).
+- **Next step** — the first `handoff.json next_steps` entry.
+- **Blockers** — any recorded blockers from `handoff.json`, or "none".
+- **Trust** — `Trust: N verified / M disputed / T total` from reading `trust.bundle`. Each disputed or unknown claim is listed with its id and a copy-pasteable remedy command: `npm run workflow:sidecar -- claim <id> <dir>`.
+- **Liveness advisory** (when applicable) — `[LIVENESS WARNING: another agent appears live on this work: actor <X>, last seen <T>]` when the shared liveness stream (`.flow-agents/liveness/events.jsonl`, ADR 0012) contains a fresh claim or heartbeat from a different actor for the same slug. This is advisory only — the hook exits 0 regardless.
+- **Route hint** — `To continue: resume this work. Or run pull-work to assess WIP and start new/parallel work.` — always routes the resume-vs-parallel decision through `pull-work` rather than auto-taking it.
+
+The `RESUME:` block appears on `SessionStart` only. `UserPromptSubmit` and `PostToolUse`
+behavior is unchanged.
+
+All reads are fail-open: a missing `handoff.json`, `trust.bundle`, or liveness stream
+degrades gracefully — the section is omitted or shows "no data", and the hook never throws.
+
+The liveness freshness check is read-only (ADR 0012). Writing or excluding liveness claims
+is scoped to issue #151 (a later slice). The session-level event log (Layer 2) is also
+deferred.
+
+### Shared liveness helper
+
+The freshness logic is centralised in `scripts/hooks/lib/liveness-read.js` (pure CJS,
+zero dependencies). It exports:
+
+- `readLivenessEvents(streamPath)` — reads a `.flow-agents/liveness/events.jsonl` file
+  line-by-line, JSON-parses each, and tolerates malformed lines.
+- `freshHolders(events, slug, selfActor, nowMs)` — returns actors (excluding `selfActor`)
+  who hold a within-TTL claim or heartbeat on `subjectId === slug`.
+
+Both the hook (`scripts/hooks/workflow-steering.js`) and the compiled CLI
+(`build/src/cli/workflow-sidecar.js`) consume this helper so the TTL/freshness logic lives
+in one place.

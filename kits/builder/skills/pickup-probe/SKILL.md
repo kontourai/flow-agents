@@ -84,6 +84,35 @@ Planning is ready only when:
 - The route reason and next action are recorded in an artifact that can be recovered without chat memory.
 
 If the gate fails, stop before `plan-work` and update the artifact with the blocker or decision gap.
+## Gate Claims: Record Pickup Probe Results
+
+When the Planning Gate passes, record the two gate claims for the Builder Kit `design-probe` step before handing off to `plan-work`. These satisfy the `builder.design-probe.pickup-readiness` and `builder.design-probe.decisions` gate expectations.
+
+**Claim 1 — Pickup readiness** (probe passed, goal fit and scope confirmed):
+
+```bash
+npm run workflow:sidecar -- record-gate-claim .flow-agents/<slug> \
+  --expectation pickup-probe-readiness \
+  --status pass \
+  --summary "Pickup probe passed: goal fit confirmed, blockers checked, dependencies reviewed, acceptance criteria verified." \
+  --evidence-ref-json '{"kind":"artifact","file":".flow-agents/<slug>/<slug>--pull-work.md","summary":"Pull-work artifact recording probe status, scope, and planning readiness."}'
+```
+
+**Claim 2 — Probe decisions captured** (decisions, accepted gaps, and planning readiness are recorded):
+
+```bash
+npm run workflow:sidecar -- record-gate-claim .flow-agents/<slug> \
+  --expectation probe-decisions-or-accepted-gaps \
+  --status pass \
+  --summary "Probe decisions recorded: <decision-count> decisions, <gap-count> accepted gaps. Planning readiness: <ready|accepted_gap_ready>." \
+  --evidence-ref-json '{"kind":"artifact","file":".flow-agents/<slug>/<slug>--pull-work.md","summary":"Pull-work artifact with decisions, accepted gaps, and planning handoff."}'
+```
+
+Record both claims together immediately when the gate passes. Use `--status fail` when the gate fails (unresolved blocker or decision gap). Use `--status not_verified` only when the session has no active flow step.
+
+When the gate fails, record `--status fail` with `--expectation pickup-probe-readiness` naming the blocker, and omit or defer the decisions claim until the blocker is resolved.
+
+
 
 ## Docs And ADR Policy
 

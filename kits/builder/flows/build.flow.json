@@ -1,6 +1,16 @@
 {
   "id": "builder.build",
   "version": "1.0",
+  "phase_map": {
+    "pickup": "pull-work",
+    "planning": "plan",
+    "execution": "execute",
+    "verification": "verify",
+    "goal_fit": "merge-ready",
+    "evidence": "merge-ready",
+    "release": "pr-open",
+    "learning": "learn"
+  },
   "steps": [
     { "id": "pull-work", "next": "design-probe" },
     { "id": "design-probe", "next": "plan" },
@@ -25,7 +35,10 @@
           "bundle_claim": {
             "claimType": "builder.pull-work.selected",
             "subjectType": "work-item",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         }
       ]
@@ -41,7 +54,10 @@
           "bundle_claim": {
             "claimType": "builder.design-probe.pickup-readiness",
             "subjectType": "work-item",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         },
         {
@@ -52,7 +68,10 @@
           "bundle_claim": {
             "claimType": "builder.design-probe.decisions",
             "subjectType": "decision",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         }
       ]
@@ -68,7 +87,10 @@
           "bundle_claim": {
             "claimType": "builder.plan.implementation",
             "subjectType": "artifact",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         }
       ]
@@ -84,7 +106,10 @@
           "bundle_claim": {
             "claimType": "builder.execute.scope",
             "subjectType": "change",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         }
       ]
@@ -111,7 +136,10 @@
           "bundle_claim": {
             "claimType": "builder.verify.tests",
             "subjectType": "flow-step",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         },
         {
@@ -123,7 +151,11 @@
           "bundle_claim": {
             "claimType": "builder.verify.policy-compliance",
             "subjectType": "artifact",
-            "accepted_statuses": ["trusted", "accepted", "advisory"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted",
+              "advisory"
+            ]
           }
         }
       ]
@@ -150,7 +182,10 @@
           "bundle_claim": {
             "claimType": "builder.merge-ready.readiness",
             "subjectType": "change",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         }
       ]
@@ -166,7 +201,10 @@
           "bundle_claim": {
             "claimType": "builder.pr-open.pull-request",
             "subjectType": "pull-request",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         }
       ]
@@ -182,7 +220,10 @@
           "bundle_claim": {
             "claimType": "builder.merge-ready-ci.readiness",
             "subjectType": "pull-request",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         }
       ]
@@ -198,7 +239,10 @@
           "bundle_claim": {
             "claimType": "builder.learn.decisions",
             "subjectType": "decision",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         },
         {
@@ -209,7 +253,10 @@
           "bundle_claim": {
             "claimType": "builder.learn.evidence",
             "subjectType": "release",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         }
       ]

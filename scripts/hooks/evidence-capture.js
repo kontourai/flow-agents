@@ -15,8 +15,24 @@
  *     "observedResult": "pass" | "fail",   // deterministically inferred
  *     "exitCode":       <integer> | null,  // null when only pass/fail is inferable
  *     "capturedAt":     "<ISO-8601 timestamp>",
- *     "source":         "postToolUse-capture"
+ *     "source":         "postToolUse-capture",
+ *     "_chain":         { "seq": <n>, "prevHash": "<hex>", "hash": "<hex>" }
  *   }
+ *
+ * Hash-chain integrity (Increment B2, tamper-EVIDENCE):
+ *   command-log.jsonl is the independent capture truth source. Each record carries
+ *   a `_chain` block: hash = sha256(prevHash + canonicalJson(record)) where
+ *   canonicalJson is the record WITHOUT the `_chain` field, keys sorted.
+ *   The genesis prevHash is a fixed constant. This makes alteration, removal, or
+ *   reordering of entries DETECTABLE by the Stop gate's verifyCommandLogChain().
+ *
+ *   HONEST FRAMING: this is tamper-EVIDENCE, NOT tamper-PROOF. An agent that
+ *   recomputes the whole chain from scratch can still forge a valid chain. The
+ *   real tamper-proof boundary is the signed checkpoint (B1). The chain raises the
+ *   local bar and catches casual/accidental tampering and corruption.
+ *
+ *   Fail-open: any chain computation error falls back to writing the plain record
+ *   without `_chain`. A chain failure must NEVER block capture or corrupt the log.
  *
  * Exit-code nuance: the host payload exposes `tool_response`/`tool_output`/`error`
  * (per docs/spec/runtime-hook-surface.md §1, postToolUse). A clean integer exit
@@ -32,6 +48,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const MAX_STDIN = 1024 * 1024;
 const MAX_COMMAND_LEN = 4096;
@@ -42,6 +59,69 @@ const MAX_OUTPUT_SCAN = 64 * 1024;
 // name set permissive (substring match) so unknown-but-command-shaped tools on
 // other runtimes still get captured when they carry a command string.
 const COMMAND_TOOL_NAME = /(^|[^a-z])(bash|shell|sh|exec|run|command|terminal|cmd|process|executebash|executecommand)([^a-z]|$)/i;
+
+// ─── Hash-chain integrity (tamper-EVIDENCE) ───────────────────────────────────
+//
+// Genesis prevHash: a fixed arbitrary sentinel used when the log is empty or
+// the last entry has no _chain field (legacy record). This is NOT the SHA256 of
+// any specific input string — it is a fixed constant chosen for the original
+// implementation. (A previous comment incorrectly claimed it was
+// sha256("flow-agents:command-log:genesis"); that is wrong.)
+//
+// Writer (this file, CHAIN_GENESIS) and verifier (stop-goal-fit.js,
+// CHAIN_GENESIS_VERIFY) MUST use the same value. Do not change one without
+// changing the other — existing chained logs depend on this constant.
+//
+// HONEST FRAMING: this makes alteration DETECTABLE, not impossible. An agent
+// that rewrites all hashes can still forge the chain. The real tamper-proof
+// boundary is the signed checkpoint (B1). We do not oversell this boundary.
+const CHAIN_GENESIS = 'a3f9e2b7d5c84f1e6a0d2c3b9f7e1a4d8c6b5f2e9a0d3c7b1f4e8a2d6c0b9f3';
+
+/**
+ * Stable canonical JSON for the chain input: the record WITHOUT the `_chain`
+ * field, keys sorted alphabetically. This ensures the hash is independent of
+ * key insertion order and that `_chain` itself does not contribute to its own
+ * hash (circular dependency).
+ */
+function canonicalJsonForChain(record) {
+  // Strip _chain if present (should not be, but defensive).
+  const keys = Object.keys(record).filter(k => k !== '_chain').sort();
+  const obj = {};
+  for (const k of keys) obj[k] = record[k];
+  return JSON.stringify(obj);
+}
+
+/**
+ * Compute the sha256 hex hash for this chain link.
+ * hash = sha256(prevHash + canonicalJson(record))
+ */
+function computeChainHash(prevHash, record) {
+  const input = prevHash + canonicalJsonForChain(record);
+  return crypto.createHash('sha256').update(input, 'utf8').digest('hex');
+}
+
+/**
+ * Read the last entry from command-log.jsonl that has a `_chain` block.
+ * Returns { seq, hash } of that entry, or { seq: -1, hash: CHAIN_GENESIS }
+ * when the log is absent, empty, or all existing entries are legacy (no _chain).
+ *
+ * We scan from the end so we can stop as soon as we find a chained entry
+ * without loading the whole file (practical optimization for long logs).
+ */
+function readLastChainState(logFile) {
+  let raw = '';
+  try { raw = fs.readFileSync(logFile, 'utf8'); } catch { return { seq: -1, hash: CHAIN_GENESIS }; }
+  const lines = raw.split('\n').filter(l => l.trim());
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let entry;
+    try { entry = JSON.parse(lines[i]); } catch { continue; }
+    if (entry && entry._chain && typeof entry._chain.hash === 'string' && typeof entry._chain.seq === 'number') {
+      return { seq: entry._chain.seq, hash: entry._chain.hash };
+    }
+  }
+  return { seq: -1, hash: CHAIN_GENESIS };
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 function parseJson(raw) {
   try { return JSON.parse(raw || '{}'); } catch { return {}; }
@@ -224,7 +304,21 @@ function run(rawInput) {
 
     const logFile = path.join(artifactDir, 'command-log.jsonl');
     fs.mkdirSync(artifactDir, { recursive: true });
-    fs.appendFileSync(logFile, JSON.stringify(record) + '\n');
+
+    // Hash-chain integrity: compute _chain before appending. Fail-open: any
+    // error in chain computation falls back to the plain record (no _chain).
+    // A chain failure must NEVER block capture or corrupt the log.
+    let recordToWrite = record;
+    try {
+      const { seq: prevSeq, hash: prevHash } = readLastChainState(logFile);
+      const seq = prevSeq + 1;
+      const hash = computeChainHash(prevHash, record);
+      // Spread record fields then add _chain so the chain field is appended last
+      // (cosmetic ordering; canonicalJsonForChain excludes it during hashing).
+      recordToWrite = { ...record, _chain: { seq, prevHash, hash } };
+    } catch { /* chain computation failed — write plain record, do not block */ }
+
+    fs.appendFileSync(logFile, JSON.stringify(recordToWrite) + '\n');
   } catch { /* fail-open: capture never blocks or corrupts */ }
   return rawInput;
 }
@@ -247,4 +341,8 @@ module.exports = {
   observeResult,
   isCommandTool,
   findRepoRoot,
+  // Chain helpers exported for testing and gate verification.
+  canonicalJsonForChain,
+  computeChainHash,
+  CHAIN_GENESIS,
 };

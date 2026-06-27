@@ -1,0 +1,113 @@
+# trust-reconcile.yml — CI trust anchor: Phase 1 (external anti-gaming anchor) +
+#                       Phase 2 (signed attestation over CI's own fresh results).
+#
+# Phase 1: re-runs canonical verification FRESH in a clean CI environment that
+# the agent does not control, then reconciles a delivered checkpoint/bundle's
+# claimed passes against CI reality. Any divergence (claimed pass + CI fail,
+# claimed pass + laundering operator, claimed pass + command CI never ran,
+# checkpoint-only bundle, claim with no evidence) fails the job with a clear
+# diagnostic message.
+#
+# Canonical verify command: npm run trust-reconcile-verify
+#   = npm run build && npm run eval:static
+#   (integration + the anti-gaming regression suite run in ci.yml's required
+#    "Runtime and Kit" lane, not here — see evals/ci/antigaming-suite.sh)
+#   This is the REAL verification this repo runs (build + static evals + integration
+#   evals), not a compile-only check. The script is declared in package.json so
+#   trust-reconcile.js auto-discovers it without needing TRUST_RECONCILE_COMMANDS.
+#
+# Phase 2 (additive): after the reconcile step PASSES, mint a signed in-toto
+# attestation over CI's own fresh results using Sigstore keyless signing
+# (Fulcio + Rekor). The attestation is uploaded as a workflow artifact.
+# Gated: the mint step only runs when the reconcile step passes (the job stays
+# red when reconcile fails — Phase 1 behavior unchanged).
+#
+# Design: NEVER trusts agent-produced artifacts as a truth source. The bundle is
+# read only to DETECT DIVERGENCE — CI's fresh run is the only authoritative result.
+# The agent cannot self-declare success here: it cannot modify the CI environment,
+# pre-disable this job, or post-forge results after the check runs.
+#
+# THIS JOB IS INTENDED TO BE A REQUIRED STATUS CHECK (branch protection).
+# Enabling it as required is a server-side GitHub branch-protection configuration
+# step — it is not wired here by code. Once required, no PR can merge past it.
+#
+# Additive — NOT a gate-hook change. Does not modify scripts/hooks/*, kits/knowledge,
+# or continue-work. Mirrors the structure of .github/workflows/ci.yml.
+
+name: Trust Reconcile
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trust-reconcile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  trust-reconcile:
+    name: Trust Reconcile
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Phase 2: id-token: write is required for Sigstore keyless signing (Fulcio OIDC).
+    # Mirrors the pattern in .github/workflows/publish-npm.yml.
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24"
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install shell tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq ripgrep
+
+      - name: Trust reconcile
+        id: trust-reconcile
+        run: node scripts/ci/trust-reconcile.js
+        # Canonical verify: auto-discovered from package.json scripts["trust-reconcile-verify"]
+        #   = npm run build && npm run eval:static
+#   (integration + the anti-gaming regression suite run in ci.yml's required
+#    "Runtime and Kit" lane, not here — see evals/ci/antigaming-suite.sh)
+        # This runs the REAL verification (build + static + integration evals), NOT a
+        # compile-only check. Override via TRUST_RECONCILE_COMMANDS or --commands if needed.
+        # Bundle auto-discovery: if delivery/trust.bundle or delivery/trust.checkpoint.json
+        # exists in the checkout, CI reconciles per-command claimed passes against fresh
+        # results automatically. When absent, only the fresh verify is enforced (fail-open).
+        # Phase 2: on success, writes ci-trust-reconcile-results.json to RUNNER_TEMP
+        # for mint-attestation.js to consume.
+
+      # Phase 2: Mint signed attestation over CI's own fresh results.
+      # Runs only when the trust-reconcile step passes (default step condition:
+      # previous steps must succeed). The job stays red if reconcile fails.
+      - name: Mint attestation
+        run: node scripts/ci/mint-attestation.js
+        # Sigstore keyless signing uses the OIDC token from id-token: write (above).
+        # Locally (no OIDC): signStatementWithSigstore returns null → writes unsigned
+        # in-toto statement → exits 0 (fail-open). The job does not crash.
+
+      - name: Upload attestation
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: trust-attestation
+          path: |
+            trust.attestation.sig.json
+            trust.attestation.intoto.json
+            trust.attestation.status.json
+          if-no-files-found: ignore
+          retention-days: 30

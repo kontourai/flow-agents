@@ -27,6 +27,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
+const crypto = require('crypto');
 
 const MAX_STDIN = 1024 * 1024;
 const ACTIVE_STATUSES = new Set([
@@ -44,8 +45,9 @@ const ACTIVE_STATUSES = new Set([
 ]);
 // WORKFLOW_SESSION_TYPES: used for artifact identification only, not for verdict production.
 const WORKFLOW_SESSION_TYPES = new Set(['deliver', 'delivery', 'fix-bug', 'execute-plan', 'verify-work']);
-const SIDECAR_NAMES = new Set(['state.json', 'acceptance.json', 'evidence.json', 'handoff.json']);
-const OPTIONAL_SIDECAR_NAMES = new Set(['critique.json']);
+// Phase 4c: bundle-only. Required set = {state.json, handoff.json, trust.bundle}. Drop evidence.json/acceptance.json/critique.json.
+const SIDECAR_NAMES = new Set(['state.json', 'handoff.json', 'trust.bundle']);
+const OPTIONAL_SIDECAR_NAMES = new Set();
 
 // A workflow that has not started execution is EXPECTED to be incomplete, so the
 // Stop gate must not hard-block on its missing DOD / Goal Fit / not-done state.
@@ -136,7 +138,23 @@ function sidecarValidation(root, artifactDir) {
   if (requireSidecars || requireCritique) {
     const present = new Set(sidecarFiles.map(file => path.basename(file)));
     const requiredNames = new Set(requireSidecars ? SIDECAR_NAMES : []);
-    if (requireCritique) requiredNames.add('critique.json');
+    // Phase 4c: critique.json is no longer written; trust.bundle carries critique claims.
+    // FLOW_AGENTS_REQUIRE_CRITIQUE is satisfied by:
+    //   - critique.json (legacy, may not be in SIDECAR_NAMES but may still be on disk), OR
+    //   - trust.bundle that contains at least one workflow.critique.review claim.
+    if (requireCritique) {
+      // Check disk directly (critique.json is no longer in SIDECAR_NAMES so may not be in present)
+      const hasCritiqueJson = fs.existsSync(path.join(artifactDir, 'critique.json'));
+      const bundleFile = path.join(artifactDir, 'trust.bundle');
+      let hasBundleCritique = false;
+      if (fs.existsSync(bundleFile)) {
+        try {
+          const b = JSON.parse(fs.readFileSync(bundleFile, 'utf8'));
+          hasBundleCritique = Array.isArray(b.claims) && b.claims.some(c => c && c.claimType === 'workflow.critique.review');
+        } catch { /* fall through — no bundle critique */ }
+      }
+      if (!hasCritiqueJson && !hasBundleCritique) requiredNames.add('critique.json');
+    }
     const missing = [...requiredNames].filter(name => !present.has(name)).sort();
     if (missing.length > 0) {
       return missing.map(name => `${relative(root, path.join(artifactDir, name))} sidecar validation: required sidecar is missing`);
@@ -264,6 +282,25 @@ async function tryLoadSurface() {
   }
 }
 
+// ─── ADR 0016 Abstraction A P-c: flow-resolver integration ────────────────────
+// Load the compiled flow-resolver (build/src/lib/flow-resolver.js) via CJS
+// require behind the same hasBuild guard used for the validator. Fail-open:
+// returns null when build/ is absent, require throws, or current.json has no
+// active_flow_id / active_step_id. The caller (bundleEnforcement, sidecarGuidance)
+// treats null as "no active FlowDefinition" and falls back to the workflow.* path.
+function loadActiveFlowStep(flowAgentsDir) {
+  const packageRoot = path.resolve(__dirname, '..', '..');
+  const builtResolver = path.join(packageRoot, 'build', 'src', 'lib', 'flow-resolver.js');
+  if (!fs.existsSync(builtResolver)) return null; // hasBuild guard: no build/ yet
+  try {
+    const resolver = require(builtResolver);
+    if (typeof resolver.resolveActiveFlowStep !== 'function') return null;
+    return resolver.resolveActiveFlowStep(flowAgentsDir);
+  } catch {
+    return null; // require failed or resolver threw — fail-open
+  }
+}
+
 function safeOneLine(value, maxLength = 220) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   if (text.length <= maxLength) return text;
@@ -281,12 +318,20 @@ function normalizedStatus(value) {
 // so consumer reads produce identical verdicts.
 
 /**
- * Extract the effective "verdict" from trust.bundle workflow.check.* claims.
+ * Extract the effective "verdict" from trust.bundle workflow.check.* claims,
+ * or from declared claimTypes when a FlowDefinition is active (P-c extension).
  * Priority of non-pass statuses: fail > not_verified > partial > pass.
- * Returns null when the bundle has no workflow check claims.
+ * Returns null when the bundle has no matching claims.
+ *
+ * @param {Array} claims - trust.bundle claims array
+ * @param {Set<string>|null} [declaredClaimTypes] - optional set of declared claimTypes from gateExpects[]
  */
-function bundleEvidenceVerdict(claims) {
-  const checkClaims = claims.filter(c => c && typeof c.claimType === 'string' && c.claimType.startsWith('workflow.check.'));
+function bundleEvidenceVerdict(claims, declaredClaimTypes) {
+  const checkClaims = claims.filter(c => {
+    if (!c || typeof c.claimType !== 'string') return false;
+    if (c.claimType.startsWith('workflow.check.')) return true;
+    return declaredClaimTypes != null && declaredClaimTypes.has(c.claimType);
+  });
   if (checkClaims.length === 0) return null;
   let worst = 'pass';
   const PRIORITY = { fail: 4, failed: 4, not_verified: 3, 'not-verified': 3, partial: 2, pass: 1, skip: 0 };
@@ -311,10 +356,16 @@ function claimCheckId(subjectId) {
  * Build the list of blocking check-claims from trust.bundle (equivalent to
  * evidence.json.checks filtered to non-pass status).
  * Returns objects shaped like { id, status, summary } (summary from fieldOrBehavior).
+ *
+ * @param {Array} claims - trust.bundle claims array
+ * @param {Set<string>|null} [declaredClaimTypes] - optional set of declared claimTypes from gateExpects[]
  */
-function bundleBlockingChecks(claims) {
+function bundleBlockingChecks(claims, declaredClaimTypes) {
   return claims.filter(c => {
-    if (!c || typeof c.claimType !== 'string' || !c.claimType.startsWith('workflow.check.')) return false;
+    if (!c || typeof c.claimType !== 'string') return false;
+    const typeMatch = c.claimType.startsWith('workflow.check.')
+      || (declaredClaimTypes != null && declaredClaimTypes.has(c.claimType));
+    if (!typeMatch) return false;
     const v = normalizedStatus(c.value || '');
     return v === 'fail' || v === 'failed' || v === 'not_verified' || v === 'not-verified';
   }).map(c => ({
@@ -325,11 +376,19 @@ function bundleBlockingChecks(claims) {
 }
 
 /**
- * Determine critique status from trust.bundle workflow.critique.review claims.
+ * Determine critique status from trust.bundle workflow.critique.review claims,
+ * or from declared claimTypes when a FlowDefinition is active (P-c extension).
  * Returns the "worst" value among critique claims, or null when none present.
+ *
+ * @param {Array} claims - trust.bundle claims array
+ * @param {Set<string>|null} [declaredClaimTypes] - optional set of declared claimTypes from gateExpects[]
  */
-function bundleCritiqueStatus(claims) {
-  const critiqueClaims = claims.filter(c => c && c.claimType === 'workflow.critique.review');
+function bundleCritiqueStatus(claims, declaredClaimTypes) {
+  const critiqueClaims = claims.filter(c => {
+    if (!c || typeof c.claimType !== 'string') return false;
+    if (c.claimType === 'workflow.critique.review') return true;
+    return declaredClaimTypes != null && declaredClaimTypes.has(c.claimType);
+  });
   if (critiqueClaims.length === 0) return null;
   // A disputed or failed critique is blocking
   for (const c of critiqueClaims) {
@@ -347,8 +406,11 @@ function bundleCritiqueStatus(claims) {
  *
  * Returns objects shaped like { id, kind, status, command } — same shape as
  * evidence.json.checks — so captureCrossReference's body logic is unchanged.
+ *
+ * @param {object} bundle - trust.bundle object
+ * @param {Set<string>|null} [declaredClaimTypes] - optional set of declared claimTypes from gateExpects[]
  */
-function bundleClaimedPassCommandChecks(bundle) {
+function bundleClaimedPassCommandChecks(bundle, declaredClaimTypes) {
   const allEvidence = Array.isArray(bundle.evidence) ? bundle.evidence : [];
   const allClaims = Array.isArray(bundle.claims) ? bundle.claims : [];
 
@@ -370,7 +432,8 @@ function bundleClaimedPassCommandChecks(bundle) {
     if (!cmd) continue;
     const claim = claimById.get(ev.claimId);
     if (!claim) continue;
-    if (!String(claim.claimType || '').startsWith('workflow.check.')) continue;
+    const claimTypeStr = String(claim.claimType || '');
+    if (!claimTypeStr.startsWith('workflow.check.') && !(declaredClaimTypes != null && declaredClaimTypes.has(claimTypeStr))) continue;
     // Deduplicate by command
     if (seen.has(cmd)) continue;
     seen.add(cmd);
@@ -383,7 +446,10 @@ function bundleClaimedPassCommandChecks(bundle) {
   // (no evidence item with execution) — these are originally-claimed-pass checks
   // that were never captured.
   for (const c of allClaims) {
-    if (!c || c.claimType !== 'workflow.check.command') continue;
+    if (!c || typeof c.claimType !== 'string') continue;
+    const isCommandType = c.claimType === 'workflow.check.command'
+      || (declaredClaimTypes != null && declaredClaimTypes.has(c.claimType));
+    if (!isCommandType) continue;
     if (normalizedStatus(c.value || '') !== 'pass') continue;
     // Check if this claim already has a capture evidence item (covered in (A))
     const hasCapture = allEvidence.some(ev => ev && ev.claimId === c.id && ev.execution && ev.execution.label);
@@ -407,12 +473,20 @@ function bundleClaimedPassCommandChecks(bundle) {
 }
 
 /**
- * Extract pending acceptance criteria from trust.bundle workflow.acceptance.criterion claims.
+ * Extract pending acceptance criteria from trust.bundle workflow.acceptance.criterion claims,
+ * or from declared claimTypes when a FlowDefinition is active (P-c extension).
  * Returns the count of claims whose value is pending/not_started/empty/unknown.
- * Returns null when the bundle has no acceptance criterion claims.
+ * Returns null when the bundle has no matching claims.
+ *
+ * @param {Array} claims - trust.bundle claims array
+ * @param {Set<string>|null} [declaredClaimTypes] - optional set of declared claimTypes from gateExpects[]
  */
-function bundlePendingCriteriaCount(claims) {
-  const criteriaClaims = claims.filter(c => c && c.claimType === 'workflow.acceptance.criterion');
+function bundlePendingCriteriaCount(claims, declaredClaimTypes) {
+  const criteriaClaims = claims.filter(c => {
+    if (!c || typeof c.claimType !== 'string') return false;
+    if (c.claimType === 'workflow.acceptance.criterion') return true;
+    return declaredClaimTypes != null && declaredClaimTypes.has(c.claimType);
+  });
   if (criteriaClaims.length === 0) return null;
   const pending = criteriaClaims.filter(c => {
     const v = normalizedStatus(c.value || '');
@@ -431,8 +505,17 @@ function bundlePendingCriteriaCount(claims) {
  * not_verified_gaps: always from evidence.json (no bundle equivalent).
  * critique status: read from trust.bundle when present, fall back to critique.json.
  *   Finding details: still from critique.json when present (both bundle and sidecar paths).
+ *
+ * ADR 0016 P-c: when activeFlowStep is non-null, pass its declared claimTypes to
+ * bundle helpers so declared-type claims (e.g. builder.verify.tests) produce the
+ * same sidecar guidance signals as workflow.* claims.
  */
-function sidecarGuidance(root, artifactDir) {
+function sidecarGuidance(root, artifactDir, activeFlowStep) {
+  // Build the declared claimType set from the FlowDefinition gate expects[] (P-c).
+  // Null when no FlowDefinition is active (fallback: helpers use workflow.* prefix only).
+  const declaredClaimTypes = activeFlowStep && Array.isArray(activeFlowStep.gateExpects)
+    ? new Set(activeFlowStep.gateExpects.map(e => e && e.bundle_claim && e.bundle_claim.claimType).filter(Boolean))
+    : null;
   const warnings = [];
   const state = readJsonFile(path.join(artifactDir, 'state.json'));
   const base = relative(root, artifactDir);
@@ -463,11 +546,12 @@ function sidecarGuidance(root, artifactDir) {
 
   if (bundleClaims) {
     // Phase 4b: read verdict and per-check signals from trust.bundle claims.
-    const verdict = bundleEvidenceVerdict(bundleClaims);
+    // P-c: pass declaredClaimTypes so declared-type claims are included alongside workflow.*.
+    const verdict = bundleEvidenceVerdict(bundleClaims, declaredClaimTypes);
     if (verdict && verdict !== 'pass' && verdict !== 'skip') {
       warnings.push(`${base} evidence verdict:${safeOneLine(verdict, 40)}; do not deliver without accepted gap or new evidence.`);
     }
-    const blockingChecks = bundleBlockingChecks(bundleClaims);
+    const blockingChecks = bundleBlockingChecks(bundleClaims, declaredClaimTypes);
     for (const check of blockingChecks.slice(0, 4)) {
       const status = safeOneLine(check.status || 'unknown', 40);
       warnings.push(`${base} evidence check ${safeOneLine(check.id || 'unknown', 80)} status:${status}: ${safeOneLine(check.summary)}`);
@@ -503,7 +587,8 @@ function sidecarGuidance(root, artifactDir) {
 
   if (bundleClaims) {
     // Phase 4b: read critique status from trust.bundle claims.
-    const critiqueStatusVal = bundleCritiqueStatus(bundleClaims);
+    // P-c: pass declaredClaimTypes so declared-type critique claims are included.
+    const critiqueStatusVal = bundleCritiqueStatus(bundleClaims, declaredClaimTypes);
     const critiqueIsBlocking = critiqueStatusVal !== null && normalizedStatus(critiqueStatusVal) !== 'pass';
     if (critiqueIsBlocking) {
       warnings.push(`${base} critique status:${safeOneLine(critiqueStatusVal || 'unknown', 40)}; required critique must pass or findings be accepted.`);
@@ -590,6 +675,195 @@ function readCommandLog(artifactDir) {
   }
   return byCommand;
 }
+
+/**
+ * Read command-log.jsonl into a map of normalized-command -> LATEST capture outcome.
+ * The LAST entry for each command wins (unlike readCommandLog which makes FAIL sticky).
+ * Used for both capturedFailReconciliation and captureCrossReference (Fix C): we want to
+ * know the LAST result, so a genuine re-run-to-pass clears the earlier FAIL. Only an actual
+ * re-run (new PASS entry in the log) clears it — a new claim cannot change the log.
+ */
+function readLatestCommandLog(artifactDir) {
+  const file = path.join(artifactDir, 'command-log.jsonl');
+  let raw = '';
+  try { raw = fs.readFileSync(file, 'utf8'); } catch { return new Map(); }
+  const byCommand = new Map();
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let entry;
+    try { entry = JSON.parse(trimmed); } catch { continue; }
+    if (!entry || typeof entry.command !== 'string') continue;
+    const key = normalizeCommand(entry.command);
+    if (!key) continue;
+    const failed = entry.observedResult === 'fail' || (Number.isInteger(entry.exitCode) && entry.exitCode !== 0);
+    // LAST entry wins — genuine re-run-to-pass overwrites the earlier FAIL.
+    byCommand.set(key, {
+      ran: true,
+      failed,
+      exitCode: Number.isInteger(entry.exitCode) ? entry.exitCode : null,
+    });
+  }
+  return byCommand;
+}
+
+// ─── Claim-status helpers for capturedFailReconciliation ─────────────────────
+
+/**
+ * Returns true when a claim's stored status+value asserts the command PASSED.
+ * Used to detect namespace-agnostic false-completions.
+ */
+function claimAssertsPass(status, value) {
+  const s = String(status || '').toLowerCase();
+  const v = String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  // Fix E: added 'approved' status alias and 'true'/'ok' value aliases
+  return (s === 'verified' || s === 'assumed' || s === 'accepted' || s === 'trusted' || s === 'approved')
+    && (v === 'pass' || v === 'passed' || v === 'verified' || v === 'true' || v === 'ok');
+}
+
+/**
+ * Returns true when a claim's stored status+value ACKNOWLEDGES a failure
+ * (the agent owned the failure rather than claiming pass).
+ */
+function claimAcknowledgesFailure(status, value) {
+  const s = String(status || '').toLowerCase();
+  const v = String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return s === 'disputed' || s === 'rejected' || s === 'failing' || s === 'failed'
+    || s === 'not_verified' || s === 'not-verified'
+    || v === 'fail' || v === 'failed' || v === 'not_verified' || v === 'failing';
+}
+
+/**
+ * Returns true when a command string contains an exit-code-neutralizing operator.
+ * A claimed-pass check whose captured command uses one of these cannot be accepted as a
+ * deterministic pass — the real sub-command may have failed silently.
+ *
+ * R6 extended logic (identical patterns used by scripts/ci/trust-reconcile.js — centralize
+ * as a follow-up if drift becomes a maintenance concern):
+ *   - ANY || operator is flagged. A legitimate verification command never needs || — its
+ *     only purpose in a verification command is to mask the real exit code (e.g.
+ *     `npm test || exit 0`, `npm test || echo ok`, `npm test || /bin/true`, `npm test || (exit 0)`).
+ *   - | true  (single pipe into true — always exits 0)
+ *   - Trailing ; or newline followed by: true  :  exit 0  /bin/true
+ *
+ * Fix D: applied in captureCrossReference's satisfied path and capturedFailReconciliation.
+ */
+function hasLaunderingOperator(cmd) {
+  // ANY || in a claimed verification command is an exit-code mask.
+  // Legitimate verification commands never need || — its only purpose there is to
+  // suppress the real exit code (|| exit 0, || echo ok, || /bin/true, || (exit 0), etc.).
+  if (/\|\|/.test(cmd)) return true;
+  // | true  — single-pipe into true: `cmd | true` always exits 0 regardless of left-side exit code.
+  if (/\|\s*true\b/.test(cmd)) return true;
+  // Trailing ; or \n followed by exit-neutralizing commands (same threat, appended after the real cmd):
+  //   ; true    ; :    ; exit 0    ; /bin/true    (and \n variants)
+  if (/[;\n]\s*true\b/.test(cmd)) return true;
+  if (/[;\n]\s*:\s*(?:$|\s|;)/.test(cmd)) return true;
+  if (/[;\n]\s*exit\s+0\b/.test(cmd)) return true;
+  if (/[;\n]\s*\/bin\/true\b/.test(cmd)) return true;
+  return false;
+}
+
+// ─── Hash-chain integrity verification (Increment B2, tamper-EVIDENCE) ────────
+//
+// command-log.jsonl is the independent capture truth source. Each chained entry
+// carries a `_chain` block: {seq, prevHash, hash} where
+//   hash = sha256(prevHash + canonicalJson(record))
+// and canonicalJson is the record WITHOUT `_chain`, keys sorted alphabetically.
+//
+// HONEST FRAMING: this is tamper-EVIDENCE, not tamper-PROOF. An agent that
+// rewrites all hashes can still forge a valid chain. The real tamper-proof
+// boundary is the signed checkpoint (B1). This raises the local bar and catches
+// casual/accidental tampering and corruption.
+//
+// verifyCommandLogChain returns:
+//   "ok"     — all entries have _chain and every hash/linkage is valid.
+//   "legacy" — no _chain fields at all (pre-B2 log); treat as today, no
+//              integrity claim. Backward-compat: existing fixtures stay green.
+//   "broken" — a chained entry has a bad hash or bad linkage; the capture
+//              truth source appears altered/removed/reordered.
+//
+// The genesis prevHash is a fixed arbitrary sentinel — NOT the SHA256 of any
+// specific input string. The comment in evidence-capture.js previously (and
+// incorrectly) claimed it was sha256("flow-agents:command-log:genesis"); it is not.
+// Writer (evidence-capture.js CHAIN_GENESIS) and verifier (CHAIN_GENESIS_VERIFY here)
+// MUST use the same value. Do not change one without changing the other.
+const CHAIN_GENESIS_VERIFY = 'a3f9e2b7d5c84f1e6a0d2c3b9f7e1a4d8c6b5f2e9a0d3c7b1f4e8a2d6c0b9f3';
+
+/**
+ * Canonical JSON for chain verification: record WITHOUT `_chain`, keys sorted.
+ * Must be byte-identical to canonicalJsonForChain() in evidence-capture.js.
+ */
+function canonicalJsonForVerify(record) {
+  const keys = Object.keys(record).filter(k => k !== '_chain').sort();
+  const obj = {};
+  for (const k of keys) obj[k] = record[k];
+  return JSON.stringify(obj);
+}
+
+/**
+ * Verify the hash chain of command-log.jsonl.
+ * Returns { status, brokenAt } where:
+ *   status  = "ok" | "legacy" | "broken"
+ *   brokenAt = index (0-based) of the first broken entry, or null
+ */
+function verifyCommandLogChain(artifactDir) {
+  const file = path.join(artifactDir, 'command-log.jsonl');
+  let raw = '';
+  try { raw = fs.readFileSync(file, 'utf8'); } catch { return { status: 'legacy', brokenAt: null }; }
+
+  const lines = raw.split('\n').filter(l => l.trim());
+  if (lines.length === 0) return { status: 'legacy', brokenAt: null };
+
+  // Parse all entries, tolerating unparseable lines (they count as legacy/unchained).
+  const entries = [];
+  for (const line of lines) {
+    try {
+      const entry = JSON.parse(line);
+      if (entry && typeof entry === 'object') entries.push(entry);
+    } catch { /* skip malformed lines */ }
+  }
+  if (entries.length === 0) return { status: 'legacy', brokenAt: null };
+
+  // Classify: are there any chained entries?
+  const hasAnyChain = entries.some(e => e._chain && typeof e._chain.hash === 'string');
+  if (!hasAnyChain) return { status: 'legacy', brokenAt: null };
+
+  // Verify chain linkage. Legacy entries (no _chain) that precede the first
+  // chained entry are tolerated (mixed log during the upgrade transition).
+  // However, a chain entry following another chain entry must link correctly.
+  let prevHash = CHAIN_GENESIS_VERIFY;
+  let prevWasChained = false;
+  let chainedCount = 0;
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const chain = entry._chain;
+    if (!chain || typeof chain.hash !== 'string') {
+      // Legacy entry without _chain. If we have already seen a chained entry,
+      // a gap in the chain (a legacy entry in the middle) counts as broken
+      // (it could indicate a removed chained entry was replaced by a legacy one).
+      if (prevWasChained) return { status: 'broken', brokenAt: i };
+      // Before any chained entry: tolerate (legacy prefix).
+      continue;
+    }
+
+    // This is a chained entry. Verify hash.
+    const expectedHash = crypto.createHash('sha256')
+      .update(prevHash + canonicalJsonForVerify(entry), 'utf8')
+      .digest('hex');
+    if (chain.hash !== expectedHash) return { status: 'broken', brokenAt: i };
+
+    // Verify linkage: prevHash must match what this entry claims.
+    if (chain.prevHash !== prevHash) return { status: 'broken', brokenAt: i };
+
+    prevHash = chain.hash;
+    prevWasChained = true;
+    chainedCount += 1;
+  }
+
+  return { status: 'ok', brokenAt: null };
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Resolve a TRUSTED command to re-run for a claimed-pass check whose command was
@@ -722,24 +996,101 @@ function runBackstop(trusted) {
  * command items) when the bundle is present, falling back to evidence.json checks
  * for bundle-less sessions. command-log.jsonl UNCHANGED — it stays the capture
  * truth source. The teeth (claimed-pass + captured-fail → block) are byte-identical.
+ *
+ * ADR 0016 P-c (fix): accept activeFlowStep so declared-type sessions (e.g.
+ * builder.verify.tests) are visible to the cross-reference, closing the hole
+ * where captureCrossReference was the only capture consumer not threaded with
+ * the FlowDefinition. Mirrors the pattern in bundleEnforcement / sidecarGuidance.
  */
-function captureCrossReference(root, artifactDir) {
+function captureCrossReference(root, artifactDir, activeFlowStep) {
+  // Build the declared claimType set from the FlowDefinition gate expects[] (P-c).
+  // Null when no FlowDefinition is active (fallback: bundleClaimedPassCommandChecks
+  // uses workflow.check.* prefix only — no regression for non-FlowDefinition sessions).
+  const declaredClaimTypes = activeFlowStep && Array.isArray(activeFlowStep.gateExpects)
+    ? new Set(activeFlowStep.gateExpects.map(e => e && e.bundle_claim && e.bundle_claim.claimType).filter(Boolean))
+    : null;
   const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
   const acceptance = readJsonFile(path.join(artifactDir, 'acceptance.json'));
-  const log = readCommandLog(artifactDir);
+  const log = readLatestCommandLog(artifactDir); // Fix C: latest-wins; genuine fix-then-rerun-to-pass clears the block
   const base = relative(root, artifactDir);
   const backstopMode = resolveBackstopMode();
   const warnings = [];
+
+  // AC3 fail-closed: detect a missing command log in a post-execution session.
+  // When state.json confirms the session is past the planning phase (commands should
+  // have run), but command-log.jsonl is absent, emit a FULL_BLOCK warning.
+  // A genuine pre-execution session (no commands expected yet) is NOT blocked —
+  // distinguished by requiring BOTH a non-pre-execution phase AND a non-pre-execution
+  // status (avoids blocking a freshly planned task that has state.json but no log yet).
+  //
+  // BAR-RAISER: an agent could forge state.json with a pre-execution phase to avoid
+  // this. The real anchor is external (signed checkpoints + human review).
+  {
+    const logFileMissing = !fs.existsSync(path.join(artifactDir, 'command-log.jsonl'));
+    if (logFileMissing) {
+      const captureState = readJsonFile(path.join(artifactDir, 'state.json'));
+      if (captureState) {
+        const capturePhase = normalizedStatus(captureState.phase || '');
+        const captureStatus = normalizedStatus(captureState.status || '');
+        // Post-execution: phase is set AND not a pre-execution phase (idea/backlog/pickup/planning).
+        // Also require status is not a pre-execution status (new/planning/planned/backlog).
+        const postExecPhase = capturePhase && !PRE_EXECUTION_PHASES.has(capturePhase);
+        const preExecStatus = !captureStatus || captureStatus === 'new' || PRE_EXECUTION_STATUSES.has(captureStatus);
+        if (postExecPhase && !preExecStatus) {
+          // Fix #216 over-block: only emit the missing-log warning when a command was
+          // actually EXPECTED to be captured — i.e., the trust.bundle evidence has at
+          // least one item with execution.label (concrete proof a command was meant to
+          // be captured). A no-command session (doc review, policy task advanced to
+          // verification without running shell commands) must NOT be blocked here.
+          // Note: `bundle` is already read at the top of captureCrossReference.
+          const captureEvidence = bundle && Array.isArray(bundle.evidence) ? bundle.evidence : [];
+          const hasExpectedCapture = captureEvidence.some(ev => ev && ev.execution && ev.execution.label);
+          if (hasExpectedCapture) {
+            warnings.push(
+              `${base} expected capture log is missing — possible deletion of the capture truth source; ` +
+              `phase:${capturePhase} status:${captureStatus} indicates commands should have run. ` +
+              'Cannot verify command execution deterministically. ' +
+              'Restore from a checkpoint or investigate.'
+            );
+          }
+        }
+      }
+    }
+  }
+
+  // ── Hash-chain integrity check ──────────────────────────────────────────────
+  // Verify command-log.jsonl before trusting its pass/fail signals. If the chain
+  // is broken (altered, removed, or reordered entries), the capture truth source
+  // is compromised: we must NOT trust its pass signals for claimed-pass checks.
+  //
+  // ok     → proceed normally (chain is valid, log is trustworthy).
+  // legacy → proceed normally (pre-B2 log, no chain to verify, existing behavior).
+  // broken → emit a loud warning and treat ALL claimed-pass commands relying on
+  //          this log as NOT_VERIFIED/blocking — do not let them sail through.
+  let chainBroken = false;
+  {
+    const chainResult = verifyCommandLogChain(artifactDir);
+    if (chainResult.status === 'broken') {
+      chainBroken = true;
+      const brokenIdx = chainResult.brokenAt !== null ? ` (entry ${chainResult.brokenAt})` : '';
+      warnings.push(
+        `${base} command-log integrity check FAILED — capture truth source appears tampered${brokenIdx}: ` +
+        'claimed-pass checks relying on it are NOT trusted. ' +
+        'This is tamper-EVIDENCE (hash-chain broken); alteration, removal, or reordering detected. ' +
+        'NOT_VERIFIED: cannot confirm or deny claimed passes.'
+      );
+    }
+  }
 
   // Build the list of claimed-pass command checks — bundle-first, evidence.json fallback.
   let claimedPass;
   if (bundle && Array.isArray(bundle.claims)) {
     // Phase 4b: source from trust.bundle evidence[] (execution/command items).
-    claimedPass = bundleClaimedPassCommandChecks(bundle);
+    claimedPass = bundleClaimedPassCommandChecks(bundle, declaredClaimTypes);
   } else {
     // Fallback: no bundle — read from evidence.json (existing behavior, no regression).
     const evidence = readJsonFile(path.join(artifactDir, 'evidence.json'));
-    if (!evidence || !Array.isArray(evidence.checks)) return [];
+    if (!evidence || !Array.isArray(evidence.checks)) return warnings;
     claimedPass = evidence.checks.filter(check => {
       if (!check || typeof check !== 'object') return false;
       const kind = normalizedStatus(check.kind);
@@ -754,13 +1105,19 @@ function captureCrossReference(root, artifactDir) {
     const id = safeOneLine(check.id || cmd, 80);
     const logged = log.get(cmd);
 
-    if (logged && logged.ran) {
-      // (1) Cross-reference the capture log first.
+    if (!chainBroken && logged && logged.ran) {
+      // (1) Cross-reference the capture log first (only when chain is intact).
+      // A broken chain means we cannot trust the log's pass signals — skip this
+      // shortcut and fall through to the backstop/NOT_VERIFIED path below.
       if (logged.failed) {
         const exit = Number.isInteger(logged.exitCode) ? ` (exitCode:${logged.exitCode})` : '';
         warnings.push(`${base} evidence check ${id}: capture log CONTRADICTS claimed pass — command "${safeOneLine(cmd, 120)}" was recorded as FAIL${exit}. This is a caught false-completion.`);
+      } else if (hasLaunderingOperator(cmd)) {
+        // Fix D: exit-code laundering. The captured exit-0 is not trustworthy — the command
+        // baked in '|| true' / '|| :' / '; true' / '; exit 0' / '| true' to mask the real result.
+        warnings.push(`${base} evidence check ${id}: claimed pass relies on an exit-code-laundered command "${safeOneLine(cmd, 120)}" — the exit code is not a trustworthy signal (laundering operators mask the real exit code).`);
       }
-      // log shows it ran and passed → satisfied deterministically, no re-run.
+      // else: log shows it ran and passed with no laundering → satisfied deterministically.
       continue;
     }
 
@@ -790,6 +1147,151 @@ function captureCrossReference(root, artifactDir) {
   return warnings;
 }
 
+/**
+ * Namespace-agnostic captured-FAIL reconciliation (AC1 — closes the allowlist bypass).
+ *
+ * The existing captureCrossReference only checks claims that pass the namespace
+ * allowlist (workflow.* prefix or declared gateExpects[]). A kit-typed claim
+ * (e.g. builder.verify.tests) whose command-log entry says FAIL can slip through
+ * when no active FlowDefinition declares that claimType.
+ *
+ * This function is namespace-agnostic: it builds the LATEST-capture-per-command map
+ * and for each command whose last capture is FAIL it checks:
+ *   (A) Any claim (ANY namespace) asserting pass for that command → false-completion HARD_BLOCK
+ *       Fix A: runs on EVERY stop (status-independent). A claim contradicting the capture is
+ *       a false-completion regardless of whether state.json shows the task as 'done'.
+ * Fix D: also checks commands with laundering operators whose latest capture is PASS (exit 0);
+ *   a claimed-pass for a laundered command is NOT a trustworthy signal.
+ * Fix B: Case B (unaccounted at completion — no-claim-at-all branch) REMOVED.
+ *   It over-blocked incidental failures (grep no-match, git diff --exit-code, etc.).
+ *   Case A covers the real threat (claimed pass contradicts captured fail).
+ * Fix E: verifyCommandLogChain called; on broken chain reconciliation is skipped (log
+ *   integrity is already signalled by captureCrossReference).
+ *
+ * No-over-block guarantees:
+ *   - Fail-then-re-run-to-pass: latest is PASS → not in latestFails → no warning.
+ *   - Acknowledged failure: claim has failing/disputed status → ackClaims → no warning.
+ *   - No-command session: no log → latestLog empty → no warning.
+ *   - Incidental fail (grep/diff/find) with no pass-claim → no warning (Case B removed).
+ */
+function capturedFailReconciliation(root, artifactDir, taskStatus) {
+  // Fix A: removed the `completing` guard. Run on EVERY stop — status-independent.
+  // A claim contradicting the capture is a false-completion whether or not the agent
+  // has set state.json.status to a terminal value. (taskStatus param kept for compat.)
+
+  const latestLog = readLatestCommandLog(artifactDir);
+  if (latestLog.size === 0) return []; // No captures — nothing to reconcile
+
+  // Fix E: verify chain integrity; skip reconciliation when broken (log untrusted).
+  // The main integrity warning is already emitted by captureCrossReference.
+  const chainResult = verifyCommandLogChain(artifactDir);
+  if (chainResult.status === 'broken') return []; // Can't trust pass/fail signals
+
+  // Collect commands whose LATEST capture is FAIL (Case A).
+  const latestFails = new Map(); // cmd -> {failed:true, exitCode}
+  for (const [cmd, info] of latestLog) {
+    if (info.failed) latestFails.set(cmd, info);
+  }
+
+  // Fix D: Collect commands whose latest capture is PASS (exit 0) but whose command
+  // string contains an exit-code-neutralizing operator (laundering). The captured
+  // exit-0 is not a trustworthy signal for these — real test failures are hidden.
+  const launderedPass = new Map(); // cmd -> {failed:false, exitCode:0}
+  for (const [cmd, info] of latestLog) {
+    if (!info.failed && hasLaunderingOperator(cmd)) launderedPass.set(cmd, info);
+  }
+
+  if (latestFails.size === 0 && launderedPass.size === 0) return []; // Nothing to flag
+
+  const base = relative(root, artifactDir);
+  const warnings = [];
+
+  // Load the trust.bundle for claim/evidence analysis.
+  const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
+  const allClaims = bundle && Array.isArray(bundle.claims) ? bundle.claims : [];
+  const allEvidence = bundle && Array.isArray(bundle.evidence) ? bundle.evidence : [];
+
+  // Build: claimId → claim (for fast evidence→claim lookup)
+  const claimById = new Map();
+  for (const c of allClaims) {
+    if (c && c.id) claimById.set(c.id, c);
+  }
+
+  // commandsToCheck: FAIL-latest commands + laundered-pass commands
+  const commandsToCheck = new Set([...latestFails.keys(), ...launderedPass.keys()]);
+
+  // For each relevant command, track what claims say about it.
+  // cmdAcc: cmd → {passClaims: [...], ackClaims: []}
+  const cmdAcc = new Map();
+  const initAcc = (cmd) => {
+    if (!cmdAcc.has(cmd)) cmdAcc.set(cmd, { passClaims: [], ackClaims: [] });
+    return cmdAcc.get(cmd);
+  };
+
+  // Path A: evidence items with execution.label link a claim to a specific command.
+  for (const ev of allEvidence) {
+    if (!ev || !ev.execution || !ev.execution.label) continue;
+    const cmd = normalizeCommand(ev.execution.label);
+    if (!cmd || !commandsToCheck.has(cmd)) continue;
+    const claim = claimById.get(ev.claimId);
+    if (!claim) continue;
+    const acc = initAcc(cmd);
+    const s = String(claim.status || '').toLowerCase();
+    const v = normalizedStatus(claim.value || '');
+    if (claimAssertsPass(s, v)) acc.passClaims.push(claim);
+    if (claimAcknowledgesFailure(s, v)) acc.ackClaims.push(claim);
+  }
+
+  // Path B: claim.fieldOrBehavior resolves directly to the command (field-based resolution).
+  for (const c of allClaims) {
+    if (!c) continue;
+    const cmd = normalizeCommand(c.fieldOrBehavior || '');
+    if (!cmd || !commandsToCheck.has(cmd)) continue;
+    const acc = initAcc(cmd);
+    const s = String(c.status || '').toLowerCase();
+    const v = normalizedStatus(c.value || '');
+    if (claimAssertsPass(s, v)) acc.passClaims.push(c);
+    if (claimAcknowledgesFailure(s, v)) acc.ackClaims.push(c);
+  }
+
+  // Case A: Evaluate each FAIL-latest command for pass-claims (status-independent).
+  for (const [cmd, failInfo] of latestFails) {
+    const exit = Number.isInteger(failInfo.exitCode) ? failInfo.exitCode : null;
+    const exitStr = exit !== null ? ` (exit ${exit})` : '';
+    const acc = cmdAcc.get(cmd);
+
+    if (acc && acc.passClaims.length > 0) {
+      // Any-namespace claim asserts pass for a command whose latest capture is FAIL.
+      // This is the namespace-agnostic false-completion signal.
+      const claim = acc.passClaims[0];
+      warnings.push(
+        `${base} captured command '${safeOneLine(cmd, 120)}' last ran FAIL${exitStr} ` +
+        `but claim ${safeOneLine(claim.subjectId || claim.id, 80)} (${safeOneLine(claim.claimType, 48)}) ` +
+        `asserts pass — namespace-agnostic caught false-completion.`
+      );
+    }
+    // Fix B: Case B (unaccounted at completion — no-claim-at-all) REMOVED.
+    // It over-blocked incidental failures with no pass-claim. Case A covers the real threat.
+    // Acknowledged failure (ackClaims.length > 0) → OK, no warning.
+  }
+
+  // Fix D: Evaluate laundered-pass commands for pass-claims.
+  for (const [cmd] of launderedPass) {
+    const acc = cmdAcc.get(cmd);
+    if (acc && acc.passClaims.length > 0) {
+      const claim = acc.passClaims[0];
+      warnings.push(
+        `${base} captured command '${safeOneLine(cmd, 120)}' claimed pass relies on an ` +
+        `exit-code-laundered command — claim ${safeOneLine(claim.subjectId || claim.id, 80)} ` +
+        `(${safeOneLine(claim.claimType, 48)}) asserts pass but the exit code is not a ` +
+        `trustworthy signal (laundering operators mask the real exit code).`
+      );
+    }
+  }
+
+  return warnings;
+}
+
 // ─── ADR 0010 Phase 2: enforce on the canonical Hachure trust.bundle ──────────
 
 // ─── ADR 0010 Phase 2: enforce on the canonical Hachure trust.bundle ──────────
@@ -807,7 +1309,13 @@ function captureCrossReference(root, artifactDir) {
 // stored status (e.g. stored "verified" but evidence re-derives to "disputed"),
 // that mismatch is a strong tamper signal — block with an explicit warning.
 // Fail-open: if Surface is unavailable, fall back to the stored-status check.
-async function bundleEnforcement(artifactDir) {
+//
+// ADR 0016 P-c: when activeFlowStep is non-null, claim-selection uses the gate's
+// declared claimType set (gateExpects[].bundle_claim.claimType). When null, the
+// existing workflow.* prefix filter runs unchanged (fallback). The re-derivation
+// loop, tamper-detection, high/critical filter, and block/exit-2 logic are
+// STRUCTURALLY UNCHANGED — only WHICH claims are selected changes.
+async function bundleEnforcement(artifactDir, activeFlowStep) {
   const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
   if (!bundle || !Array.isArray(bundle.claims)) return [];
 
@@ -818,11 +1326,74 @@ async function bundleEnforcement(artifactDir) {
   const allEvents = Array.isArray(bundle.events) ? bundle.events : [];
   const allPolicies = Array.isArray(bundle.policies) ? bundle.policies : [];
 
+  // P-c: claim-selection predicate.
+  // When activeFlowStep is non-null, select claims whose claimType is in the
+  // gate's declared set. When null, fall back to the existing workflow.* prefix
+  // filter so no-FlowDefinition sessions are unaffected.
+  const declaredClaimTypes = activeFlowStep && Array.isArray(activeFlowStep.gateExpects)
+    ? new Set(activeFlowStep.gateExpects.map(e => e && e.bundle_claim && e.bundle_claim.claimType).filter(Boolean))
+    : null;
+
+  // SECURITY (Layer 2 — gate-bypass-chain fix): use UNION form instead of if/else.
+  // With the old if/else, an empty declaredClaimTypes (Set{}) from a fake flow with
+  // expects:[] caused isSelectedClaim to return false for EVERY claim — all
+  // bundleEnforcement checks were silently bypassed. The union form ensures workflow.*
+  // claims are ALWAYS enforced regardless of whether a FlowDefinition is active or what
+  // its expects[] contains. Declared claimTypes are added on top of the baseline.
+  //
+  // AC3 two-part dependency (regression guard — see test_captured_fail_reconciliation.sh):
+  //   Part 1 (this union form): ensures bundleEnforcement always enforces workflow.* claims
+  //     regardless of declaredClaimTypes being null or empty Set.
+  //   Part 2 (empty-expects guard below): emits gate-misconfiguration HARD_BLOCK when
+  //     declaredClaimTypes is a non-null empty Set (active flow with expects:[]).
+  //   Both parts are required: Part 1 alone lets the empty-expects bypass slip through
+  //   without a loud signal; Part 2 alone without the union would silently pass 0 claims.
+  const isSelectedClaim = (claim) => {
+    const ct = String(claim.claimType || '');
+    // Union: workflow.* is always selected (baseline); declared types extend it.
+    return ct.startsWith('workflow.') || (declaredClaimTypes != null && declaredClaimTypes.has(ct));
+  };
+
+  // Misconfiguration guard: an active FlowDefinition with zero expects[] is suspicious.
+  // Empty expects can indicate a tampered flow definition (the gate-bypass exploit).
+  // Emit a hard warning so operators see it regardless of session phase.
+  if (declaredClaimTypes !== null && declaredClaimTypes.size === 0) {
+    warnings.push(`gate misconfiguration: active FlowDefinition has empty expects[] (possible tampered flow definition or zero-expects bypass attempt); verify the flow definition is authentic before delivery.`);
+  }
+
+  // AC3 fail-closed (high-assurance path): when @kontourai/surface is unavailable, we
+  // cannot re-derive claim status from evidence/events/policies. For high/critical-impact
+  // selected claims this means we silently trust the stored status field — exactly the
+  // vector re-derive-at-gate (ADR 0010 Phase 2b) was designed to close.
+  // Fail-closed: emit a FULL_BLOCK warning so operators see that re-derivation is absent.
+  // Low-impact-only bundles stay non-blocking (noise reduction for common dev sessions).
+  //
+  // BAR-RAISER, NOT AIRTIGHT: an agent that deletes/corrupts @kontourai/surface to force
+  // surface=null would trigger this path deliberately. The real anchor is external:
+  // signed checkpoints + human review. This raises the cost of the silent-trust vector.
+  if (!surface) {
+    const highImpactCount = bundle.claims.reduce((n, claim) => {
+      if (!claim || typeof claim !== 'object') return n;
+      const impact = String(claim.impactLevel || '').toLowerCase();
+      if (impact !== 'high' && impact !== 'critical') return n;
+      return isSelectedClaim(claim) ? n + 1 : n;
+    }, 0);
+    if (highImpactCount > 0) {
+      warnings.push(
+        `surface unavailable — ${highImpactCount} high/critical-impact claim(s) could not be re-derived at gate; ` +
+        'stored claim status is trusted without independent re-derivation (fail-closed: high-assurance path). ' +
+        'Ensure @kontourai/surface is installed and importable, or escalate for operator review.'
+      );
+    }
+  }
+
   for (const claim of bundle.claims) {
     if (!claim || typeof claim !== 'object') continue;
     const impact = String(claim.impactLevel || '').toLowerCase();
     const storedStatus = String(claim.status || '').toLowerCase();
     if (impact !== 'high' && impact !== 'critical') continue;
+    // P-c: claim-selection — only process claims matching the active predicate.
+    if (!isSelectedClaim(claim)) continue;
 
     // Step 1: Re-derive status via Surface when available.
     // This closes the gaming vector: editing the stored status field cannot bypass
@@ -863,9 +1434,9 @@ async function bundleEnforcement(artifactDir) {
       && (recomputedStatus === 'disputed' || recomputedStatus === 'rejected');
 
     if (isTampered) {
-      warnings.push(`trust.bundle claim tampered: ${safeOneLine(claim.subjectId || claim.id, 80)} (${safeOneLine(claim.claimType, 48)}) — stored status "${storedStatus}" does not match recompute "${recomputedStatus}" (possible tampered bundle); caught false-completion.`);
+      warnings.push(`trust.bundle claim tampered: ${safeOneLine(claim.subjectId || claim.id, 80)} (${safeOneLine(claim.claimType, 48)}) — stored status "${storedStatus}" does not match recompute "${recomputedStatus}" (possible tampered bundle); caught false-completion. Run: npm run workflow:sidecar -- claim ${safeOneLine(claim.subjectId || claim.id, 80)} ${artifactDir}`);
     } else {
-      warnings.push(`trust.bundle claim disputed: ${safeOneLine(claim.subjectId || claim.id, 80)} (${safeOneLine(claim.claimType, 48)}) — Surface recompute shows not verified; caught false-completion.`);
+      warnings.push(`trust.bundle claim disputed: ${safeOneLine(claim.subjectId || claim.id, 80)} (${safeOneLine(claim.claimType, 48)}) — Surface recompute shows not verified; caught false-completion. Run: npm run workflow:sidecar -- claim ${safeOneLine(claim.subjectId || claim.id, 80)} ${artifactDir}`);
     }
   }
   return warnings;
@@ -911,7 +1482,13 @@ function isPreExecution(artifactDir, markdownStatus) {
 // When the task is delivered but acceptance criteria are still pending, emit the
 // Final Acceptance reminder. Read from trust.bundle claims when present; fall back
 // to acceptance.json for bundle-less sessions.
-function missingBundleOrStateSignal(artifactDir) {
+//
+// ADR 0016 P-c: pass activeFlowStep so bundlePendingCriteriaCount includes declared types.
+function missingBundleOrStateSignal(artifactDir, activeFlowStep) {
+  // Build the declared claimType set from the FlowDefinition gate expects[] (P-c).
+  const declaredClaimTypes = activeFlowStep && Array.isArray(activeFlowStep.gateExpects)
+    ? new Set(activeFlowStep.gateExpects.map(e => e && e.bundle_claim && e.bundle_claim.claimType).filter(Boolean))
+    : null;
   const warnings = [];
   const hasBundle = fs.existsSync(path.join(artifactDir, 'trust.bundle'));
   const state = readJsonFile(path.join(artifactDir, 'state.json'));
@@ -932,7 +1509,8 @@ function missingBundleOrStateSignal(artifactDir) {
 
   if (bundleClaims) {
     // Phase 4b: read pending criteria count from trust.bundle claims.
-    const pendingCount = bundlePendingCriteriaCount(bundleClaims);
+    // P-c: pass declaredClaimTypes so declared-type acceptance claims are included.
+    const pendingCount = bundlePendingCriteriaCount(bundleClaims, declaredClaimTypes);
     if (pendingCount !== null && pendingCount > 0) {
       const base = path.basename(artifactDir);
       warnings.push(`${base} Final Acceptance: ${pendingCount} acceptance criterion/criteria still pending; complete CI/merge/docs before final delivery.`);
@@ -954,6 +1532,21 @@ function missingBundleOrStateSignal(artifactDir) {
 
   return warnings;
 }
+
+// ─── Gate severity classification regexes (module scope — used by analyze() and run()) ─
+//
+// HARD_BLOCK: always blocks, even for pre-execution and terminal tasks.
+//   Fires on genuine false-completion signals (a claimed pass the capture log or
+//   evidence.json contradicts), integrity failures, and gate misconfiguration.
+//
+// FULL_BLOCK: fires for execution-onward tasks (post-planning, non-terminal).
+//   Includes all HARD_BLOCK patterns plus completeness/hygiene and not-done state.
+//
+// Both are used in analyze() for blocking decisions AND in run() for the AC2
+// MAX_BLOCKS hard-block guard (preventing auto-release of hard blocks).
+const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered/;
+// FULL_BLOCK adds: workflow-state hygiene, surface-unavailable fail-closed, missing log.
+const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing|exit-code-laundered/;
 
 async function analyze(root, now = Date.now()) {
   const flowAgentsDir = path.join(root, '.flow-agents');
@@ -983,11 +1576,39 @@ async function analyze(root, now = Date.now()) {
   // Verdict is now bundle-driven via bundleEnforcement + sidecarGuidance.
   // Sessions with neither trust.bundle nor state.json are caught by missingBundleOrStateSignal.
 
+  // ADR 0016 P-c: load the active FlowDefinition gate (fail-open: null when absent).
+  // Null → existing workflow.* fallback path unchanged. Non-null → expects[]-driven claim selection.
+  const activeFlowStep = loadActiveFlowStep(flowAgentsDir);
+
   warnings.push(...sidecarValidation(root, path.dirname(latest.file)));
-  warnings.push(...sidecarGuidance(root, path.dirname(latest.file)));
-  warnings.push(...captureCrossReference(root, path.dirname(latest.file)));
-  warnings.push(...(await bundleEnforcement(path.dirname(latest.file))));
-  warnings.push(...missingBundleOrStateSignal(path.dirname(latest.file)));
+  warnings.push(...sidecarGuidance(root, path.dirname(latest.file), activeFlowStep));
+  const captureWarnings = captureCrossReference(root, path.dirname(latest.file), activeFlowStep);
+  warnings.push(...captureWarnings);
+  // Dedup: bundleEnforcement and captureCrossReference can both fire "caught false-completion"
+  // for the same disputed claim. Suppress the bundleEnforcement warning ONLY when
+  // captureCrossReference already produced a hard-block warning ("caught false-completion")
+  // for the same check. NOT_VERIFIED / backstop-skip capture warnings must NOT suppress
+  // the bundle tamper/disputed signal — that mismatch is a re-derive block independent of
+  // whether the command was ever captured (anti-gaming guarantee, ADR 0010 Phase 2b).
+  const captureHardBlockIds = new Set();
+  for (const w of captureWarnings) {
+    if (!/caught false-completion/.test(w)) continue; // only hard blocks suppress bundle warning
+    const m = /evidence check ([^\s:]+):/.exec(w);
+    if (m) captureHardBlockIds.add(m[1]);
+  }
+  const bundleWarnings = (await bundleEnforcement(path.dirname(latest.file), activeFlowStep)).filter(w => {
+    if (!captureHardBlockIds.size) return true;
+    // bundleEnforcement warns: "trust.bundle claim disputed: <subjectId> ..."
+    const m = /trust\.bundle claim (?:disputed|tampered): ([^\s(]+)/.exec(w);
+    if (!m) return true;
+    const subjectId = m[1];
+    // subjectId = "slug/checkId" — extract the checkId (last segment)
+    const checkId = subjectId.includes('/') ? subjectId.slice(subjectId.indexOf('/') + 1) : subjectId;
+    // If captureCrossReference already hard-blocked this check, suppress the bundle warning.
+    return !captureHardBlockIds.has(checkId);
+  });
+  warnings.push(...bundleWarnings);
+  warnings.push(...missingBundleOrStateSignal(path.dirname(latest.file), activeFlowStep));
 
   // A pre-execution task (not started) OR a terminal task (which is itself a
   // completion *claim*) must not block on mere incompleteness — but a FALSE claim
@@ -997,10 +1618,15 @@ async function analyze(root, now = Date.now()) {
   const taskStatus = gateState ? normalizedStatus(gateState.status) : normalizedStatus(status);
   const preExecution = isPreExecution(path.dirname(latest.file), status);
   const terminal = TERMINAL_STATUSES.has(taskStatus);
-  // Always-block: a claimed pass the capture log or evidence.json contradicts.
-  const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing/;
-  // Full gate (execution onward): also completeness/hygiene and not-done state.
-  const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —/;
+
+  // Namespace-agnostic captured-FAIL reconciliation (AC1 — closes the allowlist bypass).
+  // Fix A: status-independent — runs on EVERY stop. A claim contradicting the capture
+  // is a false-completion whether or not the agent says the task is 'done'.
+  warnings.push(...capturedFailReconciliation(root, path.dirname(latest.file), taskStatus));
+
+  // Use module-scope HARD_BLOCK / FULL_BLOCK (defined above analyze()).
+  // pre-execution/terminal tasks: only HARD_BLOCK signals cause a block.
+  // execution-onward tasks: FULL_BLOCK signals cause a block.
   const blockRe = (preExecution || terminal) ? HARD_BLOCK : FULL_BLOCK;
   const blocking = warnings.some(w => {
     // Capture cross-reference warn-mode notes never block (operator opted out).
@@ -1083,6 +1709,26 @@ async function run(rawInput) {
   const maxBlocks = resolveMaxBlocks();
   const count = bumpBlockStreak(root, reasonsHash(result.warnings));
   if (count >= maxBlocks) {
+    // AC2: never auto-release a HARD block (caught false-completion, capture contradiction,
+    // tamper signal, gate misconfiguration, integrity failure). An agent burning through
+    // N identical hard blocks to escape via the streak counter must not work.
+    //
+    // BAR-RAISER, NOT AIRTIGHT: an agent with shell access can still reset the streak
+    // by deleting .flow-agents/.goal-fit-block-streak.json or by modifying the warning
+    // text so the hash changes. The real anchor is external (signed checkpoints + human
+    // review). This raises the cost of the burn-through-the-counter escape vector.
+    const isHardBlock = result.warnings.some(w => {
+      if (/\[backstop in warn mode — not blocking\]/.test(w)) return false;
+      return HARD_BLOCK.test(w);
+    });
+    if (isHardBlock) {
+      // Do NOT clear the streak — keep accumulating so the same hard block stays visible.
+      return {
+        stdout: rawInput,
+        stderr: `${message}\n[Hook] Goal Fit: max-blocks reached but the block is a caught false-completion / integrity failure — not auto-releasing; requires a real fix or operator override.`,
+        exitCode: 2,
+      };
+    }
     clearBlockStreak(root);
     return {
       stdout: rawInput,
@@ -1128,4 +1774,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, readCommandLog, resolveTrustedCommand, declaredManifestTarget };
+module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator };

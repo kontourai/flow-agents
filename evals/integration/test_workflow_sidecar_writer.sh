@@ -480,10 +480,12 @@ else
   _fail "sidecar writer evidence failed: $(cat "$TMPDIR_EVAL/evidence.out" "$TMPDIR_EVAL/evidence.err")"
 fi
 
-if rg -q '"status": "verified"' "$ARTIFACT_DIR/state.json" && rg -q '"status": "pass"' "$ARTIFACT_DIR/acceptance.json"; then
-  _pass "sidecar writer updates state and acceptance from evidence"
+# Phase 4c: acceptance.json criteria status no longer updated at verification time (bundle-only).
+# State is verified; bundle claims carry the criteria status.
+if rg -q '"status": "verified"' "$ARTIFACT_DIR/state.json"   && [[ -f "$ARTIFACT_DIR/trust.bundle" ]]   && node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const ac=b.claims.filter(c=>c.claimType==="workflow.acceptance.criterion"); if(ac.length===0) throw new Error("no acceptance criterion claims in bundle"); if(ac.some(c=>c.value!=="pass")) throw new Error("some acceptance criterion not pass in bundle: "+JSON.stringify(ac.map(c=>c.value)));' "$ARTIFACT_DIR/trust.bundle" 2>/dev/null; then
+  _pass "sidecar writer updates state and records acceptance in bundle from evidence"
 else
-  _fail "sidecar writer did not update state and acceptance"
+  _fail "sidecar writer did not update state or bundle from evidence"
 fi
 
 INVALID_REF_DIR="$TMPDIR_EVAL/repo/.flow-agents/invalid-evidence-ref"
@@ -545,14 +547,15 @@ else
 fi
 
 SURFACE_CHECK='{"id":"surface-trust-fixture","kind":"policy","status":"pass","summary":"Hachure trust.bundle evidence passed.","surface_trust_refs":[{"artifact_kind":"trust.bundle","artifact_ref":"trust/report.json","gate_id":"builder.trust.bundle","claim_type":"builder.trust.bundle","claim_status":"accepted","subject":"builder-kit","freshness":{"status":"fresh","summary":"Issued during this workflow."},"authority":{"producer":"surface-local","summary":"Local Surface trust producer."},"integrity":{"status":"matched","summary":"Artifact digest matched expected subject and gate.","digest":"sha256:abc123"},"status":"pass","summary":"Accepted trust.bundle claim."}]}'
+# Phase 4c: evidence.json no longer written; verify in trust.bundle (sole verification artifact).
 if flow_agents_node "$WRITER" record-evidence "$ARTIFACT_DIR" \
   --verdict pass \
   --check-json "$SURFACE_CHECK" \
   --timestamp "2026-05-09T00:01:05Z" >"$TMPDIR_EVAL/surface-evidence.out" 2>"$TMPDIR_EVAL/surface-evidence.err" \
-  && rg -q '"surface_trust_refs"' "$ARTIFACT_DIR/evidence.json" \
-  && rg -q '"artifact_kind": "trust.bundle"' "$ARTIFACT_DIR/evidence.json" \
-  && ! rg -q 'veritas' "$ARTIFACT_DIR/evidence.json"; then
-  _pass "sidecar writer records Hachure-aligned trust.bundle refs"
+  && [[ -f "$ARTIFACT_DIR/trust.bundle" ]] \
+  && ! rg -q 'veritas' "$ARTIFACT_DIR/trust.bundle" \
+  && node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const c=b.claims.find(c=>c.claimType==="workflow.check.policy"); if(!c) throw new Error("no policy claim in bundle"); if(c.value!=="pass") throw new Error("expected pass, got "+c.value);' "$ARTIFACT_DIR/trust.bundle" 2>/dev/null; then
+  _pass "sidecar writer records Hachure-aligned trust.bundle refs (verified in bundle)"
 else
   _fail "sidecar writer did not record Hachure-aligned trust.bundle refs: $(cat "$TMPDIR_EVAL/surface-evidence.out" "$TMPDIR_EVAL/surface-evidence.err")"
 fi
@@ -595,13 +598,16 @@ check_surface_fixture() {
   local expected_text="$5"
   local dir="$TMPDIR_EVAL/repo/.flow-agents/surface-$name"
   mkdir -p "$dir"
+  # Phase 4c: evidence.json no longer written; verify surface trust check status in trust.bundle.
   if flow_agents_node "$WRITER" record-evidence "$dir" \
     --task-slug "surface-$name" \
     --verdict "$verdict" \
     --check-json '{"id":"ordinary-builder-evidence","kind":"test","status":"pass","summary":"Ordinary Builder Kit evidence still records."}' \
     --surface-trust-json "$SURFACE_FIXTURE_DIR/$fixture" \
     --timestamp "2026-05-09T00:02:00Z" >"$TMPDIR_EVAL/surface-$name.out" 2>"$TMPDIR_EVAL/surface-$name.err" \
-    && node -e 'const fs=require("fs"); const [file, expectedStatus, expectedText]=process.argv.slice(1); const data=JSON.parse(fs.readFileSync(file,"utf8")); const trustChecks=data.checks.filter((check)=>check.id.startsWith("surface-trust-")); if (trustChecks.length!==1) throw new Error(`expected one surface trust check, found ${trustChecks.length}`); const check=trustChecks[0]; if (check.status!==expectedStatus) throw new Error(`expected ${expectedStatus}, got ${check.status}`); const ref=check.surface_trust_refs[0]; const blob=JSON.stringify(check); if (!blob.includes(expectedText)) throw new Error(`missing expected text ${expectedText}: ${blob}`); if (blob.toLowerCase().includes("veritas")) throw new Error("surface trust output leaked a Veritas-specific field"); if (ref.gate_id==="unknown" || ref.claim_type==="unknown") throw new Error("surface trust ref did not map gate and claim metadata");' "$dir/evidence.json" "$expected_status" "$expected_text"
+    && [[ -f "$dir/trust.bundle" ]] \
+    && ! grep -qi 'veritas' "$dir/trust.bundle" \
+    && node -e 'const fs=require("fs"); const [bundleFile, expectedStatus, expectedText]=process.argv.slice(1); const b=JSON.parse(fs.readFileSync(bundleFile,"utf8")); const policyClaims=b.claims.filter((c)=>c.claimType==="workflow.check.policy"); if(policyClaims.length!==1) throw new Error("expected one policy claim, found "+policyClaims.length); const c=policyClaims[0]; if(c.value!==expectedStatus) throw new Error("expected "+expectedStatus+", got "+c.value); const blob=JSON.stringify(b); if(!blob.includes(expectedText)) throw new Error("missing expected text "+expectedText+" in bundle");' "$dir/trust.bundle" "$expected_status" "$expected_text" 2>/dev/null
   then
     _pass "surface trust fixture maps $name to $expected_status evidence"
   else
@@ -619,13 +625,15 @@ check_surface_fixture "artifact-absent" "artifact-absent.json" "not_verified" "n
 
 PURE_SURFACE_DIR="$TMPDIR_EVAL/repo/.flow-agents/surface-trust-only"
 mkdir -p "$PURE_SURFACE_DIR"
+# Phase 4c: evidence.json no longer written; verify in trust.bundle.
 if flow_agents_node "$WRITER" record-evidence "$PURE_SURFACE_DIR" \
   --task-slug "surface-trust-only" \
   --verdict pass \
   --surface-trust-json "$SURFACE_FIXTURE_DIR/accepted-claim-trust-report.json" \
   --timestamp "2026-05-09T00:02:30Z" >"$TMPDIR_EVAL/surface-only.out" 2>"$TMPDIR_EVAL/surface-only.err" \
-  && rg -q '"surface_trust_refs"' "$PURE_SURFACE_DIR/evidence.json"; then
-  _pass "sidecar writer records Surface trust evidence without unrelated check-json"
+  && [[ -f "$PURE_SURFACE_DIR/trust.bundle" ]] \
+  && node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); if(!Array.isArray(b.claims)||b.claims.length===0) throw new Error("no claims in bundle"); ' "$PURE_SURFACE_DIR/trust.bundle" 2>/dev/null; then
+  _pass "sidecar writer records Surface trust evidence without unrelated check-json (verified in bundle)"
 else
   _fail "sidecar writer should accept Surface trust evidence without check-json: $(cat "$TMPDIR_EVAL/surface-only.out" "$TMPDIR_EVAL/surface-only.err")"
 fi
@@ -885,8 +893,12 @@ else
   _fail "sidecar writer not-verified evidence failed: $(cat "$TMPDIR_EVAL/nv-evidence.out" "$TMPDIR_EVAL/nv-evidence.err")"
 fi
 
-if rg -q '"status": "not_verified"' "$NV_DIR/state.json" && rg -q '"not_verified_gaps"' "$NV_DIR/evidence.json"; then
-  _pass "sidecar writer preserves not-verified state and gaps"
+# Phase 4c: evidence.json no longer written; not-verified state is in state.json + trust.bundle.
+# not_verified_gaps are accepted as input but not persisted to a sidecar (bundle-only sessions).
+if rg -q '"status": "not_verified"' "$NV_DIR/state.json" \
+  && [[ -f "$NV_DIR/trust.bundle" ]] \
+  && node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const c=b.claims.find(c=>c.claimType==="workflow.check.external"); if(!c) throw new Error("no external check claim"); if(c.value!=="not_verified") throw new Error("expected not_verified, got "+c.value);' "$NV_DIR/trust.bundle" 2>/dev/null; then
+  _pass "sidecar writer preserves not-verified state in state.json and bundle"
 else
   _fail "sidecar writer did not preserve not-verified state"
 fi
@@ -978,10 +990,11 @@ status_a=$?
 wait "$pid_b"
 status_b=$?
 
+# Phase 4c: critique.json no longer written; verify both reviews are in trust.bundle claims.
 if [[ "$status_a" -eq 0 && "$status_b" -eq 0 ]] \
-  && rg -q '"id": "concurrent-review-a"' "$CONCURRENT_DIR/critique.json" \
-  && rg -q '"id": "concurrent-review-b"' "$CONCURRENT_DIR/critique.json"; then
-  _pass "sidecar writer serializes concurrent sidecar writes"
+  && [[ -f "$CONCURRENT_DIR/trust.bundle" ]] \
+  && node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const cc=b.claims.filter(c=>c.claimType==="workflow.critique.review"); if(cc.length<2) throw new Error("expected 2 critique claims, found "+cc.length+": "+JSON.stringify(cc.map(c=>c.subjectId)));' "$CONCURRENT_DIR/trust.bundle" 2>/dev/null; then
+  _pass "sidecar writer serializes concurrent sidecar writes (both reviews in bundle)"
 else
   _fail "sidecar writer lost concurrent critique writes: $(cat "$TMPDIR_EVAL/concurrent-a.out" "$TMPDIR_EVAL/concurrent-a.err" "$TMPDIR_EVAL/concurrent-b.out" "$TMPDIR_EVAL/concurrent-b.err")"
 fi
@@ -1679,21 +1692,24 @@ else
   _fail "dogfood-pass should allow honest failed records: $(cat "$TMPDIR_EVAL/dogfood-failed-pass.out" "$TMPDIR_EVAL/dogfood-failed-pass.err")"
 fi
 
-if rg -q '"verdict": "fail"' "$FAILED_DOGFOOD_DIR/evidence.json" \
-  && rg -q '"status": "fail"' "$FAILED_DOGFOOD_DIR/critique.json" \
-  && rg -q '"status": "failed"' "$FAILED_DOGFOOD_DIR/state.json" \
-  && rg -q 'Required dogfood critique is not passing' "$FAILED_DOGFOOD_DIR/handoff.json"; then
-  _pass "dogfood-pass failed records preserve failed state and blockers"
+# Phase 4c: evidence.json/critique.json no longer written; verify in trust.bundle.
+if rg -q '"status": "failed"' "$FAILED_DOGFOOD_DIR/state.json" \
+  && rg -q 'Required dogfood critique is not passing' "$FAILED_DOGFOOD_DIR/handoff.json" \
+  && [[ -f "$FAILED_DOGFOOD_DIR/trust.bundle" ]] \
+  && node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const cc=b.claims.filter(c=>c.claimType==="workflow.check.test"); if(!cc.length) throw new Error("no test check claim"); if(cc[0].value!=="fail") throw new Error("expected fail, got "+cc[0].value); const crit=b.claims.filter(c=>c.claimType==="workflow.critique.review"); if(!crit.length) throw new Error("no critique claim"); if(crit[0].value!=="fail") throw new Error("expected fail critique, got "+crit[0].value);' "$FAILED_DOGFOOD_DIR/trust.bundle" 2>/dev/null; then
+  _pass "dogfood-pass failed records preserve failed state and blockers (verified in bundle)"
 else
   _fail "dogfood-pass failed record did not preserve routing state"
 fi
 
+# Phase 4c: critique.json no longer written; validator reports sidecar missing (still blocks gate).
+# The trust.bundle carries the disputed critique claim which is the authoritative gate signal.
 if flow_agents_node "$VALIDATOR" --require-sidecars --require-critique "$FAILED_DOGFOOD_DIR" >"$TMPDIR_EVAL/dogfood-failed-valid.out" 2>"$TMPDIR_EVAL/dogfood-failed-valid.err"; then
-  _fail "strict validator should still reject failed required critique"
-elif rg -q 'required critique must pass' "$TMPDIR_EVAL/dogfood-failed-valid.out" "$TMPDIR_EVAL/dogfood-failed-valid.err"; then
-  _pass "dogfood-pass failed records remain visibly blocked under strict validation"
+  _fail "strict validator should still reject when critique is missing (4c bundle-only)"
+elif rg -q 'required critique must pass|required sidecar is missing' "$TMPDIR_EVAL/dogfood-failed-valid.out" "$TMPDIR_EVAL/dogfood-failed-valid.err"; then
+  _pass "dogfood-pass failed records remain visibly blocked under strict validation (sidecar missing or critique fail)"
 else
-  _fail "dogfood-pass failed record strict validation did not expose critique blocker"
+  _fail "dogfood-pass failed record strict validation did not expose critique blocker: $(cat "$TMPDIR_EVAL/dogfood-failed-valid.out" "$TMPDIR_EVAL/dogfood-failed-valid.err")"
 fi
 
 if flow_agents_node "$WRITER" dogfood-pass \
@@ -1715,11 +1731,13 @@ else
   _fail "dogfood-pass failed: $(cat "$TMPDIR_EVAL/dogfood-pass.out" "$TMPDIR_EVAL/dogfood-pass.err")"
 fi
 
+# Phase 4c: critique.json no longer written; verify in trust.bundle.
 if rg -q '"state_status": "verified"' "$TMPDIR_EVAL/dogfood-pass.out" \
-  && rg -q '"status": "pass"' "$DOGFOOD_DIR/critique.json" \
   && rg -q '"status": "learned"' "$DOGFOOD_DIR/learning.json" \
-  && rg -q '"status": "verified"' "$DOGFOOD_DIR/state.json"; then
-  _pass "dogfood-pass writes clean evidence, critique, learning, and state"
+  && rg -q '"status": "verified"' "$DOGFOOD_DIR/state.json" \
+  && [[ -f "$DOGFOOD_DIR/trust.bundle" ]] \
+  && node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const crit=b.claims.filter(c=>c.claimType==="workflow.critique.review"); if(!crit.length) throw new Error("no critique claim in bundle"); if(crit[0].value!=="pass") throw new Error("expected pass critique, got "+crit[0].value);' "$DOGFOOD_DIR/trust.bundle" 2>/dev/null; then
+  _pass "dogfood-pass writes clean bundle, learning, and state (4c bundle-only)"
 else
   _fail "dogfood-pass did not produce expected clean sidecars"
 fi
@@ -1830,6 +1848,7 @@ flow_agents_node "$WRITER" init-plan "$DOGFOOD_NV_DIR/dogfood-not-verified--deli
   --next-action "Record not verified dogfood pass." \
   --timestamp "2026-05-09T00:00:00Z" >"$TMPDIR_EVAL/dogfood-nv-init.out" 2>"$TMPDIR_EVAL/dogfood-nv-init.err"
 
+# Phase 4c: evidence.json no longer written; verify not-verified claim in trust.bundle.
 if flow_agents_node "$WRITER" dogfood-pass \
   --artifact-root "$SESSION_ROOT" \
   --artifact-dir "$DOGFOOD_NV_DIR" \
@@ -1838,10 +1857,10 @@ if flow_agents_node "$WRITER" dogfood-pass \
   --gap "External live runtime unavailable." \
   --summary "Dogfood pass preserved not verified evidence." \
   --timestamp "2026-05-09T00:06:00Z" >"$TMPDIR_EVAL/dogfood-nv.out" 2>"$TMPDIR_EVAL/dogfood-nv.err" \
-  && rg -q '"verdict": "not_verified"' "$DOGFOOD_NV_DIR/evidence.json" \
   && rg -q '"state_status": "not_verified"' "$TMPDIR_EVAL/dogfood-nv.out" \
-  && rg -q '"External live runtime unavailable."' "$DOGFOOD_NV_DIR/evidence.json"; then
-  _pass "dogfood-pass preserves NOT_VERIFIED evidence and routing"
+  && [[ -f "$DOGFOOD_NV_DIR/trust.bundle" ]] \
+  && node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const ec=b.claims.filter(c=>c.claimType==="workflow.check.external"); if(!ec.length) throw new Error("no external check claim"); if(ec[0].value!=="not_verified") throw new Error("expected not_verified, got "+ec[0].value);' "$DOGFOOD_NV_DIR/trust.bundle" 2>/dev/null; then
+  _pass "dogfood-pass preserves NOT_VERIFIED evidence and routing (verified in bundle)"
 else
   _fail "dogfood-pass did not preserve not verified evidence: $(cat "$TMPDIR_EVAL/dogfood-nv.out" "$TMPDIR_EVAL/dogfood-nv.err")"
 fi
@@ -2009,8 +2028,10 @@ else
   _fail "sidecar writer import critique failed: $(cat "$TMPDIR_EVAL/import-critique.out" "$TMPDIR_EVAL/import-critique.err")"
 fi
 
-if rg -q '"id": "minor-style-note"' "$REVIEW_DIR/critique.json" && rg -q '"status": "fixed"' "$REVIEW_DIR/critique.json"; then
-  _pass "sidecar writer extracts review findings"
+# Phase 4c: critique.json no longer written; verify critique claim in trust.bundle.
+if [[ -f "$REVIEW_DIR/trust.bundle" ]] \
+  && node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const crit=b.claims.filter(c=>c.claimType==="workflow.critique.review"); if(!crit.length) throw new Error("no critique claim"); if(crit[0].value!=="pass") throw new Error("expected pass, got "+crit[0].value);' "$REVIEW_DIR/trust.bundle" 2>/dev/null; then
+  _pass "sidecar writer extracts review findings (verified in bundle)"
 else
   _fail "sidecar writer did not extract review findings"
 fi
@@ -2097,8 +2118,10 @@ MARKDOWN
 
 if flow_agents_node "$WRITER" import-critique "$IMPORT_BAD" "$IMPORT_BAD/imported-bad-critique--review.md" >"$TMPDIR_EVAL/import-bad-critique.out" 2>&1; then
   _fail "sidecar writer should reject imported failing critique"
-elif rg -q 'required critique must pass' "$TMPDIR_EVAL/import-bad-critique.out" && rg -q '"id": "imported-blocker"' "$IMPORT_BAD/critique.json"; then
-  _pass "sidecar writer persists and rejects imported failing critique"
+elif rg -q 'required critique must pass' "$TMPDIR_EVAL/import-bad-critique.out" \
+  && [[ -f "$IMPORT_BAD/trust.bundle" ]] \
+  && node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const crit=b.claims.filter(c=>c.claimType==="workflow.critique.review"); if(!crit.length) throw new Error("no critique claim"); if(crit[0].value!=="fail") throw new Error("expected fail, got "+crit[0].value);' "$IMPORT_BAD/trust.bundle" 2>/dev/null; then
+  _pass "sidecar writer persists and rejects imported failing critique (critique in bundle, not sidecar)"
 else
   _fail "imported failing critique did not persist actionable finding"
 fi
@@ -2130,8 +2153,8 @@ if [[ -f "$TB_BUNDLE_PATH" ]]; then
 import { readFileSync } from 'node:fs';
 import { validateTrustBundle } from '${ROOT}/build/src/cli/workflow-sidecar.js';
 const bundle = JSON.parse(readFileSync('${TB_BUNDLE_PATH}', 'utf8'));
-const result = validateTrustBundle(bundle);
-if (!result.available) { process.stderr.write('hachure unavailable: validateTrustBundle.available was false\n'); process.exit(2); }
+const result = await validateTrustBundle(bundle);
+if (!result.available) { process.stderr.write('surface unavailable: validateTrustBundle.available was false\n'); process.exit(2); }
 if (!result.valid) { process.stderr.write('schema invalid: ' + result.errors.join('; ') + '\n'); process.exit(1); }
 NODEOF
   then
@@ -2324,6 +2347,54 @@ else
   _fail "trust-mcp print/enable invocation failed"
 fi
 
+# ─── AC6: agent liveness (ADR 0012) — held / free-on-lapse / free-on-release ──
+TB_LIVENESS_ROOT="$TMPDIR_EVAL/liveness/.flow-agents"
+flow_agents_node "$WRITER" liveness claim     held-subj  --actor agent-A --at "2026-06-25T11:50:00Z" --ttl 1800 --artifact-root "$TB_LIVENESS_ROOT" >/dev/null 2>&1
+flow_agents_node "$WRITER" liveness heartbeat held-subj  --actor agent-A --at "2026-06-25T11:58:00Z" --artifact-root "$TB_LIVENESS_ROOT" >/dev/null 2>&1
+flow_agents_node "$WRITER" liveness claim     stale-subj --actor agent-B --at "2026-06-25T11:00:00Z" --ttl 1800 --artifact-root "$TB_LIVENESS_ROOT" >/dev/null 2>&1
+flow_agents_node "$WRITER" liveness claim     rel-subj   --actor agent-C --at "2026-06-25T11:50:00Z" --ttl 1800 --artifact-root "$TB_LIVENESS_ROOT" >/dev/null 2>&1
+flow_agents_node "$WRITER" liveness release   rel-subj   --actor agent-C --at "2026-06-25T11:55:00Z" --artifact-root "$TB_LIVENESS_ROOT" >/dev/null 2>&1
+LIVENESS_OUT=$(flow_agents_node "$WRITER" liveness status --now "2026-06-25T12:00:00Z" --artifact-root "$TB_LIVENESS_ROOT" 2>/dev/null | grep -viE "unknown format")
+if echo "$LIVENESS_OUT" | grep -qE "held-subj.*agent-A.*held" \
+  && echo "$LIVENESS_OUT" | grep -qE "stale-subj.*agent-B.*free" \
+  && echo "$LIVENESS_OUT" | grep -qE "rel-subj.*agent-C.*free"; then
+  _pass "liveness: liveness claims recompute held / free(lapsed) / free(released) via Surface deriveTrustStatus (ADR 0012)"
+else
+  _fail "liveness status mismatch (expected held/free/free): $LIVENESS_OUT"
+fi
+
+# ─── AC7: lifecycle-driven liveness (ADR 0012) — init-plan claims, advance-state releases (opt-in) ──
+TB_LC_ROOT="$TMPDIR_EVAL/liveness-lifecycle/.flow-agents"
+TB_LC_DIR="$TB_LC_ROOT/lc-task"; mkdir -p "$TB_LC_DIR"
+cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_LC_DIR/lc-task--deliver.md"
+FLOW_AGENTS_LIVENESS=on FLOW_AGENTS_ACTOR=agent-LC flow_agents_node "$WRITER" init-plan "$TB_LC_DIR/lc-task--deliver.md" --task-slug lc-task --source-request x --summary y --next-action z --timestamp "2026-06-25T11:50:00Z" >/dev/null 2>&1
+LC_HELD=$(flow_agents_node "$WRITER" liveness status --now "2026-06-25T12:00:00Z" --artifact-root "$TB_LC_ROOT" 2>/dev/null | grep -viE "unknown format")
+FLOW_AGENTS_LIVENESS=on FLOW_AGENTS_ACTOR=agent-LC flow_agents_node "$WRITER" advance-state "$TB_LC_DIR" --status delivered --phase done --task-slug lc-task --timestamp "2026-06-25T11:55:00Z" >/dev/null 2>&1
+LC_FREE=$(flow_agents_node "$WRITER" liveness status --now "2026-06-25T12:00:00Z" --artifact-root "$TB_LC_ROOT" 2>/dev/null | grep -viE "unknown format")
+TB_OFF_ROOT="$TMPDIR_EVAL/liveness-off/.flow-agents"; mkdir -p "$TB_OFF_ROOT/off-task"
+cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_OFF_ROOT/off-task/off-task--deliver.md"
+flow_agents_node "$WRITER" init-plan "$TB_OFF_ROOT/off-task/off-task--deliver.md" --task-slug off-task --source-request x --summary y --next-action z >/dev/null 2>&1
+if echo "$LC_HELD" | grep -qE "lc-task.*agent-LC.*held" && echo "$LC_FREE" | grep -qE "lc-task.*agent-LC.*free" && [ ! -f "$TB_OFF_ROOT/liveness/events.jsonl" ]; then
+  _pass "liveness lifecycle: init-plan claims (held), advance→delivered releases (free); opt-in respected (no events when disabled)"
+else
+  _fail "liveness lifecycle mismatch: held=[$LC_HELD] free=[$LC_FREE] off=$([ -f "$TB_OFF_ROOT/liveness/events.jsonl" ] && echo wrote || echo none)"
+fi
+
+# ─── AC8: bundle-writers fail LOUDLY when Surface unavailable — no silent data loss (#156) ──
+TB_FO_DIR="$TMPDIR_EVAL/repo/.flow-agents/failopen"
+mkdir -p "$TB_FO_DIR"
+cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_FO_DIR/failopen--deliver.md"
+flow_agents_node "$WRITER" init-plan "$TB_FO_DIR/failopen--deliver.md" --task-slug failopen --source-request x --summary y --next-action z --timestamp "2026-05-09T00:00:00Z" >/dev/null 2>&1
+flow_agents_node "$WRITER" record-evidence "$TB_FO_DIR" --verdict pass --check-json '{"id":"c1","kind":"test","status":"pass","summary":"s"}' --timestamp "2026-05-09T00:01:00Z" >/dev/null 2>&1
+# With Surface forced-unavailable, record-critique MUST fail (non-zero), not silently drop the critique.
+if FLOW_AGENTS_SURFACE_UNAVAILABLE=1 flow_agents_node "$WRITER" record-critique "$TB_FO_DIR" --id rev-fo --reviewer r --verdict pass --summary fo --timestamp "2026-05-09T00:02:00Z" >"$TMPDIR_EVAL/failopen.out" 2>&1; then
+  _fail "record-critique fail-opened (exit 0) when Surface unavailable — SILENT DATA LOSS: $(cat "$TMPDIR_EVAL/failopen.out")"
+elif grep -qiE "was NOT written|not persisted" "$TMPDIR_EVAL/failopen.out"; then
+  _pass "bundle-writers fail loudly (no silent data loss) when Surface unavailable (#156)"
+else
+  _fail "record-critique failed but without a clear not-persisted message: $(cat "$TMPDIR_EVAL/failopen.out")"
+fi
+
 
 # ─── AC3: statusFunctionVersion conformance ───────────────────────────────────
 # Assert the statusFunctionVersion embedded in the emitted trust.bundle source
@@ -2397,6 +2468,155 @@ NODEOF
     _fail "hachure conformance vectors failed: $(cat "$TMPDIR_EVAL/tb-conf-vectors.err")"
   fi
 fi
+
+# ─── Deterministic session slug from work-item ref (#161) ───────────────────
+
+WORK_ITEM_ROOT="$TMPDIR_EVAL/work-item-repo/.flow-agents"
+
+# (a) --work-item derives deterministic slug kontourai-flow-agents-161
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$WORK_ITEM_ROOT" \
+  --work-item "kontourai/flow-agents#161" \
+  --title "Work Item 161" \
+  --summary "Deterministic slug from work-item ref." \
+  --timestamp "2026-06-25T00:00:00Z" >"$TMPDIR_EVAL/wi-ensure.out" 2>"$TMPDIR_EVAL/wi-ensure.err"; then
+  _pass "ensure-session --work-item derives slug kontourai-flow-agents-161"
+else
+  _fail "ensure-session --work-item failed: $(cat "$TMPDIR_EVAL/wi-ensure.out" "$TMPDIR_EVAL/wi-ensure.err")"
+fi
+
+if [[ -f "$WORK_ITEM_ROOT/kontourai-flow-agents-161/state.json" ]]; then
+  _pass "ensure-session --work-item creates expected session directory"
+else
+  _fail "ensure-session --work-item did not create $WORK_ITEM_ROOT/kontourai-flow-agents-161/"
+fi
+
+# (b) idempotency: second call same ref → same directory, no failure
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$WORK_ITEM_ROOT" \
+  --work-item "kontourai/flow-agents#161" \
+  --title "Work Item 161 Second" \
+  --summary "Idempotent call." \
+  --timestamp "2026-06-25T00:00:01Z" >"$TMPDIR_EVAL/wi-ensure2.out" 2>"$TMPDIR_EVAL/wi-ensure2.err" \
+  && [[ -f "$WORK_ITEM_ROOT/kontourai-flow-agents-161/state.json" ]]; then
+  _pass "ensure-session --work-item is idempotent (same slug/dir on second call)"
+else
+  _fail "ensure-session --work-item idempotency failed: $(cat "$TMPDIR_EVAL/wi-ensure2.out" "$TMPDIR_EVAL/wi-ensure2.err")"
+fi
+
+# (c) --task-slug wins over --work-item (back-compat: explicit overrides derived)
+TASK_SLUG_ROOT="$TMPDIR_EVAL/task-slug-repo/.flow-agents"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$TASK_SLUG_ROOT" \
+  --task-slug "manual-slug" \
+  --work-item "kontourai/flow-agents#161" \
+  --title "Manual Slug" \
+  --summary "Explicit task-slug must win over work-item." \
+  --timestamp "2026-06-25T00:00:02Z" >"$TMPDIR_EVAL/wi-taskslug.out" 2>"$TMPDIR_EVAL/wi-taskslug.err" \
+  && [[ -d "$TASK_SLUG_ROOT/manual-slug" ]] \
+  && [[ ! -d "$TASK_SLUG_ROOT/kontourai-flow-agents-161" ]]; then
+  _pass "ensure-session --task-slug wins over --work-item (back-compat)"
+else
+  _fail "ensure-session --task-slug did not win over --work-item: $(cat "$TMPDIR_EVAL/wi-taskslug.out" "$TMPDIR_EVAL/wi-taskslug.err")"
+fi
+
+# (c2) --task-slug only (no --work-item) still works
+TASK_SLUG_ONLY_ROOT="$TMPDIR_EVAL/task-slug-only-repo/.flow-agents"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$TASK_SLUG_ONLY_ROOT" \
+  --task-slug "explicit-only" \
+  --title "Explicit Only" \
+  --summary "task-slug only, no work-item." \
+  --timestamp "2026-06-25T00:00:03Z" >"$TMPDIR_EVAL/wi-onlyslug.out" 2>"$TMPDIR_EVAL/wi-onlyslug.err" \
+  && [[ -d "$TASK_SLUG_ONLY_ROOT/explicit-only" ]]; then
+  _pass "ensure-session --task-slug alone still works (back-compat regression guard)"
+else
+  _fail "ensure-session --task-slug alone failed: $(cat "$TMPDIR_EVAL/wi-onlyslug.out" "$TMPDIR_EVAL/wi-onlyslug.err")"
+fi
+
+# (d) liveness subjectId matches work-item slug
+# ensure-session establishes the slug; liveness events (emitted by init-plan/advance-state) key
+# on that same slug as subjectId. We verify this by emitting two liveness claim events directly
+# via `liveness claim` using the slug derived from the ref, then asserting both share subjectId.
+LIVENESS_WORK_ROOT="$TMPDIR_EVAL/liveness-wi-repo/.flow-agents"
+# First: ensure-session --work-item produces the expected slug (directory name proof)
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$LIVENESS_WORK_ROOT" \
+  --work-item "kontourai/flow-agents#162" \
+  --title "Liveness Work Item" \
+  --summary "Liveness subjectId test." \
+  --timestamp "2026-06-25T00:00:04Z" >"$TMPDIR_EVAL/wi-liveness1.out" 2>"$TMPDIR_EVAL/wi-liveness1.err" \
+  && [[ -d "$LIVENESS_WORK_ROOT/kontourai-flow-agents-162" ]]; then
+  _pass "ensure-session --work-item creates session dir with deterministic slug"
+else
+  _fail "ensure-session --work-item session dir check failed: $(cat "$TMPDIR_EVAL/wi-liveness1.out" "$TMPDIR_EVAL/wi-liveness1.err")"
+fi
+
+# Emit two liveness claim events using the same subjectId (as init-plan does when FLOW_AGENTS_LIVENESS=on).
+# This proves: same work-item ref → same slug → same subjectId across two agents.
+FLOW_AGENTS_ACTOR=agent-a flow_agents_node "$WRITER" liveness claim \
+  --artifact-root "$LIVENESS_WORK_ROOT" \
+  kontourai-flow-agents-162 >"$TMPDIR_EVAL/wi-liveness-claim-a.out" 2>"$TMPDIR_EVAL/wi-liveness-claim-a.err"
+FLOW_AGENTS_ACTOR=agent-b flow_agents_node "$WRITER" liveness claim \
+  --artifact-root "$LIVENESS_WORK_ROOT" \
+  kontourai-flow-agents-162 >"$TMPDIR_EVAL/wi-liveness-claim-b.out" 2>"$TMPDIR_EVAL/wi-liveness-claim-b.err"
+
+LIVENESS_EVENTS="$LIVENESS_WORK_ROOT/liveness/events.jsonl"
+if [[ -f "$LIVENESS_EVENTS" ]] \
+  && grep -q '"subjectId":"kontourai-flow-agents-162"' "$LIVENESS_EVENTS"; then
+  _pass "liveness events contain subjectId kontourai-flow-agents-162"
+else
+  _fail "liveness events missing expected subjectId: $(cat "$LIVENESS_EVENTS" 2>/dev/null || echo 'file not found')"
+fi
+
+# Both events must share the same subjectId value (two agents, same ref → same subjectId)
+subject_count=$(grep -c '"subjectId":"kontourai-flow-agents-162"' "$LIVENESS_EVENTS" 2>/dev/null || echo 0)
+if [[ "$subject_count" -ge 2 ]]; then
+  _pass "both liveness events share subjectId kontourai-flow-agents-162 (same ref → same subjectId)"
+else
+  _fail "expected >=2 liveness events with subjectId kontourai-flow-agents-162, found $subject_count"
+fi
+
+# (e) malformed ref is rejected
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$WORK_ITEM_ROOT" \
+  --work-item "kontourai/flow-agents/bad" \
+  --title "Bad Ref" \
+  --summary "Should fail." \
+  --timestamp "2026-06-25T00:00:06Z" >"$TMPDIR_EVAL/wi-bad-slash.out" 2>&1; then
+  _fail "ensure-session should reject work-item ref without # separator"
+elif grep -q 'owner/repo#id format' "$TMPDIR_EVAL/wi-bad-slash.out"; then
+  _pass "ensure-session rejects work-item ref without # separator"
+else
+  _fail "malformed ref rejection message was unexpected: $(cat "$TMPDIR_EVAL/wi-bad-slash.out")"
+fi
+
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$WORK_ITEM_ROOT" \
+  --work-item "kontourai/flow-agents#abc" \
+  --title "Bad ID" \
+  --summary "Should fail on non-numeric id." \
+  --timestamp "2026-06-25T00:00:07Z" >"$TMPDIR_EVAL/wi-bad-id.out" 2>&1; then
+  _fail "ensure-session should reject work-item with non-numeric id"
+elif grep -q 'numeric issue number' "$TMPDIR_EVAL/wi-bad-id.out"; then
+  _pass "ensure-session rejects work-item with non-numeric id"
+else
+  _fail "non-numeric id rejection message was unexpected: $(cat "$TMPDIR_EVAL/wi-bad-id.out")"
+fi
+
+# Neither --task-slug nor --work-item → back-compat error message must contain "task-slug is required"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$WORK_ITEM_ROOT" \
+  --title "No Slug" \
+  --summary "Should fail." \
+  --timestamp "2026-06-25T00:00:08Z" >"$TMPDIR_EVAL/wi-no-slug.out" 2>&1; then
+  _fail "ensure-session should require --task-slug or --work-item"
+elif grep -q 'task-slug is required' "$TMPDIR_EVAL/wi-no-slug.out"; then
+  _pass "ensure-session dies with 'task-slug is required' when neither flag is supplied (back-compat)"
+else
+  _fail "missing slug error message lacked 'task-slug is required': $(cat "$TMPDIR_EVAL/wi-no-slug.out")"
+fi
+
 
 if [[ "$errors" -eq 0 ]]; then
   echo "Workflow sidecar writer integration passed."
