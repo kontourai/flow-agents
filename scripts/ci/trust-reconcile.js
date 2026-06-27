@@ -50,6 +50,7 @@
 
 const { spawnSync } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 // ---------------------------------------------------------------------------
@@ -365,6 +366,31 @@ function main() {
     process.stdout.write('\n[trust-reconcile] exit 0: fresh verify passed');
     if (bundlePath) process.stdout.write(', all claimed-pass commands reconciled clean');
     process.stdout.write('\n');
+
+    // Write CI results file for mint-attestation.js to consume.
+    // Path mirrors what mint-attestation.js reads: RUNNER_TEMP/ci-trust-reconcile-results.json
+    // (or os.tmpdir() locally). Failure is non-fatal — mint-attestation synthesizes if missing.
+    const resultsDir = process.env.RUNNER_TEMP || os.tmpdir();
+    const resultsFilePath = path.join(resultsDir, 'ci-trust-reconcile-results.json');
+    const ciResultsArr = Array.from(ciResults.entries()).map(([cmd, r]) => ({
+      command: cmd,
+      exitCode: r.exitCode,
+      passed: r.passed,
+    }));
+    const resultsPayload = {
+      commit_sha: process.env.GITHUB_SHA || 'unknown',
+      canonical_commands: ciResultsArr,
+      reconciled: bundlePath !== null,
+      built_at: new Date().toISOString(),
+    };
+    try {
+      fs.writeFileSync(resultsFilePath, JSON.stringify(resultsPayload, null, 2));
+      process.stdout.write(`[trust-reconcile] results written: ${resultsFilePath}\n`);
+    } catch (err) {
+      // Non-fatal: mint-attestation will synthesize from env if this file is absent.
+      process.stdout.write(`[trust-reconcile] results write skipped (${err.message})\n`);
+    }
+
     process.exit(0);
   }
 
