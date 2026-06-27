@@ -38,3 +38,12 @@ evals/results/reports/
 # A finalized README/docs gif is committed deliberately under docs/assets/, not the raw evals/acceptance/ output.
 evals/acceptance/*.mp4
 evals/acceptance/*.gif
+
+# delivery/ is intentionally committed — CI trust anchor reads from it.
+# The trust-reconcile.yml job reads delivery/trust.bundle (or trust.checkpoint.json)
+# to reconcile agent-claimed passes against fresh CI results.
+# Phase-1b follow-up: the deliver skill will write here automatically.
+# See scripts/ci/trust-reconcile.js and .github/workflows/trust-reconcile.yml.
+# Explicitly allow the delivery directory (negation is a no-op here since
+# no earlier rule excludes it, but makes the intent unambiguous):
+!delivery/
