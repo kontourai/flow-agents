@@ -291,6 +291,25 @@ Selected work is ready when:
 If the gate fails, update the artifact and stop with the blocker.
 
 After a merge, automatic continuation may inspect the queue and write a new pull-work artifact, but it cannot enter planning or execution for the next work item until a fresh pickup Probe record exists for that newly selected item or justified group.
+## Gate Claim: Record Selected Work
+
+When the Pickup Gate passes and work is selected (not just a shepherding scan or WIP-only audit), record the gate claim for the Builder Kit `pull-work` step before handing off to `design-probe` or `plan-work`. This satisfies the `builder.pull-work.selected` gate expectation.
+
+Use the `selected_item_ids` as the evidence artifact ref and confirm that scope and acceptance criteria are present in the pull-work artifact:
+
+```bash
+npm run workflow:sidecar -- record-gate-claim .flow-agents/<slug> \
+  --expectation selected-work \
+  --status pass \
+  --summary "Selected <work-item-ref>: scope clear, acceptance criteria present." \
+  --evidence-ref-json '{"kind":"artifact","file":".flow-agents/<slug>/<slug>--pull-work.md","summary":"Pull-work artifact with selected_item_ids, scope, and acceptance criteria."}'
+```
+
+Use `--status fail` when the gate fails (blocker recorded but no selection made). Use `--status not_verified` only when the session has no active flow step (non-Builder-Kit usage).
+
+Record `--status fail` with a summary naming the blocker when stopping before selection. Do not record `pass` until `selected_item_ids` are confirmed and the pickup gate criteria above are met.
+
+
 
 ## Flow Validation Boundary
 
