@@ -1,0 +1,145 @@
+# trust-verify/action.yml — Reusable composite action: Flow Agents trust anchor.
+#
+# INTENDED AS A REQUIRED STATUS CHECK. Add this job to your workflow, then add
+# "Trust Verify" as a required, no-bypass status check in GitHub branch protection.
+# Once required, no PR can merge past it — the external CI anchor is armed.
+#
+# What it does:
+#   1. Re-runs your canonical verify command FRESH in a clean CI environment that
+#      the agent does not control (build + tests + lint — whatever you declare).
+#   2. If a delivery/trust.bundle is present, RECONCILES the agent's claimed-pass
+#      commands against CI's own fresh results. Any divergence (claimed pass + CI
+#      fail, laundered command, claim with no evidence, checkpoint-only bundle)
+#      fails the job with a clear diagnostic.
+#   3. Optionally mints a signed in-toto attestation over CI's own fresh results
+#      (requires id-token: write in the calling job).
+#
+# Inputs:
+#   verify-command    [required]  Your comprehensive verify command (build + tests +
+#                                 lint). What the agent ran locally should match what
+#                                 this reruns in CI.
+#   bundle            [optional]  Path to the delivered trust.bundle (default:
+#                                 delivery/trust.bundle). Auto-discovered if present.
+#   fail-on-divergence [optional] Fail the job on any divergence (default: true).
+#                                 Set to false for observability-only mode.
+#   sign              [optional]  Mint a signed in-toto attestation after a clean
+#                                 reconcile (default: false). Requires id-token: write.
+#   node-version      [optional]  Node.js version (default: 24).
+#
+# Usage in a downstream repo:
+#
+#   jobs:
+#     trust-verify:
+#       name: Trust Verify
+#       runs-on: ubuntu-latest
+#       permissions:
+#         contents: read
+#         id-token: write   # only needed when sign: true
+#       steps:
+#         - uses: actions/checkout@<sha>
+#         - uses: kontourai/flow-agents/.github/actions/trust-verify@<sha>
+#           with:
+#             verify-command: "npm run build && npm test && npm run lint"
+#
+# Then in GitHub branch protection → "Require status checks":
+#   Add "Trust Verify" as a required check with no bypass option.
+#
+# The agent publishes delivery/trust.bundle during the deliver skill. When that file
+# is present in the PR's checkout, this action reconciles per-command claimed passes
+# against fresh CI truth. When absent, only the fresh verify is enforced (fail-open
+# on bundle absence; fail-closed on divergence when the bundle is present).
+#
+# See docs/trust-anchor-adoption.md for the full adoption guide.
+
+name: "Flow Agents Trust Verify"
+description: >
+  Re-runs canonical verification fresh and reconciles a delivered trust.bundle's
+  claimed passes against CI results. Intended as a required status check.
+
+inputs:
+  verify-command:
+    description: >
+      Canonical verify command (build + tests + lint). Comma-separated commands
+      are each run in sequence. Fail-closed if not provided and no
+      trust-reconcile-verify script is in package.json.
+    required: true
+  bundle:
+    description: >
+      Path to the delivered trust.bundle (relative to workspace root).
+      Auto-discovers delivery/trust.bundle if this input is not set.
+    required: false
+    default: "delivery/trust.bundle"
+  fail-on-divergence:
+    description: >
+      Fail the job when divergence is detected (default: true). Set to false for
+      observability-only mode (the step still reports divergence but does not
+      fail the job).
+    required: false
+    default: "true"
+  sign:
+    description: >
+      Mint a signed in-toto attestation after a clean reconcile (default: false).
+      Requires id-token: write permission in the calling job. The attestation is
+      uploaded as a workflow artifact named trust-attestation.
+    required: false
+    default: "false"
+  node-version:
+    description: "Node.js version to use."
+    required: false
+    default: "24"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    # Resolve the bundle path: use the input value if the file exists, otherwise
+    # pass an empty string (trust-reconcile.js auto-discovers or operates fail-open).
+    - name: Trust verify
+      id: trust-verify
+      shell: bash
+      env:
+        VERIFY_COMMAND: ${{ inputs.verify-command }}
+        BUNDLE_INPUT: ${{ inputs.bundle }}
+        FAIL_ON_DIVERGENCE: ${{ inputs.fail-on-divergence }}
+      run: |
+        # Resolve bundle path: use the input if the file exists, empty otherwise.
+        if [ -n "$BUNDLE_INPUT" ] && [ -f "$BUNDLE_INPUT" ]; then
+          BUNDLE_ARG="--bundle $BUNDLE_INPUT"
+        else
+          BUNDLE_ARG=""
+        fi
+
+        node "${{ github.action_path }}/../../scripts/ci/trust-reconcile.js" \
+          --commands "$VERIFY_COMMAND" \
+          --repo-root "${{ github.workspace }}" \
+          $BUNDLE_ARG || {
+          code=$?
+          if [ "$FAIL_ON_DIVERGENCE" = "true" ]; then
+            exit $code
+          fi
+          echo "[trust-verify] divergence detected (fail-on-divergence=false — continuing)"
+        }
+
+    # Phase 2 (optional): mint a signed in-toto attestation over CI's own fresh results.
+    # Only runs when sign=true and the trust-verify step passed.
+    # Requires id-token: write in the calling job for Sigstore keyless signing.
+    - name: Mint attestation
+      if: inputs.sign == 'true' && steps.trust-verify.outcome == 'success'
+      shell: bash
+      run: node "${{ github.action_path }}/../../scripts/ci/mint-attestation.js"
+
+    - name: Upload attestation
+      if: inputs.sign == 'true' && steps.trust-verify.outcome == 'success'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: trust-attestation
+        path: |
+          trust.attestation.sig.json
+          trust.attestation.intoto.json
+          trust.attestation.status.json
+        if-no-files-found: ignore
+        retention-days: 30

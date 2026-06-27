@@ -75,8 +75,17 @@ rather you trust this *because* you can see where the lines are.
 > closed) until a round came back clean. That loop is now part of the policy, and the
 > regression suite that proves it runs on every change.
 
+## Add it to your repo
+
+The same external anchor works in **any** repo that uses Flow Agents — add the
+[`trust-verify` composite action](trust-anchor-adoption.md) as a required check, or run it
+locally / in any CI with `npx @kontourai/flow-agents verify`. See the
+[Trust Anchor Adoption guide](trust-anchor-adoption.md) for the full wiring (publish the
+bundle → add the action → make it a required, no-bypass check + CODEOWNERS).
+
 ## Learn more
 
+- **Add the anchor to your repo:** [Trust Anchor Adoption guide](trust-anchor-adoption.md)
 - **Architecture, threat model, and residuals:** [ADR 0017 — The Anti-Gaming Trust Security
   Model](adr/0017-anti-gaming-trust-security-model.md)
 - **The trust state model it builds on:** [ADR 0010 — Workflow Trust State as a Hachure
