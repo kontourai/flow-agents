@@ -30,13 +30,15 @@
         {
           "id": "selected-work",
           "kind": "trust.bundle",
-          "required": false,
-          "explore_hint": "No natural trust.bundle producer in the current skill surface. pull-work writes a Markdown artifact but has no record-evidence call. Flag for design: category (c) no-producer gate per ADR 0016 P-d plan.",
+          "required": true,
           "description": "A ready work item is selected with scope and acceptance context.",
           "bundle_claim": {
             "claimType": "builder.pull-work.selected",
             "subjectType": "work-item",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         }
       ]
@@ -47,25 +49,29 @@
         {
           "id": "pickup-probe-readiness",
           "kind": "trust.bundle",
-          "required": false,
-          "explore_hint": "No natural trust.bundle producer in the current skill surface. pickup-probe writes a Markdown artifact but has no record-evidence call. Flag for design: category (c) no-producer gate per ADR 0016 P-d plan.",
+          "required": true,
           "description": "Pickup Probe evidence is recorded before planning: goal fit and scope, blockers and dependencies, dependency freshness, acceptance criteria quality, provider state, risk, stop-short risks, planning readiness, decisions, unresolved questions, accepted gaps, probe_status, probe_artifact_ref, grouping decision, expected modified files, and conflict risks.",
           "bundle_claim": {
             "claimType": "builder.design-probe.pickup-readiness",
             "subjectType": "work-item",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         },
         {
           "id": "probe-decisions-or-accepted-gaps",
           "kind": "trust.bundle",
-          "required": false,
-          "explore_hint": "No natural trust.bundle producer in the current skill surface. Decisions are captured in Markdown artifacts but not as structured claims. Flag for design: category (c) no-producer gate per ADR 0016 P-d plan.",
+          "required": true,
           "description": "Planning is blocked until pickup Probe decisions are captured in the pull-work or plan handoff artifact, or unresolved questions are explicitly recorded as accepted gaps. Stale broad continuation language after a merge is not sufficient for planning newly selected work.",
           "bundle_claim": {
             "claimType": "builder.design-probe.decisions",
             "subjectType": "decision",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         }
       ]
@@ -81,7 +87,10 @@
           "bundle_claim": {
             "claimType": "builder.plan.implementation",
             "subjectType": "artifact",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         }
       ]
@@ -97,7 +106,10 @@
           "bundle_claim": {
             "claimType": "builder.execute.scope",
             "subjectType": "change",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         }
       ]
@@ -124,7 +136,10 @@
           "bundle_claim": {
             "claimType": "builder.verify.tests",
             "subjectType": "flow-step",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         },
         {
@@ -136,7 +151,11 @@
           "bundle_claim": {
             "claimType": "builder.verify.policy-compliance",
             "subjectType": "artifact",
-            "accepted_statuses": ["trusted", "accepted", "advisory"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted",
+              "advisory"
+            ]
           }
         }
       ]
@@ -163,7 +182,10 @@
           "bundle_claim": {
             "claimType": "builder.merge-ready.readiness",
             "subjectType": "change",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         }
       ]
@@ -174,13 +196,15 @@
         {
           "id": "pull-request-opened",
           "kind": "trust.bundle",
-          "required": false,
-          "explore_hint": "No natural trust.bundle producer in the current skill surface. PR creation is a provider action; no record-evidence call exists after PR open. Flag for design: category (c) no-producer gate per ADR 0016 P-d plan.",
+          "required": true,
           "description": "A pull request exists with linked work, implementation summary, and verification evidence.",
           "bundle_claim": {
             "claimType": "builder.pr-open.pull-request",
             "subjectType": "pull-request",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         }
       ]
@@ -196,7 +220,10 @@
           "bundle_claim": {
             "claimType": "builder.merge-ready-ci.readiness",
             "subjectType": "pull-request",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         }
       ]
@@ -207,25 +234,29 @@
         {
           "id": "decision-evidence",
           "kind": "trust.bundle",
-          "required": false,
-          "explore_hint": "No natural trust.bundle producer in the current skill surface. record-learning writes learning.json which is a structured sidecar but not a trust.bundle claim. Flag for design: category (c) no-producer gate per ADR 0016 P-d plan.",
+          "required": true,
           "description": "Durable decision evidence from the build is recorded.",
           "bundle_claim": {
             "claimType": "builder.learn.decisions",
             "subjectType": "decision",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         },
         {
           "id": "learning-evidence",
           "kind": "trust.bundle",
-          "required": false,
-          "explore_hint": "No natural trust.bundle producer in the current skill surface. record-learning writes learning.json which is a structured sidecar but not a trust.bundle claim. Flag for design: category (c) no-producer gate per ADR 0016 P-d plan.",
+          "required": true,
           "description": "Learning evidence from delivery is recorded for future work.",
           "bundle_claim": {
             "claimType": "builder.learn.evidence",
             "subjectType": "release",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
           }
         }
       ]

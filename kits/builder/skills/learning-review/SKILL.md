@@ -105,6 +105,36 @@ Check whether accepted delivery artifacts were promoted into long-lived document
 
 Record which follow-ups were created, which were intentionally deferred, and what trigger should revisit deferred work.
 
+## Gate Claims: Record Learning Outcomes
+
+After `learning.json` is written and the learning verdict is `LEARNED` or `FOLLOWUP_REQUIRED`, record the two gate claims for the Builder Kit `learn` step. These satisfy the `builder.learn.decisions` and `builder.learn.evidence` gate expectations.
+
+**Claim 1 — Decision evidence** (durable decisions from the build are recorded):
+
+```bash
+npm run workflow:sidecar -- record-gate-claim .flow-agents/<slug> \
+  --expectation decision-evidence \
+  --status pass \
+  --summary "Build decisions recorded: <decision-count> decisions captured, correction.<needed> recorded." \
+  --evidence-ref-json '{"kind":"artifact","file":".flow-agents/<slug>/learning.json","summary":"learning.json with decisions and correction state."}'
+```
+
+**Claim 2 — Learning evidence** (learnings from delivery are recorded for future work):
+
+```bash
+npm run workflow:sidecar -- record-gate-claim .flow-agents/<slug> \
+  --expectation learning-evidence \
+  --status pass \
+  --summary "Learning evidence captured: <outcome> outcome, facts recorded, routing complete." \
+  --evidence-ref-json '{"kind":"artifact","file":".flow-agents/<slug>/learning.json","summary":"learning.json with outcomes, facts, and routing."}'
+```
+
+Record both claims immediately after `record-learning` succeeds and artifact validation passes. Use `--status fail` when `record-learning` fails or when learning cannot be captured (verdict `BLOCKED`). Use `--status not_verified` only when the session has no active Builder Kit flow step.
+
+When the learning verdict is `FOLLOWUP_REQUIRED`, record both claims with `--status pass` and name the open routing in the summary; the follow-up route is separate from gate satisfaction.
+
+
+
 ## Gates
 
 - Learning Gate: observed outcome is recorded with evidence.

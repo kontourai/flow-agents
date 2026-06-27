@@ -216,6 +216,17 @@ After review, verification, evidence, and Goal Fit are clean for the same diff:
 3. Push the branch.
 4. Open or update the provider change record with issue links, closing refs, evidence links, and verification summary, or record an explicit no-provider-change reason.
 5. Wait for provider checks/CI or record missing checks as `NOT_VERIFIED`.
+6. Record the gate claim for the Builder Kit `pr-open` step immediately after the PR is opened or updated:
+
+```bash
+npm run workflow:sidecar -- record-gate-claim .flow-agents/<slug> \
+  --expectation pull-request-opened \
+  --status pass \
+  --summary "PR opened: <pr-url>. Linked to <work-item-ref>, implementation summary and verification evidence attached." \
+  --evidence-ref-json '{"kind":"provider","url":"<pr-url>"}'
+```
+
+Use `--status fail` when the PR cannot be opened or when no provider change record is created and the reason is not an accepted no-provider-change path. Use `--status not_verified` when provider access is unavailable and the PR creation cannot be confirmed.
 
 Do not invoke `release-readiness` before this gate unless the user explicitly accepts a no-provider-change/no-push path and the reason is recorded in the session artifact. For GitHub, the first `ChangeProvider` adapter example is a PR with PR checks.
 

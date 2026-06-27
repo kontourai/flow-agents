@@ -305,10 +305,18 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
   //       builder.learn.evidence            (learn-gate, subjectType=release)
   //   For category (c): record-gate-claim subcommand allows skills to target a specific
   //   expects[] entry by --expectation <id>, bypassing this semantic match entirely.
-  function matchExpectsEntry(kind: "check" | "acceptance" | "critique", checkKindVal?: string): { claimType: string; subjectType: string } | null {
+  function matchExpectsEntry(kind: "check" | "acceptance" | "critique", checkKindVal?: string, expectationId?: string): { claimType: string; subjectType: string } | null {
     if (!activeStep || activeStep.gateExpects.length === 0) return null;
     const expects = activeStep.gateExpects;
     if (kind === "check") {
+      // ADR 0016 P-d Increment 2: when an explicit expectation id is given (from record-gate-claim
+      // --expectation), bypass heuristics and do exact lookup. This ensures multi-expects[] gates
+      // (learn-gate: decision + release; design-probe-gate: work-item + decision) produce the
+      // correct declared claimType rather than the heuristic-selected one.
+      if (expectationId) {
+        const exact = expects.find((e) => e.id === expectationId);
+        if (exact) return { claimType: exact.bundle_claim.claimType, subjectType: exact.bundle_claim.subjectType };
+      }
       const isPolicy = checkKindVal === "policy";
       if (isPolicy) {
         const match = expects.find((e) => {
@@ -381,7 +389,8 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     evidenceItems.push(evItem);
 
     // P-b: dual-emit when active flow/step present
-    const declared = matchExpectsEntry("check", check.kind);
+    // When record-gate-claim sets _gate_claim_expectation_id, pass it for exact lookup (ADR 0016 P-d Increment 2).
+    const declared = matchExpectsEntry("check", check.kind, typeof check._gate_claim_expectation_id === "string" ? check._gate_claim_expectation_id : undefined);
     if (declared) {
       // Primary: declared kit-typed claim
       const declaredPolicy = ensurePolicy(declared.claimType, "high", ["test_output"]);
@@ -1179,13 +1188,15 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   // non-flow-step fallback path. The subjectType on the resulting claim comes from the
   // expects[] entry via matchExpectsEntry.
   const checkId = expectationId || targetExpectation.id;
-  // Build a minimal "external" check. Do not include extra fields that normalizeCheck
-  // does not accept or that might appear in the trust.bundle payload.
+  // Build a minimal "external" check. Include _gate_claim_expectation_id so that
+  // matchExpectsEntry can do an exact lookup for multi-expects[] gates (ADR 0016 P-d Increment 2).
+  // normalizeCheck preserves extra underscore-prefixed fields without stripping them.
   const check: AnyObj = {
     id: `gate-claim-${checkId}`,
     kind: "external",
     status: statusVal,
     summary,
+    _gate_claim_expectation_id: targetExpectation.id,
   };
 
   // Include structured evidence refs if provided
