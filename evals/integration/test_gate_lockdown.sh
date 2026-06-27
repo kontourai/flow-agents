@@ -665,16 +665,20 @@ echo "=== Diff scope check ==="
 # Round 3 (fix/resolvefirststep-tee) ADDS: workflow-sidecar.ts, flow-resolver.ts (path-traversal fix)
 # and config-protection.js (tee multi-file fix). Forbidden: kits/knowledge/**, continue-work,
 # stop-goal-fit.js, evidence-capture.js in R3.
+# Round 5a (fix/gate-status-independent): stop-goal-fit.js is EXPLICITLY ALLOWED (the primary
+# change). Forbidden: kits/knowledge/**, continue-work, evidence-capture.js, workflow-sidecar.ts,
+# flow-resolver.ts, config-protection.js in R5a.
 # Use grep patterns to avoid triggering the source path validator.
 FORBIDDEN_MODIFIED=""
 FORBIDDEN_PATTERNS=(
   "kits/knowledge/"
-  "stop-goal-fit.js"
   "evidence-capture.js"
 )
 # continue-work: the collision boundary skill file (not in scripts/hooks/).
 # Use a conservative basename check to avoid a false src-path reference.
 FORBIDDEN_PATTERNS+=("continue-work")
+# R5a additional: these files are owned by other workers in this round.
+FORBIDDEN_PATTERNS+=("workflow-sidecar.ts" "flow-resolver.ts" "config-protection.js")
 for pat in "${FORBIDDEN_PATTERNS[@]}"; do
   if git -C "$ROOT" diff --name-only HEAD 2>/dev/null | grep -q "$pat"; then
     FORBIDDEN_MODIFIED="$FORBIDDEN_MODIFIED $pat"
@@ -687,11 +691,12 @@ else
   _fail "Diff scope: FORBIDDEN files modified:$FORBIDDEN_MODIFIED"
 fi
 
-# Verify the expected files were modified (R3 scope: config-protection.js + workflow-sidecar.ts)
+# Verify the expected files were modified (cumulative R3+R5a scope)
 EXPECTED_CHANGED=0
 for f in \
   "scripts/hooks/config-protection.js" \
-  "src/cli/workflow-sidecar.ts"
+  "src/cli/workflow-sidecar.ts" \
+  "scripts/hooks/stop-goal-fit.js"
 do
   if git -C "$ROOT" diff --name-only HEAD 2>/dev/null | grep -q "$f" || \
      git -C "$ROOT" status --short 2>/dev/null | grep -q "$f"; then
@@ -699,14 +704,16 @@ do
   fi
 done
 if [ "$EXPECTED_CHANGED" -ge 1 ]; then
-  _pass "Diff scope: expected R3 fix files (config-protection.js + workflow-sidecar.ts) modified"
+  _pass "Diff scope: expected fix files modified (R3+R5a scope)"
 else
   # Fallback: check the fixes are present in the files regardless of git status
   if grep -q "pastDashDash" "$ROOT/scripts/hooks/config-protection.js" && \
      grep -q "resolveFlowFilePath" "$ROOT/src/cli/workflow-sidecar.ts"; then
-    _pass "Diff scope: R3 fix patterns present in config-protection.js + workflow-sidecar.ts"
+    _pass "Diff scope: R3+R5a fix patterns present in expected files"
+  elif grep -q "hasLaunderingOperator\|Fix A.*status-independent\|capturedFailReconciliation" "$ROOT/scripts/hooks/stop-goal-fit.js"; then
+    _pass "Diff scope: R5a fix patterns present in stop-goal-fit.js"
   else
-    _fail "Diff scope: expected R3 fix changes not found in files"
+    _fail "Diff scope: expected fix changes not found in files"
   fi
 fi
 

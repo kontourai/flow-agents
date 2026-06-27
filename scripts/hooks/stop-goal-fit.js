@@ -679,9 +679,9 @@ function readCommandLog(artifactDir) {
 /**
  * Read command-log.jsonl into a map of normalized-command -> LATEST capture outcome.
  * The LAST entry for each command wins (unlike readCommandLog which makes FAIL sticky).
- * Used for the namespace-agnostic captured-FAIL reconciliation: we want to know what
- * happened LAST for each command, so a genuine re-run-to-pass clears the FAIL.
- * Do NOT use for captureCrossReference (which must keep FAIL sticky for claimed-pass checks).
+ * Used for both capturedFailReconciliation and captureCrossReference (Fix C): we want to
+ * know the LAST result, so a genuine re-run-to-pass clears the earlier FAIL. Only an actual
+ * re-run (new PASS entry in the log) clears it — a new claim cannot change the log.
  */
 function readLatestCommandLog(artifactDir) {
   const file = path.join(artifactDir, 'command-log.jsonl');
@@ -716,8 +716,9 @@ function readLatestCommandLog(artifactDir) {
 function claimAssertsPass(status, value) {
   const s = String(status || '').toLowerCase();
   const v = String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
-  return (s === 'verified' || s === 'assumed' || s === 'accepted' || s === 'trusted')
-    && (v === 'pass' || v === 'passed' || v === 'verified');
+  // Fix E: added 'approved' status alias and 'true'/'ok' value aliases
+  return (s === 'verified' || s === 'assumed' || s === 'accepted' || s === 'trusted' || s === 'approved')
+    && (v === 'pass' || v === 'passed' || v === 'verified' || v === 'true' || v === 'ok');
 }
 
 /**
@@ -730,6 +731,21 @@ function claimAcknowledgesFailure(status, value) {
   return s === 'disputed' || s === 'rejected' || s === 'failing' || s === 'failed'
     || s === 'not_verified' || s === 'not-verified'
     || v === 'fail' || v === 'failed' || v === 'not_verified' || v === 'failing';
+}
+
+/**
+ * Returns true when a command string contains an exit-code-neutralizing operator.
+ * These operators mask the real exit code: '|| true', '|| :', '; true', '; exit 0', '| true'.
+ * A claimed-pass check whose captured command uses one of these cannot be accepted as a
+ * deterministic pass — the real sub-command may have failed silently.
+ * Fix D: applied in captureCrossReference's satisfied path and capturedFailReconciliation.
+ */
+function hasLaunderingOperator(cmd) {
+  return /\|\|\s*true\b/.test(cmd)
+      || /\|\|\s*:\s*(?:$|\s|;)/.test(cmd)
+      || /;\s*true\b/.test(cmd)
+      || /;\s*exit\s+0\b/.test(cmd)
+      || /\|\s*true\b/.test(cmd);
 }
 
 // ─── Hash-chain integrity verification (Increment B2, tamper-EVIDENCE) ────────
@@ -979,7 +995,7 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
     : null;
   const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
   const acceptance = readJsonFile(path.join(artifactDir, 'acceptance.json'));
-  const log = readCommandLog(artifactDir);
+  const log = readLatestCommandLog(artifactDir); // Fix C: latest-wins; genuine fix-then-rerun-to-pass clears the block
   const base = relative(root, artifactDir);
   const backstopMode = resolveBackstopMode();
   const warnings = [];
@@ -1080,8 +1096,12 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
       if (logged.failed) {
         const exit = Number.isInteger(logged.exitCode) ? ` (exitCode:${logged.exitCode})` : '';
         warnings.push(`${base} evidence check ${id}: capture log CONTRADICTS claimed pass — command "${safeOneLine(cmd, 120)}" was recorded as FAIL${exit}. This is a caught false-completion.`);
+      } else if (hasLaunderingOperator(cmd)) {
+        // Fix D: exit-code laundering. The captured exit-0 is not trustworthy — the command
+        // baked in '|| true' / '|| :' / '; true' / '; exit 0' / '| true' to mask the real result.
+        warnings.push(`${base} evidence check ${id}: claimed pass relies on an exit-code-laundered command "${safeOneLine(cmd, 120)}" — the exit code is not a trustworthy signal (laundering operators mask the real exit code).`);
       }
-      // log shows it ran and passed → satisfied deterministically, no re-run.
+      // else: log shows it ran and passed with no laundering → satisfied deterministically.
       continue;
     }
 
@@ -1122,31 +1142,50 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
  * This function is namespace-agnostic: it builds the LATEST-capture-per-command map
  * and for each command whose last capture is FAIL it checks:
  *   (A) Any claim (ANY namespace) asserting pass for that command → false-completion HARD_BLOCK
- *   (B) No claim acknowledges the failure (failing/disputed/not_verified) → unaccounted HARD_BLOCK
+ *       Fix A: runs on EVERY stop (status-independent). A claim contradicting the capture is
+ *       a false-completion regardless of whether state.json shows the task as 'done'.
+ * Fix D: also checks commands with laundering operators whose latest capture is PASS (exit 0);
+ *   a claimed-pass for a laundered command is NOT a trustworthy signal.
+ * Fix B: Case B (unaccounted at completion — no-claim-at-all branch) REMOVED.
+ *   It over-blocked incidental failures (grep no-match, git diff --exit-code, etc.).
+ *   Case A covers the real threat (claimed pass contradicts captured fail).
+ * Fix E: verifyCommandLogChain called; on broken chain reconciliation is skipped (log
+ *   integrity is already signalled by captureCrossReference).
  *
- * Fires ONLY at a completing session (terminal/verified status).
- * Mid-execution FAILs are expected; only completion-time FAILs need reconciliation.
- *
- * AC2 guarantees (no over-block):
- *   - Does NOT fire mid-execution (completing guard).
+ * No-over-block guarantees:
  *   - Fail-then-re-run-to-pass: latest is PASS → not in latestFails → no warning.
- *   - Acknowledged failure: claim has failing/disputed status → ackClaims present → no warning.
+ *   - Acknowledged failure: claim has failing/disputed status → ackClaims → no warning.
  *   - No-command session: no log → latestLog empty → no warning.
+ *   - Incidental fail (grep/diff/find) with no pass-claim → no warning (Case B removed).
  */
 function capturedFailReconciliation(root, artifactDir, taskStatus) {
-  // Only fire at completion — not mid-execution (fails are expected while working).
-  const completing = TERMINAL_STATUSES.has(taskStatus) || taskStatus === 'verified';
-  if (!completing) return [];
+  // Fix A: removed the `completing` guard. Run on EVERY stop — status-independent.
+  // A claim contradicting the capture is a false-completion whether or not the agent
+  // has set state.json.status to a terminal value. (taskStatus param kept for compat.)
 
   const latestLog = readLatestCommandLog(artifactDir);
   if (latestLog.size === 0) return []; // No captures — nothing to reconcile
 
-  // Collect commands whose LATEST capture is FAIL.
+  // Fix E: verify chain integrity; skip reconciliation when broken (log untrusted).
+  // The main integrity warning is already emitted by captureCrossReference.
+  const chainResult = verifyCommandLogChain(artifactDir);
+  if (chainResult.status === 'broken') return []; // Can't trust pass/fail signals
+
+  // Collect commands whose LATEST capture is FAIL (Case A).
   const latestFails = new Map(); // cmd -> {failed:true, exitCode}
   for (const [cmd, info] of latestLog) {
     if (info.failed) latestFails.set(cmd, info);
   }
-  if (latestFails.size === 0) return []; // All latest captures passed
+
+  // Fix D: Collect commands whose latest capture is PASS (exit 0) but whose command
+  // string contains an exit-code-neutralizing operator (laundering). The captured
+  // exit-0 is not a trustworthy signal for these — real test failures are hidden.
+  const launderedPass = new Map(); // cmd -> {failed:false, exitCode:0}
+  for (const [cmd, info] of latestLog) {
+    if (!info.failed && hasLaunderingOperator(cmd)) launderedPass.set(cmd, info);
+  }
+
+  if (latestFails.size === 0 && launderedPass.size === 0) return []; // Nothing to flag
 
   const base = relative(root, artifactDir);
   const warnings = [];
@@ -1162,7 +1201,10 @@ function capturedFailReconciliation(root, artifactDir, taskStatus) {
     if (c && c.id) claimById.set(c.id, c);
   }
 
-  // For each FAIL-latest command, track what claims say about it.
+  // commandsToCheck: FAIL-latest commands + laundered-pass commands
+  const commandsToCheck = new Set([...latestFails.keys(), ...launderedPass.keys()]);
+
+  // For each relevant command, track what claims say about it.
   // cmdAcc: cmd → {passClaims: [...], ackClaims: []}
   const cmdAcc = new Map();
   const initAcc = (cmd) => {
@@ -1174,7 +1216,7 @@ function capturedFailReconciliation(root, artifactDir, taskStatus) {
   for (const ev of allEvidence) {
     if (!ev || !ev.execution || !ev.execution.label) continue;
     const cmd = normalizeCommand(ev.execution.label);
-    if (!cmd || !latestFails.has(cmd)) continue;
+    if (!cmd || !commandsToCheck.has(cmd)) continue;
     const claim = claimById.get(ev.claimId);
     if (!claim) continue;
     const acc = initAcc(cmd);
@@ -1188,7 +1230,7 @@ function capturedFailReconciliation(root, artifactDir, taskStatus) {
   for (const c of allClaims) {
     if (!c) continue;
     const cmd = normalizeCommand(c.fieldOrBehavior || '');
-    if (!cmd || !latestFails.has(cmd)) continue;
+    if (!cmd || !commandsToCheck.has(cmd)) continue;
     const acc = initAcc(cmd);
     const s = String(c.status || '').toLowerCase();
     const v = normalizedStatus(c.value || '');
@@ -1196,7 +1238,7 @@ function capturedFailReconciliation(root, artifactDir, taskStatus) {
     if (claimAcknowledgesFailure(s, v)) acc.ackClaims.push(c);
   }
 
-  // Evaluate each FAIL-latest command.
+  // Case A: Evaluate each FAIL-latest command for pass-claims (status-independent).
   for (const [cmd, failInfo] of latestFails) {
     const exit = Number.isInteger(failInfo.exitCode) ? failInfo.exitCode : null;
     const exitStr = exit !== null ? ` (exit ${exit})` : '';
@@ -1211,16 +1253,24 @@ function capturedFailReconciliation(root, artifactDir, taskStatus) {
         `but claim ${safeOneLine(claim.subjectId || claim.id, 80)} (${safeOneLine(claim.claimType, 48)}) ` +
         `asserts pass — namespace-agnostic caught false-completion.`
       );
-    } else if (!acc || acc.ackClaims.length === 0) {
-      // No claim acknowledges this failure — unaccounted captured FAIL at completion.
+    }
+    // Fix B: Case B (unaccounted at completion — no-claim-at-all) REMOVED.
+    // It over-blocked incidental failures with no pass-claim. Case A covers the real threat.
+    // Acknowledged failure (ackClaims.length > 0) → OK, no warning.
+  }
+
+  // Fix D: Evaluate laundered-pass commands for pass-claims.
+  for (const [cmd] of launderedPass) {
+    const acc = cmdAcc.get(cmd);
+    if (acc && acc.passClaims.length > 0) {
+      const claim = acc.passClaims[0];
       warnings.push(
-        `${base} captured command '${safeOneLine(cmd, 120)}' last ran FAIL${exitStr} ` +
-        `and is unaccounted at completion — ` +
-        `cannot complete with an unresolved captured failure. ` +
-        `Acknowledge the failure in evidence (mark as fail/disputed) or re-run the command to pass.`
+        `${base} captured command '${safeOneLine(cmd, 120)}' claimed pass relies on an ` +
+        `exit-code-laundered command — claim ${safeOneLine(claim.subjectId || claim.id, 80)} ` +
+        `(${safeOneLine(claim.claimType, 48)}) asserts pass but the exit code is not a ` +
+        `trustworthy signal (laundering operators mask the real exit code).`
       );
     }
-    // else: acc.ackClaims.length > 0 → acknowledged failure → OK, no warning
   }
 
   return warnings;
@@ -1478,9 +1528,9 @@ function missingBundleOrStateSignal(artifactDir, activeFlowStep) {
 //
 // Both are used in analyze() for blocking decisions AND in run() for the AC2
 // MAX_BLOCKS hard-block guard (preventing auto-release of hard blocks).
-const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|unaccounted at completion/;
+const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered/;
 // FULL_BLOCK adds: workflow-state hygiene, surface-unavailable fail-closed, missing log.
-const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing|unaccounted at completion/;
+const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing|exit-code-laundered/;
 
 async function analyze(root, now = Date.now()) {
   const flowAgentsDir = path.join(root, '.flow-agents');
@@ -1554,8 +1604,8 @@ async function analyze(root, now = Date.now()) {
   const terminal = TERMINAL_STATUSES.has(taskStatus);
 
   // Namespace-agnostic captured-FAIL reconciliation (AC1 — closes the allowlist bypass).
-  // Must run AFTER taskStatus is resolved so the completing guard works correctly.
-  // Fires only at completion (terminal/verified); mid-execution FAILs are expected.
+  // Fix A: status-independent — runs on EVERY stop. A claim contradicting the capture
+  // is a false-completion whether or not the agent says the task is 'done'.
   warnings.push(...capturedFailReconciliation(root, path.dirname(latest.file), taskStatus));
 
   // Use module-scope HARD_BLOCK / FULL_BLOCK (defined above analyze()).
