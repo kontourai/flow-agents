@@ -196,6 +196,29 @@ else
   _fail "HELP-FLAG: expected usage text, got: $out4"
 fi
 
+# ─── TEST 5: composite action path resolution ──────────────────────────────────
+# Regression for the cross-repo path bug: the action at .github/actions/trust-verify/
+# resolves node scripts relative to github.action_path. A wrong `../` depth makes the
+# action fail with "Cannot find module" in a CONSUMER repo (it passes a local CLI test
+# but breaks the actual adoption path). Assert every action_path-relative script ref
+# resolves to a real file.
+echo "=== TEST 5: trust-verify action node refs resolve to real scripts ==="
+if node -e '
+  const fs=require("fs"), path=require("path");
+  const root=process.argv[1];
+  const actionDir=path.join(root,".github/actions/trust-verify");
+  const y=fs.readFileSync(path.join(actionDir,"action.yml"),"utf8");
+  const refs=[...y.matchAll(/action_path \}\}\/([^"]+\.js)/g)].map(m=>m[1]);
+  if(refs.length===0){console.error("no action_path script refs found");process.exit(1);}
+  let ok=true;
+  for(const r of refs){ if(!fs.existsSync(path.resolve(actionDir,r))){console.error("UNRESOLVED: "+r);ok=false;} }
+  process.exit(ok?0:1);
+' "$ROOT"; then
+  _pass "ACTION-PATH: all trust-verify action.yml script refs resolve"
+else
+  _fail "ACTION-PATH: a trust-verify action.yml script ref does not resolve (wrong ../ depth?)"
+fi
+
 # ─── Summary ──────────────────────────────────────────────────────────────────
 echo ""
 echo "────────────────────────────────────────────"
