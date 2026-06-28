@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.0.2](https://github.com/kontourai/flow-agents/compare/v2.0.1...v2.0.2) (2026-06-28)
+
+
+### Fixes
+
+* **evidence-capture:** serialize command-log appends to prevent chain forks ([#232](https://github.com/kontourai/flow-agents/issues/232)) ([bb167e9](https://github.com/kontourai/flow-agents/commit/bb167e93e7f6cc19baa88da613e96fe88a681c10))
+
+
+### Documentation
+
+* **design:** preserve WorkflowRun observability + FlowRun event-sourcing design notes ([#239](https://github.com/kontourai/flow-agents/issues/239)) ([c2dc116](https://github.com/kontourai/flow-agents/commit/c2dc11698cf63704f14087001c4494079195d197))
+
 ## [2.0.1](https://github.com/kontourai/flow-agents/compare/v2.0.0...v2.0.1) (2026-06-27)
 
 
