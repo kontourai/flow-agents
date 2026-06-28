@@ -113,7 +113,9 @@ runs:
           BUNDLE_ARG=""
         fi
 
-        node "${{ github.action_path }}/../../scripts/ci/trust-reconcile.js" \
+        # action_path is .github/actions/trust-verify/ — climb THREE levels to the
+        # repo root where scripts/ lives (trust-verify -> actions -> .github -> root).
+        node "${{ github.action_path }}/../../../scripts/ci/trust-reconcile.js" \
           --commands "$VERIFY_COMMAND" \
           --repo-root "${{ github.workspace }}" \
           $BUNDLE_ARG || {
@@ -130,7 +132,7 @@ runs:
     - name: Mint attestation
       if: inputs.sign == 'true' && steps.trust-verify.outcome == 'success'
       shell: bash
-      run: node "${{ github.action_path }}/../../scripts/ci/mint-attestation.js"
+      run: node "${{ github.action_path }}/../../../scripts/ci/mint-attestation.js"
 
     - name: Upload attestation
       if: inputs.sign == 'true' && steps.trust-verify.outcome == 'success'
