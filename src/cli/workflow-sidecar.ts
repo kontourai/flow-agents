@@ -19,11 +19,17 @@ export const verdicts = new Set(["pass", "partial", "fail", "not_verified"]);
 function now(): string { return new Date().toISOString().replace(/\.\d{3}Z$/, "Z"); }
 function read(file: string): string { return fs.readFileSync(file, "utf8"); }
 export function writeJson(file: string, payload: AnyObj): void { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`); }
-function printJson(payload: AnyObj): void { console.log(JSON.stringify(payload).replace(/":/g, '": ').replace(/,"/g, ', "')); }
+// Single-line but readable "key": "value" form. Built by collapsing the
+// structural whitespace from an indented stringify — corruption-proof, unlike a
+// regex that would also rewrite ":"/"," sequences inside string values.
+function spacedLine(payload: AnyObj, replacer?: (string | number)[]): string {
+  return JSON.stringify(payload, replacer as never, 1).replace(/\n\s*/g, " ");
+}
+function printJson(payload: AnyObj): void { console.log(spacedLine(payload)); }
 export function loadJson(file: string, fallback: AnyObj = {}): AnyObj { return fs.existsSync(file) ? JSON.parse(read(file)) : { ...fallback }; }
 export function appendJsonl(file: string, payload: AnyObj): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const line = JSON.stringify(payload, Object.keys(payload).sort()).replace(/":/g, '": ').replace(/,"/g, ', "');
+  const line = spacedLine(payload, Object.keys(payload).sort());
   fs.appendFileSync(file, `${line}\n`);
 }
 function die(message: string): never { throw new Error(message); }
