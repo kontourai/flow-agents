@@ -125,6 +125,70 @@ function readKitFlows(flowAgentsDir: string): KitFlowEntry[] {
   return results;
 }
 
+// ---------------------------------------------------------------------------
+// Usage extraction — map a Strands model-call event onto the documented
+// Anthropic usage object, defensively across SDK shapes.
+// ---------------------------------------------------------------------------
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
+}
+
+function numField(obj: Record<string, unknown> | undefined, ...keys: string[]): number {
+  if (!obj) return 0;
+  for (const key of keys) {
+    const v = obj[key];
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+  }
+  return 0;
+}
+
+function strField(obj: Record<string, unknown> | undefined, ...keys: string[]): string | undefined {
+  if (!obj) return undefined;
+  for (const key of keys) {
+    const v = obj[key];
+    if (typeof v === "string" && v) return v;
+  }
+  return undefined;
+}
+
+export function extractModelUsage(
+  event: StrandsEvent
+): { model: string; input: number; output: number; cacheCreation: number; cacheRead: number } | null {
+  // Find the usage object wherever the event surfaces it.
+  const containers = [
+    event,
+    asRecord(event.usage),
+    asRecord(event.response),
+    asRecord(event.result),
+    asRecord(event.message),
+    asRecord(event.output),
+    asRecord(event.modelResponse),
+  ];
+  let usage: Record<string, unknown> | undefined;
+  let modelCarrier: Record<string, unknown> | undefined;
+  for (const container of containers) {
+    const c = asRecord(container);
+    if (!c) continue;
+    const candidate = asRecord(c.usage) ?? (("input_tokens" in c || "inputTokens" in c) ? c : undefined);
+    if (candidate && !usage) usage = candidate;
+    if (!modelCarrier && (typeof c.model === "string" || typeof c.modelId === "string")) modelCarrier = c;
+  }
+  if (!usage) return null;
+
+  const input = numField(usage, "input_tokens", "inputTokens");
+  const output = numField(usage, "output_tokens", "outputTokens");
+  const cacheCreation = numField(usage, "cache_creation_input_tokens", "cacheCreationInputTokens");
+  const cacheRead = numField(usage, "cache_read_input_tokens", "cacheReadInputTokens");
+  if (input === 0 && output === 0 && cacheCreation === 0 && cacheRead === 0) return null;
+
+  const model =
+    strField(modelCarrier, "model", "modelId") ??
+    strField(usage, "model") ??
+    "unknown";
+  return { model, input, output, cacheCreation, cacheRead };
+}
+
 function buildKitFlowsHint(flows: KitFlowEntry[]): string {
   if (flows.length === 0) return "";
   const lines = ["KIT FLOWS: the following kit flows are activated for this workspace:"];
@@ -164,6 +228,11 @@ export class FlowAgentsHooks {
   private readonly policyGate: PolicyGate;
   private readonly _workspace: string;
   private _sessionStartMs: number | null = null;
+  // Per-model token accumulator, summed across model-call events for the session.
+  private _usageByModel = new Map<
+    string,
+    { input: number; output: number; cacheCreation: number; cacheRead: number }
+  >();
 
   constructor(options: FlowAgentsHooksOptions = {}) {
     this._workspace = findRepoRoot(options.workspace ?? process.cwd());
@@ -248,6 +317,15 @@ export class FlowAgentsHooks {
     registry.addCallback(AfterInvocationEvent, (event) => this.onAfterInvocation(event));
     registry.addCallback(BeforeToolCallEvent, (event) => this.onBeforeToolCall(event));
     registry.addCallback(AfterToolCallEvent, (event) => this.onAfterToolCall(event));
+
+    // AfterModelCallEvent carries per-call token usage (the SDK's documented
+    // usage source). Optional — only registered if the installed SDK exposes it,
+    // so older SDKs still work (usage is simply not collected there).
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+    const AfterModelCallEvent = (require("strands-agents") as any).AfterModelCallEvent as EventClass | undefined;
+    if (AfterModelCallEvent) {
+      registry.addCallback(AfterModelCallEvent, (event) => this.onAfterModelCall(event));
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -262,11 +340,66 @@ export class FlowAgentsHooks {
     this.sink.emitUserPromptSubmit();
   }
 
-  /** AfterInvocationEvent → stop / session.end */
+  /** AfterInvocationEvent → emit session.usage (if any) then stop / session.end */
   onAfterInvocation(_event: StrandsEvent): void {
     const durationMs =
       this._sessionStartMs !== null ? Date.now() - this._sessionStartMs : 0;
+
+    if (this._usageByModel.size > 0) {
+      const byModel = Array.from(this._usageByModel.entries()).map(([model, t]) => ({
+        model,
+        inputTokens: t.input,
+        outputTokens: t.output,
+        cacheCreationInputTokens: t.cacheCreation,
+        cacheReadInputTokens: t.cacheRead,
+      }));
+      const sum = byModel.reduce(
+        (acc, m) => ({
+          input: acc.input + m.inputTokens,
+          output: acc.output + m.outputTokens,
+          cacheCreation: acc.cacheCreation + m.cacheCreationInputTokens,
+          cacheRead: acc.cacheRead + m.cacheReadInputTokens,
+        }),
+        { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 }
+      );
+      this.sink.emitUsage({
+        model: byModel.length === 1 ? byModel[0].model : undefined,
+        durationS: durationMs / 1000,
+        inputTokens: sum.input,
+        outputTokens: sum.output,
+        cacheCreationInputTokens: sum.cacheCreation,
+        cacheReadInputTokens: sum.cacheRead,
+        byModel,
+      });
+      this._usageByModel.clear();
+    }
+
     this.sink.emitSessionEnd(durationMs);
+  }
+
+  /**
+   * AfterModelCallEvent → accumulate per-model token usage.
+   *
+   * Reads the documented Anthropic usage object (input_tokens, output_tokens,
+   * cache_creation_input_tokens, cache_read_input_tokens) from wherever the
+   * Strands event surfaces it. Defensive across SDK shapes — if no usage is
+   * found, the call is a no-op (tokens for that turn are simply not counted).
+   */
+  onAfterModelCall(event: StrandsEvent): void {
+    const extracted = extractModelUsage(event);
+    if (!extracted) return;
+    const { model, input, output, cacheCreation, cacheRead } = extracted;
+    const current = this._usageByModel.get(model) ?? {
+      input: 0,
+      output: 0,
+      cacheCreation: 0,
+      cacheRead: 0,
+    };
+    current.input += input;
+    current.output += output;
+    current.cacheCreation += cacheCreation;
+    current.cacheRead += cacheRead;
+    this._usageByModel.set(model, current);
   }
 
   /**
@@ -307,6 +440,7 @@ export class FlowAgentsHooks {
   /** Call once after constructing / wiring to emit the agentSpawn event. */
   emitSessionStart(): void {
     this._sessionStartMs = Date.now();
+    this._usageByModel.clear();
     this.sink.emitSessionStart();
   }
 }

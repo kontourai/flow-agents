@@ -81,6 +81,8 @@ class FlowAgentsHooks:
         self._policy = policy_gate if policy_gate is not None else PolicyGate()
         self._steering = SteeringContext(workspace=workspace)
         self._session_start_ts: Optional[float] = None
+        # Per-model token accumulator, summed across model-call events.
+        self._usage_by_model: Dict[str, Dict[str, int]] = {}
 
     # ------------------------------------------------------------------
     # Public API available WITHOUT strands installed
@@ -137,6 +139,21 @@ class FlowAgentsHooks:
         registry.add_callback(BeforeToolCallEvent, self._on_before_tool_call)
         registry.add_callback(AfterToolCallEvent, self._on_after_tool_call)
 
+        # Model-call event carries per-call token usage (the SDK's documented
+        # usage source). Optional — registered only if the installed SDK exposes
+        # it, under whichever name this SDK version uses.
+        try:
+            import strands.hooks as _sh  # type: ignore[import]
+
+            model_event = (
+                getattr(_sh, "AfterModelCallEvent", None)
+                or getattr(_sh, "AfterModelInvocationEvent", None)
+            )
+            if model_event is not None:
+                registry.add_callback(model_event, self._on_after_model_call)
+        except ImportError:
+            pass
+
     # ------------------------------------------------------------------
     # Private callbacks
     # ------------------------------------------------------------------
@@ -144,6 +161,7 @@ class FlowAgentsHooks:
     def _on_agent_initialized(self, event: Any) -> None:
         """AgentInitializedEvent → agentSpawn / session.start"""
         self._session_start_ts = time.monotonic()
+        self._usage_by_model = {}
         self._sink.emit_session_start()
 
     def _on_before_invocation(self, event: Any) -> None:
@@ -153,11 +171,57 @@ class FlowAgentsHooks:
         self._sink.emit("userPromptSubmit")
 
     def _on_after_invocation(self, event: Any) -> None:
-        """AfterInvocationEvent → stop / session.end"""
+        """AfterInvocationEvent → emit session.usage (if any) then stop / session.end"""
         duration_s = 0.0
         if self._session_start_ts is not None:
             duration_s = time.monotonic() - self._session_start_ts
+
+        if self._usage_by_model:
+            by_model = []
+            totals = {"input": 0, "output": 0, "cache_creation": 0, "cache_read": 0}
+            for model, tok in self._usage_by_model.items():
+                by_model.append(
+                    {
+                        "model": model,
+                        "input_tokens": tok["input"],
+                        "output_tokens": tok["output"],
+                        "cache_creation_input_tokens": tok["cache_creation"],
+                        "cache_read_input_tokens": tok["cache_read"],
+                    }
+                )
+                for key in totals:
+                    totals[key] += tok[key]
+            self._sink.emit_usage(
+                model=next(iter(self._usage_by_model)) if len(self._usage_by_model) == 1 else None,
+                input_tokens=totals["input"],
+                output_tokens=totals["output"],
+                cache_creation_input_tokens=totals["cache_creation"],
+                cache_read_input_tokens=totals["cache_read"],
+                duration_s=duration_s,
+                by_model=by_model,
+            )
+            self._usage_by_model = {}
+
         self._sink.emit_session_end(duration_s=duration_s)
+
+    def _on_after_model_call(self, event: Any) -> None:
+        """Model-call event → accumulate per-model token usage.
+
+        Reads the documented Anthropic usage object (input_tokens, output_tokens,
+        cache_creation_input_tokens, cache_read_input_tokens) from wherever the
+        Strands event surfaces it. Defensive across SDK shapes; no-op if absent.
+        """
+        extracted = _extract_model_usage(event)
+        if extracted is None:
+            return
+        model = extracted["model"]
+        acc = self._usage_by_model.setdefault(
+            model, {"input": 0, "output": 0, "cache_creation": 0, "cache_read": 0}
+        )
+        acc["input"] += extracted["input"]
+        acc["output"] += extracted["output"]
+        acc["cache_creation"] += extracted["cache_creation"]
+        acc["cache_read"] += extracted["cache_read"]
 
     def _on_before_tool_call(self, event: Any) -> None:
         """
@@ -192,3 +256,64 @@ class FlowAgentsHooks:
         tool_name = tool_use.get("name", "")
         result = getattr(event, "result", None)
         self._sink.emit_tool_result(tool_name=tool_name, tool_output=result)
+
+
+# ----------------------------------------------------------------------------
+# Usage extraction — map a Strands model-call event onto the documented
+# Anthropic usage object, defensively across SDK shapes (object or dict).
+# ----------------------------------------------------------------------------
+
+
+def _attr(obj: Any, *keys: str) -> Any:
+    for key in keys:
+        if isinstance(obj, dict):
+            if key in obj and obj[key] is not None:
+                return obj[key]
+        else:
+            value = getattr(obj, key, None)
+            if value is not None:
+                return value
+    return None
+
+
+def _num(obj: Any, *keys: str) -> int:
+    value = _attr(obj, *keys)
+    return value if isinstance(value, (int, float)) else 0
+
+
+def _extract_model_usage(event: Any) -> Optional[Dict[str, Any]]:
+    containers = [
+        event,
+        _attr(event, "usage"),
+        _attr(event, "response"),
+        _attr(event, "result"),
+        _attr(event, "message"),
+        _attr(event, "output"),
+        _attr(event, "model_response"),
+    ]
+    usage = None
+    model_carrier = None
+    for container in containers:
+        if container is None:
+            continue
+        candidate = _attr(container, "usage")
+        if candidate is None and (_attr(container, "input_tokens", "inputTokens") is not None):
+            candidate = container
+        if candidate is not None and usage is None:
+            usage = candidate
+        if model_carrier is None and _attr(container, "model", "model_id", "modelId") is not None:
+            model_carrier = container
+    if usage is None:
+        return None
+
+    tokens = {
+        "input": _num(usage, "input_tokens", "inputTokens"),
+        "output": _num(usage, "output_tokens", "outputTokens"),
+        "cache_creation": _num(usage, "cache_creation_input_tokens", "cacheCreationInputTokens"),
+        "cache_read": _num(usage, "cache_read_input_tokens", "cacheReadInputTokens"),
+    }
+    if not any(tokens.values()):
+        return None
+
+    model = _attr(model_carrier, "model", "model_id", "modelId") or _attr(usage, "model") or "unknown"
+    return {"model": str(model), **tokens}

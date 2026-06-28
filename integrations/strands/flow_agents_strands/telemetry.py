@@ -216,6 +216,90 @@ class TelemetrySink:
             {"turn": {"prompt_text": "", "steering_context": steering_text}},
         )
 
+    def emit_usage(
+        self,
+        *,
+        model: Optional[str] = None,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cache_creation_input_tokens: int = 0,
+        cache_read_input_tokens: int = 0,
+        duration_s: Optional[float] = None,
+        by_model: Optional[list] = None,
+    ) -> Dict[str, Any]:
+        """
+        Emit a ``session.usage`` event with real token counts + derived cost.
+
+        The Strands SDK surfaces per-invocation usage on model-call events;
+        accumulate those and pass the totals here at session end. Tokens are the
+        source of truth; ``estimated_cost_usd`` is derived from PRICING (the
+        console recomputes it authoritatively, so a pricing change is
+        retroactive). Mirrors the ``session.usage`` shape emitted by
+        scripts/telemetry/telemetry.sh so the console aggregates both the same.
+        """
+        event = self._base_event("session.usage")
+        event["event_id"] = f"{event['event_id']}-usage"
+        event["hook"] = {
+            "event_name": "usage",
+            "runtime_session_id": "",
+            "turn_id": "",
+            "transcript_path": "",
+            "model": model or "",
+            "source": "strands",
+            "stop_hook_active": None,
+            "last_assistant_message": "",
+            "raw_input": None,
+        }
+
+        by_model_out = []
+        for entry in by_model or []:
+            tokens = _normalize_tokens(entry)
+            em = entry.get("model", "unknown")
+            by_model_out.append(
+                {
+                    "model": em,
+                    "input_tokens": tokens["input"],
+                    "output_tokens": tokens["output"],
+                    "cache_creation_input_tokens": tokens["cache_creation"],
+                    "cache_read_input_tokens": tokens["cache_read"],
+                    "estimated_cost_usd": _cost_for_model(em, tokens),
+                }
+            )
+
+        flat = _normalize_tokens(
+            {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cache_creation_input_tokens": cache_creation_input_tokens,
+                "cache_read_input_tokens": cache_read_input_tokens,
+            }
+        )
+        cost = (
+            round(sum(m["estimated_cost_usd"] for m in by_model_out), 6)
+            if by_model_out
+            else _cost_for_model(model, flat)
+        )
+
+        event["usage"] = {
+            "model": model or self.runtime,
+            "duration_s": duration_s,
+            "input_tokens": flat["input"],
+            "output_tokens": flat["output"],
+            "cache_creation_input_tokens": flat["cache_creation"],
+            "cache_read_input_tokens": flat["cache_read"],
+            "estimated_cost_usd": cost,
+            "pricing_version": _pricing_version(),
+            "by_model": by_model_out or None,
+        }
+
+        try:
+            with self._log_file.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(event) + "\n")
+        except OSError:
+            pass  # fail-open: telemetry must never block agent work
+
+        return event
+
 
 def _normalize_tool_name(name: str) -> str:
     """
@@ -236,3 +320,91 @@ def _normalize_tool_name(name: str) -> str:
         "use_subagent": "use_subagent",
     }
     return _MAP.get(name.lower(), name)
+
+
+# ---------------------------------------------------------------------------
+# Usage / cost — mirror of scripts/telemetry/pricing.json (per 1M tokens, USD)
+# ---------------------------------------------------------------------------
+
+# Pricing is read from the single-source registry (scripts/telemetry/pricing.json),
+# never hand-maintained here. Resolution: TELEMETRY_PRICING_FILE /
+# FLOW_AGENTS_PRICING_FILE env path, else the repo-relative registry, else a
+# minimal fallback. Tokens are exact regardless; the console recomputes cost
+# authoritatively, so a missing file only degrades the sink's stamped estimate.
+_FALLBACK_REGISTRY = {
+    "current_version": "fallback",
+    "versions": {
+        "fallback": {
+            "cache_multipliers": {"write_5m": 1.25, "write_1h": 2.0, "read": 0.1},
+            "models": {},
+            "default": {"input": 5.0, "output": 25.0},
+            "zero_cost_models": ["<synthetic>", "synthetic", "unknown", ""],
+        }
+    },
+}
+_REGISTRY_CACHE: Optional[Dict[str, Any]] = None
+
+
+def _load_registry() -> Dict[str, Any]:
+    global _REGISTRY_CACHE
+    if _REGISTRY_CACHE is not None:
+        return _REGISTRY_CACHE
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.environ.get("TELEMETRY_PRICING_FILE"),
+        os.environ.get("FLOW_AGENTS_PRICING_FILE"),
+        os.path.join(here, "..", "..", "..", "scripts", "telemetry", "pricing.json"),
+        os.path.join(here, "..", "..", "..", "..", "scripts", "telemetry", "pricing.json"),
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            with open(candidate, "r", encoding="utf-8") as fh:
+                parsed = json.load(fh)
+            if isinstance(parsed, dict) and isinstance(parsed.get("versions"), dict):
+                _REGISTRY_CACHE = parsed
+                return _REGISTRY_CACHE
+        except (OSError, ValueError):
+            continue
+    _REGISTRY_CACHE = _FALLBACK_REGISTRY
+    return _REGISTRY_CACHE
+
+
+def _pricing_version() -> str:
+    return str(_load_registry().get("current_version", "fallback"))
+
+
+def _version_block() -> Dict[str, Any]:
+    reg = _load_registry()
+    versions = reg.get("versions", {})
+    return versions.get(reg.get("current_version"), _FALLBACK_REGISTRY["versions"]["fallback"])
+
+
+def _num(value: Any) -> int:
+    return value if isinstance(value, (int, float)) else 0
+
+
+def _normalize_tokens(entry: Dict[str, Any]) -> Dict[str, int]:
+    return {
+        "input": _num(entry.get("input_tokens")),
+        "output": _num(entry.get("output_tokens")),
+        "cache_creation": _num(entry.get("cache_creation_input_tokens")),
+        "cache_read": _num(entry.get("cache_read_input_tokens")),
+    }
+
+
+def _cost_for_model(model: Optional[str], tokens: Dict[str, int]) -> float:
+    block = _version_block()
+    key = (model or "").strip()
+    if key in set(block.get("zero_cost_models", [])):
+        return 0.0
+    rate = block.get("models", {}).get(key, block.get("default", {"input": 5.0, "output": 25.0}))
+    cm = block.get("cache_multipliers", {"write_5m": 1.25, "read": 0.1})
+    cost = (
+        tokens["input"] * rate["input"]
+        + tokens["output"] * rate["output"]
+        + tokens["cache_creation"] * rate["input"] * cm["write_5m"]
+        + tokens["cache_read"] * rate["input"] * cm["read"]
+    ) / 1_000_000
+    return round(cost, 6)
