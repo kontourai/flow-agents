@@ -13,6 +13,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import {
+  costForModel as pkgCostForModel,
+  currentPricingVersion as pkgPricingVersion,
+  setRegistry as setPkgRegistry
+} from "@kontourai/console-telemetry";
 
 // ---------------------------------------------------------------------------
 // Strands TS → canonical event-name mapping
@@ -303,7 +308,12 @@ export class TelemetrySink {
 }
 
 // ---------------------------------------------------------------------------
-// Usage / cost — mirror of scripts/telemetry/pricing.json (per 1M tokens, USD)
+// Usage / cost — pricing math + registry shape come from the shared contract
+// package @kontourai/console-telemetry (single source). This sink only loads
+// the flow-agents authored registry (scripts/telemetry/pricing.json) and feeds
+// it to the package so cost prices against pricing.json rather than the
+// package's bundled fallback. Tokens are exact regardless; the console
+// recomputes cost authoritatively.
 // ---------------------------------------------------------------------------
 
 export interface TokenCounts {
@@ -326,37 +336,15 @@ interface NormalizedTokens {
   cacheRead: number;
 }
 
-// Pricing is read from the single-source registry (scripts/telemetry/pricing.json),
-// never hand-maintained here. Resolution: TELEMETRY_PRICING_FILE /
-// FLOW_AGENTS_PRICING_FILE env path, else the repo-relative registry, else a
-// minimal fallback. Tokens are exact regardless; the console recomputes cost
-// authoritatively, so a missing file only degrades the sink's stamped estimate.
-interface PricingVersionBlock {
-  cache_multipliers: { write_5m: number; write_1h: number; read: number };
-  models: Record<string, { input: number; output: number }>;
-  default: { input: number; output: number };
-  zero_cost_models: string[];
-}
-interface PricingRegistry {
-  current_version: string;
-  versions: Record<string, PricingVersionBlock>;
-}
-
-const FALLBACK_REGISTRY: PricingRegistry = {
-  current_version: "fallback",
-  versions: {
-    fallback: {
-      cache_multipliers: { write_5m: 1.25, write_1h: 2.0, read: 0.1 },
-      models: {},
-      default: { input: 5.0, output: 25.0 },
-      zero_cost_models: ["<synthetic>", "synthetic", "unknown", ""]
-    }
-  }
-};
-
-let cachedRegistry: PricingRegistry | null = null;
-function loadRegistry(): PricingRegistry {
-  if (cachedRegistry) return cachedRegistry;
+// Feed the package the flow-agents authored registry when present (its single
+// source of truth). Resolution: TELEMETRY_PRICING_FILE / FLOW_AGENTS_PRICING_FILE
+// env path, else the repo-relative registry. Runs once; on failure the package
+// keeps its bundled fallback. The console recomputes cost authoritatively, so a
+// missing file only degrades the sink's stamped estimate.
+let registryLoaded = false;
+function ensureRegistry(): void {
+  if (registryLoaded) return;
+  registryLoaded = true;
   const candidates = [
     process.env.TELEMETRY_PRICING_FILE,
     process.env.FLOW_AGENTS_PRICING_FILE,
@@ -367,19 +355,18 @@ function loadRegistry(): PricingRegistry {
     try {
       const parsed = JSON.parse(fs.readFileSync(candidate, "utf8"));
       if (parsed && typeof parsed.current_version === "string" && parsed.versions) {
-        cachedRegistry = parsed as PricingRegistry;
-        return cachedRegistry;
+        setPkgRegistry(parsed);
+        return;
       }
     } catch {
       // try next candidate
     }
   }
-  cachedRegistry = FALLBACK_REGISTRY;
-  return cachedRegistry;
 }
 
 function pricingVersion(): string {
-  return loadRegistry().current_version;
+  ensureRegistry();
+  return pkgPricingVersion();
 }
 
 function num(value: number | undefined): number {
@@ -400,17 +387,11 @@ function normalizeTokens(tokens: TokenCounts): NormalizedTokens {
 }
 
 function costForModel(model: string | undefined, tokens: NormalizedTokens): number {
-  const registry = loadRegistry();
-  const block = registry.versions[registry.current_version] ?? FALLBACK_REGISTRY.versions.fallback;
-  const key = (model ?? "").trim();
-  if (block.zero_cost_models.includes(key)) return 0;
-  const rate = block.models[key] ?? block.default;
-  const cm = block.cache_multipliers;
-  return round6(
-    (tokens.input * rate.input +
-      tokens.output * rate.output +
-      tokens.cacheCreation * rate.input * cm.write_5m +
-      tokens.cacheRead * rate.input * cm.read) /
-      1_000_000
-  );
+  ensureRegistry();
+  return pkgCostForModel(model, {
+    inputTokens: tokens.input,
+    outputTokens: tokens.output,
+    cacheCreationInputTokens: tokens.cacheCreation,
+    cacheReadInputTokens: tokens.cacheRead
+  });
 }
