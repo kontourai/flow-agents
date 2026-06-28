@@ -309,13 +309,35 @@ add_stop_data_and_emit_usage() {
     tool_count=$(usage_count_tool_calls "$session_id" "$full_log")
     delegation_count=$(usage_count_delegations "$session_id" "$full_log")
 
+    # Ground-truth token + cost usage from the runtime transcript, when the
+    # runtime exposes one (Claude Code, Codex, etc. set hook.transcript_path).
+    # Tokens are source-of-truth; estimated_cost_usd is derived from pricing.json
+    # (recomputed authoritatively console-side, so pricing updates are retroactive).
+    local transcript_path transcript_usage
+    transcript_path=$(echo "$event" | jq -r '.hook.transcript_path // ""')
+    transcript_usage=$(usage_parse_transcript "$transcript_path")
+    [[ -z "$transcript_usage" ]] && transcript_usage='null'
+
     local usage_event
     usage_event=$(echo "$event" | jq -c \
       --arg m "$model" \
       --argjson tc "$tool_count" \
       --argjson dc "$delegation_count" \
+      --argjson tu "$transcript_usage" \
       '.event_type = "session.usage" | .event_id = (.event_id + "-usage") | . + {
-        usage: {model: $m, duration_s: .session.duration_s, tool_invocations: $tc, delegations: $dc, input_tokens: null, output_tokens: null, estimated_cost_usd: null}
+        usage: ({
+          model: $m,
+          duration_s: .session.duration_s,
+          tool_invocations: $tc,
+          delegations: $dc,
+          input_tokens: ($tu.input_tokens // null),
+          output_tokens: ($tu.output_tokens // null),
+          cache_creation_input_tokens: ($tu.cache_creation_input_tokens // null),
+          cache_read_input_tokens: ($tu.cache_read_input_tokens // null),
+          estimated_cost_usd: ($tu.estimated_cost_usd // null),
+          pricing_version: ($tu.pricing_version // null),
+          by_model: ($tu.by_model // null)
+        })
       }')
     transport_emit "$usage_event"
   fi
