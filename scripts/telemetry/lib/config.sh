@@ -38,6 +38,11 @@ CONSOLE_TELEMETRY_URL="${CONSOLE_TELEMETRY_URL:-${CONSOLE_URL:-}}"
 CONSOLE_TELEMETRY_ENDPOINT_URL="${CONSOLE_TELEMETRY_ENDPOINT_URL:-}"
 CONSOLE_TELEMETRY_TOKEN="${CONSOLE_TELEMETRY_TOKEN:-${CONSOLE_AUTH_TOKEN:-}}"
 CONSOLE_TENANT_ID="${CONSOLE_TENANT_ID:-}"
+# Pricing registry source (consumed by lib/pricing.sh). Explicit file/URL win;
+# otherwise the URL is derived from the console below so all runtimes read one
+# live pricing source. Falls back to the bundled pricing.json offline.
+TELEMETRY_PRICING_FILE="${TELEMETRY_PRICING_FILE:-${FLOW_AGENTS_PRICING_FILE:-}}"
+TELEMETRY_PRICING_URL="${TELEMETRY_PRICING_URL:-${FLOW_AGENTS_PRICING_URL:-}}"
 
 # Load config file if it exists
 if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
@@ -78,12 +83,22 @@ if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
         console_telemetry_token) CONSOLE_TELEMETRY_TOKEN="$value" ;;
         console_tenant_id) CONSOLE_TENANT_ID="$value" ;;
         console_telemetry_redact) CONSOLE_TELEMETRY_REDACT="$value" ;;
+        console_pricing_url) TELEMETRY_PRICING_URL="$value" ;;
+        pricing_url) TELEMETRY_PRICING_URL="$value" ;;
+        pricing_file) TELEMETRY_PRICING_FILE="$value" ;;
       esac
     fi
   done < "$TELEMETRY_CONFIG_FILE"
 fi
 
 CONSOLE_TELEMETRY_REDACT="${CONSOLE_TELEMETRY_REDACT:-${TELEMETRY_CHANNEL_ANALYTICS_REDACT}}"
+
+# Derive the live pricing source from the console when not set explicitly, the
+# same way the transport derives /api/telemetry/records. One live source for
+# bash/Python/TS runtimes; lib/pricing.sh caches it and falls back to bundled.
+if [[ -z "${TELEMETRY_PRICING_URL:-}" && -n "${CONSOLE_TELEMETRY_URL:-}" ]]; then
+  TELEMETRY_PRICING_URL="${CONSOLE_TELEMETRY_URL%/}/api/telemetry/pricing"
+fi
 
 # Ensure directories exist
 mkdir -p "$TELEMETRY_DATA_DIR" "$TELEMETRY_SESSION_DIR" 2>/dev/null

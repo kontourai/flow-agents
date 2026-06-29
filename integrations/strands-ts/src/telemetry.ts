@@ -12,12 +12,17 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import {
   costForModel as pkgCostForModel,
   currentPricingVersion as pkgPricingVersion,
   setRegistry as setPkgRegistry
 } from "@kontourai/console-telemetry";
+
+// ESM has no __dirname; derive it (this package is "type":"module").
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // ---------------------------------------------------------------------------
 // Strands TS → canonical event-name mapping
