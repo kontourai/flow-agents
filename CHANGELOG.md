@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.1.0](https://github.com/kontourai/flow-agents/compare/v2.0.1...v2.1.0) (2026-06-29)
+
+
+### Features
+
+* **telemetry:** derive live pricing source from the console ([#242](https://github.com/kontourai/flow-agents/issues/242)) ([ddce44e](https://github.com/kontourai/flow-agents/commit/ddce44e813e9a3515953324f4878bf51c33252ba))
+* **telemetry:** real token+cost capture with single-source versioned pricing ([#241](https://github.com/kontourai/flow-agents/issues/241)) ([b0bd4c3](https://github.com/kontourai/flow-agents/commit/b0bd4c347897ec77f60d84cae702e7f42b2871d7))
+
+
+### Fixes
+
+* **evidence-capture:** serialize command-log appends to prevent chain forks ([#232](https://github.com/kontourai/flow-agents/issues/232)) ([bb167e9](https://github.com/kontourai/flow-agents/commit/bb167e93e7f6cc19baa88da613e96fe88a681c10))
+* **flow-agents:** stop corrupting sidecar JSONL event lines ([#244](https://github.com/kontourai/flow-agents/issues/244)) ([fb65d10](https://github.com/kontourai/flow-agents/commit/fb65d1017e5cb659ce2b48da7a548f0c1f360426))
+* **trust-verify action:** correct cross-repo script path (../../ → ../../../) ([#240](https://github.com/kontourai/flow-agents/issues/240)) ([a75a6d2](https://github.com/kontourai/flow-agents/commit/a75a6d28baf68b4be527a2e8cdff8f007af88bd5))
+
+
+### Documentation
+
+* **design:** preserve WorkflowRun observability + FlowRun event-sourcing design notes ([#239](https://github.com/kontourai/flow-agents/issues/239)) ([c2dc116](https://github.com/kontourai/flow-agents/commit/c2dc11698cf63704f14087001c4494079195d197))
+* **flow-agents:** advertise the real eval coverage, clearly scoped (ops[#23](https://github.com/kontourai/flow-agents/issues/23)) ([#248](https://github.com/kontourai/flow-agents/issues/248)) ([d208207](https://github.com/kontourai/flow-agents/commit/d20820749408d5fa63f2bf1470252000712de5d8))
+
 ## [2.0.1](https://github.com/kontourai/flow-agents/compare/v2.0.0...v2.0.1) (2026-06-27)
 
 
