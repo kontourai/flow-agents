@@ -51,6 +51,11 @@ function computeChainHash(prevHash, record) {
  *   - ANY `||`             (e.g. `npm test || exit 0`, `|| echo ok`, `|| /bin/true`)
  *   - `| true`             (pipe into true — the pipeline absorbs the exit code)
  *   - trailing `; true` / `; :` / `; exit 0` / `; /bin/true` (and `\n` variants)
+ *
+ * FROZEN bar-raiser (ADR 0018). Do NOT add new evasion-pattern rules here; route new
+ * laundering shapes to the external CI anchor (trust-reconcile + the anti-gaming suite).
+ * Accepted limitation: the blanket `||` rule over-blocks legitimate control-flow `||`
+ * (e.g. `test -d node_modules || npm ci`) — it fails toward blocking by design.
  */
 function hasLaunderingOperator(cmd) {
   // ANY || in a claimed verification command is an exit-code mask.
