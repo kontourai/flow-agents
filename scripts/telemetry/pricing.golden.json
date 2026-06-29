@@ -1,0 +1,15 @@
+{
+  "_note": "Cross-runtime cost golden vectors. Keep IN SYNC with console-telemetry/test/golden-vectors.json (identical content). Asserted by the flow-agents bash usage tests, the Python sink tests, and the console-telemetry package so every runtime that prices tokens produces the SAME cost. If these drift between repos, a runtime's cost math has diverged.",
+  "pricing_version": "2026-06-28",
+  "cases": [
+    { "name": "opus cache-read-dominated", "model": "claude-opus-4-8", "tokens": { "input": 1000, "output": 2000, "cache_creation": 0, "cache_read": 500000 }, "expected_cost_usd": 0.305 },
+    { "name": "opus output only", "model": "claude-opus-4-8", "tokens": { "input": 0, "output": 1000, "cache_creation": 0, "cache_read": 0 }, "expected_cost_usd": 0.025 },
+    { "name": "fable output", "model": "claude-fable-5", "tokens": { "input": 0, "output": 100, "cache_creation": 0, "cache_read": 0 }, "expected_cost_usd": 0.005 },
+    { "name": "haiku output", "model": "claude-haiku-4-5", "tokens": { "input": 0, "output": 1000, "cache_creation": 0, "cache_read": 0 }, "expected_cost_usd": 0.005 },
+    { "name": "sonnet input 1M", "model": "claude-sonnet-4-6", "tokens": { "input": 1000000, "output": 0, "cache_creation": 0, "cache_read": 0 }, "expected_cost_usd": 3.0 },
+    { "name": "opus cache-write 5m tier", "model": "claude-opus-4-8", "tokens": { "input": 0, "output": 0, "cache_creation": 1000000, "cache_read": 0 }, "expected_cost_usd": 6.25 },
+    { "name": "opus billion-scale", "model": "claude-opus-4-8", "tokens": { "input": 200000, "output": 1600000, "cache_creation": 9000000, "cache_read": 1000000000 }, "expected_cost_usd": 597.25 },
+    { "name": "synthetic is free", "model": "<synthetic>", "tokens": { "input": 999, "output": 999, "cache_creation": 999, "cache_read": 999 }, "expected_cost_usd": 0 },
+    { "name": "unknown model uses default rate", "model": "some-unlisted-model", "tokens": { "input": 1000000, "output": 0, "cache_creation": 0, "cache_read": 0 }, "expected_cost_usd": 5.0 }
+  ]
+}

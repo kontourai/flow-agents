@@ -12,7 +12,12 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
+
+// ESM has no __dirname; derive it (this package is "type":"module").
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // ---------------------------------------------------------------------------
 // Strands TS → canonical event-name mapping
@@ -248,4 +253,169 @@ export class TelemetrySink {
   emitUserPromptSubmit(extra?: Record<string, unknown>): TelemetryEvent {
     return this.emit("userPromptSubmit", extra);
   }
+
+  /**
+   * Emit a `session.usage` event with real token counts + derived cost.
+   *
+   * The Strands SDK surfaces per-invocation usage on AfterModelCall /
+   * AfterInvocation events; accumulate those and pass the totals here at
+   * session end. Tokens are the source of truth; estimated_cost_usd is derived
+   * from PRICING (the console recomputes it authoritatively, so a pricing
+   * change is retroactive). Mirrors the `session.usage` shape emitted by
+   * scripts/telemetry/telemetry.sh so the console aggregates both identically.
+   */
+  emitUsage(usage: UsageInput): TelemetryEvent {
+    const event = this.buildBaseEvent("session.usage");
+    event.event_id = `${event.event_id}-usage`;
+    event.hook = { ...event.hook, event_name: "usage" };
+
+    const byModel = (usage.byModel ?? []).map((entry) => {
+      const tokens = normalizeTokens(entry);
+      return {
+        model: entry.model,
+        input_tokens: tokens.input,
+        output_tokens: tokens.output,
+        cache_creation_input_tokens: tokens.cacheCreation,
+        cache_read_input_tokens: tokens.cacheRead,
+        estimated_cost_usd: costForModel(entry.model, tokens)
+      };
+    });
+
+    const flat = normalizeTokens(usage);
+    const cost = byModel.length
+      ? round6(byModel.reduce((sum, m) => sum + m.estimated_cost_usd, 0))
+      : costForModel(usage.model, flat);
+
+    event.usage = {
+      model: usage.model ?? this.runtime,
+      duration_s: usage.durationS ?? null,
+      input_tokens: flat.input,
+      output_tokens: flat.output,
+      cache_creation_input_tokens: flat.cacheCreation,
+      cache_read_input_tokens: flat.cacheRead,
+      estimated_cost_usd: cost,
+      pricing_version: pricingVersion(),
+      by_model: byModel.length ? byModel : null
+    };
+
+    try {
+      fs.appendFileSync(this.logFile, JSON.stringify(event) + "\n", "utf8");
+    } catch {
+      // fail-open: telemetry must never block agent work
+    }
+    return event;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Usage / cost — mirror of scripts/telemetry/pricing.json (per 1M tokens, USD)
+// ---------------------------------------------------------------------------
+
+export interface TokenCounts {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
+}
+
+export interface UsageInput extends TokenCounts {
+  model?: string;
+  durationS?: number;
+  byModel?: Array<TokenCounts & { model: string }>;
+}
+
+interface NormalizedTokens {
+  input: number;
+  output: number;
+  cacheCreation: number;
+  cacheRead: number;
+}
+
+// Pricing is read from the single-source registry (scripts/telemetry/pricing.json),
+// never hand-maintained here. Resolution: TELEMETRY_PRICING_FILE /
+// FLOW_AGENTS_PRICING_FILE env path, else the repo-relative registry, else a
+// minimal fallback. Tokens are exact regardless; the console recomputes cost
+// authoritatively, so a missing file only degrades the sink's stamped estimate.
+interface PricingVersionBlock {
+  cache_multipliers: { write_5m: number; write_1h: number; read: number };
+  models: Record<string, { input: number; output: number }>;
+  default: { input: number; output: number };
+  zero_cost_models: string[];
+}
+interface PricingRegistry {
+  current_version: string;
+  versions: Record<string, PricingVersionBlock>;
+}
+
+const FALLBACK_REGISTRY: PricingRegistry = {
+  current_version: "fallback",
+  versions: {
+    fallback: {
+      cache_multipliers: { write_5m: 1.25, write_1h: 2.0, read: 0.1 },
+      models: {},
+      default: { input: 5.0, output: 25.0 },
+      zero_cost_models: ["<synthetic>", "synthetic", "unknown", ""]
+    }
+  }
+};
+
+let cachedRegistry: PricingRegistry | null = null;
+function loadRegistry(): PricingRegistry {
+  if (cachedRegistry) return cachedRegistry;
+  const candidates = [
+    process.env.TELEMETRY_PRICING_FILE,
+    process.env.FLOW_AGENTS_PRICING_FILE,
+    path.join(__dirname, "../../../scripts/telemetry/pricing.json"),
+    path.join(__dirname, "../../../../scripts/telemetry/pricing.json")
+  ].filter((p): p is string => Boolean(p));
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(candidate, "utf8"));
+      if (parsed && typeof parsed.current_version === "string" && parsed.versions) {
+        cachedRegistry = parsed as PricingRegistry;
+        return cachedRegistry;
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+  cachedRegistry = FALLBACK_REGISTRY;
+  return cachedRegistry;
+}
+
+function pricingVersion(): string {
+  return loadRegistry().current_version;
+}
+
+function num(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function round6(value: number): number {
+  return Math.round(value * 1_000_000) / 1_000_000;
+}
+
+function normalizeTokens(tokens: TokenCounts): NormalizedTokens {
+  return {
+    input: num(tokens.inputTokens),
+    output: num(tokens.outputTokens),
+    cacheCreation: num(tokens.cacheCreationInputTokens),
+    cacheRead: num(tokens.cacheReadInputTokens)
+  };
+}
+
+function costForModel(model: string | undefined, tokens: NormalizedTokens): number {
+  const registry = loadRegistry();
+  const block = registry.versions[registry.current_version] ?? FALLBACK_REGISTRY.versions.fallback;
+  const key = (model ?? "").trim();
+  if (block.zero_cost_models.includes(key)) return 0;
+  const rate = block.models[key] ?? block.default;
+  const cm = block.cache_multipliers;
+  return round6(
+    (tokens.input * rate.input +
+      tokens.output * rate.output +
+      tokens.cacheCreation * rate.input * cm.write_5m +
+      tokens.cacheRead * rate.input * cm.read) /
+      1_000_000
+  );
 }

@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
-import { resolveActiveFlowStep, resolveFlowFilePath, resolvePhaseMap, type ActiveFlowStep } from "../lib/flow-resolver.js";
+import { resolveActiveFlowStep, resolveFlowFilePath, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
 
 type AnyObj = Record<string, any>;
 
@@ -19,11 +19,17 @@ export const verdicts = new Set(["pass", "partial", "fail", "not_verified"]);
 function now(): string { return new Date().toISOString().replace(/\.\d{3}Z$/, "Z"); }
 function read(file: string): string { return fs.readFileSync(file, "utf8"); }
 export function writeJson(file: string, payload: AnyObj): void { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`); }
-function printJson(payload: AnyObj): void { console.log(JSON.stringify(payload).replace(/":/g, '": ').replace(/,"/g, ', "')); }
+// Single-line but readable "key": "value" form. Built by collapsing the
+// structural whitespace from an indented stringify — corruption-proof, unlike a
+// regex that would also rewrite ":"/"," sequences inside string values.
+function spacedLine(payload: AnyObj, replacer?: (string | number)[]): string {
+  return JSON.stringify(payload, replacer as never, 1).replace(/\n\s*/g, " ");
+}
+function printJson(payload: AnyObj): void { console.log(spacedLine(payload)); }
 export function loadJson(file: string, fallback: AnyObj = {}): AnyObj { return fs.existsSync(file) ? JSON.parse(read(file)) : { ...fallback }; }
 export function appendJsonl(file: string, payload: AnyObj): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const line = JSON.stringify(payload, Object.keys(payload).sort()).replace(/":/g, '": ').replace(/,"/g, ', "');
+  const line = spacedLine(payload, Object.keys(payload).sort());
   fs.appendFileSync(file, `${line}\n`);
 }
 function die(message: string): never { throw new Error(message); }
@@ -1026,21 +1032,71 @@ function deriveSurfaceStatus(ref: AnyObj): string {
   if (ref.integrity?.status !== "matched") return "fail";
   return "pass";
 }
+/**
+ * Derive kit identity from a parsed trust.bundle by structurally reading the
+ * DECLARED primary claim (kit-typed) rather than hardcoding "builder".
+ *
+ * Resolution order (no fallbacks to "builder"):
+ *   1. First non-workflow.* claim in bundle.claims[] → claimType drives kitId + subject.
+ *   2. No kit-typed claim: try current.json active_flow_id adjacent to the bundle file
+ *      (bundle lives at <session-dir>/trust.bundle → flowAgentsDir = grandparent).
+ *   3. Genuinely unknown: mark as "unknown" — never hardcode a kit identity.
+ */
+export function kitIdentityFromBundle(
+  raw: AnyObj,
+  bundleFile: string,
+): { claimType: string; kitId: string; subject: string; gateId: string } {
+  // 1. Structurally read the bundle's declared kit-typed claim.
+  const claims: AnyObj[] = Array.isArray(raw.claims) ? raw.claims : [];
+  for (const claim of claims) {
+    const ct = typeof claim?.claimType === "string" ? claim.claimType : "";
+    if (ct && !ct.startsWith("workflow.")) {
+      const kitId = ct.split(".")[0] ?? "unknown";
+      if (kitId && kitId !== "unknown") {
+        return { claimType: ct, kitId, subject: `${kitId}-kit`, gateId: ct };
+      }
+    }
+  }
+  // 2. No kit-typed claim in bundle — try to derive kit from current.json active_flow_id.
+  //    The bundle lives at <session-dir>/trust.bundle, so:
+  //      sessionDir = path.dirname(bundleFile)
+  //      flowAgentsDir = path.dirname(sessionDir)
+  try {
+    const sessionDir = path.dirname(bundleFile);
+    const flowAgentsDir = path.dirname(sessionDir);
+    const currentFile = path.join(flowAgentsDir, "current.json");
+    const current = JSON.parse(fs.readFileSync(currentFile, "utf8")) as Record<string, unknown>;
+    const flowId = typeof current["active_flow_id"] === "string" ? current["active_flow_id"] : null;
+    if (flowId && flowId.includes(".")) {
+      const kitId = flowId.split(".")[0]!;
+      if (kitId) {
+        const derivedClaimType = `${kitId}.trust.bundle`;
+        return { claimType: derivedClaimType, kitId, subject: `${kitId}-kit`, gateId: derivedClaimType };
+      }
+    }
+  } catch {
+    // Ignore — fall through to unknown
+  }
+  // 3. Genuinely unknown — never fallback to "builder".
+  return { claimType: "unknown.trust.bundle", kitId: "unknown", subject: "unknown-kit", gateId: "unknown.trust.bundle" };
+}
 function surfaceCheckFromArtifact(file: string, index: number): AnyObj {
   const raw = JSON.parse(read(file));
   const lower = JSON.stringify(raw).toLowerCase();
+  // Structurally read kit identity from the bundle — never hardcode "builder".
+  const { claimType: bundleClaimType, subject: bundleSubject, gateId: bundleGateId } = kitIdentityFromBundle(raw, file);
   let ref: AnyObj;
   if (lower.includes("provider") && lower.includes("absent")) {
-    ref = { artifact_kind: "trust.bundle", artifact_ref: file, gate_id: "provider.unavailable", claim_type: "builder.trust.bundle", claim_status: "unknown", subject: "builder-kit", freshness: { status: "unknown", summary: "No trust provider is configured" }, authority: { producer: "unknown", summary: "No trust provider is configured" }, integrity: { status: "unknown", summary: "Unknown" }, status: "not_verified", summary: "No trust provider is configured" };
+    ref = { artifact_kind: "trust.bundle", artifact_ref: file, gate_id: "provider.unavailable", claim_type: bundleClaimType, claim_status: "unknown", subject: bundleSubject, freshness: { status: "unknown", summary: "No trust provider is configured" }, authority: { producer: "unknown", summary: "No trust provider is configured" }, integrity: { status: "unknown", summary: "Unknown" }, status: "not_verified", summary: "No trust provider is configured" };
   } else if (lower.includes("artifact") && lower.includes("absent")) {
-    ref = { artifact_kind: "trust.bundle", artifact_ref: file, gate_id: "artifact.unavailable", claim_type: "builder.trust.bundle", claim_status: "unknown", subject: "builder-kit", freshness: { status: "unknown", summary: "Artifact not readable" }, authority: { producer: "unknown", summary: "Artifact not readable" }, integrity: { status: "unknown", summary: "Artifact not readable" }, status: "not_verified", summary: "artifact not readable" };
+    ref = { artifact_kind: "trust.bundle", artifact_ref: file, gate_id: "artifact.unavailable", claim_type: bundleClaimType, claim_status: "unknown", subject: bundleSubject, freshness: { status: "unknown", summary: "Artifact not readable" }, authority: { producer: "unknown", summary: "Artifact not readable" }, integrity: { status: "unknown", summary: "Artifact not readable" }, status: "not_verified", summary: "artifact not readable" };
   } else {
     const claimStatus = lower.includes("rejected") ? "rejected" : "accepted";
     const freshness = lower.includes("stale") ? "stale" : "fresh";
     const producer = lower.includes("missing-authority") ? "unknown" : "surface-local";
     const integrity = lower.includes("mismatch") ? "mismatch" : "matched";
     // Use trust.bundle as the canonical Hachure-aligned artifact_kind for all trust-backed evidence refs
-    ref = { artifact_kind: "trust.bundle", artifact_ref: file, gate_id: "builder.trust.bundle", claim_type: "builder.trust.bundle", claim_status: claimStatus, subject: "builder-kit", freshness: { status: freshness, summary: freshness === "fresh" ? "fresh" : "not currently verifiable" }, authority: { producer, summary: producer === "unknown" ? "missing authority" : "Local Surface trust producer." }, integrity: { status: integrity, summary: integrity === "matched" ? "matched" : "integrity mismatch" } };
+    ref = { artifact_kind: "trust.bundle", artifact_ref: file, gate_id: bundleGateId, claim_type: bundleClaimType, claim_status: claimStatus, subject: bundleSubject, freshness: { status: freshness, summary: freshness === "fresh" ? "fresh" : "not currently verifiable" }, authority: { producer, summary: producer === "unknown" ? "missing authority" : "Local Surface trust producer." }, integrity: { status: integrity, summary: integrity === "matched" ? "matched" : "integrity mismatch" } };
     ref.status = deriveSurfaceStatus(ref);
     ref.summary = ref.status === "pass" ? "accepted" : ref.status === "not_verified" ? "not currently verifiable" : (claimStatus === "rejected" ? "rejected" : producer === "unknown" ? "missing authority" : "integrity mismatch");
   }
@@ -1279,14 +1335,20 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
   const prev = loadJson(path.join(dir, "state.json"));
   if ((status === "archived" || status === "accepted") && prev.phase !== "learning") diagnostic(dir, "terminal_jump_rejected", "Terminal workflow states require release and learning gates.");
   const flow = opt(p, "flow-definition");
-  if (flow === "builder.build" && prev.phase === "verification" && phase === "execution") {
+  // Route-back guard: FlowDefinition-driven (not hardcoded to builder.build).
+  // Fires when the active flow's gate for prev.phase declares a route_back_policy
+  // AND the target phase maps to a step listed in on_route_back values.
+  // builder.build verify-gate already carries this declaration — behavior preserved.
+  const repoRoot = flow ? findRepoRootFromDir(dir) : "";
+  const routeBack = flow ? resolveRouteBackPolicy(flow, prev.phase, phase, repoRoot) : null;
+  if (routeBack) {
     const reason = opt(p, "route-back-reason");
-    if (!reason) diagnostic(dir, "route_back_reason_required", "Builder Kit route-back requires implementation_defect or equivalent reason.");
+    if (!reason) diagnostic(dir, "route_back_reason_required", `Route-back from ${prev.phase} to ${phase} requires a --route-back-reason (e.g. implementation_defect).`);
     const file = path.join(dir, "transition-attempts.json");
     const attempts = loadJson(file);
-    const key = `verification->execution:${reason}`;
+    const key = `${prev.phase}->${phase}:${reason}`;
     const count = attempts[key]?.count ?? 0;
-    if (count >= 3) diagnostic(dir, "route_back_attempts_exceeded", "Builder Kit route-back attempts exceeded.");
+    if (count >= routeBack.maxAttempts) diagnostic(dir, "route_back_attempts_exceeded", `Route-back attempt limit (${routeBack.maxAttempts}) exceeded for ${prev.phase}→${phase}.`);
     attempts[key] = { count: count + 1, reason, updated_at: opt(p, "timestamp", now()) };
     writeJson(file, attempts);
   }
@@ -1300,7 +1362,7 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
   // --step-id individually. The repoRoot is derived by walking up from dir to find kits/.
   if (flow) {
     const root = path.resolve(opt(p, "artifact-root", path.dirname(dir)));
-    const repoRoot = findRepoRootFromDir(dir);
+    // repoRoot already computed above when flow is present
     const phaseMap = resolvePhaseMap(flow, repoRoot);
     const stepId = phaseMap?.[phase] ?? undefined;
     if (stepId) {
