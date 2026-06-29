@@ -790,6 +790,15 @@ echo "=== AC3.1 — Surface unavailable fail-closed ==="
 echo ""
 echo "--- AC3.1a: Isolated (no @kontourai/surface) with high-impact claim → BLOCKS ---"
 
+# The gate imports the shared scripts/lib/command-log-chain.js helpers. A real
+# install rsyncs the whole tree, so the lib always sits beside the hooks. Mirror that:
+# the isolated gates live at "$TMP/surface-iso*/stop-goal-fit.js", so "../lib" resolves
+# to "$TMP/lib" for both. This keeps the test exercising surface-unavailable fail-closed
+# (not a spurious module-not-found crash).
+ISO_LIBDIR="$TMP/lib"
+mkdir -p "$ISO_LIBDIR"
+cp "$ROOT/scripts/lib/command-log-chain.js" "$ISO_LIBDIR/"
+
 # Create isolated node context that can't find @kontourai/surface
 ISO_DIR="$TMP/surface-iso"
 mkdir -p "$ISO_DIR/repo/.flow-agents/surftest"
@@ -1014,13 +1023,19 @@ else
 fi
 
 echo ""
-echo "--- AC3.3c: Both files use the SAME genesis constant value ---"
-genesis_ec=$(grep "const CHAIN_GENESIS = " "$ROOT/scripts/hooks/evidence-capture.js" | sed "s/.*= '//;s/'.*//")
-genesis_sg=$(grep "const CHAIN_GENESIS_VERIFY = " "$ROOT/scripts/hooks/stop-goal-fit.js" | sed "s/.*= '//;s/'.*//")
-if [ "$genesis_ec" = "$genesis_sg" ] && [ -n "$genesis_ec" ]; then
-  _pass "AC3.3: Both files use the same genesis constant ($genesis_ec)"
+echo "--- AC3.3c: genesis is single-sourced and imported by writer + verifier (cannot diverge) ---"
+# Stronger than the old "two literals match" check: the genesis literal now lives in
+# exactly ONE module, and both the writer and verifier import it — so divergence is
+# structurally impossible rather than merely currently-equal.
+genesis_lib=$(grep "const CHAIN_GENESIS = " "$ROOT/scripts/lib/command-log-chain.js" | sed "s/.*= '//;s/'.*//")
+if [ -n "$genesis_lib" ] \
+   && grep -q "require.*command-log-chain" "$ROOT/scripts/hooks/evidence-capture.js" \
+   && grep -q "require.*command-log-chain" "$ROOT/scripts/hooks/stop-goal-fit.js" \
+   && ! grep -qE "const CHAIN_GENESIS = '" "$ROOT/scripts/hooks/evidence-capture.js" \
+   && ! grep -qE "const CHAIN_GENESIS_VERIFY = '" "$ROOT/scripts/hooks/stop-goal-fit.js"; then
+  _pass "AC3.3: genesis single-sourced in scripts/lib/command-log-chain.js ($genesis_lib); writer + verifier import it, no divergent literal"
 else
-  _fail "AC3.3: Genesis constant mismatch: evidence-capture=$genesis_ec stop-goal-fit=$genesis_sg"
+  _fail "AC3.3: genesis not single-sourced (lib='$genesis_lib') or a divergent literal remains in a consumer"
 fi
 
 
