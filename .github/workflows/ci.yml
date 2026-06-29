@@ -14,6 +14,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Suite-wide secret-scan gate, defined once in kontourai/.github (Hachure: one
+  # normative source). Scans git-tracked history; gitignored runtime/.env excluded.
+  secret-scan:
+    name: Secret Scan
+    uses: kontourai/.github/.github/workflows/secret-scan.yml@main
+    permissions:
+      contents: read
+
   source-and-static:
     name: Source and Static
     runs-on: ubuntu-latest
