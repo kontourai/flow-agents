@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.1](https://github.com/kontourai/flow-agents/compare/v2.1.0...v2.1.1) (2026-06-29)
+
+
+### Refactoring
+
+* **flow-agents:** one shared module for command-log chain helpers (ops[#20](https://github.com/kontourai/flow-agents/issues/20)) ([#249](https://github.com/kontourai/flow-agents/issues/249)) ([67af85f](https://github.com/kontourai/flow-agents/commit/67af85f5010dace3f33b36b86245e0c7aad95f77))
+
 ## [2.1.0](https://github.com/kontourai/flow-agents/compare/v2.0.1...v2.1.0) (2026-06-29)
 
 
