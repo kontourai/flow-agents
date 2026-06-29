@@ -40,6 +40,12 @@
  * any interpreter not in the list (ruby, php, etc.), and multiline here-docs.
  * The real anchor remains external (clean CI env + human review).
  *
+ * FROZEN bar-raiser (ADR 0018). The redirect / interpreter-write / cp-target detection
+ * is intentionally non-exhaustive and is NOT to be grown with new evasion-pattern rules.
+ * A newly-discovered self-tamper vector belongs in the external CI anchor (trust-reconcile
+ * does not trust agent-written files) and the required anti-gaming suite — not another
+ * local string matcher. Bug fixes that don't expand the pattern surface are still welcome.
+ *
  * Exit codes: 0 = allow, 2 = block
  */
 
