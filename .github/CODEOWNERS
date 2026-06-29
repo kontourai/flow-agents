@@ -27,3 +27,5 @@
 # FlowDefinition resolution + the trust producer/checkpoint/signing the gate depends on
 /src/lib/flow-resolver.ts       @briananderson1222
 /src/cli/workflow-sidecar.ts    @briananderson1222
+# Modules decomposed out of workflow-sidecar.ts (ops#22) keep the same ownership.
+/src/cli/sidecar-*.ts           @briananderson1222

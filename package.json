@@ -99,6 +99,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:unit": "npm run build --silent && node --test src/cli/*.test.mjs",
     "validate:source": "npm run build --silent && node build/src/cli.js validate-source",
     "validate:artifacts": "npm run build --silent && node build/src/cli/validate-workflow-artifacts.js",
     "context-map": "npm run build --silent && node build/src/cli.js context-map",
