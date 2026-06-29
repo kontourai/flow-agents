@@ -29,7 +29,7 @@ Flow Agents addresses this with a process-discipline layer that sits between the
 - **Four canonical policies** — workflow steering (phase reminders at each turn), quality gate (per-file checks after edits), stop-goal-fit (evidence check before the agent stops), and config protection (veto writes to linter/formatter configs). Each policy class has a canonical script under `scripts/hooks/` and compiles to the host's native hook format.
 - **Evidence over confidence** — important work ends with tests, browser checks, CI results, review findings, governance reports, or an explicit `NOT_VERIFIED` gap. Optional [Veritas](docs/veritas-integration.md) integration attaches repo-governance evidence without making it mandatory.
 - **Verifiable, un-gameable "done"** — the agent can't mark work complete that isn't: the gate re-derives the verdict from independent evidence, an external CI anchor re-runs the verification fresh and fails the merge on any divergence, and CI mints a Sigstore-signed record of what shipped. See [Verifiable Trust — why "done" actually means done](docs/verifiable-trust.md).
-- **Evals that keep the bundle honest** — 77 integration and 36 static bundle assertions validate the skills, contracts, fixtures, and hook influence as the bundle evolves.
+- **Evals that keep the bundle honest** — 60 integration scenarios (1,829 assertions) and 7 static suites (110 assertions) validate the skills, contracts, fixtures, and hook influence as the bundle evolves.
 
 ## Flow Agents as a process-discipline layer
 
@@ -52,8 +52,8 @@ L2 means all four policy classes with blocking; L1 means steering and stop-goal-
 
 | Runtime | Ships | Tested |
 | --- | --- | --- |
-| Claude Code | install + hooks + bundle | 77 integration + 36 static assertions — reference implementation |
-| Codex | install + hooks + bundle | 77 integration + 36 static assertions — reference implementation |
+| Claude Code | install + hooks + bundle | 60 integration scenarios + 7 static suites (1,939 assertions) — reference implementation |
+| Codex | install + hooks + bundle | 60 integration scenarios + 7 static suites (1,939 assertions) — reference implementation |
 | Kiro | install + hooks + bundle | included in bundle assertions |
 
 **Partial support — L1 (steering + stop-goal-fit warning)**
