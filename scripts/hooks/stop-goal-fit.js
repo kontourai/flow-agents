@@ -29,6 +29,16 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const crypto = require('crypto');
 
+// Hash-chain primitives + the exit-code-laundering heuristic come from ONE shared
+// module, so this verifier can never drift from the writer (evidence-capture.js).
+// CHAIN_GENESIS is re-aliased to CHAIN_GENESIS_VERIFY to preserve the long-standing
+// export name consumed by repair-command-log.js and the fork-classification eval.
+const {
+  CHAIN_GENESIS: CHAIN_GENESIS_VERIFY,
+  canonicalJsonForChain,
+  hasLaunderingOperator,
+} = require('../lib/command-log-chain.js');
+
 const MAX_STDIN = 1024 * 1024;
 const ACTIVE_STATUSES = new Set([
   'planning',
@@ -733,36 +743,10 @@ function claimAcknowledgesFailure(status, value) {
     || v === 'fail' || v === 'failed' || v === 'not_verified' || v === 'failing';
 }
 
-/**
- * Returns true when a command string contains an exit-code-neutralizing operator.
- * A claimed-pass check whose captured command uses one of these cannot be accepted as a
- * deterministic pass — the real sub-command may have failed silently.
- *
- * R6 extended logic (identical patterns used by scripts/ci/trust-reconcile.js — centralize
- * as a follow-up if drift becomes a maintenance concern):
- *   - ANY || operator is flagged. A legitimate verification command never needs || — its
- *     only purpose in a verification command is to mask the real exit code (e.g.
- *     `npm test || exit 0`, `npm test || echo ok`, `npm test || /bin/true`, `npm test || (exit 0)`).
- *   - | true  (single pipe into true — always exits 0)
- *   - Trailing ; or newline followed by: true  :  exit 0  /bin/true
- *
- * Fix D: applied in captureCrossReference's satisfied path and capturedFailReconciliation.
- */
-function hasLaunderingOperator(cmd) {
-  // ANY || in a claimed verification command is an exit-code mask.
-  // Legitimate verification commands never need || — its only purpose there is to
-  // suppress the real exit code (|| exit 0, || echo ok, || /bin/true, || (exit 0), etc.).
-  if (/\|\|/.test(cmd)) return true;
-  // | true  — single-pipe into true: `cmd | true` always exits 0 regardless of left-side exit code.
-  if (/\|\s*true\b/.test(cmd)) return true;
-  // Trailing ; or \n followed by exit-neutralizing commands (same threat, appended after the real cmd):
-  //   ; true    ; :    ; exit 0    ; /bin/true    (and \n variants)
-  if (/[;\n]\s*true\b/.test(cmd)) return true;
-  if (/[;\n]\s*:\s*(?:$|\s|;)/.test(cmd)) return true;
-  if (/[;\n]\s*exit\s+0\b/.test(cmd)) return true;
-  if (/[;\n]\s*\/bin\/true\b/.test(cmd)) return true;
-  return false;
-}
+// hasLaunderingOperator (the exit-code-mask heuristic) is imported from
+// ../lib/command-log-chain.js so this verifier and scripts/ci/trust-reconcile.js
+// share one normative definition. Applied in captureCrossReference's satisfied
+// path and capturedFailReconciliation.
 
 // ─── Hash-chain integrity verification (Increment B2, tamper-EVIDENCE) ────────
 //
@@ -786,20 +770,9 @@ function hasLaunderingOperator(cmd) {
 // The genesis prevHash is a fixed arbitrary sentinel — NOT the SHA256 of any
 // specific input string. The comment in evidence-capture.js previously (and
 // incorrectly) claimed it was sha256("flow-agents:command-log:genesis"); it is not.
-// Writer (evidence-capture.js CHAIN_GENESIS) and verifier (CHAIN_GENESIS_VERIFY here)
-// MUST use the same value. Do not change one without changing the other.
-const CHAIN_GENESIS_VERIFY = 'a3f9e2b7d5c84f1e6a0d2c3b9f7e1a4d8c6b5f2e9a0d3c7b1f4e8a2d6c0b9f3';
-
-/**
- * Canonical JSON for chain verification: record WITHOUT `_chain`, keys sorted.
- * Must be byte-identical to canonicalJsonForChain() in evidence-capture.js.
- */
-function canonicalJsonForVerify(record) {
-  const keys = Object.keys(record).filter(k => k !== '_chain').sort();
-  const obj = {};
-  for (const k of keys) obj[k] = record[k];
-  return JSON.stringify(obj);
-}
+// Both the genesis (CHAIN_GENESIS_VERIFY, imported above) and the canonical-JSON
+// helper (canonicalJsonForChain) come from ../lib/command-log-chain.js, the single
+// source the writer in evidence-capture.js imports too — so they cannot diverge.
 
 /**
  * Verify the hash chain of command-log.jsonl.
@@ -870,7 +843,7 @@ function verifyCommandLogChain(artifactDir) {
     // (a) Self-consistency. A content edit without rehashing fails here.
     if (typeof chain.prevHash !== 'string') return { status: 'broken', brokenAt: i, forkAt: null };
     const selfHash = crypto.createHash('sha256')
-      .update(chain.prevHash + canonicalJsonForVerify(entry), 'utf8')
+      .update(chain.prevHash + canonicalJsonForChain(entry), 'utf8')
       .digest('hex');
     if (chain.hash !== selfHash) return { status: 'broken', brokenAt: i, forkAt: null };
 

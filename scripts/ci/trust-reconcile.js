@@ -61,6 +61,10 @@ const { spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+// One normative definition shared with scripts/hooks/stop-goal-fit.js — the local
+// copy here had drifted (it was missing the trailing `/bin/true` check), which is
+// exactly why this is now imported rather than duplicated.
+const { hasLaunderingOperator } = require('../lib/command-log-chain.js');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -80,29 +84,9 @@ function isPassingValue(v) {
   return v === true || v === 1 || v === 'true' || v === 'pass';
 }
 
-/**
- * Returns true when a command string contains an exit-code-laundering operator.
- * These operators mask real exit codes so the real sub-command may have failed silently.
- *
- * Rules (applied to claimed verification commands only):
- *   - ANY || operator — verify commands must not contain ||. This catches:
- *     || exit 0, || echo ok, || /bin/true, || true, || :, etc.
- *   - ; or newline followed by true / : / exit 0 — trailing success injection
- *
- * NOTE: Logic must stay identical to scripts/hooks/stop-goal-fit.js hasLaunderingOperator.
- * Centralize into a shared module as a follow-up (coordinate-free duplication for now).
- */
-function hasLaunderingOperator(cmd) {
-  // Flag ANY || operator — masks the exit code of the left-hand command.
-  if (/\|\|/.test(cmd)) return true;
-  // Flag ; or newline followed by true / : / exit 0
-  if (/[;\n]\s*true\b/.test(cmd)) return true;
-  if (/[;\n]\s*:\s*(?:$|\s|;|\n)/.test(cmd)) return true;
-  if (/[;\n]\s*exit\s+0\b/.test(cmd)) return true;
-  // Flag pipe to true (pipeline absorbs exit code)
-  if (/\|\s*true\b/.test(cmd)) return true;
-  return false;
-}
+// hasLaunderingOperator is imported from ../lib/command-log-chain.js (above) so this
+// CI reconciler and the stop-goal-fit verifier apply the identical exit-code-mask
+// heuristic — see that module for the rules.
 
 /**
  * Run a single shell command under bash, capturing exit code.

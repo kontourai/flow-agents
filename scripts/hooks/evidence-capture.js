@@ -62,43 +62,16 @@ const COMMAND_TOOL_NAME = /(^|[^a-z])(bash|shell|sh|exec|run|command|terminal|cm
 
 // ─── Hash-chain integrity (tamper-EVIDENCE) ───────────────────────────────────
 //
-// Genesis prevHash: a fixed arbitrary sentinel used when the log is empty or
-// the last entry has no _chain field (legacy record). This is NOT the SHA256 of
-// any specific input string — it is a fixed constant chosen for the original
-// implementation. (A previous comment incorrectly claimed it was
-// sha256("flow-agents:command-log:genesis"); that is wrong.)
-//
-// Writer (this file, CHAIN_GENESIS) and verifier (stop-goal-fit.js,
-// CHAIN_GENESIS_VERIFY) MUST use the same value. Do not change one without
-// changing the other — existing chained logs depend on this constant.
-//
-// HONEST FRAMING: this makes alteration DETECTABLE, not impossible. An agent
-// that rewrites all hashes can still forge the chain. The real tamper-proof
-// boundary is the signed checkpoint (B1). We do not oversell this boundary.
-const CHAIN_GENESIS = 'a3f9e2b7d5c84f1e6a0d2c3b9f7e1a4d8c6b5f2e9a0d3c7b1f4e8a2d6c0b9f3';
-
-/**
- * Stable canonical JSON for the chain input: the record WITHOUT the `_chain`
- * field, keys sorted alphabetically. This ensures the hash is independent of
- * key insertion order and that `_chain` itself does not contribute to its own
- * hash (circular dependency).
- */
-function canonicalJsonForChain(record) {
-  // Strip _chain if present (should not be, but defensive).
-  const keys = Object.keys(record).filter(k => k !== '_chain').sort();
-  const obj = {};
-  for (const k of keys) obj[k] = record[k];
-  return JSON.stringify(obj);
-}
-
-/**
- * Compute the sha256 hex hash for this chain link.
- * hash = sha256(prevHash + canonicalJson(record))
- */
-function computeChainHash(prevHash, record) {
-  const input = prevHash + canonicalJsonForChain(record);
-  return crypto.createHash('sha256').update(input, 'utf8').digest('hex');
-}
+// CHAIN_GENESIS is a fixed arbitrary sentinel — NOT the SHA256 of any specific
+// input string (a previous comment incorrectly claimed sha256("…:genesis")). The
+// writer here and the verifier in stop-goal-fit.js MUST canonicalize and seed
+// identically, so the genesis constant and the canonicalJson/hash helpers live in
+// ONE shared module that both import — divergence is structurally impossible.
+const {
+  CHAIN_GENESIS,
+  canonicalJsonForChain,
+  computeChainHash,
+} = require('../lib/command-log-chain.js');
 
 /**
  * Read the last entry from command-log.jsonl that has a `_chain` block.
