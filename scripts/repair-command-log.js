@@ -26,17 +26,10 @@ const path = require('path');
 const crypto = require('crypto');
 
 const gate = require(path.join(__dirname, 'hooks', 'stop-goal-fit.js'));
-const GENESIS = gate.CHAIN_GENESIS_VERIFY;
-
-function canon(rec) {
-  const keys = Object.keys(rec).filter((k) => k !== '_chain').sort();
-  const obj = {};
-  for (const k of keys) obj[k] = rec[k];
-  return JSON.stringify(obj);
-}
-function hashLink(prev, rec) {
-  return crypto.createHash('sha256').update(prev + canon(rec), 'utf8').digest('hex');
-}
+// Genesis + canonicalization/hash come from the single shared module, so a repaired
+// chain is re-linked byte-identically to how the writer/verifier compute it.
+const { CHAIN_GENESIS, canonicalJsonForChain, computeChainHash } = require('./lib/command-log-chain.js');
+const GENESIS = CHAIN_GENESIS;
 
 function main() {
   const dir = process.argv[2];
@@ -77,8 +70,8 @@ function main() {
   records.sort((a, b) => {
     const ta = String(a.capturedAt || ''), tb = String(b.capturedAt || '');
     if (ta !== tb) return ta < tb ? -1 : 1;
-    const ha = crypto.createHash('sha256').update(canon(a)).digest('hex');
-    const hb = crypto.createHash('sha256').update(canon(b)).digest('hex');
+    const ha = crypto.createHash('sha256').update(canonicalJsonForChain(a)).digest('hex');
+    const hb = crypto.createHash('sha256').update(canonicalJsonForChain(b)).digest('hex');
     return ha < hb ? -1 : ha > hb ? 1 : 0;
   });
 
@@ -87,7 +80,7 @@ function main() {
   let prev = GENESIS;
   let seq = 0;
   for (const rec of records) {
-    const h = hashLink(prev, rec);
+    const h = computeChainHash(prev, rec);
     out.push(JSON.stringify({ ...rec, _chain: { seq, prevHash: prev, hash: h } }));
     prev = h; seq += 1;
   }
@@ -100,7 +93,7 @@ function main() {
     source: 'chain-repair',
     repair: { reason, entries: records.length, forkAt: verdict.forkAt },
   };
-  const mh = hashLink(prev, marker);
+  const mh = computeChainHash(prev, marker);
   out.push(JSON.stringify({ ...marker, _chain: { seq, prevHash: prev, hash: mh } }));
 
   fs.copyFileSync(file, file + '.prebackup-repair');
