@@ -87,6 +87,7 @@ for (const entry of required) {
 const requiredExcludes = [
   "!evals/cases/dev/node_modules/",
   "!**/.flow-agents/",
+  "!**/.kontourai/",
   "!**/.surface/",
   "!**/.telemetry/",
   "!**/.veritas/",
@@ -99,7 +100,7 @@ const forbidden = [
   ".agents/",
   ".codex/",
   ".claude/",
-  ".flow-agents/",
+  ".kontourai/",
   ".surface/",
   ".telemetry/",
   ".veritas/",
@@ -142,14 +143,14 @@ NODE
   else
     _pass "tracked source has no legacy Flow Agents rename references"
   fi
-  if (cd "$ROOT_DIR" && FLOW_AGENTS_CONTENT_BOUNDARY_FILES='.flow-agents/example/state.json' node scripts/check-content-boundary.cjs >/tmp/content-boundary-runtime.out 2>&1); then
+  if (cd "$ROOT_DIR" && FLOW_AGENTS_CONTENT_BOUNDARY_FILES='.kontourai/flow-agents/example/state.json' node scripts/check-content-boundary.cjs >/tmp/content-boundary-runtime.out 2>&1); then
     _fail "content boundary allows ordinary workflow runtime artifacts"
   elif rg -q 'Flow Agents runtime artifact must not be tracked' /tmp/content-boundary-runtime.out; then
     _pass "content boundary blocks ordinary workflow runtime artifacts"
   else
     _fail "content boundary runtime rejection was not actionable"
   fi
-  if (cd "$ROOT_DIR" && FLOW_AGENTS_CONTENT_BOUNDARY_FILES='.flow-agents/nested/example/closeout.md' node scripts/check-content-boundary.cjs >/tmp/content-boundary-nested.out 2>&1); then
+  if (cd "$ROOT_DIR" && FLOW_AGENTS_CONTENT_BOUNDARY_FILES='.kontourai/flow-agents/nested/example/closeout.md' node scripts/check-content-boundary.cjs >/tmp/content-boundary-nested.out 2>&1); then
     _fail "content boundary allows nested workflow runtime artifacts"
   elif rg -q 'Flow Agents runtime artifact must not be tracked' /tmp/content-boundary-nested.out; then
     _pass "content boundary blocks nested workflow runtime artifacts"
@@ -157,7 +158,7 @@ NODE
     _fail "content boundary nested runtime rejection was not actionable"
   fi
   current_branch="$(cd "$ROOT_DIR" && git branch --show-current 2>/dev/null || true)"
-  tracked_runtime_artifacts="$(cd "$ROOT_DIR" && git ls-files -- '.flow-agents' 2>/dev/null || true)"
+  tracked_runtime_artifacts="$(cd "$ROOT_DIR" && git ls-files -- '.kontourai/flow-agents' 2>/dev/null || true)"
   if [[ "$current_branch" == "main" && -n "$tracked_runtime_artifacts" ]]; then
     printf '%s\n' "$tracked_runtime_artifacts" >/tmp/tracked-flow-agent-runtime-artifacts.txt
     _fail "main contains tracked workflow runtime artifacts (see /tmp/tracked-flow-agent-runtime-artifacts.txt)"

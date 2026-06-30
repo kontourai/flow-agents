@@ -50,13 +50,13 @@ Flow Agents may need local schemas for reliability glue that existing standards 
 
 | Format | Purpose | Target Location | Status |
 | --- | --- | --- | --- |
-| Workflow state | Current phase, owner, next action, status, and resumability data | `.flow-agents/<slug>/state.json` | Draft schema: `schemas/workflow-state.schema.json` |
-| Acceptance criteria | Criteria, source request, evidence requirements, and goal-fit status | `.flow-agents/<slug>/acceptance.json` | Draft schema: `schemas/workflow-acceptance.schema.json` |
-| Evidence summary | Proof commands, standard refs, skipped checks, not-verified gaps, and external evidence links | `.flow-agents/<slug>/evidence.json` | Draft schema: `schemas/workflow-evidence.schema.json` |
-| Handoff | What another agent or future session needs to continue safely | `.flow-agents/<slug>/handoff.json` | Draft schema: `schemas/workflow-handoff.schema.json` |
-| Critique record | Reviewer passes, findings, severity, and resolution state for critique loops | `.flow-agents/<slug>/critique.json` | Draft schema: `schemas/workflow-critique.schema.json` |
-| Release readiness | Merge, release, deploy, hold, rollback, docs, and operational readiness decisions | `.flow-agents/<slug>/release.json` | Draft schema: `schemas/workflow-release.schema.json` |
-| Learning record | Repeated failure, correction, pattern, and recommended system update | `.flow-agents/<slug>/learning.json` or `.telemetry/outcomes.jsonl` | Draft schema: `schemas/workflow-learning.schema.json` |
+| Workflow state | Current phase, owner, next action, status, and resumability data | `.kontourai/flow-agents/<slug>/state.json` | Draft schema: `schemas/workflow-state.schema.json` |
+| Acceptance criteria | Criteria, source request, evidence requirements, and goal-fit status | `.kontourai/flow-agents/<slug>/acceptance.json` | Draft schema: `schemas/workflow-acceptance.schema.json` |
+| Evidence summary | Proof commands, standard refs, skipped checks, not-verified gaps, and external evidence links | `.kontourai/flow-agents/<slug>/evidence.json` | Draft schema: `schemas/workflow-evidence.schema.json` |
+| Handoff | What another agent or future session needs to continue safely | `.kontourai/flow-agents/<slug>/handoff.json` | Draft schema: `schemas/workflow-handoff.schema.json` |
+| Critique record | Reviewer passes, findings, severity, and resolution state for critique loops | `.kontourai/flow-agents/<slug>/critique.json` | Draft schema: `schemas/workflow-critique.schema.json` |
+| Release readiness | Merge, release, deploy, hold, rollback, docs, and operational readiness decisions | `.kontourai/flow-agents/<slug>/release.json` | Draft schema: `schemas/workflow-release.schema.json` |
+| Learning record | Repeated failure, correction, pattern, and recommended system update | `.kontourai/flow-agents/<slug>/learning.json` or `.telemetry/outcomes.jsonl` | Draft schema: `schemas/workflow-learning.schema.json` |
 | Context map | Compact project map: structure, commands, conventions, test strategy, Kits, and recent state | Generated under `.flow-agents/` or configurable cache | Planned |
 | Kit Catalog | Product-facing catalog of Flow Kits and their activation, layered over the always-installed standalone base | `kits/catalog.json` plus generated export catalog metadata | Catalog: `kits/catalog.json` |
 | Governance adapter | Optional bridge from Flow Agents evidence gates to tools such as Veritas | `context/contracts/governance-adapter-contract.md` | Draft contract |

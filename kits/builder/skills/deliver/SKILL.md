@@ -22,7 +22,7 @@ Inherited from primitives:
 
 ## Orchestrator Rule
 
-You never use `read`, `glob`, `grep`, or `code` on source files. You only read/write the session file and artifact files in `.flow-agents/<slug>/`.
+You never use `read`, `glob`, `grep`, or `code` on source files. You only read/write the session file and artifact files in `.kontourai/flow-agents/<slug>/`.
 
 ## Shared Contracts
 
@@ -52,9 +52,9 @@ When the repository provides `npm run workflow:sidecar --`, use it for routine w
 - `record-learning` for learning-review outcomes
 - `dogfood-pass` for Flow Agents repo changes that should record evidence, critique, optional learning, state, and handoff in one validated pass
 
-After writer updates, run `npm run workflow:validate-artifacts -- --require-sidecars .flow-agents/<slug>` when local validation is available. If the writer or validation is unavailable or blocked by sandbox policy, record the exact gap in the session artifact as `NOT_VERIFIED` instead of pretending structured state exists.
+After writer updates, run `npm run workflow:validate-artifacts -- --require-sidecars .kontourai/flow-agents/<slug>` when local validation is available. If the writer or validation is unavailable or blocked by sandbox policy, record the exact gap in the session artifact as `NOT_VERIFIED` instead of pretending structured state exists.
 
-`ensure-session` maintains `.flow-agents/current.json`. The orchestrator owns root `state.json` and `handoff.json` updates. Delegated agents must be given the workflow artifact root and should append events under `agents/<agent-id>/events.jsonl` through `record-agent-event` instead of guessing the slug or rewriting root state.
+`ensure-session` maintains `.kontourai/flow-agents/current.json`. The orchestrator owns root `state.json` and `handoff.json` updates. Delegated agents must be given the workflow artifact root and should append events under `agents/<agent-id>/events.jsonl` through `record-agent-event` instead of guessing the slug or rewriting root state.
 
 ## Input
 
@@ -80,7 +80,7 @@ Direct ad hoc implementation requests that are not provider-backed backlog picku
 
 ## Session File
 
-Path: `.flow-agents/<slug>/<slug>--deliver.md`
+Path: `.kontourai/flow-agents/<slug>/<slug>--deliver.md`
 
 ```markdown
 # <Goal one-liner>
@@ -100,8 +100,8 @@ iteration: 0
 - Loop exits only after the Goal Fit Gate is fully checked or explicitly accepted
 - CRITICAL/HIGH → re-plan → execute → review → verify
 - MEDIUM/FAIL → execute fix pass → review → verify
-- Temporary planning and execution artifacts live in `.flow-agents/<slug>/`; durable feature documentation is promoted after CI/merge
-- Local runtime work stays under `.flow-agents/` and remains untracked; durable outcomes must be promoted before merge to `main`
+- Temporary planning and execution artifacts live in `.kontourai/flow-agents/<slug>/`; durable feature documentation is promoted after CI/merge
+- Local runtime work stays under `.kontourai/flow-agents/` and remains untracked; durable outcomes must be promoted before merge to `main`
 
 ## Plan
 
@@ -218,7 +218,7 @@ After review, verification, evidence, and Goal Fit are clean for the same diff:
 2. Publish the session trust bundle to `delivery/` so the CI trust-reconcile job can verify what the agent claimed. `record-release` (via the sidecar writer) does this automatically (best-effort). To publish or re-publish explicitly:
 
    ```bash
-   npm run workflow:sidecar -- publish-delivery .flow-agents/<slug>
+   npm run workflow:sidecar -- publish-delivery .kontourai/flow-agents/<slug>
    ```
 
    Then force-stage the trust artifacts for the delivery commit. They are gitignored
@@ -237,7 +237,7 @@ After review, verification, evidence, and Goal Fit are clean for the same diff:
 7. Record the gate claim for the Builder Kit `pr-open` step immediately after the PR is opened or updated:
 
 ```bash
-npm run workflow:sidecar -- record-gate-claim .flow-agents/<slug> \
+npm run workflow:sidecar -- record-gate-claim .kontourai/flow-agents/<slug> \
   --expectation pull-request-opened \
   --status pass \
   --summary "PR opened: <pr-url>. Linked to <work-item-ref>, implementation summary and verification evidence attached." \
@@ -253,11 +253,11 @@ Do not invoke `release-readiness` before this gate unless the user explicitly ac
 After CI passes and the work is merged or otherwise accepted:
 
 1. Update `## Final Acceptance` in the session file.
-2. Archive the working artifacts under `.flow-agents/<slug>/archive/` or keep a stable link to them.
+2. Archive the working artifacts under `.kontourai/flow-agents/<slug>/archive/` or keep a stable link to them.
 3. Record provider records, verification evidence, durable docs targets, accepted gaps, and follow-up routing in durable docs or provider records.
 4. Promote the relevant plan, decision, evidence, and usage notes into long-lived docs such as `docs/`, `README.md`, or a project decision record.
 5. Link the long-lived doc back to the provider record, archived plan artifact, or accepted evidence when useful so future readers can see why and how the feature was built.
-6. Confirm `.flow-agents/` runtime artifacts remain untracked before merge to `main`.
+6. Confirm `.kontourai/flow-agents/` runtime artifacts remain untracked before merge to `main`.
 7. **Clean up the workspace once the merge is confirmed.** First verify the merge actually happened from the provider's own record (a merge commit / `mergedAt`) — not a green check or a watcher's exit code. Then honor the `worktree_lifecycle` recorded by `pull-work` (`retain_until: pr_merged`): remove the isolated worktree (`git worktree remove <path>`) and delete the now-merged branch locally and on the remote. Never delete a branch or worktree before the merge is confirmed — a closed-but-unmerged PR or a prematurely deleted branch loses work. The task is not done while it leaves a stale worktree or merged branch behind.
 8. Hand off to `learning-review` when the delivery exposed workflow, testing, documentation, or product follow-up.
 

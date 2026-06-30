@@ -23,7 +23,7 @@ Convert raw ideas into shaped, prioritized, executable backlog without starting 
 
 ## Artifact Contract
 
-Create or update `.flow-agents/<slug>/<slug>--idea-to-backlog.md` with:
+Create or update `.kontourai/flow-agents/<slug>/<slug>--idea-to-backlog.md` with:
 
 - `source_ideas`: raw inputs and dedupe links
 - `idea_inventory`: one record per distinct idea, classification, outcome, and reason

@@ -158,13 +158,17 @@ echo "--- Installed Layout ---"
 for dir in \
   "$KIRO_DEST/agents" \
   "$BASE_DEST/.flow-agents" \
+  "$BASE_DEST/.kontourai/flow-agents" \
   "$CLAUDE_DEST/.claude/agents" \
   "$CLAUDE_DEST/.claude/skills" \
   "$CLAUDE_DEST/.flow-agents" \
+  "$CLAUDE_DEST/.kontourai/flow-agents" \
   "$CODEX_DEST/.codex/agents" \
   "$CODEX_DEST/.codex/skills" \
   "$CODEX_DEST/.flow-agents" \
-  "$CODEX_FULL_DEST/.flow-agents"; do
+  "$CODEX_DEST/.kontourai/flow-agents" \
+  "$CODEX_FULL_DEST/.flow-agents" \
+  "$CODEX_FULL_DEST/.kontourai/flow-agents"; do
   if [[ -d "$dir" ]]; then
     _pass "$dir exists"
   else
@@ -218,7 +222,7 @@ fi
 
 if rg -F -q "console_telemetry_url=$LOCAL_KONTOUR_CONSOLE_URL" "$CODEX_INIT_DEST/scripts/telemetry/telemetry.conf" \
   && rg -q '^console_tenant_id=tenant-a$' "$CODEX_INIT_DEST/scripts/telemetry/telemetry.conf" \
-  && [[ -f "$CODEX_INIT_DEST/.flow-agents/runtime/codex/activation.json" ]]; then
+  && [[ -f "$CODEX_INIT_DEST/.kontourai/flow-agents/projections/codex/activation.json" ]]; then
   _pass "flow-agents init persists Console config and activates Codex kits"
 else
   _fail "flow-agents init did not persist Console config or activate Codex kits"
@@ -226,6 +230,7 @@ fi
 
 if [[ -f "$BASE_INIT_DEST/AGENTS.md" ]] \
   && [[ -d "$BASE_INIT_DEST/.flow-agents" ]] \
+  && [[ -d "$BASE_INIT_DEST/.kontourai/flow-agents" ]] \
   && rg -F -q "console_telemetry_url=$LOCAL_KONTOUR_CONSOLE_URL" "$BASE_INIT_DEST/scripts/telemetry/telemetry.conf"; then
   _pass "flow-agents init default installs base AGENTS.md workspace contract"
 else
@@ -322,7 +327,7 @@ for (const expected of ["builder.shape", "builder.build", "codex-local.activatio
 for (const item of data.generated_runtime_files || []) {
   if (!fs.existsSync(path.join(dest, item.path))) throw new Error(`generated runtime file missing: ${item.path}`);
 }
-if (!fs.existsSync(path.join(dest, ".flow-agents/runtime/codex/activation.json"))) throw new Error("runtime activation manifest missing");
+if (!fs.existsSync(path.join(dest, ".kontourai/flow-agents/projections/codex/activation.json"))) throw new Error("runtime activation manifest missing");
 console.log("ok");
 NODE
 then
@@ -367,25 +372,25 @@ else
   _pass "installed bundles are free of machine-local absolute paths"
 fi
 
-if [[ -f "$CLAUDE_DEST/.flow-agents/.gitkeep" ]]; then
+if [[ -f "$CLAUDE_DEST/.kontourai/flow-agents/.gitkeep" ]]; then
   _pass "Claude Code task dir scaffold installed"
 else
   _fail "Claude Code task dir scaffold missing"
 fi
 
-if [[ -f "$CODEX_DEST/.flow-agents/.gitkeep" ]]; then
+if [[ -f "$CODEX_DEST/.kontourai/flow-agents/.gitkeep" ]]; then
   _pass "Codex task dir scaffold installed"
 else
   _fail "Codex task dir scaffold missing"
 fi
 
-if [[ -f "$OPENCODE_DEST/.flow-agents/.gitkeep" ]]; then
+if [[ -f "$OPENCODE_DEST/.kontourai/flow-agents/.gitkeep" ]]; then
   _pass "opencode task dir scaffold installed"
 else
   _fail "opencode task dir scaffold missing"
 fi
 
-if [[ -f "$PI_DEST/.flow-agents/.gitkeep" ]]; then
+if [[ -f "$PI_DEST/.kontourai/flow-agents/.gitkeep" ]]; then
   _pass "pi task dir scaffold installed"
 else
   _fail "pi task dir scaffold missing"
@@ -417,9 +422,10 @@ else
   _fail "installed Claude permissions/statusline or Codex profile-v2 progress config is missing"
 fi
 
-if [[ -f "$CODEX_DEST/.codex/kdev.config.toml" && -f "$CODEX_DEST/.codex/kdev-br.config.toml" ]] \
-  && rg -q 'approvals_reviewer = "auto_review"' "$CODEX_DEST/.codex/kdev.config.toml" \
-  && rg -q 'model_provider = "amazon-bedrock"' "$CODEX_DEST/.codex/kdev-br.config.toml"; then
+if [[ -f "$CODEX_DEST/.codex/builder.config.toml" && -f "$CODEX_DEST/.codex/personal.config.toml" ]] \
+  && [[ "$(find "$CODEX_DEST/.codex" -maxdepth 1 -name '*.config.toml' | wc -l | tr -d ' ')" == "2" ]] \
+  && rg -q 'Flow Agents Builder mode' "$CODEX_DEST/.codex/builder.config.toml" \
+  && rg -q 'knowledge-capture' "$CODEX_DEST/.codex/personal.config.toml"; then
   _pass "Codex install includes profile-v2 config files"
 else
   _fail "Codex install is missing profile-v2 config files"
@@ -517,7 +523,7 @@ const critique = {
   }],
 };
 function writeFixture(root) {
-  const taskDir = path.join(root, ".flow-agents/installed-hook-demo");
+  const taskDir = path.join(root, ".kontourai/flow-agents/installed-hook-demo");
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, "state.json"), JSON.stringify(state), "utf8");
   fs.writeFileSync(path.join(taskDir, "critique.json"), JSON.stringify(critique), "utf8");
@@ -593,7 +599,7 @@ const critique = {
   critiques: [{ id: "oc-review", reviewer: "tool-code-reviewer", reviewed_at: "2026-06-01T00:01:00Z", verdict: "fail", summary: "Blocking.", findings: [{ id: "oc-open", severity: "high", status: "open", description: "Open finding." }] }],
 };
 function writeFixture(root) {
-  const taskDir = path.join(root, ".flow-agents/opencode-hook-demo");
+  const taskDir = path.join(root, ".kontourai/flow-agents/opencode-hook-demo");
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, "state.json"), JSON.stringify(state), "utf8");
   fs.writeFileSync(path.join(taskDir, "critique.json"), JSON.stringify(critique), "utf8");
@@ -652,7 +658,7 @@ const critique = {
   critiques: [{ id: "pi-review", reviewer: "tool-code-reviewer", reviewed_at: "2026-06-01T00:01:00Z", verdict: "fail", summary: "Blocking.", findings: [{ id: "pi-open", severity: "high", status: "open", description: "Open finding." }] }],
 };
 function writeFixture(root) {
-  const taskDir = path.join(root, ".flow-agents/pi-hook-demo");
+  const taskDir = path.join(root, ".kontourai/flow-agents/pi-hook-demo");
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, "state.json"), JSON.stringify(state), "utf8");
   fs.writeFileSync(path.join(taskDir, "critique.json"), JSON.stringify(critique), "utf8");

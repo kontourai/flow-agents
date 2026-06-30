@@ -52,7 +52,7 @@ renamed, or changes category, update the table and the validator together.
 | `codex-telemetry-hook.js` | telemetry shim | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_telemetry.sh` | Captures Codex hook telemetry and fails open. |
 | `run-hook.js` | hook runner | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_goal_fit_hook.sh`, `evals/integration/test_workflow_steering_hook.sh` | Applies profile/disable flags, traversal checks, and hook execution. |
 | `config-protection.js` | policy hook | `evals/integration/test_hook_category_behaviors.sh` | Blocks unsafe runtime config edits. |
-| `evidence-capture.js` | policy hook | `evals/integration/test_evidence_capture_hook.sh` | Deterministically captures command executions to `.flow-agents/<slug>/command-log.jsonl` so evidence is machine-recorded, not model-claimed (cross-referenced by stop-goal-fit). |
+| `evidence-capture.js` | policy hook | `evals/integration/test_evidence_capture_hook.sh` | Deterministically captures command executions to `.kontourai/flow-agents/<slug>/command-log.jsonl` so evidence is machine-recorded, not model-claimed (cross-referenced by stop-goal-fit). |
 | `governance-audit.sh` | policy hook | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_telemetry.sh` | Emits governance/Veritas audit context when configured. |
 | `opencode-hook-adapter.js` | runtime adapter | `evals/integration/test_bundle_install.sh` | Translates opencode plugin events into the shared hook runner contract. |
 | `opencode-telemetry-hook.js` | telemetry shim | `evals/integration/test_bundle_install.sh` | Captures opencode plugin telemetry and fails open. |
@@ -70,7 +70,7 @@ renamed, or changes category, update the table and the validator together.
 | `lib/audit-transport.sh` | shared hook library | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_telemetry.sh` | Shared audit event transport functions. |
 | `lib/hook-flags.js` | shared hook library | `evals/integration/test_hook_category_behaviors.sh` | Shared profile/disable flag parsing. |
 | `lib/liveness-read.js` | shared hook library | `evals/integration/test_session_resume_roundtrip.sh` | Shared liveness event reader + freshness check (`readLivenessEvents`, `freshHolders`); consumed by the reground hook and `workflow-sidecar liveness status`. |
-| `lib/local-artifact-paths.js` | shared hook library | `evals/integration/test_migrate_local_artifacts.sh`, `evals/integration/test_workflow_sidecar_writer.sh` | Shared `.kontourai/flow-agents` artifact-root helpers with legacy `.flow-agents` read compatibility for CJS hooks. |
+| `lib/local-artifact-paths.js` | shared hook library | `evals/integration/test_migrate_local_artifacts.sh`, `evals/integration/test_workflow_sidecar_writer.sh` | Shared `.kontourai/flow-agents` artifact-root helpers for CJS hooks. |
 | `lib/patterns.sh` | shared hook library | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_telemetry.sh` | Shared shell pattern constants. |
 | `lib/resolve-formatter.js` | shared hook library | `evals/integration/test_hook_category_behaviors.sh` | Shared formatter resolution helper. |
 
@@ -103,7 +103,7 @@ prompting. Add `--allow-network` to probe a non-local HTTPS Console endpoint.
 
 ## Install And Repo Utilities
 
-- `install-codex-home.sh`: installs the isolated generated Codex home.
+- `install-codex-home.sh`: installs the generated Codex bundle into `CODEX_HOME`, or `~/.codex` when `CODEX_HOME` is unset. A positional destination argument is the explicit override for isolated homes and tests.
 - `setup-repo-hooks.sh`: configures this clone's Git hook path.
 - `check-content-boundary.cjs`, `detect-tools.sh`, `discover-agents.sh`, `git-status.sh`: repo-local helper commands.
 - `context-budget/` and `statusline/`: specialized support tooling copied into bundles where needed.

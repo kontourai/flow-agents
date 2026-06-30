@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs, flagList, flagString } from "../lib/args.js";
 
-const FLOW_ARTIFACT_PATTERN = /(?<path>\.flow-agents\/[^\s`'")]+)/g;
+const FLOW_ARTIFACT_PATTERN = /(?<path>\.kontourai\/flow-agents\/[^\s`'")]+)/g;
 const GITHUB_ISSUE_PATTERN = /(?:(?<owner>[A-Za-z0-9_.-]+)\/(?<repo>[A-Za-z0-9_.-]+))?#(?<number>\d+)/g;
 const GITHUB_URL_PATTERN = /https:\/\/github\.com\/(?<owner>[^/\s]+)\/(?<repo>[^/\s]+)\/(?:issues|pull)\/(?<number>\d+)/g;
 const BLOCKER_PATTERN = /\b(?:blocked by|depends on|waiting on|requires|should follow|coordinate with)\b[:\s-]*(?<refs>[^\n]+)/gi;

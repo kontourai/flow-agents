@@ -27,7 +27,7 @@ That reference is docs-only guidance for new resource-shaped contracts and does 
 The lifecycle for in-progress and completed workflow artifacts is documented in the Workflow Artifact Lifecycle:
 https://github.com/kontourai/flow-agents/blob/main/docs/workflow-artifact-lifecycle.md
 
-Runtime workflow artifacts under `.flow-agents/` remain local and ignored. Completed work must promote durable behavior, decisions, contracts, and evidence into long-lived docs, source, schemas, or provider records before merge to `main`.
+Runtime workflow artifacts under `.kontourai/flow-agents/` remain local and ignored. Explicit durable Flow Agents config/install state may live under `.flow-agents/` when documented, but runtime readers do not fall back there. Completed work must promote durable behavior, decisions, contracts, and evidence into long-lived docs, source, schemas, or provider records before merge to `main`.
 
 ## How Skills And Agents Use Them
 

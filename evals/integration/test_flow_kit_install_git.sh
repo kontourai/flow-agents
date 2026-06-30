@@ -31,6 +31,58 @@ FILE_URL="file://$FIXTURE_REPO"
 
 echo "  (fixture repo: $FILE_URL)"
 
+# --- Test 0: default destination honors CODEX_HOME and --dest overrides it ---
+DEFAULT_CODEX_HOME="$TMP_DIR/default-codex-home"
+OVERRIDE_DEST="$TMP_DIR/override-dest"
+mkdir -p "$DEFAULT_CODEX_HOME" "$OVERRIDE_DEST"
+
+default_out="$TMP_DIR/default-dest.out"
+if CODEX_HOME="$DEFAULT_CODEX_HOME" flow_agents_node "$CLI" install "$VALID_SRC" >"$default_out" 2>&1 \
+  && [[ -f "$DEFAULT_CODEX_HOME/kits/local/installed-kits.json" ]] \
+  && [[ -d "$DEFAULT_CODEX_HOME/kits/local/repositories/example-kit" ]]; then
+  pass "kit install without --dest defaults to CODEX_HOME"
+else
+  fail "kit install without --dest did not default to CODEX_HOME"
+  sed -n '1,80p' "$default_out"
+fi
+
+list_out="$TMP_DIR/default-list.out"
+if CODEX_HOME="$DEFAULT_CODEX_HOME" flow_agents_node "$CLI" list >"$list_out" 2>&1 \
+  && grep -q "example-kit" "$list_out"; then
+  pass "kit list without --dest reads CODEX_HOME"
+else
+  fail "kit list without --dest did not read CODEX_HOME"
+  sed -n '1,80p' "$list_out"
+fi
+
+status_out="$TMP_DIR/default-status.out"
+if CODEX_HOME="$DEFAULT_CODEX_HOME" flow_agents_node "$CLI" status example-kit >"$status_out" 2>&1 \
+  && grep -q '"id": "example-kit"' "$status_out"; then
+  pass "kit status without --dest reads CODEX_HOME"
+else
+  fail "kit status without --dest did not read CODEX_HOME"
+  sed -n '1,80p' "$status_out"
+fi
+
+activate_out="$TMP_DIR/default-activate.out"
+if CODEX_HOME="$DEFAULT_CODEX_HOME" flow_agents_node "$CLI" activate --source-root "$ROOT" >"$activate_out" 2>&1 \
+  && [[ -f "$DEFAULT_CODEX_HOME/.kontourai/flow-agents/projections/codex/activation.json" ]]; then
+  pass "kit activate without --dest writes CODEX_HOME"
+else
+  fail "kit activate without --dest did not write CODEX_HOME"
+  sed -n '1,80p' "$activate_out"
+fi
+
+override_out="$TMP_DIR/override-dest.out"
+if CODEX_HOME="$DEFAULT_CODEX_HOME" flow_agents_node "$CLI" install "$VALID_SRC" --dest "$OVERRIDE_DEST" >"$override_out" 2>&1 \
+  && [[ -f "$OVERRIDE_DEST/kits/local/installed-kits.json" ]] \
+  && [[ -d "$OVERRIDE_DEST/kits/local/repositories/example-kit" ]]; then
+  pass "kit install --dest overrides CODEX_HOME"
+else
+  fail "kit install --dest did not override CODEX_HOME"
+  sed -n '1,80p' "$override_out"
+fi
+
 # --- Test 1: basic install-git from file:// URL ---
 install_out="$TMP_DIR/install-git.out"
 if flow_agents_node "$CLI" install "$FILE_URL" --dest "$DEST" >"$install_out" 2>&1; then

@@ -25,14 +25,14 @@
     "install_default": "~/.flow-agents"
   },
   "claude_code": {
-    "task_dir": ".flow-agents",
+    "task_dir": ".kontourai/flow-agents",
     "permissions": {
       "defaultMode": "auto"
     },
     "skipDangerousModePermissionPrompt": true
   },
   "codex": {
-    "task_dir": ".flow-agents",
+    "task_dir": ".kontourai/flow-agents",
     "settings": {
       "approvals_reviewer": "auto_review"
     },
@@ -57,22 +57,21 @@
       "dev"
     ],
     "profiles": {
-      "kdev": {
+      "builder": {
         "model": "gpt-5.5",
         "model_reasoning_effort": "medium",
         "approval_policy": "on-request",
         "sandbox_mode": "workspace-write",
         "web_search": "cached",
-        "developer_instructions": "You are operating in Flow Agents dev mode. You write and modify code, validate it works, and deliver clean results. You own the code; specialist tool-* subagents provide bounded context, review, verification, or parallel implementation support. Use deliver for feature work, fix-bug for bug fixes, plan-work for planning, execute-plan for approved plans, review-work for critique, verify-work for evidence collection, search-first for unfamiliar external APIs, and context-budget when context grows. When a workflow skill or shared contract names a delegate, that delegate is a required gate, not an optional optimization: plan-work must delegate to tool-planner, execute-plan to tool-worker, review-work to tool-code-reviewer and conditionally tool-security-reviewer, verify-work to tool-verifier, and browser/UI verification to tool-playwright when those agents are available. Attempt required delegation even in read-only or partially blocked environments; if blocked, report the blocked gate as NOT_VERIFIED or incomplete with evidence instead of replacing it with a local summary. In progress and final reports, name exact delegate ids such as tool-planner, tool-worker, tool-code-reviewer, tool-security-reviewer, tool-verifier, and tool-playwright so text-only evals remain auditable when telemetry is unavailable. In Codex, required specialist delegation must pass the role through the spawn tool, for example agent_type=tool-worker; do not spawn unnamed/default subagents for Flow Agents worker, planner, reviewer, verifier, or Playwright gates."
+        "developer_instructions": "You are operating in Flow Agents Builder mode. You write and modify code, validate it works, and deliver clean results. You own the code; specialist tool-* subagents provide bounded context, review, verification, or parallel implementation support. Use deliver for feature work, fix-bug for bug fixes, plan-work for planning, execute-plan for approved plans, review-work for critique, verify-work for evidence collection, search-first for unfamiliar external APIs, and context-budget when context grows. When a workflow skill or shared contract names a delegate, that delegate is a required gate, not an optional optimization: plan-work must delegate to tool-planner, execute-plan to tool-worker, review-work to tool-code-reviewer and conditionally tool-security-reviewer, verify-work to tool-verifier, and browser/UI verification to tool-playwright when those agents are available. Attempt required delegation even in read-only or partially blocked environments; if blocked, report the blocked gate as NOT_VERIFIED or incomplete with evidence instead of replacing it with a local summary. In progress and final reports, name exact delegate ids such as tool-planner, tool-worker, tool-code-reviewer, tool-security-reviewer, tool-verifier, and tool-playwright so text-only evals remain auditable when telemetry is unavailable. In Codex, required specialist delegation must pass the role through the spawn tool, for example agent_type=tool-worker; do not spawn unnamed/default subagents for Flow Agents worker, planner, reviewer, verifier, or Playwright gates."
       },
-      "kdev-br": {
-        "model_provider": "amazon-bedrock",
-        "model": "amazon.nova-pro-v1:0",
+      "personal": {
+        "model": "gpt-5.4-mini",
         "model_reasoning_effort": "medium",
         "approval_policy": "on-request",
         "sandbox_mode": "workspace-write",
         "web_search": "cached",
-        "developer_instructions": "You are operating in Flow Agents dev mode on Amazon Bedrock. You write and modify code, validate it works, and deliver clean results. You own the code; specialist tool-* subagents provide bounded context, review, verification, or parallel implementation support. Use deliver for feature work, fix-bug for bug fixes, plan-work for planning, execute-plan for approved plans, review-work for critique, verify-work for evidence collection, search-first for unfamiliar external APIs, and context-budget when context grows. When a workflow skill or shared contract names a delegate, that delegate is a required gate, not an optional optimization: plan-work must delegate to tool-planner, execute-plan to tool-worker, review-work to tool-code-reviewer and conditionally tool-security-reviewer, verify-work to tool-verifier, and browser/UI verification to tool-playwright when those agents are available. Attempt required delegation even in read-only or partially blocked environments; if blocked, report the blocked gate as NOT_VERIFIED or incomplete with evidence instead of replacing it with a local summary. In progress and final reports, name exact delegate ids such as tool-planner, tool-worker, tool-code-reviewer, tool-security-reviewer, tool-verifier, and tool-playwright so text-only evals remain auditable when telemetry is unavailable. In Codex, required specialist delegation must pass the role through the spawn tool, for example agent_type=tool-worker; do not spawn unnamed/default subagents for Flow Agents worker, planner, reviewer, verifier, or Playwright gates."
+        "developer_instructions": "You are operating in Flow Agents Personal mode for email, knowledge work, research, writing, and lightweight automation. Keep durable notes and decisions easy to recover across sessions. Use knowledge-capture when the user asks you to remember, save, capture, file, or bookmark context, or when a source, decision, relationship detail, or reusable lesson should be indexed. Prefer concise synthesis, explicit source attribution when web research is used, and reversible changes to local files. For software work, switch back to Builder mode or explicitly use the Builder workflow skills so planning, review, and verification gates remain intact."
       }
     },
     "model_providers": {
@@ -223,10 +222,10 @@
     ]
   },
   "opencode": {
-    "task_dir": ".flow-agents",
+    "task_dir": ".kontourai/flow-agents",
     "default_agent_mode": "subagent"
   },
   "pi": {
-    "task_dir": ".flow-agents"
+    "task_dir": ".kontourai/flow-agents"
   }
 }

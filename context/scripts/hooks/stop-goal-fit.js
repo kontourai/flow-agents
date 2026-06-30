@@ -2,7 +2,7 @@
 /**
  * Stop Hook: warn when an active workflow is about to stop short of its goal.
  *
- * The hook reads .flow-agents artifacts, looks for the most recent active
+ * The hook reads .kontourai/flow-agents artifacts, looks for the most recent active
  * delivery/session file, and reports missing Definition Of Done, Goal Fit, or
  * Final Acceptance state.
  *
@@ -15,7 +15,7 @@
  * Code at L2) set block so the installed product enforces while the engine
  * default and conformance contract stay warn.
  *
- * Scope: the gate evaluates the session's current task (.flow-agents/current.json)
+ * Scope: the gate evaluates the session's current task (.kontourai/flow-agents/current.json)
  * when set, so an unrelated active workflow elsewhere in the repo does not gate
  * this stop. It also never hard-blocks a pre-execution (not-yet-started) task on
  * mere incompleteness — only genuine false-completion signals (a claimed pass the
@@ -654,9 +654,9 @@ async function bundleEnforcement(artifactDir) {
 }
 
 /**
- * Scope to the session's current task when .flow-agents/current.json points at
+ * Scope to the session's current task when .kontourai/flow-agents/current.json points at
  * one (mirroring evidence-capture.js). Returns the slug dir, or null to fall back
- * to scanning all of .flow-agents (newest-mtime).
+ * to scanning all of .kontourai/flow-agents (newest-mtime).
  */
 function preferredArtifactDir(flowAgentsDir) {
   const current = readJsonFile(path.join(flowAgentsDir, 'current.json'));
@@ -724,7 +724,7 @@ function missingBundleOrStateSignal(artifactDir) {
 }
 
 async function analyze(root, now = Date.now()) {
-  const flowAgentsDir = path.join(root, '.flow-agents');
+  const flowAgentsDir = path.join(root, '.kontourai', 'flow-agents');
   // Scope to the session's current task when current.json names one, so an
   // unrelated active workflow elsewhere in the repo does not gate this stop.
   const scoped = preferredArtifactDir(flowAgentsDir);
@@ -802,7 +802,7 @@ function resolveMaxBlocks() {
 }
 
 function blockStreakFile(root) {
-  return path.join(root, '.flow-agents', '.goal-fit-block-streak.json');
+  return path.join(root, '.kontourai', 'flow-agents', '.goal-fit-block-streak.json');
 }
 
 function reasonsHash(warnings) {

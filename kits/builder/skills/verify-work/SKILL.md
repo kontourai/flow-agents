@@ -39,7 +39,7 @@ This skill owns orchestration and routing. The verification contract owns phases
 
 ## Input
 
-- **Session file path**: the session file in `.flow-agents/<slug>/` (preferred)
+- **Session file path**: the session file in `.kontourai/flow-agents/<slug>/` (preferred)
 - The session file references the plan artifact (which has acceptance criteria) and execution progress (which has modified files)
 - If NO session file exists, delegate to tool-verifier directly (see Standalone Verification below)
 
@@ -84,6 +84,13 @@ Skip session file lookup — go straight to delegation.
 7. Write or update `evidence.json` with verification checks, top-level verdict, and `not_verified_gaps`
    - use `npm run workflow:sidecar -- record-evidence <artifact-dir> --verdict ... --check-json ...` when the repository provides it
    - `checks[].artifact_refs` must use structured evidence ref objects, not legacy strings
+   - for multi-repo or cross-product work, preserve a coverage matrix in the
+     evidence report or check summaries that lists each affected root and its
+     build/test, dependency/security, provider/CI, and accepted-gap status
+   - if external dependency audit or provider checks are blocked by approval,
+     privacy, credentials, network, or missing change-provider state, record the
+     affected roots as `not_verified` instead of collapsing the lane into a
+     generic pass/fail
 8. Update `acceptance.json` with criterion statuses and structured evidence refs
    - `criteria[].evidence_refs` must use structured evidence refs and map each AC id to command/test proof plus source refs for behavior claims
    - when source refs are missing for a behavior claim, mark the criterion `not_verified` or record an accepted gap instead of using broad prose-only evidence

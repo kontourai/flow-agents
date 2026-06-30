@@ -2,7 +2,7 @@
 # test_evidence_capture_hook.sh — Capture-first evidence determinism contracts.
 #
 # Part A: evidence-capture.js deterministically records command executions to
-#         .flow-agents/<slug>/command-log.jsonl (machine-recorded, not model-claimed).
+#         .kontourai/flow-agents/<slug>/command-log.jsonl (machine-recorded, not model-claimed).
 # Part B: stop-goal-fit.js cross-references evidence.json claimed-pass command
 #         checks against the capture log, and re-runs a TRUSTED backstop command
 #         only when the log has no execution for a claimed-pass command.
@@ -23,10 +23,10 @@ _fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 # ---- helpers -------------------------------------------------------------
 seed_repo() { # $1 dir, $2 slug
   local p="$1" slug="$2"
-  mkdir -p "$p/.flow-agents/$slug"
+  mkdir -p "$p/.kontourai/flow-agents/$slug"
   printf '# Repo\n' > "$p/AGENTS.md"
-  printf '%s' "{\"schema_version\":\"1.0\",\"task_slug\":\"$slug\",\"status\":\"delivered\",\"phase\":\"done\",\"updated_at\":\"2026-06-23T00:00:00Z\",\"next_action\":{\"status\":\"done\",\"summary\":\"done\"}}" > "$p/.flow-agents/$slug/state.json"
-  cat > "$p/.flow-agents/$slug/$slug--deliver.md" <<MD
+  printf '%s' "{\"schema_version\":\"1.0\",\"task_slug\":\"$slug\",\"status\":\"delivered\",\"phase\":\"done\",\"updated_at\":\"2026-06-23T00:00:00Z\",\"next_action\":{\"status\":\"done\",\"summary\":\"done\"}}" > "$p/.kontourai/flow-agents/$slug/state.json"
+  cat > "$p/.kontourai/flow-agents/$slug/$slug--deliver.md" <<MD
 # $slug
 
 branch: main
@@ -59,7 +59,7 @@ printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","cwd":"%s","tool_inp
 # A non-command tool (Write) must NOT be captured.
 printf '{"hook_event_name":"PostToolUse","tool_name":"Write","cwd":"%s","tool_input":{"file_path":"/tmp/x"}}' "$A" | capture
 
-LOG="$A/.flow-agents/t1/command-log.jsonl"
+LOG="$A/.kontourai/flow-agents/t1/command-log.jsonl"
 if [[ -f "$LOG" ]]; then _pass "capture writes command-log.jsonl"; else _fail "capture did not write command-log.jsonl"; fi
 
 lines=$(wc -l < "$LOG" | tr -d ' ')
@@ -90,8 +90,8 @@ else _fail "capture should be non-blocking and echo stdin"; fi
 # ============================================================================
 echo "Part B1: log contradicts claimed pass → block"
 B="$TMP/contradict"; seed_repo "$B" t1
-printf '%s' '{"schema_version":"1.0","task_slug":"t1","verdict":"pass","checks":[{"id":"unit-tests","kind":"command","status":"pass","command":"npm test","summary":"tests passed"}]}' > "$B/.flow-agents/t1/evidence.json"
-printf '%s\n' '{"command":"npm test","observedResult":"fail","exitCode":1,"capturedAt":"2026-06-23T00:00:00Z","source":"postToolUse-capture"}' > "$B/.flow-agents/t1/command-log.jsonl"
+printf '%s' '{"schema_version":"1.0","task_slug":"t1","verdict":"pass","checks":[{"id":"unit-tests","kind":"command","status":"pass","command":"npm test","summary":"tests passed"}]}' > "$B/.kontourai/flow-agents/t1/evidence.json"
+printf '%s\n' '{"command":"npm test","observedResult":"fail","exitCode":1,"capturedAt":"2026-06-23T00:00:00Z","source":"postToolUse-capture"}' > "$B/.kontourai/flow-agents/t1/command-log.jsonl"
 
 if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip node "$GATE" >/dev/null 2>"$TMP/b1.err" <<JSON
 {"hook_event_name":"Stop","cwd":"$B"}
@@ -109,8 +109,8 @@ fi
 # ============================================================================
 echo "Part B2: log confirms claimed pass → satisfied, no re-run"
 C="$TMP/confirm"; seed_repo "$C" t1
-printf '%s' '{"schema_version":"1.0","task_slug":"t1","verdict":"pass","checks":[{"id":"unit-tests","kind":"command","status":"pass","command":"npm test","summary":"tests passed"}]}' > "$C/.flow-agents/t1/evidence.json"
-printf '%s\n' '{"command":"npm test","observedResult":"pass","exitCode":0,"capturedAt":"2026-06-23T00:00:00Z","source":"postToolUse-capture"}' > "$C/.flow-agents/t1/command-log.jsonl"
+printf '%s' '{"schema_version":"1.0","task_slug":"t1","verdict":"pass","checks":[{"id":"unit-tests","kind":"command","status":"pass","command":"npm test","summary":"tests passed"}]}' > "$C/.kontourai/flow-agents/t1/evidence.json"
+printf '%s\n' '{"command":"npm test","observedResult":"pass","exitCode":0,"capturedAt":"2026-06-23T00:00:00Z","source":"postToolUse-capture"}' > "$C/.kontourai/flow-agents/t1/command-log.jsonl"
 # A poisoned npm on PATH proves the gate does NOT re-run when the log confirms.
 POISON="$TMP/poison"; mkdir -p "$POISON"
 printf '#!/usr/bin/env bash\necho "npm should not run" >&2\nexit 99\n' > "$POISON/npm"; chmod +x "$POISON/npm"
@@ -127,7 +127,7 @@ else _pass "gate trusts the log on a confirmed pass and does not re-run the back
 echo "Part B3: never-captured claim → trusted manifest backstop catches a fail"
 D="$TMP/backstop"; seed_repo "$D" t1
 printf '%s' '{"name":"x","scripts":{"test":"exit 7"}}' > "$D/package.json"
-printf '%s' '{"schema_version":"1.0","task_slug":"t1","verdict":"pass","checks":[{"id":"unit-tests","kind":"command","status":"pass","command":"npm test","summary":"tests passed"}]}' > "$D/.flow-agents/t1/evidence.json"
+printf '%s' '{"schema_version":"1.0","task_slug":"t1","verdict":"pass","checks":[{"id":"unit-tests","kind":"command","status":"pass","command":"npm test","summary":"tests passed"}]}' > "$D/.kontourai/flow-agents/t1/evidence.json"
 # command-log.jsonl intentionally absent — the command was never actually run.
 
 if FLOW_AGENTS_GOAL_FIT_MODE=block node "$GATE" >/dev/null 2>"$TMP/b3.err" <<JSON
@@ -146,9 +146,10 @@ fi
 # ============================================================================
 echo "Part B4: never-captured claim, nothing trusted resolves → NOT_VERIFIED"
 E="$TMP/notverified"; seed_repo "$E" t1
-printf '%s' '{"schema_version":"1.0","task_slug":"t1","verdict":"pass","checks":[{"id":"custom","kind":"command","status":"pass","command":"./my-thing.sh","summary":"ran custom"}]}' > "$E/.flow-agents/t1/evidence.json"
+printf '%s' '{"schema_version":"1.0","task_slug":"t1","status":"in_progress","phase":"verification","updated_at":"2026-06-23T00:00:00Z","next_action":{"status":"continue","summary":"verify command evidence"}}' > "$E/.kontourai/flow-agents/t1/state.json"
+printf '%s' '{"schema_version":"1.0","task_slug":"t1","verdict":"pass","checks":[{"id":"custom","kind":"command","status":"pass","command":"./my-thing.sh","summary":"ran custom"}]}' > "$E/.kontourai/flow-agents/t1/evidence.json"
 
-if FLOW_AGENTS_GOAL_FIT_MODE=block node "$GATE" >/dev/null 2>"$TMP/b4.err" <<JSON
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_RECHECK=false node "$GATE" >/dev/null 2>"$TMP/b4.err" <<JSON
 {"hook_event_name":"Stop","cwd":"$E"}
 JSON
 then _fail "gate should not silently pass an un-captured, un-verifiable claimed-pass command"
@@ -164,7 +165,7 @@ fi
 # ============================================================================
 echo "Part B5: free-form model command re-run is opt-in only"
 F="$TMP/recheck"; seed_repo "$F" t1
-printf '%s' '{"schema_version":"1.0","task_slug":"t1","verdict":"pass","checks":[{"id":"custom","kind":"command","status":"pass","command":"exit 5","summary":"ran custom"}]}' > "$F/.flow-agents/t1/evidence.json"
+printf '%s' '{"schema_version":"1.0","task_slug":"t1","verdict":"pass","checks":[{"id":"custom","kind":"command","status":"pass","command":"exit 5","summary":"ran custom"}]}' > "$F/.kontourai/flow-agents/t1/evidence.json"
 # Opt-in ON: the model's free-form "exit 5" is re-run and fails → block.
 if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_RECHECK=true node "$GATE" >/dev/null 2>"$TMP/b5.err" <<JSON
 {"hook_event_name":"Stop","cwd":"$F"}

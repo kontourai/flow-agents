@@ -3,11 +3,14 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { loadJson, readText, root, walkFiles, writeText } from "./common.js";
+import { DURABLE_FLOW_AGENTS_DIR, FLOW_AGENTS_RUNTIME_DIR } from "../lib/local-artifact-root.js";
 
 type Agent = Record<string, unknown> & { name: string; prompt: string };
 const dist = process.env.FLOW_AGENTS_DIST_DIR ? path.resolve(process.env.FLOW_AGENTS_DIST_DIR) : path.join(root, "dist");
 const manifest = loadJson<Record<string, any>>(path.join(root, "packaging/manifest.json"));
 const pkgVersion: string = (loadJson<Record<string, unknown>>(path.join(root, "package.json")) as Record<string, string>)["version"] ?? "0.0.0";
+const runtimeTaskDir = FLOW_AGENTS_RUNTIME_DIR;
+const durableInstallRecordRel = `${DURABLE_FLOW_AGENTS_DIR}/install.json`;
 const textExtensions = new Set([".css", ".html", ".js", ".json", ".md", ".sh", ".toml", ".txt", ".yaml", ".yml", ".ts"]);
 const dropDiagnostics: string[] = [];
 const printDiagnostics = !["0", "false", "no"].includes(String(process.env.FLOW_AGENTS_EXPORT_DIAGNOSTICS ?? "1").toLowerCase());
@@ -181,7 +184,7 @@ function generatedAgentsSummary(agents: Agent[]): string {
 function exportRootAgentsMd(label: string, agents: Agent[], taskDir: string): string {
   return `# Universal Agent Bundle (${label})\n\nThis bundle was generated from the canonical source in this repo. Treat the repo root as the source of truth and regenerate the bundle instead of editing exported agent files by hand.\n\n## Shared Conventions\n\n- \`skills/\`, \`context/\`, \`powers/\`, \`prompts/\`, \`scripts/\`, and \`evals/\` were copied from the canonical source.\n- Cross-session task artifacts should live under \`${taskDir}\`.\n- Kiro-only hook wiring was stripped from exported non-Kiro agents to keep the package portable.\n\n## Exported Agents\n\n${generatedAgentsSummary(agents)}\n`;
 }
-const CODEX_LIVE_HOOKS_README = `\n## Running with hooks active (live)\n\n\`install.sh\` lays the bundle into a workspace, but a live Codex session needs a \`CODEX_HOME\` that has both the bundle's hooks/scripts AND your real credentials. Use the dedicated installer, which flattens the config to the home root and copies your auth from \`~/.codex\`:\n\n\`\`\`bash\nbash scripts/install-codex-home.sh "$HOME/.flow-agents/codex"\nCODEX_HOME="$HOME/.flow-agents/codex" codex exec --dangerously-bypass-hook-trust -C /path/to/project "<prompt>"\n\`\`\`\n\nThe goal-fit Stop hook then enforces by default (\`FLOW_AGENTS_GOAL_FIT_MODE=block\`); set it to \`warn\` or \`off\` to override.\n`;
+const CODEX_LIVE_HOOKS_README = `\n## Running with hooks active (live)\n\n\`install.sh\` lays the bundle into a workspace, but a live Codex session needs a \`CODEX_HOME\` that has both the bundle's hooks/scripts AND your real credentials. Use the dedicated installer, which defaults to \`CODEX_HOME\` when set and otherwise \`~/.codex\`, flattens the config to the home root, and copies your auth from \`~/.codex\` when installing elsewhere:\n\n\`\`\`bash\nbash scripts/install-codex-home.sh\ncodex exec --dangerously-bypass-hook-trust -C /path/to/project \"<prompt>\"\n\`\`\`\n\nPass a positional destination to install into an explicit alternate Codex home.\n\nThe goal-fit Stop hook then enforces by default (\`FLOW_AGENTS_GOAL_FIT_MODE=block\`); set it to \`warn\` or \`off\` to override.\n`;
 function exportTargetReadme(label: string, installHint: string, extra = ""): string {
   return `# ${label} Bundle\n\nGenerated from the canonical source in this repository.\n\n## Install\n\n\`\`\`bash\n${installHint}\n\`\`\`\n\nThe install ships the full standalone base (skills, agents, powers) plus the\nFlow Kits. Kit depth is activated through the Kit Catalog, not at install time.\n\n## Contents\n\n- Harness-specific agents\n- Shared skills\n- Shared context, powers, prompts, scripts, and evals\n${extra}`;
 }
@@ -330,9 +333,9 @@ function installScript(label: string, defaultDestDisplay: string, token?: string
   const requiredCheck = destRequired ? `if [[ -z "$DEST" ]]; then\n  usage\n  exit 2\nfi\n` : "";
   const usageDest = destRequired ? "/path/to/workspace" : defaultDestDisplay;
   const mergeBlock = mergeConfig
-    ? `\nif command -v node >/dev/null 2>&1; then\n  node "$DEST/scripts/install-merge.js" --config "$DEST/${mergeConfig.configRelPath}" --managed-hooks "$SRC/${mergeConfig.managedConfigRelPath}" --version "${mergeConfig.version}" --install-record "$DEST/.flow-agents/install.json" --runtime "${mergeConfig.runtime}" || true\nfi`
+    ? `\nif command -v node >/dev/null 2>&1; then\n  node "$DEST/scripts/install-merge.js" --config "$DEST/${mergeConfig.configRelPath}" --managed-hooks "$SRC/${mergeConfig.managedConfigRelPath}" --version "${mergeConfig.version}" --install-record "$DEST/${durableInstallRecordRel}" --runtime "${mergeConfig.runtime}" || true\nfi`
     : stampConfig
-    ? `\nif command -v node >/dev/null 2>&1; then\n  node "$DEST/scripts/install-merge.js" --stamp-only --version "${stampConfig.version}" --install-record "$DEST/.flow-agents/install.json" --runtime "${stampConfig.runtime}" || true\nfi`
+    ? `\nif command -v node >/dev/null 2>&1; then\n  node "$DEST/scripts/install-merge.js" --stamp-only --version "${stampConfig.version}" --install-record "$DEST/${durableInstallRecordRel}" --runtime "${stampConfig.runtime}" || true\nfi`
     : "";
   return `#!/usr/bin/env bash\nset -euo pipefail\n\nusage() {\n  cat >&2 <<'EOF'\nusage: bash install.sh ${usageDest} [options]\n\nOptions:\n  --telemetry-sink NAME   local-files, local-kontour-console,\n                          kontour-hosted-console, user-hosted-console,\n                          or legacy aliases. May be repeated.\n  --console-url URL       Persist Console telemetry base URL.\n  --console-endpoint URL  Persist full Console telemetry records endpoint URL.\n  --console-token-file PATH\n                          Read Console telemetry bearer token from a file.\n  --console-tenant ID     Persist Console tenant identifier.\nEOF\n}\n\nDEST=""\nDEST_SET=0\nCONSOLE_CONFIG_ARGS=()\nwhile [[ $# -gt 0 ]]; do\n  case "$1" in\n    --telemetry-sink|--telemetry-sinks|--console-url|--console-endpoint|--console-endpoint-url|--console-token-file|--console-tenant|--console-tenant-id)\n      [[ $# -ge 2 ]] || { echo "install.sh: $1 requires a value" >&2; exit 2; }\n      CONSOLE_CONFIG_ARGS+=("$1" "$2")\n      shift 2\n      ;;\n    --help|-h)\n      usage\n      exit 0\n      ;;\n    -*)\n      echo "install.sh: unknown option: $1" >&2\n      usage\n      exit 2\n      ;;\n    *)\n      if [[ "$DEST_SET" -eq 1 ]]; then\n        echo "install.sh: unexpected argument: $1" >&2\n        usage\n        exit 2\n      fi\n      DEST="$1"\n      DEST_SET=1\n      shift\n      ;;\n  esac\ndone${destFallback}\n${requiredCheck}SRC="$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)"\n\nmkdir -p "$DEST"\nrsync -a ${token ? "--delete " : ""}${mergeConfig ? `--exclude="${mergeConfig.configRelPath}" ` : ""}"$SRC"/ "$DEST"/${replaceBlock}${mergeBlock}\nif [[ \${#CONSOLE_CONFIG_ARGS[@]} -gt 0 || -n "\${FLOW_AGENTS_TELEMETRY_SINK:-}" || -n "\${FLOW_AGENTS_TELEMETRY_SINKS:-}" || -n "\${FLOW_AGENTS_CONSOLE_URL:-}" || -n "\${CONSOLE_TELEMETRY_URL:-}" || -n "\${CONSOLE_URL:-}" || -n "\${FLOW_AGENTS_CONSOLE_TOKEN_FILE:-}" || -n "\${CONSOLE_TELEMETRY_TOKEN_FILE:-}" ]]; then\n  bash "$DEST/scripts/telemetry/install-console-config.sh" "$DEST/scripts/telemetry/telemetry.conf" "\${CONSOLE_CONFIG_ARGS[@]}"\nfi\necho "Installed ${label} bundle ${token ? "to" : "into"} $DEST"\n`;
 }
@@ -341,8 +344,8 @@ function buildBase(agents: Agent[]): void {
   const bundle = path.join(dist, "base");
   resetDir(bundle);
   copySharedContent(bundle, "base", "<bundle-root>");
-  writeText(path.join(bundle, ".flow-agents", ".gitkeep"), "");
-  writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Base", agents, ".flow-agents"));
+  writeText(path.join(bundle, runtimeTaskDir, ".gitkeep"), "");
+  writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Base", agents, runtimeTaskDir));
   writeText(path.join(bundle, "README.md"), exportTargetReadme("Base", "bash install.sh /path/to/workspace"));
   writeText(path.join(bundle, "install.sh"), installScript("Base", "/path/to/workspace", undefined, undefined, undefined, { runtime: "base", version: pkgVersion }));
   fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
@@ -354,7 +357,7 @@ function buildKiro(agents: Agent[]): void {
   resetDir(bundle);
   copySharedContent(bundle, "kiro", token);
   for (const spec of agents) writeText(path.join(bundle, "agents", `${spec.name}.json`), sanitizeText(`${JSON.stringify(sanitizeAgentJson(spec), null, 2)}\n`, "kiro", token));
-  writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Kiro", agents, ".flow-agents"));
+  writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Kiro", agents, runtimeTaskDir));
   writeText(path.join(bundle, "README.md"), exportTargetReadme("Kiro", "bash install.sh $HOME/.flow-agents"));
   writeText(path.join(bundle, "install.sh"), installScript("Kiro", "$HOME/.flow-agents", token, '${FLOW_AGENTS_DEST:-$HOME/.flow-agents}', undefined, { runtime: "kiro", version: pkgVersion }));
   fs.chmodSync(path.join(bundle, "install.sh"), 0o755);

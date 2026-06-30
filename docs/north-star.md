@@ -206,7 +206,7 @@ Exit criteria:
 
 - A workflow can resume from artifacts without relying on the model remembering prior turns.
 - Goal Fit, evidence status, and next action can be read mechanically.
-- Multiple agents can share one workflow root by resolving `.flow-agents/current.json` and appending agent-local events instead of racing on root state.
+- Multiple agents can share one workflow root by resolving `.kontourai/flow-agents/current.json` and appending agent-local events instead of racing on root state.
 
 ## Phase 3: Add Just-In-Time Guidance
 
@@ -261,7 +261,7 @@ Tasks:
 - Add promotion gates so guidance becomes stricter only after evidence shows it helps.
 - Make dashboards answer whether Flow Agents is improving outcomes over time.
 - Dogfood the workflow artifacts on Flow Agents changes: each substantial pass should produce sidecars, run artifact validation, delegate critique, update durable docs, and route accepted critique into the next slice. **Started:** `npm run workflow:sidecar -- dogfood-pass` records evidence, required critique, optional release readiness, optional learning, state, and handoff in one fail-closed validated pass.
-- Automatically create or select the current session artifact so self-validation does not depend on the user or orchestrator hand-picking `.flow-agents/<slug>`. **Started:** `npm run workflow:sidecar -- ensure-session` creates or selects a delivery session artifact plus initial state, acceptance, and handoff sidecars.
+- Automatically create or select the current session artifact so self-validation does not depend on the user or orchestrator hand-picking `.kontourai/flow-agents/<slug>`. **Started:** `npm run workflow:sidecar -- ensure-session` creates or selects a delivery session artifact plus initial state, acceptance, and handoff sidecars.
 
 Exit criteria:
 

@@ -19,7 +19,7 @@ AGENT="${AGENT:-${FLOW_AGENTS_EVAL_AGENT:-dev}}"
 
 profile_for_agent() {
   case "$1" in
-    dev) echo "kdev" ;;
+    dev) echo "builder" ;;
     *) echo "" ;;
   esac
 }

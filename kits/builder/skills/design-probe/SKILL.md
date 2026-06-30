@@ -107,21 +107,21 @@ This applies whether the probe is run directly (generic) or as part of a Builder
 **Claim 1 — Pickup readiness** (probe passed, goal fit and scope confirmed):
 
 ```bash
-npm run workflow:sidecar -- record-gate-claim .flow-agents/<slug> \
+npm run workflow:sidecar -- record-gate-claim .kontourai/flow-agents/<slug> \
   --expectation pickup-probe-readiness \
   --status pass \
   --summary "Design probe passed: goal fit confirmed, scope aligned, planning readiness verified." \
-  --evidence-ref-json '{"kind":"artifact","file":".flow-agents/<slug>/<slug>--<artifact>.md","summary":"Design-probe artifact with decisions, accepted gaps, and planning readiness."}'
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/<slug>/<slug>--<artifact>.md","summary":"Design-probe artifact with decisions, accepted gaps, and planning readiness."}'
 ```
 
 **Claim 2 — Probe decisions captured**:
 
 ```bash
-npm run workflow:sidecar -- record-gate-claim .flow-agents/<slug> \
+npm run workflow:sidecar -- record-gate-claim .kontourai/flow-agents/<slug> \
   --expectation probe-decisions-or-accepted-gaps \
   --status pass \
   --summary "Probe decisions recorded: decisions made, unresolved questions explicit, planning readiness confirmed." \
-  --evidence-ref-json '{"kind":"artifact","file":".flow-agents/<slug>/<slug>--<artifact>.md","summary":"Design-probe artifact with decisions and accepted gaps."}'
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/<slug>/<slug>--<artifact>.md","summary":"Design-probe artifact with decisions and accepted gaps."}'
 ```
 
 Record both claims when shared understanding exists and the next action is `plan-work` or equivalent. Use `--status fail` when stopping due to an unresolved blocker. Skip these claims entirely when `design-probe` is used outside a Builder Kit flow (no active `builder.build` flow step in `current.json`).

@@ -48,7 +48,7 @@ If a fix is needed, report it as a finding. The orchestrator routes it back to e
 
 ## Input
 
-- Session file path in `.flow-agents/<slug>/` when available
+- Session file path in `.kontourai/flow-agents/<slug>/` when available
 - Plan artifact or implementation summary
 - Modified files from execution progress or `git diff --name-only`
 - Project standards, especially `context/code-review-standards.md` when present
@@ -84,6 +84,29 @@ lockfile risk using configured read-only tooling, but review-work must not add
 package-registry behavior, update dependencies, or install scanners. If the
 required dependency review cannot run, record the dependency lane as
 `not_verified`.
+
+For multi-repo or cross-product work, dependency review must preserve the full
+scope. Before delegating, enumerate every affected repo/package-manager root and
+record one status per root:
+
+- `pass`: dependency review ran and found no blocking issue
+- `fail`: dependency review ran and found a blocking advisory, version, or
+  lockfile issue
+- `skip_no_manifest`: the root has no supported dependency manifest
+- `not_verified`: review could not run or the result is unavailable
+
+Do not narrow the dependency lane to only roots that failed build/test. If the
+work changed shared conventions, generated artifact paths, install scripts, CI,
+or workspace-wide guidance, the dependency review summary must say which product
+roots were included and which were out of scope.
+
+External advisory/audit services can disclose private dependency metadata. Before
+running tools such as `npm audit`, registry lookups, or vendor advisory APIs,
+record whether the user explicitly approved that disclosure for the affected
+roots. If approval is absent, rejected, or too ambiguous for the local execution
+policy, keep local inventory evidence and mark the external-audit portion
+`not_verified` with the approval/privacy blocker. Do not convert that blocker
+into a clean pass.
 
 ## IaC/Policy Review Triggers
 

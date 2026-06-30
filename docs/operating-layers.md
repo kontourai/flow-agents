@@ -18,7 +18,7 @@ For the concrete directory-by-directory source map, generated output policy, run
 | Skills | Reusable procedures an agent can invoke when a task matches | Always-on policy, credentials, or long-lived memory | Agent Skills / `SKILL.md` |
 | Powers | Tool bundles, MCP configs, and activation guidance | Workflow gates or repo-specific policy semantics | MCP, OpenAPI, OAuth/OIDC |
 | Agents | Role prompts, delegation boundaries, and scoped tool access | Generic task procedures that should be skills | Harness-native subagents/profiles |
-| Workflows | Durable state, gates, handoffs, acceptance criteria, and phase transitions | Domain-specific knowledge records or tool internals | JSON Schema sidecars plus Markdown summaries |
+| Workflows | Resumable state, gates, handoffs, acceptance criteria, and phase transitions | Domain-specific knowledge records or tool internals | JSON Schema sidecars plus Markdown summaries |
 | Knowledge | People, organizations, meetings, decisions, commitments, notes, and follow-ups | Verification verdicts or runtime telemetry | CommonMark, JSContact, iCalendar, JMAP, WebVTT/SRT, JSON-LD |
 | Evidence | Proof, telemetry, findings, evals, provenance, and quality outcomes | User-facing procedure instructions | OpenTelemetry, SARIF, CycloneDX, SLSA, JSON Schema |
 
@@ -37,7 +37,8 @@ Governance tools such as Veritas belong at the Evidence boundary. Flow Agents sh
 | `kits/` | Flow Kits | Kit Catalog entries, Flow Kit manifests, Flow Definitions, and supporting assets. Builder Kit is the first proof point. |
 | `prompts/` | Skills / Rules | Saved invocations. Promote repeatable procedures into skills when they grow stable. |
 | `docs/workflow-*.md` | Workflows | Human-readable workflow contracts and usage guidance. |
-| `.flow-agents/` | Workflows | Cross-session task artifacts. Runtime state stays local and ignored; durable outcomes are promoted into docs, source, schemas, or provider records before merge. |
+| `.kontourai/flow-agents/` | Workflows | Non-durable cross-session task artifacts and generated projections. Runtime state stays local and ignored; durable outcomes are promoted into docs, source, schemas, or provider records before merge. |
+| `.flow-agents/` | Workflows | Flow Agents-owned durable config/install state when a distribution explicitly owns that path. Not a runtime artifact fallback. |
 | `scripts/` | Evidence / Workflows / Packaging | Validation, build, telemetry, hooks, and artifact tooling. |
 | `src/` | Workflows / Evidence / Packaging | TypeScript CLI, runtime adapter, Flow Kit, shared library, build, validation, context-map, packaging, and CLI helper source compiled into `build/src/`. |
 | `evals/` | Evidence | Static, behavioral, integration, and acceptance checks. |
@@ -80,7 +81,7 @@ Builder Kit evidence gates can reference Surface trust state without naming a pr
 Workflow artifacts have their own lifecycle policy:
 https://github.com/kontourai/flow-agents/blob/main/docs/workflow-artifact-lifecycle.md
 
-Use `.flow-agents/<slug>/` for local runtime/session state. If in-progress planning needs review or handoff, promote the durable decision, behavior, and evidence summary into normal docs or provider records before merge; keep runtime artifacts out of git.
+Use `.kontourai/flow-agents/<slug>/` for local runtime/session state. Keep `.flow-agents/` for explicit durable Flow Agents config/install state. If in-progress planning needs review or handoff, promote the durable decision, behavior, and evidence summary into normal docs or provider records before merge; keep runtime artifacts out of git.
 
 If a proposed artifact seems to belong to multiple layers, split it. For example, a dependency-checking capability may have:
 

@@ -9,7 +9,7 @@
  * against this captured truth: a check claiming a command passed while the log
  * shows it FAILED is a caught false-completion.
  *
- * Records to `.flow-agents/<slug>/command-log.jsonl`, one JSON object per line:
+ * Records to `.kontourai/flow-agents/<slug>/command-log.jsonl`, one JSON object per line:
  *   {
  *     "command":        "<the command string the agent ran>",
  *     "observedResult": "pass" | "fail",   // deterministically inferred
@@ -168,7 +168,7 @@ function readJsonFile(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
 }
 
-// Newest-mtime state.json under .flow-agents/<slug>/, mirroring how
+// Newest-mtime state.json under .kontourai/flow-agents/<slug>/, mirroring how
 // workflow-steering.js and stop-goal-fit.js locate the active artifact dir.
 function latestStateDir(flowAgentsDir) {
   let best = null;
@@ -194,7 +194,7 @@ function latestStateDir(flowAgentsDir) {
 
 /**
  * Resolve the active artifact directory the same way the other hooks do:
- * prefer .flow-agents/current.json (active_slug / artifact_dir), then fall back
+ * prefer .kontourai/flow-agents/current.json (active_slug / artifact_dir), then fall back
  * to the newest-mtime state.json directory.
  */
 function resolveArtifactDir(root) {

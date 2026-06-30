@@ -174,7 +174,7 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["build", "types", "lint", "test", "security", "diff", "browser", "runtime", "policy", "external"]
+            "enum": ["build", "types", "lint", "test", "command", "security", "diff", "browser", "runtime", "policy", "external"]
           },
           "status": {
             "type": "string",

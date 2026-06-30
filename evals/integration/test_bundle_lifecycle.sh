@@ -231,18 +231,18 @@ OPENCODE_USER="$TMPDIR_EVAL/user-opencode"
 # Create user-owned files (unknown to the bundle)
 mkdir -p "$CLAUDE_USER/.claude/custom"
 echo "# user custom agent" > "$CLAUDE_USER/.claude/custom/my-custom-agent.md"
-mkdir -p "$CLAUDE_USER/.flow-agents/my-session"
-echo '{"custom":"data"}' > "$CLAUDE_USER/.flow-agents/my-session/state.json"
+mkdir -p "$CLAUDE_USER/.kontourai/flow-agents/my-session"
+echo '{"custom":"data"}' > "$CLAUDE_USER/.kontourai/flow-agents/my-session/state.json"
 
 mkdir -p "$CODEX_USER/.codex/custom"
 printf 'name = "my-custom-agent"\n' > "$CODEX_USER/.codex/custom/my-custom-agent.toml"
-mkdir -p "$CODEX_USER/.flow-agents/my-session"
-echo '{"custom":"data"}' > "$CODEX_USER/.flow-agents/my-session/state.json"
+mkdir -p "$CODEX_USER/.kontourai/flow-agents/my-session"
+echo '{"custom":"data"}' > "$CODEX_USER/.kontourai/flow-agents/my-session/state.json"
 
 mkdir -p "$OPENCODE_USER/.opencode/custom"
 echo "# user custom agent" > "$OPENCODE_USER/.opencode/custom/my-custom-agent.md"
-mkdir -p "$OPENCODE_USER/.flow-agents/my-session"
-echo '{"custom":"data"}' > "$OPENCODE_USER/.flow-agents/my-session/state.json"
+mkdir -p "$OPENCODE_USER/.kontourai/flow-agents/my-session"
+echo '{"custom":"data"}' > "$OPENCODE_USER/.kontourai/flow-agents/my-session/state.json"
 
 # Modify an installed skill file to simulate user edits
 CLAUDE_INSTALLED_SKILL="$CLAUDE_USER/.claude/skills/plan-work/SKILL.md"
@@ -272,19 +272,19 @@ fi
 (cd "$ROOT_DIR/dist/opencode" && bash install.sh "$OPENCODE_USER" >/dev/null 2>&1) || true
 
 # Assert: user-owned unknown files survive
-if [[ -f "$CLAUDE_USER/.claude/custom/my-custom-agent.md" && -f "$CLAUDE_USER/.flow-agents/my-session/state.json" ]]; then
+if [[ -f "$CLAUDE_USER/.claude/custom/my-custom-agent.md" && -f "$CLAUDE_USER/.kontourai/flow-agents/my-session/state.json" ]]; then
   _pass "claude-code re-install: user-owned files not removed by rsync"
 else
   _fail "claude-code re-install: user-owned files were removed"
 fi
 
-if [[ -f "$CODEX_USER/.codex/custom/my-custom-agent.toml" && -f "$CODEX_USER/.flow-agents/my-session/state.json" ]]; then
+if [[ -f "$CODEX_USER/.codex/custom/my-custom-agent.toml" && -f "$CODEX_USER/.kontourai/flow-agents/my-session/state.json" ]]; then
   _pass "codex re-install: user-owned files not removed by rsync"
 else
   _fail "codex re-install: user-owned files were removed"
 fi
 
-if [[ -f "$OPENCODE_USER/.opencode/custom/my-custom-agent.md" && -f "$OPENCODE_USER/.flow-agents/my-session/state.json" ]]; then
+if [[ -f "$OPENCODE_USER/.opencode/custom/my-custom-agent.md" && -f "$OPENCODE_USER/.kontourai/flow-agents/my-session/state.json" ]]; then
   _pass "opencode re-install: user-owned files not removed by rsync"
 else
   _fail "opencode re-install: user-owned files were removed"
@@ -528,7 +528,7 @@ fi
 # and point CLAUDE_PROJECT_DIR there so the hook can resolve its scripts.
 # This mirrors the real dogfood use case where the repo root has scripts/ from the bundle.
 DOGFOOD_WORKSPACE="$CLAUDE_IDEM"  # reuse the installed workspace from the idempotent section
-mkdir -p "$DOGFOOD_WORKSPACE/.flow-agents"
+mkdir -p "$DOGFOOD_WORKSPACE/.kontourai/flow-agents"
 
 if node - "$DOGFOOD_DEST2/.claude/settings.json" "$DOGFOOD_WORKSPACE" << 'NODE'
 const fs = require("node:fs");
@@ -537,7 +537,7 @@ const { spawnSync } = require("node:child_process");
 const [settingsPath, workspace] = process.argv.slice(2);
 
 // Write minimal fixtures for workflow-steering into the workspace
-const taskDir = path.join(workspace, ".flow-agents", "dogfood-hook-demo");
+const taskDir = path.join(workspace, ".kontourai", "flow-agents", "dogfood-hook-demo");
 fs.mkdirSync(taskDir, { recursive: true });
 const state = {
   schema_version: "1.0",

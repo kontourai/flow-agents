@@ -172,11 +172,15 @@ if node - "$DIST_DIR/codex/.codex" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 const root = process.argv[2];
-const expected = ["kdev", "kdev-br"];
+const expected = ["builder", "personal"];
 const missingFiles = expected.filter((name) => !fs.existsSync(path.join(root, `${name}.config.toml`)));
 if (missingFiles.length) throw new Error(`profile-v2 config files missing: ${missingFiles.join(", ")}`);
+const extra = fs.readdirSync(root).filter((name) => name.endsWith(".config.toml") && !expected.includes(name.replace(/\.config\.toml$/, "")));
+if (extra.length) throw new Error(`unexpected generated profile files: ${extra.join(", ")}`);
 const missing = expected.filter((name) => !fs.readFileSync(path.join(root, `${name}.config.toml`), "utf8").includes('approvals_reviewer = "auto_review"'));
 if (missing.length) throw new Error(`profile auto-review approval reviewer missing: ${missing.join(", ")}`);
+const personal = fs.readFileSync(path.join(root, "personal.config.toml"), "utf8");
+if (!personal.includes("Flow Agents Personal mode") || !personal.includes("knowledge-capture")) throw new Error("personal profile does not carry knowledge-work instructions");
 console.log("ok");
 NODE
 then
@@ -373,7 +377,7 @@ fi
 
 echo ""
 echo "--- Shared Task Dirs ---"
-for dir in "$DIST_DIR/claude-code/.flow-agents" "$DIST_DIR/codex/.flow-agents" "$DIST_DIR/opencode/.flow-agents" "$DIST_DIR/pi/.flow-agents"; do
+for dir in "$DIST_DIR/claude-code/.kontourai/flow-agents" "$DIST_DIR/codex/.kontourai/flow-agents" "$DIST_DIR/opencode/.kontourai/flow-agents" "$DIST_DIR/pi/.kontourai/flow-agents"; do
   if [[ -d "$dir" ]]; then
     _pass "$(realpath "$dir" 2>/dev/null || echo "$dir") exists"
   else

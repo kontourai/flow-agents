@@ -9,7 +9,7 @@
 #
 # Covers:
 #   AC1 — config-protection.js: blocked Write/Edit to kill-switch / routing files
-#         (.claude/settings.json, shell profiles, .flow-agents/current.json) and
+#         (.claude/settings.json, shell profiles, .kontourai/flow-agents/current.json) and
 #         shell-redirect detection (best-effort, incomplete coverage).
 #   AC2 — stop-goal-fit.js: MAX_BLOCKS cannot release a HARD block (false-completion
 #         / integrity failure); only soft/advisory streaks may auto-release.
@@ -40,11 +40,11 @@ trap cleanup EXIT
 
 seed_repo_inprogress() { # $1=dir $2=slug $3=phase(opt) $4=status(opt)
   local dir="$1" slug="$2" phase="${3:-execution}" status="${4:-in_progress}"
-  mkdir -p "$dir/.flow-agents/$slug"
+  mkdir -p "$dir/.kontourai/flow-agents/$slug"
   printf '# Repo\n' > "$dir/AGENTS.md"
   printf '%s' "{\"schema_version\":\"1.0\",\"task_slug\":\"$slug\",\"status\":\"$status\",\"phase\":\"$phase\",\"updated_at\":\"2026-06-27T00:00:00Z\",\"next_action\":{\"status\":\"in_progress\",\"summary\":\"Testing\"}}" \
-    > "$dir/.flow-agents/$slug/state.json"
-  cat > "$dir/.flow-agents/$slug/$slug--deliver.md" << MD
+    > "$dir/.kontourai/flow-agents/$slug/state.json"
+  cat > "$dir/.kontourai/flow-agents/$slug/$slug--deliver.md" << MD
 # $slug
 
 branch: main
@@ -58,11 +58,11 @@ MD
 
 seed_repo_preexec() { # $1=dir $2=slug
   local dir="$1" slug="$2"
-  mkdir -p "$dir/.flow-agents/$slug"
+  mkdir -p "$dir/.kontourai/flow-agents/$slug"
   printf '# Repo\n' > "$dir/AGENTS.md"
   printf '%s' "{\"schema_version\":\"1.0\",\"task_slug\":\"$slug\",\"status\":\"planned\",\"phase\":\"planning\",\"updated_at\":\"2026-06-27T00:00:00Z\",\"next_action\":{\"status\":\"planned\",\"summary\":\"Planning\"}}" \
-    > "$dir/.flow-agents/$slug/state.json"
-  cat > "$dir/.flow-agents/$slug/$slug--deliver.md" << MD
+    > "$dir/.kontourai/flow-agents/$slug/state.json"
+  cat > "$dir/.kontourai/flow-agents/$slug/$slug--deliver.md" << MD
 # $slug
 
 branch: main
@@ -189,15 +189,15 @@ for profile in ".bash_profile" ".bashrc" ".profile" ".zprofile" ".zshrc"; do
 done
 
 echo ""
-echo "--- AC1.3: Write/Edit to .flow-agents/current.json BLOCKED ---"
+echo "--- AC1.3: Write/Edit to .kontourai/flow-agents/current.json BLOCKED ---"
 set +e
-prot_out=$(echo '{"tool_name":"Write","tool_input":{"path":"/repo/.flow-agents/current.json"}}' | node "$PROT" 2>&1)
+prot_out=$(echo '{"tool_name":"Write","tool_input":{"path":"/repo/.kontourai/flow-agents/current.json"}}' | node "$PROT" 2>&1)
 prot_exit=$?
 set -e
 if [ "$prot_exit" -eq 2 ] && echo "$prot_out" | grep -q "BLOCKED"; then
-  _pass "Write to .flow-agents/current.json blocked (exit 2)"
+  _pass "Write to .kontourai/flow-agents/current.json blocked (exit 2)"
 else
-  _fail "Write to .flow-agents/current.json NOT blocked (exit=$prot_exit)"
+  _fail "Write to .kontourai/flow-agents/current.json NOT blocked (exit=$prot_exit)"
 fi
 
 echo ""
@@ -238,15 +238,15 @@ else
 fi
 
 echo ""
-echo "--- AC1.7: tee .flow-agents/current.json BLOCKED ---"
+echo "--- AC1.7: tee .kontourai/flow-agents/current.json BLOCKED ---"
 set +e
-prot_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"echo {} | tee .flow-agents/current.json"}}' | node "$PROT" 2>&1)
+prot_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"echo {} | tee .kontourai/flow-agents/current.json"}}' | node "$PROT" 2>&1)
 prot_exit=$?
 set -e
 if [ "$prot_exit" -eq 2 ]; then
-  _pass "tee to .flow-agents/current.json blocked (exit 2)"
+  _pass "tee to .kontourai/flow-agents/current.json blocked (exit 2)"
 else
-  _fail "tee to .flow-agents/current.json NOT blocked (exit=$prot_exit)"
+  _fail "tee to .kontourai/flow-agents/current.json NOT blocked (exit=$prot_exit)"
 fi
 
 echo ""
@@ -276,15 +276,15 @@ else
 fi
 
 echo ""
-echo "--- AC1.11: tee multi-file — tee /tmp/x .flow-agents/current.json BLOCKED ---"
+echo "--- AC1.11: tee multi-file — tee /tmp/x .kontourai/flow-agents/current.json BLOCKED ---"
 set +e
-prot_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"echo {} | tee /tmp/x .flow-agents/current.json"}}' | node "$PROT" 2>&1)
+prot_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"echo {} | tee /tmp/x .kontourai/flow-agents/current.json"}}' | node "$PROT" 2>&1)
 prot_exit=$?
 set -e
 if [ "$prot_exit" -eq 2 ] && echo "$prot_out" | grep -q "BLOCKED"; then
-  _pass "tee /tmp/x .flow-agents/current.json blocked (protected 2nd arg checked) (exit 2)"
+  _pass "tee /tmp/x .kontourai/flow-agents/current.json blocked (protected 2nd arg checked) (exit 2)"
 else
-  _fail "tee /tmp/x .flow-agents/current.json NOT blocked (exit=$prot_exit, out=$prot_out)"
+  _fail "tee /tmp/x .kontourai/flow-agents/current.json NOT blocked (exit=$prot_exit, out=$prot_out)"
 fi
 
 echo ""
@@ -325,27 +325,27 @@ echo ""
 echo "=== AC1 R5a: state.json/trust.bundle protection + interpreter-write detection ==="
 
 echo ""
-echo "--- AC1.13: Write to .flow-agents/slug/state.json BLOCKED (R5a) ---"
+echo "--- AC1.13: Write to .kontourai/flow-agents/slug/state.json BLOCKED (R5a) ---"
 set +e
-prot_out=$(echo '{"tool_name":"Write","tool_input":{"path":"/repo/.flow-agents/my-slug/state.json"}}' | node "$PROT" 2>&1)
+prot_out=$(echo '{"tool_name":"Write","tool_input":{"path":"/repo/.kontourai/flow-agents/my-slug/state.json"}}' | node "$PROT" 2>&1)
 prot_exit=$?
 set -e
 if [ "$prot_exit" -eq 2 ] && echo "$prot_out" | grep -q "BLOCKED"; then
-  _pass "Write to .flow-agents/slug/state.json blocked (exit 2)"
+  _pass "Write to .kontourai/flow-agents/slug/state.json blocked (exit 2)"
 else
-  _fail "Write to .flow-agents/slug/state.json NOT blocked (exit=$prot_exit)"
+  _fail "Write to .kontourai/flow-agents/slug/state.json NOT blocked (exit=$prot_exit)"
 fi
 
 echo ""
-echo "--- AC1.14: Edit to .flow-agents/slug/trust.bundle BLOCKED (R5a) ---"
+echo "--- AC1.14: Edit to .kontourai/flow-agents/slug/trust.bundle BLOCKED (R5a) ---"
 set +e
-prot_out=$(echo '{"tool_name":"Edit","tool_input":{"path":"/repo/.flow-agents/my-slug/trust.bundle"}}' | node "$PROT" 2>&1)
+prot_out=$(echo '{"tool_name":"Edit","tool_input":{"path":"/repo/.kontourai/flow-agents/my-slug/trust.bundle"}}' | node "$PROT" 2>&1)
 prot_exit=$?
 set -e
 if [ "$prot_exit" -eq 2 ] && echo "$prot_out" | grep -q "BLOCKED"; then
-  _pass "Edit to .flow-agents/slug/trust.bundle blocked (exit 2)"
+  _pass "Edit to .kontourai/flow-agents/slug/trust.bundle blocked (exit 2)"
 else
-  _fail "Edit to .flow-agents/slug/trust.bundle NOT blocked (exit=$prot_exit)"
+  _fail "Edit to .kontourai/flow-agents/slug/trust.bundle NOT blocked (exit=$prot_exit)"
 fi
 
 echo ""
@@ -363,25 +363,49 @@ fi
 echo ""
 echo "--- AC1.16: Bash redirect > to state.json BLOCKED (R5a: REDIRECT_PROTECTED_RE extended) ---"
 set +e
-prot_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"echo {} > .flow-agents/slug/state.json"}}' | node "$PROT" 2>&1)
+prot_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"echo {} > .kontourai/flow-agents/slug/state.json"}}' | node "$PROT" 2>&1)
 prot_exit=$?
 set -e
 if [ "$prot_exit" -eq 2 ] && echo "$prot_out" | grep -q "BLOCKED"; then
-  _pass "Bash redirect > .flow-agents/slug/state.json blocked (exit 2)"
+  _pass "Bash redirect > .kontourai/flow-agents/slug/state.json blocked (exit 2)"
 else
-  _fail "Bash redirect > .flow-agents/slug/state.json NOT blocked (exit=$prot_exit)"
+  _fail "Bash redirect > .kontourai/flow-agents/slug/state.json NOT blocked (exit=$prot_exit)"
 fi
 
 echo ""
 echo "--- AC1.17: tee to trust.bundle BLOCKED (R5a: REDIRECT_PROTECTED_RE extended) ---"
 set +e
-prot_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"echo {} | tee .flow-agents/slug/trust.bundle"}}' | node "$PROT" 2>&1)
+prot_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"echo {} | tee .kontourai/flow-agents/slug/trust.bundle"}}' | node "$PROT" 2>&1)
 prot_exit=$?
 set -e
 if [ "$prot_exit" -eq 2 ] && echo "$prot_out" | grep -q "BLOCKED"; then
-  _pass "tee to .flow-agents/slug/trust.bundle blocked (exit 2)"
+  _pass "tee to .kontourai/flow-agents/slug/trust.bundle blocked (exit 2)"
 else
-  _fail "tee to .flow-agents/slug/trust.bundle NOT blocked (exit=$prot_exit)"
+  _fail "tee to .kontourai/flow-agents/slug/trust.bundle NOT blocked (exit=$prot_exit)"
+fi
+
+echo ""
+echo "--- AC1.17b: Write to goal-fit block streak BLOCKED ---"
+set +e
+prot_out=$(echo '{"tool_name":"Write","tool_input":{"path":"/repo/.kontourai/flow-agents/.goal-fit-block-streak.json"}}' | node "$PROT" 2>&1)
+prot_exit=$?
+set -e
+if [ "$prot_exit" -eq 2 ] && echo "$prot_out" | grep -q "BLOCKED"; then
+  _pass "Write to .kontourai/flow-agents/.goal-fit-block-streak.json blocked (exit 2)"
+else
+  _fail "Write to .kontourai/flow-agents/.goal-fit-block-streak.json NOT blocked (exit=$prot_exit)"
+fi
+
+echo ""
+echo "--- AC1.17c: tee to goal-fit block streak BLOCKED ---"
+set +e
+prot_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"echo {} | tee .kontourai/flow-agents/.goal-fit-block-streak.json"}}' | node "$PROT" 2>&1)
+prot_exit=$?
+set -e
+if [ "$prot_exit" -eq 2 ] && echo "$prot_out" | grep -q "BLOCKED"; then
+  _pass "tee to .kontourai/flow-agents/.goal-fit-block-streak.json blocked (exit 2)"
+else
+  _fail "tee to .kontourai/flow-agents/.goal-fit-block-streak.json NOT blocked (exit=$prot_exit)"
 fi
 
 echo ""
@@ -487,7 +511,7 @@ echo ""
 echo "--- AC1.R6a.2: Gate blocks npm test || exit 0 (claimed pass via laundered command) ---"
 R6LA="$TMP/r6la-laundering"
 seed_repo_inprogress "$R6LA" "launder-r6"
-python3 - "$R6LA/.flow-agents/launder-r6/trust.bundle" "launder-r6" "npm test || exit 0" << 'PY'
+python3 - "$R6LA/.kontourai/flow-agents/launder-r6/trust.bundle" "launder-r6" "npm test || exit 0" << 'PY'
 import json, sys
 bp, slug, cmd = sys.argv[1], sys.argv[2], sys.argv[3]
 bundle = {
@@ -505,7 +529,7 @@ bundle = {
 json.dump(bundle, open(bp, 'w'))
 PY
 printf '%s\n' '{"command":"npm test || exit 0","observedResult":"pass","exitCode":0,"capturedAt":"2026-06-27T00:00:00Z","source":"postToolUse-capture"}' \
-  > "$R6LA/.flow-agents/launder-r6/command-log.jsonl"
+  > "$R6LA/.kontourai/flow-agents/launder-r6/command-log.jsonl"
 
 set +e
 r6la_out=$(run_gate "$R6LA")
@@ -526,7 +550,7 @@ echo ""
 echo "--- AC1.R6a.3: Gate blocks npm test || echo ok (claimed pass via laundered command) ---"
 R6LB="$TMP/r6lb-laundering"
 seed_repo_inprogress "$R6LB" "launder-r6b"
-python3 - "$R6LB/.flow-agents/launder-r6b/trust.bundle" "launder-r6b" "npm test || echo ok" << 'PY'
+python3 - "$R6LB/.kontourai/flow-agents/launder-r6b/trust.bundle" "launder-r6b" "npm test || echo ok" << 'PY'
 import json, sys
 bp, slug, cmd = sys.argv[1], sys.argv[2], sys.argv[3]
 bundle = {
@@ -544,7 +568,7 @@ bundle = {
 json.dump(bundle, open(bp, 'w'))
 PY
 printf '%s\n' '{"command":"npm test || echo ok","observedResult":"pass","exitCode":0,"capturedAt":"2026-06-27T00:00:00Z","source":"postToolUse-capture"}' \
-  > "$R6LB/.flow-agents/launder-r6b/command-log.jsonl"
+  > "$R6LB/.kontourai/flow-agents/launder-r6b/command-log.jsonl"
 
 set +e
 r6lb_out=$(run_gate "$R6LB")
@@ -560,7 +584,7 @@ echo ""
 echo "--- AC1.R6a.4: Gate blocks npm test || /bin/true (claimed pass via laundered command) ---"
 R6LC="$TMP/r6lc-laundering"
 seed_repo_inprogress "$R6LC" "launder-r6c"
-python3 - "$R6LC/.flow-agents/launder-r6c/trust.bundle" "launder-r6c" "npm test || /bin/true" << 'PY'
+python3 - "$R6LC/.kontourai/flow-agents/launder-r6c/trust.bundle" "launder-r6c" "npm test || /bin/true" << 'PY'
 import json, sys
 bp, slug, cmd = sys.argv[1], sys.argv[2], sys.argv[3]
 bundle = {
@@ -578,7 +602,7 @@ bundle = {
 json.dump(bundle, open(bp, 'w'))
 PY
 printf '%s\n' '{"command":"npm test || /bin/true","observedResult":"pass","exitCode":0,"capturedAt":"2026-06-27T00:00:00Z","source":"postToolUse-capture"}' \
-  > "$R6LC/.flow-agents/launder-r6c/command-log.jsonl"
+  > "$R6LC/.kontourai/flow-agents/launder-r6c/command-log.jsonl"
 
 set +e
 r6lc_out=$(run_gate "$R6LC")
@@ -594,7 +618,7 @@ echo ""
 echo "--- AC1.R6a.5: Bare 'npm test' with PASS log NOT blocked (no over-flag) ---"
 R6LD="$TMP/r6ld-legit"
 seed_repo_inprogress "$R6LD" "legit-r6"
-python3 - "$R6LD/.flow-agents/legit-r6/trust.bundle" "legit-r6" << 'PY'
+python3 - "$R6LD/.kontourai/flow-agents/legit-r6/trust.bundle" "legit-r6" << 'PY'
 import json, sys
 bp, slug = sys.argv[1], sys.argv[2]
 bundle = {
@@ -612,7 +636,7 @@ bundle = {
 json.dump(bundle, open(bp, 'w'))
 PY
 printf '%s\n' '{"command":"npm test","observedResult":"pass","exitCode":0,"capturedAt":"2026-06-27T00:00:00Z","source":"postToolUse-capture"}' \
-  > "$R6LD/.flow-agents/legit-r6/command-log.jsonl"
+  > "$R6LD/.kontourai/flow-agents/legit-r6/command-log.jsonl"
 
 set +e
 r6ld_out=$(run_gate "$R6LD")
@@ -726,8 +750,8 @@ AC2D="$TMP/ac2-hard"
 seed_repo_inprogress "$AC2D" "ac2hard"
 # Evidence claims npm test passed, but log shows it failed → caught false-completion
 printf '%s' '{"schema_version":"1.0","task_slug":"ac2hard","verdict":"pass","checks":[{"id":"unit-tests","kind":"command","status":"pass","command":"npm test","summary":"passed"}]}' \
-  > "$AC2D/.flow-agents/ac2hard/evidence.json"
-write_chained_fail_log "$AC2D/.flow-agents/ac2hard/command-log.jsonl" "npm test"
+  > "$AC2D/.kontourai/flow-agents/ac2hard/evidence.json"
+write_chained_fail_log "$AC2D/.kontourai/flow-agents/ac2hard/command-log.jsonl" "npm test"
 
 set +e
 ac2h_1=$(FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=1 FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip \
@@ -758,9 +782,9 @@ echo "--- AC2.2: MAX_BLOCKS=1 with soft/advisory-only streak → may release (ex
 AC2S="$TMP/ac2-soft"
 seed_repo_inprogress "$AC2S" "ac2soft" "execution" "executing"
 # Write a clean bundle with no disputed claims (just a workflow-state warning from status)
-write_clean_bundle "$AC2S/.flow-agents/ac2soft/trust.bundle"
+write_clean_bundle "$AC2S/.kontourai/flow-agents/ac2soft/trust.bundle"
 # Write empty command-log so missing-log doesn't fire
-printf '' > "$AC2S/.flow-agents/ac2soft/command-log.jsonl"
+printf '' > "$AC2S/.kontourai/flow-agents/ac2soft/command-log.jsonl"
 
 set +e
 # First call: blocks (streak=1, max=1 → already at max → soft: release)
@@ -801,15 +825,15 @@ cp "$ROOT/scripts/lib/command-log-chain.js" "$ISO_LIBDIR/"
 
 # Create isolated node context that can't find @kontourai/surface
 ISO_DIR="$TMP/surface-iso"
-mkdir -p "$ISO_DIR/repo/.flow-agents/surftest"
+mkdir -p "$ISO_DIR/repo/.kontourai/flow-agents/surftest"
 mkdir -p "$ISO_DIR/lib"
 cp "$GATE" "$ISO_DIR/stop-goal-fit.js"
 cp "$ROOT/scripts/hooks/lib/local-artifact-paths.js" "$ISO_DIR/lib/"
 printf '# Repo\n' > "$ISO_DIR/repo/AGENTS.md"
 # Non-terminal session (execution phase, in_progress status)
 printf '%s' '{"schema_version":"1.0","task_slug":"surftest","status":"in_progress","phase":"execution","updated_at":"2026-06-27T00:00:00Z","next_action":{"status":"in_progress","summary":"running"}}' \
-  > "$ISO_DIR/repo/.flow-agents/surftest/state.json"
-cat > "$ISO_DIR/repo/.flow-agents/surftest/surftest--deliver.md" << 'MD'
+  > "$ISO_DIR/repo/.kontourai/flow-agents/surftest/state.json"
+cat > "$ISO_DIR/repo/.kontourai/flow-agents/surftest/surftest--deliver.md" << 'MD'
 # surftest
 
 branch: main
@@ -819,9 +843,9 @@ type: deliver
 ## Definition Of Done
 - [ ] tests pass
 MD
-write_high_impact_bundle "$ISO_DIR/repo/.flow-agents/surftest/trust.bundle" "surftest" "verified"
+write_high_impact_bundle "$ISO_DIR/repo/.kontourai/flow-agents/surftest/trust.bundle" "surftest" "verified"
 # Empty log (non-missing)
-printf '' > "$ISO_DIR/repo/.flow-agents/surftest/command-log.jsonl"
+printf '' > "$ISO_DIR/repo/.kontourai/flow-agents/surftest/command-log.jsonl"
 
 set +e
 # Run in isolated dir with NODE_PATH=$ISO_DIR so @kontourai/surface cannot be found
@@ -847,14 +871,14 @@ echo ""
 echo "--- AC3.1b: Low-impact-only bundle with unavailable surface → NOT blocked ---"
 
 ISO2_DIR="$TMP/surface-iso2"
-mkdir -p "$ISO2_DIR/repo/.flow-agents/lowtest"
+mkdir -p "$ISO2_DIR/repo/.kontourai/flow-agents/lowtest"
 mkdir -p "$ISO2_DIR/lib"
 cp "$GATE" "$ISO2_DIR/stop-goal-fit.js"
 cp "$ROOT/scripts/hooks/lib/local-artifact-paths.js" "$ISO2_DIR/lib/"
 printf '# Repo\n' > "$ISO2_DIR/repo/AGENTS.md"
 printf '%s' '{"schema_version":"1.0","task_slug":"lowtest","status":"in_progress","phase":"execution","updated_at":"2026-06-27T00:00:00Z","next_action":{"status":"in_progress","summary":"running"}}' \
-  > "$ISO2_DIR/repo/.flow-agents/lowtest/state.json"
-cat > "$ISO2_DIR/repo/.flow-agents/lowtest/lowtest--deliver.md" << 'MD'
+  > "$ISO2_DIR/repo/.kontourai/flow-agents/lowtest/state.json"
+cat > "$ISO2_DIR/repo/.kontourai/flow-agents/lowtest/lowtest--deliver.md" << 'MD'
 # lowtest
 
 branch: main
@@ -865,7 +889,7 @@ type: deliver
 - [ ] tests pass
 MD
 # Low-impact claim only
-python3 - "$ISO2_DIR/repo/.flow-agents/lowtest/trust.bundle" "lowtest" << 'PY'
+python3 - "$ISO2_DIR/repo/.kontourai/flow-agents/lowtest/trust.bundle" "lowtest" << 'PY'
 import json, sys
 bp, slug = sys.argv[1], sys.argv[2]
 bundle = {
@@ -886,7 +910,7 @@ bundle = {
 }
 json.dump(bundle, open(bp, 'w'))
 PY
-printf '' > "$ISO2_DIR/repo/.flow-agents/lowtest/command-log.jsonl"
+printf '' > "$ISO2_DIR/repo/.kontourai/flow-agents/lowtest/command-log.jsonl"
 
 set +e
 surf2_out=$(NODE_PATH="$ISO2_DIR" FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=100000 \
@@ -919,7 +943,7 @@ seed_repo_inprogress "$AC3D" "postex" "execution" "in_progress"
 # This simulates a session where the agent ran commands (evidence.execution.label present)
 # but deleted command-log.jsonl. The #216 guard uses execution.label to distinguish this
 # from a legitimate no-command session (no execution.label → no missing-log warning).
-python3 - "$AC3D/.flow-agents/postex/trust.bundle" << 'PY'
+python3 - "$AC3D/.kontourai/flow-agents/postex/trust.bundle" << 'PY'
 import json, sys
 bundle = {
     "schemaVersion": 3, "source": "test",
@@ -962,7 +986,7 @@ echo "--- AC3.2b: Pre-execution session (planning/planned) with no log → NOT b
 
 AC3P="$TMP/ac3-preexec"
 seed_repo_preexec "$AC3P" "preex"
-write_clean_bundle "$AC3P/.flow-agents/preex/trust.bundle"
+write_clean_bundle "$AC3P/.kontourai/flow-agents/preex/trust.bundle"
 # No command-log.jsonl — pre-execution sessions have no commands yet
 
 set +e
@@ -984,11 +1008,11 @@ echo "--- AC3.2c: Post-execution session WITH command log present → NOT falsel
 
 AC3C="$TMP/ac3-cleanlog"
 seed_repo_inprogress "$AC3C" "cleanlog" "execution" "in_progress"
-write_clean_bundle "$AC3C/.flow-agents/cleanlog/trust.bundle"
-write_chained_fail_log "$AC3C/.flow-agents/cleanlog/command-log.jsonl" "echo hello"
+write_clean_bundle "$AC3C/.kontourai/flow-agents/cleanlog/trust.bundle"
+write_chained_fail_log "$AC3C/.kontourai/flow-agents/cleanlog/command-log.jsonl" "echo hello"
 # Override: mark the command as pass in evidence to avoid false-completion blocking
 printf '%s' '{"schema_version":"1.0","task_slug":"cleanlog","verdict":"pass","checks":[]}' \
-  > "$AC3C/.flow-agents/cleanlog/evidence.json"
+  > "$AC3C/.kontourai/flow-agents/cleanlog/evidence.json"
 
 set +e
 ac3c_out=$(FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=100000 \
@@ -1051,9 +1075,9 @@ echo "=== Over-block check: normal session NOT falsely blocked ==="
 
 OVR="$TMP/overblock"
 seed_repo_inprogress "$OVR" "normal" "execution" "in_progress"
-write_clean_bundle "$OVR/.flow-agents/normal/trust.bundle"
+write_clean_bundle "$OVR/.kontourai/flow-agents/normal/trust.bundle"
 # Write a valid command log (empty — no claims to cross-reference)
-printf '' > "$OVR/.flow-agents/normal/command-log.jsonl"
+printf '' > "$OVR/.kontourai/flow-agents/normal/command-log.jsonl"
 
 set +e
 ovr_out=$(FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=100000 \
@@ -1143,7 +1167,7 @@ if [ "$errors" -eq 0 ]; then
   echo "       R6b: delivery/trust.bundle + delivery/trust.checkpoint.json protected (Write/Edit + > + cp/mv blocked)"
   echo "       INCOMPLETE: process substitution, runtime path construction, rsync/scp/dd evade"
   echo "  AC2: Hard blocks (false-completion, integrity failure) NOT auto-released by MAX_BLOCKS"
-  echo "       INCOMPLETE: agent can reset streak by deleting .goal-fit-block-streak.json via Bash"
+  echo "       INCOMPLETE: agent can reset streak with runtime-constructed paths"
   echo "  AC3.1: surface-unavailable + high-impact → FULL_BLOCK warning; low-impact non-blocking"
   echo "         INCOMPLETE: agent could delete @kontourai/surface to force this path"
   echo "  AC3.2: missing log in post-execution → FULL_BLOCK; pre-execution → not blocked"

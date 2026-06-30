@@ -86,8 +86,8 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
 **Canonical trigger event**: `userPromptSubmit` and `agentSpawn`/`SessionStart` (active-goal re-grounding), `postToolUse` (after `InvokeSubagents` tool calls)
 
 **Inputs consumed**:
-- `.flow-agents/<slug>/state.json` — current workflow phase and status
-- `.flow-agents/<slug>/critique.json` — open critique findings
+- `.kontourai/flow-agents/<slug>/state.json` — current workflow phase and status
+- `.kontourai/flow-agents/<slug>/critique.json` — open critique findings
 - `docs/context-map.md` — structure hint for repo navigation
 
 **Decision contract**: Non-blocking. Always exits 0. Appends steering text to the agent's context via `additionalContext` in the hook response. Does not block any action. It re-grounds the active workflow goal (status, phase, recorded next step) at the start of every user turn — not only for flagged/blocked states — and on `SessionStart`, which fires after context compaction and on resume. This is the mechanism that keeps an in-flight goal alive across context loss instead of relying on the model voluntarily re-reading the sidecar.
@@ -125,12 +125,12 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
 **Canonical trigger event**: `stop`
 
 **Inputs consumed**:
-- `.flow-agents/<slug>/*.md` — workflow artifact files (scanned for active status, DOD, Goal Fit Gate sections)
-- `.flow-agents/<slug>/state.json` — workflow phase and next action
-- `.flow-agents/<slug>/evidence.json` — verification verdict and NOT_VERIFIED gaps
-- `.flow-agents/<slug>/critique.json` — critique status and open findings
-- `.flow-agents/<slug>/command-log.jsonl` — the deterministic capture log written by the Evidence Capture policy (see §2.5); cross-referenced against `evidence.json` claimed-pass command checks
-- `.flow-agents/<slug>/acceptance.json` — acceptance criteria; a criterion's `command`-kind `evidence_ref` (`excerpt`) is the most-trusted backstop command
+- `.kontourai/flow-agents/<slug>/*.md` — workflow artifact files (scanned for active status, DOD, Goal Fit Gate sections)
+- `.kontourai/flow-agents/<slug>/state.json` — workflow phase and next action
+- `.kontourai/flow-agents/<slug>/evidence.json` — verification verdict and NOT_VERIFIED gaps
+- `.kontourai/flow-agents/<slug>/critique.json` — critique status and open findings
+- `.kontourai/flow-agents/<slug>/command-log.jsonl` — the deterministic capture log written by the Evidence Capture policy (see §2.5); cross-referenced against `evidence.json` claimed-pass command checks
+- `.kontourai/flow-agents/<slug>/acceptance.json` — acceptance criteria; a criterion's `command`-kind `evidence_ref` (`excerpt`) is the most-trusted backstop command
 - `FLOW_AGENTS_GOAL_FIT_MODE` env var — `block` | `warn` | `off` (the legacy `FLOW_AGENTS_GOAL_FIT_STRICT=true` is an alias for `block`)
 - `FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS` env var — consecutive-identical-block cap before the escape hatch releases (default 3)
 - `FLOW_AGENTS_GOAL_FIT_BACKSTOP` env var — `block` (default) | `off`/`warn` | `skip`; controls the capture backstop re-run (see Capture cross-reference below)
@@ -186,9 +186,9 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
 **Inputs consumed**:
 - `tool_name` + `tool_input.command` — identifies a command/shell execution (a command string present, with a command-shaped tool name; when no tool name is present but a command string is, it is still captured).
 - `tool_response` / `tool_output` / `error` — the host tool result (per §1, `postToolUse`); the source of the deterministically-observed outcome.
-- `.flow-agents/current.json` (`active_slug` / `artifact_dir`) then newest-mtime `state.json` — resolves the active artifact dir, the same way Workflow Steering and Stop-Goal-Fit do.
+- `.kontourai/flow-agents/current.json` (`active_slug` / `artifact_dir`) then newest-mtime `state.json` — resolves the active artifact dir, the same way Workflow Steering and Stop-Goal-Fit do.
 
-**Output**: appends one JSON object per line to `.flow-agents/<slug>/command-log.jsonl`:
+**Output**: appends one JSON object per line to `.kontourai/flow-agents/<slug>/command-log.jsonl`:
 
 ```json
 { "command": "npm test", "observedResult": "pass", "exitCode": 0, "capturedAt": "2026-06-23T00:00:00Z", "source": "postToolUse-capture" }
@@ -561,7 +561,7 @@ The CLI command is:
 flow-agents kit activate --adapter strands-local [--dest DIR] [--source-root DIR]
 ```
 
-This writes activated flow files to `.flow-agents/runtime/strands/flows/<kit-id>/<asset-id>.flow.json` and produces a parity-diagnostic `activation.json` (same schema as codex-local: `schema_version`, `adapter`, `supported_asset_classes`, `generated_runtime_files`, `skipped_assets`, `warnings`, `errors`).
+This writes activated flow files to `.kontourai/flow-agents/projections/strands/flows/<kit-id>/<asset-id>.flow.json` and produces a parity-diagnostic `activation.json` (same schema as codex-local: `schema_version`, `adapter`, `supported_asset_classes`, `generated_runtime_files`, `skipped_assets`, `warnings`, `errors`).
 
 ### 9.2 Steering context surfacing (AC2)
 
@@ -572,7 +572,7 @@ This writes activated flow files to `.flow-agents/runtime/strands/flows/<kit-id>
 ```
 hooks = FlowAgentsHooks(workspace=".")
 system_prompt = base_prompt + hooks.steering_context()
-# steering_context() includes KIT FLOWS section if .flow-agents/runtime/strands/flows/ is populated
+# steering_context() includes KIT FLOWS section if .kontourai/flow-agents/projections/strands/flows/ is populated
 ```
 
 **TypeScript usage**:
@@ -580,14 +580,14 @@ system_prompt = base_prompt + hooks.steering_context()
 ```typescript
 const hooks = new FlowAgentsHooks({ workspace: "." });
 const systemPrompt = basePrompt + hooks.steeringContext();
-// steeringContext() includes KIT FLOWS section if .flow-agents/runtime/strands/flows/ is populated
+// steeringContext() includes KIT FLOWS section if .kontourai/flow-agents/projections/strands/flows/ is populated
 ```
 
 ### 9.3 Co-existence with codex-local
 
 The `codex-local` and `strands-local` runtime directories are independent:
 
-- `codex-local` writes to `.flow-agents/runtime/codex/`
-- `strands-local` writes to `.flow-agents/runtime/strands/`
+- `codex-local` writes to `.kontourai/flow-agents/projections/codex/`
+- `strands-local` writes to `.kontourai/flow-agents/projections/strands/`
 
 Running either adapter does not affect the other's runtime directory. Both adapters skip non-flow asset classes (skills, docs, adapters, evals, assets) with `reason: "asset class is diagnostic-only for <adapter>"`.

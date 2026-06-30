@@ -229,7 +229,7 @@ export function buildWorkflowLearningProjection(
         sourceRef: {
           product: "flow-agents",
           kind: "workflow-learning",
-          id: ".flow-agents/*/learning.json",
+          id: ".kontourai/flow-agents/*/learning.json",
           label: "Local workflow learning sidecars",
         },
       },

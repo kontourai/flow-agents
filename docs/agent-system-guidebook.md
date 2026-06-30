@@ -73,7 +73,7 @@ The hidden supports are:
 | “Keep going until nothing is left.” | Use hooks and workflow state to avoid stopping early, then continue through verification and docs. |
 | “Use subagents to critique.” | Delegate critique as report-only work, record findings, fix failures, and re-run verification. |
 | “Can we validate this on Flow Agents itself?” | Use Flow Agents artifacts, hooks, evals, and learning loops on Flow Agents itself. |
-| “What slug are we on?” | Resolve `.flow-agents/current.json`; do not depend on memory from chat. |
+| “What slug are we on?” | Resolve `.kontourai/flow-agents/current.json`; do not depend on memory from chat. |
 
 ## Mental Model
 
@@ -192,7 +192,7 @@ npm run workflow:sidecar -- current --format path
 npm run workflow:sidecar -- record-agent-event ...
 ```
 
-`ensure-session` creates or selects the workflow and writes `.flow-agents/current.json`. `current` resolves the active workflow path. `record-agent-event` lets parallel workers append progress to `agents/<agent-id>/events.jsonl` without guessing the slug.
+`ensure-session` creates or selects the workflow and writes `.kontourai/flow-agents/current.json`. `current` resolves the active workflow path. `record-agent-event` lets parallel workers append progress to `agents/<agent-id>/events.jsonl` without guessing the slug.
 
 This is the key answer to multi-agent coordination: agents should not rely on conversational memory for the current slug. The orchestrator resolves the active workflow and passes the path to delegates. Delegates append events. The orchestrator consolidates those events into root state, evidence, critique, and handoff.
 
@@ -320,7 +320,7 @@ flowchart LR
   Prompt --> Current --> State --> Handoff --> Evidence --> Action
 ```
 
-The agent should not reconstruct the session from memory. It should resolve the active workflow from `.flow-agents/current.json`, read the sidecars, and continue from the recorded next action. If evidence is missing, it should say `NOT_VERIFIED` or keep working. If critique is open, it should fix or route the finding. If everything is clean, it can deliver.
+The agent should not reconstruct the session from memory. It should resolve the active workflow from `.kontourai/flow-agents/current.json`, read the sidecars, and continue from the recorded next action. If evidence is missing, it should say `NOT_VERIFIED` or keep working. If critique is open, it should fix or route the finding. If everything is clean, it can deliver.
 
 ## One-Page Cheat Sheet
 

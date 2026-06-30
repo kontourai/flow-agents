@@ -14,6 +14,11 @@ const REPOSITORIES_REL = path.join("kits", "local", "repositories");
 
 function registryPath(dest: string): string { return path.join(dest, REGISTRY_REL); }
 function installedPath(dest: string, kitId: string): string { return path.join(dest, REPOSITORIES_REL, kitId); }
+function defaultCodexHome(): string { return process.env["CODEX_HOME"] || path.join(os.homedir(), ".codex"); }
+function resolveDest(flags: ReturnType<typeof parseArgs>["flags"]): string {
+  const explicit = flagString(flags, "dest");
+  return path.resolve(explicit ?? defaultCodexHome());
+}
 
 function loadRegistry(dest: string): { schema_version: string; kits: Record<string, unknown>[] } {
   const file = registryPath(dest);
@@ -80,7 +85,7 @@ async function install(argv: string[]): Promise<number> {
 
 async function installLocalSource(source: string, argv: string[]): Promise<number> {
   const args = parseArgs(argv);
-  const dest = path.resolve(flagString(args.flags, "dest", ".") ?? ".");
+  const dest = resolveDest(args.flags);
   let manifest: Record<string, unknown>;
   try {
     manifest = await assertKitRepository(source);
@@ -94,6 +99,7 @@ async function installLocalSource(source: string, argv: string[]): Promise<numbe
   const registry = loadRegistry(dest);
   const existing = registry.kits.find((entry) => entry.id === kitId);
   const target = installedPath(dest, kitId);
+  fs.mkdirSync(dest, { recursive: true });
   assertPathContained(dest, target);
   const sourceText = source;
   if (existing && existing.source !== sourceText && !flagBool(args.flags, "update")) {
@@ -133,7 +139,7 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
   }
   if (!ref) ref = flagString(args.flags, "ref") ?? null;
 
-  const dest = path.resolve(flagString(args.flags, "dest", ".") ?? ".");
+  const dest = resolveDest(args.flags);
   const force = flagBool(args.flags, "force") ?? false;
   const update = flagBool(args.flags, "update") ?? false;
 
@@ -171,6 +177,7 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
     const registry = loadRegistry(dest);
     const existing = registry.kits.find((entry) => entry.id === kitId);
     const target = installedPath(dest, kitId);
+    fs.mkdirSync(dest, { recursive: true });
     assertPathContained(dest, target);
     const sourceText = repoUrl + (ref ? `#${ref}` : "");
     if (existing && existing.source !== sourceText && !update) {
@@ -202,7 +209,7 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
 
 function list(argv: string[]): number {
   const args = parseArgs(argv);
-  const dest = path.resolve(flagString(args.flags, "dest", ".") ?? ".");
+  const dest = resolveDest(args.flags);
   const entries = loadRegistry(dest).kits;
   if (!entries.length) {
     console.log("No local Flow Kits installed.");
@@ -216,7 +223,7 @@ function list(argv: string[]): number {
 
 function status(argv: string[]): number {
   const args = parseArgs(argv);
-  const dest = path.resolve(flagString(args.flags, "dest", ".") ?? ".");
+  const dest = resolveDest(args.flags);
   let entries = loadRegistry(dest).kits;
   const kitId = args.positionals[0];
   if (kitId) {
@@ -241,7 +248,7 @@ const AVAILABLE_ADAPTERS = ["codex-local", "strands-local"];
 
 function activate(argv: string[]): number {
   const args = parseArgs(argv);
-  const dest = path.resolve(flagString(args.flags, "dest", ".") ?? ".");
+  const dest = resolveDest(args.flags);
   const sourceRoot = path.resolve(flagString(args.flags, "source-root", path.resolve(path.dirname(process.argv[1]), "..")) ?? ".");
   const adapter = flagString(args.flags, "adapter");
   if (adapter && !AVAILABLE_ADAPTERS.includes(adapter)) {
