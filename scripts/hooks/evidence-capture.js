@@ -48,6 +48,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { flowAgentsArtifactRootsForRead } = require('./lib/local-artifact-paths');
 const crypto = require('crypto');
 
 const MAX_STDIN = 1024 * 1024;
@@ -197,18 +198,23 @@ function latestStateDir(flowAgentsDir) {
  * to the newest-mtime state.json directory.
  */
 function resolveArtifactDir(root) {
-  const flowAgentsDir = path.join(root, '.flow-agents');
-  const current = readJsonFile(path.join(flowAgentsDir, 'current.json'));
-  if (current) {
-    const slug = current.artifact_dir || current.active_slug;
-    if (typeof slug === 'string' && slug.trim()) {
-      // Guard against path traversal in the slug.
-      const safe = slug.replace(/\.\.+/g, '').replace(/^[/\\]+/, '');
-      const dir = path.join(flowAgentsDir, safe);
-      if (dir.startsWith(flowAgentsDir + path.sep) && fs.existsSync(dir)) return dir;
+  for (const flowAgentsDir of flowAgentsArtifactRootsForRead(root)) {
+    const current = readJsonFile(path.join(flowAgentsDir, 'current.json'));
+    if (current) {
+      const slug = current.artifact_dir || current.active_slug;
+      if (typeof slug === 'string' && slug.trim()) {
+        // Guard against path traversal in the slug.
+        const safe = slug.replace(/\.\.+/g, '').replace(/^[/\\]+/, '');
+        const dir = path.join(flowAgentsDir, safe);
+        if (dir.startsWith(flowAgentsDir + path.sep) && fs.existsSync(dir)) return dir;
+      }
     }
   }
-  return latestStateDir(flowAgentsDir);
+  for (const flowAgentsDir of flowAgentsArtifactRootsForRead(root)) {
+    const latest = latestStateDir(flowAgentsDir);
+    if (latest) return latest;
+  }
+  return null;
 }
 
 function isCommandTool(toolName, command) {

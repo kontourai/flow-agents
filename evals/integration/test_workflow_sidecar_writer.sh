@@ -37,6 +37,40 @@ VALIDATOR="validate-workflow-artifacts"
 ARTIFACT_DIR="$TMPDIR_EVAL/repo/.flow-agents/auto-sidecars"
 mkdir -p "$ARTIFACT_DIR"
 
+DEFAULT_ROOT_REPO="$TMPDIR_EVAL/default-root-repo"
+mkdir -p "$DEFAULT_ROOT_REPO"
+if (cd "$DEFAULT_ROOT_REPO" && flow_agents_node "$WRITER" ensure-session \
+  --task-slug default-root \
+  --title "Default Root" \
+  --summary "Default root should use the Kontour runtime artifact home." \
+  --criterion "Default root exists" \
+  --timestamp "2026-05-09T00:00:00Z" >"$TMPDIR_EVAL/default-root.out" 2>"$TMPDIR_EVAL/default-root.err"); then
+  if [[ -f "$DEFAULT_ROOT_REPO/.kontourai/flow-agents/default-root/state.json" ]] \
+    && [[ -f "$DEFAULT_ROOT_REPO/.kontourai/flow-agents/current.json" ]] \
+    && [[ ! -e "$DEFAULT_ROOT_REPO/.flow-agents/default-root/state.json" ]]; then
+    _pass "sidecar writer defaults new sessions to .kontourai/flow-agents"
+  else
+    _fail "sidecar writer default root did not use .kontourai/flow-agents"
+  fi
+else
+  _fail "sidecar writer default-root ensure-session failed: $(cat "$TMPDIR_EVAL/default-root.out" "$TMPDIR_EVAL/default-root.err")"
+fi
+
+OLD_ROOT_REPO="$TMPDIR_EVAL/old-root-repo"
+mkdir -p "$OLD_ROOT_REPO/.flow-agents/old-session"
+cat > "$OLD_ROOT_REPO/.flow-agents/current.json" <<'JSON'
+{"schema_version":"1.0","active_slug":"old-session","artifact_dir":"old-session"}
+JSON
+cat > "$OLD_ROOT_REPO/.flow-agents/old-session/state.json" <<'JSON'
+{"schema_version":"1.0","task_slug":"old-session","status":"planned","phase":"planning","next_action":{"status":"continue","summary":"continue"}}
+JSON
+if (cd "$OLD_ROOT_REPO" && flow_agents_node "$WRITER" current --format slug >"$TMPDIR_EVAL/old-current.out" 2>"$TMPDIR_EVAL/old-current.err") \
+  && [[ "$(cat "$TMPDIR_EVAL/old-current.out")" == "old-session" ]]; then
+  _pass "sidecar writer reads legacy .flow-agents current session when no new root exists"
+else
+  _fail "sidecar writer did not read legacy current session: $(cat "$TMPDIR_EVAL/old-current.out" "$TMPDIR_EVAL/old-current.err")"
+fi
+
 SESSION_ROOT="$TMPDIR_EVAL/repo/.flow-agents"
 if flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$SESSION_ROOT" \

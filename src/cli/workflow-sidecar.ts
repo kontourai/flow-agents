@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
 import { resolveActiveFlowStep, resolveFlowFilePath, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
+import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 
 type AnyObj = Record<string, any>;
 
@@ -652,7 +653,7 @@ function isUnderDir(dir: string, root: string): boolean {
 function explicitArtifactRoot(p: ReturnType<typeof parseArgs>): string {
   const explicit = opt(p, "artifact-dir");
   const configuredRoot = opt(p, "artifact-root");
-  if (!explicit) return path.resolve(configuredRoot || ".flow-agents");
+  if (!explicit) return configuredRoot ? path.resolve(configuredRoot) : flowAgentsArtifactRoot();
   const dir = path.resolve(explicit);
   if (!fs.existsSync(dir)) die(`artifact directory does not exist: ${dir}`);
   if (fs.lstatSync(dir).isSymbolicLink()) die(`artifact directory must not be a symlink: ${dir}`);
@@ -879,7 +880,7 @@ function initSidecars(dir: string, slug: string, sourceRequest: string, summary:
 }
 
 function ensureSession(p: ReturnType<typeof parseArgs>): number {
-  const root = path.resolve(opt(p, "artifact-root", ".flow-agents"));
+  const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : flowAgentsArtifactRoot();
   const slug = opt(p, "task-slug") || (opt(p, "work-item") ? workItemSlug(opt(p, "work-item")) : die("--task-slug is required (or pass --work-item to derive it)"));
   const dir = sessionDirFor(root, slug);
   fs.mkdirSync(dir, { recursive: true });
@@ -912,7 +913,7 @@ function ensureSession(p: ReturnType<typeof parseArgs>): number {
 }
 
 function current(p: ReturnType<typeof parseArgs>): number {
-  const root = path.resolve(opt(p, "artifact-root", ".flow-agents"));
+  const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : defaultArtifactRootForRead();
   const dir = currentDir(root);
   if (!dir) die("no current workflow session is recorded");
   const format = opt(p, "format", "path");
@@ -1829,7 +1830,7 @@ function assertExistingLearningValid(dir: string): void {
   }
 }
 async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
-  const root = path.resolve(opt(p, "artifact-root", ".flow-agents"));
+  const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : defaultArtifactRootForRead();
   const dir = path.resolve(opt(p, "artifact-dir") || currentDir(root) || "");
   requireArtifactDirUnderRoot(dir, root);
   assertExistingLearningValid(dir);
@@ -2265,7 +2266,7 @@ function loadSurfacePanelJs(): string {
 }
 
 async function renderTrustPanel(p: ReturnType<typeof parseArgs>): Promise<number> {
-  const root = path.resolve(opt(p, "artifact-root", ".flow-agents"));
+  const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : defaultArtifactRootForRead();
   const dir = p.positional[0] ? artifactDirFrom(p.positional[0]) : currentDir(root);
   if (!dir) die("render-trust-panel requires a workflow dir or a recorded current session");
   let bundle: AnyObj | null = null;
@@ -2431,7 +2432,7 @@ function livenessLifecycle(taskDir: string, slug: string, kind: "claim" | "heart
 }
 
 async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
-  const root = path.resolve(opt(p, "artifact-root", ".flow-agents"));
+  const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : flowAgentsArtifactRoot();
   const action = p.positional[0] || "";
   const subjectId = p.positional[1] || "";
   const actor = opt(p, "actor", process.env.FLOW_AGENTS_ACTOR || "unknown");
@@ -2651,7 +2652,9 @@ Available claim ids:
 async function main(): Promise<number> {
   const p = parseArgs(process.argv.slice(2));
   if (!p.command) die("workflow-sidecar command is required");
-  const lockRoot = ["ensure-session", "current", "dogfood-pass", "liveness"].includes(p.command) ? path.resolve(opt(p, "artifact-root", ".flow-agents")) : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.command === "claim" ? (p.positional[1] ? path.resolve(p.positional[1]) : "") : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
+  const lockRoot = ["ensure-session", "current", "dogfood-pass", "liveness"].includes(p.command)
+    ? (opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : (p.command === "ensure-session" ? flowAgentsArtifactRoot() : defaultArtifactRootForRead()))
+    : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.command === "claim" ? (p.positional[1] ? path.resolve(p.positional[1]) : "") : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
   return withLock(lockRoot, ["ensure-session", "record-agent-event", "dogfood-pass"].includes(p.command), p.command, () => {
     switch (p.command) {
       case "ensure-session": return ensureSession(p);
