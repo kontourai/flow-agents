@@ -1,21 +1,50 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 
 import {
   defaultArtifactRootForRead,
+  durableFlowAgentsRoot,
+  durableInstallRecordPath,
+  DURABLE_FLOW_AGENTS_DIR,
+  FLOW_AGENTS_RUNTIME_DIR,
+  FLOW_AGENTS_RUNTIME_SUBDIR,
   flowAgentsArtifactRoot,
   KONTOURAI_DIR,
-  legacyFlowAgentsArtifactRoot,
-  LEGACY_FLOW_AGENTS_DIR,
 } from "../../build/src/index.js";
 
 test("public API exports local artifact root helpers", () => {
   const cwd = path.resolve("/tmp/flow-agents-public-api");
 
   assert.equal(KONTOURAI_DIR, ".kontourai");
-  assert.equal(LEGACY_FLOW_AGENTS_DIR, ".flow-agents");
-  assert.equal(flowAgentsArtifactRoot(cwd), path.join(cwd, ".kontourai", "flow-agents"));
-  assert.equal(legacyFlowAgentsArtifactRoot(cwd), path.join(cwd, ".flow-agents"));
-  assert.equal(defaultArtifactRootForRead(cwd), path.join(cwd, ".kontourai", "flow-agents"));
+  assert.equal(FLOW_AGENTS_RUNTIME_SUBDIR, "flow-agents");
+  assert.equal(FLOW_AGENTS_RUNTIME_DIR, path.join(".kontourai", "flow-agents"));
+  assert.equal(DURABLE_FLOW_AGENTS_DIR, ".flow-agents");
+  assert.equal(flowAgentsArtifactRoot(cwd), path.join(cwd, FLOW_AGENTS_RUNTIME_DIR));
+  assert.equal(durableFlowAgentsRoot(cwd), path.join(cwd, ".flow-agents"));
+  assert.equal(durableInstallRecordPath(cwd), path.join(cwd, ".flow-agents", "install.json"));
+  assert.equal(defaultArtifactRootForRead(cwd), path.join(cwd, FLOW_AGENTS_RUNTIME_DIR));
+  assert.notEqual(defaultArtifactRootForRead(cwd), durableFlowAgentsRoot(cwd));
+});
+
+test("TS and CJS artifact helpers stay in parity without durable-root fallback", () => {
+  const require = createRequire(import.meta.url);
+  const cjs = require("../../scripts/hooks/lib/local-artifact-paths.js");
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-paths-"));
+
+  fs.mkdirSync(path.join(cwd, DURABLE_FLOW_AGENTS_DIR, "previous-session"), { recursive: true });
+  fs.writeFileSync(path.join(cwd, DURABLE_FLOW_AGENTS_DIR, "current.json"), "{}\n");
+
+  assert.equal(cjs.KONTOURAI_DIR, KONTOURAI_DIR);
+  assert.equal(cjs.FLOW_AGENTS_RUNTIME_SUBDIR, FLOW_AGENTS_RUNTIME_SUBDIR);
+  assert.equal(cjs.FLOW_AGENTS_RUNTIME_DIR, FLOW_AGENTS_RUNTIME_DIR);
+  assert.equal(cjs.DURABLE_FLOW_AGENTS_DIR, DURABLE_FLOW_AGENTS_DIR);
+
+  assert.equal(cjs.flowAgentsArtifactRoot(cwd), flowAgentsArtifactRoot(cwd));
+  assert.equal(cjs.defaultArtifactRootForRead(cwd), defaultArtifactRootForRead(cwd));
+  assert.equal(cjs.durableFlowAgentsRoot(cwd), durableFlowAgentsRoot(cwd));
+  assert.deepEqual(cjs.flowAgentsArtifactRootsForRead(cwd), []);
 });

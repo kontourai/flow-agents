@@ -3,8 +3,9 @@ build/
 _site/
 test-results/
 
-# Local Flow Agents runtime/session state. Durable source belongs in docs/,
-# context/, integrations/, scripts/, or tracked bundle source directories.
+# Local Flow Agents state. Non-durable workflow/session artifacts live under
+# .kontourai/flow-agents. Durable source belongs in docs/, context/,
+# integrations/, scripts/, or tracked bundle source directories.
 .flow-agents/*
 .claude/
 /.codex/

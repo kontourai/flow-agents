@@ -115,11 +115,13 @@ the model can't talk its way around.
 
 ## How each arm was run
 
-- **Codex live**: use the dedicated installer, which flattens the config to the home root
-  and copies your real auth from `~/.codex`:
+- **Codex live**: use the dedicated installer, which flattens the config to the Codex home
+  root and copies your real auth from `~/.codex`. By default it targets `CODEX_HOME`, or
+  `~/.codex` when `CODEX_HOME` is unset; pass a positional path only for an explicit
+  isolated or test install:
   ```bash
-  bash scripts/install-codex-home.sh "$HOME/.flow-agents/codex"
-  CODEX_HOME="$HOME/.flow-agents/codex" codex exec --dangerously-bypass-hook-trust -C <project> "<prompt>"
+  bash scripts/install-codex-home.sh
+  codex exec --dangerously-bypass-hook-trust -C <project> "<prompt>"
   ```
   Verified live: from a bare `continue`, Codex re-grounded and created `RESUMED.txt`.
 - **Claude live**: `dist/claude-code/install.sh <workspace>` then `claude -p` from the

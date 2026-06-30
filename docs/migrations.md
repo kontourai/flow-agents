@@ -6,11 +6,12 @@ title: Migrations
 
 ## Unreleased
 
-- Workflow runtime artifacts now live under `.flow-agents/` instead of
-  `.agents/flow-agents/`. Move any local session directories, sidecars, or
-  `current.json` pointers you want to keep into the new root. Runtime state
-  remains ignored; promote durable outcomes into docs, source, schemas, or
-  provider records before merge.
+- Workflow runtime artifacts now live under `.kontourai/flow-agents/` instead
+  of earlier runtime roots such as `.flow-agents/` or `.agents/flow-agents/`.
+  Move any local session directories, sidecars, or `current.json` pointers you
+  want to keep into the new root. Runtime readers do not fall back to old roots.
+  Runtime state remains ignored; promote durable outcomes into docs, source,
+  schemas, or provider records before merge.
 - Flow Agents setup no longer accepts Console bearer tokens as CLI arguments.
   Replace `--console-token TOKEN` with `--console-token-file PATH` for
   headless installs, or use the prompted `flow-agents init` flow. Interactive

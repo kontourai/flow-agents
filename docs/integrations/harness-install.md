@@ -79,7 +79,8 @@ The install appends rather than replaces, so existing hooks are not removed. Rev
       …
   skills/
     …
-  .flow-agents/            ← runtime workflow artifacts (not committed)
+  .kontourai/
+    flow-agents/           ← runtime workflow artifacts (not committed)
 ```
 
 ## opencode

@@ -10,6 +10,7 @@ import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { activateCodexLocal } from "../runtime-adapters.js";
 import { main as buildBundles } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
+import { durableInstallRecordPath } from "../lib/local-artifact-root.js";
 
 type Runtime = "base" | "codex" | "claude-code" | "kiro" | "opencode" | "pi";
 type TelemetrySink = "local-files" | "local-kontour-console" | "kontour-hosted-console" | "user-hosted-console" | "kontour-cloud" | "hosted-kontour-console";
@@ -101,8 +102,8 @@ Options:
                           Honors FLOW_AGENTS_USER_CLAUDE_SETTINGS for test isolation.
                         opencode: merges opencode.json into ~/.config/opencode/opencode.json
                           (honors XDG_CONFIG_HOME; test isolation via FLOW_AGENTS_USER_OPENCODE_CONFIG).
-                        codex: runs install-codex-home.sh into ~/.flow-agents/codex
-                          (the isolated Codex HOME; hooks merged, not overwritten).
+                        codex: runs install-codex-home.sh into CODEX_HOME or ~/.codex
+                          (hooks merged, not overwritten).
                         pi: NOT_VERIFIED (no documented global dir); warns and falls back to workspace default.
   --telemetry-sink local-files|local-kontour-console|kontour-hosted-console|user-hosted-console
   --console-url URL
@@ -193,9 +194,8 @@ function globalDest(runtime: Runtime): string {
     return path.join(process.env["XDG_CONFIG_HOME"] ?? path.join(os.homedir(), ".config"), "opencode");
   }
   if (runtime === "codex") {
-    // codex --global routes to the isolated Codex HOME at ~/.flow-agents/codex.
-    // This is the same path used by install-codex-home.sh; --dest overrides it for sandbox testing.
-    return path.join(os.homedir(), ".flow-agents", "codex");
+    // codex --global routes to the standard Codex home. --dest remains an explicit override.
+    return process.env["CODEX_HOME"] || path.join(os.homedir(), ".codex");
   }
   if (runtime === "pi") {
     // pi has no documented global config dir.
@@ -378,11 +378,11 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
       fs.renameSync(tmp, destSettingsPath);
       // Write version stamp.
-      const installRecordDir = path.join(options.dest, ".flow-agents");
+      const recordPath = durableInstallRecordPath(options.dest);
+      const installRecordDir = path.dirname(recordPath);
       fs.mkdirSync(installRecordDir, { recursive: true });
       const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
       const record = { version: pkgJson["version"] ?? "0.0.0", installedAt: new Date().toISOString(), runtime: "claude-code", global: true };
-      const recordPath = path.join(installRecordDir, "install.json");
       const recordTmp = `${recordPath}.tmp.${process.pid}`;
       fs.writeFileSync(recordTmp, `${JSON.stringify(record, null, 2)}\n`, "utf8");
       fs.renameSync(recordTmp, recordPath);
@@ -416,11 +416,11 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 `, "utf8");
       fs.renameSync(tmp, destConfigPath);
       // Write version stamp.
-      const installRecordDir = path.join(options.dest, ".flow-agents");
+      const recordPath = durableInstallRecordPath(options.dest);
+      const installRecordDir = path.dirname(recordPath);
       fs.mkdirSync(installRecordDir, { recursive: true });
       const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
       const record = { version: pkgJson["version"] ?? "0.0.0", installedAt: new Date().toISOString(), runtime: "opencode", global: true };
-      const recordPath = path.join(installRecordDir, "install.json");
       const recordTmp = `${recordPath}.tmp.${process.pid}`;
       fs.writeFileSync(recordTmp, `${JSON.stringify(record, null, 2)}
 `, "utf8");
@@ -428,9 +428,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       console.log(`Flow Agents global config merged for opencode in ${options.dest}`);
       return 0;
     }
-    // --global for codex: run install-codex-home.sh to install into the isolated Codex HOME.
-    // The codex --global path is ~/.flow-agents/codex (the isolated home IS codex's global).
-    // Pass through telemetry/console args and honor --dest override for sandbox testing.
+    // --global for codex: run install-codex-home.sh to install into the Codex home.
+    // Defaults to CODEX_HOME or ~/.codex. --dest remains an explicit override.
     if (options.global && options.runtime === "codex") {
       const codexHomeScript = path.join(root, "scripts", "install-codex-home.sh");
       if (!fs.existsSync(codexHomeScript)) {
@@ -448,7 +447,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         console.error(`flow-agents init: unable to run install-codex-home.sh: ${result.error.message}`);
         return 1;
       }
-      return result.status ?? 1;
+      const installed = result.status ?? 1;
+      if (installed !== 0) return installed;
+      return activateKits(options);
     }
     // --global for pi: NOT_VERIFIED (no documented global dir). Warn and fall through to workspace install.
     if (options.global && options.runtime === "pi") {
@@ -534,11 +535,11 @@ function dogfoodClaudeCode(bundleRoot: string, dest: string): void {
   fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
   fs.renameSync(tmp, destSettingsPath);
   // Write version stamp.
-  const installRecordDir = path.join(dest, ".flow-agents");
+  const recordPath = durableInstallRecordPath(dest);
+  const installRecordDir = path.dirname(recordPath);
   fs.mkdirSync(installRecordDir, { recursive: true });
   const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
   const record = { version: pkgJson["version"] ?? "0.0.0", installedAt: new Date().toISOString(), runtime: "claude-code" };
-  const recordPath = path.join(installRecordDir, "install.json");
   const recordTmp = `${recordPath}.tmp.${process.pid}`;
   fs.writeFileSync(recordTmp, `${JSON.stringify(record, null, 2)}\n`, "utf8");
   fs.renameSync(recordTmp, recordPath);
@@ -572,11 +573,11 @@ function dogfoodCodex(bundleRoot: string, dest: string): void {
   fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
   fs.renameSync(tmp, destHooksPath);
   // Write version stamp.
-  const installRecordDir = path.join(dest, ".flow-agents");
+  const recordPath = durableInstallRecordPath(dest);
+  const installRecordDir = path.dirname(recordPath);
   fs.mkdirSync(installRecordDir, { recursive: true });
   const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
   const record = { version: pkgJson["version"] ?? "0.0.0", installedAt: new Date().toISOString(), runtime: "codex" };
-  const recordPath = path.join(installRecordDir, "install.json");
   const recordTmp = `${recordPath}.tmp.${process.pid}`;
   fs.writeFileSync(recordTmp, `${JSON.stringify(record, null, 2)}\n`, "utf8");
   fs.renameSync(recordTmp, recordPath);

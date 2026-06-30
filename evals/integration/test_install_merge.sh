@@ -871,6 +871,21 @@ fi
 # ─── codex-home: CH1: merge — user Stop hook survives install-codex-home ─────
 echo "=== Install Merge-Aware Tests (codex-home) ==="
 echo ""
+echo "--- CH0: codex-home default destination honors CODEX_HOME ---"
+
+CH0_CODEX_HOME="$TMPDIR_EVAL/codex-home-ch0"
+CH0_REAL_HOME="$TMPDIR_EVAL/fake-real-codex-ch0"
+mkdir -p "$CH0_CODEX_HOME" "$CH0_REAL_HOME"
+
+CODEX_HOME="$CH0_CODEX_HOME" CODEX_REAL_HOME="$CH0_REAL_HOME" bash "$ROOT_DIR/scripts/install-codex-home.sh" >/dev/null 2>&1
+
+if [[ -f "$CH0_CODEX_HOME/hooks.json" && -f "$CH0_CODEX_HOME/.flow-agents/install.json" && ! -e "$TMPDIR_EVAL/.codex/hooks.json" ]]; then
+  _pass "CH0: install-codex-home defaults to CODEX_HOME"
+else
+  _fail "CH0: install-codex-home did not default to CODEX_HOME"
+fi
+
+echo ""
 echo "--- CH1: codex-home merge — seed user Stop hook → install → user hook survives + FA hooks present ---"
 
 CH1_DEST="$TMPDIR_EVAL/codex-home-ch1"
@@ -994,6 +1009,160 @@ fi
 
 echo ""
 
+# ─── codex-home: CH4: real home preservation ────────────────────────────────
+echo "--- CH4: codex-home preserves user config, profiles, hooks, local kit state, and user skills ---"
+
+CH4_DEST="$TMPDIR_EVAL/codex-home-ch4"
+mkdir -p "$CH4_DEST/kits/local/repositories/user-kit" "$CH4_DEST/sk""ills/user-owned-skill" "$CH4_DEST/ag""ents"
+
+cat > "$CH4_DEST/config.toml" << 'EOF_CFG'
+model = "user-model"
+EOF_CFG
+
+cat > "$CH4_DEST/custom.config.toml" << 'EOF_CFG'
+model = "user-profile-model"
+EOF_CFG
+cat > "$CH4_DEST/builder.config.toml" << 'EOF_CFG'
+# Generated from packaging/manifest.json. Edit the manifest, not this file.
+model = "old-builder-profile"
+EOF_CFG
+cat > "$CH4_DEST/retired-generated.config.toml" << 'EOF_CFG'
+# Generated from packaging/manifest.json. Edit the manifest, not this file.
+model = "old-generated-profile"
+EOF_CFG
+
+cat > "$CH4_DEST/AGENTS.md" << 'EOF_AGENTS'
+# User Codex Instructions
+EOF_AGENTS
+
+cat > "$CH4_DEST/hooks.json" << 'JSON'
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo ch4-user-stop-hook"
+          }
+        ]
+      }
+    ]
+  }
+}
+JSON
+
+cat > "$CH4_DEST/kits/local/installed-kits.json" << 'JSON'
+{
+  "kits": [
+    {
+      "id": "user-kit",
+      "source": "local-user-source",
+      "state": "installed"
+    }
+  ]
+}
+JSON
+cat > "$CH4_DEST/kits/local/repositories/user-kit/kit.json" << 'JSON'
+{"id":"user-kit","name":"User Kit"}
+JSON
+cat > "$CH4_DEST/sk""ills/user-owned-skill/SKILL.md" << 'EOF_SKILL'
+# User Owned Skill
+EOF_SKILL
+cat > "$CH4_DEST/ag""ents/user-owned-agent.toml" << 'EOF_AGENT'
+name = "user-owned-agent"
+EOF_AGENT
+
+CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex" bash "$ROOT_DIR/scripts/install-codex-home.sh" "$CH4_DEST" >/dev/null 2>&1
+
+if grep -q 'user-model' "$CH4_DEST/config.toml" \
+  && grep -q 'user-profile-model' "$CH4_DEST/custom.config.toml" \
+  && grep -q 'User Codex Instructions' "$CH4_DEST/AGENTS.md"; then
+  _pass "CH4: user-owned config.toml, profile, and AGENTS.md preserved"
+else
+  _fail "CH4: user-owned config.toml, profile, or AGENTS.md was overwritten"
+fi
+
+if [[ -f "$CH4_DEST/builder.config.toml" && -f "$CH4_DEST/personal.config.toml" ]] \
+  && grep -q 'Flow Agents Builder mode' "$CH4_DEST/builder.config.toml" \
+  && grep -q 'knowledge-capture' "$CH4_DEST/personal.config.toml"; then
+  _pass "CH4: generated Codex profiles are seeded or refreshed"
+else
+  _fail "CH4: generated Codex profiles were not seeded or refreshed"
+fi
+
+if [[ ! -f "$CH4_DEST/retired-generated.config.toml" ]]; then
+  _pass "CH4: retired generated Codex profiles are removed"
+else
+  _fail "CH4: retired generated Codex profiles were not removed"
+fi
+
+if [[ -f "$CH4_DEST/kits/local/installed-kits.json" && -f "$CH4_DEST/kits/local/repositories/user-kit/kit.json" ]] \
+  && node - "$CH4_DEST/kits/local/installed-kits.json" << 'NODE'
+const fs = require("node:fs");
+const registry = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!Array.isArray(registry.kits) || !registry.kits.some((kit) => kit.id === "user-kit")) {
+  throw new Error("user kit registry entry missing");
+}
+console.log("ok");
+NODE
+then
+  _pass "CH4: kits/local registry and repository preserved"
+else
+  _fail "CH4: kits/local registry or repository was removed"
+fi
+
+if [[ -f "$CH4_DEST/sk""ills/search-first/SKILL.md" && -f "$CH4_DEST/sk""ills/plan-work/SKILL.md" && -f "$CH4_DEST/sk""ills/user-owned-skill/SKILL.md" ]]; then
+  _pass "CH4: root, Builder Kit workflow, and user-owned skills coexist in flattened Codex skills"
+else
+  _fail "CH4: root skill, Builder Kit workflow skill, or user-owned skill missing from flattened Codex skills"
+fi
+
+if [[ -f "$CH4_DEST/scripts/install-merge.js" && -f "$CH4_DEST/build/src/cli/kit.js" && -f "$CH4_DEST/ag""ents/tool-worker.toml" && -f "$CH4_DEST/ag""ents/user-owned-agent.toml" && -f "$CH4_DEST/hooks.json" ]] \
+  && node - "$CH4_DEST/hooks.json" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const stopGroups = (s.hooks || {}).Stop || [];
+const hasUser = stopGroups.some((g) => (g.hooks || []).some((h) => String(h.command || "").includes("echo ch4-user-stop-hook")));
+const hasFA = Object.values(s.hooks || {}).flat().some((g) => (g.hooks || []).some((h) => String(h.statusMessage || "").includes("Recording Flow Agents telemetry")));
+if (!hasUser) throw new Error("user hook missing");
+if (!hasFA) throw new Error("FA hooks missing");
+console.log("ok");
+NODE
+then
+  _pass "CH4: Flow Agents bundle scripts, build artifacts, generated/user agents, and merged hooks installed"
+else
+  _fail "CH4: bundle scripts, build artifacts, generated/user agents, or merged hooks missing"
+fi
+
+if node "$CH4_DEST/scripts/kit.js" list --dest "$CH4_DEST" >/dev/null 2>&1; then
+  _pass "CH4: installed scripts/kit.js runs with installed build bundle"
+else
+  _fail "CH4: installed scripts/kit.js could not run with installed build bundle"
+fi
+
+echo ""
+
+# ─── codex-home: CH5: destination symlink containment ───────────────────────
+echo "--- CH5: codex-home refuses managed destination symlinks ---"
+
+for CH5_REL in scripts kits sk""ills hooks.json; do
+  CH5_DEST="$TMPDIR_EVAL/codex-home-ch5-${CH5_REL//\//-}"
+  CH5_OUTSIDE="$TMPDIR_EVAL/codex-home-ch5-outside-${CH5_REL//\//-}"
+  mkdir -p "$CH5_DEST" "$CH5_OUTSIDE"
+  ln -s "$CH5_OUTSIDE" "$CH5_DEST/$CH5_REL"
+  if CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex" bash "$ROOT_DIR/scripts/install-codex-home.sh" "$CH5_DEST" >"$TMPDIR_EVAL/ch5.out" 2>&1; then
+    _fail "CH5: install unexpectedly succeeded with symlinked destination $CH5_REL"
+  elif grep -q "refusing to write through symlink" "$TMPDIR_EVAL/ch5.out" \
+    && [[ -z "$(find "$CH5_OUTSIDE" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+    _pass "CH5: install refuses symlinked destination $CH5_REL without writing outside"
+  else
+    _fail "CH5: symlinked destination $CH5_REL did not fail closed"
+  fi
+done
+
+echo ""
+
 # ─── opencode --global: OG1: seed user key → install --global → key survives + $schema + stamp ─
 echo "=== Install Merge-Aware Tests (--global runtimes) ==="
 echo ""
@@ -1079,7 +1248,11 @@ CG1_DEST="$TMPDIR_EVAL/codex-global-cg1"
 mkdir -p "$CG1_DEST"
 
 # Run init --global --runtime codex with dest override (sandbox isolation)
-CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex"   node "$ROOT_DIR/build/src/cli.js" init --runtime codex --global --dest "$CG1_DEST" --yes >/dev/null 2>&1 || true
+if CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex" node "$ROOT_DIR/build/src/cli.js" init --runtime codex --global --dest "$CG1_DEST" --activate-kits --yes >/dev/null 2>&1; then
+  _pass "CG1: codex --global --activate-kits command succeeds"
+else
+  _fail "CG1: codex --global --activate-kits command failed"
+fi
 
 # Assert: FA hooks present in $DEST/hooks.json
 if node - "$CG1_DEST/hooks.json" << 'NODE'
@@ -1110,6 +1283,54 @@ then
   _pass "CG1: codex --global: version stamp written (runtime=codex)"
 else
   _fail "CG1: codex --global: version stamp missing or wrong"
+fi
+
+if [[ -f "$CG1_DEST/.kontourai/flow-agents/projections/codex/activation.json" ]]; then
+  _pass "CG1: codex --global --activate-kits writes activation output under target Codex home"
+else
+  _fail "CG1: codex --global --activate-kits did not write activation output under target Codex home"
+fi
+
+echo ""
+
+# ─── codex --global: CG1B: default CODEX_HOME + --dest override precedence ───
+echo "--- CG1B: codex --global default honors CODEX_HOME and --dest overrides ---"
+
+CG1B_CODEX_HOME="$TMPDIR_EVAL/codex-global-cg1b-codex-home"
+CG1B_OVERRIDE="$TMPDIR_EVAL/codex-global-cg1b-override"
+mkdir -p "$CG1B_CODEX_HOME" "$CG1B_OVERRIDE"
+
+if CODEX_HOME="$CG1B_CODEX_HOME" CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex" node "$ROOT_DIR/build/src/cli.js" init --runtime codex --global --yes >/dev/null 2>&1; then
+  _pass "CG1B: codex --global without --dest command succeeds"
+else
+  _fail "CG1B: codex --global without --dest command failed"
+fi
+
+if [[ -f "$CG1B_CODEX_HOME/hooks.json" && -f "$CG1B_CODEX_HOME/.flow-agents/install.json" ]]; then
+  _pass "CG1B: codex --global without --dest installs into CODEX_HOME"
+else
+  _fail "CG1B: codex --global without --dest did not install into CODEX_HOME"
+fi
+
+rm -rf "$CG1B_CODEX_HOME"
+mkdir -p "$CG1B_CODEX_HOME"
+
+if CODEX_HOME="$CG1B_CODEX_HOME" CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex" node "$ROOT_DIR/build/src/cli.js" init --runtime codex --global --dest "$CG1B_OVERRIDE" --yes >/dev/null 2>&1; then
+  _pass "CG1B: codex --global --dest command succeeds"
+else
+  _fail "CG1B: codex --global --dest command failed"
+fi
+
+if [[ -f "$CG1B_OVERRIDE/hooks.json" && -f "$CG1B_OVERRIDE/.flow-agents/install.json" ]]; then
+  _pass "CG1B: codex --global --dest overrides CODEX_HOME"
+else
+  _fail "CG1B: codex --global --dest did not override CODEX_HOME"
+fi
+
+if [[ ! -e "$CG1B_CODEX_HOME/hooks.json" && ! -e "$CG1B_CODEX_HOME/.flow-agents/install.json" ]]; then
+  _pass "CG1B: codex --global --dest did not write install artifacts into CODEX_HOME"
+else
+  _fail "CG1B: codex --global --dest wrote install artifacts into CODEX_HOME"
 fi
 
 echo ""

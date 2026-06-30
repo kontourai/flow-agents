@@ -42,11 +42,11 @@ trap cleanup EXIT
 # ─── Helper: seed a delivered (terminal) workflow artifact ────────────────────
 seed_delivered() { # $1=dir $2=slug
   local p="$1" slug="$2"
-  mkdir -p "$p/.flow-agents/$slug"
+  mkdir -p "$p/.kontourai/flow-agents/$slug"
   printf '# Repo\n' > "$p/AGENTS.md"
   printf '%s' "{\"schema_version\":\"1.0\",\"task_slug\":\"$slug\",\"status\":\"delivered\",\"phase\":\"done\",\"updated_at\":\"2026-06-27T00:00:00Z\",\"next_action\":{\"status\":\"done\",\"summary\":\"done\"}}" \
-    > "$p/.flow-agents/$slug/state.json"
-  cat > "$p/.flow-agents/$slug/$slug--deliver.md" << MD
+    > "$p/.kontourai/flow-agents/$slug/state.json"
+  cat > "$p/.kontourai/flow-agents/$slug/$slug--deliver.md" << MD
 # $slug
 
 branch: main
@@ -131,10 +131,10 @@ T1="$TMP/t1-bypass"
 seed_delivered "$T1" "bypass-kit"
 
 # NO active_flow_id in current.json
-printf '%s' '{"artifact_dir":"bypass-kit"}' > "$T1/.flow-agents/current.json"
+printf '%s' '{"artifact_dir":"bypass-kit"}' > "$T1/.kontourai/flow-agents/current.json"
 
-write_kit_pass_bundle "$T1/.flow-agents/bypass-kit/trust.bundle" "bypass-kit"
-write_fail_log "$T1/.flow-agents/bypass-kit/command-log.jsonl"
+write_kit_pass_bundle "$T1/.kontourai/flow-agents/bypass-kit/trust.bundle" "bypass-kit"
+write_fail_log "$T1/.kontourai/flow-agents/bypass-kit/command-log.jsonl"
 
 echo ""
 echo "--- 1a. PRE-FIX simulation: show the gate was blind ---"
@@ -208,7 +208,7 @@ seed_delivered "$T2" "nondeclared"
 
 # current.json: active flow (builder.build/verify)
 printf '%s' '{"artifact_dir":"nondeclared","active_flow_id":"builder.build","active_step_id":"verify"}' \
-  > "$T2/.flow-agents/current.json"
+  > "$T2/.kontourai/flow-agents/current.json"
 
 # Fake flow defs dir (safe, not agent-writable)
 FLOW_DEFS_DIR="$TMP/flows"
@@ -238,7 +238,7 @@ cat > "$FLOW_DEFS_DIR/builder.build.flow.json" << 'FLOWJSON'
 FLOWJSON
 
 # Bundle: agent-chosen NON-declared claimType (e.g. "acme.custom.verify") claiming npm test passed
-python3 - "$T2/.flow-agents/nondeclared/trust.bundle" "nondeclared" << 'PY'
+python3 - "$T2/.kontourai/flow-agents/nondeclared/trust.bundle" "nondeclared" << 'PY'
 import json, sys
 bundle_path, slug = sys.argv[1], sys.argv[2]
 bundle = {
@@ -263,7 +263,7 @@ bundle = {
 }
 json.dump(bundle, open(bundle_path, 'w'))
 PY
-write_fail_log "$T2/.flow-agents/nondeclared/command-log.jsonl"
+write_fail_log "$T2/.kontourai/flow-agents/nondeclared/command-log.jsonl"
 
 set +e
 t2_out="$(FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip \
@@ -293,9 +293,9 @@ echo "=== 3. NO OVER-BLOCK (a): clean session, no captured fails ==="
 
 T3="$TMP/t3-clean"
 seed_delivered "$T3" "clean-sess"
-printf '%s' '{"artifact_dir":"clean-sess"}' > "$T3/.flow-agents/current.json"
-write_kit_pass_bundle "$T3/.flow-agents/clean-sess/trust.bundle" "clean-sess"
-write_pass_log "$T3/.flow-agents/clean-sess/command-log.jsonl"
+printf '%s' '{"artifact_dir":"clean-sess"}' > "$T3/.kontourai/flow-agents/current.json"
+write_kit_pass_bundle "$T3/.kontourai/flow-agents/clean-sess/trust.bundle" "clean-sess"
+write_pass_log "$T3/.kontourai/flow-agents/clean-sess/command-log.jsonl"
 
 set +e
 t3_out="$(run_gate "$T3")"
@@ -319,13 +319,13 @@ echo "=== 4. NO OVER-BLOCK (b): fail-then-re-run-to-pass (latest capture PASS) =
 
 T4="$TMP/t4-rerun"
 seed_delivered "$T4" "rerun-pass"
-printf '%s' '{"artifact_dir":"rerun-pass"}' > "$T4/.flow-agents/current.json"
-write_kit_pass_bundle "$T4/.flow-agents/rerun-pass/trust.bundle" "rerun-pass"
+printf '%s' '{"artifact_dir":"rerun-pass"}' > "$T4/.kontourai/flow-agents/current.json"
+write_kit_pass_bundle "$T4/.kontourai/flow-agents/rerun-pass/trust.bundle" "rerun-pass"
 # FAIL first, then PASS (re-run fixed it — latest is PASS)
 {
   printf '%s\n' '{"command":"npm test","observedResult":"fail","exitCode":1,"capturedAt":"2026-06-27T00:00:00Z","source":"test"}'
   printf '%s\n' '{"command":"npm test","observedResult":"pass","exitCode":0,"capturedAt":"2026-06-27T00:00:01Z","source":"test"}'
-} > "$T4/.flow-agents/rerun-pass/command-log.jsonl"
+} > "$T4/.kontourai/flow-agents/rerun-pass/command-log.jsonl"
 
 set +e
 t4_out="$(run_gate "$T4")"
@@ -349,10 +349,10 @@ echo "=== 5. NO OVER-BLOCK (c): acknowledged failure (evidence marks command dis
 
 T5="$TMP/t5-ack"
 seed_delivered "$T5" "ack-fail"
-printf '%s' '{"artifact_dir":"ack-fail"}' > "$T5/.flow-agents/current.json"
+printf '%s' '{"artifact_dir":"ack-fail"}' > "$T5/.kontourai/flow-agents/current.json"
 
 # Bundle: claim acknowledges failure (status=disputed, value=fail)
-python3 - "$T5/.flow-agents/ack-fail/trust.bundle" "ack-fail" << 'PY'
+python3 - "$T5/.kontourai/flow-agents/ack-fail/trust.bundle" "ack-fail" << 'PY'
 import json, sys
 bundle_path, slug = sys.argv[1], sys.argv[2]
 bundle = {
@@ -379,7 +379,7 @@ bundle = {
 }
 json.dump(bundle, open(bundle_path, 'w'))
 PY
-write_fail_log "$T5/.flow-agents/ack-fail/command-log.jsonl"
+write_fail_log "$T5/.kontourai/flow-agents/ack-fail/command-log.jsonl"
 
 set +e
 t5_out="$(run_gate "$T5")"
@@ -403,12 +403,12 @@ echo "=== 6. NO OVER-BLOCK (d): no-command doc/policy session (verified, no exec
 echo "    (#216 fix: missing-log check must NOT fire when no command was expected)"
 
 T6="$TMP/t6-nocommand"
-mkdir -p "$T6/.flow-agents/nocommand"
+mkdir -p "$T6/.kontourai/flow-agents/nocommand"
 printf '# Repo\n' > "$T6/AGENTS.md"
 # State is verified (completing) but no commands were run
 printf '%s' '{"schema_version":"1.0","task_slug":"nocommand","status":"verified","phase":"verification","updated_at":"2026-06-27T00:00:00Z","next_action":{"status":"done","summary":"done"}}' \
-  > "$T6/.flow-agents/nocommand/state.json"
-cat > "$T6/.flow-agents/nocommand/nocommand--deliver.md" << 'MD'
+  > "$T6/.kontourai/flow-agents/nocommand/state.json"
+cat > "$T6/.kontourai/flow-agents/nocommand/nocommand--deliver.md" << 'MD'
 # nocommand
 
 branch: main
@@ -423,10 +423,10 @@ type: deliver
 
 ### Verdict: PASS
 MD
-printf '%s' '{"artifact_dir":"nocommand"}' > "$T6/.flow-agents/current.json"
+printf '%s' '{"artifact_dir":"nocommand"}' > "$T6/.kontourai/flow-agents/current.json"
 
 # Bundle with NO execution.label (doc/policy session — no commands run)
-python3 - "$T6/.flow-agents/nocommand/trust.bundle" << 'PY'
+python3 - "$T6/.kontourai/flow-agents/nocommand/trust.bundle" << 'PY'
 import json, sys
 bundle = {
     "schemaVersion": 3, "source": "flow-agents/workflow-sidecar",
@@ -476,11 +476,11 @@ echo "    (Two-part dependency: union form ALWAYS enforces workflow.* + empty-ex
 echo "     emits gate-misconfiguration HARD_BLOCK for empty expects[])"
 
 T7="$TMP/t7-empty-expects"
-mkdir -p "$T7/.flow-agents/empty-expects"
+mkdir -p "$T7/.kontourai/flow-agents/empty-expects"
 printf '# Repo\n' > "$T7/AGENTS.md"
 printf '%s' '{"schema_version":"1.0","task_slug":"empty-expects","status":"in_progress","phase":"execution","updated_at":"2026-06-27T00:00:00Z","next_action":{"status":"in_progress","summary":"Testing"}}' \
-  > "$T7/.flow-agents/empty-expects/state.json"
-cat > "$T7/.flow-agents/empty-expects/empty-expects--deliver.md" << 'MD'
+  > "$T7/.kontourai/flow-agents/empty-expects/state.json"
+cat > "$T7/.kontourai/flow-agents/empty-expects/empty-expects--deliver.md" << 'MD'
 # empty-expects
 
 branch: main
@@ -491,10 +491,10 @@ type: deliver
 - [ ] tests pass
 MD
 printf '%s' '{"artifact_dir":"empty-expects","active_flow_id":"builder.build","active_step_id":"verify"}' \
-  > "$T7/.flow-agents/current.json"
+  > "$T7/.kontourai/flow-agents/current.json"
 
 # Bundle with ONLY kit-typed claims (no workflow.*)
-python3 - "$T7/.flow-agents/empty-expects/trust.bundle" "empty-expects" << 'PY'
+python3 - "$T7/.kontourai/flow-agents/empty-expects/trust.bundle" "empty-expects" << 'PY'
 import json, sys
 bundle_path, slug = sys.argv[1], sys.argv[2]
 bundle = {
@@ -510,7 +510,7 @@ bundle = {
 }
 json.dump(bundle, open(bundle_path, 'w'))
 PY
-printf '' > "$T7/.flow-agents/empty-expects/command-log.jsonl"
+printf '' > "$T7/.kontourai/flow-agents/empty-expects/command-log.jsonl"
 
 # Fake flow with expects:[] (safe dir, not agent-writable)
 FAKE_FLOWS="$TMP/fake-flows-ac3"
@@ -566,12 +566,12 @@ echo "    PRE-FIX: completing guard skipped reconciliation for non-terminal stat
 echo "    POST-FIX: guard removed → check runs on every stop (status-independent)"
 
 T8="$TMP/t8-status-dodge"
-mkdir -p "$T8/.flow-agents/status-dodge"
+mkdir -p "$T8/.kontourai/flow-agents/status-dodge"
 printf '# Repo\n' > "$T8/AGENTS.md"
 # CRITICAL: status = 'blocked' (non-terminal — pre-fix would have returned [] here)
 printf '%s' '{"schema_version":"1.0","task_slug":"status-dodge","status":"blocked","phase":"executing","updated_at":"2026-06-27T00:00:00Z","next_action":{"status":"in_progress","summary":"running"}}' \
-  > "$T8/.flow-agents/status-dodge/state.json"
-cat > "$T8/.flow-agents/status-dodge/status-dodge--deliver.md" << 'MD'
+  > "$T8/.kontourai/flow-agents/status-dodge/state.json"
+cat > "$T8/.kontourai/flow-agents/status-dodge/status-dodge--deliver.md" << 'MD'
 # status-dodge
 
 branch: main
@@ -588,7 +588,7 @@ type: deliver
 MD
 
 # Bundle: kit-typed claim asserting pass for "npm test"
-python3 - "$T8/.flow-agents/status-dodge/trust.bundle" "status-dodge" << 'PY'
+python3 - "$T8/.kontourai/flow-agents/status-dodge/trust.bundle" "status-dodge" << 'PY'
 import json, sys
 bundle_path, slug = sys.argv[1], sys.argv[2]
 bundle = {
@@ -614,7 +614,7 @@ bundle = {
 json.dump(bundle, open(bundle_path, 'w'))
 PY
 # command-log: "npm test" FAIL (latest capture is FAIL — the agent lied)
-write_fail_log "$T8/.flow-agents/status-dodge/command-log.jsonl"
+write_fail_log "$T8/.kontourai/flow-agents/status-dodge/command-log.jsonl"
 
 echo ""
 echo "--- 8a. PRE-FIX simulation (completing guard) ---"
@@ -663,14 +663,14 @@ echo "    POST-FIX: Case B removed → incidental fails with no claim NOT blocke
 
 T9="$TMP/t9-overblock"
 seed_delivered "$T9" "overblock-sess"
-printf '%s' '{"artifact_dir":"overblock-sess"}' > "$T9/.flow-agents/current.json"
+printf '%s' '{"artifact_dir":"overblock-sess"}' > "$T9/.kontourai/flow-agents/current.json"
 # Bundle: only "npm test" claim asserting pass (no claim about the grep incidental fail)
-write_kit_pass_bundle "$T9/.flow-agents/overblock-sess/trust.bundle" "overblock-sess"
+write_kit_pass_bundle "$T9/.kontourai/flow-agents/overblock-sess/trust.bundle" "overblock-sess"
 # Log: "npm test" PASS + incidental "grep --quiet somepattern AGENTS.md" FAIL (exit 1)
 printf '%s\n%s\n' \
   '{"command":"npm test","observedResult":"pass","exitCode":0,"capturedAt":"2026-06-27T00:00:00Z","source":"postToolUse-capture"}' \
   '{"command":"grep --quiet somepattern AGENTS.md","observedResult":"fail","exitCode":1,"capturedAt":"2026-06-27T00:00:01Z","source":"postToolUse-capture"}' \
-  > "$T9/.flow-agents/overblock-sess/command-log.jsonl"
+  > "$T9/.kontourai/flow-agents/overblock-sess/command-log.jsonl"
 
 set +e
 t9_out="$(run_gate "$T9")"
@@ -708,13 +708,13 @@ echo "    POST-FIX: latest-wins → re-run to PASS clears the block"
 
 T10="$TMP/t10-fixpass"
 seed_delivered "$T10" "fixpass-sess"
-printf '%s' '{"artifact_dir":"fixpass-sess"}' > "$T10/.flow-agents/current.json"
-write_kit_pass_bundle "$T10/.flow-agents/fixpass-sess/trust.bundle" "fixpass-sess"
+printf '%s' '{"artifact_dir":"fixpass-sess"}' > "$T10/.kontourai/flow-agents/current.json"
+write_kit_pass_bundle "$T10/.kontourai/flow-agents/fixpass-sess/trust.bundle" "fixpass-sess"
 # Log: FAIL first, then PASS (genuine fix-then-re-run)
 printf '%s\n%s\n' \
   '{"command":"npm test","observedResult":"fail","exitCode":1,"capturedAt":"2026-06-27T00:00:00Z","source":"postToolUse-capture"}' \
   '{"command":"npm test","observedResult":"pass","exitCode":0,"capturedAt":"2026-06-27T00:00:01Z","source":"postToolUse-capture"}' \
-  > "$T10/.flow-agents/fixpass-sess/command-log.jsonl"
+  > "$T10/.kontourai/flow-agents/fixpass-sess/command-log.jsonl"
 
 set +e
 t10_out="$(run_gate "$T10")"
@@ -747,9 +747,9 @@ echo "    POST-FIX: hasLaunderingOperator detects || true → 'exit-code-launder
 
 T11="$TMP/t11-laundering"
 seed_delivered "$T11" "laundering-sess"
-printf '%s' '{"artifact_dir":"laundering-sess"}' > "$T11/.flow-agents/current.json"
+printf '%s' '{"artifact_dir":"laundering-sess"}' > "$T11/.kontourai/flow-agents/current.json"
 # Bundle: claim asserting pass for "npm test || true" — command string has laundering operator
-python3 - "$T11/.flow-agents/laundering-sess/trust.bundle" "laundering-sess" << 'PY'
+python3 - "$T11/.kontourai/flow-agents/laundering-sess/trust.bundle" "laundering-sess" << 'PY'
 import json, sys
 bundle_path, slug = sys.argv[1], sys.argv[2]
 bundle = {
@@ -777,7 +777,7 @@ PY
 # Log: "npm test || true" captured as PASS (exit 0) — the laundering worked
 printf '%s\n' \
   '{"command":"npm test || true","observedResult":"pass","exitCode":0,"capturedAt":"2026-06-27T00:00:00Z","source":"postToolUse-capture"}' \
-  > "$T11/.flow-agents/laundering-sess/command-log.jsonl"
+  > "$T11/.kontourai/flow-agents/laundering-sess/command-log.jsonl"
 
 set +e
 t11_out="$(run_gate "$T11")"

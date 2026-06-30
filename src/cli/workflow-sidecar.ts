@@ -13,7 +13,7 @@ type AnyObj = Record<string, any>;
 
 export const statuses = new Set(["new", "planning", "planned", "in_progress", "blocked", "verifying", "verified", "needs_decision", "not_verified", "failed", "delivered", "accepted", "archived"]);
 export const phases = ["idea", "backlog", "pickup", "planning", "execution", "verification", "goal_fit", "evidence", "release", "learning", "done"];
-export const checkKinds = new Set(["build", "types", "lint", "test", "security", "diff", "browser", "runtime", "policy", "external"]);
+export const checkKinds = new Set(["build", "types", "lint", "test", "command", "security", "diff", "browser", "runtime", "policy", "external"]);
 export const checkStatuses = new Set(["pass", "fail", "not_verified", "skip"]);
 export const verdicts = new Set(["pass", "partial", "fail", "not_verified"]);
 
@@ -536,7 +536,7 @@ export async function writeTrustBundle(dir: string, slug: string, timestamp: str
       const raw = fs.readFileSync(path.join(dir, "command-log.jsonl"), "utf8");
       commandLog = raw.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => { try { return JSON.parse(l) as AnyObj; } catch { return null; } }).filter((x): x is AnyObj => x !== null);
     } catch { /* no capture log — fine */ }
-    // ADR 0016 Abstraction A (P-d): pass the .flow-agents dir ONLY when current.json
+    // ADR 0016 Abstraction A (P-d): pass the runtime artifact root ONLY when current.json
     // points to this session (scoped active-flow guard). If current.json.artifact_dir
     // resolves to a different session, pass null — no active-flow claim mapping for this bundle.
     const _flowAgentsDir = path.dirname(dir);
@@ -850,7 +850,13 @@ function currentDir(root: string): string | null {
   const c = loadCurrent(root);
   if (!c) return null;
   const dir = path.resolve(root, c.artifact_dir ?? c.active_slug ?? "");
-  return fs.existsSync(dir) ? dir : null;
+  if (!fs.existsSync(dir)) return null;
+  try {
+    requireArtifactDirUnderRoot(dir, root);
+  } catch {
+    return null;
+  }
+  return dir;
 }
 function updateCurrentAgent(root: string, dir: string, agentId: string, status: string, timestamp: string): void {
   const cur = loadCurrent(root);
@@ -928,7 +934,7 @@ function recordAgentEvent(p: ReturnType<typeof parseArgs>): number {
   const dir = explicit ? path.resolve(explicit) : currentDir(root);
   if (!dir || !fs.existsSync(dir)) die("artifact directory does not exist");
   if (explicit && fs.lstatSync(dir).isSymbolicLink()) die(`artifact directory must not be a symlink: ${dir}`);
-  if (hasExplicitRoot) requireArtifactDirUnderRoot(dir, root);
+  if (hasExplicitRoot || !explicit) requireArtifactDirUnderRoot(dir, root);
   const timestamp = opt(p, "timestamp", now());
   const agent = validateAgentId(opt(p, "agent-id"));
   const event = { timestamp, agent_id: agent, kind: opt(p, "kind", "note"), status: opt(p, "status", "info"), summary: opt(p, "summary"), ...(opt(p, "ref") ? { ref: opt(p, "ref") } : {}) };
@@ -986,7 +992,7 @@ export function normalizeEvidenceRefs(raw: unknown, label: string): AnyObj[] {
 export function normalizeCheck(raw: AnyObj): AnyObj {
   const check = { ...raw };
   if (!check.id || !check.kind || !check.status || !check.summary) die("check requires id, kind, status, and summary");
-  if (!checkKinds.has(check.kind)) die("kind must be one of: build, types, lint, test, security, diff, browser, runtime, policy, external");
+    if (!checkKinds.has(check.kind)) die("kind must be one of: build, types, lint, test, command, security, diff, browser, runtime, policy, external");
   if (!checkStatuses.has(check.status)) die("status must be one of: pass, fail, not_verified, skip");
   if (Array.isArray(check.standard_refs)) for (const ref of check.standard_refs) if (!["junit", "sarif", "coverage", "veritas"].includes(ref.standard)) die("standard must be one of");
   if (check.artifact_refs) check.artifact_refs = normalizeEvidenceRefs(check.artifact_refs, "artifact_refs");
@@ -1129,7 +1135,7 @@ export function writeState(dir: string, slug: string, status: string, phase: str
 // "builder.verify.policy-compliance") so round-trip helpers broaden their filters
 // to include declared claims alongside the legacy workflow.* ones.
 //
-// Safety guard: current.json in the .flow-agents dir records the CURRENTLY ACTIVE
+// Safety guard: current.json in the runtime artifact root records the CURRENTLY ACTIVE
 // session via artifact_dir. If current.json points to a different session than `dir`
 // (e.g. another session was the last to call advance-state --flow-definition), we
 // return an empty set so declared-type predicates are NOT applied to the wrong session.
@@ -1657,7 +1663,7 @@ async function sealCheckpoint(p: ReturnType<typeof parseArgs>): Promise<number> 
 
 // ─── Publish Delivery Bundle ──────────────────────────────────────────────────
 // Copies the session's trust.bundle (+ checkpoint companions) from the gitignored
-// session artifact dir (.flow-agents/<slug>/) to the committed delivery/ transport
+// session artifact dir (.kontourai/flow-agents/<slug>/) to the committed delivery/ transport
 // path so the CI trust-reconcile job can reconcile it against fresh CI results.
 //
 // Fail-soft: if trust.bundle is absent (no evidence recorded yet), does nothing.
@@ -1909,7 +1915,7 @@ export interface BundleFile {
   policies: AnyObj[];
 }
 
-/** The gate block signal read from .flow-agents/.goal-fit-block-streak.json */
+/** The gate block signal read from .kontourai/flow-agents/.goal-fit-block-streak.json */
 export interface GateBlockSignal {
   /** True when the streak file exists AND count >= 1 */
   blocked: boolean;
@@ -1926,13 +1932,13 @@ export interface GateBlockSignal {
 export type GateCalibration = "correct" | "false_block" | "missed_block";
 
 /**
- * Read the gate block signal from .flow-agents/.goal-fit-block-streak.json
+ * Read the gate block signal from .kontourai/flow-agents/.goal-fit-block-streak.json
  * (written by scripts/hooks/stop-goal-fit.js when block mode fires).
  * The file sits at <artifact-root>/.goal-fit-block-streak.json — one level
  * above the session artifact dir. Fail-open: returns { blocked: false } when
  * the file is absent or unreadable.
  *
- * @param artifactRoot  The .flow-agents root dir (parent of session slug dir).
+ * @param artifactRoot  The runtime artifact root dir (parent of session slug dir).
  */
 export function readGateBlockSignal(artifactRoot: string): GateBlockSignal {
   const streakFile = path.join(artifactRoot, ".goal-fit-block-streak.json");
@@ -2159,7 +2165,7 @@ export function buildGateInquiryRecords(
  *
  * The block signal is read from <artifact-root>/.goal-fit-block-streak.json,
  * written by scripts/hooks/stop-goal-fit.js when block mode fires. The file
- * lives one level above the session slug dir (the .flow-agents root).
+ * lives one level above the session slug dir (the runtime artifact root).
  *
  * If @kontourai/surface is unavailable, logs a warning and returns 0
  * (fail-open — no bespoke fork fallback).
@@ -2185,7 +2191,7 @@ async function gateReview(p: ReturnType<typeof parseArgs>): Promise<number> {
 
   const bundle: BundleFile = JSON.parse(fs.readFileSync(bundlePath, "utf8"));
 
-  // Read gate block signal from .flow-agents root (one level above session dir)
+  // Read gate block signal from the runtime artifact root (one level above session dir)
   const artifactRoot = path.dirname(dir);
   const blockSignal = readGateBlockSignal(artifactRoot);
 
@@ -2342,7 +2348,7 @@ function trustMcp(p: ReturnType<typeof parseArgs>): number {
   if (mode === "print") {
     console.log(JSON.stringify({ mcpServers: { [TRUST_MCP_SERVER]: trustMcpRegistration() } }, null, 2));
     process.stderr.write(`\n# Paste the above into your runtime MCP config (e.g. .mcp.json). Flow Agents does NOT write it for you unless you run: trust-mcp --mode enable\n`);
-    process.stderr.write(`# To view a task's trust inline, call surface_summary with path=<.flow-agents/<slug>/trust.bundle>.\n`);
+    process.stderr.write(`# To view a task's trust inline, call surface_summary with path=<.kontourai/flow-agents/<slug>/trust.bundle>.\n`);
     return 0;
   }
   if (mode !== "enable" && mode !== "disable") die("trust-mcp --mode must be print|enable|disable");
@@ -2424,7 +2430,7 @@ function livenessEnabled(): boolean { const v = String(process.env.FLOW_AGENTS_L
 function livenessLifecycle(taskDir: string, slug: string, kind: "claim" | "heartbeat" | "release", timestamp: string): void {
   if (!livenessEnabled()) return;
   try {
-    const root = path.dirname(taskDir); // .flow-agents/<slug> → .flow-agents (the shared liveness stream lives here)
+    const root = path.dirname(taskDir); // .kontourai/flow-agents/<slug> → .kontourai/flow-agents (the shared liveness stream lives here)
     const evt: AnyObj = { type: kind, subjectId: slug, actor: resolveLivenessActor(), at: timestamp, source: "lifecycle" };
     if (kind === "claim") evt.ttlSeconds = 1800;
     appendLivenessEvent(root, evt);

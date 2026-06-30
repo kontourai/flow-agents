@@ -20,9 +20,9 @@ import * as path from "node:path";
 //
 // Both kitId and flowName originate from agent-writable sources (active_flow_id
 // in current.json, and FLOW_AGENTS_FLOW_DEFS_DIR set by the runtime). A crafted
-// value like "builder.../../../.flow-agents/slug/fake-flow" produces:
+// value like "builder.../../../.kontourai/flow-agents/slug/fake-flow" produces:
 //   kitId = "builder"
-//   flowName = "../../../.flow-agents/slug/fake-flow"
+//   flowName = "../../../.kontourai/flow-agents/slug/fake-flow"
 // which resolves OUTSIDE kits/ via path.join traversal.
 //
 // SLUG_RE closes this: it rejects any value containing path separators, dots,
@@ -36,12 +36,23 @@ import * as path from "node:path";
 const SLUG_RE = /^[a-zA-Z0-9_-]+$/;
 
 /**
- * Returns true when the given resolved absolute path falls within a .flow-agents
- * directory (an agent-writable area). Used to reject FLOW_AGENTS_FLOW_DEFS_DIR
+ * Returns true when the given resolved absolute path falls within a Flow Agents
+ * runtime artifact directory (an agent-writable area). Used to reject FLOW_AGENTS_FLOW_DEFS_DIR
  * overrides that point into agent-controlled storage.
  */
+function hasAgentWritableRuntimeSegment(resolvedDir: string): boolean {
+  const parts = resolvedDir.split(path.sep);
+  if (parts.includes(".flow-agents")) return true;
+  return parts.some((part, index) => part === ".kontourai" && parts[index + 1] === "flow-agents");
+}
+
 function isAgentWritableDir(resolvedDir: string): boolean {
-  return resolvedDir.split(path.sep).includes(".flow-agents");
+  if (hasAgentWritableRuntimeSegment(resolvedDir)) return true;
+  try {
+    return hasAgentWritableRuntimeSegment(fs.realpathSync.native(resolvedDir));
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -49,11 +60,11 @@ function isAgentWritableDir(resolvedDir: string): boolean {
  *
  * Returns the validated absolute file path, or null when:
  *  - kitId or flowName contains chars outside SLUG_RE (rejects traversal)
- *  - FLOW_AGENTS_FLOW_DEFS_DIR resolves into a .flow-agents directory
+ *  - FLOW_AGENTS_FLOW_DEFS_DIR resolves into a runtime artifact directory
  *  - The resolved path escapes the expected root (belt-and-suspenders)
  *
- * When the override is unsafe (points into .flow-agents), falls back silently
- * to the repoRoot/kits/ path so the resolver still works for legit flows.
+ * When the override is unsafe, it is ignored and the resolver uses the
+ * canonical repoRoot/kits/ source for legitimate flows.
  */
 export function resolveFlowFilePath(
   kitId: string,
@@ -72,8 +83,8 @@ export function resolveFlowFilePath(
   if (override) {
     const resolvedOverride = path.resolve(override);
     if (isAgentWritableDir(resolvedOverride)) {
-      // Override targets an agent-writable .flow-agents path — reject it and
-      // fall back to the kit root.  The session will resolve the real kit flow.
+      // Override targets an agent-writable runtime path; ignore it and use
+      // the canonical kit root. The session will resolve the real kit flow.
       expectedRoot = path.resolve(repoRoot, "kits");
       flowFilePath = path.join(repoRoot, "kits", kitId, "flows", `${flowName}.flow.json`);
     } else {
@@ -165,7 +176,7 @@ export function resolveFlowStep(flowId: string, stepId: string, repoRoot: string
   if (!SLUG_RE.test(stepId)) return null;
 
   // Determine the FlowDefinition file path with slug validation + path containment check.
-  // Returns null for traversal attempts (e.g. flowName = "../../../.flow-agents/fake").
+  // Returns null for traversal attempts (e.g. flowName = "../../../.kontourai/flow-agents/fake").
   const flowFilePath = resolveFlowFilePath(kitId, flowName, flowId, repoRoot);
   if (!flowFilePath) return null;
 
@@ -239,7 +250,7 @@ export function resolvePhaseMap(flowId: string, repoRoot: string): Record<string
  * the nearest ancestor that contains a `kits/` subdirectory. If none is found,
  * falls back to `process.cwd()` so the default "run from repo root" case still works.
  *
- * This is required because the .flow-agents directory can live anywhere (temp dirs,
+ * This is required because the runtime artifact directory can live anywhere (temp dirs,
  * subprojects, CI workspaces) while the kits/ directory is always at the repo root.
  */
 function findRepoRoot(startDir: string): string {
@@ -264,7 +275,7 @@ function findRepoRoot(startDir: string): string {
  * with a fallback to process.cwd(). This handles temp dirs, CI workspaces, and
  * subproject layouts without hardcoding the repo structure.
  *
- * @param flowAgentsDir Path to the .flow-agents directory (contains current.json).
+ * @param flowAgentsDir Path to the runtime artifact root directory (contains current.json).
  * @returns ActiveFlowStep or null when fields are absent or resolution fails.
  */
 export function resolveActiveFlowStep(flowAgentsDir: string): ActiveFlowStep | null {

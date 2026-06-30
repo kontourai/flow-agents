@@ -98,7 +98,7 @@ const requiredUsageFeedbackFiles = [
 const fixtureOwnershipSelfAuditRefs = new Set([
   "evals/integration/test_fixture_retirement_audit.sh",
 ]);
-const pythonInventoryExcludes = new Set([".git", ".flow-agents", "node_modules", ".venv", "dist", "__pycache__", ".pytest_cache", ".cache", "build", "integrations"]);
+const pythonInventoryExcludes = new Set([".git", ".flow-agents", ".kontourai", "node_modules", ".venv", "dist", "__pycache__", ".pytest_cache", ".cache", "build", "integrations"]);
 const pythonCommandScanRoots = ["README.md", "docs", "context", "skills", "prompts", "agents", "evals", "scripts", "packaging", "package.json"];
 const allowedPythonCommandFiles = [
   /^agents\/tool-explore-deps\.json$/,

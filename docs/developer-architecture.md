@@ -106,7 +106,7 @@ flowchart TB
   Evidence -->|missing evidence| Plan
 ```
 
-**Current state:** The durable handoff surface is a pair of human-readable Markdown artifacts and machine-readable JSON sidecars under `.flow-agents/<slug>/`. Verification, critique, release, and learning records are explicit artifacts rather than hidden chat memory.
+**Current state:** The durable handoff surface is a pair of human-readable Markdown artifacts and machine-readable JSON sidecars under `.kontourai/flow-agents/<slug>/`. Verification, critique, release, and learning records are explicit artifacts rather than hidden chat memory.
 
 **Programmatic API (for native hosts):** The canonical sidecar writer/validator is importable as a library, not only via the `flow-agents-workflow-sidecar` CLI. A host that records workflow evidence natively should import the package root rather than reimplement validated read / merge / write:
 

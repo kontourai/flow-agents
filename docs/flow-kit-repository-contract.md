@@ -30,7 +30,7 @@ npm run kit -- status example-kit --dest /path/to/installed-flow-agents
 npm run kit -- activate --dest /path/to/installed-flow-agents --format json
 ```
 
-`--dest` is the installed bundle or workspace root. When omitted, the command uses the current working directory. Tests and automation should pass a temp destination; the command does not need to write to a user home directory.
+`--dest` is the installed bundle, workspace root, isolated Codex home, or test fixture destination. When omitted, Codex-oriented kit commands install into the normal Codex home: `CODEX_HOME` when it is set, otherwise `~/.codex`. Pass `--dest` to override that destination for workspace installs, isolated homes, or tests.
 
 Install always runs the same repository validation used by `npm run validate:source -- --kit` before it creates or updates local install state. A validation failure exits nonzero and leaves the destination registry and copied kits unchanged.
 
@@ -64,7 +64,7 @@ Reinstalling the same kit id from the same source with the same content is idemp
 
 ## Runtime Activation
 
-`activate` reads the built-in Kit Catalog and local install overlay, selects a runtime adapter, and writes generated runtime-local files into the destination workspace. When `--adapter` is omitted, Flow Agents selects the only implemented adapter:
+`activate` reads the built-in Kit Catalog and local install overlay, selects a runtime adapter, and writes generated non-durable projection files into the destination workspace. When `--adapter` is omitted, Flow Agents selects the only implemented adapter:
 
 ```text
 codex-local
@@ -80,13 +80,13 @@ The `codex-local` adapter supports only Flow Definition assets declared in `flow
 
 Activation reuses the installed local kit registry at `<dest>/kits/local/installed-kits.json`; it does not duplicate installed kit state and does not edit `kits/catalog.json`.
 
-Generated files are written under:
+Generated adapter projections are written under:
 
 ```text
-<dest>/.flow-agents/runtime/codex/
+<dest>/.kontourai/flow-agents/projections/codex/
 ```
 
-Flow Definition copies are placed under `flows/<kit-id>/<flow-id>.flow.json`, and activation writes an `activation.json` manifest in the same runtime-local area.
+Flow Definition copies are placed under `flows/<kit-id>/<flow-id>.flow.json`, and activation writes an `activation.json` manifest in the same projection area. These files are regenerable from the Kit Catalog plus `kits/local`; they are not the durable run state for a workflow.
 
 The stable activation diagnostics include:
 

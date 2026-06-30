@@ -15,12 +15,12 @@
  *     export FLOW_AGENTS_GOAL_FIT_MODE=off for the next bash -lc hook invocation.
  *   - .claude/settings.json / settings.local.json — where an agent could add an
  *     env block or delete the Stop hook entry entirely.
- *   - .flow-agents/current.json — where an agent could forge active_flow_id /
+ *   - .kontourai/flow-agents/current.json — where an agent could forge active_flow_id /
  *     active_step_id to route the gate to a fake permissive FlowDefinition.
- *   - .flow-agents/<slug>/state.json — where an agent could forge phase=planning
+ *   - .kontourai/flow-agents/<slug>/state.json — where an agent could forge phase=planning
  *     to downgrade from FULL_BLOCK to HARD_BLOCK (R5a: MEDIUM finding fix).
  *     SAFE: the CLI writes state.json via writeState → writeJson → fs.writeFileSync.
- *   - .flow-agents/<slug>/trust.bundle — where an agent could forge claims.
+ *   - .kontourai/flow-agents/<slug>/trust.bundle — where an agent could forge claims.
  *     SAFE: the CLI writes trust.bundle via writeTrustBundle → writeJson → fs.writeFileSync.
  *   (Verified: ensureSession / advanceState / writeCurrent / writeState /
  *    writeTrustBundle all use writeJson which calls fs.writeFileSync directly —
@@ -78,7 +78,7 @@ const PROTECTED_FILES = new Set([
 // These files need PATH context (not just basename) to avoid over-matching
 // common file names in unrelated projects.
 //
-// R5a adds .flow-agents/<slug>/state.json and .flow-agents/<slug>/trust.bundle.
+// R5a adds flow-agents runtime state and trust.bundle paths.
 //
 // checkProtectedPathPattern(filePath) → { name, reason } | null
 // ---------------------------------------------------------------------------
@@ -86,8 +86,9 @@ const PROTECTED_FILES = new Set([
 /**
  * Check whether a Write/Edit tool file path targets a gate kill-switch file
  * that requires path-level matching (.claude/settings.json,
- * .flow-agents/current.json, .flow-agents/<slug>/state.json,
- * .flow-agents/<slug>/trust.bundle).
+ * .kontourai/flow-agents/current.json, .kontourai/flow-agents/<slug>/state.json,
+ * .kontourai/flow-agents/<slug>/trust.bundle, and deprecated runtime-shaped
+ * .flow-agents equivalents).
  *
  * Returns { name, reason } when blocked, null when allowed.
  *
@@ -119,35 +120,45 @@ function checkProtectedPathPattern(filePath) {
     };
   }
 
-  // .flow-agents/current.json — an agent could forge active_flow_id / active_step_id
+  // .kontourai/flow-agents/current.json — an agent could forge active_flow_id / active_step_id
   // to route the gate to a permissive or empty-expects FlowDefinition.
   // SAFE: the workflow CLI writes current.json via fs (writeJson → fs.writeFileSync),
   // NOT via the Write/Edit tool — blocking the tool path does not break legit sidecar.
-  if (/(?:^|\/)\.flow-agents\/current\.json$/.test(norm)) {
+  if (/(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\.json$/.test(norm)) {
     return {
-      name: '.flow-agents/current.json',
+      name: '.kontourai/flow-agents/current.json',
       reason: 'an agent could forge active_flow_id/active_step_id to route the gate to a permissive FlowDefinition',
     };
   }
 
-  // .flow-agents/<slug>/state.json — an agent could forge phase=planning to
+  // .kontourai/flow-agents/.goal-fit-block-streak.json controls soft-block
+  // release counting. An agent could force early advisory-gate release by
+  // writing a high count.
+  if (/(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/\.goal-fit-block-streak\.json$/.test(norm)) {
+    return {
+      name: '.kontourai/flow-agents/.goal-fit-block-streak.json',
+      reason: 'an agent could manipulate goal-fit block streak state to force early soft-block release',
+    };
+  }
+
+  // .kontourai/flow-agents/<slug>/state.json — an agent could forge phase=planning to
   // downgrade the block regime (FULL_BLOCK → HARD_BLOCK) and weaken gate checks.
   // SAFE: the CLI writes state.json via writeState → writeJson → fs.writeFileSync,
   // NOT via the Write/Edit tool — blocking the tool path does not break legit sidecar.
-  if (/(?:^|\/)\.flow-agents\/[^/]+\/state\.json$/.test(norm)) {
+  if (/(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/state\.json$/.test(norm)) {
     return {
-      name: '.flow-agents/<slug>/state.json',
+      name: '.kontourai/flow-agents/<slug>/state.json',
       reason: 'an agent could forge phase=planning to downgrade the block regime and weaken gate enforcement',
     };
   }
 
-  // .flow-agents/<slug>/trust.bundle — an agent could forge claims (e.g. status=verified
+  // .kontourai/flow-agents/<slug>/trust.bundle — an agent could forge claims (e.g. status=verified
   // or impactLevel=low) to suppress gate blocks or make disputed evidence appear accepted.
   // SAFE: the CLI writes trust.bundle via writeTrustBundle → writeJson → fs.writeFileSync,
   // NOT via the Write/Edit tool — blocking the tool path does not break legit sidecar.
-  if (/(?:^|\/)\.flow-agents\/[^/]+\/trust\.bundle$/.test(norm)) {
+  if (/(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/trust\.bundle$/.test(norm)) {
     return {
-      name: '.flow-agents/<slug>/trust.bundle',
+      name: '.kontourai/flow-agents/<slug>/trust.bundle',
       reason: 'an agent could forge trust claims (verified status, impact level) to bypass gate integrity checks',
     };
   }
@@ -371,14 +382,14 @@ function checkCommandForBypass(command) {
 // When the agent uses a Bash tool (tool_input.command), detect redirects that
 // write to protected paths via shell redirect operators (> >>) or `tee`.
 //
-// R5a extends coverage to .flow-agents/<slug>/state.json and trust.bundle.
+// R5a extends coverage to flow-agents runtime state and trust.bundle.
 //
 // HONEST — INCOMPLETE COVERAGE: this catches the obvious forms only:
 //   - `cmd > ~/.bashrc`                        ✓ caught (> redirect operator)
 //   - `cmd >> .claude/settings.json`           ✓ caught (>> redirect operator)
-//   - `tee .flow-agents/current.json`          ✓ caught (tee command)
-//   - `cmd > .flow-agents/s/state.json`        ✓ caught (> redirect operator)
-//   - `tee .flow-agents/s/trust.bundle`        ✓ caught (tee command)
+//   - `tee .kontourai/flow-agents/current.json`   ✓ caught (tee command)
+//   - `cmd > .kontourai/flow-agents/s/state.json` ✓ caught (> redirect operator)
+//   - `tee .kontourai/flow-agents/s/trust.bundle` ✓ caught (tee command)
 //   - `sed -i ... .bashrc`                     ✗ NOT caught (in-place edit)
 //   - `interpreted-lang -c "open(...,'w')"     ✗ NOT caught (see interpreter check)
 //   - `/dev/fd` tricks, process substitution   ✗ NOT caught
@@ -391,10 +402,13 @@ function checkCommandForBypass(command) {
 /**
  * Regex that matches a normalized (forward-slash) path ending with a protected
  * kill-switch file: shell profiles, .claude/settings*.json,
- * .flow-agents/current.json, .flow-agents/<slug>/state.json,
- * .flow-agents/<slug>/trust.bundle.
+ * .kontourai/flow-agents/current.json,
+ * .kontourai/flow-agents/.goal-fit-block-streak.json,
+ * .kontourai/flow-agents/<slug>/state.json,
+ * .kontourai/flow-agents/<slug>/trust.bundle, and deprecated runtime-shaped
+ * .flow-agents equivalents.
  */
-const REDIRECT_PROTECTED_RE = /(?:^|\/|~\/)(\.bash_profile|\.bashrc|\.profile|\.zprofile|\.zshrc)$|(?:^|\/)\.claude\/settings(?:\.local)?\.json$|(?:^|\/)\.flow-agents\/current\.json$|(?:^|\/)\.flow-agents\/[^/]+\/state\.json$|(?:^|\/)\.flow-agents\/[^/]+\/trust\.bundle$|(?:^|\/)delivery\/trust\.bundle$|(?:^|\/)delivery\/trust\.checkpoint\.json$/;
+const REDIRECT_PROTECTED_RE = /(?:^|\/|~\/)(\.bash_profile|\.bashrc|\.profile|\.zprofile|\.zshrc)$|(?:^|\/)\.claude\/settings(?:\.local)?\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/\.goal-fit-block-streak\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/state\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/trust\.bundle$|(?:^|\/)delivery\/trust\.bundle$|(?:^|\/)delivery\/trust\.checkpoint\.json$/;
 
 /**
  * Return true when a token (an unquoted redirect target or tee argument) matches

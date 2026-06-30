@@ -77,7 +77,7 @@ When verification runs as part of a workflow, write or update `evidence.json` be
 Use the sidecar writer when available:
 
 ```bash
-npm run workflow:sidecar -- record-evidence .flow-agents/<slug> \
+npm run workflow:sidecar -- record-evidence .kontourai/flow-agents/<slug> \
   --verdict pass \
   --check-json '{"id":"tests","kind":"test","status":"pass","summary":"Relevant checks passed."}'
 ```

@@ -82,7 +82,7 @@ This view shows how each phase is composed. The left rail is the durable phase s
       <section class="phase-lane phase-lane--primary"><h3>Primary</h3><p><code>builder-shape</code> <code>idea-to-backlog</code></p></section>
       <section class="phase-lane"><h3>Support</h3><p><code>search-first</code> <code>explore</code> <code>frontend-design</code> <code>github-cli</code> <code>knowledge-capture</code></p></section>
       <section class="phase-lane"><h3>Nested sections / future primitives</h3><p>intake/dedupe, separate ideas, thinnest meaningful slice, opportunity review, explore options, <code>shape-work</code>, prioritize work, sync executable backlog</p></section>
-      <section class="phase-lane phase-lane--gate"><h3>Gate & artifact</h3><p>Idea, slice, shape, and backlog gates. Writes shaped briefs and GitHub issue links in <code>.flow-agents/&lt;slug&gt;/</code>.</p></section>
+      <section class="phase-lane phase-lane--gate"><h3>Gate & artifact</h3><p>Idea, slice, shape, and backlog gates. Writes shaped briefs and GitHub issue links in <code>.kontourai/flow-agents/&lt;slug&gt;/</code>.</p></section>
     </div>
   </article>
   <article class="phase-row">
@@ -137,15 +137,15 @@ The highest-leverage future extractions are likely `shape-work`, `test-map`, `sc
 
 Each workflow phase ends with an explicit gate and durable artifact:
 
-- `builder-shape` invokes Builder Kit shape, delegates to `idea-to-backlog`, links `kits/builder/flows/shape.flow.json`, and writes the standard `.flow-agents/<slug>/<slug>--idea-to-backlog.md` artifact.
-- `idea-to-backlog` writes `.flow-agents/<slug>/<slug>--idea-to-backlog.md` and produces shaped briefs plus GitHub issue links.
-- `pull-work` writes `.flow-agents/<slug>/<slug>--pull-work.md` with selected issues, WIP notes, blockers, pickup Probe decisions or accepted gaps, worktree decision, expected modified files, conflict risks, and a `plan-work` handoff.
-- `plan-work` and `deliver` write `.flow-agents/<slug>/<slug>--*.md` artifacts with `Definition Of Done`, `Goal Fit Gate`, and `Final Acceptance` sections.
+- `builder-shape` invokes Builder Kit shape, delegates to `idea-to-backlog`, links `kits/builder/flows/shape.flow.json`, and writes the standard `.kontourai/flow-agents/<slug>/<slug>--idea-to-backlog.md` artifact.
+- `idea-to-backlog` writes `.kontourai/flow-agents/<slug>/<slug>--idea-to-backlog.md` and produces shaped briefs plus GitHub issue links.
+- `pull-work` writes `.kontourai/flow-agents/<slug>/<slug>--pull-work.md` with selected issues, WIP notes, blockers, pickup Probe decisions or accepted gaps, worktree decision, expected modified files, conflict risks, and a `plan-work` handoff.
+- `plan-work` and `deliver` write `.kontourai/flow-agents/<slug>/<slug>--*.md` artifacts with `Definition Of Done`, `Goal Fit Gate`, and `Final Acceptance` sections.
 - `review-work` writes reviewer artifacts when available and updates `critique.json` with quality, security, architecture, standards, and resolution state.
 - `verify-work` writes verification artifacts and updates `evidence.json` with behavior evidence mapped to acceptance criteria.
-- `evidence-gate` writes `.flow-agents/<slug>/<slug>--evidence-gate.md` with acceptance evidence, CI summary, integrity report, verdict, and next step.
-- `release-readiness` writes `.flow-agents/<slug>/<slug>--release-readiness.md` with release scope, evidence reference, risk review, operational plan, rollback plan, observability plan, post-deploy checks, and decision.
-- `learning-review` writes `.flow-agents/<slug>/<slug>--learning-review.md` with outcomes, evidence, decisions, gaps, follow-ups, knowledge updates, and verdict.
+- `evidence-gate` writes `.kontourai/flow-agents/<slug>/<slug>--evidence-gate.md` with acceptance evidence, CI summary, integrity report, verdict, and next step.
+- `release-readiness` writes `.kontourai/flow-agents/<slug>/<slug>--release-readiness.md` with release scope, evidence reference, risk review, operational plan, rollback plan, observability plan, post-deploy checks, and decision.
+- `learning-review` writes `.kontourai/flow-agents/<slug>/<slug>--learning-review.md` with outcomes, evidence, decisions, gaps, follow-ups, knowledge updates, and verdict.
 
 Core gates:
 

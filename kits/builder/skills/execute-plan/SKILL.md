@@ -29,7 +29,7 @@ This skill owns orchestration between waves. The contracts own artifact continui
 
 ## Input
 
-- **Plan artifact path**: path to the `-plan.md` file in `.flow-agents/<slug>/`
+- **Plan artifact path**: path to the `-plan.md` file in `.kontourai/flow-agents/<slug>/`
 - **Session file path**: the session file to update with progress
 
 ## Workflow

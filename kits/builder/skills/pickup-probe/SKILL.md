@@ -91,21 +91,21 @@ When the Planning Gate passes, record the two gate claims for the Builder Kit `d
 **Claim 1 — Pickup readiness** (probe passed, goal fit and scope confirmed):
 
 ```bash
-npm run workflow:sidecar -- record-gate-claim .flow-agents/<slug> \
+npm run workflow:sidecar -- record-gate-claim .kontourai/flow-agents/<slug> \
   --expectation pickup-probe-readiness \
   --status pass \
   --summary "Pickup probe passed: goal fit confirmed, blockers checked, dependencies reviewed, acceptance criteria verified." \
-  --evidence-ref-json '{"kind":"artifact","file":".flow-agents/<slug>/<slug>--pull-work.md","summary":"Pull-work artifact recording probe status, scope, and planning readiness."}'
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/<slug>/<slug>--pull-work.md","summary":"Pull-work artifact recording probe status, scope, and planning readiness."}'
 ```
 
 **Claim 2 — Probe decisions captured** (decisions, accepted gaps, and planning readiness are recorded):
 
 ```bash
-npm run workflow:sidecar -- record-gate-claim .flow-agents/<slug> \
+npm run workflow:sidecar -- record-gate-claim .kontourai/flow-agents/<slug> \
   --expectation probe-decisions-or-accepted-gaps \
   --status pass \
   --summary "Probe decisions recorded: <decision-count> decisions, <gap-count> accepted gaps. Planning readiness: <ready|accepted_gap_ready>." \
-  --evidence-ref-json '{"kind":"artifact","file":".flow-agents/<slug>/<slug>--pull-work.md","summary":"Pull-work artifact with decisions, accepted gaps, and planning handoff."}'
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/<slug>/<slug>--pull-work.md","summary":"Pull-work artifact with decisions, accepted gaps, and planning handoff."}'
 ```
 
 Record both claims together immediately when the gate passes. Use `--status fail` when the gate fails (unresolved blocker or decision gap). Use `--status not_verified` only when the session has no active flow step.

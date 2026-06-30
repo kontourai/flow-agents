@@ -69,4 +69,4 @@ Do not treat missing CI, missing required review, missing branch protection data
 
 ## Artifact Lifecycle
 
-Local workflow artifacts under `.flow-agents/<slug>/` or a distribution-specific artifact root are runtime/session state by default. Provider records may link to those artifacts, but long-lived decisions should be promoted into durable docs, release notes, changelogs, ADRs, or provider comments/descriptions that are intended to persist.
+Local workflow artifacts under `.kontourai/flow-agents/<slug>/` or a distribution-specific artifact root are runtime/session state by default. Provider records may link to those artifacts, but long-lived decisions should be promoted into durable docs, release notes, changelogs, ADRs, or provider comments/descriptions that are intended to persist.

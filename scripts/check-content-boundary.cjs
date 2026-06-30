@@ -42,7 +42,7 @@ function isIgnoredPath(filePath) {
 }
 
 function isWorkflowRuntimeArtifact(filePath) {
-  return filePath.startsWith(".flow-agents/");
+  return filePath.startsWith(".kontourai/flow-agents/") || filePath.startsWith(".flow-agents/");
 }
 
 function lineNumberFor(content, index) {

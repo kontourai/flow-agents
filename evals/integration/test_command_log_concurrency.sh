@@ -30,15 +30,15 @@ trap cleanup EXIT
 
 REPO="$TMP/repo"
 SLUG="conc"
-mkdir -p "$REPO/.flow-agents/$SLUG"
+mkdir -p "$REPO/.kontourai/flow-agents/$SLUG"
 printf '# Repo\n' > "$REPO/AGENTS.md"
 # Anchor the capture log to this slug. evidence-capture.js resolves the artifact
-# dir via .flow-agents/current.json (active_slug) or the newest state.json; seed
-# both so resolveArtifactDir() points at .flow-agents/<slug>/.
-printf '{"active_slug":"%s","artifact_dir":".flow-agents/%s"}' "$SLUG" "$SLUG" \
-  > "$REPO/.flow-agents/current.json"
+# dir via .kontourai/flow-agents/current.json (active_slug) or the newest state.json; seed
+# both so resolveArtifactDir() points at .kontourai/flow-agents/<slug>/.
+printf '{"active_slug":"%s","artifact_dir":".kontourai/flow-agents/%s"}' "$SLUG" "$SLUG" \
+  > "$REPO/.kontourai/flow-agents/current.json"
 printf '%s' "{\"schema_version\":\"1.0\",\"task_slug\":\"$SLUG\",\"status\":\"in_progress\",\"phase\":\"build\",\"updated_at\":\"2026-06-23T00:00:00Z\",\"next_action\":{\"status\":\"in_progress\",\"summary\":\"work\"}}" \
-  > "$REPO/.flow-agents/$SLUG/state.json"
+  > "$REPO/.kontourai/flow-agents/$SLUG/state.json"
 
 N=24
 echo "Test: $N concurrent captures into one command-log must not fork the chain"
@@ -51,7 +51,7 @@ for i in $(seq 1 "$N"); do
 done
 wait
 
-LOG="$REPO/.flow-agents/$SLUG/command-log.jsonl"
+LOG="$REPO/.kontourai/flow-agents/$SLUG/command-log.jsonl"
 
 # 1. All N records present.
 count=$(grep -c '' "$LOG" 2>/dev/null || echo 0)
@@ -91,7 +91,7 @@ else
 fi
 
 # 3. The verifier confirms an intact chain.
-chain_status=$(node -e "const g = require('$GATE'); console.log(g.verifyCommandLogChain('$REPO/.flow-agents/$SLUG').status);")
+chain_status=$(node -e "const g = require('$GATE'); console.log(g.verifyCommandLogChain('$REPO/.kontourai/flow-agents/$SLUG').status);")
 if [[ "$chain_status" == "ok" ]]; then
   _pass "verifyCommandLogChain → ok under concurrency"
 else

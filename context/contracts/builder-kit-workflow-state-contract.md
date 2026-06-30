@@ -44,7 +44,7 @@ Every Builder Kit build-flow pause, resume, or step transition must make the fol
 
 ## Probe Record
 
-A Builder Kit Probe record is a JSON sidecar beside the other workflow artifacts, for example `.flow-agents/<slug>/builder-kit-probe.json`. It is the durable location for pickup/design context that would otherwise make `state.json` too broad.
+A Builder Kit Probe record is a JSON sidecar beside the other workflow artifacts, for example `.kontourai/flow-agents/<slug>/builder-kit-probe.json`. It is the durable location for pickup/design context that would otherwise make `state.json` too broad.
 
 Required shape:
 
@@ -168,7 +168,7 @@ Baseline freshness example for missing historical `planned_base_sha`:
         {
           "id": "source_artifact",
           "description": "Source shaped artifact or pickup artifact used to accept the fallback baseline.",
-          "source": ".flow-agents/<slug>/<slug>--idea-to-backlog.md",
+          "source": ".kontourai/flow-agents/<slug>/<slug>--idea-to-backlog.md",
           "example_value": ".flow-agents/builder-kit-not-verified-resolution-hints/builder-kit-not-verified-resolution-hints--idea-to-backlog.md"
         }
       ],
