@@ -25,7 +25,7 @@ Flow Agents addresses this with a process-discipline layer that sits between the
 
 - **One workflow across runtimes** — the same `idea → backlog → plan → build → review → verify → evidence → release → learning` path installs into Claude Code, Codex, Kiro, opencode, and pi without rewriting it per tool.
 - **Workflow skills** — `idea-to-backlog`, `pull-work`, `plan-work`, `execute-plan`, `review-work`, `verify-work`, `evidence-gate`, `release-readiness`, `learning-review`, and orchestrators like `deliver` and `fix-bug` that chain them.
-- **Durable workflow state** — schema-validated sidecars under `.flow-agents/` record acceptance criteria, evidence, critique, handoff, and learning, so any session can resume from recorded state instead of chat memory.
+- **Resumable workflow state** — schema-validated sidecars under `.kontourai/flow-agents/` record acceptance criteria, evidence, critique, handoff, and learning, so any session can resume from recorded state instead of chat memory.
 - **Four canonical policies** — workflow steering (phase reminders at each turn), quality gate (per-file checks after edits), stop-goal-fit (evidence check before the agent stops), and config protection (veto writes to linter/formatter configs). Each policy class has a canonical script under `scripts/hooks/` and compiles to the host's native hook format.
 - **Evidence over confidence** — important work ends with tests, browser checks, CI results, review findings, governance reports, or an explicit `NOT_VERIFIED` gap. Optional [Veritas](docs/veritas-integration.md) integration attaches repo-governance evidence without making it mandatory.
 - **Verifiable, un-gameable "done"** — the agent can't mark work complete that isn't: the gate re-derives the verdict from independent evidence, an external CI anchor re-runs the verification fresh and fails the merge on any divergence, and CI mints a Sigstore-signed record of what shipped. See [Verifiable Trust — why "done" actually means done](docs/verifiable-trust.md).
@@ -88,6 +88,8 @@ npx @kontourai/flow-agents init --runtime opencode --dest /path/to/workspace --y
 npx @kontourai/flow-agents init --runtime pi --dest /path/to/workspace --yes
 ```
 
+For Codex global installs, omit `--dest` and use `--global`: Flow Agents installs into `CODEX_HOME` when it is set, otherwise `~/.codex`. Pass `--dest` only when you intentionally want an isolated or test-specific Codex home.
+
 Working from a checkout (for contributors): `npm install && npm run build`, then `node build/src/cli.js init --dest /path/to/workspace`.
 
 The installer copies the bundled agents, skills, context, scripts, evals, Flow Kit assets, and the Flow Agents-owned `console.telemetry.json` descriptor into the target workspace. Telemetry writes to local files by default; optional sinks mirror it to a local, hosted, or self-hosted Kontour Console (`--telemetry-sink local-kontour-console | kontour-hosted-console | user-hosted-console --console-url …`).
@@ -121,7 +123,7 @@ Use deliver for the issue you just filed. Pull it, probe the design, plan it,
 implement it, verify it, and stop if any evidence is missing.
 ```
 
-Each step has an evidence gate. The agent either presents the expected evidence and advances, or blocks and explains what is missing — it does not produce a confident summary and proceed on partial work. Session state is written to `.flow-agents/<slug>/` and survives context loss or compaction.
+Each step has an evidence gate. The agent either presents the expected evidence and advances, or blocks and explains what is missing — it does not produce a confident summary and proceed on partial work. Non-durable session state is written to `.kontourai/flow-agents/<slug>/` and survives context loss or compaction.
 
 For a full walkthrough — what each gate checks, what you observe, and how to invoke individual skills — read the [Builder Kit Quick Start](docs/getting-started.md).
 
@@ -148,6 +150,10 @@ The Knowledge Kit is also LIVE-proven: the default adapter passes the parameteri
 Install a local kit:
 
 ```bash
+# default Codex/global kit destination: CODEX_HOME, or ~/.codex when CODEX_HOME is unset
+npx @kontourai/flow-agents kit install path/to/my-kit
+
+# explicit override for workspace or test installs
 npx @kontourai/flow-agents kit install path/to/my-kit --dest /path/to/workspace
 ```
 
@@ -209,7 +215,7 @@ See [Repository Structure](docs/repository-structure.md) for the canonical map. 
 - `agents/`, `agent-cards/`, `skills/`, `context/`, `powers/`, and `prompts/` are canonical bundle source.
 - `src/` and `scripts/` are product, tooling, validation, installer, hook, telemetry, and compatibility source; see [scripts/README.md](scripts/README.md).
 - `kits/`, `schemas/`, `packaging/`, `evals/`, `docs/`, and `integrations/` hold Flow Kit assets, contracts, package metadata, evals, durable docs, and optional integrations.
-- `dist/`, `build/`, and `_site/` are generated output. Local `.flow-agents/`, `.codex/`, `.claude/`, telemetry, promptfoo, Veritas, and cache directories are runtime state and stay ignored; durable outcomes belong in docs, source, schemas, or provider records.
+- `dist/`, `build/`, and `_site/` are generated output. Local `.kontourai/`, `.flow-agents/`, `.codex/`, `.claude/`, telemetry, promptfoo, Veritas, and cache directories stay ignored; durable outcomes belong in docs, source, schemas, or provider records.
 
 ## Documentation
 

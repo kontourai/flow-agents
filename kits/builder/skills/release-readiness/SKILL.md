@@ -28,7 +28,7 @@ Release Readiness is not Evidence Gate. Evidence Gate decides whether completed 
 
 ## Artifact Contract
 
-Create or update `.flow-agents/<slug>/<slug>--release-readiness.md` with:
+Create or update `.kontourai/flow-agents/<slug>/<slug>--release-readiness.md` with:
 
 - `release_scope`: work included, excluded, issue/provider-change links
 - `evidence_reference`: evidence artifact, verdict, residual risks
@@ -37,13 +37,13 @@ Create or update `.flow-agents/<slug>/<slug>--release-readiness.md` with:
 - `rollback_plan`: trigger, steps, owner, expected recovery signal
 - `observability_plan`: metrics, logs, traces, alerts, dashboards
 - `post_deploy_checks`: checks, commands, URLs, timing, expected signals
-- `final_acceptance_docs`: long-lived docs updated, archived `.flow-agents/<slug>/` links, and deferred docs follow-ups
+- `final_acceptance_docs`: long-lived docs updated, archived `.kontourai/flow-agents/<slug>/` links, and deferred docs follow-ups
 - `decision`: MERGE, RELEASE, DEPLOY, HOLD, or ROLLBACK_REQUIRED
 
 When the repository provides `npm run workflow:sidecar --`, also write `release.json` with:
 
 ```bash
-npm run workflow:sidecar -- record-release .flow-agents/<slug> \
+npm run workflow:sidecar -- record-release .kontourai/flow-agents/<slug> \
   --decision merge \
   --scope "..." \
   --evidence-ref evidence.json \
@@ -108,7 +108,7 @@ When CI has passed and merge/release acceptance is clear, require a docs decisio
 
 - update long-lived docs with what changed, how to use it, and important why/how decisions; or
 - record why no durable docs are needed; and
-- link back to the archived `.flow-agents/<slug>/` plan/session artifact for implementation history.
+- link back to the archived `.kontourai/flow-agents/<slug>/` plan/session artifact for implementation history.
 
 ## Gates
 

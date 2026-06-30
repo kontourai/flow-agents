@@ -28,10 +28,13 @@ Evidence Gate is not Release Readiness. It asks whether completed work has enoug
 - Provider change / branch / check run links when available.
 - Changed-file summary.
 - Active TODOs, issue links, and release/rollback notes.
+- Cross-repo dependency/provider coverage matrix when work spans multiple
+  products, package-manager roots, generated artifact locations, install
+  scripts, CI, or shared workflow guidance.
 
 ## Artifact Contract
 
-Write or update `.flow-agents/<slug>/<slug>--evidence-gate.md` with:
+Write or update `.kontourai/flow-agents/<slug>/<slug>--evidence-gate.md` with:
 
 - `intent`: issue/brief, acceptance criteria, non-goals, risk class
 - `evidence_manifest`: command/check name, source, timestamp, result, link/output pointer
@@ -101,6 +104,13 @@ Check for process gaming or accidental drift:
 - sensitive files touched without review
 
 Sensitive areas include auth, security middleware, data migrations, CI config, deployment scripts, feature flags, test helpers, lint/type config, payment, crypto, and filesystem/network operations.
+
+For multi-repo or cross-product changes, require an explicit coverage matrix
+before a clean pass. The matrix must list every affected product/repo root and
+the status of build/test evidence, dependency/security review, provider/CI
+evidence, and any accepted gaps. A clean evidence verdict requires every
+applicable root to be covered or a human-accepted gap recorded with the reason.
+Do not infer cross-product coverage from a passing subset.
 
 ### 4. CI And Flake Assessment
 
@@ -178,6 +188,21 @@ Use `git` and the active `ChangeProvider` adapter when available to:
 - keep GitHub PRs as the first `ChangeProvider` adapter example: for GitHub, open or update a PR and collect PR checks
 
 If commit, push, provider change publication, or provider checks are blocked, keep the release path at `NOT_VERIFIED` or `HOLD` until the blocker is resolved or explicitly accepted by the user.
+
+### 8. Dependency And External-Audit Coverage
+
+When dependency review is in scope, evidence-gate must preserve both local
+inventory evidence and external advisory/audit evidence separately. External
+audit commands and registry/advisory lookups may disclose private dependency
+metadata; if the execution policy rejects the command or the user has not
+explicitly approved that disclosure, record the affected roots as
+`NOT_VERIFIED` for external audit and name the privacy/approval blocker.
+
+For cross-product work, a dependency/security lane can pass only when every
+applicable package-manager root has one of these recorded outcomes: `pass`,
+`fail`, `skip_no_manifest`, or an accepted `not_verified` gap. Existing
+vulnerabilities are still `FAIL` for the dependency lane unless the user
+explicitly accepts them as unrelated residual risk.
 
 ## Gate
 

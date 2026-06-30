@@ -34,7 +34,7 @@ run_bounded() {
 
 WRITER="workflow-sidecar"
 VALIDATOR="validate-workflow-artifacts"
-ARTIFACT_DIR="$TMPDIR_EVAL/repo/.flow-agents/auto-sidecars"
+ARTIFACT_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/auto-sidecars"
 mkdir -p "$ARTIFACT_DIR"
 
 DEFAULT_ROOT_REPO="$TMPDIR_EVAL/default-root-repo"
@@ -56,22 +56,57 @@ else
   _fail "sidecar writer default-root ensure-session failed: $(cat "$TMPDIR_EVAL/default-root.out" "$TMPDIR_EVAL/default-root.err")"
 fi
 
-OLD_ROOT_REPO="$TMPDIR_EVAL/old-root-repo"
-mkdir -p "$OLD_ROOT_REPO/.flow-agents/old-session"
-cat > "$OLD_ROOT_REPO/.flow-agents/current.json" <<'JSON'
-{"schema_version":"1.0","active_slug":"old-session","artifact_dir":"old-session"}
+PREVIOUS_ROOT_REPO="$TMPDIR_EVAL/previous-root-repo"
+mkdir -p "$PREVIOUS_ROOT_REPO/.flow-agents/previous-session"
+cat > "$PREVIOUS_ROOT_REPO/.flow-agents/current.json" <<'JSON'
+{"schema_version":"1.0","active_slug":"previous-session","artifact_dir":"previous-session"}
 JSON
-cat > "$OLD_ROOT_REPO/.flow-agents/old-session/state.json" <<'JSON'
-{"schema_version":"1.0","task_slug":"old-session","status":"planned","phase":"planning","next_action":{"status":"continue","summary":"continue"}}
+cat > "$PREVIOUS_ROOT_REPO/.flow-agents/previous-session/state.json" <<'JSON'
+{"schema_version":"1.0","task_slug":"previous-session","status":"planned","phase":"planning","next_action":{"status":"continue","summary":"continue"}}
 JSON
-if (cd "$OLD_ROOT_REPO" && flow_agents_node "$WRITER" current --format slug >"$TMPDIR_EVAL/old-current.out" 2>"$TMPDIR_EVAL/old-current.err") \
-  && [[ "$(cat "$TMPDIR_EVAL/old-current.out")" == "old-session" ]]; then
-  _pass "sidecar writer reads legacy .flow-agents current session when no new root exists"
+if (cd "$PREVIOUS_ROOT_REPO" && flow_agents_node "$WRITER" current --format slug >"$TMPDIR_EVAL/previous-current.out" 2>"$TMPDIR_EVAL/previous-current.err"); then
+  _fail "sidecar writer default current unexpectedly read previous .flow-agents runtime root: $(cat "$TMPDIR_EVAL/previous-current.out")"
 else
-  _fail "sidecar writer did not read legacy current session: $(cat "$TMPDIR_EVAL/old-current.out" "$TMPDIR_EVAL/old-current.err")"
+  _pass "sidecar writer does not fall back to previous .flow-agents runtime root"
 fi
 
-SESSION_ROOT="$TMPDIR_EVAL/repo/.flow-agents"
+if (cd "$PREVIOUS_ROOT_REPO" && flow_agents_node "$WRITER" current --artifact-root "$PREVIOUS_ROOT_REPO/.flow-agents" --format slug >"$TMPDIR_EVAL/previous-current-explicit.out" 2>"$TMPDIR_EVAL/previous-current-explicit.err") \
+  && [[ "$(cat "$TMPDIR_EVAL/previous-current-explicit.out")" == "previous-session" ]]; then
+  _pass "sidecar writer reads explicitly supplied artifact root"
+else
+  _fail "sidecar writer did not read explicit artifact root: $(cat "$TMPDIR_EVAL/previous-current-explicit.out" "$TMPDIR_EVAL/previous-current-explicit.err")"
+fi
+
+TRAVERSAL_ROOT="$TMPDIR_EVAL/traversal-repo/.kontourai/flow-agents"
+TRAVERSAL_OUTSIDE="$TMPDIR_EVAL/traversal-outside-existing"
+mkdir -p "$TRAVERSAL_ROOT" "$TRAVERSAL_OUTSIDE"
+node - "$TRAVERSAL_ROOT" "$TRAVERSAL_OUTSIDE" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const root = process.argv[2];
+const outside = process.argv[3];
+fs.writeFileSync(path.join(root, "current.json"), JSON.stringify({
+  schema_version: "1.0",
+  active_slug: "escape",
+  artifact_dir: path.relative(root, outside),
+  updated_at: "2026-05-09T00:00:00Z",
+}) + "\n");
+NODE
+if run_bounded 5 flow_agents_node "$WRITER" record-agent-event \
+  --artifact-root "$TRAVERSAL_ROOT" \
+  --agent-id tool-worker \
+  --kind note \
+  --status active \
+  --summary "must not write outside" \
+  >"$TMPDIR_EVAL/current-traversal.out" 2>"$TMPDIR_EVAL/current-traversal.err"; then
+  _fail "sidecar writer accepted current.json artifact_dir outside artifact root"
+elif [[ ! -e "$TRAVERSAL_OUTSIDE/agents" ]]; then
+  _pass "sidecar writer rejects current.json artifact_dir outside artifact root"
+else
+  _fail "sidecar writer wrote agent events outside artifact root"
+fi
+
+SESSION_ROOT="$TMPDIR_EVAL/repo/.kontourai/flow-agents"
 if flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$SESSION_ROOT" \
   --task-slug ensured-session \
@@ -118,12 +153,12 @@ if (cd "$UNSAFE_REPO_ROOT" \
   && git init -q \
   && git remote add origin "file:///Users/alice/customer-secret.git" \
   && FLOW_AGENTS_REPO="/Users/alice/customer-secret" flow_agents_node "$WRITER" ensure-session \
-    --artifact-root ".flow-agents" \
+    --artifact-root ".kontourai/flow-agents" \
     --task-slug unsafe-repo \
     --title "Unsafe repo" \
     --summary "Unsafe repo fallback." \
     --timestamp "2026-05-09T00:00:00Z" >/dev/null 2>"$TMPDIR_EVAL/unsafe-repo.err" \
-  && node - ".flow-agents/unsafe-repo/state.json" <<'NODE'
+  && node - ".kontourai/flow-agents/unsafe-repo/state.json" <<'NODE'
 const fs = require("node:fs");
 const repo = JSON.parse(fs.readFileSync(process.argv[2], "utf8")).repo;
 if (repo !== "unsafe-repo") throw new Error(`unsafe repo fallback was ${JSON.stringify(repo)}`);
@@ -162,7 +197,7 @@ else
 fi
 
 cp "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-traversal-agent.json"
-TRAVERSAL_AGENT_OUTSIDE="$TMPDIR_EVAL/repo/.flow-agents/evil-agent-outside.jsonl"
+TRAVERSAL_AGENT_OUTSIDE="$TMPDIR_EVAL/repo/.kontourai/flow-agents/evil-agent-outside.jsonl"
 if run_bounded 5 flow_agents_node "$WRITER" record-agent-event \
   --artifact-root "$SESSION_ROOT" \
   --agent-id ../evil-agent-outside \
@@ -219,7 +254,7 @@ if flow_agents_node "$WRITER" ensure-session \
   --timestamp "2026-05-09T00:00:50Z" >"$TMPDIR_EVAL/ensure-traversal.out" 2>&1; then
   _fail "sidecar writer should reject traversal task slugs"
 elif rg -q -- '--task-slug must not contain' "$TMPDIR_EVAL/ensure-traversal.out" \
-  && [[ ! -d "$TMPDIR_EVAL/repo/.flow-agents/outside" ]]; then
+  && [[ ! -d "$TMPDIR_EVAL/repo/.kontourai/flow-agents/outside" ]]; then
   _pass "sidecar writer rejects traversal task slugs without creating outside dirs"
 else
   _fail "sidecar writer traversal rejection was not fail-closed: $(cat "$TMPDIR_EVAL/ensure-traversal.out")"
@@ -522,7 +557,7 @@ else
   _fail "sidecar writer did not update state or bundle from evidence"
 fi
 
-INVALID_REF_DIR="$TMPDIR_EVAL/repo/.flow-agents/invalid-evidence-ref"
+INVALID_REF_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/invalid-evidence-ref"
 mkdir -p "$INVALID_REF_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$INVALID_REF_DIR/invalid-evidence-ref--deliver.md"
 flow_agents_node "$WRITER" init-plan "$INVALID_REF_DIR/invalid-evidence-ref--deliver.md" \
@@ -557,7 +592,7 @@ else
   _fail "incomplete structured artifact_refs rejection was not fail-closed: $(cat "$TMPDIR_EVAL/incomplete-ref.out" "$TMPDIR_EVAL/incomplete-ref.err")"
 fi
 
-INVALID_ACCEPTANCE_REF_DIR="$TMPDIR_EVAL/repo/.flow-agents/invalid-acceptance-ref"
+INVALID_ACCEPTANCE_REF_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/invalid-acceptance-ref"
 mkdir -p "$INVALID_ACCEPTANCE_REF_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$INVALID_ACCEPTANCE_REF_DIR/invalid-acceptance-ref--deliver.md"
 flow_agents_node "$WRITER" init-plan "$INVALID_ACCEPTANCE_REF_DIR/invalid-acceptance-ref--deliver.md" \
@@ -630,7 +665,7 @@ check_surface_fixture() {
   local verdict="$3"
   local expected_status="$4"
   local expected_text="$5"
-  local dir="$TMPDIR_EVAL/repo/.flow-agents/surface-$name"
+  local dir="$TMPDIR_EVAL/repo/.kontourai/flow-agents/surface-$name"
   mkdir -p "$dir"
   # Phase 4c: evidence.json no longer written; verify surface trust check status in trust.bundle.
   if flow_agents_node "$WRITER" record-evidence "$dir" \
@@ -657,7 +692,7 @@ check_surface_fixture "integrity-mismatch" "integrity-mismatch-trust-report.json
 check_surface_fixture "provider-absent" "provider-absent.json" "not_verified" "not_verified" "No trust provider is configured"
 check_surface_fixture "artifact-absent" "artifact-absent.json" "not_verified" "not_verified" "not readable"
 
-PURE_SURFACE_DIR="$TMPDIR_EVAL/repo/.flow-agents/surface-trust-only"
+PURE_SURFACE_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/surface-trust-only"
 mkdir -p "$PURE_SURFACE_DIR"
 # Phase 4c: evidence.json no longer written; verify in trust.bundle.
 if flow_agents_node "$WRITER" record-evidence "$PURE_SURFACE_DIR" \
@@ -737,7 +772,7 @@ else
   _fail "terminal jump rejection lacked diagnostics or mutated authoritative sidecars"
 fi
 
-BUILDER_TRANSITION_DIR="$TMPDIR_EVAL/repo/.flow-agents/builder-transition-guard"
+BUILDER_TRANSITION_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/builder-transition-guard"
 mkdir -p "$BUILDER_TRANSITION_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$BUILDER_TRANSITION_DIR/builder-transition-guard--deliver.md"
 flow_agents_node "$WRITER" init-plan "$BUILDER_TRANSITION_DIR/builder-transition-guard--deliver.md" \
@@ -835,7 +870,7 @@ else
   _fail "Builder Kit max-attempt route-back behavior was not deterministic"
 fi
 
-LEGACY_TRANSITION_DIR="$TMPDIR_EVAL/repo/.flow-agents/legacy-transition-guard"
+LEGACY_TRANSITION_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/legacy-transition-guard"
 mkdir -p "$LEGACY_TRANSITION_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$LEGACY_TRANSITION_DIR/legacy-transition-guard--deliver.md"
 flow_agents_node "$WRITER" init-plan "$LEGACY_TRANSITION_DIR/legacy-transition-guard--deliver.md" \
@@ -864,7 +899,7 @@ else
   _fail "legacy-compatible direct primitive route-back failed: $(cat "$TMPDIR_EVAL/legacy-route-back.out" "$TMPDIR_EVAL/legacy-route-back.err")"
 fi
 
-NV_DIR="$TMPDIR_EVAL/repo/.flow-agents/not-verified-sidecars"
+NV_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/not-verified-sidecars"
 mkdir -p "$NV_DIR"
 cat > "$NV_DIR/not-verified-sidecars--deliver.md" <<'MARKDOWN'
 # Route not verified evidence
@@ -937,7 +972,7 @@ else
   _fail "sidecar writer did not preserve not-verified state"
 fi
 
-NEW_INVALID_DIR="$TMPDIR_EVAL/repo/.flow-agents/new-invalid-artifact"
+NEW_INVALID_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/new-invalid-artifact"
 if flow_agents_node "$WRITER" record-evidence "$NEW_INVALID_DIR" \
   --verdict banana \
   --check-json '{"id":"invalid-new","kind":"test","status":"pass","summary":"Should fail."}' >"$TMPDIR_EVAL/new-invalid.out" 2>&1; then
@@ -948,7 +983,7 @@ else
   _fail "sidecar writer left lock file for invalid new artifact command"
 fi
 
-LOCK_DENIED_DIR="$TMPDIR_EVAL/repo/.flow-agents/lock-denied"
+LOCK_DENIED_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/lock-denied"
 mkdir -p "$LOCK_DENIED_DIR"
 if chmod 500 "$LOCK_DENIED_DIR" 2>"$TMPDIR_EVAL/lock-denied-chmod.err"; then
   if run_bounded 5 flow_agents_node "$WRITER" record-critique "$LOCK_DENIED_DIR" \
@@ -992,7 +1027,7 @@ else
   _fail "sidecar writer critique failed: $(cat "$TMPDIR_EVAL/critique.out" "$TMPDIR_EVAL/critique.err")"
 fi
 
-CONCURRENT_DIR="$TMPDIR_EVAL/repo/.flow-agents/concurrent-critiques"
+CONCURRENT_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/concurrent-critiques"
 mkdir -p "$CONCURRENT_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$CONCURRENT_DIR/concurrent-critiques--deliver.md"
 flow_agents_node "$WRITER" init-plan "$CONCURRENT_DIR/concurrent-critiques--deliver.md" \
@@ -1056,7 +1091,7 @@ else
   _fail "sidecar writer did not update release state"
 fi
 
-NO_SUMMARY_RELEASE_DIR="$TMPDIR_EVAL/repo/.flow-agents/no-summary-release"
+NO_SUMMARY_RELEASE_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/no-summary-release"
 mkdir -p "$NO_SUMMARY_RELEASE_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$NO_SUMMARY_RELEASE_DIR/no-summary-release--deliver.md"
 flow_agents_node "$WRITER" init-plan "$NO_SUMMARY_RELEASE_DIR/no-summary-release--deliver.md" \
@@ -1110,7 +1145,7 @@ else
   _fail "no-correction learning closeout failed validation: $(cat "$TMPDIR_EVAL/learning-valid.out" "$TMPDIR_EVAL/learning-valid.err")"
 fi
 
-CORRECTION_DIR="$TMPDIR_EVAL/repo/.flow-agents/correction-needed-learning"
+CORRECTION_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/correction-needed-learning"
 mkdir -p "$CORRECTION_DIR"
 if flow_agents_node "$WRITER" record-learning "$CORRECTION_DIR" \
   --task-slug correction-needed-learning \
@@ -1124,7 +1159,7 @@ else
   _fail "correction-needed learning closeout failed: $(cat "$TMPDIR_EVAL/correction-needed-learning.out" "$TMPDIR_EVAL/correction-needed-learning.err" "$TMPDIR_EVAL/correction-needed-valid.out" "$TMPDIR_EVAL/correction-needed-valid.err")"
 fi
 
-DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-pass"
+DOGFOOD_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/dogfood-pass"
 mkdir -p "$DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$DOGFOOD_DIR/dogfood-pass--deliver.md"
 flow_agents_node "$WRITER" init-plan "$DOGFOOD_DIR/dogfood-pass--deliver.md" \
@@ -1145,7 +1180,7 @@ else
   _fail "dogfood-pass missing actionable no-evidence error"
 fi
 
-DIRTY_EVIDENCE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-dirty-evidence"
+DIRTY_EVIDENCE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/dogfood-dirty-evidence"
 mkdir -p "$DIRTY_EVIDENCE_DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$DIRTY_EVIDENCE_DOGFOOD_DIR/dogfood-dirty-evidence--deliver.md"
 flow_agents_node "$WRITER" init-plan "$DIRTY_EVIDENCE_DOGFOOD_DIR/dogfood-dirty-evidence--deliver.md" \
@@ -1191,7 +1226,7 @@ else
   _fail "dogfood-pass existing dirty evidence was not fail-closed"
 fi
 
-INVALID_EXISTING_EVIDENCE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-existing-invalid-evidence"
+INVALID_EXISTING_EVIDENCE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/dogfood-existing-invalid-evidence"
 mkdir -p "$INVALID_EXISTING_EVIDENCE_DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$INVALID_EXISTING_EVIDENCE_DOGFOOD_DIR/dogfood-existing-invalid-evidence--deliver.md"
 flow_agents_node "$WRITER" init-plan "$INVALID_EXISTING_EVIDENCE_DOGFOOD_DIR/dogfood-existing-invalid-evidence--deliver.md" \
@@ -1265,7 +1300,7 @@ else
   _fail "dogfood-pass not_verified clean-pass check was not fail-closed"
 fi
 
-INVALID_EVIDENCE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-invalid-evidence"
+INVALID_EVIDENCE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/dogfood-invalid-evidence"
 mkdir -p "$INVALID_EVIDENCE_DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$INVALID_EVIDENCE_DOGFOOD_DIR/dogfood-invalid-evidence--deliver.md"
 flow_agents_node "$WRITER" init-plan "$INVALID_EVIDENCE_DOGFOOD_DIR/dogfood-invalid-evidence--deliver.md" \
@@ -1292,7 +1327,7 @@ else
   _fail "dogfood-pass invalid evidence metadata was not fail-closed"
 fi
 
-INVALID_LEARNING_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-invalid-learning"
+INVALID_LEARNING_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/dogfood-invalid-learning"
 mkdir -p "$INVALID_LEARNING_DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$INVALID_LEARNING_DOGFOOD_DIR/dogfood-invalid-learning--deliver.md"
 flow_agents_node "$WRITER" init-plan "$INVALID_LEARNING_DOGFOOD_DIR/dogfood-invalid-learning--deliver.md" \
@@ -1318,7 +1353,7 @@ else
   _fail "dogfood-pass invalid learning was not fail-closed"
 fi
 
-INVALID_LEARNING_SHAPE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-invalid-learning-shape"
+INVALID_LEARNING_SHAPE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/dogfood-invalid-learning-shape"
 mkdir -p "$INVALID_LEARNING_SHAPE_DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$INVALID_LEARNING_SHAPE_DOGFOOD_DIR/dogfood-invalid-learning-shape--deliver.md"
 flow_agents_node "$WRITER" init-plan "$INVALID_LEARNING_SHAPE_DOGFOOD_DIR/dogfood-invalid-learning-shape--deliver.md" \
@@ -1344,7 +1379,7 @@ else
   _fail "dogfood-pass invalid learning shape was not fail-closed"
 fi
 
-EXISTING_INVALID_LEARNING_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-existing-invalid-learning"
+EXISTING_INVALID_LEARNING_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/dogfood-existing-invalid-learning"
 mkdir -p "$EXISTING_INVALID_LEARNING_DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$EXISTING_INVALID_LEARNING_DOGFOOD_DIR/dogfood-existing-invalid-learning--deliver.md"
 flow_agents_node "$WRITER" init-plan "$EXISTING_INVALID_LEARNING_DOGFOOD_DIR/dogfood-existing-invalid-learning--deliver.md" \
@@ -1397,7 +1432,7 @@ else
   _fail "dogfood-pass existing invalid learning was not fail-closed"
 fi
 
-EXISTING_LEARNED_NO_CORRECTION_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-learned-no-correction"
+EXISTING_LEARNED_NO_CORRECTION_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/dogfood-learned-no-correction"
 mkdir -p "$EXISTING_LEARNED_NO_CORRECTION_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$EXISTING_LEARNED_NO_CORRECTION_DIR/dogfood-learned-no-correction--deliver.md"
 flow_agents_node "$WRITER" init-plan "$EXISTING_LEARNED_NO_CORRECTION_DIR/dogfood-learned-no-correction--deliver.md" \
@@ -1452,7 +1487,7 @@ else
   _fail "dogfood-pass existing learned learning missing correction was not fail-closed"
 fi
 
-INVALID_CRITIQUE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-invalid-critique"
+INVALID_CRITIQUE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/dogfood-invalid-critique"
 mkdir -p "$INVALID_CRITIQUE_DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$INVALID_CRITIQUE_DOGFOOD_DIR/dogfood-invalid-critique--deliver.md"
 flow_agents_node "$WRITER" init-plan "$INVALID_CRITIQUE_DOGFOOD_DIR/dogfood-invalid-critique--deliver.md" \
@@ -1484,7 +1519,7 @@ else
   _fail "dogfood-pass invalid critique metadata was not fail-closed"
 fi
 
-EXISTING_INVALID_CRITIQUE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-existing-invalid-critique"
+EXISTING_INVALID_CRITIQUE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/dogfood-existing-invalid-critique"
 mkdir -p "$EXISTING_INVALID_CRITIQUE_DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$EXISTING_INVALID_CRITIQUE_DOGFOOD_DIR/dogfood-existing-invalid-critique--deliver.md"
 flow_agents_node "$WRITER" init-plan "$EXISTING_INVALID_CRITIQUE_DOGFOOD_DIR/dogfood-existing-invalid-critique--deliver.md" \
@@ -1650,7 +1685,7 @@ else
   _fail "dogfood-pass failing critique was not fail-closed"
 fi
 
-DIRTY_CRITIQUE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-dirty-critique"
+DIRTY_CRITIQUE_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/dogfood-dirty-critique"
 mkdir -p "$DIRTY_CRITIQUE_DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$DIRTY_CRITIQUE_DOGFOOD_DIR/dogfood-dirty-critique--deliver.md"
 flow_agents_node "$WRITER" init-plan "$DIRTY_CRITIQUE_DOGFOOD_DIR/dogfood-dirty-critique--deliver.md" \
@@ -1701,7 +1736,7 @@ else
   _fail "dogfood-pass existing dirty critique was not fail-closed"
 fi
 
-FAILED_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-failed-pass"
+FAILED_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/dogfood-failed-pass"
 mkdir -p "$FAILED_DOGFOOD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$FAILED_DOGFOOD_DIR/dogfood-failed-pass--deliver.md"
 flow_agents_node "$WRITER" init-plan "$FAILED_DOGFOOD_DIR/dogfood-failed-pass--deliver.md" \
@@ -1834,7 +1869,7 @@ else
   _fail "dogfood-pass release readiness did not update expected sidecars"
 fi
 
-DOGFOOD_NV_DIR="$TMPDIR_EVAL/repo/.flow-agents/dogfood-not-verified"
+DOGFOOD_NV_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/dogfood-not-verified"
 mkdir -p "$DOGFOOD_NV_DIR"
 cat > "$DOGFOOD_NV_DIR/dogfood-not-verified--deliver.md" <<'MARKDOWN'
 # Dogfood not verified fixture
@@ -1914,7 +1949,7 @@ else
   _fail "invalid release decision failure was not actionable"
 fi
 
-SEMANTIC_RELEASE_DIR="$TMPDIR_EVAL/repo/.flow-agents/semantic-release"
+SEMANTIC_RELEASE_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/semantic-release"
 mkdir -p "$SEMANTIC_RELEASE_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$SEMANTIC_RELEASE_DIR/semantic-release--deliver.md"
 flow_agents_node "$WRITER" init-plan "$SEMANTIC_RELEASE_DIR/semantic-release--deliver.md" \
@@ -1989,7 +2024,7 @@ else
   _fail "incomplete correction prevention failure was not actionable: $(cat "$TMPDIR_EVAL/correction-incomplete-prevention.out")"
 fi
 
-SEMANTIC_LEARNING_DIR="$TMPDIR_EVAL/repo/.flow-agents/semantic-learning"
+SEMANTIC_LEARNING_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/semantic-learning"
 mkdir -p "$SEMANTIC_LEARNING_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$SEMANTIC_LEARNING_DIR/semantic-learning--deliver.md"
 flow_agents_node "$WRITER" init-plan "$SEMANTIC_LEARNING_DIR/semantic-learning--deliver.md" \
@@ -2023,7 +2058,7 @@ else
   _fail "semantic learning failure advanced state or lacked actionable output"
 fi
 
-REVIEW_DIR="$TMPDIR_EVAL/repo/.flow-agents/imported-critique"
+REVIEW_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/imported-critique"
 mkdir -p "$REVIEW_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$REVIEW_DIR/imported-critique--deliver.md"
 flow_agents_node "$WRITER" init-plan "$REVIEW_DIR/imported-critique--deliver.md" \
@@ -2090,7 +2125,7 @@ else
   _fail "writer output failed validation: $(cat "$TMPDIR_EVAL/valid.out" "$TMPDIR_EVAL/valid.err")"
 fi
 
-BAD_DIR="$TMPDIR_EVAL/repo/.flow-agents/bad-critique"
+BAD_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/bad-critique"
 mkdir -p "$BAD_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$BAD_DIR/bad-critique--deliver.md"
 
@@ -2118,7 +2153,7 @@ else
   _fail "open critique failure did not mention open findings"
 fi
 
-IMPORT_BAD="$TMPDIR_EVAL/repo/.flow-agents/imported-bad-critique"
+IMPORT_BAD="$TMPDIR_EVAL/repo/.kontourai/flow-agents/imported-bad-critique"
 mkdir -p "$IMPORT_BAD"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$IMPORT_BAD/imported-bad-critique--deliver.md"
 flow_agents_node "$WRITER" init-plan "$IMPORT_BAD/imported-bad-critique--deliver.md" \
@@ -2162,7 +2197,7 @@ fi
 
 
 # ─── AC1: trust.bundle dual-write file existence and schema validity ──────────
-TB_SCHEMA_DIR="$TMPDIR_EVAL/repo/.flow-agents/trust-bundle-schema"
+TB_SCHEMA_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/trust-bundle-schema"
 mkdir -p "$TB_SCHEMA_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_SCHEMA_DIR/trust-bundle-schema--deliver.md"
 flow_agents_node "$WRITER" init-plan "$TB_SCHEMA_DIR/trust-bundle-schema--deliver.md" \
@@ -2199,7 +2234,7 @@ NODEOF
 fi
 
 # ─── AC2: claim status fidelity — pass→verified, fail→disputed ───────────────
-TB_FIDELITY_DIR="$TMPDIR_EVAL/repo/.flow-agents/trust-bundle-fidelity"
+TB_FIDELITY_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/trust-bundle-fidelity"
 mkdir -p "$TB_FIDELITY_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_FIDELITY_DIR/trust-bundle-fidelity--deliver.md"
 flow_agents_node "$WRITER" init-plan "$TB_FIDELITY_DIR/trust-bundle-fidelity--deliver.md" \
@@ -2239,7 +2274,7 @@ else
 fi
 
 # ─── AC2: claim status fidelity — critique fail→disputed, pass→verified ──────
-TB_CRITIQUE_DIR="$TMPDIR_EVAL/repo/.flow-agents/trust-bundle-critique"
+TB_CRITIQUE_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/trust-bundle-critique"
 mkdir -p "$TB_CRITIQUE_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_CRITIQUE_DIR/trust-bundle-critique--deliver.md"
 flow_agents_node "$WRITER" init-plan "$TB_CRITIQUE_DIR/trust-bundle-critique--deliver.md" \
@@ -2290,7 +2325,7 @@ else
 fi
 
 # ─── AC3: capture authoritative over claimed status + policies present (ADR 0010 maximal) ──
-TB_CAPTURE_DIR="$TMPDIR_EVAL/repo/.flow-agents/trust-bundle-capture"
+TB_CAPTURE_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/trust-bundle-capture"
 mkdir -p "$TB_CAPTURE_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_CAPTURE_DIR/trust-bundle-capture--deliver.md"
 flow_agents_node "$WRITER" init-plan "$TB_CAPTURE_DIR/trust-bundle-capture--deliver.md" \
@@ -2382,7 +2417,7 @@ else
 fi
 
 # ─── AC6: agent liveness (ADR 0012) — held / free-on-lapse / free-on-release ──
-TB_LIVENESS_ROOT="$TMPDIR_EVAL/liveness/.flow-agents"
+TB_LIVENESS_ROOT="$TMPDIR_EVAL/liveness/.kontourai/flow-agents"
 flow_agents_node "$WRITER" liveness claim     held-subj  --actor agent-A --at "2026-06-25T11:50:00Z" --ttl 1800 --artifact-root "$TB_LIVENESS_ROOT" >/dev/null 2>&1
 flow_agents_node "$WRITER" liveness heartbeat held-subj  --actor agent-A --at "2026-06-25T11:58:00Z" --artifact-root "$TB_LIVENESS_ROOT" >/dev/null 2>&1
 flow_agents_node "$WRITER" liveness claim     stale-subj --actor agent-B --at "2026-06-25T11:00:00Z" --ttl 1800 --artifact-root "$TB_LIVENESS_ROOT" >/dev/null 2>&1
@@ -2398,14 +2433,14 @@ else
 fi
 
 # ─── AC7: lifecycle-driven liveness (ADR 0012) — init-plan claims, advance-state releases (opt-in) ──
-TB_LC_ROOT="$TMPDIR_EVAL/liveness-lifecycle/.flow-agents"
+TB_LC_ROOT="$TMPDIR_EVAL/liveness-lifecycle/.kontourai/flow-agents"
 TB_LC_DIR="$TB_LC_ROOT/lc-task"; mkdir -p "$TB_LC_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_LC_DIR/lc-task--deliver.md"
 FLOW_AGENTS_LIVENESS=on FLOW_AGENTS_ACTOR=agent-LC flow_agents_node "$WRITER" init-plan "$TB_LC_DIR/lc-task--deliver.md" --task-slug lc-task --source-request x --summary y --next-action z --timestamp "2026-06-25T11:50:00Z" >/dev/null 2>&1
 LC_HELD=$(flow_agents_node "$WRITER" liveness status --now "2026-06-25T12:00:00Z" --artifact-root "$TB_LC_ROOT" 2>/dev/null | grep -viE "unknown format")
 FLOW_AGENTS_LIVENESS=on FLOW_AGENTS_ACTOR=agent-LC flow_agents_node "$WRITER" advance-state "$TB_LC_DIR" --status delivered --phase done --task-slug lc-task --timestamp "2026-06-25T11:55:00Z" >/dev/null 2>&1
 LC_FREE=$(flow_agents_node "$WRITER" liveness status --now "2026-06-25T12:00:00Z" --artifact-root "$TB_LC_ROOT" 2>/dev/null | grep -viE "unknown format")
-TB_OFF_ROOT="$TMPDIR_EVAL/liveness-off/.flow-agents"; mkdir -p "$TB_OFF_ROOT/off-task"
+TB_OFF_ROOT="$TMPDIR_EVAL/liveness-off/.kontourai/flow-agents"; mkdir -p "$TB_OFF_ROOT/off-task"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_OFF_ROOT/off-task/off-task--deliver.md"
 flow_agents_node "$WRITER" init-plan "$TB_OFF_ROOT/off-task/off-task--deliver.md" --task-slug off-task --source-request x --summary y --next-action z >/dev/null 2>&1
 if echo "$LC_HELD" | grep -qE "lc-task.*agent-LC.*held" && echo "$LC_FREE" | grep -qE "lc-task.*agent-LC.*free" && [ ! -f "$TB_OFF_ROOT/liveness/events.jsonl" ]; then
@@ -2415,7 +2450,7 @@ else
 fi
 
 # ─── AC8: bundle-writers fail LOUDLY when Surface unavailable — no silent data loss (#156) ──
-TB_FO_DIR="$TMPDIR_EVAL/repo/.flow-agents/failopen"
+TB_FO_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/failopen"
 mkdir -p "$TB_FO_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_FO_DIR/failopen--deliver.md"
 flow_agents_node "$WRITER" init-plan "$TB_FO_DIR/failopen--deliver.md" --task-slug failopen --source-request x --summary y --next-action z --timestamp "2026-05-09T00:00:00Z" >/dev/null 2>&1
@@ -2435,7 +2470,7 @@ fi
 # field matches @kontourai/surface's exported statusFunctionVersion constant.
 # Also run hachure conformance vectors through Surface's deriveClaimStatus to
 # confirm our producer path produces canonical statuses.
-TB_CONF_DIR="$TMPDIR_EVAL/repo/.flow-agents/trust-bundle-conformance"
+TB_CONF_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/trust-bundle-conformance"
 mkdir -p "$TB_CONF_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_CONF_DIR/trust-bundle-conformance--deliver.md"
 flow_agents_node "$WRITER" init-plan "$TB_CONF_DIR/trust-bundle-conformance--deliver.md"   --source-request "Conformance fixture."   --summary "Conformance fixture."   --next-action "Record evidence and check statusFunctionVersion."   --timestamp "2026-05-09T00:00:00Z" >"$TMPDIR_EVAL/tb-conf-init.out" 2>"$TMPDIR_EVAL/tb-conf-init.err"
@@ -2505,7 +2540,7 @@ fi
 
 # ─── Deterministic session slug from work-item ref (#161) ───────────────────
 
-WORK_ITEM_ROOT="$TMPDIR_EVAL/work-item-repo/.flow-agents"
+WORK_ITEM_ROOT="$TMPDIR_EVAL/work-item-repo/.kontourai/flow-agents"
 
 # (a) --work-item derives deterministic slug kontourai-flow-agents-161
 if flow_agents_node "$WRITER" ensure-session \
@@ -2539,7 +2574,7 @@ else
 fi
 
 # (c) --task-slug wins over --work-item (back-compat: explicit overrides derived)
-TASK_SLUG_ROOT="$TMPDIR_EVAL/task-slug-repo/.flow-agents"
+TASK_SLUG_ROOT="$TMPDIR_EVAL/task-slug-repo/.kontourai/flow-agents"
 if flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$TASK_SLUG_ROOT" \
   --task-slug "manual-slug" \
@@ -2555,7 +2590,7 @@ else
 fi
 
 # (c2) --task-slug only (no --work-item) still works
-TASK_SLUG_ONLY_ROOT="$TMPDIR_EVAL/task-slug-only-repo/.flow-agents"
+TASK_SLUG_ONLY_ROOT="$TMPDIR_EVAL/task-slug-only-repo/.kontourai/flow-agents"
 if flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$TASK_SLUG_ONLY_ROOT" \
   --task-slug "explicit-only" \
@@ -2572,7 +2607,7 @@ fi
 # ensure-session establishes the slug; liveness events (emitted by init-plan/advance-state) key
 # on that same slug as subjectId. We verify this by emitting two liveness claim events directly
 # via `liveness claim` using the slug derived from the ref, then asserting both share subjectId.
-LIVENESS_WORK_ROOT="$TMPDIR_EVAL/liveness-wi-repo/.flow-agents"
+LIVENESS_WORK_ROOT="$TMPDIR_EVAL/liveness-wi-repo/.kontourai/flow-agents"
 # First: ensure-session --work-item produces the expected slug (directory name proof)
 if flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$LIVENESS_WORK_ROOT" \

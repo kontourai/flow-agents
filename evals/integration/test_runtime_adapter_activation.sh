@@ -67,21 +67,21 @@ for (const item of data.generated_runtime_files) {
   if (path.resolve(catalog) === path.resolve(generatedPath)) throw new Error("activation generated over kits/catalog.json");
 }
 
-// Skills must be written to .flow-agents/runtime/codex/skills/<kit-id>/
+// Skills must be written to .kontourai/flow-agents/projections/codex/skills/<kit-id>/
 const skillFiles = data.generated_runtime_files.filter((item) => item.asset_class === "skills");
 if (!skillFiles.length) throw new Error("no skills in generated_runtime_files");
 for (const item of skillFiles) {
-  if (!item.path.includes(".flow-agents/runtime/codex/skills/")) {
+  if (!item.path.includes(".kontourai/flow-agents/projections/codex/skills/")) {
     throw new Error(`skill not under codex skills dir: ${item.path}`);
   }
   if (!fs.existsSync(path.join(dest, item.path))) throw new Error(`skill file missing on disk: ${item.path}`);
 }
 
-// Docs must be written to .flow-agents/runtime/codex/docs/<kit-id>/
+// Docs must be written to .kontourai/flow-agents/projections/codex/docs/<kit-id>/
 const docFiles = data.generated_runtime_files.filter((item) => item.asset_class === "docs");
 if (!docFiles.length) throw new Error("no docs in generated_runtime_files");
 for (const item of docFiles) {
-  if (!item.path.includes(".flow-agents/runtime/codex/docs/")) {
+  if (!item.path.includes(".kontourai/flow-agents/projections/codex/docs/")) {
     throw new Error(`doc not under codex docs dir: ${item.path}`);
   }
 }
@@ -100,7 +100,7 @@ for (const item of data.skipped_assets) {
     if (!(key in item)) throw new Error(`skipped asset missing ${key}: ${JSON.stringify(item)}`);
   }
 }
-if (!fs.existsSync(path.join(dest, ".flow-agents/runtime/codex/activation.json"))) throw new Error("runtime activation manifest missing");
+if (!fs.existsSync(path.join(dest, ".kontourai/flow-agents/projections/codex/activation.json"))) throw new Error("runtime activation manifest missing");
 console.log("ok");
 NODE
 then
@@ -192,27 +192,27 @@ for (const item of data.generated_runtime_files) {
   if (item.asset_class === "activation-manifest") continue;
   const generatedPath = path.join(dest, item.path);
   if (!fs.existsSync(generatedPath)) throw new Error(`generated file missing: ${generatedPath}`);
-  // Verify flow files are under .flow-agents/runtime/strands/flows/
-  if (item.asset_class === "flows" && !item.path.includes(".flow-agents/runtime/strands/flows/")) {
+  // Verify flow files are under .kontourai/flow-agents/projections/strands/flows/
+  if (item.asset_class === "flows" && !item.path.includes(".kontourai/flow-agents/projections/strands/flows/")) {
     throw new Error(`generated flow path not under strands runtime dir: ${item.path}`);
   }
 }
 
-// Skills must be written to .flow-agents/runtime/strands/skills/<kit-id>/
+// Skills must be written to .kontourai/flow-agents/projections/strands/skills/<kit-id>/
 const skillFiles = data.generated_runtime_files.filter((item) => item.asset_class === "skills");
 if (!skillFiles.length) throw new Error("no skills in generated_runtime_files for strands-local");
 for (const item of skillFiles) {
-  if (!item.path.includes(".flow-agents/runtime/strands/skills/")) {
+  if (!item.path.includes(".kontourai/flow-agents/projections/strands/skills/")) {
     throw new Error(`skill not under strands skills dir: ${item.path}`);
   }
   if (!fs.existsSync(path.join(dest, item.path))) throw new Error(`skill file missing on disk: ${item.path}`);
 }
 
-// Docs must be written to .flow-agents/runtime/strands/docs/<kit-id>/
+// Docs must be written to .kontourai/flow-agents/projections/strands/docs/<kit-id>/
 const docFiles = data.generated_runtime_files.filter((item) => item.asset_class === "docs");
 if (!docFiles.length) throw new Error("no docs in generated_runtime_files for strands-local");
 for (const item of docFiles) {
-  if (!item.path.includes(".flow-agents/runtime/strands/docs/")) {
+  if (!item.path.includes(".kontourai/flow-agents/projections/strands/docs/")) {
     throw new Error(`doc not under strands docs dir: ${item.path}`);
   }
 }
@@ -223,7 +223,7 @@ if (skippedClasses.has("skills")) throw new Error("skills should not be in skipp
 if (skippedClasses.has("docs")) throw new Error("docs should not be in skipped_assets for strands-local");
 
 // Verify activation.json written at strands runtime dir
-const manifestPath = path.join(dest, ".flow-agents/runtime/strands/activation.json");
+const manifestPath = path.join(dest, ".kontourai/flow-agents/projections/strands/activation.json");
 if (!fs.existsSync(manifestPath)) throw new Error("strands runtime activation.json missing");
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 if (manifest.adapter !== "strands-local") throw new Error(`activation.json adapter mismatch: ${manifest.adapter}`);
@@ -239,7 +239,7 @@ for (const item of manifest.skipped_assets) {
 if (!Array.isArray(data.skipped_assets)) throw new Error("result skipped_assets is not an array");
 
 // Catalog not mutated
-if (path.resolve(catalog) === path.resolve(path.join(dest, ".flow-agents/runtime/strands/activation.json"))) {
+if (path.resolve(catalog) === path.resolve(path.join(dest, ".kontourai/flow-agents/projections/strands/activation.json"))) {
   throw new Error("activation generated over kits/catalog.json");
 }
 
@@ -266,10 +266,10 @@ const path = require("node:path");
 const data = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const dest = process.argv[3];
 if (data.selected_adapter !== "codex-local") throw new Error(`expected codex-local, got: ${data.selected_adapter}`);
-const manifestPath = path.join(dest, ".flow-agents/runtime/codex/activation.json");
+const manifestPath = path.join(dest, ".kontourai/flow-agents/projections/codex/activation.json");
 if (!fs.existsSync(manifestPath)) throw new Error("codex activation.json still not present");
 // Strands runtime dir must also still exist
-const strandsManifestPath = path.join(dest, ".flow-agents/runtime/strands/activation.json");
+const strandsManifestPath = path.join(dest, ".kontourai/flow-agents/projections/strands/activation.json");
 if (!fs.existsSync(strandsManifestPath)) throw new Error("strands activation.json was removed by codex-local run");
 console.log("ok");
 NODE
@@ -306,9 +306,9 @@ const data = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const dest = process.argv[3];
 if (data.selected_adapter !== "codex-local") throw new Error(`expected codex-local, got: ${data.selected_adapter}`);
 // builder kit has no skills or docs — skills dir should not exist (or be empty)
-const skillsDir = path.join(dest, ".flow-agents/runtime/codex/skills");
+const skillsDir = path.join(dest, ".kontourai/flow-agents/projections/codex/skills");
 // It's fine if the dir doesn't exist; builder kit has no skills
-const docsDir = path.join(dest, ".flow-agents/runtime/codex/docs");
+const docsDir = path.join(dest, ".kontourai/flow-agents/projections/codex/docs");
 // builder kit has no docs either
 // No skills or docs in skipped_assets (none declared)
 const skippedClasses = new Set(data.skipped_assets.map((item) => item.asset_class));
@@ -319,7 +319,7 @@ if (skippedClasses.has("docs")) throw new Error("builder kit (no docs) should no
 const ids = new Set(data.generated_runtime_files.map((item) => item.asset_id));
 if (!ids.has("builder.shape")) throw new Error("missing builder.shape flow");
 if (!ids.has("builder.build")) throw new Error("missing builder.build flow");
-if (!fs.existsSync(path.join(dest, ".flow-agents/runtime/codex/activation.json"))) throw new Error("activation.json missing");
+if (!fs.existsSync(path.join(dest, ".kontourai/flow-agents/projections/codex/activation.json"))) throw new Error("activation.json missing");
 console.log("ok");
 NODE
 then

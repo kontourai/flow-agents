@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install-codex-home.sh - Install Flow Agents as an isolated Codex home.
+# install-codex-home.sh - Install Flow Agents into a Codex home.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,7 +19,7 @@ Options:
 EOF
 }
 
-DEST="$HOME/.flow-agents/codex"
+DEST="${CODEX_HOME:-$HOME/.codex}"
 DEST_SET=0
 CONSOLE_CONFIG_ARGS=()
 while [[ $# -gt 0 ]]; do
@@ -59,47 +59,144 @@ else
 fi
 
 mkdir -p "$DEST"
+DEST_REAL="$(cd "$DEST" && pwd -P)"
 
-# Stash the user's existing hooks.json (if any) BEFORE cleaning, so the merge
-# step below can preserve user hooks across re-installs.
+assert_safe_dest_path() {
+  local rel="$1"
+  local current="$DEST"
+  local part
+  IFS='/' read -r -a parts <<< "$rel"
+  for part in "${parts[@]}"; do
+    [[ -n "$part" && "$part" != "." ]] || continue
+    [[ "$part" != ".." ]] || { echo "install-codex-home.sh: unsafe destination path: $rel" >&2; exit 1; }
+    current="$current/$part"
+    if [[ -L "$current" ]]; then
+      echo "install-codex-home.sh: refusing to write through symlink: $current" >&2
+      exit 1
+    fi
+  done
+  local parent
+  parent="$(dirname "$current")"
+  mkdir -p "$parent"
+  local parent_real
+  parent_real="$(cd "$parent" && pwd -P)"
+  case "$parent_real/" in
+    "$DEST_REAL"/*) ;;
+    *) echo "install-codex-home.sh: destination escapes Codex home: $current" >&2; exit 1 ;;
+  esac
+}
+
+# Stash the user's existing hooks.json (if any), so the merge step below can
+# preserve user hooks across installs while replacing Flow Agents-managed groups.
 FA_USER_HOOKS_STASH=""
+assert_safe_dest_path "hooks.json"
 if [[ -f "$DEST/hooks.json" ]]; then
   FA_USER_HOOKS_STASH="$(mktemp /tmp/fa-user-hooks.XXXXXX.json)"
   cp "$DEST/hooks.json" "$FA_USER_HOOKS_STASH"
 fi
 
-# This is an isolated generated Codex home. Clean generated bundle content before
-# overlaying so renamed/deleted source files do not survive across installs.
-rm -rf \
-  "$DEST/.flow-agents" \
-  "$DEST/.codex" \
-  "$DEST/AGENTS.md" \
-  "$DEST/README.md" \
-  "$DEST/console.telemetry.json" \
-  "$DEST/install.sh" \
-  "$DEST/config.toml" \
-  "$DEST/hooks.json" \
-  "$DEST/agent-cards" \
-  "$DEST/agents" \
-  "$DEST/context" \
-  "$DEST/docs" \
-  "$DEST/evals" \
-  "$DEST/integrations" \
-  "$DEST/kits" \
-  "$DEST/packaging" \
-  "$DEST/powers" \
-  "$DEST/prompts" \
-  "$DEST/schemas" \
-  "$DEST/scripts" \
-  "$DEST/skills"
-find "$DEST" -maxdepth 1 -type f -name 'k*.config.toml' -delete
+# A real Codex home can contain user-owned config, profiles, auth, hooks, and
+# locally installed kits. Update Flow Agents-owned bundle trees in place without
+# deleting that state. `kits/local` is user/runtime state; everything else under
+# the generated bundle paths is managed by this installer.
+for managed_dir in \
+  .flow-agents \
+  agent-cards \
+  build \
+  context \
+  docs \
+  evals \
+  integrations \
+  packaging \
+  powers \
+  prompts \
+  schemas \
+  scripts
+do
+  if [[ -d "$ROOT_DIR/dist/codex/$managed_dir" ]]; then
+    assert_safe_dest_path "$managed_dir"
+    mkdir -p "$DEST/$managed_dir"
+    rsync -a --delete "$ROOT_DIR/dist/codex/$managed_dir/" "$DEST/$managed_dir/"
+  fi
+done
 
-rsync -a "$ROOT_DIR/dist/codex/." "$DEST/"
-rsync -a "$ROOT_DIR/dist/codex/.codex/." "$DEST/"
-rm -rf "$DEST/.codex" 2>/dev/null || true
+# Skills are user-extensible in a real Codex home. Merge both bundle skill
+# layers into the flattened destination without deleting user-owned skills.
+if [[ -d "$ROOT_DIR/dist/codex/skills" ]]; then
+  assert_safe_dest_path "skills"
+  mkdir -p "$DEST/skills"
+  rsync -a "$ROOT_DIR/dist/codex/skills/" "$DEST/skills/"
+fi
+
+if [[ -d "$ROOT_DIR/dist/codex/.codex/skills" ]]; then
+  assert_safe_dest_path "skills"
+  mkdir -p "$DEST/skills"
+  rsync -a "$ROOT_DIR/dist/codex/.codex/skills/" "$DEST/skills/"
+fi
+
+if [[ -d "$ROOT_DIR/dist/codex/kits" ]]; then
+  assert_safe_dest_path "kits"
+  mkdir -p "$DEST/kits"
+  rsync -a --delete --exclude 'local/' "$ROOT_DIR/dist/codex/kits/" "$DEST/kits/"
+fi
+
+# Agents are user-extensible in a real Codex home. Merge generated agents
+# without deleting user-owned agents.
+if [[ -d "$ROOT_DIR/dist/codex/.codex/agents" ]]; then
+  assert_safe_dest_path "agents"
+  mkdir -p "$DEST/agents"
+  rsync -a "$ROOT_DIR/dist/codex/.codex/agents/" "$DEST/agents/"
+fi
+
+for bundle_file in README.md console.telemetry.json install.sh; do
+  if [[ -f "$ROOT_DIR/dist/codex/$bundle_file" ]]; then
+    assert_safe_dest_path "$bundle_file"
+    cp "$ROOT_DIR/dist/codex/$bundle_file" "$DEST/$bundle_file"
+  fi
+done
+
+# Root Codex config/profiles and AGENTS.md may be user-owned in ~/.codex.
+# Seed Flow Agents defaults only when absent.
+for seed_file in AGENTS.md; do
+  if [[ -f "$ROOT_DIR/dist/codex/$seed_file" && ! -e "$DEST/$seed_file" ]]; then
+    assert_safe_dest_path "$seed_file"
+    cp "$ROOT_DIR/dist/codex/$seed_file" "$DEST/$seed_file"
+  fi
+done
+generated_profile_files=()
+profile_names=()
+for seed_source in "$ROOT_DIR/dist/codex/.codex/config.toml" "$ROOT_DIR"/dist/codex/.codex/*.config.toml; do
+  [[ -f "$seed_source" ]] || continue
+  seed_file="$(basename "$seed_source")"
+  if [[ "$seed_file" == *.config.toml ]]; then
+    generated_profile_files+=("$seed_file")
+    profile_names+=("${seed_file%.config.toml}")
+  fi
+  if [[ ! -e "$DEST/$seed_file" ]] || grep -q 'Generated from packaging/manifest.json' "$DEST/$seed_file"; then
+    assert_safe_dest_path "$seed_file"
+    cp "$seed_source" "$DEST/$seed_file"
+  fi
+done
+for profile_path in "$DEST"/*.config.toml; do
+  [[ -f "$profile_path" ]] || continue
+  profile_file="$(basename "$profile_path")"
+  keep_generated=0
+  for generated_file in "${generated_profile_files[@]}"; do
+    if [[ "$profile_file" == "$generated_file" ]]; then
+      keep_generated=1
+      break
+    fi
+  done
+  if [[ "$keep_generated" -eq 0 ]] && grep -q 'Generated from packaging/manifest.json' "$profile_path"; then
+    assert_safe_dest_path "$profile_file"
+    rm -f "$profile_path"
+  fi
+done
+rmdir "$DEST/.codex" 2>/dev/null || true
 
 for auth_file in auth.json version.json installation_id models_cache.json; do
-  if [[ -f "$REAL_CODEX_HOME/$auth_file" ]]; then
+  if [[ "$REAL_CODEX_HOME" != "$DEST" && -f "$REAL_CODEX_HOME/$auth_file" ]]; then
+    assert_safe_dest_path "$auth_file"
     cp "$REAL_CODEX_HOME/$auth_file" "$DEST/$auth_file"
   fi
 done
@@ -122,7 +219,7 @@ if command -v node >/dev/null 2>&1 && [[ -f "$FA_MANAGED_HOOKS" ]]; then
       --managed-hooks "$FA_MANAGED_HOOKS" \
       --version "$FA_VERSION" \
       --install-record "$DEST/.flow-agents/install.json" \
-      --runtime "codex" || true
+      --runtime "codex"
     # Move the merged result into the destination.
     cp "$FA_USER_HOOKS_STASH" "$DEST/hooks.json"
     rm -f "$FA_USER_HOOKS_STASH"
@@ -133,7 +230,7 @@ if command -v node >/dev/null 2>&1 && [[ -f "$FA_MANAGED_HOOKS" ]]; then
       --managed-hooks "$FA_MANAGED_HOOKS" \
       --version "$FA_VERSION" \
       --install-record "$DEST/.flow-agents/install.json" \
-      --runtime "codex" || true
+      --runtime "codex"
   fi
 fi
 
@@ -141,5 +238,8 @@ if [[ ${#CONSOLE_CONFIG_ARGS[@]} -gt 0 || -n "${FLOW_AGENTS_TELEMETRY_SINK:-}" |
   bash "$DEST/scripts/telemetry/install-console-config.sh" "$DEST/scripts/telemetry/telemetry.conf" "${CONSOLE_CONFIG_ARGS[@]}"
 fi
 
-echo "Installed isolated Flow Agents Codex home at $DEST"
-echo "Use: CODEX_HOME=$DEST codex --profile kdev"
+echo "Installed Flow Agents into Codex home at $DEST"
+if [[ "${#profile_names[@]}" -gt 0 ]]; then
+  echo "Profiles: ${profile_names[*]}"
+fi
+echo "Use: codex --profile builder"

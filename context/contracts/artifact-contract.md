@@ -1,14 +1,14 @@
 # Workflow Artifact Contract
 
-Workflow artifacts are the durable handoff surface between orchestrators, workers, verifiers, hooks, evals, and future sessions.
+Workflow artifacts are the resumable local handoff surface between orchestrators, workers, verifiers, hooks, evals, and future sessions.
 
 ## Artifact Root
 
-Use the task artifact root defined by the active distribution's bundle instructions. This source repo has a historical default task root, but distributions may substitute their own root during export.
+Use the task artifact root defined by the active distribution's bundle instructions. This source repo writes and discovers non-durable task artifacts under `.kontourai/flow-agents/<slug>/` by default.
 
 Do not hard-code a different root inside a skill or agent when the distribution has already defined one.
 
-In this source tree, `.flow-agents/<slug>/` is the local runtime/session state root by default. Exported agent bundles may map the runtime root to a distribution-specific path through their bundle instructions; treat those paths as local runtime roots, not durable product documentation.
+In this source tree, `.kontourai/flow-agents/<slug>/` is the local runtime/session state root by default. `.flow-agents/` is reserved for Flow Agents-owned durable config/install state; do not put non-durable workflow sessions there. Exported agent bundles may map the runtime root to a distribution-specific path through their bundle instructions; treat those paths as local runtime roots, not durable product documentation.
 
 The artifact root is local working memory unless a workflow explicitly promotes or publishes it:
 
@@ -17,8 +17,8 @@ The artifact root is local working memory unless a workflow explicitly promotes 
 - Archive completed local records under `<artifact-root>/<slug>/archive/<date>/` when they are useful for audit or recovery but should not remain the active session.
 - Promote stable decisions, usage guidance, release notes, and accepted architecture changes into durable docs such as `docs/`, ADRs, changelogs, or provider-backed descriptions/comments.
 - Publish provider records only through the provider adapter or explicit publish-change step. Provider records may link back to local artifacts, but they do not make local runtime files durable by themselves.
-- Do not commit local workflow runtime roots such as `.flow-agents/<slug>/` as durable policy unless a repository-specific contract explicitly says that artifact is promoted.
-- Do not commit local workflow runtime roots such as `.flow-agents/<slug>/`; final acceptance must promote durable content before merge.
+- Do not commit local workflow runtime roots such as `.kontourai/flow-agents/<slug>/` as durable policy unless a repository-specific contract explicitly says that artifact is promoted.
+- Do not commit local workflow runtime roots such as `.kontourai/flow-agents/<slug>/`; final acceptance must promote durable content before merge.
 
 ## Persistence Integrity
 
@@ -34,7 +34,7 @@ records under concurrency.)
 
 ### Structured Sidecars
 
-Markdown artifacts remain the human-readable handoff surface. JSON sidecars are the machine-readable recovery and gate surface. When a workflow creates or updates the corresponding information, write the sidecar beside the Markdown artifacts in `.flow-agents/<slug>/`.
+Markdown artifacts remain the human-readable handoff surface. JSON sidecars are the machine-readable recovery and gate surface. When a workflow creates or updates the corresponding information, write the sidecar beside the Markdown artifacts in `.kontourai/flow-agents/<slug>/`.
 
 Draft sidecars:
 
@@ -51,7 +51,7 @@ Sidecar rules:
 - Keep `schema_version` at `1.0` until the schema changes incompatibly.
 - Keep `task_slug` stable across all sidecars for a workflow.
 - Prefer `npm run workflow:sidecar --` for creating and updating sidecars. If a harness cannot run the writer, produce equivalent JSON and validate it with `npm run workflow:validate-artifacts --`.
-- Use `npm run workflow:sidecar -- ensure-session` when available to create or select the current `.flow-agents/<slug>/` session artifact before substantial work starts.
+- Use `npm run workflow:sidecar -- ensure-session` when available to create or select the current `.kontourai/flow-agents/<slug>/` session artifact before substantial work starts.
 - Update `state.json` at phase transitions.
 - Create or update `acceptance.json` when planning defines or changes acceptance criteria.
 - Create or update `evidence.json` when verification or evidence-gate records proof.

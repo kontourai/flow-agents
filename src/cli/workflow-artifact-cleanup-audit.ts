@@ -50,7 +50,7 @@ function printHelp(): void {
   console.log("Read-only dry-run audit for local workflow artifact directories.");
   console.log("");
   console.log("Options:");
-  console.log("  --artifact-root <path>  Local artifact root to scan (default: .kontourai/flow-agents, with .flow-agents read fallback)");
+  console.log("  --artifact-root <path>  Local artifact root to scan (default: .kontourai/flow-agents)");
   console.log("  --json                  Print stable JSON buckets instead of text");
   console.log("  --help                  Show this help");
   console.log("");

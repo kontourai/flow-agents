@@ -51,7 +51,7 @@
   "tools" : [ "read", "imageRead", "glob", "grep", "ls", "code", "shell", "write" ],
   "toolsSettings" : {
     "write" : {
-      "allowedPaths" : [ ".flow-agents/**/*" ]
+      "allowedPaths" : [ ".kontourai/flow-agents/**/*" ]
     }
   },
   "name" : "tool-code-reviewer",

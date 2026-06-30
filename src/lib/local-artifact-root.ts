@@ -2,15 +2,21 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 export const KONTOURAI_DIR = ".kontourai";
-export const LEGACY_FLOW_AGENTS_DIR = ".flow-agents";
+export const FLOW_AGENTS_RUNTIME_SUBDIR = "flow-agents";
+export const FLOW_AGENTS_RUNTIME_DIR = `${KONTOURAI_DIR}/${FLOW_AGENTS_RUNTIME_SUBDIR}`;
+export const DURABLE_FLOW_AGENTS_DIR = ".flow-agents";
 export const LEGACY_TELEMETRY_DIR = ".telemetry";
 
 export function flowAgentsArtifactRoot(cwd = process.cwd()): string {
-  return path.resolve(cwd, KONTOURAI_DIR, "flow-agents");
+  return path.resolve(cwd, FLOW_AGENTS_RUNTIME_DIR);
 }
 
-export function legacyFlowAgentsArtifactRoot(cwd = process.cwd()): string {
-  return path.resolve(cwd, LEGACY_FLOW_AGENTS_DIR);
+export function durableFlowAgentsRoot(cwd = process.cwd()): string {
+  return path.resolve(cwd, DURABLE_FLOW_AGENTS_DIR);
+}
+
+export function durableInstallRecordPath(cwd = process.cwd()): string {
+  return path.join(durableFlowAgentsRoot(cwd), "install.json");
 }
 
 export function telemetryDataDir(cwd = process.cwd()): string {
@@ -26,7 +32,7 @@ export function firstExistingPath(candidates: string[]): string {
 }
 
 export function defaultArtifactRootForRead(cwd = process.cwd()): string {
-  return firstExistingPath([flowAgentsArtifactRoot(cwd), legacyFlowAgentsArtifactRoot(cwd)]);
+  return flowAgentsArtifactRoot(cwd);
 }
 
 export function defaultTelemetryDirForRead(cwd = process.cwd()): string {

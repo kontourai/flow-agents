@@ -26,7 +26,7 @@ Every worker delegation must target the exact `tool-worker` role. Omitting the r
 3. **Context** — relevant code patterns, conventions, types/interfaces it needs to follow
 4. **Working directory** — if different from current
 
-tool-worker manages its own TODO files in `.flow-agents/<slug>/` and tracks `modified_files` to detect conflicts with other parallel workers. It will end its turn immediately if instructions are insufficient rather than guessing.
+tool-worker manages its own TODO files in `.kontourai/flow-agents/<slug>/` and tracks `modified_files` to detect conflicts with other parallel workers. It will end its turn immediately if instructions are insufficient rather than guessing.
 
 ## Conflict Avoidance
 

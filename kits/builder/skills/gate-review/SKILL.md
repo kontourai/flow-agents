@@ -12,7 +12,7 @@ Classify gate fires and suspected misses from the session's `trust.bundle` by ca
 - **Advisory-only**: proposes fixes, never applies them. No finding may instruct auto-application of any fix.
 - Never writes to `scripts/hooks/` or any flow file.
 - Reads the local `trust.bundle` file only. Does NOT fall back to `command-log.jsonl`, `.goal-fit-block-streak.json`, or `evidence.json` direct reads as primary inputs.
-- If no `trust.bundle` is present at `.flow-agents/<slug>/trust.bundle`, reports `NOT_VERIFIED` and stops. Does not silently degrade to bespoke sidecar reads.
+- If no `trust.bundle` is present at `.kontourai/flow-agents/<slug>/trust.bundle`, reports `NOT_VERIFIED` and stops. Does not silently degrade to bespoke sidecar reads.
 - Routes all telemetry, `learning.json` writes, and correction routing through `learning-review`. Gate-review never calls `record-learning` directly.
 - Reads `state.json` for lifecycle context only (phase, status). `state.json` is NOT a trust claim per ADR 0010.
 - Reads `context/gate-awareness.md` for vocabulary alignment when available.
@@ -23,7 +23,7 @@ Classify gate fires and suspected misses from the session's `trust.bundle` by ca
 
 ## Inputs
 
-- `trust.bundle` at `.flow-agents/<slug>/trust.bundle` (produced by ADR 0010 Phase 1 dual-write in `workflow-sidecar`).
+- `trust.bundle` at `.kontourai/flow-agents/<slug>/trust.bundle` (produced by ADR 0010 Phase 1 dual-write in `workflow-sidecar`).
 
   **Dependency**: this file is NOT present at `origin/main @ a9b8fd6`; it requires ADR 0010 Phase 1 to be built and merged (owned by `arch/goal-fit-gate-trust-bundle`). Do not begin execution until Phase 1 has landed or a fixture is agreed with that owner.
 
@@ -64,12 +64,12 @@ Classify gate fires and suspected misses from the session's `trust.bundle` by ca
   | `stale` | Claim data is outdated; gate had stale input. |
   | `unknown` | No event found; claim was never evaluated. |
 
-- `state.json` at `.flow-agents/<slug>/state.json` (lifecycle context; not a trust input).
+- `state.json` at `.kontourai/flow-agents/<slug>/state.json` (lifecycle context; not a trust input).
 - Optional: seeded fixture `trust.bundle` path for testing before Phase 1 produces real bundles.
 
 ## Artifact Contract
 
-Write the following artifacts under `.flow-agents/<slug>/`:
+Write the following artifacts under `.kontourai/flow-agents/<slug>/`:
 
 ### `<slug>--gate-review.md`
 
@@ -161,7 +161,7 @@ Cross-reference with `state.json` phase at the time of the block to confirm the 
 
 ### Step 1 — Locate trust.bundle
 
-Resolve `.flow-agents/<slug>/trust.bundle`. The slug is the most recent active session (by `current.json` or `state.json` newest-mtime). If absent, surface the blocker:
+Resolve `.kontourai/flow-agents/<slug>/trust.bundle`. The slug is the most recent active session (by `current.json` or `state.json` newest-mtime). If absent, surface the blocker:
 
 ```
 [gate-review] trust.bundle absent — NOT_VERIFIED. Build ADR 0010 Phase 1 first.
@@ -209,7 +209,7 @@ Pass the `gate-review.inquiries.json` path as additional reviewer notes to `lear
 
 Example invocation note:
 ```
-gate-review InquiryRecords at .flow-agents/<slug>/gate-review.inquiries.json:
+gate-review InquiryRecords at .kontourai/flow-agents/<slug>/gate-review.inquiries.json:
 - <N> record(s): calibration counts
 - gate fired: <true/false>
 - calibration: correct=<n>, false_block=<n>, missed_block=<n>

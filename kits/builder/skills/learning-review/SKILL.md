@@ -14,7 +14,7 @@ Turn delivery outcomes into durable learning and follow-up work.
 - Capture facts, decisions, and follow-up issues separately.
 - Feed actionable changes back to `idea-to-backlog`, GitHub issues, tests, docs, or knowledge.
 - Use `knowledge-capture` or `observe` when the learning should persist beyond the repo.
-- Compare long-lived docs against the local `.flow-agents/<slug>/` plan and the final acceptance artifact so implementation intent is not lost after merge.
+- Compare long-lived docs against the local `.kontourai/flow-agents/<slug>/` plan and the final acceptance artifact so implementation intent is not lost after merge.
 - Treat `learning-review` as the terminal closeout decision point for correction telemetry. Compare intended behavior to observed behavior before writing `learning.json`, then record either `correction.needed: false` for a clean run or `correction.needed: true` for a mismatch.
 
 ## Inputs
@@ -23,7 +23,7 @@ Turn delivery outcomes into durable learning and follow-up work.
 
 ## Artifact Contract
 
-Create or update `.flow-agents/<slug>/<slug>--learning-review.md` with:
+Create or update `.kontourai/flow-agents/<slug>/<slug>--learning-review.md` with:
 
 - `scope`: delivered work, issue/PR/release links, dates
 - `outcomes`: expected vs observed behavior and signals
@@ -39,7 +39,7 @@ Create or update `.flow-agents/<slug>/<slug>--learning-review.md` with:
 When the repository provides `npm run workflow:sidecar --`, also write `learning.json` with:
 
 ```bash
-npm run workflow:sidecar -- record-learning .flow-agents/<slug> \
+npm run workflow:sidecar -- record-learning .kontourai/flow-agents/<slug> \
   --status learned \
   --record-json '{"id":"...","source_refs":["release.json"],"outcome":"success","facts":["..."],"interpretation":"...","routing":[{"target":"none","action":"No follow-up required after intended-vs-observed closeout.","status":"completed"}],"correction":{"needed":false,"evidence":"Acceptance, release, docs promotion, and learning closeout behaved as intended."}}' \
   --summary "..."
@@ -112,21 +112,21 @@ After `learning.json` is written and the learning verdict is `LEARNED` or `FOLLO
 **Claim 1 — Decision evidence** (durable decisions from the build are recorded):
 
 ```bash
-npm run workflow:sidecar -- record-gate-claim .flow-agents/<slug> \
+npm run workflow:sidecar -- record-gate-claim .kontourai/flow-agents/<slug> \
   --expectation decision-evidence \
   --status pass \
   --summary "Build decisions recorded: <decision-count> decisions captured, correction.<needed> recorded." \
-  --evidence-ref-json '{"kind":"artifact","file":".flow-agents/<slug>/learning.json","summary":"learning.json with decisions and correction state."}'
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/<slug>/learning.json","summary":"learning.json with decisions and correction state."}'
 ```
 
 **Claim 2 — Learning evidence** (learnings from delivery are recorded for future work):
 
 ```bash
-npm run workflow:sidecar -- record-gate-claim .flow-agents/<slug> \
+npm run workflow:sidecar -- record-gate-claim .kontourai/flow-agents/<slug> \
   --expectation learning-evidence \
   --status pass \
   --summary "Learning evidence captured: <outcome> outcome, facts recorded, routing complete." \
-  --evidence-ref-json '{"kind":"artifact","file":".flow-agents/<slug>/learning.json","summary":"learning.json with outcomes, facts, and routing."}'
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/<slug>/learning.json","summary":"learning.json with outcomes, facts, and routing."}'
 ```
 
 Record both claims immediately after `record-learning` succeeds and artifact validation passes. Use `--status fail` when `record-learning` fails or when learning cannot be captured (verdict `BLOCKED`). Use `--status not_verified` only when the session has no active Builder Kit flow step.

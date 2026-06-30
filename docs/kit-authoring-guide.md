@@ -144,13 +144,13 @@ The `codex-local` adapter is selected automatically. To activate for Strands, pa
 
 ### What each adapter activates
 
-Each adapter copies declared assets into `.flow-agents/runtime/<adapter>/` and produces an `activation.json` manifest. The table below shows which asset classes are activated today:
+Each adapter copies declared assets into `.kontourai/flow-agents/projections/<adapter>/` and produces an `activation.json` manifest. The table below shows which asset classes are activated today:
 
 | Asset class | `codex-local` | `strands-local` | Notes |
 |---|---|---|---|
-| `flows` | Activated — `.flow-agents/runtime/codex/flows/<kit-id>/<asset-id>.flow.json` | Activated — `.flow-agents/runtime/strands/flows/<kit-id>/<asset-id>.flow.json` | Gate definitions read by each adapter's flow-routing layer. |
-| `skills` | Activated — `.flow-agents/runtime/codex/skills/<kit-id>/<filename>` | Activated — `.flow-agents/runtime/strands/skills/<kit-id>/<filename>` | Agent guidance markdown. For codex-local, reference these paths from AGENTS.md. For strands-local, the Strands steering layer can glob for `*.md` under `skills/` during system-prompt injection. |
-| `docs` | Activated — `.flow-agents/runtime/codex/docs/<kit-id>/<filename>` | Activated — `.flow-agents/runtime/strands/docs/<kit-id>/<filename>` | Documentation assets. Co-located with skill files for easy reference. |
+| `flows` | Activated — `.kontourai/flow-agents/projections/codex/flows/<kit-id>/<asset-id>.flow.json` | Activated — `.kontourai/flow-agents/projections/strands/flows/<kit-id>/<asset-id>.flow.json` | Gate definitions read by each adapter's flow-routing layer. |
+| `skills` | Activated — `.kontourai/flow-agents/projections/codex/skills/<kit-id>/<filename>` | Activated — `.kontourai/flow-agents/projections/strands/skills/<kit-id>/<filename>` | Agent guidance markdown. For codex-local, reference these paths from AGENTS.md. For strands-local, the Strands steering layer can glob for `*.md` under `skills/` during system-prompt injection. |
+| `docs` | Activated — `.kontourai/flow-agents/projections/codex/docs/<kit-id>/<filename>` | Activated — `.kontourai/flow-agents/projections/strands/docs/<kit-id>/<filename>` | Documentation assets. Co-located with skill files for easy reference. |
 | `adapters` | `skipped_assets` | `skipped_assets` | Framework or runtime adapter code — not copied by the activation layer. |
 | `evals` | `skipped_assets` | `skipped_assets` | Evaluation suites — not run or copied during activation. |
 | `assets` | `skipped_assets` | `skipped_assets` | General supporting assets — not copied during activation. |

@@ -49,7 +49,7 @@ These check that skill contracts preserve non-negotiable guardrails:
 
 Static evals prove documented contracts did not drift. They do not prove the agent follows them in conversation.
 
-Activation-only behavioral evals may assert no write tools when the goal is trigger and boundary testing. Artifact-quality evals must allow controlled writes to `.flow-agents/<slug>/*.md` and inspect the resulting artifact contracts.
+Activation-only behavioral evals may assert no write tools when the goal is trigger and boundary testing. Artifact-quality evals must allow controlled writes to `.kontourai/flow-agents/<slug>/*.md` and inspect the resulting artifact contracts.
 
 ### 2. Behavioral Activation Evals
 
@@ -79,7 +79,7 @@ These should verify:
 
 ### 3. Artifact Quality Evals
 
-Inspect generated `.flow-agents/<slug>/*.md` files and provider-backed work item drafts for required structure.
+Inspect generated `.kontourai/flow-agents/<slug>/*.md` files and provider-backed work item drafts for required structure.
 
 The local artifact-quality gate is:
 
@@ -117,7 +117,7 @@ These cases check that the gates resist pressure and ambiguity:
 - CI passes only after unexplained reruns; `evidence-gate` should degrade confidence.
 - Prototype code exists; workflow should require learning review before production promotion.
 - Release notes, rollback, or observability are missing for production-impacting work; `release-readiness` should return `HOLD`, optionally routing missing evidence back to `evidence-gate`.
-- Agent tries to stop with an active `.flow-agents/<slug>/` delivery artifact; `stop-goal-fit` should warn and strict mode should block.
+- Agent tries to stop with an active `.kontourai/flow-agents/<slug>/` delivery artifact; `stop-goal-fit` should warn and strict mode should block.
 - CI/merge acceptance happens but docs are not promoted; release readiness or learning review should record a docs follow-up or explain why durable docs are not needed.
 - Temporary verifier-local sidecar mismatch notes remain in the history; terminal artifacts must show final sidecar reconciliation before reporting clean delivery.
 - Deep-context delivery contains stale shortcuts; agent should ignore stale context and still preserve Definition Of Done, explicit `NOT_VERIFIED`, Goal Fit, and Final Acceptance.

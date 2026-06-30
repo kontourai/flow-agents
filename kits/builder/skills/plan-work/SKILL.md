@@ -98,11 +98,11 @@ The `tool-planner` prompt context must include the latest-base confirmation and 
 
 ## Workflow
 
-1. Create session file in `.flow-agents/<slug>/` if one wasn't provided:
+1. Create session file in `.kontourai/flow-agents/<slug>/` if one wasn't provided:
    - Filename: `<slug>--plan-work.md`
    - `status: planning`, `type: plan-work`
    - Create or update `state.json` with phase `planning`
-   - use `npm run workflow:sidecar -- ensure-session --source-request ... --summary ... --criterion ...` when the repository provides it; this also writes `.flow-agents/current.json`
+   - use `npm run workflow:sidecar -- ensure-session --source-request ... --summary ... --criterion ...` when the repository provides it; this also writes `.kontourai/flow-agents/current.json`
    - **Builder Kit build flow**: add `--flow-id builder.build` to the `ensure-session` call when `plan-work` is invoked from `deliver`, from the Builder Kit `build` flow, or from a pick-up-and-build request after `pull-work`. This activates the FlowDefinition-driven path so producers fire and gates enforce on builder.* claims. Do NOT add `--flow-id` for direct/ad-hoc primitive `plan-work` invocations that are not part of a builder-flow.
 2. Delegate to `tool-planner`:
    ```
@@ -179,7 +179,7 @@ Copied from the plan artifact. This is the stop condition for delivery.
 
 ## Output
 
-- Session file in `.flow-agents/<slug>/` with status `planned`
+- Session file in `.kontourai/flow-agents/<slug>/` with status `planned`
 - Plan artifact: `<session-basename>-plan.md`
 - Structured sidecars: `state.json`, `acceptance.json`, and `handoff.json`
 - The plan artifact is the source of truth — tool-worker agents read it directly

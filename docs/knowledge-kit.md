@@ -43,7 +43,11 @@ The vector detector is fail-closed: infrastructure failures throw `EMBED_FAILURE
 ## Quick reference
 
 ```bash
-# Install the kit into a workspace
+# Install the kit into the default Codex/global kit destination:
+# CODEX_HOME, or ~/.codex when CODEX_HOME is unset
+npx @kontourai/flow-agents kit install kits/knowledge
+
+# Override the destination for a workspace, isolated home, or test
 npx @kontourai/flow-agents kit install kits/knowledge --dest /path/to/workspace
 
 # Run the contract suite against the default adapter

@@ -19,7 +19,7 @@ For the full source/generated/runtime inventory, see [Repository Structure](../d
 
 - `dist/kiro/` keeps native Kiro JSON agents and rewrites path-bound config through the install token.
 - `dist/claude-code/` exports `.claude/agents/*.md` and `.claude/skills/*/SKILL.md`.
-- `dist/codex/` exports `.codex/agents/*.toml`, `.codex/skills/*/SKILL.md`, and profile config for `kdev` and its Bedrock variant.
+- `dist/codex/` exports `.codex/agents/*.toml`, `.codex/skills/*/SKILL.md`, and generated profile config for operating intents such as `builder` and `personal`.
 
 All targets also receive shared canonical directories where supported: `context/`, `powers/`, `prompts/`, `scripts/`, and `evals/`.
 
@@ -29,7 +29,7 @@ All targets also receive shared canonical directories where supported: `context/
 
 `dist/` is a generated export surface, not the source of truth. Installed runtime directories such as `.codex/` and `.claude/` are also not source. They are created from the generated target bundle and installer scripts. If generated or installed hook config is wrong, fix the canonical source, rebuild `dist/`, and reinstall the runtime config.
 
-Runtime workflow state under `.flow-agents/<slug>/` is local working memory. Packaging should copy canonical workflow contracts and skills, but it should not publish local task artifacts as product source. Durable outcomes must be promoted into docs, source, schemas, or provider records before merge.
+Runtime workflow state under `.kontourai/flow-agents/<slug>/` is local working memory. Packaging should copy canonical workflow contracts and skills, but it should not publish local task artifacts as product source. Durable outcomes must be promoted into docs, source, schemas, or provider records before merge.
 
 ## Validation And Build
 

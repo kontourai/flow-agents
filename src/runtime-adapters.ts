@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { readJson, relPath, writeJson } from "./lib/fs.js";
+import { flowAgentsArtifactRoot } from "./lib/local-artifact-root.js";
 
 export type KitAsset = {
   kit_id: string;
@@ -134,7 +135,7 @@ const ACTIVATED_ASSET_CLASSES = new Set(["flows", "skills", "docs"]);
 
 export function activateCodexLocal(sourceRoot: string, dest: string): Record<string, unknown> {
   const inventory = readKitInventory(sourceRoot, dest);
-  const runtimeDir = path.join(dest, ".flow-agents", "runtime", "codex");
+  const runtimeDir = path.join(flowAgentsArtifactRoot(dest), "projections", "codex");
   const generated: Record<string, string>[] = [];
   const skipped: Record<string, string | null>[] = [];
   for (const asset of inventory.assets) {
@@ -177,11 +178,11 @@ export function activateCodexLocal(sourceRoot: string, dest: string): Record<str
 // layout knowledge. The Strands steering layer then reads the written runtime files.
 export function activateStrandsLocal(sourceRoot: string, dest: string): Record<string, unknown> {
   const inventory = readKitInventory(sourceRoot, dest);
-  // Runtime flows land at .flow-agents/runtime/strands/flows/<kit-id>/<asset-id>.flow.json
+  // Runtime flows land at .kontourai/flow-agents/projections/strands/flows/<kit-id>/<asset-id>.flow.json
   // so the Strands steering context can glob for *.flow.json under this path.
-  // Runtime skills land at .flow-agents/runtime/strands/skills/<kit-id>/<filename> and
-  // docs at .flow-agents/runtime/strands/docs/<kit-id>/<filename> for system-prompt injection.
-  const runtimeDir = path.join(dest, ".flow-agents", "runtime", "strands");
+  // Runtime skills land at .kontourai/flow-agents/projections/strands/skills/<kit-id>/<filename> and
+  // docs at .kontourai/flow-agents/projections/strands/docs/<kit-id>/<filename> for system-prompt injection.
+  const runtimeDir = path.join(flowAgentsArtifactRoot(dest), "projections", "strands");
   const generated: Record<string, string>[] = [];
   const skipped: Record<string, string | null>[] = [];
   for (const asset of inventory.assets) {
@@ -197,7 +198,7 @@ export function activateStrandsLocal(sourceRoot: string, dest: string): Record<s
     } else if (asset.asset_class === "skills" || asset.asset_class === "docs") {
       // Mirror the codex-local layout: strands/<class>/<kit-id>/<filename>.
       // The Strands system-prompt injection layer can glob for all *.md files under
-      // .flow-agents/runtime/strands/skills/ to include agent guidance in the context.
+      // .kontourai/flow-agents/projections/strands/skills/ to include agent guidance in the context.
       const filename = path.basename(asset.source_path);
       const output = path.join(runtimeDir, asset.asset_class, safeSegment(asset.kit_id), filename);
       fs.mkdirSync(path.dirname(output), { recursive: true });

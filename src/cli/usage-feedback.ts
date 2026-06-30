@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import * as os from "node:os";
 import * as path from "node:path";
 import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
-import { defaultArtifactRootForRead, defaultTelemetryDirForRead, defaultTelemetryDirsForRead, telemetryDataDir, flowAgentsArtifactRoot, legacyFlowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
+import { defaultArtifactRootForRead, defaultTelemetryDirForRead, defaultTelemetryDirsForRead, telemetryDataDir, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 
 const VALID_RESULTS = new Set(["success", "partial", "failure", "not_verified"]);
 
@@ -146,7 +146,7 @@ function syncArtifacts(argv: string[]): number {
   const dir = telemetryDir(flags);
   ensureSafeDir(dir);
   const artifacts = flagList(flags, "artifact-dir");
-  const records = (artifacts.length ? artifacts : [flowAgentsArtifactRoot(), legacyFlowAgentsArtifactRoot()]).flatMap((item) => fs.existsSync(item) ? artifactOutcomes(item, flags) : []);
+  const records = (artifacts.length ? artifacts : [flowAgentsArtifactRoot()]).flatMap((item) => fs.existsSync(item) ? artifactOutcomes(item, flags) : []);
   writeJsonlUpsert(path.join(dir, "outcomes.jsonl"), records, "outcome_id");
   if (!flagBool(flags, "quiet")) console.log(`synced ${records.length} artifact outcome(s) to ${path.join(dir, "outcomes.jsonl")}`);
   return 0;
@@ -368,7 +368,7 @@ function syncProject(project: Record<string, unknown>, globalDir: string): void 
 function discoverProjects(root: string): Record<string, unknown>[] {
   if (!fs.existsSync(root)) return [];
   const candidates = [root, ...fs.readdirSync(root).map((name) => path.join(root, name))];
-  return candidates.filter((candidate) => fs.existsSync(flowAgentsArtifactRoot(candidate)) || fs.existsSync(legacyFlowAgentsArtifactRoot(candidate))).map((repoRoot) => {
+  return candidates.filter((candidate) => fs.existsSync(flowAgentsArtifactRoot(candidate))).map((repoRoot) => {
     const name = path.basename(repoRoot);
     return { name, repo: name, repo_root: repoRoot, artifact_dir: defaultArtifactRootForRead(repoRoot), input_telemetry_dir: defaultTelemetryDirForRead(repoRoot), runtime: "codex", skill_ids: [] };
   });

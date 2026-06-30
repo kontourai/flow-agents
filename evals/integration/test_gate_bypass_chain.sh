@@ -3,10 +3,10 @@
 # gate-bypass chain (adversarial review HIGH/A01/A04).
 #
 # Exploit chain (pre-fix):
-#   1. Traversal via active_flow_id: "builder.../../../.flow-agents/slug/fake-flow"
-#      splits into kitId="builder" / flowName="../../../.flow-agents/slug/fake-flow"
+#   1. Traversal via active_flow_id: "builder.../../../.kontourai/flow-agents/slug/fake-flow"
+#      splits into kitId="builder" / flowName="../../../.kontourai/flow-agents/slug/fake-flow"
 #      → path.join escapes kits/ → loads attacker-authored fake-flow.flow.json
-#      directly from .flow-agents/ (agent-writable location).
+#      directly from .kontourai/flow-agents/ (agent-writable location).
 #   2. Fake flow has gates:{g:{step:"verify",expects:[]}} → declaredClaimTypes=Set{}
 #      (empty, NOT null) → old if/else isSelectedClaim returns false for EVERY claim
 #      → bundleEnforcement emits ZERO warnings → tamper-detection bypassed → exit 0.
@@ -23,7 +23,7 @@
 #   1. Layer 1 — traversal closed: pre-fix path.join escapes kits/, post-fix returns null.
 #   2. Layer 2 — empty-Set closed: pre-fix 0 claims selected, post-fix exit 2.
 #   3. Full chain end-to-end: traversal current.json + fake empty-expects flow under
-#      .flow-agents/ + disputed workflow.* bundle → PRE-FIX exit 0, POST-FIX exit 2.
+#      .kontourai/flow-agents/ + disputed workflow.* bundle → PRE-FIX exit 0, POST-FIX exit 2.
 #   4. Legit session regression: builder.build/verify with real flow still works.
 #
 # Deterministic, no model spend, self-cleaning.
@@ -48,11 +48,11 @@ trap cleanup EXIT
 # ─── Helper: seed a minimal in-progress workflow artifact ─────────────────────
 seed_repo_inprogress() { # $1=dir $2=slug
   local p="$1" slug="$2"
-  mkdir -p "$p/.flow-agents/$slug"
+  mkdir -p "$p/.kontourai/flow-agents/$slug"
   printf '# Repo\n' > "$p/AGENTS.md"
   printf '%s' "{\"schema_version\":\"1.0\",\"task_slug\":\"$slug\",\"status\":\"in_progress\",\"phase\":\"execution\",\"updated_at\":\"2026-06-27T00:00:00Z\",\"next_action\":{\"status\":\"in_progress\",\"summary\":\"Testing\"}}" \
-    > "$p/.flow-agents/$slug/state.json"
-  cat > "$p/.flow-agents/$slug/$slug--deliver.md" << MD
+    > "$p/.kontourai/flow-agents/$slug/state.json"
+  cat > "$p/.kontourai/flow-agents/$slug/$slug--deliver.md" << MD
 # $slug
 
 branch: main
@@ -109,10 +109,10 @@ const path = require('path');
 const repoRoot = '/repo';
 
 // Exact exploit string from the task description
-const malId = 'builder.../../../.flow-agents/slug/fake-flow';
+const malId = 'builder.../../../.kontourai/flow-agents/slug/fake-flow';
 const dot = malId.indexOf('.');  // 7
 const kitId = malId.slice(0, dot);      // 'builder'
-const flowName = malId.slice(dot + 1);  // '../../../.flow-agents/slug/fake-flow'
+const flowName = malId.slice(dot + 1);  // '../../../.kontourai/flow-agents/slug/fake-flow'
 
 console.log('  Traversal flowId: \"' + malId + '\"');
 console.log('  Parsed: kitId=\"' + kitId + '\" flowName=\"' + flowName + '\"');
@@ -121,7 +121,7 @@ console.log('  Parsed: kitId=\"' + kitId + '\" flowName=\"' + flowName + '\"');
 const preFix = path.join(repoRoot, 'kits', kitId, 'flows', flowName + '.flow.json');
 console.log('  PRE-FIX path.join: ' + preFix);
 const escaped = !preFix.startsWith(path.join(repoRoot, 'kits') + '/');
-console.log('  PRE-FIX escapes kits/: ' + escaped + ' → would load attacker file under .flow-agents/');
+console.log('  PRE-FIX escapes kits/: ' + escaped + ' → would load attacker file under .kontourai/flow-agents/');
 
 if (!escaped) {
   console.error('ERROR: expected traversal to escape kits/ with this flowId');
@@ -140,8 +140,8 @@ const repoRoot = '$ROOT';
 
 // Traversal IDs — all must return null (slug validation rejects '.', '/', etc.)
 const cases = [
-  ['builder.../../../.flow-agents/slug/fake-flow', 'verify'],  // exact exploit from task
-  ['builder../../../.flow-agents/x/fake', 'verify'],           // double-dot variant
+  ['builder.../../../.kontourai/flow-agents/slug/fake-flow', 'verify'],  // exact exploit from task
+  ['builder../../../.kontourai/flow-agents/x/fake', 'verify'],           // double-dot variant
   ['builder.../etc/passwd', 'verify'],                          // etc/passwd probe
   ['kit-id.flow/../../secret', 'step'],                         // different separator
   ['builder.build', '../../../etc'],                            // traversal in stepId
@@ -173,23 +173,35 @@ console.log('builder.build/verify: gateId=' + result.gateId + ' expects=' + resu
 " 2>&1 && _pass "Legit builder.build/verify resolves correctly (no over-rejection)" \
           || _fail "Legit builder.build/verify regression"
 
-# Validate FLOW_AGENTS_FLOW_DEFS_DIR under .flow-agents is rejected
+# Validate FLOW_AGENTS_FLOW_DEFS_DIR under .kontourai/flow-agents is rejected
 T1_DIR="$TMP/t1-override"
-mkdir -p "$T1_DIR/.flow-agents/fake-flows"
-cat > "$T1_DIR/.flow-agents/fake-flows/builder.build.flow.json" << 'JSON'
+mkdir -p "$T1_DIR/.kontourai/flow-agents/fake-flows"
+cat > "$T1_DIR/.kontourai/flow-agents/fake-flows/builder.build.flow.json" << 'JSON'
 {"id":"fake","version":"0.0","gates":{"g":{"step":"verify","expects":[]}}}
 JSON
 node -e "
 const r = require('$RESOLVER');
-// Override points INTO .flow-agents (agent-writable) — must fall back to kits/
-process.env.FLOW_AGENTS_FLOW_DEFS_DIR = '$T1_DIR/.flow-agents/fake-flows';
+// Override points INTO .kontourai/flow-agents (agent-writable) — must fall back to kits/
+process.env.FLOW_AGENTS_FLOW_DEFS_DIR = '$T1_DIR/.kontourai/flow-agents/fake-flows';
 const result = r.resolveFlowStep('builder.build', 'verify', '$T1_DIR');
 delete process.env.FLOW_AGENTS_FLOW_DEFS_DIR;
 // Falls back to repoRoot/kits/ which has no builder.build flow → null
 // This confirms the agent-writable FLOW_DEFS_DIR override was rejected
-console.log('FLOW_DEFS_DIR under .flow-agents: result =', result, '(null = override rejected)');
-" 2>&1 && _pass "FLOW_AGENTS_FLOW_DEFS_DIR under .flow-agents is ignored (agent-writable protection)" \
-          || _fail "FLOW_AGENTS_FLOW_DEFS_DIR .flow-agents bypass not blocked"
+console.log('FLOW_DEFS_DIR under .kontourai/flow-agents: result =', result, '(null = override rejected)');
+" 2>&1 && _pass "FLOW_AGENTS_FLOW_DEFS_DIR under .kontourai/flow-agents is ignored (agent-writable protection)" \
+          || _fail "FLOW_AGENTS_FLOW_DEFS_DIR .kontourai/flow-agents bypass not blocked"
+
+ln -s "$T1_DIR/.kontourai/flow-agents/fake-flows" "$TMP/safe-looking-flow-defs"
+node -e "
+const r = require('$RESOLVER');
+// Override LOOKS safe but resolves through a symlink into agent-writable runtime artifacts.
+process.env.FLOW_AGENTS_FLOW_DEFS_DIR = '$TMP/safe-looking-flow-defs';
+const result = r.resolveFlowStep('builder.build', 'verify', '$T1_DIR');
+delete process.env.FLOW_AGENTS_FLOW_DEFS_DIR;
+console.log('FLOW_DEFS_DIR symlink to .kontourai/flow-agents: result =', result, '(null = symlink override rejected)');
+if (result !== null) process.exit(1);
+" 2>&1 && _pass "FLOW_AGENTS_FLOW_DEFS_DIR symlink into .kontourai/flow-agents is ignored" \
+          || _fail "FLOW_AGENTS_FLOW_DEFS_DIR symlink into .kontourai/flow-agents bypass not blocked"
 
 
 # ─── Test 2: Empty-Set closed — Layer 2 union form ───────────────────────────
@@ -198,11 +210,11 @@ echo "=== 2. Layer 2 — Empty-Set defense: union isSelectedClaim + empty-expect
 
 T2_DIR="$TMP/t2-empty-set"
 seed_repo_inprogress "$T2_DIR" "empty-set-test"
-seed_disputed_bundle "$T2_DIR/.flow-agents/empty-set-test/trust.bundle" "empty-set-test"
+seed_disputed_bundle "$T2_DIR/.kontourai/flow-agents/empty-set-test/trust.bundle" "empty-set-test"
 printf '%s' '{"artifact_dir":"empty-set-test","active_flow_id":"builder.build","active_step_id":"verify"}' \
-  > "$T2_DIR/.flow-agents/current.json"
+  > "$T2_DIR/.kontourai/flow-agents/current.json"
 
-# Fake flow with empty expects[] (loaded via FLOW_DEFS_DIR — NOT under .flow-agents)
+# Fake flow with empty expects[] (loaded via FLOW_DEFS_DIR — NOT under .kontourai/flow-agents)
 mkdir -p "$TMP/fake-flows-safe"
 cat > "$TMP/fake-flows-safe/builder.build.flow.json" << 'JSON'
 {"id":"builder.build","version":"0.0","gates":{"fake-gate":{"step":"verify","expects":[]}}}
@@ -262,19 +274,19 @@ echo ""
 echo "=== 3. Full exploit chain: traversal current.json + fake empty-expects flow + disputed bundle ==="
 echo ""
 echo "Setup: T3_DIR has kits/ so findRepoRoot returns T3_DIR."
-echo "Traversal flowId 'builder.../../../.flow-agents/slug/fake-flow' with repoRoot=T3_DIR resolves to:"
-echo "  T3_DIR/.flow-agents/slug/fake-flow.flow.json (agent-writable — the fake flow)"
+echo "Traversal flowId 'builder.../../../.kontourai/flow-agents/slug/fake-flow' with repoRoot=T3_DIR resolves to:"
+echo "  T3_DIR/.kontourai/flow-agents/slug/fake-flow.flow.json (agent-writable — the fake flow)"
 
 T3_DIR="$TMP/t3-full-chain"
 mkdir -p "$T3_DIR/kits"  # ensures findRepoRoot returns T3_DIR
 seed_repo_inprogress "$T3_DIR" "exploit-test"
-seed_disputed_bundle "$T3_DIR/.flow-agents/exploit-test/trust.bundle" "exploit-test"
+seed_disputed_bundle "$T3_DIR/.kontourai/flow-agents/exploit-test/trust.bundle" "exploit-test"
 
 # Place the fake flow exactly where the traversal would resolve it:
-# path.join(T3_DIR, "kits", "builder", "flows", "../../../.flow-agents/slug/fake-flow.flow.json")
-# = T3_DIR/.flow-agents/slug/fake-flow.flow.json
-mkdir -p "$T3_DIR/.flow-agents/slug"
-cat > "$T3_DIR/.flow-agents/slug/fake-flow.flow.json" << 'JSON'
+# path.join(T3_DIR, "kits", "builder", "flows", "../../../.kontourai/flow-agents/slug/fake-flow.flow.json")
+# = T3_DIR/.kontourai/flow-agents/slug/fake-flow.flow.json
+mkdir -p "$T3_DIR/.kontourai/flow-agents/slug"
+cat > "$T3_DIR/.kontourai/flow-agents/slug/fake-flow.flow.json" << 'JSON'
 {
   "id": "fake-bypass",
   "version": "0.0",
@@ -288,15 +300,15 @@ cat > "$T3_DIR/.flow-agents/slug/fake-flow.flow.json" << 'JSON'
 JSON
 
 # current.json: traversal active_flow_id pointing to the fake flow
-printf '%s' '{"artifact_dir":"exploit-test","active_flow_id":"builder.../../../.flow-agents/slug/fake-flow","active_step_id":"verify"}' \
-  > "$T3_DIR/.flow-agents/current.json"
+printf '%s' '{"artifact_dir":"exploit-test","active_flow_id":"builder.../../../.kontourai/flow-agents/slug/fake-flow","active_step_id":"verify"}' \
+  > "$T3_DIR/.kontourai/flow-agents/current.json"
 
 echo ""
 echo "--- 3a. PRE-FIX: demonstrate traversal would load the fake flow ---"
 node -e "
 const path = require('path');
 const repoRoot = '$T3_DIR';
-const flowId = 'builder.../../../.flow-agents/slug/fake-flow';
+const flowId = 'builder.../../../.kontourai/flow-agents/slug/fake-flow';
 const dot = flowId.indexOf('.');
 const kitId = flowId.slice(0, dot);
 const flowName = flowId.slice(dot + 1);
@@ -353,13 +365,13 @@ echo ""
 echo "=== 4. Regression: legit builder.build/verify session passes (no false-block) ==="
 
 T4_DIR="$TMP/t4-legit"
-mkdir -p "$T4_DIR/.flow-agents/legit-test"
+mkdir -p "$T4_DIR/.kontourai/flow-agents/legit-test"
 printf '# Repo\n' > "$T4_DIR/AGENTS.md"
 printf '%s' '{"artifact_dir":"legit-test","active_flow_id":"builder.build","active_step_id":"verify"}' \
-  > "$T4_DIR/.flow-agents/current.json"
+  > "$T4_DIR/.kontourai/flow-agents/current.json"
 printf '%s' '{"schema_version":"1.0","task_slug":"legit-test","status":"delivered","phase":"done","updated_at":"2026-06-27T00:00:00Z","next_action":{"status":"done","summary":"done"}}' \
-  > "$T4_DIR/.flow-agents/legit-test/state.json"
-cat > "$T4_DIR/.flow-agents/legit-test/legit-test--deliver.md" << 'MD'
+  > "$T4_DIR/.kontourai/flow-agents/legit-test/state.json"
+cat > "$T4_DIR/.kontourai/flow-agents/legit-test/legit-test--deliver.md" << 'MD'
 # legit-test
 
 branch: main
@@ -376,7 +388,7 @@ type: deliver
 MD
 
 # Write a CLEAN trust.bundle for builder.verify.tests (status=verified, passing evidence)
-python3 - "$T4_DIR/.flow-agents/legit-test/trust.bundle" << 'PY'
+python3 - "$T4_DIR/.kontourai/flow-agents/legit-test/trust.bundle" << 'PY'
 import json, sys
 bundle = {
     "schemaVersion": 3,

@@ -4,7 +4,7 @@ title: Workflow Artifact Lifecycle
 
 # Workflow Artifact Lifecycle
 
-Flow Agents treats task artifacts as useful working memory, not permanent product documentation. Feature branches should promote durable planning, decisions, evidence pointers, and acceptance notes into normal project docs, source, schemas, or provider records instead of carrying `.flow-agents/` runtime files.
+Flow Agents treats task artifacts as useful working memory, not permanent product documentation. Feature branches should promote durable planning, decisions, evidence pointers, and acceptance notes into normal project docs, source, schemas, or provider records instead of carrying `.kontourai/flow-agents/` runtime files.
 
 The local artifact root is a current-state dashboard first and a short-lived recovery cache second. It should answer "what needs attention now?" without forcing agents to sift through old successful deliveries.
 
@@ -17,17 +17,19 @@ npm run workflow-artifact-cleanup-audit -- --artifact-root .flow-agents
 npm run workflow-artifact-cleanup-audit -- --artifact-root .flow-agents --json
 ```
 
+The default root for local runtime artifacts is `.kontourai/flow-agents`. `.flow-agents` may hold explicit durable Flow Agents config/install state, but it is not a runtime fallback. Move old local sessions with the migration script instead of relying on automatic fallback reads.
+
 The command scans immediate workflow directories, skips non-workflow lanes such as `archive/`, and reports active WIP separately from cleanup candidates, terminal done records, active learning follow-ups, and invalid sidecars. This first slice is dry-run classification only: it does not delete, archive, move, or rewrite runtime artifacts by default, and it has no apply mode.
 
 Use the Current-State Semantics and Local Retention Policy sections below to interpret each bucket. In particular, learning records with `learning.status: followup_required` or any `routing[].status: open` remain active learning follow-ups until every route is completed, opened elsewhere, deferred with a trigger, accepted, or rejected.
 
 ## Artifact Lanes
 
-Use one local lane under `.flow-agents/`:
+Use one local non-durable lane under `.kontourai/flow-agents/`:
 
 | Lane | Path | Commit Policy | Purpose |
 | --- | --- | --- | --- |
-| Runtime workspace | `.flow-agents/<slug>/` | Do not commit | Local session state, sidecars, delegate events, scratch evidence, and recovery notes. |
+| Runtime workspace | `.kontourai/flow-agents/<slug>/` | Do not commit | Local session state, sidecars, delegate events, scratch evidence, and recovery notes. |
 
 The runtime workspace stays local because it may contain stale session state, machine-specific paths, or noisy intermediate artifacts. When a branch needs cross-session or cross-person traceability, promote the durable summary, decisions, evidence pointers, and acceptance notes into docs, source, schemas, or provider records instead of committing runtime artifacts.
 
@@ -75,13 +77,13 @@ Durable learning should be promoted by target:
 
 ## Local Retention Policy
 
-For local-only users, keep enough local state to recover recent work, but do not use `.flow-agents/<slug>/` as the long-term system of record.
+For local-only users, keep enough local state to recover recent work, but do not use `.kontourai/flow-agents/<slug>/` as the long-term system of record.
 
 Recommended defaults:
 
 | Artifact class | Retain locally | Durable destination |
 | --- | --- | --- |
-| Active WIP, blockers, and unresolved decisions | Until resolved | Current `.flow-agents/<slug>/` state and handoff. |
+| Active WIP, blockers, and unresolved decisions | Until resolved | Current `.kontourai/flow-agents/<slug>/` state and handoff. |
 | Recently merged or accepted deliveries | 14-30 days, or until the next queue audit | PR body, issue comments, release records, promoted docs, or archived evidence refs. |
 | Security, migration, release, or provider-governance evidence | 30-90 days when useful for audit | Provider record, release note, durable doc, or external evidence store. |
 | Routine successful local runtime artifacts | Delete or archive after durable promotion and recovery window | Usually none beyond provider record and docs. |
@@ -117,10 +119,10 @@ Before merge to `main`:
 
 1. Promote durable behavior, contracts, decisions, operations notes, and usage guidance into long-lived docs such as `README.md`, `docs/`, `docs/adr/`, schema docs, runbooks, changelogs, or provider records.
 2. Make sure the durable record names the promotion targets and any accepted gaps.
-3. Confirm `.flow-agents/` runtime artifacts remain untracked.
+3. Confirm `.kontourai/flow-agents/` runtime artifacts remain untracked.
 4. Keep links to provider records, durable docs, or archived external evidence instead of relying on temporary local files.
 
-`main` must not contain tracked files under `.flow-agents/`. If runtime artifacts still seem necessary after merge, their durable content has not been promoted yet.
+`main` must not contain tracked files under `.kontourai/flow-agents/`. If runtime artifacts still seem necessary after merge, their durable content has not been promoted yet.
 
 ## Promotion Targets
 
@@ -138,4 +140,4 @@ Do not promote raw intermediate thinking wholesale. Promote the resulting decisi
 
 ## Enforcement
 
-Runtime state remains ignored under `.flow-agents/`. Static package validation fails if runtime artifacts are tracked. Reviewers should reject PRs that omit durable docs, source, schema, provider, or evidence updates needed to understand shipped behavior.
+Runtime state remains ignored under `.kontourai/flow-agents/`. Static package validation fails if runtime artifacts are tracked. Reviewers should reject PRs that omit durable docs, source, schema, provider, or evidence updates needed to understand shipped behavior.

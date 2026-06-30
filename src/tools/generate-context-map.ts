@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { exists, loadJson, markdownTable, oneLine, readText, rel, root, writeText } from "./common.js";
+import { DURABLE_FLOW_AGENTS_DIR, FLOW_AGENTS_RUNTIME_DIR } from "../lib/local-artifact-root.js";
 
 const defaultOutput = path.join(root, "docs/context-map.md");
 const dirDescriptions: Record<string, string> = {
@@ -22,7 +23,7 @@ const commands = [
   ["Source tree", "npm run validate:source"],
   ["Static suite", "bash evals/run.sh static"],
   ["Integration suite", "bash evals/run.sh integration"],
-  ["Workflow artifacts", "npm run workflow:validate-artifacts -- --require-sidecars --require-critique .flow-agents/<slug>"],
+  ["Workflow artifacts", `npm run workflow:validate-artifacts -- --require-sidecars --require-critique ${FLOW_AGENTS_RUNTIME_DIR}/<slug>`],
   ["Workflow sidecars", "npm run workflow:sidecar -- --help"],
   ["Claim lookup", "npm run workflow:sidecar -- claim <id> <dir>"],
   ["Context map drift", "npm run context-map:check"],
@@ -71,7 +72,8 @@ function repoShape(manifest: Record<string, unknown>): string[][] {
     rows.push([dir, "optional", "Optional local/user pack copied when present."]);
   }
   rows.push(["dist", "generated", "Generated bundle exports. Do not edit by hand."]);
-  rows.push([".flow-agents", "runtime", "Cross-session workflow artifacts and sidecars. Not committed by default."]);
+  rows.push([FLOW_AGENTS_RUNTIME_DIR, "runtime", "Non-durable workflow artifacts, sidecars, and generated projections. Not committed by default."]);
+  rows.push([DURABLE_FLOW_AGENTS_DIR, "durable local state", "Explicit Flow Agents config/install state. Not a runtime artifact fallback."]);
   return rows;
 }
 
@@ -147,13 +149,13 @@ function latestRuntimeStates(includeRuntime: boolean): string[] {
   if (!includeRuntime) {
     return [
       "Runtime workflow state is excluded from the committed map.",
-      "Regenerate locally with `npm run context-map -- --include-runtime` to include recent `.flow-agents` state.",
+      `Regenerate locally with \`npm run context-map -- --include-runtime\` to include recent \`${FLOW_AGENTS_RUNTIME_DIR}\` state.`,
     ];
   }
-  const workflowDir = path.join(root, ".flow-agents");
-  if (!exists(workflowDir)) return ["No local workflow state found under `.flow-agents`."];
+  const workflowDir = path.join(root, FLOW_AGENTS_RUNTIME_DIR);
+  if (!exists(workflowDir)) return [`No local workflow state found under \`${FLOW_AGENTS_RUNTIME_DIR}\`.`];
   const states = fs.readdirSync(workflowDir).map((name) => path.join(workflowDir, name, "state.json")).filter(exists).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
-  if (!states.length) return ["No local workflow state found under `.flow-agents`."];
+  if (!states.length) return [`No local workflow state found under \`${FLOW_AGENTS_RUNTIME_DIR}\`.`];
   const rows = states.slice(0, 8).map((file) => {
     const data = loadJson<Record<string, unknown>>(file);
     const next = typeof data.next_action === "object" && data.next_action ? data.next_action as Record<string, unknown> : {};
@@ -171,11 +173,11 @@ function render(includeRuntime: boolean): string {
     "## How To Use This", "",
     "- Start here when a session is long, resumed, or context-constrained.",
     "- Load only the specific skill, contract, schema, or doc that matches the task.",
-    "- Treat `.flow-agents` as runtime state and `dist/` as generated output.", "",
+    `- Treat \`${FLOW_AGENTS_RUNTIME_DIR}\` as runtime state and \`dist/\` as generated output.`, "",
     "## Repository Shape", "", ...markdownTable(["Path", "Role", "Purpose"], repoShape(manifest)), "",
     "## Core Commands", "", ...markdownTable(["Use", "Command"], commands), "",
     "## Workflow Sidecars", "",
-    "Machine-readable workflow state lives beside Markdown artifacts in `.flow-agents/<slug>/`.", "",
+    `Machine-readable workflow state lives beside Markdown artifacts in \`${FLOW_AGENTS_RUNTIME_DIR}/<slug>/\`.`, "",
     ...markdownTable(["Schema", "Title", "ID"], schemas()), "",
     "Primary tools: `npm run workflow:sidecar`, `npm run workflow:validate-artifacts`, `scripts/hooks/stop-goal-fit.js`, and `scripts/hooks/workflow-steering.js`.", "",
     "## Workflow Skills", "", ...markdownTable(["Skill", "Source", "When To Load"], workflowRows), "",

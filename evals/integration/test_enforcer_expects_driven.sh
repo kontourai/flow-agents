@@ -34,11 +34,11 @@ trap cleanup EXIT
 # ─── helper: seed a minimal delivered workflow artifact ───────────────────────
 seed_repo() { # $1=dir $2=slug
   local p="$1" slug="$2"
-  mkdir -p "$p/.flow-agents/$slug"
+  mkdir -p "$p/.kontourai/flow-agents/$slug"
   printf '# Repo\n' > "$p/AGENTS.md"
   printf '%s' "{\"schema_version\":\"1.0\",\"task_slug\":\"$slug\",\"status\":\"delivered\",\"phase\":\"done\",\"updated_at\":\"2026-06-26T00:00:00Z\",\"next_action\":{\"status\":\"done\",\"summary\":\"done\"}}" \
-    > "$p/.flow-agents/$slug/state.json"
-  cat > "$p/.flow-agents/$slug/$slug--deliver.md" << MD
+    > "$p/.kontourai/flow-agents/$slug/state.json"
+  cat > "$p/.kontourai/flow-agents/$slug/$slug--deliver.md" << MD
 # $slug
 
 branch: main
@@ -67,9 +67,9 @@ seed_repo "$T1_DIR" "declares-tampered"
 
 # current.json: active flow
 printf '%s' '{"artifact_dir":"declares-tampered","active_flow_id":"builder.build","active_step_id":"verify"}' \
-  > "$T1_DIR/.flow-agents/current.json"
+  > "$T1_DIR/.kontourai/flow-agents/current.json"
 
-python3 - "$T1_DIR/.flow-agents/declares-tampered/trust.bundle" << 'PY'
+python3 - "$T1_DIR/.kontourai/flow-agents/declares-tampered/trust.bundle" << 'PY'
 import json, sys
 bundle = {
     "schemaVersion": 3,
@@ -152,9 +152,9 @@ T2_DIR="$TMP/t2"
 seed_repo "$T2_DIR" "declares-clean"
 
 printf '%s' '{"artifact_dir":"declares-clean","active_flow_id":"builder.build","active_step_id":"verify"}' \
-  > "$T2_DIR/.flow-agents/current.json"
+  > "$T2_DIR/.kontourai/flow-agents/current.json"
 
-python3 - "$T2_DIR/.flow-agents/declares-clean/trust.bundle" << 'PY'
+python3 - "$T2_DIR/.kontourai/flow-agents/declares-clean/trust.bundle" << 'PY'
 import json, sys
 bundle = {
     "schemaVersion": 3,
@@ -227,9 +227,9 @@ seed_repo "$T3_DIR" "no-flow"
 
 # No current.json flow keys (empty current.json that is still valid)
 printf '%s' '{"artifact_dir":"no-flow"}' \
-  > "$T3_DIR/.flow-agents/current.json"
+  > "$T3_DIR/.kontourai/flow-agents/current.json"
 
-python3 - "$T3_DIR/.flow-agents/no-flow/trust.bundle" << 'PY'
+python3 - "$T3_DIR/.kontourai/flow-agents/no-flow/trust.bundle" << 'PY'
 import json, sys
 bundle = {
     "schemaVersion": 3,

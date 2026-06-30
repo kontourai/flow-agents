@@ -24,6 +24,16 @@ npx @kontourai/flow-agents init --runtime opencode    --dest . --yes
 
 The installer copies agents, skills, context contracts, hook scripts, Kit assets, and the Flow Agents telemetry descriptor into the workspace. The Builder Kit installs automatically. Your agent reads those files at startup; no plugin registry required.
 
+For a normal Codex global install, target the Codex home instead of a project workspace:
+
+```bash
+npx @kontourai/flow-agents init --runtime codex --global --activate-kits --yes
+```
+
+That installs into `CODEX_HOME` when it is set, otherwise `~/.codex`. Use `--dest /path/to/codex-home` only when you need an explicit override for an isolated install, CI fixture, or test.
+
+Keep generated Codex base config lean. Put profile-specific model, provider, and approval settings in separate `<profile>.config.toml` files and select them with `codex --profile <name>`.
+
 **What lands in the workspace:**
 
 - `agents/`, `skills/`, `context/` — skill definitions and shared contracts the agent follows
@@ -84,7 +94,7 @@ The agent will run the `builder-shape` / `idea-to-backlog` skill, which:
 3. drafts a shaped work item with a stated outcome, non-goals, acceptance criteria, and a verification expectation
 4. stops at the `breakdown-gate` and waits for you to confirm before creating GitHub issues
 
-You will see the agent write a local artifact at `.flow-agents/<slug>/<slug>--idea-to-backlog.md`. That artifact is the machine-readable input to the next stage — not a summary in the chat window.
+You will see the agent write a local artifact at `.kontourai/flow-agents/<slug>/<slug>--idea-to-backlog.md`. That artifact is the machine-readable input to the next stage — not a summary in the chat window.
 
 To continue and file the GitHub issue:
 
@@ -128,7 +138,7 @@ Use verify-work on the current branch and report what evidence is present.
 
 ### What you observe
 
-- **Between each step**, the agent writes a local session sidecar under `.flow-agents/<slug>/` — `state.json`, `acceptance.json`, `evidence.json`, and `handoff.json`. These survive compaction, tab close, or a new session. A future session resumes from recorded state.
+- **Between each step**, the agent writes a local session sidecar under `.kontourai/flow-agents/<slug>/` — `state.json`, `acceptance.json`, `evidence.json`, and `handoff.json`. These survive compaction, tab close, or a new session. A future session resumes from recorded state.
 - **At each gate**, the agent either presents the evidence and moves forward, or blocks and explains what is missing. It does not make up a confident summary and proceed.
 - **The stop-goal-fit hook** (at L2) prevents the agent from stopping when evidence is still incomplete — you see a warning or block rather than "all done!" on partial work.
 - **If verify fails**, the verify-gate routes back to execution (or plan, or design-probe, depending on the failure class) and tries again — up to three times before hard-blocking.
