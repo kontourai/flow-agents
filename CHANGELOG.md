@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.2.0](https://github.com/kontourai/flow-agents/compare/v2.1.1...v2.2.0) (2026-06-30)
+
+
+### Features
+
+* **strands-ts:** consume @kontourai/console-telemetry for pricing/cost ([#243](https://github.com/kontourai/flow-agents/issues/243)) ([eba7ff3](https://github.com/kontourai/flow-agents/commit/eba7ff39433f602e7e17b17164a84fa187aa3dc8))
+
+
+### Fixes
+
+* **flow-agents:** expose kontourai artifact roots ([#258](https://github.com/kontourai/flow-agents/issues/258)) ([82db131](https://github.com/kontourai/flow-agents/commit/82db1319e9115820c606c71c40087c05b1278fce))
+
+
+### Documentation
+
+* **flow-agents:** ADR 0018 — freeze local shell-parsing heuristics (ops[#21](https://github.com/kontourai/flow-agents/issues/21)) ([#255](https://github.com/kontourai/flow-agents/issues/255)) ([777fc50](https://github.com/kontourai/flow-agents/commit/777fc5029409f85bb3097da7f3141e3b4783a789))
+
+
+### Refactoring
+
+* **flow-agents:** extract a pure seam from workflow-sidecar + add TS unit layer (ops[#22](https://github.com/kontourai/flow-agents/issues/22)) ([#257](https://github.com/kontourai/flow-agents/issues/257)) ([7af3f44](https://github.com/kontourai/flow-agents/commit/7af3f44fb1d4c05e155da9e4f6090f1a99b534ef))
+
 ## [2.1.1](https://github.com/kontourai/flow-agents/compare/v2.1.0...v2.1.1) (2026-06-29)
 
 
