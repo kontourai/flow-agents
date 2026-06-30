@@ -74,6 +74,7 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/lib/audit-transport.sh", { category: "shared hook library", requiredNeedles: ["audit_emit"] }],
   ["scripts/hooks/lib/hook-flags.js", { category: "shared hook library", requiredNeedles: ["isHookEnabled"] }],
   ["scripts/hooks/lib/liveness-read.js", { category: "shared hook library", requiredNeedles: ["freshHolders", "readLivenessEvents"] }],
+  ["scripts/hooks/lib/local-artifact-paths.js", { category: "shared hook library", requiredNeedles: ["flowAgentsArtifactRoot", "defaultArtifactRootForRead"] }],
   ["scripts/hooks/lib/patterns.sh", { category: "shared hook library", requiredNeedles: ["_detect_secrets"] }],
   ["scripts/hooks/lib/resolve-formatter.js", { category: "shared hook library", requiredNeedles: ["resolveFormatter"] }],
 ]);

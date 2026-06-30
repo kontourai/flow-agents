@@ -8,7 +8,7 @@
  * Zero runtime dependencies beyond Node.js built-ins.
  * Fails open: telemetry errors never block kit operations.
  *
- * Sink path: <workspace>/.telemetry/full.jsonl
+ * Sink path: <workspace>/.kontourai/telemetry/full.jsonl
  * The workspace is resolved from FLOW_AGENTS_WORKSPACE env var, falling back
  * to process.cwd().
  *
@@ -47,7 +47,7 @@ function schemaEventType(canonical) {
 
 function resolveSinkPath(workspace) {
   const ws = workspace || process.env.FLOW_AGENTS_WORKSPACE || process.cwd();
-  return path.join(ws, ".telemetry", "full.jsonl");
+  return path.join(ws, ".kontourai", "telemetry", "full.jsonl");
 }
 
 // ---------------------------------------------------------------------------

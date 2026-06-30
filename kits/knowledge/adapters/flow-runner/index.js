@@ -17,7 +17,7 @@
  *   - defaultSimilarityDetector         — pluggable similarity interface default (R3)
  *
  * Telemetry:
- *   Gate events are emitted to <workspace>/.telemetry/full.jsonl using
+ *   Gate events are emitted to <workspace>/.kontourai/telemetry/full.jsonl using
  *   canonical schema v0.3.0 events (preToolUse at gate entry, postToolUse at gate exit).
  *
  * Similarity Interface (R3):

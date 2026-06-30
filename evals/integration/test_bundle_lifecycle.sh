@@ -630,14 +630,14 @@ fi
 echo ""
 echo "--- opencode Plugin Hook Chain (end-to-end telemetry persistence) ---"
 # Execute the REAL generated plugin module under node, invoke its handlers,
-# and assert telemetry events persist inside the workspace .telemetry/ —
+# and assert telemetry events persist inside the workspace .kontourai/telemetry/ —
 # not the workspace PARENT. Pins three live-smoke findings (2026-06-11):
 #   1. spawning process.execPath fails under non-node hosts (NODE_BIN guard)
 #   2. empty stdin makes the telemetry pipeline silently skip the emit
 #   3. TELEMETRY_DATA_DIR escaping to the workspace parent (../../.. depth bug)
 CHAIN_WS="$TMPDIR_EVAL/plugin-chain-opencode"
 (cd "$ROOT_DIR/dist/opencode" && bash install.sh "$CHAIN_WS" >/dev/null 2>&1) || true
-rm -rf "$CHAIN_WS/.telemetry" "$TMPDIR_EVAL/.telemetry"
+rm -rf "$CHAIN_WS/.kontourai/telemetry" "$CHAIN_WS/.telemetry" "$TMPDIR_EVAL/.kontourai" "$TMPDIR_EVAL/.telemetry"
 
 if (cd "$CHAIN_WS" && node --input-type=module -e "
 const mod = await import('./.opencode/plugins/flow-agents.js');
@@ -653,21 +653,21 @@ fi
 # The telemetry emit is detached (disowned) and can take a few seconds to
 # land; poll rather than fixed-sleep.
 for _i in 1 2 3 4 5 6 7 8 9 10; do
-  [[ -s "$CHAIN_WS/.telemetry/full.jsonl" ]] && break
+  [[ -s "$CHAIN_WS/.kontourai/telemetry/full.jsonl" ]] && break
   sleep 1
 done
-if [[ -s "$CHAIN_WS/.telemetry/full.jsonl" ]] && node -e "
-  require('fs').readFileSync('$CHAIN_WS/.telemetry/full.jsonl','utf8').trim().split('\n').map(JSON.parse);
+if [[ -s "$CHAIN_WS/.kontourai/telemetry/full.jsonl" ]] && node -e "
+  require('fs').readFileSync('$CHAIN_WS/.kontourai/telemetry/full.jsonl','utf8').trim().split('\n').map(JSON.parse);
 " 2>/dev/null; then
-  _pass "opencode plugin: handlers persisted telemetry events in workspace .telemetry/"
+  _pass "opencode plugin: handlers persisted telemetry events in workspace .kontourai/telemetry/"
 else
-  _fail "opencode plugin: no telemetry events persisted in workspace .telemetry/"
+  _fail "opencode plugin: no telemetry events persisted in workspace .kontourai/telemetry/"
 fi
 
-if [[ ! -e "$TMPDIR_EVAL/.telemetry" ]]; then
+if [[ ! -e "$TMPDIR_EVAL/.kontourai/telemetry" && ! -e "$TMPDIR_EVAL/.telemetry" ]]; then
   _pass "opencode plugin: telemetry did not leak into the workspace parent directory"
 else
-  _fail "opencode plugin: telemetry leaked into workspace parent (.telemetry escape)"
+  _fail "opencode plugin: telemetry leaked into workspace parent"
 fi
 
 echo ""

@@ -17,6 +17,7 @@
 const fs = require('fs');
 const path = require('path');
 const { readLivenessEvents, freshHolders } = require('./lib/liveness-read');
+const { flowAgentsArtifactRootsForRead } = require('./lib/local-artifact-paths');
 
 const STEERING = {
   'tool-planner': [
@@ -101,7 +102,8 @@ function readJson(file) {
 }
 
 function latestWorkflowState(root) {
-  const states = walkStateFiles(path.join(root, '.flow-agents'))
+  const states = flowAgentsArtifactRootsForRead(root)
+    .flatMap(artifactRoot => walkStateFiles(artifactRoot))
     .map(file => {
       let stat;
       try { stat = fs.statSync(file); } catch { return null; }
@@ -295,8 +297,8 @@ function resumeSteering(root, current) {
 
     // Liveness advisory
     try {
-      const livenessFile = path.join(root, '.flow-agents', 'liveness', 'events.jsonl');
-      const events = readLivenessEvents(livenessFile);
+      const events = flowAgentsArtifactRootsForRead(root)
+        .flatMap(artifactRoot => readLivenessEvents(path.join(artifactRoot, 'liveness', 'events.jsonl')));
       if (events.length > 0) {
         const selfActor = (process.env.FLOW_AGENTS_ACTOR || '').trim() || 'local';
         const holders = freshHolders(events, slug, selfActor, Date.now());

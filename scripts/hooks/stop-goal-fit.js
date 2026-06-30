@@ -38,6 +38,10 @@ const {
   canonicalJsonForChain,
   hasLaunderingOperator,
 } = require('../lib/command-log-chain.js');
+const {
+  flowAgentsArtifactRoot,
+  flowAgentsArtifactRootsForRead,
+} = require('./lib/local-artifact-paths');
 
 const MAX_STDIN = 1024 * 1024;
 const ACTIVE_STATUSES = new Set([
@@ -1575,11 +1579,11 @@ const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence 
 const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing|exit-code-laundered/;
 
 async function analyze(root, now = Date.now()) {
-  const flowAgentsDir = path.join(root, '.flow-agents');
+  const flowAgentsDirs = flowAgentsArtifactRootsForRead(root);
   // Scope to the session's current task when current.json names one, so an
   // unrelated active workflow elsewhere in the repo does not gate this stop.
-  const scoped = preferredArtifactDir(flowAgentsDir);
-  const searchDirs = scoped ? [scoped] : [flowAgentsDir];
+  const scoped = flowAgentsDirs.map(preferredArtifactDir).find(Boolean);
+  const searchDirs = scoped ? [scoped] : flowAgentsDirs;
   const artifacts = searchDirs
     .flatMap(dir => walkMarkdown(dir))
     .map(readArtifact)
@@ -1589,6 +1593,7 @@ async function analyze(root, now = Date.now()) {
   if (artifacts.length === 0) return { warnings: [], blocking: false };
 
   const latest = artifacts[0];
+  const latestArtifactDir = path.dirname(latest.file);
   const warnings = [];
   const relPath = relative(root, latest.file);
   const status = latest.status || 'unknown';
@@ -1604,11 +1609,11 @@ async function analyze(root, now = Date.now()) {
 
   // ADR 0016 P-c: load the active FlowDefinition gate (fail-open: null when absent).
   // Null → existing workflow.* fallback path unchanged. Non-null → expects[]-driven claim selection.
-  const activeFlowStep = loadActiveFlowStep(flowAgentsDir);
+  const activeFlowStep = loadActiveFlowStep(path.dirname(latestArtifactDir));
 
-  warnings.push(...sidecarValidation(root, path.dirname(latest.file)));
-  warnings.push(...sidecarGuidance(root, path.dirname(latest.file), activeFlowStep));
-  const captureWarnings = captureCrossReference(root, path.dirname(latest.file), activeFlowStep);
+  warnings.push(...sidecarValidation(root, latestArtifactDir));
+  warnings.push(...sidecarGuidance(root, latestArtifactDir, activeFlowStep));
+  const captureWarnings = captureCrossReference(root, latestArtifactDir, activeFlowStep);
   warnings.push(...captureWarnings);
   // Dedup: bundleEnforcement and captureCrossReference can both fire "caught false-completion"
   // for the same disputed claim. Suppress the bundleEnforcement warning ONLY when
@@ -1622,7 +1627,7 @@ async function analyze(root, now = Date.now()) {
     const m = /evidence check ([^\s:]+):/.exec(w);
     if (m) captureHardBlockIds.add(m[1]);
   }
-  const bundleWarnings = (await bundleEnforcement(path.dirname(latest.file), activeFlowStep)).filter(w => {
+  const bundleWarnings = (await bundleEnforcement(latestArtifactDir, activeFlowStep)).filter(w => {
     if (!captureHardBlockIds.size) return true;
     // bundleEnforcement warns: "trust.bundle claim disputed: <subjectId> ..."
     const m = /trust\.bundle claim (?:disputed|tampered): ([^\s(]+)/.exec(w);
@@ -1634,21 +1639,21 @@ async function analyze(root, now = Date.now()) {
     return !captureHardBlockIds.has(checkId);
   });
   warnings.push(...bundleWarnings);
-  warnings.push(...missingBundleOrStateSignal(path.dirname(latest.file), activeFlowStep));
+  warnings.push(...missingBundleOrStateSignal(latestArtifactDir, activeFlowStep));
 
   // A pre-execution task (not started) OR a terminal task (which is itself a
   // completion *claim*) must not block on mere incompleteness — but a FALSE claim
   // (capture/evidence contradiction) still blocks at any phase. This is the whole
   // point of the capture cross-reference: catch a task that falsely claims done.
-  const gateState = readJsonFile(path.join(path.dirname(latest.file), 'state.json'));
+  const gateState = readJsonFile(path.join(latestArtifactDir, 'state.json'));
   const taskStatus = gateState ? normalizedStatus(gateState.status) : normalizedStatus(status);
-  const preExecution = isPreExecution(path.dirname(latest.file), status);
+  const preExecution = isPreExecution(latestArtifactDir, status);
   const terminal = TERMINAL_STATUSES.has(taskStatus);
 
   // Namespace-agnostic captured-FAIL reconciliation (AC1 — closes the allowlist bypass).
   // Fix A: status-independent — runs on EVERY stop. A claim contradicting the capture
   // is a false-completion whether or not the agent says the task is 'done'.
-  warnings.push(...capturedFailReconciliation(root, path.dirname(latest.file), taskStatus));
+  warnings.push(...capturedFailReconciliation(root, latestArtifactDir, taskStatus));
 
   // Use module-scope HARD_BLOCK / FULL_BLOCK (defined above analyze()).
   // pre-execution/terminal tasks: only HARD_BLOCK signals cause a block.
@@ -1686,7 +1691,8 @@ function resolveMaxBlocks() {
 }
 
 function blockStreakFile(root) {
-  return path.join(root, '.flow-agents', '.goal-fit-block-streak.json');
+  const artifactRoot = flowAgentsArtifactRoot(root);
+  return path.join(artifactRoot, '.goal-fit-block-streak.json');
 }
 
 function reasonsHash(warnings) {

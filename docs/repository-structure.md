@@ -10,9 +10,10 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
 
 - Edit canonical source in the repo root areas listed below, then regenerate derived output with the documented commands.
 - Do not edit `dist/`, `build/`, or `_site/` by hand. They are generated from tracked source.
-- Do not commit local runtime state from `.flow-agents/<slug>/`, `.codex/`, `.claude/`, `.omx/`, `.promptfoo/`, `.telemetry/`, `.surface/`, `.veritas/`, or tool caches.
+- Do not commit local runtime state from `.flow-agents/<slug>/`, `.kontourai/`, `.codex/`, `.claude/`, `.omx/`, `.promptfoo/`, `.telemetry/`, `.surface/`, generated `.veritas/` output, or tool caches; intentionally tracked `.veritas/` governance/config remains durable source.
 - Runtime workflow artifacts stay local and ignored; promote reviewable or durable outcomes to docs, source, schemas, or provider records before merging to `main`.
 - Treat generated exports and installed runtime config as products of `packaging/manifest.json`, `src/tools/build-universal-bundles.ts`, `scripts/install-*.sh`, and the source directories they copy.
+- Use `.kontourai/` for non-durable local or generated Kontour workspace state. Keep durable tracked files in intuitive product-owned paths such as `.veritas/`, `.flow/`, `.agents/`, `.claude/commands`, and `docs/`; existing transition ignores remain during migration.
 
 ## Target Layout
 
@@ -32,7 +33,7 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
   docs/                        # durable docs and GitHub Pages source
   integrations/                # optional external integration config
   dist/ build/ _site/           # generated output; ignored
-  .flow-agents/ .codex/ .claude/ ... # local runtime state; ignored by default
+  .flow-agents/ .kontourai/ .codex/ .claude/ ... # local runtime state; ignored by default
 ```
 
 ## Top-Level Inventory
@@ -40,11 +41,12 @@ This is the canonical developer-facing map for the Flow Agents repository. Use i
 | Path | Classification | Source of truth | Generated or runtime policy | Safe cleanup rule |
 | --- | --- | --- | --- | --- |
 | `.flow-agents/` | runtime state | Workflow tools write local session artifacts. | Ignored. | Do not commit task runtime roots; promote durable decisions to docs, source, schemas, or providers before merge. |
+| `.kontourai/` | local/generated workspace state | Local Kontour tools and developer workflows. | Ignored. | Safe local cleanup when no active workflow needs it; durable source and decisions stay in product-owned tracked paths. |
 | `.claude/` | installed runtime config | Generated bundle or local runtime install. | Ignored. | Reinstall from `dist/claude-code/` instead of editing as source. |
 | `.codex/` | installed runtime config | Generated bundle or local runtime install. | Ignored. | Reinstall from `dist/codex/` or `scripts/install-codex-home.sh`; do not treat local hooks as canonical. |
 | `.githooks/` | canonical repo tooling | Tracked repository hook scripts. | Source, not runtime agent hooks. | Keep compatible with `npm run setup:repo-hooks` and `npm run validate:repo-hooks --`. |
 | `.github/` | canonical CI config | GitHub workflow files. | Source. | Preserve workflow command names and artifact expectations. |
-| `.ai/`, `.omx/`, `.promptfoo/`, `.surface/`, `.telemetry/`, `.veritas/` | runtime, cache, or integration output | Local tools and optional integrations. | Ignored runtime state. | Clean locally when not needed; promote only stable integration config under `integrations/` or durable docs. |
+| `.ai/`, `.omx/`, `.promptfoo/`, `.surface/`, `.telemetry/`, `.veritas/` | runtime, cache, or integration output | Local tools, optional integrations, and generated Veritas output. | Ignored runtime state, except intentionally tracked Veritas governance/config. | Clean locally when not needed; promote only stable integration config under `integrations/` or durable docs. |
 | `.venv/`, `node_modules/`, `test-results/`, `__pycache__/` | dependency/cache output | Package managers and test tools. | Ignored. | Safe local cleanup; recreate with normal install or test commands. |
 | `_site/` | generated docs output | Built from `docs/`. | Ignored. | Recreate with docs preview/build tooling. |
 | `agent-cards/` | canonical source | Discovery metadata for routable agents. | Exported into runtime bundles. | Do not delete without checking bundle manifests and evals. |
@@ -114,6 +116,8 @@ The package requires Node `>=22`, and GitHub Actions runs CI on Node 22. Keep `@
 `.codex/` and `.claude/` at the repo root are installed runtime configuration surfaces. They can be useful for local testing, but canonical hook scripts and runtime config live in `scripts/hooks/`, `context/`, `packaging/`, and generated bundle output. The stale local `.codex/hooks.json` incident came from treating an installed runtime file as if it were canonical source. The fix is to regenerate or reinstall runtime config and update the canonical builder/install sources when behavior must change.
 
 `.flow-agents/<slug>/` is workflow working memory. Keep plans, sidecars, evidence, and handoffs there while work is active. Promote stable outcomes into `docs/`, schemas, source, or provider records before final acceptance.
+
+Across Kontour repos, `.kontourai/` is the simple ignored home for non-durable local/generated workspace state. It is not a durable source root. Keep durable governance, Flow config, agent source, command source, and documentation in the product-owned tracked paths where developers expect them, including `.veritas/`, `.flow/`, `.agents/`, `.claude/commands`, and `docs/`. Existing transition ignores such as `.flow-agents/`, `.kontour/`, `.surface/`, `.veritas/evidence/`, `.flow/runs/`, and `.telemetry/` remain in place during migration.
 
 `evals/fixtures/` ownership is tracked in [Fixture Ownership](fixture-ownership.md).
 Do not delete or add fixture directories without updating that inventory and the

@@ -802,7 +802,9 @@ cp "$ROOT/scripts/lib/command-log-chain.js" "$ISO_LIBDIR/"
 # Create isolated node context that can't find @kontourai/surface
 ISO_DIR="$TMP/surface-iso"
 mkdir -p "$ISO_DIR/repo/.flow-agents/surftest"
+mkdir -p "$ISO_DIR/lib"
 cp "$GATE" "$ISO_DIR/stop-goal-fit.js"
+cp "$ROOT/scripts/hooks/lib/local-artifact-paths.js" "$ISO_DIR/lib/"
 printf '# Repo\n' > "$ISO_DIR/repo/AGENTS.md"
 # Non-terminal session (execution phase, in_progress status)
 printf '%s' '{"schema_version":"1.0","task_slug":"surftest","status":"in_progress","phase":"execution","updated_at":"2026-06-27T00:00:00Z","next_action":{"status":"in_progress","summary":"running"}}' \
@@ -846,7 +848,9 @@ echo "--- AC3.1b: Low-impact-only bundle with unavailable surface → NOT blocke
 
 ISO2_DIR="$TMP/surface-iso2"
 mkdir -p "$ISO2_DIR/repo/.flow-agents/lowtest"
+mkdir -p "$ISO2_DIR/lib"
 cp "$GATE" "$ISO2_DIR/stop-goal-fit.js"
+cp "$ROOT/scripts/hooks/lib/local-artifact-paths.js" "$ISO2_DIR/lib/"
 printf '# Repo\n' > "$ISO2_DIR/repo/AGENTS.md"
 printf '%s' '{"schema_version":"1.0","task_slug":"lowtest","status":"in_progress","phase":"execution","updated_at":"2026-06-27T00:00:00Z","next_action":{"status":"in_progress","summary":"running"}}' \
   > "$ISO2_DIR/repo/.flow-agents/lowtest/state.json"
