@@ -135,10 +135,10 @@ TAMPER_DIR="$TMP/tamper-verify"
 TAMPER_SLUG="tamper-verify-test"
 mkdir -p "$TAMPER_DIR"
 printf '# Test repo\n' > "$TAMPER_DIR/AGENTS.md"
-mkdir -p "$TAMPER_DIR/.flow-agents/$TAMPER_SLUG"
+mkdir -p "$TAMPER_DIR/.kontourai/flow-agents/$TAMPER_SLUG"
 
 flow_agents_node "$WRITER" ensure-session \
-  --artifact-root "$TAMPER_DIR/.flow-agents" \
+  --artifact-root "$TAMPER_DIR/.kontourai/flow-agents" \
   --task-slug "$TAMPER_SLUG" \
   --title "Tamper verify test" \
   --summary "Testing tamper detection at verify step." \
@@ -146,18 +146,18 @@ flow_agents_node "$WRITER" ensure-session \
   --step-id verify \
   --timestamp "2026-06-01T02:00:00Z" >/dev/null 2>&1
 
-flow_agents_node "$WRITER" init-plan "$TAMPER_DIR/.flow-agents/$TAMPER_SLUG/$TAMPER_SLUG--deliver.md" \
+flow_agents_node "$WRITER" init-plan "$TAMPER_DIR/.kontourai/flow-agents/$TAMPER_SLUG/$TAMPER_SLUG--deliver.md" \
   --source-request "Test" --summary "Tamper test" \
   --timestamp "2026-06-01T02:00:00Z" >/dev/null 2>&1
 
-flow_agents_node "$WRITER" advance-state "$TAMPER_DIR/.flow-agents/$TAMPER_SLUG" \
+flow_agents_node "$WRITER" advance-state "$TAMPER_DIR/.kontourai/flow-agents/$TAMPER_SLUG" \
   --status in_progress --phase verification \
   --summary "At verify." --next-action "Continue." \
   --flow-definition builder.build \
   --timestamp "2026-06-01T02:00:30Z" >/dev/null 2>&1
 
 # Write TAMPERED trust.bundle: stored verified, evidence passing=false
-python3 - "$TAMPER_DIR/.flow-agents/$TAMPER_SLUG/trust.bundle" << 'PY'
+python3 - "$TAMPER_DIR/.kontourai/flow-agents/$TAMPER_SLUG/trust.bundle" << 'PY'
 import json, sys
 bundle = {
     "schemaVersion": 3,

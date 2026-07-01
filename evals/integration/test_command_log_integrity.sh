@@ -32,11 +32,11 @@ trap cleanup EXIT
 # ── helper: seed a minimal delivered workflow artifact ────────────────────────
 seed_repo() { # $1=dir $2=slug
   local p="$1" slug="$2"
-  mkdir -p "$p/.flow-agents/$slug"
+  mkdir -p "$p/.kontourai/flow-agents/$slug"
   printf '# Repo\n' > "$p/AGENTS.md"
   printf '%s' "{\"schema_version\":\"1.0\",\"task_slug\":\"$slug\",\"status\":\"delivered\",\"phase\":\"done\",\"updated_at\":\"2026-06-23T00:00:00Z\",\"next_action\":{\"status\":\"done\",\"summary\":\"done\"}}" \
-    > "$p/.flow-agents/$slug/state.json"
-  cat > "$p/.flow-agents/$slug/$slug--deliver.md" << MD
+    > "$p/.kontourai/flow-agents/$slug/state.json"
+  cat > "$p/.kontourai/flow-agents/$slug/$slug--deliver.md" << MD
 # $slug
 
 branch: main
@@ -71,12 +71,12 @@ echo "Test 1: altered entry (flip fail→pass without fixing hash) → broken �
 T1="$TMP/t1"; seed_repo "$T1" t1
 write_chained_log "$T1" t1
 
-LOG="$T1/.flow-agents/t1/command-log.jsonl"
+LOG="$T1/.kontourai/flow-agents/t1/command-log.jsonl"
 
 if [[ -f "$LOG" ]]; then _pass "T1: command-log.jsonl written"; else _fail "T1: command-log.jsonl missing"; fi
 
 # Verify clean chain (before tamper)
-chain_status=$(node -e "const g = require('$GATE'); const r = g.verifyCommandLogChain('$T1/.flow-agents/t1'); console.log(r.status);")
+chain_status=$(node -e "const g = require('$GATE'); const r = g.verifyCommandLogChain('$T1/.kontourai/flow-agents/t1'); console.log(r.status);")
 if [[ "$chain_status" == "ok" ]]; then
   _pass "T1: untampered chain verifies as ok"
 else
@@ -97,7 +97,7 @@ open(sys.argv[1], 'w').write('\n'.join(lines) + '\n')
 PY
 
 # Verify broken chain
-chain_after=$(node -e "const g = require('$GATE'); const r = g.verifyCommandLogChain('$T1/.flow-agents/t1'); console.log(r.status + ':' + r.brokenAt);")
+chain_after=$(node -e "const g = require('$GATE'); const r = g.verifyCommandLogChain('$T1/.kontourai/flow-agents/t1'); console.log(r.status + ':' + r.brokenAt);")
 if [[ "$chain_after" == "broken:1" ]]; then
   _pass "T1: tampered entry detected → broken at entry 1"
 else
@@ -108,7 +108,7 @@ fi
 # The tampered entry (lint) was a FAIL flipped to PASS — so the log now shows a false pass.
 # Since chain is broken, gate should block with integrity warning and NOT trust log passes.
 printf '%s' '{"schema_version":"1.0","task_slug":"t1","verdict":"pass","checks":[{"id":"npm-test","kind":"command","status":"pass","command":"npm test","summary":"passed"}]}' \
-  > "$T1/.flow-agents/t1/evidence.json"
+  > "$T1/.kontourai/flow-agents/t1/evidence.json"
 
 set +e
 gate_out=$(FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip \
@@ -141,7 +141,7 @@ echo "Test 2: removed/reordered entry → linkage breaks → broken → gate fla
 T2="$TMP/t2"; seed_repo "$T2" t2
 write_chained_log "$T2" t2
 
-LOG2="$T2/.flow-agents/t2/command-log.jsonl"
+LOG2="$T2/.kontourai/flow-agents/t2/command-log.jsonl"
 lines_before=$(wc -l < "$LOG2" | tr -d ' ')
 
 # Reorder: swap entry 0 and entry 1
@@ -153,7 +153,7 @@ lines[0], lines[1] = lines[1], lines[0]
 open(sys.argv[1], 'w').write('\n'.join(lines) + '\n')
 PY
 
-chain_reorder=$(node -e "const g = require('$GATE'); const r = g.verifyCommandLogChain('$T2/.flow-agents/t2'); console.log(r.status);")
+chain_reorder=$(node -e "const g = require('$GATE'); const r = g.verifyCommandLogChain('$T2/.kontourai/flow-agents/t2'); console.log(r.status);")
 if [[ "$chain_reorder" == "broken" ]]; then
   _pass "T2: reordered entries detected → broken"
 else
@@ -163,7 +163,7 @@ fi
 # Test: delete middle entry (restore then delete entry 0 so entry 1's prevHash is wrong)
 write_chained_log "$T2" t2  # re-append fresh entries (now 4 total — but that's fine for test)
 # Write a fresh log with just 2 entries and then delete the first
-LOG2_FRESH="$T2/.flow-agents/t2/command-log.jsonl"
+LOG2_FRESH="$T2/.kontourai/flow-agents/t2/command-log.jsonl"
 python3 - "$LOG2_FRESH" << 'PY'
 import sys
 lines = [l for l in open(sys.argv[1]).read().strip().split('\n') if l.strip()]
@@ -173,7 +173,7 @@ last2 = lines[-2:]
 open(sys.argv[1], 'w').write(last2[1] + '\n')
 PY
 
-chain_delete=$(node -e "const g = require('$GATE'); const r = g.verifyCommandLogChain('$T2/.flow-agents/t2'); console.log(r.status);")
+chain_delete=$(node -e "const g = require('$GATE'); const r = g.verifyCommandLogChain('$T2/.kontourai/flow-agents/t2'); console.log(r.status);")
 if [[ "$chain_delete" == "broken" ]]; then
   _pass "T2: removed predecessor entry detected → broken (prevHash mismatch)"
 else
@@ -191,7 +191,7 @@ printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","cwd":"%s","tool_inp
 printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","cwd":"%s","tool_input":{"command":"npm run build"},"tool_response":{"exitCode":1}}' "$T3" \
   | node "$CAPTURE" >/dev/null 2>&1
 
-chain_legit=$(node -e "const g = require('$GATE'); const r = g.verifyCommandLogChain('$T3/.flow-agents/t3'); console.log(r.status);")
+chain_legit=$(node -e "const g = require('$GATE'); const r = g.verifyCommandLogChain('$T3/.kontourai/flow-agents/t3'); console.log(r.status);")
 if [[ "$chain_legit" == "ok" ]]; then
   _pass "T3: untampered chained log verifies ok"
 else
@@ -200,7 +200,7 @@ fi
 
 # Evidence claims npm run build passed (it actually failed → capture log shows fail → block)
 printf '%s' '{"schema_version":"1.0","task_slug":"t3","verdict":"pass","checks":[{"id":"build","kind":"command","status":"pass","command":"npm run build","summary":"build passed"}]}' \
-  > "$T3/.flow-agents/t3/evidence.json"
+  > "$T3/.kontourai/flow-agents/t3/evidence.json"
 
 set +e
 gate3_out=$(FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip \
@@ -234,9 +234,9 @@ T4="$TMP/t4"; seed_repo "$T4" t4
 
 # Write a legacy-style log (no _chain field) — exactly like pre-B2 fixtures
 printf '%s\n' '{"command":"npm test","observedResult":"fail","exitCode":1,"capturedAt":"2026-06-23T00:00:00Z","source":"postToolUse-capture"}' \
-  > "$T4/.flow-agents/t4/command-log.jsonl"
+  > "$T4/.kontourai/flow-agents/t4/command-log.jsonl"
 
-chain_legacy=$(node -e "const g = require('$GATE'); const r = g.verifyCommandLogChain('$T4/.flow-agents/t4'); console.log(r.status);")
+chain_legacy=$(node -e "const g = require('$GATE'); const r = g.verifyCommandLogChain('$T4/.kontourai/flow-agents/t4'); console.log(r.status);")
 if [[ "$chain_legacy" == "legacy" ]]; then
   _pass "T4: unchained (legacy) log returns legacy status"
 else
@@ -245,7 +245,7 @@ fi
 
 # Evidence claims npm test passed, but legacy log shows it failed → still blocks
 printf '%s' '{"schema_version":"1.0","task_slug":"t4","verdict":"pass","checks":[{"id":"unit-tests","kind":"command","status":"pass","command":"npm test","summary":"passed"}]}' \
-  > "$T4/.flow-agents/t4/evidence.json"
+  > "$T4/.kontourai/flow-agents/t4/evidence.json"
 
 set +e
 gate4_out=$(FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip \

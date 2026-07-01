@@ -31,11 +31,11 @@ trap cleanup EXIT
 # ─── helper: seed a minimal delivered workflow artifact ───────────────────────
 seed_repo() { # $1=dir $2=slug
   local p="$1" slug="$2"
-  mkdir -p "$p/.flow-agents/$slug"
+  mkdir -p "$p/.kontourai/flow-agents/$slug"
   printf '# Repo\n' > "$p/AGENTS.md"
   printf '%s' "{\"schema_version\":\"1.0\",\"task_slug\":\"$slug\",\"status\":\"delivered\",\"phase\":\"done\",\"updated_at\":\"2026-06-23T00:00:00Z\",\"next_action\":{\"status\":\"done\",\"summary\":\"done\"}}" \
-    > "$p/.flow-agents/$slug/state.json"
-  cat > "$p/.flow-agents/$slug/$slug--deliver.md" << MD
+    > "$p/.kontourai/flow-agents/$slug/state.json"
+  cat > "$p/.kontourai/flow-agents/$slug/$slug--deliver.md" << MD
 # $slug
 
 branch: main
@@ -66,7 +66,7 @@ seed_repo "$TAMPER_DIR" "tampered"
 # - claim.status = "verified"   (stored, tampered to look safe)
 # - evidence[passing=false]     (real command failed, fold in by sidecar)
 # Surface.deriveClaimStatus will see passing:false evidence and return "disputed".
-python3 - "$TAMPER_DIR/.flow-agents/tampered/trust.bundle" << 'PY'
+python3 - "$TAMPER_DIR/.kontourai/flow-agents/tampered/trust.bundle" << 'PY'
 import json, sys
 bundle = {
     "schemaVersion": 3,
@@ -143,7 +143,7 @@ echo "Test 2: legitimate bundle (stored verified, evidence→verified) must ALLO
 LEGIT_DIR="$TMP/legit"
 seed_repo "$LEGIT_DIR" "legit"
 
-python3 - "$LEGIT_DIR/.flow-agents/legit/trust.bundle" << 'PY'
+python3 - "$LEGIT_DIR/.kontourai/flow-agents/legit/trust.bundle" << 'PY'
 import json, sys
 bundle = {
     "schemaVersion": 3,
@@ -211,7 +211,7 @@ echo "Test 3: stored-disputed bundle must still BLOCK (no regression from #133)"
 STORED_DIR="$TMP/stored"
 seed_repo "$STORED_DIR" "stored"
 
-python3 - "$STORED_DIR/.flow-agents/stored/trust.bundle" << 'PY'
+python3 - "$STORED_DIR/.kontourai/flow-agents/stored/trust.bundle" << 'PY'
 import json, sys
 bundle = {
     "schemaVersion": 3,
