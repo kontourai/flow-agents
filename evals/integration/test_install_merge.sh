@@ -363,6 +363,46 @@ else
   _fail "--global: merge into global settings failed or user key/hook lost"
 fi
 
+# Regression guard: --global hook commands must resolve regardless of which
+# project is open. The bundle template resolves scripts/ via
+# ${CLAUDE_PROJECT_DIR:-$(pwd)}, which only exists for project-scoped installs
+# (installBundle rsyncs scripts/ alongside .claude/). A --global install must
+# rewrite that to an absolute path, or every FA hook silently MODULE_NOT_FOUNDs
+# in any project other than this package's own checkout.
+if [[ -f "$GLOBAL_SETTINGS_JSON" ]] && node - "$GLOBAL_SETTINGS_JSON" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const hooks = s.hooks || {};
+const commands = Object.values(hooks).flat().flatMap((g) => (g.hooks || []).map((h) => String(h.command || "")));
+const faCommands = commands.filter((c) => c.includes("claude-hook-adapter.js") || c.includes("claude-telemetry-hook.js"));
+if (faCommands.length === 0) throw new Error("no FA hook commands found to check");
+for (const c of faCommands) {
+  if (c.includes("CLAUDE_PROJECT_DIR")) throw new Error("FA hook command still depends on CLAUDE_PROJECT_DIR (breaks outside this package's own project): " + c);
+  const m = c.match(/node "([^"]+\/scripts\/hooks\/[^"]+\.js)"/);
+  if (!m) throw new Error("FA hook command has no absolute scripts/hooks path: " + c);
+  if (!fs.existsSync(m[1])) throw new Error("FA hook command points at a path that does not exist: " + m[1]);
+}
+console.log("ok");
+NODE
+then
+  _pass "--global: FA hook commands use an absolute, resolvable path (no CLAUDE_PROJECT_DIR dependency)"
+else
+  _fail "--global: FA hook commands are not resolvable outside this package's own project directory"
+fi
+
+# Regression guard: --global must also sync skills and agents so newly added
+# Builder Kit skills don't require a full reinstall to pick up.
+if [[ -d "$GLOBAL_SETTINGS_DIR/skills/plan-work" && -f "$GLOBAL_SETTINGS_DIR/skills/plan-work/SKILL.md" ]]; then
+  _pass "--global: skills synced into global destination"
+else
+  _fail "--global: skills were not synced into global destination"
+fi
+if [[ -d "$GLOBAL_SETTINGS_DIR/agents" && -n "$(ls -A "$GLOBAL_SETTINGS_DIR/agents" 2>/dev/null)" ]]; then
+  _pass "--global: agents synced into global destination"
+else
+  _fail "--global: agents were not synced into global destination"
+fi
+
 echo ""
 
 # ─── Scenario 6: Manual proof (user-visible) ─────────────────────────────────
