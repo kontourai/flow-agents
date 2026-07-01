@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.0](https://github.com/kontourai/flow-agents/compare/v2.2.0...v2.3.0) (2026-07-01)
+
+
+### Features
+
+* **strands-ts:** consume @kontourai/console-telemetry for pricing/cost ([eb878b0](https://github.com/kontourai/flow-agents/commit/eb878b024a166b68d5cef00cd659311de9c7b49b))
+
 ## [2.2.0](https://github.com/kontourai/flow-agents/compare/v2.1.1...v2.2.0) (2026-06-30)
 
 
