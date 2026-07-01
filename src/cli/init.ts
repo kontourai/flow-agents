@@ -286,6 +286,73 @@ function ensureBundle(runtime: Runtime): string {
   return bundle;
 }
 
+// The bundle's hook commands resolve the flow-agents scripts directory via
+// ${CLAUDE_PROJECT_DIR:-$(pwd)}. That is correct for a project-scoped install
+// (installBundle rsyncs scripts/ alongside .claude/, so CLAUDE_PROJECT_DIR ==
+// the install destination). It is NOT correct for a --global install: there
+// is no per-destination copy of scripts/, and CLAUDE_PROJECT_DIR varies with
+// whichever project happens to be open, so the hook resolves to a path that
+// exists in at most one project (and never for most sessions). Global
+// installs need an absolute, session-independent path instead.
+const GLOBAL_INSTALL_PROJECT_DIR_PREFIX = /root="\$\{CLAUDE_PROJECT_DIR:-\$\(pwd\)\}";\s*/g;
+const GLOBAL_INSTALL_PROJECT_DIR_VAR = /"\$root\//g;
+
+function rewriteCommandForGlobalInstall(command: string, sourceRoot: string): string {
+  return command
+    .replace(GLOBAL_INSTALL_PROJECT_DIR_PREFIX, "")
+    .replace(GLOBAL_INSTALL_PROJECT_DIR_VAR, `"${sourceRoot}/`);
+}
+
+/** Recursively rewrite every `command` string found under `value` in place. */
+function rewriteCommandsForGlobalInstall(value: unknown, sourceRoot: string): void {
+  if (Array.isArray(value)) {
+    for (const item of value) rewriteCommandsForGlobalInstall(item, sourceRoot);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  const obj = value as Record<string, unknown>;
+  for (const key of Object.keys(obj)) {
+    if (key === "command" && typeof obj[key] === "string") {
+      obj[key] = rewriteCommandForGlobalInstall(obj[key] as string, sourceRoot);
+      continue;
+    }
+    rewriteCommandsForGlobalInstall(obj[key], sourceRoot);
+  }
+}
+
+/**
+ * Additively copy every file under srcDir into destDir, creating directories
+ * as needed and overwriting files whose content changed. Never deletes files
+ * in destDir that srcDir does not own — destDir may contain unrelated content
+ * (other kits, other tools) that this sync must not touch.
+ */
+function copyDirMerge(srcDir: string, destDir: string): { added: number; updated: number } {
+  let added = 0;
+  let updated = 0;
+  if (!fs.existsSync(srcDir)) return { added, updated };
+  for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+    const srcPath = path.join(srcDir, entry.name);
+    const destPath = path.join(destDir, entry.name);
+    if (entry.isDirectory()) {
+      const nested = copyDirMerge(srcPath, destPath);
+      added += nested.added;
+      updated += nested.updated;
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const content = fs.readFileSync(srcPath);
+    if (fs.existsSync(destPath)) {
+      if (Buffer.compare(fs.readFileSync(destPath), content) === 0) continue;
+      updated += 1;
+    } else {
+      fs.mkdirSync(path.dirname(destPath), { recursive: true });
+      added += 1;
+    }
+    fs.writeFileSync(destPath, content);
+  }
+  return { added, updated };
+}
+
 function installBundle(bundle: string, options: InitOptions): number {
   const args = ["install.sh", options.dest];
   for (const sink of options.telemetrySinks) args.push("--telemetry-sink", sink);
@@ -345,10 +412,13 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       // targeting the global settings, so the collision they'd create is expected.
       if (!options.global) checkScopeCollision();
     }
-    // --global for claude-code: merge only into the global/user-level settings dir.
-    // This writes only the hook-wiring config (merge into ~/.claude/settings.json),
-    // not the full workspace bundle. The global settings dir is the claude config root,
-    // so the settings.json lives directly in dest (not dest/.claude/).
+    // --global for claude-code: merge hook-wiring into the global/user-level
+    // settings dir, plus additively sync skills/agents so a global install
+    // does not silently go stale as new Builder Kit skills ship. This does
+    // NOT rsync the full workspace bundle (no context/, powers/, prompts/,
+    // etc.) — only the parts a global Claude Code user-config needs. The
+    // global settings dir is the claude config root, so the settings.json
+    // lives directly in dest (not dest/.claude/).
     if (options.global && options.runtime === "claude-code") {
       const bundle = ensureBundle(options.runtime);
       // For --global, dest is ~/.claude/ (the global settings dir).
@@ -364,6 +434,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       // Remove permissive defaults (not appropriate for global user settings).
       delete managed["permissions"];
       delete managed["skipDangerousModePermissionPrompt"];
+      // See rewriteCommandsForGlobalInstall: bundle hook commands assume
+      // CLAUDE_PROJECT_DIR points at this package; a global install must not
+      // depend on which project is currently open, so pin to an absolute path.
+      rewriteCommandsForGlobalInstall(managed, root);
       fs.mkdirSync(options.dest, { recursive: true });
       const destSettingsPath = path.join(options.dest, "settings.json");
       const installMergePath = path.join(root, "scripts", "install-merge.js");
@@ -377,6 +451,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       const tmp = `${destSettingsPath}.tmp.${process.pid}`;
       fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
       fs.renameSync(tmp, destSettingsPath);
+      // Additive skills/agents sync: adds new files and updates changed ones,
+      // never deletes — dest may hold unrelated content from other kits/tools.
+      const skillsSync = copyDirMerge(path.join(bundle, ".claude", "skills"), path.join(options.dest, "skills"));
+      const agentsSync = copyDirMerge(path.join(bundle, ".claude", "agents"), path.join(options.dest, "agents"));
       // Write version stamp.
       const recordPath = durableInstallRecordPath(options.dest);
       const installRecordDir = path.dirname(recordPath);
@@ -387,6 +465,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       fs.writeFileSync(recordTmp, `${JSON.stringify(record, null, 2)}\n`, "utf8");
       fs.renameSync(recordTmp, recordPath);
       console.log(`Flow Agents global hooks merged for claude-code in ${options.dest}`);
+      console.log(`Synced skills (+${skillsSync.added} new, ~${skillsSync.updated} updated) and agents (+${agentsSync.added} new, ~${agentsSync.updated} updated) in ${options.dest}`);
       return 0;
     }
     // --global for opencode: merge FA opencode.json into the global opencode config dir.
