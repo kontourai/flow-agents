@@ -18,6 +18,7 @@ import { loadJson as _loadJson, writeJson as _writeJson } from "./cli/workflow-s
 
 export {
   defaultArtifactRootForRead,
+  defaultCodexHome,
   defaultTelemetryDirForRead,
   defaultTelemetryDirsForRead,
   durableFlowAgentsRoot,

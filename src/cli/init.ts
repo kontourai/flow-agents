@@ -10,7 +10,7 @@ import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { activateCodexLocal } from "../runtime-adapters.js";
 import { main as buildBundles } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
-import { durableInstallRecordPath } from "../lib/local-artifact-root.js";
+import { defaultCodexHome, durableInstallRecordPath } from "../lib/local-artifact-root.js";
 
 type Runtime = "base" | "codex" | "claude-code" | "kiro" | "opencode" | "pi";
 type TelemetrySink = "local-files" | "local-kontour-console" | "kontour-hosted-console" | "user-hosted-console" | "kontour-cloud" | "hosted-kontour-console";
@@ -195,7 +195,7 @@ function globalDest(runtime: Runtime): string {
   }
   if (runtime === "codex") {
     // codex --global routes to the standard Codex home. --dest remains an explicit override.
-    return process.env["CODEX_HOME"] || path.join(os.homedir(), ".codex");
+    return defaultCodexHome();
   }
   if (runtime === "pi") {
     // pi has no documented global config dir.
