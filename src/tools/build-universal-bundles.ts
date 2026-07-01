@@ -263,7 +263,7 @@ function claudePolicy(event: string, script: string, envPrefix = ""): string {
   return `bash -lc 'root="\${CLAUDE_PROJECT_DIR:-$(pwd)}"; ${envPrefix}node "$root/scripts/hooks/claude-hook-adapter.js" ${event} ${script.replace(/\.js$/, "")} ${script} default'`;
 }
 function codexRoot(scriptPath: string): string {
-  return `root="\${CODEX_HOME:-}"; if [ -z "$root" ] || [ ! -f "$root/${scriptPath}" ]; then root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); fi`;
+  return `root="\${CODEX_HOME:-}"; if [ -z "$root" ] || [ ! -f "$root/${scriptPath}" ]; then root=$(git rev-parse --show-toplevel 2>/dev/null || pwd); fi; if [ ! -f "$root/${scriptPath}" ] && [ -f "$HOME/.codex/${scriptPath}" ]; then root="$HOME/.codex"; fi; if [ ! -f "$root/${scriptPath}" ]; then echo "flow-agents: hook script not found at $root/${scriptPath} (checked \\$CODEX_HOME, git toplevel/cwd, and \\$HOME/.codex) - skipping hook" >&2; exit 0; fi`;
 }
 function codexTelemetry(event: string): string {
   if (event === "PermissionRequest") return `bash -lc '${codexRoot("scripts/telemetry/telemetry.sh")}; bash "$root/scripts/telemetry/telemetry.sh" permissionRequest dev'`;
