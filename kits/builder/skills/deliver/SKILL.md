@@ -259,7 +259,7 @@ After CI passes and the work is merged or otherwise accepted:
 5. Link the long-lived doc back to the provider record, archived plan artifact, or accepted evidence when useful so future readers can see why and how the feature was built.
 6. Confirm `.kontourai/flow-agents/` runtime artifacts remain untracked before merge to `main`.
 7. **Clean up the workspace once the merge is confirmed.** First verify the merge actually happened from the provider's own record (a merge commit / `mergedAt`) — not a green check or a watcher's exit code. Then honor the `worktree_lifecycle` recorded by `pull-work` (`retain_until: pr_merged`): remove the isolated worktree (`git worktree remove <path>`) and delete the now-merged branch locally and on the remote. Never delete a branch or worktree before the merge is confirmed — a closed-but-unmerged PR or a prematurely deleted branch loses work. The task is not done while it leaves a stale worktree or merged branch behind.
-8. Hand off to `learning-review` when the delivery exposed workflow, testing, documentation, or product follow-up.
+8. Hand off to `learning-review` for terminal closeout. Clean runs record a lightweight no-correction-needed learning record (`correction.needed: false`, closed routing such as `target: "none"`); mismatches, friction, missing docs, failed gates, incidents, or product follow-up record `correction.needed: true` or `FOLLOWUP_REQUIRED` with routed prevention/follow-up. Do not skip learning just because the delivery looked clean.
 
 ### 11. Deliver
 

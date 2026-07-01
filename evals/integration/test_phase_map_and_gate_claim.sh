@@ -189,6 +189,58 @@ node -e "
   && _pass "bundle contains builder.pull-work.selected with subjectType=work-item, status=verified" \
   || _fail "bundle missing or incorrect builder.pull-work.selected claim"
 
+echo ""
+echo "=== 4b. composed publish-learn gate claim emits builder.pr-open.pull-request ==="
+
+COMPOSED_ROOT="$TMP/composed-gate-claim-test"
+mkdir -p "$COMPOSED_ROOT"
+
+flow_agents_node "workflow-sidecar" ensure-session \
+  --artifact-root "$COMPOSED_ROOT" \
+  --task-slug composed-gate-claim \
+  --title "Composed Gate Claim Test" \
+  --summary "Test composed Builder publish/learn flow producer." \
+  --flow-id builder.build \
+  --step-id pr-open \
+  --timestamp "2026-06-26T00:00:00Z" >/dev/null 2>&1
+
+flow_agents_node "workflow-sidecar" init-plan "$COMPOSED_ROOT/composed-gate-claim/composed-gate-claim--deliver.md" \
+  --source-request "Test" --summary "Testing" \
+  --timestamp "2026-06-26T00:00:00Z" >/dev/null 2>&1
+
+if flow_agents_node "workflow-sidecar" record-gate-claim "$COMPOSED_ROOT/composed-gate-claim" \
+  --status pass \
+  --summary "PR opened with verification evidence." \
+  --expectation pull-request-opened \
+  --timestamp "2026-06-26T00:01:00Z" >/dev/null 2>&1; then
+  _pass "record-gate-claim exits 0 at composed pr-open step"
+else
+  _fail "record-gate-claim failed at composed pr-open step"
+fi
+
+node -e "
+  const fs = require('fs');
+  const current = JSON.parse(fs.readFileSync('$COMPOSED_ROOT/current.json', 'utf8'));
+  if (current.active_flow_id !== 'builder.build') throw new Error('expected active_flow_id=builder.build, got ' + current.active_flow_id);
+  if (current.active_step_id !== 'pr-open') throw new Error('expected active_step_id=pr-open, got ' + current.active_step_id);
+  const bundle = JSON.parse(fs.readFileSync('$COMPOSED_ROOT/composed-gate-claim/trust.bundle', 'utf8'));
+  const target = (bundle.claims || []).find(c => c.claimType === 'builder.pr-open.pull-request');
+  if (!target) {
+    console.error('no builder.pr-open.pull-request claim found; claims:', (bundle.claims||[]).map(c=>c.claimType).join(', '));
+    process.exit(1);
+  }
+  if (target.subjectType !== 'pull-request') {
+    console.error('expected subjectType=pull-request, got', target.subjectType);
+    process.exit(1);
+  }
+  if (target.status !== 'verified') {
+    console.error('expected status=verified, got', target.status);
+    process.exit(1);
+  }
+" 2>/dev/null \
+  && _pass "composed bundle contains builder.pr-open.pull-request with active parent flow" \
+  || _fail "composed bundle missing or incorrect builder.pr-open.pull-request claim"
+
 # ─── Tamper-blocks: stored verified + evidence fail → BLOCK (exit 2) ─────────
 echo ""
 echo "=== 5. TAMPERED bundle (stored verified, evidence fail) → BLOCK ==="
@@ -196,22 +248,22 @@ echo "=== 5. TAMPERED bundle (stored verified, evidence fail) → BLOCK ==="
 T_DIR="$TMP/tamper-test"
 mkdir -p "$T_DIR"
 printf '# Repo\n' > "$T_DIR/AGENTS.md"
-mkdir -p "$T_DIR/.flow-agents/tamper"
+mkdir -p "$T_DIR/.kontourai/flow-agents/tamper"
 
 flow_agents_node "workflow-sidecar" ensure-session \
-  --artifact-root "$T_DIR/.flow-agents" \
+  --artifact-root "$T_DIR/.kontourai/flow-agents" \
   --task-slug tamper \
   --title "Tamper Test" \
   --summary "Testing tamper detection." \
   --flow-id builder.build \
   --timestamp "2026-06-26T00:00:00Z" >/dev/null 2>&1
 
-flow_agents_node "workflow-sidecar" init-plan "$T_DIR/.flow-agents/tamper/tamper--deliver.md" \
+flow_agents_node "workflow-sidecar" init-plan "$T_DIR/.kontourai/flow-agents/tamper/tamper--deliver.md" \
   --source-request "Test" --summary "Testing" \
   --timestamp "2026-06-26T00:00:00Z" >/dev/null 2>&1
 
 # Advance to in_progress so we're past pre-execution
-flow_agents_node "workflow-sidecar" advance-state "$T_DIR/.flow-agents/tamper" \
+flow_agents_node "workflow-sidecar" advance-state "$T_DIR/.kontourai/flow-agents/tamper" \
   --status in_progress \
   --phase pickup \
   --summary "In progress." \
@@ -220,7 +272,7 @@ flow_agents_node "workflow-sidecar" advance-state "$T_DIR/.flow-agents/tamper" \
   --timestamp "2026-06-26T00:00:30Z" >/dev/null 2>&1
 
 # Write a TAMPERED trust.bundle: stored verified, evidence passing=false
-python3 - "$T_DIR/.flow-agents/tamper/trust.bundle" << 'PY'
+python3 - "$T_DIR/.kontourai/flow-agents/tamper/trust.bundle" << 'PY'
 import json, sys
 bundle = {
     "schemaVersion": 3,
@@ -302,18 +354,18 @@ mkdir -p "$C_DIR"
 printf '# Repo\n' > "$C_DIR/AGENTS.md"
 
 flow_agents_node "workflow-sidecar" ensure-session \
-  --artifact-root "$C_DIR/.flow-agents" \
+  --artifact-root "$C_DIR/.kontourai/flow-agents" \
   --task-slug clean \
   --title "Clean Test" \
   --summary "Testing clean gate claim." \
   --flow-id builder.build \
   --timestamp "2026-06-26T00:00:00Z" >/dev/null 2>&1
 
-flow_agents_node "workflow-sidecar" init-plan "$C_DIR/.flow-agents/clean/clean--deliver.md" \
+flow_agents_node "workflow-sidecar" init-plan "$C_DIR/.kontourai/flow-agents/clean/clean--deliver.md" \
   --source-request "Test" --summary "Testing" \
   --timestamp "2026-06-26T00:00:00Z" >/dev/null 2>&1
 
-flow_agents_node "workflow-sidecar" advance-state "$C_DIR/.flow-agents/clean" \
+flow_agents_node "workflow-sidecar" advance-state "$C_DIR/.kontourai/flow-agents/clean" \
   --status in_progress \
   --phase pickup \
   --summary "In progress." \
@@ -324,14 +376,14 @@ flow_agents_node "workflow-sidecar" advance-state "$C_DIR/.flow-agents/clean" \
 # Fix next_action so it reads as "done" for the gate
 node -e "
   const fs = require('fs');
-  const f = '$C_DIR/.flow-agents/clean/state.json';
+  const f = '$C_DIR/.kontourai/flow-agents/clean/state.json';
   const s = JSON.parse(fs.readFileSync(f, 'utf8'));
   s.next_action = { status: 'done', summary: 'Work complete.' };
   s.status = 'verified';
   fs.writeFileSync(f, JSON.stringify(s, null, 2) + '\n');
 " 2>/dev/null
 
-flow_agents_node "workflow-sidecar" record-gate-claim "$C_DIR/.flow-agents/clean" \
+flow_agents_node "workflow-sidecar" record-gate-claim "$C_DIR/.kontourai/flow-agents/clean" \
   --status pass \
   --summary "Selected issue #177 for implementation." \
   --expectation selected-work \

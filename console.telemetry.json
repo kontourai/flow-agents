@@ -218,6 +218,28 @@
       "limit": 10
     },
     {
+      "id": "builder.publish-learn",
+      "label": "Builder publish and learn",
+      "match": {
+        "attribute": "flow",
+        "includes": "builder.publish-learn"
+      },
+      "titleAttribute": "title",
+      "detailAttributes": {
+        "Project": "project",
+        "Repository": "repo",
+        "Task": "taskSlug",
+        "Status": "status",
+        "Outcome": "outcome",
+        "Phase": "phase",
+        "Skill": "skill",
+        "Agent": "agent",
+        "Model": "model",
+        "Observed": "observedAt"
+      },
+      "limit": 10
+    },
+    {
       "id": "delivery",
       "label": "Delivery workflows",
       "match": {

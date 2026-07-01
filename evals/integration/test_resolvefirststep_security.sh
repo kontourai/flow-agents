@@ -76,6 +76,28 @@ else
   _fail "resolveFlowFilePath: some cases did not match expected"
 fi
 
+echo ""
+echo "=== 1b. resolveFlowFilePath symlink escape → null (realpath containment) ==="
+
+SYMLINK_REPO="$TMP/symlink-repo"
+SYMLINK_SECRET="$TMP/symlink-secret"
+mkdir -p "$SYMLINK_REPO/kits/builder/flows" "$SYMLINK_SECRET"
+printf '{"id":"builder.build","version":"1.0.0","steps":[],"gates":{}}' > "$SYMLINK_SECRET/build.flow.json"
+ln -s "$SYMLINK_SECRET/build.flow.json" "$SYMLINK_REPO/kits/builder/flows/build.flow.json"
+
+node --input-type=module << JSEOF 2>&1
+import { resolveFlowFilePath } from '${FLOW_RESOLVER_JS}';
+const result = resolveFlowFilePath("builder", "build", "builder.build", "$SYMLINK_REPO");
+if (result !== null) throw new Error("symlink escape should return null, got " + result);
+console.log("  PASS: symlinked flow file pointing outside kits/ returned null");
+JSEOF
+
+if [ $? -eq 0 ]; then
+  _pass "resolveFlowFilePath: symlink escape rejected"
+else
+  _fail "resolveFlowFilePath: symlink escape was not rejected"
+fi
+
 # ─── Behavioral: ensure-session with traversal --flow-id → null active_step_id ─
 echo ""
 echo "=== 2. ensure-session --flow-id traversal → no active_step_id (null return) ==="

@@ -14,6 +14,11 @@
       "id": "builder.build",
       "path": "flows/build.flow.json",
       "description": "Pull ready work through design probing, planning, implementation, verification, pull request readiness, merge readiness, and learning."
+    },
+    {
+      "id": "builder.publish-learn",
+      "path": "flows/publish-learn.flow.json",
+      "description": "Reusable delivery closeout extension for publish, provider/CI merge readiness, and learning feedback gates."
     }
   ],
   "skills": [

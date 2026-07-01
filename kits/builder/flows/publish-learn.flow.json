@@ -1,0 +1,90 @@
+{
+  "id": "builder.publish-learn",
+  "version": "1.0",
+  "description": "Reusable delivery closeout extension: publish the verified change, confirm merge readiness from provider/CI evidence, and record learning feedback.",
+  "steps": [
+    { "id": "pr-open", "next": "merge-ready-ci" },
+    { "id": "merge-ready-ci", "next": "learn" },
+    { "id": "learn", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "exports": [
+    "builder.pr-open.pull-request",
+    "builder.merge-ready-ci.readiness",
+    "builder.learn.decisions",
+    "builder.learn.evidence"
+  ],
+  "gates": {
+    "pr-open-gate": {
+      "step": "pr-open",
+      "expects": [
+        {
+          "id": "pull-request-opened",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "A pull request exists with linked work, implementation summary, and verification evidence.",
+          "bundle_claim": {
+            "claimType": "builder.pr-open.pull-request",
+            "subjectType": "pull-request",
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
+          }
+        }
+      ]
+    },
+    "merge-ready-ci-gate": {
+      "step": "merge-ready-ci",
+      "expects": [
+        {
+          "id": "ci-merge-readiness",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "CI and review status support a merge-ready decision.",
+          "bundle_claim": {
+            "claimType": "builder.merge-ready-ci.readiness",
+            "subjectType": "pull-request",
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
+          }
+        }
+      ]
+    },
+    "learn-gate": {
+      "step": "learn",
+      "expects": [
+        {
+          "id": "decision-evidence",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Durable decision evidence from the build is recorded.",
+          "bundle_claim": {
+            "claimType": "builder.learn.decisions",
+            "subjectType": "decision",
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
+          }
+        },
+        {
+          "id": "learning-evidence",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Learning evidence from delivery is recorded for future work.",
+          "bundle_claim": {
+            "claimType": "builder.learn.evidence",
+            "subjectType": "release",
+            "accepted_statuses": [
+              "trusted",
+              "accepted"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

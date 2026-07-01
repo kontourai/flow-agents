@@ -77,6 +77,7 @@ OPERATING_LAYERS_DOC="$ROOT/docs/operating-layers.md"
 DEVELOPER_ARCHITECTURE_DOC="$ROOT/docs/developer-architecture.md"
 GITIGNORE="$ROOT/.gitignore"
 BUILDER_BUILD_FLOW="$ROOT/kits/builder/flows/build.flow.json"
+BUILDER_PUBLISH_LEARN_FLOW="$ROOT/kits/builder/flows/publish-learn.flow.json"
 FLOW_AGENTS_FLOW_ADR="$ROOT/docs/adr/0001-flow-agents-consumes-flow.md"
 ARTIFACT_CONTRACT="$ROOT/context/contracts/artifact-contract.md"
 PLANNING_CONTRACT="$ROOT/context/contracts/planning-contract.md"
@@ -180,6 +181,7 @@ require_file "$ARTIFACT_LIFECYCLE_DOC" "workflow artifact lifecycle doc"
 require_file "$OPERATING_LAYERS_DOC" "operating layers doc"
 require_file "$DEVELOPER_ARCHITECTURE_DOC" "developer architecture doc"
 require_file "$BUILDER_BUILD_FLOW" "Builder Kit build Flow Definition"
+require_file "$BUILDER_PUBLISH_LEARN_FLOW" "Builder Kit publish-learn Flow Definition"
 require_file "$FLOW_AGENTS_FLOW_ADR" "Flow Agents Flow boundary ADR"
 require_file "$ARTIFACT_CONTRACT" "artifact contract"
 require_file "$PLANNING_CONTRACT" "planning contract"
@@ -294,7 +296,7 @@ require_text "$DELIVERY_CONTRACT" 'Final Acceptance' "delivery contract defines 
 require_text "$DELIVERY_CONTRACT" 'Publish verified changes before release readiness' "delivery contract requires publish-change before release readiness"
 require_text "$DELIVERY_CONTRACT" 'verified diff committed and pushed' "final acceptance requires committed and pushed diff"
 require_text "$DELIVERY_CONTRACT" 'provider change record created or updated' "final acceptance requires provider change or explicit no-provider-change reason"
-require_text "$DELIVERY_CONTRACT" 'local `\.flow-agents/` runtime artifacts remain untracked' "final acceptance requires runtime artifacts stay untracked"
+require_text "$DELIVERY_CONTRACT" 'local `\.kontourai/flow-agents/` runtime artifacts remain untracked' "final acceptance requires runtime artifacts stay untracked"
 require_text "$DELIVERY_CONTRACT" 'GitHub PRs are the first `ChangeProvider` adapter example' "delivery contract keeps GitHub PR as adapter example"
 require_text "$DELIVERY_CONTRACT" 'Delegation Gates' "delivery contract defines delegation gates"
 require_text "$DELIVERY_CONTRACT" 'Do not replace the delegate gate with a local summary' "delivery contract forbids local gate substitution"
@@ -385,6 +387,8 @@ require_text "$KIT_REPOSITORY_DOC" 'schema_version' "kit repository doc defines 
 require_text "$KIT_REPOSITORY_DOC" 'flows' "kit repository doc defines declared Flow Definitions"
 require_text "$KIT_REPOSITORY_DOC" '[Aa]bsolute paths are rejected' "kit repository doc defines path safety"
 require_text "$KIT_REPOSITORY_DOC" 'does not install remote kits' "kit repository doc states remote install non-goal"
+require_text "$ROOT/docs/kit-authoring-guide.md" 'uses_flow' "kit authoring guide documents Flow Definition composition"
+require_text "$ROOT/docs/kit-authoring-guide.md" 'builder.publish-learn' "kit authoring guide documents composed publish-learn example"
 require_text "$PAGES_INDEX" 'Quick Start' "docs index presents product quick start"
 require_text "$KIT_REPOSITORY_INTEGRATION" 'valid-local-kit' "kit repository integration covers valid fixture"
 require_text "$KIT_REPOSITORY_INTEGRATION" 'invalid-schema-version' "kit repository integration covers invalid schema version"
@@ -442,6 +446,7 @@ require_text "$DELIVER" 'Required Preflight' "deliver defines pull/pickup prefli
 require_text "$DELIVER" 'pull-work -> pickup-probe' "deliver routes missing pickup evidence through pull-work and pickup-probe"
 require_text "$DELIVER" 'continue automatically to execution' "deliver can proceed autonomously after planning"
 require_text "$DELIVER" '\.kontourai/flow-agents/<slug>/archive' "deliver archives working artifacts"
+require_text "$DELIVER" 'Do not skip learning just because the delivery looked clean' "deliver always routes terminal closeout through learning-review"
 require_text "$DELIVER" 'Sidecar Writer Adoption' "deliver owns sidecar writer adoption"
 require_text "$DELIVER" 'record-critique|import-critique' "deliver records critique through sidecar writer"
 require_text "$VERIFY_WORK" 'Goal Fit' "verify-work reports Goal Fit"
@@ -542,6 +547,11 @@ require_text "$CONTEXT_MAP_INTEGRATION" 'context map generation is deterministic
 require_text "$WORKFLOW_STEERING_INTEGRATION" 'workflow steering hook neutralizes multiline critique findings' "workflow steering integration covers critique sanitization"
 require_text "$WORKFLOW_STEERING_INTEGRATION" 'workflow steering hook appends context-map recovery guidance' "workflow steering integration covers context-map guidance"
 require_text "$WORKFLOW_STEERING_INTEGRATION" 'workflow steering hook emits ambient state guidance at user prompt submit' "workflow steering integration covers ambient state guidance"
+require_text "$WORKFLOW_STEERING_INTEGRATION" 'Claude hook adapter surfaces Builder workflow route for coding prompts' "workflow steering integration covers Claude Builder-route prompt guidance"
+require_text "$WORKFLOW_STEERING_INTEGRATION" 'publish/release-readiness and learning-review' "workflow steering integration covers full Builder lifecycle guidance"
+require_text "$WORKFLOW_STEERING_INTEGRATION" 'does not route explicit review-only prompts into Builder workflow' "workflow steering integration covers review-only prompt suppression"
+require_text "$WORKFLOW_STEERING_INTEGRATION" 'does not route explicit validation-only prompts into Builder workflow' "workflow steering integration covers validation-only prompt suppression"
+require_text "$WORKFLOW_STEERING_INTEGRATION" 'does not route question-only test prompts into Builder workflow' "workflow steering integration covers question-only test prompt suppression"
 require_text "$ROOT/evals/integration/test_goal_fit_hook.sh" 'goal-fit hook reports actionable sidecar guidance' "goal-fit integration covers specific sidecar guidance"
 require_text "$HOOK_INFLUENCE_CASES" 'agent_must_do' "hook influence cases define expected agent behavior"
 require_text "$HOOK_INFLUENCE_CASES" 'live-acceptance' "hook influence cases include live acceptance evidence"
@@ -1068,6 +1078,11 @@ require_text "$BUILDER_BUILD_FLOW" 'Planning is blocked until pickup Probe decis
 require_text "$BUILDER_BUILD_FLOW" 'probe_status' "Builder build flow names probe status"
 require_text "$BUILDER_BUILD_FLOW" 'probe_artifact_ref' "Builder build flow names probe artifact ref"
 require_text "$BUILDER_BUILD_FLOW" 'Stale broad continuation language after a merge is not sufficient' "Builder build flow blocks stale broad continuation"
+require_text "$BUILDER_BUILD_FLOW" '"uses_flow": "builder.publish-learn"' "Builder build flow composes publish-learn extension"
+require_text "$BUILDER_PUBLISH_LEARN_FLOW" '"builder.pr-open.pull-request"' "Builder publish-learn flow exports PR-open evidence"
+require_text "$BUILDER_PUBLISH_LEARN_FLOW" '"builder.merge-ready-ci.readiness"' "Builder publish-learn flow exports CI merge readiness evidence"
+require_text "$BUILDER_PUBLISH_LEARN_FLOW" '"builder.learn.evidence"' "Builder publish-learn flow exports learning evidence"
+require_text "$BUILDER_PUBLISH_LEARN_FLOW" '"exports"' "Builder publish-learn flow declares exported claims"
 if node - "$BUILDER_BUILD_FLOW" <<'NODE'; then
 const fs = require("node:fs");
 const flow = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
@@ -1085,6 +1100,24 @@ NODE
   pass "Builder build flow keeps provider-neutral trust.bundle expectations"
 else
   fail "Builder build flow keeps provider-neutral trust.bundle expectations"
+fi
+if node - "$BUILDER_BUILD_FLOW" "$BUILDER_PUBLISH_LEARN_FLOW" <<'NODE'; then
+const fs = require("node:fs");
+const parent = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const child = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+for (const stepId of ["pr-open", "merge-ready-ci", "learn"]) {
+  const step = (parent.steps || []).find((item) => item.id === stepId);
+  if (step?.uses_flow !== "builder.publish-learn") throw new Error(`${stepId} should use builder.publish-learn`);
+  const childGate = Object.values(child.gates || {}).find((gate) => gate.step === stepId);
+  if (!childGate) throw new Error(`builder.publish-learn missing gate for ${stepId}`);
+  for (const expectation of childGate.expects || []) {
+    if (expectation.kind !== "trust.bundle") throw new Error(`${expectation.id || "<unknown>"} is not a trust.bundle expectation`);
+  }
+}
+NODE
+  pass "Builder publish-learn composition resolves PR, CI, and learning gates"
+else
+  fail "Builder publish-learn composition resolves PR, CI, and learning gates"
 fi
 require_text "$MAP" 'pull-work' "map includes pull-work"
 require_text "$MAP" 'pickup Probe before planning' "map documents pickup Probe before planning"

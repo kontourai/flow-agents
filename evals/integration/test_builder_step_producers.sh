@@ -15,8 +15,8 @@
 #   5. builder.learn.decisions               (step: learn,        expectation: decision-evidence)
 #   6. builder.learn.evidence                (step: learn,        expectation: learning-evidence)
 #
-# build.flow.json confirmation:
-#   - All 6 claims above are required:true.
+# Flow Definition confirmation:
+#   - All 6 claims above are required:true across builder.build and builder.publish-learn.
 #   - policy-compliance remains required:false (advisory — no skill producer).
 #
 # Deterministic, no model spend, self-cleaning.
@@ -106,21 +106,21 @@ setup_tamper_session() {
   local t_dir="$1" slug="$2" step="$3"
   mkdir -p "$t_dir"
   printf '# Repo\n' > "$t_dir/AGENTS.md"
-  mkdir -p "$t_dir/.flow-agents/$slug"
+  mkdir -p "$t_dir/.kontourai/flow-agents/$slug"
 
   flow_agents_node "workflow-sidecar" ensure-session \
-    --artifact-root "$t_dir/.flow-agents" \
+    --artifact-root "$t_dir/.kontourai/flow-agents" \
     --task-slug "$slug" \
     --title "Tamper test: $step" \
     --summary "Testing tamper detection." \
     --flow-id builder.build \
     --timestamp "2026-06-26T00:00:00Z" >/dev/null 2>&1
 
-  flow_agents_node "workflow-sidecar" init-plan "$t_dir/.flow-agents/$slug/$slug--deliver.md" \
+  flow_agents_node "workflow-sidecar" init-plan "$t_dir/.kontourai/flow-agents/$slug/$slug--deliver.md" \
     --source-request "Test" --summary "Testing" \
     --timestamp "2026-06-26T00:00:00Z" >/dev/null 2>&1
 
-  set_active_step "$t_dir/.flow-agents" "$slug" "$step"
+  set_active_step "$t_dir/.kontourai/flow-agents" "$slug" "$step"
 }
 
 # ─── Test: produce a gate claim at a given step ───────────────────────────────
@@ -178,7 +178,7 @@ test_tamper_blocks() {
   setup_tamper_session "$t_dir" "$slug" "$step"
 
   # Write a TAMPERED trust.bundle: stored verified, evidence passing=false
-  python3 - "$t_dir/.flow-agents/$slug/trust.bundle" "$claim_type" "$subject_type" << 'PY'
+  python3 - "$t_dir/.kontourai/flow-agents/$slug/trust.bundle" "$claim_type" "$subject_type" << 'PY'
 import json, sys
 claim_type = sys.argv[2]
 subject_type = sys.argv[3]
@@ -254,13 +254,16 @@ PY
   fi
 }
 
-# ─── Test 0: build.flow.json required:true confirmation ──────────────────────
+# ─── Test 0: Flow Definition required:true confirmation ──────────────────────
 echo ""
-echo "=== 0. build.flow.json: confirm required:true for produced gates ==="
+echo "=== 0. Flow Definitions: confirm required:true for produced gates ==="
 
 node -e "
   const fs = require('fs');
-  const flow = JSON.parse(fs.readFileSync('$ROOT/kits/builder/flows/build.flow.json', 'utf8'));
+  const flows = [
+    JSON.parse(fs.readFileSync('$ROOT/kits/builder/flows/build.flow.json', 'utf8')),
+    JSON.parse(fs.readFileSync('$ROOT/kits/builder/flows/publish-learn.flow.json', 'utf8')),
+  ];
   const requiredTrue = [
     'selected-work',
     'pickup-probe-readiness',
@@ -271,26 +274,31 @@ node -e "
   ];
   const requiredFalse = ['policy-compliance'];
   let ok = true;
-  for (const [gateName, gate] of Object.entries(flow.gates)) {
-    for (const exp of gate.expects || []) {
+  for (const flow of flows) {
+    for (const [gateName, gate] of Object.entries(flow.gates || {})) {
+      for (const exp of gate.expects || []) {
       if (requiredTrue.includes(exp.id) && exp.required !== true) {
-        console.error('FAIL: ' + exp.id + ' in ' + gateName + ' should be required:true, got ' + exp.required);
+        console.error('FAIL: ' + exp.id + ' in ' + flow.id + '/' + gateName + ' should be required:true, got ' + exp.required);
         ok = false;
       }
       if (requiredFalse.includes(exp.id) && exp.required !== false) {
-        console.error('FAIL: ' + exp.id + ' in ' + gateName + ' should remain required:false (advisory), got ' + exp.required);
+        console.error('FAIL: ' + exp.id + ' in ' + flow.id + '/' + gateName + ' should remain required:false (advisory), got ' + exp.required);
         ok = false;
+      }
       }
     }
   }
   if (!ok) process.exit(1);
 " 2>/dev/null \
-  && _pass "build.flow.json: 6 produced gates are required:true, policy-compliance is required:false" \
-  || _fail "build.flow.json: required flag mismatch"
+  && _pass "Flow Definitions: 6 produced gates are required:true, policy-compliance is required:false" \
+  || _fail "Flow Definitions: required flag mismatch"
 
 node -e "
   const fs = require('fs');
-  const flow = JSON.parse(fs.readFileSync('$ROOT/kits/builder/flows/build.flow.json', 'utf8'));
+  const flows = [
+    JSON.parse(fs.readFileSync('$ROOT/kits/builder/flows/build.flow.json', 'utf8')),
+    JSON.parse(fs.readFileSync('$ROOT/kits/builder/flows/publish-learn.flow.json', 'utf8')),
+  ];
   const producedIds = [
     'selected-work',
     'pickup-probe-readiness',
@@ -300,18 +308,20 @@ node -e "
     'learning-evidence',
   ];
   let ok = true;
-  for (const [gateName, gate] of Object.entries(flow.gates)) {
-    for (const exp of gate.expects || []) {
+  for (const flow of flows) {
+    for (const [gateName, gate] of Object.entries(flow.gates || {})) {
+      for (const exp of gate.expects || []) {
       if (producedIds.includes(exp.id) && exp.explore_hint) {
-        console.error('FAIL: ' + exp.id + ' in ' + gateName + ' still has explore_hint (remove when producer exists)');
+        console.error('FAIL: ' + exp.id + ' in ' + flow.id + '/' + gateName + ' still has explore_hint (remove when producer exists)');
         ok = false;
+      }
       }
     }
   }
   if (!ok) process.exit(1);
 " 2>/dev/null \
-  && _pass "build.flow.json: no explore_hint on produced gate entries" \
-  || _fail "build.flow.json: produced gate entries still have explore_hint"
+  && _pass "Flow Definitions: no explore_hint on produced gate entries" \
+  || _fail "Flow Definitions: produced gate entries still have explore_hint"
 
 # ─── Tests 1–6: produce + tamper-block for each of the 6 claims ──────────────
 

@@ -205,6 +205,52 @@ function contextMapSteering(root) {
   ].join(' ');
 }
 
+function promptText(input) {
+  const candidates = [
+    input && input.prompt,
+    input && input.user_prompt,
+    input && input.message,
+    input && input.text,
+    input && input.tool_input && input.tool_input.prompt,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate;
+  }
+  return '';
+}
+
+function looksLikeBuilderWork(text) {
+  const normalized = safeStateText(text, 2000).toLowerCase();
+  if (!normalized) return false;
+  const readOnlyIntent = /\b(read[- ]only|review[- ]only|no (source |code |file )?(changes?|edits?|modifications?)|do not (modify|edit|change|write|fix|implement|touch)|don't (modify|edit|change|write|fix|implement|touch)|dont (modify|edit|change|write|fix|implement|touch))\b/.test(normalized);
+  if (readOnlyIntent) return false;
+  const questionOnlyIntent = /^(what|which|who|when|where|why|how)\b/.test(normalized);
+  if (questionOnlyIntent) return false;
+  const noCodeQuestion = /\b(explain|describe|summari[sz]e|what is|how does|how do i|why does|review|critique)\b/.test(normalized)
+    && !/\b(build|create|implement|ship|deliver|fix|debug|refactor|add|update|change|modify|wire|migrate|install|scaffold|write|code)\b/.test(normalized);
+  if (noCodeQuestion) return false;
+  const verificationOnlyIntent = /\b(validate|test|verify|check)\b/.test(normalized)
+    && !/\b(build|create|implement|ship|deliver|fix|debug|refactor|add|update|change|modify|wire|migrate|install|scaffold|write|code)\b/.test(normalized);
+  if (verificationOnlyIntent) return false;
+  const hasWorkVerb = /\b(build|create|implement|ship|deliver|fix|debug|refactor|add|update|change|modify|wire|migrate|install|scaffold|write|code)\b/.test(normalized);
+  const hasWorkObject = /\b(api|endpoint|component|feature|bug|failing test|regression|integration|hook|script|cli|config|schema|migration)\b/.test(normalized);
+  const hasRequestLanguage = /\b(can you|please|let's|lets|need|should|make|ensure|support|add|update|fix|work on)\b/.test(normalized);
+  return hasWorkVerb || (hasWorkObject && hasRequestLanguage);
+}
+
+function builderWorkflowSteering(input) {
+  if (!looksLikeBuilderWork(promptText(input))) return '';
+  return [
+    'BUILDER WORKFLOW ROUTE: this user prompt looks like coding/build work.',
+    'Builder lifecycle: shape raw ideas -> build selected work -> publish verified branch/PR -> learn correction feedback.',
+    'Before source edits or implementation commands, activate Builder Kit delivery workflow.',
+    'If the user explicitly requested TDD, activate `tdd-workflow`; otherwise activate `deliver` and keep the session on `builder.build`.',
+    'Use `npm run workflow:sidecar -- ensure-session --flow-id builder.build ...` when the repo provides the sidecar writer.',
+    'After local verification, continue to publish/release-readiness and learning-review; do not treat local verification as terminal delivery.',
+    'Do not bypass plan-work -> execute-plan -> review-work -> verify-work for coding tasks; direct implementation is only acceptable when the user explicitly asks for no workflow or explanation-only help.',
+  ].join(' ');
+}
+
 /**
  * Compose the RESUME block for SessionStart.
  *
@@ -348,6 +394,15 @@ function run(rawInput) {
       }
     }
 
+    if (event === 'UserPromptSubmit') {
+      const builderHint = builderWorkflowSteering(input);
+      if (builderHint) {
+        hints.push(builderHint);
+        const contextHint = contextMapSteering(root);
+        if (contextHint) hints.push(contextHint);
+      }
+    }
+
     // SessionStart only: append the RESUME block for richer situational awareness
     if (event === 'SessionStart' && current) {
       const resumeBlock = resumeSteering(root, current);
@@ -379,4 +434,17 @@ if (require.main === module) {
   });
 }
 
-module.exports = { run, stateSteering, critiqueSteering, contextMapSteering, latestWorkflowState, findRepoRoot, safeStateText, stateNeedsAmbientSteering, resumeSteering };
+module.exports = {
+  run,
+  stateSteering,
+  critiqueSteering,
+  contextMapSteering,
+  latestWorkflowState,
+  findRepoRoot,
+  safeStateText,
+  stateNeedsAmbientSteering,
+  resumeSteering,
+  promptText,
+  looksLikeBuilderWork,
+  builderWorkflowSteering,
+};

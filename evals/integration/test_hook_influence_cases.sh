@@ -51,6 +51,7 @@ fi
 
 if rg -q 'dev-builder-build-requires-pickup-probe-before-plan' "$CASES" \
   && rg -q 'dev-builder-review-before-verify-after-execute' "$CASES" \
+  && rg -q 'dev-builder-route-fresh-coding-prompt' "$CASES" \
   && rg -q 'dev-verify-fail-preserves-trace-before-rework' "$CASES" \
   && rg -q 'codex-claude-strict-stop-adapter-contract' "$CASES"; then
   _pass "hook influence cases cover #62 Builder Kit loop categories"

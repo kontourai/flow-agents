@@ -91,6 +91,22 @@ A Flow Definition at minimum needs `id`, `version`, `steps`, and `gates`. Steps 
 
 The `id` in the flow file should match the `id` declared in `kit.json`'s `flows` list. Look at `kits/builder/flows/shape.flow.json` and `kits/builder/flows/build.flow.json` in this repository for fuller examples of multi-step flows with required and optional gate evidence.
 
+Flow Definitions may compose another declared Flow Definition at a step with `uses_flow`. The parent keeps lifecycle ownership (`active_flow_id` can remain the parent flow), while gate resolution for that step comes from the child flow with the same step id. Use this for reusable extensions such as publish, CI merge readiness, or learning closeout:
+
+```json
+{
+  "id": "builder.build",
+  "steps": [
+    { "id": "verify", "next": "pr-open" },
+    { "id": "pr-open", "next": "merge-ready-ci", "uses_flow": "builder.publish-learn" },
+    { "id": "merge-ready-ci", "next": "learn", "uses_flow": "builder.publish-learn" },
+    { "id": "learn", "next": "done", "uses_flow": "builder.publish-learn" }
+  ]
+}
+```
+
+The child flow should declare the gates for those step ids and list the claim types it intentionally exposes in `exports` (expectation ids are also accepted for non-claim expectations). Composition fails closed when a child gate expectation is not exported. Parent verification is still determined by trust-bundle claims: required child claims that are missing, disputed, or `not_verified` prevent the composed parent from being treated as verified.
+
 ## Validate
 
 Before installing or sharing a kit, run validation from the flow-agents checkout:

@@ -141,6 +141,38 @@
       }
     },
     {
+      "id": "dev-builder-route-fresh-coding-prompt",
+      "description": "A fresh coding/build prompt with no active sidecar should still steer into Builder Kit delivery workflow before source edits. Claude Code must receive this as prompt-submit additional context through the hook adapter.",
+      "runtime_scope": ["claude-code", "codex", "kiro-cli"],
+      "hook": "workflow-steering",
+      "event": "UserPromptSubmit",
+      "fixture_state": {
+        "task_slug": "fresh-coding-prompt",
+        "status": "new",
+        "phase": "intake",
+        "active_flow_id": null,
+        "prompt": "Please implement the new settings API and update its tests."
+      },
+      "guidance_must_include": [
+        "BUILDER WORKFLOW ROUTE",
+        "activate `deliver`",
+        "--flow-id builder.build",
+        "plan-work -> execute-plan -> review-work -> verify-work",
+        "publish/release-readiness and learning-review"
+      ],
+      "agent_must_do": [
+        "activate Builder Kit delivery workflow before source edits or implementation commands",
+        "use deliver by default for coding/build work unless the user explicitly requested TDD",
+        "keep the session on builder.build and do not bypass plan-work -> execute-plan -> review-work -> verify-work",
+        "continue from local verification into publish, release readiness, and learning feedback"
+      ],
+      "evidence": {
+        "tier": "adapter",
+        "command": "bash evals/integration/test_workflow_steering_hook.sh",
+        "status": "always-run-in-integration"
+      }
+    },
+    {
       "id": "codex-live-context-gap",
       "runtime_scope": ["codex"],
       "hook": "workflow-steering",
