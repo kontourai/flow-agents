@@ -203,6 +203,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_runtime_adapter_activation.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_codex_hook_resolution.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_bundle_install.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_bundle_lifecycle.sh" || result=1
