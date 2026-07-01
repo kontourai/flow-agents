@@ -121,7 +121,7 @@ NODE
   if node - "$ROOT_DIR/console.telemetry.json" <<'NODE'
 const fs = require("node:fs");
 const descriptor = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-for (const id of ["builder.shape", "builder.build"]) {
+for (const id of ["builder.shape", "builder.build", "builder.publish-learn"]) {
   const flow = (descriptor.flows || []).find((candidate) => candidate.id === id);
   if (!flow) throw new Error(`missing ${id} flow descriptor`);
   if (!flow.detailAttributes || Array.isArray(flow.detailAttributes) || typeof flow.detailAttributes !== "object") {
@@ -175,12 +175,12 @@ NODE
   else
     _fail "installed bundle is missing Kit Catalog or Builder Kit manifest"
   fi
-  if [[ -f "$PACKAGE_DIR/kits/builder/flows/shape.flow.json" && -f "$PACKAGE_DIR/kits/builder/flows/build.flow.json" ]]; then
+  if [[ -f "$PACKAGE_DIR/kits/builder/flows/shape.flow.json" && -f "$PACKAGE_DIR/kits/builder/flows/build.flow.json" && -f "$PACKAGE_DIR/kits/builder/flows/publish-learn.flow.json" ]]; then
     _pass "installed bundle includes Builder Kit Flow Definitions"
   else
     _fail "installed bundle is missing Builder Kit Flow Definitions"
   fi
-  if node - "$PACKAGE_DIR/kits/catalog.json" "$PACKAGE_DIR/kits/builder/kit.json" "$PACKAGE_DIR/kits/builder/flows/shape.flow.json" "$PACKAGE_DIR/kits/builder/flows/build.flow.json" <<'NODE'
+  if node - "$PACKAGE_DIR/kits/catalog.json" "$PACKAGE_DIR/kits/builder/kit.json" "$PACKAGE_DIR/kits/builder/flows/shape.flow.json" "$PACKAGE_DIR/kits/builder/flows/build.flow.json" "$PACKAGE_DIR/kits/builder/flows/publish-learn.flow.json" <<'NODE'
 const fs = require("node:fs");
 for (const file of process.argv.slice(2)) JSON.parse(fs.readFileSync(file, "utf8"));
 console.log("ok");
@@ -190,9 +190,10 @@ NODE
   else
     _fail "installed kit JSON parse failed"
   fi
-  if node - "$PACKAGE_DIR/kits/builder/flows/build.flow.json" <<'NODE'
+  if node - "$PACKAGE_DIR/kits/builder/flows/build.flow.json" "$PACKAGE_DIR/kits/builder/flows/publish-learn.flow.json" <<'NODE'
 const fs = require("node:fs");
 const flow = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const publishLearn = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
 const steps = Object.fromEntries((flow.steps || []).map((step) => [step.id, step.next]));
 if (steps["pull-work"] !== "design-probe") throw new Error("pull-work should route to design-probe");
 if (steps["design-probe"] !== "plan") throw new Error("design-probe should route to plan");
@@ -209,13 +210,20 @@ for (const gateId of ["verify-gate", "merge-ready-gate"]) {
   for (const [reason, target] of Object.entries(expected)) if (gate.on_route_back?.[reason] !== target) throw new Error(`${gateId} ${reason} should route to ${target}`);
   if (gate.route_back_policy?.on_exceeded !== "block") throw new Error(`${gateId} route_back_policy should block on exceeded attempts`);
 }
-const expectations = Object.values(flow.gates || {}).flatMap((gate) => gate.expects || []);
+for (const stepId of ["pr-open", "merge-ready-ci", "learn"]) {
+  const step = (flow.steps || []).find((item) => item.id === stepId);
+  if (step?.uses_flow !== "builder.publish-learn") throw new Error(`${stepId} should compose builder.publish-learn`);
+}
+const expectations = [
+  ...Object.values(flow.gates || {}).flatMap((gate) => gate.expects || []),
+  ...Object.values(publishLearn.gates || {}).flatMap((gate) => gate.expects || []),
+];
 if (!expectations.length) throw new Error("Builder build flow should declare gate expectations");
 for (const expectation of expectations) {
   if (expectation.kind !== "trust.bundle") throw new Error(`${expectation.id || "<unknown>"} should remain a trust.bundle expectation`);
   if (!expectation.bundle_claim?.claimType || !expectation.bundle_claim?.accepted_statuses) throw new Error(`${expectation.id || "<unknown>"} should declare bundle_claim claimType and accepted statuses`);
 }
-const flowText = JSON.stringify(flow).toLowerCase();
+const flowText = JSON.stringify({ flow, publishLearn }).toLowerCase();
 for (const term of ["veritas", "trust_provider", "trust-provider", "provider_name", "provider_ref", "veritas_policy", "veritas_readiness"]) {
   if (flowText.includes(term)) throw new Error(`Builder build flow should not name provider-specific trust field: ${term}`);
 }

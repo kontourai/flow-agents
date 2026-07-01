@@ -106,7 +106,19 @@ export function resolveFlowFilePath(
     return null; // traversal still detected — paranoid fallback
   }
 
-  return resolvedPath;
+  // If the file exists, resolve final symlinks before returning a readable path.
+  // `readFileSync` follows symlinks; this keeps lexical containment from turning
+  // into an out-of-root file read through a symlinked FlowDefinition.
+  try {
+    const realExpectedRoot = fs.existsSync(expectedRoot) ? fs.realpathSync.native(expectedRoot) : expectedRoot;
+    const realPath = fs.realpathSync.native(resolvedPath);
+    if (!realPath.startsWith(realExpectedRoot + path.sep) && realPath !== realExpectedRoot) {
+      return null;
+    }
+    return realPath;
+  } catch {
+    return resolvedPath;
+  }
 }
 
 // ─── Public types ─────────────────────────────────────────────────────────────
@@ -129,6 +141,8 @@ export type ActiveFlowStep = {
   stepId: string;
   gateId: string;
   gateExpects: GateExpectation[];
+  /** When resolved through a parent step's uses_flow edge, names the child FlowDefinition that owns the gate. */
+  sourceFlowId?: string;
 };
 
 /** Shape of a gate entry in the FlowDefinition JSON. */
@@ -149,9 +163,37 @@ type FlowDefinition = {
    *  (e.g. "execution") to step ids (e.g. "execute") so advance-state can write active_step_id
    *  without hardcoding any vocabulary in the core. */
   phase_map?: Record<string, string>;
-  steps?: Array<{ id: string; next: string | null }>;
+  steps?: Array<{ id: string; next: string | null; uses_flow?: string }>;
   gates?: Record<string, FlowGate>;
+  /** Optional claim types or expectation ids this flow intentionally exposes to parent/composed flows. */
+  exports?: string[];
 };
+
+type InternalActiveFlowStep = ActiveFlowStep & { flowExports?: string[] };
+
+function flowIdParts(flowId: string): { kitId: string; flowName: string } | null {
+  if (!flowId) return null;
+  const dotIdx = flowId.indexOf(".");
+  if (dotIdx < 1) return null;
+  const kitId = flowId.slice(0, dotIdx);
+  const flowName = flowId.slice(dotIdx + 1);
+  if (!kitId || !flowName) return null;
+  return { kitId, flowName };
+}
+
+function readFlowDefinition(flowId: string, repoRoot: string): FlowDefinition | null {
+  const parts = flowIdParts(flowId);
+  if (!parts) return null;
+  const flowFilePath = resolveFlowFilePath(parts.kitId, parts.flowName, flowId, repoRoot);
+  if (!flowFilePath) return null;
+
+  try {
+    const raw = fs.readFileSync(flowFilePath, "utf8");
+    return JSON.parse(raw) as FlowDefinition;
+  } catch {
+    return null; // ENOENT, permission error, or parse error → fail-open
+  }
+}
 
 /**
  * Resolve the gate expects[] for a specific (flowId, stepId) pair.
@@ -163,38 +205,69 @@ type FlowDefinition = {
  * @returns ActiveFlowStep with the matched gate's expects[], or null on any error.
  */
 export function resolveFlowStep(flowId: string, stepId: string, repoRoot: string): ActiveFlowStep | null {
+  const resolved = resolveFlowStepInternal(flowId, stepId, repoRoot, new Set<string>());
+  if (!resolved) return null;
+  const { flowExports: _flowExports, ...publicStep } = resolved;
+  return publicStep;
+}
+
+function expectationExportKeys(expectation: GateExpectation): string[] {
+  const keys: string[] = [];
+  if (typeof expectation.id === "string" && expectation.id) keys.push(expectation.id);
+  const claimType = expectation.bundle_claim?.claimType;
+  if (typeof claimType === "string" && claimType) keys.push(claimType);
+  return keys;
+}
+
+function exportedExpectations(expectations: GateExpectation[], exportsList: unknown): GateExpectation[] | null {
+  if (!Array.isArray(exportsList)) return null;
+  const exported = new Set(exportsList.filter((item): item is string => typeof item === "string" && item.length > 0));
+  const allowed = expectations.filter((expectation) => expectationExportKeys(expectation).some((key) => exported.has(key)));
+  return allowed.length === expectations.length ? allowed : null;
+}
+
+function resolveFlowStepInternal(flowId: string, stepId: string, repoRoot: string, seen: Set<string>): InternalActiveFlowStep | null {
   if (!flowId || !stepId) return null;
-  const dotIdx = flowId.indexOf(".");
-  if (dotIdx < 1) return null; // flowId must have at least one "." to derive kitId
-  const kitId = flowId.slice(0, dotIdx);
-  // The flow filename is the part after the first "." (e.g. "build" from "builder.build")
-  const flowName = flowId.slice(dotIdx + 1);
-  if (!kitId || !flowName) return null;
+  if (!flowIdParts(flowId)) return null;
 
   // Layer 1 defense: validate stepId too — it is matched against gate.step values but
   // still originates from agent-writable current.json active_step_id.
   if (!SLUG_RE.test(stepId)) return null;
+  const seenKey = `${flowId}:${stepId}`;
+  if (seen.has(seenKey)) return null;
+  seen.add(seenKey);
 
-  // Determine the FlowDefinition file path with slug validation + path containment check.
-  // Returns null for traversal attempts (e.g. flowName = "../../../.kontourai/flow-agents/fake").
-  const flowFilePath = resolveFlowFilePath(kitId, flowName, flowId, repoRoot);
-  if (!flowFilePath) return null;
+  const flowDef = readFlowDefinition(flowId, repoRoot);
+  if (!flowDef) return null;
 
-  let flowDef: FlowDefinition;
-  try {
-    const raw = fs.readFileSync(flowFilePath, "utf8");
-    flowDef = JSON.parse(raw) as FlowDefinition;
-  } catch {
-    return null; // ENOENT, permission error, or parse error → fail-open
-  }
-
-  if (!flowDef || typeof flowDef !== "object" || !flowDef.gates) return null;
+  if (!flowDef || typeof flowDef !== "object") return null;
 
   // Find the gate whose .step matches stepId.
-  for (const [gateId, gate] of Object.entries(flowDef.gates)) {
-    if (!gate || gate.step !== stepId) continue;
-    const expects = Array.isArray(gate.expects) ? gate.expects : [];
-    return { flowId, stepId, gateId, gateExpects: expects };
+  if (flowDef.gates) {
+    for (const [gateId, gate] of Object.entries(flowDef.gates)) {
+      if (!gate || gate.step !== stepId) continue;
+      const expects = Array.isArray(gate.expects) ? gate.expects : [];
+      return { flowId, stepId, gateId, gateExpects: expects, flowExports: flowDef.exports };
+    }
+  }
+
+  const composedStep = Array.isArray(flowDef.steps)
+    ? flowDef.steps.find((step) => step && step.id === stepId && typeof step.uses_flow === "string" && step.uses_flow.trim())
+    : null;
+  if (composedStep?.uses_flow) {
+    const child = resolveFlowStepInternal(composedStep.uses_flow, stepId, repoRoot, seen);
+    if (child) {
+      const childGateExpects = exportedExpectations(child.gateExpects, child.flowExports);
+      if (!childGateExpects) return null;
+      return {
+        flowId,
+        stepId,
+        gateId: `${child.flowId}:${child.gateId}`,
+        gateExpects: childGateExpects,
+        sourceFlowId: child.flowId,
+        flowExports: flowDef.exports,
+      };
+    }
   }
 
   return null; // no gate matched the given stepId
@@ -216,24 +289,8 @@ export function resolveFlowStep(flowId: string, stepId: string, repoRoot: string
  * @returns Record<string,string> phase→stepId map, or null on absence/error.
  */
 export function resolvePhaseMap(flowId: string, repoRoot: string): Record<string, string> | null {
-  if (!flowId) return null;
-  const dotIdx = flowId.indexOf(".");
-  if (dotIdx < 1) return null;
-  const kitId = flowId.slice(0, dotIdx);
-  const flowName = flowId.slice(dotIdx + 1);
-  if (!kitId || !flowName) return null;
-
-  // Layer 1 defense: same slug validation + path containment as resolveFlowStep.
-  const flowFilePath = resolveFlowFilePath(kitId, flowName, flowId, repoRoot);
-  if (!flowFilePath) return null;
-
-  let flowDef: FlowDefinition;
-  try {
-    const raw = fs.readFileSync(flowFilePath, "utf8");
-    flowDef = JSON.parse(raw) as FlowDefinition;
-  } catch {
-    return null; // ENOENT, permission error, or parse error → fail-open
-  }
+  const flowDef = readFlowDefinition(flowId, repoRoot);
+  if (!flowDef) return null;
 
   if (!flowDef || typeof flowDef !== "object") return null;
   const pm = flowDef.phase_map;

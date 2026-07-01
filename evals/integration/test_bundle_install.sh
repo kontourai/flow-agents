@@ -292,7 +292,7 @@ NODE
   else
     _fail "$dir is missing Kit Catalog or Builder Kit manifest"
   fi
-  if [[ -f "$dir/kits/builder/flows/shape.flow.json" && -f "$dir/kits/builder/flows/build.flow.json" ]]; then
+  if [[ -f "$dir/kits/builder/flows/shape.flow.json" && -f "$dir/kits/builder/flows/build.flow.json" && -f "$dir/kits/builder/flows/publish-learn.flow.json" ]]; then
     _pass "$dir includes Builder Kit Flow Definitions"
   else
     _fail "$dir is missing Builder Kit Flow Definitions"
@@ -321,7 +321,7 @@ const dest = process.argv[2];
 const data = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
 if (data.selected_adapter !== "codex-local") throw new Error("codex-local was not selected");
 const ids = new Set((data.generated_runtime_files || []).map((item) => item.asset_id));
-for (const expected of ["builder.shape", "builder.build", "codex-local.activation"]) {
+for (const expected of ["builder.shape", "builder.build", "builder.publish-learn", "codex-local.activation"]) {
   if (!ids.has(expected)) throw new Error(`missing generated runtime asset: ${expected}`);
 }
 for (const item of data.generated_runtime_files || []) {
@@ -340,7 +340,7 @@ if node - "$KIRO_DEST" "$BASE_DEST" "$CLAUDE_DEST" "$CODEX_DEST" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 for (const root of process.argv.slice(2)) {
-  for (const rel of ["kits/catalog.json", "kits/builder/kit.json", "kits/builder/flows/shape.flow.json", "kits/builder/flows/build.flow.json"]) {
+  for (const rel of ["kits/catalog.json", "kits/builder/kit.json", "kits/builder/flows/shape.flow.json", "kits/builder/flows/build.flow.json", "kits/builder/flows/publish-learn.flow.json"]) {
     JSON.parse(fs.readFileSync(path.join(root, rel), "utf8"));
   }
 }

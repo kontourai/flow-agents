@@ -16,12 +16,12 @@ _pass() { echo "  ✓ $1"; }
 _fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 
 REPO="$TMPDIR_EVAL/repo"
-mkdir -p "$REPO/.flow-agents/steering-demo"
+mkdir -p "$REPO/.kontourai/flow-agents/steering-demo"
 mkdir -p "$REPO/docs"
 printf '# Test Repo\n' > "$REPO/AGENTS.md"
 printf '# Context Map\n' > "$REPO/docs/context-map.md"
 
-cat > "$REPO/.flow-agents/steering-demo/state.json" <<'JSON'
+cat > "$REPO/.kontourai/flow-agents/steering-demo/state.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "steering-demo",
@@ -36,7 +36,7 @@ cat > "$REPO/.flow-agents/steering-demo/state.json" <<'JSON'
 }
 JSON
 
-cat > "$REPO/.flow-agents/steering-demo/critique.json" <<'JSON'
+cat > "$REPO/.kontourai/flow-agents/steering-demo/critique.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "steering-demo",
@@ -217,6 +217,176 @@ else
   _fail "Claude hook adapter should not fail for prompt-submit workflow steering"
 fi
 
+FRESH_REPO="$TMPDIR_EVAL/fresh-repo"
+mkdir -p "$FRESH_REPO/docs"
+printf '# Fresh Repo\n' > "$FRESH_REPO/AGENTS.md"
+printf '# Context Map\n' > "$FRESH_REPO/docs/context-map.md"
+
+if node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/builder-route.out" 2>"$TMPDIR_EVAL/builder-route.err" <<JSON
+{"hook_event_name":"UserPromptSubmit","cwd":"$FRESH_REPO","prompt":"Please implement the new settings API and update its tests."}
+JSON
+then
+  if rg -q 'BUILDER WORKFLOW ROUTE' "$TMPDIR_EVAL/builder-route.out" && \
+     rg -q 'activate `deliver`' "$TMPDIR_EVAL/builder-route.out" && \
+     rg -q -- '--flow-id builder.build' "$TMPDIR_EVAL/builder-route.out" && \
+     rg -q 'plan-work -> execute-plan -> review-work -> verify-work' "$TMPDIR_EVAL/builder-route.out" && \
+     rg -q 'publish/release-readiness and learning-review' "$TMPDIR_EVAL/builder-route.out"; then
+    _pass "workflow steering hook routes fresh coding prompts into Builder workflow"
+  else
+    _fail "workflow steering missed Builder workflow route for coding prompt: $(cat "$TMPDIR_EVAL/builder-route.out")"
+  fi
+else
+  _fail "workflow steering hook should not fail for fresh coding prompt"
+fi
+
+if node "$ROOT/scripts/hooks/claude-hook-adapter.js" UserPromptSubmit prompt:workflow-steering workflow-steering.js standard,strict >"$TMPDIR_EVAL/claude-builder-route.out" 2>"$TMPDIR_EVAL/claude-builder-route.err" <<JSON
+{"hook_event_name":"UserPromptSubmit","cwd":"$FRESH_REPO","prompt":"Please implement the new settings API and update its tests."}
+JSON
+then
+  if node - "$TMPDIR_EVAL/claude-builder-route.out" <<'NODE'
+const fs = require("node:fs");
+const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const ctx = payload.hookSpecificOutput?.additionalContext || "";
+if (payload.continue !== true) throw new Error("continue not true");
+if (payload.suppressOutput !== false) throw new Error("suppressOutput should be false when guidance exists");
+for (const needle of ["BUILDER WORKFLOW ROUTE", "activate `deliver`", "--flow-id builder.build", "plan-work -> execute-plan -> review-work -> verify-work", "publish/release-readiness and learning-review"]) {
+  if (!ctx.includes(needle)) throw new Error(`missing ${needle}`);
+}
+NODE
+  then
+    _pass "Claude hook adapter surfaces Builder workflow route for coding prompts"
+  else
+    _fail "Claude hook adapter missed Builder workflow route: $(cat "$TMPDIR_EVAL/claude-builder-route.out") $(cat "$TMPDIR_EVAL/claude-builder-route.err")"
+  fi
+else
+  _fail "Claude hook adapter should not fail for Builder workflow route"
+fi
+
+if node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/builder-route-review-only.out" 2>"$TMPDIR_EVAL/builder-route-review-only.err" <<JSON
+{"hook_event_name":"UserPromptSubmit","cwd":"$FRESH_REPO","prompt":"Please review the test coverage and validate whether it is enough. Do not modify files."}
+JSON
+then
+  if ! rg -q 'BUILDER WORKFLOW ROUTE' "$TMPDIR_EVAL/builder-route-review-only.out"; then
+    _pass "workflow steering hook does not route explicit review-only prompts into Builder workflow"
+  else
+    _fail "workflow steering incorrectly routed review-only prompt: $(cat "$TMPDIR_EVAL/builder-route-review-only.out")"
+  fi
+else
+  _fail "workflow steering hook should not fail for review-only prompt"
+fi
+
+if node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/builder-route-validate-only.out" 2>"$TMPDIR_EVAL/builder-route-validate-only.err" <<JSON
+{"hook_event_name":"UserPromptSubmit","cwd":"$FRESH_REPO","prompt":"Please validate whether the tests are enough. Do not modify files."}
+JSON
+then
+  if ! rg -q 'BUILDER WORKFLOW ROUTE' "$TMPDIR_EVAL/builder-route-validate-only.out"; then
+    _pass "workflow steering hook does not route explicit validation-only prompts into Builder workflow"
+  else
+    _fail "workflow steering incorrectly routed validation-only prompt: $(cat "$TMPDIR_EVAL/builder-route-validate-only.out")"
+  fi
+else
+  _fail "workflow steering hook should not fail for validation-only prompt"
+fi
+
+if node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/builder-route-bare-validate.out" 2>"$TMPDIR_EVAL/builder-route-bare-validate.err" <<JSON
+{"hook_event_name":"UserPromptSubmit","cwd":"$FRESH_REPO","prompt":"Please validate whether the settings API tests are enough."}
+JSON
+then
+  if ! rg -q 'BUILDER WORKFLOW ROUTE' "$TMPDIR_EVAL/builder-route-bare-validate.out"; then
+    _pass "workflow steering hook does not route bare validation prompts into Builder workflow"
+  else
+    _fail "workflow steering incorrectly routed bare validation prompt: $(cat "$TMPDIR_EVAL/builder-route-bare-validate.out")"
+  fi
+else
+  _fail "workflow steering hook should not fail for bare validation prompt"
+fi
+
+if node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/builder-route-bare-test.out" 2>"$TMPDIR_EVAL/builder-route-bare-test.err" <<JSON
+{"hook_event_name":"UserPromptSubmit","cwd":"$FRESH_REPO","prompt":"Please test whether this still reproduces."}
+JSON
+then
+  if ! rg -q 'BUILDER WORKFLOW ROUTE' "$TMPDIR_EVAL/builder-route-bare-test.out"; then
+    _pass "workflow steering hook does not route bare test prompts into Builder workflow"
+  else
+    _fail "workflow steering incorrectly routed bare test prompt: $(cat "$TMPDIR_EVAL/builder-route-bare-test.out")"
+  fi
+else
+  _fail "workflow steering hook should not fail for bare test prompt"
+fi
+
+if node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/builder-route-test-question.out" 2>"$TMPDIR_EVAL/builder-route-test-question.err" <<JSON
+{"hook_event_name":"UserPromptSubmit","cwd":"$FRESH_REPO","prompt":"What tests should I run for the settings API?"}
+JSON
+then
+  if ! rg -q 'BUILDER WORKFLOW ROUTE' "$TMPDIR_EVAL/builder-route-test-question.out"; then
+    _pass "workflow steering hook does not route question-only test prompts into Builder workflow"
+  else
+    _fail "workflow steering incorrectly routed question-only test prompt: $(cat "$TMPDIR_EVAL/builder-route-test-question.out")"
+  fi
+else
+  _fail "workflow steering hook should not fail for question-only test prompt"
+fi
+
+if node "$ROOT/scripts/hooks/claude-hook-adapter.js" UserPromptSubmit prompt:workflow-steering workflow-steering.js standard,strict >"$TMPDIR_EVAL/claude-builder-route-review-only.out" 2>"$TMPDIR_EVAL/claude-builder-route-review-only.err" <<JSON
+{"hook_event_name":"UserPromptSubmit","cwd":"$FRESH_REPO","prompt":"Please review the test coverage and validate whether it is enough. Do not modify files."}
+JSON
+then
+  if node - "$TMPDIR_EVAL/claude-builder-route-review-only.out" <<'NODE'
+const fs = require("node:fs");
+const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const ctx = payload.hookSpecificOutput?.additionalContext || "";
+if (payload.continue !== true) throw new Error("continue not true");
+if (ctx.includes("BUILDER WORKFLOW ROUTE")) throw new Error("review-only prompt should not route to Builder workflow");
+NODE
+  then
+    _pass "Claude hook adapter does not route explicit review-only prompts into Builder workflow"
+  else
+    _fail "Claude hook adapter incorrectly routed review-only prompt: $(cat "$TMPDIR_EVAL/claude-builder-route-review-only.out") $(cat "$TMPDIR_EVAL/claude-builder-route-review-only.err")"
+  fi
+else
+  _fail "Claude hook adapter should not fail for review-only prompt"
+fi
+
+if node "$ROOT/scripts/hooks/claude-hook-adapter.js" UserPromptSubmit prompt:workflow-steering workflow-steering.js standard,strict >"$TMPDIR_EVAL/claude-builder-route-validate-only.out" 2>"$TMPDIR_EVAL/claude-builder-route-validate-only.err" <<JSON
+{"hook_event_name":"UserPromptSubmit","cwd":"$FRESH_REPO","prompt":"Please validate whether the tests are enough. Do not modify files."}
+JSON
+then
+  if node - "$TMPDIR_EVAL/claude-builder-route-validate-only.out" <<'NODE'
+const fs = require("node:fs");
+const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const ctx = payload.hookSpecificOutput?.additionalContext || "";
+if (payload.continue !== true) throw new Error("continue not true");
+if (ctx.includes("BUILDER WORKFLOW ROUTE")) throw new Error("validation-only prompt should not route to Builder workflow");
+NODE
+  then
+    _pass "Claude hook adapter does not route explicit validation-only prompts into Builder workflow"
+  else
+    _fail "Claude hook adapter incorrectly routed validation-only prompt: $(cat "$TMPDIR_EVAL/claude-builder-route-validate-only.out") $(cat "$TMPDIR_EVAL/claude-builder-route-validate-only.err")"
+  fi
+else
+  _fail "Claude hook adapter should not fail for validation-only prompt"
+fi
+
+if node "$ROOT/scripts/hooks/claude-hook-adapter.js" UserPromptSubmit prompt:workflow-steering workflow-steering.js standard,strict >"$TMPDIR_EVAL/claude-builder-route-test-question.out" 2>"$TMPDIR_EVAL/claude-builder-route-test-question.err" <<JSON
+{"hook_event_name":"UserPromptSubmit","cwd":"$FRESH_REPO","prompt":"What tests should I run for the settings API?"}
+JSON
+then
+  if node - "$TMPDIR_EVAL/claude-builder-route-test-question.out" <<'NODE'
+const fs = require("node:fs");
+const payload = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const ctx = payload.hookSpecificOutput?.additionalContext || "";
+if (payload.continue !== true) throw new Error("continue not true");
+if (ctx.includes("BUILDER WORKFLOW ROUTE")) throw new Error("question-only test prompt should not route to Builder workflow");
+NODE
+  then
+    _pass "Claude hook adapter does not route question-only test prompts into Builder workflow"
+  else
+    _fail "Claude hook adapter incorrectly routed question-only test prompt: $(cat "$TMPDIR_EVAL/claude-builder-route-test-question.out") $(cat "$TMPDIR_EVAL/claude-builder-route-test-question.err")"
+  fi
+else
+  _fail "Claude hook adapter should not fail for question-only test prompt"
+fi
+
 if node "$ROOT/scripts/hooks/codex-hook-adapter.js" post:workflow-steering workflow-steering.js standard,strict >"$TMPDIR_EVAL/codex-adapter.out" 2>"$TMPDIR_EVAL/codex-adapter.err" <<JSON
 {"hook_event_name":"PostToolUse","cwd":"$REPO","tool_input":{"command":"Bash","content":{"command":"bash evals/run.sh integration"}},"tool_response":"integration finished"}
 JSON
@@ -285,7 +455,7 @@ else
   _fail "Codex hook adapter should not fail for prompt-submit workflow steering"
 fi
 
-cat > "$REPO/.flow-agents/steering-demo/state.json" <<'JSON'
+cat > "$REPO/.kontourai/flow-agents/steering-demo/state.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "steering-demo",
@@ -298,7 +468,7 @@ cat > "$REPO/.flow-agents/steering-demo/state.json" <<'JSON'
   }
 }
 JSON
-rm -f "$REPO/.flow-agents/steering-demo/critique.json"
+rm -f "$REPO/.kontourai/flow-agents/steering-demo/critique.json"
 
 if node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/done.out" 2>"$TMPDIR_EVAL/done.err" <<JSON
 {"cwd":"$REPO","tool_input":{"command":"InvokeSubagents","content":{"subagents":[{"agent_name":"tool-verifier"}]}},"tool_response":"verification finished"}

@@ -103,6 +103,151 @@ else
   _fail "resolver: CJS require failed"
 fi
 
+# Test 6: composed Builder closeout step resolves through builder.publish-learn
+if node --input-type=module << NODEEOF
+import { resolveFlowStep } from '${_RESOLVER_MOD}';
+const r = resolveFlowStep('builder.build', 'pr-open', '${ROOT}');
+if (!r) throw new Error('expected non-null result for builder.build/pr-open');
+if (r.flowId !== 'builder.build') throw new Error('expected active flowId builder.build, got ' + r.flowId);
+if (r.sourceFlowId !== 'builder.publish-learn') throw new Error('expected sourceFlowId builder.publish-learn, got ' + r.sourceFlowId);
+if (r.gateId !== 'builder.publish-learn:pr-open-gate') throw new Error('expected composed gate id, got ' + r.gateId);
+const claim = r.gateExpects.find(e => e.bundle_claim.claimType === 'builder.pr-open.pull-request');
+if (!claim) throw new Error('expected builder.pr-open.pull-request in composed expects');
+NODEEOF
+then
+  _pass "resolver: builder.build/pr-open resolves composed builder.publish-learn gate"
+else
+  _fail "resolver: builder.build/pr-open composed gate failed"
+fi
+
+# Test 7: composed child gates must export every imported expectation
+COMPOSE_DEFS="$TMP/compose-defs"
+mkdir -p "$COMPOSE_DEFS"
+cat > "$COMPOSE_DEFS/test.parent.flow.json" <<'JSON'
+{
+  "id": "test.parent",
+  "version": "1.0.0",
+  "steps": [{ "id": "compose", "next": null, "uses_flow": "test.child" }],
+  "gates": {}
+}
+JSON
+cat > "$COMPOSE_DEFS/test.child.flow.json" <<'JSON'
+{
+  "id": "test.child",
+  "version": "1.0.0",
+  "steps": [{ "id": "compose", "next": null }],
+  "exports": ["test.child.allowed"],
+  "gates": {
+    "compose-gate": {
+      "step": "compose",
+      "expects": [
+        {
+          "id": "allowed",
+          "kind": "trust.bundle",
+          "required": true,
+          "bundle_claim": {
+            "claimType": "test.child.allowed",
+            "subjectType": "flow-step",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    }
+  }
+}
+JSON
+
+if FLOW_AGENTS_FLOW_DEFS_DIR="$COMPOSE_DEFS" node --input-type=module << NODEEOF
+import { resolveFlowStep } from '${_RESOLVER_MOD}';
+const r = resolveFlowStep('test.parent', 'compose', '${ROOT}');
+if (!r) throw new Error('expected exported composition to resolve');
+if (r.sourceFlowId !== 'test.child') throw new Error('expected sourceFlowId test.child, got ' + r.sourceFlowId);
+if (!r.gateExpects.some(e => e.bundle_claim.claimType === 'test.child.allowed')) throw new Error('missing exported claim');
+NODEEOF
+then
+  _pass "resolver: composed child exports allow imported gate expectations"
+else
+  _fail "resolver: exported composed child claim failed"
+fi
+
+cat > "$COMPOSE_DEFS/test.child.flow.json" <<'JSON'
+{
+  "id": "test.child",
+  "version": "1.0.0",
+  "steps": [{ "id": "compose", "next": null }],
+  "exports": ["test.child.other"],
+  "gates": {
+    "compose-gate": {
+      "step": "compose",
+      "expects": [
+        {
+          "id": "allowed",
+          "kind": "trust.bundle",
+          "required": true,
+          "bundle_claim": {
+            "claimType": "test.child.allowed",
+            "subjectType": "flow-step",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    }
+  }
+}
+JSON
+
+if FLOW_AGENTS_FLOW_DEFS_DIR="$COMPOSE_DEFS" node --input-type=module << NODEEOF
+import { resolveFlowStep } from '${_RESOLVER_MOD}';
+const r = resolveFlowStep('test.parent', 'compose', '${ROOT}');
+if (r !== null) throw new Error('expected non-exported composition to fail closed');
+NODEEOF
+then
+  _pass "resolver: non-exported composed child claims fail closed"
+else
+  _fail "resolver: non-exported composed child claim was imported"
+fi
+
+cat > "$COMPOSE_DEFS/test.child.flow.json" <<'JSON'
+{
+  "id": "test.child",
+  "version": "1.0.0",
+  "steps": [{ "id": "compose", "next": null, "uses_flow": "test.child" }],
+  "exports": ["test.child.allowed"],
+  "gates": {}
+}
+JSON
+
+if FLOW_AGENTS_FLOW_DEFS_DIR="$COMPOSE_DEFS" node --input-type=module << NODEEOF
+import { resolveFlowStep } from '${_RESOLVER_MOD}';
+const r = resolveFlowStep('test.parent', 'compose', '${ROOT}');
+if (r !== null) throw new Error('expected self-cycle composition to return null');
+NODEEOF
+then
+  _pass "resolver: composed flow self-cycle returns null"
+else
+  _fail "resolver: composed flow self-cycle did not fail closed"
+fi
+
+cat > "$COMPOSE_DEFS/test.parent.flow.json" <<'JSON'
+{
+  "id": "test.parent",
+  "version": "1.0.0",
+  "steps": [{ "id": "compose", "next": null, "uses_flow": "../outside" }],
+  "gates": {}
+}
+JSON
+
+if FLOW_AGENTS_FLOW_DEFS_DIR="$COMPOSE_DEFS" node --input-type=module << NODEEOF
+import { resolveFlowStep } from '${_RESOLVER_MOD}';
+const r = resolveFlowStep('test.parent', 'compose', '${ROOT}');
+if (r !== null) throw new Error('expected invalid uses_flow id to return null');
+NODEEOF
+then
+  _pass "resolver: invalid composed uses_flow id returns null"
+else
+  _fail "resolver: invalid composed uses_flow id did not fail closed"
+fi
+
 echo ""
 echo "── P-d declared-only: session WITH active_flow_id=builder.build / active_step_id=verify ──"
 
