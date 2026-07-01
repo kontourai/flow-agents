@@ -22,7 +22,7 @@ errors=0
 _pass() { echo "  ✓ $1"; }
 _fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 
-SD=".flow-agents/s"
+SD=".kontourai/flow-agents/s"
 
 # Build a command-log from a spec: JSON array of {cmd,exit,src,parent} where
 # parent is the 0-based index of the entry whose hash is this entry's prevHash
@@ -41,10 +41,10 @@ build() { # $1=dir $2=spec-json
       const prev=s.parent===-1?GEN:hashes[s.parent]; const h=H(prev,rec);
       hashes.push(h); lines.push(JSON.stringify({...rec,_chain:{seq:i,prevHash:prev,hash:h}}));
     });
-    fs.writeFileSync(path.join(process.env.DIR,".flow-agents/s/command-log.jsonl"),lines.join("\n")+"\n");
+    fs.writeFileSync(path.join(process.env.DIR,".kontourai/flow-agents/s/command-log.jsonl"),lines.join("\n")+"\n");
   ' "$2"
 }
-status() { DIR="$1" node -e 'const g=require(process.env.GATE);console.log(g.verifyCommandLogChain(process.env.DIR+"/.flow-agents/s").status)' ; }
+status() { DIR="$1" node -e 'const g=require(process.env.GATE);console.log(g.verifyCommandLogChain(process.env.DIR+"/.kontourai/flow-agents/s").status)' ; }
 
 # ── 1. linear → ok ────────────────────────────────────────────────────────────
 D="$TMP/linear"; build "$D" '[{"cmd":"a","exit":0,"parent":-1},{"cmd":"b","exit":0,"parent":0}]'

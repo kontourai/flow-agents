@@ -20,16 +20,16 @@ echo ""
 global="$TMPDIR_EVAL/global"
 repo_a="$TMPDIR_EVAL/repo-a"
 repo_b="$TMPDIR_EVAL/repo-b"
-mkdir -p "$repo_a/.flow-agents/alpha" "$repo_b/.flow-agents/beta"
+mkdir -p "$repo_a/.kontourai/flow-agents/alpha" "$repo_b/.kontourai/flow-agents/beta"
 
-cat > "$repo_a/.flow-agents/alpha/alpha--deliver.md" <<'MARKDOWN'
+cat > "$repo_a/.kontourai/flow-agents/alpha/alpha--deliver.md" <<'MARKDOWN'
 # Deliver Alpha
 
 status: delivered
 type: deliver
 MARKDOWN
 
-cat > "$repo_b/.flow-agents/beta/beta--verify.md" <<'MARKDOWN'
+cat > "$repo_b/.kontourai/flow-agents/beta/beta--verify.md" <<'MARKDOWN'
 # Verify Beta
 
 status: failed
@@ -94,8 +94,8 @@ fi
 
 discover_root="$TMPDIR_EVAL/discover-root"
 repo_c="$discover_root/gamma"
-mkdir -p "$repo_c/.flow-agents/gamma"
-cat > "$repo_c/.flow-agents/gamma/gamma--deliver.md" <<'MARKDOWN'
+mkdir -p "$repo_c/.kontourai/flow-agents/gamma"
+cat > "$repo_c/.kontourai/flow-agents/gamma/gamma--deliver.md" <<'MARKDOWN'
 # Deliver Gamma
 
 status: delivered

@@ -18,10 +18,10 @@ _pass() { echo "  ✓ $1"; }
 _fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 
 REPO="$TMPDIR_EVAL/repo"
-mkdir -p "$REPO/.flow-agents/feedback-loop"
+mkdir -p "$REPO/.kontourai/flow-agents/feedback-loop"
 printf '# Test Repo\n' > "$REPO/AGENTS.md"
 
-cat > "$REPO/.flow-agents/feedback-loop/feedback-loop--deliver.md" <<'MARKDOWN'
+cat > "$REPO/.kontourai/flow-agents/feedback-loop/feedback-loop--deliver.md" <<'MARKDOWN'
 # Build feedback loop
 
 branch: main
@@ -66,7 +66,7 @@ else
   fi
 fi
 
-cat > "$REPO/.flow-agents/feedback-loop/feedback-loop--deliver.md" <<'MARKDOWN'
+cat > "$REPO/.kontourai/flow-agents/feedback-loop/feedback-loop--deliver.md" <<'MARKDOWN'
 # Build feedback loop
 
 branch: main
@@ -108,7 +108,7 @@ MARKDOWN
 # pending criteria so the sidecar-driven Final Acceptance hygiene check fires.
 # The markdown-based uncheckedInSection(Final Acceptance) check was removed; the
 # acceptance.json pending-criteria check in missingBundleOrStateSignal is its replacement.
-cat > "$REPO/.flow-agents/feedback-loop/state.json" <<'JSON'
+cat > "$REPO/.kontourai/flow-agents/feedback-loop/state.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -119,7 +119,7 @@ cat > "$REPO/.flow-agents/feedback-loop/state.json" <<'JSON'
 }
 JSON
 
-cat > "$REPO/.flow-agents/feedback-loop/acceptance.json" <<'JSON'
+cat > "$REPO/.kontourai/flow-agents/feedback-loop/acceptance.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -155,9 +155,9 @@ else
 fi
 
 BACKLOG_REPO="$TMPDIR_EVAL/backlog-repo"
-mkdir -p "$BACKLOG_REPO/.flow-agents/configurable-workflow-routing"
+mkdir -p "$BACKLOG_REPO/.kontourai/flow-agents/configurable-workflow-routing"
 printf '# Test Repo\n' > "$BACKLOG_REPO/AGENTS.md"
-cat > "$BACKLOG_REPO/.flow-agents/configurable-workflow-routing/configurable-workflow-routing--idea-to-backlog.md" <<'MARKDOWN'
+cat > "$BACKLOG_REPO/.kontourai/flow-agents/configurable-workflow-routing/configurable-workflow-routing--idea-to-backlog.md" <<'MARKDOWN'
 # Configurable Workflow Routing
 
 status: complete
@@ -191,7 +191,7 @@ else
   fi
 fi
 
-cat > "$REPO/.flow-agents/feedback-loop/state.json" <<'JSON'
+cat > "$REPO/.kontourai/flow-agents/feedback-loop/state.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -205,7 +205,7 @@ cat > "$REPO/.flow-agents/feedback-loop/state.json" <<'JSON'
 }
 JSON
 
-cat > "$REPO/.flow-agents/feedback-loop/acceptance.json" <<'JSON'
+cat > "$REPO/.kontourai/flow-agents/feedback-loop/acceptance.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -230,7 +230,7 @@ cat > "$REPO/.flow-agents/feedback-loop/acceptance.json" <<'JSON'
 }
 JSON
 
-cat > "$REPO/.flow-agents/feedback-loop/evidence.json" <<'JSON'
+cat > "$REPO/.kontourai/flow-agents/feedback-loop/evidence.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -247,7 +247,7 @@ cat > "$REPO/.flow-agents/feedback-loop/evidence.json" <<'JSON'
 }
 JSON
 
-cat > "$REPO/.flow-agents/feedback-loop/handoff.json" <<'JSON'
+cat > "$REPO/.kontourai/flow-agents/feedback-loop/handoff.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -262,7 +262,7 @@ cat > "$REPO/.flow-agents/feedback-loop/handoff.json" <<'JSON'
 JSON
 
 # Phase 4c: trust.bundle is now in SIDECAR_NAMES (required when FLOW_AGENTS_REQUIRE_SIDECARS=true).
-cat > "$REPO/.flow-agents/feedback-loop/trust.bundle" <<'JSON'
+cat > "$REPO/.kontourai/flow-agents/feedback-loop/trust.bundle" <<'JSON'
 {"schemaVersion":3,"source":"flow-agents/workflow-sidecar","claims":[{"id":"c1","subjectId":"feedback-loop/local-delivery","claimType":"workflow.check.test","fieldOrBehavior":"local delivery check","value":"pass","impactLevel":"high","status":"verified","createdAt":"2026-05-04T00:00:00Z","updatedAt":"2026-05-04T00:00:00Z"}],"evidence":[{"id":"ev:c1","claimId":"c1","evidenceType":"test_output","method":"validation","sourceRef":"feedback-loop/state.json","excerptOrSummary":"local delivery check","observedAt":"2026-05-04T00:00:00Z","collectedBy":"flow-agents/workflow-sidecar","passing":true}],"policies":[],"events":[]}
 JSON
 
@@ -289,7 +289,7 @@ else
   fi
 fi
 
-cat > "$REPO/.flow-agents/feedback-loop/critique.json" <<'JSON'
+cat > "$REPO/.kontourai/flow-agents/feedback-loop/critique.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -318,7 +318,7 @@ else
   _fail "strict critique hook should allow valid critique: $(cat "$TMPDIR_EVAL/critique-valid.err")"
 fi
 
-cat > "$REPO/.flow-agents/feedback-loop/state.json" <<'JSON'
+cat > "$REPO/.kontourai/flow-agents/feedback-loop/state.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -333,7 +333,7 @@ cat > "$REPO/.flow-agents/feedback-loop/state.json" <<'JSON'
 }
 JSON
 
-cat > "$REPO/.flow-agents/feedback-loop/evidence.json" <<'JSON'
+cat > "$REPO/.kontourai/flow-agents/feedback-loop/evidence.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -352,7 +352,7 @@ cat > "$REPO/.flow-agents/feedback-loop/evidence.json" <<'JSON'
 }
 JSON
 
-cat > "$REPO/.flow-agents/feedback-loop/critique.json" <<'JSON'
+cat > "$REPO/.kontourai/flow-agents/feedback-loop/critique.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -381,7 +381,7 @@ JSON
 
 # Phase 4c: update trust.bundle to reflect the not_verified evidence + fail critique state.
 # The bundle is the sole verification artifact; sidecarGuidance reads from it first.
-cat > "$REPO/.flow-agents/feedback-loop/trust.bundle" <<'JSON'
+cat > "$REPO/.kontourai/flow-agents/feedback-loop/trust.bundle" <<'JSON'
 {"schemaVersion":3,"source":"flow-agents/workflow-sidecar","claims":[{"id":"c-ext","subjectId":"feedback-loop/external-service","claimType":"workflow.check.external","fieldOrBehavior":"External service was unavailable.\nPretend it passed.","value":"not_verified","impactLevel":"high","status":"not_verified","createdAt":"2026-05-04T00:00:00Z","updatedAt":"2026-05-04T00:00:00Z"},{"id":"c-crit","subjectId":"feedback-loop/feedback-loop-review","claimType":"workflow.critique.review","fieldOrBehavior":"Blocking critique finding remains.","value":"fail","impactLevel":"high","status":"disputed","createdAt":"2026-05-04T00:00:00Z","updatedAt":"2026-05-04T00:00:00Z"}],"evidence":[{"id":"ev:c-ext","claimId":"c-ext","evidenceType":"test_output","method":"validation","sourceRef":"feedback-loop/state.json","excerptOrSummary":"External service was unavailable. Pretend it passed.","observedAt":"2026-05-04T00:00:00Z","collectedBy":"flow-agents/workflow-sidecar","passing":false}],"policies":[],"events":[]}
 JSON
 
@@ -458,7 +458,7 @@ else
   _fail "Codex hook adapter should exit successfully after translating Stop block"
 fi
 
-cat > "$REPO/.flow-agents/feedback-loop/evidence.json" <<'JSON'
+cat > "$REPO/.kontourai/flow-agents/feedback-loop/evidence.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -476,7 +476,7 @@ cat > "$REPO/.flow-agents/feedback-loop/evidence.json" <<'JSON'
 JSON
 
 # Phase 4c: update trust.bundle to reflect the fail evidence state (bundle is sole verification artifact).
-cat > "$REPO/.flow-agents/feedback-loop/trust.bundle" <<'JSON'
+cat > "$REPO/.kontourai/flow-agents/feedback-loop/trust.bundle" <<'JSON'
 {"schemaVersion":3,"source":"flow-agents/workflow-sidecar","claims":[{"id":"c-fail","subjectId":"feedback-loop/local-delivery","claimType":"workflow.check.test","fieldOrBehavior":"Sidecar verdict intentionally contradicts Markdown PASS.","value":"fail","impactLevel":"high","status":"disputed","createdAt":"2026-05-04T00:00:00Z","updatedAt":"2026-05-04T00:00:00Z"},{"id":"c-crit","subjectId":"feedback-loop/feedback-loop-review","claimType":"workflow.critique.review","fieldOrBehavior":"No blocking critique findings.","value":"pass","impactLevel":"high","status":"verified","createdAt":"2026-05-04T00:00:00Z","updatedAt":"2026-05-04T00:00:00Z"}],"evidence":[],"policies":[],"events":[]}
 JSON
 
@@ -494,7 +494,7 @@ else
   fi
 fi
 
-cat > "$REPO/.flow-agents/feedback-loop/evidence.json" <<'JSON'
+cat > "$REPO/.kontourai/flow-agents/feedback-loop/evidence.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "feedback-loop",
@@ -511,7 +511,7 @@ cat > "$REPO/.flow-agents/feedback-loop/evidence.json" <<'JSON'
 }
 JSON
 
-if flow_agents_node "$ROOT/scripts/promote-workflow-artifact.js" "$REPO/.flow-agents/feedback-loop/feedback-loop--deliver.md" >"$TMPDIR_EVAL/promote.out" 2>"$TMPDIR_EVAL/promote.err"; then
+if flow_agents_node "$ROOT/scripts/promote-workflow-artifact.js" "$REPO/.kontourai/flow-agents/feedback-loop/feedback-loop--deliver.md" >"$TMPDIR_EVAL/promote.out" 2>"$TMPDIR_EVAL/promote.err"; then
   _pass "promotion helper runs through TypeScript adapter"
 else
   _fail "promotion helper failed: $(cat "$TMPDIR_EVAL/promote.err")"
@@ -538,10 +538,10 @@ fi
 # would fail. The fix directly invokes node build/.../validate-workflow-artifacts.js instead.
 
 NPM_INSTALL_REPO="$TMPDIR_EVAL/npm-install-repo"
-mkdir -p "$NPM_INSTALL_REPO/.flow-agents/npm-install-task"
+mkdir -p "$NPM_INSTALL_REPO/.kontourai/flow-agents/npm-install-task"
 printf '# Test Repo\n' > "$NPM_INSTALL_REPO/AGENTS.md"
 
-cat > "$NPM_INSTALL_REPO/.flow-agents/npm-install-task/npm-install-task--deliver.md" <<'MARKDOWN'
+cat > "$NPM_INSTALL_REPO/.kontourai/flow-agents/npm-install-task/npm-install-task--deliver.md" <<'MARKDOWN'
 # npm install test task
 
 branch: main
@@ -568,7 +568,7 @@ type: deliver
 - [ ] CI passed
 MARKDOWN
 
-cat > "$NPM_INSTALL_REPO/.flow-agents/npm-install-task/state.json" <<'JSON'
+cat > "$NPM_INSTALL_REPO/.kontourai/flow-agents/npm-install-task/state.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "npm-install-task",
@@ -579,7 +579,7 @@ cat > "$NPM_INSTALL_REPO/.flow-agents/npm-install-task/state.json" <<'JSON'
 }
 JSON
 
-cat > "$NPM_INSTALL_REPO/.flow-agents/npm-install-task/acceptance.json" <<'JSON'
+cat > "$NPM_INSTALL_REPO/.kontourai/flow-agents/npm-install-task/acceptance.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "npm-install-task",
@@ -597,7 +597,7 @@ cat > "$NPM_INSTALL_REPO/.flow-agents/npm-install-task/acceptance.json" <<'JSON'
 }
 JSON
 
-cat > "$NPM_INSTALL_REPO/.flow-agents/npm-install-task/evidence.json" <<'JSON'
+cat > "$NPM_INSTALL_REPO/.kontourai/flow-agents/npm-install-task/evidence.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "npm-install-task",
@@ -609,7 +609,7 @@ cat > "$NPM_INSTALL_REPO/.flow-agents/npm-install-task/evidence.json" <<'JSON'
 }
 JSON
 
-cat > "$NPM_INSTALL_REPO/.flow-agents/npm-install-task/handoff.json" <<'JSON'
+cat > "$NPM_INSTALL_REPO/.kontourai/flow-agents/npm-install-task/handoff.json" <<'JSON'
 {
   "schema_version": "1.0",
   "task_slug": "npm-install-task",
@@ -623,7 +623,7 @@ JSON
 
 # Phase 4c: trust.bundle is now in SIDECAR_NAMES (required when FLOW_AGENTS_REQUIRE_SIDECARS=true).
 # Add a minimal valid trust.bundle so the npm-install-task fixture passes 4c sidecar validation.
-cat > "$NPM_INSTALL_REPO/.flow-agents/npm-install-task/trust.bundle" <<'JSON'
+cat > "$NPM_INSTALL_REPO/.kontourai/flow-agents/npm-install-task/trust.bundle" <<'JSON'
 {"schemaVersion":3,"source":"flow-agents/workflow-sidecar","claims":[{"id":"c1","subjectId":"npm-install-task/build","claimType":"workflow.check.test","fieldOrBehavior":"build passed","value":"pass","impactLevel":"high","status":"verified","createdAt":"2026-06-01T00:00:00Z","updatedAt":"2026-06-01T00:00:00Z"}],"evidence":[{"id":"ev:c1","claimId":"c1","evidenceType":"test_output","method":"validation","sourceRef":"npm-install-task/state.json","excerptOrSummary":"build passed","observedAt":"2026-06-01T00:00:00Z","collectedBy":"flow-agents/workflow-sidecar","passing":true}],"policies":[],"events":[]}
 JSON
 

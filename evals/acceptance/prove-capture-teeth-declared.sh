@@ -37,11 +37,11 @@ trap cleanup EXIT
 # ─── helper: seed a minimal delivered workflow artifact ───────────────────────
 seed_repo() { # $1=dir $2=slug
   local p="$1" slug="$2"
-  mkdir -p "$p/.flow-agents/$slug"
+  mkdir -p "$p/.kontourai/flow-agents/$slug"
   printf '# Repo\n' > "$p/AGENTS.md"
   printf '%s' "{\"schema_version\":\"1.0\",\"task_slug\":\"$slug\",\"status\":\"delivered\",\"phase\":\"done\",\"updated_at\":\"2026-06-27T00:00:00Z\",\"next_action\":{\"status\":\"done\",\"summary\":\"done\"}}" \
-    > "$p/.flow-agents/$slug/state.json"
-  cat > "$p/.flow-agents/$slug/$slug--deliver.md" << MD
+    > "$p/.kontourai/flow-agents/$slug/state.json"
+  cat > "$p/.kontourai/flow-agents/$slug/$slug--deliver.md" << MD
 # $slug
 
 branch: main
@@ -138,13 +138,13 @@ seed_repo "$T1" "declared-false"
 
 # current.json: active FlowDefinition
 printf '%s' '{"artifact_dir":"declared-false","active_flow_id":"builder.build","active_step_id":"verify"}' \
-  > "$T1/.flow-agents/current.json"
+  > "$T1/.kontourai/flow-agents/current.json"
 
-write_declared_bundle "$T1/.flow-agents/declared-false/trust.bundle"
+write_declared_bundle "$T1/.kontourai/flow-agents/declared-false/trust.bundle"
 
 # command-log: npm test recorded as FAIL — the independent truth source says FAILED
 printf '%s\n' '{"command":"npm test","observedResult":"fail","exitCode":1,"capturedAt":"2026-06-27T00:00:00Z","source":"postToolUse-capture"}' \
-  > "$T1/.flow-agents/declared-false/command-log.jsonl"
+  > "$T1/.kontourai/flow-agents/declared-false/command-log.jsonl"
 
 set +e
 t1_out="$(FLOW_AGENTS_GOAL_FIT_MODE=block \
@@ -186,10 +186,10 @@ T2="$TMP/t2"
 seed_repo "$T2" "declared-pass"
 
 printf '%s' '{"artifact_dir":"declared-pass","active_flow_id":"builder.build","active_step_id":"verify"}' \
-  > "$T2/.flow-agents/current.json"
+  > "$T2/.kontourai/flow-agents/current.json"
 
 # Reuse same bundle (trusts pass) but command-log confirms pass
-python3 - "$T2/.flow-agents/declared-pass/trust.bundle" << 'PY'
+python3 - "$T2/.kontourai/flow-agents/declared-pass/trust.bundle" << 'PY'
 import json, sys
 bundle = {
     "schemaVersion": 3,
@@ -229,7 +229,7 @@ PY
 
 # command-log: npm test recorded as PASS — confirming evidence
 printf '%s\n' '{"command":"npm test","observedResult":"pass","exitCode":0,"capturedAt":"2026-06-27T00:00:00Z","source":"postToolUse-capture"}' \
-  > "$T2/.flow-agents/declared-pass/command-log.jsonl"
+  > "$T2/.kontourai/flow-agents/declared-pass/command-log.jsonl"
 
 set +e
 t2_out="$(FLOW_AGENTS_GOAL_FIT_MODE=block \
@@ -260,9 +260,9 @@ seed_repo "$T3" "wf-false"
 
 # No current.json active flow → loadActiveFlowStep returns null → workflow.* fallback
 printf '%s' '{"artifact_dir":"wf-false"}' \
-  > "$T3/.flow-agents/current.json"
+  > "$T3/.kontourai/flow-agents/current.json"
 
-python3 - "$T3/.flow-agents/wf-false/trust.bundle" << 'PY'
+python3 - "$T3/.kontourai/flow-agents/wf-false/trust.bundle" << 'PY'
 import json, sys
 bundle = {
     "schemaVersion": 3,
@@ -302,7 +302,7 @@ PY
 
 # command-log: npm test recorded as FAIL
 printf '%s\n' '{"command":"npm test","observedResult":"fail","exitCode":1,"capturedAt":"2026-06-27T00:00:00Z","source":"postToolUse-capture"}' \
-  > "$T3/.flow-agents/wf-false/command-log.jsonl"
+  > "$T3/.kontourai/flow-agents/wf-false/command-log.jsonl"
 
 set +e
 t3_out="$(FLOW_AGENTS_GOAL_FIT_MODE=block \

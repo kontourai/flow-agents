@@ -102,7 +102,7 @@ if jq -e --arg generated "$GENERATED_AT" '
   .derivedFrom.eventHistory == "unavailable" and
   .derivedFrom.directSnapshot.emittedAt == $generated and
   .derivedFrom.directSnapshot.producer == {"id":"flow-agents-learning","product":"flow-agents"} and
-  .derivedFrom.directSnapshot.sourceRef == {"product":"flow-agents","kind":"workflow-learning","id":".flow-agents/*/learning.json","label":"Local workflow learning sidecars"} and
+  .derivedFrom.directSnapshot.sourceRef == {"product":"flow-agents","kind":"workflow-learning","id":".kontourai/flow-agents/*/learning.json","label":"Local workflow learning sidecars"} and
   (.learnings | length) == 2
 ' "$PROJECTION" >/dev/null 2>&1; then
   _pass "projection envelope includes Console schema, scope, producer, and direct snapshot provenance"
