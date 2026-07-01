@@ -8,13 +8,13 @@ import { parseArgs, flagBool, flagString } from "../lib/args.js";
 import { assertPathContained, copyDir, isoNow, readJson, walkFiles, writeJson } from "../lib/fs.js";
 import { assertKitRepository, deriveKitTargets } from "../flow-kit/validate.js";
 import { activateCodexLocal, activateStrandsLocal } from "../runtime-adapters.js";
+import { defaultCodexHome } from "../lib/local-artifact-root.js";
 
 const REGISTRY_REL = path.join("kits", "local", "installed-kits.json");
 const REPOSITORIES_REL = path.join("kits", "local", "repositories");
 
 function registryPath(dest: string): string { return path.join(dest, REGISTRY_REL); }
 function installedPath(dest: string, kitId: string): string { return path.join(dest, REPOSITORIES_REL, kitId); }
-function defaultCodexHome(): string { return process.env["CODEX_HOME"] || path.join(os.homedir(), ".codex"); }
 function resolveDest(flags: ReturnType<typeof parseArgs>["flags"]): string {
   const explicit = flagString(flags, "dest");
   return path.resolve(explicit ?? defaultCodexHome());

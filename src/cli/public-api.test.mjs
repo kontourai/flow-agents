@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 
 import {
   defaultArtifactRootForRead,
+  defaultCodexHome,
   durableFlowAgentsRoot,
   durableInstallRecordPath,
   DURABLE_FLOW_AGENTS_DIR,
@@ -47,4 +48,26 @@ test("TS and CJS artifact helpers stay in parity without durable-root fallback",
   assert.equal(cjs.defaultArtifactRootForRead(cwd), defaultArtifactRootForRead(cwd));
   assert.equal(cjs.durableFlowAgentsRoot(cwd), durableFlowAgentsRoot(cwd));
   assert.deepEqual(cjs.flowAgentsArtifactRootsForRead(cwd), []);
+});
+
+test("defaultCodexHome honors CODEX_HOME env override", () => {
+  const previous = process.env["CODEX_HOME"];
+  try {
+    process.env["CODEX_HOME"] = "/custom/codex-home";
+    assert.equal(defaultCodexHome(), "/custom/codex-home");
+  } finally {
+    if (previous === undefined) delete process.env["CODEX_HOME"];
+    else process.env["CODEX_HOME"] = previous;
+  }
+});
+
+test("defaultCodexHome falls back to ~/.codex when CODEX_HOME is unset", () => {
+  const previous = process.env["CODEX_HOME"];
+  try {
+    delete process.env["CODEX_HOME"];
+    assert.equal(defaultCodexHome(), path.join(os.homedir(), ".codex"));
+  } finally {
+    if (previous === undefined) delete process.env["CODEX_HOME"];
+    else process.env["CODEX_HOME"] = previous;
+  }
 });
