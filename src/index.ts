@@ -17,6 +17,20 @@ import * as path from "node:path";
 import { loadJson as _loadJson, writeJson as _writeJson } from "./cli/workflow-sidecar.js";
 
 export {
+  defaultArtifactRootForRead,
+  defaultTelemetryDirForRead,
+  defaultTelemetryDirsForRead,
+  firstExistingPath,
+  flowAgentsArtifactRoot,
+  KONTOURAI_DIR,
+  legacyFlowAgentsArtifactRoot,
+  LEGACY_FLOW_AGENTS_DIR,
+  legacyTelemetryDataDir,
+  LEGACY_TELEMETRY_DIR,
+  telemetryDataDir,
+} from "./lib/local-artifact-root.js";
+
+export {
   // Trust-bundle (Hachure) validation — the same validator the writer uses.
   validateTrustBundle,
   // Evidence / check / learning validation + normalization. These throw on

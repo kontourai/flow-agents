@@ -3,11 +3,13 @@ import { fileURLToPath } from "node:url";
 import * as os from "node:os";
 import * as path from "node:path";
 import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
+import { defaultArtifactRootForRead, defaultTelemetryDirForRead, defaultTelemetryDirsForRead, telemetryDataDir, flowAgentsArtifactRoot, legacyFlowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 
 const VALID_RESULTS = new Set(["success", "partial", "failure", "not_verified"]);
 
 function telemetryDir(flags: Record<string, string | boolean | string[]>): string {
-  return path.resolve(flagString(flags, "telemetry-dir", process.env.TELEMETRY_DATA_DIR ?? ".telemetry") ?? ".telemetry");
+  const explicit = flagString(flags, "telemetry-dir") ?? process.env.TELEMETRY_DATA_DIR;
+  return explicit ? path.resolve(explicit) : telemetryDataDir();
 }
 
 function ensureSafeDir(dir: string): void {
@@ -110,7 +112,8 @@ function normalize(input: Record<string, unknown>[], runtime: string, flags: Rec
 function importTelemetry(argv: string[], defaultRuntime?: string): number {
   const { flags } = parseArgs(argv);
   const runtime = defaultRuntime ?? flagString(flags, "runtime", "codex") ?? "codex";
-  const input = flagString(flags, "input-full-jsonl") ?? path.join(flagString(flags, "input-telemetry-dir") ?? "", "full.jsonl");
+  const explicitInputDir = flagString(flags, "input-telemetry-dir");
+  const input = flagString(flags, "input-full-jsonl") ?? path.join(explicitInputDir ? path.resolve(explicitInputDir) : defaultTelemetryDirForRead(), "full.jsonl");
   if (!input || !fs.existsSync(input)) throw new Error(`input telemetry file does not exist: ${input}`);
   const dir = telemetryDir(flags);
   ensureSafeDir(dir);
@@ -143,7 +146,7 @@ function syncArtifacts(argv: string[]): number {
   const dir = telemetryDir(flags);
   ensureSafeDir(dir);
   const artifacts = flagList(flags, "artifact-dir");
-  const records = (artifacts.length ? artifacts : [".flow-agents"]).flatMap((item) => fs.existsSync(item) ? artifactOutcomes(item, flags) : []);
+  const records = (artifacts.length ? artifacts : [flowAgentsArtifactRoot(), legacyFlowAgentsArtifactRoot()]).flatMap((item) => fs.existsSync(item) ? artifactOutcomes(item, flags) : []);
   writeJsonlUpsert(path.join(dir, "outcomes.jsonl"), records, "outcome_id");
   if (!flagBool(flags, "quiet")) console.log(`synced ${records.length} artifact outcome(s) to ${path.join(dir, "outcomes.jsonl")}`);
   return 0;
@@ -288,7 +291,9 @@ function markdownReport(data: Record<string, unknown>, groupBy?: string): string
 
 function report(argv: string[]): number {
   const { flags } = parseArgs(argv);
-  const dirs = flagList(flags, "telemetry-dir").map((dir) => path.resolve(dir));
+  const requestedDirs = flagList(flags, "telemetry-dir");
+  const dirs = (requestedDirs.length ? requestedDirs.map((dir) => path.resolve(dir)) : defaultTelemetryDirsForRead()).filter(Boolean);
+  if (dirs.length === 0) dirs.push(telemetryDataDir());
   dirs.forEach(ensureSafeDir);
   const data = reportData(dirs, flagString(flags, "group-by"));
   const format = flagString(flags, "format", "markdown");
@@ -319,7 +324,7 @@ function registerProject(argv: string[]): number {
   ensureSafeDir(globalDir);
   const repoRoot = path.resolve(flagString(flags, "repo-root", ".") ?? ".");
   const name = flagString(flags, "name", path.basename(repoRoot)) ?? path.basename(repoRoot);
-  const record = { name, repo_root: repoRoot, artifact_dir: path.join(repoRoot, ".flow-agents"), input_telemetry_dir: path.join(repoRoot, ".telemetry"), runtime: flagString(flags, "runtime", "codex"), repo: flagString(flags, "repo", name), agent: flagString(flags, "agent"), profile_id: flagString(flags, "profile-id"), prompt_id: flagString(flags, "prompt-id"), prompt_variant: flagString(flags, "prompt-variant"), skill_ids: flagList(flags, "skill-id"), skill_variant: flagString(flags, "skill-variant") };
+  const record = { name, repo_root: repoRoot, artifact_dir: defaultArtifactRootForRead(repoRoot), input_telemetry_dir: defaultTelemetryDirForRead(repoRoot), runtime: flagString(flags, "runtime", "codex"), repo: flagString(flags, "repo", name), agent: flagString(flags, "agent"), profile_id: flagString(flags, "profile-id"), prompt_id: flagString(flags, "prompt-id"), prompt_variant: flagString(flags, "prompt-variant"), skill_ids: flagList(flags, "skill-id"), skill_variant: flagString(flags, "skill-variant") };
   const registryFile = path.join(globalDir, "projects.json");
   const existing = fs.existsSync(registryFile) ? JSON.parse(fs.readFileSync(registryFile, "utf8")) : { projects: [] };
   const projects = Array.isArray(existing) ? existing : Array.isArray(existing.projects) ? existing.projects : [];
@@ -342,7 +347,9 @@ function syncProject(project: Record<string, unknown>, globalDir: string): void 
   const name = String(project.name ?? project.repo ?? "project").replace(/[^a-zA-Z0-9_.-]+/g, "-") || "project";
   const store = path.join(globalDir, "projects", name);
   ensureSafeDir(store);
-  const artifactDir = String(project.artifact_dir ?? path.join(String(project.repo_root), ".flow-agents"));
+  const repoRoot = String(project.repo_root ?? process.cwd());
+  const configuredArtifactDir = typeof project.artifact_dir === "string" ? project.artifact_dir : "";
+  const artifactDir = configuredArtifactDir && fs.existsSync(configuredArtifactDir) ? configuredArtifactDir : defaultArtifactRootForRead(repoRoot);
   const flags: Record<string, string | boolean | string[]> = {
     "repo": String(project.repo ?? name),
     "runtime": String(project.runtime ?? "codex"),
@@ -361,9 +368,9 @@ function syncProject(project: Record<string, unknown>, globalDir: string): void 
 function discoverProjects(root: string): Record<string, unknown>[] {
   if (!fs.existsSync(root)) return [];
   const candidates = [root, ...fs.readdirSync(root).map((name) => path.join(root, name))];
-  return candidates.filter((candidate) => fs.existsSync(path.join(candidate, ".flow-agents"))).map((repoRoot) => {
+  return candidates.filter((candidate) => fs.existsSync(flowAgentsArtifactRoot(candidate)) || fs.existsSync(legacyFlowAgentsArtifactRoot(candidate))).map((repoRoot) => {
     const name = path.basename(repoRoot);
-    return { name, repo: name, repo_root: repoRoot, artifact_dir: path.join(repoRoot, ".flow-agents"), input_telemetry_dir: path.join(repoRoot, ".telemetry"), runtime: "codex", skill_ids: [] };
+    return { name, repo: name, repo_root: repoRoot, artifact_dir: defaultArtifactRootForRead(repoRoot), input_telemetry_dir: defaultTelemetryDirForRead(repoRoot), runtime: "codex", skill_ids: [] };
   });
 }
 

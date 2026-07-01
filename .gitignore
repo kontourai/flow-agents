@@ -14,6 +14,7 @@ test-results/
 .promptfoo/
 .veritas/
 .surface/
+.kontourai/
 
 # Dependency installs and build caches
 node_modules/

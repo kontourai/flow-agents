@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
 import { resolveActiveFlowStep, resolveFlowFilePath, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
+import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 
 type AnyObj = Record<string, any>;
 
@@ -652,7 +653,7 @@ function isUnderDir(dir: string, root: string): boolean {
 function explicitArtifactRoot(p: ReturnType<typeof parseArgs>): string {
   const explicit = opt(p, "artifact-dir");
   const configuredRoot = opt(p, "artifact-root");
-  if (!explicit) return path.resolve(configuredRoot || ".flow-agents");
+  if (!explicit) return configuredRoot ? path.resolve(configuredRoot) : flowAgentsArtifactRoot();
   const dir = path.resolve(explicit);
   if (!fs.existsSync(dir)) die(`artifact directory does not exist: ${dir}`);
   if (fs.lstatSync(dir).isSymbolicLink()) die(`artifact directory must not be a symlink: ${dir}`);
@@ -879,7 +880,7 @@ function initSidecars(dir: string, slug: string, sourceRequest: string, summary:
 }
 
 function ensureSession(p: ReturnType<typeof parseArgs>): number {
-  const root = path.resolve(opt(p, "artifact-root", ".flow-agents"));
+  const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : flowAgentsArtifactRoot();
   const slug = opt(p, "task-slug") || (opt(p, "work-item") ? workItemSlug(opt(p, "work-item")) : die("--task-slug is required (or pass --work-item to derive it)"));
   const dir = sessionDirFor(root, slug);
   fs.mkdirSync(dir, { recursive: true });
@@ -912,7 +913,7 @@ function ensureSession(p: ReturnType<typeof parseArgs>): number {
 }
 
 function current(p: ReturnType<typeof parseArgs>): number {
-  const root = path.resolve(opt(p, "artifact-root", ".flow-agents"));
+  const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : defaultArtifactRootForRead();
   const dir = currentDir(root);
   if (!dir) die("no current workflow session is recorded");
   const format = opt(p, "format", "path");
@@ -1829,7 +1830,7 @@ function assertExistingLearningValid(dir: string): void {
   }
 }
 async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
-  const root = path.resolve(opt(p, "artifact-root", ".flow-agents"));
+  const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : defaultArtifactRootForRead();
   const dir = path.resolve(opt(p, "artifact-dir") || currentDir(root) || "");
   requireArtifactDirUnderRoot(dir, root);
   assertExistingLearningValid(dir);
@@ -2265,7 +2266,7 @@ function loadSurfacePanelJs(): string {
 }
 
 async function renderTrustPanel(p: ReturnType<typeof parseArgs>): Promise<number> {
-  const root = path.resolve(opt(p, "artifact-root", ".flow-agents"));
+  const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : defaultArtifactRootForRead();
   const dir = p.positional[0] ? artifactDirFrom(p.positional[0]) : currentDir(root);
   if (!dir) die("render-trust-panel requires a workflow dir or a recorded current session");
   let bundle: AnyObj | null = null;
@@ -2431,7 +2432,7 @@ function livenessLifecycle(taskDir: string, slug: string, kind: "claim" | "heart
 }
 
 async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
-  const root = path.resolve(opt(p, "artifact-root", ".flow-agents"));
+  const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : flowAgentsArtifactRoot();
   const action = p.positional[0] || "";
   const subjectId = p.positional[1] || "";
   const actor = opt(p, "actor", process.env.FLOW_AGENTS_ACTOR || "unknown");
@@ -2481,130 +2482,13 @@ async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ─── Claim Lookup — pure helper (promotable to Surface #171) ─────────────────
-// buildClaimExplanation is a PURE function: report + bundle + id in, structured
-// explanation out. No fs, no CLI, no .flow-agents paths. Zero flow-agents
-// specifics inside it — it can be lifted to Surface unchanged (issue #171).
-
-export interface ClaimEvidenceItem {
-  evidenceType: string;
-  label: string;
-  execution: { runner: string; label: string; isError: boolean; exitCode: number | null } | null;
-  passing: boolean;
-  summary: string;
-}
-
-export interface ClaimExplanation {
-  found: boolean;
-  status: string;
-  value: string;
-  claimType: string;
-  evidence: ClaimEvidenceItem[];
-  policy: {
-    id: string;
-    requiredEvidence: string[];
-    requiredMethods?: string[];
-    acceptanceCriteria: string[];
-    reviewAuthority: string;
-  } | null;
-  why: {
-    directInputs: AnyObj[];
-    leafClaims: AnyObj[];
-    diagnostics: AnyObj[];
-    transparencyGaps: AnyObj[];
-    changeRecords: AnyObj[];
-  };
-}
-
-/**
- * Build a structured explanation for a specific claim.
- * PURE: report + bundle + id in, structured explanation out.
- * No fs, no CLI, no .flow-agents paths. Promotable to Surface #171.
- *
- * @param report   TrustReport from buildTrustReport(bundle) — required for derived status
- * @param bundle   Raw parsed trust.bundle (BundleFile shape)
- * @param claimId  The claim id to explain
- */
-export function buildClaimExplanation(
-  report: Record<string, unknown>,
-  bundle: Record<string, unknown>,
-  claimId: string,
-): ClaimExplanation {
-  const reportClaims = Array.isArray(report.claims) ? (report.claims as AnyObj[]) : [];
-  const reportClaim = reportClaims.find((c: AnyObj) => c.id === claimId);
-
-  if (!reportClaim) {
-    return {
-      found: false,
-      status: "unknown",
-      value: "",
-      claimType: "",
-      evidence: [],
-      policy: null,
-      why: { directInputs: [], leafClaims: [], diagnostics: [], transparencyGaps: [], changeRecords: [] },
-    };
-  }
-
-  const bundleClaims = Array.isArray(bundle.claims) ? (bundle.claims as AnyObj[]) : [];
-  const bundleClaim = bundleClaims.find((c: AnyObj) => c.id === claimId) ?? reportClaim;
-  const bundlePolicies = Array.isArray(bundle.policies) ? (bundle.policies as AnyObj[]) : [];
-  const bundleEvidence = Array.isArray(bundle.evidence) ? (bundle.evidence as AnyObj[]) : [];
-
-  // Governing policy — follow verificationPolicyId into bundle.policies[]
-  const verificationPolicyId = typeof bundleClaim.verificationPolicyId === "string" ? bundleClaim.verificationPolicyId : undefined;
-  const rawPolicy = verificationPolicyId ? bundlePolicies.find((p: AnyObj) => p.id === verificationPolicyId) : undefined;
-  const policy = rawPolicy
-    ? {
-        id: String(rawPolicy.id ?? ""),
-        requiredEvidence: Array.isArray(rawPolicy.requiredEvidence) ? (rawPolicy.requiredEvidence as string[]) : [],
-        requiredMethods: Array.isArray(rawPolicy.requiredMethods) ? (rawPolicy.requiredMethods as string[]) : undefined,
-        acceptanceCriteria: Array.isArray(rawPolicy.acceptanceCriteria) ? (rawPolicy.acceptanceCriteria as string[]) : [],
-        reviewAuthority: String(rawPolicy.reviewAuthority ?? ""),
-      }
-    : null;
-
-  // Evidence enhancement: pull evidence items for this claim, surface the execution block
-  const claimEvidenceItems = bundleEvidence.filter((ev: AnyObj) => ev && ev.claimId === claimId);
-  const evidence: ClaimEvidenceItem[] = claimEvidenceItems.map((ev: AnyObj) => {
-    const exec = ev.execution && typeof ev.execution === "object" ? (ev.execution as AnyObj) : null;
-    const execution = exec
-      ? {
-          runner: String(exec.runner ?? exec.label ?? ""),
-          label: String(exec.label ?? exec.runner ?? ""),
-          isError: Boolean(exec.isError ?? (typeof exec.exitCode === "number" && exec.exitCode !== 0)),
-          exitCode: typeof exec.exitCode === "number" ? exec.exitCode : null,
-        }
-      : null;
-    return {
-      evidenceType: String(ev.evidenceType ?? ev.type ?? "unknown"),
-      label: String(ev.label ?? ev.excerptOrSummary ?? ev.sourceRef ?? ev.id ?? ""),
-      execution,
-      passing: execution ? !execution.isError : String(ev.status ?? "") !== "disputed",
-      summary: String(ev.excerptOrSummary ?? ev.summary ?? ev.label ?? ""),
-    };
-  });
-
-  // Drilldown: extract from report structure (report.transparencyGaps, report.changeRecords)
-  const allGaps = Array.isArray(report.transparencyGaps) ? (report.transparencyGaps as AnyObj[]) : [];
-  const allChanges = Array.isArray(report.changeRecords) ? (report.changeRecords as AnyObj[]) : [];
-  const transparencyGaps = allGaps.filter((g: AnyObj) => g && g.claimId === claimId);
-  const changeRecords = allChanges.filter((c: AnyObj) => c && c.claimId === claimId);
-
-  return {
-    found: true,
-    status: String(reportClaim.status ?? "unknown"),
-    value: String(bundleClaim.value ?? reportClaim.value ?? ""),
-    claimType: String(bundleClaim.claimType ?? reportClaim.claimType ?? ""),
-    evidence,
-    policy,
-    why: {
-      directInputs: [],   // populated by buildDerivationDrilldown if non-leaf
-      leafClaims: [],
-      diagnostics: [],
-      transparencyGaps,
-      changeRecords,
-    },
-  };
-}
+// buildClaimExplanation + its types are extracted to ./sidecar-claim-explain.ts
+// (ops#22): a PURE projection (report + bundle + id in, structured explanation out)
+// with no fs/CLI/shared state, unit-tested in isolation. Re-exported here so the
+// library facade (src/index.ts) and the IO `claimLookup` handler below are unchanged.
+export { buildClaimExplanation } from "./sidecar-claim-explain.js";
+export type { ClaimEvidenceItem, ClaimExplanation } from "./sidecar-claim-explain.js";
+import { buildClaimExplanation } from "./sidecar-claim-explain.js";
 
 /**
  * claim <id> <dir>
@@ -2768,7 +2652,9 @@ Available claim ids:
 async function main(): Promise<number> {
   const p = parseArgs(process.argv.slice(2));
   if (!p.command) die("workflow-sidecar command is required");
-  const lockRoot = ["ensure-session", "current", "dogfood-pass", "liveness"].includes(p.command) ? path.resolve(opt(p, "artifact-root", ".flow-agents")) : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.command === "claim" ? (p.positional[1] ? path.resolve(p.positional[1]) : "") : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
+  const lockRoot = ["ensure-session", "current", "dogfood-pass", "liveness"].includes(p.command)
+    ? (opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : (p.command === "ensure-session" ? flowAgentsArtifactRoot() : defaultArtifactRootForRead()))
+    : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.command === "claim" ? (p.positional[1] ? path.resolve(p.positional[1]) : "") : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
   return withLock(lockRoot, ["ensure-session", "record-agent-event", "dogfood-pass"].includes(p.command), p.command, () => {
     switch (p.command) {
       case "ensure-session": return ensureSession(p);

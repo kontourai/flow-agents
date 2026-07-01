@@ -7,10 +7,9 @@ TELEMETRY_CONFIG_FILE="${TELEMETRY_CONFIG_FILE:-${TELEMETRY_DIR}/telemetry.conf}
 # Defaults
 TELEMETRY_ENABLED="${TELEMETRY_ENABLED:-true}"
 # TELEMETRY_DIR is <workspace>/scripts/telemetry, so the workspace root is
-# two levels up. Three levels escaped into the workspace's PARENT directory
-# (caught by live acceptance smoke 2026-06-11: events landed in /tmp/.telemetry
-# instead of the installed workspace).
-TELEMETRY_DATA_DIR="${TELEMETRY_DATA_DIR:-$(cd "${TELEMETRY_DIR}/../.." && pwd)/.telemetry}"
+# two levels up. Local runtime telemetry defaults under .kontourai/telemetry;
+# explicit TELEMETRY_DATA_DIR still wins.
+TELEMETRY_DATA_DIR="${TELEMETRY_DATA_DIR:-$(cd "${TELEMETRY_DIR}/../.." && pwd)/.kontourai/telemetry}"
 TELEMETRY_SESSION_DIR="${TELEMETRY_SESSION_DIR:-${TELEMETRY_DATA_DIR}/sessions}"
 TELEMETRY_ENRICH_SYSTEM="${TELEMETRY_ENRICH_SYSTEM:-true}"
 TELEMETRY_ENRICH_WORKSPACE="${TELEMETRY_ENRICH_WORKSPACE:-true}"

@@ -1,6 +1,6 @@
 {
   "name": "@kontourai/flow-agents",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "Flow Agents — a Kontour product that applies Flow and Veritas discipline as a portable process layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, pi, and GitHub Actions — with framework adapters (AWS Strands preview) on the same policy-engine contract.",
   "keywords": [
     "agents",
@@ -99,6 +99,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:unit": "npm run build --silent && node --test src/cli/*.test.mjs",
     "validate:source": "npm run build --silent && node build/src/cli.js validate-source",
     "validate:artifacts": "npm run build --silent && node build/src/cli/validate-workflow-artifacts.js",
     "context-map": "npm run build --silent && node build/src/cli.js context-map",

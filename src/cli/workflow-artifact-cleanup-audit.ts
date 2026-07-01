@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as path from "node:path";
 import { flagBool, flagString, parseArgs } from "../lib/args.js";
+import { defaultArtifactRootForRead } from "../lib/local-artifact-root.js";
 
 type Classification =
   | "active_wip"
@@ -49,7 +50,7 @@ function printHelp(): void {
   console.log("Read-only dry-run audit for local workflow artifact directories.");
   console.log("");
   console.log("Options:");
-  console.log("  --artifact-root <path>  Local artifact root to scan (default: .flow-agents)");
+  console.log("  --artifact-root <path>  Local artifact root to scan (default: .kontourai/flow-agents, with .flow-agents read fallback)");
   console.log("  --json                  Print stable JSON buckets instead of text");
   console.log("  --help                  Show this help");
   console.log("");
@@ -269,7 +270,8 @@ export function main(argv = process.argv.slice(2)): number {
   }
   let result: AuditResult;
   try {
-    result = audit(flagString(args.flags, "artifact-root", ".flow-agents") ?? ".flow-agents");
+    const root = flagString(args.flags, "artifact-root") ? path.resolve(flagString(args.flags, "artifact-root")!) : defaultArtifactRootForRead();
+    result = audit(root);
   } catch (error) {
     console.error(`workflow-artifact-cleanup-audit: ${error instanceof Error ? error.message : String(error)}`);
     return 1;

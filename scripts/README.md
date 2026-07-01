@@ -70,6 +70,7 @@ renamed, or changes category, update the table and the validator together.
 | `lib/audit-transport.sh` | shared hook library | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_telemetry.sh` | Shared audit event transport functions. |
 | `lib/hook-flags.js` | shared hook library | `evals/integration/test_hook_category_behaviors.sh` | Shared profile/disable flag parsing. |
 | `lib/liveness-read.js` | shared hook library | `evals/integration/test_session_resume_roundtrip.sh` | Shared liveness event reader + freshness check (`readLivenessEvents`, `freshHolders`); consumed by the reground hook and `workflow-sidecar liveness status`. |
+| `lib/local-artifact-paths.js` | shared hook library | `evals/integration/test_migrate_local_artifacts.sh`, `evals/integration/test_workflow_sidecar_writer.sh` | Shared `.kontourai/flow-agents` artifact-root helpers with legacy `.flow-agents` read compatibility for CJS hooks. |
 | `lib/patterns.sh` | shared hook library | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_telemetry.sh` | Shared shell pattern constants. |
 | `lib/resolve-formatter.js` | shared hook library | `evals/integration/test_hook_category_behaviors.sh` | Shared formatter resolution helper. |
 
