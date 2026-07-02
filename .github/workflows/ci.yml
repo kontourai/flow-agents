@@ -262,6 +262,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check pull-work-provider-integration
 
+      - name: Veritas governance kit integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check veritas-governance-kit-integration
+
       # The anti-gaming + trust regression suite runs in this REQUIRED lane so that
       # weakening the gate / CI anchor / their protections (or removing a regression
       # test) is caught and cannot merge. Convergence red-team (Round 5/7) closure.

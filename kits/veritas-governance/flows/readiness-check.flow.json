@@ -1,0 +1,35 @@
+{
+  "id": "veritas-governance.readiness-check",
+  "version": "1.0",
+  "steps": [
+    { "id": "readiness", "next": "gate-check" },
+    { "id": "gate-check", "next": null }
+  ],
+  "gates": {
+    "gate-check-gate": {
+      "step": "gate-check",
+      "expects": [
+        {
+          "id": "readiness-verdict",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "A `veritas readiness --check evidence --working-tree` run, projected by the kit adapter (adapter/readiness-to-trust-bundle.mjs) into a Hachure trust.bundle, produced a verified software-readiness-verdict claim for this change.",
+          "explore_hint": "Run `veritas readiness --check evidence --working-tree`, project its evidence report with adapter/readiness-to-trust-bundle.mjs, then `flow attach-evidence <run> --gate gate-check-gate --file <bundle> --bundle`.",
+          "bundle_claim": {
+            "claimType": "software-readiness-verdict",
+            "subjectType": "repository-change",
+            "accepted_statuses": ["verified"]
+          }
+        }
+      ],
+      "on_route_back": {
+        "missing_evidence": "gate-check",
+        "default": "gate-check"
+      },
+      "route_back_policy": {
+        "max_attempts": 3,
+        "on_exceeded": "block"
+      }
+    }
+  }
+}

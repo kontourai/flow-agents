@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "id": "veritas-governance",
+  "name": "Veritas Governance Kit",
+  "description": "Turns a repo's Veritas-governed Repo Standards into deterministic, agentless gate evidence: a single flow gates a real `veritas readiness` run as a trust.bundle software-readiness-verdict claim. Wraps @kontourai/veritas via CLI invocation and a kit-local trust.bundle adapter; does not fork or reimplement standards evaluation.",
+  "flows": [
+    {
+      "id": "veritas-governance.readiness-check",
+      "path": "flows/readiness-check.flow.json",
+      "description": "Single-gate agentless flow: requires a verified software-readiness-verdict trust.bundle claim (projected from `veritas readiness --check evidence --working-tree`) before the gate-check step can pass. CI-callable, K0."
+    }
+  ],
+  "docs": [
+    { "id": "veritas-governance.readme", "path": "docs/README.md" }
+  ]
+}

@@ -18,6 +18,12 @@
       "name": "Release Evidence Kit",
       "path": "kits/release-evidence",
       "description": "Minimal flows-only kit for proving agentless gate evaluation over surface claims in CI. One gate expects a trusted release.evidence claim."
+    },
+    {
+      "id": "veritas-governance",
+      "name": "Veritas Governance Kit",
+      "path": "kits/veritas-governance",
+      "description": "Agentless kit that gates a real `veritas readiness` verdict as a trust.bundle software-readiness-verdict claim. Wraps @kontourai/veritas via CLI + a kit-local adapter; does not reimplement standards evaluation."
     }
   ]
 }
