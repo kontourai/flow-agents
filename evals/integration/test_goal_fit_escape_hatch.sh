@@ -34,21 +34,21 @@ c2=$(run_block "$TMPDIR_EVAL/b2.err")
 c3=$(run_block "$TMPDIR_EVAL/b3.err")
 c4=$(run_block "$TMPDIR_EVAL/b4.err")
 
-[[ "$c1" -eq 2 ]] && rg -q 'BLOCK 1/3' "$TMPDIR_EVAL/b1.err" \
-  && _pass "first identical block exits 2 (BLOCK 1/3)" \
-  || _fail "first block should exit 2 BLOCK 1/3 (got $c1: $(cat "$TMPDIR_EVAL/b1.err"))"
+[[ "$c1" -eq 2 ]] && rg -q 'Stop blocked .* \(block 1; after 3 identical blocks' "$TMPDIR_EVAL/b1.err" \
+  && _pass "first identical block exits 2 (block 1; after 3 identical blocks)" \
+  || _fail "first block should exit 2, block 1/3 shape (got $c1: $(cat "$TMPDIR_EVAL/b1.err"))"
 
-[[ "$c2" -eq 2 ]] && rg -q 'BLOCK 2/3' "$TMPDIR_EVAL/b2.err" \
-  && _pass "second identical block exits 2 (BLOCK 2/3)" \
-  || _fail "second block should exit 2 BLOCK 2/3 (got $c2)"
+[[ "$c2" -eq 2 ]] && rg -q 'Stop blocked .* \(block 2; after 3 identical blocks' "$TMPDIR_EVAL/b2.err" \
+  && _pass "second identical block exits 2 (block 2; after 3 identical blocks)" \
+  || _fail "second block should exit 2, block 2/3 shape (got $c2)"
 
-[[ "$c3" -eq 0 ]] && rg -q 'RELEASED after 3 consecutive identical blocks' "$TMPDIR_EVAL/b3.err" \
+[[ "$c3" -eq 0 ]] && rg -q 'released — the same gap\(s\) blocked 3x without progress' "$TMPDIR_EVAL/b3.err" \
   && _pass "third identical block RELEASES (exit 0, loud notice)" \
   || _fail "third block should release exit 0 (got $c3: $(cat "$TMPDIR_EVAL/b3.err"))"
 
-[[ "$c4" -eq 2 ]] && rg -q 'BLOCK 1/3' "$TMPDIR_EVAL/b4.err" \
+[[ "$c4" -eq 2 ]] && rg -q 'Stop blocked .* \(block 1; after 3 identical blocks' "$TMPDIR_EVAL/b4.err" \
   && _pass "streak resets after release (next block is 1/3 again)" \
-  || _fail "post-release block should reset to BLOCK 1/3 (got $c4)"
+  || _fail "post-release block should reset to block 1/3 shape (got $c4)"
 
 # A changing goal-fit gap must reset the streak (progress, not a stuck loop).
 printf '%s' "$PAYLOAD" | FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=3 node "$ROOT/scripts/hooks/stop-goal-fit.js" >/dev/null 2>/dev/null
@@ -56,7 +56,7 @@ printf '%s' "$PAYLOAD" | FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MA
 printf '# Stuck\n\nbranch: main\nstatus: verifying\ntype: deliver\n\n## Plan\n\nDifferent.\n' \
   > "$REPO/.flow-agents/stuck/stuck--deliver.md"
 cd=$(run_block "$TMPDIR_EVAL/bd.err")
-[[ "$cd" -eq 2 ]] && rg -q 'BLOCK 1/3' "$TMPDIR_EVAL/bd.err" \
+[[ "$cd" -eq 2 ]] && rg -q 'Stop blocked .* \(block 1; after 3 identical blocks' "$TMPDIR_EVAL/bd.err" \
   && _pass "changed goal-fit gap resets the streak to 1/3" \
   || _fail "changed gap should reset streak (got $cd: $(cat "$TMPDIR_EVAL/bd.err"))"
 

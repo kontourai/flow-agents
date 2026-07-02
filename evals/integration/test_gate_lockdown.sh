@@ -793,8 +793,8 @@ ac2s_1=$(FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=1 FLOW_
 ac2s_1_exit=$?
 set -e
 
-if [ "$ac2s_1_exit" -eq 0 ] && echo "$ac2s_1" | grep -q "RELEASED after"; then
-  _pass "AC2: soft/advisory-only streak releases at MAX_BLOCKS=1 (exit 0, RELEASED after)"
+if [ "$ac2s_1_exit" -eq 0 ] && echo "$ac2s_1" | grep -q "released — the same gap(s) blocked"; then
+  _pass "AC2: soft/advisory-only streak releases at MAX_BLOCKS=1 (exit 0, released notice)"
 else
   _fail "AC2: soft streak should release at MAX_BLOCKS=1. exit=$ac2s_1_exit out=${ac2s_1:0:300}"
 fi

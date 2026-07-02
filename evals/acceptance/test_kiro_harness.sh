@@ -113,7 +113,7 @@ MARKDOWN
 stop_output="$(cd "$TMP_WORK" && FLOW_AGENTS_GOAL_FIT_STRICT=true kiro-cli chat --agent dev --no-interactive "Reply with READY only." 2>&1 || true)"
 stop_clean="$(printf '%s' "$stop_output" | strip_ansi)"
 if echo "$stop_clean" | grep -q 'stop "node .*stop:goal-fit stop-goal-fit.js standard,strict" failed with exit code: 2' \
-  && echo "$stop_clean" | grep -q '\[Hook\] Goal Fit warning:' \
+  && echo "$stop_clean" | grep -q '\[stop-gate\] Goal Fit warning:' \
   && echo "$stop_clean" | grep -q 'live-stop--deliver.md is still status:executing'; then
   _pass "strict Goal Fit stop hook surfaces live Kiro stop gate"
 else
