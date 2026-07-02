@@ -65,7 +65,7 @@ write_declared_bundle() { # $1=bundle-path
   python3 - "$1" << 'PY'
 import json, sys
 bundle = {
-    "schemaVersion": 3,
+    "schemaVersion": 5,
     "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c1",
@@ -192,7 +192,7 @@ printf '%s' '{"artifact_dir":"declared-pass","active_flow_id":"builder.build","a
 python3 - "$T2/.kontourai/flow-agents/declared-pass/trust.bundle" << 'PY'
 import json, sys
 bundle = {
-    "schemaVersion": 3,
+    "schemaVersion": 5,
     "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c2",
@@ -265,7 +265,7 @@ printf '%s' '{"artifact_dir":"wf-false"}' \
 python3 - "$T3/.kontourai/flow-agents/wf-false/trust.bundle" << 'PY'
 import json, sys
 bundle = {
-    "schemaVersion": 3,
+    "schemaVersion": 5,
     "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c3",

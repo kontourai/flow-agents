@@ -98,7 +98,7 @@ const [,, bundlePath, label, passingVal] = process.argv;
 // Evaluate passing value as JS literal
 const passing = JSON.parse(passingVal);
 const bundle = {
-  schemaVersion: 3,
+  schemaVersion: 5,
   source: "test-fixture",
   claims: [
     {
@@ -107,7 +107,7 @@ const bundle = {
       value: "pass",
       status: "verified",
       subjectId: "test/build",
-      surface: "flow-agents.workflow",
+      facet: "flow-agents.workflow",
       subjectType: "workflow-check",
       fieldOrBehavior: "build",
       createdAt: "2026-06-27T00:00:00Z",
@@ -170,7 +170,7 @@ write_bundle_claim_no_evidence() {
 const fs = require('fs');
 const [,, bundlePath] = process.argv;
 const bundle = {
-  schemaVersion: 3,
+  schemaVersion: 5,
   source: "test-fixture",
   claims: [
     {
@@ -179,7 +179,7 @@ const bundle = {
       value: "pass",
       status: "verified",
       subjectId: "test/command-never-run",
-      surface: "flow-agents.workflow",
+      facet: "flow-agents.workflow",
       subjectType: "workflow-check",
       fieldOrBehavior: "npm run test-never-ran",
       createdAt: "2026-06-27T00:00:00Z",

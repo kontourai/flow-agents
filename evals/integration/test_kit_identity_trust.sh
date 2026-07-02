@@ -44,11 +44,11 @@ const fs = require('fs');
 // argv[0]=node, argv[1]="-", argv[2]=file path
 const bundlePath = process.argv[2];
 const bundle = {
-  schemaVersion: 3, source: "test-fixture",
+  schemaVersion: 5, source: "test-fixture",
   claims: [{
     id: "c-knowledge-1", claimType: "knowledge.verify.tests",
     subjectType: "flow-step", subjectId: "test-slug/knowledge-ev",
-    surface: "flow-agents.workflow", fieldOrBehavior: "knowledge verification",
+    facet: "flow-agents.workflow", fieldOrBehavior: "knowledge verification",
     value: "pass", status: "verified",
     createdAt: "2026-06-27T00:00:00Z", updatedAt: "2026-06-27T00:00:00Z",
     impactLevel: "high", verificationPolicyId: "policy:knowledge.verify.tests"
@@ -62,11 +62,11 @@ node - "$TMP/builder.bundle" << 'NODE'
 const fs = require('fs');
 const bundlePath = process.argv[2];
 const bundle = {
-  schemaVersion: 3, source: "test-fixture",
+  schemaVersion: 5, source: "test-fixture",
   claims: [{
     id: "c-builder-1", claimType: "builder.verify.tests",
     subjectType: "flow-step", subjectId: "test-slug/builder-ev",
-    surface: "flow-agents.workflow", fieldOrBehavior: "builder verification",
+    facet: "flow-agents.workflow", fieldOrBehavior: "builder verification",
     value: "pass", status: "verified",
     createdAt: "2026-06-27T00:00:00Z", updatedAt: "2026-06-27T00:00:00Z",
     impactLevel: "high", verificationPolicyId: "policy:builder.verify.tests"
@@ -80,11 +80,11 @@ node - "$TMP/workflow-only.bundle" << 'NODE'
 const fs = require('fs');
 const bundlePath = process.argv[2];
 const bundle = {
-  schemaVersion: 3, source: "test-fixture",
+  schemaVersion: 5, source: "test-fixture",
   claims: [{
     id: "c-wf-1", claimType: "workflow.check.build",
     subjectType: "workflow-check", subjectId: "test-slug/build",
-    surface: "flow-agents.workflow", fieldOrBehavior: "build check",
+    facet: "flow-agents.workflow", fieldOrBehavior: "build check",
     value: "pass", status: "verified",
     createdAt: "2026-06-27T00:00:00Z", updatedAt: "2026-06-27T00:00:00Z",
     impactLevel: "high", verificationPolicyId: "policy:workflow.check.build"

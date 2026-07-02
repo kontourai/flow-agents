@@ -160,7 +160,7 @@ flow_agents_node "$WRITER" advance-state "$TAMPER_DIR/.kontourai/flow-agents/$TA
 python3 - "$TAMPER_DIR/.kontourai/flow-agents/$TAMPER_SLUG/trust.bundle" << 'PY'
 import json, sys
 bundle = {
-    "schemaVersion": 3,
+    "schemaVersion": 5,
     "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c1",
