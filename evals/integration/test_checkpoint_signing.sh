@@ -15,6 +15,10 @@
 #      This proves the signing PATH is structurally correct without needing real OIDC.
 #   4. ADDITIVE: all existing gating tests still pass (record-release, advance-state-delivered,
 #      seal-checkpoint, record-evidence, record-critique all unaffected).
+#   5. NO-CLOBBER (WS5 iteration-2 part 2 regression guard): this eval's scratch sessions
+#      (mktemp -d, no kits/ ancestor) never publish into this real repo's delivery/trust.bundle,
+#      even when the eval is run from a checkout of this repo — publish-delivery's repo-root
+#      resolution is fail-closed and TEST 2 passes an explicit scratch --repo-root.
 #
 # Deterministic, no model spend, no network, self-cleaning.
 # Usage: bash evals/integration/test_checkpoint_signing.sh
@@ -33,6 +37,19 @@ _fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 
 cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
+
+# REGRESSION GUARD (WS5 iteration-2 part 2): this eval's scratch sessions live under a
+# mktemp -d tree with no kits/ ancestor. Before the fail-closed fix to
+# findRepoRootFromDir/publishDelivery in src/cli/workflow-sidecar.ts, a scratch session's
+# record-release / advance-state --status delivered call would silently fall back to
+# process.cwd() for its delivery/ repo-root — and when this eval runs from a checkout of
+# THIS repo (as it does under npm run eval:static / the integration suite), that clobbered
+# the real repo's own delivery/trust.bundle with scratch fixture content. Capture this real
+# repo's delivery/trust.bundle content hash now (before any scratch session in this eval
+# runs) and re-check it is byte-identical after every test below.
+REAL_DELIVERY_BUNDLE="$ROOT/delivery/trust.bundle"
+_bundle_hash() { if [[ -f "$1" ]]; then shasum -a 256 "$1" | awk '{print $1}'; else echo "absent"; fi; }
+REAL_DELIVERY_HASH_BEFORE="$(_bundle_hash "$REAL_DELIVERY_BUNDLE")"
 
 # ─────────────────────────────────────────────────────────────────────────────
 echo ""
@@ -242,6 +259,14 @@ SLUG2="sign-test-failopen"
 SESSION_DIR2="$AROOT2/$SLUG2"
 mkdir -p "$AROOT2"
 
+# REGRESSION FIX (WS5 iteration-2 part 2): this session dir has no kits/ ancestor of its
+# own (it lives under $TMP). Pass an explicit --repo-root pointing at a scratch repo-root
+# under $TMP so advance-state --status delivered's auto-publish never has to fall back to
+# (or, pre-fix, silently trust) process.cwd() — matching test_publish_delivery.sh's pattern
+# of always giving its scratch sessions an explicit repo-root.
+REPO_ROOT2="$TMP/test2/scratch-repo"
+mkdir -p "$REPO_ROOT2"
+
 flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$AROOT2" \
   --task-slug "$SLUG2" \
@@ -264,12 +289,19 @@ flow_agents_node "$WRITER" advance-state "$SESSION_DIR2" \
   --status delivered \
   --phase release \
   --summary "Delivered." \
+  --repo-root "$REPO_ROOT2" \
   --timestamp "2026-06-26T11:03:00Z" >/dev/null 2>&1 || SEAL_EXIT=$?
 
 if [[ "$SEAL_EXIT" -eq 0 ]]; then
   _pass "advance-state --status delivered exits 0 (seal succeeds, signing is fail-open)"
 else
   _fail "advance-state --status delivered exited $SEAL_EXIT (signing must not break the seal)"
+fi
+
+if [[ -f "$REPO_ROOT2/delivery/trust.bundle" ]]; then
+  _pass "publish-delivery published into the explicit scratch --repo-root ($REPO_ROOT2/delivery/trust.bundle), not process.cwd()"
+else
+  _fail "publish-delivery did not write to the explicit scratch --repo-root ($REPO_ROOT2/delivery/trust.bundle) — check the --repo-root plumbing in advanceState"
 fi
 
 if [[ -f "$SESSION_DIR2/trust.checkpoint.json" ]]; then
@@ -475,6 +507,17 @@ if [[ $? -eq 0 ]]; then
   _pass "Increment A checkpoint envelope shape preserved (additive — no regression)"
 else
   _fail "Increment A checkpoint envelope shape broken (regression)"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+echo ""
+echo "=== TEST 5: Regression — this eval's scratch sessions never touch the real repo's delivery/trust.bundle ==="
+
+REAL_DELIVERY_HASH_AFTER="$(_bundle_hash "$REAL_DELIVERY_BUNDLE")"
+if [[ "$REAL_DELIVERY_HASH_AFTER" == "$REAL_DELIVERY_HASH_BEFORE" ]]; then
+  _pass "real repo delivery/trust.bundle unchanged by this eval's scratch sessions (before=$REAL_DELIVERY_HASH_BEFORE after=$REAL_DELIVERY_HASH_AFTER)"
+else
+  _fail "real repo delivery/trust.bundle CHANGED during this eval (before=$REAL_DELIVERY_HASH_BEFORE after=$REAL_DELIVERY_HASH_AFTER) — a scratch session's publish-delivery clobbered $REAL_DELIVERY_BUNDLE"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -850,14 +850,20 @@ function validateAgentId(agent: string): string {
 
 /**
  * Find the repository root by walking upward from a starting directory to locate
- * the nearest ancestor containing a kits/ subdirectory. Mirrors flow-resolver.ts
- * findRepoRoot, but callable from workflow-sidecar.ts without re-importing the
- * internal helper.
+ * the nearest ancestor containing a kits/ subdirectory, without falling back to
+ * process.cwd(). Returns null when no kits/ ancestor is found within the walk
+ * bound (e.g. a scratch/temp session directory with no repo ancestor at all).
  *
- * ADR 0016 Abstraction A (P-d): used by advance-state and ensure-session to
- * derive repoRoot for resolvePhaseMap calls.
+ * WS5 iteration-2 part 2: extracted so publishDelivery's repo-root resolution can
+ * be fail-closed (see findRepoRootFromDir below and publishDelivery). A scratch
+ * test session dir (mktemp -d, no kits/ ancestor) must never resolve to whatever
+ * repo happens to be the current process's cwd — that previously let a throwaway
+ * eval-local trust.bundle silently clobber this real repo's delivery/trust.bundle
+ * when the eval was run from a checkout of this repo (see
+ * evals/integration/test_checkpoint_signing.sh TEST 2 and the WS5 session findings
+ * at .kontourai/flow-agents/ws5-governance-kit-slice1).
  */
-function findRepoRootFromDir(startDir: string): string {
+function findRepoRootFromDirStrict(startDir: string): string | null {
   let dir = startDir;
   for (let i = 0; i < 16; i++) {
     if (fs.existsSync(path.join(dir, "kits"))) return dir;
@@ -865,7 +871,24 @@ function findRepoRootFromDir(startDir: string): string {
     if (parent === dir) break;
     dir = parent;
   }
-  return process.cwd();
+  return null;
+}
+
+/**
+ * Find the repository root by walking upward from a starting directory to locate
+ * the nearest ancestor containing a kits/ subdirectory. Mirrors flow-resolver.ts
+ * findRepoRoot, but callable from workflow-sidecar.ts without re-importing the
+ * internal helper. Falls back to process.cwd() when no kits/ ancestor is found —
+ * appropriate for phase-map/first-step resolution (ADR 0016 Abstraction A, P-d),
+ * where the caller is always invoked from within a real repo checkout.
+ *
+ * Do NOT use this cwd-falling-back variant for publishDelivery's repo-root
+ * resolution — use findRepoRootFromDirStrict there instead, so a scratch/test
+ * session dir with no repo ancestor fails closed (skips publish) rather than
+ * silently trusting process.cwd(), which could be an unrelated real repo.
+ */
+function findRepoRootFromDir(startDir: string): string {
+  return findRepoRootFromDirStrict(startDir) ?? process.cwd();
 }
 
 /**
@@ -1509,7 +1532,14 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
   if (status === "delivered") {
     await sealTrustCheckpoint(dir, slug, timestamp, status, "release").catch(() => { /* best-effort; checkpoint seal must not break advance-state */ });
     // Publish delivery bundle: best-effort copy to delivery/ for CI trust-reconcile.
-    await publishDelivery(dir, findRepoRootFromDir(dir)).catch(() => { /* best-effort; must not break advance-state */ });
+    // Fail-closed repo-root resolution (findRepoRootFromDirStrict, no cwd fallback) — see
+    // publishDelivery below. An explicit --repo-root (e.g. for a scratch/test artifact dir
+    // with no kits/ ancestor of its own) always wins, matching publishDeliveryCmd. Failures
+    // are visible (stderr warning), not silently swallowed.
+    const publishRepoRoot = opt(p, "repo-root") ? path.resolve(opt(p, "repo-root")) : findRepoRootFromDirStrict(dir);
+    await publishDelivery(dir, publishRepoRoot).catch((err: unknown) => {
+      process.stderr.write(`[advance-state] WARNING: publish-delivery failed: ${err instanceof Error ? err.message : String(err)}\n`);
+    });
   }
   return 0;
 }
@@ -1576,7 +1606,14 @@ async function recordRelease(p: ReturnType<typeof parseArgs>): Promise<number> {
   // Trust checkpoint: seal at the "delivered" moment (the natural terminal mark for record-release).
   await sealTrustCheckpoint(dir, slug, payload.updated_at, "delivered", "release").catch(() => { /* best-effort; checkpoint seal must not break record-release */ });
   // Publish delivery bundle: best-effort copy to delivery/ for CI trust-reconcile.
-  await publishDelivery(dir, findRepoRootFromDir(dir)).catch(() => { /* best-effort; must not break record-release */ });
+  // Fail-closed repo-root resolution (findRepoRootFromDirStrict, no cwd fallback) — see
+  // publishDelivery below. An explicit --repo-root (e.g. for a scratch/test artifact dir with
+  // no kits/ ancestor of its own) always wins, matching publishDeliveryCmd. Failures are
+  // visible (stderr warning), not silently swallowed.
+  const publishRepoRoot = opt(p, "repo-root") ? path.resolve(opt(p, "repo-root")) : findRepoRootFromDirStrict(dir);
+  await publishDelivery(dir, publishRepoRoot).catch((err: unknown) => {
+    process.stderr.write(`[record-release] WARNING: publish-delivery failed: ${err instanceof Error ? err.message : String(err)}\n`);
+  });
   return 0;
 }
 
@@ -1806,12 +1843,24 @@ async function sealCheckpoint(p: ReturnType<typeof parseArgs>): Promise<number> 
  * trust.checkpoint.intoto.json / trust.checkpoint.sig.json from the
  * session artifact dir to <repoRoot>/delivery/.
  *
- * Fail-soft: if trust.bundle is absent, returns without throwing.
+ * Fail-soft on a missing bundle: if trust.bundle is absent, returns without throwing.
+ * Fail-CLOSED on repo-root resolution: repoRoot must be a real, resolved kits/ ancestor
+ * (see findRepoRootFromDirStrict) — null (no ancestor found) skips the publish with a
+ * visible warning instead of writing to whatever process.cwd() happens to be. This
+ * prevents a scratch/test session dir (no kits/ ancestor) from silently clobbering an
+ * unrelated real repo's delivery/trust.bundle when invoked with that repo as cwd (see
+ * evals/integration/test_checkpoint_signing.sh TEST 2 and the WS5 session findings at
+ * .kontourai/flow-agents/ws5-governance-kit-slice1 for the root cause this fixes).
  * Idempotent: overwrites on re-delivery.
  */
-export async function publishDelivery(dir: string, repoRoot: string): Promise<void> {
+export async function publishDelivery(dir: string, repoRoot: string | null): Promise<void> {
   const bundleSrc = path.join(dir, "trust.bundle");
   if (!fs.existsSync(bundleSrc)) return; // no bundle — skip gracefully
+
+  if (!repoRoot) {
+    process.stderr.write(`[publish-delivery] WARNING: no kits/ ancestor found from ${dir}; skipping publish. Refusing to fall back to process.cwd() to avoid clobbering an unrelated repo's delivery/trust.bundle. Pass --repo-root explicitly if this session dir is intentionally outside a repo checkout.\n`);
+    return;
+  }
 
   const deliveryDir = path.join(repoRoot, "delivery");
   fs.mkdirSync(deliveryDir, { recursive: true });
@@ -1847,7 +1896,10 @@ export async function publishDelivery(dir: string, repoRoot: string): Promise<vo
  */
 async function publishDeliveryCmd(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
-  const repoRoot = opt(p, "repo-root") || findRepoRootFromDir(dir);
+  // Fail-closed: an explicit --repo-root always wins; otherwise resolve strictly (no
+  // process.cwd() fallback) so a scratch/test artifact dir cannot accidentally publish
+  // into whichever repo happens to be the current working directory.
+  const repoRoot = opt(p, "repo-root") || findRepoRootFromDirStrict(dir);
   await publishDelivery(dir, repoRoot);
   return 0;
 }

@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0",
+  "slug": "ws5-governance-kit-closeout",
+  "work_item": null,
+  "status": "delivered",
+  "phase": "release",
+  "sealed_at": "2026-07-02T16:25:37Z",
+  "commit_sha": "95f6bafe37a4eb492d6ccb70892f0038e35a3850",
+  "checkpoint": {
+    "asOf": "2026-07-02T16:25:37.719Z",
+    "statusByClaimId": {
+      "ws5-governance-kit-closeout-build-typecheck.flow-agents-workflow.npm-run-validate-source": "verified",
+      "ws5-governance-kit-closeout-unit-tests.flow-agents-workflow.bash-evals-run-sh-static": "verified",
+      "ws5-governance-kit-closeout-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh": "verified",
+      "ws5-governance-kit-closeout-checkpoint-signing.flow-agents-workflow.bash-evals-integration-test-checkpoint-signing-sh": "verified",
+      "ws5-governance-kit-closeout-fixture-pii-scan.flow-agents-workflow.grep-rnie-brian-gmail-kits-veritas-governance-fixtures": "verified",
+      "ws5-governance-kit-closeout-veritas-107-settled-semantics.flow-agents-workflow.true-veritas-107-merged-blocking-require-failures-win-over-promotion-allowed-adapter-readme-35-35-adapter-tests-pin-settled-gate-semantics": "verified",
+      "ws5-governance-kit-closeout-trust-reconcile-exits-0-on-the-published-bundle.flow-agents-workflow.trust-reconcile-exits-0-on-the-published-bundle": "proposed",
+      "ws5-governance-kit-closeout-closing-review.flow-agents-workflow.closing-review-of-ws5-veritas-governance-kit-supersedes-session-ws5-governance-kit-slice1-all-four-previously-disputed-gate-review-findings-are-genuinely-resolved-adapter-faithfulness-settled-by-merged-veritas-107-trust-bundle-reconcile-staged-findreporootfromdirstrict-no-clobber-5-5-test-checkpoint-signing-sh-fixture-pii-leak-scrubbed-zero-grep-hits-acceptance-artifacts-inconsistency-ac5-now-pass-slice1-s-own-bundle-is-frozen-and-unreconcilable-per-flow-agents-267-268-this-fresh-session-records-today-s-verified-green-state": "verified"
+    },
+    "throughEventCreatedAt": "2026-07-02T16:24:28Z",
+    "throughEventCreatedAtByClaimId": {
+      "ws5-governance-kit-closeout-build-typecheck.flow-agents-workflow.npm-run-validate-source": "2026-07-02T16:24:28Z",
+      "ws5-governance-kit-closeout-unit-tests.flow-agents-workflow.bash-evals-run-sh-static": "2026-07-02T16:24:28Z",
+      "ws5-governance-kit-closeout-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh": "2026-07-02T16:24:28Z",
+      "ws5-governance-kit-closeout-checkpoint-signing.flow-agents-workflow.bash-evals-integration-test-checkpoint-signing-sh": "2026-07-02T16:24:28Z",
+      "ws5-governance-kit-closeout-fixture-pii-scan.flow-agents-workflow.grep-rnie-brian-gmail-kits-veritas-governance-fixtures": "2026-07-02T16:24:28Z",
+      "ws5-governance-kit-closeout-veritas-107-settled-semantics.flow-agents-workflow.true-veritas-107-merged-blocking-require-failures-win-over-promotion-allowed-adapter-readme-35-35-adapter-tests-pin-settled-gate-semantics": "2026-07-02T16:24:28Z",
+      "ws5-governance-kit-closeout-trust-reconcile-exits-0-on-the-published-bundle.flow-agents-workflow.trust-reconcile-exits-0-on-the-published-bundle": null,
+      "ws5-governance-kit-closeout-closing-review.flow-agents-workflow.closing-review-of-ws5-veritas-governance-kit-supersedes-session-ws5-governance-kit-slice1-all-four-previously-disputed-gate-review-findings-are-genuinely-resolved-adapter-faithfulness-settled-by-merged-veritas-107-trust-bundle-reconcile-staged-findreporootfromdirstrict-no-clobber-5-5-test-checkpoint-signing-sh-fixture-pii-leak-scrubbed-zero-grep-hits-acceptance-artifacts-inconsistency-ac5-now-pass-slice1-s-own-bundle-is-frozen-and-unreconcilable-per-flow-agents-267-268-this-fresh-session-records-today-s-verified-green-state": "2026-07-02T16:24:28Z"
+    },
+    "statusFunctionVersion": "2"
+  }
+}

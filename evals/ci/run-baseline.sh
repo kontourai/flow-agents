@@ -40,6 +40,7 @@ CHECKS=(
   "Usage and cost integration|bash evals/integration/test_usage_cost.sh"
   "Utterance check integration|bash evals/integration/test_utterance_check.sh"
   "Pull work provider integration|bash evals/integration/test_pull_work_provider.sh"
+  "Veritas governance kit integration|bash evals/integration/test_veritas_governance_kit.sh"
   "Anti-gaming and trust suite|bash evals/ci/antigaming-suite.sh"
   "Usage feedback import integration|bash evals/integration/test_usage_feedback_import.sh"
   "Usage feedback outcomes integration|bash evals/integration/test_usage_feedback_outcomes.sh"
@@ -85,6 +86,7 @@ LANE_RUNTIME_AND_KIT=(
   "Usage and cost integration"
   "Utterance check integration"
   "Pull work provider integration"
+  "Veritas governance kit integration"
   "Anti-gaming and trust suite"
 )
 

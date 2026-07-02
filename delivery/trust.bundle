@@ -1,0 +1,385 @@
+{
+  "schemaVersion": 3,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "ws5-governance-kit-closeout-build-typecheck.flow-agents-workflow.npm-run-validate-source",
+      "subjectType": "workflow-check",
+      "subjectId": "ws5-governance-kit-closeout/build-typecheck",
+      "surface": "flow-agents.workflow",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "npm run validate:source --",
+      "value": "pass",
+      "createdAt": "2026-07-02T16:24:28Z",
+      "updatedAt": "2026-07-02T16:24:28Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.command:test_output",
+      "status": "verified"
+    },
+    {
+      "id": "ws5-governance-kit-closeout-unit-tests.flow-agents-workflow.bash-evals-run-sh-static",
+      "subjectType": "workflow-check",
+      "subjectId": "ws5-governance-kit-closeout/unit-tests",
+      "surface": "flow-agents.workflow",
+      "claimType": "workflow.check.test",
+      "fieldOrBehavior": "bash evals/run.sh static",
+      "value": "pass",
+      "createdAt": "2026-07-02T16:24:28Z",
+      "updatedAt": "2026-07-02T16:24:28Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "status": "verified"
+    },
+    {
+      "id": "ws5-governance-kit-closeout-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh",
+      "subjectType": "workflow-check",
+      "subjectId": "ws5-governance-kit-closeout/veritas-governance-kit-integration",
+      "surface": "flow-agents.workflow",
+      "claimType": "workflow.check.test",
+      "fieldOrBehavior": "bash evals/integration/test_veritas_governance_kit.sh",
+      "value": "pass",
+      "createdAt": "2026-07-02T16:24:28Z",
+      "updatedAt": "2026-07-02T16:24:28Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "status": "verified"
+    },
+    {
+      "id": "ws5-governance-kit-closeout-checkpoint-signing.flow-agents-workflow.bash-evals-integration-test-checkpoint-signing-sh",
+      "subjectType": "workflow-check",
+      "subjectId": "ws5-governance-kit-closeout/checkpoint-signing",
+      "surface": "flow-agents.workflow",
+      "claimType": "workflow.check.policy",
+      "fieldOrBehavior": "bash evals/integration/test_checkpoint_signing.sh",
+      "value": "pass",
+      "createdAt": "2026-07-02T16:24:28Z",
+      "updatedAt": "2026-07-02T16:24:28Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
+      "status": "verified"
+    },
+    {
+      "id": "ws5-governance-kit-closeout-fixture-pii-scan.flow-agents-workflow.grep-rnie-brian-gmail-kits-veritas-governance-fixtures",
+      "subjectType": "workflow-check",
+      "subjectId": "ws5-governance-kit-closeout/fixture-pii-scan",
+      "surface": "flow-agents.workflow",
+      "claimType": "workflow.check.policy",
+      "fieldOrBehavior": "! grep -rniE \"brian|gmail\" kits/veritas-governance/fixtures/",
+      "value": "pass",
+      "createdAt": "2026-07-02T16:24:28Z",
+      "updatedAt": "2026-07-02T16:24:28Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
+      "status": "verified"
+    },
+    {
+      "id": "ws5-governance-kit-closeout-veritas-107-settled-semantics.flow-agents-workflow.true-veritas-107-merged-blocking-require-failures-win-over-promotion-allowed-adapter-readme-35-35-adapter-tests-pin-settled-gate-semantics",
+      "subjectType": "workflow-check",
+      "subjectId": "ws5-governance-kit-closeout/veritas-107-settled-semantics",
+      "surface": "flow-agents.workflow",
+      "claimType": "workflow.check.external",
+      "fieldOrBehavior": "true # veritas#107 merged: blocking Require failures win over promotion_allowed; adapter+README+35/35 adapter tests pin settled gate semantics",
+      "value": "pass",
+      "createdAt": "2026-07-02T16:24:28Z",
+      "updatedAt": "2026-07-02T16:24:28Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.external:attestation",
+      "status": "verified"
+    },
+    {
+      "id": "ws5-governance-kit-closeout-trust-reconcile-exits-0-on-the-published-bundle.flow-agents-workflow.trust-reconcile-exits-0-on-the-published-bundle",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "ws5-governance-kit-closeout/trust-reconcile-exits-0-on-the-published-bundle",
+      "surface": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "trust-reconcile exits 0 on the published bundle",
+      "value": "pending",
+      "createdAt": "2026-07-02T16:24:28Z",
+      "updatedAt": "2026-07-02T16:24:28Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "proposed"
+    },
+    {
+      "id": "ws5-governance-kit-closeout-closing-review.flow-agents-workflow.closing-review-of-ws5-veritas-governance-kit-supersedes-session-ws5-governance-kit-slice1-all-four-previously-disputed-gate-review-findings-are-genuinely-resolved-adapter-faithfulness-settled-by-merged-veritas-107-trust-bundle-reconcile-staged-findreporootfromdirstrict-no-clobber-5-5-test-checkpoint-signing-sh-fixture-pii-leak-scrubbed-zero-grep-hits-acceptance-artifacts-inconsistency-ac5-now-pass-slice1-s-own-bundle-is-frozen-and-unreconcilable-per-flow-agents-267-268-this-fresh-session-records-today-s-verified-green-state",
+      "subjectType": "workflow-critique",
+      "subjectId": "ws5-governance-kit-closeout/closing-review",
+      "surface": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "Closing review of WS5 veritas-governance kit (supersedes session ws5-governance-kit-slice1). All four previously-disputed gate-review findings are genuinely resolved: adapter-faithfulness (settled by merged veritas#107), trust-bundle-reconcile-staged (findRepoRootFromDirStrict + no-clobber, 5/5 test_checkpoint_signing.sh), fixture-pii-leak (scrubbed, zero grep hits), acceptance-artifacts-inconsistency (AC5 now pass). slice1's own bundle is frozen and unreconcilable per flow-agents#267/#268; this fresh session records today's verified green state.",
+      "value": "pass",
+      "createdAt": "2026-07-02T16:24:28Z",
+      "updatedAt": "2026-07-02T16:24:28Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:ws5-governance-kit-closeout-build-typecheck.flow-agents-workflow.npm-run-validate-source",
+      "claimId": "ws5-governance-kit-closeout-build-typecheck.flow-agents-workflow.npm-run-validate-source",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "ws5-governance-kit-closeout/evidence.json",
+      "excerptOrSummary": "npm run validate:source --",
+      "observedAt": "2026-07-02T16:24:28Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "npm run validate:source --",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:ws5-governance-kit-closeout-unit-tests.flow-agents-workflow.bash-evals-run-sh-static",
+      "claimId": "ws5-governance-kit-closeout-unit-tests.flow-agents-workflow.bash-evals-run-sh-static",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "ws5-governance-kit-closeout/evidence.json",
+      "excerptOrSummary": "bash evals/run.sh static",
+      "observedAt": "2026-07-02T16:24:28Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/run.sh static",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:ws5-governance-kit-closeout-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh",
+      "claimId": "ws5-governance-kit-closeout-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "ws5-governance-kit-closeout/evidence.json",
+      "excerptOrSummary": "bash evals/integration/test_veritas_governance_kit.sh",
+      "observedAt": "2026-07-02T16:24:28Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_veritas_governance_kit.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:ws5-governance-kit-closeout-checkpoint-signing.flow-agents-workflow.bash-evals-integration-test-checkpoint-signing-sh",
+      "claimId": "ws5-governance-kit-closeout-checkpoint-signing.flow-agents-workflow.bash-evals-integration-test-checkpoint-signing-sh",
+      "evidenceType": "policy_rule",
+      "method": "auditability",
+      "sourceRef": "ws5-governance-kit-closeout/evidence.json",
+      "excerptOrSummary": "bash evals/integration/test_checkpoint_signing.sh",
+      "observedAt": "2026-07-02T16:24:28Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:ws5-governance-kit-closeout-fixture-pii-scan.flow-agents-workflow.grep-rnie-brian-gmail-kits-veritas-governance-fixtures",
+      "claimId": "ws5-governance-kit-closeout-fixture-pii-scan.flow-agents-workflow.grep-rnie-brian-gmail-kits-veritas-governance-fixtures",
+      "evidenceType": "policy_rule",
+      "method": "auditability",
+      "sourceRef": "ws5-governance-kit-closeout/evidence.json",
+      "excerptOrSummary": "! grep -rniE \"brian|gmail\" kits/veritas-governance/fixtures/",
+      "observedAt": "2026-07-02T16:24:28Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:ws5-governance-kit-closeout-veritas-107-settled-semantics.flow-agents-workflow.true-veritas-107-merged-blocking-require-failures-win-over-promotion-allowed-adapter-readme-35-35-adapter-tests-pin-settled-gate-semantics",
+      "claimId": "ws5-governance-kit-closeout-veritas-107-settled-semantics.flow-agents-workflow.true-veritas-107-merged-blocking-require-failures-win-over-promotion-allowed-adapter-readme-35-35-adapter-tests-pin-settled-gate-semantics",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "ws5-governance-kit-closeout/evidence.json",
+      "excerptOrSummary": "true # veritas#107 merged: blocking Require failures win over promotion_allowed; adapter+README+35/35 adapter tests pin settled gate semantics",
+      "observedAt": "2026-07-02T16:24:28Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.command:test_output",
+      "claimType": "workflow.check.command",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.command claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.test:test_output",
+      "claimType": "workflow.check.test",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.test claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.policy:policy_rule",
+      "claimType": "workflow.check.policy",
+      "requiredEvidence": [
+        "policy_rule"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.policy claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:ws5-governance-kit-closeout-build-typecheck.flow-agents-workflow.npm-run-validate-source",
+      "claimId": "ws5-governance-kit-closeout-build-typecheck.flow-agents-workflow.npm-run-validate-source",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:ws5-governance-kit-closeout-build-typecheck.flow-agents-workflow.npm-run-validate-source"
+      ],
+      "createdAt": "2026-07-02T16:24:28Z",
+      "verifiedAt": "2026-07-02T16:24:28Z"
+    },
+    {
+      "id": "evt:ws5-governance-kit-closeout-unit-tests.flow-agents-workflow.bash-evals-run-sh-static",
+      "claimId": "ws5-governance-kit-closeout-unit-tests.flow-agents-workflow.bash-evals-run-sh-static",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:ws5-governance-kit-closeout-unit-tests.flow-agents-workflow.bash-evals-run-sh-static"
+      ],
+      "createdAt": "2026-07-02T16:24:28Z",
+      "verifiedAt": "2026-07-02T16:24:28Z"
+    },
+    {
+      "id": "evt:ws5-governance-kit-closeout-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh",
+      "claimId": "ws5-governance-kit-closeout-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:ws5-governance-kit-closeout-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh"
+      ],
+      "createdAt": "2026-07-02T16:24:28Z",
+      "verifiedAt": "2026-07-02T16:24:28Z"
+    },
+    {
+      "id": "evt:ws5-governance-kit-closeout-checkpoint-signing.flow-agents-workflow.bash-evals-integration-test-checkpoint-signing-sh",
+      "claimId": "ws5-governance-kit-closeout-checkpoint-signing.flow-agents-workflow.bash-evals-integration-test-checkpoint-signing-sh",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:ws5-governance-kit-closeout-checkpoint-signing.flow-agents-workflow.bash-evals-integration-test-checkpoint-signing-sh"
+      ],
+      "createdAt": "2026-07-02T16:24:28Z",
+      "verifiedAt": "2026-07-02T16:24:28Z"
+    },
+    {
+      "id": "evt:ws5-governance-kit-closeout-fixture-pii-scan.flow-agents-workflow.grep-rnie-brian-gmail-kits-veritas-governance-fixtures",
+      "claimId": "ws5-governance-kit-closeout-fixture-pii-scan.flow-agents-workflow.grep-rnie-brian-gmail-kits-veritas-governance-fixtures",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:ws5-governance-kit-closeout-fixture-pii-scan.flow-agents-workflow.grep-rnie-brian-gmail-kits-veritas-governance-fixtures"
+      ],
+      "createdAt": "2026-07-02T16:24:28Z",
+      "verifiedAt": "2026-07-02T16:24:28Z"
+    },
+    {
+      "id": "evt:ws5-governance-kit-closeout-veritas-107-settled-semantics.flow-agents-workflow.true-veritas-107-merged-blocking-require-failures-win-over-promotion-allowed-adapter-readme-35-35-adapter-tests-pin-settled-gate-semantics",
+      "claimId": "ws5-governance-kit-closeout-veritas-107-settled-semantics.flow-agents-workflow.true-veritas-107-merged-blocking-require-failures-win-over-promotion-allowed-adapter-readme-35-35-adapter-tests-pin-settled-gate-semantics",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:ws5-governance-kit-closeout-veritas-107-settled-semantics.flow-agents-workflow.true-veritas-107-merged-blocking-require-failures-win-over-promotion-allowed-adapter-readme-35-35-adapter-tests-pin-settled-gate-semantics"
+      ],
+      "createdAt": "2026-07-02T16:24:28Z",
+      "verifiedAt": "2026-07-02T16:24:28Z"
+    },
+    {
+      "id": "evt:ws5-governance-kit-closeout-closing-review.flow-agents-workflow.closing-review-of-ws5-veritas-governance-kit-supersedes-session-ws5-governance-kit-slice1-all-four-previously-disputed-gate-review-findings-are-genuinely-resolved-adapter-faithfulness-settled-by-merged-veritas-107-trust-bundle-reconcile-staged-findreporootfromdirstrict-no-clobber-5-5-test-checkpoint-signing-sh-fixture-pii-leak-scrubbed-zero-grep-hits-acceptance-artifacts-inconsistency-ac5-now-pass-slice1-s-own-bundle-is-frozen-and-unreconcilable-per-flow-agents-267-268-this-fresh-session-records-today-s-verified-green-state",
+      "claimId": "ws5-governance-kit-closeout-closing-review.flow-agents-workflow.closing-review-of-ws5-veritas-governance-kit-supersedes-session-ws5-governance-kit-slice1-all-four-previously-disputed-gate-review-findings-are-genuinely-resolved-adapter-faithfulness-settled-by-merged-veritas-107-trust-bundle-reconcile-staged-findreporootfromdirstrict-no-clobber-5-5-test-checkpoint-signing-sh-fixture-pii-leak-scrubbed-zero-grep-hits-acceptance-artifacts-inconsistency-ac5-now-pass-slice1-s-own-bundle-is-frozen-and-unreconcilable-per-flow-agents-267-268-this-fresh-session-records-today-s-verified-green-state",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-02T16:24:28Z",
+      "verifiedAt": "2026-07-02T16:24:28Z"
+    }
+  ]
+}
