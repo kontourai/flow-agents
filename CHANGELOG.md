@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.4.0](https://github.com/kontourai/flow-agents/compare/v2.3.0...v2.4.0) (2026-07-02)
+
+
+### Features
+
+* **kits:** cross-kit dependencies, skill-collision fixes, sidecar governance ([#264](https://github.com/kontourai/flow-agents/issues/264)) ([b2a4cc8](https://github.com/kontourai/flow-agents/commit/b2a4cc8abc1d7a822274fae90ee5e5e9e6dc7de5))
+
+
+### Fixes
+
+* **bundles:** resolve Codex hook script with HOME fallback; fail open with diagnostic ([e9c5993](https://github.com/kontourai/flow-agents/commit/e9c5993d84483c114641090026afaedc70afdcdb))
+* **evals:** heal integration lanes after runtime-path split ([20cdb36](https://github.com/kontourai/flow-agents/commit/20cdb36ac4b5704599faa524a5189d288b6d8a40))
+* **flow-agents:** resolve claude-code --global hook paths absolutely ([9148033](https://github.com/kontourai/flow-agents/commit/9148033f7c1e02512550f342d1bf3ac5e80fdf9d))
+
+
+### Refactoring
+
+* **flow-agents:** centralize Codex home default helper ([dc9995c](https://github.com/kontourai/flow-agents/commit/dc9995cdc43a456ab6248307ef6d5ace59559313))
+
 ## [2.3.0](https://github.com/kontourai/flow-agents/compare/v2.2.0...v2.3.0) (2026-07-01)
 
 
