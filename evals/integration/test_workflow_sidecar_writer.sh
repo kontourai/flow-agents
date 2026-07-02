@@ -557,6 +557,45 @@ else
   _fail "sidecar writer did not update state or bundle from evidence"
 fi
 
+# ─── WS8 (ADR 0020) AC1: producer evidence classification ─────────────────────
+# buildTrustBundle derives evidence.evidenceType/method from check.kind instead of
+# hardcoding test_output, and always stamps execution.label on command-backed checks.
+CLASSIFY_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/evidence-classification"
+mkdir -p "$CLASSIFY_DIR"
+cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$CLASSIFY_DIR/evidence-classification--deliver.md"
+flow_agents_node "$WRITER" init-plan "$CLASSIFY_DIR/evidence-classification--deliver.md" \
+  --source-request "Classify evidence by kind." \
+  --summary "Evidence classification fixture." \
+  --next-action "Record mixed-kind evidence." \
+  --timestamp "2026-05-09T00:01:00Z" >"$TMPDIR_EVAL/classify-init.out" 2>"$TMPDIR_EVAL/classify-init.err"
+
+if flow_agents_node "$WRITER" record-evidence "$CLASSIFY_DIR" \
+  --verdict pass \
+  --check-json '{"id":"unit-tests","kind":"test","status":"pass","summary":"Unit tests passed.","command":"npm test"}' \
+  --check-json '{"id":"dashboard-ui","kind":"browser","status":"pass","summary":"Visual check of dashboard."}' \
+  --timestamp "2026-05-09T00:01:05Z" >"$TMPDIR_EVAL/classify.out" 2>"$TMPDIR_EVAL/classify.err"; then
+  if node - "$CLASSIFY_DIR/trust.bundle" << 'NODE' 2>/dev/null
+const fs = require("fs");
+const b = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const ev = b.evidence || [];
+const testEv = ev.find((e) => /unit-tests/.test(String(e.claimId)) || /Unit tests/.test(String(e.excerptOrSummary)));
+const browserEv = ev.find((e) => /dashboard-ui/.test(String(e.claimId)) || /dashboard/.test(String(e.excerptOrSummary)));
+if (!testEv) throw new Error("no test-kind evidence item");
+if (!browserEv) throw new Error("no browser-kind evidence item");
+if (testEv.evidenceType !== "test_output") throw new Error("test-kind evidenceType expected test_output, got " + testEv.evidenceType);
+if (!testEv.execution || testEv.execution.label !== "npm test") throw new Error("test-kind must stamp execution.label 'npm test', got " + JSON.stringify(testEv.execution));
+if (browserEv.evidenceType === "test_output") throw new Error("browser-kind evidenceType must NOT be test_output (got test_output)");
+if (browserEv.evidenceType !== "crawl_observation") throw new Error("browser-kind evidenceType expected crawl_observation, got " + browserEv.evidenceType);
+NODE
+  then
+    _pass "AC1: producer classifies test-kind as test_output+label and browser-kind as crawl_observation"
+  else
+    _fail "AC1: evidence classification incorrect: $(cat "$TMPDIR_EVAL/classify.out" "$TMPDIR_EVAL/classify.err")"
+  fi
+else
+  _fail "AC1: record-evidence for classification fixture failed: $(cat "$TMPDIR_EVAL/classify.out" "$TMPDIR_EVAL/classify.err")"
+fi
+
 INVALID_REF_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/invalid-evidence-ref"
 mkdir -p "$INVALID_REF_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$INVALID_REF_DIR/invalid-evidence-ref--deliver.md"

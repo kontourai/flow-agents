@@ -78,6 +78,8 @@ If a perspective is required but cannot be reviewed, record it as `not_verified`
 
 When review runs as part of a workflow, write or update the configured critique artifact/sink. For the current local sidecar materialization, write or update `critique.json` beside the workflow artifacts using `schemas/workflow-critique.schema.json`.
 
+Reviewers write critique **through** `record-critique` (or `import-critique` for a Markdown report), directly or via the orchestrating skill — never by hand-authoring `critique.json`, `evidence.json`, or `acceptance.json`. Those bespoke sidecars were retired as the source of truth by ADR 0010 Phase 4c; `trust.bundle` is the sole verification artifact and only the sidecar writer performs the evidence classification the CI trust anchor depends on (ADR 0020). `config-protection.js` blocks direct tool writes to these gate files by design.
+
 Prefer the sidecar writer when available:
 
 ```bash

@@ -890,10 +890,39 @@ function verifyCommandLogChain(artifactDir) {
  *       FLOW_AGENTS_GOAL_FIT_RECHECK=true (the RCE-risky opt-in path).
  * Returns { argv, cwd, source } or null when nothing trusted resolves.
  */
+// WS8 (AC10b): a kind:"command" evidence ref's excerpt/command must be a literally runnable
+// shell command, not a prose description of a manual verification step. This heuristic
+// rejects prose so the goal-fit backstop never spawns `bash -lc "<a sentence>"` and
+// misreports the resulting shell error as a caught false-completion. Pairs with the rule
+// stated in context/contracts/planning-contract.md (AC11).
+function isRunnableCommandText(text) {
+  const s = typeof text === 'string' ? text.trim() : '';
+  if (!s) return false;
+  // Sentence-like prose (a . ! or ? followed by more words) is not a single command.
+  if (/[.!?]\s+\S/.test(s)) return false;
+  const first = s.split(/\s+/)[0] || '';
+  // WS8 (AC10b, iteration 2): the first-token allowlist is broadened to the common
+  // real-world verify binaries a project's runnable evidence names (git, tsc, eslint,
+  // python/python3, docker, curl, jq, diff, grep, test) so honest command evidence is not
+  // misclassified as prose. Still fail-closed for genuinely non-command prose: a bare
+  // sentence whose first token is none of these (and carries no path prefix or shell
+  // metacharacter) is rejected rather than executed.
+  const knownBinary = /^(npm|npx|pnpm|yarn|node|bash|sh|zsh|make|just|task|cargo|go|pytest|tox|deno|bun|ruby|rake|mvn|gradle|dotnet|swift|flutter|dart|git|tsc|eslint|python|python3|docker|curl|jq|diff|grep|test)$/.test(first)
+    || first.startsWith('./') || first.startsWith('/') || first.includes('/');
+  const hasShellMeta = /[|&;<>()$`]/.test(s);
+  return knownBinary || hasShellMeta;
+}
+
 function resolveTrustedCommand(root, artifactDir, check, acceptance) {
   // (a) acceptance criterion command for the matching criterion.
   const fromAcceptance = acceptanceCommandFor(check, acceptance);
-  if (fromAcceptance) return { argv: ['bash', '-lc', fromAcceptance], cwd: root, source: 'acceptance' };
+  if (fromAcceptance) {
+    // WS8 (AC10b): never spawn a prose "excerpt" as bash. A kind:"command" ref whose text
+    // is not a runnable shell command is malformed-evidence — reported distinctly, not
+    // executed, and not conflated with a caught false-completion.
+    if (!isRunnableCommandText(fromAcceptance)) return { malformed: fromAcceptance };
+    return { argv: ['bash', '-lc', fromAcceptance], cwd: root, source: 'acceptance' };
+  }
 
   // (b) declared manifest target. Map the check command/id to a declared script.
   const declared = declaredManifestTarget(root, check);
@@ -1157,6 +1186,12 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
       continue;
     }
     const trusted = resolveTrustedCommand(root, artifactDir, check, acceptance);
+    if (trusted && trusted.malformed) {
+      // WS8 (AC10b): the matching acceptance criterion named a kind:"command" evidence ref
+      // whose text is prose, not a runnable command. Do NOT execute it; classify it.
+      warnings.push(`${base} evidence check ${id}: malformed-evidence — acceptance criterion names a kind:"command" evidence ref whose text is not a runnable shell command ("${safeOneLine(trusted.malformed, 120)}"); it was NOT executed. Use a literal runnable command, or record the check as not_verified/accepted_gap (see context/contracts/planning-contract.md).`);
+      continue;
+    }
     if (!trusted) {
       warnings.push(`${base} evidence check ${id}: claimed pass but NOT_VERIFIED — command "${safeOneLine(cmd, 120)}" was never captured and no trusted command (acceptance criterion / declared manifest target) resolves to re-run it. Set FLOW_AGENTS_GOAL_FIT_RECHECK=true to opt into re-running the model's free-form command.`);
       continue;
@@ -1487,6 +1522,24 @@ function preferredArtifactDir(flowAgentsDir) {
   return dir.startsWith(flowAgentsDir + path.sep) && fs.existsSync(dir) ? dir : null;
 }
 
+/** WS8 (AC10a): a session dir is eligible as "active" only with real sidecar presence. */
+function hasSidecarPresence(artifactDir) {
+  return fs.existsSync(path.join(artifactDir, 'state.json')) || fs.existsSync(path.join(artifactDir, 'trust.bundle'));
+}
+
+// WS8 (AC10a): when current.json names a slug whose session directory does NOT exist,
+// return that slug so analyze() can log the staleness rather than silently falling back to
+// a global mtime scan that could resurface an abandoned/never-real session as active.
+function staleCurrentSlug(flowAgentsDir) {
+  const current = readJsonFile(path.join(flowAgentsDir, 'current.json'));
+  if (!current) return null;
+  const slug = current.artifact_dir || current.active_slug;
+  if (typeof slug !== 'string' || !slug.trim()) return null;
+  const safe = slug.replace(/\.\.+/g, '').replace(/^[/\\]+/, '');
+  const dir = path.join(flowAgentsDir, safe);
+  return (dir.startsWith(flowAgentsDir + path.sep) && !fs.existsSync(dir)) ? slug : null;
+}
+
 /**
  * A task is pre-execution (work not yet started) when its state.json status/phase
  * is still in the idea→planning band, or (no state.json) its markdown status is.
@@ -1576,19 +1629,29 @@ function missingBundleOrStateSignal(artifactDir, activeFlowStep) {
 // MAX_BLOCKS hard-block guard (preventing auto-release of hard blocks).
 const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered/;
 // FULL_BLOCK adds: workflow-state hygiene, surface-unavailable fail-closed, missing log.
-const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing|exit-code-laundered/;
+const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing|exit-code-laundered|malformed-evidence/;
 
 async function analyze(root, now = Date.now()) {
   const flowAgentsDirs = flowAgentsArtifactRootsForRead(root);
   // Scope to the session's current task when current.json names one, so an
   // unrelated active workflow elsewhere in the repo does not gate this stop.
   const scoped = flowAgentsDirs.map(preferredArtifactDir).find(Boolean);
+  // WS8 (AC10a): if current.json points at a nonexistent slug, LOG the staleness and, in
+  // the global fallback, require sidecar presence so a stale pointer cannot resurface an
+  // abandoned/never-real markdown-only directory as "the active session".
+  const staleSlug = scoped ? null : flowAgentsDirs.map(staleCurrentSlug).find(Boolean);
+  if (staleSlug) {
+    process.stderr.write(`[Hook] Goal Fit: current.json names slug "${safeOneLine(staleSlug, 80)}" but no such session directory exists — ignoring the stale pointer instead of resurfacing an abandoned session via a global mtime scan.\n`);
+  }
   const searchDirs = scoped ? [scoped] : flowAgentsDirs;
-  const artifacts = searchDirs
+  let artifacts = searchDirs
     .flatMap(dir => walkMarkdown(dir))
     .map(readArtifact)
     .filter(isWorkflowArtifact)
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  if (staleSlug) {
+    artifacts = artifacts.filter(a => a && hasSidecarPresence(path.dirname(a.file)));
+  }
 
   if (artifacts.length === 0) return { warnings: [], blocking: false };
 

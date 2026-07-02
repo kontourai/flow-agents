@@ -68,6 +68,7 @@ renamed, or changes category, update the table and the validator together.
 | `pre-commit-quality.js` | repo guardrail hook | `evals/integration/test_hook_category_behaviors.sh` | Supports repository Git hook checks, not installed runtime hooks. |
 | `desktop-notify.sh` | local notification helper | `evals/integration/test_hook_category_behaviors.sh` | Optional local desktop notification helper. |
 | `lib/audit-transport.sh` | shared hook library | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_telemetry.sh` | Shared audit event transport functions. |
+| `lib/config-protection-remedies.js` | shared hook library | `evals/integration/test_hook_category_behaviors.sh` | Sanctioned-remedy table for `config-protection.js` (WS8/ADR 0020 extraction). |
 | `lib/hook-flags.js` | shared hook library | `evals/integration/test_hook_category_behaviors.sh` | Shared profile/disable flag parsing. |
 | `lib/liveness-read.js` | shared hook library | `evals/integration/test_session_resume_roundtrip.sh` | Shared liveness event reader + freshness check (`readLivenessEvents`, `freshHolders`); consumed by the reground hook and `workflow-sidecar liveness status`. |
 | `lib/local-artifact-paths.js` | shared hook library | `evals/integration/test_migrate_local_artifacts.sh`, `evals/integration/test_workflow_sidecar_writer.sh` | Shared `.kontourai/flow-agents` artifact-root helpers for CJS hooks. |

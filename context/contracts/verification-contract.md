@@ -14,6 +14,14 @@ Verification is report-only. It proves whether the implementation satisfies the 
 
 Verifiers and reviewers do not modify source code. They may run commands, inspect files, take screenshots, and write verification artifacts. They must not apply fixes, formatting, lint autofixes, or patches.
 
+## Writing Evidence Through The Sidecar Writer
+
+Verifiers write evidence and acceptance status **through** `record-evidence` (directly, or via the orchestrating skill), never by hand-authoring `evidence.json`, `acceptance.json`, or `trust.bundle`. Those bespoke sidecars were retired as the source of truth by ADR 0010 Phase 4c; the `trust.bundle` is the sole verification artifact, and only the sidecar writer performs the evidence classification (`evidenceType`/`method` derivation and manifest reconciliation) the CI trust anchor depends on (ADR 0020). `config-protection.js` blocks direct tool writes to these gate files by design. If the sidecar writer is unavailable, record the exact gap instead of writing the files by hand.
+
+## Mutation Testing Runs In A Scratch Copy
+
+Mutation-testing tools (Stryker or equivalent) **must** run against a scratch/throwaway copy of the working tree, never the live working tree. They deliberately introduce defects to measure test-suite sensitivity; running them in place risks leaving mutated source, corrupting the checkout, or tripping the gate/anchor on injected failures. Copy the tree to a temporary directory (or a git worktree/clone) and run the mutation tool there; discard it afterward.
+
 ## Verification Phases
 
 Attempt relevant phases and record evidence:

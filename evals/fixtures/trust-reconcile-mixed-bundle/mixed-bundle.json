@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 3,
+  "source": "ws8-mixed-bundle-fixture",
+  "note": "WS8 (ADR 0020) end-to-end proof fixture: a single bundle carrying (1) a CI-reconcilable test_output claim whose execution.label is a real reconcile-manifest command (run-baseline.sh 'Content boundary' check), (2) an honest session-local human_attestation claim that is Surface-verified from its own evidence+event (the reconciler re-derives this status CI-side and it matches), and (3) an explicitly-waived accepted_gap claim (status assumed, metadata.waiver). Carries real events+policies so CI-side re-derivation (deriveClaimStatus) yields the same status the bundle asserts — i.e. an honest producer bundle, not a hand-set status. This is the exact mixed-evidence shape PR #264 could not get past Trust Reconcile.",
+  "claims": [
+    {
+      "id": "c-reconcilable",
+      "claimType": "workflow.check.test",
+      "value": "pass",
+      "status": "verified",
+      "subjectId": "ws8-mixed/content-boundary",
+      "surface": "flow-agents.workflow",
+      "subjectType": "workflow-check",
+      "fieldOrBehavior": "content boundary check passed",
+      "createdAt": "2026-07-02T00:00:00Z",
+      "updatedAt": "2026-07-02T00:00:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.test:test_output"
+    },
+    {
+      "id": "c-session-local",
+      "claimType": "workflow.check.external",
+      "value": "pass",
+      "status": "verified",
+      "subjectId": "ws8-mixed/manual-accessibility-review",
+      "surface": "flow-agents.workflow",
+      "subjectType": "workflow-check",
+      "fieldOrBehavior": "manual accessibility review of the dashboard confirmed WCAG AA contrast",
+      "createdAt": "2026-07-02T00:00:00Z",
+      "updatedAt": "2026-07-02T00:00:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.external:human_attestation"
+    },
+    {
+      "id": "c-waived",
+      "claimType": "workflow.check.external",
+      "value": "skip",
+      "status": "assumed",
+      "subjectId": "ws8-mixed/load-test",
+      "surface": "flow-agents.workflow",
+      "subjectType": "workflow-check",
+      "fieldOrBehavior": "sustained-load performance test",
+      "createdAt": "2026-07-02T00:00:00Z",
+      "updatedAt": "2026-07-02T00:00:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.external:attestation",
+      "metadata": {
+        "waiver": {
+          "reason": "load-test environment not provisioned this cycle; tracked for the perf milestone",
+          "approved_by": "brian",
+          "approved_at": "2026-07-02T00:00:00Z"
+        }
+      }
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-reconcilable",
+      "claimId": "c-reconcilable",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "ws8-mixed/command-log.jsonl",
+      "excerptOrSummary": "content boundary check passed",
+      "observedAt": "2026-07-02T00:00:00Z",
+      "collectedBy": "flow-agents/evidence-capture",
+      "passing": true,
+      "execution": { "runner": "bash", "label": "npm run check:content-boundary --", "isError": false, "exitCode": 0 }
+    },
+    {
+      "id": "ev-session-local",
+      "claimId": "c-session-local",
+      "evidenceType": "human_attestation",
+      "method": "attestation",
+      "sourceRef": "ws8-mixed/evidence.json",
+      "excerptOrSummary": "Reviewer manually verified dashboard contrast against WCAG AA using the axe DevTools panel.",
+      "observedAt": "2026-07-02T00:00:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev-waived",
+      "claimId": "c-waived",
+      "evidenceType": "attestation",
+      "method": "attestation",
+      "sourceRef": "ws8-mixed/evidence.json",
+      "excerptOrSummary": "Accepted gap: sustained-load performance test deferred.",
+      "observedAt": "2026-07-02T00:00:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.test:test_output",
+      "claimType": "workflow.check.test",
+      "requiredEvidence": ["test_output"],
+      "acceptanceCriteria": ["A verified verification event must support a workflow.check.test claim."],
+      "reviewAuthority": "system",
+      "validityRule": { "kind": "manual" },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.external:human_attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": ["human_attestation"],
+      "acceptanceCriteria": ["A verified verification event must support a workflow.check.external claim."],
+      "reviewAuthority": "system",
+      "validityRule": { "kind": "manual" },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": ["attestation"],
+      "acceptanceCriteria": ["A verified verification event must support a workflow.check.external claim."],
+      "reviewAuthority": "system",
+      "validityRule": { "kind": "manual" },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt-reconcilable",
+      "claimId": "c-reconcilable",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": ["ev-reconcilable"],
+      "createdAt": "2026-07-02T00:00:00Z",
+      "verifiedAt": "2026-07-02T00:00:00Z"
+    },
+    {
+      "id": "evt-session-local",
+      "claimId": "c-session-local",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "attestation",
+      "evidenceIds": ["ev-session-local"],
+      "createdAt": "2026-07-02T00:00:00Z",
+      "verifiedAt": "2026-07-02T00:00:00Z"
+    },
+    {
+      "id": "evt-waived",
+      "claimId": "c-waived",
+      "status": "assumed",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "attestation",
+      "evidenceIds": ["ev-waived"],
+      "createdAt": "2026-07-02T00:00:00Z",
+      "verifiedAt": "2026-07-02T00:00:00Z"
+    }
+  ]
+}

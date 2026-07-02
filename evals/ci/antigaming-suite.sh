@@ -31,6 +31,10 @@ TESTS=(
   "evals/integration/test_mint_attestation.sh"
   "evals/integration/test_publish_delivery.sh"
   "evals/integration/test_phase_map_and_gate_claim.sh"
+  "evals/integration/test_trust_reconcile_manifest.sh"
+  "evals/integration/test_trust_reconcile_mixed_bundle.sh"
+  "evals/integration/test_trust_reconcile_negatives.sh"
+  "evals/integration/test_goal_fit_ghost_session.sh"
 )
 
 fail=0

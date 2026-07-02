@@ -241,6 +241,48 @@ function criterionStatusToEventStatus(status: string): string | null {
   if (status === "accepted_gap") return "assumed";
   return null; // pending / not_verified → no event → Surface returns "unknown"
 }
+/**
+ * WS8 (ADR 0020): Derive Surface evidence classification (evidenceType + method)
+ * from a workflow check's kind, replacing the previous hardcoded `test_output`.
+ * Only command-backed re-runnable checks are `test_output` (CI-reconcilable);
+ * everything else is inherently session-local (manual attestation, provider/
+ * document citation, crawl observation, policy rule, source excerpt). The
+ * `reconcilable` flag is informational — the CI reconciler classifies purely by
+ * the emitted `evidenceType`. Every value is a member of Surface's own
+ * evidence.schema.json `evidenceType`/`method` enums (consume-never-fork).
+ */
+function classifyEvidence(kind: string | undefined, hasCommand: boolean): { evidenceType: string; method: string; reconcilable: boolean } {
+  const k = String(kind ?? "external");
+  switch (k) {
+    case "build":
+    case "types":
+    case "lint":
+    case "test":
+    case "command":
+      return { evidenceType: "test_output", method: "validation", reconcilable: true };
+    case "security":
+      return hasCommand
+        ? { evidenceType: "test_output", method: "validation", reconcilable: true }
+        : { evidenceType: "attestation", method: "corroboration", reconcilable: false };
+    case "diff":
+      return { evidenceType: "source_excerpt", method: "extraction", reconcilable: false };
+    case "browser":
+      return hasCommand
+        ? { evidenceType: "test_output", method: "validation", reconcilable: true }
+        : { evidenceType: "crawl_observation", method: "observation", reconcilable: false };
+    case "runtime":
+      return hasCommand
+        ? { evidenceType: "test_output", method: "validation", reconcilable: true }
+        : { evidenceType: "attestation", method: "attestation", reconcilable: false };
+    case "policy":
+      return { evidenceType: "policy_rule", method: "auditability", reconcilable: false };
+    case "external":
+      return { evidenceType: "attestation", method: "corroboration", reconcilable: false };
+    default:
+      return { evidenceType: "test_output", method: "validation", reconcilable: true };
+  }
+}
+
 /** Map a critique verdict to the Surface VerificationEvent status. */
 function critiqueToEventStatus(verdict: string, findings: AnyObj[]): string | null {
   if (verdict === "fail") return "disputed";
@@ -281,14 +323,29 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
   const events: AnyObj[] = [];
   const ts = timestamp || new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 
-  // One VerificationPolicy per distinct claimType, so status is policy-governed
-  // (not derived against an empty policy set). Maximal-fidelity per ADR 0010.
+  // One VerificationPolicy per distinct (claimType, requiredEvidence) pair, so status is
+  // policy-governed (not derived against an empty policy set). Maximal-fidelity per ADR 0010.
+  //
+  // WS8 (AC1, iteration 2): the cache is keyed by claimType + the normalized requiredEvidence
+  // set, NOT by claimType alone. Two checks of the same legacy claimType that differ in
+  // command-presence (e.g. a command-backed browser check → requiredEvidence [test_output]
+  // vs a no-command browser check → [crawl_observation]) previously COLLIDED: the first-seen
+  // requiredEvidence won and corrupted the second claim's derived status (verified → proposed)
+  // in a record-order-dependent way. Keying by (claimType, requiredEvidence) makes policy
+  // construction order-independent — each distinct evidence signature gets its own policy, and
+  // each claim references its own via verificationPolicyId (Surface's resolvePolicyForClaim
+  // honors verificationPolicyId first, so same-claimType policies never cross-resolve).
+  // Merging is NOT used because Surface's requiredEvidence is all-of (`.every`), so a union
+  // would over-constrain both claims.
   const policies = new Map<string, AnyObj>();
   const ensurePolicy = (claimType: string, impactLevel: string, requiredEvidence: string[]): AnyObj => {
-    let p = policies.get(claimType);
+    const reqSorted = [...new Set(requiredEvidence)].sort();
+    const key = `${claimType}::${reqSorted.join(",")}`;
+    let p = policies.get(key);
     if (!p) {
-      p = { id: `policy:${claimType}`, claimType, requiredEvidence, acceptanceCriteria: [`A verified verification event must support a ${claimType} claim.`], reviewAuthority: "system", validityRule: { kind: "manual" }, stalenessTriggers: [], conflictRules: [], impactLevel };
-      policies.set(claimType, p);
+      const id = reqSorted.length ? `policy:${claimType}:${reqSorted.join("+")}` : `policy:${claimType}`;
+      p = { id, claimType, requiredEvidence: reqSorted, acceptanceCriteria: [`A verified verification event must support a ${claimType} claim.`], reviewAuthority: "system", validityRule: { kind: "manual" }, stalenessTriggers: [], conflictRules: [], impactLevel };
+      policies.set(key, p);
     }
     return p;
   };
@@ -402,12 +459,22 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const claimId = generateClaimId(subjectId, "flow-agents.workflow", fieldOrBehavior);
     const evId = `ev:${claimId}`;
     const legacyClaimType = `workflow.check.${check.kind ?? "external"}`;
-    const policy = ensurePolicy(legacyClaimType, "high", ["test_output"]);
 
     const cmd = typeof check.command === "string" ? check.command.replace(/\s+/g, " ").trim() : "";
     const captured = cmd ? captureByCommand.get(cmd) : undefined;
+    // WS8 (ADR 0020): classify evidence from check.kind instead of hardcoding test_output.
+    // A waived accepted-gap (check._waiver, set by record-evidence/record-gate-claim
+    // --accepted-gap-reason/--waived-by) is by definition session-local: it is an
+    // attested accepted gap, never a CI-re-runnable command, so it is classified
+    // attestation/attestation and its claim status is forced to `assumed` (reusing the
+    // existing accepted_gap -> assumed mapping — no new status value).
+    const waiver = (check._waiver && typeof check._waiver === "object") ? check._waiver as AnyObj : null;
+    const evClass = waiver
+      ? { evidenceType: "attestation", method: "attestation", reconcilable: false }
+      : classifyEvidence(check.kind, cmd.length > 0);
+    const policy = ensurePolicy(legacyClaimType, "high", [evClass.evidenceType]);
     const effectiveStatus = captured ? captured.observedResult : String(check.status ?? "");
-    const evStatus = checkStatusToEventStatus(effectiveStatus);
+    const evStatus = waiver ? "assumed" : checkStatusToEventStatus(effectiveStatus);
 
     const claimEvents: AnyObj[] = [];
     if (evStatus) {
@@ -415,11 +482,17 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       events.push(evt);
       claimEvents.push(evt);
     }
-    const evItem: AnyObj = { id: evId, claimId, evidenceType: "test_output", method: "validation", sourceRef: `${slug}/evidence.json`, excerptOrSummary: fieldOrBehavior, observedAt: ts, collectedBy: "flow-agents/workflow-sidecar", passing: effectiveStatus === "pass" };
+    const evItem: AnyObj = { id: evId, claimId, evidenceType: evClass.evidenceType, method: evClass.method, sourceRef: `${slug}/evidence.json`, excerptOrSummary: fieldOrBehavior, observedAt: ts, collectedBy: "flow-agents/workflow-sidecar", passing: effectiveStatus === "pass" };
     if (captured) {
       evItem.sourceRef = `${slug}/command-log.jsonl`;
       evItem.collectedBy = "flow-agents/evidence-capture";
       evItem.execution = { runner: "bash", label: cmd, isError: captured.observedResult === "fail", ...(captured.exitCode != null ? { exitCode: captured.exitCode } : {}) };
+    } else if (cmd && !waiver) {
+      // WS8 (ADR 0020): always stamp execution.label on command-backed checks so the CI
+      // reconciler has a stable key to match against the manifest, even when the local
+      // command-log capture did not happen to run this command. isError is derived from
+      // the check's own reported status (no captured exit code available in this path).
+      evItem.execution = { runner: "bash", label: cmd, isError: effectiveStatus !== "pass" };
     }
     evidenceItems.push(evItem);
 
@@ -428,13 +501,13 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const declared = matchExpectsEntry("check", check.kind, typeof check._gate_claim_expectation_id === "string" ? check._gate_claim_expectation_id : undefined);
     if (declared) {
       // Declared kit-typed claim only — no legacy shadow (ADR 0016 P-d).
-      const declaredPolicy = ensurePolicy(declared.claimType, "high", ["test_output"]);
-      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, surface: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id };
+      const declaredPolicy = ensurePolicy(declared.claimType, "high", [evClass.evidenceType]);
+      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, surface: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, ...(waiver ? { metadata: { waiver } } : {}) };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
       claims.push({ ...declaredClaimObj, status: declaredStatus });
     } else {
       // No active flow step — only the workflow.* primary claim (legitimate no-flow fallback path).
-      const claimObj: AnyObj = { id: claimId, subjectType: "workflow-check", subjectId, surface: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id };
+      const claimObj: AnyObj = { id: claimId, subjectType: "workflow-check", subjectId, surface: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id, ...(waiver ? { metadata: { waiver } } : {}) };
       const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
       claims.push({ ...claimObj, status: derivedStatus });
     }
@@ -825,7 +898,7 @@ function resolveFirstStep(flowId: string, repoRoot: string): string | null {
   }
 }
 
-function writeCurrent(root: string, dir: string, timestamp: string, owner: string, source: string, flowId?: string, stepId?: string): void {
+function writeCurrent(root: string, dir: string, timestamp: string, owner: string, source: string, flowId?: string, stepId?: string, adHocReason?: string): void {
   writeJson(path.join(root, "current.json"), {
     schema_version: "1.0",
     active_slug: path.basename(dir),
@@ -839,6 +912,11 @@ function writeCurrent(root: string, dir: string, timestamp: string, owner: strin
     // FlowDefinition omit them and fall through to the workflow.* claim type path.
     ...(flowId ? { active_flow_id: flowId } : {}),
     ...(stepId ? { active_step_id: stepId } : {}),
+    // WS8 (AC12): sanctioned ad-hoc direct entry marker. Set when --step-id explicitly
+    // targets a step other than the flow's resolved first step, so stop-goal-fit /
+    // gate-review can distinguish an intentional direct entry (e.g. a planning-only
+    // session that skips pull-work) from a stale/mis-stamped active_step_id.
+    ...(adHocReason ? { ad_hoc_entry: true, ad_hoc_reason: adHocReason } : {}),
   });
 }
 function loadCurrent(root: string): AnyObj | null {
@@ -907,13 +985,26 @@ function ensureSession(p: ReturnType<typeof parseArgs>): number {
   // ensure-session --flow-id builder.build produces a FlowDefinition-driven session even
   // before the first advance-state call.
   const flowId = opt(p, "flow-id");
-  let stepId = opt(p, "step-id");
+  const explicitStep = opt(p, "step-id");
+  let stepId = explicitStep;
+  let adHocReason: string | undefined;
   if (flowId && !stepId) {
     const repoRoot = findRepoRootFromDir(dir);
     const firstStep = resolveFirstStep(flowId, repoRoot);
     if (firstStep) stepId = firstStep;
+  } else if (flowId && explicitStep) {
+    // WS8 (AC12): --step-id is the sanctioned ad-hoc direct-entry mechanism. When it names
+    // a step other than the flow's resolved first step, record an explicit ad_hoc_entry
+    // marker (with a reason) instead of silently letting the mis-stamp look like the
+    // flow's normal first step. This is the root-cause fix for a planning-only session
+    // whose active_step_id would otherwise default to builder.build's first step.
+    const repoRoot = findRepoRootFromDir(dir);
+    const firstStep = resolveFirstStep(flowId, repoRoot);
+    if (firstStep && firstStep !== explicitStep) {
+      adHocReason = opt(p, "ad-hoc-reason") || `direct entry at step "${explicitStep}" via --step-id (flow first step is "${firstStep}")`;
+    }
   }
-  writeCurrent(root, dir, timestamp, "workflow-sidecar", "ensure-session", flowId || undefined, stepId || undefined);
+  writeCurrent(root, dir, timestamp, "workflow-sidecar", "ensure-session", flowId || undefined, stepId || undefined, adHocReason);
   console.log(dir);
   return 0;
 }
@@ -1219,12 +1310,46 @@ function critiquesFromBundle(dir: string, declaredClaimTypes: Set<string> = new 
   }));
 }
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * WS8 (ADR 0020): parse the accepted-gap waiver flags. Both --accepted-gap-reason and
+ * --waived-by are required together (an accepted gap with no justification or no
+ * approver is refused — no silent/default waiver). Returns the waiver record to stamp
+ * onto claim.metadata.waiver, or null when neither flag is present. Reuses the existing
+ * accepted_gap -> assumed status mapping; adds no new canonical status value.
+ */
+function parseWaiver(p: ReturnType<typeof parseArgs>, ts: string): AnyObj | null {
+  const reason = opt(p, "accepted-gap-reason");
+  const waivedBy = opt(p, "waived-by");
+  if (!reason && !waivedBy) return null;
+  if (!reason) die("--accepted-gap-reason is required when --waived-by is set (an accepted gap must carry its justification)");
+  if (!waivedBy) die("--waived-by is required when --accepted-gap-reason is set (an accepted gap must name its approver)");
+  return { reason, approved_by: waivedBy, approved_at: ts };
+}
+
 async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const verdict = opt(p, "verdict") || die("--verdict is required");
   if (!verdicts.has(verdict)) die("verdict must be one of: pass, partial, fail, not_verified");
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
-  const checks = [...opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"))), ...opts(p, "surface-trust-json").map(surfaceCheckFromArtifact)];
+  const _ts0 = opt(p, "timestamp", now());
+  const _waiver = parseWaiver(p, _ts0);
+  const _checksRaw = [...opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"))), ...opts(p, "surface-trust-json").map(surfaceCheckFromArtifact)];
+  // WS8 (AC4, iteration 2): a command-backed check reconciles against CI or fails — it can
+  // NEVER be waived. Reject --accepted-gap-reason/--waived-by on any check whose evidence
+  // classifies as test_output (build/types/lint/test/command, and security/browser/runtime
+  // WHEN a command is present). Only session-local checks (attestation/observation/citation/
+  // diff/policy) are waivable. The CI reconciler enforces the same rule server-side (a waiver
+  // on test_output evidence is a divergence), so this producer-side guard is defense-in-depth,
+  // not the sole gate. (ADR 0020)
+  if (_waiver) {
+    for (const c of _checksRaw) {
+      const hasCmd = typeof (c as AnyObj).command === "string" && String((c as AnyObj).command).trim().length > 0;
+      if (classifyEvidence((c as AnyObj).kind as string | undefined, hasCmd).evidenceType === "test_output") {
+        die(`--accepted-gap-reason/--waived-by cannot be applied to a command-backed check (kind='${String((c as AnyObj).kind)}'${hasCmd ? " with a command" : ""}): a command-backed check reconciles against CI or fails and cannot be waived. Waive only session-local checks (attestation/observation/citation). (ADR 0020)`);
+      }
+    }
+  }
+  const checks = _checksRaw.map((c) => _waiver ? { ...c, _waiver } : c);
   if (!checks.length && opts(p, "surface-trust-json").length === 0) die("record-evidence requires at least one --check-json or --surface-trust-json");
   validateAcceptanceEvidenceRefs(dir);
   // Phase 4c: bundle is the sole verification artifact — stop writing evidence.json and acceptance.json update.
@@ -1325,8 +1450,11 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   }
 
   const checkNormalized = normalizeCheck(check);
+  // WS8 (ADR 0020): honor the accepted-gap waiver flags for a gate claim too.
+  const gateWaiver = parseWaiver(p, ts);
+  if (gateWaiver) checkNormalized._waiver = gateWaiver;
   // Log the targeted gate expectation for transparency (goes to stderr only)
-  process.stderr.write(`[record-gate-claim] targeting ${activeStep.stepId}/${activeStep.gateId}/${targetExpectation.id} → claimType=${claimType} subjectType=${subjectType}\n`);
+  process.stderr.write(`[record-gate-claim] targeting ${activeStep.stepId}/${activeStep.gateId}/${targetExpectation.id} → claimType=${claimType} subjectType=${subjectType}${gateWaiver ? " (WAIVED accepted_gap)" : ""}\n`);
   assertBundleWritten(await writeTrustBundle(dir, slug, ts, [checkNormalized], [], []));
   return 0;
 }
