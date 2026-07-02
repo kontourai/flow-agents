@@ -1,10 +1,16 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 type Issue = { path: string; message: string };
 
-const root = path.resolve(".");
+// Resolve bundled JSON Schemas relative to this compiled script's own package
+// location (build/src/cli/validate-workflow-artifacts.js -> ../../../schemas), NOT
+// process.cwd(), so `flow-agents-validate-artifacts` works from any repo (the artifact
+// paths to validate are still taken from argv/cwd). Mirrors the package-relative pattern
+// used for liveness-read.js in workflow-sidecar.ts.
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const statusRe = /\[(PASS|FAIL|NOT_VERIFIED|SKIP|PARTIAL)\]/i;
 const dateTimeRe = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const sidecarSchemas: Record<string, string> = {
@@ -264,7 +270,7 @@ function validateSidecar(file: string): Issue[] {
   if (value === undefined) return issues;
   const schemaFile = sidecarSchemas[path.basename(file)];
   if (schemaFile) {
-    const schema = JSON.parse(readText(path.join(root, schemaFile)));
+    const schema = JSON.parse(readText(path.join(packageRoot, schemaFile)));
     validateSchemaValue(file, value, schema, path.basename(file), issues, schema);
   }
   if (path.basename(file) === "evidence.json") {

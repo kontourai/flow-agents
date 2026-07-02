@@ -54,7 +54,7 @@ When the repository provides `npm run workflow:sidecar --`, use it for routine w
 
 After writer updates, run `npm run workflow:validate-artifacts -- --require-sidecars .kontourai/flow-agents/<slug>` when local validation is available. If the writer or validation is unavailable or blocked by sandbox policy, record the exact gap in the session artifact as `NOT_VERIFIED` instead of pretending structured state exists.
 
-`ensure-session` maintains `.kontourai/flow-agents/current.json`. The orchestrator owns root `state.json` and `handoff.json` updates. Delegated agents must be given the workflow artifact root and should append events under `agents/<agent-id>/events.jsonl` through `record-agent-event` instead of guessing the slug or rewriting root state.
+`ensure-session` maintains `.kontourai/flow-agents/current.json`. The orchestrator is responsible for keeping root `state.json` and `handoff.json` current, but performs every such update **exclusively** through the sidecar writer (`npm run workflow:sidecar -- advance-state` for state transitions, `init-plan` for the initial plan write) — never through a direct Write/Edit tool call against the sidecar path. `config-protection.js` blocks direct tool-mediated writes to `state.json` by design; that block is expected and correct, not a bug to route around. Delegated agents must be given the workflow artifact root and should append events under `agents/<agent-id>/events.jsonl` through `record-agent-event` instead of guessing the slug or rewriting root state.
 
 ## Input
 

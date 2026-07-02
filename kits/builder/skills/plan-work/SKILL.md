@@ -101,7 +101,7 @@ The `tool-planner` prompt context must include the latest-base confirmation and 
 1. Create session file in `.kontourai/flow-agents/<slug>/` if one wasn't provided:
    - Filename: `<slug>--plan-work.md`
    - `status: planning`, `type: plan-work`
-   - Create or update `state.json` with phase `planning`
+   - Create or update `state.json` (phase `planning`) via `npm run workflow:sidecar -- init-plan`/`ensure-session` — never through a direct Write/Edit tool call (`config-protection.js` blocks that by design)
    - use `npm run workflow:sidecar -- ensure-session --source-request ... --summary ... --criterion ...` when the repository provides it; this also writes `.kontourai/flow-agents/current.json`
    - **Builder Kit build flow**: add `--flow-id builder.build` to the `ensure-session` call when `plan-work` is invoked from `deliver`, from the Builder Kit `build` flow, or from a pick-up-and-build request after `pull-work`. This activates the FlowDefinition-driven path so producers fire and gates enforce on builder.* claims. Do NOT add `--flow-id` for direct/ad-hoc primitive `plan-work` invocations that are not part of a builder-flow.
 2. Delegate to `tool-planner`:
@@ -127,7 +127,7 @@ The `tool-planner` prompt context must include the latest-base confirmation and 
    - if task-to-acceptance mapping is unclear, send the planner feedback before presenting the plan as ready
 4. Read the plan artifact
 5. Update session file: paste plan summary into `## Plan`, set `status: planned`
-6. Update `state.json` with `status: planned`, phase `planning`, and the next action
+6. Update `state.json` (`status: planned`, phase `planning`, next action) via `npm run workflow:sidecar -- advance-state` — never through a direct Write/Edit tool call (`config-protection.js` blocks that by design)
 7. Present the plan to the user
 8. If the user wants changes, re-delegate to tool-planner with feedback
 

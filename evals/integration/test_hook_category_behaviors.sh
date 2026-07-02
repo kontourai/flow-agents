@@ -196,6 +196,36 @@ else
 fi
 
 echo ""
+echo "=== Sidecar Path Protection: read-allow / write-block with sanctioned remedy (AC7) ==="
+
+# Read on a sidecar state.json must be ALLOWED — read-only tools never mutate a file.
+if printf '%s\n' '{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"path":"/repo/.kontourai/flow-agents/my-slug/state.json"}}' \
+  | node "$ROOT/scripts/hooks/run-hook.js" pre:config-protection config-protection.js standard,strict >"$TMPDIR_EVAL/read-state.out" 2>"$TMPDIR_EVAL/read-state.err"; then
+  pass "Read on a sidecar state.json is allowed (read-only carve-out)"
+else
+  fail "Read on a sidecar state.json was incorrectly blocked"
+  cat "$TMPDIR_EVAL/read-state.err"
+fi
+
+# Write on a sidecar state.json must be BLOCKED with the sanctioned advance-state remedy,
+# and must NOT advise disabling the config-protection hook.
+if printf '%s\n' '{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"path":"/repo/.kontourai/flow-agents/my-slug/state.json"}}' \
+  | node "$ROOT/scripts/hooks/run-hook.js" pre:config-protection config-protection.js standard,strict >"$TMPDIR_EVAL/write-state.out" 2>"$TMPDIR_EVAL/write-state.err"; then
+  fail "Write on a sidecar state.json should be blocked"
+else
+  status=$?
+  if [[ "$status" -eq 2 ]] \
+    && grep -q "workflow:sidecar -- advance-state" "$TMPDIR_EVAL/write-state.err" \
+    && grep -q "Never disable this hook" "$TMPDIR_EVAL/write-state.err" \
+    && ! grep -q "disable the config-protection hook temporarily" "$TMPDIR_EVAL/write-state.err"; then
+    pass "Write on a sidecar state.json is blocked with the sanctioned advance-state remedy (no disable-the-hook advice)"
+  else
+    fail "sidecar state.json block message is not the reworded remedy"
+    cat "$TMPDIR_EVAL/write-state.err"
+  fi
+fi
+
+echo ""
 echo "=== Bypass Flag Detection Tests ==="
 
 # Decode flag strings from base64.
@@ -245,6 +275,79 @@ if printf '%s\n' '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input
   pass "git push -n (dry-run) is allowed (AC2)"
 else
   fail "git push -n was incorrectly blocked (AC2)"
+fi
+
+echo ""
+echo "=== Interpreter-Write / Copy-Move Remedy Tests (gap closure) ==="
+
+# Interpreter-write block on a sidecar state.json must surface the SAME
+# sanctioned advance-state remedy as the plain Write-tool case above, not the
+# generic (and factually wrong) "no sanctioned automated writer" fallback.
+#
+# The assembled command below reproduces the historical bug shape exactly:
+# the protected path lives INSIDE a double-quoted JS string, immediately
+# followed by a single quote and trailing punctuation (', data)) rather than
+# whitespace -- e.g. require('fs').writeFileSync('<path>', data). Pieces are
+# built via variable indirection for authoring safety, but the ASSEMBLED
+# command string at eval runtime has no whitespace-delimited token that ends
+# cleanly at the basename, so Pass 1's end-anchored token match cannot find
+# it and remedyForCommand must fall back to Pass 2's substring scan against
+# the raw command text.
+NODE_EVAL_FLAG="-e"
+SIDECAR_SLUG="my-slug"
+SIDECAR_STATE_BASENAME="state.json"
+SIDECAR_STATE_PATH="/repo/.kontourai/flow-agents/${SIDECAR_SLUG}/${SIDECAR_STATE_BASENAME}"
+INTERP_JS="require('fs').writeFileSync('${SIDECAR_STATE_PATH}', data)"
+INTERP_CMD_STATE="node ${NODE_EVAL_FLAG} \"${INTERP_JS}\""
+# Sanity: the path must NOT be a clean trailing token (no whitespace-token
+# boundary right after the basename) -- otherwise this test would silently
+# regress to exercising Pass 1 instead of Pass 2, as the prior version did.
+case "$INTERP_CMD_STATE" in
+  *"${SIDECAR_STATE_BASENAME} "*|*"${SIDECAR_STATE_BASENAME}")
+    fail "interpreter-write test fixture regressed to a clean trailing token (no longer exercises Pass 2)"
+    ;;
+esac
+INTERP_JSON_CMD="${INTERP_CMD_STATE//\"/\\\"}"
+_P=$(printf '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"%s"}}' "$INTERP_JSON_CMD")
+if printf '%s\n' "$_P" | node "$ROOT/scripts/hooks/run-hook.js" pre:config-protection config-protection.js standard,strict >"$TMPDIR_EVAL/interp-state.out" 2>"$TMPDIR_EVAL/interp-state.err"; then
+  fail "interpreter-write to a sidecar state.json should be blocked"
+else
+  status=$?
+  if [[ "$status" -eq 2 ]] \
+    && grep -q "workflow:sidecar -- advance-state" "$TMPDIR_EVAL/interp-state.err" \
+    && ! grep -q "no sanctioned automated writer for shell profiles" "$TMPDIR_EVAL/interp-state.err"; then
+    pass "interpreter-write block on a sidecar state.json surfaces the advance-state remedy (not the shell-profile fallback)"
+  else
+    fail "interpreter-write block message did not surface the advance-state remedy"
+    cat "$TMPDIR_EVAL/interp-state.err"
+  fi
+fi
+
+# cp/mv block on delivery/trust.bundle must name the sanctioned
+# publish-delivery writer instead of describing the internal publishDelivery
+# fs call.
+#
+# Note: unlike the interpreter-write case above, cp/mv destination arguments
+# ARE clean whitespace-delimited tokens (checkCopyMoveToProtected picks the
+# last positional argument, and remedyForCommand's Pass 1 matches that token
+# directly via checkProtectedPathPattern). Pass 1 legitimately covers this
+# path, so no substring-scan (Pass 2) strengthening is needed here --
+# verified by mutation-disabling Pass 2 and confirming this assertion still
+# passes.
+CP_BIN="cp"
+DELIVERY_TRUST_BUNDLE="delivery/trust.bundle"
+CP_CMD_DELIVERY="${CP_BIN} forged.json ${DELIVERY_TRUST_BUNDLE}"
+_P=$(printf '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"%s"}}' "$CP_CMD_DELIVERY")
+if printf '%s\n' "$_P" | node "$ROOT/scripts/hooks/run-hook.js" pre:config-protection config-protection.js standard,strict >"$TMPDIR_EVAL/cp-delivery.out" 2>"$TMPDIR_EVAL/cp-delivery.err"; then
+  fail "cp to delivery/trust.bundle should be blocked"
+else
+  status=$?
+  if [[ "$status" -eq 2 ]] && grep -q "workflow:sidecar -- publish-delivery" "$TMPDIR_EVAL/cp-delivery.err"; then
+    pass "cp block on delivery/trust.bundle surfaces the sanctioned publish-delivery remedy"
+  else
+    fail "cp block on delivery/trust.bundle did not surface the publish-delivery remedy"
+    cat "$TMPDIR_EVAL/cp-delivery.err"
+  fi
 fi
 if [[ "$errors" -eq 0 ]]; then
   echo "Hook category behavior checks passed"

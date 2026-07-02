@@ -128,6 +128,21 @@ else
   sed -n '1,160p' "$status_output"
 fi
 
+# Cross-kit dependency: install-time non-blocking warning (AC1).
+# valid-with-dependency declares a dependency on a kit that is never installed.
+DEP_SRC="$ROOT/evals/fixtures/flow-kit-repository/valid-with-dependency"
+DEP_DEST="$TMP_DIR/dep-dest"
+mkdir -p "$DEP_DEST"
+dep_output="$TMP_DIR/dep-install.out"
+if flow_agents_node "$CLI" install "$DEP_SRC" --dest "$DEP_DEST" >"$dep_output" 2>&1 \
+  && rg -q "declares a dependency on 'nonexistent-dep-kit'" "$dep_output" \
+  && rg -q "not installed" "$dep_output"; then
+  pass "kit with a missing declared dependency installs (exit 0) with a non-blocking warning"
+else
+  fail "missing-dependency install did not warn or exited non-zero"
+  sed -n '1,160p' "$dep_output"
+fi
+
 CATALOG_HASH_AFTER="$(shasum -a 256 "$ROOT/kits/catalog.json" | awk '{print $1}')"
 if [[ "$CATALOG_HASH_BEFORE" == "$CATALOG_HASH_AFTER" ]]; then
   pass "local installs do not mutate source kits/catalog.json"

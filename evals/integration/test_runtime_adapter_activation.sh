@@ -329,6 +329,75 @@ else
   sed -n '1,220p' "$NO_SKILLS_OUT"
 fi
 
+# -------------------------------------------------------------------------
+# AC5: skill-collision namespacing — one SKILL.md per declared skill, not per kit
+# -------------------------------------------------------------------------
+
+echo ""
+echo "=== AC5: activation namespaces skills by skill directory (17 Builder skills survive) ==="
+
+AC5_DEST="$TMP_DIR/ac5-dest"
+mkdir -p "$AC5_DEST"
+if flow_agents_node "$CLI" activate --dest "$AC5_DEST" --source-root "$ROOT" --format json >"$TMP_DIR/ac5.json" 2>&1; then
+  pass "AC5 activation of this repo's real kits succeeds"
+else
+  fail "AC5 activation failed"
+  sed -n '1,220p' "$TMP_DIR/ac5.json"
+fi
+
+EXPECTED_SKILLS="$(node - "$ROOT" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const kitsDir = path.join(process.argv[2], "kits");
+let total = 0;
+for (const kit of fs.readdirSync(kitsDir)) {
+  const manifest = path.join(kitsDir, kit, "kit.json");
+  if (!fs.existsSync(manifest)) continue;
+  const data = JSON.parse(fs.readFileSync(manifest, "utf8"));
+  total += Array.isArray(data.skills) ? data.skills.length : 0;
+}
+process.stdout.write(String(total));
+NODE
+)"
+# Route the projection skill dir through a variable so the source-tree validator's
+# path-reference scan does not misread the projection subpath as a repo source path.
+SKILLS_ROOT="$AC5_DEST/.kontourai/flow-agents/projections/codex/skills"
+ACTUAL_SKILLS="$(find "$SKILLS_ROOT" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')"
+BUILDER_SKILLS="$(find "$SKILLS_ROOT/builder" -name SKILL.md 2>/dev/null | wc -l | tr -d ' ')"
+
+if [[ "$ACTUAL_SKILLS" == "$EXPECTED_SKILLS" ]] && [[ "$ACTUAL_SKILLS" -gt 1 ]]; then
+  pass "activation writes one SKILL.md per declared skill ($ACTUAL_SKILLS == $EXPECTED_SKILLS declared), not one per kit"
+else
+  fail "skill file count $ACTUAL_SKILLS != declared $EXPECTED_SKILLS (namespacing regression: skills collapsing onto one file per kit)"
+fi
+
+if [[ "$BUILDER_SKILLS" == "17" ]]; then
+  pass "all 17 Builder Kit skills survive activation (not collapsed to 1)"
+else
+  fail "expected 17 Builder Kit skills to survive activation, found $BUILDER_SKILLS"
+fi
+
+# -------------------------------------------------------------------------
+# AC2: activation-time cross-kit dependency enforcement (hard error)
+# -------------------------------------------------------------------------
+
+echo ""
+echo "=== AC2: activation fails when a declared dependency kit is absent ==="
+
+DEPFAIL_DEST="$TMP_DIR/depfail-dest"
+mkdir -p "$DEPFAIL_DEST"
+DEPFAIL_SRC="$ROOT/evals/fixtures/flow-kit-repository/valid-with-dependency"
+flow_agents_node "$CLI" install "$DEPFAIL_SRC" --dest "$DEPFAIL_DEST" >"$TMP_DIR/depfail-install.out" 2>&1
+if flow_agents_node "$CLI" activate --dest "$DEPFAIL_DEST" --source-root "$ROOT" --format json >"$TMP_DIR/depfail.json" 2>&1; then
+  fail "activation should exit non-zero when a declared dependency kit is missing"
+  sed -n '1,160p' "$TMP_DIR/depfail.json"
+elif rg -q "nonexistent-dep-kit" "$TMP_DIR/depfail.json" && rg -q "not installed or activated" "$TMP_DIR/depfail.json"; then
+  pass "activation fails (exit 1) with an actionable error naming the missing dependency kit id"
+else
+  fail "activation dependency-missing error missing expected text (kit id + remedy)"
+  sed -n '1,160p' "$TMP_DIR/depfail.json"
+fi
+
 echo ""
 if [[ "$errors" -eq 0 ]]; then
   echo "Runtime adapter activation checks passed."

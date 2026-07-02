@@ -10,7 +10,7 @@ pass=0
 fail=0
 
 cleanup() {
-  rm -rf "$REPRO_FIRST_DIR" "$REPRO_SECOND_DIR"
+  rm -rf "$REPRO_FIRST_DIR" "$REPRO_SECOND_DIR" "$ROOT_DIR/kits/zzz-collision-eval-probe"
 }
 trap cleanup EXIT
 
@@ -429,6 +429,47 @@ if grep -q "reason: result.reason" "$BUILDER_SRC"; then
 else
   _fail "pi adapter block path dropped the policy reason"
 fi
+
+echo ""
+echo "--- Skill collision detector (AC6) ---"
+# Positive: the real skill set across skills/ and kits/*/kit.json builds with no collision.
+if (cd "$ROOT_DIR" && FLOW_AGENTS_DIST_DIR="$(mktemp -d)" node build/src/cli.js build-bundles) >/tmp/universal-bundle-collision-clean.txt 2>&1; then
+  _pass "build succeeds with the current (collision-free) skill set"
+else
+  _fail "clean build unexpectedly failed"
+  sed -n '1,60p' /tmp/universal-bundle-collision-clean.txt
+fi
+
+# Negative: a synthetic kit re-using an existing skill directory name (deliver) must FAIL
+# the build with a diagnostic naming both source kits.
+COLLIDE_KIT="$ROOT_DIR/kits/zzz-collision-eval-probe"
+rm -rf "$COLLIDE_KIT"
+mkdir -p "$COLLIDE_KIT/skills/deliver"
+cat > "$COLLIDE_KIT/kit.json" <<'KITJSON'
+{
+  "schema_version": "1.0",
+  "id": "zzz-collision-eval-probe",
+  "name": "Collision Eval Probe",
+  "flows": [],
+  "skills": [
+    { "id": "zzz.deliver", "path": "skills/deliver/SKILL.md" }
+  ]
+}
+KITJSON
+printf '# collision probe skill\n' > "$COLLIDE_KIT/skills/deliver/SKILL.md"
+if (cd "$ROOT_DIR" && FLOW_AGENTS_DIST_DIR="$(mktemp -d)" node build/src/cli.js build-bundles) >/tmp/universal-bundle-collision.txt 2>&1; then
+  _fail "build should FAIL when two kits declare the same skill directory name"
+else
+  if grep -q "skill name collision" /tmp/universal-bundle-collision.txt \
+    && grep -q "kits/builder" /tmp/universal-bundle-collision.txt \
+    && grep -q "zzz-collision-eval-probe" /tmp/universal-bundle-collision.txt; then
+    _pass "build fails with a clear collision diagnostic naming both source kits"
+  else
+    _fail "collision diagnostic missing expected text"
+    sed -n '1,60p' /tmp/universal-bundle-collision.txt
+  fi
+fi
+rm -rf "$COLLIDE_KIT"
 
 echo ""
 echo "==========================="
