@@ -275,7 +275,7 @@ flow_agents_node "workflow-sidecar" advance-state "$T_DIR/.kontourai/flow-agents
 python3 - "$T_DIR/.kontourai/flow-agents/tamper/trust.bundle" << 'PY'
 import json, sys
 bundle = {
-    "schemaVersion": 3,
+    "schemaVersion": 5,
     "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c1",

@@ -183,7 +183,7 @@ import json, sys
 claim_type = sys.argv[2]
 subject_type = sys.argv[3]
 bundle = {
-    "schemaVersion": 3,
+    "schemaVersion": 5,
     "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c1",

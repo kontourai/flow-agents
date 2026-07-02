@@ -69,7 +69,7 @@ seed_repo "$TAMPER_DIR" "tampered"
 python3 - "$TAMPER_DIR/.kontourai/flow-agents/tampered/trust.bundle" << 'PY'
 import json, sys
 bundle = {
-    "schemaVersion": 3,
+    "schemaVersion": 5,
     "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c1",
@@ -146,7 +146,7 @@ seed_repo "$LEGIT_DIR" "legit"
 python3 - "$LEGIT_DIR/.kontourai/flow-agents/legit/trust.bundle" << 'PY'
 import json, sys
 bundle = {
-    "schemaVersion": 3,
+    "schemaVersion": 5,
     "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c2",
@@ -214,7 +214,7 @@ seed_repo "$STORED_DIR" "stored"
 python3 - "$STORED_DIR/.kontourai/flow-agents/stored/trust.bundle" << 'PY'
 import json, sys
 bundle = {
-    "schemaVersion": 3,
+    "schemaVersion": 5,
     "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c3",

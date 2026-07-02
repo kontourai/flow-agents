@@ -62,14 +62,14 @@ seed_trust_bundle() {
 
   cat > "$dir/trust.bundle" <<JSON
 {
-  "schemaVersion": 3,
+  "schemaVersion": 5,
   "source": "gate-review-test;statusFunctionVersion=1",
   "claims": [
     {
       "id": "$claimId",
       "subjectType": "workflow-check",
       "subjectId": "$slug/unit-tests",
-      "surface": "flow-agents.workflow",
+      "facet": "flow-agents.workflow",
       "claimType": "workflow.check.test",
       "fieldOrBehavior": "unit tests pass",
       "value": "pass",
@@ -256,7 +256,7 @@ mkdir -p "$AC2MB_DIR"
 # Seed: empty bundle (no claims) + no block + expected criterion absent → missed_block
 cat > "$AC2MB_DIR/trust.bundle" <<JSON
 {
-  "schemaVersion": 3,
+  "schemaVersion": 5,
   "source": "gate-review-test;statusFunctionVersion=1",
   "claims": [],
   "evidence": [],

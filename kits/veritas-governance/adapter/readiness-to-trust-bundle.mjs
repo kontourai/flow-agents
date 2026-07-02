@@ -128,6 +128,17 @@ export function buildReadinessTrustBundle(record, opts = {}) {
     id: claimId,
     subjectType: "repository-change",
     subjectId,
+    // DELIBERATE LEGACY WRITE (surface 2.0.0 Claim.facet migration): this bundle is
+    // consumed by `flow attach-evidence --bundle`, which validates against the `hachure` npm
+    // package's OWN trust-bundle/claim schemas (node_modules/hachure/schemas/*.schema.json via
+    // @kontourai/flow's trust-bundle-validator.js) -- NOT via @kontourai/surface's
+    // validateTrustBundle read-shim. hachure@0.5.1 still REQUIRES `surface` on a Claim and
+    // restricts `schemaVersion` to the enum [2, 3, 4]; it has not yet published the facet-rename
+    // schema bump that @kontourai/surface@2.0.0's docs describe. Writing `facet`/schemaVersion 5
+    // here would fail hachure's strict schema validation and break `flow attach-evidence
+    // --bundle` (see evals/integration/test_veritas_governance_kit.sh). Once hachure ships the
+    // facet-rename schema (and @kontourai/flow picks it up), migrate this site along with the
+    // rest of the Claim.surface -> Claim.facet rename.
     surface: surfaceName,
     claimType,
     fieldOrBehavior: "mergeReadiness",
@@ -143,7 +154,7 @@ export function buildReadinessTrustBundle(record, opts = {}) {
 
   return {
     bundle: {
-      schemaVersion: 3,
+      schemaVersion: 3, // see DELIBERATE LEGACY WRITE note above (hachure@0.5.1 enum is [2,3,4])
       source: "veritas-governance-kit/readiness-adapter",
       claims: [{ ...claim, status }],
       evidence: [evItem],

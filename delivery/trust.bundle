@@ -1,115 +1,227 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 5,
   "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
   "claims": [
     {
-      "id": "ws5-governance-kit-closeout-build-typecheck.flow-agents-workflow.npm-run-validate-source",
+      "id": "surface-2-facet-migration-content-boundary.flow-agents-workflow.npm-run-check-content-boundary",
       "subjectType": "workflow-check",
-      "subjectId": "ws5-governance-kit-closeout/build-typecheck",
-      "surface": "flow-agents.workflow",
+      "subjectId": "surface-2-facet-migration/content-boundary",
+      "facet": "flow-agents.workflow",
       "claimType": "workflow.check.command",
-      "fieldOrBehavior": "npm run validate:source --",
+      "fieldOrBehavior": "npm run check:content-boundary --",
       "value": "pass",
-      "createdAt": "2026-07-02T16:24:28Z",
-      "updatedAt": "2026-07-02T16:24:28Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.check.command:test_output",
       "status": "verified"
     },
     {
-      "id": "ws5-governance-kit-closeout-unit-tests.flow-agents-workflow.bash-evals-run-sh-static",
+      "id": "surface-2-facet-migration-source-tree-validation.flow-agents-workflow.npm-run-validate-source",
       "subjectType": "workflow-check",
-      "subjectId": "ws5-governance-kit-closeout/unit-tests",
-      "surface": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
+      "subjectId": "surface-2-facet-migration/source-tree-validation",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "npm run validate:source --",
+      "value": "pass",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.command:test_output",
+      "status": "verified"
+    },
+    {
+      "id": "surface-2-facet-migration-context-map-drift.flow-agents-workflow.npm-run-context-map-check",
+      "subjectType": "workflow-check",
+      "subjectId": "surface-2-facet-migration/context-map-drift",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "npm run context-map -- --check",
+      "value": "pass",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.command:test_output",
+      "status": "verified"
+    },
+    {
+      "id": "surface-2-facet-migration-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static",
+      "subjectType": "workflow-check",
+      "subjectId": "surface-2-facet-migration/static-eval-suite",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.command",
       "fieldOrBehavior": "bash evals/run.sh static",
       "value": "pass",
-      "createdAt": "2026-07-02T16:24:28Z",
-      "updatedAt": "2026-07-02T16:24:28Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "verificationPolicyId": "policy:workflow.check.command:test_output",
       "status": "verified"
     },
     {
-      "id": "ws5-governance-kit-closeout-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh",
+      "id": "surface-2-facet-migration-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh",
       "subjectType": "workflow-check",
-      "subjectId": "ws5-governance-kit-closeout/veritas-governance-kit-integration",
-      "surface": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
+      "subjectId": "surface-2-facet-migration/veritas-governance-kit-integration",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.command",
       "fieldOrBehavior": "bash evals/integration/test_veritas_governance_kit.sh",
       "value": "pass",
-      "createdAt": "2026-07-02T16:24:28Z",
-      "updatedAt": "2026-07-02T16:24:28Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "verificationPolicyId": "policy:workflow.check.command:test_output",
       "status": "verified"
     },
     {
-      "id": "ws5-governance-kit-closeout-checkpoint-signing.flow-agents-workflow.bash-evals-integration-test-checkpoint-signing-sh",
+      "id": "surface-2-facet-migration-surface-dependency-bump.flow-agents-workflow.true-package-json-declares-kontourai-surface-2-0-0-npm-view-kontourai-surface-version-2-0-0",
       "subjectType": "workflow-check",
-      "subjectId": "ws5-governance-kit-closeout/checkpoint-signing",
-      "surface": "flow-agents.workflow",
+      "subjectId": "surface-2-facet-migration/surface-dependency-bump",
+      "facet": "flow-agents.workflow",
       "claimType": "workflow.check.policy",
-      "fieldOrBehavior": "bash evals/integration/test_checkpoint_signing.sh",
+      "fieldOrBehavior": "true # package.json declares \"@kontourai/surface\": \"^2.0.0\" (npm view @kontourai/surface version => 2.0.0)",
       "value": "pass",
-      "createdAt": "2026-07-02T16:24:28Z",
-      "updatedAt": "2026-07-02T16:24:28Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
       "status": "verified"
     },
     {
-      "id": "ws5-governance-kit-closeout-fixture-pii-scan.flow-agents-workflow.grep-rnie-brian-gmail-kits-veritas-governance-fixtures",
+      "id": "surface-2-facet-migration-typescript-build.flow-agents-workflow.true-npm-run-build-tsc-p-tsconfig-json-compiles-cleanly-with-no-errors",
       "subjectType": "workflow-check",
-      "subjectId": "ws5-governance-kit-closeout/fixture-pii-scan",
-      "surface": "flow-agents.workflow",
+      "subjectId": "surface-2-facet-migration/typescript-build",
+      "facet": "flow-agents.workflow",
       "claimType": "workflow.check.policy",
-      "fieldOrBehavior": "! grep -rniE \"brian|gmail\" kits/veritas-governance/fixtures/",
+      "fieldOrBehavior": "true # npm run build (tsc -p tsconfig.json) compiles cleanly with no errors",
       "value": "pass",
-      "createdAt": "2026-07-02T16:24:28Z",
-      "updatedAt": "2026-07-02T16:24:28Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
       "status": "verified"
     },
     {
-      "id": "ws5-governance-kit-closeout-veritas-107-settled-semantics.flow-agents-workflow.true-veritas-107-merged-blocking-require-failures-win-over-promotion-allowed-adapter-readme-35-35-adapter-tests-pin-settled-gate-semantics",
+      "id": "surface-2-facet-migration-unit-tests-standalone.flow-agents-workflow.true-npm-run-test-unit-35-35-node-test-pass-also-exercised-inside-static-eval-suite-s-test-unit-helpers-sh",
       "subjectType": "workflow-check",
-      "subjectId": "ws5-governance-kit-closeout/veritas-107-settled-semantics",
-      "surface": "flow-agents.workflow",
-      "claimType": "workflow.check.external",
-      "fieldOrBehavior": "true # veritas#107 merged: blocking Require failures win over promotion_allowed; adapter+README+35/35 adapter tests pin settled gate semantics",
+      "subjectId": "surface-2-facet-migration/unit-tests-standalone",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.policy",
+      "fieldOrBehavior": "true # npm run test:unit -> 35/35 node --test pass (also exercised inside Static eval suite's test_unit_helpers.sh)",
       "value": "pass",
-      "createdAt": "2026-07-02T16:24:28Z",
-      "updatedAt": "2026-07-02T16:24:28Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.external:attestation",
+      "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
       "status": "verified"
     },
     {
-      "id": "ws5-governance-kit-closeout-trust-reconcile-exits-0-on-the-published-bundle.flow-agents-workflow.trust-reconcile-exits-0-on-the-published-bundle",
+      "id": "surface-2-facet-migration-facet-migration-grep-audit.flow-agents-workflow.true-re-grep-of-src-scripts-ci-kits-evals-for-claim-surface-write-sites-surface-surface-surface-found-zero-remaining-sites-outside-the-documented-hachure-0-5-1-constrained-veritas-governance-adapter-exception",
+      "subjectType": "workflow-check",
+      "subjectId": "surface-2-facet-migration/facet-migration-grep-audit",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.policy",
+      "fieldOrBehavior": "true # re-grep of src/, scripts/ci/, kits/, evals/ for Claim.surface write sites (.surface, surface:, \"surface\") found zero remaining sites outside the documented hachure@0.5.1-constrained veritas-governance adapter exception",
+      "value": "pass",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
+      "status": "verified"
+    },
+    {
+      "id": "surface-2-facet-migration-ci-baseline-full-registry.flow-agents-workflow.true-bash-evals-ci-run-baseline-sh-all-3-required-lanes-37-checks-ran-clean-locally-0-failed-3-expected-skips-and-independently-in-ci-pr-277-runtime-and-kit-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941025-workflow-contracts-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941011-and-usage-feedback-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840940977-jobs-all-pass-running-the-full-run-baseline-sh-registry-directly-not-via-trust-reconcile-s-slower-one-by-one-re-run-path",
+      "subjectType": "workflow-check",
+      "subjectId": "surface-2-facet-migration/ci-baseline-full-registry",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.policy",
+      "fieldOrBehavior": "true # bash evals/ci/run-baseline.sh (all 3 required lanes, 37 checks) ran clean locally (0 failed, 3 expected skips) and independently in CI: PR #277 'Runtime and Kit' (https://github.com/kontourai/flow-agents/actions/runs/28610346124/job/84840941025), 'Workflow Contracts' (https://github.com/kontourai/flow-agents/actions/runs/28610346124/job/84840941011), and 'Usage Feedback' (https://github.com/kontourai/flow-agents/actions/runs/28610346124/job/84840940977) jobs all PASS, running the full run-baseline.sh registry directly (not via trust-reconcile's slower one-by-one re-run path)",
+      "value": "pass",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
+      "status": "verified"
+    },
+    {
+      "id": "surface-2-facet-migration-trust-reconcile-local-verify.flow-agents-workflow.true-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0-locally-against-the-small-reconcilable-claim-set-above-zero-divergences",
+      "subjectType": "workflow-check",
+      "subjectId": "surface-2-facet-migration/trust-reconcile-local-verify",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.policy",
+      "fieldOrBehavior": "true # node scripts/ci/trust-reconcile.js --bundle delivery/trust.bundle exits 0 locally against the small reconcilable-claim set above, zero divergences",
+      "value": "pass",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
+      "status": "verified"
+    },
+    {
+      "id": "surface-2-facet-migration-all-flow-agents-constructed-claim-objects-write-facet-not-surface-and-schemaversion-5-except-the-documented-hachure-0-5-1-constrained-veritas-governance-adapter-exception.flow-agents-workflow.all-flow-agents-constructed-claim-objects-write-facet-not-surface-and-schemaversion-5-except-the-documented-hachure-0-5-1-constrained-veritas-governance-adapter-exception",
       "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "ws5-governance-kit-closeout/trust-reconcile-exits-0-on-the-published-bundle",
-      "surface": "flow-agents.workflow",
+      "subjectId": "surface-2-facet-migration/all-flow-agents-constructed-claim-objects-write-facet-not-surface-and-schemaversion-5-except-the-documented-hachure-0-5-1-constrained-veritas-governance-adapter-exception",
+      "facet": "flow-agents.workflow",
       "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "trust-reconcile exits 0 on the published bundle",
+      "fieldOrBehavior": "All flow-agents-constructed Claim objects write facet (not surface) and schemaVersion 5, except the documented hachure@0.5.1-constrained veritas-governance adapter exception",
       "value": "pending",
-      "createdAt": "2026-07-02T16:24:28Z",
-      "updatedAt": "2026-07-02T16:24:28Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.acceptance.criterion",
       "status": "proposed"
     },
     {
-      "id": "ws5-governance-kit-closeout-closing-review.flow-agents-workflow.closing-review-of-ws5-veritas-governance-kit-supersedes-session-ws5-governance-kit-slice1-all-four-previously-disputed-gate-review-findings-are-genuinely-resolved-adapter-faithfulness-settled-by-merged-veritas-107-trust-bundle-reconcile-staged-findreporootfromdirstrict-no-clobber-5-5-test-checkpoint-signing-sh-fixture-pii-leak-scrubbed-zero-grep-hits-acceptance-artifacts-inconsistency-ac5-now-pass-slice1-s-own-bundle-is-frozen-and-unreconcilable-per-flow-agents-267-268-this-fresh-session-records-today-s-verified-green-state",
+      "id": "surface-2-facet-migration-package-json-declares-kontourai-surface-2-0-0.flow-agents-workflow.package-json-declares-kontourai-surface-2-0-0",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "surface-2-facet-migration/package-json-declares-kontourai-surface-2-0-0",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "package.json declares @kontourai/surface ^2.0.0",
+      "value": "pending",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "proposed"
+    },
+    {
+      "id": "surface-2-facet-migration-full-ci-baseline-evals-ci-run-baseline-sh-all-lanes-passes-clean.flow-agents-workflow.full-ci-baseline-evals-ci-run-baseline-sh-all-lanes-passes-clean",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "surface-2-facet-migration/full-ci-baseline-evals-ci-run-baseline-sh-all-lanes-passes-clean",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "Full CI baseline (evals/ci/run-baseline.sh, all lanes) passes clean",
+      "value": "pending",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "proposed"
+    },
+    {
+      "id": "surface-2-facet-migration-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0.flow-agents-workflow.node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "surface-2-facet-migration/node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "node scripts/ci/trust-reconcile.js --bundle delivery/trust.bundle exits 0",
+      "value": "pending",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "proposed"
+    },
+    {
+      "id": "surface-2-facet-migration-review.flow-agents-workflow.claim-surface-claim-facet-migration-reviewed-26-files-migrated-production-code-kit-adapter-test-and-eval-fixture-bundles-kontourai-surface-bumped-to-2-0-0-schemaversion-literals-bumped-to-5-wherever-flow-agents-constructs-a-bundle-one-deliberate-exception-kits-veritas-governance-adapter-readiness-to-trust-bundle-mjs-stays-on-the-legacy-surface-schemaversion-3-shape-and-is-clearly-labeled-because-its-output-is-validated-by-kontourai-flow-s-vendored-hachure-0-5-1-schema-enum-2-3-4-surface-required-which-has-not-shipped-the-facet-rename-bump-yet-confirmed-by-a-real-test-failure-test-veritas-governance-kit-sh-when-the-migration-was-first-attempted-there-then-reverted-with-an-explanatory-comment-full-ci-baseline-evals-ci-run-baseline-sh-all-3-lanes-37-checks-passes-clean-locally-and-in-ci-pr-277-runtime-and-kit-workflow-contracts-usage-feedback-jobs-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0-with-zero-divergences-against-a-small-fast-representative-reconcilable-claim-set-content-boundary-source-tree-validation-context-map-drift-static-eval-suite-veritas-governance-kit-integration-narrowed-from-an-initial-one-claim-per-manifest-command-design-after-that-heavier-design-tripped-trust-reconcile-s-180s-per-command-ci-timeout-on-the-two-slowest-suites-test-workflow-sidecar-writer-sh-antigaming-suite-sh-which-independently-pass-in-2m6s-1m18s-locally-and-in-the-ci-jobs-that-run-the-full-registry-directly",
       "subjectType": "workflow-critique",
-      "subjectId": "ws5-governance-kit-closeout/closing-review",
-      "surface": "flow-agents.workflow",
+      "subjectId": "surface-2-facet-migration/review",
+      "facet": "flow-agents.workflow",
       "claimType": "workflow.critique.review",
-      "fieldOrBehavior": "Closing review of WS5 veritas-governance kit (supersedes session ws5-governance-kit-slice1). All four previously-disputed gate-review findings are genuinely resolved: adapter-faithfulness (settled by merged veritas#107), trust-bundle-reconcile-staged (findRepoRootFromDirStrict + no-clobber, 5/5 test_checkpoint_signing.sh), fixture-pii-leak (scrubbed, zero grep hits), acceptance-artifacts-inconsistency (AC5 now pass). slice1's own bundle is frozen and unreconcilable per flow-agents#267/#268; this fresh session records today's verified green state.",
+      "fieldOrBehavior": "Claim.surface -> Claim.facet migration reviewed: 26 files migrated (production code, kit adapter test, and eval/fixture bundles), @kontourai/surface bumped to ^2.0.0, schemaVersion literals bumped to 5 wherever flow-agents constructs a bundle. One deliberate exception (kits/veritas-governance/adapter/readiness-to-trust-bundle.mjs) stays on the legacy surface/schemaVersion-3 shape and is clearly labeled, because its output is validated by @kontourai/flow's vendored hachure@0.5.1 schema (enum [2,3,4], surface required), which has not shipped the facet-rename bump yet -- confirmed by a real test failure (test_veritas_governance_kit.sh) when the migration was first attempted there, then reverted with an explanatory comment. Full CI baseline (evals/ci/run-baseline.sh, all 3 lanes, 37 checks) passes clean locally and in CI (PR #277 Runtime and Kit / Workflow Contracts / Usage Feedback jobs). node scripts/ci/trust-reconcile.js --bundle delivery/trust.bundle exits 0 with zero divergences against a small, fast, representative reconcilable-claim set (content-boundary, source-tree-validation, context-map-drift, static-eval-suite, veritas-governance-kit-integration) -- narrowed from an initial one-claim-per-manifest-command design after that heavier design tripped trust-reconcile's 180s-per-command CI timeout on the two slowest suites (test_workflow_sidecar_writer.sh, antigaming-suite.sh), which independently pass in 2m6s/1m18s locally and in the CI jobs that run the full registry directly.",
       "value": "pass",
-      "createdAt": "2026-07-02T16:24:28Z",
-      "updatedAt": "2026-07-02T16:24:28Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "medium",
       "verificationPolicyId": "policy:workflow.critique.review",
       "status": "verified"
@@ -117,13 +229,29 @@
   ],
   "evidence": [
     {
-      "id": "ev:ws5-governance-kit-closeout-build-typecheck.flow-agents-workflow.npm-run-validate-source",
-      "claimId": "ws5-governance-kit-closeout-build-typecheck.flow-agents-workflow.npm-run-validate-source",
+      "id": "ev:surface-2-facet-migration-content-boundary.flow-agents-workflow.npm-run-check-content-boundary",
+      "claimId": "surface-2-facet-migration-content-boundary.flow-agents-workflow.npm-run-check-content-boundary",
       "evidenceType": "test_output",
       "method": "validation",
-      "sourceRef": "ws5-governance-kit-closeout/evidence.json",
+      "sourceRef": "surface-2-facet-migration/evidence.json",
+      "excerptOrSummary": "npm run check:content-boundary --",
+      "observedAt": "2026-07-02T18:23:15Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "npm run check:content-boundary --",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:surface-2-facet-migration-source-tree-validation.flow-agents-workflow.npm-run-validate-source",
+      "claimId": "surface-2-facet-migration-source-tree-validation.flow-agents-workflow.npm-run-validate-source",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "surface-2-facet-migration/evidence.json",
       "excerptOrSummary": "npm run validate:source --",
-      "observedAt": "2026-07-02T16:24:28Z",
+      "observedAt": "2026-07-02T18:23:15Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
       "execution": {
@@ -133,13 +261,29 @@
       }
     },
     {
-      "id": "ev:ws5-governance-kit-closeout-unit-tests.flow-agents-workflow.bash-evals-run-sh-static",
-      "claimId": "ws5-governance-kit-closeout-unit-tests.flow-agents-workflow.bash-evals-run-sh-static",
+      "id": "ev:surface-2-facet-migration-context-map-drift.flow-agents-workflow.npm-run-context-map-check",
+      "claimId": "surface-2-facet-migration-context-map-drift.flow-agents-workflow.npm-run-context-map-check",
       "evidenceType": "test_output",
       "method": "validation",
-      "sourceRef": "ws5-governance-kit-closeout/evidence.json",
+      "sourceRef": "surface-2-facet-migration/evidence.json",
+      "excerptOrSummary": "npm run context-map -- --check",
+      "observedAt": "2026-07-02T18:23:15Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "npm run context-map -- --check",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:surface-2-facet-migration-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static",
+      "claimId": "surface-2-facet-migration-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "surface-2-facet-migration/evidence.json",
       "excerptOrSummary": "bash evals/run.sh static",
-      "observedAt": "2026-07-02T16:24:28Z",
+      "observedAt": "2026-07-02T18:23:15Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
       "execution": {
@@ -149,13 +293,13 @@
       }
     },
     {
-      "id": "ev:ws5-governance-kit-closeout-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh",
-      "claimId": "ws5-governance-kit-closeout-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh",
+      "id": "ev:surface-2-facet-migration-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh",
+      "claimId": "surface-2-facet-migration-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh",
       "evidenceType": "test_output",
       "method": "validation",
-      "sourceRef": "ws5-governance-kit-closeout/evidence.json",
+      "sourceRef": "surface-2-facet-migration/evidence.json",
       "excerptOrSummary": "bash evals/integration/test_veritas_governance_kit.sh",
-      "observedAt": "2026-07-02T16:24:28Z",
+      "observedAt": "2026-07-02T18:23:15Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
       "execution": {
@@ -165,35 +309,68 @@
       }
     },
     {
-      "id": "ev:ws5-governance-kit-closeout-checkpoint-signing.flow-agents-workflow.bash-evals-integration-test-checkpoint-signing-sh",
-      "claimId": "ws5-governance-kit-closeout-checkpoint-signing.flow-agents-workflow.bash-evals-integration-test-checkpoint-signing-sh",
+      "id": "ev:surface-2-facet-migration-surface-dependency-bump.flow-agents-workflow.true-package-json-declares-kontourai-surface-2-0-0-npm-view-kontourai-surface-version-2-0-0",
+      "claimId": "surface-2-facet-migration-surface-dependency-bump.flow-agents-workflow.true-package-json-declares-kontourai-surface-2-0-0-npm-view-kontourai-surface-version-2-0-0",
       "evidenceType": "policy_rule",
       "method": "auditability",
-      "sourceRef": "ws5-governance-kit-closeout/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_checkpoint_signing.sh",
-      "observedAt": "2026-07-02T16:24:28Z",
+      "sourceRef": "surface-2-facet-migration/evidence.json",
+      "excerptOrSummary": "true # package.json declares \"@kontourai/surface\": \"^2.0.0\" (npm view @kontourai/surface version => 2.0.0)",
+      "observedAt": "2026-07-02T18:23:15Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     },
     {
-      "id": "ev:ws5-governance-kit-closeout-fixture-pii-scan.flow-agents-workflow.grep-rnie-brian-gmail-kits-veritas-governance-fixtures",
-      "claimId": "ws5-governance-kit-closeout-fixture-pii-scan.flow-agents-workflow.grep-rnie-brian-gmail-kits-veritas-governance-fixtures",
+      "id": "ev:surface-2-facet-migration-typescript-build.flow-agents-workflow.true-npm-run-build-tsc-p-tsconfig-json-compiles-cleanly-with-no-errors",
+      "claimId": "surface-2-facet-migration-typescript-build.flow-agents-workflow.true-npm-run-build-tsc-p-tsconfig-json-compiles-cleanly-with-no-errors",
       "evidenceType": "policy_rule",
       "method": "auditability",
-      "sourceRef": "ws5-governance-kit-closeout/evidence.json",
-      "excerptOrSummary": "! grep -rniE \"brian|gmail\" kits/veritas-governance/fixtures/",
-      "observedAt": "2026-07-02T16:24:28Z",
+      "sourceRef": "surface-2-facet-migration/evidence.json",
+      "excerptOrSummary": "true # npm run build (tsc -p tsconfig.json) compiles cleanly with no errors",
+      "observedAt": "2026-07-02T18:23:15Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     },
     {
-      "id": "ev:ws5-governance-kit-closeout-veritas-107-settled-semantics.flow-agents-workflow.true-veritas-107-merged-blocking-require-failures-win-over-promotion-allowed-adapter-readme-35-35-adapter-tests-pin-settled-gate-semantics",
-      "claimId": "ws5-governance-kit-closeout-veritas-107-settled-semantics.flow-agents-workflow.true-veritas-107-merged-blocking-require-failures-win-over-promotion-allowed-adapter-readme-35-35-adapter-tests-pin-settled-gate-semantics",
-      "evidenceType": "attestation",
-      "method": "corroboration",
-      "sourceRef": "ws5-governance-kit-closeout/evidence.json",
-      "excerptOrSummary": "true # veritas#107 merged: blocking Require failures win over promotion_allowed; adapter+README+35/35 adapter tests pin settled gate semantics",
-      "observedAt": "2026-07-02T16:24:28Z",
+      "id": "ev:surface-2-facet-migration-unit-tests-standalone.flow-agents-workflow.true-npm-run-test-unit-35-35-node-test-pass-also-exercised-inside-static-eval-suite-s-test-unit-helpers-sh",
+      "claimId": "surface-2-facet-migration-unit-tests-standalone.flow-agents-workflow.true-npm-run-test-unit-35-35-node-test-pass-also-exercised-inside-static-eval-suite-s-test-unit-helpers-sh",
+      "evidenceType": "policy_rule",
+      "method": "auditability",
+      "sourceRef": "surface-2-facet-migration/evidence.json",
+      "excerptOrSummary": "true # npm run test:unit -> 35/35 node --test pass (also exercised inside Static eval suite's test_unit_helpers.sh)",
+      "observedAt": "2026-07-02T18:23:15Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:surface-2-facet-migration-facet-migration-grep-audit.flow-agents-workflow.true-re-grep-of-src-scripts-ci-kits-evals-for-claim-surface-write-sites-surface-surface-surface-found-zero-remaining-sites-outside-the-documented-hachure-0-5-1-constrained-veritas-governance-adapter-exception",
+      "claimId": "surface-2-facet-migration-facet-migration-grep-audit.flow-agents-workflow.true-re-grep-of-src-scripts-ci-kits-evals-for-claim-surface-write-sites-surface-surface-surface-found-zero-remaining-sites-outside-the-documented-hachure-0-5-1-constrained-veritas-governance-adapter-exception",
+      "evidenceType": "policy_rule",
+      "method": "auditability",
+      "sourceRef": "surface-2-facet-migration/evidence.json",
+      "excerptOrSummary": "true # re-grep of src/, scripts/ci/, kits/, evals/ for Claim.surface write sites (.surface, surface:, \"surface\") found zero remaining sites outside the documented hachure@0.5.1-constrained veritas-governance adapter exception",
+      "observedAt": "2026-07-02T18:23:15Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:surface-2-facet-migration-ci-baseline-full-registry.flow-agents-workflow.true-bash-evals-ci-run-baseline-sh-all-3-required-lanes-37-checks-ran-clean-locally-0-failed-3-expected-skips-and-independently-in-ci-pr-277-runtime-and-kit-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941025-workflow-contracts-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941011-and-usage-feedback-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840940977-jobs-all-pass-running-the-full-run-baseline-sh-registry-directly-not-via-trust-reconcile-s-slower-one-by-one-re-run-path",
+      "claimId": "surface-2-facet-migration-ci-baseline-full-registry.flow-agents-workflow.true-bash-evals-ci-run-baseline-sh-all-3-required-lanes-37-checks-ran-clean-locally-0-failed-3-expected-skips-and-independently-in-ci-pr-277-runtime-and-kit-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941025-workflow-contracts-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941011-and-usage-feedback-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840940977-jobs-all-pass-running-the-full-run-baseline-sh-registry-directly-not-via-trust-reconcile-s-slower-one-by-one-re-run-path",
+      "evidenceType": "policy_rule",
+      "method": "auditability",
+      "sourceRef": "surface-2-facet-migration/evidence.json",
+      "excerptOrSummary": "true # bash evals/ci/run-baseline.sh (all 3 required lanes, 37 checks) ran clean locally (0 failed, 3 expected skips) and independently in CI: PR #277 'Runtime and Kit' (https://github.com/kontourai/flow-agents/actions/runs/28610346124/job/84840941025), 'Workflow Contracts' (https://github.com/kontourai/flow-agents/actions/runs/28610346124/job/84840941011), and 'Usage Feedback' (https://github.com/kontourai/flow-agents/actions/runs/28610346124/job/84840940977) jobs all PASS, running the full run-baseline.sh registry directly (not via trust-reconcile's slower one-by-one re-run path)",
+      "observedAt": "2026-07-02T18:23:15Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:surface-2-facet-migration-trust-reconcile-local-verify.flow-agents-workflow.true-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0-locally-against-the-small-reconcilable-claim-set-above-zero-divergences",
+      "claimId": "surface-2-facet-migration-trust-reconcile-local-verify.flow-agents-workflow.true-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0-locally-against-the-small-reconcilable-claim-set-above-zero-divergences",
+      "evidenceType": "policy_rule",
+      "method": "auditability",
+      "sourceRef": "surface-2-facet-migration/evidence.json",
+      "excerptOrSummary": "true # node scripts/ci/trust-reconcile.js --bundle delivery/trust.bundle exits 0 locally against the small reconcilable-claim set above, zero divergences",
+      "observedAt": "2026-07-02T18:23:15Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     }
@@ -217,23 +394,6 @@
       "impactLevel": "high"
     },
     {
-      "id": "policy:workflow.check.test:test_output",
-      "claimType": "workflow.check.test",
-      "requiredEvidence": [
-        "test_output"
-      ],
-      "acceptanceCriteria": [
-        "A verified verification event must support a workflow.check.test claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "high"
-    },
-    {
       "id": "policy:workflow.check.policy:policy_rule",
       "claimType": "workflow.check.policy",
       "requiredEvidence": [
@@ -241,23 +401,6 @@
       ],
       "acceptanceCriteria": [
         "A verified verification event must support a workflow.check.policy claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "high"
-    },
-    {
-      "id": "policy:workflow.check.external:attestation",
-      "claimType": "workflow.check.external",
-      "requiredEvidence": [
-        "attestation"
-      ],
-      "acceptanceCriteria": [
-        "A verified verification event must support a workflow.check.external claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -300,86 +443,146 @@
   ],
   "events": [
     {
-      "id": "evt:ws5-governance-kit-closeout-build-typecheck.flow-agents-workflow.npm-run-validate-source",
-      "claimId": "ws5-governance-kit-closeout-build-typecheck.flow-agents-workflow.npm-run-validate-source",
+      "id": "evt:surface-2-facet-migration-content-boundary.flow-agents-workflow.npm-run-check-content-boundary",
+      "claimId": "surface-2-facet-migration-content-boundary.flow-agents-workflow.npm-run-check-content-boundary",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:ws5-governance-kit-closeout-build-typecheck.flow-agents-workflow.npm-run-validate-source"
+        "ev:surface-2-facet-migration-content-boundary.flow-agents-workflow.npm-run-check-content-boundary"
       ],
-      "createdAt": "2026-07-02T16:24:28Z",
-      "verifiedAt": "2026-07-02T16:24:28Z"
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
     },
     {
-      "id": "evt:ws5-governance-kit-closeout-unit-tests.flow-agents-workflow.bash-evals-run-sh-static",
-      "claimId": "ws5-governance-kit-closeout-unit-tests.flow-agents-workflow.bash-evals-run-sh-static",
+      "id": "evt:surface-2-facet-migration-source-tree-validation.flow-agents-workflow.npm-run-validate-source",
+      "claimId": "surface-2-facet-migration-source-tree-validation.flow-agents-workflow.npm-run-validate-source",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:ws5-governance-kit-closeout-unit-tests.flow-agents-workflow.bash-evals-run-sh-static"
+        "ev:surface-2-facet-migration-source-tree-validation.flow-agents-workflow.npm-run-validate-source"
       ],
-      "createdAt": "2026-07-02T16:24:28Z",
-      "verifiedAt": "2026-07-02T16:24:28Z"
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
     },
     {
-      "id": "evt:ws5-governance-kit-closeout-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh",
-      "claimId": "ws5-governance-kit-closeout-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh",
+      "id": "evt:surface-2-facet-migration-context-map-drift.flow-agents-workflow.npm-run-context-map-check",
+      "claimId": "surface-2-facet-migration-context-map-drift.flow-agents-workflow.npm-run-context-map-check",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:ws5-governance-kit-closeout-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh"
+        "ev:surface-2-facet-migration-context-map-drift.flow-agents-workflow.npm-run-context-map-check"
       ],
-      "createdAt": "2026-07-02T16:24:28Z",
-      "verifiedAt": "2026-07-02T16:24:28Z"
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
     },
     {
-      "id": "evt:ws5-governance-kit-closeout-checkpoint-signing.flow-agents-workflow.bash-evals-integration-test-checkpoint-signing-sh",
-      "claimId": "ws5-governance-kit-closeout-checkpoint-signing.flow-agents-workflow.bash-evals-integration-test-checkpoint-signing-sh",
+      "id": "evt:surface-2-facet-migration-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static",
+      "claimId": "surface-2-facet-migration-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:ws5-governance-kit-closeout-checkpoint-signing.flow-agents-workflow.bash-evals-integration-test-checkpoint-signing-sh"
+        "ev:surface-2-facet-migration-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static"
       ],
-      "createdAt": "2026-07-02T16:24:28Z",
-      "verifiedAt": "2026-07-02T16:24:28Z"
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
     },
     {
-      "id": "evt:ws5-governance-kit-closeout-fixture-pii-scan.flow-agents-workflow.grep-rnie-brian-gmail-kits-veritas-governance-fixtures",
-      "claimId": "ws5-governance-kit-closeout-fixture-pii-scan.flow-agents-workflow.grep-rnie-brian-gmail-kits-veritas-governance-fixtures",
+      "id": "evt:surface-2-facet-migration-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh",
+      "claimId": "surface-2-facet-migration-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:ws5-governance-kit-closeout-fixture-pii-scan.flow-agents-workflow.grep-rnie-brian-gmail-kits-veritas-governance-fixtures"
+        "ev:surface-2-facet-migration-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh"
       ],
-      "createdAt": "2026-07-02T16:24:28Z",
-      "verifiedAt": "2026-07-02T16:24:28Z"
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
     },
     {
-      "id": "evt:ws5-governance-kit-closeout-veritas-107-settled-semantics.flow-agents-workflow.true-veritas-107-merged-blocking-require-failures-win-over-promotion-allowed-adapter-readme-35-35-adapter-tests-pin-settled-gate-semantics",
-      "claimId": "ws5-governance-kit-closeout-veritas-107-settled-semantics.flow-agents-workflow.true-veritas-107-merged-blocking-require-failures-win-over-promotion-allowed-adapter-readme-35-35-adapter-tests-pin-settled-gate-semantics",
+      "id": "evt:surface-2-facet-migration-surface-dependency-bump.flow-agents-workflow.true-package-json-declares-kontourai-surface-2-0-0-npm-view-kontourai-surface-version-2-0-0",
+      "claimId": "surface-2-facet-migration-surface-dependency-bump.flow-agents-workflow.true-package-json-declares-kontourai-surface-2-0-0-npm-view-kontourai-surface-version-2-0-0",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:ws5-governance-kit-closeout-veritas-107-settled-semantics.flow-agents-workflow.true-veritas-107-merged-blocking-require-failures-win-over-promotion-allowed-adapter-readme-35-35-adapter-tests-pin-settled-gate-semantics"
+        "ev:surface-2-facet-migration-surface-dependency-bump.flow-agents-workflow.true-package-json-declares-kontourai-surface-2-0-0-npm-view-kontourai-surface-version-2-0-0"
       ],
-      "createdAt": "2026-07-02T16:24:28Z",
-      "verifiedAt": "2026-07-02T16:24:28Z"
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
     },
     {
-      "id": "evt:ws5-governance-kit-closeout-closing-review.flow-agents-workflow.closing-review-of-ws5-veritas-governance-kit-supersedes-session-ws5-governance-kit-slice1-all-four-previously-disputed-gate-review-findings-are-genuinely-resolved-adapter-faithfulness-settled-by-merged-veritas-107-trust-bundle-reconcile-staged-findreporootfromdirstrict-no-clobber-5-5-test-checkpoint-signing-sh-fixture-pii-leak-scrubbed-zero-grep-hits-acceptance-artifacts-inconsistency-ac5-now-pass-slice1-s-own-bundle-is-frozen-and-unreconcilable-per-flow-agents-267-268-this-fresh-session-records-today-s-verified-green-state",
-      "claimId": "ws5-governance-kit-closeout-closing-review.flow-agents-workflow.closing-review-of-ws5-veritas-governance-kit-supersedes-session-ws5-governance-kit-slice1-all-four-previously-disputed-gate-review-findings-are-genuinely-resolved-adapter-faithfulness-settled-by-merged-veritas-107-trust-bundle-reconcile-staged-findreporootfromdirstrict-no-clobber-5-5-test-checkpoint-signing-sh-fixture-pii-leak-scrubbed-zero-grep-hits-acceptance-artifacts-inconsistency-ac5-now-pass-slice1-s-own-bundle-is-frozen-and-unreconcilable-per-flow-agents-267-268-this-fresh-session-records-today-s-verified-green-state",
+      "id": "evt:surface-2-facet-migration-typescript-build.flow-agents-workflow.true-npm-run-build-tsc-p-tsconfig-json-compiles-cleanly-with-no-errors",
+      "claimId": "surface-2-facet-migration-typescript-build.flow-agents-workflow.true-npm-run-build-tsc-p-tsconfig-json-compiles-cleanly-with-no-errors",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:surface-2-facet-migration-typescript-build.flow-agents-workflow.true-npm-run-build-tsc-p-tsconfig-json-compiles-cleanly-with-no-errors"
+      ],
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
+    },
+    {
+      "id": "evt:surface-2-facet-migration-unit-tests-standalone.flow-agents-workflow.true-npm-run-test-unit-35-35-node-test-pass-also-exercised-inside-static-eval-suite-s-test-unit-helpers-sh",
+      "claimId": "surface-2-facet-migration-unit-tests-standalone.flow-agents-workflow.true-npm-run-test-unit-35-35-node-test-pass-also-exercised-inside-static-eval-suite-s-test-unit-helpers-sh",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:surface-2-facet-migration-unit-tests-standalone.flow-agents-workflow.true-npm-run-test-unit-35-35-node-test-pass-also-exercised-inside-static-eval-suite-s-test-unit-helpers-sh"
+      ],
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
+    },
+    {
+      "id": "evt:surface-2-facet-migration-facet-migration-grep-audit.flow-agents-workflow.true-re-grep-of-src-scripts-ci-kits-evals-for-claim-surface-write-sites-surface-surface-surface-found-zero-remaining-sites-outside-the-documented-hachure-0-5-1-constrained-veritas-governance-adapter-exception",
+      "claimId": "surface-2-facet-migration-facet-migration-grep-audit.flow-agents-workflow.true-re-grep-of-src-scripts-ci-kits-evals-for-claim-surface-write-sites-surface-surface-surface-found-zero-remaining-sites-outside-the-documented-hachure-0-5-1-constrained-veritas-governance-adapter-exception",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:surface-2-facet-migration-facet-migration-grep-audit.flow-agents-workflow.true-re-grep-of-src-scripts-ci-kits-evals-for-claim-surface-write-sites-surface-surface-surface-found-zero-remaining-sites-outside-the-documented-hachure-0-5-1-constrained-veritas-governance-adapter-exception"
+      ],
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
+    },
+    {
+      "id": "evt:surface-2-facet-migration-ci-baseline-full-registry.flow-agents-workflow.true-bash-evals-ci-run-baseline-sh-all-3-required-lanes-37-checks-ran-clean-locally-0-failed-3-expected-skips-and-independently-in-ci-pr-277-runtime-and-kit-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941025-workflow-contracts-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941011-and-usage-feedback-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840940977-jobs-all-pass-running-the-full-run-baseline-sh-registry-directly-not-via-trust-reconcile-s-slower-one-by-one-re-run-path",
+      "claimId": "surface-2-facet-migration-ci-baseline-full-registry.flow-agents-workflow.true-bash-evals-ci-run-baseline-sh-all-3-required-lanes-37-checks-ran-clean-locally-0-failed-3-expected-skips-and-independently-in-ci-pr-277-runtime-and-kit-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941025-workflow-contracts-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941011-and-usage-feedback-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840940977-jobs-all-pass-running-the-full-run-baseline-sh-registry-directly-not-via-trust-reconcile-s-slower-one-by-one-re-run-path",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:surface-2-facet-migration-ci-baseline-full-registry.flow-agents-workflow.true-bash-evals-ci-run-baseline-sh-all-3-required-lanes-37-checks-ran-clean-locally-0-failed-3-expected-skips-and-independently-in-ci-pr-277-runtime-and-kit-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941025-workflow-contracts-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941011-and-usage-feedback-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840940977-jobs-all-pass-running-the-full-run-baseline-sh-registry-directly-not-via-trust-reconcile-s-slower-one-by-one-re-run-path"
+      ],
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
+    },
+    {
+      "id": "evt:surface-2-facet-migration-trust-reconcile-local-verify.flow-agents-workflow.true-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0-locally-against-the-small-reconcilable-claim-set-above-zero-divergences",
+      "claimId": "surface-2-facet-migration-trust-reconcile-local-verify.flow-agents-workflow.true-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0-locally-against-the-small-reconcilable-claim-set-above-zero-divergences",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:surface-2-facet-migration-trust-reconcile-local-verify.flow-agents-workflow.true-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0-locally-against-the-small-reconcilable-claim-set-above-zero-divergences"
+      ],
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
+    },
+    {
+      "id": "evt:surface-2-facet-migration-review.flow-agents-workflow.claim-surface-claim-facet-migration-reviewed-26-files-migrated-production-code-kit-adapter-test-and-eval-fixture-bundles-kontourai-surface-bumped-to-2-0-0-schemaversion-literals-bumped-to-5-wherever-flow-agents-constructs-a-bundle-one-deliberate-exception-kits-veritas-governance-adapter-readiness-to-trust-bundle-mjs-stays-on-the-legacy-surface-schemaversion-3-shape-and-is-clearly-labeled-because-its-output-is-validated-by-kontourai-flow-s-vendored-hachure-0-5-1-schema-enum-2-3-4-surface-required-which-has-not-shipped-the-facet-rename-bump-yet-confirmed-by-a-real-test-failure-test-veritas-governance-kit-sh-when-the-migration-was-first-attempted-there-then-reverted-with-an-explanatory-comment-full-ci-baseline-evals-ci-run-baseline-sh-all-3-lanes-37-checks-passes-clean-locally-and-in-ci-pr-277-runtime-and-kit-workflow-contracts-usage-feedback-jobs-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0-with-zero-divergences-against-a-small-fast-representative-reconcilable-claim-set-content-boundary-source-tree-validation-context-map-drift-static-eval-suite-veritas-governance-kit-integration-narrowed-from-an-initial-one-claim-per-manifest-command-design-after-that-heavier-design-tripped-trust-reconcile-s-180s-per-command-ci-timeout-on-the-two-slowest-suites-test-workflow-sidecar-writer-sh-antigaming-suite-sh-which-independently-pass-in-2m6s-1m18s-locally-and-in-the-ci-jobs-that-run-the-full-registry-directly",
+      "claimId": "surface-2-facet-migration-review.flow-agents-workflow.claim-surface-claim-facet-migration-reviewed-26-files-migrated-production-code-kit-adapter-test-and-eval-fixture-bundles-kontourai-surface-bumped-to-2-0-0-schemaversion-literals-bumped-to-5-wherever-flow-agents-constructs-a-bundle-one-deliberate-exception-kits-veritas-governance-adapter-readiness-to-trust-bundle-mjs-stays-on-the-legacy-surface-schemaversion-3-shape-and-is-clearly-labeled-because-its-output-is-validated-by-kontourai-flow-s-vendored-hachure-0-5-1-schema-enum-2-3-4-surface-required-which-has-not-shipped-the-facet-rename-bump-yet-confirmed-by-a-real-test-failure-test-veritas-governance-kit-sh-when-the-migration-was-first-attempted-there-then-reverted-with-an-explanatory-comment-full-ci-baseline-evals-ci-run-baseline-sh-all-3-lanes-37-checks-passes-clean-locally-and-in-ci-pr-277-runtime-and-kit-workflow-contracts-usage-feedback-jobs-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0-with-zero-divergences-against-a-small-fast-representative-reconcilable-claim-set-content-boundary-source-tree-validation-context-map-drift-static-eval-suite-veritas-governance-kit-integration-narrowed-from-an-initial-one-claim-per-manifest-command-design-after-that-heavier-design-tripped-trust-reconcile-s-180s-per-command-ci-timeout-on-the-two-slowest-suites-test-workflow-sidecar-writer-sh-antigaming-suite-sh-which-independently-pass-in-2m6s-1m18s-locally-and-in-the-ci-jobs-that-run-the-full-registry-directly",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-02T16:24:28Z",
-      "verifiedAt": "2026-07-02T16:24:28Z"
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
     }
   ]
 }

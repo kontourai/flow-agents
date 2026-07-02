@@ -147,7 +147,7 @@
     "@kontourai/flow": "~1.4.1"
   },
   "optionalDependencies": {
-    "hachure": "^0.5.1",
-    "@kontourai/surface": "^1.2.0"
+    "@kontourai/surface": "^2.0.0",
+    "hachure": "^0.5.1"
   }
 }

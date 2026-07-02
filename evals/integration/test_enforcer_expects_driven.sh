@@ -72,7 +72,7 @@ printf '%s' '{"artifact_dir":"declares-tampered","active_flow_id":"builder.build
 python3 - "$T1_DIR/.kontourai/flow-agents/declares-tampered/trust.bundle" << 'PY'
 import json, sys
 bundle = {
-    "schemaVersion": 3,
+    "schemaVersion": 5,
     "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c1",
@@ -157,7 +157,7 @@ printf '%s' '{"artifact_dir":"declares-clean","active_flow_id":"builder.build","
 python3 - "$T2_DIR/.kontourai/flow-agents/declares-clean/trust.bundle" << 'PY'
 import json, sys
 bundle = {
-    "schemaVersion": 3,
+    "schemaVersion": 5,
     "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c2",
@@ -232,7 +232,7 @@ printf '%s' '{"artifact_dir":"no-flow"}' \
 python3 - "$T3_DIR/.kontourai/flow-agents/no-flow/trust.bundle" << 'PY'
 import json, sys
 bundle = {
-    "schemaVersion": 3,
+    "schemaVersion": 5,
     "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c3",
