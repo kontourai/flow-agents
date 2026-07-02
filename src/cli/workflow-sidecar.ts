@@ -2605,13 +2605,43 @@ function livenessLabel(status: string): string {
 // so the workflow lifecycle itself maintains the liveness claim — no manual liveness calls.
 // Additive + fail-open: a liveness-emit failure never affects the workflow command.
 const LIVENESS_TERMINAL = new Set(["delivered", "accepted", "archived"]);
-function resolveLivenessActor(): string { return (process.env.FLOW_AGENTS_ACTOR || "").trim() || "local"; }
+/**
+ * Delegate to the shared pure-CJS resolver (scripts/hooks/lib/actor-identity.js), mirroring the
+ * createRequire pattern used by readLivenessEvents() above. Deliberately NO inline duplicate
+ * fallback: if the module fails to load, that failure itself must surface as an unresolved actor
+ * ("") — never silently degrade back to the retired "local" default (issue #287).
+ */
+function loadActorIdentityHelper(): {
+  resolveActor: (env: NodeJS.ProcessEnv) => { actor: string; source: string };
+  sanitizeSegment: (value: unknown) => string;
+} {
+  const _req = createRequire(import.meta.url);
+  const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/actor-identity.js");
+  return _req(helperPath) as {
+    resolveActor: (env: NodeJS.ProcessEnv) => { actor: string; source: string };
+    sanitizeSegment: (value: unknown) => string;
+  };
+}
+function resolveLivenessActor(): string {
+  return loadActorIdentityHelper().resolveActor(process.env).actor;
+}
+/** True when an actor is empty or the retired literal "local" (case-insensitive) — the one shared
+ * definition of "unresolved" used by both the lifecycle auto-emit path and the direct CLI path so
+ * they can never disagree (#287 fix iteration 1, F6). */
+function isUnresolvedActor(actor: string): boolean {
+  return !actor || actor.toLowerCase() === "local";
+}
 function livenessEnabled(): boolean { const v = String(process.env.FLOW_AGENTS_LIVENESS || "").trim().toLowerCase(); return v === "on" || v === "1" || v === "true"; }
 function livenessLifecycle(taskDir: string, slug: string, kind: "claim" | "heartbeat" | "release", timestamp: string): void {
   if (!livenessEnabled()) return;
   try {
+    const actor = resolveLivenessActor();
+    if (isUnresolvedActor(actor)) {
+      process.stderr.write("[liveness] skipped auto-emit: actor unresolved (set FLOW_AGENTS_ACTOR or run inside a supported runtime)\n");
+      return;
+    }
     const root = path.dirname(taskDir); // .kontourai/flow-agents/<slug> → .kontourai/flow-agents (the shared liveness stream lives here)
-    const evt: AnyObj = { type: kind, subjectId: slug, actor: resolveLivenessActor(), at: timestamp, source: "lifecycle" };
+    const evt: AnyObj = { type: kind, subjectId: slug, actor, at: timestamp, source: "lifecycle" };
     if (kind === "claim") evt.ttlSeconds = 1800;
     appendLivenessEvent(root, evt);
   } catch { /* best-effort; liveness is advisory and must never break the workflow */ }
@@ -2621,10 +2651,26 @@ async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
   const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : flowAgentsArtifactRoot();
   const action = p.positional[0] || "";
   const subjectId = p.positional[1] || "";
-  const actor = opt(p, "actor", process.env.FLOW_AGENTS_ACTOR || "unknown");
   const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 
   if (action === "claim" || action === "heartbeat" || action === "release") {
+    // Actor resolution happens only for write actions (F5, #287 fix iteration 1) — "status" is a
+    // read path and must not shell out via resolveLivenessActor()/resolveActor().
+    const helper = loadActorIdentityHelper();
+    const explicitActorRaw = opt(p, "actor", "");
+    // F7 (#287 fix iteration 2): an explicit --actor value that strips to empty under the allowed
+    // [A-Za-z0-9_.-] charset (e.g. "--actor ':::'") is a hard error on this write path, not a
+    // silent fallback to sanitizeSegment's shared "unknown" sentinel — garbage on an explicit flag
+    // is an authoring mistake the caller must fix, unlike the env-override seam (which falls
+    // through to derivation instead, since there is no flag to correct).
+    if (explicitActorRaw && !/[A-Za-z0-9_.-]/.test(explicitActorRaw)) {
+      die(`liveness ${action} --actor value strips to empty under the allowed actor charset ([A-Za-z0-9_.-]) — pass a --actor value containing at least one letter, digit, underscore, period, or hyphen.`);
+    }
+    const explicitActor = explicitActorRaw ? helper.sanitizeSegment(explicitActorRaw) : "";
+    const actor = explicitActor || helper.resolveActor(process.env).actor;
+    if (isUnresolvedActor(actor)) {
+      die(`liveness ${action} requires a resolvable actor — no explicit --actor flag, no FLOW_AGENTS_ACTOR override, and runtime/ancestry resolution failed. Fix: pass --actor <id>, or set FLOW_AGENTS_ACTOR=<id>, or run inside a supported runtime.`);
+    }
     if (!subjectId) die(`liveness ${action} requires a subjectId`);
     const evt: AnyObj = { type: action, subjectId, actor, at: opt(p, "at") || nowIso };
     if (action === "claim") evt.ttlSeconds = Number.parseInt(opt(p, "ttl", "1800"), 10) || 1800;

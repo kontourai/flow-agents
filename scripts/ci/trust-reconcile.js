@@ -32,9 +32,12 @@
  *   --repo-root <path>   Repository root. Default: TRUST_RECONCILE_REPO_ROOT or cwd.
  *
  * Environment fallbacks:
- *   TRUST_RECONCILE_BUNDLE    Path to delivered bundle (same as --bundle).
- *   TRUST_RECONCILE_COMMANDS  Comma- or newline-separated canonical commands.
- *   TRUST_RECONCILE_REPO_ROOT Repository root.
+ *   TRUST_RECONCILE_BUNDLE               Path to delivered bundle (same as --bundle).
+ *   TRUST_RECONCILE_COMMANDS              Comma- or newline-separated canonical commands.
+ *   TRUST_RECONCILE_REPO_ROOT             Repository root.
+ *   TRUST_RECONCILE_COMMAND_TIMEOUT_MS    Timeout (ms) for each canonical/manifest command
+ *                                         run (Step 1 fresh-verify + on-demand manifest
+ *                                         reconcile). Default: 600000 (10 min).
  *
  * Auto-discovery (when no --bundle or TRUST_RECONCILE_BUNDLE is set):
  *   Checks delivery/trust.bundle, then delivery/trust.checkpoint.json under repo root.
@@ -89,24 +92,52 @@ function isPassingValue(v) {
 // heuristic — see that module for the rules.
 
 /**
+ * Default manifest/canonical-command execution timeout (ms). Overridable via
+ * TRUST_RECONCILE_COMMAND_TIMEOUT_MS. 10 minutes is comfortably above the slowest
+ * required-lane check (this repo's own CI lanes allow up to ~10 min); the prior
+ * hardcoded 180000ms (3 min) killed legitimately slow evals (e.g.
+ * evals/integration/test_workflow_sidecar_writer.sh, ~150s on a fast Mac, >180s on
+ * GitHub Actions runners) mid-run, producing a spurious divergence rather than a real
+ * failure.
+ */
+const DEFAULT_COMMAND_TIMEOUT_MS = 600000;
+
+/** Resolve the manifest/canonical-command timeout: TRUST_RECONCILE_COMMAND_TIMEOUT_MS env, else default. */
+function resolveCommandTimeoutMs() {
+  const raw = process.env.TRUST_RECONCILE_COMMAND_TIMEOUT_MS;
+  if (raw !== undefined && raw !== '') {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_COMMAND_TIMEOUT_MS;
+}
+
+/**
  * Run a single shell command under bash, capturing exit code.
- * @returns {{ cmd, exitCode, passed, stdout, stderr }}
+ * @returns {{ cmd, exitCode, passed, timedOut, timeoutMs, stdout, stderr }}
  */
 function runCommand(cmd, repoRoot) {
+  const timeoutMs = resolveCommandTimeoutMs();
   const result = spawnSync('bash', ['-c', cmd], {
     cwd: repoRoot,
     encoding: 'utf8',
-    timeout: 180000,
+    timeout: timeoutMs,
     killSignal: 'SIGKILL',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const exitCode = (result.status !== null && result.status !== undefined)
     ? result.status
     : 1;
+  // spawnSync sets result.error (ETIMEDOUT) when the timeout kills the process — this is
+  // NOT a real command failure and must be distinguishable in the FAIL log line so a
+  // future reader chases the timeout config, not a phantom test bug.
+  const timedOut = !!(result.error && result.error.code === 'ETIMEDOUT');
   return {
     cmd,
     exitCode,
     passed: exitCode === 0 && !result.error,
+    timedOut,
+    timeoutMs,
     stdout: result.stdout || '',
     stderr: result.stderr || '',
   };
@@ -530,6 +561,8 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
 
     if (result.passed) {
       process.stdout.write(`[trust-reconcile]   PASS: ${cmd}\n`);
+    } else if (result.timedOut) {
+      process.stderr.write(`[trust-reconcile]   FAIL: ${cmd} (TIMED OUT after ${result.timeoutMs}ms — this is a timeout kill, not a real command failure; if this command is a legitimately slow check, raise TRUST_RECONCILE_COMMAND_TIMEOUT_MS)\n`);
     } else {
       process.stderr.write(`[trust-reconcile]   FAIL: ${cmd} (exit ${result.exitCode})\n`);
       if (result.stderr) {
@@ -671,6 +704,8 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
           ciResults.set(normalCmd, ciResult);
           if (r.passed) {
             process.stdout.write(`[trust-reconcile]   PASS: ${entry.command}\n`);
+          } else if (r.timedOut) {
+            process.stderr.write(`[trust-reconcile]   FAIL: ${entry.command} (TIMED OUT after ${r.timeoutMs}ms — this is a timeout kill, not a real command failure; if this manifest command is a legitimately slow check, raise TRUST_RECONCILE_COMMAND_TIMEOUT_MS)\n`);
           } else {
             process.stderr.write(`[trust-reconcile]   FAIL: ${entry.command} (exit ${r.exitCode})\n`);
             if (r.stderr) {

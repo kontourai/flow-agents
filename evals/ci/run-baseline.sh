@@ -19,6 +19,7 @@ CHECKS=(
   "Fixture retirement audit integration|bash evals/integration/test_fixture_retirement_audit.sh"
   "Publish-change helper integration|bash evals/integration/test_publish_change_helper.sh"
   "Workflow sidecar writer integration|bash evals/integration/test_workflow_sidecar_writer.sh"
+  "Actor identity resolver integration|bash evals/integration/test_actor_identity.sh"
   "Goal Fit hook integration|bash evals/integration/test_goal_fit_hook.sh"
   "Hook category behavior integration|bash evals/integration/test_hook_category_behaviors.sh"
   "Workflow steering hook integration|bash evals/integration/test_workflow_steering_hook.sh"
@@ -62,6 +63,7 @@ LANE_WORKFLOW_CONTRACTS=(
   "Fixture retirement audit integration"
   "Publish-change helper integration"
   "Workflow sidecar writer integration"
+  "Actor identity resolver integration"
 )
 
 LANE_RUNTIME_AND_KIT=(

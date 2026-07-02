@@ -484,7 +484,7 @@ The `RESUME:` block supplements the existing `STATE:` line and contains:
 - **Next step** — the first `handoff.json next_steps` entry.
 - **Blockers** — any recorded blockers from `handoff.json`, or "none".
 - **Trust** — `Trust: N verified / M disputed / T total` from reading `trust.bundle`. Each disputed or unknown claim is listed with its id and a copy-pasteable remedy command: `npm run workflow:sidecar -- claim <id> <dir>`.
-- **Liveness advisory** (when applicable) — `[LIVENESS WARNING: another agent appears live on this work: actor <X>, last seen <T>]` when the shared liveness stream (`.flow-agents/liveness/events.jsonl`, ADR 0012) contains a fresh claim or heartbeat from a different actor for the same slug. This is advisory only — the hook exits 0 regardless.
+- **Liveness advisory** (when applicable) — `[LIVENESS WARNING: another agent appears live on this work: actor <X>, last seen <T>]` when the shared liveness stream (`.flow-agents/liveness/events.jsonl`, ADR 0012) contains a fresh claim or heartbeat from a different actor for the same slug. This is advisory only — the hook exits 0 regardless. The block also always includes an `ACTOR: <actor> (<source>)` line — the same runtime-agnostic actor identity this session resolves for itself (see "Actor identity and liveness writes" below), so a resuming agent can see at a glance which identity its own liveness claims/heartbeats will be filed under.
 - **Route hint** — `To continue: resume this work. Or run pull-work to assess WIP and start new/parallel work.` — always routes the resume-vs-parallel decision through `pull-work` rather than auto-taking it.
 
 The `RESUME:` block appears on `SessionStart` only. `UserPromptSubmit` and `PostToolUse`
@@ -510,3 +510,46 @@ zero dependencies). It exports:
 Both the hook (`scripts/hooks/workflow-steering.js`) and the compiled CLI
 (`build/src/cli/workflow-sidecar.js`) consume this helper so the TTL/freshness logic lives
 in one place.
+
+### Actor identity and liveness writes
+
+Liveness claims/heartbeats/releases are attributed to a runtime-agnostic **actor struct**
+`{runtime, session_id, host, human?}`, serialized (via `serializeActor()` in the shared
+`scripts/hooks/lib/actor-identity.js` resolver — same sharing pattern as `liveness-read.js`
+above) into a single string safe for the existing `${subjectId}::${actor}` grouping key. Both
+`workflow-sidecar`'s `liveness` command and `workflow-steering.js`'s SessionStart advisory
+consume the same `resolveActor()` function, so a session's own claim/heartbeat events are
+never mistaken for "another agent."
+
+`resolveActor()` derives the actor automatically, with zero required configuration, via a
+priority chain:
+
+1. An explicit `FLOW_AGENTS_ACTOR` env override, if set (and not the literal `"local"`,
+   case-insensitive) — always wins.
+2. A runtime-native session-id env var already ambient in the current process's own
+   environment — confirmed for Claude Code (`CLAUDE_CODE_SESSION_ID`); the equivalent var for
+   Codex/opencode/pi is unverified as of this writing.
+3. A process-ancestry fallback (the resolver's parent PID plus that parent process's exact
+   start timestamp, hashed into a short opaque token) — needs no runtime cooperation, is
+   stable across repeated invocations within one session, and is distinct across concurrent
+   sessions on one host. This is the correctness backstop for runtimes whose native
+   session-id env var is not yet confirmed.
+
+**Liveness writes fail loud.** `liveness claim`, `liveness heartbeat`, and `liveness release`
+exit nonzero with remediation text whenever the resolved actor is empty or the literal
+`"local"` (case-insensitive) — they never silently fall back to the old shared `"local"`
+default. Fix: pass `--actor <id>` explicitly, set `FLOW_AGENTS_ACTOR=<id>`, or run inside a
+supported runtime so the derivation chain above can resolve a real identity.
+
+**Liveness reads stay backward-compatible.** `liveness status` and `freshHolders()` (in
+`liveness-read.js`) continue to parse, group, and label pre-existing events whose `actor`
+field is the literal string `"local"` without error or behavior change — only *new* writes
+are rejected, not historical data.
+
+This actor struct is the same shape referenced by
+[ADR 0012](adr/0012-agent-coordination-as-liveness-claims.md) and by
+[ADR 0021](adr/0021-assignment-leases-and-stale-claim-takeover.md) §2 (`AssignmentProvider`)
+as the forward-looking identity model for durable assignment. ADR 0021 is still Draft, and its
+other slices (`AssignmentProvider`, the janitor, takeover/supersede, the verify-hold publish
+gate) are **not** implemented by this change — only the actor struct and derivation chain
+described here.
