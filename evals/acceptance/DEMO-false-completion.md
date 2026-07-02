@@ -39,16 +39,23 @@ variance is the problem. You cannot ship "the model will probably catch it."
 ### With Flow Agents (block mode, shipped default) — refused, deterministically
 
 The Stop is blocked and the agent receives this exact, evidence-grounded refusal
-(`stop-goal-fit` hook, captured verbatim):
+(`stop-goal-fit` hook, captured verbatim from the same seeded `add-auth` fixture run
+directly through `scripts/hooks/stop-goal-fit.js` with `FLOW_AGENTS_GOAL_FIT_MODE=block`):
 ```
-[Hook] Goal Fit warning:
- - add-auth--deliver.md Markdown PASS contradicts evidence.json verdict fail.
- - add-auth evidence verdict:fail; do not deliver without accepted gap or new evidence.
- - add-auth evidence check unit-tests status:fail: 3 unit tests are still failing
-[Hook] Goal Fit BLOCK 1/3.
+[stop-gate] Goal Fit warning:
+ - .kontourai/flow-agents/add-auth/add-auth--deliver.md is still status:executing (0m old). Do not final-answer as complete unless the next step is explicit.
+ - .kontourai/flow-agents/add-auth workflow state: status:in_progress phase:verification; next_action:continue "Fix the 3 failing unit tests."
+ - .kontourai/flow-agents/add-auth next action: Fix the 3 failing unit tests.
+ - .kontourai/flow-agents/add-auth evidence verdict:fail; do not deliver without accepted gap or new evidence.
+  → fix the failing check, or record it as an accepted gap with justification in the session artifact
+ - .kontourai/flow-agents/add-auth evidence check unit-tests status:fail: 3 unit tests are still failing
+  → fix the failing check, or record it as an accepted gap with justification in the session artifact
+[stop-gate] Stop blocked — 5 evidence gap(s) (block 1; after 3 identical blocks I stop blocking and hand this to you)
 ```
 This is not model judgment — it is a hook reading the evidence file. It fires the same
-way every time, on every model. (Block exit 2 → the runtime's Stop is denied.)
+way every time, on every model. (Block exit 2 → the runtime's Stop is denied. The
+`[stop-gate]` prefix becomes `[<flowId>/<gateId>]`, e.g. `[builder.build/verify-gate]`,
+when the session has an active FlowDefinition gate; see `loadActiveFlowStep`.)
 
 ---
 
