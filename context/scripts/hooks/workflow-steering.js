@@ -17,6 +17,7 @@
 const fs = require('fs');
 const path = require('path');
 const { readLivenessEvents, freshHolders } = require('./lib/liveness-read');
+const { resolveActor } = require('./lib/actor-identity');
 const { flowAgentsArtifactRootsForRead } = require('./lib/local-artifact-paths');
 
 const STEERING = {
@@ -343,15 +344,20 @@ function resumeSteering(root, current) {
 
     // Liveness advisory
     try {
+      const resolved = resolveActor(process.env);
+      const selfActor = resolved.actor || 'local';
       const events = flowAgentsArtifactRootsForRead(root)
         .flatMap(artifactRoot => readLivenessEvents(path.join(artifactRoot, 'liveness', 'events.jsonl')));
       if (events.length > 0) {
-        const selfActor = (process.env.FLOW_AGENTS_ACTOR || '').trim() || 'local';
+        // selfActor (for exclusion matching) stays raw here; only the display strings pushed
+        // into `lines` are sanitized below, since holders come from the shared multi-writer
+        // liveness stream and must be treated as untrusted display input (#287 fix iteration 1).
         const holders = freshHolders(events, slug, selfActor, Date.now());
         for (const h of holders) {
-          lines.push(`[LIVENESS WARNING: another agent appears live on this work: actor ${h.actor}, last seen ${h.lastAt}]`);
+          lines.push(`[LIVENESS WARNING: another agent appears live on this work: actor ${safeStateText(h.actor)}, last seen ${h.lastAt}]`);
         }
       }
+      lines.push(`ACTOR: ${safeStateText(selfActor)} (${resolved.source})`);
     } catch { /* skip */ }
 
     // Pull-work route hint

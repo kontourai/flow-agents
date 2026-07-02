@@ -187,6 +187,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_workflow_sidecar_writer.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_actor_identity.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_veritas_governance_adapter.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_workflow_steering_hook.sh" || result=1

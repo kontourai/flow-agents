@@ -2488,6 +2488,110 @@ else
   _fail "liveness lifecycle mismatch: held=[$LC_HELD] free=[$LC_FREE] off=$([ -f "$TB_OFF_ROOT/liveness/events.jsonl" ] && echo wrote || echo none)"
 fi
 
+# ─── AC5 (#287): two auto-derived sessions (no --actor, no FLOW_AGENTS_ACTOR) → two distinct held holders ──
+# Simulates two concurrent sessions on one host via injected CLAUDE_CODE_SESSION_ID envs (the
+# runtime-native session-id signal actor-identity.js's resolveActor() reads at priority layer 2).
+# Neither invocation passes --actor; the actor is fully auto-derived.
+TB_TWOHOLDERS_ROOT="$TMPDIR_EVAL/liveness-two-holders/.kontourai/flow-agents"
+CLAUDE_CODE_SESSION_ID=sess-a flow_agents_node "$WRITER" liveness claim two-holder-subj --ttl 1800 --artifact-root "$TB_TWOHOLDERS_ROOT" >"$TMPDIR_EVAL/two-holders-a.out" 2>"$TMPDIR_EVAL/two-holders-a.err"
+TWO_HOLDERS_A_STATUS=$?
+CLAUDE_CODE_SESSION_ID=sess-b flow_agents_node "$WRITER" liveness claim two-holder-subj --ttl 1800 --artifact-root "$TB_TWOHOLDERS_ROOT" >"$TMPDIR_EVAL/two-holders-b.out" 2>"$TMPDIR_EVAL/two-holders-b.err"
+TWO_HOLDERS_B_STATUS=$?
+flow_agents_node "$WRITER" liveness status --json --subject two-holder-subj --artifact-root "$TB_TWOHOLDERS_ROOT" >"$TMPDIR_EVAL/two-holders-status.json" 2>"$TMPDIR_EVAL/two-holders-status.err"
+if [[ "$TWO_HOLDERS_A_STATUS" -eq 0 && "$TWO_HOLDERS_B_STATUS" -eq 0 ]] \
+  && node - "$TMPDIR_EVAL/two-holders-status.json" <<'NODE'
+const fs = require("node:fs");
+const rows = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!Array.isArray(rows) || rows.length !== 2) throw new Error("expected 2 rows, got " + JSON.stringify(rows));
+const held = rows.filter((r) => r.label === "held");
+if (held.length !== 2) throw new Error("expected 2 held rows, got " + JSON.stringify(rows));
+const actors = new Set(held.map((r) => r.actor));
+if (actors.size !== 2) throw new Error("expected 2 distinct actors, got " + JSON.stringify([...actors]));
+if ([...actors].some((a) => String(a).toLowerCase() === "local")) throw new Error("actor collapsed to local: " + JSON.stringify([...actors]));
+NODE
+then
+  _pass "liveness (AC5): two auto-derived sessions (no --actor) produce two distinct held holders, not one collapsed 'local' holder"
+else
+  _fail "liveness (AC5) two-holder check failed: $(cat "$TMPDIR_EVAL/two-holders-a.out" "$TMPDIR_EVAL/two-holders-a.err" "$TMPDIR_EVAL/two-holders-b.out" "$TMPDIR_EVAL/two-holders-b.err" "$TMPDIR_EVAL/two-holders-status.err") json=$(cat "$TMPDIR_EVAL/two-holders-status.json" 2>/dev/null)"
+fi
+
+# ─── AC6 (#287): forced-unresolved actor → liveness write exits nonzero with remediation ──
+# FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED=1 (together with NODE_ENV=test — F4, #287 fix iteration 1:
+# the hatch requires BOTH vars) is the test-only escape hatch in actor-identity.js's resolveActor():
+# it short-circuits to {actor: "", source: "test-forced-unresolved"} before any real runtime/ancestry
+# detection runs, deterministically proving the fail-loud path without needing to sabotage ps/proc.
+# No --actor flag, no (non-forced) FLOW_AGENTS_ACTOR set.
+TB_FORCEUNRES_ROOT="$TMPDIR_EVAL/liveness-forced-unresolved/.kontourai/flow-agents"
+if FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED=1 NODE_ENV=test flow_agents_node "$WRITER" liveness claim forced-unresolved-subj --artifact-root "$TB_FORCEUNRES_ROOT" >"$TMPDIR_EVAL/forced-unresolved.out" 2>"$TMPDIR_EVAL/forced-unresolved.err"; then
+  _fail "liveness (AC6): claim with FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED=1 should have exited nonzero"
+elif rg -q -- '--actor' "$TMPDIR_EVAL/forced-unresolved.err" && rg -q -- 'FLOW_AGENTS_ACTOR' "$TMPDIR_EVAL/forced-unresolved.err" \
+  && [[ ! -f "$TB_FORCEUNRES_ROOT/liveness/events.jsonl" ]]; then
+  _pass "liveness (AC6): forced-unresolved actor (no --actor, no runtime/ancestry signal) exits nonzero naming --actor and FLOW_AGENTS_ACTOR"
+else
+  _fail "liveness (AC6) forced-unresolved rejection lacked remediation or wrote an event: $(cat "$TMPDIR_EVAL/forced-unresolved.out" "$TMPDIR_EVAL/forced-unresolved.err")"
+fi
+
+# ─── AC3 (#287): literal "local" actor is rejected even when explicitly set, not just when absent ──
+# Deviation note (see worker report): `FLOW_AGENTS_ACTOR=local` alone (env override, no --actor) is
+# REJECTED by actor-identity.js's resolveActor() at the override layer (it can never round-trip back
+# in via that seam — see the module's own header comment) but the command then falls through to a
+# real runtime/ancestry-derived actor and SUCCEEDS with that distinct, non-"local" value whenever any
+# resolution layer is available (true in this sandbox via CLAUDE_CODE_SESSION_ID, and true in nearly
+# any environment via the process-ancestry fallback) — empirically confirmed exit 0 during this
+# task's investigation. The `--actor local` explicit-flag path bypasses resolveActor's override
+# rejection and hits the liveness() guard directly, so it is the deterministic, environment-independent
+# way to prove "explicitly set literal local is rejected, never silently written" at the CLI level.
+TB_LITERALLOCAL_ROOT="$TMPDIR_EVAL/liveness-literal-local/.kontourai/flow-agents"
+if flow_agents_node "$WRITER" liveness claim literal-local-subj --actor local --artifact-root "$TB_LITERALLOCAL_ROOT" >"$TMPDIR_EVAL/literal-local.out" 2>"$TMPDIR_EVAL/literal-local.err"; then
+  _fail "liveness (AC3): claim with --actor local should have exited nonzero"
+elif rg -q -- '--actor' "$TMPDIR_EVAL/literal-local.err" && rg -q -- 'FLOW_AGENTS_ACTOR' "$TMPDIR_EVAL/literal-local.err" \
+  && [[ ! -f "$TB_LITERALLOCAL_ROOT/liveness/events.jsonl" ]]; then
+  _pass "liveness (AC3): explicit --actor local (case-insensitive literal) exits nonzero naming --actor and FLOW_AGENTS_ACTOR"
+else
+  _fail "liveness (AC3) literal-local rejection lacked remediation or wrote an event: $(cat "$TMPDIR_EVAL/literal-local.out" "$TMPDIR_EVAL/literal-local.err")"
+fi
+if flow_agents_node "$WRITER" liveness claim literal-local-subj-upper --actor LOCAL --artifact-root "$TB_LITERALLOCAL_ROOT" >"$TMPDIR_EVAL/literal-local-upper.out" 2>"$TMPDIR_EVAL/literal-local-upper.err"; then
+  _fail "liveness (AC3): claim with --actor LOCAL (case-insensitive) should have exited nonzero"
+else
+  _pass "liveness (AC3): explicit --actor LOCAL is rejected case-insensitively"
+fi
+# Env-only override path: FLOW_AGENTS_ACTOR=local (no --actor) must never let "local" round-trip back
+# in as the persisted actor — it falls through to auto-derivation instead of dying when a resolution
+# layer is available (documented behavior of the override seam, see comment above).
+if FLOW_AGENTS_ACTOR=local flow_agents_node "$WRITER" liveness claim literal-local-env-subj --artifact-root "$TB_LITERALLOCAL_ROOT" >"$TMPDIR_EVAL/literal-local-env.out" 2>"$TMPDIR_EVAL/literal-local-env.err" \
+  && ! rg -q '"actor":"local"' "$TB_LITERALLOCAL_ROOT/liveness/events.jsonl" 2>/dev/null \
+  && ! rg -qi 'by local$' "$TMPDIR_EVAL/literal-local-env.out"; then
+  _pass "liveness (AC3): FLOW_AGENTS_ACTOR=local override is rejected and never round-trips into the persisted actor"
+else
+  _fail "liveness (AC3) FLOW_AGENTS_ACTOR=local override handling regressed: $(cat "$TMPDIR_EVAL/literal-local-env.out" "$TMPDIR_EVAL/literal-local-env.err")"
+fi
+
+# ─── T4 (#287 fix iteration 2, F7): explicit --actor value that strips to empty under the allowed
+# [A-Za-z0-9_.-] charset is a hard error on the write path (unlike the env-override seam, which
+# falls through to derivation) — claim exits nonzero with remediation and writes no event.
+TB_STRIPEMPTY_ROOT="$TMPDIR_EVAL/liveness-strip-empty/.kontourai/flow-agents"
+if flow_agents_node "$WRITER" liveness claim strip-empty-subj --actor ':::' --artifact-root "$TB_STRIPEMPTY_ROOT" >"$TMPDIR_EVAL/strip-empty.out" 2>"$TMPDIR_EVAL/strip-empty.err"; then
+  _fail "liveness (T4/F7): claim with --actor ':::' should have exited nonzero"
+elif rg -q -- '--actor' "$TMPDIR_EVAL/strip-empty.err"   && [[ ! -f "$TB_STRIPEMPTY_ROOT/liveness/events.jsonl" ]]; then
+  _pass "liveness (T4/F7): --actor ':::' (strips to empty) exits nonzero with --actor remediation and writes no event"
+else
+  _fail "liveness (T4/F7) strip-to-empty --actor rejection lacked remediation or wrote an event: $(cat "$TMPDIR_EVAL/strip-empty.out" "$TMPDIR_EVAL/strip-empty.err")"
+fi
+
+# ─── AC4 (#287): backward-compatible reads of legacy literal "local" events ──
+# Hand-seed liveness/events.jsonl directly (bypassing the CLI) to simulate a pre-#287 event whose
+# actor field is the literal string "local", then confirm `liveness status` still parses, groups, and
+# labels it correctly — reads must keep tolerating historical "local" events (unlike writes).
+TB_LEGACY_ROOT="$TMPDIR_EVAL/liveness-legacy/.kontourai/flow-agents"
+mkdir -p "$TB_LEGACY_ROOT/liveness"
+printf '%s\n' '{"type":"claim","subjectId":"legacy-subj","actor":"local","at":"2026-06-25T11:50:00Z","ttlSeconds":1800}' > "$TB_LEGACY_ROOT/liveness/events.jsonl"
+LEGACY_STATUS_OUT=$(flow_agents_node "$WRITER" liveness status --subject legacy-subj --now "2026-06-25T12:00:00Z" --artifact-root "$TB_LEGACY_ROOT" 2>/dev/null)
+if echo "$LEGACY_STATUS_OUT" | grep -qE "legacy-subj.*local.*held"; then
+  _pass "liveness (AC4): hand-seeded legacy actor:\"local\" event still parses as one held row"
+else
+  _fail "liveness (AC4) legacy 'local' event failed to parse: $LEGACY_STATUS_OUT"
+fi
+
 # ─── AC8: bundle-writers fail LOUDLY when Surface unavailable — no silent data loss (#156) ──
 TB_FO_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/failopen"
 mkdir -p "$TB_FO_DIR"

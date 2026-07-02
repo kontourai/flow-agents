@@ -67,6 +67,7 @@ renamed, or changes category, update the table and the validator together.
 | `workflow-steering.js` | policy hook | `evals/integration/test_workflow_steering_hook.sh` | Provides workflow guidance from current artifact state. |
 | `pre-commit-quality.js` | repo guardrail hook | `evals/integration/test_hook_category_behaviors.sh` | Supports repository Git hook checks, not installed runtime hooks. |
 | `desktop-notify.sh` | local notification helper | `evals/integration/test_hook_category_behaviors.sh` | Optional local desktop notification helper. |
+| `lib/actor-identity.js` | shared hook library | `evals/integration/test_actor_identity.sh` | Shared runtime-agnostic actor identity resolver (`resolveActor`) consumed by `workflow-steering.js` and `workflow-sidecar.js` to retire the shared `"local"` liveness-actor default (issue #287). |
 | `lib/audit-transport.sh` | shared hook library | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_telemetry.sh` | Shared audit event transport functions. |
 | `lib/config-protection-remedies.js` | shared hook library | `evals/integration/test_hook_category_behaviors.sh` | Sanctioned-remedy table for `config-protection.js` (WS8/ADR 0020 extraction). |
 | `lib/hook-flags.js` | shared hook library | `evals/integration/test_hook_category_behaviors.sh` | Shared profile/disable flag parsing. |
