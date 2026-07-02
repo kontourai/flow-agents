@@ -71,7 +71,7 @@ write_kit_pass_bundle() { # $1=bundle_path $2=slug $3=claim_value(opt)
 import json, sys
 bundle_path, slug, claim_val = sys.argv[1], sys.argv[2], sys.argv[3]
 bundle = {
-    "schemaVersion": 3, "source": "flow-agents/workflow-sidecar",
+    "schemaVersion": 5, "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c1", "subjectId": slug + "/tests", "subjectType": "flow-step",
         "claimType": "builder.verify.tests",
@@ -242,7 +242,7 @@ python3 - "$T2/.kontourai/flow-agents/nondeclared/trust.bundle" "nondeclared" <<
 import json, sys
 bundle_path, slug = sys.argv[1], sys.argv[2]
 bundle = {
-    "schemaVersion": 3, "source": "flow-agents/workflow-sidecar",
+    "schemaVersion": 5, "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c1", "subjectId": slug + "/tests", "subjectType": "custom",
         "claimType": "acme.custom.verify",   # neither workflow.* NOR declared by the flow
@@ -356,7 +356,7 @@ python3 - "$T5/.kontourai/flow-agents/ack-fail/trust.bundle" "ack-fail" << 'PY'
 import json, sys
 bundle_path, slug = sys.argv[1], sys.argv[2]
 bundle = {
-    "schemaVersion": 3, "source": "flow-agents/workflow-sidecar",
+    "schemaVersion": 5, "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c1", "subjectId": slug + "/tests", "subjectType": "flow-step",
         "claimType": "builder.verify.tests",
@@ -429,7 +429,7 @@ printf '%s' '{"artifact_dir":"nocommand"}' > "$T6/.kontourai/flow-agents/current
 python3 - "$T6/.kontourai/flow-agents/nocommand/trust.bundle" << 'PY'
 import json, sys
 bundle = {
-    "schemaVersion": 3, "source": "flow-agents/workflow-sidecar",
+    "schemaVersion": 5, "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c1", "subjectId": "nocommand/review", "subjectType": "workflow-check",
         "claimType": "workflow.check.review", "fieldOrBehavior": "policy doc reviewed",
@@ -498,7 +498,7 @@ python3 - "$T7/.kontourai/flow-agents/empty-expects/trust.bundle" "empty-expects
 import json, sys
 bundle_path, slug = sys.argv[1], sys.argv[2]
 bundle = {
-    "schemaVersion": 3, "source": "flow-agents/workflow-sidecar",
+    "schemaVersion": 5, "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c1", "subjectId": slug + "/tests", "subjectType": "flow-step",
         "claimType": "builder.verify.tests",
@@ -592,7 +592,7 @@ python3 - "$T8/.kontourai/flow-agents/status-dodge/trust.bundle" "status-dodge" 
 import json, sys
 bundle_path, slug = sys.argv[1], sys.argv[2]
 bundle = {
-    "schemaVersion": 3, "source": "flow-agents/workflow-sidecar",
+    "schemaVersion": 5, "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c1", "subjectId": slug + "/tests", "subjectType": "flow-step",
         "claimType": "builder.verify.tests",
@@ -753,7 +753,7 @@ python3 - "$T11/.kontourai/flow-agents/laundering-sess/trust.bundle" "laundering
 import json, sys
 bundle_path, slug = sys.argv[1], sys.argv[2]
 bundle = {
-    "schemaVersion": 3, "source": "flow-agents/workflow-sidecar",
+    "schemaVersion": 5, "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c1", "subjectId": slug + "/tests", "subjectType": "flow-step",
         "claimType": "builder.verify.tests",

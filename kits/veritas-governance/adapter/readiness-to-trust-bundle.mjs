@@ -128,7 +128,7 @@ export function buildReadinessTrustBundle(record, opts = {}) {
     id: claimId,
     subjectType: "repository-change",
     subjectId,
-    surface: surfaceName,
+    facet: surfaceName,
     claimType,
     fieldOrBehavior: "mergeReadiness",
     value: { verdict: ready ? "ready" : "not-ready", sourceRef, blocking: { failedRequirements: failedRules, failedEvidenceChecks: failedChecks } },
@@ -143,7 +143,7 @@ export function buildReadinessTrustBundle(record, opts = {}) {
 
   return {
     bundle: {
-      schemaVersion: 3,
+      schemaVersion: 5,
       source: "veritas-governance-kit/readiness-adapter",
       claims: [{ ...claim, status }],
       evidence: [evItem],

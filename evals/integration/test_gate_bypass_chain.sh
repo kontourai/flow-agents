@@ -72,7 +72,7 @@ seed_disputed_bundle() { # $1=bundle_path $2=slug
 import json, sys
 bundle_path, slug = sys.argv[1], sys.argv[2]
 bundle = {
-    "schemaVersion": 3,
+    "schemaVersion": 5,
     "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c-dispute",
@@ -391,7 +391,7 @@ MD
 python3 - "$T4_DIR/.kontourai/flow-agents/legit-test/trust.bundle" << 'PY'
 import json, sys
 bundle = {
-    "schemaVersion": 3,
+    "schemaVersion": 5,
     "source": "flow-agents/workflow-sidecar",
     "claims": [{
         "id": "c-legit",

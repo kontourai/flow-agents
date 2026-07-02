@@ -140,11 +140,14 @@ test("buildReadinessTrustBundle: a clean record yields a ready/verified software
 
   assert.equal(verdict, "ready");
   assert.equal(derivedStatus, "verified");
-  assert.equal(bundle.schemaVersion, 3);
+  // bundle uses the facet-renamed schemaVersion 5 shape (hachure@0.9's strict schema): see
+  // https://github.com/kontourai/flow-agents/issues/281.
+  assert.equal(bundle.schemaVersion, 5);
   assert.equal(bundle.source, "veritas-governance-kit/readiness-adapter");
   assert.equal(bundle.claims.length, 1);
   const claim = bundle.claims[0];
   assert.equal(claim.claimType, "software-readiness-verdict");
+  assert.equal(claim.facet, "veritas.readiness");
   assert.equal(claim.subjectId, "test-subject-ready");
   assert.equal(claim.value.verdict, "ready");
   assert.equal(claim.status, "verified");

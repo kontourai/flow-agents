@@ -13,7 +13,7 @@
     "AGENTS.md": "# Test Repo\n",
     ".flow-agents/false-bundle/false-bundle--deliver.md": "# False Bundle\n\nbranch: main\nstatus: delivered\ntype: deliver\n\n## Definition Of Done\n- [x] tests pass\n\n## Goal Fit Gate\n- [x] acceptance verified\n\n### Verdict: PASS\n",
     ".flow-agents/false-bundle/state.json": "{\"schema_version\":\"1.0\",\"task_slug\":\"false-bundle\",\"status\":\"delivered\",\"phase\":\"done\",\"updated_at\":\"2026-06-23T00:00:00Z\",\"next_action\":{\"status\":\"done\",\"summary\":\"done\"}}",
-    ".flow-agents/false-bundle/trust.bundle": "{\"schemaVersion\":3,\"source\":\"flow-agents/workflow-sidecar\",\"claims\":[{\"id\":\"c1\",\"subjectId\":\"false-bundle/unit-tests\",\"claimType\":\"workflow.check.command\",\"fieldOrBehavior\":\"unit tests\",\"value\":\"fail\",\"impactLevel\":\"high\",\"status\":\"disputed\",\"createdAt\":\"2026-06-23T00:00:00Z\",\"updatedAt\":\"2026-06-23T00:00:00Z\"}],\"evidence\":[],\"policies\":[],\"events\":[]}"
+    ".flow-agents/false-bundle/trust.bundle": "{\"schemaVersion\":5,\"source\":\"flow-agents/workflow-sidecar\",\"claims\":[{\"id\":\"c1\",\"subjectId\":\"false-bundle/unit-tests\",\"claimType\":\"workflow.check.command\",\"fieldOrBehavior\":\"unit tests\",\"value\":\"fail\",\"impactLevel\":\"high\",\"status\":\"disputed\",\"createdAt\":\"2026-06-23T00:00:00Z\",\"updatedAt\":\"2026-06-23T00:00:00Z\"}],\"evidence\":[],\"policies\":[],\"events\":[]}"
   },
   "env": {
     "FLOW_AGENTS_GOAL_FIT_MODE": "block",

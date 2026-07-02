@@ -46,14 +46,14 @@ seed_disputed_bundle() {
   mkdir -p "$dir"
   cat > "$dir/trust.bundle" <<JSON
 {
-  "schemaVersion": 3,
+  "schemaVersion": 5,
   "source": "claim-lookup-test;statusFunctionVersion=1",
   "claims": [
     {
       "id": "$claimId",
       "subjectType": "workflow-check",
       "subjectId": "${slug}/unit-tests",
-      "surface": "flow-agents.workflow",
+      "facet": "flow-agents.workflow",
       "claimType": "workflow.check.test",
       "fieldOrBehavior": "unit tests pass",
       "value": "fail",
@@ -255,14 +255,14 @@ mkdir -p "$AC5_DIR"
 # won't match any evidence check id and bundleEnforcement won't be deduped.
 cat > "$AC5_DIR/trust.bundle" <<'BUNDLE'
 {
-  "schemaVersion": 3,
+  "schemaVersion": 5,
   "source": "claim-lookup-test",
   "claims": [
     {
       "id": "gate-hint-test/AC1.flow-agents.workflow.acceptance criterion verified",
       "subjectType": "workflow-criterion",
       "subjectId": "gate-hint-test/AC1",
-      "surface": "flow-agents.workflow",
+      "facet": "flow-agents.workflow",
       "claimType": "workflow.acceptance.criterion",
       "fieldOrBehavior": "acceptance criterion verified",
       "value": "fail",

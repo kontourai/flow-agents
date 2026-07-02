@@ -46,7 +46,7 @@ const fs = require('fs');
 const [,, bundlePath, label, passingStr] = process.argv;
 const passing = passingStr === 'true';
 const bundle = {
-  schemaVersion: 3,
+  schemaVersion: 5,
   source: "test-fixture",
   claims: [
     {
@@ -55,7 +55,7 @@ const bundle = {
       value: passing ? "pass" : "fail",
       status: passing ? "verified" : "disputed",
       subjectId: "test-slug/build",
-      surface: "flow-agents.workflow",
+      facet: "flow-agents.workflow",
       subjectType: "workflow-check",
       fieldOrBehavior: "build",
       createdAt: "2026-06-27T00:00:00Z",

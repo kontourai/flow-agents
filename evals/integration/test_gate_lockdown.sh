@@ -78,7 +78,7 @@ write_clean_bundle() { # $1=path
   python3 - "$1" << 'PY'
 import json, sys
 bundle = {
-    "schemaVersion": 3, "source": "test",
+    "schemaVersion": 5, "source": "test",
     "claims": [], "evidence": [], "policies": [], "events": []
 }
 json.dump(bundle, open(sys.argv[1], 'w'))
@@ -90,7 +90,7 @@ write_high_impact_bundle() { # $1=path $2=slug $3=status(verified|disputed)
 import json, sys
 bp, slug, status = sys.argv[1], sys.argv[2], sys.argv[3]
 bundle = {
-    "schemaVersion": 3, "source": "test",
+    "schemaVersion": 5, "source": "test",
     "claims": [{
         "id": "c-high",
         "subjectId": slug + "/tests",
@@ -515,7 +515,7 @@ python3 - "$R6LA/.kontourai/flow-agents/launder-r6/trust.bundle" "launder-r6" "n
 import json, sys
 bp, slug, cmd = sys.argv[1], sys.argv[2], sys.argv[3]
 bundle = {
-    "schemaVersion": 3, "source": "flow-agents/workflow-sidecar",
+    "schemaVersion": 5, "source": "flow-agents/workflow-sidecar",
     "claims": [{"id":"c1","subjectId":slug+"/tests","subjectType":"flow-step",
       "claimType":"builder.verify.tests","fieldOrBehavior":cmd,
       "value":"pass","impactLevel":"high","status":"verified",
@@ -554,7 +554,7 @@ python3 - "$R6LB/.kontourai/flow-agents/launder-r6b/trust.bundle" "launder-r6b" 
 import json, sys
 bp, slug, cmd = sys.argv[1], sys.argv[2], sys.argv[3]
 bundle = {
-    "schemaVersion": 3, "source": "test",
+    "schemaVersion": 5, "source": "test",
     "claims": [{"id":"c1","subjectId":slug+"/tests","subjectType":"flow-step",
       "claimType":"builder.verify.tests","fieldOrBehavior":cmd,
       "value":"pass","impactLevel":"high","status":"verified",
@@ -588,7 +588,7 @@ python3 - "$R6LC/.kontourai/flow-agents/launder-r6c/trust.bundle" "launder-r6c" 
 import json, sys
 bp, slug, cmd = sys.argv[1], sys.argv[2], sys.argv[3]
 bundle = {
-    "schemaVersion": 3, "source": "test",
+    "schemaVersion": 5, "source": "test",
     "claims": [{"id":"c1","subjectId":slug+"/tests","subjectType":"flow-step",
       "claimType":"builder.verify.tests","fieldOrBehavior":cmd,
       "value":"pass","impactLevel":"high","status":"verified",
@@ -622,7 +622,7 @@ python3 - "$R6LD/.kontourai/flow-agents/legit-r6/trust.bundle" "legit-r6" << 'PY
 import json, sys
 bp, slug = sys.argv[1], sys.argv[2]
 bundle = {
-    "schemaVersion": 3, "source": "test",
+    "schemaVersion": 5, "source": "test",
     "claims": [{"id":"c1","subjectId":slug+"/tests","subjectType":"flow-step",
       "claimType":"builder.verify.tests","fieldOrBehavior":"npm test",
       "value":"pass","impactLevel":"high","status":"verified",
@@ -893,7 +893,7 @@ python3 - "$ISO2_DIR/repo/.kontourai/flow-agents/lowtest/trust.bundle" "lowtest"
 import json, sys
 bp, slug = sys.argv[1], sys.argv[2]
 bundle = {
-    "schemaVersion": 3, "source": "test",
+    "schemaVersion": 5, "source": "test",
     "claims": [{
         "id": "c-low",
         "subjectId": slug + "/docs",
@@ -946,7 +946,7 @@ seed_repo_inprogress "$AC3D" "postex" "execution" "in_progress"
 python3 - "$AC3D/.kontourai/flow-agents/postex/trust.bundle" << 'PY'
 import json, sys
 bundle = {
-    "schemaVersion": 3, "source": "test",
+    "schemaVersion": 5, "source": "test",
     "claims": [],
     "evidence": [{
         "id": "ev-captured", "claimId": None,
