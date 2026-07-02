@@ -100,6 +100,51 @@ slugify() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-//; s/-$//'
 }
 
+# WS8 (ADR 0020): the reconcile manifest is THIS registry, not a new file. Every entry
+# EMITTED below is a member of a REQUIRED LANE_* array (source-and-static, workflow-contracts,
+# runtime-and-kit), each of which gates a merge — so a manifest command is, by construction, a
+# required-lane command. The advisory LANE_USAGE_FEEDBACK lane (continue-on-error, non-blocking)
+# is EXCLUDED from the emit so a test_output claim can never reconcile against a non-gating
+# command. scripts/ci/trust-reconcile.js consumes this emit to resolve the manifest.
+_json_str() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  printf '"%s"' "$s"
+}
+
+_lanes_for_label() {
+  # WS8 (ADR 0020, iteration 2): LANE_USAGE_FEEDBACK is deliberately NOT considered here.
+  # The reconcile manifest must contain only commands that gate a merge in a required lane.
+  # The usage-feedback lane is advisory (its steps run continue-on-error and its failures do
+  # not block), so a usage-feedback check is NOT a required-lane command and must not be a
+  # manifest entry a test_output claim can reconcile against. Entries whose ONLY lane is
+  # usage-feedback therefore resolve to empty lanes and are skipped by emit_manifest_json.
+  local label="$1" out="" x
+  for x in "${LANE_SOURCE_AND_STATIC[@]}"; do [[ "$x" == "$label" ]] && { out="${out}\"source-and-static\","; break; }; done
+  for x in "${LANE_WORKFLOW_CONTRACTS[@]}"; do [[ "$x" == "$label" ]] && { out="${out}\"workflow-contracts\","; break; }; done
+  for x in "${LANE_RUNTIME_AND_KIT[@]}"; do [[ "$x" == "$label" ]] && { out="${out}\"runtime-and-kit\","; break; }; done
+  printf '%s' "${out%,}"
+}
+
+emit_manifest_json() {
+  # Machine-readable manifest: every lane-covered check as {id, command, lanes[]}.
+  # Only checks present in at least one LANE_* array are emitted (anti-gaming: a manifest
+  # command must run in a required lane by construction).
+  local entry label command id lanes first=1
+  printf '['
+  for entry in "${CHECKS[@]}"; do
+    label="${entry%%|*}"
+    command="${entry#*|}"
+    id="$(slugify "$label")"
+    lanes="$(_lanes_for_label "$label")"
+    [[ -z "$lanes" ]] && continue
+    if [[ $first -eq 1 ]]; then first=0; else printf ','; fi
+    printf '{"id":%s,"command":%s,"lanes":[%s]}' "$(_json_str "$id")" "$(_json_str "$command")" "$lanes"
+  done
+  printf ']\n'
+}
+
 active_lane() {
   printf '%s' "${FLOW_AGENTS_CI_LANE:-all}"
 }
@@ -306,6 +351,9 @@ case "${1:-}" in
   --finalize)
     finalize_results
     ;;
+  --manifest-json)
+    emit_manifest_json
+    ;;
   "")
     validate_active_lane || exit 2
     init_results
@@ -328,7 +376,7 @@ case "${1:-}" in
     finalize_results
     ;;
   *)
-    echo "Usage: $0 [--init|--check <check-id-or-label>|--finalize|--lane <lane>]" >&2
+    echo "Usage: $0 [--init|--check <check-id-or-label>|--finalize|--lane <lane>|--manifest-json]" >&2
     exit 2
     ;;
 esac

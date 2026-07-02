@@ -20,6 +20,37 @@ The artifact root is local working memory unless a workflow explicitly promotes 
 - Do not commit local workflow runtime roots such as `.kontourai/flow-agents/<slug>/` as durable policy unless a repository-specific contract explicitly says that artifact is promoted.
 - Do not commit local workflow runtime roots such as `.kontourai/flow-agents/<slug>/`; final acceptance must promote durable content before merge.
 
+## Session Archival Policy
+
+Two archive locations exist and serve distinct purposes — do not conflate them:
+
+- **Per-session, in-place history:** `<artifact-root>/<slug>/archive/<date>/` (above) holds
+  point-in-time snapshots of an *active* session's own records for audit/recovery while the
+  session remains in the active listing.
+- **Whole-session archival (canonical):** `<artifact-root>/archive/<slug>/` is where an
+  entire terminal session is *moved out of the active listing*. This is the root-level
+  `archive/` that `src/cli/workflow-artifact-cleanup-audit.ts` already treats as a skipped
+  root entry (`SKIPPED_ROOT_ENTRIES`), so an archived session is not re-scanned as active
+  WIP. Use this location when relocating a completed session; do not invent a third path.
+
+Retention rule (selection, not automatic deletion): a session is an **archival candidate**
+when `workflow-artifact-cleanup-audit` classifies it `terminal_done` (a `delivered`/
+`accepted`/`archived` session in phase `done`, or an `accepted`/`archived` session with no
+open learning routing) **and** its `state.json` `updatedAt` is older than a retention
+window (default 30 days). Use the audit tool's existing read-only classification as the
+candidate selector — do not build new discovery logic. `active_wip`,
+`active_learning_followup`, `cleanup_candidate`, and `invalid` sessions are **never**
+archival candidates on age alone.
+
+Procedure (documented; archival itself remains a deliberate, non-automated move — the audit
+tool "does not delete, archive," by design):
+
+1. `node build/src/cli/workflow-artifact-cleanup-audit.js <artifact-root>` to classify.
+2. From the `terminal_done` bucket, select those whose `state.json` `updatedAt` predates the
+   retention window.
+3. Move each selected `<artifact-root>/<slug>/` to `<artifact-root>/archive/<slug>/`
+   (a human-reviewed or explicitly-invoked move — not a silent background job).
+
 ## Persistence Integrity
 
 Writing a durable artifact must **fail loud, never fail-open.** If a record (state, evidence, a

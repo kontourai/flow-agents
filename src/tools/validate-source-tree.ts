@@ -25,6 +25,15 @@ const mirroredFiles = new Map<string, { mirror: string; allowedDifferences: Arra
   ["scripts/telemetry/console-presets.sh", { mirror: "context/scripts/telemetry/console-presets.sh", allowedDifferences: [] }],
   ["scripts/telemetry/install-console-config.sh", { mirror: "context/scripts/telemetry/install-console-config.sh", allowedDifferences: [] }],
   ["scripts/discover-agents.sh", { mirror: "context/scripts/discover-agents.sh", allowedDifferences: [['ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"', 'ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"']] }],
+  // WS8 (AC9): scripts/hooks/* is the actively-maintained source of truth; context/ holds
+  // the exported mirror. These four hooks (and the config-protection remedy lib) had drifted
+  // silently because nothing validated them. Enforce byte-identical mirrors so future drift
+  // fails `npm run validate:source` instead of silently accumulating.
+  ["scripts/hooks/config-protection.js", { mirror: "context/scripts/hooks/config-protection.js", allowedDifferences: [] }],
+  ["scripts/hooks/lib/config-protection-remedies.js", { mirror: "context/scripts/hooks/lib/config-protection-remedies.js", allowedDifferences: [] }],
+  ["scripts/hooks/stop-goal-fit.js", { mirror: "context/scripts/hooks/stop-goal-fit.js", allowedDifferences: [] }],
+  ["scripts/hooks/run-hook.js", { mirror: "context/scripts/hooks/run-hook.js", allowedDifferences: [] }],
+  ["scripts/hooks/workflow-steering.js", { mirror: "context/scripts/hooks/workflow-steering.js", allowedDifferences: [] }],
 ]);
 const publicScriptWrappers = new Map<string, { target: string; significantLines: string[] }>([
   ["scripts/build-universal-bundles.js", { target: "../build/src/tools/build-universal-bundles.js", significantLines: [
@@ -72,6 +81,7 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/workflow-steering.js", { category: "policy hook", requiredNeedles: ["Workflow Steering Hook"] }],
   ["scripts/hooks/desktop-notify.sh", { category: "local notification helper", requiredNeedles: ["desktop-notify.sh", "osascript"] }],
   ["scripts/hooks/lib/audit-transport.sh", { category: "shared hook library", requiredNeedles: ["audit_emit"] }],
+  ["scripts/hooks/lib/config-protection-remedies.js", { category: "shared hook library", requiredNeedles: ["SANCTIONED_REMEDIES", "REMEDY_COMMAND_CANDIDATES"] }],
   ["scripts/hooks/lib/hook-flags.js", { category: "shared hook library", requiredNeedles: ["isHookEnabled"] }],
   ["scripts/hooks/lib/liveness-read.js", { category: "shared hook library", requiredNeedles: ["freshHolders", "readLivenessEvents"] }],
   ["scripts/hooks/lib/local-artifact-paths.js", { category: "shared hook library", requiredNeedles: ["flowAgentsArtifactRoot", "defaultArtifactRootForRead"] }],
@@ -88,6 +98,9 @@ const fixtureOwnerPolicies = new Map<string, { owners: string[]; classification:
   ["evals/fixtures/pull-work-provider", { owners: ["evals/integration/test_pull_work_provider.sh"], classification: "work item provider normalization fixtures" }],
   ["evals/fixtures/pull-work-wip-shepherding", { owners: ["evals/static/test_workflow_skills.sh"], classification: "WIP shepherding state fixtures" }],
   ["evals/fixtures/surface-trust", { owners: ["evals/integration/test_workflow_sidecar_writer.sh"], classification: "Surface trust evidence fixtures" }],
+  ["evals/fixtures/trust-reconcile-exploits", { owners: ["evals/integration/test_trust_reconcile_negatives.sh"], classification: "WS8 trust-reconcile anti-gaming exploit fixtures (frozen negative regressions)" }],
+  ["evals/fixtures/trust-reconcile-mixed-bundle", { owners: ["evals/integration/test_trust_reconcile_mixed_bundle.sh"], classification: "WS8 trust-reconcile mixed-evidence end-to-end proof fixture" }],
+  ["evals/fixtures/trust-reconcile-ws3", { owners: ["evals/integration/test_trust_reconcile_negatives.sh"], classification: "WS8 AC6 backward-compat fixture: real ws3-kit-dependencies-namespacing old-style bundle" }],
   ["evals/fixtures/usage-feedback", { owners: ["evals/integration/test_usage_feedback_import.sh", "evals/integration/test_usage_feedback_outcomes.sh", "evals/integration/test_usage_feedback_report.sh"], classification: "usage feedback import/outcome fixtures" }],
   ["evals/fixtures/veritas-governance-adapter", { owners: ["evals/integration/test_veritas_governance_adapter.sh"], classification: "Veritas governance adapter fixtures" }],
 ]);
@@ -105,6 +118,11 @@ const allowedPythonCommandFiles = [
   /^evals\/results\//,
   /^evals\/lib\/python\.sh$/,
   /(^|\/)telemetry\/lib\/enrich\.sh$/,
+  // WS8 (AC10b): stop-goal-fit.js lists python/python3 in its first-token command-RECOGNIZER
+  // allowlist (so honest command evidence from a polyglot adopter project is not misclassified
+  // as prose). These are literal recognizer tokens, NOT a flow-agents Python dependency — no
+  // .py file is ever invoked — so the two byte-identical mirror copies are exempt here.
+  /^(context\/)?scripts\/hooks\/stop-goal-fit\.js$/,
 ];
 
 function tryLoadJson(file: string, reporter: Reporter): any {

@@ -22,6 +22,7 @@
 # The anti-gaming gate + its enforcement hooks
 /scripts/hooks/stop-goal-fit.js     @briananderson1222
 /scripts/hooks/config-protection.js @briananderson1222
+/scripts/hooks/lib/config-protection-remedies.js @briananderson1222
 /scripts/hooks/evidence-capture.js  @briananderson1222
 
 # FlowDefinition resolution + the trust producer/checkpoint/signing the gate depends on

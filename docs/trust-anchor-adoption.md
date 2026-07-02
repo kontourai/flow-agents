@@ -106,12 +106,91 @@ for the files that declare what CI runs:
 
 ```
 # Trust anchor config — requires owner review.
-# An agent cannot weaken verify-command without a human approving the change.
+# An agent cannot weaken verify-command or the reconcile manifest without a human
+# approving the change.
 .github/workflows/trust-verify.yml  @your-org/owners
 package.json                         @your-org/owners
+evals/ci/run-baseline.sh             @your-org/owners
 ```
 
-Adjust paths and team names for your repo structure.
+`package.json` covers both `trust-reconcile-verify` and the `trust-reconcile-manifest`
+declaration (see below); `evals/ci/run-baseline.sh` covers the manifest registry when you
+source the manifest from a `run-baseline.sh`-shaped registry. Adjust paths and team names
+for your repo structure.
+
+## Declaring a Manifest (Multiple Commands)
+
+The single `trust-reconcile-verify` command above is the anchor's standalone fresh-verify
+(and the legacy reconcile path — a manifest of size 1). To reconcile **granular,
+per-acceptance-criterion** evidence — some commands, some session-local/manual/provider
+evidence — declare a **reconcile manifest**: a set of named, individually-re-runnable
+commands, each of which must actually run in a required CI lane (see ADR 0020).
+
+Resolution priority (first match wins):
+
+1. CLI `--manifest '<json>'`
+2. `TRUST_RECONCILE_MANIFEST` environment variable (JSON)
+3. `package.json` `"trust-reconcile-manifest"` — either an inline array, or a string
+   command that emits the JSON:
+
+   ```json
+   {
+     "trust-reconcile-manifest": [
+       { "id": "unit",  "command": "npm test" },
+       { "id": "lint",  "command": "npm run lint" },
+       { "id": "types", "command": "npm run typecheck" }
+     ]
+   }
+   ```
+
+   Every `id`/`command` here must be a command your required CI actually runs. If your repo
+   already has a lane registry that CI invokes, point the key at its machine-readable emit
+   instead of duplicating it (this is what Flow Agents does — see the mirror section):
+
+   ```json
+   { "scripts": { "trust-reconcile-manifest": "bash evals/ci/run-baseline.sh --manifest-json" } }
+   ```
+4. `evals/ci/run-baseline.sh --manifest-json` (auto-detected, if present).
+
+**How classification works.** A claim reconciles per-command against fresh CI results only
+when its evidence is `evidenceType: "test_output"` **and** its command matches a manifest
+entry. Honest session-local evidence (`human_attestation`, `crawl_observation`,
+`document_citation`, `policy_rule`, `source_excerpt`, `attestation`) is never flagged
+"not-run" for lacking a command — it is accepted on its Surface-derived `verified`/`assumed`
+status. A `test_output` claim whose command is not in the manifest is still a divergence
+(you cannot self-label an arbitrary command `test_output` to dodge the manifest).
+
+**Session-local passes are loudly, not quietly, marked.** A non-command-backed claim that
+re-derives `verified` (and carries no waiver) is NOT independently re-runnable by CI — the
+anchor can only confirm the bundle is internally self-consistent, not that the underlying
+attestation is true. It prints a distinct line for every such claim:
+
+```
+[trust-reconcile] ATTESTED (not independently verifiable at L0): '<claimId>' (<claimType>) evidenceType=<type> — accepted on bundle-internal consistency only; see ADR 0020 Residuals
+```
+
+plus a summary count (`N attested claim(s) accepted without independent verification`). This
+does not change the exit code — attestations are not blocked, only disclosed — so review the
+`ATTESTED` lines and count in any bundle before trusting it. See the **Residuals** section of
+[ADR 0020](adr/0020-trust-reconcile-manifest-and-claim-classification.md) for the full
+disclosure (fabricated self-consistent attestations, unauthenticated `approved_by`, and the
+evidenceType-laundering route).
+
+**Waiving an accepted gap.** For an honestly-accepted gap, record it with both flags:
+
+```bash
+npm run workflow:sidecar -- record-evidence <artifact-dir> --verdict pass \
+  --check-json '{"id":"load-test","kind":"external","status":"skip","summary":"sustained-load perf test"}' \
+  --accepted-gap-reason "load-test env not provisioned this cycle; tracked for the perf milestone" \
+  --waived-by "your-name"
+```
+
+Both `--accepted-gap-reason` and `--waived-by` are required together — an accepted gap
+with no justification or approver is refused (no silent waiver). Reuse a **separate**
+`record-evidence` invocation for waived checks: the flags apply to every check in the
+invocation. The anchor prints each waived claim on a distinct, un-suppressible
+`[trust-reconcile] WAIVED: ...` line in the required job's own log — reviewed and visible,
+never silent.
 
 ## Configuring the Verify Command
 
@@ -164,9 +243,14 @@ Flow Agents uses the same pattern in its own repository:
 
 - **`scripts/ci/trust-reconcile.js`** — the anchor script (runs in
   `.github/workflows/trust-reconcile.yml`).
-- **`package.json` `trust-reconcile-verify`** — `npm run build && npm run eval:static`.
+- **`package.json` `trust-reconcile-verify`** — `npm run build && npm run eval:static`
+  (the standalone fresh-verify / legacy single-command reconcile path).
+- **`package.json` `trust-reconcile-manifest`** — `bash evals/ci/run-baseline.sh
+  --manifest-json` (the reconcile manifest *is* the live `run-baseline.sh` `LANE_*`
+  registry — every entry runs in a required `ci.yml` lane by construction).
 - **`evals/ci/antigaming-suite.sh`** — the regression suite that proves the gate and
-  anchor work; runs in the required `ci.yml` lane.
+  anchor work (including `test_trust_reconcile_manifest.sh` and the end-to-end
+  `test_trust_reconcile_mixed_bundle.sh`); runs in the required `ci.yml` lane.
 - **Branch protection** on `main` — `Trust Reconcile` required, `enforce_admins` on.
 
 ## Adoption Checklist
@@ -192,6 +276,23 @@ the mismatch. Fix the underlying test failure.
 **"trust divergence: command contains exit-code-laundering operator"**: A claimed
 command used `||`, `; true`, or `; exit 0`. These mask real exit codes. Remove them.
 
+**"command is not in the reconcile manifest"**: A `test_output` claim named a command that
+is not a manifest entry. Either declare the command in your `trust-reconcile-manifest` (and
+ensure it runs in a required CI lane), or, if the evidence is genuinely session-local
+(manual/provider/observation), record it with a non-`test_output` `evidenceType` so it is
+classified session-local instead of expected to be CI-re-runnable.
+
+**"session-local claim ... asserts pass ... but has no waiver and no Surface-derived
+verified/assumed status"**: An honest session-local claim must either resolve a real
+`verified`/`assumed` Surface status from its own evidence, or be explicitly waived with
+`--accepted-gap-reason` + `--waived-by`. Classification is not a pass bypass.
+
 **"checkpoint-only bundle cannot be reconciled per-command"**: A `delivery/trust.bundle`
 was expected but only `delivery/trust.checkpoint.json` was found. The deliver skill
 publishes the full bundle; ensure it ran correctly.
+
+**"ATTESTED (not independently verifiable at L0): ..."**: Not an error — the job still
+passes. This is the anchor telling you a claim was accepted on bundle-internal consistency
+only (no CI command to re-run and no independent, cryptographically-verified attestation).
+Review each `ATTESTED` line and the summary count before trusting the bundle; see
+[ADR 0020's Residuals section](adr/0020-trust-reconcile-manifest-and-claim-classification.md).

@@ -19,6 +19,7 @@ const { spawnSync } = require('child_process');
 const { isHookEnabled } = require('./lib/hook-flags');
 
 const MAX_STDIN = 1024 * 1024;
+const CONTRACT_VERSION = '1.0';
 
 function readStdinRaw() {
   return new Promise(resolve => {
@@ -99,7 +100,12 @@ async function main() {
 
   if (hookModule && typeof hookModule.run === 'function') {
     try {
-      const output = hookModule.run(raw, { truncated, maxStdin: MAX_STDIN });
+      const outputOrPromise = hookModule.run(raw, { truncated, maxStdin: MAX_STDIN });
+      // Support async run() (returns a Promise): await before emitting result.
+      // Synchronous run() returns a plain value — Promise.resolve wraps it safely.
+      const output = (outputOrPromise && typeof outputOrPromise.then === 'function')
+        ? await outputOrPromise
+        : outputOrPromise;
       process.exit(emitHookResult(raw, output));
     } catch (e) {
       process.stderr.write(`[Hook] run() error for ${hookId}: ${e.message}\n`);
@@ -128,6 +134,13 @@ async function main() {
   }
 
   process.exit(Number.isInteger(result.status) ? result.status : 0);
+}
+
+// Additive: --contract-version prints the engine contract version and exits.
+// Backward-compatible: existing callers never pass this flag.
+if (process.argv.includes('--contract-version')) {
+  process.stdout.write(JSON.stringify({ contract_version: CONTRACT_VERSION, runner: 'run-hook.js' }) + '\n');
+  process.exit(0);
 }
 
 main().catch(err => {

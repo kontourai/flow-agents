@@ -186,3 +186,23 @@ Copied from the plan artifact. This is the stop condition for delivery.
 - Plan artifact follows `context/contracts/planning-contract.md`
 
 {context?}
+
+## Ad-hoc Direct Entry (Planning-Only or Non-`pull-work` Sessions)
+
+`ensure-session --flow-id <id>` without `--step-id` defaults `active_step_id` to the
+flow's FIRST step (`pull-work` for `builder.build`). For a session that legitimately
+enters mid-flow — e.g. planning directly from a portfolio work item without a
+`pull-work`/pickup artifact — pass the sanctioned override:
+
+```
+npm run workflow:sidecar -- ensure-session \
+  --flow-id builder.build --task-slug <slug> --step-id plan \
+  [--ad-hoc-reason "planning a directly-issued work item; no pull-work artifact"]
+```
+
+When `--step-id` names a step other than the flow's first step, `ensure-session` records
+`ad_hoc_entry: true` + `ad_hoc_reason` in `current.json`. This is the sanctioned way to
+enter a flow mid-stream: the explicit marker lets `stop-goal-fit` / `gate-review`
+distinguish an intentional direct entry from a stale or mis-stamped `active_step_id`,
+instead of silently defaulting to the first step and looking like a normal `pull-work`
+start.
