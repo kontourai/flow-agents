@@ -3,382 +3,294 @@
   "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
   "claims": [
     {
-      "id": "kontourai-flow-agents-287-re-verify-287-iter2.flow-agents-workflow.iter-2-re-verify-f7-t4-fix-build-clean-validate-source-clean-evals-run-sh-static-30-30-pass-test-actor-identity-sh-10-10-pass-env-override-falls-through-to-derived-actor-stderr-warning-flow-agents-actor-unknown-honored-verbatim-test-workflow-sidecar-writer-sh-137-137-pass-incl-liveness-t4-f7-actor-colon-colon-colon-exits-nonzero-no-event-test-session-resume-roundtrip-sh-13-fail-13-pass-all-pre-existing-baseline-fixture-drift-plus-new-t2-assertions-pass-mirror-diff-empty-4-direct-cli-probes-pass-derived-actor-for-actor-dies-with-no-event-flow-agents-actor-unknown-honored-two-holders-headline-no-regressions-vs-iteration-1-ac1-ac8-remain-verified",
-      "subjectType": "work-item",
-      "subjectId": "kontourai-flow-agents-287/re-verify-287-iter2",
-      "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
-      "fieldOrBehavior": "Iter-2 re-verify (F7/T4 fix): build clean, validate:source clean, evals/run.sh static 30/30 pass, test_actor_identity.sh 10/10 pass (env override :::  falls through to derived actor + stderr warning; FLOW_AGENTS_ACTOR=unknown honored verbatim), test_workflow_sidecar_writer.sh 137/137 pass (incl liveness T4/F7 --actor colon-colon-colon exits nonzero no event), test_session_resume_roundtrip.sh 13 fail/13 pass all pre-existing baseline fixture drift plus new T2 assertions pass, mirror diff empty, 4 direct CLI probes pass (derived actor for :::, --actor ::: dies with no event, FLOW_AGENTS_ACTOR=unknown honored, two-holders headline). No regressions vs iteration-1; AC1-AC8 remain verified.",
-      "value": "pass",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
-      "status": "verified"
-    },
-    {
       "id": "kontourai-flow-agents-287-ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment.flow-agents-workflow.ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment",
-      "subjectType": "work-item",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-287/ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC1 `actor-struct-and-stable-serialization`: A runtime-agnostic actor struct `{runtime, session_id, host, human?}` is serialized by a new pure function `serializeActor()` in `scripts/hooks/lib/actor-identity.js` into a single string safe for the existing `${subjectId}::${actor}` grouping key (no `::`, no raw `:` inside any segment)",
       "value": "pass",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
+      "createdAt": "2026-07-02T22:00:00Z",
+      "updatedAt": "2026-07-02T22:00:00Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:test_output",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-287-ac2-automatic-derivation-no-user-discipline-resolveactor-returns-a-distinct-non-empty-non-local-actor-with-zero-required-configuration-via-the-runtime-native-env-var-when-present-or-the-process-ancestry-fallback-otherwise.flow-agents-workflow.ac2-automatic-derivation-no-user-discipline-resolveactor-returns-a-distinct-non-empty-non-local-actor-with-zero-required-configuration-via-the-runtime-native-env-var-when-present-or-the-process-ancestry-fallback-otherwise",
-      "subjectType": "work-item",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-287/ac2-automatic-derivation-no-user-discipline-resolveactor-returns-a-distinct-non-empty-non-local-actor-with-zero-required-configuration-via-the-runtime-native-env-var-when-present-or-the-process-ancestry-fallback-otherwise",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC2 `automatic-derivation-no-user-discipline`: `resolveActor()` returns a distinct, non-empty, non-`\"local\"` actor with zero required configuration, via the runtime-native env var when present or the process-ancestry fallback otherwise",
       "value": "pass",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
+      "createdAt": "2026-07-02T22:00:00Z",
+      "updatedAt": "2026-07-02T22:00:00Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:test_output",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-287-ac3-liveness-writes-fail-loud-workflow-sidecar-liveness-claim-heartbeat-release-exits-nonzero-with-remediation-text-naming-actor-and-flow-agents-actor-whenever-the-resolved-actor-is-empty-or-the-literal-local-case-insensitive-it-never-silently-substitutes-a-fallback-value.flow-agents-workflow.ac3-liveness-writes-fail-loud-workflow-sidecar-liveness-claim-heartbeat-release-exits-nonzero-with-remediation-text-naming-actor-and-flow-agents-actor-whenever-the-resolved-actor-is-empty-or-the-literal-local-case-insensitive-it-never-silently-substitutes-a-fallback-value",
-      "subjectType": "work-item",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-287/ac3-liveness-writes-fail-loud-workflow-sidecar-liveness-claim-heartbeat-release-exits-nonzero-with-remediation-text-naming-actor-and-flow-agents-actor-whenever-the-resolved-actor-is-empty-or-the-literal-local-case-insensitive-it-never-silently-substitutes-a-fallback-value",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC3 `liveness-writes-fail-loud`: `workflow-sidecar liveness claim|heartbeat|release` exits nonzero with remediation text (naming `--actor` and `FLOW_AGENTS_ACTOR`) whenever the resolved actor is empty or the literal `\"local\"` (case-insensitive); it never silently substitutes a fallback value",
       "value": "pass",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
+      "createdAt": "2026-07-02T22:00:00Z",
+      "updatedAt": "2026-07-02T22:00:00Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:test_output",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-287-ac4-backward-compatible-reads-of-legacy-local-events-liveness-status-and-scripts-hooks-lib-liveness-read-js-s-freshholders-continue-to-parse-group-and-correctly-label-pre-existing-events-whose-actor-field-is-the-literal-string-local-without-error-or-behavior-change.flow-agents-workflow.ac4-backward-compatible-reads-of-legacy-local-events-liveness-status-and-scripts-hooks-lib-liveness-read-js-s-freshholders-continue-to-parse-group-and-correctly-label-pre-existing-events-whose-actor-field-is-the-literal-string-local-without-error-or-behavior-change",
-      "subjectType": "work-item",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-287/ac4-backward-compatible-reads-of-legacy-local-events-liveness-status-and-scripts-hooks-lib-liveness-read-js-s-freshholders-continue-to-parse-group-and-correctly-label-pre-existing-events-whose-actor-field-is-the-literal-string-local-without-error-or-behavior-change",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC4 `backward-compatible-reads-of-legacy-local-events`: `liveness status` and `scripts/hooks/lib/liveness-read.js`'s `freshHolders` continue to parse, group, and correctly label pre-existing events whose `actor` field is the literal string `\"local\"` without error or behavior change",
       "value": "pass",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
+      "createdAt": "2026-07-02T22:00:00Z",
+      "updatedAt": "2026-07-02T22:00:00Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:test_output",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-287-ac5-two-concurrent-sessions-produce-two-holders-two-simulated-sessions-on-one-host-distinct-derived-actors-no-explicit-actor-flag-simulating-auto-derivation-via-env-injection-both-claim-the-same-subject-liveness-status-json-reports-two-distinct-subjectid-actor-rows-with-label-held-not-one-collapsed-holder.flow-agents-workflow.ac5-two-concurrent-sessions-produce-two-holders-two-simulated-sessions-on-one-host-distinct-derived-actors-no-explicit-actor-flag-simulating-auto-derivation-via-env-injection-both-claim-the-same-subject-liveness-status-json-reports-two-distinct-subjectid-actor-rows-with-label-held-not-one-collapsed-holder",
-      "subjectType": "work-item",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-287/ac5-two-concurrent-sessions-produce-two-holders-two-simulated-sessions-on-one-host-distinct-derived-actors-no-explicit-actor-flag-simulating-auto-derivation-via-env-injection-both-claim-the-same-subject-liveness-status-json-reports-two-distinct-subjectid-actor-rows-with-label-held-not-one-collapsed-holder",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC5 `two-concurrent-sessions-produce-two-holders`: Two simulated sessions on one host (distinct derived actors, no explicit `--actor` flag, simulating auto-derivation via env injection) both claim the same subject; `liveness status --json` reports two distinct `{subjectId, actor}` rows with `label: \"held\"`, not one collapsed holder",
       "value": "pass",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
+      "createdAt": "2026-07-02T22:00:00Z",
+      "updatedAt": "2026-07-02T22:00:00Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:test_output",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-287-ac6-unset-actor-exits-nonzero-with-remediation-running-liveness-claim-subject-with-flow-agents-actor-unset-no-actor-flag-and-the-runtime-ancestry-resolution-forced-unavailable-test-harness-stub-via-flow-agents-actor-test-force-unresolved-1-escape-hatch-see-wave-1-task-1-1-exits-nonzero-and-prints-remediation-text-naming-actor-flow-agents-actor.flow-agents-workflow.ac6-unset-actor-exits-nonzero-with-remediation-running-liveness-claim-subject-with-flow-agents-actor-unset-no-actor-flag-and-the-runtime-ancestry-resolution-forced-unavailable-test-harness-stub-via-flow-agents-actor-test-force-unresolved-1-escape-hatch-see-wave-1-task-1-1-exits-nonzero-and-prints-remediation-text-naming-actor-flow-agents-actor",
-      "subjectType": "work-item",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-287/ac6-unset-actor-exits-nonzero-with-remediation-running-liveness-claim-subject-with-flow-agents-actor-unset-no-actor-flag-and-the-runtime-ancestry-resolution-forced-unavailable-test-harness-stub-via-flow-agents-actor-test-force-unresolved-1-escape-hatch-see-wave-1-task-1-1-exits-nonzero-and-prints-remediation-text-naming-actor-flow-agents-actor",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC6 `unset-actor-exits-nonzero-with-remediation`: Running `liveness claim <subject>` with `FLOW_AGENTS_ACTOR` unset, no `--actor` flag, and the runtime/ancestry resolution forced unavailable (test harness stub via `FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED=1` escape hatch, see Wave 1 Task 1.1) exits nonzero and prints remediation text naming `--actor`/`FLOW_AGENTS_ACTOR`",
       "value": "pass",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
+      "createdAt": "2026-07-02T22:00:00Z",
+      "updatedAt": "2026-07-02T22:00:00Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:test_output",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-287-ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent.flow-agents-workflow.ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent",
-      "subjectType": "work-item",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-287/ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC7 `self-actor-filtering-stays-consistent`: `workflow-steering.js`'s SessionStart liveness warning (`resumeSteering`, `freshHolders(..., selfActor, ...)`) uses the same shared resolver as the sidecar writer, so a session's own claim/heartbeat events are never reported back to it as \"another agent\"",
       "value": "pass",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
+      "createdAt": "2026-07-02T22:00:00Z",
+      "updatedAt": "2026-07-02T22:00:00Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
-      "status": "verified"
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
+      "metadata": {
+        "waiver": {
+          "reason": "AC7's specific assertions (self-actor / derived-self-actor filtering in workflow-steering.js's SessionStart liveness warning) pass in evals/integration/test_session_resume_roundtrip.sh (see 'self-actor (local) correctly excluded' and 'derived self-actor ... correctly excluded' assertions), but that script is not a required-lane CI manifest command: it carries 13 pre-existing, unrelated baseline-fixture assertion failures (RESUME block / trust-takeaway / pull-work-route-hint fixture drift predating this change) that fail the whole file's exit code, so it is intentionally not wired into any run-baseline.sh LANE_* array. Accepting AC7 as session-verified pending that file's baseline stabilization or a narrower AC7-only eval.",
+          "approved_by": "brian.anderson1222@gmail.com session-approved",
+          "approved_at": "2026-07-02T22:00:00Z"
+        }
+      },
+      "status": "assumed"
     },
     {
       "id": "kontourai-flow-agents-287-ac8-source-tree-mirror-stays-in-sync-context-scripts-hooks-workflow-steering-js-remains-byte-identical-to-scripts-hooks-workflow-steering-js-after-the-change-enforced-mirror-per-src-tools-validate-source-tree-ts-line-36.flow-agents-workflow.ac8-source-tree-mirror-stays-in-sync-context-scripts-hooks-workflow-steering-js-remains-byte-identical-to-scripts-hooks-workflow-steering-js-after-the-change-enforced-mirror-per-src-tools-validate-source-tree-ts-line-36",
-      "subjectType": "work-item",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-287/ac8-source-tree-mirror-stays-in-sync-context-scripts-hooks-workflow-steering-js-remains-byte-identical-to-scripts-hooks-workflow-steering-js-after-the-change-enforced-mirror-per-src-tools-validate-source-tree-ts-line-36",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC8 `source-tree-mirror-stays-in-sync`: `context/scripts/hooks/workflow-steering.js` remains byte-identical to `scripts/hooks/workflow-steering.js` after the change (enforced mirror per `src/tools/validate-source-tree.ts` line 36)",
       "value": "pass",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
+      "createdAt": "2026-07-02T22:00:00Z",
+      "updatedAt": "2026-07-02T22:00:00Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:test_output",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-287-re-verify-287-iter2-actor-identity.flow-agents-workflow.iter-2-re-verify-f7-t4-fix-evals-integration-test-actor-identity-sh-10-10-pass-env-override-falls-through-to-derived-actor-stderr-warning-flow-agents-actor-unknown-honored-verbatim-no-regressions-vs-iteration-1",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-287/re-verify-287-iter2-actor-identity",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "Iter-2 re-verify (F7/T4 fix): evals/integration/test_actor_identity.sh 10/10 pass (env override ':::' falls through to derived actor + stderr warning; FLOW_AGENTS_ACTOR=unknown honored verbatim). No regressions vs iteration-1.",
+      "value": "pass",
+      "createdAt": "2026-07-02T22:00:00Z",
+      "updatedAt": "2026-07-02T22:00:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:test_output",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-287-re-verify-287-iter2-sidecar-writer.flow-agents-workflow.iter-2-re-verify-f7-t4-fix-evals-integration-test-workflow-sidecar-writer-sh-137-137-pass-incl-liveness-t4-f7-actor-exits-nonzero-no-event-no-regressions-vs-iteration-1-ac1-ac8-remain-verified",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-287/re-verify-287-iter2-sidecar-writer",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "Iter-2 re-verify (F7/T4 fix): evals/integration/test_workflow_sidecar_writer.sh 137/137 pass (incl. liveness T4/F7 --actor ':::' exits nonzero, no event). No regressions vs iteration-1; AC1-AC8 remain verified.",
+      "value": "pass",
+      "createdAt": "2026-07-02T22:00:00Z",
+      "updatedAt": "2026-07-02T22:00:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:test_output",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-287-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-296-closes-287-part-of-epic-151-two-review-iterations-two-verify-passes-clean-evidence-in-trust-bundle-delivery-published",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-287/pull-request-opened",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "PR opened: https://github.com/kontourai/flow-agents/pull/296. Closes #287, part of epic #151. Two review iterations + two verify passes clean; evidence in trust bundle; delivery/ published.",
+      "value": "pass",
+      "createdAt": "2026-07-02T22:00:00Z",
+      "updatedAt": "2026-07-02T22:00:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-287-ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment.flow-agents-workflow.ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment",
-      "subjectType": "work-item",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-287/ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
-      "fieldOrBehavior": "AC1 `actor-struct-and-stable-serialization`: A runtime-agnostic actor struct `{runtime, session_id, host, human?}` is serialized by a new pure function `serializeActor()` in `scripts/hooks/lib/actor-identity.js` into a single string safe for the existing `${subjectId}::${actor}` grouping key (no `::`, no raw `:` inside any segment)",
-      "value": "pending",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected",
-      "status": "proposed"
-    },
-    {
-      "id": "kontourai-flow-agents-287-ac2-automatic-derivation-no-user-discipline-resolveactor-returns-a-distinct-non-empty-non-local-actor-with-zero-required-configuration-via-the-runtime-native-env-var-when-present-or-the-process-ancestry-fallback-otherwise.flow-agents-workflow.ac2-automatic-derivation-no-user-discipline-resolveactor-returns-a-distinct-non-empty-non-local-actor-with-zero-required-configuration-via-the-runtime-native-env-var-when-present-or-the-process-ancestry-fallback-otherwise",
-      "subjectType": "work-item",
-      "subjectId": "kontourai-flow-agents-287/ac2-automatic-derivation-no-user-discipline-resolveactor-returns-a-distinct-non-empty-non-local-actor-with-zero-required-configuration-via-the-runtime-native-env-var-when-present-or-the-process-ancestry-fallback-otherwise",
-      "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
-      "fieldOrBehavior": "AC2 `automatic-derivation-no-user-discipline`: `resolveActor()` returns a distinct, non-empty, non-`\"local\"` actor with zero required configuration, via the runtime-native env var when present or the process-ancestry fallback otherwise",
-      "value": "pending",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected",
-      "status": "proposed"
-    },
-    {
-      "id": "kontourai-flow-agents-287-ac3-liveness-writes-fail-loud-workflow-sidecar-liveness-claim-heartbeat-release-exits-nonzero-with-remediation-text-naming-actor-and-flow-agents-actor-whenever-the-resolved-actor-is-empty-or-the-literal-local-case-insensitive-it-never-silently-substitutes-a-fallback-value.flow-agents-workflow.ac3-liveness-writes-fail-loud-workflow-sidecar-liveness-claim-heartbeat-release-exits-nonzero-with-remediation-text-naming-actor-and-flow-agents-actor-whenever-the-resolved-actor-is-empty-or-the-literal-local-case-insensitive-it-never-silently-substitutes-a-fallback-value",
-      "subjectType": "work-item",
-      "subjectId": "kontourai-flow-agents-287/ac3-liveness-writes-fail-loud-workflow-sidecar-liveness-claim-heartbeat-release-exits-nonzero-with-remediation-text-naming-actor-and-flow-agents-actor-whenever-the-resolved-actor-is-empty-or-the-literal-local-case-insensitive-it-never-silently-substitutes-a-fallback-value",
-      "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
-      "fieldOrBehavior": "AC3 `liveness-writes-fail-loud`: `workflow-sidecar liveness claim|heartbeat|release` exits nonzero with remediation text (naming `--actor` and `FLOW_AGENTS_ACTOR`) whenever the resolved actor is empty or the literal `\"local\"` (case-insensitive); it never silently substitutes a fallback value",
-      "value": "pending",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected",
-      "status": "proposed"
-    },
-    {
-      "id": "kontourai-flow-agents-287-ac4-backward-compatible-reads-of-legacy-local-events-liveness-status-and-scripts-hooks-lib-liveness-read-js-s-freshholders-continue-to-parse-group-and-correctly-label-pre-existing-events-whose-actor-field-is-the-literal-string-local-without-error-or-behavior-change.flow-agents-workflow.ac4-backward-compatible-reads-of-legacy-local-events-liveness-status-and-scripts-hooks-lib-liveness-read-js-s-freshholders-continue-to-parse-group-and-correctly-label-pre-existing-events-whose-actor-field-is-the-literal-string-local-without-error-or-behavior-change",
-      "subjectType": "work-item",
-      "subjectId": "kontourai-flow-agents-287/ac4-backward-compatible-reads-of-legacy-local-events-liveness-status-and-scripts-hooks-lib-liveness-read-js-s-freshholders-continue-to-parse-group-and-correctly-label-pre-existing-events-whose-actor-field-is-the-literal-string-local-without-error-or-behavior-change",
-      "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
-      "fieldOrBehavior": "AC4 `backward-compatible-reads-of-legacy-local-events`: `liveness status` and `scripts/hooks/lib/liveness-read.js`'s `freshHolders` continue to parse, group, and correctly label pre-existing events whose `actor` field is the literal string `\"local\"` without error or behavior change",
-      "value": "pending",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected",
-      "status": "proposed"
-    },
-    {
-      "id": "kontourai-flow-agents-287-ac5-two-concurrent-sessions-produce-two-holders-two-simulated-sessions-on-one-host-distinct-derived-actors-no-explicit-actor-flag-simulating-auto-derivation-via-env-injection-both-claim-the-same-subject-liveness-status-json-reports-two-distinct-subjectid-actor-rows-with-label-held-not-one-collapsed-holder.flow-agents-workflow.ac5-two-concurrent-sessions-produce-two-holders-two-simulated-sessions-on-one-host-distinct-derived-actors-no-explicit-actor-flag-simulating-auto-derivation-via-env-injection-both-claim-the-same-subject-liveness-status-json-reports-two-distinct-subjectid-actor-rows-with-label-held-not-one-collapsed-holder",
-      "subjectType": "work-item",
-      "subjectId": "kontourai-flow-agents-287/ac5-two-concurrent-sessions-produce-two-holders-two-simulated-sessions-on-one-host-distinct-derived-actors-no-explicit-actor-flag-simulating-auto-derivation-via-env-injection-both-claim-the-same-subject-liveness-status-json-reports-two-distinct-subjectid-actor-rows-with-label-held-not-one-collapsed-holder",
-      "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
-      "fieldOrBehavior": "AC5 `two-concurrent-sessions-produce-two-holders`: Two simulated sessions on one host (distinct derived actors, no explicit `--actor` flag, simulating auto-derivation via env injection) both claim the same subject; `liveness status --json` reports two distinct `{subjectId, actor}` rows with `label: \"held\"`, not one collapsed holder",
-      "value": "pending",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected",
-      "status": "proposed"
-    },
-    {
-      "id": "kontourai-flow-agents-287-ac6-unset-actor-exits-nonzero-with-remediation-running-liveness-claim-subject-with-flow-agents-actor-unset-no-actor-flag-and-the-runtime-ancestry-resolution-forced-unavailable-test-harness-stub-via-flow-agents-actor-test-force-unresolved-1-escape-hatch-see-wave-1-task-1-1-exits-nonzero-and-prints-remediation-text-naming-actor-flow-agents-actor.flow-agents-workflow.ac6-unset-actor-exits-nonzero-with-remediation-running-liveness-claim-subject-with-flow-agents-actor-unset-no-actor-flag-and-the-runtime-ancestry-resolution-forced-unavailable-test-harness-stub-via-flow-agents-actor-test-force-unresolved-1-escape-hatch-see-wave-1-task-1-1-exits-nonzero-and-prints-remediation-text-naming-actor-flow-agents-actor",
-      "subjectType": "work-item",
-      "subjectId": "kontourai-flow-agents-287/ac6-unset-actor-exits-nonzero-with-remediation-running-liveness-claim-subject-with-flow-agents-actor-unset-no-actor-flag-and-the-runtime-ancestry-resolution-forced-unavailable-test-harness-stub-via-flow-agents-actor-test-force-unresolved-1-escape-hatch-see-wave-1-task-1-1-exits-nonzero-and-prints-remediation-text-naming-actor-flow-agents-actor",
-      "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
-      "fieldOrBehavior": "AC6 `unset-actor-exits-nonzero-with-remediation`: Running `liveness claim <subject>` with `FLOW_AGENTS_ACTOR` unset, no `--actor` flag, and the runtime/ancestry resolution forced unavailable (test harness stub via `FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED=1` escape hatch, see Wave 1 Task 1.1) exits nonzero and prints remediation text naming `--actor`/`FLOW_AGENTS_ACTOR`",
-      "value": "pending",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected",
-      "status": "proposed"
-    },
-    {
-      "id": "kontourai-flow-agents-287-ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent.flow-agents-workflow.ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent",
-      "subjectType": "work-item",
-      "subjectId": "kontourai-flow-agents-287/ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent",
-      "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
-      "fieldOrBehavior": "AC7 `self-actor-filtering-stays-consistent`: `workflow-steering.js`'s SessionStart liveness warning (`resumeSteering`, `freshHolders(..., selfActor, ...)`) uses the same shared resolver as the sidecar writer, so a session's own claim/heartbeat events are never reported back to it as \"another agent\"",
-      "value": "pending",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected",
-      "status": "proposed"
-    },
-    {
-      "id": "kontourai-flow-agents-287-ac8-source-tree-mirror-stays-in-sync-context-scripts-hooks-workflow-steering-js-remains-byte-identical-to-scripts-hooks-workflow-steering-js-after-the-change-enforced-mirror-per-src-tools-validate-source-tree-ts-line-36.flow-agents-workflow.ac8-source-tree-mirror-stays-in-sync-context-scripts-hooks-workflow-steering-js-remains-byte-identical-to-scripts-hooks-workflow-steering-js-after-the-change-enforced-mirror-per-src-tools-validate-source-tree-ts-line-36",
-      "subjectType": "work-item",
-      "subjectId": "kontourai-flow-agents-287/ac8-source-tree-mirror-stays-in-sync-context-scripts-hooks-workflow-steering-js-remains-byte-identical-to-scripts-hooks-workflow-steering-js-after-the-change-enforced-mirror-per-src-tools-validate-source-tree-ts-line-36",
-      "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
-      "fieldOrBehavior": "AC8 `source-tree-mirror-stays-in-sync`: `context/scripts/hooks/workflow-steering.js` remains byte-identical to `scripts/hooks/workflow-steering.js` after the change (enforced mirror per `src/tools/validate-source-tree.ts` line 36)",
-      "value": "pending",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected",
-      "status": "proposed"
-    },
-    {
-      "id": "kontourai-flow-agents-287-ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment.flow-agents-workflow.ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment",
-      "subjectType": "work-item",
-      "subjectId": "kontourai-flow-agents-287/ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment",
-      "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC1 `actor-struct-and-stable-serialization`: A runtime-agnostic actor struct `{runtime, session_id, host, human?}` is serialized by a new pure function `serializeActor()` in `scripts/hooks/lib/actor-identity.js` into a single string safe for the existing `${subjectId}::${actor}` grouping key (no `::`, no raw `:` inside any segment)",
       "value": "pass",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
-      "impactLevel": "medium",
-      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "createdAt": "2026-07-02T22:00:00Z",
+      "updatedAt": "2026-07-02T22:00:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-287-ac2-automatic-derivation-no-user-discipline-resolveactor-returns-a-distinct-non-empty-non-local-actor-with-zero-required-configuration-via-the-runtime-native-env-var-when-present-or-the-process-ancestry-fallback-otherwise.flow-agents-workflow.ac2-automatic-derivation-no-user-discipline-resolveactor-returns-a-distinct-non-empty-non-local-actor-with-zero-required-configuration-via-the-runtime-native-env-var-when-present-or-the-process-ancestry-fallback-otherwise",
-      "subjectType": "work-item",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-287/ac2-automatic-derivation-no-user-discipline-resolveactor-returns-a-distinct-non-empty-non-local-actor-with-zero-required-configuration-via-the-runtime-native-env-var-when-present-or-the-process-ancestry-fallback-otherwise",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC2 `automatic-derivation-no-user-discipline`: `resolveActor()` returns a distinct, non-empty, non-`\"local\"` actor with zero required configuration, via the runtime-native env var when present or the process-ancestry fallback otherwise",
       "value": "pass",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
-      "impactLevel": "medium",
-      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "createdAt": "2026-07-02T22:00:00Z",
+      "updatedAt": "2026-07-02T22:00:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-287-ac3-liveness-writes-fail-loud-workflow-sidecar-liveness-claim-heartbeat-release-exits-nonzero-with-remediation-text-naming-actor-and-flow-agents-actor-whenever-the-resolved-actor-is-empty-or-the-literal-local-case-insensitive-it-never-silently-substitutes-a-fallback-value.flow-agents-workflow.ac3-liveness-writes-fail-loud-workflow-sidecar-liveness-claim-heartbeat-release-exits-nonzero-with-remediation-text-naming-actor-and-flow-agents-actor-whenever-the-resolved-actor-is-empty-or-the-literal-local-case-insensitive-it-never-silently-substitutes-a-fallback-value",
-      "subjectType": "work-item",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-287/ac3-liveness-writes-fail-loud-workflow-sidecar-liveness-claim-heartbeat-release-exits-nonzero-with-remediation-text-naming-actor-and-flow-agents-actor-whenever-the-resolved-actor-is-empty-or-the-literal-local-case-insensitive-it-never-silently-substitutes-a-fallback-value",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC3 `liveness-writes-fail-loud`: `workflow-sidecar liveness claim|heartbeat|release` exits nonzero with remediation text (naming `--actor` and `FLOW_AGENTS_ACTOR`) whenever the resolved actor is empty or the literal `\"local\"` (case-insensitive); it never silently substitutes a fallback value",
       "value": "pass",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
-      "impactLevel": "medium",
-      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "createdAt": "2026-07-02T22:00:00Z",
+      "updatedAt": "2026-07-02T22:00:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-287-ac4-backward-compatible-reads-of-legacy-local-events-liveness-status-and-scripts-hooks-lib-liveness-read-js-s-freshholders-continue-to-parse-group-and-correctly-label-pre-existing-events-whose-actor-field-is-the-literal-string-local-without-error-or-behavior-change.flow-agents-workflow.ac4-backward-compatible-reads-of-legacy-local-events-liveness-status-and-scripts-hooks-lib-liveness-read-js-s-freshholders-continue-to-parse-group-and-correctly-label-pre-existing-events-whose-actor-field-is-the-literal-string-local-without-error-or-behavior-change",
-      "subjectType": "work-item",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-287/ac4-backward-compatible-reads-of-legacy-local-events-liveness-status-and-scripts-hooks-lib-liveness-read-js-s-freshholders-continue-to-parse-group-and-correctly-label-pre-existing-events-whose-actor-field-is-the-literal-string-local-without-error-or-behavior-change",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC4 `backward-compatible-reads-of-legacy-local-events`: `liveness status` and `scripts/hooks/lib/liveness-read.js`'s `freshHolders` continue to parse, group, and correctly label pre-existing events whose `actor` field is the literal string `\"local\"` without error or behavior change",
       "value": "pass",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
-      "impactLevel": "medium",
-      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "createdAt": "2026-07-02T22:00:00Z",
+      "updatedAt": "2026-07-02T22:00:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-287-ac5-two-concurrent-sessions-produce-two-holders-two-simulated-sessions-on-one-host-distinct-derived-actors-no-explicit-actor-flag-simulating-auto-derivation-via-env-injection-both-claim-the-same-subject-liveness-status-json-reports-two-distinct-subjectid-actor-rows-with-label-held-not-one-collapsed-holder.flow-agents-workflow.ac5-two-concurrent-sessions-produce-two-holders-two-simulated-sessions-on-one-host-distinct-derived-actors-no-explicit-actor-flag-simulating-auto-derivation-via-env-injection-both-claim-the-same-subject-liveness-status-json-reports-two-distinct-subjectid-actor-rows-with-label-held-not-one-collapsed-holder",
-      "subjectType": "work-item",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-287/ac5-two-concurrent-sessions-produce-two-holders-two-simulated-sessions-on-one-host-distinct-derived-actors-no-explicit-actor-flag-simulating-auto-derivation-via-env-injection-both-claim-the-same-subject-liveness-status-json-reports-two-distinct-subjectid-actor-rows-with-label-held-not-one-collapsed-holder",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC5 `two-concurrent-sessions-produce-two-holders`: Two simulated sessions on one host (distinct derived actors, no explicit `--actor` flag, simulating auto-derivation via env injection) both claim the same subject; `liveness status --json` reports two distinct `{subjectId, actor}` rows with `label: \"held\"`, not one collapsed holder",
       "value": "pass",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
-      "impactLevel": "medium",
-      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "createdAt": "2026-07-02T22:00:00Z",
+      "updatedAt": "2026-07-02T22:00:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-287-ac6-unset-actor-exits-nonzero-with-remediation-running-liveness-claim-subject-with-flow-agents-actor-unset-no-actor-flag-and-the-runtime-ancestry-resolution-forced-unavailable-test-harness-stub-via-flow-agents-actor-test-force-unresolved-1-escape-hatch-see-wave-1-task-1-1-exits-nonzero-and-prints-remediation-text-naming-actor-flow-agents-actor.flow-agents-workflow.ac6-unset-actor-exits-nonzero-with-remediation-running-liveness-claim-subject-with-flow-agents-actor-unset-no-actor-flag-and-the-runtime-ancestry-resolution-forced-unavailable-test-harness-stub-via-flow-agents-actor-test-force-unresolved-1-escape-hatch-see-wave-1-task-1-1-exits-nonzero-and-prints-remediation-text-naming-actor-flow-agents-actor",
-      "subjectType": "work-item",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-287/ac6-unset-actor-exits-nonzero-with-remediation-running-liveness-claim-subject-with-flow-agents-actor-unset-no-actor-flag-and-the-runtime-ancestry-resolution-forced-unavailable-test-harness-stub-via-flow-agents-actor-test-force-unresolved-1-escape-hatch-see-wave-1-task-1-1-exits-nonzero-and-prints-remediation-text-naming-actor-flow-agents-actor",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC6 `unset-actor-exits-nonzero-with-remediation`: Running `liveness claim <subject>` with `FLOW_AGENTS_ACTOR` unset, no `--actor` flag, and the runtime/ancestry resolution forced unavailable (test harness stub via `FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED=1` escape hatch, see Wave 1 Task 1.1) exits nonzero and prints remediation text naming `--actor`/`FLOW_AGENTS_ACTOR`",
       "value": "pass",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
-      "impactLevel": "medium",
-      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "createdAt": "2026-07-02T22:00:00Z",
+      "updatedAt": "2026-07-02T22:00:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-287-ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent.flow-agents-workflow.ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent",
-      "subjectType": "work-item",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-287/ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC7 `self-actor-filtering-stays-consistent`: `workflow-steering.js`'s SessionStart liveness warning (`resumeSteering`, `freshHolders(..., selfActor, ...)`) uses the same shared resolver as the sidecar writer, so a session's own claim/heartbeat events are never reported back to it as \"another agent\"",
       "value": "pass",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
-      "impactLevel": "medium",
-      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "createdAt": "2026-07-02T22:00:00Z",
+      "updatedAt": "2026-07-02T22:00:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-287-ac8-source-tree-mirror-stays-in-sync-context-scripts-hooks-workflow-steering-js-remains-byte-identical-to-scripts-hooks-workflow-steering-js-after-the-change-enforced-mirror-per-src-tools-validate-source-tree-ts-line-36.flow-agents-workflow.ac8-source-tree-mirror-stays-in-sync-context-scripts-hooks-workflow-steering-js-remains-byte-identical-to-scripts-hooks-workflow-steering-js-after-the-change-enforced-mirror-per-src-tools-validate-source-tree-ts-line-36",
-      "subjectType": "work-item",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-287/ac8-source-tree-mirror-stays-in-sync-context-scripts-hooks-workflow-steering-js-remains-byte-identical-to-scripts-hooks-workflow-steering-js-after-the-change-enforced-mirror-per-src-tools-validate-source-tree-ts-line-36",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC8 `source-tree-mirror-stays-in-sync`: `context/scripts/hooks/workflow-steering.js` remains byte-identical to `scripts/hooks/workflow-steering.js` after the change (enforced mirror per `src/tools/validate-source-tree.ts` line 36)",
       "value": "pass",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
-      "impactLevel": "medium",
-      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "createdAt": "2026-07-02T22:00:00Z",
+      "updatedAt": "2026-07-02T22:00:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-287-code-review-287-iteration-2.flow-agents-workflow.iteration-2-re-review-f7-t4-fix-for-the-strip-to-empty-actor-override-confirmed-via-direct-node-repro-both-fall-through-to-the-same-derived-process-ancestry-actor-with-source-process-ancestry-never-source-explicit-override-never-actor-unknown-one-stderr-warning-each-literal-flow-agents-actor-unknown-still-honored-as-explicit-override-actor-on-liveness-claim-dies-exit-1-with-actor-remediation-and-writes-no-event-unset-empty-flow-agents-actor-stays-silent-no-warning-f1-f6-from-iteration-1-untouched-and-context-mirror-still-byte-identical-evals-integration-test-actor-identity-sh-10-10-pass-evals-integration-test-workflow-sidecar-writer-sh-140-140-pass-exit-0-one-new-non-blocking-medium-the-strip-to-empty-charset-predicate-a-za-z0-9-is-duplicated-verbatim-not-exported-as-a-shared-helper-between-scripts-hooks-lib-actor-identity-js-308-and-src-cli-workflow-sidecar-ts-2666-a-drift-risk-if-the-allowed-charset-ever-changes-in-only-one-place",
-      "subjectType": "work-item",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-287/code-review-287-iteration-2",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "Iteration-2 re-review: F7/T4 fix for the strip-to-empty actor override confirmed via direct node repro (:::/@@@ both fall through to the same derived process-ancestry actor with source=process-ancestry, never source=explicit-override, never actor=unknown, one stderr warning each); literal FLOW_AGENTS_ACTOR=unknown still honored as explicit-override; --actor ':::' on liveness claim dies (exit 1) with --actor remediation and writes no event; unset/empty FLOW_AGENTS_ACTOR stays silent (no warning); F1-F6 from iteration 1 untouched and context mirror still byte-identical. evals/integration/test_actor_identity.sh: 10/10 pass. evals/integration/test_workflow_sidecar_writer.sh: 140/140 pass, exit 0. One new non-blocking MEDIUM: the strip-to-empty charset predicate /[A-Za-z0-9_.-]/ is duplicated verbatim (not exported as a shared helper) between scripts/hooks/lib/actor-identity.js:308 and src/cli/workflow-sidecar.ts:2666, a drift risk if the allowed charset ever changes in only one place.",
       "value": "pass",
-      "createdAt": "2026-07-02T21:22:05Z",
-      "updatedAt": "2026-07-02T21:22:05Z",
+      "createdAt": "2026-07-02T22:00:00Z",
+      "updatedAt": "2026-07-02T22:00:00Z",
       "impactLevel": "medium",
-      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "status": "verified"
     }
   ],
   "evidence": [
-    {
-      "id": "ev:kontourai-flow-agents-287-re-verify-287-iter2.flow-agents-workflow.iter-2-re-verify-f7-t4-fix-build-clean-validate-source-clean-evals-run-sh-static-30-30-pass-test-actor-identity-sh-10-10-pass-env-override-falls-through-to-derived-actor-stderr-warning-flow-agents-actor-unknown-honored-verbatim-test-workflow-sidecar-writer-sh-137-137-pass-incl-liveness-t4-f7-actor-colon-colon-colon-exits-nonzero-no-event-test-session-resume-roundtrip-sh-13-fail-13-pass-all-pre-existing-baseline-fixture-drift-plus-new-t2-assertions-pass-mirror-diff-empty-4-direct-cli-probes-pass-derived-actor-for-actor-dies-with-no-event-flow-agents-actor-unknown-honored-two-holders-headline-no-regressions-vs-iteration-1-ac1-ac8-remain-verified",
-      "claimId": "kontourai-flow-agents-287-re-verify-287-iter2.flow-agents-workflow.iter-2-re-verify-f7-t4-fix-build-clean-validate-source-clean-evals-run-sh-static-30-30-pass-test-actor-identity-sh-10-10-pass-env-override-falls-through-to-derived-actor-stderr-warning-flow-agents-actor-unknown-honored-verbatim-test-workflow-sidecar-writer-sh-137-137-pass-incl-liveness-t4-f7-actor-colon-colon-colon-exits-nonzero-no-event-test-session-resume-roundtrip-sh-13-fail-13-pass-all-pre-existing-baseline-fixture-drift-plus-new-t2-assertions-pass-mirror-diff-empty-4-direct-cli-probes-pass-derived-actor-for-actor-dies-with-no-event-flow-agents-actor-unknown-honored-two-holders-headline-no-regressions-vs-iteration-1-ac1-ac8-remain-verified",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "kontourai-flow-agents-287/evidence.json",
-      "excerptOrSummary": "Iter-2 re-verify (F7/T4 fix): build clean, validate:source clean, evals/run.sh static 30/30 pass, test_actor_identity.sh 10/10 pass (env override :::  falls through to derived actor + stderr warning; FLOW_AGENTS_ACTOR=unknown honored verbatim), test_workflow_sidecar_writer.sh 137/137 pass (incl liveness T4/F7 --actor colon-colon-colon exits nonzero no event), test_session_resume_roundtrip.sh 13 fail/13 pass all pre-existing baseline fixture drift plus new T2 assertions pass, mirror diff empty, 4 direct CLI probes pass (derived actor for :::, --actor ::: dies with no event, FLOW_AGENTS_ACTOR=unknown honored, two-holders headline). No regressions vs iteration-1; AC1-AC8 remain verified.",
-      "observedAt": "2026-07-02T21:22:05Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
-    },
     {
       "id": "ev:kontourai-flow-agents-287-ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment.flow-agents-workflow.ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment",
       "claimId": "kontourai-flow-agents-287-ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment.flow-agents-workflow.ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment",
@@ -386,9 +298,14 @@
       "method": "validation",
       "sourceRef": "kontourai-flow-agents-287/evidence.json",
       "excerptOrSummary": "AC1 `actor-struct-and-stable-serialization`: A runtime-agnostic actor struct `{runtime, session_id, host, human?}` is serialized by a new pure function `serializeActor()` in `scripts/hooks/lib/actor-identity.js` into a single string safe for the existing `${subjectId}::${actor}` grouping key (no `::`, no raw `:` inside any segment)",
-      "observedAt": "2026-07-02T21:22:05Z",
+      "observedAt": "2026-07-02T22:00:00Z",
       "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_actor_identity.sh",
+        "isError": false
+      }
     },
     {
       "id": "ev:kontourai-flow-agents-287-ac2-automatic-derivation-no-user-discipline-resolveactor-returns-a-distinct-non-empty-non-local-actor-with-zero-required-configuration-via-the-runtime-native-env-var-when-present-or-the-process-ancestry-fallback-otherwise.flow-agents-workflow.ac2-automatic-derivation-no-user-discipline-resolveactor-returns-a-distinct-non-empty-non-local-actor-with-zero-required-configuration-via-the-runtime-native-env-var-when-present-or-the-process-ancestry-fallback-otherwise",
@@ -397,9 +314,14 @@
       "method": "validation",
       "sourceRef": "kontourai-flow-agents-287/evidence.json",
       "excerptOrSummary": "AC2 `automatic-derivation-no-user-discipline`: `resolveActor()` returns a distinct, non-empty, non-`\"local\"` actor with zero required configuration, via the runtime-native env var when present or the process-ancestry fallback otherwise",
-      "observedAt": "2026-07-02T21:22:05Z",
+      "observedAt": "2026-07-02T22:00:00Z",
       "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_actor_identity.sh",
+        "isError": false
+      }
     },
     {
       "id": "ev:kontourai-flow-agents-287-ac3-liveness-writes-fail-loud-workflow-sidecar-liveness-claim-heartbeat-release-exits-nonzero-with-remediation-text-naming-actor-and-flow-agents-actor-whenever-the-resolved-actor-is-empty-or-the-literal-local-case-insensitive-it-never-silently-substitutes-a-fallback-value.flow-agents-workflow.ac3-liveness-writes-fail-loud-workflow-sidecar-liveness-claim-heartbeat-release-exits-nonzero-with-remediation-text-naming-actor-and-flow-agents-actor-whenever-the-resolved-actor-is-empty-or-the-literal-local-case-insensitive-it-never-silently-substitutes-a-fallback-value",
@@ -408,9 +330,14 @@
       "method": "validation",
       "sourceRef": "kontourai-flow-agents-287/evidence.json",
       "excerptOrSummary": "AC3 `liveness-writes-fail-loud`: `workflow-sidecar liveness claim|heartbeat|release` exits nonzero with remediation text (naming `--actor` and `FLOW_AGENTS_ACTOR`) whenever the resolved actor is empty or the literal `\"local\"` (case-insensitive); it never silently substitutes a fallback value",
-      "observedAt": "2026-07-02T21:22:05Z",
+      "observedAt": "2026-07-02T22:00:00Z",
       "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_workflow_sidecar_writer.sh",
+        "isError": false
+      }
     },
     {
       "id": "ev:kontourai-flow-agents-287-ac4-backward-compatible-reads-of-legacy-local-events-liveness-status-and-scripts-hooks-lib-liveness-read-js-s-freshholders-continue-to-parse-group-and-correctly-label-pre-existing-events-whose-actor-field-is-the-literal-string-local-without-error-or-behavior-change.flow-agents-workflow.ac4-backward-compatible-reads-of-legacy-local-events-liveness-status-and-scripts-hooks-lib-liveness-read-js-s-freshholders-continue-to-parse-group-and-correctly-label-pre-existing-events-whose-actor-field-is-the-literal-string-local-without-error-or-behavior-change",
@@ -419,9 +346,14 @@
       "method": "validation",
       "sourceRef": "kontourai-flow-agents-287/evidence.json",
       "excerptOrSummary": "AC4 `backward-compatible-reads-of-legacy-local-events`: `liveness status` and `scripts/hooks/lib/liveness-read.js`'s `freshHolders` continue to parse, group, and correctly label pre-existing events whose `actor` field is the literal string `\"local\"` without error or behavior change",
-      "observedAt": "2026-07-02T21:22:05Z",
+      "observedAt": "2026-07-02T22:00:00Z",
       "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_workflow_sidecar_writer.sh",
+        "isError": false
+      }
     },
     {
       "id": "ev:kontourai-flow-agents-287-ac5-two-concurrent-sessions-produce-two-holders-two-simulated-sessions-on-one-host-distinct-derived-actors-no-explicit-actor-flag-simulating-auto-derivation-via-env-injection-both-claim-the-same-subject-liveness-status-json-reports-two-distinct-subjectid-actor-rows-with-label-held-not-one-collapsed-holder.flow-agents-workflow.ac5-two-concurrent-sessions-produce-two-holders-two-simulated-sessions-on-one-host-distinct-derived-actors-no-explicit-actor-flag-simulating-auto-derivation-via-env-injection-both-claim-the-same-subject-liveness-status-json-reports-two-distinct-subjectid-actor-rows-with-label-held-not-one-collapsed-holder",
@@ -430,9 +362,14 @@
       "method": "validation",
       "sourceRef": "kontourai-flow-agents-287/evidence.json",
       "excerptOrSummary": "AC5 `two-concurrent-sessions-produce-two-holders`: Two simulated sessions on one host (distinct derived actors, no explicit `--actor` flag, simulating auto-derivation via env injection) both claim the same subject; `liveness status --json` reports two distinct `{subjectId, actor}` rows with `label: \"held\"`, not one collapsed holder",
-      "observedAt": "2026-07-02T21:22:05Z",
+      "observedAt": "2026-07-02T22:00:00Z",
       "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_workflow_sidecar_writer.sh",
+        "isError": false
+      }
     },
     {
       "id": "ev:kontourai-flow-agents-287-ac6-unset-actor-exits-nonzero-with-remediation-running-liveness-claim-subject-with-flow-agents-actor-unset-no-actor-flag-and-the-runtime-ancestry-resolution-forced-unavailable-test-harness-stub-via-flow-agents-actor-test-force-unresolved-1-escape-hatch-see-wave-1-task-1-1-exits-nonzero-and-prints-remediation-text-naming-actor-flow-agents-actor.flow-agents-workflow.ac6-unset-actor-exits-nonzero-with-remediation-running-liveness-claim-subject-with-flow-agents-actor-unset-no-actor-flag-and-the-runtime-ancestry-resolution-forced-unavailable-test-harness-stub-via-flow-agents-actor-test-force-unresolved-1-escape-hatch-see-wave-1-task-1-1-exits-nonzero-and-prints-remediation-text-naming-actor-flow-agents-actor",
@@ -441,18 +378,23 @@
       "method": "validation",
       "sourceRef": "kontourai-flow-agents-287/evidence.json",
       "excerptOrSummary": "AC6 `unset-actor-exits-nonzero-with-remediation`: Running `liveness claim <subject>` with `FLOW_AGENTS_ACTOR` unset, no `--actor` flag, and the runtime/ancestry resolution forced unavailable (test harness stub via `FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED=1` escape hatch, see Wave 1 Task 1.1) exits nonzero and prints remediation text naming `--actor`/`FLOW_AGENTS_ACTOR`",
-      "observedAt": "2026-07-02T21:22:05Z",
+      "observedAt": "2026-07-02T22:00:00Z",
       "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_actor_identity.sh",
+        "isError": false
+      }
     },
     {
       "id": "ev:kontourai-flow-agents-287-ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent.flow-agents-workflow.ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent",
       "claimId": "kontourai-flow-agents-287-ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent.flow-agents-workflow.ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent",
-      "evidenceType": "test_output",
-      "method": "validation",
+      "evidenceType": "attestation",
+      "method": "attestation",
       "sourceRef": "kontourai-flow-agents-287/evidence.json",
       "excerptOrSummary": "AC7 `self-actor-filtering-stays-consistent`: `workflow-steering.js`'s SessionStart liveness warning (`resumeSteering`, `freshHolders(..., selfActor, ...)`) uses the same shared resolver as the sidecar writer, so a session's own claim/heartbeat events are never reported back to it as \"another agent\"",
-      "observedAt": "2026-07-02T21:22:05Z",
+      "observedAt": "2026-07-02T22:00:00Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     },
@@ -463,20 +405,68 @@
       "method": "validation",
       "sourceRef": "kontourai-flow-agents-287/evidence.json",
       "excerptOrSummary": "AC8 `source-tree-mirror-stays-in-sync`: `context/scripts/hooks/workflow-steering.js` remains byte-identical to `scripts/hooks/workflow-steering.js` after the change (enforced mirror per `src/tools/validate-source-tree.ts` line 36)",
-      "observedAt": "2026-07-02T21:22:05Z",
+      "observedAt": "2026-07-02T22:00:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "npm run validate:source --",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-287-re-verify-287-iter2-actor-identity.flow-agents-workflow.iter-2-re-verify-f7-t4-fix-evals-integration-test-actor-identity-sh-10-10-pass-env-override-falls-through-to-derived-actor-stderr-warning-flow-agents-actor-unknown-honored-verbatim-no-regressions-vs-iteration-1",
+      "claimId": "kontourai-flow-agents-287-re-verify-287-iter2-actor-identity.flow-agents-workflow.iter-2-re-verify-f7-t4-fix-evals-integration-test-actor-identity-sh-10-10-pass-env-override-falls-through-to-derived-actor-stderr-warning-flow-agents-actor-unknown-honored-verbatim-no-regressions-vs-iteration-1",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-287/evidence.json",
+      "excerptOrSummary": "Iter-2 re-verify (F7/T4 fix): evals/integration/test_actor_identity.sh 10/10 pass (env override ':::' falls through to derived actor + stderr warning; FLOW_AGENTS_ACTOR=unknown honored verbatim). No regressions vs iteration-1.",
+      "observedAt": "2026-07-02T22:00:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_actor_identity.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-287-re-verify-287-iter2-sidecar-writer.flow-agents-workflow.iter-2-re-verify-f7-t4-fix-evals-integration-test-workflow-sidecar-writer-sh-137-137-pass-incl-liveness-t4-f7-actor-exits-nonzero-no-event-no-regressions-vs-iteration-1-ac1-ac8-remain-verified",
+      "claimId": "kontourai-flow-agents-287-re-verify-287-iter2-sidecar-writer.flow-agents-workflow.iter-2-re-verify-f7-t4-fix-evals-integration-test-workflow-sidecar-writer-sh-137-137-pass-incl-liveness-t4-f7-actor-exits-nonzero-no-event-no-regressions-vs-iteration-1-ac1-ac8-remain-verified",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-287/evidence.json",
+      "excerptOrSummary": "Iter-2 re-verify (F7/T4 fix): evals/integration/test_workflow_sidecar_writer.sh 137/137 pass (incl. liveness T4/F7 --actor ':::' exits nonzero, no event). No regressions vs iteration-1; AC1-AC8 remain verified.",
+      "observedAt": "2026-07-02T22:00:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_workflow_sidecar_writer.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-287-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-296-closes-287-part-of-epic-151-two-review-iterations-two-verify-passes-clean-evidence-in-trust-bundle-delivery-published",
+      "claimId": "kontourai-flow-agents-287-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-296-closes-287-part-of-epic-151-two-review-iterations-two-verify-passes-clean-evidence-in-trust-bundle-delivery-published",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-287/evidence.json",
+      "excerptOrSummary": "PR opened: https://github.com/kontourai/flow-agents/pull/296. Closes #287, part of epic #151. Two review iterations + two verify passes clean; evidence in trust bundle; delivery/ published.",
+      "observedAt": "2026-07-02T22:00:00Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     }
   ],
   "policies": [
     {
-      "id": "policy:workflow.check.selected:test_output",
-      "claimType": "workflow.check.selected",
+      "id": "policy:workflow.check.test:test_output",
+      "claimType": "workflow.check.test",
       "requiredEvidence": [
         "test_output"
       ],
       "acceptanceCriteria": [
-        "A verified verification event must support a workflow.check.selected claim."
+        "A verified verification event must support a workflow.check.test claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -487,13 +477,47 @@
       "impactLevel": "high"
     },
     {
-      "id": "policy:builder.pull-work.selected:test_output",
-      "claimType": "builder.pull-work.selected",
+      "id": "policy:builder.pr-open.pull-request:test_output",
+      "claimType": "builder.pr-open.pull-request",
       "requiredEvidence": [
         "test_output"
       ],
       "acceptanceCriteria": [
-        "A verified verification event must support a builder.pull-work.selected claim."
+        "A verified verification event must support a builder.pr-open.pull-request claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pr-open.pull-request:attestation",
+      "claimType": "builder.pr-open.pull-request",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pr-open.pull-request claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -519,11 +543,11 @@
       "impactLevel": "high"
     },
     {
-      "id": "policy:builder.pull-work.selected",
-      "claimType": "builder.pull-work.selected",
+      "id": "policy:builder.pr-open.pull-request",
+      "claimType": "builder.pr-open.pull-request",
       "requiredEvidence": [],
       "acceptanceCriteria": [
-        "A verified verification event must support a builder.pull-work.selected claim."
+        "A verified verification event must support a builder.pr-open.pull-request claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -551,18 +575,6 @@
   ],
   "events": [
     {
-      "id": "evt:kontourai-flow-agents-287-re-verify-287-iter2.flow-agents-workflow.iter-2-re-verify-f7-t4-fix-build-clean-validate-source-clean-evals-run-sh-static-30-30-pass-test-actor-identity-sh-10-10-pass-env-override-falls-through-to-derived-actor-stderr-warning-flow-agents-actor-unknown-honored-verbatim-test-workflow-sidecar-writer-sh-137-137-pass-incl-liveness-t4-f7-actor-colon-colon-colon-exits-nonzero-no-event-test-session-resume-roundtrip-sh-13-fail-13-pass-all-pre-existing-baseline-fixture-drift-plus-new-t2-assertions-pass-mirror-diff-empty-4-direct-cli-probes-pass-derived-actor-for-actor-dies-with-no-event-flow-agents-actor-unknown-honored-two-holders-headline-no-regressions-vs-iteration-1-ac1-ac8-remain-verified",
-      "claimId": "kontourai-flow-agents-287-re-verify-287-iter2.flow-agents-workflow.iter-2-re-verify-f7-t4-fix-build-clean-validate-source-clean-evals-run-sh-static-30-30-pass-test-actor-identity-sh-10-10-pass-env-override-falls-through-to-derived-actor-stderr-warning-flow-agents-actor-unknown-honored-verbatim-test-workflow-sidecar-writer-sh-137-137-pass-incl-liveness-t4-f7-actor-colon-colon-colon-exits-nonzero-no-event-test-session-resume-roundtrip-sh-13-fail-13-pass-all-pre-existing-baseline-fixture-drift-plus-new-t2-assertions-pass-mirror-diff-empty-4-direct-cli-probes-pass-derived-actor-for-actor-dies-with-no-event-flow-agents-actor-unknown-honored-two-holders-headline-no-regressions-vs-iteration-1-ac1-ac8-remain-verified",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:kontourai-flow-agents-287-re-verify-287-iter2.flow-agents-workflow.iter-2-re-verify-f7-t4-fix-build-clean-validate-source-clean-evals-run-sh-static-30-30-pass-test-actor-identity-sh-10-10-pass-env-override-falls-through-to-derived-actor-stderr-warning-flow-agents-actor-unknown-honored-verbatim-test-workflow-sidecar-writer-sh-137-137-pass-incl-liveness-t4-f7-actor-colon-colon-colon-exits-nonzero-no-event-test-session-resume-roundtrip-sh-13-fail-13-pass-all-pre-existing-baseline-fixture-drift-plus-new-t2-assertions-pass-mirror-diff-empty-4-direct-cli-probes-pass-derived-actor-for-actor-dies-with-no-event-flow-agents-actor-unknown-honored-two-holders-headline-no-regressions-vs-iteration-1-ac1-ac8-remain-verified"
-      ],
-      "createdAt": "2026-07-02T21:22:05Z",
-      "verifiedAt": "2026-07-02T21:22:05Z"
-    },
-    {
       "id": "evt:kontourai-flow-agents-287-ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment.flow-agents-workflow.ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment",
       "claimId": "kontourai-flow-agents-287-ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment.flow-agents-workflow.ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment",
       "status": "verified",
@@ -571,8 +583,8 @@
       "evidenceIds": [
         "ev:kontourai-flow-agents-287-ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment.flow-agents-workflow.ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment"
       ],
-      "createdAt": "2026-07-02T21:22:05Z",
-      "verifiedAt": "2026-07-02T21:22:05Z"
+      "createdAt": "2026-07-02T22:00:00Z",
+      "verifiedAt": "2026-07-02T22:00:00Z"
     },
     {
       "id": "evt:kontourai-flow-agents-287-ac2-automatic-derivation-no-user-discipline-resolveactor-returns-a-distinct-non-empty-non-local-actor-with-zero-required-configuration-via-the-runtime-native-env-var-when-present-or-the-process-ancestry-fallback-otherwise.flow-agents-workflow.ac2-automatic-derivation-no-user-discipline-resolveactor-returns-a-distinct-non-empty-non-local-actor-with-zero-required-configuration-via-the-runtime-native-env-var-when-present-or-the-process-ancestry-fallback-otherwise",
@@ -583,8 +595,8 @@
       "evidenceIds": [
         "ev:kontourai-flow-agents-287-ac2-automatic-derivation-no-user-discipline-resolveactor-returns-a-distinct-non-empty-non-local-actor-with-zero-required-configuration-via-the-runtime-native-env-var-when-present-or-the-process-ancestry-fallback-otherwise.flow-agents-workflow.ac2-automatic-derivation-no-user-discipline-resolveactor-returns-a-distinct-non-empty-non-local-actor-with-zero-required-configuration-via-the-runtime-native-env-var-when-present-or-the-process-ancestry-fallback-otherwise"
       ],
-      "createdAt": "2026-07-02T21:22:05Z",
-      "verifiedAt": "2026-07-02T21:22:05Z"
+      "createdAt": "2026-07-02T22:00:00Z",
+      "verifiedAt": "2026-07-02T22:00:00Z"
     },
     {
       "id": "evt:kontourai-flow-agents-287-ac3-liveness-writes-fail-loud-workflow-sidecar-liveness-claim-heartbeat-release-exits-nonzero-with-remediation-text-naming-actor-and-flow-agents-actor-whenever-the-resolved-actor-is-empty-or-the-literal-local-case-insensitive-it-never-silently-substitutes-a-fallback-value.flow-agents-workflow.ac3-liveness-writes-fail-loud-workflow-sidecar-liveness-claim-heartbeat-release-exits-nonzero-with-remediation-text-naming-actor-and-flow-agents-actor-whenever-the-resolved-actor-is-empty-or-the-literal-local-case-insensitive-it-never-silently-substitutes-a-fallback-value",
@@ -595,8 +607,8 @@
       "evidenceIds": [
         "ev:kontourai-flow-agents-287-ac3-liveness-writes-fail-loud-workflow-sidecar-liveness-claim-heartbeat-release-exits-nonzero-with-remediation-text-naming-actor-and-flow-agents-actor-whenever-the-resolved-actor-is-empty-or-the-literal-local-case-insensitive-it-never-silently-substitutes-a-fallback-value.flow-agents-workflow.ac3-liveness-writes-fail-loud-workflow-sidecar-liveness-claim-heartbeat-release-exits-nonzero-with-remediation-text-naming-actor-and-flow-agents-actor-whenever-the-resolved-actor-is-empty-or-the-literal-local-case-insensitive-it-never-silently-substitutes-a-fallback-value"
       ],
-      "createdAt": "2026-07-02T21:22:05Z",
-      "verifiedAt": "2026-07-02T21:22:05Z"
+      "createdAt": "2026-07-02T22:00:00Z",
+      "verifiedAt": "2026-07-02T22:00:00Z"
     },
     {
       "id": "evt:kontourai-flow-agents-287-ac4-backward-compatible-reads-of-legacy-local-events-liveness-status-and-scripts-hooks-lib-liveness-read-js-s-freshholders-continue-to-parse-group-and-correctly-label-pre-existing-events-whose-actor-field-is-the-literal-string-local-without-error-or-behavior-change.flow-agents-workflow.ac4-backward-compatible-reads-of-legacy-local-events-liveness-status-and-scripts-hooks-lib-liveness-read-js-s-freshholders-continue-to-parse-group-and-correctly-label-pre-existing-events-whose-actor-field-is-the-literal-string-local-without-error-or-behavior-change",
@@ -607,8 +619,8 @@
       "evidenceIds": [
         "ev:kontourai-flow-agents-287-ac4-backward-compatible-reads-of-legacy-local-events-liveness-status-and-scripts-hooks-lib-liveness-read-js-s-freshholders-continue-to-parse-group-and-correctly-label-pre-existing-events-whose-actor-field-is-the-literal-string-local-without-error-or-behavior-change.flow-agents-workflow.ac4-backward-compatible-reads-of-legacy-local-events-liveness-status-and-scripts-hooks-lib-liveness-read-js-s-freshholders-continue-to-parse-group-and-correctly-label-pre-existing-events-whose-actor-field-is-the-literal-string-local-without-error-or-behavior-change"
       ],
-      "createdAt": "2026-07-02T21:22:05Z",
-      "verifiedAt": "2026-07-02T21:22:05Z"
+      "createdAt": "2026-07-02T22:00:00Z",
+      "verifiedAt": "2026-07-02T22:00:00Z"
     },
     {
       "id": "evt:kontourai-flow-agents-287-ac5-two-concurrent-sessions-produce-two-holders-two-simulated-sessions-on-one-host-distinct-derived-actors-no-explicit-actor-flag-simulating-auto-derivation-via-env-injection-both-claim-the-same-subject-liveness-status-json-reports-two-distinct-subjectid-actor-rows-with-label-held-not-one-collapsed-holder.flow-agents-workflow.ac5-two-concurrent-sessions-produce-two-holders-two-simulated-sessions-on-one-host-distinct-derived-actors-no-explicit-actor-flag-simulating-auto-derivation-via-env-injection-both-claim-the-same-subject-liveness-status-json-reports-two-distinct-subjectid-actor-rows-with-label-held-not-one-collapsed-holder",
@@ -619,8 +631,8 @@
       "evidenceIds": [
         "ev:kontourai-flow-agents-287-ac5-two-concurrent-sessions-produce-two-holders-two-simulated-sessions-on-one-host-distinct-derived-actors-no-explicit-actor-flag-simulating-auto-derivation-via-env-injection-both-claim-the-same-subject-liveness-status-json-reports-two-distinct-subjectid-actor-rows-with-label-held-not-one-collapsed-holder.flow-agents-workflow.ac5-two-concurrent-sessions-produce-two-holders-two-simulated-sessions-on-one-host-distinct-derived-actors-no-explicit-actor-flag-simulating-auto-derivation-via-env-injection-both-claim-the-same-subject-liveness-status-json-reports-two-distinct-subjectid-actor-rows-with-label-held-not-one-collapsed-holder"
       ],
-      "createdAt": "2026-07-02T21:22:05Z",
-      "verifiedAt": "2026-07-02T21:22:05Z"
+      "createdAt": "2026-07-02T22:00:00Z",
+      "verifiedAt": "2026-07-02T22:00:00Z"
     },
     {
       "id": "evt:kontourai-flow-agents-287-ac6-unset-actor-exits-nonzero-with-remediation-running-liveness-claim-subject-with-flow-agents-actor-unset-no-actor-flag-and-the-runtime-ancestry-resolution-forced-unavailable-test-harness-stub-via-flow-agents-actor-test-force-unresolved-1-escape-hatch-see-wave-1-task-1-1-exits-nonzero-and-prints-remediation-text-naming-actor-flow-agents-actor.flow-agents-workflow.ac6-unset-actor-exits-nonzero-with-remediation-running-liveness-claim-subject-with-flow-agents-actor-unset-no-actor-flag-and-the-runtime-ancestry-resolution-forced-unavailable-test-harness-stub-via-flow-agents-actor-test-force-unresolved-1-escape-hatch-see-wave-1-task-1-1-exits-nonzero-and-prints-remediation-text-naming-actor-flow-agents-actor",
@@ -631,20 +643,20 @@
       "evidenceIds": [
         "ev:kontourai-flow-agents-287-ac6-unset-actor-exits-nonzero-with-remediation-running-liveness-claim-subject-with-flow-agents-actor-unset-no-actor-flag-and-the-runtime-ancestry-resolution-forced-unavailable-test-harness-stub-via-flow-agents-actor-test-force-unresolved-1-escape-hatch-see-wave-1-task-1-1-exits-nonzero-and-prints-remediation-text-naming-actor-flow-agents-actor.flow-agents-workflow.ac6-unset-actor-exits-nonzero-with-remediation-running-liveness-claim-subject-with-flow-agents-actor-unset-no-actor-flag-and-the-runtime-ancestry-resolution-forced-unavailable-test-harness-stub-via-flow-agents-actor-test-force-unresolved-1-escape-hatch-see-wave-1-task-1-1-exits-nonzero-and-prints-remediation-text-naming-actor-flow-agents-actor"
       ],
-      "createdAt": "2026-07-02T21:22:05Z",
-      "verifiedAt": "2026-07-02T21:22:05Z"
+      "createdAt": "2026-07-02T22:00:00Z",
+      "verifiedAt": "2026-07-02T22:00:00Z"
     },
     {
       "id": "evt:kontourai-flow-agents-287-ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent.flow-agents-workflow.ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent",
       "claimId": "kontourai-flow-agents-287-ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent.flow-agents-workflow.ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent",
-      "status": "verified",
+      "status": "assumed",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
         "ev:kontourai-flow-agents-287-ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent.flow-agents-workflow.ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent"
       ],
-      "createdAt": "2026-07-02T21:22:05Z",
-      "verifiedAt": "2026-07-02T21:22:05Z"
+      "createdAt": "2026-07-02T22:00:00Z",
+      "verifiedAt": "2026-07-02T22:00:00Z"
     },
     {
       "id": "evt:kontourai-flow-agents-287-ac8-source-tree-mirror-stays-in-sync-context-scripts-hooks-workflow-steering-js-remains-byte-identical-to-scripts-hooks-workflow-steering-js-after-the-change-enforced-mirror-per-src-tools-validate-source-tree-ts-line-36.flow-agents-workflow.ac8-source-tree-mirror-stays-in-sync-context-scripts-hooks-workflow-steering-js-remains-byte-identical-to-scripts-hooks-workflow-steering-js-after-the-change-enforced-mirror-per-src-tools-validate-source-tree-ts-line-36",
@@ -655,8 +667,44 @@
       "evidenceIds": [
         "ev:kontourai-flow-agents-287-ac8-source-tree-mirror-stays-in-sync-context-scripts-hooks-workflow-steering-js-remains-byte-identical-to-scripts-hooks-workflow-steering-js-after-the-change-enforced-mirror-per-src-tools-validate-source-tree-ts-line-36.flow-agents-workflow.ac8-source-tree-mirror-stays-in-sync-context-scripts-hooks-workflow-steering-js-remains-byte-identical-to-scripts-hooks-workflow-steering-js-after-the-change-enforced-mirror-per-src-tools-validate-source-tree-ts-line-36"
       ],
-      "createdAt": "2026-07-02T21:22:05Z",
-      "verifiedAt": "2026-07-02T21:22:05Z"
+      "createdAt": "2026-07-02T22:00:00Z",
+      "verifiedAt": "2026-07-02T22:00:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-287-re-verify-287-iter2-actor-identity.flow-agents-workflow.iter-2-re-verify-f7-t4-fix-evals-integration-test-actor-identity-sh-10-10-pass-env-override-falls-through-to-derived-actor-stderr-warning-flow-agents-actor-unknown-honored-verbatim-no-regressions-vs-iteration-1",
+      "claimId": "kontourai-flow-agents-287-re-verify-287-iter2-actor-identity.flow-agents-workflow.iter-2-re-verify-f7-t4-fix-evals-integration-test-actor-identity-sh-10-10-pass-env-override-falls-through-to-derived-actor-stderr-warning-flow-agents-actor-unknown-honored-verbatim-no-regressions-vs-iteration-1",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-287-re-verify-287-iter2-actor-identity.flow-agents-workflow.iter-2-re-verify-f7-t4-fix-evals-integration-test-actor-identity-sh-10-10-pass-env-override-falls-through-to-derived-actor-stderr-warning-flow-agents-actor-unknown-honored-verbatim-no-regressions-vs-iteration-1"
+      ],
+      "createdAt": "2026-07-02T22:00:00Z",
+      "verifiedAt": "2026-07-02T22:00:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-287-re-verify-287-iter2-sidecar-writer.flow-agents-workflow.iter-2-re-verify-f7-t4-fix-evals-integration-test-workflow-sidecar-writer-sh-137-137-pass-incl-liveness-t4-f7-actor-exits-nonzero-no-event-no-regressions-vs-iteration-1-ac1-ac8-remain-verified",
+      "claimId": "kontourai-flow-agents-287-re-verify-287-iter2-sidecar-writer.flow-agents-workflow.iter-2-re-verify-f7-t4-fix-evals-integration-test-workflow-sidecar-writer-sh-137-137-pass-incl-liveness-t4-f7-actor-exits-nonzero-no-event-no-regressions-vs-iteration-1-ac1-ac8-remain-verified",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-287-re-verify-287-iter2-sidecar-writer.flow-agents-workflow.iter-2-re-verify-f7-t4-fix-evals-integration-test-workflow-sidecar-writer-sh-137-137-pass-incl-liveness-t4-f7-actor-exits-nonzero-no-event-no-regressions-vs-iteration-1-ac1-ac8-remain-verified"
+      ],
+      "createdAt": "2026-07-02T22:00:00Z",
+      "verifiedAt": "2026-07-02T22:00:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-287-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-296-closes-287-part-of-epic-151-two-review-iterations-two-verify-passes-clean-evidence-in-trust-bundle-delivery-published",
+      "claimId": "kontourai-flow-agents-287-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-296-closes-287-part-of-epic-151-two-review-iterations-two-verify-passes-clean-evidence-in-trust-bundle-delivery-published",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-287-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-296-closes-287-part-of-epic-151-two-review-iterations-two-verify-passes-clean-evidence-in-trust-bundle-delivery-published"
+      ],
+      "createdAt": "2026-07-02T22:00:00Z",
+      "verifiedAt": "2026-07-02T22:00:00Z"
     },
     {
       "id": "evt:kontourai-flow-agents-287-ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment.flow-agents-workflow.ac1-actor-struct-and-stable-serialization-a-runtime-agnostic-actor-struct-runtime-session-id-host-human-is-serialized-by-a-new-pure-function-serializeactor-in-scripts-hooks-lib-actor-identity-js-into-a-single-string-safe-for-the-existing-subjectid-actor-grouping-key-no-no-raw-inside-any-segment",
@@ -665,8 +713,8 @@
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-02T21:22:05Z",
-      "verifiedAt": "2026-07-02T21:22:05Z"
+      "createdAt": "2026-07-02T22:00:00Z",
+      "verifiedAt": "2026-07-02T22:00:00Z"
     },
     {
       "id": "evt:kontourai-flow-agents-287-ac2-automatic-derivation-no-user-discipline-resolveactor-returns-a-distinct-non-empty-non-local-actor-with-zero-required-configuration-via-the-runtime-native-env-var-when-present-or-the-process-ancestry-fallback-otherwise.flow-agents-workflow.ac2-automatic-derivation-no-user-discipline-resolveactor-returns-a-distinct-non-empty-non-local-actor-with-zero-required-configuration-via-the-runtime-native-env-var-when-present-or-the-process-ancestry-fallback-otherwise",
@@ -675,8 +723,8 @@
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-02T21:22:05Z",
-      "verifiedAt": "2026-07-02T21:22:05Z"
+      "createdAt": "2026-07-02T22:00:00Z",
+      "verifiedAt": "2026-07-02T22:00:00Z"
     },
     {
       "id": "evt:kontourai-flow-agents-287-ac3-liveness-writes-fail-loud-workflow-sidecar-liveness-claim-heartbeat-release-exits-nonzero-with-remediation-text-naming-actor-and-flow-agents-actor-whenever-the-resolved-actor-is-empty-or-the-literal-local-case-insensitive-it-never-silently-substitutes-a-fallback-value.flow-agents-workflow.ac3-liveness-writes-fail-loud-workflow-sidecar-liveness-claim-heartbeat-release-exits-nonzero-with-remediation-text-naming-actor-and-flow-agents-actor-whenever-the-resolved-actor-is-empty-or-the-literal-local-case-insensitive-it-never-silently-substitutes-a-fallback-value",
@@ -685,8 +733,8 @@
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-02T21:22:05Z",
-      "verifiedAt": "2026-07-02T21:22:05Z"
+      "createdAt": "2026-07-02T22:00:00Z",
+      "verifiedAt": "2026-07-02T22:00:00Z"
     },
     {
       "id": "evt:kontourai-flow-agents-287-ac4-backward-compatible-reads-of-legacy-local-events-liveness-status-and-scripts-hooks-lib-liveness-read-js-s-freshholders-continue-to-parse-group-and-correctly-label-pre-existing-events-whose-actor-field-is-the-literal-string-local-without-error-or-behavior-change.flow-agents-workflow.ac4-backward-compatible-reads-of-legacy-local-events-liveness-status-and-scripts-hooks-lib-liveness-read-js-s-freshholders-continue-to-parse-group-and-correctly-label-pre-existing-events-whose-actor-field-is-the-literal-string-local-without-error-or-behavior-change",
@@ -695,8 +743,8 @@
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-02T21:22:05Z",
-      "verifiedAt": "2026-07-02T21:22:05Z"
+      "createdAt": "2026-07-02T22:00:00Z",
+      "verifiedAt": "2026-07-02T22:00:00Z"
     },
     {
       "id": "evt:kontourai-flow-agents-287-ac5-two-concurrent-sessions-produce-two-holders-two-simulated-sessions-on-one-host-distinct-derived-actors-no-explicit-actor-flag-simulating-auto-derivation-via-env-injection-both-claim-the-same-subject-liveness-status-json-reports-two-distinct-subjectid-actor-rows-with-label-held-not-one-collapsed-holder.flow-agents-workflow.ac5-two-concurrent-sessions-produce-two-holders-two-simulated-sessions-on-one-host-distinct-derived-actors-no-explicit-actor-flag-simulating-auto-derivation-via-env-injection-both-claim-the-same-subject-liveness-status-json-reports-two-distinct-subjectid-actor-rows-with-label-held-not-one-collapsed-holder",
@@ -705,8 +753,8 @@
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-02T21:22:05Z",
-      "verifiedAt": "2026-07-02T21:22:05Z"
+      "createdAt": "2026-07-02T22:00:00Z",
+      "verifiedAt": "2026-07-02T22:00:00Z"
     },
     {
       "id": "evt:kontourai-flow-agents-287-ac6-unset-actor-exits-nonzero-with-remediation-running-liveness-claim-subject-with-flow-agents-actor-unset-no-actor-flag-and-the-runtime-ancestry-resolution-forced-unavailable-test-harness-stub-via-flow-agents-actor-test-force-unresolved-1-escape-hatch-see-wave-1-task-1-1-exits-nonzero-and-prints-remediation-text-naming-actor-flow-agents-actor.flow-agents-workflow.ac6-unset-actor-exits-nonzero-with-remediation-running-liveness-claim-subject-with-flow-agents-actor-unset-no-actor-flag-and-the-runtime-ancestry-resolution-forced-unavailable-test-harness-stub-via-flow-agents-actor-test-force-unresolved-1-escape-hatch-see-wave-1-task-1-1-exits-nonzero-and-prints-remediation-text-naming-actor-flow-agents-actor",
@@ -715,8 +763,8 @@
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-02T21:22:05Z",
-      "verifiedAt": "2026-07-02T21:22:05Z"
+      "createdAt": "2026-07-02T22:00:00Z",
+      "verifiedAt": "2026-07-02T22:00:00Z"
     },
     {
       "id": "evt:kontourai-flow-agents-287-ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent.flow-agents-workflow.ac7-self-actor-filtering-stays-consistent-workflow-steering-js-s-sessionstart-liveness-warning-resumesteering-freshholders-selfactor-uses-the-same-shared-resolver-as-the-sidecar-writer-so-a-session-s-own-claim-heartbeat-events-are-never-reported-back-to-it-as-another-agent",
@@ -725,8 +773,8 @@
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-02T21:22:05Z",
-      "verifiedAt": "2026-07-02T21:22:05Z"
+      "createdAt": "2026-07-02T22:00:00Z",
+      "verifiedAt": "2026-07-02T22:00:00Z"
     },
     {
       "id": "evt:kontourai-flow-agents-287-ac8-source-tree-mirror-stays-in-sync-context-scripts-hooks-workflow-steering-js-remains-byte-identical-to-scripts-hooks-workflow-steering-js-after-the-change-enforced-mirror-per-src-tools-validate-source-tree-ts-line-36.flow-agents-workflow.ac8-source-tree-mirror-stays-in-sync-context-scripts-hooks-workflow-steering-js-remains-byte-identical-to-scripts-hooks-workflow-steering-js-after-the-change-enforced-mirror-per-src-tools-validate-source-tree-ts-line-36",
@@ -735,8 +783,8 @@
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-02T21:22:05Z",
-      "verifiedAt": "2026-07-02T21:22:05Z"
+      "createdAt": "2026-07-02T22:00:00Z",
+      "verifiedAt": "2026-07-02T22:00:00Z"
     },
     {
       "id": "evt:kontourai-flow-agents-287-code-review-287-iteration-2.flow-agents-workflow.iteration-2-re-review-f7-t4-fix-for-the-strip-to-empty-actor-override-confirmed-via-direct-node-repro-both-fall-through-to-the-same-derived-process-ancestry-actor-with-source-process-ancestry-never-source-explicit-override-never-actor-unknown-one-stderr-warning-each-literal-flow-agents-actor-unknown-still-honored-as-explicit-override-actor-on-liveness-claim-dies-exit-1-with-actor-remediation-and-writes-no-event-unset-empty-flow-agents-actor-stays-silent-no-warning-f1-f6-from-iteration-1-untouched-and-context-mirror-still-byte-identical-evals-integration-test-actor-identity-sh-10-10-pass-evals-integration-test-workflow-sidecar-writer-sh-140-140-pass-exit-0-one-new-non-blocking-medium-the-strip-to-empty-charset-predicate-a-za-z0-9-is-duplicated-verbatim-not-exported-as-a-shared-helper-between-scripts-hooks-lib-actor-identity-js-308-and-src-cli-workflow-sidecar-ts-2666-a-drift-risk-if-the-allowed-charset-ever-changes-in-only-one-place",
@@ -745,8 +793,8 @@
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-02T21:22:05Z",
-      "verifiedAt": "2026-07-02T21:22:05Z"
+      "createdAt": "2026-07-02T22:00:00Z",
+      "verifiedAt": "2026-07-02T22:00:00Z"
     }
   ]
 }
