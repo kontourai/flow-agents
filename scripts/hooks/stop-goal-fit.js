@@ -315,6 +315,30 @@ function loadActiveFlowStep(flowAgentsDir) {
   }
 }
 
+/**
+ * Message-assembly only: derive the user-facing gate identity prefix from the
+ * resolved active FlowDefinition step (loadActiveFlowStep). Produces
+ * "[<flowId>/<gateId>]" (e.g. "[builder.build/verify-gate]") when a
+ * FlowDefinition gate is active, else the generic "[stop-gate]" fallback.
+ * Purely cosmetic — never affects claim selection, HARD_BLOCK/FULL_BLOCK
+ * classification, block counting, or exit codes.
+ */
+function gateLabel(activeFlowStep) {
+  return activeFlowStep && activeFlowStep.flowId && activeFlowStep.gateId
+    ? `[${activeFlowStep.flowId}/${activeFlowStep.gateId}]`
+    : '[stop-gate]';
+}
+
+/**
+ * Derive the declared claimType Set from an active FlowDefinition's gate expects[].
+ * Returns null when no FlowDefinition is active (callers fall back to workflow.* only).
+ */
+function declaredClaimTypesFor(activeFlowStep) {
+  return activeFlowStep && Array.isArray(activeFlowStep.gateExpects)
+    ? new Set(activeFlowStep.gateExpects.map(e => e && e.bundle_claim && e.bundle_claim.claimType).filter(Boolean))
+    : null;
+}
+
 function safeOneLine(value, maxLength = 220) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   if (text.length <= maxLength) return text;
@@ -527,9 +551,7 @@ function bundlePendingCriteriaCount(claims, declaredClaimTypes) {
 function sidecarGuidance(root, artifactDir, activeFlowStep) {
   // Build the declared claimType set from the FlowDefinition gate expects[] (P-c).
   // Null when no FlowDefinition is active (fallback: helpers use workflow.* prefix only).
-  const declaredClaimTypes = activeFlowStep && Array.isArray(activeFlowStep.gateExpects)
-    ? new Set(activeFlowStep.gateExpects.map(e => e && e.bundle_claim && e.bundle_claim.claimType).filter(Boolean))
-    : null;
+  const declaredClaimTypes = declaredClaimTypesFor(activeFlowStep);
   const warnings = [];
   const state = readJsonFile(path.join(artifactDir, 'state.json'));
   const base = relative(root, artifactDir);
@@ -1049,9 +1071,7 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
   // Build the declared claimType set from the FlowDefinition gate expects[] (P-c).
   // Null when no FlowDefinition is active (fallback: bundleClaimedPassCommandChecks
   // uses workflow.check.* prefix only — no regression for non-FlowDefinition sessions).
-  const declaredClaimTypes = activeFlowStep && Array.isArray(activeFlowStep.gateExpects)
-    ? new Set(activeFlowStep.gateExpects.map(e => e && e.bundle_claim && e.bundle_claim.claimType).filter(Boolean))
-    : null;
+  const declaredClaimTypes = declaredClaimTypesFor(activeFlowStep);
   const bundle = readJsonFile(path.join(artifactDir, 'trust.bundle'));
   const acceptance = readJsonFile(path.join(artifactDir, 'acceptance.json'));
   const log = readLatestCommandLog(artifactDir); // Fix C: latest-wins; genuine fix-then-rerun-to-pass clears the block
@@ -1395,9 +1415,7 @@ async function bundleEnforcement(artifactDir, activeFlowStep) {
   // When activeFlowStep is non-null, select claims whose claimType is in the
   // gate's declared set. When null, fall back to the existing workflow.* prefix
   // filter so no-FlowDefinition sessions are unaffected.
-  const declaredClaimTypes = activeFlowStep && Array.isArray(activeFlowStep.gateExpects)
-    ? new Set(activeFlowStep.gateExpects.map(e => e && e.bundle_claim && e.bundle_claim.claimType).filter(Boolean))
-    : null;
+  const declaredClaimTypes = declaredClaimTypesFor(activeFlowStep);
 
   // SECURITY (Layer 2 — gate-bypass-chain fix): use UNION form instead of if/else.
   // With the old if/else, an empty declaredClaimTypes (Set{}) from a fake flow with
@@ -1569,9 +1587,7 @@ function isPreExecution(artifactDir, markdownStatus) {
 // ADR 0016 P-c: pass activeFlowStep so bundlePendingCriteriaCount includes declared types.
 function missingBundleOrStateSignal(artifactDir, activeFlowStep) {
   // Build the declared claimType set from the FlowDefinition gate expects[] (P-c).
-  const declaredClaimTypes = activeFlowStep && Array.isArray(activeFlowStep.gateExpects)
-    ? new Set(activeFlowStep.gateExpects.map(e => e && e.bundle_claim && e.bundle_claim.claimType).filter(Boolean))
-    : null;
+  const declaredClaimTypes = declaredClaimTypesFor(activeFlowStep);
   const warnings = [];
   const hasBundle = fs.existsSync(path.join(artifactDir, 'trust.bundle'));
   const state = readJsonFile(path.join(artifactDir, 'state.json'));
@@ -1727,7 +1743,7 @@ async function analyze(root, now = Date.now()) {
     if (/\[backstop in warn mode — not blocking\]/.test(w)) return false;
     return blockRe.test(w);
   });
-  return { warnings, blocking, preExecution };
+  return { warnings, blocking, preExecution, gatePrefix: gateLabel(activeFlowStep) };
 }
 
 /**
@@ -1780,6 +1796,52 @@ function bumpBlockStreak(root, hash) {
   return count;
 }
 
+/**
+ * Message-assembly only: per-gap remediation guidance (linter-style "  → " line)
+ * appended under a matching warning. Fix-first / accept-second ordering per
+ * class; the "accept" path always names a reason requirement and is never the
+ * only or primary option. Does not affect which warnings are emitted, HARD_BLOCK/
+ * FULL_BLOCK classification, block counting, or exit codes — text only.
+ * Returns null when a warning does not match one of the four known classes.
+ */
+function remediationFor(warning) {
+  const w = String(warning || '');
+
+  // (1) claimed pass but the trusted re-run failed — reuse the exact command
+  // already named in the warning text; never invent a different one.
+  // NOTE: anchor on the quoted command substring + fixed tail, NOT on
+  // `trusted backstop (<source>)` paren-matching. trusted.source can itself
+  // contain parens (e.g. "model-command (FLOW_AGENTS_GOAL_FIT_RECHECK)"), and a
+  // non-nesting `[^)]*` silently fails to match that nested-paren source,
+  // dropping the guidance line for the RECHECK backstop path.
+  const rerun = /re-run of "([\s\S]+?)" FAILED with exit \d+, contradicting the claimed pass/.exec(w);
+  if (rerun) {
+    return `  → run: ${rerun[1]} — fix the failures, then re-record the check`;
+  }
+
+  // (2) claimed pass never captured (no trusted command resolved, backstop
+  // disabled via FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip, or the backstop could not launch).
+  // Same nested-paren fix as (1): match on the invariant "could not run" tail
+  // rather than paren-counting the `(<source>)` segment.
+  if (/claimed pass but NOT_VERIFIED — command ".+?" was never captured/.test(w)
+    || /claimed pass but NOT_VERIFIED — trusted backstop .*could not run/.test(w)) {
+    return "  → run the command in this session (evidence capture is active), then re-record the check with the exact command string via: npm run workflow:sidecar -- record-evidence <artifact-dir> --verdict <v> --check-json '...'";
+  }
+
+  // (3) critique verdict fail / open findings.
+  if (/critique status:/.test(w) || /critique open /.test(w)) {
+    return '  → resolve the findings and record a passing critique (record-critique), or mark each finding accepted with a reason';
+  }
+
+  // (4) evidence verdict fail / missing acceptance evidence.
+  if (/evidence verdict:/.test(w) || /evidence check .+ status:/.test(w)
+    || /evidence NOT_VERIFIED gap:/.test(w) || /Final Acceptance:/.test(w)) {
+    return '  → fix the failing check, or record it as an accepted gap with justification in the session artifact';
+  }
+
+  return null;
+}
+
 async function run(rawInput) {
   const input = parseJson(rawInput);
   const root = findRepoRoot(input.cwd || process.cwd());
@@ -1791,9 +1853,15 @@ async function run(rawInput) {
     return rawInput;
   }
 
+  const gatePrefix = result.gatePrefix || '[stop-gate]';
   const message = [
-    '[Hook] Goal Fit warning:',
-    ...result.warnings.map(w => ` - ${w}`),
+    `${gatePrefix} Goal Fit warning:`,
+    ...result.warnings.flatMap(w => {
+      const lines = [` - ${w}`];
+      const guidance = remediationFor(w);
+      if (guidance) lines.push(guidance);
+      return lines;
+    }),
   ].join('\n');
 
   if (mode !== 'block' || !result.blocking) {
@@ -1820,20 +1888,20 @@ async function run(rawInput) {
       // Do NOT clear the streak — keep accumulating so the same hard block stays visible.
       return {
         stdout: rawInput,
-        stderr: `${message}\n[Hook] Goal Fit: max-blocks reached but the block is a caught false-completion / integrity failure — not auto-releasing; requires a real fix or operator override.`,
+        stderr: `${message}\n${gatePrefix} max-blocks reached but the block is a caught false-completion / integrity failure — not auto-releasing; requires a real fix or operator override.`,
         exitCode: 2,
       };
     }
     clearBlockStreak(root);
     return {
       stdout: rawInput,
-      stderr: `${message}\n[Hook] Goal Fit block RELEASED after ${count} consecutive identical blocks (FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=${maxBlocks}): the same gap persists, surfacing to the human instead of looping.`,
+      stderr: `${message}\n${gatePrefix} released — the same gap(s) blocked ${count}x without progress; needs your decision (listed above).`,
       exitCode: 0,
     };
   }
   return {
     stdout: rawInput,
-    stderr: `${message}\n[Hook] Goal Fit BLOCK ${count}/${maxBlocks}.`,
+    stderr: `${message}\n${gatePrefix} Stop blocked — ${result.warnings.length} evidence gap(s) (block ${count}; after ${maxBlocks} identical blocks I stop blocking and hand this to you)`,
     exitCode: 2,
   };
 }

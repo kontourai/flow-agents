@@ -97,6 +97,41 @@ The broader boundary reconciliation (issue #174) is phased:
 
 **Invariant that must survive migration (#183 Finding 2):** `WorkflowRun.status.conditions` are writable summaries; the gate re-derives from Hachure claims via Surface; `conditions[].evidenceRefs` cite claim IDs. **Do not fuse Resource and claim** — the separation (a friendly mutable surface over an un-gameable derived core) is the architecture.
 
+### Status update (2026-07-01) — Tier 2 Phase 3 landed and hardened
+
+**Phase 3 ("hooks") of the Tier 2 migration has landed — this is not an unfinished step.**
+PRs #204–#209 (P-a through P-d, ADR 0016 Abstraction A) implemented the FlowDefinition →
+enforcement bridge: P-a, a shared `src/lib/flow-resolver.ts` resolver
+(`resolveActiveFlowStep`) that turns `(active_flow_id, active_step_id)` into a gate's
+`expects[]`; P-b, declared-claim producers (`record-gate-claim` stamps kit-namespaced
+claims per the active FlowDefinition's gate); P-c, gate enforcement in
+`scripts/hooks/stop-goal-fit.js` reading `activeFlowStep.gateExpects[]` to select claims by
+declared `claimType`; and P-d, `phase_map`-driven `advance-state --flow-definition` plus
+retirement of the `-legacy` dual-emit shadow, so a live FlowDefinition-driven session emits
+only kit-namespaced claims.
+
+**It was then red-teamed in PR #215, which found the literal end-state unsafe.** The literal
+Abstraction A text — declared-only enforcement, no `workflow.*` fallback — composed into a
+HIGH-severity (OWASP A01/A04) gate-bypass chain: a forged `current.json` pointing at an
+agent-authored `.flow.json` with an empty `expects: []` made the pure if/else selection logic
+return `false` for every claim, silently skipping all re-derivation, tamper-detection, and
+high/critical enforcement. PR #215 closed this by replacing the if/else with a **permanent
+union-enforcement floor** — `workflow.*` claims are *always* enforced alongside whatever a
+declared FlowDefinition adds, never instead of it — plus an empty-`expects[]`
+`gate misconfiguration:` `HARD_BLOCK`. **This union floor and HARD_BLOCK are an intentional,
+tested departure from Abstraction A's literal "instead of" wording, not an unfinished step
+toward it, and must not be "completed" by removing them** (see ADR 0016 and ADR 0018, which
+independently forbids adding new local `config-protection.js` patterns for this class of
+vector and routes new self-tamper/kill-switch findings to Layer 4 instead).
+
+**The one gap this left named and open — kit FlowDefinition files
+(`kits/*/flows/*.flow.json`) had no CODEOWNERS coverage, so a narrowed-but-nonempty
+`expects[]` edit had no owner-review trip-wire — is closed as of 2026-07-01, per ADR 0018
+Decision #2** (a self-tamper/kill-switch vector routes to Layer 4 — CODEOWNERS + a required
+regression test — not a new `config-protection.js` matcher). This closes the last open item
+from this Reassessment's Phase 3; Phases 4–6 (resume/evals, retire sidecars, Flow kernel)
+remain scoped as described above.
+
 ## Consequences
 
 - **No bespoke trust-bundle schema validator in flow-agents.** Surface is the canonical

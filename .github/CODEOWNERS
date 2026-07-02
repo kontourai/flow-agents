@@ -30,3 +30,10 @@
 /src/cli/workflow-sidecar.ts    @briananderson1222
 # Modules decomposed out of workflow-sidecar.ts (ops#22) keep the same ownership.
 /src/cli/sidecar-*.ts           @briananderson1222
+
+# Kit FlowDefinitions — the enforcer's expects[] taxonomy (ADR 0016 Abstraction A) comes
+# from these files. Narrowing a gate's expects[] locally is a real self-tamper vector
+# that Layer 2 (CI trust-reconcile) does not catch for non-command-shaped claims. Per
+# ADR 0018 Decision #2, route new kill-switch vectors to Layer 4 (this file), not a new
+# config-protection.js matcher.
+/kits/*/flows/*.flow.json      @briananderson1222
