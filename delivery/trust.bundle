@@ -10,8 +10,8 @@
       "claimType": "workflow.check.command",
       "fieldOrBehavior": "npm run check:content-boundary --",
       "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.check.command:test_output",
       "status": "verified"
@@ -24,8 +24,8 @@
       "claimType": "workflow.check.command",
       "fieldOrBehavior": "npm run validate:source --",
       "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.check.command:test_output",
       "status": "verified"
@@ -38,8 +38,8 @@
       "claimType": "workflow.check.command",
       "fieldOrBehavior": "npm run context-map -- --check",
       "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.check.command:test_output",
       "status": "verified"
@@ -52,372 +52,8 @@
       "claimType": "workflow.check.command",
       "fieldOrBehavior": "bash evals/run.sh static",
       "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-workflow-artifact-integration.flow-agents-workflow.bash-evals-integration-test-workflow-artifacts-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/workflow-artifact-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_workflow_artifacts.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-workflow-artifact-cleanup-audit-integration.flow-agents-workflow.bash-evals-integration-test-workflow-artifact-cleanup-audit-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/workflow-artifact-cleanup-audit-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_workflow_artifact_cleanup_audit.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-fixture-retirement-audit-integration.flow-agents-workflow.bash-evals-integration-test-fixture-retirement-audit-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/fixture-retirement-audit-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_fixture_retirement_audit.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-publish-change-helper-integration.flow-agents-workflow.bash-evals-integration-test-publish-change-helper-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/publish-change-helper-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_publish_change_helper.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/workflow-sidecar-writer-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_workflow_sidecar_writer.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-goal-fit-hook-integration.flow-agents-workflow.bash-evals-integration-test-goal-fit-hook-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/goal-fit-hook-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_goal_fit_hook.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-hook-category-behavior-integration.flow-agents-workflow.bash-evals-integration-test-hook-category-behaviors-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/hook-category-behavior-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_hook_category_behaviors.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-workflow-steering-hook-integration.flow-agents-workflow.bash-evals-integration-test-workflow-steering-hook-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/workflow-steering-hook-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_workflow_steering_hook.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-hook-influence-contract-integration.flow-agents-workflow.bash-evals-integration-test-hook-influence-cases-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/hook-influence-contract-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_hook_influence_cases.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-flow-kit-repository-integration.flow-agents-workflow.bash-evals-integration-test-flow-kit-repository-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/flow-kit-repository-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_flow_kit_repository.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-runtime-adapter-activation-integration.flow-agents-workflow.bash-evals-integration-test-runtime-adapter-activation-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/runtime-adapter-activation-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_runtime_adapter_activation.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-bundle-install-integration.flow-agents-workflow.bash-evals-integration-test-bundle-install-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/bundle-install-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_bundle_install.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-bundle-lifecycle-integration.flow-agents-workflow.bash-evals-integration-test-bundle-lifecycle-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/bundle-lifecycle-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_bundle_lifecycle.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-activate-npx-context-integration.flow-agents-workflow.bash-evals-integration-test-activate-npx-context-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/activate-npx-context-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_activate_npx_context.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-kit-conformance-levels-integration.flow-agents-workflow.bash-evals-integration-test-kit-conformance-levels-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/kit-conformance-levels-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_kit_conformance_levels.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-local-flow-kit-install-integration.flow-agents-workflow.bash-evals-integration-test-local-flow-kit-install-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/local-flow-kit-install-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_local_flow_kit_install.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-flow-kit-install-git-integration.flow-agents-workflow.bash-evals-integration-test-flow-kit-install-git-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/flow-kit-install-git-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_flow_kit_install_git.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-console-learning-projection-integration.flow-agents-workflow.bash-evals-integration-test-console-learning-projection-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/console-learning-projection-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_console_learning_projection.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-context-map-integration.flow-agents-workflow.bash-evals-integration-test-context-map-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/context-map-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_context_map.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-effective-backlog-settings-integration.flow-agents-workflow.bash-evals-integration-test-effective-backlog-settings-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/effective-backlog-settings-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_effective_backlog_settings.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-flow-agents-statusline-integration.flow-agents-workflow.bash-evals-integration-test-flow-agents-statusline-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/flow-agents-statusline-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_flow_agents_statusline.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-telemetry-contract-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/telemetry-contract-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_telemetry.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-telemetry-doctor-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-doctor-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/telemetry-doctor-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_telemetry_doctor.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-usage-and-cost-integration.flow-agents-workflow.bash-evals-integration-test-usage-cost-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/usage-and-cost-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_usage_cost.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-utterance-check-integration.flow-agents-workflow.bash-evals-integration-test-utterance-check-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/utterance-check-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_utterance_check.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-pull-work-provider-integration.flow-agents-workflow.bash-evals-integration-test-pull-work-provider-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/pull-work-provider-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/integration/test_pull_work_provider.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.check.command:test_output",
       "status": "verified"
@@ -430,137 +66,11 @@
       "claimType": "workflow.check.command",
       "fieldOrBehavior": "bash evals/integration/test_veritas_governance_kit.sh",
       "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.check.command:test_output",
       "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-anti-gaming-and-trust-suite.flow-agents-workflow.bash-evals-ci-antigaming-suite-sh",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/anti-gaming-and-trust-suite",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "bash evals/ci/antigaming-suite.sh",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-usage-feedback-import-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-import-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/usage-feedback-import-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.policy",
-      "fieldOrBehavior": "true # bash evals/integration/test_usage_feedback_import.sh — advisory usage-feedback lane (non-gating, deliberately excluded from evals/ci/run-baseline.sh's reconcile manifest); passed locally",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-usage-feedback-outcomes-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-outcomes-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/usage-feedback-outcomes-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.policy",
-      "fieldOrBehavior": "true # bash evals/integration/test_usage_feedback_outcomes.sh — advisory usage-feedback lane (non-gating, deliberately excluded from evals/ci/run-baseline.sh's reconcile manifest); passed locally",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-usage-feedback-report-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-report-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/usage-feedback-report-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.policy",
-      "fieldOrBehavior": "true # bash evals/integration/test_usage_feedback_report.sh — advisory usage-feedback lane (non-gating, deliberately excluded from evals/ci/run-baseline.sh's reconcile manifest); passed locally",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-usage-feedback-dashboard-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-dashboard-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/usage-feedback-dashboard-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.policy",
-      "fieldOrBehavior": "true # bash evals/integration/test_usage_feedback_dashboard.sh — advisory usage-feedback lane (non-gating, deliberately excluded from evals/ci/run-baseline.sh's reconcile manifest); passed locally",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-usage-feedback-global-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-global-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/usage-feedback-global-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.policy",
-      "fieldOrBehavior": "true # bash evals/integration/test_usage_feedback_global.sh — advisory usage-feedback lane (non-gating, deliberately excluded from evals/ci/run-baseline.sh's reconcile manifest); passed locally",
-      "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
-      "status": "verified"
-    },
-    {
-      "id": "surface-2-facet-migration-live-github-mutation-checks.flow-agents-workflow.true-skipped-by-default-publish-change-live-provider-mutation-checks-require-an-explicit-maintainer-run-lane",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/live-github-mutation-checks",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.external",
-      "fieldOrBehavior": "true # Skipped by default; publish-change/live provider mutation checks require an explicit maintainer-run lane.",
-      "value": "not_verified",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.external:attestation",
-      "status": "proposed"
-    },
-    {
-      "id": "surface-2-facet-migration-llm-acceptance-evals.flow-agents-workflow.true-skipped-by-default-invoke-acceptance-or-llm-eval-lanes-separately-with-explicit-opt-in-flags",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/llm-acceptance-evals",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.external",
-      "fieldOrBehavior": "true # Skipped by default; invoke acceptance or LLM eval lanes separately with explicit opt-in flags.",
-      "value": "not_verified",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.external:attestation",
-      "status": "proposed"
-    },
-    {
-      "id": "surface-2-facet-migration-veritas-governance-provider-evidence.flow-agents-workflow.true-skipped-unless-a-governance-adapter-is-configured-evidence-gate-must-record-not-verified-when-required-evidence-is-unavailable",
-      "subjectType": "workflow-check",
-      "subjectId": "surface-2-facet-migration/veritas-governance-provider-evidence",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.external",
-      "fieldOrBehavior": "true # Skipped unless a governance adapter is configured; evidence-gate must record NOT_VERIFIED when required evidence is unavailable.",
-      "value": "not_verified",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.external:attestation",
-      "status": "proposed"
     },
     {
       "id": "surface-2-facet-migration-surface-dependency-bump.flow-agents-workflow.true-package-json-declares-kontourai-surface-2-0-0-npm-view-kontourai-surface-version-2-0-0",
@@ -570,8 +80,8 @@
       "claimType": "workflow.check.policy",
       "fieldOrBehavior": "true # package.json declares \"@kontourai/surface\": \"^2.0.0\" (npm view @kontourai/surface version => 2.0.0)",
       "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
       "status": "verified"
@@ -584,8 +94,8 @@
       "claimType": "workflow.check.policy",
       "fieldOrBehavior": "true # npm run build (tsc -p tsconfig.json) compiles cleanly with no errors",
       "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
       "status": "verified"
@@ -598,8 +108,8 @@
       "claimType": "workflow.check.policy",
       "fieldOrBehavior": "true # npm run test:unit -> 35/35 node --test pass (also exercised inside Static eval suite's test_unit_helpers.sh)",
       "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
       "status": "verified"
@@ -612,8 +122,36 @@
       "claimType": "workflow.check.policy",
       "fieldOrBehavior": "true # re-grep of src/, scripts/ci/, kits/, evals/ for Claim.surface write sites (.surface, surface:, \"surface\") found zero remaining sites outside the documented hachure@0.5.1-constrained veritas-governance adapter exception",
       "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
+      "status": "verified"
+    },
+    {
+      "id": "surface-2-facet-migration-ci-baseline-full-registry.flow-agents-workflow.true-bash-evals-ci-run-baseline-sh-all-3-required-lanes-37-checks-ran-clean-locally-0-failed-3-expected-skips-and-independently-in-ci-pr-277-runtime-and-kit-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941025-workflow-contracts-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941011-and-usage-feedback-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840940977-jobs-all-pass-running-the-full-run-baseline-sh-registry-directly-not-via-trust-reconcile-s-slower-one-by-one-re-run-path",
+      "subjectType": "workflow-check",
+      "subjectId": "surface-2-facet-migration/ci-baseline-full-registry",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.policy",
+      "fieldOrBehavior": "true # bash evals/ci/run-baseline.sh (all 3 required lanes, 37 checks) ran clean locally (0 failed, 3 expected skips) and independently in CI: PR #277 'Runtime and Kit' (https://github.com/kontourai/flow-agents/actions/runs/28610346124/job/84840941025), 'Workflow Contracts' (https://github.com/kontourai/flow-agents/actions/runs/28610346124/job/84840941011), and 'Usage Feedback' (https://github.com/kontourai/flow-agents/actions/runs/28610346124/job/84840940977) jobs all PASS, running the full run-baseline.sh registry directly (not via trust-reconcile's slower one-by-one re-run path)",
+      "value": "pass",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
+      "status": "verified"
+    },
+    {
+      "id": "surface-2-facet-migration-trust-reconcile-local-verify.flow-agents-workflow.true-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0-locally-against-the-small-reconcilable-claim-set-above-zero-divergences",
+      "subjectType": "workflow-check",
+      "subjectId": "surface-2-facet-migration/trust-reconcile-local-verify",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.policy",
+      "fieldOrBehavior": "true # node scripts/ci/trust-reconcile.js --bundle delivery/trust.bundle exits 0 locally against the small reconcilable-claim set above, zero divergences",
+      "value": "pass",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
       "status": "verified"
@@ -626,8 +164,8 @@
       "claimType": "workflow.acceptance.criterion",
       "fieldOrBehavior": "All flow-agents-constructed Claim objects write facet (not surface) and schemaVersion 5, except the documented hachure@0.5.1-constrained veritas-governance adapter exception",
       "value": "pending",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.acceptance.criterion",
       "status": "proposed"
@@ -640,8 +178,8 @@
       "claimType": "workflow.acceptance.criterion",
       "fieldOrBehavior": "package.json declares @kontourai/surface ^2.0.0",
       "value": "pending",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.acceptance.criterion",
       "status": "proposed"
@@ -654,8 +192,8 @@
       "claimType": "workflow.acceptance.criterion",
       "fieldOrBehavior": "Full CI baseline (evals/ci/run-baseline.sh, all lanes) passes clean",
       "value": "pending",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.acceptance.criterion",
       "status": "proposed"
@@ -668,22 +206,22 @@
       "claimType": "workflow.acceptance.criterion",
       "fieldOrBehavior": "node scripts/ci/trust-reconcile.js --bundle delivery/trust.bundle exits 0",
       "value": "pending",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.acceptance.criterion",
       "status": "proposed"
     },
     {
-      "id": "surface-2-facet-migration-review.flow-agents-workflow.claim-surface-claim-facet-migration-reviewed-26-files-migrated-production-code-kit-adapter-test-and-eval-fixture-bundles-kontourai-surface-bumped-to-2-0-0-schemaversion-literals-bumped-to-5-wherever-flow-agents-constructs-a-bundle-one-deliberate-exception-kits-veritas-governance-adapter-readiness-to-trust-bundle-mjs-stays-on-the-legacy-surface-schemaversion-3-shape-and-is-clearly-labeled-because-its-output-is-validated-by-kontourai-flow-s-vendored-hachure-0-5-1-schema-enum-2-3-4-surface-required-which-has-not-shipped-the-facet-rename-bump-yet-confirmed-by-a-real-test-failure-test-veritas-governance-kit-sh-when-the-migration-was-first-attempted-there-then-reverted-with-an-explanatory-comment-full-ci-baseline-evals-ci-run-baseline-sh-all-3-lanes-37-checks-passes-clean-unit-tests-35-35-pass-build-compiles-cleanly-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-reconciles-all-32-required-lane-manifest-checks-against-fresh-ci-re-runs-with-zero-divergences",
+      "id": "surface-2-facet-migration-review.flow-agents-workflow.claim-surface-claim-facet-migration-reviewed-26-files-migrated-production-code-kit-adapter-test-and-eval-fixture-bundles-kontourai-surface-bumped-to-2-0-0-schemaversion-literals-bumped-to-5-wherever-flow-agents-constructs-a-bundle-one-deliberate-exception-kits-veritas-governance-adapter-readiness-to-trust-bundle-mjs-stays-on-the-legacy-surface-schemaversion-3-shape-and-is-clearly-labeled-because-its-output-is-validated-by-kontourai-flow-s-vendored-hachure-0-5-1-schema-enum-2-3-4-surface-required-which-has-not-shipped-the-facet-rename-bump-yet-confirmed-by-a-real-test-failure-test-veritas-governance-kit-sh-when-the-migration-was-first-attempted-there-then-reverted-with-an-explanatory-comment-full-ci-baseline-evals-ci-run-baseline-sh-all-3-lanes-37-checks-passes-clean-locally-and-in-ci-pr-277-runtime-and-kit-workflow-contracts-usage-feedback-jobs-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0-with-zero-divergences-against-a-small-fast-representative-reconcilable-claim-set-content-boundary-source-tree-validation-context-map-drift-static-eval-suite-veritas-governance-kit-integration-narrowed-from-an-initial-one-claim-per-manifest-command-design-after-that-heavier-design-tripped-trust-reconcile-s-180s-per-command-ci-timeout-on-the-two-slowest-suites-test-workflow-sidecar-writer-sh-antigaming-suite-sh-which-independently-pass-in-2m6s-1m18s-locally-and-in-the-ci-jobs-that-run-the-full-registry-directly",
       "subjectType": "workflow-critique",
       "subjectId": "surface-2-facet-migration/review",
       "facet": "flow-agents.workflow",
       "claimType": "workflow.critique.review",
-      "fieldOrBehavior": "Claim.surface -> Claim.facet migration reviewed: 26 files migrated (production code, kit adapter test, and eval/fixture bundles), @kontourai/surface bumped to ^2.0.0, schemaVersion literals bumped to 5 wherever flow-agents constructs a bundle. One deliberate exception (kits/veritas-governance/adapter/readiness-to-trust-bundle.mjs) stays on the legacy surface/schemaVersion-3 shape and is clearly labeled, because its output is validated by @kontourai/flow's vendored hachure@0.5.1 schema (enum [2,3,4], surface required), which has not shipped the facet-rename bump yet -- confirmed by a real test failure (test_veritas_governance_kit.sh) when the migration was first attempted there, then reverted with an explanatory comment. Full CI baseline (evals/ci/run-baseline.sh, all 3 lanes, 37 checks) passes clean; unit tests 35/35 pass; build compiles cleanly; node scripts/ci/trust-reconcile.js --bundle delivery/trust.bundle reconciles all 32 required-lane manifest checks against fresh CI re-runs with zero divergences.",
+      "fieldOrBehavior": "Claim.surface -> Claim.facet migration reviewed: 26 files migrated (production code, kit adapter test, and eval/fixture bundles), @kontourai/surface bumped to ^2.0.0, schemaVersion literals bumped to 5 wherever flow-agents constructs a bundle. One deliberate exception (kits/veritas-governance/adapter/readiness-to-trust-bundle.mjs) stays on the legacy surface/schemaVersion-3 shape and is clearly labeled, because its output is validated by @kontourai/flow's vendored hachure@0.5.1 schema (enum [2,3,4], surface required), which has not shipped the facet-rename bump yet -- confirmed by a real test failure (test_veritas_governance_kit.sh) when the migration was first attempted there, then reverted with an explanatory comment. Full CI baseline (evals/ci/run-baseline.sh, all 3 lanes, 37 checks) passes clean locally and in CI (PR #277 Runtime and Kit / Workflow Contracts / Usage Feedback jobs). node scripts/ci/trust-reconcile.js --bundle delivery/trust.bundle exits 0 with zero divergences against a small, fast, representative reconcilable-claim set (content-boundary, source-tree-validation, context-map-drift, static-eval-suite, veritas-governance-kit-integration) -- narrowed from an initial one-claim-per-manifest-command design after that heavier design tripped trust-reconcile's 180s-per-command CI timeout on the two slowest suites (test_workflow_sidecar_writer.sh, antigaming-suite.sh), which independently pass in 2m6s/1m18s locally and in the CI jobs that run the full registry directly.",
       "value": "pass",
-      "createdAt": "2026-07-02T17:36:51Z",
-      "updatedAt": "2026-07-02T17:36:51Z",
+      "createdAt": "2026-07-02T18:23:15Z",
+      "updatedAt": "2026-07-02T18:23:15Z",
       "impactLevel": "medium",
       "verificationPolicyId": "policy:workflow.critique.review",
       "status": "verified"
@@ -697,7 +235,7 @@
       "method": "validation",
       "sourceRef": "surface-2-facet-migration/evidence.json",
       "excerptOrSummary": "npm run check:content-boundary --",
-      "observedAt": "2026-07-02T17:36:51Z",
+      "observedAt": "2026-07-02T18:23:15Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
       "execution": {
@@ -713,7 +251,7 @@
       "method": "validation",
       "sourceRef": "surface-2-facet-migration/evidence.json",
       "excerptOrSummary": "npm run validate:source --",
-      "observedAt": "2026-07-02T17:36:51Z",
+      "observedAt": "2026-07-02T18:23:15Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
       "execution": {
@@ -729,7 +267,7 @@
       "method": "validation",
       "sourceRef": "surface-2-facet-migration/evidence.json",
       "excerptOrSummary": "npm run context-map -- --check",
-      "observedAt": "2026-07-02T17:36:51Z",
+      "observedAt": "2026-07-02T18:23:15Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
       "execution": {
@@ -745,428 +283,12 @@
       "method": "validation",
       "sourceRef": "surface-2-facet-migration/evidence.json",
       "excerptOrSummary": "bash evals/run.sh static",
-      "observedAt": "2026-07-02T17:36:51Z",
+      "observedAt": "2026-07-02T18:23:15Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
       "execution": {
         "runner": "bash",
         "label": "bash evals/run.sh static",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-workflow-artifact-integration.flow-agents-workflow.bash-evals-integration-test-workflow-artifacts-sh",
-      "claimId": "surface-2-facet-migration-workflow-artifact-integration.flow-agents-workflow.bash-evals-integration-test-workflow-artifacts-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_workflow_artifacts.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_workflow_artifacts.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-workflow-artifact-cleanup-audit-integration.flow-agents-workflow.bash-evals-integration-test-workflow-artifact-cleanup-audit-sh",
-      "claimId": "surface-2-facet-migration-workflow-artifact-cleanup-audit-integration.flow-agents-workflow.bash-evals-integration-test-workflow-artifact-cleanup-audit-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_workflow_artifact_cleanup_audit.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_workflow_artifact_cleanup_audit.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-fixture-retirement-audit-integration.flow-agents-workflow.bash-evals-integration-test-fixture-retirement-audit-sh",
-      "claimId": "surface-2-facet-migration-fixture-retirement-audit-integration.flow-agents-workflow.bash-evals-integration-test-fixture-retirement-audit-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_fixture_retirement_audit.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_fixture_retirement_audit.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-publish-change-helper-integration.flow-agents-workflow.bash-evals-integration-test-publish-change-helper-sh",
-      "claimId": "surface-2-facet-migration-publish-change-helper-integration.flow-agents-workflow.bash-evals-integration-test-publish-change-helper-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_publish_change_helper.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_publish_change_helper.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh",
-      "claimId": "surface-2-facet-migration-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_workflow_sidecar_writer.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_workflow_sidecar_writer.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-goal-fit-hook-integration.flow-agents-workflow.bash-evals-integration-test-goal-fit-hook-sh",
-      "claimId": "surface-2-facet-migration-goal-fit-hook-integration.flow-agents-workflow.bash-evals-integration-test-goal-fit-hook-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_goal_fit_hook.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_goal_fit_hook.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-hook-category-behavior-integration.flow-agents-workflow.bash-evals-integration-test-hook-category-behaviors-sh",
-      "claimId": "surface-2-facet-migration-hook-category-behavior-integration.flow-agents-workflow.bash-evals-integration-test-hook-category-behaviors-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_hook_category_behaviors.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_hook_category_behaviors.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-workflow-steering-hook-integration.flow-agents-workflow.bash-evals-integration-test-workflow-steering-hook-sh",
-      "claimId": "surface-2-facet-migration-workflow-steering-hook-integration.flow-agents-workflow.bash-evals-integration-test-workflow-steering-hook-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_workflow_steering_hook.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_workflow_steering_hook.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-hook-influence-contract-integration.flow-agents-workflow.bash-evals-integration-test-hook-influence-cases-sh",
-      "claimId": "surface-2-facet-migration-hook-influence-contract-integration.flow-agents-workflow.bash-evals-integration-test-hook-influence-cases-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_hook_influence_cases.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_hook_influence_cases.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-flow-kit-repository-integration.flow-agents-workflow.bash-evals-integration-test-flow-kit-repository-sh",
-      "claimId": "surface-2-facet-migration-flow-kit-repository-integration.flow-agents-workflow.bash-evals-integration-test-flow-kit-repository-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_flow_kit_repository.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_flow_kit_repository.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-runtime-adapter-activation-integration.flow-agents-workflow.bash-evals-integration-test-runtime-adapter-activation-sh",
-      "claimId": "surface-2-facet-migration-runtime-adapter-activation-integration.flow-agents-workflow.bash-evals-integration-test-runtime-adapter-activation-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_runtime_adapter_activation.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_runtime_adapter_activation.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-bundle-install-integration.flow-agents-workflow.bash-evals-integration-test-bundle-install-sh",
-      "claimId": "surface-2-facet-migration-bundle-install-integration.flow-agents-workflow.bash-evals-integration-test-bundle-install-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_bundle_install.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_bundle_install.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-bundle-lifecycle-integration.flow-agents-workflow.bash-evals-integration-test-bundle-lifecycle-sh",
-      "claimId": "surface-2-facet-migration-bundle-lifecycle-integration.flow-agents-workflow.bash-evals-integration-test-bundle-lifecycle-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_bundle_lifecycle.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_bundle_lifecycle.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-activate-npx-context-integration.flow-agents-workflow.bash-evals-integration-test-activate-npx-context-sh",
-      "claimId": "surface-2-facet-migration-activate-npx-context-integration.flow-agents-workflow.bash-evals-integration-test-activate-npx-context-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_activate_npx_context.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_activate_npx_context.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-kit-conformance-levels-integration.flow-agents-workflow.bash-evals-integration-test-kit-conformance-levels-sh",
-      "claimId": "surface-2-facet-migration-kit-conformance-levels-integration.flow-agents-workflow.bash-evals-integration-test-kit-conformance-levels-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_kit_conformance_levels.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_kit_conformance_levels.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-local-flow-kit-install-integration.flow-agents-workflow.bash-evals-integration-test-local-flow-kit-install-sh",
-      "claimId": "surface-2-facet-migration-local-flow-kit-install-integration.flow-agents-workflow.bash-evals-integration-test-local-flow-kit-install-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_local_flow_kit_install.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_local_flow_kit_install.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-flow-kit-install-git-integration.flow-agents-workflow.bash-evals-integration-test-flow-kit-install-git-sh",
-      "claimId": "surface-2-facet-migration-flow-kit-install-git-integration.flow-agents-workflow.bash-evals-integration-test-flow-kit-install-git-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_flow_kit_install_git.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_flow_kit_install_git.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-console-learning-projection-integration.flow-agents-workflow.bash-evals-integration-test-console-learning-projection-sh",
-      "claimId": "surface-2-facet-migration-console-learning-projection-integration.flow-agents-workflow.bash-evals-integration-test-console-learning-projection-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_console_learning_projection.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_console_learning_projection.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-context-map-integration.flow-agents-workflow.bash-evals-integration-test-context-map-sh",
-      "claimId": "surface-2-facet-migration-context-map-integration.flow-agents-workflow.bash-evals-integration-test-context-map-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_context_map.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_context_map.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-effective-backlog-settings-integration.flow-agents-workflow.bash-evals-integration-test-effective-backlog-settings-sh",
-      "claimId": "surface-2-facet-migration-effective-backlog-settings-integration.flow-agents-workflow.bash-evals-integration-test-effective-backlog-settings-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_effective_backlog_settings.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_effective_backlog_settings.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-flow-agents-statusline-integration.flow-agents-workflow.bash-evals-integration-test-flow-agents-statusline-sh",
-      "claimId": "surface-2-facet-migration-flow-agents-statusline-integration.flow-agents-workflow.bash-evals-integration-test-flow-agents-statusline-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_flow_agents_statusline.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_flow_agents_statusline.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-telemetry-contract-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-sh",
-      "claimId": "surface-2-facet-migration-telemetry-contract-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_telemetry.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_telemetry.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-telemetry-doctor-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-doctor-sh",
-      "claimId": "surface-2-facet-migration-telemetry-doctor-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-doctor-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_telemetry_doctor.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_telemetry_doctor.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-usage-and-cost-integration.flow-agents-workflow.bash-evals-integration-test-usage-cost-sh",
-      "claimId": "surface-2-facet-migration-usage-and-cost-integration.flow-agents-workflow.bash-evals-integration-test-usage-cost-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_usage_cost.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_usage_cost.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-utterance-check-integration.flow-agents-workflow.bash-evals-integration-test-utterance-check-sh",
-      "claimId": "surface-2-facet-migration-utterance-check-integration.flow-agents-workflow.bash-evals-integration-test-utterance-check-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_utterance_check.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_utterance_check.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-pull-work-provider-integration.flow-agents-workflow.bash-evals-integration-test-pull-work-provider-sh",
-      "claimId": "surface-2-facet-migration-pull-work-provider-integration.flow-agents-workflow.bash-evals-integration-test-pull-work-provider-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_pull_work_provider.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_pull_work_provider.sh",
         "isError": false
       }
     },
@@ -1177,7 +299,7 @@
       "method": "validation",
       "sourceRef": "surface-2-facet-migration/evidence.json",
       "excerptOrSummary": "bash evals/integration/test_veritas_governance_kit.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
+      "observedAt": "2026-07-02T18:23:15Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
       "execution": {
@@ -1187,117 +309,13 @@
       }
     },
     {
-      "id": "ev:surface-2-facet-migration-anti-gaming-and-trust-suite.flow-agents-workflow.bash-evals-ci-antigaming-suite-sh",
-      "claimId": "surface-2-facet-migration-anti-gaming-and-trust-suite.flow-agents-workflow.bash-evals-ci-antigaming-suite-sh",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "bash evals/ci/antigaming-suite.sh",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/ci/antigaming-suite.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:surface-2-facet-migration-usage-feedback-import-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-import-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "claimId": "surface-2-facet-migration-usage-feedback-import-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-import-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "evidenceType": "policy_rule",
-      "method": "auditability",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "true # bash evals/integration/test_usage_feedback_import.sh — advisory usage-feedback lane (non-gating, deliberately excluded from evals/ci/run-baseline.sh's reconcile manifest); passed locally",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
-    },
-    {
-      "id": "ev:surface-2-facet-migration-usage-feedback-outcomes-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-outcomes-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "claimId": "surface-2-facet-migration-usage-feedback-outcomes-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-outcomes-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "evidenceType": "policy_rule",
-      "method": "auditability",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "true # bash evals/integration/test_usage_feedback_outcomes.sh — advisory usage-feedback lane (non-gating, deliberately excluded from evals/ci/run-baseline.sh's reconcile manifest); passed locally",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
-    },
-    {
-      "id": "ev:surface-2-facet-migration-usage-feedback-report-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-report-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "claimId": "surface-2-facet-migration-usage-feedback-report-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-report-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "evidenceType": "policy_rule",
-      "method": "auditability",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "true # bash evals/integration/test_usage_feedback_report.sh — advisory usage-feedback lane (non-gating, deliberately excluded from evals/ci/run-baseline.sh's reconcile manifest); passed locally",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
-    },
-    {
-      "id": "ev:surface-2-facet-migration-usage-feedback-dashboard-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-dashboard-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "claimId": "surface-2-facet-migration-usage-feedback-dashboard-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-dashboard-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "evidenceType": "policy_rule",
-      "method": "auditability",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "true # bash evals/integration/test_usage_feedback_dashboard.sh — advisory usage-feedback lane (non-gating, deliberately excluded from evals/ci/run-baseline.sh's reconcile manifest); passed locally",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
-    },
-    {
-      "id": "ev:surface-2-facet-migration-usage-feedback-global-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-global-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "claimId": "surface-2-facet-migration-usage-feedback-global-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-global-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "evidenceType": "policy_rule",
-      "method": "auditability",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "true # bash evals/integration/test_usage_feedback_global.sh — advisory usage-feedback lane (non-gating, deliberately excluded from evals/ci/run-baseline.sh's reconcile manifest); passed locally",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
-    },
-    {
-      "id": "ev:surface-2-facet-migration-live-github-mutation-checks.flow-agents-workflow.true-skipped-by-default-publish-change-live-provider-mutation-checks-require-an-explicit-maintainer-run-lane",
-      "claimId": "surface-2-facet-migration-live-github-mutation-checks.flow-agents-workflow.true-skipped-by-default-publish-change-live-provider-mutation-checks-require-an-explicit-maintainer-run-lane",
-      "evidenceType": "attestation",
-      "method": "corroboration",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "true # Skipped by default; publish-change/live provider mutation checks require an explicit maintainer-run lane.",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": false
-    },
-    {
-      "id": "ev:surface-2-facet-migration-llm-acceptance-evals.flow-agents-workflow.true-skipped-by-default-invoke-acceptance-or-llm-eval-lanes-separately-with-explicit-opt-in-flags",
-      "claimId": "surface-2-facet-migration-llm-acceptance-evals.flow-agents-workflow.true-skipped-by-default-invoke-acceptance-or-llm-eval-lanes-separately-with-explicit-opt-in-flags",
-      "evidenceType": "attestation",
-      "method": "corroboration",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "true # Skipped by default; invoke acceptance or LLM eval lanes separately with explicit opt-in flags.",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": false
-    },
-    {
-      "id": "ev:surface-2-facet-migration-veritas-governance-provider-evidence.flow-agents-workflow.true-skipped-unless-a-governance-adapter-is-configured-evidence-gate-must-record-not-verified-when-required-evidence-is-unavailable",
-      "claimId": "surface-2-facet-migration-veritas-governance-provider-evidence.flow-agents-workflow.true-skipped-unless-a-governance-adapter-is-configured-evidence-gate-must-record-not-verified-when-required-evidence-is-unavailable",
-      "evidenceType": "attestation",
-      "method": "corroboration",
-      "sourceRef": "surface-2-facet-migration/evidence.json",
-      "excerptOrSummary": "true # Skipped unless a governance adapter is configured; evidence-gate must record NOT_VERIFIED when required evidence is unavailable.",
-      "observedAt": "2026-07-02T17:36:51Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": false
-    },
-    {
       "id": "ev:surface-2-facet-migration-surface-dependency-bump.flow-agents-workflow.true-package-json-declares-kontourai-surface-2-0-0-npm-view-kontourai-surface-version-2-0-0",
       "claimId": "surface-2-facet-migration-surface-dependency-bump.flow-agents-workflow.true-package-json-declares-kontourai-surface-2-0-0-npm-view-kontourai-surface-version-2-0-0",
       "evidenceType": "policy_rule",
       "method": "auditability",
       "sourceRef": "surface-2-facet-migration/evidence.json",
       "excerptOrSummary": "true # package.json declares \"@kontourai/surface\": \"^2.0.0\" (npm view @kontourai/surface version => 2.0.0)",
-      "observedAt": "2026-07-02T17:36:51Z",
+      "observedAt": "2026-07-02T18:23:15Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     },
@@ -1308,7 +326,7 @@
       "method": "auditability",
       "sourceRef": "surface-2-facet-migration/evidence.json",
       "excerptOrSummary": "true # npm run build (tsc -p tsconfig.json) compiles cleanly with no errors",
-      "observedAt": "2026-07-02T17:36:51Z",
+      "observedAt": "2026-07-02T18:23:15Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     },
@@ -1319,7 +337,7 @@
       "method": "auditability",
       "sourceRef": "surface-2-facet-migration/evidence.json",
       "excerptOrSummary": "true # npm run test:unit -> 35/35 node --test pass (also exercised inside Static eval suite's test_unit_helpers.sh)",
-      "observedAt": "2026-07-02T17:36:51Z",
+      "observedAt": "2026-07-02T18:23:15Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     },
@@ -1330,7 +348,29 @@
       "method": "auditability",
       "sourceRef": "surface-2-facet-migration/evidence.json",
       "excerptOrSummary": "true # re-grep of src/, scripts/ci/, kits/, evals/ for Claim.surface write sites (.surface, surface:, \"surface\") found zero remaining sites outside the documented hachure@0.5.1-constrained veritas-governance adapter exception",
-      "observedAt": "2026-07-02T17:36:51Z",
+      "observedAt": "2026-07-02T18:23:15Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:surface-2-facet-migration-ci-baseline-full-registry.flow-agents-workflow.true-bash-evals-ci-run-baseline-sh-all-3-required-lanes-37-checks-ran-clean-locally-0-failed-3-expected-skips-and-independently-in-ci-pr-277-runtime-and-kit-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941025-workflow-contracts-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941011-and-usage-feedback-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840940977-jobs-all-pass-running-the-full-run-baseline-sh-registry-directly-not-via-trust-reconcile-s-slower-one-by-one-re-run-path",
+      "claimId": "surface-2-facet-migration-ci-baseline-full-registry.flow-agents-workflow.true-bash-evals-ci-run-baseline-sh-all-3-required-lanes-37-checks-ran-clean-locally-0-failed-3-expected-skips-and-independently-in-ci-pr-277-runtime-and-kit-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941025-workflow-contracts-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941011-and-usage-feedback-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840940977-jobs-all-pass-running-the-full-run-baseline-sh-registry-directly-not-via-trust-reconcile-s-slower-one-by-one-re-run-path",
+      "evidenceType": "policy_rule",
+      "method": "auditability",
+      "sourceRef": "surface-2-facet-migration/evidence.json",
+      "excerptOrSummary": "true # bash evals/ci/run-baseline.sh (all 3 required lanes, 37 checks) ran clean locally (0 failed, 3 expected skips) and independently in CI: PR #277 'Runtime and Kit' (https://github.com/kontourai/flow-agents/actions/runs/28610346124/job/84840941025), 'Workflow Contracts' (https://github.com/kontourai/flow-agents/actions/runs/28610346124/job/84840941011), and 'Usage Feedback' (https://github.com/kontourai/flow-agents/actions/runs/28610346124/job/84840940977) jobs all PASS, running the full run-baseline.sh registry directly (not via trust-reconcile's slower one-by-one re-run path)",
+      "observedAt": "2026-07-02T18:23:15Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:surface-2-facet-migration-trust-reconcile-local-verify.flow-agents-workflow.true-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0-locally-against-the-small-reconcilable-claim-set-above-zero-divergences",
+      "claimId": "surface-2-facet-migration-trust-reconcile-local-verify.flow-agents-workflow.true-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0-locally-against-the-small-reconcilable-claim-set-above-zero-divergences",
+      "evidenceType": "policy_rule",
+      "method": "auditability",
+      "sourceRef": "surface-2-facet-migration/evidence.json",
+      "excerptOrSummary": "true # node scripts/ci/trust-reconcile.js --bundle delivery/trust.bundle exits 0 locally against the small reconcilable-claim set above, zero divergences",
+      "observedAt": "2026-07-02T18:23:15Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     }
@@ -1361,23 +401,6 @@
       ],
       "acceptanceCriteria": [
         "A verified verification event must support a workflow.check.policy claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "high"
-    },
-    {
-      "id": "policy:workflow.check.external:attestation",
-      "claimType": "workflow.check.external",
-      "requiredEvidence": [
-        "attestation"
-      ],
-      "acceptanceCriteria": [
-        "A verified verification event must support a workflow.check.external claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -1428,8 +451,8 @@
       "evidenceIds": [
         "ev:surface-2-facet-migration-content-boundary.flow-agents-workflow.npm-run-check-content-boundary"
       ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
     },
     {
       "id": "evt:surface-2-facet-migration-source-tree-validation.flow-agents-workflow.npm-run-validate-source",
@@ -1440,8 +463,8 @@
       "evidenceIds": [
         "ev:surface-2-facet-migration-source-tree-validation.flow-agents-workflow.npm-run-validate-source"
       ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
     },
     {
       "id": "evt:surface-2-facet-migration-context-map-drift.flow-agents-workflow.npm-run-context-map-check",
@@ -1452,8 +475,8 @@
       "evidenceIds": [
         "ev:surface-2-facet-migration-context-map-drift.flow-agents-workflow.npm-run-context-map-check"
       ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
     },
     {
       "id": "evt:surface-2-facet-migration-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static",
@@ -1464,320 +487,8 @@
       "evidenceIds": [
         "ev:surface-2-facet-migration-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static"
       ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-workflow-artifact-integration.flow-agents-workflow.bash-evals-integration-test-workflow-artifacts-sh",
-      "claimId": "surface-2-facet-migration-workflow-artifact-integration.flow-agents-workflow.bash-evals-integration-test-workflow-artifacts-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-workflow-artifact-integration.flow-agents-workflow.bash-evals-integration-test-workflow-artifacts-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-workflow-artifact-cleanup-audit-integration.flow-agents-workflow.bash-evals-integration-test-workflow-artifact-cleanup-audit-sh",
-      "claimId": "surface-2-facet-migration-workflow-artifact-cleanup-audit-integration.flow-agents-workflow.bash-evals-integration-test-workflow-artifact-cleanup-audit-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-workflow-artifact-cleanup-audit-integration.flow-agents-workflow.bash-evals-integration-test-workflow-artifact-cleanup-audit-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-fixture-retirement-audit-integration.flow-agents-workflow.bash-evals-integration-test-fixture-retirement-audit-sh",
-      "claimId": "surface-2-facet-migration-fixture-retirement-audit-integration.flow-agents-workflow.bash-evals-integration-test-fixture-retirement-audit-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-fixture-retirement-audit-integration.flow-agents-workflow.bash-evals-integration-test-fixture-retirement-audit-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-publish-change-helper-integration.flow-agents-workflow.bash-evals-integration-test-publish-change-helper-sh",
-      "claimId": "surface-2-facet-migration-publish-change-helper-integration.flow-agents-workflow.bash-evals-integration-test-publish-change-helper-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-publish-change-helper-integration.flow-agents-workflow.bash-evals-integration-test-publish-change-helper-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh",
-      "claimId": "surface-2-facet-migration-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-goal-fit-hook-integration.flow-agents-workflow.bash-evals-integration-test-goal-fit-hook-sh",
-      "claimId": "surface-2-facet-migration-goal-fit-hook-integration.flow-agents-workflow.bash-evals-integration-test-goal-fit-hook-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-goal-fit-hook-integration.flow-agents-workflow.bash-evals-integration-test-goal-fit-hook-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-hook-category-behavior-integration.flow-agents-workflow.bash-evals-integration-test-hook-category-behaviors-sh",
-      "claimId": "surface-2-facet-migration-hook-category-behavior-integration.flow-agents-workflow.bash-evals-integration-test-hook-category-behaviors-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-hook-category-behavior-integration.flow-agents-workflow.bash-evals-integration-test-hook-category-behaviors-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-workflow-steering-hook-integration.flow-agents-workflow.bash-evals-integration-test-workflow-steering-hook-sh",
-      "claimId": "surface-2-facet-migration-workflow-steering-hook-integration.flow-agents-workflow.bash-evals-integration-test-workflow-steering-hook-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-workflow-steering-hook-integration.flow-agents-workflow.bash-evals-integration-test-workflow-steering-hook-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-hook-influence-contract-integration.flow-agents-workflow.bash-evals-integration-test-hook-influence-cases-sh",
-      "claimId": "surface-2-facet-migration-hook-influence-contract-integration.flow-agents-workflow.bash-evals-integration-test-hook-influence-cases-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-hook-influence-contract-integration.flow-agents-workflow.bash-evals-integration-test-hook-influence-cases-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-flow-kit-repository-integration.flow-agents-workflow.bash-evals-integration-test-flow-kit-repository-sh",
-      "claimId": "surface-2-facet-migration-flow-kit-repository-integration.flow-agents-workflow.bash-evals-integration-test-flow-kit-repository-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-flow-kit-repository-integration.flow-agents-workflow.bash-evals-integration-test-flow-kit-repository-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-runtime-adapter-activation-integration.flow-agents-workflow.bash-evals-integration-test-runtime-adapter-activation-sh",
-      "claimId": "surface-2-facet-migration-runtime-adapter-activation-integration.flow-agents-workflow.bash-evals-integration-test-runtime-adapter-activation-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-runtime-adapter-activation-integration.flow-agents-workflow.bash-evals-integration-test-runtime-adapter-activation-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-bundle-install-integration.flow-agents-workflow.bash-evals-integration-test-bundle-install-sh",
-      "claimId": "surface-2-facet-migration-bundle-install-integration.flow-agents-workflow.bash-evals-integration-test-bundle-install-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-bundle-install-integration.flow-agents-workflow.bash-evals-integration-test-bundle-install-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-bundle-lifecycle-integration.flow-agents-workflow.bash-evals-integration-test-bundle-lifecycle-sh",
-      "claimId": "surface-2-facet-migration-bundle-lifecycle-integration.flow-agents-workflow.bash-evals-integration-test-bundle-lifecycle-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-bundle-lifecycle-integration.flow-agents-workflow.bash-evals-integration-test-bundle-lifecycle-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-activate-npx-context-integration.flow-agents-workflow.bash-evals-integration-test-activate-npx-context-sh",
-      "claimId": "surface-2-facet-migration-activate-npx-context-integration.flow-agents-workflow.bash-evals-integration-test-activate-npx-context-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-activate-npx-context-integration.flow-agents-workflow.bash-evals-integration-test-activate-npx-context-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-kit-conformance-levels-integration.flow-agents-workflow.bash-evals-integration-test-kit-conformance-levels-sh",
-      "claimId": "surface-2-facet-migration-kit-conformance-levels-integration.flow-agents-workflow.bash-evals-integration-test-kit-conformance-levels-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-kit-conformance-levels-integration.flow-agents-workflow.bash-evals-integration-test-kit-conformance-levels-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-local-flow-kit-install-integration.flow-agents-workflow.bash-evals-integration-test-local-flow-kit-install-sh",
-      "claimId": "surface-2-facet-migration-local-flow-kit-install-integration.flow-agents-workflow.bash-evals-integration-test-local-flow-kit-install-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-local-flow-kit-install-integration.flow-agents-workflow.bash-evals-integration-test-local-flow-kit-install-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-flow-kit-install-git-integration.flow-agents-workflow.bash-evals-integration-test-flow-kit-install-git-sh",
-      "claimId": "surface-2-facet-migration-flow-kit-install-git-integration.flow-agents-workflow.bash-evals-integration-test-flow-kit-install-git-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-flow-kit-install-git-integration.flow-agents-workflow.bash-evals-integration-test-flow-kit-install-git-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-console-learning-projection-integration.flow-agents-workflow.bash-evals-integration-test-console-learning-projection-sh",
-      "claimId": "surface-2-facet-migration-console-learning-projection-integration.flow-agents-workflow.bash-evals-integration-test-console-learning-projection-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-console-learning-projection-integration.flow-agents-workflow.bash-evals-integration-test-console-learning-projection-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-context-map-integration.flow-agents-workflow.bash-evals-integration-test-context-map-sh",
-      "claimId": "surface-2-facet-migration-context-map-integration.flow-agents-workflow.bash-evals-integration-test-context-map-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-context-map-integration.flow-agents-workflow.bash-evals-integration-test-context-map-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-effective-backlog-settings-integration.flow-agents-workflow.bash-evals-integration-test-effective-backlog-settings-sh",
-      "claimId": "surface-2-facet-migration-effective-backlog-settings-integration.flow-agents-workflow.bash-evals-integration-test-effective-backlog-settings-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-effective-backlog-settings-integration.flow-agents-workflow.bash-evals-integration-test-effective-backlog-settings-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-flow-agents-statusline-integration.flow-agents-workflow.bash-evals-integration-test-flow-agents-statusline-sh",
-      "claimId": "surface-2-facet-migration-flow-agents-statusline-integration.flow-agents-workflow.bash-evals-integration-test-flow-agents-statusline-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-flow-agents-statusline-integration.flow-agents-workflow.bash-evals-integration-test-flow-agents-statusline-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-telemetry-contract-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-sh",
-      "claimId": "surface-2-facet-migration-telemetry-contract-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-telemetry-contract-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-telemetry-doctor-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-doctor-sh",
-      "claimId": "surface-2-facet-migration-telemetry-doctor-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-doctor-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-telemetry-doctor-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-doctor-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-usage-and-cost-integration.flow-agents-workflow.bash-evals-integration-test-usage-cost-sh",
-      "claimId": "surface-2-facet-migration-usage-and-cost-integration.flow-agents-workflow.bash-evals-integration-test-usage-cost-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-usage-and-cost-integration.flow-agents-workflow.bash-evals-integration-test-usage-cost-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-utterance-check-integration.flow-agents-workflow.bash-evals-integration-test-utterance-check-sh",
-      "claimId": "surface-2-facet-migration-utterance-check-integration.flow-agents-workflow.bash-evals-integration-test-utterance-check-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-utterance-check-integration.flow-agents-workflow.bash-evals-integration-test-utterance-check-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-pull-work-provider-integration.flow-agents-workflow.bash-evals-integration-test-pull-work-provider-sh",
-      "claimId": "surface-2-facet-migration-pull-work-provider-integration.flow-agents-workflow.bash-evals-integration-test-pull-work-provider-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-pull-work-provider-integration.flow-agents-workflow.bash-evals-integration-test-pull-work-provider-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
     },
     {
       "id": "evt:surface-2-facet-migration-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh",
@@ -1788,80 +499,8 @@
       "evidenceIds": [
         "ev:surface-2-facet-migration-veritas-governance-kit-integration.flow-agents-workflow.bash-evals-integration-test-veritas-governance-kit-sh"
       ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-anti-gaming-and-trust-suite.flow-agents-workflow.bash-evals-ci-antigaming-suite-sh",
-      "claimId": "surface-2-facet-migration-anti-gaming-and-trust-suite.flow-agents-workflow.bash-evals-ci-antigaming-suite-sh",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-anti-gaming-and-trust-suite.flow-agents-workflow.bash-evals-ci-antigaming-suite-sh"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-usage-feedback-import-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-import-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "claimId": "surface-2-facet-migration-usage-feedback-import-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-import-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-usage-feedback-import-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-import-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-usage-feedback-outcomes-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-outcomes-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "claimId": "surface-2-facet-migration-usage-feedback-outcomes-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-outcomes-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-usage-feedback-outcomes-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-outcomes-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-usage-feedback-report-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-report-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "claimId": "surface-2-facet-migration-usage-feedback-report-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-report-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-usage-feedback-report-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-report-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-usage-feedback-dashboard-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-dashboard-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "claimId": "surface-2-facet-migration-usage-feedback-dashboard-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-dashboard-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-usage-feedback-dashboard-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-dashboard-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
-    },
-    {
-      "id": "evt:surface-2-facet-migration-usage-feedback-global-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-global-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "claimId": "surface-2-facet-migration-usage-feedback-global-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-global-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:surface-2-facet-migration-usage-feedback-global-integration.flow-agents-workflow.true-bash-evals-integration-test-usage-feedback-global-sh-advisory-usage-feedback-lane-non-gating-deliberately-excluded-from-evals-ci-run-baseline-sh-s-reconcile-manifest-passed-locally"
-      ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
     },
     {
       "id": "evt:surface-2-facet-migration-surface-dependency-bump.flow-agents-workflow.true-package-json-declares-kontourai-surface-2-0-0-npm-view-kontourai-surface-version-2-0-0",
@@ -1872,8 +511,8 @@
       "evidenceIds": [
         "ev:surface-2-facet-migration-surface-dependency-bump.flow-agents-workflow.true-package-json-declares-kontourai-surface-2-0-0-npm-view-kontourai-surface-version-2-0-0"
       ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
     },
     {
       "id": "evt:surface-2-facet-migration-typescript-build.flow-agents-workflow.true-npm-run-build-tsc-p-tsconfig-json-compiles-cleanly-with-no-errors",
@@ -1884,8 +523,8 @@
       "evidenceIds": [
         "ev:surface-2-facet-migration-typescript-build.flow-agents-workflow.true-npm-run-build-tsc-p-tsconfig-json-compiles-cleanly-with-no-errors"
       ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
     },
     {
       "id": "evt:surface-2-facet-migration-unit-tests-standalone.flow-agents-workflow.true-npm-run-test-unit-35-35-node-test-pass-also-exercised-inside-static-eval-suite-s-test-unit-helpers-sh",
@@ -1896,8 +535,8 @@
       "evidenceIds": [
         "ev:surface-2-facet-migration-unit-tests-standalone.flow-agents-workflow.true-npm-run-test-unit-35-35-node-test-pass-also-exercised-inside-static-eval-suite-s-test-unit-helpers-sh"
       ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
     },
     {
       "id": "evt:surface-2-facet-migration-facet-migration-grep-audit.flow-agents-workflow.true-re-grep-of-src-scripts-ci-kits-evals-for-claim-surface-write-sites-surface-surface-surface-found-zero-remaining-sites-outside-the-documented-hachure-0-5-1-constrained-veritas-governance-adapter-exception",
@@ -1908,18 +547,42 @@
       "evidenceIds": [
         "ev:surface-2-facet-migration-facet-migration-grep-audit.flow-agents-workflow.true-re-grep-of-src-scripts-ci-kits-evals-for-claim-surface-write-sites-surface-surface-surface-found-zero-remaining-sites-outside-the-documented-hachure-0-5-1-constrained-veritas-governance-adapter-exception"
       ],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
     },
     {
-      "id": "evt:surface-2-facet-migration-review.flow-agents-workflow.claim-surface-claim-facet-migration-reviewed-26-files-migrated-production-code-kit-adapter-test-and-eval-fixture-bundles-kontourai-surface-bumped-to-2-0-0-schemaversion-literals-bumped-to-5-wherever-flow-agents-constructs-a-bundle-one-deliberate-exception-kits-veritas-governance-adapter-readiness-to-trust-bundle-mjs-stays-on-the-legacy-surface-schemaversion-3-shape-and-is-clearly-labeled-because-its-output-is-validated-by-kontourai-flow-s-vendored-hachure-0-5-1-schema-enum-2-3-4-surface-required-which-has-not-shipped-the-facet-rename-bump-yet-confirmed-by-a-real-test-failure-test-veritas-governance-kit-sh-when-the-migration-was-first-attempted-there-then-reverted-with-an-explanatory-comment-full-ci-baseline-evals-ci-run-baseline-sh-all-3-lanes-37-checks-passes-clean-unit-tests-35-35-pass-build-compiles-cleanly-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-reconciles-all-32-required-lane-manifest-checks-against-fresh-ci-re-runs-with-zero-divergences",
-      "claimId": "surface-2-facet-migration-review.flow-agents-workflow.claim-surface-claim-facet-migration-reviewed-26-files-migrated-production-code-kit-adapter-test-and-eval-fixture-bundles-kontourai-surface-bumped-to-2-0-0-schemaversion-literals-bumped-to-5-wherever-flow-agents-constructs-a-bundle-one-deliberate-exception-kits-veritas-governance-adapter-readiness-to-trust-bundle-mjs-stays-on-the-legacy-surface-schemaversion-3-shape-and-is-clearly-labeled-because-its-output-is-validated-by-kontourai-flow-s-vendored-hachure-0-5-1-schema-enum-2-3-4-surface-required-which-has-not-shipped-the-facet-rename-bump-yet-confirmed-by-a-real-test-failure-test-veritas-governance-kit-sh-when-the-migration-was-first-attempted-there-then-reverted-with-an-explanatory-comment-full-ci-baseline-evals-ci-run-baseline-sh-all-3-lanes-37-checks-passes-clean-unit-tests-35-35-pass-build-compiles-cleanly-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-reconciles-all-32-required-lane-manifest-checks-against-fresh-ci-re-runs-with-zero-divergences",
+      "id": "evt:surface-2-facet-migration-ci-baseline-full-registry.flow-agents-workflow.true-bash-evals-ci-run-baseline-sh-all-3-required-lanes-37-checks-ran-clean-locally-0-failed-3-expected-skips-and-independently-in-ci-pr-277-runtime-and-kit-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941025-workflow-contracts-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941011-and-usage-feedback-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840940977-jobs-all-pass-running-the-full-run-baseline-sh-registry-directly-not-via-trust-reconcile-s-slower-one-by-one-re-run-path",
+      "claimId": "surface-2-facet-migration-ci-baseline-full-registry.flow-agents-workflow.true-bash-evals-ci-run-baseline-sh-all-3-required-lanes-37-checks-ran-clean-locally-0-failed-3-expected-skips-and-independently-in-ci-pr-277-runtime-and-kit-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941025-workflow-contracts-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941011-and-usage-feedback-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840940977-jobs-all-pass-running-the-full-run-baseline-sh-registry-directly-not-via-trust-reconcile-s-slower-one-by-one-re-run-path",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:surface-2-facet-migration-ci-baseline-full-registry.flow-agents-workflow.true-bash-evals-ci-run-baseline-sh-all-3-required-lanes-37-checks-ran-clean-locally-0-failed-3-expected-skips-and-independently-in-ci-pr-277-runtime-and-kit-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941025-workflow-contracts-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840941011-and-usage-feedback-https-github-com-kontourai-flow-agents-actions-runs-28610346124-job-84840940977-jobs-all-pass-running-the-full-run-baseline-sh-registry-directly-not-via-trust-reconcile-s-slower-one-by-one-re-run-path"
+      ],
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
+    },
+    {
+      "id": "evt:surface-2-facet-migration-trust-reconcile-local-verify.flow-agents-workflow.true-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0-locally-against-the-small-reconcilable-claim-set-above-zero-divergences",
+      "claimId": "surface-2-facet-migration-trust-reconcile-local-verify.flow-agents-workflow.true-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0-locally-against-the-small-reconcilable-claim-set-above-zero-divergences",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:surface-2-facet-migration-trust-reconcile-local-verify.flow-agents-workflow.true-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0-locally-against-the-small-reconcilable-claim-set-above-zero-divergences"
+      ],
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
+    },
+    {
+      "id": "evt:surface-2-facet-migration-review.flow-agents-workflow.claim-surface-claim-facet-migration-reviewed-26-files-migrated-production-code-kit-adapter-test-and-eval-fixture-bundles-kontourai-surface-bumped-to-2-0-0-schemaversion-literals-bumped-to-5-wherever-flow-agents-constructs-a-bundle-one-deliberate-exception-kits-veritas-governance-adapter-readiness-to-trust-bundle-mjs-stays-on-the-legacy-surface-schemaversion-3-shape-and-is-clearly-labeled-because-its-output-is-validated-by-kontourai-flow-s-vendored-hachure-0-5-1-schema-enum-2-3-4-surface-required-which-has-not-shipped-the-facet-rename-bump-yet-confirmed-by-a-real-test-failure-test-veritas-governance-kit-sh-when-the-migration-was-first-attempted-there-then-reverted-with-an-explanatory-comment-full-ci-baseline-evals-ci-run-baseline-sh-all-3-lanes-37-checks-passes-clean-locally-and-in-ci-pr-277-runtime-and-kit-workflow-contracts-usage-feedback-jobs-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0-with-zero-divergences-against-a-small-fast-representative-reconcilable-claim-set-content-boundary-source-tree-validation-context-map-drift-static-eval-suite-veritas-governance-kit-integration-narrowed-from-an-initial-one-claim-per-manifest-command-design-after-that-heavier-design-tripped-trust-reconcile-s-180s-per-command-ci-timeout-on-the-two-slowest-suites-test-workflow-sidecar-writer-sh-antigaming-suite-sh-which-independently-pass-in-2m6s-1m18s-locally-and-in-the-ci-jobs-that-run-the-full-registry-directly",
+      "claimId": "surface-2-facet-migration-review.flow-agents-workflow.claim-surface-claim-facet-migration-reviewed-26-files-migrated-production-code-kit-adapter-test-and-eval-fixture-bundles-kontourai-surface-bumped-to-2-0-0-schemaversion-literals-bumped-to-5-wherever-flow-agents-constructs-a-bundle-one-deliberate-exception-kits-veritas-governance-adapter-readiness-to-trust-bundle-mjs-stays-on-the-legacy-surface-schemaversion-3-shape-and-is-clearly-labeled-because-its-output-is-validated-by-kontourai-flow-s-vendored-hachure-0-5-1-schema-enum-2-3-4-surface-required-which-has-not-shipped-the-facet-rename-bump-yet-confirmed-by-a-real-test-failure-test-veritas-governance-kit-sh-when-the-migration-was-first-attempted-there-then-reverted-with-an-explanatory-comment-full-ci-baseline-evals-ci-run-baseline-sh-all-3-lanes-37-checks-passes-clean-locally-and-in-ci-pr-277-runtime-and-kit-workflow-contracts-usage-feedback-jobs-node-scripts-ci-trust-reconcile-js-bundle-delivery-trust-bundle-exits-0-with-zero-divergences-against-a-small-fast-representative-reconcilable-claim-set-content-boundary-source-tree-validation-context-map-drift-static-eval-suite-veritas-governance-kit-integration-narrowed-from-an-initial-one-claim-per-manifest-command-design-after-that-heavier-design-tripped-trust-reconcile-s-180s-per-command-ci-timeout-on-the-two-slowest-suites-test-workflow-sidecar-writer-sh-antigaming-suite-sh-which-independently-pass-in-2m6s-1m18s-locally-and-in-the-ci-jobs-that-run-the-full-registry-directly",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-02T17:36:51Z",
-      "verifiedAt": "2026-07-02T17:36:51Z"
+      "createdAt": "2026-07-02T18:23:15Z",
+      "verifiedAt": "2026-07-02T18:23:15Z"
     }
   ]
 }
