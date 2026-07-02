@@ -148,6 +148,6 @@
   },
   "optionalDependencies": {
     "@kontourai/surface": "^2.0.0",
-    "hachure": "^0.5.1"
+    "hachure": "^0.9.0"
   }
 }
