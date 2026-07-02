@@ -54,7 +54,7 @@ Required fields:
 | `name` | Non-empty display name |
 | `flows` | Non-empty list; each entry must have `id` and `path` |
 
-Optional fields: `product_name`, `description`, `skills`, `docs`, `adapters`, `evals`, `assets`. Optional fields list relative asset paths or objects with `id`, `path`, and optional `description`. `skills` and `docs` assets are activated by both adapters alongside flows. `adapters`, `evals`, and `assets` appear in diagnostics as `skipped_assets` (see the Activate section for the full per-adapter table).
+Optional fields: `product_name`, `description`, `skills`, `docs`, `adapters`, `evals`, `assets`, `dependencies` (cross-kit dependency declarations; see [Cross-kit dependencies](#cross-kit-dependencies)). Optional fields list relative asset paths or objects with `id`, `path`, and optional `description`. `skills` and `docs` assets are activated by both adapters alongside flows. `adapters`, `evals`, and `assets` appear in diagnostics as `skipped_assets` (see the Activate section for the full per-adapter table).
 
 ## Minimal flow file
 
@@ -195,6 +195,14 @@ For path errors: all declared paths must be relative, must not contain `..`, and
 
 For conflicts on re-install: if you install a different source with an existing kit id, the command fails unless you pass `--update`. Use `--force` to re-copy an existing same-source install after validation.
 
+For cross-kit dependency errors:
+
+- `kit.json: dependencies[N].kit_id must be a kebab-case kit id` — the entry's `kit_id` is missing or not lowercase kebab-case. Fix the id.
+- `kit.json: dependencies[N].kit_id must not reference the declaring kit itself` — remove the self-referential entry; a kit cannot depend on itself.
+- `kit.json: dependencies[N].kit_id duplicates '<id>'` — collapse the duplicate declaration to a single entry.
+- `warning: kit '<id>' declares a dependency on '<dep>' ... which is not installed` (at install) — advisory only; install the depended-on kit with `flow-agents kit install <source>` before activating, or activation will fail.
+- `<id>: declares a dependency on kit '<dep>' ... which is not installed or activated` (at activate, non-zero exit) — install the missing kit and re-activate, or remove the dependency declaration if it is no longer needed.
+
 See the [Flow Kit Repository Contract](flow-kit-repository-contract.md) for the full validation rules, registry schema, activation diagnostics, and the install/update/force semantics.
 
 ## Layering: container vs. agent extension
@@ -227,6 +235,41 @@ The **agent extension** is owned by Flow Agents. It defines the optional asset c
 | `assets` | General supporting assets |
 
 Each extension field is an optional array of entries with `id`, `path`, and optional `description`. Extension fields are validated by Flow Agents using the same path rules as the container layer (relative, no `..`, must exist). Unknown extension entries are recorded as `skipped_assets` during activation rather than treated as errors.
+
+### Cross-kit dependencies
+
+A kit may declare that it depends on **another kit** whose skills it invokes at runtime. This is a Flow Agents extension-layer concern (a skill in one kit calling a skill in another), not part of the Flow-owned container contract — see [ADR 0019](adr/0019-kit-dependency-ownership.md) for the ownership rationale (grounded in the container schema's `additionalProperties: true` and ADR 0008's Dividing Test). It is **not** a package manager: it declares and validates *presence*, it does not fetch kits or resolve versions.
+
+Shape:
+
+```json
+{
+  "schema_version": "1.0",
+  "id": "builder",
+  "name": "Builder Kit",
+  "flows": [ /* ... */ ],
+  "dependencies": [
+    {
+      "kit_id": "knowledge",
+      "reason": "learning-review invokes knowledge-capture for durable knowledge storage"
+    }
+  ],
+  "skills": [ /* ... */ ]
+}
+```
+
+| Field | Rule |
+|---|---|
+| `kit_id` | Required. Kebab-case kit id (`^[a-z][a-z0-9-]*$`) of the depended-on kit. Must not reference the declaring kit itself, and must not be duplicated across entries. |
+| `reason` | Optional string explaining why the dependency exists (which skill invokes which). |
+
+Where it is checked:
+
+- **Shape** — at `flow-agents kit install`, `inspect`, and `validate` time. A malformed entry (bad `kit_id`, self-reference, duplicate) is a **hard error**.
+- **Presence at install** — `flow-agents kit install` prints a **non-blocking warning** when a declared dependency is not present in the destination's **local** registry, then exits 0. This check sees only the local installed-kits registry, not the built-in Kit Catalog (an accepted v1 limitation).
+- **Presence at activation** — `flow-agents kit activate` is a **hard error** (non-zero exit) when a declared `kit_id` is not present among the union of built-in catalog kits and locally-installed kits.
+
+`dependencies` is metadata, not evaluable-gate content, so it does **not** affect K0/K1/K2 conformance scoring (see the K-levels section below).
 
 ### When a kit "is" a Flow Agents Kit
 

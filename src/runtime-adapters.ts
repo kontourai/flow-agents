@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { readJson, relPath, writeJson } from "./lib/fs.js";
 import { flowAgentsArtifactRoot } from "./lib/local-artifact-root.js";
+import { parseKitDependencies } from "./flow-kit/validate.js";
 
 export type KitAsset = {
   kit_id: string;
@@ -16,6 +17,12 @@ export type KitAsset = {
 
 export type KitInventory = { assets: KitAsset[]; warnings: string[]; errors: string[] };
 
+/** A cross-kit dependency edge discovered while loading a kit manifest. */
+export type KitDependencyRef = { from_kit_id: string; kit_id: string; reason?: string };
+
+/** The parsed result of a single kit manifest: its id, activatable assets, and declared dependencies. */
+export type LoadedKit = { kit_id: string; assets: KitAsset[]; dependencies: KitDependencyRef[] };
+
 const ASSET_CLASSES = ["flows", "skills", "docs", "adapters", "evals", "assets"];
 
 function assetPath(root: string, value: string): string | null {
@@ -25,24 +32,24 @@ function assetPath(root: string, value: string): string | null {
   return resolved === absRoot || resolved.startsWith(`${absRoot}${path.sep}`) ? resolved : null;
 }
 
-function loadKitAssets(kitRoot: string, sourceKind: string, warnings: string[], errors: string[]): KitAsset[] {
+function loadKitAssets(kitRoot: string, sourceKind: string, warnings: string[], errors: string[]): LoadedKit {
   const manifestPath = path.join(kitRoot, "kit.json");
   if (!fs.existsSync(manifestPath)) {
     errors.push(`${kitRoot}: missing kit.json`);
-    return [];
+    return { kit_id: "", assets: [], dependencies: [] };
   }
   let manifest: Record<string, unknown>;
   try {
     manifest = readJson(manifestPath) as Record<string, unknown>;
   } catch (error) {
     errors.push(`${manifestPath}: ${(error as Error).message}`);
-    return [];
+    return { kit_id: "", assets: [], dependencies: [] };
   }
   const kitId = typeof manifest.id === "string" ? manifest.id : "";
   const kitName = typeof manifest.name === "string" ? manifest.name : kitId;
   if (!kitId) {
     errors.push(`${manifestPath}: missing kit id`);
-    return [];
+    return { kit_id: "", assets: [], dependencies: [] };
   }
   const assets: KitAsset[] = [];
   for (const assetClass of ASSET_CLASSES) {
@@ -79,13 +86,21 @@ function loadKitAssets(kitRoot: string, sourceKind: string, warnings: string[], 
       assets.push({ kit_id: kitId, kit_name: kitName, asset_class: assetClass, asset_id: assetId, relative_path: rel, source_path: source, source_kind: sourceKind, description });
     }
   }
-  return assets;
+  // Parse cross-kit dependency declarations (extension-layer metadata; see
+  // docs/adr/0019-kit-dependency-ownership.md). Shape errors surface at
+  // install/inspect/validate time via validateKitRepository; here we only collect
+  // the edges so activation can enforce presence against the full inventory.
+  const dependencies: KitDependencyRef[] = parseKitDependencies(manifest, manifestPath).entries
+    .map((dep) => ({ from_kit_id: kitId, kit_id: dep.kit_id, ...(dep.reason ? { reason: dep.reason } : {}) }));
+  return { kit_id: kitId, assets, dependencies };
 }
 
 export function readKitInventory(sourceRoot: string, dest: string): KitInventory {
   const warnings: string[] = [];
   const errors: string[] = [];
   const assets: KitAsset[] = [];
+  const dependencies: KitDependencyRef[] = [];
+  const presentKitIds = new Set<string>();
   const catalogPath = path.join(sourceRoot, "kits", "catalog.json");
   if (!fs.existsSync(catalogPath)) warnings.push(`${catalogPath}: built-in Kit Catalog not found; skipping built-in kits (this is normal when running outside a flow-agents checkout)`);
   else {
@@ -100,7 +115,12 @@ export function readKitInventory(sourceRoot: string, dest: string): KitInventory
         }
         const kitRoot = assetPath(sourceRoot, rel);
         if (!kitRoot || !fs.existsSync(kitRoot)) warnings.push(`${catalogPath}: kits[${index}].path unavailable: ${rel}`);
-        else assets.push(...loadKitAssets(kitRoot, "builtin", warnings, errors));
+        else {
+          const loaded = loadKitAssets(kitRoot, "builtin", warnings, errors);
+          assets.push(...loaded.assets);
+          dependencies.push(...loaded.dependencies);
+          if (loaded.kit_id) presentKitIds.add(loaded.kit_id);
+        }
       });
     }
   }
@@ -116,8 +136,21 @@ export function readKitInventory(sourceRoot: string, dest: string): KitInventory
         if (typeof id !== "string") return;
         const kitRoot = path.join(dest, "kits", "local", "repositories", id);
         if (!fs.existsSync(kitRoot)) warnings.push(`${id}: installed kit copy missing at ${kitRoot}; skipping`);
-        else assets.push(...loadKitAssets(kitRoot, "local", warnings, errors));
+        else {
+          const loaded = loadKitAssets(kitRoot, "local", warnings, errors);
+          assets.push(...loaded.assets);
+          dependencies.push(...loaded.dependencies);
+          if (loaded.kit_id) presentKitIds.add(loaded.kit_id);
+        }
       });
+    }
+  }
+  // Activation-time cross-kit dependency enforcement: any declared dependency whose
+  // kit_id is not present among the union of built-in catalog kits and locally-installed
+  // kits is a hard error (feeds the errors[] -> activation-manifest -> non-zero exit path).
+  for (const dep of dependencies) {
+    if (!presentKitIds.has(dep.kit_id)) {
+      errors.push(`${dep.from_kit_id}: declares a dependency on kit '${dep.kit_id}'${dep.reason ? ` (${dep.reason})` : ""} which is not installed or activated. Install it with 'flow-agents kit install <source>' and re-activate, or remove the dependency declaration if it is no longer needed.`);
     }
   }
   return { assets, warnings, errors };
@@ -153,7 +186,13 @@ export function activateCodexLocal(sourceRoot: string, dest: string): Record<str
       // agent's guidance index (AGENTS.md) can reference them and they are co-located
       // with flow definitions for the same kit.
       const filename = path.basename(asset.source_path);
-      const output = path.join(runtimeDir, asset.asset_class, safeSegment(asset.kit_id), filename);
+      // Namespace skills by BOTH kit id AND the skill's own directory name: every skill
+      // file is literally named SKILL.md, so keying only on kit id collides all of a
+      // kit's skills onto one .../<kit-id>/SKILL.md file. Docs keep the flat
+      // <kit-id>/<filename> layout (no per-directory collision found).
+      const output = asset.asset_class === "skills"
+        ? path.join(runtimeDir, asset.asset_class, safeSegment(asset.kit_id), safeSegment(path.basename(path.dirname(asset.source_path))), filename)
+        : path.join(runtimeDir, asset.asset_class, safeSegment(asset.kit_id), filename);
       fs.mkdirSync(path.dirname(output), { recursive: true });
       fs.copyFileSync(asset.source_path, output);
       generated.push({ asset_class: asset.asset_class, path: relPath(dest, output), kit_id: asset.kit_id, asset_id: asset.asset_id ?? "", source_path: asset.source_path.split(path.sep).join("/") });
@@ -200,7 +239,13 @@ export function activateStrandsLocal(sourceRoot: string, dest: string): Record<s
       // The Strands system-prompt injection layer can glob for all *.md files under
       // .kontourai/flow-agents/projections/strands/skills/ to include agent guidance in the context.
       const filename = path.basename(asset.source_path);
-      const output = path.join(runtimeDir, asset.asset_class, safeSegment(asset.kit_id), filename);
+      // Namespace skills by BOTH kit id AND the skill's own directory name: every skill
+      // file is literally named SKILL.md, so keying only on kit id collides all of a
+      // kit's skills onto one .../<kit-id>/SKILL.md file. Docs keep the flat
+      // <kit-id>/<filename> layout (no per-directory collision found).
+      const output = asset.asset_class === "skills"
+        ? path.join(runtimeDir, asset.asset_class, safeSegment(asset.kit_id), safeSegment(path.basename(path.dirname(asset.source_path))), filename)
+        : path.join(runtimeDir, asset.asset_class, safeSegment(asset.kit_id), filename);
       fs.mkdirSync(path.dirname(output), { recursive: true });
       fs.copyFileSync(asset.source_path, output);
       generated.push({ asset_class: asset.asset_class, path: relPath(dest, output), kit_id: asset.kit_id, asset_id: asset.asset_id ?? "", source_path: asset.source_path.split(path.sep).join("/") });

@@ -606,6 +606,107 @@ function checkCopyMoveToProtected(command) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Sanctioned remedies for blocked writes.
+//
+// AC7: for sidecar/gate kill-switch paths the block message MUST name the
+// sanctioned `npm run workflow:sidecar -- <command>` writer (or a human maintainer
+// for host-owned files) and MUST NEVER advise disabling the config-protection hook.
+// ---------------------------------------------------------------------------
+const READ_ONLY_TOOL_NAMES = new Set(['read', 'glob', 'grep', 'ls', 'notebookread', 'websearch', 'webfetch']);
+
+const SHELL_PROFILE_REMEDY =
+  'There is no sanctioned automated writer for shell profiles; ask a human maintainer to edit it directly. Never disable this hook to make the write.';
+
+const SANCTIONED_REMEDIES = {
+  '.claude/settings.json':
+    'There is no sanctioned automated writer for this file. Ask a human maintainer to edit it directly. Never disable this hook to make the write.',
+  '.claude/settings.local.json':
+    'There is no sanctioned automated writer for this file. Ask a human maintainer to edit it directly. Never disable this hook to make the write.',
+  '.kontourai/flow-agents/current.json':
+    'Use `npm run workflow:sidecar -- ensure-session` (or `advance-state`), which writes this file for you. Never disable this hook to make the write.',
+  '.kontourai/flow-agents/.goal-fit-block-streak.json':
+    'This file is only mutated internally by the goal-fit Stop hook; there is no sanctioned agent writer. Never disable this hook to make the write.',
+  '.kontourai/flow-agents/<slug>/state.json':
+    'Use `npm run workflow:sidecar -- advance-state <artifact-dir> --status <status> --phase <phase> --summary ... --next-action ...`. Never disable this hook to make the write.',
+  '.kontourai/flow-agents/<slug>/trust.bundle':
+    'Use `npm run workflow:sidecar -- record-gate-claim` or `seal-checkpoint`, not a direct write. Never disable this hook to make the write.',
+  'delivery/trust.bundle':
+    'This is written automatically by the delivery publish step (`npm run workflow:sidecar -- publish-delivery` / `advance-state --status delivered`). Never disable this hook to make the write.',
+  'delivery/trust.checkpoint.json':
+    'This is written automatically by the delivery publish step (`npm run workflow:sidecar -- publish-delivery` / `advance-state --status delivered`). Never disable this hook to make the write.',
+};
+
+/** Sanctioned remedy for a protected path name (from checkProtectedPathPattern). */
+function remedyFor(name) {
+  return SANCTIONED_REMEDIES[name] || SHELL_PROFILE_REMEDY;
+}
+
+/**
+ * Ordered remedy lookup candidates for raw command-string (substring) matching.
+ * Each entry names a SANCTIONED_REMEDIES key and the literal needle(s) that,
+ * when found anywhere in the command text, identify that protected path.
+ *
+ * Needed because Pass 1 (below) tokenizes on whitespace and requires a token
+ * to END at the protected basename. Real interpreter-write commands embed the
+ * path inside a quoted string followed by punctuation (an inline interpreter
+ * eval flag calling fs.writeFileSync with a quoted path argument), so no
+ * token ends cleanly at the basename and Pass 1 never matches.
+ *
+ * Order matters: more specific paths (delivery/*) are listed before the
+ * generic slug-scoped basenames they would otherwise collide with (both
+ * the per-slug trust bundle and the delivery trust bundle share the
+ * basename 'trust.bundle') -- first match wins, deterministically.
+ */
+const REMEDY_COMMAND_CANDIDATES = [
+  { name: 'delivery/trust.checkpoint.json', needles: ['delivery/trust.checkpoint.json', 'trust.checkpoint.json'] },
+  { name: 'delivery/trust.bundle', needles: ['delivery/trust.bundle'] },
+  { name: '.kontourai/flow-agents/<slug>/trust.bundle', needles: ['trust.bundle'] },
+  { name: '.kontourai/flow-agents/<slug>/state.json', needles: ['state.json'] },
+  { name: '.kontourai/flow-agents/.goal-fit-block-streak.json', needles: ['.goal-fit-block-streak.json'] },
+  { name: '.kontourai/flow-agents/current.json', needles: ['current.json'] },
+  { name: '.claude/settings.local.json', needles: ['settings.local.json'] },
+  { name: '.claude/settings.json', needles: ['.claude/settings.json'] },
+];
+
+/**
+ * Recover the sanctioned remedy for a blocked Bash command.
+ *
+ * Pass 1: exact path-pattern match on individual tokens -- handles shell
+ * redirects / tee / cp where the protected path is its own clean token
+ * (a bare redirect target, or a cp/mv destination argument).
+ *
+ * Pass 2: substring match against the raw command text -- handles
+ * interpreter-write commands where the protected path sits inside a quoted
+ * string followed by punctuation, so no token ends at the basename and
+ * Pass 1's dollar-anchored regex never matches. Any blocked command that
+ * references a path with a SANCTIONED_REMEDIES entry gets that entry's
+ * remedy instead of falling through to the generic (and often factually
+ * wrong) shell-profile advice.
+ *
+ * Never returns advice to disable the hook.
+ */
+function remedyForCommand(command) {
+  if (typeof command !== 'string') return SHELL_PROFILE_REMEDY;
+
+  const segments = splitSegments(command);
+  for (const seg of segments) {
+    for (const tok of tokenize(seg)) {
+      const match = checkProtectedPathPattern(tok);
+      if (match) return remedyFor(match.name);
+      if (PROTECTED_FILES.has(path.basename(tok))) return SHELL_PROFILE_REMEDY;
+    }
+  }
+
+  for (const candidate of REMEDY_COMMAND_CANDIDATES) {
+    if (candidate.needles.some((needle) => command.includes(needle))) {
+      return remedyFor(candidate.name);
+    }
+  }
+
+  return SHELL_PROFILE_REMEDY;
+}
+
 function run(inputOrRaw, options = {}) {
   if (options.truncated) {
     return {
@@ -618,8 +719,11 @@ function run(inputOrRaw, options = {}) {
   try {
     input = typeof inputOrRaw === 'string' ? JSON.parse(inputOrRaw) : inputOrRaw;
   } catch { return { exitCode: 0 }; }
+  const toolName = String(input?.tool_name || '').trim().toLowerCase();
   const filePath = input?.tool_input?.path || input?.tool_input?.file_path || '';
-  if (filePath) {
+  // Read-only tools never mutate a file, so path-based protection must not block them.
+  // (Bash is NOT read-only and stays fully covered by the command-based checks below.)
+  if (filePath && !READ_ONLY_TOOL_NAMES.has(toolName)) {
     const basename = path.basename(filePath);
     if (PROTECTED_FILES.has(basename)) {
       return {
@@ -637,7 +741,7 @@ function run(inputOrRaw, options = {}) {
         exitCode: 2,
         stderr: `BLOCKED: Writing to ${pathMatch.name} is not allowed. ` +
           `This file is protected because ${pathMatch.reason}. ` +
-          'If this is a legitimate change, disable the config-protection hook temporarily and document the reason.',
+          remedyFor(pathMatch.name),
       };
     }
   }
@@ -662,8 +766,8 @@ function run(inputOrRaw, options = {}) {
         exitCode: 2,
         stderr: `BLOCKED: Detected ${redirect} targeting a protected gate kill-switch file. ` +
           'Writing to shell profiles or Claude/flow-agents config files via shell redirect could ' +
-          'disable or tamper with the gate. If this is a legitimate operation, ' +
-          'disable the config-protection hook temporarily and document the reason. ' +
+          'disable or tamper with the gate. Do not disable this hook. ' +
+          remedyForCommand(command) + ' ' +
           'NOTE: This check has incomplete coverage (sed -i and similar forms are not caught).',
       };
     }
@@ -677,8 +781,8 @@ function run(inputOrRaw, options = {}) {
         exitCode: 2,
         stderr: `BLOCKED: Detected ${interpWrite} in a Bash command. ` +
           'Interpreter invocations (node -e, py3 -c, sed -i, perl -e) that reference ' +
-          'protected gate files could tamper with the gate. If this is a legitimate operation, ' +
-          'disable the config-protection hook temporarily and document the reason. ' +
+          'protected gate files could tamper with the gate. Do not disable this hook. ' +
+          remedyForCommand(command) + ' ' +
           'NOTE: This check has INCOMPLETE COVERAGE — runtime path construction evades it.',
       };
     }
@@ -691,8 +795,8 @@ function run(inputOrRaw, options = {}) {
         exitCode: 2,
         stderr: `BLOCKED: Detected ${copyMove} in a Bash command. ` +
           'Writing to delivery/trust.bundle or delivery/trust.checkpoint.json via cp/mv/install ' +
-          'could forge the CI trust anchor. The legitimate write path is the publishDelivery CLI ' +
-          '(fs.copyFileSync -- not the Write/Edit tool or bash cp). ' +
+          'could forge the CI trust anchor. Do not disable this hook. ' +
+          remedyForCommand(command) + ' ' +
           'NOTE: This check covers cp/mv/install only -- other copy tools may evade it.',
       };
     }

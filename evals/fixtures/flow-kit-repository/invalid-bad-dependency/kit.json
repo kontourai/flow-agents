@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "id": "bad-dependency-kit",
+  "name": "Bad Dependency Kit",
+  "product_name": "Bad Dependency Kit",
+  "description": "A valid container whose dependencies entry is malformed (missing kit_id) — used to assert dependency shape validation rejects it.",
+  "flows": [
+    { "id": "example.review", "path": "flows/review.flow.json", "description": "Review a small change." }
+  ],
+  "dependencies": [
+    { "reason": "this entry is intentionally missing a kit_id" }
+  ]
+}

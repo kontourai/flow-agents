@@ -7,6 +7,8 @@ title: "ADR 0007: Flow / Skill / Kit / Tool Boundary"
 **Date:** 2026-06-15  
 **Status:** Accepted
 
+> **Cross-Kit Skill Sharing resolved by [ADR 0019](./0019-kit-dependency-ownership.md) (2026-07-01).** The "Cross-Kit Skill Sharing: DEFERRED" question below is resolved: the npm-dependency-style model (Kit B declares a peer dependency on Kit A and consumes its skills by reference) is adopted at the Flow Agents extension layer via a `kit.json` `dependencies` field. The single-kit-ownership principle recorded here still stands; only the deferral is lifted.
+
 ---
 
 ## Context

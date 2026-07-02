@@ -13,6 +13,11 @@ const runtimeTaskDir = FLOW_AGENTS_RUNTIME_DIR;
 const durableInstallRecordRel = `${DURABLE_FLOW_AGENTS_DIR}/install.json`;
 const textExtensions = new Set([".css", ".html", ".js", ".json", ".md", ".sh", ".toml", ".txt", ".yaml", ".yml", ".ts"]);
 const dropDiagnostics: string[] = [];
+// Set by collectAllSkills() when two kits (or a kit and the top-level skills/
+// dir) declare the same skill directory name. Reported via the same
+// console.error + process.exitCode diagnostic idiom as the rest of this file
+// (see main()) instead of an uncaught thrown Error / stack trace.
+let skillCollisionDiagnostic: string | null = null;
 const printDiagnostics = !["0", "false", "no"].includes(String(process.env.FLOW_AGENTS_EXPORT_DIAGNOSTICS ?? "1").toLowerCase());
 
 /**
@@ -24,17 +29,29 @@ const printDiagnostics = !["0", "false", "no"].includes(String(process.env.FLOW_
  */
 function collectAllSkills(): Array<{ name: string; src: string }> {
   const results: Array<{ name: string; src: string }> = [];
-  const seen = new Set<string>();
+  const seen = new Map<string, string>(); // skill name -> source description of first declaration
+  const collisions: string[] = [];
+
+  // Compiled host bundles ship skills flat at .claude/skills/<name>/SKILL.md etc., so
+  // the install name (skill directory name) must be globally unique across skills/ and
+  // every kit. A duplicate is a build-FAILING collision, never a silent drop — the
+  // previous Set-based dedupe silently kept only the first and discarded the rest.
+  const recordSkill = (name: string, src: string, source: string): void => {
+    const prior = seen.get(name);
+    if (prior !== undefined) {
+      collisions.push(`  - '${name}' is declared by both ${prior} and ${source}`);
+      return;
+    }
+    seen.set(name, source);
+    results.push({ name, src });
+  };
 
   // 1. Top-level skills/ directory (tools pending reclassification).
   const skillsDir = path.join(root, "skills");
   if (fs.existsSync(skillsDir)) {
     for (const skill of fs.readdirSync(skillsDir).sort()) {
       const skillPath = path.join(skillsDir, skill, "SKILL.md");
-      if (fs.existsSync(skillPath) && !seen.has(skill)) {
-        seen.add(skill);
-        results.push({ name: skill, src: skillPath });
-      }
+      if (fs.existsSync(skillPath)) recordSkill(skill, skillPath, "skills/");
     }
   }
 
@@ -55,12 +72,17 @@ function collectAllSkills(): Array<{ name: string; src: string }> {
         // Derive install name from the directory containing SKILL.md (one level up).
         const absPath = path.resolve(path.join(kitsDir, kitName), relPath);
         const skillName = path.basename(path.dirname(absPath));
-        if (fs.existsSync(absPath) && !seen.has(skillName)) {
-          seen.add(skillName);
-          results.push({ name: skillName, src: absPath });
-        }
+        if (fs.existsSync(absPath)) recordSkill(skillName, absPath, `kits/${kitName}`);
       }
     }
+  }
+
+  if (collisions.length) {
+    skillCollisionDiagnostic =
+      "flow-agents: skill name collision — skill directory names must be unique across " +
+      "skills/ and all kits/*/kit.json:\n" +
+      collisions.join("\n") +
+      "\nRename one of the colliding skill directories so every compiled bundle skill has a unique install name.";
   }
 
   return results.sort((a, b) => a.name.localeCompare(b.name));
@@ -702,6 +724,14 @@ function buildCatalog(agents: Agent[]): Record<string, unknown> {
 }
 export function main(): number {
   fs.mkdirSync(dist, { recursive: true });
+  // Populate (and, on collision, set) skillCollisionDiagnostic before any
+  // build step writes output -- fail fast with a clear diagnostic instead of
+  // partially building bundles from a deduped/ambiguous skill set.
+  collectAllSkills();
+  if (skillCollisionDiagnostic) {
+    console.error(skillCollisionDiagnostic);
+    return 1;
+  }
   const agents = fs.readdirSync(path.join(root, "agents")).filter((name) => name.endsWith(".json")).sort().map((name) => loadJson<Agent>(path.join(root, "agents", name)));
   buildBase(agents);
   buildKiro(agents);

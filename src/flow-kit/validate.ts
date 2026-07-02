@@ -10,6 +10,72 @@ const EXTENSION_ASSET_CLASSES = ["skills", "docs", "adapters", "evals", "assets"
 const CORE_CONTAINER_FIELDS = new Set(["schema_version", "id", "name", "description", "product_name", "flows"]);
 const AGENT_EXTENSION_CLASSES = new Set(["skills", "docs", "adapters", "evals", "assets"]);
 
+// Flow Agents-recognized metadata fields that are neither core container fields nor
+// agent-extension asset classes. Recognized here so they are never misreported as
+// unknown third-party extension namespaces. `dependencies` declares cross-kit skill
+// dependencies (extension-layer ownership; see docs/adr/0019-kit-dependency-ownership.md).
+const KNOWN_METADATA_FIELDS = new Set(["dependencies"]);
+
+export interface KitDependencyEntry {
+  kit_id: string;
+  reason?: string;
+}
+
+/**
+ * Parse and shape-validate a kit manifest's `dependencies` field (Flow Agents
+ * extension-layer metadata; see docs/adr/0019-kit-dependency-ownership.md).
+ *
+ * Shape rules:
+ *  - `dependencies` (if present) must be an array.
+ *  - each entry must be an object with a `kit_id` string matching ^[a-z][a-z0-9-]*$.
+ *  - `kit_id` must not equal the declaring kit's own id (no self-reference).
+ *  - no duplicate `kit_id` across entries.
+ *  - `reason` is an optional string.
+ *
+ * Returns the parsed entries plus any shape errors (empty errors = valid). This is
+ * a sibling shape check, not a member of the file-path-oriented EXTENSION_ASSET_CLASSES
+ * loop, because dependency entries have no `path`/file to check.
+ */
+export function parseKitDependencies(manifest: Record<string, unknown>, manifestPath: string): { entries: KitDependencyEntry[]; errors: string[] } {
+  const entries: KitDependencyEntry[] = [];
+  const errors: string[] = [];
+  const raw = manifest.dependencies;
+  if (raw === undefined) return { entries, errors };
+  if (!Array.isArray(raw)) {
+    errors.push(`${manifestPath}: .dependencies must be a list`);
+    return { entries, errors };
+  }
+  const ownId = typeof manifest.id === "string" ? manifest.id : "";
+  const seen = new Set<string>();
+  raw.forEach((entry, index) => {
+    if (typeof entry !== "object" || entry === null) {
+      errors.push(`${manifestPath}: dependencies[${index}] must be an object`);
+      return;
+    }
+    const record = entry as Record<string, unknown>;
+    const kitId = record.kit_id;
+    if (typeof kitId !== "string" || !/^[a-z][a-z0-9-]*$/.test(kitId)) {
+      errors.push(`${manifestPath}: dependencies[${index}].kit_id must be a kebab-case kit id (^[a-z][a-z0-9-]*$)`);
+      return;
+    }
+    if (ownId && kitId === ownId) {
+      errors.push(`${manifestPath}: dependencies[${index}].kit_id must not reference the declaring kit itself ('${kitId}')`);
+      return;
+    }
+    if (seen.has(kitId)) {
+      errors.push(`${manifestPath}: dependencies[${index}].kit_id duplicates '${kitId}'`);
+      return;
+    }
+    seen.add(kitId);
+    if (record.reason !== undefined && typeof record.reason !== "string") {
+      errors.push(`${manifestPath}: dependencies[${index}].reason must be a string when present`);
+    }
+    const reason = typeof record.reason === "string" ? record.reason : undefined;
+    entries.push({ kit_id: kitId, ...(reason ? { reason } : {}) });
+  });
+  return { entries, errors };
+}
+
 export type KitTargetConsumer =
   | "flow"
   | "flow-agents"
@@ -167,7 +233,7 @@ export async function deriveKitTargets(manifest: Record<string, unknown>, kitDir
   // Detect third-party extension namespaces: top-level keys that are neither
   // core fields nor Flow Agents extension classes.
   const thirdPartyExtensions: string[] = Object.keys(manifest)
-    .filter((key) => !CORE_CONTAINER_FIELDS.has(key) && !AGENT_EXTENSION_CLASSES.has(key))
+    .filter((key) => !CORE_CONTAINER_FIELDS.has(key) && !AGENT_EXTENSION_CLASSES.has(key) && !KNOWN_METADATA_FIELDS.has(key))
     .sort();
 
   const targets: KitTargetConsumer[] = [];
@@ -247,6 +313,13 @@ export async function validateKitRepository(kitDir: string): Promise<string[]> {
       }
     });
   }
+
+  // Flow Agents metadata: cross-kit dependency declarations (extension-layer;
+  // see docs/adr/0019-kit-dependency-ownership.md). Shape-only here — presence is
+  // checked separately (non-blocking at install, hard error at activation).
+  const depResult = parseKitDependencies(manifest, manifestPath);
+  for (const err of depResult.errors) errors.push(err);
+
   return errors;
 }
 

@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "id": "with-dependency-kit",
+  "name": "With Dependency Kit",
+  "product_name": "With Dependency Kit",
+  "description": "A valid Flow Kit that declares a well-formed cross-kit dependency on a kit that is deliberately never installed.",
+  "flows": [
+    { "id": "example.review", "path": "flows/review.flow.json", "description": "Review a small change." }
+  ],
+  "dependencies": [
+    { "kit_id": "nonexistent-dep-kit", "reason": "declared dependency deliberately absent from any registry or catalog" }
+  ]
+}

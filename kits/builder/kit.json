@@ -21,6 +21,12 @@
       "description": "Reusable delivery closeout extension for publish, provider/CI merge readiness, and learning feedback gates."
     }
   ],
+  "dependencies": [
+    {
+      "kit_id": "knowledge",
+      "reason": "learning-review invokes knowledge-capture (kits/knowledge/skills/knowledge-capture/SKILL.md) for durable knowledge storage"
+    }
+  ],
   "skills": [
     {
       "id": "builder.builder-shape",

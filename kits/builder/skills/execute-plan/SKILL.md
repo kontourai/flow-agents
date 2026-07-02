@@ -67,7 +67,7 @@ This skill owns orchestration between waves. The contracts own artifact continui
    - Record worker progress with `npm run workflow:sidecar -- record-agent-event --artifact-dir <artifact-dir> --agent-id <worker-id> --kind evidence --status active|done --summary ...`
 9. After all waves: set session file `status: executed` and update `state.json` / `handoff.json` with `advance-state`
 
-The orchestrator owns root `state.json` updates. Workers should receive the workflow artifact root explicitly and append agent events under that root instead of inferring the slug or rewriting shared sidecars.
+The orchestrator is responsible for keeping root `state.json` current, and performs that update **exclusively** through `npm run workflow:sidecar -- advance-state` — never through a direct Write/Edit tool call against the sidecar path. `config-protection.js` blocks direct tool-mediated writes to `state.json` by design; that block is expected and correct, not a bug to route around. Workers should receive the workflow artifact root explicitly and append agent events under that root instead of inferring the slug or rewriting shared sidecars.
 
 ## Pre-Fan-Out Freshness Re-Check
 

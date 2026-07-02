@@ -6,7 +6,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
 import { assertPathContained, copyDir, isoNow, readJson, walkFiles, writeJson } from "../lib/fs.js";
-import { assertKitRepository, deriveKitTargets } from "../flow-kit/validate.js";
+import { assertKitRepository, deriveKitTargets, parseKitDependencies } from "../flow-kit/validate.js";
 import { activateCodexLocal, activateStrandsLocal } from "../runtime-adapters.js";
 import { defaultCodexHome } from "../lib/local-artifact-root.js";
 
@@ -25,6 +25,28 @@ function loadRegistry(dest: string): { schema_version: string; kits: Record<stri
   if (!fs.existsSync(file)) return { schema_version: "1.0", kits: [] };
   const data = readJson(file) as { schema_version?: string; kits?: unknown[] };
   return { schema_version: data.schema_version ?? "1.0", kits: Array.isArray(data.kits) ? data.kits.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null) : [] };
+}
+
+/**
+ * Emit a non-blocking warning for each declared kit dependency that is not present
+ * in the destination's LOCAL registry.
+ *
+ * Scope limitation (v1, accepted): this check only sees the local installed-kits
+ * registry at `dest`, NOT the built-in Kit Catalog. A dependency satisfied solely by
+ * a built-in catalog kit will still warn here. Presence is enforced authoritatively
+ * (hard error) at activation time against the full discovered inventory
+ * (built-in catalog + local registry) — see src/runtime-adapters.ts.
+ */
+function warnUninstalledDependencies(manifest: Record<string, unknown>, manifestPath: string, dest: string): void {
+  const { entries } = parseKitDependencies(manifest, manifestPath);
+  if (!entries.length) return;
+  const installed = new Set(loadRegistry(dest).kits.map((entry) => String(entry.id ?? "")));
+  const kitId = String(manifest.id);
+  for (const dep of entries) {
+    if (!installed.has(dep.kit_id)) {
+      console.log(`warning: kit '${kitId}' declares a dependency on '${dep.kit_id}'${dep.reason ? ` (${dep.reason})` : ""} which is not installed at ${dest}; install it first with 'flow-agents kit install <source>' or activation will fail`);
+    }
+  }
 }
 
 function contentHash(root: string): string {
@@ -95,6 +117,7 @@ async function installLocalSource(source: string, argv: string[]): Promise<numbe
     return 1;
   }
   const kitId = String(manifest.id);
+  warnUninstalledDependencies(manifest, path.join(source, "kit.json"), dest);
   const hash = contentHash(source);
   const registry = loadRegistry(dest);
   const existing = registry.kits.find((entry) => entry.id === kitId);
@@ -173,6 +196,7 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
 
     // Delegate to the shared install logic (copy + registry update).
     const kitId = String(manifest.id);
+    warnUninstalledDependencies(manifest, path.join(tmpBase, "kit.json"), dest);
     const hash = kitContentHash(tmpBase);
     const registry = loadRegistry(dest);
     const existing = registry.kits.find((entry) => entry.id === kitId);

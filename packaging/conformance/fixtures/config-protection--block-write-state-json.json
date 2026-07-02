@@ -1,0 +1,20 @@
+{
+  "description": "config-protection blocks a Write to a sidecar state.json and routes to the sanctioned sidecar writer (never advising the hook be disabled)",
+  "policy_class": "config-protection",
+  "canonical_event": "preToolUse",
+  "conformance_level": "L2",
+  "hook_id": "config-protection",
+  "hook_script": "config-protection.js",
+  "payload": {
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Write",
+    "tool_input": {
+      "path": "/repo/.kontourai/flow-agents/my-slug/state.json"
+    }
+  },
+  "expected": {
+    "exit_code": 2,
+    "stderr_contains": ["BLOCKED", "advance-state", "Never disable this hook"],
+    "stdout_is_empty": true
+  }
+}
