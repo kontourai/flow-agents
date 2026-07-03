@@ -37,6 +37,9 @@ Create or update `.kontourai/flow-agents/<slug>/<slug>--pull-work.md` with:
 
 - `board_snapshot`: filters, issue list, labels, milestone/provider milestone state, project fields, state, blockers
 - `wip_assessment`: active work, reviews, verification, CI remediation, with personal WIP separated from global conflict context
+- `liveness_preflight`: per-candidate `{subjectId, state: held|reclaimable|free|mine, holder_actor?, status_raw}` plus `self_actor`/`self_actor_source`, computed via `liveness status --json` + `liveness whoami --json`; `self_actor` is captured exactly once per pull-work pass and pinned for reuse (see "1a. Liveness Selection Preflight" and "Liveness Claim On Selection" — never re-derived per claim call); this is the liveness-only projection of ADR 0021 §1's join, pending #290's assignment dimension
+- `reclaimable_override`: recorded only when a `reclaimable` (stale) candidate is selected, or when `--force`/an explicit user instruction overrides a `held` exclusion — the explicit opt-in decision and its stated reason (see "1a. Liveness Selection Preflight")
+- `liveness_claim`: per selected item, `{subjectId, actor, emitted_at, ttl_seconds}`; on any claim-emit failure, `{skipped: <stderr reason>}` instead — fail-open (never block selection on a liveness-emit failure) but never silent: the skip reason is also surfaced in pull-work's user-facing output, and an unresolved-actor failure additionally names the remediation (`--actor <id>` / `FLOW_AGENTS_ACTOR=<id>` / a supported runtime), matching ADR 0012; also carries an optional `post_claim_conflict: {other_actor, detected_at}` when the post-claim re-check (see "Post-Claim Conflict Re-check") detects a double-hold
 - `my_active_work`: local worktrees, dirty branches, open PRs by the current user, active sidecars, and in-flight review/verification/release work owned by the current user
 - `shepherding_candidates`: personal PRs, worktrees, or sidecars that should be reviewed, fixed, published, merged, abandoned, or cleaned before starting more work
 - `stale_worktrees`: worktrees with no open PR, no recent activity, merged/abandoned branches, or unclear ownership that need an explicit keep/remove decision
@@ -110,6 +113,41 @@ Classify revision freshness as:
 Missing `planned_base_sha` is not fresh. Record it as an explicit `NOT_VERIFIED` or accepted-gap baseline with the concrete fallback baseline used, such as current target ref/SHA plus provider history. Do not invent revision certainty for legacy work items.
 
 Return vague work to `idea-to-backlog` instead of inventing scope.
+
+### 1a. Liveness Selection Preflight
+
+Resolve the current actor once per `pull-work` pass and pin it for reuse:
+
+```bash
+npm run workflow:sidecar -- liveness whoami --json
+```
+
+Capture the returned `actor` value as `self_actor` (and its `source` as `self_actor_source`) exactly once per pass. Reuse this pinned `self_actor` value explicitly via `--actor <self_actor>` on every subsequent `liveness claim` call in the same pass (see "Liveness Claim On Selection" below) — never re-derive the actor mid-pass, since ancestry/session-based resolution could otherwise resolve to a different value across separate calls within the same pass and silently defeat the "who am I" pinning this preflight depends on.
+
+Read the full liveness stream once per pass (omit `--subject` to get every row):
+
+```bash
+npm run workflow:sidecar -- liveness status --json
+```
+
+For each ready candidate, derive `subjectId` via:
+
+```bash
+npm run workflow:sidecar -- resolve-slug <owner>/<repo>#<issue-number>
+```
+
+then group all rows for that `subjectId` by subject (classify per subject, not per row) and classify in this precedence order, reading each row's raw `status` field (never `label`):
+
+1. a `verified` row for an actor other than self ⇒ `held`, excluded from the ready set by default, even when a `verified` row for the resolved self actor also exists on the same subject — that combination is a double-hold: surface it as `held` plus an explicit conflict warning (per ADR 0012 §4 detection: "a false-stale double-hold ... is detected ... not prevented"), never silently resolve it to `mine`.
+2. else, a `verified` row for the resolved self actor ⇒ `mine`: hand to `### 2. Enforce WIP And Shepherding`'s existing personal-WIP logic; do not re-offer as new, do not exclude as held-by-other.
+3. else, a `stale` row (any actor) ⇒ `reclaimable`: offered, flagged, with a warning; selecting it requires an explicit recorded opt-in (record in `reclaimable_override`, and/or `alignment_questions`), never a silent normal pick.
+4. else (a `revoked`-only row, a `superseded` row, or no row at all) ⇒ `free`, offered normally — except a `superseded` row is surfaced but never auto-selected (full takeover semantics are #294; this is an accepted gap, not silently ignored).
+
+An explicit user instruction to proceed despite a `held` or `reclaimable` classification (`--force`, "take it anyway", equivalent) overrides the exclusion/opt-in requirement; the override and its stated reason must be recorded in the artifact (`liveness_preflight`, `reclaimable_override`, and/or `priority_rationale`).
+
+This preflight computes the **liveness-only** projection of ADR 0021 §1's `assignment ⋈ liveness` join. The assignment dimension is #290's `AssignmentProvider` (durable GitHub-side claim); until it lands, assignment is treated as always-unassigned, which ADR 0021 §1's own table shows is safe because staleness — not assignment — is what excludes.
+
+`liveness claim`/`status`/`whoami` read/write the local runtime liveness stream, never GitHub issue/label/assignee state — this is not a provider mutation, and the existing no-provider-mutation rule (see below) is unchanged by this slice. #290 will add the one narrow, audited GitHub-side mutation that pairs with this liveness emit.
 
 ### 2. Enforce WIP And Shepherding
 
@@ -186,6 +224,43 @@ Use these compact examples as the expected artifact shape when selecting or reje
 - **Resource Contract audit work**: `selected_scope`: single-item audit of the Resource Contract guidance across the owning repo and referenced docs; `priority_rationale`: selected because it protects later implementation work and resolves contract drift before code changes; `dependencies`: requires current contract docs and provider refs to be fresh, with unknown external repo state recorded as `NOT_VERIFIED` if not checked; `wip_conflict_notes`: block if another active task edits the same contract, otherwise record as global context; `grouping_check`: do not bundle fixes unless the issue explicitly requires audit plus remediation; `alignment_questions`: ask whether to stop at audit evidence or include narrowly scoped doc fixes, with a recommended answer.
 - **dogfood-alpha implementation work**: `selected_scope`: single-item implementation slice in the dogfood-alpha milestone; `priority_rationale`: high delivery alignment and unlocks product dogfood evidence, but only selected if dependencies are closed or explicitly accepted; `dependencies`: list blocked-by issues, required artifacts, and pickup Probe freshness; `wip_conflict_notes`: require worktree isolation when implementation overlaps active files or release lanes; `grouping_check`: Work Item Group only when one item hard-blocks the implementation and the dependency sequence is part of the same acceptance signal; `alignment_questions`: ask the narrow scope question before `plan-work` if the issue could expand into provider adapters or runtime orchestration.
 - **blocked cross-product dependency**: `selected_scope`: no implementation selection; `priority_rationale`: defer because a higher-priority item in another product/repo is blocked by an unresolved dependency or missing provider state; `dependencies`: name the blocker, owner/repo when known, and freshness check; `wip_conflict_notes`: record any release-lane or provider-state conflict as the reason to stop; `grouping_check`: unsafe-group unless explicit dependency sequencing and shared acceptance justify a bundle; `alignment_questions`: ask whether to shepherd/unblock the dependency, return to shaping, or choose the next ready independent item.
+
+### Liveness Claim On Selection
+
+Once `selected_item_ids` is finalized at the end of `### 3. Select Work`, before handoff to `plan-work`, for each selected item run:
+
+```bash
+npm run workflow:sidecar -- liveness claim <subjectId> --actor <self_actor>
+```
+
+using the same `subjectId` computed via `resolve-slug` during the preflight, and the same pinned `self_actor` captured once from `liveness whoami --json` at the start of this pass (`### 1a. Liveness Selection Preflight`) — always pass `--actor <self_actor>` explicitly on every claim in this pass; never a fresh derivation per claim call.
+
+Record the result in `liveness_claim` as `{subjectId, actor, emitted_at, ttl_seconds}`. On any claim-emit failure (non-zero exit, unresolved actor, or liveness disabled/unavailable), record `{skipped: <stderr reason>}` in `liveness_claim` instead — fail-open, never block selection on a liveness-emit failure — and also surface that skip reason in pull-work's user-facing output; never silent. When the failure is specifically an unresolved-actor failure, additionally name the remediation (`--actor <id>` / `FLOW_AGENTS_ACTOR=<id>` / a supported runtime), matching `liveness claim`'s own error message.
+
+### Post-Claim Conflict Re-check
+
+After emitting claims for the selected item(s) above, re-read liveness status for those same subjects:
+
+```bash
+npm run workflow:sidecar -- liveness status --json --subject <subjectId>
+```
+
+If another actor's fresh (`verified`) claim now coexists with this session's own just-emitted claim on the same subject — a double-hold, per ADR 0012 §4 ("a false-stale double-hold (two fresh claims on one subject) is detected ... via Hachure `conflictRules`/`conflictedClaims`, not prevented") — surface the conflict prominently in the user-facing output and instruct the user to coordinate before proceeding; do not silently continue as if the selection were exclusive. Record the detected conflict in `liveness_claim`'s `post_claim_conflict` field.
+
+When a double-hold is detected, immediately run the deterministic tiebreaker using the same pinned `self_actor` and the same `subjectId` already in scope:
+
+```bash
+npm run workflow:sidecar -- liveness verdict <subjectId> --json
+```
+
+`liveness verdict` is a read-only, lock-free CLI action that computes `{subjectId, winner, losers, reason, holders}` as a pure function of the shared liveness stream: among the subject's currently-fresh claim holders, the one whose current `claim` event has the earliest `at` wins; an exact-timestamp tie breaks by ascending actor-id string comparison (`reason: "tie-actor-lexicographic"`) — the SAME verdict for the SAME stream state regardless of which actor invokes it.
+
+Branch on the returned `winner.actor`:
+
+- If `winner.actor !== self_actor`, this session is the loser: immediately run `npm run workflow:sidecar -- liveness release <subjectId> --actor <self_actor>`, extend `post_claim_conflict` with `{verdict_reason, winner_actor, conceded: true}`, and return to `### 3. Select Work` to reselect within the same `pull-work` pass — excluding the just-released subject — before any handoff to `plan-work`.
+- If `winner.actor === self_actor`, this session wins: record the verdict for transparency (`{verdict_reason, winner_actor: self_actor, conceded: false}`) in `post_claim_conflict` and proceed normally; do not release.
+
+Honesty note: this re-check narrows, but does not close, the read-then-write race between the preflight's read and the claim's write. The verdict-and-release loop above closes the "detected but advisory-only" gap ADR 0012 §4 names for THIS session's own double-hold — the loser deterministically concedes and re-selects within the same pass, a new convergence guarantee this slice adds — but it still does not provide true mutual exclusion across the read-then-write race window itself; that residual is unchanged from before. True mutual exclusion arrives with the provider assignment lease (#290) and the `verify-hold` publish gate (#293).
 
 ### 4. Anchor Check
 
