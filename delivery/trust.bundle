@@ -1,0 +1,834 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "kontourai-flow-agents-300-build.flow-agents-workflow.tsc-exit-0-captured-publish-pass",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-300/build",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.build",
+      "fieldOrBehavior": "tsc exit 0 (captured, publish pass)",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:20:25Z",
+      "updatedAt": "2026-07-03T19:20:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.build:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "build"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-300-typecheck.flow-agents-workflow.tsc-noemit-exit-0-captured",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-300/typecheck",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.types",
+      "fieldOrBehavior": "tsc --noEmit exit 0 (captured)",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:20:25Z",
+      "updatedAt": "2026-07-03T19:20:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.types:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "types"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-300-validate-source.flow-agents-workflow.source-tree-validation-passed-captured",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-300/validate-source",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.lint",
+      "fieldOrBehavior": "source tree validation passed (captured)",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:20:25Z",
+      "updatedAt": "2026-07-03T19:20:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.lint:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "lint"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-300-evals-static.flow-agents-workflow.static-lane-exit-0-incl-codeowners-regression-lock-w-delivery-declared-entry-captured",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-300/evals-static",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.test",
+      "fieldOrBehavior": "static lane exit 0 incl. CODEOWNERS regression lock w/ delivery/DECLARED entry (captured)",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:20:25Z",
+      "updatedAt": "2026-07-03T19:20:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-300-trust-reconcile-eval.flow-agents-workflow.test-3-bundle-required-rewrite-green-captured",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-300/trust-reconcile-eval",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.test",
+      "fieldOrBehavior": "TEST 3 bundle-required rewrite green (captured)",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:20:25Z",
+      "updatedAt": "2026-07-03T19:20:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-300-trust-reconcile-negatives.flow-agents-workflow.all-cases-7a-7v-green-marker-matrix-compound-scopes-staleness-7n-7r-event-scoping-7s-7u-red-push-never-green-7v-captured",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-300/trust-reconcile-negatives",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.test",
+      "fieldOrBehavior": "all cases 7a-7v green: marker matrix, compound scopes, staleness (7n-7r), event scoping (7s-7u), red-push-never-green (7v) (captured)",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:20:25Z",
+      "updatedAt": "2026-07-03T19:20:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-300-reconcile-soundness.flow-agents-workflow.test-c-declared-path-adaptation-green-captured",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-300/reconcile-soundness",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.test",
+      "fieldOrBehavior": "TEST C DECLARED-path adaptation green (captured)",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:20:25Z",
+      "updatedAt": "2026-07-03T19:20:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-300-publish-delivery-eval.flow-agents-workflow.staleness-aware-fixtures-green-captured",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-300/publish-delivery-eval",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.test",
+      "fieldOrBehavior": "staleness-aware fixtures green (captured)",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:20:25Z",
+      "updatedAt": "2026-07-03T19:20:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-300-antigaming-suite.flow-agents-workflow.24-tests-green-captured",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-300/antigaming-suite",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.test",
+      "fieldOrBehavior": "24 tests green (captured)",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:20:25Z",
+      "updatedAt": "2026-07-03T19:20:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-300-sidecar-writer-restored.flow-agents-workflow.restored-347-hard-cutover-block-3-3-worker-verified-post-restore-file-byte-identical-to-origin-main",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-300/sidecar-writer-restored",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.test",
+      "fieldOrBehavior": "restored #347 hard-cutover block 3/3 (worker-verified post-restore; file byte-identical to origin/main)",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:20:25Z",
+      "updatedAt": "2026-07-03T19:20:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-300-ac1-no-bundle-no-marker-fails-closed.flow-agents-workflow.no-bundle-no-delivery-declared-marker-reconciler-exits-1-issues-contains-type-bundle-required-no-declared-marker-diagnostic-printed",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-300/ac1-no-bundle-no-marker-fails-closed",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "No bundle + no delivery/DECLARED marker: reconciler exits 1, issues[] contains type 'bundle-required-no-declared-marker', diagnostic printed.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:20:25Z",
+      "updatedAt": "2026-07-03T19:20:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-300-ac2-declared-marker-exempts-step2-only.flow-agents-workflow.well-formed-in-scope-delivery-declared-marker-no-bundle-exit-0-loud-declared-no-agent-delivery-line-printed-mirroring-waived-format-step-1-fresh-verify-still-runs-not-skipped",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-300/ac2-declared-marker-exempts-step2-only",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "Well-formed, in-scope delivery/DECLARED marker + no bundle: exit 0, loud 'DECLARED (no-agent-delivery): ...' line printed mirroring WAIVED: format, Step 1 fresh verify still runs (not skipped).",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:20:25Z",
+      "updatedAt": "2026-07-03T19:20:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-300-ac3-malformed-marker-fails-closed.flow-agents-workflow.marker-missing-any-required-field-e-g-approved-by-is-treated-as-absent-fails-closed-exit-1-diagnostic-names-the-specific-missing-field-s",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-300/ac3-malformed-marker-fails-closed",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "Marker missing any required field (e.g. approved_by) is treated as absent, fails closed (exit 1), diagnostic names the specific missing field(s).",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:20:25Z",
+      "updatedAt": "2026-07-03T19:20:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-300-ac4-scope-matcher-no-regex.flow-agents-workflow.scope-matcher-supports-exactly-ref-commit-single-or-a-b-range-author-branch-prefix-forms-via-string-equality-prefix-only-no-regexp-constructed-from-marker-content",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-300/ac4-scope-matcher-no-regex",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "Scope matcher supports exactly ref:, commit: (single or a..b range), author:, branch-prefix: forms via string equality/prefix only — no RegExp constructed from marker content.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:20:25Z",
+      "updatedAt": "2026-07-03T19:20:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-300-ac5-negative-regression-required-lane.flow-agents-workflow.new-negative-regression-coverage-lands-in-evals-integration-test-trust-reconcile-negatives-sh-already-wired-into-the-required-evals-ci-antigaming-suite-sh-tests-array-verified-24-entries-and-evals-integration-test-trust-reconcile-sh-test-3-updated-so-it-no-longer-asserts-stale-fail-open-behavior",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-300/ac5-negative-regression-required-lane",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "New negative-regression coverage lands in evals/integration/test_trust_reconcile_negatives.sh (already wired into the required evals/ci/antigaming-suite.sh TESTS array — verified, 24 entries) and evals/integration/test_trust_reconcile.sh (TEST 3 updated so it no longer asserts stale fail-open behavior).",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:20:25Z",
+      "updatedAt": "2026-07-03T19:20:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-300-ac6-path-layout-agnostic-discovery-seam.flow-agents-workflow.discoverbundle-and-the-new-discoverdeclaredmarker-both-route-through-one-shared-resolvedeliverycandidates-reporoot-filename-seam-not-scattered-delivery-path-literals-composable-with-335-per-session-delivery-paths-without-call-site-rework",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-300/ac6-path-layout-agnostic-discovery-seam",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "discoverBundle() and the new discoverDeclaredMarker() both route through one shared resolveDeliveryCandidates(repoRoot, filename) seam, not scattered delivery/ path literals — composable with #335 per-session delivery paths without call-site rework.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:20:25Z",
+      "updatedAt": "2026-07-03T19:20:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-300-ac7-workflow-yaml-comments-only.flow-agents-workflow.github-workflows-trust-reconcile-yml-diff-is-comment-only-no-on-jobs-steps-or-permissions-key-changes-yaml-valid-check-in-test-trust-reconcile-sh-still-passes",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-300/ac7-workflow-yaml-comments-only",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": ".github/workflows/trust-reconcile.yml diff is comment-only — no on:, jobs:, steps:, or permissions: key changes; YAML-VALID check in test_trust_reconcile.sh still passes.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:20:25Z",
+      "updatedAt": "2026-07-03T19:20:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-300-ac8-required-check-migration-decision.flow-agents-workflow.decision-gate-not-a-code-ac-trust-reconcile-is-verified-as-an-already-required-admin-enforced-branch-protection-check-gh-api-branches-main-protection-gh-pr-checks-278-owner-must-explicitly-choose-a-approve-a-multi-entry-delivery-declared-covering-dependabot-release-please-before-with-this-merge-b-accept-temporary-bot-pr-breakage-or-c-other-not-defaulted-to-a-without-recorded-sign-off",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-300/ac8-required-check-migration-decision",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "DECISION GATE (not a code AC): Trust Reconcile is VERIFIED as an already-required, admin-enforced branch-protection check (gh api branches/main/protection + gh pr checks 278). Owner must explicitly choose: (a) approve a multi-entry delivery/DECLARED covering dependabot + release-please before/with this merge, (b) accept temporary bot-PR breakage, or (c) other. Not defaulted to (a) without recorded sign-off.",
+      "value": "not_verified",
+      "createdAt": "2026-07-03T19:20:25Z",
+      "updatedAt": "2026-07-03T19:20:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "proposed"
+    },
+    {
+      "id": "kontourai-flow-agents-300-review-history.flow-agents-workflow.history-5-iterations-3-reviewer-highs-ref-spoofing-compound-scopes-shallow-checkout-false-staling-fetch-depth-0-head-sha-squash-push-false-staling-event-scoping-1-reviewer-critical-resolved-as-rebase-lag-misread-355-absorption-nothing-reverted-2-mediums-coverage-gaps-fixed-7h-7v-2-verifier-governance-corrections-ac8-owner-turn-requirement-ac7-pending-owner-confirmation-via-draft-pr-review-all-findings-resolved-or-explicitly-routed",
+      "subjectType": "workflow-critique",
+      "subjectId": "kontourai-flow-agents-300/review-history",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "History: 5 iterations, 3 reviewer HIGHs (ref-spoofing -> compound scopes; shallow-checkout false-staling -> fetch-depth 0 + head-sha; squash-push false-staling -> event scoping), 1 reviewer CRITICAL resolved as rebase-lag misread (#355 absorption, nothing reverted), 2 MEDIUMs + coverage gaps fixed (7h-7v), 2 verifier governance corrections (AC8 owner-turn requirement; AC7 pending owner confirmation via draft-PR review). All findings resolved or explicitly routed.",
+      "value": "comment",
+      "createdAt": "2026-07-03T19:20:25Z",
+      "updatedAt": "2026-07-03T19:20:25Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-03T19:20:24Z"
+      },
+      "status": "assumed"
+    },
+    {
+      "id": "kontourai-flow-agents-300-review-final.flow-agents-workflow.publish-state-clean-event-scoping-traced-sound-step-1-failures-never-masked-locked-by-eval-7v-344-355-supersession-logic-orthogonal-to-staleness-by-construction-untrack-declared-codeowners-gitignore-consistent-no-debug-todo-residue-diff-exactly-13-intended-entries-vs-current-origin-main-tool-security-reviewer-clean-from-iteration-2-compound-scopes-per-its-own-remediation-ac7-residual-225-pr-editable-yml-documented-in-adr-addendum-docstring-per-final-review",
+      "subjectType": "workflow-critique",
+      "subjectId": "kontourai-flow-agents-300/review-final",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "Publish state: clean. Event-scoping traced sound (Step-1 failures never masked — locked by eval 7v); #344/#355 supersession logic orthogonal to staleness by construction; untrack + DECLARED + CODEOWNERS + gitignore consistent; no debug/TODO residue; diff exactly 13 intended entries vs current origin/main. tool-security-reviewer clean from iteration 2 (compound scopes per its own remediation); AC7 residual (#225 PR-editable yml) documented in ADR addendum + docstring per final review.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:20:25Z",
+      "updatedAt": "2026-07-03T19:20:25Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-03T19:20:25Z"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:kontourai-flow-agents-300-build.flow-agents-workflow.tsc-exit-0-captured-publish-pass",
+      "claimId": "kontourai-flow-agents-300-build.flow-agents-workflow.tsc-exit-0-captured-publish-pass",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-300/evidence.json",
+      "excerptOrSummary": "tsc exit 0 (captured, publish pass)",
+      "observedAt": "2026-07-03T19:20:25Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "npm run build",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-300-typecheck.flow-agents-workflow.tsc-noemit-exit-0-captured",
+      "claimId": "kontourai-flow-agents-300-typecheck.flow-agents-workflow.tsc-noemit-exit-0-captured",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-300/evidence.json",
+      "excerptOrSummary": "tsc --noEmit exit 0 (captured)",
+      "observedAt": "2026-07-03T19:20:25Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "npm run typecheck",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-300-validate-source.flow-agents-workflow.source-tree-validation-passed-captured",
+      "claimId": "kontourai-flow-agents-300-validate-source.flow-agents-workflow.source-tree-validation-passed-captured",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-300/evidence.json",
+      "excerptOrSummary": "source tree validation passed (captured)",
+      "observedAt": "2026-07-03T19:20:25Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "npm run validate:source",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-300-evals-static.flow-agents-workflow.static-lane-exit-0-incl-codeowners-regression-lock-w-delivery-declared-entry-captured",
+      "claimId": "kontourai-flow-agents-300-evals-static.flow-agents-workflow.static-lane-exit-0-incl-codeowners-regression-lock-w-delivery-declared-entry-captured",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-300/evidence.json",
+      "excerptOrSummary": "static lane exit 0 incl. CODEOWNERS regression lock w/ delivery/DECLARED entry (captured)",
+      "observedAt": "2026-07-03T19:20:25Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/run.sh static",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-300-trust-reconcile-eval.flow-agents-workflow.test-3-bundle-required-rewrite-green-captured",
+      "claimId": "kontourai-flow-agents-300-trust-reconcile-eval.flow-agents-workflow.test-3-bundle-required-rewrite-green-captured",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-300/evidence.json",
+      "excerptOrSummary": "TEST 3 bundle-required rewrite green (captured)",
+      "observedAt": "2026-07-03T19:20:25Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_trust_reconcile.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-300-trust-reconcile-negatives.flow-agents-workflow.all-cases-7a-7v-green-marker-matrix-compound-scopes-staleness-7n-7r-event-scoping-7s-7u-red-push-never-green-7v-captured",
+      "claimId": "kontourai-flow-agents-300-trust-reconcile-negatives.flow-agents-workflow.all-cases-7a-7v-green-marker-matrix-compound-scopes-staleness-7n-7r-event-scoping-7s-7u-red-push-never-green-7v-captured",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-300/evidence.json",
+      "excerptOrSummary": "all cases 7a-7v green: marker matrix, compound scopes, staleness (7n-7r), event scoping (7s-7u), red-push-never-green (7v) (captured)",
+      "observedAt": "2026-07-03T19:20:25Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_trust_reconcile_negatives.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-300-reconcile-soundness.flow-agents-workflow.test-c-declared-path-adaptation-green-captured",
+      "claimId": "kontourai-flow-agents-300-reconcile-soundness.flow-agents-workflow.test-c-declared-path-adaptation-green-captured",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-300/evidence.json",
+      "excerptOrSummary": "TEST C DECLARED-path adaptation green (captured)",
+      "observedAt": "2026-07-03T19:20:25Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_reconcile_soundness.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-300-publish-delivery-eval.flow-agents-workflow.staleness-aware-fixtures-green-captured",
+      "claimId": "kontourai-flow-agents-300-publish-delivery-eval.flow-agents-workflow.staleness-aware-fixtures-green-captured",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-300/evidence.json",
+      "excerptOrSummary": "staleness-aware fixtures green (captured)",
+      "observedAt": "2026-07-03T19:20:25Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_publish_delivery.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-300-antigaming-suite.flow-agents-workflow.24-tests-green-captured",
+      "claimId": "kontourai-flow-agents-300-antigaming-suite.flow-agents-workflow.24-tests-green-captured",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-300/evidence.json",
+      "excerptOrSummary": "24 tests green (captured)",
+      "observedAt": "2026-07-03T19:20:25Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/ci/antigaming-suite.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-300-sidecar-writer-restored.flow-agents-workflow.restored-347-hard-cutover-block-3-3-worker-verified-post-restore-file-byte-identical-to-origin-main",
+      "claimId": "kontourai-flow-agents-300-sidecar-writer-restored.flow-agents-workflow.restored-347-hard-cutover-block-3-3-worker-verified-post-restore-file-byte-identical-to-origin-main",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-300/evidence.json",
+      "excerptOrSummary": "restored #347 hard-cutover block 3/3 (worker-verified post-restore; file byte-identical to origin/main)",
+      "observedAt": "2026-07-03T19:20:25Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_workflow_sidecar_writer.sh",
+        "isError": false
+      }
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.build:test_output",
+      "claimType": "workflow.check.build",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.build claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.types:test_output",
+      "claimType": "workflow.check.types",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.types claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.lint:test_output",
+      "claimType": "workflow.check.lint",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.lint claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.test:test_output",
+      "claimType": "workflow.check.test",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.test claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:kontourai-flow-agents-300-build.flow-agents-workflow.tsc-exit-0-captured-publish-pass",
+      "claimId": "kontourai-flow-agents-300-build.flow-agents-workflow.tsc-exit-0-captured-publish-pass",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-300-build.flow-agents-workflow.tsc-exit-0-captured-publish-pass"
+      ],
+      "createdAt": "2026-07-03T19:20:25Z",
+      "verifiedAt": "2026-07-03T19:20:25Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-300-typecheck.flow-agents-workflow.tsc-noemit-exit-0-captured",
+      "claimId": "kontourai-flow-agents-300-typecheck.flow-agents-workflow.tsc-noemit-exit-0-captured",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-300-typecheck.flow-agents-workflow.tsc-noemit-exit-0-captured"
+      ],
+      "createdAt": "2026-07-03T19:20:25Z",
+      "verifiedAt": "2026-07-03T19:20:25Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-300-validate-source.flow-agents-workflow.source-tree-validation-passed-captured",
+      "claimId": "kontourai-flow-agents-300-validate-source.flow-agents-workflow.source-tree-validation-passed-captured",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-300-validate-source.flow-agents-workflow.source-tree-validation-passed-captured"
+      ],
+      "createdAt": "2026-07-03T19:20:25Z",
+      "verifiedAt": "2026-07-03T19:20:25Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-300-evals-static.flow-agents-workflow.static-lane-exit-0-incl-codeowners-regression-lock-w-delivery-declared-entry-captured",
+      "claimId": "kontourai-flow-agents-300-evals-static.flow-agents-workflow.static-lane-exit-0-incl-codeowners-regression-lock-w-delivery-declared-entry-captured",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-300-evals-static.flow-agents-workflow.static-lane-exit-0-incl-codeowners-regression-lock-w-delivery-declared-entry-captured"
+      ],
+      "createdAt": "2026-07-03T19:20:25Z",
+      "verifiedAt": "2026-07-03T19:20:25Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-300-trust-reconcile-eval.flow-agents-workflow.test-3-bundle-required-rewrite-green-captured",
+      "claimId": "kontourai-flow-agents-300-trust-reconcile-eval.flow-agents-workflow.test-3-bundle-required-rewrite-green-captured",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-300-trust-reconcile-eval.flow-agents-workflow.test-3-bundle-required-rewrite-green-captured"
+      ],
+      "createdAt": "2026-07-03T19:20:25Z",
+      "verifiedAt": "2026-07-03T19:20:25Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-300-trust-reconcile-negatives.flow-agents-workflow.all-cases-7a-7v-green-marker-matrix-compound-scopes-staleness-7n-7r-event-scoping-7s-7u-red-push-never-green-7v-captured",
+      "claimId": "kontourai-flow-agents-300-trust-reconcile-negatives.flow-agents-workflow.all-cases-7a-7v-green-marker-matrix-compound-scopes-staleness-7n-7r-event-scoping-7s-7u-red-push-never-green-7v-captured",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-300-trust-reconcile-negatives.flow-agents-workflow.all-cases-7a-7v-green-marker-matrix-compound-scopes-staleness-7n-7r-event-scoping-7s-7u-red-push-never-green-7v-captured"
+      ],
+      "createdAt": "2026-07-03T19:20:25Z",
+      "verifiedAt": "2026-07-03T19:20:25Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-300-reconcile-soundness.flow-agents-workflow.test-c-declared-path-adaptation-green-captured",
+      "claimId": "kontourai-flow-agents-300-reconcile-soundness.flow-agents-workflow.test-c-declared-path-adaptation-green-captured",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-300-reconcile-soundness.flow-agents-workflow.test-c-declared-path-adaptation-green-captured"
+      ],
+      "createdAt": "2026-07-03T19:20:25Z",
+      "verifiedAt": "2026-07-03T19:20:25Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-300-publish-delivery-eval.flow-agents-workflow.staleness-aware-fixtures-green-captured",
+      "claimId": "kontourai-flow-agents-300-publish-delivery-eval.flow-agents-workflow.staleness-aware-fixtures-green-captured",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-300-publish-delivery-eval.flow-agents-workflow.staleness-aware-fixtures-green-captured"
+      ],
+      "createdAt": "2026-07-03T19:20:25Z",
+      "verifiedAt": "2026-07-03T19:20:25Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-300-antigaming-suite.flow-agents-workflow.24-tests-green-captured",
+      "claimId": "kontourai-flow-agents-300-antigaming-suite.flow-agents-workflow.24-tests-green-captured",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-300-antigaming-suite.flow-agents-workflow.24-tests-green-captured"
+      ],
+      "createdAt": "2026-07-03T19:20:25Z",
+      "verifiedAt": "2026-07-03T19:20:25Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-300-sidecar-writer-restored.flow-agents-workflow.restored-347-hard-cutover-block-3-3-worker-verified-post-restore-file-byte-identical-to-origin-main",
+      "claimId": "kontourai-flow-agents-300-sidecar-writer-restored.flow-agents-workflow.restored-347-hard-cutover-block-3-3-worker-verified-post-restore-file-byte-identical-to-origin-main",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-300-sidecar-writer-restored.flow-agents-workflow.restored-347-hard-cutover-block-3-3-worker-verified-post-restore-file-byte-identical-to-origin-main"
+      ],
+      "createdAt": "2026-07-03T19:20:25Z",
+      "verifiedAt": "2026-07-03T19:20:25Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-300-ac1-no-bundle-no-marker-fails-closed.flow-agents-workflow.no-bundle-no-delivery-declared-marker-reconciler-exits-1-issues-contains-type-bundle-required-no-declared-marker-diagnostic-printed",
+      "claimId": "kontourai-flow-agents-300-ac1-no-bundle-no-marker-fails-closed.flow-agents-workflow.no-bundle-no-delivery-declared-marker-reconciler-exits-1-issues-contains-type-bundle-required-no-declared-marker-diagnostic-printed",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:20:25Z",
+      "verifiedAt": "2026-07-03T19:20:25Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-300-ac2-declared-marker-exempts-step2-only.flow-agents-workflow.well-formed-in-scope-delivery-declared-marker-no-bundle-exit-0-loud-declared-no-agent-delivery-line-printed-mirroring-waived-format-step-1-fresh-verify-still-runs-not-skipped",
+      "claimId": "kontourai-flow-agents-300-ac2-declared-marker-exempts-step2-only.flow-agents-workflow.well-formed-in-scope-delivery-declared-marker-no-bundle-exit-0-loud-declared-no-agent-delivery-line-printed-mirroring-waived-format-step-1-fresh-verify-still-runs-not-skipped",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:20:25Z",
+      "verifiedAt": "2026-07-03T19:20:25Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-300-ac3-malformed-marker-fails-closed.flow-agents-workflow.marker-missing-any-required-field-e-g-approved-by-is-treated-as-absent-fails-closed-exit-1-diagnostic-names-the-specific-missing-field-s",
+      "claimId": "kontourai-flow-agents-300-ac3-malformed-marker-fails-closed.flow-agents-workflow.marker-missing-any-required-field-e-g-approved-by-is-treated-as-absent-fails-closed-exit-1-diagnostic-names-the-specific-missing-field-s",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:20:25Z",
+      "verifiedAt": "2026-07-03T19:20:25Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-300-ac4-scope-matcher-no-regex.flow-agents-workflow.scope-matcher-supports-exactly-ref-commit-single-or-a-b-range-author-branch-prefix-forms-via-string-equality-prefix-only-no-regexp-constructed-from-marker-content",
+      "claimId": "kontourai-flow-agents-300-ac4-scope-matcher-no-regex.flow-agents-workflow.scope-matcher-supports-exactly-ref-commit-single-or-a-b-range-author-branch-prefix-forms-via-string-equality-prefix-only-no-regexp-constructed-from-marker-content",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:20:25Z",
+      "verifiedAt": "2026-07-03T19:20:25Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-300-ac5-negative-regression-required-lane.flow-agents-workflow.new-negative-regression-coverage-lands-in-evals-integration-test-trust-reconcile-negatives-sh-already-wired-into-the-required-evals-ci-antigaming-suite-sh-tests-array-verified-24-entries-and-evals-integration-test-trust-reconcile-sh-test-3-updated-so-it-no-longer-asserts-stale-fail-open-behavior",
+      "claimId": "kontourai-flow-agents-300-ac5-negative-regression-required-lane.flow-agents-workflow.new-negative-regression-coverage-lands-in-evals-integration-test-trust-reconcile-negatives-sh-already-wired-into-the-required-evals-ci-antigaming-suite-sh-tests-array-verified-24-entries-and-evals-integration-test-trust-reconcile-sh-test-3-updated-so-it-no-longer-asserts-stale-fail-open-behavior",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:20:25Z",
+      "verifiedAt": "2026-07-03T19:20:25Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-300-ac6-path-layout-agnostic-discovery-seam.flow-agents-workflow.discoverbundle-and-the-new-discoverdeclaredmarker-both-route-through-one-shared-resolvedeliverycandidates-reporoot-filename-seam-not-scattered-delivery-path-literals-composable-with-335-per-session-delivery-paths-without-call-site-rework",
+      "claimId": "kontourai-flow-agents-300-ac6-path-layout-agnostic-discovery-seam.flow-agents-workflow.discoverbundle-and-the-new-discoverdeclaredmarker-both-route-through-one-shared-resolvedeliverycandidates-reporoot-filename-seam-not-scattered-delivery-path-literals-composable-with-335-per-session-delivery-paths-without-call-site-rework",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:20:25Z",
+      "verifiedAt": "2026-07-03T19:20:25Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-300-ac7-workflow-yaml-comments-only.flow-agents-workflow.github-workflows-trust-reconcile-yml-diff-is-comment-only-no-on-jobs-steps-or-permissions-key-changes-yaml-valid-check-in-test-trust-reconcile-sh-still-passes",
+      "claimId": "kontourai-flow-agents-300-ac7-workflow-yaml-comments-only.flow-agents-workflow.github-workflows-trust-reconcile-yml-diff-is-comment-only-no-on-jobs-steps-or-permissions-key-changes-yaml-valid-check-in-test-trust-reconcile-sh-still-passes",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:20:25Z",
+      "verifiedAt": "2026-07-03T19:20:25Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-300-review-history.flow-agents-workflow.history-5-iterations-3-reviewer-highs-ref-spoofing-compound-scopes-shallow-checkout-false-staling-fetch-depth-0-head-sha-squash-push-false-staling-event-scoping-1-reviewer-critical-resolved-as-rebase-lag-misread-355-absorption-nothing-reverted-2-mediums-coverage-gaps-fixed-7h-7v-2-verifier-governance-corrections-ac8-owner-turn-requirement-ac7-pending-owner-confirmation-via-draft-pr-review-all-findings-resolved-or-explicitly-routed",
+      "claimId": "kontourai-flow-agents-300-review-history.flow-agents-workflow.history-5-iterations-3-reviewer-highs-ref-spoofing-compound-scopes-shallow-checkout-false-staling-fetch-depth-0-head-sha-squash-push-false-staling-event-scoping-1-reviewer-critical-resolved-as-rebase-lag-misread-355-absorption-nothing-reverted-2-mediums-coverage-gaps-fixed-7h-7v-2-verifier-governance-corrections-ac8-owner-turn-requirement-ac7-pending-owner-confirmation-via-draft-pr-review-all-findings-resolved-or-explicitly-routed",
+      "status": "assumed",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:20:25Z",
+      "verifiedAt": "2026-07-03T19:20:25Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-300-review-final.flow-agents-workflow.publish-state-clean-event-scoping-traced-sound-step-1-failures-never-masked-locked-by-eval-7v-344-355-supersession-logic-orthogonal-to-staleness-by-construction-untrack-declared-codeowners-gitignore-consistent-no-debug-todo-residue-diff-exactly-13-intended-entries-vs-current-origin-main-tool-security-reviewer-clean-from-iteration-2-compound-scopes-per-its-own-remediation-ac7-residual-225-pr-editable-yml-documented-in-adr-addendum-docstring-per-final-review",
+      "claimId": "kontourai-flow-agents-300-review-final.flow-agents-workflow.publish-state-clean-event-scoping-traced-sound-step-1-failures-never-masked-locked-by-eval-7v-344-355-supersession-logic-orthogonal-to-staleness-by-construction-untrack-declared-codeowners-gitignore-consistent-no-debug-todo-residue-diff-exactly-13-intended-entries-vs-current-origin-main-tool-security-reviewer-clean-from-iteration-2-compound-scopes-per-its-own-remediation-ac7-residual-225-pr-editable-yml-documented-in-adr-addendum-docstring-per-final-review",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:20:25Z",
+      "verifiedAt": "2026-07-03T19:20:25Z"
+    }
+  ]
+}
