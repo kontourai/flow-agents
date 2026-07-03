@@ -22,6 +22,9 @@ CHECKS=(
   "Workflow sidecar writer integration|bash evals/integration/test_workflow_sidecar_writer.sh"
   "Sidecar field preservation integration|bash evals/integration/test_sidecar_field_preservation.sh"
   "Actor identity resolver integration|bash evals/integration/test_actor_identity.sh"
+  "Assignment provider local-file integration|bash evals/integration/test_assignment_provider_local_file.sh"
+  "Assignment provider github integration|bash evals/integration/test_assignment_provider_github.sh"
+  "Pull work assignment join integration|bash evals/integration/test_pull_work_assignment_join.sh"
   "Goal Fit hook integration|bash evals/integration/test_goal_fit_hook.sh"
   "Hook category behavior integration|bash evals/integration/test_hook_category_behaviors.sh"
   "Workflow steering hook integration|bash evals/integration/test_workflow_steering_hook.sh"
@@ -72,6 +75,9 @@ LANE_WORKFLOW_CONTRACTS=(
   "Workflow sidecar writer integration"
   "Sidecar field preservation integration"
   "Actor identity resolver integration"
+  "Assignment provider local-file integration"
+  "Assignment provider github integration"
+  "Pull work assignment join integration"
 )
 
 LANE_RUNTIME_AND_KIT=(

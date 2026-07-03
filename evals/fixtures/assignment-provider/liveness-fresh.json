@@ -1,0 +1,9 @@
+[
+  {
+    "type": "claim",
+    "subjectId": "kontourai/flow-agents#4242",
+    "actor": "claude-code:fixture-actor-a-session:fixture-host",
+    "at": "2026-06-01T12:15:00Z",
+    "ttlSeconds": 1800
+  }
+]

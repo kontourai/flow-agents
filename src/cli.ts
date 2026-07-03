@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { basename } from "node:path";
 import { main as effectiveBacklogSettings } from "./cli/effective-backlog-settings.js";
+import { main as effectiveAssignmentProviderSettings } from "./cli/effective-assignment-provider-settings.js";
+import { main as assignmentProvider } from "./cli/assignment-provider.js";
 import { main as consoleLearningProjection } from "./cli/console-learning-projection.js";
 import { main as kit } from "./cli/kit.js";
 import { main as fixtureRetirementAudit } from "./cli/fixture-retirement-audit.js";
@@ -25,6 +27,8 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["build-bundles", () => buildBundles()],
   ["console-learning-projection", consoleLearningProjection],
   ["context-map", contextMap],
+  ["assignment-provider", assignmentProvider],
+  ["effective-assignment-provider-settings", effectiveAssignmentProviderSettings],
   ["effective-backlog-settings", effectiveBacklogSettings],
   ["fixture-retirement-audit", fixtureRetirementAudit],
   ["kit", kit],
@@ -48,6 +52,8 @@ const aliases = new Map<string, string>([
   ["flow-agents-build-bundles", "build-bundles"],
   ["flow-agents-console-learning-projection", "console-learning-projection"],
   ["flow-agents-context-map", "context-map"],
+  ["flow-agents-assignment-provider", "assignment-provider"],
+  ["flow-agents-effective-assignment-provider-settings", "effective-assignment-provider-settings"],
   ["flow-agents-effective-backlog-settings", "effective-backlog-settings"],
   ["flow-agents-fixture-retirement-audit", "fixture-retirement-audit"],
   ["flow-agents-kit", "kit"],

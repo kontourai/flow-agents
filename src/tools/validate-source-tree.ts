@@ -93,6 +93,7 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/lib/resolve-formatter.js", { category: "shared hook library", requiredNeedles: ["resolveFormatter"] }],
 ]);
 const fixtureOwnerPolicies = new Map<string, { owners: string[]; classification: string }>([
+  ["evals/fixtures/assignment-provider", { owners: ["evals/integration/test_assignment_provider_local_file.sh", "evals/integration/test_assignment_provider_github.sh", "evals/integration/test_pull_work_assignment_join.sh"], classification: "AssignmentProvider local-file and GitHub render/status fixtures (#290)" }],
   ["evals/fixtures/backlog-provider-settings", { owners: ["evals/integration/test_effective_backlog_settings.sh"], classification: "settings precedence fixtures" }],
   ["evals/fixtures/builder-kit-workflow-state", { owners: ["evals/static/test_workflow_skills.sh"], classification: "Builder Kit workflow-state fixtures" }],
   ["evals/fixtures/console-learning-projection", { owners: ["evals/integration/test_console_learning_projection.sh"], classification: "console learning projection fixtures" }],

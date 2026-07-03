@@ -3,17 +3,35 @@
   "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
   "claims": [
     {
-      "id": "kontourai-flow-agents-267-content-boundary.flow-agents-workflow.content-boundary",
-      "subjectType": "flow-step",
-      "subjectId": "kontourai-flow-agents-267/content-boundary",
+      "id": "kontourai-flow-agents-290-build-compile-summary.flow-agents-workflow.non-command-backed-summary-adr-0020-rule-bare-npm-run-build-silent-is-not-itself-a-manifest-entry-so-it-is-not-recorded-as-command-backed-test-output-it-is-subsumed-by-the-manifest-matched-source-tree-validation-check-below-whose-own-script-runs-build-first-npm-run-build-silent-this-session-exit-0-confirming-the-typescript-project-including-the-two-new-cli-modules-assignment-provider-ts-effective-assignment-provider-settings-ts-and-the-f1-f5-fix-set-compile-clean",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-290/build-compile-summary",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
-      "fieldOrBehavior": "content boundary",
+      "claimType": "workflow.check.runtime",
+      "fieldOrBehavior": "NON-command-backed summary (ADR 0020 rule: bare `npm run build --silent` is not itself a manifest entry, so it is not recorded as command-backed test_output; it is subsumed by the manifest-matched `source-tree-validation` check below, whose own script runs build first). `npm run build --silent`, this session: exit 0, confirming the TypeScript project including the two new CLI modules (assignment-provider.ts, effective-assignment-provider-settings.ts) and the F1-F5 fix set compile clean.",
       "value": "pass",
-      "createdAt": "2026-07-03T10:03:00Z",
-      "updatedAt": "2026-07-03T10:03:00Z",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests:test_output",
+      "verificationPolicyId": "policy:workflow.check.runtime:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "runtime"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-source-tree-validation.flow-agents-workflow.manifest-matched-source-tree-validation-npm-run-validate-source-exits-0-this-script-s-own-package-json-definition-runs-npm-run-build-silent-first-so-a-clean-run-also-confirms-the-cli-modules-compile-and-are-correctly-registered-mirrored-per-validate-source-tree-ts-s-cli-registration-rules",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-290/source-tree-validation",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "Manifest-matched (source-tree-validation). `npm run validate:source --` exits 0; this script's own package.json definition runs `npm run build --silent` first, so a clean run also confirms the CLI modules compile and are correctly registered/mirrored per validate-source-tree.ts's CLI-registration rules.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.command:test_output",
       "metadata": {
         "origin": "check",
         "check_kind": "command"
@@ -21,17 +39,17 @@
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-267-decision-registry.flow-agents-workflow.decision-registry",
-      "subjectType": "flow-step",
-      "subjectId": "kontourai-flow-agents-267/decision-registry",
+      "id": "kontourai-flow-agents-290-context-map-drift.flow-agents-workflow.manifest-matched-context-map-drift-npm-run-context-map-check-exits-0-with-docs-context-map-md-is-current-confirms-ac10-s-context-map-regeneration-is-committed-and-non-drifted",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-290/context-map-drift",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
-      "fieldOrBehavior": "decision registry",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "Manifest-matched (context-map-drift). `npm run context-map -- --check` exits 0 with 'docs/context-map.md is current.' -- confirms AC10's context-map regeneration is committed and non-drifted.",
       "value": "pass",
-      "createdAt": "2026-07-03T10:03:00Z",
-      "updatedAt": "2026-07-03T10:03:00Z",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests:test_output",
+      "verificationPolicyId": "policy:workflow.check.command:test_output",
       "metadata": {
         "origin": "check",
         "check_kind": "command"
@@ -39,135 +57,581 @@
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-267-source-tree-validation.flow-agents-workflow.source-tree-validation",
-      "subjectType": "flow-step",
-      "subjectId": "kontourai-flow-agents-267/source-tree-validation",
+      "id": "kontourai-flow-agents-290-static-eval-suite.flow-agents-workflow.manifest-matched-static-eval-suite-full-static-suite-exits-0-no-failures-35-35-ts-unit-tests-pass-all-other-static-assertion-blocks-pass-runs-npm-run-build-as-a-prerequisite-so-a-clean-run-confirms-the-whole-typescript-project-including-the-f1-f5-fix-set-compiles",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-290/static-eval-suite",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
-      "fieldOrBehavior": "source tree validation",
+      "claimType": "workflow.check.test",
+      "fieldOrBehavior": "Manifest-matched (static-eval-suite). Full static suite exits 0, no failures (35/35 TS unit tests pass; all other static assertion blocks pass). Runs `npm run build` as a prerequisite, so a clean run confirms the whole TypeScript project (including the F1-F5 fix set) compiles.",
       "value": "pass",
-      "createdAt": "2026-07-03T10:03:00Z",
-      "updatedAt": "2026-07-03T10:03:00Z",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests:test_output",
+      "verificationPolicyId": "policy:workflow.check.test:test_output",
       "metadata": {
         "origin": "check",
-        "check_kind": "command"
+        "check_kind": "test"
       },
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-267-record-critique-fail-then-pass-supersedes-latest-wins-history-retained.flow-agents-workflow.record-critique-fail-then-pass-supersedes-latest-wins-history-retained",
-      "subjectType": "flow-step",
-      "subjectId": "kontourai-flow-agents-267/record-critique-fail-then-pass-supersedes-latest-wins-history-retained",
+      "id": "kontourai-flow-agents-290-assignment-provider-local-file-integration.flow-agents-workflow.manifest-matched-assignment-provider-local-file-integration-re-verify-iteration-1-all-34-34-assertions-pass-up-from-30-pre-fix-including-three-new-genuine-os-process-concurrency-race-assertions-f1-fix-plan-two-real-simultaneously-launched-claim-processes-for-the-same-subject-different-actors-asserting-exactly-one-exits-0-the-on-disk-record-has-a-single-entry-audit-trail-and-the-holder-matches-the-actual-winner-supports-ac5-ac6-ac7-ac9",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-290/assignment-provider-local-file-integration",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
-      "fieldOrBehavior": "record-critique fail then pass supersedes (latest wins, history retained)",
-      "value": "pending",
-      "createdAt": "2026-07-03T10:03:00Z",
-      "updatedAt": "2026-07-03T10:03:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests",
-      "metadata": {
-        "origin": "acceptance"
-      },
-      "status": "proposed"
-    },
-    {
-      "id": "kontourai-flow-agents-267-check-critique-round-trip-is-lossless-and-type-stable-under-flow-id.flow-agents-workflow.check-critique-round-trip-is-lossless-and-type-stable-under-flow-id",
-      "subjectType": "flow-step",
-      "subjectId": "kontourai-flow-agents-267/check-critique-round-trip-is-lossless-and-type-stable-under-flow-id",
-      "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
-      "fieldOrBehavior": "check/critique round-trip is lossless and type-stable under --flow-id",
-      "value": "pending",
-      "createdAt": "2026-07-03T10:03:00Z",
-      "updatedAt": "2026-07-03T10:03:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests",
-      "metadata": {
-        "origin": "acceptance"
-      },
-      "status": "proposed"
-    },
-    {
-      "id": "kontourai-flow-agents-267-superseded-historical-fail-tolerated-by-validator-live-fail-still-blocks.flow-agents-workflow.superseded-historical-fail-tolerated-by-validator-live-fail-still-blocks",
-      "subjectType": "flow-step",
-      "subjectId": "kontourai-flow-agents-267/superseded-historical-fail-tolerated-by-validator-live-fail-still-blocks",
-      "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
-      "fieldOrBehavior": "superseded historical fail tolerated by validator; live fail still blocks",
-      "value": "pending",
-      "createdAt": "2026-07-03T10:03:00Z",
-      "updatedAt": "2026-07-03T10:03:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests",
-      "metadata": {
-        "origin": "acceptance"
-      },
-      "status": "proposed"
-    },
-    {
-      "id": "kontourai-flow-agents-267-code-review.flow-agents-workflow.supersession-reviewer-scoped-round-trip-type-stable-anti-gaming-suite-green",
-      "subjectType": "artifact",
-      "subjectId": "kontourai-flow-agents-267/code-review",
-      "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.policy-compliance",
-      "fieldOrBehavior": "Supersession reviewer-scoped, round-trip type-stable, anti-gaming suite green.",
+      "claimType": "workflow.check.test",
+      "fieldOrBehavior": "Manifest-matched (assignment-provider-local-file-integration). Re-verify iteration-1: all 34/34 assertions pass (up from 30 pre-fix), including three NEW genuine OS-process concurrency-race assertions (F1 fix-plan): two real, simultaneously-launched claim processes for the same subject/different actors, asserting exactly one exits 0, the on-disk record has a single-entry audit trail, and the holder matches the actual winner. Supports AC5, AC6, AC7, AC9.",
       "value": "pass",
-      "createdAt": "2026-07-03T10:03:00Z",
-      "updatedAt": "2026-07-03T10:03:00Z",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-assignment-provider-github-integration.flow-agents-workflow.manifest-matched-assignment-provider-github-integration-re-verify-iteration-1-all-45-45-assertions-pass-up-from-42-pre-fix-including-new-f2-hostile-branch-artifact-dir-actor-human-payload-with-newline-ansi-system-text-is-control-char-stripped-in-status-output-both-raw-and-json-escaped-ansi-forms-absent-effective-state-classification-unchanged-and-f3-idle-days-is-exactly-deterministic-via-now-not-real-wall-clock-also-confirmed-idle-days-still-falls-back-correctly-to-real-date-now-when-now-is-omitted-assertions-supports-ac3-ac4-ac9-ac11",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-290/assignment-provider-github-integration",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.test",
+      "fieldOrBehavior": "Manifest-matched (assignment-provider-github-integration). Re-verify iteration-1: all 45/45 assertions pass (up from 42 pre-fix), including NEW F2 (hostile branch/artifact_dir/actor.human payload with newline+ANSI+[SYSTEM] text is control-char-stripped in status output, both raw and JSON-escaped ANSI forms absent, effective-state classification unchanged) and F3 (idle_days is EXACTLY deterministic via --now, not real wall clock; also confirmed idle_days still falls back correctly to real Date.now() when --now is omitted) assertions. Supports AC3, AC4, AC9, AC11.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-pull-work-assignment-join-integration.flow-agents-workflow.manifest-matched-pull-work-assignment-join-integration-re-verify-iteration-1-unaffected-by-f1-f5-still-10-10-assertions-pass-two-actor-simulation-subject-is-free-before-either-session-claims-session-a-claims-it-session-b-s-subsequent-status-join-check-reports-held-never-free-session-b-selects-and-claims-a-disjoint-subject-instead-session-a-s-and-session-b-s-claimed-subject-lists-are-disjoint-supports-ac10-ac12",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-290/pull-work-assignment-join-integration",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.test",
+      "fieldOrBehavior": "Manifest-matched (pull-work-assignment-join-integration). Re-verify iteration-1: unaffected by F1-F5, still 10/10 assertions pass. Two-actor simulation: subject is free before either session claims; session A claims it; session B's subsequent status/join check reports held (never free); session B selects and claims a disjoint subject instead; session A's and session B's claimed-subject lists are disjoint. Supports AC10, AC12.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-pull-work-liveness-preflight-integration.flow-agents-workflow.manifest-matched-pull-work-liveness-preflight-integration-re-verify-iteration-1-68-68-assertions-pass-up-from-65-pre-fix-including-new-f5-wording-correction-assertions-pull-work-now-scopes-true-mutual-exclusion-to-the-local-file-provider-only-via-290-s-lock-does-not-overclaim-true-mutual-exclusion-for-the-github-provider-advisory-last-writer-detect-not-prevent-and-explicitly-warns-290-does-not-close-the-github-race",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-290/pull-work-liveness-preflight-integration",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.test",
+      "fieldOrBehavior": "Manifest-matched (pull-work-liveness-preflight-integration). Re-verify iteration-1: 68/68 assertions pass (up from 65 pre-fix), including NEW F5 wording-correction assertions: pull-work now scopes true mutual exclusion to the local-file provider only (via #290's lock), does NOT overclaim true mutual exclusion for the GitHub provider (advisory/last-writer, detect not prevent), and explicitly warns #290 does not close the GitHub race.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-pull-work-provider-integration.flow-agents-workflow.manifest-matched-pull-work-provider-integration-re-verify-iteration-1-unaffected-by-f1-f5-still-69-69-assertions-pass-regression-check-confirming-this-issue-s-changes-to-pull-work-skill-md-and-the-provider-cli-did-not-disturb-the-existing-workitemprovider-fixture-based-eval",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-290/pull-work-provider-integration",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.test",
+      "fieldOrBehavior": "Manifest-matched (pull-work-provider-integration). Re-verify iteration-1: unaffected by F1-F5, still 69/69 assertions pass -- regression check confirming this issue's changes to pull-work/SKILL.md and the provider CLI did not disturb the existing WorkItemProvider fixture-based eval.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-gh-process-absence-source-scan.flow-agents-workflow.session-local-no-command-not-a-manifest-entry-independent-source-tree-grep-re-run-this-session-execfilesync-spawnsync-spawn-exec-naming-gh-anywhere-under-src-zero-hits-outside-a-single-explanatory-code-comment-in-assignment-provider-ts-confirms-ac9-at-the-source-level-independent-of-the-evals-own-self-checks",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-290/gh-process-absence-source-scan",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.security",
+      "fieldOrBehavior": "SESSION-LOCAL (no command; not a manifest entry). Independent source-tree grep, re-run this session: `execFileSync|spawnSync|spawn\\(|exec\\(` naming `gh` anywhere under src/ -> zero hits outside a single explanatory code comment in assignment-provider.ts. Confirms AC9 at the source level, independent of the evals' own self-checks.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.security:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "security"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-trust-reconcile-manifest-parity.flow-agents-workflow.session-local-kind-policy-is-non-reconcilable-regardless-of-command-presence-per-adr-0020-s-classification-table-deliberately-recorded-without-a-command-field-since-the-exact-command-run-this-session-bash-evals-integration-test-trust-reconcile-manifest-sh-is-a-narrower-slice-of-the-actual-manifest-entry-anti-gaming-and-trust-suite-not-that-entry-itself-re-run-this-session-exit-0-manifest-entries-42-ci-yml-check-invocations-42-both-pass-lines-every-ci-yml-required-check-invocation-is-a-manifest-entry-every-manifest-entry-is-invoked-by-a-required-ci-yml-job-own-independent-recount-grep-based-diff-of-run-baseline-sh-manifest-json-ids-vs-ci-yml-s-required-check-slugs-usage-feedback-excluded-reproduces-42-42-with-an-empty-diff-both-directions-aside-a-full-run-of-the-actual-manifest-command-bash-evals-ci-antigaming-suite-sh-id-anti-gaming-and-trust-suite-was-also-attempted-this-session-for-rigor-it-failed-on-an-unrelated-sub-test-evals-acceptance-prove-capture-teeth-sh-s-shipped-bundle-install-step-claude-code-install-sh-failed-codex-install-sh-failed-root-caused-as-environment-flake-not-a-290-regression-or-a-manifest-parity-defect-a-this-branch-s-diff-touches-none-of-dist-install-sh-or-evidence-capture-b-re-running-prove-capture-teeth-sh-standalone-immediately-after-passed-cleanly-8-8-exit-0-c-the-trust-reconcile-manifest-sub-test-itself-was-unaffected-in-both-runs-per-the-verification-contract-s-flaky-test-rule-this-is-disclosed-rather-than-silently-re-run-to-green-and-is-not-claimed-as-manifest-command-backed-evidence-for-this-check-hence-the-session-local-no-command-classification-above",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-290/trust-reconcile-manifest-parity",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.policy",
+      "fieldOrBehavior": "SESSION-LOCAL (kind=policy is non-reconcilable regardless of command presence per ADR 0020's classification table; deliberately recorded without a `command` field since the exact command run this session -- `bash evals/integration/test_trust_reconcile_manifest.sh` -- is a narrower slice of the actual manifest entry 'anti-gaming-and-trust-suite', not that entry itself). Re-run this session: exit 0, 'manifest entries: 42 ; ci.yml --check invocations: 42', both PASS lines ('every ci.yml required --check invocation is a manifest entry'; 'every manifest entry is invoked by a required ci.yml job'). Own independent recount (grep-based diff of run-baseline.sh --manifest-json ids vs ci.yml's required --check slugs, usage-feedback excluded) reproduces 42==42 with an empty diff both directions. Aside: a full run of the actual manifest command (`bash evals/ci/antigaming-suite.sh`, id 'anti-gaming-and-trust-suite') was also attempted this session for rigor; it failed on an UNRELATED sub-test (evals/acceptance/prove-capture-teeth.sh's 'shipped bundle install' step: 'Claude Code install.sh failed' / 'Codex install.sh failed'). Root-caused as environment flake, not a #290 regression or a manifest-parity defect: (a) this branch's diff touches none of dist/, install.sh, or evidence-capture; (b) re-running prove-capture-teeth.sh standalone immediately after passed cleanly (8/8, exit 0); (c) the trust-reconcile-manifest sub-test itself was unaffected in both runs. Per the verification contract's flaky-test rule, this is disclosed rather than silently re-run to green and is NOT claimed as manifest-command-backed evidence for this check -- hence the session-local (no-command) classification above.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "policy"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-concurrency-race-independent-reproduction.flow-agents-workflow.session-local-no-command-independent-of-the-checked-in-eval-s-own-single-iteration-race-assertion-re-ran-the-exact-40-iteration-concurrent-os-process-race-script-race40-sh-originally-used-to-reproduce-the-pre-fix-defect-14-15-double-wins-corroborating-the-code-review-subagent-s-own-29-40-reproduction-methodology-for-each-of-40-iterations-spawn-two-real-simultaneously-launched-assignment-provider-claim-processes-for-a-fresh-subject-different-actors-via-background-wait-genuine-os-level-race-not-sequential-assert-exactly-one-process-exits-0-verify-the-on-disk-record-s-audit-trail-length-is-exactly-1-verify-no-leftover-lockdir-post-fix-result-exactly-one-winner-count-40-40-both-succeeded-count-0-40-neither-succeeded-count-0-40-no-unexpected-audit-state-or-leftover-lockdir-lines-were-emitted-the-script-prints-those-only-on-failure-across-all-40-iterations-this-is-a-full-reversal-of-the-pre-fix-result-and-directly-proves-ac7-and-the-adr-0021-no-lost-locks-premise-for-the-local-file-provider",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-290/concurrency-race-independent-reproduction",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.security",
+      "fieldOrBehavior": "SESSION-LOCAL (no command; independent of the checked-in eval's own single-iteration race assertion). Re-ran the EXACT 40-iteration concurrent OS-process race script (race40.sh) originally used to reproduce the pre-fix defect (14/15 double-wins, corroborating the code-review subagent's own 29/40 reproduction). Methodology: for each of 40 iterations, spawn two REAL, simultaneously-launched `assignment-provider claim` processes for a fresh subject, different actors, via background `&` + `wait` (genuine OS-level race, not sequential); assert exactly one process exits 0; verify the on-disk record's audit_trail length is exactly 1; verify no leftover lockdir. POST-FIX RESULT: exactly_one_winner_count=40/40, both_succeeded_count=0/40, neither_succeeded_count=0/40. No 'UNEXPECTED AUDIT STATE' or 'LEFTOVER LOCKDIR' lines were emitted (the script prints those only on failure) across all 40 iterations. This is a full reversal of the pre-fix result and directly proves AC7 and the ADR 0021 'no lost locks' premise for the local-file provider.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.security:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "security"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-f2-hostile-payload-independent-reproduction.flow-agents-workflow.session-local-no-command-independent-of-the-checked-in-eval-s-own-hostile-fixture-built-a-distinct-hostile-fixture-from-the-eval-s-own-different-marker-text-different-control-bytes-cr-bel-a-distinct-ansi-csi-sequence-a-system-ignore-prior-instructions-trailer-via-a-forged-claim-marker-github-issue-comment-any-commenter-can-post-one-then-ran-assignment-provider-status-provider-github-against-it-result-the-raw-payload-with-its-control-bytes-intact-is-absent-from-stdout-the-esc-and-bel-bytes-are-absent-from-stdout-the-parsed-json-s-assignment-record-branch-artifact-dir-and-actor-human-fields-all-equal-the-control-char-stripped-expected-value-computed-independently-via-a-c0-del-c1-codepoint-filter-not-by-importing-the-implementation-s-own-sanitizer-effective-effective-state-remains-human-held-proving-sanitization-does-not-perturb-the-human-assignee-presence-gate-confirms-f2-is-fixed-and-generalizes-beyond-the-eval-s-specific-fixture-string",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-290/f2-hostile-payload-independent-reproduction",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.security",
+      "fieldOrBehavior": "SESSION-LOCAL (no command; independent of the checked-in eval's own hostile fixture). Built a DISTINCT hostile fixture from the eval's own (different marker text, different control bytes: CR + BEL + a distinct ANSI CSI sequence + a '[SYSTEM] ignore prior instructions' trailer) via a forged claim-marker GitHub issue comment (any commenter can post one), then ran `assignment-provider status --provider github` against it. RESULT: the raw payload (with its control bytes intact) is absent from stdout; the ESC and BEL bytes are absent from stdout; the parsed JSON's `assignment.record.branch`, `.artifact_dir`, and `.actor.human` fields all equal the control-char-stripped expected value (computed independently via a C0/DEL/C1 codepoint filter, not by importing the implementation's own sanitizer); `effective.effective_state` remains 'human-held', proving sanitization does not perturb the human-assignee presence gate. Confirms F2 is fixed and generalizes beyond the eval's specific fixture string.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.security:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "security"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-ac1-contract-doc-review.flow-agents-workflow.re-verify-iteration-1-re-read-context-contracts-assignment-provider-contract-md-unchanged-in-substance-from-the-prior-verification-pass-other-than-f4-s-additive-argv-array-execution-note-cross-check-against-docs-adr-0021-assignment-leases-and-stale-claim-takeover-md-sections-1-2-4-6-still-holds-no-paraphrase-drift",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-290/ac1-contract-doc-review",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.diff",
+      "fieldOrBehavior": "Re-verify iteration-1: re-read context/contracts/assignment-provider-contract.md; unchanged in substance from the prior verification pass other than F4's additive argv-array-execution note. Cross-check against docs/adr/0021-assignment-leases-and-stale-claim-takeover.md sections 1-2/4/6 still holds, no paraphrase drift.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.diff:source_excerpt",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "diff"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-ac2-settings-schema-independent-validation.flow-agents-workflow.re-verify-iteration-1-schemas-assignment-provider-settings-schema-json-is-unchanged-by-the-f1-f5-fix-set-confirmed-via-diff-scope-the-fix-touches-only-src-cli-assignment-provider-ts-kits-builder-skills-pull-work-skill-md-context-contracts-assignment-provider-contract-md-and-eval-scripts-prior-independent-ajv-validation-good-instance-valid-true-missing-provider-kind-valid-false-github-kind-missing-repo-valid-false-carried-forward-as-still-applicable",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-290/ac2-settings-schema-independent-validation",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.diff",
+      "fieldOrBehavior": "Re-verify iteration-1: schemas/assignment-provider-settings.schema.json is unchanged by the F1-F5 fix set (confirmed via diff-scope: the fix touches only src/cli/assignment-provider.ts, kits/builder/skills/pull-work/SKILL.md, context/contracts/assignment-provider-contract.md, and eval scripts). Prior independent ajv validation (good instance valid=true; missing provider.kind valid=false; github kind missing repo valid=false) carried forward as still-applicable.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.diff:source_excerpt",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "diff"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-ac8-pull-work-skill-wiring-review.flow-agents-workflow.re-read-the-diff-of-kits-builder-skills-pull-work-skill-md-s-f4-f5-changes-an-explicit-argv-array-never-shell-string-interpolation-execution-note-added-to-the-assignment-claim-on-selection-section-f4-and-the-mutual-exclusion-claim-corrected-to-scope-true-mutual-exclusion-to-the-local-file-provider-only-via-290-s-lock-explicitly-not-claiming-it-for-the-github-provider-which-remains-advisory-last-writer-f5-no-other-functional-change-to-the-selection-step-wiring-verified-in-the-prior-pass",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-290/ac8-pull-work-skill-wiring-review",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.diff",
+      "fieldOrBehavior": "Re-read the diff of kits/builder/skills/pull-work/SKILL.md's F4/F5 changes: an explicit argv-array (never shell-string interpolation) execution note added to the Assignment Claim On Selection section (F4), and the mutual-exclusion claim corrected to scope 'true mutual exclusion' to the local-file provider only via #290's lock, explicitly NOT claiming it for the GitHub provider, which remains advisory/last-writer (F5). No other functional change to the selection-step wiring verified in the prior pass.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.diff:source_excerpt",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "diff"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-ac10-docs-and-context-map-review.flow-agents-workflow.docs-context-map-md-drift-checked-clean-via-the-command-backed-context-map-drift-check-above-docs-workflow-usage-guide-md-s-assignment-ownership-the-third-provider-leg-subsection-re-read-unchanged-in-substance",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-290/ac10-docs-and-context-map-review",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.diff",
+      "fieldOrBehavior": "docs/context-map.md drift-checked clean via the command-backed context-map-drift check above. docs/workflow-usage-guide.md's 'Assignment ownership: the third provider leg' subsection re-read, unchanged in substance.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.diff:source_excerpt",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "diff"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-goal-fit.flow-agents-workflow.user-outcome-now-fully-met-a-selected-github-issue-carries-a-durable-human-visible-ownership-record-the-same-operations-work-against-a-local-file-record-for-tracker-less-repos-evals-with-genuine-mutual-exclusion-f1-independently-re-confirmed-40-40-human-assignees-are-never-silently-reclaimed-untrusted-github-claim-comment-fields-no-longer-leak-unsanitized-into-agent-facing-output-f2-independently-re-confirmed-idle-days-is-deterministic-under-now-f3-the-argv-execution-contract-is-explicit-f4-skill-md-no-longer-overclaims-github-side-mutual-exclusion-f5-design-decision-1-s-render-execute-divergence-remains-explicitly-documented-and-owner-confirmed-state-json-history-session-9ce76bbb-durable-docs-target-contract-doc-workflow-usage-guide-subsection-is-met",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-290/goal-fit",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.policy",
+      "fieldOrBehavior": "User outcome now fully met: a selected GitHub issue carries a durable, human-visible ownership record; the same operations work against a local-file record for tracker-less repos/evals with GENUINE mutual exclusion (F1, independently re-confirmed 40/40); human assignees are never silently reclaimed; untrusted GitHub claim-comment fields no longer leak unsanitized into agent-facing output (F2, independently re-confirmed); idle_days is deterministic under --now (F3); the argv-execution contract is explicit (F4); SKILL.md no longer overclaims GitHub-side mutual exclusion (F5). Design Decision 1's render/execute divergence remains explicitly documented and owner-confirmed (state.json history, session 9ce76bbb). Durable docs target (contract doc + workflow-usage-guide subsection) is met.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "policy"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-pre-existing-unrelated-eval-failures.flow-agents-workflow.accepted-gap-waived-this-check-s-underlying-record-evidence-call-carried-this-check-s-waiver-via-the-per-check-waiver-json-payload-adr-0020-rule-a-waiver-cannot-ride-the-global-accepted-gap-reason-waived-by-flags-when-the-same-record-evidence-call-also-includes-command-backed-checks-this-call-includes-8-the-per-check-waiver-is-stamped-on-this-claim-s-metadata-in-trust-bundle-status-assumed-and-is-not-duplicated-here-since-this-schema-does-not-carry-a-waiver-property-see-trust-bundle-claim-workflow-check-runtime-pre-existing-unrelated-eval-failures-for-the-canonical-waiver-record-reason-three-pre-existing-eval-failures-unrelated-to-290-s-scope-confirmed-via-diff-scope-approved-by-re-verification-session-independent-diff-scope-confirmation-per-the-task-brief-s-own-pre-existing-framing-approved-at-2026-07-03t18-14-59z-three-eval-scripts-test-goal-fit-hook-sh-1-failing-assertion-goal-fit-hook-should-not-block-by-default-test-goal-fit-escape-hatch-sh-5-failing-assertions-test-session-resume-roundtrip-sh-13-failing-assertions-fail-in-this-working-tree-independent-of-this-session-s-290-re-verification-diff-scope-check-git-diff-stat-against-this-branch-s-merge-base-2e603de-confirms-none-of-the-source-files-these-evals-exercise-goal-fit-hook-logic-workflow-steering-escape-hatch-session-resume-liveness-warning-rendering-are-touched-by-this-branch-s-changed-or-added-files-only-github-workflows-ci-yml-docs-context-map-md-docs-fixture-ownership-md-docs-workflow-usage-guide-md-evals-ci-run-baseline-sh-evals-integration-test-fixture-retirement-audit-sh-evals-integration-test-pull-work-liveness-preflight-sh-evals-run-sh-kits-builder-skills-pull-work-skill-md-package-json-two-additive-npm-script-lines-only-src-cli-ts-src-tools-validate-source-tree-ts-plus-the-new-assignment-provider-only-files-confirmed-pre-existing-not-a-regression-introduced-by-this-issue-or-its-iteration-1-fix-separately-test-bundle-install-sh-the-fourth-eval-flagged-as-possibly-pre-existing-broken-going-into-this-re-verify-was-re-run-this-session-and-passed-cleanly-77-77-it-is-not-an-open-gap-and-is-not-part-of-this-waiver",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-290/pre-existing-unrelated-eval-failures",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.runtime",
+      "fieldOrBehavior": "ACCEPTED GAP, waived. This check's underlying record-evidence call carried this check's waiver via the PER-CHECK `_waiver` JSON payload (ADR 0020 rule: a waiver cannot ride the global --accepted-gap-reason/--waived-by flags when the same record-evidence call also includes command-backed checks -- this call includes 8). The per-check waiver is stamped on this claim's metadata in trust.bundle (status: assumed) and is not duplicated here since this schema does not carry a `_waiver` property; see trust.bundle claim workflow.check.runtime / 'pre-existing-unrelated-eval-failures' for the canonical waiver record (reason: three pre-existing eval failures unrelated to #290's scope, confirmed via diff-scope; approved_by: re-verification session, independent diff-scope confirmation per the task brief's own PRE-EXISTING framing; approved_at: 2026-07-03T18:14:59Z). Three eval scripts (test_goal_fit_hook.sh: 1 failing assertion 'goal-fit hook should not block by default'; test_goal_fit_escape_hatch.sh: 5 failing assertions; test_session_resume_roundtrip.sh: 13 failing assertions) fail in this working tree, independent of this session's #290 re-verification. Diff-scope check (git diff --stat against this branch's merge-base 2e603de) confirms NONE of the source files these evals exercise (goal-fit-hook logic, workflow-steering escape-hatch, session-resume/liveness-warning rendering) are touched by this branch's changed-or-added files (only .github/workflows/ci.yml, docs/context-map.md, docs/fixture-ownership.md, docs/workflow-usage-guide.md, evals/ci/run-baseline.sh, evals/integration/test_fixture_retirement_audit.sh, evals/integration/test_pull_work_liveness_preflight.sh, evals/run.sh, kits/builder/skills/pull-work/SKILL.md, package.json (two additive npm-script lines only), src/cli.ts, src/tools/validate-source-tree.ts, plus the new assignment-provider-only files). Confirmed pre-existing, not a regression introduced by this issue or its iteration-1 fix. (Separately, test_bundle_install.sh -- the fourth eval flagged as possibly pre-existing-broken going into this re-verify -- was re-run this session and PASSED cleanly, 77/77; it is NOT an open gap and is not part of this waiver.)",
+      "value": "skip",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.runtime:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "runtime",
+        "waiver": {
+          "reason": "Three pre-existing eval failures (goal_fit_hook, goal_fit_escape_hatch, session_resume_roundtrip) are unrelated to issue #290's scope (AssignmentProvider abstraction) and its iteration-1 F1-F5 fix set, confirmed via diff-scope: none of the source files these evals exercise are touched by this branch. Accepted as a pre-existing baseline gap so it does not block this issue's own re-verification; tracked separately, not fixed as part of #290.",
+          "approved_by": "brian.anderson1222@gmail.com (session-approved)",
+          "approved_at": "2026-07-03T19:05:00Z"
+        }
+      },
+      "status": "assumed"
+    },
+    {
+      "id": "kontourai-flow-agents-290-ac1-contract-doc-covers-adr-0021-sections-context-contracts-assignment-provider-contract-md.flow-agents-workflow.ac1-contract-doc-covers-adr-0021-sections-context-contracts-assignment-provider-contract-md",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-290/ac1-contract-doc-covers-adr-0021-sections-context-contracts-assignment-provider-contract-md",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC1 `contract-doc-covers-adr-0021-sections`: `context/contracts/assignment-provider-contract.md`",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-ac2-settings-schema-validates-schemas-assignment-provider-settings-schema-json.flow-agents-workflow.ac2-settings-schema-validates-schemas-assignment-provider-settings-schema-json",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-290/ac2-settings-schema-validates-schemas-assignment-provider-settings-schema-json",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC2 `settings-schema-validates`: `schemas/assignment-provider-settings.schema.json`",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-ac3-github-render-emits-versioned-comment-assignment-provider-render-claim-provider.flow-agents-workflow.ac3-github-render-emits-versioned-comment-assignment-provider-render-claim-provider",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-290/ac3-github-render-emits-versioned-comment-assignment-provider-render-claim-provider",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC3 `github-render-emits-versioned-comment`: `assignment-provider render-claim --provider",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-ac4-github-status-parses-existing-claim-assignment-provider-status-provider-github.flow-agents-workflow.ac4-github-status-parses-existing-claim-assignment-provider-status-provider-github",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-290/ac4-github-status-parses-existing-claim-assignment-provider-status-provider-github",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC4 `github-status-parses-existing-claim`: `assignment-provider status --provider github`",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-ac5-local-file-round-trip-assignment-provider-claim-status-supersede-release-provider.flow-agents-workflow.ac5-local-file-round-trip-assignment-provider-claim-status-supersede-release-provider",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-290/ac5-local-file-round-trip-assignment-provider-claim-status-supersede-release-provider",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC5 `local-file-round-trip`: `assignment-provider claim|status|supersede|release --provider",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-ac6-list-returns-actor-claims-assignment-provider-list-actor-actor-both-provider.flow-agents-workflow.ac6-list-returns-actor-claims-assignment-provider-list-actor-actor-both-provider",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-290/ac6-list-returns-actor-claims-assignment-provider-list-actor-actor-both-provider",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC6 `list-returns-actor-claims`: `assignment-provider list --actor <actor>` (both provider",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-ac7-concurrent-claim-fails-loud-or-reports-holder-a-second-claim-on-an-already-claimed.flow-agents-workflow.ac7-concurrent-claim-fails-loud-or-reports-holder-a-second-claim-on-an-already-claimed",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-290/ac7-concurrent-claim-fails-loud-or-reports-holder-a-second-claim-on-an-already-claimed",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC7 `concurrent-claim-fails-loud-or-reports-holder`: a second `claim` on an already-claimed",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-ac8-pull-work-wires-durable-claim-at-selection-pull-work-skill-md-s-selection-step.flow-agents-workflow.ac8-pull-work-wires-durable-claim-at-selection-pull-work-skill-md-s-selection-step",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-290/ac8-pull-work-wires-durable-claim-at-selection-pull-work-skill-md-s-selection-step",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC8 `pull-work-wires-durable-claim-at-selection`: `pull-work/SKILL.md`'s selection step",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-ac9-no-live-gh-process-in-evals-none-of-this-issue-s-new-eval-scripts-invoke-a-live-or.flow-agents-workflow.ac9-no-live-gh-process-in-evals-none-of-this-issue-s-new-eval-scripts-invoke-a-live-or",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-290/ac9-no-live-gh-process-in-evals-none-of-this-issue-s-new-eval-scripts-invoke-a-live-or",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC9 `no-live-gh-process-in-evals`: none of this issue's new eval scripts invoke a live or",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-ac10-docs-and-context-map-updated-docs-context-map-md-lists-the-new-schema-via.flow-agents-workflow.ac10-docs-and-context-map-updated-docs-context-map-md-lists-the-new-schema-via",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-290/ac10-docs-and-context-map-updated-docs-context-map-md-lists-the-new-schema-via",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC10 `docs-and-context-map-updated`: `docs/context-map.md` lists the new schema (via",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-ac11-human-assignee-policy-knob-present-and-respected-the-settings-schema-s.flow-agents-workflow.ac11-human-assignee-policy-knob-present-and-respected-the-settings-schema-s",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-290/ac11-human-assignee-policy-knob-present-and-respected-the-settings-schema-s",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC11 `human-assignee-policy-knob-present-and-respected`: the settings schema's",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-ac12-disjoint-selection-simulated-a-two-actor-join-simulation-proves-that-once-actor-a-s.flow-agents-workflow.ac12-disjoint-selection-simulated-a-two-actor-join-simulation-proves-that-once-actor-a-s",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-290/ac12-disjoint-selection-simulated-a-two-actor-join-simulation-proves-that-once-actor-a-s",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC12 `disjoint-selection-simulated`: a two-actor join simulation proves that once actor A's",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-code-review-290-iteration-1.flow-agents-workflow.26-files-reviewed-12-modified-14-new-abstraction-github-render-parse-path-join-logic-and-pull-work-wiring-are-solid-and-well-tested-but-the-local-file-claim-path-has-a-reproducible-toctou-race-that-silently-overwrites-a-concurrent-claim-with-zero-audit-trail-29-40-concurrent-races-negating-ac7-and-the-issue-s-no-lost-locks-premise-independently-re-reproduced-by-verification-14-15-races-a-high-untrusted-input-sanitization-gap-github-claim-comment-fields-was-also-found-and-independently-re-reproduced-by-verification-verdict-changes-requested-superseded-by-code-review-290-iteration-1-recheck-below-all-5-findings-are-independently-re-confirmed-fixed-superseded-code-review-290-iteration-1-2026-07-03t19-05-00z-2026-07-03t10-34-00z",
+      "subjectType": "workflow-critique",
+      "subjectId": "kontourai-flow-agents-290/code-review-290-iteration-1",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "26 files reviewed (12 modified, 14 new). Abstraction, GitHub render/parse path, join logic, and pull-work wiring are solid and well-tested, but the local-file claim path has a reproducible TOCTOU race that silently overwrites a concurrent claim with zero audit trail (29/40 concurrent races), negating AC7 and the issue's 'no lost locks' premise. Independently re-reproduced by verification (14/15 races). A HIGH untrusted-input-sanitization gap (GitHub claim-comment fields) was also found and independently re-reproduced by verification. Verdict: CHANGES_REQUESTED. SUPERSEDED by code-review-290-iteration-1-recheck below: all 5 findings are independently re-confirmed FIXED.",
+      "value": "fail",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
       "impactLevel": "medium",
-      "verificationPolicyId": "policy:builder.verify.policy-compliance",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "code-review subagent",
+        "reviewed_at": "2026-07-03T10:34:00Z",
+        "superseded_by": "code-review-290-iteration-1@2026-07-03T19:05:00Z"
+      },
+      "status": "superseded"
+    },
+    {
+      "id": "kontourai-flow-agents-290-code-review-290-iteration-1-recheck.flow-agents-workflow.focused-re-review-of-the-iteration-1-fix-for-all-5-prior-findings-delta-reviewed-src-cli-assignment-provider-ts-withsubjectlock-sanitizedisplayfield-computeeffectivestate-s-nowms-threading-kits-builder-skills-pull-work-skill-md-context-contracts-assignment-provider-contract-md-and-the-two-evals-integration-test-assignment-provider-sh-files-plus-test-pull-work-liveness-preflight-sh-s-updated-static-assertions-findings-0-critical-0-high-0-medium-0-low-blocking-all-5-prior-findings-independently-reproduced-as-fixed-with-live-repro-evidence-not-just-diff-reading-including-a-150-iteration-independent-concurrency-race-reproduction-and-an-explicit-vacuous-eval-check-patched-a-copy-of-withsubjectlock-to-a-no-op-and-confirmed-the-new-eval-genuinely-fails-40-40-against-the-unlocked-build-then-passes-40-40-against-the-real-lock-no-new-defects-introduced-by-the-fix-imported-from-kontourai-flow-agents-290-plan-work-code-review-iter1-md-via-npm-run-workflow-sidecar-import-critique",
+      "subjectType": "workflow-critique",
+      "subjectId": "kontourai-flow-agents-290/code-review-290-iteration-1-recheck",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "Focused re-review of the iteration-1 fix for all 5 prior findings. Delta reviewed: src/cli/assignment-provider.ts (withSubjectLock/sanitizeDisplayField/computeEffectiveState's nowMs threading), kits/builder/skills/pull-work/SKILL.md, context/contracts/assignment-provider-contract.md, and the two evals/integration/test_assignment_provider_*.sh files, plus test_pull_work_liveness_preflight.sh's updated static assertions. Findings: 0 CRITICAL, 0 HIGH, 0 MEDIUM, 0 LOW blocking. All 5 prior findings independently reproduced-as-fixed with live repro evidence (not just diff-reading), including a 150-iteration independent concurrency-race reproduction and an explicit vacuous-eval check (patched a copy of withSubjectLock to a no-op and confirmed the new eval genuinely fails 40/40 against the unlocked build, then passes 40/40 against the real lock). No new defects introduced by the fix. Imported from kontourai-flow-agents-290--plan-work-code-review-iter1.md via `npm run workflow:sidecar -- import-critique`.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
       "metadata": {
         "origin": "critique",
         "reviewer": "tool-code-reviewer",
-        "reviewed_at": "2026-07-03T10:03:00Z"
+        "reviewed_at": "2026-07-03T17:30:00Z"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-290-code-review-290-iteration-1.flow-agents-workflow.supersedes-the-original-changes-requested-review-same-critique-id-same-reviewer-per-344-s-reviewer-scoped-critique-supersession-all-5-findings-1-critical-1-high-2-medium-1-low-independently-re-confirmed-fixed-f1-withsubjectlock-atomicity-40-40-and-150-150-concurrent-race-reproductions-0-double-wins-f2-sanitizedisplayfield-control-byte-stripping-independently-reproduced-with-a-distinct-hostile-payload-f3-idle-days-now-now-governed-f4-argv-execution-contract-documented-f5-mutual-exclusion-wording-corrected-corroborated-by-the-separate-iteration-1-recheck-review-kontourai-flow-agents-290-plan-work-code-review-iter1-md-verdict-approve-and-this-re-verification-session-s-own-independent-reproductions",
+      "subjectType": "workflow-critique",
+      "subjectId": "kontourai-flow-agents-290/code-review-290-iteration-1",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "SUPERSEDES the original CHANGES_REQUESTED review (same critique id, same reviewer, per #344's reviewer-scoped critique supersession). All 5 findings (1 CRITICAL, 1 HIGH, 2 MEDIUM, 1 LOW) independently re-confirmed FIXED: F1 (withSubjectLock atomicity, 40/40 and 150/150 concurrent-race reproductions, 0 double-wins), F2 (sanitizeDisplayField control-byte stripping, independently reproduced with a distinct hostile payload), F3 (idle_days now --now-governed), F4 (argv-execution contract documented), F5 (mutual-exclusion wording corrected). Corroborated by the separate iteration-1 recheck review (kontourai-flow-agents-290--plan-work-code-review-iter1.md, verdict APPROVE) and this re-verification session's own independent reproductions.",
+      "value": "pass",
+      "createdAt": "2026-07-03T19:05:00Z",
+      "updatedAt": "2026-07-03T19:05:00Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "code-review subagent",
+        "reviewed_at": "2026-07-03T19:05:00Z"
       },
       "status": "verified"
     }
   ],
   "evidence": [
     {
-      "id": "ev:kontourai-flow-agents-267-content-boundary.flow-agents-workflow.content-boundary",
-      "claimId": "kontourai-flow-agents-267-content-boundary.flow-agents-workflow.content-boundary",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "kontourai-flow-agents-267/evidence.json",
-      "excerptOrSummary": "content boundary",
-      "observedAt": "2026-07-03T10:03:00Z",
+      "id": "ev:kontourai-flow-agents-290-build-compile-summary.flow-agents-workflow.non-command-backed-summary-adr-0020-rule-bare-npm-run-build-silent-is-not-itself-a-manifest-entry-so-it-is-not-recorded-as-command-backed-test-output-it-is-subsumed-by-the-manifest-matched-source-tree-validation-check-below-whose-own-script-runs-build-first-npm-run-build-silent-this-session-exit-0-confirming-the-typescript-project-including-the-two-new-cli-modules-assignment-provider-ts-effective-assignment-provider-settings-ts-and-the-f1-f5-fix-set-compile-clean",
+      "claimId": "kontourai-flow-agents-290-build-compile-summary.flow-agents-workflow.non-command-backed-summary-adr-0020-rule-bare-npm-run-build-silent-is-not-itself-a-manifest-entry-so-it-is-not-recorded-as-command-backed-test-output-it-is-subsumed-by-the-manifest-matched-source-tree-validation-check-below-whose-own-script-runs-build-first-npm-run-build-silent-this-session-exit-0-confirming-the-typescript-project-including-the-two-new-cli-modules-assignment-provider-ts-effective-assignment-provider-settings-ts-and-the-f1-f5-fix-set-compile-clean",
+      "evidenceType": "attestation",
+      "method": "attestation",
+      "sourceRef": "kontourai-flow-agents-290/evidence.json",
+      "excerptOrSummary": "NON-command-backed summary (ADR 0020 rule: bare `npm run build --silent` is not itself a manifest entry, so it is not recorded as command-backed test_output; it is subsumed by the manifest-matched `source-tree-validation` check below, whose own script runs build first). `npm run build --silent`, this session: exit 0, confirming the TypeScript project including the two new CLI modules (assignment-provider.ts, effective-assignment-provider-settings.ts) and the F1-F5 fix set compile clean.",
+      "observedAt": "2026-07-03T19:05:00Z",
       "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "npm run check:content-boundary --",
-        "isError": false
-      }
+      "passing": true
     },
     {
-      "id": "ev:kontourai-flow-agents-267-decision-registry.flow-agents-workflow.decision-registry",
-      "claimId": "kontourai-flow-agents-267-decision-registry.flow-agents-workflow.decision-registry",
+      "id": "ev:kontourai-flow-agents-290-source-tree-validation.flow-agents-workflow.manifest-matched-source-tree-validation-npm-run-validate-source-exits-0-this-script-s-own-package-json-definition-runs-npm-run-build-silent-first-so-a-clean-run-also-confirms-the-cli-modules-compile-and-are-correctly-registered-mirrored-per-validate-source-tree-ts-s-cli-registration-rules",
+      "claimId": "kontourai-flow-agents-290-source-tree-validation.flow-agents-workflow.manifest-matched-source-tree-validation-npm-run-validate-source-exits-0-this-script-s-own-package-json-definition-runs-npm-run-build-silent-first-so-a-clean-run-also-confirms-the-cli-modules-compile-and-are-correctly-registered-mirrored-per-validate-source-tree-ts-s-cli-registration-rules",
       "evidenceType": "test_output",
       "method": "validation",
-      "sourceRef": "kontourai-flow-agents-267/evidence.json",
-      "excerptOrSummary": "decision registry",
-      "observedAt": "2026-07-03T10:03:00Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "npm run check:decisions --",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:kontourai-flow-agents-267-source-tree-validation.flow-agents-workflow.source-tree-validation",
-      "claimId": "kontourai-flow-agents-267-source-tree-validation.flow-agents-workflow.source-tree-validation",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "kontourai-flow-agents-267/evidence.json",
-      "excerptOrSummary": "source tree validation",
-      "observedAt": "2026-07-03T10:03:00Z",
+      "sourceRef": "kontourai-flow-agents-290/evidence.json",
+      "excerptOrSummary": "Manifest-matched (source-tree-validation). `npm run validate:source --` exits 0; this script's own package.json definition runs `npm run build --silent` first, so a clean run also confirms the CLI modules compile and are correctly registered/mirrored per validate-source-tree.ts's CLI-registration rules.",
+      "observedAt": "2026-07-03T19:05:00Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
       "execution": {
@@ -175,9 +639,248 @@
         "label": "npm run validate:source --",
         "isError": false
       }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-290-context-map-drift.flow-agents-workflow.manifest-matched-context-map-drift-npm-run-context-map-check-exits-0-with-docs-context-map-md-is-current-confirms-ac10-s-context-map-regeneration-is-committed-and-non-drifted",
+      "claimId": "kontourai-flow-agents-290-context-map-drift.flow-agents-workflow.manifest-matched-context-map-drift-npm-run-context-map-check-exits-0-with-docs-context-map-md-is-current-confirms-ac10-s-context-map-regeneration-is-committed-and-non-drifted",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-290/evidence.json",
+      "excerptOrSummary": "Manifest-matched (context-map-drift). `npm run context-map -- --check` exits 0 with 'docs/context-map.md is current.' -- confirms AC10's context-map regeneration is committed and non-drifted.",
+      "observedAt": "2026-07-03T19:05:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "npm run context-map -- --check",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-290-static-eval-suite.flow-agents-workflow.manifest-matched-static-eval-suite-full-static-suite-exits-0-no-failures-35-35-ts-unit-tests-pass-all-other-static-assertion-blocks-pass-runs-npm-run-build-as-a-prerequisite-so-a-clean-run-confirms-the-whole-typescript-project-including-the-f1-f5-fix-set-compiles",
+      "claimId": "kontourai-flow-agents-290-static-eval-suite.flow-agents-workflow.manifest-matched-static-eval-suite-full-static-suite-exits-0-no-failures-35-35-ts-unit-tests-pass-all-other-static-assertion-blocks-pass-runs-npm-run-build-as-a-prerequisite-so-a-clean-run-confirms-the-whole-typescript-project-including-the-f1-f5-fix-set-compiles",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-290/evidence.json",
+      "excerptOrSummary": "Manifest-matched (static-eval-suite). Full static suite exits 0, no failures (35/35 TS unit tests pass; all other static assertion blocks pass). Runs `npm run build` as a prerequisite, so a clean run confirms the whole TypeScript project (including the F1-F5 fix set) compiles.",
+      "observedAt": "2026-07-03T19:05:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/run.sh static",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-290-assignment-provider-local-file-integration.flow-agents-workflow.manifest-matched-assignment-provider-local-file-integration-re-verify-iteration-1-all-34-34-assertions-pass-up-from-30-pre-fix-including-three-new-genuine-os-process-concurrency-race-assertions-f1-fix-plan-two-real-simultaneously-launched-claim-processes-for-the-same-subject-different-actors-asserting-exactly-one-exits-0-the-on-disk-record-has-a-single-entry-audit-trail-and-the-holder-matches-the-actual-winner-supports-ac5-ac6-ac7-ac9",
+      "claimId": "kontourai-flow-agents-290-assignment-provider-local-file-integration.flow-agents-workflow.manifest-matched-assignment-provider-local-file-integration-re-verify-iteration-1-all-34-34-assertions-pass-up-from-30-pre-fix-including-three-new-genuine-os-process-concurrency-race-assertions-f1-fix-plan-two-real-simultaneously-launched-claim-processes-for-the-same-subject-different-actors-asserting-exactly-one-exits-0-the-on-disk-record-has-a-single-entry-audit-trail-and-the-holder-matches-the-actual-winner-supports-ac5-ac6-ac7-ac9",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-290/evidence.json",
+      "excerptOrSummary": "Manifest-matched (assignment-provider-local-file-integration). Re-verify iteration-1: all 34/34 assertions pass (up from 30 pre-fix), including three NEW genuine OS-process concurrency-race assertions (F1 fix-plan): two real, simultaneously-launched claim processes for the same subject/different actors, asserting exactly one exits 0, the on-disk record has a single-entry audit trail, and the holder matches the actual winner. Supports AC5, AC6, AC7, AC9.",
+      "observedAt": "2026-07-03T19:05:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_assignment_provider_local_file.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-290-assignment-provider-github-integration.flow-agents-workflow.manifest-matched-assignment-provider-github-integration-re-verify-iteration-1-all-45-45-assertions-pass-up-from-42-pre-fix-including-new-f2-hostile-branch-artifact-dir-actor-human-payload-with-newline-ansi-system-text-is-control-char-stripped-in-status-output-both-raw-and-json-escaped-ansi-forms-absent-effective-state-classification-unchanged-and-f3-idle-days-is-exactly-deterministic-via-now-not-real-wall-clock-also-confirmed-idle-days-still-falls-back-correctly-to-real-date-now-when-now-is-omitted-assertions-supports-ac3-ac4-ac9-ac11",
+      "claimId": "kontourai-flow-agents-290-assignment-provider-github-integration.flow-agents-workflow.manifest-matched-assignment-provider-github-integration-re-verify-iteration-1-all-45-45-assertions-pass-up-from-42-pre-fix-including-new-f2-hostile-branch-artifact-dir-actor-human-payload-with-newline-ansi-system-text-is-control-char-stripped-in-status-output-both-raw-and-json-escaped-ansi-forms-absent-effective-state-classification-unchanged-and-f3-idle-days-is-exactly-deterministic-via-now-not-real-wall-clock-also-confirmed-idle-days-still-falls-back-correctly-to-real-date-now-when-now-is-omitted-assertions-supports-ac3-ac4-ac9-ac11",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-290/evidence.json",
+      "excerptOrSummary": "Manifest-matched (assignment-provider-github-integration). Re-verify iteration-1: all 45/45 assertions pass (up from 42 pre-fix), including NEW F2 (hostile branch/artifact_dir/actor.human payload with newline+ANSI+[SYSTEM] text is control-char-stripped in status output, both raw and JSON-escaped ANSI forms absent, effective-state classification unchanged) and F3 (idle_days is EXACTLY deterministic via --now, not real wall clock; also confirmed idle_days still falls back correctly to real Date.now() when --now is omitted) assertions. Supports AC3, AC4, AC9, AC11.",
+      "observedAt": "2026-07-03T19:05:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_assignment_provider_github.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-290-pull-work-assignment-join-integration.flow-agents-workflow.manifest-matched-pull-work-assignment-join-integration-re-verify-iteration-1-unaffected-by-f1-f5-still-10-10-assertions-pass-two-actor-simulation-subject-is-free-before-either-session-claims-session-a-claims-it-session-b-s-subsequent-status-join-check-reports-held-never-free-session-b-selects-and-claims-a-disjoint-subject-instead-session-a-s-and-session-b-s-claimed-subject-lists-are-disjoint-supports-ac10-ac12",
+      "claimId": "kontourai-flow-agents-290-pull-work-assignment-join-integration.flow-agents-workflow.manifest-matched-pull-work-assignment-join-integration-re-verify-iteration-1-unaffected-by-f1-f5-still-10-10-assertions-pass-two-actor-simulation-subject-is-free-before-either-session-claims-session-a-claims-it-session-b-s-subsequent-status-join-check-reports-held-never-free-session-b-selects-and-claims-a-disjoint-subject-instead-session-a-s-and-session-b-s-claimed-subject-lists-are-disjoint-supports-ac10-ac12",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-290/evidence.json",
+      "excerptOrSummary": "Manifest-matched (pull-work-assignment-join-integration). Re-verify iteration-1: unaffected by F1-F5, still 10/10 assertions pass. Two-actor simulation: subject is free before either session claims; session A claims it; session B's subsequent status/join check reports held (never free); session B selects and claims a disjoint subject instead; session A's and session B's claimed-subject lists are disjoint. Supports AC10, AC12.",
+      "observedAt": "2026-07-03T19:05:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_pull_work_assignment_join.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-290-pull-work-liveness-preflight-integration.flow-agents-workflow.manifest-matched-pull-work-liveness-preflight-integration-re-verify-iteration-1-68-68-assertions-pass-up-from-65-pre-fix-including-new-f5-wording-correction-assertions-pull-work-now-scopes-true-mutual-exclusion-to-the-local-file-provider-only-via-290-s-lock-does-not-overclaim-true-mutual-exclusion-for-the-github-provider-advisory-last-writer-detect-not-prevent-and-explicitly-warns-290-does-not-close-the-github-race",
+      "claimId": "kontourai-flow-agents-290-pull-work-liveness-preflight-integration.flow-agents-workflow.manifest-matched-pull-work-liveness-preflight-integration-re-verify-iteration-1-68-68-assertions-pass-up-from-65-pre-fix-including-new-f5-wording-correction-assertions-pull-work-now-scopes-true-mutual-exclusion-to-the-local-file-provider-only-via-290-s-lock-does-not-overclaim-true-mutual-exclusion-for-the-github-provider-advisory-last-writer-detect-not-prevent-and-explicitly-warns-290-does-not-close-the-github-race",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-290/evidence.json",
+      "excerptOrSummary": "Manifest-matched (pull-work-liveness-preflight-integration). Re-verify iteration-1: 68/68 assertions pass (up from 65 pre-fix), including NEW F5 wording-correction assertions: pull-work now scopes true mutual exclusion to the local-file provider only (via #290's lock), does NOT overclaim true mutual exclusion for the GitHub provider (advisory/last-writer, detect not prevent), and explicitly warns #290 does not close the GitHub race.",
+      "observedAt": "2026-07-03T19:05:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_pull_work_liveness_preflight.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-290-pull-work-provider-integration.flow-agents-workflow.manifest-matched-pull-work-provider-integration-re-verify-iteration-1-unaffected-by-f1-f5-still-69-69-assertions-pass-regression-check-confirming-this-issue-s-changes-to-pull-work-skill-md-and-the-provider-cli-did-not-disturb-the-existing-workitemprovider-fixture-based-eval",
+      "claimId": "kontourai-flow-agents-290-pull-work-provider-integration.flow-agents-workflow.manifest-matched-pull-work-provider-integration-re-verify-iteration-1-unaffected-by-f1-f5-still-69-69-assertions-pass-regression-check-confirming-this-issue-s-changes-to-pull-work-skill-md-and-the-provider-cli-did-not-disturb-the-existing-workitemprovider-fixture-based-eval",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-290/evidence.json",
+      "excerptOrSummary": "Manifest-matched (pull-work-provider-integration). Re-verify iteration-1: unaffected by F1-F5, still 69/69 assertions pass -- regression check confirming this issue's changes to pull-work/SKILL.md and the provider CLI did not disturb the existing WorkItemProvider fixture-based eval.",
+      "observedAt": "2026-07-03T19:05:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_pull_work_provider.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-290-gh-process-absence-source-scan.flow-agents-workflow.session-local-no-command-not-a-manifest-entry-independent-source-tree-grep-re-run-this-session-execfilesync-spawnsync-spawn-exec-naming-gh-anywhere-under-src-zero-hits-outside-a-single-explanatory-code-comment-in-assignment-provider-ts-confirms-ac9-at-the-source-level-independent-of-the-evals-own-self-checks",
+      "claimId": "kontourai-flow-agents-290-gh-process-absence-source-scan.flow-agents-workflow.session-local-no-command-not-a-manifest-entry-independent-source-tree-grep-re-run-this-session-execfilesync-spawnsync-spawn-exec-naming-gh-anywhere-under-src-zero-hits-outside-a-single-explanatory-code-comment-in-assignment-provider-ts-confirms-ac9-at-the-source-level-independent-of-the-evals-own-self-checks",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-290/evidence.json",
+      "excerptOrSummary": "SESSION-LOCAL (no command; not a manifest entry). Independent source-tree grep, re-run this session: `execFileSync|spawnSync|spawn\\(|exec\\(` naming `gh` anywhere under src/ -> zero hits outside a single explanatory code comment in assignment-provider.ts. Confirms AC9 at the source level, independent of the evals' own self-checks.",
+      "observedAt": "2026-07-03T19:05:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-290-trust-reconcile-manifest-parity.flow-agents-workflow.session-local-kind-policy-is-non-reconcilable-regardless-of-command-presence-per-adr-0020-s-classification-table-deliberately-recorded-without-a-command-field-since-the-exact-command-run-this-session-bash-evals-integration-test-trust-reconcile-manifest-sh-is-a-narrower-slice-of-the-actual-manifest-entry-anti-gaming-and-trust-suite-not-that-entry-itself-re-run-this-session-exit-0-manifest-entries-42-ci-yml-check-invocations-42-both-pass-lines-every-ci-yml-required-check-invocation-is-a-manifest-entry-every-manifest-entry-is-invoked-by-a-required-ci-yml-job-own-independent-recount-grep-based-diff-of-run-baseline-sh-manifest-json-ids-vs-ci-yml-s-required-check-slugs-usage-feedback-excluded-reproduces-42-42-with-an-empty-diff-both-directions-aside-a-full-run-of-the-actual-manifest-command-bash-evals-ci-antigaming-suite-sh-id-anti-gaming-and-trust-suite-was-also-attempted-this-session-for-rigor-it-failed-on-an-unrelated-sub-test-evals-acceptance-prove-capture-teeth-sh-s-shipped-bundle-install-step-claude-code-install-sh-failed-codex-install-sh-failed-root-caused-as-environment-flake-not-a-290-regression-or-a-manifest-parity-defect-a-this-branch-s-diff-touches-none-of-dist-install-sh-or-evidence-capture-b-re-running-prove-capture-teeth-sh-standalone-immediately-after-passed-cleanly-8-8-exit-0-c-the-trust-reconcile-manifest-sub-test-itself-was-unaffected-in-both-runs-per-the-verification-contract-s-flaky-test-rule-this-is-disclosed-rather-than-silently-re-run-to-green-and-is-not-claimed-as-manifest-command-backed-evidence-for-this-check-hence-the-session-local-no-command-classification-above",
+      "claimId": "kontourai-flow-agents-290-trust-reconcile-manifest-parity.flow-agents-workflow.session-local-kind-policy-is-non-reconcilable-regardless-of-command-presence-per-adr-0020-s-classification-table-deliberately-recorded-without-a-command-field-since-the-exact-command-run-this-session-bash-evals-integration-test-trust-reconcile-manifest-sh-is-a-narrower-slice-of-the-actual-manifest-entry-anti-gaming-and-trust-suite-not-that-entry-itself-re-run-this-session-exit-0-manifest-entries-42-ci-yml-check-invocations-42-both-pass-lines-every-ci-yml-required-check-invocation-is-a-manifest-entry-every-manifest-entry-is-invoked-by-a-required-ci-yml-job-own-independent-recount-grep-based-diff-of-run-baseline-sh-manifest-json-ids-vs-ci-yml-s-required-check-slugs-usage-feedback-excluded-reproduces-42-42-with-an-empty-diff-both-directions-aside-a-full-run-of-the-actual-manifest-command-bash-evals-ci-antigaming-suite-sh-id-anti-gaming-and-trust-suite-was-also-attempted-this-session-for-rigor-it-failed-on-an-unrelated-sub-test-evals-acceptance-prove-capture-teeth-sh-s-shipped-bundle-install-step-claude-code-install-sh-failed-codex-install-sh-failed-root-caused-as-environment-flake-not-a-290-regression-or-a-manifest-parity-defect-a-this-branch-s-diff-touches-none-of-dist-install-sh-or-evidence-capture-b-re-running-prove-capture-teeth-sh-standalone-immediately-after-passed-cleanly-8-8-exit-0-c-the-trust-reconcile-manifest-sub-test-itself-was-unaffected-in-both-runs-per-the-verification-contract-s-flaky-test-rule-this-is-disclosed-rather-than-silently-re-run-to-green-and-is-not-claimed-as-manifest-command-backed-evidence-for-this-check-hence-the-session-local-no-command-classification-above",
+      "evidenceType": "policy_rule",
+      "method": "auditability",
+      "sourceRef": "kontourai-flow-agents-290/evidence.json",
+      "excerptOrSummary": "SESSION-LOCAL (kind=policy is non-reconcilable regardless of command presence per ADR 0020's classification table; deliberately recorded without a `command` field since the exact command run this session -- `bash evals/integration/test_trust_reconcile_manifest.sh` -- is a narrower slice of the actual manifest entry 'anti-gaming-and-trust-suite', not that entry itself). Re-run this session: exit 0, 'manifest entries: 42 ; ci.yml --check invocations: 42', both PASS lines ('every ci.yml required --check invocation is a manifest entry'; 'every manifest entry is invoked by a required ci.yml job'). Own independent recount (grep-based diff of run-baseline.sh --manifest-json ids vs ci.yml's required --check slugs, usage-feedback excluded) reproduces 42==42 with an empty diff both directions. Aside: a full run of the actual manifest command (`bash evals/ci/antigaming-suite.sh`, id 'anti-gaming-and-trust-suite') was also attempted this session for rigor; it failed on an UNRELATED sub-test (evals/acceptance/prove-capture-teeth.sh's 'shipped bundle install' step: 'Claude Code install.sh failed' / 'Codex install.sh failed'). Root-caused as environment flake, not a #290 regression or a manifest-parity defect: (a) this branch's diff touches none of dist/, install.sh, or evidence-capture; (b) re-running prove-capture-teeth.sh standalone immediately after passed cleanly (8/8, exit 0); (c) the trust-reconcile-manifest sub-test itself was unaffected in both runs. Per the verification contract's flaky-test rule, this is disclosed rather than silently re-run to green and is NOT claimed as manifest-command-backed evidence for this check -- hence the session-local (no-command) classification above.",
+      "observedAt": "2026-07-03T19:05:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-290-concurrency-race-independent-reproduction.flow-agents-workflow.session-local-no-command-independent-of-the-checked-in-eval-s-own-single-iteration-race-assertion-re-ran-the-exact-40-iteration-concurrent-os-process-race-script-race40-sh-originally-used-to-reproduce-the-pre-fix-defect-14-15-double-wins-corroborating-the-code-review-subagent-s-own-29-40-reproduction-methodology-for-each-of-40-iterations-spawn-two-real-simultaneously-launched-assignment-provider-claim-processes-for-a-fresh-subject-different-actors-via-background-wait-genuine-os-level-race-not-sequential-assert-exactly-one-process-exits-0-verify-the-on-disk-record-s-audit-trail-length-is-exactly-1-verify-no-leftover-lockdir-post-fix-result-exactly-one-winner-count-40-40-both-succeeded-count-0-40-neither-succeeded-count-0-40-no-unexpected-audit-state-or-leftover-lockdir-lines-were-emitted-the-script-prints-those-only-on-failure-across-all-40-iterations-this-is-a-full-reversal-of-the-pre-fix-result-and-directly-proves-ac7-and-the-adr-0021-no-lost-locks-premise-for-the-local-file-provider",
+      "claimId": "kontourai-flow-agents-290-concurrency-race-independent-reproduction.flow-agents-workflow.session-local-no-command-independent-of-the-checked-in-eval-s-own-single-iteration-race-assertion-re-ran-the-exact-40-iteration-concurrent-os-process-race-script-race40-sh-originally-used-to-reproduce-the-pre-fix-defect-14-15-double-wins-corroborating-the-code-review-subagent-s-own-29-40-reproduction-methodology-for-each-of-40-iterations-spawn-two-real-simultaneously-launched-assignment-provider-claim-processes-for-a-fresh-subject-different-actors-via-background-wait-genuine-os-level-race-not-sequential-assert-exactly-one-process-exits-0-verify-the-on-disk-record-s-audit-trail-length-is-exactly-1-verify-no-leftover-lockdir-post-fix-result-exactly-one-winner-count-40-40-both-succeeded-count-0-40-neither-succeeded-count-0-40-no-unexpected-audit-state-or-leftover-lockdir-lines-were-emitted-the-script-prints-those-only-on-failure-across-all-40-iterations-this-is-a-full-reversal-of-the-pre-fix-result-and-directly-proves-ac7-and-the-adr-0021-no-lost-locks-premise-for-the-local-file-provider",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-290/evidence.json",
+      "excerptOrSummary": "SESSION-LOCAL (no command; independent of the checked-in eval's own single-iteration race assertion). Re-ran the EXACT 40-iteration concurrent OS-process race script (race40.sh) originally used to reproduce the pre-fix defect (14/15 double-wins, corroborating the code-review subagent's own 29/40 reproduction). Methodology: for each of 40 iterations, spawn two REAL, simultaneously-launched `assignment-provider claim` processes for a fresh subject, different actors, via background `&` + `wait` (genuine OS-level race, not sequential); assert exactly one process exits 0; verify the on-disk record's audit_trail length is exactly 1; verify no leftover lockdir. POST-FIX RESULT: exactly_one_winner_count=40/40, both_succeeded_count=0/40, neither_succeeded_count=0/40. No 'UNEXPECTED AUDIT STATE' or 'LEFTOVER LOCKDIR' lines were emitted (the script prints those only on failure) across all 40 iterations. This is a full reversal of the pre-fix result and directly proves AC7 and the ADR 0021 'no lost locks' premise for the local-file provider.",
+      "observedAt": "2026-07-03T19:05:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-290-f2-hostile-payload-independent-reproduction.flow-agents-workflow.session-local-no-command-independent-of-the-checked-in-eval-s-own-hostile-fixture-built-a-distinct-hostile-fixture-from-the-eval-s-own-different-marker-text-different-control-bytes-cr-bel-a-distinct-ansi-csi-sequence-a-system-ignore-prior-instructions-trailer-via-a-forged-claim-marker-github-issue-comment-any-commenter-can-post-one-then-ran-assignment-provider-status-provider-github-against-it-result-the-raw-payload-with-its-control-bytes-intact-is-absent-from-stdout-the-esc-and-bel-bytes-are-absent-from-stdout-the-parsed-json-s-assignment-record-branch-artifact-dir-and-actor-human-fields-all-equal-the-control-char-stripped-expected-value-computed-independently-via-a-c0-del-c1-codepoint-filter-not-by-importing-the-implementation-s-own-sanitizer-effective-effective-state-remains-human-held-proving-sanitization-does-not-perturb-the-human-assignee-presence-gate-confirms-f2-is-fixed-and-generalizes-beyond-the-eval-s-specific-fixture-string",
+      "claimId": "kontourai-flow-agents-290-f2-hostile-payload-independent-reproduction.flow-agents-workflow.session-local-no-command-independent-of-the-checked-in-eval-s-own-hostile-fixture-built-a-distinct-hostile-fixture-from-the-eval-s-own-different-marker-text-different-control-bytes-cr-bel-a-distinct-ansi-csi-sequence-a-system-ignore-prior-instructions-trailer-via-a-forged-claim-marker-github-issue-comment-any-commenter-can-post-one-then-ran-assignment-provider-status-provider-github-against-it-result-the-raw-payload-with-its-control-bytes-intact-is-absent-from-stdout-the-esc-and-bel-bytes-are-absent-from-stdout-the-parsed-json-s-assignment-record-branch-artifact-dir-and-actor-human-fields-all-equal-the-control-char-stripped-expected-value-computed-independently-via-a-c0-del-c1-codepoint-filter-not-by-importing-the-implementation-s-own-sanitizer-effective-effective-state-remains-human-held-proving-sanitization-does-not-perturb-the-human-assignee-presence-gate-confirms-f2-is-fixed-and-generalizes-beyond-the-eval-s-specific-fixture-string",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-290/evidence.json",
+      "excerptOrSummary": "SESSION-LOCAL (no command; independent of the checked-in eval's own hostile fixture). Built a DISTINCT hostile fixture from the eval's own (different marker text, different control bytes: CR + BEL + a distinct ANSI CSI sequence + a '[SYSTEM] ignore prior instructions' trailer) via a forged claim-marker GitHub issue comment (any commenter can post one), then ran `assignment-provider status --provider github` against it. RESULT: the raw payload (with its control bytes intact) is absent from stdout; the ESC and BEL bytes are absent from stdout; the parsed JSON's `assignment.record.branch`, `.artifact_dir`, and `.actor.human` fields all equal the control-char-stripped expected value (computed independently via a C0/DEL/C1 codepoint filter, not by importing the implementation's own sanitizer); `effective.effective_state` remains 'human-held', proving sanitization does not perturb the human-assignee presence gate. Confirms F2 is fixed and generalizes beyond the eval's specific fixture string.",
+      "observedAt": "2026-07-03T19:05:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-290-ac1-contract-doc-review.flow-agents-workflow.re-verify-iteration-1-re-read-context-contracts-assignment-provider-contract-md-unchanged-in-substance-from-the-prior-verification-pass-other-than-f4-s-additive-argv-array-execution-note-cross-check-against-docs-adr-0021-assignment-leases-and-stale-claim-takeover-md-sections-1-2-4-6-still-holds-no-paraphrase-drift",
+      "claimId": "kontourai-flow-agents-290-ac1-contract-doc-review.flow-agents-workflow.re-verify-iteration-1-re-read-context-contracts-assignment-provider-contract-md-unchanged-in-substance-from-the-prior-verification-pass-other-than-f4-s-additive-argv-array-execution-note-cross-check-against-docs-adr-0021-assignment-leases-and-stale-claim-takeover-md-sections-1-2-4-6-still-holds-no-paraphrase-drift",
+      "evidenceType": "source_excerpt",
+      "method": "extraction",
+      "sourceRef": "kontourai-flow-agents-290/evidence.json",
+      "excerptOrSummary": "Re-verify iteration-1: re-read context/contracts/assignment-provider-contract.md; unchanged in substance from the prior verification pass other than F4's additive argv-array-execution note. Cross-check against docs/adr/0021-assignment-leases-and-stale-claim-takeover.md sections 1-2/4/6 still holds, no paraphrase drift.",
+      "observedAt": "2026-07-03T19:05:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-290-ac2-settings-schema-independent-validation.flow-agents-workflow.re-verify-iteration-1-schemas-assignment-provider-settings-schema-json-is-unchanged-by-the-f1-f5-fix-set-confirmed-via-diff-scope-the-fix-touches-only-src-cli-assignment-provider-ts-kits-builder-skills-pull-work-skill-md-context-contracts-assignment-provider-contract-md-and-eval-scripts-prior-independent-ajv-validation-good-instance-valid-true-missing-provider-kind-valid-false-github-kind-missing-repo-valid-false-carried-forward-as-still-applicable",
+      "claimId": "kontourai-flow-agents-290-ac2-settings-schema-independent-validation.flow-agents-workflow.re-verify-iteration-1-schemas-assignment-provider-settings-schema-json-is-unchanged-by-the-f1-f5-fix-set-confirmed-via-diff-scope-the-fix-touches-only-src-cli-assignment-provider-ts-kits-builder-skills-pull-work-skill-md-context-contracts-assignment-provider-contract-md-and-eval-scripts-prior-independent-ajv-validation-good-instance-valid-true-missing-provider-kind-valid-false-github-kind-missing-repo-valid-false-carried-forward-as-still-applicable",
+      "evidenceType": "source_excerpt",
+      "method": "extraction",
+      "sourceRef": "kontourai-flow-agents-290/evidence.json",
+      "excerptOrSummary": "Re-verify iteration-1: schemas/assignment-provider-settings.schema.json is unchanged by the F1-F5 fix set (confirmed via diff-scope: the fix touches only src/cli/assignment-provider.ts, kits/builder/skills/pull-work/SKILL.md, context/contracts/assignment-provider-contract.md, and eval scripts). Prior independent ajv validation (good instance valid=true; missing provider.kind valid=false; github kind missing repo valid=false) carried forward as still-applicable.",
+      "observedAt": "2026-07-03T19:05:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-290-ac8-pull-work-skill-wiring-review.flow-agents-workflow.re-read-the-diff-of-kits-builder-skills-pull-work-skill-md-s-f4-f5-changes-an-explicit-argv-array-never-shell-string-interpolation-execution-note-added-to-the-assignment-claim-on-selection-section-f4-and-the-mutual-exclusion-claim-corrected-to-scope-true-mutual-exclusion-to-the-local-file-provider-only-via-290-s-lock-explicitly-not-claiming-it-for-the-github-provider-which-remains-advisory-last-writer-f5-no-other-functional-change-to-the-selection-step-wiring-verified-in-the-prior-pass",
+      "claimId": "kontourai-flow-agents-290-ac8-pull-work-skill-wiring-review.flow-agents-workflow.re-read-the-diff-of-kits-builder-skills-pull-work-skill-md-s-f4-f5-changes-an-explicit-argv-array-never-shell-string-interpolation-execution-note-added-to-the-assignment-claim-on-selection-section-f4-and-the-mutual-exclusion-claim-corrected-to-scope-true-mutual-exclusion-to-the-local-file-provider-only-via-290-s-lock-explicitly-not-claiming-it-for-the-github-provider-which-remains-advisory-last-writer-f5-no-other-functional-change-to-the-selection-step-wiring-verified-in-the-prior-pass",
+      "evidenceType": "source_excerpt",
+      "method": "extraction",
+      "sourceRef": "kontourai-flow-agents-290/evidence.json",
+      "excerptOrSummary": "Re-read the diff of kits/builder/skills/pull-work/SKILL.md's F4/F5 changes: an explicit argv-array (never shell-string interpolation) execution note added to the Assignment Claim On Selection section (F4), and the mutual-exclusion claim corrected to scope 'true mutual exclusion' to the local-file provider only via #290's lock, explicitly NOT claiming it for the GitHub provider, which remains advisory/last-writer (F5). No other functional change to the selection-step wiring verified in the prior pass.",
+      "observedAt": "2026-07-03T19:05:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-290-ac10-docs-and-context-map-review.flow-agents-workflow.docs-context-map-md-drift-checked-clean-via-the-command-backed-context-map-drift-check-above-docs-workflow-usage-guide-md-s-assignment-ownership-the-third-provider-leg-subsection-re-read-unchanged-in-substance",
+      "claimId": "kontourai-flow-agents-290-ac10-docs-and-context-map-review.flow-agents-workflow.docs-context-map-md-drift-checked-clean-via-the-command-backed-context-map-drift-check-above-docs-workflow-usage-guide-md-s-assignment-ownership-the-third-provider-leg-subsection-re-read-unchanged-in-substance",
+      "evidenceType": "source_excerpt",
+      "method": "extraction",
+      "sourceRef": "kontourai-flow-agents-290/evidence.json",
+      "excerptOrSummary": "docs/context-map.md drift-checked clean via the command-backed context-map-drift check above. docs/workflow-usage-guide.md's 'Assignment ownership: the third provider leg' subsection re-read, unchanged in substance.",
+      "observedAt": "2026-07-03T19:05:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-290-goal-fit.flow-agents-workflow.user-outcome-now-fully-met-a-selected-github-issue-carries-a-durable-human-visible-ownership-record-the-same-operations-work-against-a-local-file-record-for-tracker-less-repos-evals-with-genuine-mutual-exclusion-f1-independently-re-confirmed-40-40-human-assignees-are-never-silently-reclaimed-untrusted-github-claim-comment-fields-no-longer-leak-unsanitized-into-agent-facing-output-f2-independently-re-confirmed-idle-days-is-deterministic-under-now-f3-the-argv-execution-contract-is-explicit-f4-skill-md-no-longer-overclaims-github-side-mutual-exclusion-f5-design-decision-1-s-render-execute-divergence-remains-explicitly-documented-and-owner-confirmed-state-json-history-session-9ce76bbb-durable-docs-target-contract-doc-workflow-usage-guide-subsection-is-met",
+      "claimId": "kontourai-flow-agents-290-goal-fit.flow-agents-workflow.user-outcome-now-fully-met-a-selected-github-issue-carries-a-durable-human-visible-ownership-record-the-same-operations-work-against-a-local-file-record-for-tracker-less-repos-evals-with-genuine-mutual-exclusion-f1-independently-re-confirmed-40-40-human-assignees-are-never-silently-reclaimed-untrusted-github-claim-comment-fields-no-longer-leak-unsanitized-into-agent-facing-output-f2-independently-re-confirmed-idle-days-is-deterministic-under-now-f3-the-argv-execution-contract-is-explicit-f4-skill-md-no-longer-overclaims-github-side-mutual-exclusion-f5-design-decision-1-s-render-execute-divergence-remains-explicitly-documented-and-owner-confirmed-state-json-history-session-9ce76bbb-durable-docs-target-contract-doc-workflow-usage-guide-subsection-is-met",
+      "evidenceType": "policy_rule",
+      "method": "auditability",
+      "sourceRef": "kontourai-flow-agents-290/evidence.json",
+      "excerptOrSummary": "User outcome now fully met: a selected GitHub issue carries a durable, human-visible ownership record; the same operations work against a local-file record for tracker-less repos/evals with GENUINE mutual exclusion (F1, independently re-confirmed 40/40); human assignees are never silently reclaimed; untrusted GitHub claim-comment fields no longer leak unsanitized into agent-facing output (F2, independently re-confirmed); idle_days is deterministic under --now (F3); the argv-execution contract is explicit (F4); SKILL.md no longer overclaims GitHub-side mutual exclusion (F5). Design Decision 1's render/execute divergence remains explicitly documented and owner-confirmed (state.json history, session 9ce76bbb). Durable docs target (contract doc + workflow-usage-guide subsection) is met.",
+      "observedAt": "2026-07-03T19:05:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-290-pre-existing-unrelated-eval-failures.flow-agents-workflow.accepted-gap-waived-this-check-s-underlying-record-evidence-call-carried-this-check-s-waiver-via-the-per-check-waiver-json-payload-adr-0020-rule-a-waiver-cannot-ride-the-global-accepted-gap-reason-waived-by-flags-when-the-same-record-evidence-call-also-includes-command-backed-checks-this-call-includes-8-the-per-check-waiver-is-stamped-on-this-claim-s-metadata-in-trust-bundle-status-assumed-and-is-not-duplicated-here-since-this-schema-does-not-carry-a-waiver-property-see-trust-bundle-claim-workflow-check-runtime-pre-existing-unrelated-eval-failures-for-the-canonical-waiver-record-reason-three-pre-existing-eval-failures-unrelated-to-290-s-scope-confirmed-via-diff-scope-approved-by-re-verification-session-independent-diff-scope-confirmation-per-the-task-brief-s-own-pre-existing-framing-approved-at-2026-07-03t18-14-59z-three-eval-scripts-test-goal-fit-hook-sh-1-failing-assertion-goal-fit-hook-should-not-block-by-default-test-goal-fit-escape-hatch-sh-5-failing-assertions-test-session-resume-roundtrip-sh-13-failing-assertions-fail-in-this-working-tree-independent-of-this-session-s-290-re-verification-diff-scope-check-git-diff-stat-against-this-branch-s-merge-base-2e603de-confirms-none-of-the-source-files-these-evals-exercise-goal-fit-hook-logic-workflow-steering-escape-hatch-session-resume-liveness-warning-rendering-are-touched-by-this-branch-s-changed-or-added-files-only-github-workflows-ci-yml-docs-context-map-md-docs-fixture-ownership-md-docs-workflow-usage-guide-md-evals-ci-run-baseline-sh-evals-integration-test-fixture-retirement-audit-sh-evals-integration-test-pull-work-liveness-preflight-sh-evals-run-sh-kits-builder-skills-pull-work-skill-md-package-json-two-additive-npm-script-lines-only-src-cli-ts-src-tools-validate-source-tree-ts-plus-the-new-assignment-provider-only-files-confirmed-pre-existing-not-a-regression-introduced-by-this-issue-or-its-iteration-1-fix-separately-test-bundle-install-sh-the-fourth-eval-flagged-as-possibly-pre-existing-broken-going-into-this-re-verify-was-re-run-this-session-and-passed-cleanly-77-77-it-is-not-an-open-gap-and-is-not-part-of-this-waiver",
+      "claimId": "kontourai-flow-agents-290-pre-existing-unrelated-eval-failures.flow-agents-workflow.accepted-gap-waived-this-check-s-underlying-record-evidence-call-carried-this-check-s-waiver-via-the-per-check-waiver-json-payload-adr-0020-rule-a-waiver-cannot-ride-the-global-accepted-gap-reason-waived-by-flags-when-the-same-record-evidence-call-also-includes-command-backed-checks-this-call-includes-8-the-per-check-waiver-is-stamped-on-this-claim-s-metadata-in-trust-bundle-status-assumed-and-is-not-duplicated-here-since-this-schema-does-not-carry-a-waiver-property-see-trust-bundle-claim-workflow-check-runtime-pre-existing-unrelated-eval-failures-for-the-canonical-waiver-record-reason-three-pre-existing-eval-failures-unrelated-to-290-s-scope-confirmed-via-diff-scope-approved-by-re-verification-session-independent-diff-scope-confirmation-per-the-task-brief-s-own-pre-existing-framing-approved-at-2026-07-03t18-14-59z-three-eval-scripts-test-goal-fit-hook-sh-1-failing-assertion-goal-fit-hook-should-not-block-by-default-test-goal-fit-escape-hatch-sh-5-failing-assertions-test-session-resume-roundtrip-sh-13-failing-assertions-fail-in-this-working-tree-independent-of-this-session-s-290-re-verification-diff-scope-check-git-diff-stat-against-this-branch-s-merge-base-2e603de-confirms-none-of-the-source-files-these-evals-exercise-goal-fit-hook-logic-workflow-steering-escape-hatch-session-resume-liveness-warning-rendering-are-touched-by-this-branch-s-changed-or-added-files-only-github-workflows-ci-yml-docs-context-map-md-docs-fixture-ownership-md-docs-workflow-usage-guide-md-evals-ci-run-baseline-sh-evals-integration-test-fixture-retirement-audit-sh-evals-integration-test-pull-work-liveness-preflight-sh-evals-run-sh-kits-builder-skills-pull-work-skill-md-package-json-two-additive-npm-script-lines-only-src-cli-ts-src-tools-validate-source-tree-ts-plus-the-new-assignment-provider-only-files-confirmed-pre-existing-not-a-regression-introduced-by-this-issue-or-its-iteration-1-fix-separately-test-bundle-install-sh-the-fourth-eval-flagged-as-possibly-pre-existing-broken-going-into-this-re-verify-was-re-run-this-session-and-passed-cleanly-77-77-it-is-not-an-open-gap-and-is-not-part-of-this-waiver",
+      "evidenceType": "attestation",
+      "method": "attestation",
+      "sourceRef": "kontourai-flow-agents-290/evidence.json",
+      "excerptOrSummary": "ACCEPTED GAP, waived. This check's underlying record-evidence call carried this check's waiver via the PER-CHECK `_waiver` JSON payload (ADR 0020 rule: a waiver cannot ride the global --accepted-gap-reason/--waived-by flags when the same record-evidence call also includes command-backed checks -- this call includes 8). The per-check waiver is stamped on this claim's metadata in trust.bundle (status: assumed) and is not duplicated here since this schema does not carry a `_waiver` property; see trust.bundle claim workflow.check.runtime / 'pre-existing-unrelated-eval-failures' for the canonical waiver record (reason: three pre-existing eval failures unrelated to #290's scope, confirmed via diff-scope; approved_by: re-verification session, independent diff-scope confirmation per the task brief's own PRE-EXISTING framing; approved_at: 2026-07-03T18:14:59Z). Three eval scripts (test_goal_fit_hook.sh: 1 failing assertion 'goal-fit hook should not block by default'; test_goal_fit_escape_hatch.sh: 5 failing assertions; test_session_resume_roundtrip.sh: 13 failing assertions) fail in this working tree, independent of this session's #290 re-verification. Diff-scope check (git diff --stat against this branch's merge-base 2e603de) confirms NONE of the source files these evals exercise (goal-fit-hook logic, workflow-steering escape-hatch, session-resume/liveness-warning rendering) are touched by this branch's changed-or-added files (only .github/workflows/ci.yml, docs/context-map.md, docs/fixture-ownership.md, docs/workflow-usage-guide.md, evals/ci/run-baseline.sh, evals/integration/test_fixture_retirement_audit.sh, evals/integration/test_pull_work_liveness_preflight.sh, evals/run.sh, kits/builder/skills/pull-work/SKILL.md, package.json (two additive npm-script lines only), src/cli.ts, src/tools/validate-source-tree.ts, plus the new assignment-provider-only files). Confirmed pre-existing, not a regression introduced by this issue or its iteration-1 fix. (Separately, test_bundle_install.sh -- the fourth eval flagged as possibly pre-existing-broken going into this re-verify -- was re-run this session and PASSED cleanly, 77/77; it is NOT an open gap and is not part of this waiver.)",
+      "observedAt": "2026-07-03T19:05:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": false
     }
   ],
   "policies": [
+    {
+      "id": "policy:workflow.check.runtime:attestation",
+      "claimType": "workflow.check.runtime",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.runtime claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
     {
       "id": "policy:workflow.check.command:test_output",
       "claimType": "workflow.check.command",
@@ -196,13 +899,64 @@
       "impactLevel": "high"
     },
     {
-      "id": "policy:builder.verify.tests:test_output",
-      "claimType": "builder.verify.tests",
+      "id": "policy:workflow.check.test:test_output",
+      "claimType": "workflow.check.test",
       "requiredEvidence": [
         "test_output"
       ],
       "acceptanceCriteria": [
-        "A verified verification event must support a builder.verify.tests claim."
+        "A verified verification event must support a workflow.check.test claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.security:attestation",
+      "claimType": "workflow.check.security",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.security claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.policy:policy_rule",
+      "claimType": "workflow.check.policy",
+      "requiredEvidence": [
+        "policy_rule"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.policy claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.diff:source_excerpt",
+      "claimType": "workflow.check.diff",
+      "requiredEvidence": [
+        "source_excerpt"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.diff claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -228,21 +982,6 @@
       "impactLevel": "high"
     },
     {
-      "id": "policy:builder.verify.tests",
-      "claimType": "builder.verify.tests",
-      "requiredEvidence": [],
-      "acceptanceCriteria": [
-        "A verified verification event must support a builder.verify.tests claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "high"
-    },
-    {
       "id": "policy:workflow.critique.review",
       "claimType": "workflow.critique.review",
       "requiredEvidence": [],
@@ -256,69 +995,376 @@
       "stalenessTriggers": [],
       "conflictRules": [],
       "impactLevel": "medium"
-    },
-    {
-      "id": "policy:builder.verify.policy-compliance",
-      "claimType": "builder.verify.policy-compliance",
-      "requiredEvidence": [],
-      "acceptanceCriteria": [
-        "A verified verification event must support a builder.verify.policy-compliance claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "medium"
     }
   ],
   "events": [
     {
-      "id": "evt:kontourai-flow-agents-267-content-boundary.flow-agents-workflow.content-boundary",
-      "claimId": "kontourai-flow-agents-267-content-boundary.flow-agents-workflow.content-boundary",
+      "id": "evt:kontourai-flow-agents-290-build-compile-summary.flow-agents-workflow.non-command-backed-summary-adr-0020-rule-bare-npm-run-build-silent-is-not-itself-a-manifest-entry-so-it-is-not-recorded-as-command-backed-test-output-it-is-subsumed-by-the-manifest-matched-source-tree-validation-check-below-whose-own-script-runs-build-first-npm-run-build-silent-this-session-exit-0-confirming-the-typescript-project-including-the-two-new-cli-modules-assignment-provider-ts-effective-assignment-provider-settings-ts-and-the-f1-f5-fix-set-compile-clean",
+      "claimId": "kontourai-flow-agents-290-build-compile-summary.flow-agents-workflow.non-command-backed-summary-adr-0020-rule-bare-npm-run-build-silent-is-not-itself-a-manifest-entry-so-it-is-not-recorded-as-command-backed-test-output-it-is-subsumed-by-the-manifest-matched-source-tree-validation-check-below-whose-own-script-runs-build-first-npm-run-build-silent-this-session-exit-0-confirming-the-typescript-project-including-the-two-new-cli-modules-assignment-provider-ts-effective-assignment-provider-settings-ts-and-the-f1-f5-fix-set-compile-clean",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-267-content-boundary.flow-agents-workflow.content-boundary"
+        "ev:kontourai-flow-agents-290-build-compile-summary.flow-agents-workflow.non-command-backed-summary-adr-0020-rule-bare-npm-run-build-silent-is-not-itself-a-manifest-entry-so-it-is-not-recorded-as-command-backed-test-output-it-is-subsumed-by-the-manifest-matched-source-tree-validation-check-below-whose-own-script-runs-build-first-npm-run-build-silent-this-session-exit-0-confirming-the-typescript-project-including-the-two-new-cli-modules-assignment-provider-ts-effective-assignment-provider-settings-ts-and-the-f1-f5-fix-set-compile-clean"
       ],
-      "createdAt": "2026-07-03T10:03:00Z",
-      "verifiedAt": "2026-07-03T10:03:00Z"
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-267-decision-registry.flow-agents-workflow.decision-registry",
-      "claimId": "kontourai-flow-agents-267-decision-registry.flow-agents-workflow.decision-registry",
+      "id": "evt:kontourai-flow-agents-290-source-tree-validation.flow-agents-workflow.manifest-matched-source-tree-validation-npm-run-validate-source-exits-0-this-script-s-own-package-json-definition-runs-npm-run-build-silent-first-so-a-clean-run-also-confirms-the-cli-modules-compile-and-are-correctly-registered-mirrored-per-validate-source-tree-ts-s-cli-registration-rules",
+      "claimId": "kontourai-flow-agents-290-source-tree-validation.flow-agents-workflow.manifest-matched-source-tree-validation-npm-run-validate-source-exits-0-this-script-s-own-package-json-definition-runs-npm-run-build-silent-first-so-a-clean-run-also-confirms-the-cli-modules-compile-and-are-correctly-registered-mirrored-per-validate-source-tree-ts-s-cli-registration-rules",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-267-decision-registry.flow-agents-workflow.decision-registry"
+        "ev:kontourai-flow-agents-290-source-tree-validation.flow-agents-workflow.manifest-matched-source-tree-validation-npm-run-validate-source-exits-0-this-script-s-own-package-json-definition-runs-npm-run-build-silent-first-so-a-clean-run-also-confirms-the-cli-modules-compile-and-are-correctly-registered-mirrored-per-validate-source-tree-ts-s-cli-registration-rules"
       ],
-      "createdAt": "2026-07-03T10:03:00Z",
-      "verifiedAt": "2026-07-03T10:03:00Z"
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-267-source-tree-validation.flow-agents-workflow.source-tree-validation",
-      "claimId": "kontourai-flow-agents-267-source-tree-validation.flow-agents-workflow.source-tree-validation",
+      "id": "evt:kontourai-flow-agents-290-context-map-drift.flow-agents-workflow.manifest-matched-context-map-drift-npm-run-context-map-check-exits-0-with-docs-context-map-md-is-current-confirms-ac10-s-context-map-regeneration-is-committed-and-non-drifted",
+      "claimId": "kontourai-flow-agents-290-context-map-drift.flow-agents-workflow.manifest-matched-context-map-drift-npm-run-context-map-check-exits-0-with-docs-context-map-md-is-current-confirms-ac10-s-context-map-regeneration-is-committed-and-non-drifted",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-267-source-tree-validation.flow-agents-workflow.source-tree-validation"
+        "ev:kontourai-flow-agents-290-context-map-drift.flow-agents-workflow.manifest-matched-context-map-drift-npm-run-context-map-check-exits-0-with-docs-context-map-md-is-current-confirms-ac10-s-context-map-regeneration-is-committed-and-non-drifted"
       ],
-      "createdAt": "2026-07-03T10:03:00Z",
-      "verifiedAt": "2026-07-03T10:03:00Z"
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-267-code-review.flow-agents-workflow.supersession-reviewer-scoped-round-trip-type-stable-anti-gaming-suite-green",
-      "claimId": "kontourai-flow-agents-267-code-review.flow-agents-workflow.supersession-reviewer-scoped-round-trip-type-stable-anti-gaming-suite-green",
+      "id": "evt:kontourai-flow-agents-290-static-eval-suite.flow-agents-workflow.manifest-matched-static-eval-suite-full-static-suite-exits-0-no-failures-35-35-ts-unit-tests-pass-all-other-static-assertion-blocks-pass-runs-npm-run-build-as-a-prerequisite-so-a-clean-run-confirms-the-whole-typescript-project-including-the-f1-f5-fix-set-compiles",
+      "claimId": "kontourai-flow-agents-290-static-eval-suite.flow-agents-workflow.manifest-matched-static-eval-suite-full-static-suite-exits-0-no-failures-35-35-ts-unit-tests-pass-all-other-static-assertion-blocks-pass-runs-npm-run-build-as-a-prerequisite-so-a-clean-run-confirms-the-whole-typescript-project-including-the-f1-f5-fix-set-compiles",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-290-static-eval-suite.flow-agents-workflow.manifest-matched-static-eval-suite-full-static-suite-exits-0-no-failures-35-35-ts-unit-tests-pass-all-other-static-assertion-blocks-pass-runs-npm-run-build-as-a-prerequisite-so-a-clean-run-confirms-the-whole-typescript-project-including-the-f1-f5-fix-set-compiles"
+      ],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-assignment-provider-local-file-integration.flow-agents-workflow.manifest-matched-assignment-provider-local-file-integration-re-verify-iteration-1-all-34-34-assertions-pass-up-from-30-pre-fix-including-three-new-genuine-os-process-concurrency-race-assertions-f1-fix-plan-two-real-simultaneously-launched-claim-processes-for-the-same-subject-different-actors-asserting-exactly-one-exits-0-the-on-disk-record-has-a-single-entry-audit-trail-and-the-holder-matches-the-actual-winner-supports-ac5-ac6-ac7-ac9",
+      "claimId": "kontourai-flow-agents-290-assignment-provider-local-file-integration.flow-agents-workflow.manifest-matched-assignment-provider-local-file-integration-re-verify-iteration-1-all-34-34-assertions-pass-up-from-30-pre-fix-including-three-new-genuine-os-process-concurrency-race-assertions-f1-fix-plan-two-real-simultaneously-launched-claim-processes-for-the-same-subject-different-actors-asserting-exactly-one-exits-0-the-on-disk-record-has-a-single-entry-audit-trail-and-the-holder-matches-the-actual-winner-supports-ac5-ac6-ac7-ac9",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-290-assignment-provider-local-file-integration.flow-agents-workflow.manifest-matched-assignment-provider-local-file-integration-re-verify-iteration-1-all-34-34-assertions-pass-up-from-30-pre-fix-including-three-new-genuine-os-process-concurrency-race-assertions-f1-fix-plan-two-real-simultaneously-launched-claim-processes-for-the-same-subject-different-actors-asserting-exactly-one-exits-0-the-on-disk-record-has-a-single-entry-audit-trail-and-the-holder-matches-the-actual-winner-supports-ac5-ac6-ac7-ac9"
+      ],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-assignment-provider-github-integration.flow-agents-workflow.manifest-matched-assignment-provider-github-integration-re-verify-iteration-1-all-45-45-assertions-pass-up-from-42-pre-fix-including-new-f2-hostile-branch-artifact-dir-actor-human-payload-with-newline-ansi-system-text-is-control-char-stripped-in-status-output-both-raw-and-json-escaped-ansi-forms-absent-effective-state-classification-unchanged-and-f3-idle-days-is-exactly-deterministic-via-now-not-real-wall-clock-also-confirmed-idle-days-still-falls-back-correctly-to-real-date-now-when-now-is-omitted-assertions-supports-ac3-ac4-ac9-ac11",
+      "claimId": "kontourai-flow-agents-290-assignment-provider-github-integration.flow-agents-workflow.manifest-matched-assignment-provider-github-integration-re-verify-iteration-1-all-45-45-assertions-pass-up-from-42-pre-fix-including-new-f2-hostile-branch-artifact-dir-actor-human-payload-with-newline-ansi-system-text-is-control-char-stripped-in-status-output-both-raw-and-json-escaped-ansi-forms-absent-effective-state-classification-unchanged-and-f3-idle-days-is-exactly-deterministic-via-now-not-real-wall-clock-also-confirmed-idle-days-still-falls-back-correctly-to-real-date-now-when-now-is-omitted-assertions-supports-ac3-ac4-ac9-ac11",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-290-assignment-provider-github-integration.flow-agents-workflow.manifest-matched-assignment-provider-github-integration-re-verify-iteration-1-all-45-45-assertions-pass-up-from-42-pre-fix-including-new-f2-hostile-branch-artifact-dir-actor-human-payload-with-newline-ansi-system-text-is-control-char-stripped-in-status-output-both-raw-and-json-escaped-ansi-forms-absent-effective-state-classification-unchanged-and-f3-idle-days-is-exactly-deterministic-via-now-not-real-wall-clock-also-confirmed-idle-days-still-falls-back-correctly-to-real-date-now-when-now-is-omitted-assertions-supports-ac3-ac4-ac9-ac11"
+      ],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-pull-work-assignment-join-integration.flow-agents-workflow.manifest-matched-pull-work-assignment-join-integration-re-verify-iteration-1-unaffected-by-f1-f5-still-10-10-assertions-pass-two-actor-simulation-subject-is-free-before-either-session-claims-session-a-claims-it-session-b-s-subsequent-status-join-check-reports-held-never-free-session-b-selects-and-claims-a-disjoint-subject-instead-session-a-s-and-session-b-s-claimed-subject-lists-are-disjoint-supports-ac10-ac12",
+      "claimId": "kontourai-flow-agents-290-pull-work-assignment-join-integration.flow-agents-workflow.manifest-matched-pull-work-assignment-join-integration-re-verify-iteration-1-unaffected-by-f1-f5-still-10-10-assertions-pass-two-actor-simulation-subject-is-free-before-either-session-claims-session-a-claims-it-session-b-s-subsequent-status-join-check-reports-held-never-free-session-b-selects-and-claims-a-disjoint-subject-instead-session-a-s-and-session-b-s-claimed-subject-lists-are-disjoint-supports-ac10-ac12",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-290-pull-work-assignment-join-integration.flow-agents-workflow.manifest-matched-pull-work-assignment-join-integration-re-verify-iteration-1-unaffected-by-f1-f5-still-10-10-assertions-pass-two-actor-simulation-subject-is-free-before-either-session-claims-session-a-claims-it-session-b-s-subsequent-status-join-check-reports-held-never-free-session-b-selects-and-claims-a-disjoint-subject-instead-session-a-s-and-session-b-s-claimed-subject-lists-are-disjoint-supports-ac10-ac12"
+      ],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-pull-work-liveness-preflight-integration.flow-agents-workflow.manifest-matched-pull-work-liveness-preflight-integration-re-verify-iteration-1-68-68-assertions-pass-up-from-65-pre-fix-including-new-f5-wording-correction-assertions-pull-work-now-scopes-true-mutual-exclusion-to-the-local-file-provider-only-via-290-s-lock-does-not-overclaim-true-mutual-exclusion-for-the-github-provider-advisory-last-writer-detect-not-prevent-and-explicitly-warns-290-does-not-close-the-github-race",
+      "claimId": "kontourai-flow-agents-290-pull-work-liveness-preflight-integration.flow-agents-workflow.manifest-matched-pull-work-liveness-preflight-integration-re-verify-iteration-1-68-68-assertions-pass-up-from-65-pre-fix-including-new-f5-wording-correction-assertions-pull-work-now-scopes-true-mutual-exclusion-to-the-local-file-provider-only-via-290-s-lock-does-not-overclaim-true-mutual-exclusion-for-the-github-provider-advisory-last-writer-detect-not-prevent-and-explicitly-warns-290-does-not-close-the-github-race",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-290-pull-work-liveness-preflight-integration.flow-agents-workflow.manifest-matched-pull-work-liveness-preflight-integration-re-verify-iteration-1-68-68-assertions-pass-up-from-65-pre-fix-including-new-f5-wording-correction-assertions-pull-work-now-scopes-true-mutual-exclusion-to-the-local-file-provider-only-via-290-s-lock-does-not-overclaim-true-mutual-exclusion-for-the-github-provider-advisory-last-writer-detect-not-prevent-and-explicitly-warns-290-does-not-close-the-github-race"
+      ],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-pull-work-provider-integration.flow-agents-workflow.manifest-matched-pull-work-provider-integration-re-verify-iteration-1-unaffected-by-f1-f5-still-69-69-assertions-pass-regression-check-confirming-this-issue-s-changes-to-pull-work-skill-md-and-the-provider-cli-did-not-disturb-the-existing-workitemprovider-fixture-based-eval",
+      "claimId": "kontourai-flow-agents-290-pull-work-provider-integration.flow-agents-workflow.manifest-matched-pull-work-provider-integration-re-verify-iteration-1-unaffected-by-f1-f5-still-69-69-assertions-pass-regression-check-confirming-this-issue-s-changes-to-pull-work-skill-md-and-the-provider-cli-did-not-disturb-the-existing-workitemprovider-fixture-based-eval",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-290-pull-work-provider-integration.flow-agents-workflow.manifest-matched-pull-work-provider-integration-re-verify-iteration-1-unaffected-by-f1-f5-still-69-69-assertions-pass-regression-check-confirming-this-issue-s-changes-to-pull-work-skill-md-and-the-provider-cli-did-not-disturb-the-existing-workitemprovider-fixture-based-eval"
+      ],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-gh-process-absence-source-scan.flow-agents-workflow.session-local-no-command-not-a-manifest-entry-independent-source-tree-grep-re-run-this-session-execfilesync-spawnsync-spawn-exec-naming-gh-anywhere-under-src-zero-hits-outside-a-single-explanatory-code-comment-in-assignment-provider-ts-confirms-ac9-at-the-source-level-independent-of-the-evals-own-self-checks",
+      "claimId": "kontourai-flow-agents-290-gh-process-absence-source-scan.flow-agents-workflow.session-local-no-command-not-a-manifest-entry-independent-source-tree-grep-re-run-this-session-execfilesync-spawnsync-spawn-exec-naming-gh-anywhere-under-src-zero-hits-outside-a-single-explanatory-code-comment-in-assignment-provider-ts-confirms-ac9-at-the-source-level-independent-of-the-evals-own-self-checks",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-290-gh-process-absence-source-scan.flow-agents-workflow.session-local-no-command-not-a-manifest-entry-independent-source-tree-grep-re-run-this-session-execfilesync-spawnsync-spawn-exec-naming-gh-anywhere-under-src-zero-hits-outside-a-single-explanatory-code-comment-in-assignment-provider-ts-confirms-ac9-at-the-source-level-independent-of-the-evals-own-self-checks"
+      ],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-trust-reconcile-manifest-parity.flow-agents-workflow.session-local-kind-policy-is-non-reconcilable-regardless-of-command-presence-per-adr-0020-s-classification-table-deliberately-recorded-without-a-command-field-since-the-exact-command-run-this-session-bash-evals-integration-test-trust-reconcile-manifest-sh-is-a-narrower-slice-of-the-actual-manifest-entry-anti-gaming-and-trust-suite-not-that-entry-itself-re-run-this-session-exit-0-manifest-entries-42-ci-yml-check-invocations-42-both-pass-lines-every-ci-yml-required-check-invocation-is-a-manifest-entry-every-manifest-entry-is-invoked-by-a-required-ci-yml-job-own-independent-recount-grep-based-diff-of-run-baseline-sh-manifest-json-ids-vs-ci-yml-s-required-check-slugs-usage-feedback-excluded-reproduces-42-42-with-an-empty-diff-both-directions-aside-a-full-run-of-the-actual-manifest-command-bash-evals-ci-antigaming-suite-sh-id-anti-gaming-and-trust-suite-was-also-attempted-this-session-for-rigor-it-failed-on-an-unrelated-sub-test-evals-acceptance-prove-capture-teeth-sh-s-shipped-bundle-install-step-claude-code-install-sh-failed-codex-install-sh-failed-root-caused-as-environment-flake-not-a-290-regression-or-a-manifest-parity-defect-a-this-branch-s-diff-touches-none-of-dist-install-sh-or-evidence-capture-b-re-running-prove-capture-teeth-sh-standalone-immediately-after-passed-cleanly-8-8-exit-0-c-the-trust-reconcile-manifest-sub-test-itself-was-unaffected-in-both-runs-per-the-verification-contract-s-flaky-test-rule-this-is-disclosed-rather-than-silently-re-run-to-green-and-is-not-claimed-as-manifest-command-backed-evidence-for-this-check-hence-the-session-local-no-command-classification-above",
+      "claimId": "kontourai-flow-agents-290-trust-reconcile-manifest-parity.flow-agents-workflow.session-local-kind-policy-is-non-reconcilable-regardless-of-command-presence-per-adr-0020-s-classification-table-deliberately-recorded-without-a-command-field-since-the-exact-command-run-this-session-bash-evals-integration-test-trust-reconcile-manifest-sh-is-a-narrower-slice-of-the-actual-manifest-entry-anti-gaming-and-trust-suite-not-that-entry-itself-re-run-this-session-exit-0-manifest-entries-42-ci-yml-check-invocations-42-both-pass-lines-every-ci-yml-required-check-invocation-is-a-manifest-entry-every-manifest-entry-is-invoked-by-a-required-ci-yml-job-own-independent-recount-grep-based-diff-of-run-baseline-sh-manifest-json-ids-vs-ci-yml-s-required-check-slugs-usage-feedback-excluded-reproduces-42-42-with-an-empty-diff-both-directions-aside-a-full-run-of-the-actual-manifest-command-bash-evals-ci-antigaming-suite-sh-id-anti-gaming-and-trust-suite-was-also-attempted-this-session-for-rigor-it-failed-on-an-unrelated-sub-test-evals-acceptance-prove-capture-teeth-sh-s-shipped-bundle-install-step-claude-code-install-sh-failed-codex-install-sh-failed-root-caused-as-environment-flake-not-a-290-regression-or-a-manifest-parity-defect-a-this-branch-s-diff-touches-none-of-dist-install-sh-or-evidence-capture-b-re-running-prove-capture-teeth-sh-standalone-immediately-after-passed-cleanly-8-8-exit-0-c-the-trust-reconcile-manifest-sub-test-itself-was-unaffected-in-both-runs-per-the-verification-contract-s-flaky-test-rule-this-is-disclosed-rather-than-silently-re-run-to-green-and-is-not-claimed-as-manifest-command-backed-evidence-for-this-check-hence-the-session-local-no-command-classification-above",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-290-trust-reconcile-manifest-parity.flow-agents-workflow.session-local-kind-policy-is-non-reconcilable-regardless-of-command-presence-per-adr-0020-s-classification-table-deliberately-recorded-without-a-command-field-since-the-exact-command-run-this-session-bash-evals-integration-test-trust-reconcile-manifest-sh-is-a-narrower-slice-of-the-actual-manifest-entry-anti-gaming-and-trust-suite-not-that-entry-itself-re-run-this-session-exit-0-manifest-entries-42-ci-yml-check-invocations-42-both-pass-lines-every-ci-yml-required-check-invocation-is-a-manifest-entry-every-manifest-entry-is-invoked-by-a-required-ci-yml-job-own-independent-recount-grep-based-diff-of-run-baseline-sh-manifest-json-ids-vs-ci-yml-s-required-check-slugs-usage-feedback-excluded-reproduces-42-42-with-an-empty-diff-both-directions-aside-a-full-run-of-the-actual-manifest-command-bash-evals-ci-antigaming-suite-sh-id-anti-gaming-and-trust-suite-was-also-attempted-this-session-for-rigor-it-failed-on-an-unrelated-sub-test-evals-acceptance-prove-capture-teeth-sh-s-shipped-bundle-install-step-claude-code-install-sh-failed-codex-install-sh-failed-root-caused-as-environment-flake-not-a-290-regression-or-a-manifest-parity-defect-a-this-branch-s-diff-touches-none-of-dist-install-sh-or-evidence-capture-b-re-running-prove-capture-teeth-sh-standalone-immediately-after-passed-cleanly-8-8-exit-0-c-the-trust-reconcile-manifest-sub-test-itself-was-unaffected-in-both-runs-per-the-verification-contract-s-flaky-test-rule-this-is-disclosed-rather-than-silently-re-run-to-green-and-is-not-claimed-as-manifest-command-backed-evidence-for-this-check-hence-the-session-local-no-command-classification-above"
+      ],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-concurrency-race-independent-reproduction.flow-agents-workflow.session-local-no-command-independent-of-the-checked-in-eval-s-own-single-iteration-race-assertion-re-ran-the-exact-40-iteration-concurrent-os-process-race-script-race40-sh-originally-used-to-reproduce-the-pre-fix-defect-14-15-double-wins-corroborating-the-code-review-subagent-s-own-29-40-reproduction-methodology-for-each-of-40-iterations-spawn-two-real-simultaneously-launched-assignment-provider-claim-processes-for-a-fresh-subject-different-actors-via-background-wait-genuine-os-level-race-not-sequential-assert-exactly-one-process-exits-0-verify-the-on-disk-record-s-audit-trail-length-is-exactly-1-verify-no-leftover-lockdir-post-fix-result-exactly-one-winner-count-40-40-both-succeeded-count-0-40-neither-succeeded-count-0-40-no-unexpected-audit-state-or-leftover-lockdir-lines-were-emitted-the-script-prints-those-only-on-failure-across-all-40-iterations-this-is-a-full-reversal-of-the-pre-fix-result-and-directly-proves-ac7-and-the-adr-0021-no-lost-locks-premise-for-the-local-file-provider",
+      "claimId": "kontourai-flow-agents-290-concurrency-race-independent-reproduction.flow-agents-workflow.session-local-no-command-independent-of-the-checked-in-eval-s-own-single-iteration-race-assertion-re-ran-the-exact-40-iteration-concurrent-os-process-race-script-race40-sh-originally-used-to-reproduce-the-pre-fix-defect-14-15-double-wins-corroborating-the-code-review-subagent-s-own-29-40-reproduction-methodology-for-each-of-40-iterations-spawn-two-real-simultaneously-launched-assignment-provider-claim-processes-for-a-fresh-subject-different-actors-via-background-wait-genuine-os-level-race-not-sequential-assert-exactly-one-process-exits-0-verify-the-on-disk-record-s-audit-trail-length-is-exactly-1-verify-no-leftover-lockdir-post-fix-result-exactly-one-winner-count-40-40-both-succeeded-count-0-40-neither-succeeded-count-0-40-no-unexpected-audit-state-or-leftover-lockdir-lines-were-emitted-the-script-prints-those-only-on-failure-across-all-40-iterations-this-is-a-full-reversal-of-the-pre-fix-result-and-directly-proves-ac7-and-the-adr-0021-no-lost-locks-premise-for-the-local-file-provider",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-290-concurrency-race-independent-reproduction.flow-agents-workflow.session-local-no-command-independent-of-the-checked-in-eval-s-own-single-iteration-race-assertion-re-ran-the-exact-40-iteration-concurrent-os-process-race-script-race40-sh-originally-used-to-reproduce-the-pre-fix-defect-14-15-double-wins-corroborating-the-code-review-subagent-s-own-29-40-reproduction-methodology-for-each-of-40-iterations-spawn-two-real-simultaneously-launched-assignment-provider-claim-processes-for-a-fresh-subject-different-actors-via-background-wait-genuine-os-level-race-not-sequential-assert-exactly-one-process-exits-0-verify-the-on-disk-record-s-audit-trail-length-is-exactly-1-verify-no-leftover-lockdir-post-fix-result-exactly-one-winner-count-40-40-both-succeeded-count-0-40-neither-succeeded-count-0-40-no-unexpected-audit-state-or-leftover-lockdir-lines-were-emitted-the-script-prints-those-only-on-failure-across-all-40-iterations-this-is-a-full-reversal-of-the-pre-fix-result-and-directly-proves-ac7-and-the-adr-0021-no-lost-locks-premise-for-the-local-file-provider"
+      ],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-f2-hostile-payload-independent-reproduction.flow-agents-workflow.session-local-no-command-independent-of-the-checked-in-eval-s-own-hostile-fixture-built-a-distinct-hostile-fixture-from-the-eval-s-own-different-marker-text-different-control-bytes-cr-bel-a-distinct-ansi-csi-sequence-a-system-ignore-prior-instructions-trailer-via-a-forged-claim-marker-github-issue-comment-any-commenter-can-post-one-then-ran-assignment-provider-status-provider-github-against-it-result-the-raw-payload-with-its-control-bytes-intact-is-absent-from-stdout-the-esc-and-bel-bytes-are-absent-from-stdout-the-parsed-json-s-assignment-record-branch-artifact-dir-and-actor-human-fields-all-equal-the-control-char-stripped-expected-value-computed-independently-via-a-c0-del-c1-codepoint-filter-not-by-importing-the-implementation-s-own-sanitizer-effective-effective-state-remains-human-held-proving-sanitization-does-not-perturb-the-human-assignee-presence-gate-confirms-f2-is-fixed-and-generalizes-beyond-the-eval-s-specific-fixture-string",
+      "claimId": "kontourai-flow-agents-290-f2-hostile-payload-independent-reproduction.flow-agents-workflow.session-local-no-command-independent-of-the-checked-in-eval-s-own-hostile-fixture-built-a-distinct-hostile-fixture-from-the-eval-s-own-different-marker-text-different-control-bytes-cr-bel-a-distinct-ansi-csi-sequence-a-system-ignore-prior-instructions-trailer-via-a-forged-claim-marker-github-issue-comment-any-commenter-can-post-one-then-ran-assignment-provider-status-provider-github-against-it-result-the-raw-payload-with-its-control-bytes-intact-is-absent-from-stdout-the-esc-and-bel-bytes-are-absent-from-stdout-the-parsed-json-s-assignment-record-branch-artifact-dir-and-actor-human-fields-all-equal-the-control-char-stripped-expected-value-computed-independently-via-a-c0-del-c1-codepoint-filter-not-by-importing-the-implementation-s-own-sanitizer-effective-effective-state-remains-human-held-proving-sanitization-does-not-perturb-the-human-assignee-presence-gate-confirms-f2-is-fixed-and-generalizes-beyond-the-eval-s-specific-fixture-string",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-290-f2-hostile-payload-independent-reproduction.flow-agents-workflow.session-local-no-command-independent-of-the-checked-in-eval-s-own-hostile-fixture-built-a-distinct-hostile-fixture-from-the-eval-s-own-different-marker-text-different-control-bytes-cr-bel-a-distinct-ansi-csi-sequence-a-system-ignore-prior-instructions-trailer-via-a-forged-claim-marker-github-issue-comment-any-commenter-can-post-one-then-ran-assignment-provider-status-provider-github-against-it-result-the-raw-payload-with-its-control-bytes-intact-is-absent-from-stdout-the-esc-and-bel-bytes-are-absent-from-stdout-the-parsed-json-s-assignment-record-branch-artifact-dir-and-actor-human-fields-all-equal-the-control-char-stripped-expected-value-computed-independently-via-a-c0-del-c1-codepoint-filter-not-by-importing-the-implementation-s-own-sanitizer-effective-effective-state-remains-human-held-proving-sanitization-does-not-perturb-the-human-assignee-presence-gate-confirms-f2-is-fixed-and-generalizes-beyond-the-eval-s-specific-fixture-string"
+      ],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-ac1-contract-doc-review.flow-agents-workflow.re-verify-iteration-1-re-read-context-contracts-assignment-provider-contract-md-unchanged-in-substance-from-the-prior-verification-pass-other-than-f4-s-additive-argv-array-execution-note-cross-check-against-docs-adr-0021-assignment-leases-and-stale-claim-takeover-md-sections-1-2-4-6-still-holds-no-paraphrase-drift",
+      "claimId": "kontourai-flow-agents-290-ac1-contract-doc-review.flow-agents-workflow.re-verify-iteration-1-re-read-context-contracts-assignment-provider-contract-md-unchanged-in-substance-from-the-prior-verification-pass-other-than-f4-s-additive-argv-array-execution-note-cross-check-against-docs-adr-0021-assignment-leases-and-stale-claim-takeover-md-sections-1-2-4-6-still-holds-no-paraphrase-drift",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-290-ac1-contract-doc-review.flow-agents-workflow.re-verify-iteration-1-re-read-context-contracts-assignment-provider-contract-md-unchanged-in-substance-from-the-prior-verification-pass-other-than-f4-s-additive-argv-array-execution-note-cross-check-against-docs-adr-0021-assignment-leases-and-stale-claim-takeover-md-sections-1-2-4-6-still-holds-no-paraphrase-drift"
+      ],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-ac2-settings-schema-independent-validation.flow-agents-workflow.re-verify-iteration-1-schemas-assignment-provider-settings-schema-json-is-unchanged-by-the-f1-f5-fix-set-confirmed-via-diff-scope-the-fix-touches-only-src-cli-assignment-provider-ts-kits-builder-skills-pull-work-skill-md-context-contracts-assignment-provider-contract-md-and-eval-scripts-prior-independent-ajv-validation-good-instance-valid-true-missing-provider-kind-valid-false-github-kind-missing-repo-valid-false-carried-forward-as-still-applicable",
+      "claimId": "kontourai-flow-agents-290-ac2-settings-schema-independent-validation.flow-agents-workflow.re-verify-iteration-1-schemas-assignment-provider-settings-schema-json-is-unchanged-by-the-f1-f5-fix-set-confirmed-via-diff-scope-the-fix-touches-only-src-cli-assignment-provider-ts-kits-builder-skills-pull-work-skill-md-context-contracts-assignment-provider-contract-md-and-eval-scripts-prior-independent-ajv-validation-good-instance-valid-true-missing-provider-kind-valid-false-github-kind-missing-repo-valid-false-carried-forward-as-still-applicable",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-290-ac2-settings-schema-independent-validation.flow-agents-workflow.re-verify-iteration-1-schemas-assignment-provider-settings-schema-json-is-unchanged-by-the-f1-f5-fix-set-confirmed-via-diff-scope-the-fix-touches-only-src-cli-assignment-provider-ts-kits-builder-skills-pull-work-skill-md-context-contracts-assignment-provider-contract-md-and-eval-scripts-prior-independent-ajv-validation-good-instance-valid-true-missing-provider-kind-valid-false-github-kind-missing-repo-valid-false-carried-forward-as-still-applicable"
+      ],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-ac8-pull-work-skill-wiring-review.flow-agents-workflow.re-read-the-diff-of-kits-builder-skills-pull-work-skill-md-s-f4-f5-changes-an-explicit-argv-array-never-shell-string-interpolation-execution-note-added-to-the-assignment-claim-on-selection-section-f4-and-the-mutual-exclusion-claim-corrected-to-scope-true-mutual-exclusion-to-the-local-file-provider-only-via-290-s-lock-explicitly-not-claiming-it-for-the-github-provider-which-remains-advisory-last-writer-f5-no-other-functional-change-to-the-selection-step-wiring-verified-in-the-prior-pass",
+      "claimId": "kontourai-flow-agents-290-ac8-pull-work-skill-wiring-review.flow-agents-workflow.re-read-the-diff-of-kits-builder-skills-pull-work-skill-md-s-f4-f5-changes-an-explicit-argv-array-never-shell-string-interpolation-execution-note-added-to-the-assignment-claim-on-selection-section-f4-and-the-mutual-exclusion-claim-corrected-to-scope-true-mutual-exclusion-to-the-local-file-provider-only-via-290-s-lock-explicitly-not-claiming-it-for-the-github-provider-which-remains-advisory-last-writer-f5-no-other-functional-change-to-the-selection-step-wiring-verified-in-the-prior-pass",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-290-ac8-pull-work-skill-wiring-review.flow-agents-workflow.re-read-the-diff-of-kits-builder-skills-pull-work-skill-md-s-f4-f5-changes-an-explicit-argv-array-never-shell-string-interpolation-execution-note-added-to-the-assignment-claim-on-selection-section-f4-and-the-mutual-exclusion-claim-corrected-to-scope-true-mutual-exclusion-to-the-local-file-provider-only-via-290-s-lock-explicitly-not-claiming-it-for-the-github-provider-which-remains-advisory-last-writer-f5-no-other-functional-change-to-the-selection-step-wiring-verified-in-the-prior-pass"
+      ],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-ac10-docs-and-context-map-review.flow-agents-workflow.docs-context-map-md-drift-checked-clean-via-the-command-backed-context-map-drift-check-above-docs-workflow-usage-guide-md-s-assignment-ownership-the-third-provider-leg-subsection-re-read-unchanged-in-substance",
+      "claimId": "kontourai-flow-agents-290-ac10-docs-and-context-map-review.flow-agents-workflow.docs-context-map-md-drift-checked-clean-via-the-command-backed-context-map-drift-check-above-docs-workflow-usage-guide-md-s-assignment-ownership-the-third-provider-leg-subsection-re-read-unchanged-in-substance",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-290-ac10-docs-and-context-map-review.flow-agents-workflow.docs-context-map-md-drift-checked-clean-via-the-command-backed-context-map-drift-check-above-docs-workflow-usage-guide-md-s-assignment-ownership-the-third-provider-leg-subsection-re-read-unchanged-in-substance"
+      ],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-goal-fit.flow-agents-workflow.user-outcome-now-fully-met-a-selected-github-issue-carries-a-durable-human-visible-ownership-record-the-same-operations-work-against-a-local-file-record-for-tracker-less-repos-evals-with-genuine-mutual-exclusion-f1-independently-re-confirmed-40-40-human-assignees-are-never-silently-reclaimed-untrusted-github-claim-comment-fields-no-longer-leak-unsanitized-into-agent-facing-output-f2-independently-re-confirmed-idle-days-is-deterministic-under-now-f3-the-argv-execution-contract-is-explicit-f4-skill-md-no-longer-overclaims-github-side-mutual-exclusion-f5-design-decision-1-s-render-execute-divergence-remains-explicitly-documented-and-owner-confirmed-state-json-history-session-9ce76bbb-durable-docs-target-contract-doc-workflow-usage-guide-subsection-is-met",
+      "claimId": "kontourai-flow-agents-290-goal-fit.flow-agents-workflow.user-outcome-now-fully-met-a-selected-github-issue-carries-a-durable-human-visible-ownership-record-the-same-operations-work-against-a-local-file-record-for-tracker-less-repos-evals-with-genuine-mutual-exclusion-f1-independently-re-confirmed-40-40-human-assignees-are-never-silently-reclaimed-untrusted-github-claim-comment-fields-no-longer-leak-unsanitized-into-agent-facing-output-f2-independently-re-confirmed-idle-days-is-deterministic-under-now-f3-the-argv-execution-contract-is-explicit-f4-skill-md-no-longer-overclaims-github-side-mutual-exclusion-f5-design-decision-1-s-render-execute-divergence-remains-explicitly-documented-and-owner-confirmed-state-json-history-session-9ce76bbb-durable-docs-target-contract-doc-workflow-usage-guide-subsection-is-met",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-290-goal-fit.flow-agents-workflow.user-outcome-now-fully-met-a-selected-github-issue-carries-a-durable-human-visible-ownership-record-the-same-operations-work-against-a-local-file-record-for-tracker-less-repos-evals-with-genuine-mutual-exclusion-f1-independently-re-confirmed-40-40-human-assignees-are-never-silently-reclaimed-untrusted-github-claim-comment-fields-no-longer-leak-unsanitized-into-agent-facing-output-f2-independently-re-confirmed-idle-days-is-deterministic-under-now-f3-the-argv-execution-contract-is-explicit-f4-skill-md-no-longer-overclaims-github-side-mutual-exclusion-f5-design-decision-1-s-render-execute-divergence-remains-explicitly-documented-and-owner-confirmed-state-json-history-session-9ce76bbb-durable-docs-target-contract-doc-workflow-usage-guide-subsection-is-met"
+      ],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-pre-existing-unrelated-eval-failures.flow-agents-workflow.accepted-gap-waived-this-check-s-underlying-record-evidence-call-carried-this-check-s-waiver-via-the-per-check-waiver-json-payload-adr-0020-rule-a-waiver-cannot-ride-the-global-accepted-gap-reason-waived-by-flags-when-the-same-record-evidence-call-also-includes-command-backed-checks-this-call-includes-8-the-per-check-waiver-is-stamped-on-this-claim-s-metadata-in-trust-bundle-status-assumed-and-is-not-duplicated-here-since-this-schema-does-not-carry-a-waiver-property-see-trust-bundle-claim-workflow-check-runtime-pre-existing-unrelated-eval-failures-for-the-canonical-waiver-record-reason-three-pre-existing-eval-failures-unrelated-to-290-s-scope-confirmed-via-diff-scope-approved-by-re-verification-session-independent-diff-scope-confirmation-per-the-task-brief-s-own-pre-existing-framing-approved-at-2026-07-03t18-14-59z-three-eval-scripts-test-goal-fit-hook-sh-1-failing-assertion-goal-fit-hook-should-not-block-by-default-test-goal-fit-escape-hatch-sh-5-failing-assertions-test-session-resume-roundtrip-sh-13-failing-assertions-fail-in-this-working-tree-independent-of-this-session-s-290-re-verification-diff-scope-check-git-diff-stat-against-this-branch-s-merge-base-2e603de-confirms-none-of-the-source-files-these-evals-exercise-goal-fit-hook-logic-workflow-steering-escape-hatch-session-resume-liveness-warning-rendering-are-touched-by-this-branch-s-changed-or-added-files-only-github-workflows-ci-yml-docs-context-map-md-docs-fixture-ownership-md-docs-workflow-usage-guide-md-evals-ci-run-baseline-sh-evals-integration-test-fixture-retirement-audit-sh-evals-integration-test-pull-work-liveness-preflight-sh-evals-run-sh-kits-builder-skills-pull-work-skill-md-package-json-two-additive-npm-script-lines-only-src-cli-ts-src-tools-validate-source-tree-ts-plus-the-new-assignment-provider-only-files-confirmed-pre-existing-not-a-regression-introduced-by-this-issue-or-its-iteration-1-fix-separately-test-bundle-install-sh-the-fourth-eval-flagged-as-possibly-pre-existing-broken-going-into-this-re-verify-was-re-run-this-session-and-passed-cleanly-77-77-it-is-not-an-open-gap-and-is-not-part-of-this-waiver",
+      "claimId": "kontourai-flow-agents-290-pre-existing-unrelated-eval-failures.flow-agents-workflow.accepted-gap-waived-this-check-s-underlying-record-evidence-call-carried-this-check-s-waiver-via-the-per-check-waiver-json-payload-adr-0020-rule-a-waiver-cannot-ride-the-global-accepted-gap-reason-waived-by-flags-when-the-same-record-evidence-call-also-includes-command-backed-checks-this-call-includes-8-the-per-check-waiver-is-stamped-on-this-claim-s-metadata-in-trust-bundle-status-assumed-and-is-not-duplicated-here-since-this-schema-does-not-carry-a-waiver-property-see-trust-bundle-claim-workflow-check-runtime-pre-existing-unrelated-eval-failures-for-the-canonical-waiver-record-reason-three-pre-existing-eval-failures-unrelated-to-290-s-scope-confirmed-via-diff-scope-approved-by-re-verification-session-independent-diff-scope-confirmation-per-the-task-brief-s-own-pre-existing-framing-approved-at-2026-07-03t18-14-59z-three-eval-scripts-test-goal-fit-hook-sh-1-failing-assertion-goal-fit-hook-should-not-block-by-default-test-goal-fit-escape-hatch-sh-5-failing-assertions-test-session-resume-roundtrip-sh-13-failing-assertions-fail-in-this-working-tree-independent-of-this-session-s-290-re-verification-diff-scope-check-git-diff-stat-against-this-branch-s-merge-base-2e603de-confirms-none-of-the-source-files-these-evals-exercise-goal-fit-hook-logic-workflow-steering-escape-hatch-session-resume-liveness-warning-rendering-are-touched-by-this-branch-s-changed-or-added-files-only-github-workflows-ci-yml-docs-context-map-md-docs-fixture-ownership-md-docs-workflow-usage-guide-md-evals-ci-run-baseline-sh-evals-integration-test-fixture-retirement-audit-sh-evals-integration-test-pull-work-liveness-preflight-sh-evals-run-sh-kits-builder-skills-pull-work-skill-md-package-json-two-additive-npm-script-lines-only-src-cli-ts-src-tools-validate-source-tree-ts-plus-the-new-assignment-provider-only-files-confirmed-pre-existing-not-a-regression-introduced-by-this-issue-or-its-iteration-1-fix-separately-test-bundle-install-sh-the-fourth-eval-flagged-as-possibly-pre-existing-broken-going-into-this-re-verify-was-re-run-this-session-and-passed-cleanly-77-77-it-is-not-an-open-gap-and-is-not-part-of-this-waiver",
+      "status": "assumed",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-290-pre-existing-unrelated-eval-failures.flow-agents-workflow.accepted-gap-waived-this-check-s-underlying-record-evidence-call-carried-this-check-s-waiver-via-the-per-check-waiver-json-payload-adr-0020-rule-a-waiver-cannot-ride-the-global-accepted-gap-reason-waived-by-flags-when-the-same-record-evidence-call-also-includes-command-backed-checks-this-call-includes-8-the-per-check-waiver-is-stamped-on-this-claim-s-metadata-in-trust-bundle-status-assumed-and-is-not-duplicated-here-since-this-schema-does-not-carry-a-waiver-property-see-trust-bundle-claim-workflow-check-runtime-pre-existing-unrelated-eval-failures-for-the-canonical-waiver-record-reason-three-pre-existing-eval-failures-unrelated-to-290-s-scope-confirmed-via-diff-scope-approved-by-re-verification-session-independent-diff-scope-confirmation-per-the-task-brief-s-own-pre-existing-framing-approved-at-2026-07-03t18-14-59z-three-eval-scripts-test-goal-fit-hook-sh-1-failing-assertion-goal-fit-hook-should-not-block-by-default-test-goal-fit-escape-hatch-sh-5-failing-assertions-test-session-resume-roundtrip-sh-13-failing-assertions-fail-in-this-working-tree-independent-of-this-session-s-290-re-verification-diff-scope-check-git-diff-stat-against-this-branch-s-merge-base-2e603de-confirms-none-of-the-source-files-these-evals-exercise-goal-fit-hook-logic-workflow-steering-escape-hatch-session-resume-liveness-warning-rendering-are-touched-by-this-branch-s-changed-or-added-files-only-github-workflows-ci-yml-docs-context-map-md-docs-fixture-ownership-md-docs-workflow-usage-guide-md-evals-ci-run-baseline-sh-evals-integration-test-fixture-retirement-audit-sh-evals-integration-test-pull-work-liveness-preflight-sh-evals-run-sh-kits-builder-skills-pull-work-skill-md-package-json-two-additive-npm-script-lines-only-src-cli-ts-src-tools-validate-source-tree-ts-plus-the-new-assignment-provider-only-files-confirmed-pre-existing-not-a-regression-introduced-by-this-issue-or-its-iteration-1-fix-separately-test-bundle-install-sh-the-fourth-eval-flagged-as-possibly-pre-existing-broken-going-into-this-re-verify-was-re-run-this-session-and-passed-cleanly-77-77-it-is-not-an-open-gap-and-is-not-part-of-this-waiver"
+      ],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-ac1-contract-doc-covers-adr-0021-sections-context-contracts-assignment-provider-contract-md.flow-agents-workflow.ac1-contract-doc-covers-adr-0021-sections-context-contracts-assignment-provider-contract-md",
+      "claimId": "kontourai-flow-agents-290-ac1-contract-doc-covers-adr-0021-sections-context-contracts-assignment-provider-contract-md.flow-agents-workflow.ac1-contract-doc-covers-adr-0021-sections-context-contracts-assignment-provider-contract-md",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-03T10:03:00Z",
-      "verifiedAt": "2026-07-03T10:03:00Z"
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-ac2-settings-schema-validates-schemas-assignment-provider-settings-schema-json.flow-agents-workflow.ac2-settings-schema-validates-schemas-assignment-provider-settings-schema-json",
+      "claimId": "kontourai-flow-agents-290-ac2-settings-schema-validates-schemas-assignment-provider-settings-schema-json.flow-agents-workflow.ac2-settings-schema-validates-schemas-assignment-provider-settings-schema-json",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-ac3-github-render-emits-versioned-comment-assignment-provider-render-claim-provider.flow-agents-workflow.ac3-github-render-emits-versioned-comment-assignment-provider-render-claim-provider",
+      "claimId": "kontourai-flow-agents-290-ac3-github-render-emits-versioned-comment-assignment-provider-render-claim-provider.flow-agents-workflow.ac3-github-render-emits-versioned-comment-assignment-provider-render-claim-provider",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-ac4-github-status-parses-existing-claim-assignment-provider-status-provider-github.flow-agents-workflow.ac4-github-status-parses-existing-claim-assignment-provider-status-provider-github",
+      "claimId": "kontourai-flow-agents-290-ac4-github-status-parses-existing-claim-assignment-provider-status-provider-github.flow-agents-workflow.ac4-github-status-parses-existing-claim-assignment-provider-status-provider-github",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-ac5-local-file-round-trip-assignment-provider-claim-status-supersede-release-provider.flow-agents-workflow.ac5-local-file-round-trip-assignment-provider-claim-status-supersede-release-provider",
+      "claimId": "kontourai-flow-agents-290-ac5-local-file-round-trip-assignment-provider-claim-status-supersede-release-provider.flow-agents-workflow.ac5-local-file-round-trip-assignment-provider-claim-status-supersede-release-provider",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-ac6-list-returns-actor-claims-assignment-provider-list-actor-actor-both-provider.flow-agents-workflow.ac6-list-returns-actor-claims-assignment-provider-list-actor-actor-both-provider",
+      "claimId": "kontourai-flow-agents-290-ac6-list-returns-actor-claims-assignment-provider-list-actor-actor-both-provider.flow-agents-workflow.ac6-list-returns-actor-claims-assignment-provider-list-actor-actor-both-provider",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-ac7-concurrent-claim-fails-loud-or-reports-holder-a-second-claim-on-an-already-claimed.flow-agents-workflow.ac7-concurrent-claim-fails-loud-or-reports-holder-a-second-claim-on-an-already-claimed",
+      "claimId": "kontourai-flow-agents-290-ac7-concurrent-claim-fails-loud-or-reports-holder-a-second-claim-on-an-already-claimed.flow-agents-workflow.ac7-concurrent-claim-fails-loud-or-reports-holder-a-second-claim-on-an-already-claimed",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-ac8-pull-work-wires-durable-claim-at-selection-pull-work-skill-md-s-selection-step.flow-agents-workflow.ac8-pull-work-wires-durable-claim-at-selection-pull-work-skill-md-s-selection-step",
+      "claimId": "kontourai-flow-agents-290-ac8-pull-work-wires-durable-claim-at-selection-pull-work-skill-md-s-selection-step.flow-agents-workflow.ac8-pull-work-wires-durable-claim-at-selection-pull-work-skill-md-s-selection-step",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-ac9-no-live-gh-process-in-evals-none-of-this-issue-s-new-eval-scripts-invoke-a-live-or.flow-agents-workflow.ac9-no-live-gh-process-in-evals-none-of-this-issue-s-new-eval-scripts-invoke-a-live-or",
+      "claimId": "kontourai-flow-agents-290-ac9-no-live-gh-process-in-evals-none-of-this-issue-s-new-eval-scripts-invoke-a-live-or.flow-agents-workflow.ac9-no-live-gh-process-in-evals-none-of-this-issue-s-new-eval-scripts-invoke-a-live-or",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-ac10-docs-and-context-map-updated-docs-context-map-md-lists-the-new-schema-via.flow-agents-workflow.ac10-docs-and-context-map-updated-docs-context-map-md-lists-the-new-schema-via",
+      "claimId": "kontourai-flow-agents-290-ac10-docs-and-context-map-updated-docs-context-map-md-lists-the-new-schema-via.flow-agents-workflow.ac10-docs-and-context-map-updated-docs-context-map-md-lists-the-new-schema-via",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-ac11-human-assignee-policy-knob-present-and-respected-the-settings-schema-s.flow-agents-workflow.ac11-human-assignee-policy-knob-present-and-respected-the-settings-schema-s",
+      "claimId": "kontourai-flow-agents-290-ac11-human-assignee-policy-knob-present-and-respected-the-settings-schema-s.flow-agents-workflow.ac11-human-assignee-policy-knob-present-and-respected-the-settings-schema-s",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-ac12-disjoint-selection-simulated-a-two-actor-join-simulation-proves-that-once-actor-a-s.flow-agents-workflow.ac12-disjoint-selection-simulated-a-two-actor-join-simulation-proves-that-once-actor-a-s",
+      "claimId": "kontourai-flow-agents-290-ac12-disjoint-selection-simulated-a-two-actor-join-simulation-proves-that-once-actor-a-s.flow-agents-workflow.ac12-disjoint-selection-simulated-a-two-actor-join-simulation-proves-that-once-actor-a-s",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-code-review-290-iteration-1-recheck.flow-agents-workflow.focused-re-review-of-the-iteration-1-fix-for-all-5-prior-findings-delta-reviewed-src-cli-assignment-provider-ts-withsubjectlock-sanitizedisplayfield-computeeffectivestate-s-nowms-threading-kits-builder-skills-pull-work-skill-md-context-contracts-assignment-provider-contract-md-and-the-two-evals-integration-test-assignment-provider-sh-files-plus-test-pull-work-liveness-preflight-sh-s-updated-static-assertions-findings-0-critical-0-high-0-medium-0-low-blocking-all-5-prior-findings-independently-reproduced-as-fixed-with-live-repro-evidence-not-just-diff-reading-including-a-150-iteration-independent-concurrency-race-reproduction-and-an-explicit-vacuous-eval-check-patched-a-copy-of-withsubjectlock-to-a-no-op-and-confirmed-the-new-eval-genuinely-fails-40-40-against-the-unlocked-build-then-passes-40-40-against-the-real-lock-no-new-defects-introduced-by-the-fix-imported-from-kontourai-flow-agents-290-plan-work-code-review-iter1-md-via-npm-run-workflow-sidecar-import-critique",
+      "claimId": "kontourai-flow-agents-290-code-review-290-iteration-1-recheck.flow-agents-workflow.focused-re-review-of-the-iteration-1-fix-for-all-5-prior-findings-delta-reviewed-src-cli-assignment-provider-ts-withsubjectlock-sanitizedisplayfield-computeeffectivestate-s-nowms-threading-kits-builder-skills-pull-work-skill-md-context-contracts-assignment-provider-contract-md-and-the-two-evals-integration-test-assignment-provider-sh-files-plus-test-pull-work-liveness-preflight-sh-s-updated-static-assertions-findings-0-critical-0-high-0-medium-0-low-blocking-all-5-prior-findings-independently-reproduced-as-fixed-with-live-repro-evidence-not-just-diff-reading-including-a-150-iteration-independent-concurrency-race-reproduction-and-an-explicit-vacuous-eval-check-patched-a-copy-of-withsubjectlock-to-a-no-op-and-confirmed-the-new-eval-genuinely-fails-40-40-against-the-unlocked-build-then-passes-40-40-against-the-real-lock-no-new-defects-introduced-by-the-fix-imported-from-kontourai-flow-agents-290-plan-work-code-review-iter1-md-via-npm-run-workflow-sidecar-import-critique",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-290-code-review-290-iteration-1.flow-agents-workflow.supersedes-the-original-changes-requested-review-same-critique-id-same-reviewer-per-344-s-reviewer-scoped-critique-supersession-all-5-findings-1-critical-1-high-2-medium-1-low-independently-re-confirmed-fixed-f1-withsubjectlock-atomicity-40-40-and-150-150-concurrent-race-reproductions-0-double-wins-f2-sanitizedisplayfield-control-byte-stripping-independently-reproduced-with-a-distinct-hostile-payload-f3-idle-days-now-now-governed-f4-argv-execution-contract-documented-f5-mutual-exclusion-wording-corrected-corroborated-by-the-separate-iteration-1-recheck-review-kontourai-flow-agents-290-plan-work-code-review-iter1-md-verdict-approve-and-this-re-verification-session-s-own-independent-reproductions",
+      "claimId": "kontourai-flow-agents-290-code-review-290-iteration-1.flow-agents-workflow.supersedes-the-original-changes-requested-review-same-critique-id-same-reviewer-per-344-s-reviewer-scoped-critique-supersession-all-5-findings-1-critical-1-high-2-medium-1-low-independently-re-confirmed-fixed-f1-withsubjectlock-atomicity-40-40-and-150-150-concurrent-race-reproductions-0-double-wins-f2-sanitizedisplayfield-control-byte-stripping-independently-reproduced-with-a-distinct-hostile-payload-f3-idle-days-now-now-governed-f4-argv-execution-contract-documented-f5-mutual-exclusion-wording-corrected-corroborated-by-the-separate-iteration-1-recheck-review-kontourai-flow-agents-290-plan-work-code-review-iter1-md-verdict-approve-and-this-re-verification-session-s-own-independent-reproductions",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T19:05:00Z",
+      "verifiedAt": "2026-07-03T19:05:00Z"
     }
   ]
 }
