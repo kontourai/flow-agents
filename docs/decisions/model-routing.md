@@ -57,7 +57,7 @@ frontmatter.
 Routing policy changes independently of, and more often than, the skills and
 contracts that consume it (new models, new providers, retuned role-to-model
 mappings). Keeping it as data in `.datum/config.json` — the same registry
-shape datum's `extraction-default` role already uses for the campfit
+shape the `extraction-default` role already establishes as portfolio
 precedent — means a routing change is a config edit reviewed like any other
 data change, not a source/doc change scattered across every delegating
 skill.
