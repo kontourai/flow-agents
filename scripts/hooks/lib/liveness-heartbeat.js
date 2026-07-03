@@ -54,7 +54,22 @@
  * actor-identity.js / liveness-read.js consumers).
  *
  * Exports:
- *   maybeEmitHeartbeat({ cwd, env, now }) → { emitted: boolean, reason?: string }
+ *   maybeEmitHeartbeat({ cwd, env, now }) → { emitted: boolean, reason?: string,
+ *     conflict?: { actor: string, lastAt: string, ttlSeconds: number } }
+ *
+ * Mid-turn conflict detection (issue #320, AC3/AC5): every call already reads a bounded
+ * tail of the liveness stream to throttle/emit our OWN heartbeat. That same in-memory tail
+ * (or, on the rare full-read fallback path, that full read) is additionally passed through
+ * `freshHolders()` (./liveness-read) to detect another actor's fresh claim on OUR OWN held
+ * subject — zero added I/O. The optional `conflict` field is attached whenever we've
+ * confirmed we hold a live claim on the subject (regardless of whether our own heartbeat
+ * emits or throttles this call) and some other actor's most recent event for the subject is
+ * strictly newer than OUR OWN last recorded event for it prior to this call — a
+ * stream-derived episode watermark, not a wall-clock timer, so a still-fresh conflicting
+ * claim already seen on a prior call never re-fires; only a genuinely newer event from the
+ * conflicting actor does (our own heartbeat write, once appended, becomes the new watermark
+ * for the next call). Never treated as evidence for OUR OWN claim/throttle decisions above —
+ * this only ADDS a field, it never changes the existing `emitted`/`reason` semantics.
  */
 
 const fs = require('fs');
@@ -62,7 +77,7 @@ const path = require('path');
 
 const { isLivenessEnabled, resolveHeartbeatThrottleSeconds } = require('./liveness-policy');
 const { livenessStreamFile, appendLivenessEvent } = require('./liveness-write');
-const { readLivenessEvents, readLivenessEventsTail } = require('./liveness-read');
+const { readLivenessEvents, readLivenessEventsTail, freshHolders } = require('./liveness-read');
 const { resolveActor, isUnresolvedActor, sanitizeSegment } = require('./actor-identity');
 const { flowAgentsArtifactRoot } = require('./local-artifact-paths');
 
@@ -134,6 +149,72 @@ function filterMatchingPair(events, slug, actor) {
 }
 
 /**
+ * Detect another actor's fresher claim on the SAME subject as our own, using an
+ * already-loaded events array — the bounded tail in the common case, or the full-read
+ * fallback array in the rare case the EMIT decision already paid for one — never an
+ * additional `fs` call (issue #320, AC3). Reuses the canonical `freshHolders()` grouping/
+ * freshness rules from `./liveness-read` (the same helper `workflow-steering.js`'s ambient
+ * per-turn digest already relies on) instead of re-deriving freshness logic here.
+ *
+ * Episode-throttled per AC5: a holder is only reported when its `lastAt` is strictly newer
+ * than `ourLastAt` (our own last recorded event for this subject, captured BEFORE this call
+ * potentially appends its own heartbeat) — an unchanged, still-fresh conflicting claim already
+ * surfaced on a prior call never re-fires; only a genuinely new event from the conflicting
+ * actor does. This is a stream-derived watermark comparison, never a wall-clock timer. When
+ * more than one other actor qualifies, the single most-recently-updated one is reported.
+ *
+ * Known, disclosed limitation (mirrors this module's own orphan-heartbeat caveat above): if
+ * the conflicting actor's own `claim` event (carrying `ttlSeconds`) has scrolled outside the
+ * 64KB tail window, `freshHolders` defaults that holder's `ttlSeconds` to 1800s using only the
+ * heartbeat events visible in the tail — the same accepted-and-disclosed class of limitation
+ * the module header already names for the caller's OWN pair.
+ *
+ * @param {object[]} events
+ * @param {string} slug
+ * @param {string} actor
+ * @param {number} nowMs
+ * @param {string} ourLastAt
+ * @returns {{actor: string, lastAt: string, ttlSeconds: number}|undefined}
+ */
+function computeConflict(events, slug, actor, nowMs, ourLastAt) {
+  const ourLastAtMs = Date.parse(ourLastAt);
+  const others = freshHolders(events, slug, actor, nowMs).filter((h) => {
+    const holderAtMs = Date.parse(h.lastAt);
+    return Number.isFinite(holderAtMs) && Number.isFinite(ourLastAtMs) && holderAtMs > ourLastAtMs;
+  });
+  if (!others.length) return undefined;
+  const winner = others.reduce((a, b) => (Date.parse(b.lastAt) > Date.parse(a.lastAt) ? b : a));
+  // Sanitize at this single choke point (issue #320 fix iteration 1, sec-CRITICAL/HIGH F1/F2):
+  // `winner.actor`/`winner.lastAt` are read straight off the multi-writer append-only
+  // liveness/events.jsonl stream, which ANY process can append to (a second agent's shell, a
+  // hand-edit) bypassing the CLI write-side `sanitizeSegment` entirely. These values flow
+  // UNSANITIZED into agent-facing channels (hookSpecificOutput.additionalContext / stderr) in
+  // all four wrapper hooks below — the exact #287 injection class in a new, more directly
+  // agent-facing channel. Sanitizing once here, at the sole place `conflict` is constructed,
+  // means every caller (all four wrappers) inherits clean values with no per-wrapper defense
+  // to forget. `actor` reuses the same allowlist+64-char-cap `sanitizeSegment` the write side
+  // already applies to legitimate actors (a no-op on them); `lastAt` is structurally
+  // eliminated by re-serializing through Date.parse/toISOString — a timestamp can never carry
+  // control chars once canonicalized this way. `ttlSeconds` is already a Number — left as-is.
+  const winnerLastAtMs = Date.parse(winner.lastAt);
+  const sanitizedLastAt = Number.isFinite(winnerLastAtMs) ? new Date(winnerLastAtMs).toISOString() : '';
+  return { actor: sanitizeSegment(winner.actor), lastAt: sanitizedLastAt, ttlSeconds: winner.ttlSeconds };
+}
+
+/**
+ * Attach an optional `conflict` field to a result object, omitting the key entirely when no
+ * conflict was detected (rather than an explicit `conflict: undefined`), so callers can rely
+ * on a plain `if (result.conflict)` check.
+ *
+ * @param {object} result
+ * @param {{actor: string, lastAt: string, ttlSeconds: number}|undefined} conflict
+ * @returns {object}
+ */
+function attachConflictField(result, conflict) {
+  return conflict ? { ...result, conflict } : result;
+}
+
+/**
  * Emit a throttled tool-activity liveness heartbeat for the resolved
  * actor/subject, if (and only if) a fresh, unreleased claim already exists.
  * Never creates a new claim. Fails open — always resolves to a result
@@ -148,9 +229,16 @@ function filterMatchingPair(events, slug, actor) {
  *   - EMIT decision requires an actual `claim` event for the pair: taken
  *     from the tail when already present there, otherwise exactly one full
  *     read confirms (or refutes) it. No claim anywhere -> 'no-claim'.
+ *   - CONFLICT check (issue #320, AC3/AC5) reuses whichever events array (tail, or the rare
+ *     full-read fallback) already confirmed OUR OWN live claim — zero added I/O — and passes
+ *     it through `freshHolders()` to find another actor's claim on the SAME subject. Only
+ *     surfaced when that other actor's most recent event is strictly newer than our own last
+ *     recorded event for the subject prior to this call (a stream-derived watermark, not a
+ *     wall-clock timer), so it fires once per genuinely new conflicting event, independent of
+ *     whether our own heartbeat emits or throttles this call.
  *
  * @param {{cwd?: string, env?: NodeJS.ProcessEnv, now?: Date|string}} [opts]
- * @returns {{emitted: boolean, reason?: string}}
+ * @returns {{emitted: boolean, reason?: string, conflict?: {actor: string, lastAt: string, ttlSeconds: number}}}
  */
 function maybeEmitHeartbeat(opts = {}) {
   const { cwd = process.cwd(), env = process.env } = opts || {};
@@ -175,7 +263,11 @@ function maybeEmitHeartbeat(opts = {}) {
     const throttleMs = resolveHeartbeatThrottleSeconds(env) * 1000;
 
     // ─── 1. THROTTLE decision — bounded tail only, never a full read (F8(ii)) ──
-    let matching = filterMatchingPair(readLivenessEventsTail(streamPath), slug, actor);
+    // Capture the unfiltered tail buffer once (issue #320, AC3) so the CONFLICT check below
+    // can reuse the exact same in-memory array on every return path — zero additional `fs`
+    // calls beyond what the throttle/emit decisions already pay for.
+    const tailEvents = readLivenessEventsTail(streamPath);
+    let matching = filterMatchingPair(tailEvents, slug, actor);
     let last = matching.length ? matching[matching.length - 1] : null;
     if (last) {
       if (last.type === 'release') {
@@ -183,7 +275,19 @@ function maybeEmitHeartbeat(opts = {}) {
       }
       const lastAtMs = Date.parse(last.at);
       if (Number.isFinite(lastAtMs) && nowMs - lastAtMs < throttleMs) {
-        return { emitted: false, reason: 'throttled' };
+        // CONFLICT check (issue #320, AC3/AC5): only attached here when the tail ALREADY
+        // shows a genuine `claim` for our own pair — zero extra I/O, never a full read on
+        // this hot, most-common return path (preserving the "neither outcome ever pays for a
+        // full read" invariant documented above). When our own claim history has scrolled
+        // outside the tail window, this rare edge case simply omits the conflict field on
+        // THIS call rather than paying for a read; a subsequent call (once genuinely out of
+        // our own throttle window, or once the EMIT decision's full-read fallback runs) will
+        // confirm it as usual.
+        const ourClaimVisibleInTail = matching.some((e) => e.type === 'claim');
+        const conflict = ourClaimVisibleInTail
+          ? computeConflict(tailEvents, slug, actor, nowMs, last.at)
+          : undefined;
+        return attachConflictField({ emitted: false, reason: 'throttled' }, conflict);
       }
     }
 
@@ -194,8 +298,14 @@ function maybeEmitHeartbeat(opts = {}) {
     // (zero extra I/O); only pay for one full read when the tail didn't already settle it
     // (either it had no matching events at all, or it had some but none was a claim).
     let hasClaim = matching.some((e) => e.type === 'claim');
+    // `holderEvents` is whichever events array (tail, or the full read below) already
+    // confirmed our own claim — reused by the CONFLICT check (issue #320, AC3) below with no
+    // additional `fs` call of its own.
+    let holderEvents = tailEvents;
     if (!hasClaim) {
-      matching = filterMatchingPair(readLivenessEvents(streamPath), slug, actor);
+      const fullEvents = readLivenessEvents(streamPath);
+      holderEvents = fullEvents;
+      matching = filterMatchingPair(fullEvents, slug, actor);
       last = matching.length ? matching[matching.length - 1] : null;
       if (!last) {
         return { emitted: false, reason: 'no-claim' };
@@ -212,9 +322,22 @@ function maybeEmitHeartbeat(opts = {}) {
       // window now that the full read has supplied the true last event.
       const lastAtMs = Date.parse(last.at);
       if (Number.isFinite(lastAtMs) && nowMs - lastAtMs < throttleMs) {
-        return { emitted: false, reason: 'throttled' };
+        return attachConflictField(
+          { emitted: false, reason: 'throttled' },
+          computeConflict(holderEvents, slug, actor, nowMs, last.at)
+        );
       }
     }
+
+    // ─── 3. CONFLICT check — same in-memory buffer as above, zero added I/O (issue #320,
+    // AC3/AC5) ──────────────────────────────────────────────────────────────────────────
+    // Reached only once `hasClaim` is confirmed true (a live, unreleased claim on `slug`) and
+    // we are about to emit our own heartbeat. `last.at` here is OUR OWN last recorded event
+    // for this subject BEFORE this call's write below — the watermark AC5's stream-derived
+    // episode throttle compares against, so an unchanged, still-fresh conflicting claim seen
+    // on a prior call never re-fires; only a genuinely newer event from the conflicting actor
+    // does, because our own heartbeat write below becomes the new watermark for the next call.
+    const conflict = computeConflict(holderEvents, slug, actor, nowMs, last.at);
 
     const nowIso = new Date(nowMs).toISOString();
     appendLivenessEvent(root, {
@@ -224,7 +347,7 @@ function maybeEmitHeartbeat(opts = {}) {
       at: nowIso,
       source: 'tool-activity',
     });
-    return { emitted: true };
+    return attachConflictField({ emitted: true }, conflict);
   } catch (err) {
     try {
       process.stderr.write(`[liveness-heartbeat] skipped: ${err.message}\n`);

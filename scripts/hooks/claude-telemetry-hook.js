@@ -54,7 +54,7 @@ function canonicalEvent(cliEvent, payload) {
   return mapping[event] || event;
 }
 
-function claudeSuccessOutput(event) {
+function claudeSuccessOutput(event, conflict) {
   if (event === 'SessionStart') {
     return {
       continue: true,
@@ -71,6 +71,26 @@ function claudeSuccessOutput(event) {
   if (event === 'Stop' || event === 'SubagentStop' || event === 'SessionEnd') {
     return { continue: true, suppressOutput: true };
   }
+  // Mid-turn conflict injection (issue #320, AC4): fold a detected liveness conflict into the
+  // real hookSpecificOutput.additionalContext channel on PostToolUse/PostToolUseFailure,
+  // matching the precedent claude-hook-adapter.js:70-79 already establishes for policy hooks.
+  // Guarded on a well-formed `conflict` shape so a malformed value degrades to the unchanged
+  // fixed no-conflict output below, never a thrown error (AC8, fail-open).
+  if (
+    (event === 'PostToolUse' || event === 'PostToolUseFailure') &&
+    conflict &&
+    typeof conflict.actor === 'string' &&
+    typeof conflict.lastAt === 'string'
+  ) {
+    return {
+      continue: true,
+      suppressOutput: false,
+      hookSpecificOutput: {
+        hookEventName: 'PostToolUse',
+        additionalContext: `[LIVENESS CONFLICT] actor "${conflict.actor}" claimed this subject at "${conflict.lastAt}" — run \`liveness verdict\` and coordinate.`,
+      },
+    };
+  }
   return { continue: true, suppressOutput: true };
 }
 
@@ -82,9 +102,14 @@ async function main() {
   const canonical = canonicalEvent(eventArg, payload);
   const telemetryScript = path.resolve(__dirname, '..', 'telemetry', 'telemetry.sh');
 
+  let conflict;
   if (canonical === 'postToolUse') {
     try {
-      require('./lib/liveness-heartbeat').maybeEmitHeartbeat({ cwd: process.cwd(), env: process.env });
+      const heartbeatResult = require('./lib/liveness-heartbeat').maybeEmitHeartbeat({
+        cwd: process.cwd(),
+        env: process.env,
+      });
+      conflict = heartbeatResult && heartbeatResult.conflict;
     } catch (err) {
       process.stderr.write(`[ClaudeTelemetryHook] liveness heartbeat error: ${err.message}\n`);
     }
@@ -115,7 +140,7 @@ async function main() {
     process.stderr.write(`[ClaudeTelemetryHook] failed open: ${detail}\n`);
   }
 
-  process.stdout.write(`${JSON.stringify(claudeSuccessOutput(hookEvent))}\n`);
+  process.stdout.write(`${JSON.stringify(claudeSuccessOutput(hookEvent, conflict))}\n`);
 }
 
 main().catch(err => {

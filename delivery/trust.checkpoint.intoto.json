@@ -1,0 +1,95 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "trust.checkpoint.json",
+      "digest": {
+        "sha256": "2c041ade235f5f72b152a1cd966004a188d5ea0cf5c224720cae6360ee657f2f"
+      }
+    }
+  ],
+  "predicateType": "https://hachure.org/v1/bundle",
+  "predicate": {
+    "schemaVersion": 5,
+    "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+    "claims": [
+      {
+        "id": "kontourai-flow-agents-166-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-329-closes-166-one-fix-iteration-both-gates-pass-delivery-published",
+        "subjectType": "pull-request",
+        "subjectId": "kontourai-flow-agents-166/gate-claim-pull-request-opened",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pr-open.pull-request",
+        "fieldOrBehavior": "PR opened: https://github.com/kontourai/flow-agents/pull/329. Closes #166. One fix iteration; both gates pass; delivery/ published.",
+        "value": "pass",
+        "createdAt": "2026-07-03T05:52:18Z",
+        "updatedAt": "2026-07-03T05:52:18Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
+        "status": "verified"
+      }
+    ],
+    "evidence": [
+      {
+        "id": "ev:kontourai-flow-agents-166-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-329-closes-166-one-fix-iteration-both-gates-pass-delivery-published",
+        "claimId": "kontourai-flow-agents-166-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-329-closes-166-one-fix-iteration-both-gates-pass-delivery-published",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-166/evidence.json",
+        "excerptOrSummary": "PR opened: https://github.com/kontourai/flow-agents/pull/329. Closes #166. One fix iteration; both gates pass; delivery/ published.",
+        "observedAt": "2026-07-03T05:52:18Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      }
+    ],
+    "policies": [
+      {
+        "id": "policy:workflow.check.external:attestation",
+        "claimType": "workflow.check.external",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.external claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.pr-open.pull-request:attestation",
+        "claimType": "builder.pr-open.pull-request",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.pr-open.pull-request claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      }
+    ],
+    "events": [
+      {
+        "id": "evt:kontourai-flow-agents-166-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-329-closes-166-one-fix-iteration-both-gates-pass-delivery-published",
+        "claimId": "kontourai-flow-agents-166-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-329-closes-166-one-fix-iteration-both-gates-pass-delivery-published",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-166-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-329-closes-166-one-fix-iteration-both-gates-pass-delivery-published"
+        ],
+        "createdAt": "2026-07-03T05:52:18Z",
+        "verifiedAt": "2026-07-03T05:52:18Z"
+      }
+    ]
+  }
+}

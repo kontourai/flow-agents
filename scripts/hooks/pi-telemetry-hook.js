@@ -75,7 +75,24 @@ async function main() {
 
   if (canonical === 'postToolUse') {
     try {
-      require('./lib/liveness-heartbeat').maybeEmitHeartbeat({ cwd: process.cwd(), env: process.env });
+      const heartbeatResult = require('./lib/liveness-heartbeat').maybeEmitHeartbeat({
+        cwd: process.cwd(),
+        env: process.env,
+      });
+      const conflict = heartbeatResult && heartbeatResult.conflict;
+      // Degraded-runtime conflict surfacing (issue #320, AC4): this runtime's generated
+      // plugin/extension does not consume this wrapper's stdout for context injection today
+      // (confirmed by reading the generated bundle's tool-result handler) — a disclosed,
+      // pre-existing gap (see plan Unresolved Questions), not a silent one. Until that
+      // structural gap is closed, emit a stderr diagnostic only; the next-turn
+      // workflow-steering.js liveness warning remains the fallback corrector. Guarded on a
+      // well-formed `conflict` shape so a malformed value degrades to no diagnostic, never a
+      // thrown error (AC8, fail-open).
+      if (conflict && typeof conflict.actor === 'string' && typeof conflict.lastAt === 'string') {
+        process.stderr.write(
+          `[PiTelemetryHook] liveness conflict: actor "${conflict.actor}" claimed this subject at "${conflict.lastAt}" — no mid-turn injection available on this runtime (see docs/spec/runtime-hook-surface.md); relying on next-turn workflow-steering warning.\n`
+        );
+      }
     } catch (err) {
       process.stderr.write(`[PiTelemetryHook] liveness heartbeat error: ${err.message}\n`);
     }
