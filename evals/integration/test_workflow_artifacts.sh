@@ -422,6 +422,39 @@ else
   _fail "valid artifact chain failed: $(cat "$TMPDIR_EVAL/valid.out" "$TMPDIR_EVAL/valid.err")"
 fi
 
+if rg -q 'WARN .*state\.json: state\.json has no branch field' "$TMPDIR_EVAL/valid.err"; then
+  _pass "legacy state.json without branch warns (not fails) on stderr, exit 0"
+else
+  _fail "legacy state.json without branch did not warn on stderr: $(cat "$TMPDIR_EVAL/valid.err")"
+fi
+
+BRANCH_PRESENT="$TMPDIR_EVAL/branch-present"
+mkdir -p "$BRANCH_PRESENT"
+cat > "$BRANCH_PRESENT/state.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "branch-present",
+  "status": "planned",
+  "phase": "planning",
+  "branch": "agent/test-actor/branch-present",
+  "updated_at": "2026-05-06T00:00:00Z",
+  "next_action": {
+    "status": "continue",
+    "summary": "Continue."
+  }
+}
+JSON
+
+if flow_agents_node "$VALIDATOR" "$BRANCH_PRESENT" >"$TMPDIR_EVAL/branch-present.out" 2>"$TMPDIR_EVAL/branch-present.err"; then
+  if rg -q 'WARN' "$TMPDIR_EVAL/branch-present.err"; then
+    _fail "state.json with a branch field should not warn: $(cat "$TMPDIR_EVAL/branch-present.err")"
+  else
+    _pass "state.json with a branch field passes with no warning"
+  fi
+else
+  _fail "state.json with a branch field should pass: $(cat "$TMPDIR_EVAL/branch-present.out" "$TMPDIR_EVAL/branch-present.err")"
+fi
+
 BAD="$TMPDIR_EVAL/bad"
 mkdir -p "$BAD"
 

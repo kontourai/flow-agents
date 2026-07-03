@@ -177,6 +177,8 @@ Structured plan from tool-planner (pasted from artifact).
 Copied from the plan artifact. This is the stop condition for delivery.
 ```
 
+`<branch>` is the branch recorded in `state.json`'s `branch` field (`ensure-session` derives `agent/<actor>/<slug>`; an explicit `--branch` flag overrides on a new session). `ensure-session` only records the name — creating and checking out the actual git branch/worktree remains this skill's responsibility.
+
 ## Output
 
 - Session file in `.kontourai/flow-agents/<slug>/` with status `planned`

@@ -306,6 +306,109 @@ Rules:
 - Issue-backed sessions should prefer `--work-item` over hand-supplied `--task-slug` so that
   liveness subjectId alignment is automatic.
 
+#### Branch convention
+
+`ensure-session` derives a routing branch name for every newly created session and records it
+in `state.json.branch`, seeds it into the session Markdown's `branch:` line, and mirrors it into
+`current.json.branch` for the currently active session. The derived format is:
+
+```
+agent/<actor>/<slug>
+```
+
+`<actor>` comes from the same actor resolver used by liveness tracking
+(`scripts/hooks/lib/actor-identity.js`'s `resolveActor`), and `<slug>` is the session's task slug
+(or the deterministic `--work-item` slug described above).
+
+Neither the resolved actor string nor an arbitrary `--task-slug` is guaranteed to be a valid git
+ref component, so `ensure-session` runs both through an incremental `sanitizeBranchSegment` pass
+before joining them into `agent/<actor>/<slug>`:
+
+1. Replace any `:` with `-` (the actor resolver's own `:` delimiter is not a legal ref character).
+2. Re-run the actor resolver's own charset restriction (`[A-Za-z0-9_.-]`, 64-char cap).
+3. Collapse repeated `..` sequences to a single `-` (git forbids two consecutive dots in a ref
+   component).
+4. Strip a leading `.` (git forbids a component starting with `.`).
+5. Strip a trailing `.` (fix-plan iteration 1, F1 — git forbids a component ending in `.`; the
+   prior pass only handled a run of 2+ trailing dots via the `..`-collapse step above and missed
+   the single-trailing-dot case, e.g. a `--task-slug` of `my-fix.`). This runs *before* the next
+   step so a `.lock` suffix hidden behind trailing dots (e.g. `foo.lock.`) is exposed and still
+   rewritten rather than left dangling.
+6. Rewrite a trailing `.lock` to `-lock` (git forbids a component ending in `.lock`).
+7. If the FINAL result after the above steps is empty, OR is exactly the literal string
+   `unknown`, fall back to `unknown-<hash>` where `<hash>` is the first 6 hex characters of
+   `sha256(<raw input before step 1>)` (fix-plan iteration 1 F4, tightened by iteration 2 F4').
+   The hash is deterministic (same raw input always derives the same fallback, preserving the
+   "never re-derive an existing session's branch" guarantee below) but makes two *different*
+   raw inputs that both land on the fallback derive distinct branches instead of silently
+   colliding on the bare literal `unknown`. This covers three distinct ways a raw input can land
+   on the fallback, all disambiguated identically with **no exceptions**: an all-garbage input
+   (e.g. `--task-slug "???"`) whose charset filter in step 2 collapses it to nothing; a near-miss
+   input like `"unknown."` or `".unknown"` that step 4/5's leading/trailing-dot stripping
+   collapses down to the literal `unknown`; and a raw input that genuinely *is* the literal
+   string `unknown` verbatim. Iteration 1 exempted that last case (a literal `"unknown"` input
+   was left undisambiguated); iteration 2 (F4') removed that carve-out because it let a literal
+   `--actor unknown` collide, undisambiguated, with a near-miss input like `"unknown."` that
+   collapses to the same segment — every input that reaches the fallback token is now
+   disambiguated uniformly.
+
+As of fix-plan iteration 1 (re-verified against the sanitizer above, see F1 in
+`.kontourai/flow-agents/kontourai-flow-agents-289/kontourai-flow-agents-289--fix-plan-iteration-1.md`),
+this pass empirically closes every concrete git-check-ref-format(1) failure mode reachable
+through it: `sanitizeSegment`'s own `[A-Za-z0-9_.-]` charset restriction (step 2) already strips
+every character git-check-ref-format forbids elsewhere in a ref component — `@`, `{`/`}` (so
+`@{` cannot survive), `/` (so a derived segment can never end with `/`, contain `//`, or itself
+be a bare `@`), whitespace, and other control characters — so none of those were ever actually
+reachable in a *derived* segment even before this iteration; only the single-trailing-dot case
+(step 5, above) was a real, reachable gap, and it is now closed. There is no longer a known
+accepted gap for the derived path. This is still not a from-scratch reimplementation of
+`git-check-ref-format(1)` (e.g. it has not been exhaustively fuzzed against every future git
+version's rule set) — but it is not a partial/best-effort pass either.
+
+- Pass `--branch <value>` to `ensure-session` to record an explicit value verbatim instead of the
+  derived name. The override only applies while creating a brand-new session.
+- Unlike the derived path, an explicit `--branch` is **not** sanitized — it is caller intent and
+  may legitimately contain `/` (to nest under an existing convention), so `ensure-session`
+  strictly *validates* it instead and dies with a remediation message, before writing any session
+  artifact. Validation runs in two passes:
+  1. Whole-string lexical checks (fix-plan iteration 1, F2) — the value must not:
+     - contain a control character, newline, or space;
+     - start or end with `/`, or contain `//`;
+     - start with `.`, or contain a `..` sequence;
+     - end with `.` or `.lock`; or
+     - contain any character outside `[A-Za-z0-9_./-]`.
+  2. Per-`/`-component lexical checks (fix-plan iteration 2, F2') — the whole-string checks above
+     only examine the very start/end of the full value, so a charset-legal value can still smuggle
+     an invalid path component past them (e.g. `-lead`, `a/.b`, `foo.lock/bar`, `a/./b`). Every
+     `/`-delimited component must not be empty, must not be exactly `.`, must not start with `.`
+     or `-` (applied uniformly to every component, not just the first — intentionally stricter
+     than git strictly requires, which is fine for a caller-facing override flag), and must not
+     end with `.` or `.lock`.
+  3. Belt-and-braces (fix-plan iteration 2, F2'): once both lexical passes above succeed, the real
+     `git check-ref-format --branch <value>` binary is invoked (argv-array, no shell, 5-second
+     timeout) as the final authority. It can only ever *reject* a value the lexical checks already
+     let through — never re-legalize one they rejected — so it closes any residual gap between this
+     hand-rolled lexical pass and git's actual ref-name rules. When git cannot be spawned at all
+     (not installed) or does not complete within the timeout, this step is skipped silently and the
+     lexical checks above remain the sole authority.
+
+  A value that passes all of the above is recorded exactly as given (no trimming, no
+  sanitization).
+- `ensure-session` only records the branch **name** — in `state.json`, the session Markdown, and
+  `current.json`. It does not run `git checkout -b` or `git worktree add`; creating and checking
+  out the actual branch/worktree remains the calling skill's responsibility (see
+  [ADR 0021](adr/0021-assignment-leases-and-stale-claim-takeover.md) §3).
+- Resuming an existing session directory never re-derives or overwrites its already-recorded
+  `branch` — the session Markdown's existing `branch:` line always wins, regardless of which
+  actor next calls `ensure-session` against that slug. This is what makes takeover continuity
+  ("resume the incumbent's branch, never a parallel one") true by construction; see
+  [ADR 0021](adr/0021-assignment-leases-and-stale-claim-takeover.md) §5.
+- `branch` is an optional field in `workflow-state.schema.json` for migration honesty: legacy
+  `state.json` files that predate this convention have no `branch` key and still validate.
+  `workflow:validate-artifacts` prints a non-blocking `WARN` line to stderr (not a hard failure)
+  when a `state.json` has no `branch` field, naming the gap without breaking legacy
+  sessions/fixtures.
+
 Reviewer Markdown artifacts can be imported into `critique.json`:
 
 ```bash

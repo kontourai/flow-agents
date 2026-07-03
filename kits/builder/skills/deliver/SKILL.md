@@ -133,6 +133,8 @@ Use the Final Acceptance checklist from `context/contracts/delivery-contract.md`
 - iteration 2: pass — all acceptance criteria met
 ```
 
+`<branch>` is the branch recorded in `state.json`'s `branch` field (`ensure-session` derives `agent/<actor>/<slug>`; an explicit `--branch` flag overrides on a new session). `ensure-session` only records the name — creating and checking out the actual git branch/worktree remains this skill's responsibility.
+
 The `status:` values in this Markdown session file are human-readable delivery progress labels. They are not the machine-readable `state.phase` enum; structured workflow sidecars must use the canonical lifecycle values from `context/contracts/artifact-contract.md`. In particular, review-work records critique through the critique artifact/sink while the sidecar lifecycle remains in a canonical phase such as `execution`, not a `review` phase.
 
 ## Workflow

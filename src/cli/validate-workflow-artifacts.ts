@@ -265,9 +265,10 @@ function readJson(file: string): { value: any | undefined; issues: Issue[] } {
   catch (error) { return { value: undefined, issues: [{ path: file, message: `invalid JSON: ${(error as Error).message}` }] }; }
 }
 
-function validateSidecar(file: string): Issue[] {
+function validateSidecar(file: string): { issues: Issue[]; warnings: Issue[] } {
   const { value, issues } = readJson(file);
-  if (value === undefined) return issues;
+  const warnings: Issue[] = [];
+  if (value === undefined) return { issues, warnings };
   const schemaFile = sidecarSchemas[path.basename(file)];
   if (schemaFile) {
     const schema = JSON.parse(readText(path.join(packageRoot, schemaFile)));
@@ -302,7 +303,10 @@ function validateSidecar(file: string): Issue[] {
       if (Array.isArray(value.post_deploy_checks) && value.post_deploy_checks.some((c: any) => !["planned", "pass"].includes(c.status))) issues.push({ path: file, message: "deploy decision requires post_deploy_checks to be planned or pass" });
     }
   }
-  return issues;
+  if (path.basename(file) === "state.json" && value && typeof value === "object" && !Array.isArray(value) && !("branch" in value)) {
+    warnings.push({ path: file, message: "state.json has no branch field (legacy/pre-#289 session) — re-run `ensure-session` to backfill agent/<actor>/<slug>." });
+  }
+  return { issues, warnings };
 }
 
 function validateLearningCorrections(file: string, status: unknown, records: any[], issues: Issue[]): void {
@@ -419,9 +423,15 @@ function main(): number {
   const markdown = artifactPaths(pathsIn);
   const sidecars = sidecarPaths(pathsIn);
   const issues: Issue[] = [];
+  const warnings: Issue[] = [];
   if (!skipMarkdown) for (const file of markdown) issues.push(...validateArtifact(file));
-  for (const file of sidecars) issues.push(...validateSidecar(file));
+  for (const file of sidecars) {
+    const result = validateSidecar(file);
+    issues.push(...result.issues);
+    warnings.push(...result.warnings);
+  }
   issues.push(...validateSidecarGroup(pathsIn, markdown, requireSidecars, requireCritique));
+  for (const w of warnings) console.error(`WARN ${w.path}: ${w.message}`);
   if (issues.length) {
     for (const issue of issues) console.error(`${issue.path}: ${issue.message}`);
     return 1;

@@ -25,6 +25,7 @@ Every Builder Kit build-flow pause, resume, or step transition must make the fol
 | Field | Durable location | Required meaning |
 | --- | --- | --- |
 | current step | `state.phase`, `state.status`, and Probe record `current_step` | The current Builder Kit step or direct Flow Agents primitive. |
+| branch | `state.json.branch`; seeded in the session Markdown's `branch:` line | The `agent/<actor>/<slug>` routing branch `ensure-session` derives for a new session (optional field for migration honesty — see `schemas/workflow-state.schema.json`); an explicit `--branch` overrides; an existing session's already-recorded branch is never re-derived (see [ADR 0021](../../docs/adr/0021-assignment-leases-and-stale-claim-takeover.md) §3 and §5). |
 | next step | `state.next_action` and Probe record `next_step` | The next step to run after resume or after the current primitive exits. |
 | route reason | Probe record `route_reason`; summarized in `state.next_action.summary` | Why this route was selected, including missing state, evidence, decisions, or blockers. |
 | selected work item refs | Probe record `selected_work_items`; optionally linked in `handoff.json` | Neutral work item references from the work-item contract. |

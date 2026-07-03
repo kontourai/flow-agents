@@ -36,6 +36,11 @@
     "owner": {
       "type": "string"
     },
+    "branch": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Routing branch for this session, e.g. agent/<actor>/<slug> (ADR 0021 \u00a73/\u00a75, issue #289). Optional for migration honesty: legacy/in-flight sessions predate this field. ensure-session always writes it for newly created sessions; validate-workflow-artifacts warns (does not fail) when it is absent."
+    },
     "created_at": {
       "type": "string",
       "format": "date-time"

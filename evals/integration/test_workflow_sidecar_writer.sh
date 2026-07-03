@@ -457,10 +457,275 @@ if flow_agents_node "$WRITER" ensure-session \
   --criterion "Different CLI criterion" \
   --timestamp "2026-05-09T00:02:00Z" >"$TMPDIR_EVAL/ensure-existing.out" 2>"$TMPDIR_EVAL/ensure-existing.err" \
   && rg -q '"description": "Existing artifact criterion"' "$EXISTING_ONLY_DIR/acceptance.json" \
-  && ! rg -q 'Different CLI criterion' "$EXISTING_ONLY_DIR/acceptance.json"; then
-  _pass "sidecar writer derives missing sidecars from existing session Markdown"
+  && ! rg -q 'Different CLI criterion' "$EXISTING_ONLY_DIR/acceptance.json" \
+  && rg -q '"branch": "main"' "$EXISTING_ONLY_DIR/state.json"; then
+  _pass "sidecar writer derives missing sidecars from existing session Markdown and preserves its own pre-#289 branch: main line (legacy, not re-derived)"
 else
   _fail "sidecar writer drifted sidecars from existing session Markdown: $(cat "$TMPDIR_EVAL/ensure-existing.out" "$TMPDIR_EVAL/ensure-existing.err")"
+fi
+
+# ─── #289: branch as first-class routing state (agent/<actor>/<slug>) ─────────
+# AC2/AC7 (derivation + current.json mirror): a freshly created session with no explicit
+# --actor derives its branch from the ambient runtime session id. CLAUDE_CODE_SESSION_ID is
+# injected here to exercise the real Claude Code runtime-session-id path in
+# actor-identity.js's resolveActor (rather than the --actor override seam) — state.json, the
+# freshly seeded session Markdown, and current.json must all carry the same derived
+# agent/<actor>/<slug> value.
+BRANCH_ENV_DIR="$SESSION_ROOT/branch-session-env"
+if CLAUDE_CODE_SESSION_ID="claude-session-alpha-001" flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$SESSION_ROOT" \
+  --task-slug branch-session-env \
+  --source-request "Derive a routing branch from an injected runtime session id." \
+  --summary "A fresh session with no explicit --actor should derive its branch from the injected runtime session id." \
+  --timestamp "2026-05-09T00:03:00Z" >"$TMPDIR_EVAL/branch-session-env.out" 2>"$TMPDIR_EVAL/branch-session-env.err" \
+  && rg -q '"branch": "agent/claude-code-claude-session-alpha-001-[A-Za-z0-9_.-]+/branch-session-env"' "$BRANCH_ENV_DIR/state.json" \
+  && grep -Eq '^branch: agent/claude-code-claude-session-alpha-001-[A-Za-z0-9_.-]+/branch-session-env$' "$BRANCH_ENV_DIR/branch-session-env--deliver.md" \
+  && rg -q '"branch": "agent/claude-code-claude-session-alpha-001-[A-Za-z0-9_.-]+/branch-session-env"' "$SESSION_ROOT/current.json"; then
+  _pass "sidecar writer derives agent/<actor>/<slug> branch from an injected runtime session id into state.json, markdown, and current.json (AC2, AC7)"
+else
+  _fail "sidecar writer did not derive a consistent injected-session-id branch across state.json/markdown/current.json: $(cat "$TMPDIR_EVAL/branch-session-env.out" "$TMPDIR_EVAL/branch-session-env.err")"
+fi
+
+# AC3 (explicit override): --branch on a brand-new session records the value verbatim,
+# not a derived agent/<actor>/<slug> name.
+BRANCH_OVERRIDE_DIR="$SESSION_ROOT/branch-override-a"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$SESSION_ROOT" \
+  --task-slug branch-override-a \
+  --branch "custom/my-branch" \
+  --source-request "An explicit --branch overrides derivation." \
+  --summary "A brand-new session with --branch should record the value verbatim." \
+  --timestamp "2026-05-09T00:03:05Z" >"$TMPDIR_EVAL/branch-override.out" 2>"$TMPDIR_EVAL/branch-override.err" \
+  && rg -q '"branch": "custom/my-branch"' "$BRANCH_OVERRIDE_DIR/state.json" \
+  && grep -Eq '^branch: custom/my-branch$' "$BRANCH_OVERRIDE_DIR/branch-override-a--deliver.md"; then
+  _pass "sidecar writer records an explicit --branch value verbatim, not a derived name (AC3)"
+else
+  _fail "sidecar writer did not honor an explicit --branch override: $(cat "$TMPDIR_EVAL/branch-override.out" "$TMPDIR_EVAL/branch-override.err")"
+fi
+
+# AC4 (distinct actors): two fresh sessions with distinct explicit --actor values produce
+# distinct branch values, differing only in the actor segment.
+BRANCH_DERIVE_A_DIR="$SESSION_ROOT/branch-derive-a"
+BRANCH_DERIVE_B_DIR="$SESSION_ROOT/branch-derive-b"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$SESSION_ROOT" \
+  --task-slug branch-derive-a \
+  --actor test-actor-alpha \
+  --source-request "Derive a branch for actor alpha." \
+  --summary "Distinct actor alpha." \
+  --timestamp "2026-05-09T00:03:10Z" >"$TMPDIR_EVAL/branch-derive-a.out" 2>"$TMPDIR_EVAL/branch-derive-a.err" \
+  && flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$SESSION_ROOT" \
+  --task-slug branch-derive-b \
+  --actor test-actor-beta \
+  --source-request "Derive a branch for actor beta." \
+  --summary "Distinct actor beta." \
+  --timestamp "2026-05-09T00:03:11Z" >"$TMPDIR_EVAL/branch-derive-b.out" 2>"$TMPDIR_EVAL/branch-derive-b.err" \
+  && rg -q '"branch": "agent/test-actor-alpha/branch-derive-a"' "$BRANCH_DERIVE_A_DIR/state.json" \
+  && rg -q '"branch": "agent/test-actor-beta/branch-derive-b"' "$BRANCH_DERIVE_B_DIR/state.json"; then
+  _pass "sidecar writer derives distinct branch values for distinct actors (AC4)"
+else
+  _fail "sidecar writer did not derive distinct branches for distinct actors: $(cat "$TMPDIR_EVAL/branch-derive-a.out" "$TMPDIR_EVAL/branch-derive-a.err" "$TMPDIR_EVAL/branch-derive-b.out" "$TMPDIR_EVAL/branch-derive-b.err")"
+fi
+
+# AC5 (existing-session continuity): re-running ensure-session against the SAME slug from a
+# DIFFERENT actor never re-derives or overwrites the already-recorded branch (ADR 0021 §5
+# takeover continuity — resume the incumbent's branch, never a parallel one).
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$SESSION_ROOT" \
+  --task-slug branch-derive-a \
+  --actor test-actor-gamma \
+  --source-request "A takeover by a different actor must not refork the branch." \
+  --summary "Resuming actor gamma should inherit alpha's already-recorded branch." \
+  --timestamp "2026-05-09T00:03:12Z" >"$TMPDIR_EVAL/branch-no-rederive.out" 2>"$TMPDIR_EVAL/branch-no-rederive.err" \
+  && rg -q '"branch": "agent/test-actor-alpha/branch-derive-a"' "$BRANCH_DERIVE_A_DIR/state.json" \
+  && ! rg -q 'test-actor-gamma' "$BRANCH_DERIVE_A_DIR/state.json"; then
+  _pass "sidecar writer never re-derives an existing session's branch for a later actor (AC5, ADR 0021 §5)"
+else
+  _fail "sidecar writer re-derived or overwrote an existing session's branch on takeover: $(cat "$TMPDIR_EVAL/branch-no-rederive.out" "$TMPDIR_EVAL/branch-no-rederive.err")"
+fi
+
+# Actor charset guard: an explicit --actor value that strips to empty under the allowed
+# charset dies before any session artifact is written (mirrors the liveness write path's
+# existing F7 test coverage).
+BRANCH_BAD_ACTOR_DIR="$SESSION_ROOT/branch-bad-actor"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$SESSION_ROOT" \
+  --task-slug branch-bad-actor \
+  --actor ":::" \
+  --source-request "Garbage --actor should die." \
+  --summary "Should not create a session." \
+  --timestamp "2026-05-09T00:03:13Z" >"$TMPDIR_EVAL/branch-bad-actor.out" 2>"$TMPDIR_EVAL/branch-bad-actor.err"; then
+  _fail "sidecar writer should reject a --actor value that strips to empty under the allowed charset"
+elif rg -q -- '--actor value strips to empty' "$TMPDIR_EVAL/branch-bad-actor.out" "$TMPDIR_EVAL/branch-bad-actor.err" \
+  && [[ ! -f "$BRANCH_BAD_ACTOR_DIR/state.json" ]]; then
+  _pass "sidecar writer dies on a garbage --actor value before writing any session artifact"
+else
+  _fail "garbage --actor rejection was not fail-closed or lacked diagnostics: $(cat "$TMPDIR_EVAL/branch-bad-actor.out" "$TMPDIR_EVAL/branch-bad-actor.err")"
+fi
+
+# ─── #289 fix-plan iteration 1 (F1/F2/F4) ──────────────────────────────────────
+# F1: a trailing-dot slug (git-check-ref-format forbids a ref component ending in ".") derives a
+# branch that is a REAL, valid git ref — asserted against the actual `git check-ref-format`
+# binary, not a hand-rolled regex re-implementation of its rules.
+BRANCH_TRAILING_DOT_DIR="$SESSION_ROOT/branch-trailing-dot"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$SESSION_ROOT" \
+  --task-slug branch-trailing-dot \
+  --actor "my-fix." \
+  --source-request "A trailing-dot actor segment must not leave an illegal git ref." \
+  --summary "Trailing dot should be stripped, not left dangling." \
+  --timestamp "2026-07-01T00:04:00Z" >"$TMPDIR_EVAL/branch-trailing-dot.out" 2>"$TMPDIR_EVAL/branch-trailing-dot.err"; then
+  TRAILING_DOT_BRANCH="$(jq -r '.branch // empty' "$BRANCH_TRAILING_DOT_DIR/state.json" 2>/dev/null)"
+  if [[ -n "$TRAILING_DOT_BRANCH" ]] && [[ "$TRAILING_DOT_BRANCH" != *"." ]] && git check-ref-format --branch "$TRAILING_DOT_BRANCH" >/dev/null 2>&1; then
+    _pass "sidecar writer strips a trailing dot from a derived branch segment and the result passes the real git check-ref-format binary (F1)"
+  else
+    _fail "sidecar writer derived a branch that git check-ref-format rejects (F1): branch=$TRAILING_DOT_BRANCH"
+  fi
+else
+  _fail "sidecar writer ensure-session failed for trailing-dot actor fixture: $(cat "$TMPDIR_EVAL/branch-trailing-dot.out" "$TMPDIR_EVAL/branch-trailing-dot.err")"
+fi
+
+# F2: an explicit --branch is strictly validated, not trusted verbatim. Each hostile value below
+# must die BEFORE any session artifact is written (no state.json / no session Markdown), with a
+# diagnostic naming the actual problem.
+assert_hostile_branch_dies() {
+  local label="$1" branch_value="$2" slug="$3" expect_pattern="$4"
+  local dir="$SESSION_ROOT/$slug"
+  local out="$TMPDIR_EVAL/hostile-branch-$slug.out"
+  if flow_agents_node "$WRITER" ensure-session \
+    --artifact-root "$SESSION_ROOT" \
+    --task-slug "$slug" \
+    --branch "$branch_value" \
+    --source-request "Hostile --branch should die before mutation." \
+    --summary "Should not create a session." \
+    --timestamp "2026-07-01T00:04:10Z" >"$out" 2>&1; then
+    _fail "sidecar writer should reject a hostile --branch value ($label)"
+  elif rg -q -- "$expect_pattern" "$out" && [[ ! -f "$dir/state.json" ]]; then
+    _pass "sidecar writer dies on a hostile --branch value before writing any session artifact ($label, F2)"
+  else
+    _fail "hostile --branch rejection ($label) was not fail-closed or lacked diagnostics: $(cat "$out")"
+  fi
+}
+assert_hostile_branch_dies "embedded newline" "$(printf 'main\nbad')" "branch-hostile-newline" "control character or newline"
+assert_hostile_branch_dies '".." sequence' "foo..bar" "branch-hostile-dotdot" 'must not contain a "\.\." sequence'
+assert_hostile_branch_dies "trailing .lock" "foo.lock" "branch-hostile-lock" '"\.lock"'
+assert_hostile_branch_dies "embedded space" "foo bar" "branch-hostile-space" "contains a space"
+
+# F4: two distinct all-garbage --task-slug values (each collapsing sanitizeBranchSegment's
+# charset filter to empty) must derive DISTINCT branches, not silently collide on the bare
+# literal "unknown". Actor is held fixed and valid so the slug segment is the only variable.
+BRANCH_GARBAGE_A_DIR="$SESSION_ROOT/???"
+BRANCH_GARBAGE_B_DIR="$SESSION_ROOT/!!!"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$SESSION_ROOT" \
+  --task-slug '???' \
+  --actor test-actor-fix4 \
+  --source-request "All-garbage slug A." \
+  --summary "Garbage slug A." \
+  --timestamp "2026-07-01T00:04:20Z" >"$TMPDIR_EVAL/branch-garbage-a.out" 2>"$TMPDIR_EVAL/branch-garbage-a.err" \
+  && flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$SESSION_ROOT" \
+  --task-slug '!!!' \
+  --actor test-actor-fix4 \
+  --source-request "All-garbage slug B." \
+  --summary "Garbage slug B." \
+  --timestamp "2026-07-01T00:04:21Z" >"$TMPDIR_EVAL/branch-garbage-b.out" 2>"$TMPDIR_EVAL/branch-garbage-b.err"; then
+  GARBAGE_A_BRANCH="$(jq -r '.branch // empty' "$BRANCH_GARBAGE_A_DIR/state.json" 2>/dev/null)"
+  GARBAGE_B_BRANCH="$(jq -r '.branch // empty' "$BRANCH_GARBAGE_B_DIR/state.json" 2>/dev/null)"
+  if [[ -n "$GARBAGE_A_BRANCH" ]] && [[ -n "$GARBAGE_B_BRANCH" ]] \
+    && [[ "$GARBAGE_A_BRANCH" != "$GARBAGE_B_BRANCH" ]] \
+    && [[ "$GARBAGE_A_BRANCH" == agent/test-actor-fix4/unknown-* ]] \
+    && [[ "$GARBAGE_B_BRANCH" == agent/test-actor-fix4/unknown-* ]] \
+    && git check-ref-format --branch "$GARBAGE_A_BRANCH" >/dev/null 2>&1 \
+    && git check-ref-format --branch "$GARBAGE_B_BRANCH" >/dev/null 2>&1; then
+    _pass "sidecar writer derives distinct disambiguated branches for two all-garbage task slugs (F4): $GARBAGE_A_BRANCH vs $GARBAGE_B_BRANCH"
+  else
+    _fail "sidecar writer did not disambiguate two all-garbage task slugs (F4): a=$GARBAGE_A_BRANCH b=$GARBAGE_B_BRANCH"
+  fi
+else
+  _fail "sidecar writer ensure-session failed for all-garbage slug fixtures: $(cat "$TMPDIR_EVAL/branch-garbage-a.out" "$TMPDIR_EVAL/branch-garbage-a.err" "$TMPDIR_EVAL/branch-garbage-b.out" "$TMPDIR_EVAL/branch-garbage-b.err")"
+fi
+
+# ─── #289 fix-plan iteration 2 (F2'/F4' residuals from code-review-289-iteration-1) ─────────────
+# F2': the whole-string checks above (iteration 1) only look at the START/END of the full
+# --branch value, so a fuzz of charset-valid values found hostile /-delimited PATH COMPONENTS
+# that slip past them. Each of these four escape classes must still die pre-mutation.
+assert_hostile_branch_dies "leading '-' (path component)" "-lead" "branch-hostile-lead" 'starting with "-"'
+assert_hostile_branch_dies "non-first component starting with '.'" "a/.b" "branch-hostile-dotcomp" 'starting with "\."'
+assert_hostile_branch_dies "non-last component ending in .lock" "foo.lock/bar" "branch-hostile-lockcomp" '"\.lock"'
+assert_hostile_branch_dies "component that is exactly '.'" "a/./b" "branch-hostile-dotonly" '"\."'
+
+# F2' belt-and-braces: every --branch value validateExplicitBranch ACCEPTS must also pass the
+# real `git check-ref-format --branch` binary — not just this repo's earlier fixtures
+# ("custom/my-branch", AC3 above), but a representative additional accepted value with a nested
+# path and mixed charset.
+BRANCH_ACCEPTED_GIT_DIR="$SESSION_ROOT/branch-accepted-git-valid"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$SESSION_ROOT" \
+  --task-slug branch-accepted-git-valid \
+  --branch "release/2026.07_hotfix-1" \
+  --source-request "An accepted --branch value must also be a real, git-valid ref." \
+  --summary "Accepted --branch values are double-checked against the real git binary." \
+  --timestamp "2026-07-02T00:04:30Z" >"$TMPDIR_EVAL/branch-accepted-git.out" 2>"$TMPDIR_EVAL/branch-accepted-git.err"; then
+  ACCEPTED_GIT_BRANCH="$(jq -r '.branch // empty' "$BRANCH_ACCEPTED_GIT_DIR/state.json" 2>/dev/null)"
+  if [[ "$ACCEPTED_GIT_BRANCH" == "release/2026.07_hotfix-1" ]] && git check-ref-format --branch "$ACCEPTED_GIT_BRANCH" >/dev/null 2>&1; then
+    _pass "sidecar writer's accepted --branch value passes the real git check-ref-format binary (F2')"
+  else
+    _fail "sidecar writer accepted a --branch value that the real git binary rejects (F2'): branch=$ACCEPTED_GIT_BRANCH"
+  fi
+else
+  _fail "sidecar writer ensure-session failed for the accepted git-valid --branch fixture: $(cat "$TMPDIR_EVAL/branch-accepted-git.out" "$TMPDIR_EVAL/branch-accepted-git.err")"
+fi
+
+# F4': the FINAL sanitized segment equaling the literal fallback token "unknown" must ALWAYS be
+# disambiguated with the 6-hex sha256 suffix - including a literal --actor "unknown" (no
+# literal-input carve-out), and including near-miss inputs ("unknown.", ".unknown") that only
+# collapse to the literal "unknown" via this function's OWN leading/trailing-dot stripping.
+# All three must derive DISTINCT branches (distinct raw input -> distinct hash) despite sharing
+# the same effective actor "meaning".
+BRANCH_UNKNOWN_LITERAL_DIR="$SESSION_ROOT/branch-unknown-literal"
+BRANCH_UNKNOWN_TRAILING_DIR="$SESSION_ROOT/branch-unknown-trailing-dot"
+BRANCH_UNKNOWN_LEADING_DIR="$SESSION_ROOT/branch-unknown-leading-dot"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$SESSION_ROOT" \
+  --task-slug branch-unknown-literal \
+  --actor "unknown" \
+  --source-request "Literal --actor unknown must still be disambiguated." \
+  --summary "No literal-input carve-out." \
+  --timestamp "2026-07-02T00:04:40Z" >"$TMPDIR_EVAL/branch-unknown-literal.out" 2>"$TMPDIR_EVAL/branch-unknown-literal.err" \
+  && flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$SESSION_ROOT" \
+  --task-slug branch-unknown-trailing-dot \
+  --actor "unknown." \
+  --source-request "Trailing-dot actor collapsing to literal unknown must still be disambiguated." \
+  --summary "Near-miss trailing dot." \
+  --timestamp "2026-07-02T00:04:41Z" >"$TMPDIR_EVAL/branch-unknown-trailing-dot.out" 2>"$TMPDIR_EVAL/branch-unknown-trailing-dot.err" \
+  && flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$SESSION_ROOT" \
+  --task-slug branch-unknown-leading-dot \
+  --actor ".unknown" \
+  --source-request "Leading-dot actor collapsing to literal unknown must still be disambiguated." \
+  --summary "Near-miss leading dot." \
+  --timestamp "2026-07-02T00:04:42Z" >"$TMPDIR_EVAL/branch-unknown-leading-dot.out" 2>"$TMPDIR_EVAL/branch-unknown-leading-dot.err"; then
+  UNKNOWN_LITERAL_BRANCH="$(jq -r '.branch // empty' "$BRANCH_UNKNOWN_LITERAL_DIR/state.json" 2>/dev/null)"
+  UNKNOWN_TRAILING_BRANCH="$(jq -r '.branch // empty' "$BRANCH_UNKNOWN_TRAILING_DIR/state.json" 2>/dev/null)"
+  UNKNOWN_LEADING_BRANCH="$(jq -r '.branch // empty' "$BRANCH_UNKNOWN_LEADING_DIR/state.json" 2>/dev/null)"
+  if [[ "$UNKNOWN_LITERAL_BRANCH" == agent/unknown-*/branch-unknown-literal ]] \
+    && [[ "$UNKNOWN_TRAILING_BRANCH" == agent/unknown-*/branch-unknown-trailing-dot ]] \
+    && [[ "$UNKNOWN_LEADING_BRANCH" == agent/unknown-*/branch-unknown-leading-dot ]] \
+    && [[ "${UNKNOWN_LITERAL_BRANCH#agent/}" != "${UNKNOWN_TRAILING_BRANCH#agent/}" ]] \
+    && [[ "${UNKNOWN_LITERAL_BRANCH#agent/}" != "${UNKNOWN_LEADING_BRANCH#agent/}" ]] \
+    && [[ "${UNKNOWN_TRAILING_BRANCH#agent/}" != "${UNKNOWN_LEADING_BRANCH#agent/}" ]] \
+    && git check-ref-format --branch "$UNKNOWN_LITERAL_BRANCH" >/dev/null 2>&1 \
+    && git check-ref-format --branch "$UNKNOWN_TRAILING_BRANCH" >/dev/null 2>&1 \
+    && git check-ref-format --branch "$UNKNOWN_LEADING_BRANCH" >/dev/null 2>&1; then
+    _pass "sidecar writer derives three DISTINCT disambiguated branches for actors 'unknown', 'unknown.', '.unknown' (F4'): $UNKNOWN_LITERAL_BRANCH vs $UNKNOWN_TRAILING_BRANCH vs $UNKNOWN_LEADING_BRANCH"
+  else
+    _fail "sidecar writer did not disambiguate all three unknown-collapsing actor variants distinctly (F4'): literal=$UNKNOWN_LITERAL_BRANCH trailing=$UNKNOWN_TRAILING_BRANCH leading=$UNKNOWN_LEADING_BRANCH"
+  fi
+else
+  _fail "sidecar writer ensure-session failed for one of the unknown-collapsing actor fixtures: $(cat "$TMPDIR_EVAL/branch-unknown-literal.out" "$TMPDIR_EVAL/branch-unknown-literal.err" "$TMPDIR_EVAL/branch-unknown-trailing-dot.out" "$TMPDIR_EVAL/branch-unknown-trailing-dot.err" "$TMPDIR_EVAL/branch-unknown-leading-dot.out" "$TMPDIR_EVAL/branch-unknown-leading-dot.err")"
 fi
 
 printf 'DO NOT OVERWRITE\n' >> "$ENSURED_DIR/ensured-session--deliver.md"

@@ -137,4 +137,6 @@ coverage_target: 80
 - iteration 1: RED ✓, GREEN ✓, REFACTOR ✓, coverage 85%
 ```
 
+`<branch>` is the branch recorded in `state.json`'s `branch` field (`ensure-session` derives `agent/<actor>/<slug>`; an explicit `--branch` flag overrides on a new session). `ensure-session` only records the name — creating and checking out the actual git branch/worktree remains this skill's responsibility.
+
 {context?}
