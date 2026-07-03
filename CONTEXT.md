@@ -256,6 +256,15 @@ _Avoid_: Retrospective as the generic term
 
 The ability to inspect what the agent was asked to do, which operating path it followed, what evidence was collected, which gates passed or failed, and why the next action is trustworthy or blocked.
 
+### Decision Records
+
+Topic-keyed living decision records at `docs/decisions/<topic-slug>.md`, one file per decision subject, that hold the current answer to a settled question plus lean rationale. Supersession is an edit to the file; derivation context is linked via evidence refs, never inlined. Slugs are nouns from this glossary. Numbered ADRs under `docs/adr/` are frozen history and are never written for new decisions.
+_Avoid_: Numbered ADR as the format for new decisions
+
+### Decision Registry
+
+The system of Decision Records plus the generated index at [docs/decisions/index.md](docs/decisions/index.md) (slug + one-line summary). The contract is [context/contracts/decision-registry-contract.md](context/contracts/decision-registry-contract.md); the frontmatter schema is `schemas/decision-record.schema.json`; `npm run check:decisions` validates it. Consult the index at write time to decide revise-vs-create.
+
 ### Governance Adapter
 
 An optional integration that supplies policy, proof, or trust evidence without making Flow Agents own the external tool's rule semantics. Veritas is the first known governance adapter candidate.

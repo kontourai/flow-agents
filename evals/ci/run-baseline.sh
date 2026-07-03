@@ -11,6 +11,7 @@ mkdir -p "$LOG_DIR"
 
 CHECKS=(
   "Content boundary|npm run check:content-boundary --"
+  "Decision registry|npm run check:decisions --"
   "Source tree validation|npm run validate:source --"
   "Context map drift|npm run context-map -- --check"
   "Static eval suite|bash evals/run.sh static"
@@ -54,6 +55,7 @@ CHECKS=(
 
 LANE_SOURCE_AND_STATIC=(
   "Content boundary"
+  "Decision registry"
   "Source tree validation"
   "Context map drift"
   "Static eval suite"

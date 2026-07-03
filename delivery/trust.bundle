@@ -3,125 +3,103 @@
   "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
   "claims": [
     {
-      "id": "kontourai-flow-agents-309-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-0-exit-compiles-ts-build-then-runs-source-tree-validator-source-tree-validation-passed-build-tsc-also-succeeded-standalone-0-exit-as-its-prerequisite",
-      "subjectType": "work-item",
-      "subjectId": "kontourai-flow-agents-309/source-tree-validation",
+      "id": "decision-registry-contract-decision-registry-validator.flow-agents-workflow.npm-run-check-decisions-validates-the-pilot-topic-file-refuses-secret-shaped-evidence-unknown-status-and-dangling-tombstones-and-asserts-the-generated-index-is-current-wired-into-the-required-source-and-static-ci-lane",
+      "subjectType": "workflow-check",
+      "subjectId": "decision-registry-contract/decision-registry-validator",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
-      "fieldOrBehavior": "npm run validate:source -- passed (0 exit); compiles TS build then runs source-tree validator: Source tree validation passed. Build (tsc) also succeeded standalone (0 exit) as its prerequisite.",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "npm run check:decisions validates the pilot topic file, refuses secret-shaped evidence, unknown status, and dangling tombstones, and asserts the generated index is current; wired into the required source-and-static CI lane.",
       "value": "pass",
-      "createdAt": "2026-07-03T04:35:01Z",
-      "updatedAt": "2026-07-03T04:35:01Z",
+      "createdAt": "2026-07-03T04:55:49Z",
+      "updatedAt": "2026-07-03T04:55:49Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
+      "verificationPolicyId": "policy:workflow.check.command:test_output",
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-309-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-passed-167-assertions-0-failures-exit-0-including-the-4-new-309-specific-regression-checks-setup-derive-init-plan-preserves-branch-with-branchless-plan-artifact-advance-state-preserves-branch-and-current-json-mirror-backfill-repair-of-pre-fix-broken-session-static-suite-bash-evals-run-sh-static-folded-in-as-supporting-non-manifest-evidence-also-passed-31-pass-lines-1049-checkmark-assertions-0-failures-exit-0-manual-scratch-root-probes-a-full-ensure-session-init-plan-advance-state-lifecycle-b-hand-seeded-broken-fixture-repair-via-init-plan-c-fresh-derive-branch-override-no-rederive-regression-checks-all-reproduced-the-expected-309-fixed-behavior-against-the-built-cli-build-src-cli-workflow-sidecar-js",
-      "subjectType": "work-item",
-      "subjectId": "kontourai-flow-agents-309/workflow-sidecar-writer-integration",
+      "id": "decision-registry-contract-ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails.flow-agents-workflow.ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "decision-registry-contract/ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
-      "fieldOrBehavior": "bash evals/integration/test_workflow_sidecar_writer.sh passed: 167 assertions, 0 failures, exit 0, including the 4 new #309-specific regression checks (setup-derive, init-plan-preserves-branch-with-branchless-plan-artifact, advance-state-preserves-branch-and-current.json-mirror, backfill-repair-of-pre-fix-broken-session). Static suite (bash evals/run.sh static, folded in as supporting non-manifest evidence) also passed: 31 PASS lines + 1049 checkmark assertions, 0 failures, exit 0. Manual scratch-root probes (a) full ensure-session->init-plan->advance-state lifecycle, (b) hand-seeded broken-fixture repair via init-plan, (c) fresh-derive/--branch-override/no-rederive regression checks all reproduced the expected #309-fixed behavior against the built CLI (build/src/cli/workflow-sidecar.js).",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC1: valid topic file passes validator; invalid (bad status/missing subject/secret-shaped evidence) fails",
       "value": "pass",
-      "createdAt": "2026-07-03T04:35:01Z",
-      "updatedAt": "2026-07-03T04:35:01Z",
+      "createdAt": "2026-07-03T04:55:49Z",
+      "updatedAt": "2026-07-03T04:55:49Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-309-after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence.flow-agents-workflow.after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence",
-      "subjectType": "work-item",
-      "subjectId": "kontourai-flow-agents-309/after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence",
+      "id": "decision-registry-contract-ac2-index-regeneration-is-idempotent-and-diff-clean.flow-agents-workflow.ac2-index-regeneration-is-idempotent-and-diff-clean",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "decision-registry-contract/ac2-index-regeneration-is-idempotent-and-diff-clean",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
-      "fieldOrBehavior": "After ensure-session then init-plan, state.json still carries branch; eval asserts the full sequence",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC2: index regeneration is idempotent and diff-clean",
       "value": "pass",
-      "createdAt": "2026-07-03T04:35:01Z",
-      "updatedAt": "2026-07-03T04:35:01Z",
+      "createdAt": "2026-07-03T04:55:49Z",
+      "updatedAt": "2026-07-03T04:55:49Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "verified"
+    },
+    {
+      "id": "decision-registry-contract-ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable.flow-agents-workflow.ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "decision-registry-contract/ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC3: pilot decision file exists, indexed, linked from CONTEXT.md, evidence resolvable",
+      "value": "pass",
+      "createdAt": "2026-07-03T04:55:49Z",
+      "updatedAt": "2026-07-03T04:55:49Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "verified"
+    },
+    {
+      "id": "decision-registry-contract-ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples.flow-agents-workflow.ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "decision-registry-contract/ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC4: contract covers supersession-by-edit and both tombstone forms with examples",
+      "value": "pass",
+      "createdAt": "2026-07-03T04:55:49Z",
+      "updatedAt": "2026-07-03T04:55:49Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
       "status": "verified"
     }
   ],
   "evidence": [
     {
-      "id": "ev:kontourai-flow-agents-309-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-0-exit-compiles-ts-build-then-runs-source-tree-validator-source-tree-validation-passed-build-tsc-also-succeeded-standalone-0-exit-as-its-prerequisite",
-      "claimId": "kontourai-flow-agents-309-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-0-exit-compiles-ts-build-then-runs-source-tree-validator-source-tree-validation-passed-build-tsc-also-succeeded-standalone-0-exit-as-its-prerequisite",
+      "id": "ev:decision-registry-contract-decision-registry-validator.flow-agents-workflow.npm-run-check-decisions-validates-the-pilot-topic-file-refuses-secret-shaped-evidence-unknown-status-and-dangling-tombstones-and-asserts-the-generated-index-is-current-wired-into-the-required-source-and-static-ci-lane",
+      "claimId": "decision-registry-contract-decision-registry-validator.flow-agents-workflow.npm-run-check-decisions-validates-the-pilot-topic-file-refuses-secret-shaped-evidence-unknown-status-and-dangling-tombstones-and-asserts-the-generated-index-is-current-wired-into-the-required-source-and-static-ci-lane",
       "evidenceType": "test_output",
       "method": "validation",
-      "sourceRef": "kontourai-flow-agents-309/evidence.json",
-      "excerptOrSummary": "npm run validate:source -- passed (0 exit); compiles TS build then runs source-tree validator: Source tree validation passed. Build (tsc) also succeeded standalone (0 exit) as its prerequisite.",
-      "observedAt": "2026-07-03T04:35:01Z",
+      "sourceRef": "decision-registry-contract/evidence.json",
+      "excerptOrSummary": "npm run check:decisions validates the pilot topic file, refuses secret-shaped evidence, unknown status, and dangling tombstones, and asserts the generated index is current; wired into the required source-and-static CI lane.",
+      "observedAt": "2026-07-03T04:55:49Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
       "execution": {
         "runner": "bash",
-        "label": "npm run validate:source --",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:kontourai-flow-agents-309-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-passed-167-assertions-0-failures-exit-0-including-the-4-new-309-specific-regression-checks-setup-derive-init-plan-preserves-branch-with-branchless-plan-artifact-advance-state-preserves-branch-and-current-json-mirror-backfill-repair-of-pre-fix-broken-session-static-suite-bash-evals-run-sh-static-folded-in-as-supporting-non-manifest-evidence-also-passed-31-pass-lines-1049-checkmark-assertions-0-failures-exit-0-manual-scratch-root-probes-a-full-ensure-session-init-plan-advance-state-lifecycle-b-hand-seeded-broken-fixture-repair-via-init-plan-c-fresh-derive-branch-override-no-rederive-regression-checks-all-reproduced-the-expected-309-fixed-behavior-against-the-built-cli-build-src-cli-workflow-sidecar-js",
-      "claimId": "kontourai-flow-agents-309-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-passed-167-assertions-0-failures-exit-0-including-the-4-new-309-specific-regression-checks-setup-derive-init-plan-preserves-branch-with-branchless-plan-artifact-advance-state-preserves-branch-and-current-json-mirror-backfill-repair-of-pre-fix-broken-session-static-suite-bash-evals-run-sh-static-folded-in-as-supporting-non-manifest-evidence-also-passed-31-pass-lines-1049-checkmark-assertions-0-failures-exit-0-manual-scratch-root-probes-a-full-ensure-session-init-plan-advance-state-lifecycle-b-hand-seeded-broken-fixture-repair-via-init-plan-c-fresh-derive-branch-override-no-rederive-regression-checks-all-reproduced-the-expected-309-fixed-behavior-against-the-built-cli-build-src-cli-workflow-sidecar-js",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "kontourai-flow-agents-309/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_workflow_sidecar_writer.sh passed: 167 assertions, 0 failures, exit 0, including the 4 new #309-specific regression checks (setup-derive, init-plan-preserves-branch-with-branchless-plan-artifact, advance-state-preserves-branch-and-current.json-mirror, backfill-repair-of-pre-fix-broken-session). Static suite (bash evals/run.sh static, folded in as supporting non-manifest evidence) also passed: 31 PASS lines + 1049 checkmark assertions, 0 failures, exit 0. Manual scratch-root probes (a) full ensure-session->init-plan->advance-state lifecycle, (b) hand-seeded broken-fixture repair via init-plan, (c) fresh-derive/--branch-override/no-rederive regression checks all reproduced the expected #309-fixed behavior against the built CLI (build/src/cli/workflow-sidecar.js).",
-      "observedAt": "2026-07-03T04:35:01Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_workflow_sidecar_writer.sh",
+        "label": "npm run check:decisions --",
         "isError": false
       }
     }
   ],
   "policies": [
     {
-      "id": "policy:workflow.check.build:test_output",
-      "claimType": "workflow.check.build",
+      "id": "policy:workflow.check.command:test_output",
+      "claimType": "workflow.check.command",
       "requiredEvidence": [
         "test_output"
       ],
       "acceptanceCriteria": [
-        "A verified verification event must support a workflow.check.build claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "high"
-    },
-    {
-      "id": "policy:builder.pull-work.selected:test_output",
-      "claimType": "builder.pull-work.selected",
-      "requiredEvidence": [
-        "test_output"
-      ],
-      "acceptanceCriteria": [
-        "A verified verification event must support a builder.pull-work.selected claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "high"
-    },
-    {
-      "id": "policy:workflow.check.test:test_output",
-      "claimType": "workflow.check.test",
-      "requiredEvidence": [
-        "test_output"
-      ],
-      "acceptanceCriteria": [
-        "A verified verification event must support a workflow.check.test claim."
+        "A verified verification event must support a workflow.check.command claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -145,57 +123,60 @@
       "stalenessTriggers": [],
       "conflictRules": [],
       "impactLevel": "high"
-    },
-    {
-      "id": "policy:builder.pull-work.selected",
-      "claimType": "builder.pull-work.selected",
-      "requiredEvidence": [],
-      "acceptanceCriteria": [
-        "A verified verification event must support a builder.pull-work.selected claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "high"
     }
   ],
   "events": [
     {
-      "id": "evt:kontourai-flow-agents-309-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-0-exit-compiles-ts-build-then-runs-source-tree-validator-source-tree-validation-passed-build-tsc-also-succeeded-standalone-0-exit-as-its-prerequisite",
-      "claimId": "kontourai-flow-agents-309-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-0-exit-compiles-ts-build-then-runs-source-tree-validator-source-tree-validation-passed-build-tsc-also-succeeded-standalone-0-exit-as-its-prerequisite",
+      "id": "evt:decision-registry-contract-decision-registry-validator.flow-agents-workflow.npm-run-check-decisions-validates-the-pilot-topic-file-refuses-secret-shaped-evidence-unknown-status-and-dangling-tombstones-and-asserts-the-generated-index-is-current-wired-into-the-required-source-and-static-ci-lane",
+      "claimId": "decision-registry-contract-decision-registry-validator.flow-agents-workflow.npm-run-check-decisions-validates-the-pilot-topic-file-refuses-secret-shaped-evidence-unknown-status-and-dangling-tombstones-and-asserts-the-generated-index-is-current-wired-into-the-required-source-and-static-ci-lane",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-309-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-0-exit-compiles-ts-build-then-runs-source-tree-validator-source-tree-validation-passed-build-tsc-also-succeeded-standalone-0-exit-as-its-prerequisite"
+        "ev:decision-registry-contract-decision-registry-validator.flow-agents-workflow.npm-run-check-decisions-validates-the-pilot-topic-file-refuses-secret-shaped-evidence-unknown-status-and-dangling-tombstones-and-asserts-the-generated-index-is-current-wired-into-the-required-source-and-static-ci-lane"
       ],
-      "createdAt": "2026-07-03T04:35:01Z",
-      "verifiedAt": "2026-07-03T04:35:01Z"
+      "createdAt": "2026-07-03T04:55:49Z",
+      "verifiedAt": "2026-07-03T04:55:49Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-309-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-passed-167-assertions-0-failures-exit-0-including-the-4-new-309-specific-regression-checks-setup-derive-init-plan-preserves-branch-with-branchless-plan-artifact-advance-state-preserves-branch-and-current-json-mirror-backfill-repair-of-pre-fix-broken-session-static-suite-bash-evals-run-sh-static-folded-in-as-supporting-non-manifest-evidence-also-passed-31-pass-lines-1049-checkmark-assertions-0-failures-exit-0-manual-scratch-root-probes-a-full-ensure-session-init-plan-advance-state-lifecycle-b-hand-seeded-broken-fixture-repair-via-init-plan-c-fresh-derive-branch-override-no-rederive-regression-checks-all-reproduced-the-expected-309-fixed-behavior-against-the-built-cli-build-src-cli-workflow-sidecar-js",
-      "claimId": "kontourai-flow-agents-309-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-passed-167-assertions-0-failures-exit-0-including-the-4-new-309-specific-regression-checks-setup-derive-init-plan-preserves-branch-with-branchless-plan-artifact-advance-state-preserves-branch-and-current-json-mirror-backfill-repair-of-pre-fix-broken-session-static-suite-bash-evals-run-sh-static-folded-in-as-supporting-non-manifest-evidence-also-passed-31-pass-lines-1049-checkmark-assertions-0-failures-exit-0-manual-scratch-root-probes-a-full-ensure-session-init-plan-advance-state-lifecycle-b-hand-seeded-broken-fixture-repair-via-init-plan-c-fresh-derive-branch-override-no-rederive-regression-checks-all-reproduced-the-expected-309-fixed-behavior-against-the-built-cli-build-src-cli-workflow-sidecar-js",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:kontourai-flow-agents-309-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-passed-167-assertions-0-failures-exit-0-including-the-4-new-309-specific-regression-checks-setup-derive-init-plan-preserves-branch-with-branchless-plan-artifact-advance-state-preserves-branch-and-current-json-mirror-backfill-repair-of-pre-fix-broken-session-static-suite-bash-evals-run-sh-static-folded-in-as-supporting-non-manifest-evidence-also-passed-31-pass-lines-1049-checkmark-assertions-0-failures-exit-0-manual-scratch-root-probes-a-full-ensure-session-init-plan-advance-state-lifecycle-b-hand-seeded-broken-fixture-repair-via-init-plan-c-fresh-derive-branch-override-no-rederive-regression-checks-all-reproduced-the-expected-309-fixed-behavior-against-the-built-cli-build-src-cli-workflow-sidecar-js"
-      ],
-      "createdAt": "2026-07-03T04:35:01Z",
-      "verifiedAt": "2026-07-03T04:35:01Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-309-after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence.flow-agents-workflow.after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence",
-      "claimId": "kontourai-flow-agents-309-after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence.flow-agents-workflow.after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence",
+      "id": "evt:decision-registry-contract-ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails.flow-agents-workflow.ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails",
+      "claimId": "decision-registry-contract-ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails.flow-agents-workflow.ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-03T04:35:01Z",
-      "verifiedAt": "2026-07-03T04:35:01Z"
+      "createdAt": "2026-07-03T04:55:49Z",
+      "verifiedAt": "2026-07-03T04:55:49Z"
+    },
+    {
+      "id": "evt:decision-registry-contract-ac2-index-regeneration-is-idempotent-and-diff-clean.flow-agents-workflow.ac2-index-regeneration-is-idempotent-and-diff-clean",
+      "claimId": "decision-registry-contract-ac2-index-regeneration-is-idempotent-and-diff-clean.flow-agents-workflow.ac2-index-regeneration-is-idempotent-and-diff-clean",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T04:55:49Z",
+      "verifiedAt": "2026-07-03T04:55:49Z"
+    },
+    {
+      "id": "evt:decision-registry-contract-ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable.flow-agents-workflow.ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable",
+      "claimId": "decision-registry-contract-ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable.flow-agents-workflow.ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T04:55:49Z",
+      "verifiedAt": "2026-07-03T04:55:49Z"
+    },
+    {
+      "id": "evt:decision-registry-contract-ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples.flow-agents-workflow.ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples",
+      "claimId": "decision-registry-contract-ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples.flow-agents-workflow.ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T04:55:49Z",
+      "verifiedAt": "2026-07-03T04:55:49Z"
     }
   ]
 }

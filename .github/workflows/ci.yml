@@ -64,6 +64,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check content-boundary
 
+      - name: Decision registry
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check decision-registry
+
       - name: Source tree validation
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check source-tree-validation
