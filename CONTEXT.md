@@ -327,3 +327,9 @@ The Console overview for global setup, registered projects, cross-project usage,
 ### Control API
 
 The shared tool layer used by the Console, CLI, AI agents, and automation. The Control API owns operations such as reading effective settings, explaining provider resolution, testing provider health, previewing config changes, writing config, inspecting workflow state, and reporting usage or eval outcomes.
+
+### Model Routing
+
+The policy that maps a delegate role name (such as `delegate-mechanical`, `delegate-implementation`, `delegate-design`, `orchestrator`, `extraction-default`) to a specific `model@provider` ref. Model Routing is data, not code: it lives in `.datum/config.json` (read by the `@kontourai/datum` registry, schema `datum.schema.json`) and never in generated files or per-agent frontmatter. The orchestrator resolves the role at delegation time (`datum resolve <role> --json`) and passes the resolved model explicitly when spawning each delegate. See [context/contracts/execution-contract.md](context/contracts/execution-contract.md) § Delegation: Model Routing and [docs/decisions/model-routing.md](docs/decisions/model-routing.md).
+_Avoid_: Generated per-agent model frontmatter, environment-variable-only model selection
+
