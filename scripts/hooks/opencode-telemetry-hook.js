@@ -66,9 +66,18 @@ async function main() {
   const [, , eventArg = 'unknown', agentName = 'dev'] = process.argv;
   const raw = await readStdinRaw();
   const payload = parseJson(raw);
+  const canonical = canonicalEvent(eventArg, payload);
   const telemetryScript = path.resolve(__dirname, '..', 'telemetry', 'telemetry.sh');
 
-  const result = spawnSync('bash', [telemetryScript, canonicalEvent(eventArg, payload), agentName], {
+  if (canonical === 'postToolUse') {
+    try {
+      require('./lib/liveness-heartbeat').maybeEmitHeartbeat({ cwd: process.cwd(), env: process.env });
+    } catch (err) {
+      process.stderr.write(`[OpencodeTelemetryHook] liveness heartbeat error: ${err.message}\n`);
+    }
+  }
+
+  const result = spawnSync('bash', [telemetryScript, canonical, agentName], {
     input: raw,
     encoding: 'utf8',
     cwd: process.cwd(),

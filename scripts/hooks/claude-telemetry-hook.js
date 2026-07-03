@@ -79,9 +79,18 @@ async function main() {
   const raw = await readStdinRaw();
   const payload = parseJson(raw);
   const hookEvent = payload.hook_event_name || eventArg;
+  const canonical = canonicalEvent(eventArg, payload);
   const telemetryScript = path.resolve(__dirname, '..', 'telemetry', 'telemetry.sh');
 
-  const result = spawnSync('bash', [telemetryScript, canonicalEvent(eventArg, payload), agentName], {
+  if (canonical === 'postToolUse') {
+    try {
+      require('./lib/liveness-heartbeat').maybeEmitHeartbeat({ cwd: process.cwd(), env: process.env });
+    } catch (err) {
+      process.stderr.write(`[ClaudeTelemetryHook] liveness heartbeat error: ${err.message}\n`);
+    }
+  }
+
+  const result = spawnSync('bash', [telemetryScript, canonical, agentName], {
     input: raw,
     encoding: 'utf8',
     cwd: process.cwd(),

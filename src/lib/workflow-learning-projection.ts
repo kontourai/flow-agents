@@ -176,7 +176,7 @@ const KNOWN_CORRECTION_TYPES = new Set<WorkflowLearningCorrectionType>([
   "provider",
   "none",
 ]);
-const SKIPPED_ROOT_ENTRIES = new Set(["archive", "changes", "delivery-history"]);
+const SKIPPED_ROOT_ENTRIES = new Set(["archive", "changes", "delivery-history", "liveness"]);
 const MAX_SIDECAR_BYTES = 1024 * 1024;
 
 export function readWorkflowLearningSources(artifactRoot: string): WorkflowLearningSource[] {

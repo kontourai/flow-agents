@@ -41,7 +41,7 @@ const ACTIVE_STATUSES = new Set([
 const KNOWN_LEARNING_STATUSES = new Set(["pending", "learned", "followup_required", "blocked"]);
 const KNOWN_LEARNING_ROUTE_TARGETS = new Set(["rule", "skill", "power", "agent", "eval", "doc", "backlog", "knowledge", "none"]);
 const KNOWN_LEARNING_ROUTE_STATUSES = new Set(["completed", "open", "deferred", "accepted", "rejected"]);
-const SKIPPED_ROOT_ENTRIES = new Set(["archive", "changes", "delivery-history"]);
+const SKIPPED_ROOT_ENTRIES = new Set(["archive", "changes", "delivery-history", "liveness"]);
 const MAX_SIDECAR_BYTES = 1024 * 1024;
 
 function printHelp(): void {

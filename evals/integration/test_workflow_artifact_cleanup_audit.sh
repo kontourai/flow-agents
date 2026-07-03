@@ -13,7 +13,11 @@ errors=0
 pass() { echo "  ✓ $1"; }
 fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 
-mkdir -p "$ARTIFACT_ROOT"/{active-wip,terminal-done,stale-verified,learning-followup,delivered-learning-followup,invalid-learning-route,invalid-sidecar,symlink-state,large-learning,missing-state-next-action,missing-learning-records,non-array-learning-records,changes,archive,.hidden}
+mkdir -p "$ARTIFACT_ROOT"/{active-wip,terminal-done,stale-verified,learning-followup,delivered-learning-followup,invalid-learning-route,invalid-sidecar,symlink-state,large-learning,missing-state-next-action,missing-learning-records,non-array-learning-records,changes,archive,liveness,.hidden}
+
+cat > "$ARTIFACT_ROOT/liveness/events.jsonl" <<'JSONL'
+{"type":"claim","subjectId":"active-wip","actor":"agent-1","at":"2026-06-01T00:00:00Z"}
+JSONL
 
 cat > "$ARTIFACT_ROOT/active-wip/state.json" <<'JSON'
 {
@@ -257,6 +261,18 @@ json_query() {
 [[ "$(json_query "$TMPDIR_EVAL/audit.json" "buckets.invalid.6.slug")" == "symlink-state" ]] && pass "json classifies symlink state sidecar invalid" || fail "json classifies symlink state sidecar invalid"
 [[ "$(json_query "$TMPDIR_EVAL/audit.json" "buckets.invalid.6.reasons.0")" == "state.json must not be a symlink" ]] && pass "json reports symlink rejection without reading target" || fail "json reports symlink rejection without reading target"
 [[ "$(json_query "$TMPDIR_EVAL/audit.json" "buckets.cleanup_candidate.0.classification")" == "cleanup_candidate" ]] && pass "json includes stable classification field" || fail "json includes stable classification field"
+
+node -e '
+const fs = require("fs");
+const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const found = Object.values(data.buckets).some((arr) => Array.isArray(arr) && arr.some((entry) => entry.slug === "liveness"));
+process.exit(found ? 1 : 0);
+' "$TMPDIR_EVAL/audit.json"
+if [[ $? -eq 0 ]]; then
+  pass "liveness directory never appears in any bucket"
+else
+  fail "liveness directory never appears in any bucket"
+fi
 
 if flow_agents_node "$SCRIPT" --artifact-root "$TMPDIR_EVAL/missing-root" > "$TMPDIR_EVAL/missing-root.out" 2> "$TMPDIR_EVAL/missing-root.err"; then
   fail "missing artifact root exits nonzero"

@@ -484,7 +484,7 @@ The `RESUME:` block supplements the existing `STATE:` line and contains:
 - **Next step** — the first `handoff.json next_steps` entry.
 - **Blockers** — any recorded blockers from `handoff.json`, or "none".
 - **Trust** — `Trust: N verified / M disputed / T total` from reading `trust.bundle`. Each disputed or unknown claim is listed with its id and a copy-pasteable remedy command: `npm run workflow:sidecar -- claim <id> <dir>`.
-- **Liveness advisory** (when applicable) — `[LIVENESS WARNING: another agent appears live on this work: actor <X>, last seen <T>]` when the shared liveness stream (`.flow-agents/liveness/events.jsonl`, ADR 0012) contains a fresh claim or heartbeat from a different actor for the same slug. This is advisory only — the hook exits 0 regardless. The block also always includes an `ACTOR: <actor> (<source>)` line — the same runtime-agnostic actor identity this session resolves for itself (see "Actor identity and liveness writes" below), so a resuming agent can see at a glance which identity its own liveness claims/heartbeats will be filed under.
+- **Liveness advisory** (when applicable) — `[LIVENESS WARNING: another agent appears live on this work: actor <X>, last seen <T>]` when the shared liveness stream (`.kontourai/flow-agents/liveness/events.jsonl`, ADR 0012) contains a fresh claim or heartbeat from a different actor for the same slug. This is advisory only — the hook exits 0 regardless. The block also always includes an `ACTOR: <actor> (<source>)` line — the same runtime-agnostic actor identity this session resolves for itself (see "Actor identity and liveness writes" below), so a resuming agent can see at a glance which identity its own liveness claims/heartbeats will be filed under.
 - **Route hint** — `To continue: resume this work. Or run pull-work to assess WIP and start new/parallel work.` — always routes the resume-vs-parallel decision through `pull-work` rather than auto-taking it.
 
 The `RESUME:` block appears on `SessionStart` only. `UserPromptSubmit` and `PostToolUse`
@@ -493,16 +493,24 @@ behavior is unchanged.
 All reads are fail-open: a missing `handoff.json`, `trust.bundle`, or liveness stream
 degrades gracefully — the section is omitted or shows "no data", and the hook never throws.
 
-The liveness freshness check is read-only (ADR 0012). Writing or excluding liveness claims
-is scoped to issue #151 (a later slice). The session-level event log (Layer 2) is also
-deferred.
+The `RESUME:` advisory read above is read-only (ADR 0012); liveness *writes* happen
+elsewhere in the lifecycle and already exist today: `init-plan` claims the active slug and
+`advance-state` heartbeats/releases it. As of #288, `FLOW_AGENTS_LIVENESS` defaults **on** —
+presence is ambient by default. Set it to `off`/`0`/`false`/`no`/`disabled`
+(case-insensitive) to opt back out. Claim TTL defaults to `1800` seconds and is
+configurable via `FLOW_AGENTS_LIVENESS_TTL_SECONDS`; per ADR 0012 §4, tuning this value is
+itself the operational risk — too tight manufactures false reclaims, so treat liveness as
+advisory and double-check against real branch/PR state before tightening it. A throttled
+tool-activity heartbeat also rides ordinary tool use (see "Tool-activity heartbeat"
+below), so a long-running wave never goes stale on TTL alone just because it hasn't hit a
+phase transition. The session-level event log (Layer 2) is still deferred.
 
 ### Shared liveness helper
 
 The freshness logic is centralised in `scripts/hooks/lib/liveness-read.js` (pure CJS,
 zero dependencies). It exports:
 
-- `readLivenessEvents(streamPath)` — reads a `.flow-agents/liveness/events.jsonl` file
+- `readLivenessEvents(streamPath)` — reads a `.kontourai/flow-agents/liveness/events.jsonl` file
   line-by-line, JSON-parses each, and tolerates malformed lines.
 - `freshHolders(events, slug, selfActor, nowMs)` — returns actors (excluding `selfActor`)
   who hold a within-TTL claim or heartbeat on `subjectId === slug`.
@@ -511,12 +519,63 @@ Both the hook (`scripts/hooks/workflow-steering.js`) and the compiled CLI
 (`build/src/cli/workflow-sidecar.js`) consume this helper so the TTL/freshness logic lives
 in one place.
 
+### Tool-activity heartbeat
+
+`scripts/hooks/lib/liveness-heartbeat.js` (pure CJS, zero dependencies — same sharing pattern
+as `liveness-read.js` and `actor-identity.js`) exports `maybeEmitHeartbeat({ cwd, env, now })`.
+All four telemetry hook wrappers (`scripts/hooks/{claude,codex,opencode,pi}-telemetry-hook.js`)
+call it whenever the current invocation's canonical event resolves to `postToolUse`. Per
+[`docs/spec/runtime-hook-surface.md`](spec/runtime-hook-surface.md) row 280, `PostToolUseFailure`
+is a **Claude Code-only** additional native event mapped onto canonical `postToolUse` — Codex,
+Kiro, opencode, and pi each map only their own single native `postToolUse`-equivalent event
+(`PostToolUse`, `PostToolUse`, `tool.execute.after`, `tool_result` respectively); no other
+runtime has a distinct "failure" variant. The heartbeat call runs independently of the existing
+`telemetry.sh` spawn. On each call it:
+
+1. Checks `isLivenessEnabled()` — no-ops (`disabled`) if `FLOW_AGENTS_LIVENESS` is off.
+2. Reads `current.json`'s `active_slug` and resolves the actor (`actor-identity.js`) — no-ops
+   if there is no active slug or the actor cannot be resolved. These two checks run *before*
+   actor resolution specifically so a repo with liveness disabled, or with no active session,
+   never pays the actor resolver's process-ancestry `ps` spawn cost.
+3. Reads a **bounded tail** (the last 64KB, newline-aligned so a partial line at the truncation
+   boundary is dropped) of the `liveness/events.jsonl` stream, filtered for that
+   `(subjectId, actor)` pair. Because the stream is append-only, this bounded read is exact for
+   any pair whose most recent event lies within that window — which, in steady state, is always
+   true within one throttle period. Only if the pair has **zero** matching events anywhere in
+   the tail (the rare case of the first heartbeat after a claim old enough to have scrolled out
+   of the last 64KB) does it fall back to one full read of the stream. No-ops if there is no
+   prior `claim` event from this actor for this subject, or if the actor's most recent event for
+   the subject is a `release`.
+4. Throttles: only appends a new `heartbeat` event once at least
+   `FLOW_AGENTS_LIVENESS_HEARTBEAT_THROTTLE_SECONDS` (default `60`) seconds have elapsed since
+   that actor's last recorded event for the subject.
+
+The throttle window is derived from the actor-scoped stream tail itself — there is
+deliberately no separate, mutable "last heartbeat" state file. Per ADR 0021 §3 (which lists
+"advance-state + tool activity" heartbeats as one of the cross-cutting liveness touchpoints,
+riding existing writes rather than a bespoke timer), a shared state file keyed on anything
+less specific than the actor would reintroduce the same last-writer-wins race that ADR 0021
+is designed to close. Each actor only ever contends with its own prior writes, so there is no
+cross-session race to guard against.
+
+`maybeEmitHeartbeat` is fail-open, matching the #287 actor-identity convention below: any
+error is caught, a diagnostic is written to stderr, and the call returns without throwing — it
+never blocks the tool call, never alters a wrapper's stdout/success-output shape, and never
+changes a wrapper's exit code. It also does not read or depend on `TELEMETRY_ENABLED` —
+disabling telemetry does not disable liveness heartbeats, and vice versa; the two are
+independent, sibling concerns.
+
 ### Actor identity and liveness writes
 
 Liveness claims/heartbeats/releases are attributed to a runtime-agnostic **actor struct**
 `{runtime, session_id, host, human?}`, serialized (via `serializeActor()` in the shared
 `scripts/hooks/lib/actor-identity.js` resolver — same sharing pattern as `liveness-read.js`
-above) into a single string safe for the existing `${subjectId}::${actor}` grouping key. Both
+above) into a single string safe for the existing `${subjectId}::${actor}` grouping key. The
+serialized actor string embeds this machine's `os.hostname()` — so `liveness/events.jsonl` (and
+therefore `.kontourai/flow-agents/` as a whole) can indirectly reveal hostnames of every host
+that has claimed work in this repo; `.kontourai/` must stay gitignored (it already is, by
+default) and must never be force-added (`git add -f`) or bundled into a shareable support
+bundle without first reviewing it for this kind of incidental host-identifying information. Both
 `workflow-sidecar`'s `liveness` command and `workflow-steering.js`'s SessionStart advisory
 consume the same `resolveActor()` function, so a session's own claim/heartbeat events are
 never mistaken for "another agent."

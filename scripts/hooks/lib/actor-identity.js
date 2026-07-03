@@ -47,6 +47,11 @@
  *   sanitizeSegment(value)   → value restricted to [A-Za-z0-9_.-], capped 64 chars
  *   serializeActor(actor)    → actor struct serialized to a single grouping-key-safe string
  *   resolveActor(env)        → { actor: string, source: string }
+ *   isUnresolvedActor(actor) → boolean (true when actor is empty or the retired literal
+ *                              "local", case-insensitive — single-sourced predicate shared by
+ *                              the lifecycle auto-emit path, the direct CLI liveness path, and
+ *                              (#288) the tool-activity heartbeat path, so all three can never
+ *                              disagree on what counts as "no usable actor")
  */
 
 const fs = require('fs');
@@ -338,6 +343,20 @@ function resolveActor(env = process.env) {
   return { actor: '', source: 'unresolved' };
 }
 
+/**
+ * True when an actor is empty or the retired literal "local" (case-insensitive) — the one
+ * shared definition of "unresolved" (#287 fix iteration 1, F6; single-sourced here per #288's
+ * Wave 1 Task 1.1 so the lifecycle auto-emit path, the direct CLI liveness path, and the
+ * tool-activity heartbeat path all consume the same predicate rather than each forking their
+ * own copy).
+ *
+ * @param {string} actor
+ * @returns {boolean}
+ */
+function isUnresolvedActor(actor) {
+  return !actor || String(actor).toLowerCase() === 'local';
+}
+
 module.exports = {
   detectRuntime,
   runtimeSessionId,
@@ -345,4 +364,5 @@ module.exports = {
   sanitizeSegment,
   serializeActor,
   resolveActor,
+  isUnresolvedActor,
 };

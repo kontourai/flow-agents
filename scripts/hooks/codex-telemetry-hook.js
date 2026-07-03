@@ -60,6 +60,14 @@ async function main() {
   const event = hookEventName(raw);
   const telemetryScript = path.resolve(__dirname, '..', 'telemetry', 'telemetry.sh');
 
+  if (eventType === 'PostToolUse') {
+    try {
+      require('./lib/liveness-heartbeat').maybeEmitHeartbeat({ cwd: process.cwd(), env: process.env });
+    } catch (err) {
+      process.stderr.write(`[CodexTelemetryHook] liveness heartbeat error: ${err.message}\n`);
+    }
+  }
+
   const result = spawnSync('bash', [telemetryScript, eventType, agentName], {
     input: raw,
     encoding: 'utf8',

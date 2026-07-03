@@ -250,6 +250,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check telemetry-contract-integration
 
+      - name: Liveness heartbeat integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check liveness-heartbeat-integration
+
       - name: Telemetry doctor integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check telemetry-doctor-integration
