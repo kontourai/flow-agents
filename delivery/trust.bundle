@@ -3,184 +3,172 @@
   "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
   "claims": [
     {
-      "id": "promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic",
+      "id": "kontourai-flow-agents-166-pull-work-skill-obedience-live-lane.flow-agents-workflow.live-pull-work-skill-obedience-whether-an-llm-agent-actually-runs-the-documented-preflight-claim-post-claim-recheck-steps-during-a-real-session-vs-a-technically-complete-implementation-the-agent-simply-forgets-to-invoke-is-not-machine-verifiable-without-a-live-llm-eval-lane-per-the-plan-stop-short-risk-4-and-the-fix-plan-addendum-because-emission-is-purely-skill-text-driven-the-static-skill-text-assertions-ac8-62-62-passing-this-pass-prove-the-instructions-exist-not-that-they-are-followed-the-honest-limit-of-a-skill-text-slice-reconfirmed-unchanged-from-the-prior-verify-pass-recorded-again-this-re-verify-pass-as-the-accepted-gap-waiver-per-task-instructions",
       "subjectType": "workflow-check",
-      "subjectId": "promote-gate/decisions",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "decision registry validates the promotion-gate topic",
-      "value": "pass",
-      "createdAt": "2026-07-03T05:25:54Z",
-      "updatedAt": "2026-07-03T05:25:54Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes",
-      "subjectType": "workflow-check",
-      "subjectId": "promote-gate/cleanup-audit",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "cleanup-audit promote-then-archive gate integration passes",
-      "value": "pass",
-      "createdAt": "2026-07-03T05:25:54Z",
-      "updatedAt": "2026-07-03T05:25:54Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary",
-      "subjectType": "workflow-check",
-      "subjectId": "promote-gate/promotion",
+      "subjectId": "kontourai-flow-agents-166/pull-work-skill-obedience-live-lane",
       "facet": "flow-agents.workflow",
       "claimType": "workflow.check.policy",
-      "fieldOrBehavior": "Promoted the promote-then-archive gate decision + lifecycle doc + vocabulary",
-      "value": "pass",
-      "createdAt": "2026-07-03T05:25:54Z",
-      "updatedAt": "2026-07-03T05:25:54Z",
+      "fieldOrBehavior": "Live pull-work skill-obedience (whether an LLM agent actually runs the documented preflight/claim/post-claim-recheck steps during a real session, vs. a technically complete implementation the agent simply forgets to invoke) is not machine-verifiable without a live LLM eval lane. Per the plan Stop-Short Risk 4 and the fix-plan addendum: because emission is purely skill-text-driven, the static skill-text assertions (AC8, 62/62 passing this pass) prove the instructions exist, not that they are followed - the honest limit of a skill-text slice. Reconfirmed unchanged from the prior verify pass; recorded again this re-verify pass as the accepted-gap waiver per task instructions.",
+      "value": "skip",
+      "createdAt": "2026-07-03T05:50:40Z",
+      "updatedAt": "2026-07-03T05:50:40Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
+      "verificationPolicyId": "policy:workflow.check.policy:attestation",
       "metadata": {
-        "promotion": {
-          "schema_version": "1.0",
-          "none": false,
-          "targets": [
-            "docs/decisions/promotion-gate.md",
-            "docs/workflow-artifact-lifecycle.md",
-            "CONTEXT.md"
-          ],
-          "promoted_at": "2026-07-03T05:25:54Z"
+        "waiver": {
+          "reason": "Live LLM skill-obedience (whether a real pull-work session actually invokes the documented liveness preflight/claim/post-claim-recheck steps) requires a live LLM eval lane that does not exist in this repo's deterministic, no-model-spend eval suite; the static skill-text assertions (AC8) can only prove the instructions exist, not that an agent follows them in a live session. Named in the plan's Stop-Short Risk 4 and unresolved by design in a skill-text-only slice.",
+          "approved_by": "brian.anderson1222@gmail.com session-approved",
+          "approved_at": "2026-07-03T05:50:40Z"
         }
       },
+      "status": "assumed"
+    },
+    {
+      "id": "kontourai-flow-agents-166-ac1-liveness-preflight-classifies-candidates-pull-work-s-new-selection-preflight.flow-agents-workflow.ac1-liveness-preflight-classifies-candidates-pull-work-s-new-selection-preflight",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-166/ac1-liveness-preflight-classifies-candidates-pull-work-s-new-selection-preflight",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC1 `liveness-preflight-classifies-candidates`: `pull-work`'s new selection preflight",
+      "value": "pass",
+      "createdAt": "2026-07-03T05:50:40Z",
+      "updatedAt": "2026-07-03T05:50:40Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
       "status": "verified"
     },
     {
-      "id": "promote-gate-ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy.flow-agents-workflow.ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy",
+      "id": "kontourai-flow-agents-166-ac2-held-subjects-excluded-by-default-force-overrides-held-candidates-are-excluded.flow-agents-workflow.ac2-held-subjects-excluded-by-default-force-overrides-held-candidates-are-excluded",
       "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "promote-gate/ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy",
+      "subjectId": "kontourai-flow-agents-166/ac2-held-subjects-excluded-by-default-force-overrides-held-candidates-are-excluded",
       "facet": "flow-agents.workflow",
       "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC1: unpromoted delivered session archive refused with promote remedy",
-      "value": "pending",
-      "createdAt": "2026-07-03T05:25:54Z",
-      "updatedAt": "2026-07-03T05:25:54Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
-      "status": "proposed"
-    },
-    {
-      "id": "promote-gate-ac2-promoted-session-archives-cleanly-evidence-refs-resolve.flow-agents-workflow.ac2-promoted-session-archives-cleanly-evidence-refs-resolve",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "promote-gate/ac2-promoted-session-archives-cleanly-evidence-refs-resolve",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC2: promoted session archives cleanly; evidence refs resolve",
-      "value": "pending",
-      "createdAt": "2026-07-03T05:25:54Z",
-      "updatedAt": "2026-07-03T05:25:54Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
-      "status": "proposed"
-    },
-    {
-      "id": "promote-gate-ac3-explicit-no-residue-promotion-archives-cleanly-with-reason.flow-agents-workflow.ac3-explicit-no-residue-promotion-archives-cleanly-with-reason",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "promote-gate/ac3-explicit-no-residue-promotion-archives-cleanly-with-reason",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC3: explicit no-residue promotion archives cleanly with reason",
-      "value": "pending",
-      "createdAt": "2026-07-03T05:25:54Z",
-      "updatedAt": "2026-07-03T05:25:54Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
-      "status": "proposed"
-    },
-    {
-      "id": "promote-gate-review.flow-agents-workflow.promote-gate-implementation-reviewed-session-local-claim-shape-gate-classification-tests-green",
-      "subjectType": "workflow-critique",
-      "subjectId": "promote-gate/review",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.critique.review",
-      "fieldOrBehavior": "promote-gate implementation reviewed: session-local claim shape, gate classification, tests green",
+      "fieldOrBehavior": "AC2 `held-subjects-excluded-by-default-force-overrides`: `held` candidates are excluded",
       "value": "pass",
-      "createdAt": "2026-07-03T05:25:54Z",
-      "updatedAt": "2026-07-03T05:25:54Z",
-      "impactLevel": "medium",
-      "verificationPolicyId": "policy:workflow.critique.review",
+      "createdAt": "2026-07-03T05:50:40Z",
+      "updatedAt": "2026-07-03T05:50:40Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-166-ac3-reclaimable-flagged-requires-explicit-optin-reclaimable-stale-candidates-are.flow-agents-workflow.ac3-reclaimable-flagged-requires-explicit-optin-reclaimable-stale-candidates-are",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-166/ac3-reclaimable-flagged-requires-explicit-optin-reclaimable-stale-candidates-are",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC3 `reclaimable-flagged-requires-explicit-optin`: `reclaimable` (stale) candidates are",
+      "value": "pass",
+      "createdAt": "2026-07-03T05:50:40Z",
+      "updatedAt": "2026-07-03T05:50:40Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-166-ac4-claim-emitted-on-selection-with-matching-subjectid-on-finalized-selection-end-of.flow-agents-workflow.ac4-claim-emitted-on-selection-with-matching-subjectid-on-finalized-selection-end-of",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-166/ac4-claim-emitted-on-selection-with-matching-subjectid-on-finalized-selection-end-of",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC4 `claim-emitted-on-selection-with-matching-subjectid`: on finalized selection (end of",
+      "value": "pass",
+      "createdAt": "2026-07-03T05:50:40Z",
+      "updatedAt": "2026-07-03T05:50:40Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-166-ac5-own-fresh-claim-is-wip-not-a-new-pick-a-candidate-with-a-verified-row-for-the.flow-agents-workflow.ac5-own-fresh-claim-is-wip-not-a-new-pick-a-candidate-with-a-verified-row-for-the",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-166/ac5-own-fresh-claim-is-wip-not-a-new-pick-a-candidate-with-a-verified-row-for-the",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC5 `own-fresh-claim-is-wip-not-a-new-pick`: a candidate with a `verified` row for the",
+      "value": "pass",
+      "createdAt": "2026-07-03T05:50:40Z",
+      "updatedAt": "2026-07-03T05:50:40Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-166-ac6-no-provider-mutation-rule-preserved-with-290-seam-documented-the-existing-do-not.flow-agents-workflow.ac6-no-provider-mutation-rule-preserved-with-290-seam-documented-the-existing-do-not",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-166/ac6-no-provider-mutation-rule-preserved-with-290-seam-documented-the-existing-do-not",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC6 `no-provider-mutation-rule-preserved-with-290-seam-documented`: the existing \"do not",
+      "value": "pass",
+      "createdAt": "2026-07-03T05:50:40Z",
+      "updatedAt": "2026-07-03T05:50:40Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-166-ac7-whoami-and-resolve-slug-cli-additions-covered-the-two-new-read-only-cli-actions.flow-agents-workflow.ac7-whoami-and-resolve-slug-cli-additions-covered-the-two-new-read-only-cli-actions",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-166/ac7-whoami-and-resolve-slug-cli-additions-covered-the-two-new-read-only-cli-actions",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC7 `whoami-and-resolve-slug-cli-additions-covered`: the two new read-only CLI actions",
+      "value": "pass",
+      "createdAt": "2026-07-03T05:50:40Z",
+      "updatedAt": "2026-07-03T05:50:40Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-166-ac8-pull-work-skill-text-statically-asserted-every-new-pull-work-behavior-above.flow-agents-workflow.ac8-pull-work-skill-text-statically-asserted-every-new-pull-work-behavior-above",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-166/ac8-pull-work-skill-text-statically-asserted-every-new-pull-work-behavior-above",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC8 `pull-work-skill-text-statically-asserted`: every new pull-work behavior above",
+      "value": "pass",
+      "createdAt": "2026-07-03T05:50:40Z",
+      "updatedAt": "2026-07-03T05:50:40Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-166-ac9-new-eval-file-registered-adr-0020-the-new.flow-agents-workflow.ac9-new-eval-file-registered-adr-0020-the-new",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-166/ac9-new-eval-file-registered-adr-0020-the-new",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC9 `new-eval-file-registered-adr-0020`: the new",
+      "value": "pass",
+      "createdAt": "2026-07-03T05:50:40Z",
+      "updatedAt": "2026-07-03T05:50:40Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
       "status": "verified"
     }
   ],
   "evidence": [
     {
-      "id": "ev:promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic",
-      "claimId": "promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "promote-gate/evidence.json",
-      "excerptOrSummary": "decision registry validates the promotion-gate topic",
-      "observedAt": "2026-07-03T05:25:54Z",
+      "id": "ev:kontourai-flow-agents-166-pull-work-skill-obedience-live-lane.flow-agents-workflow.live-pull-work-skill-obedience-whether-an-llm-agent-actually-runs-the-documented-preflight-claim-post-claim-recheck-steps-during-a-real-session-vs-a-technically-complete-implementation-the-agent-simply-forgets-to-invoke-is-not-machine-verifiable-without-a-live-llm-eval-lane-per-the-plan-stop-short-risk-4-and-the-fix-plan-addendum-because-emission-is-purely-skill-text-driven-the-static-skill-text-assertions-ac8-62-62-passing-this-pass-prove-the-instructions-exist-not-that-they-are-followed-the-honest-limit-of-a-skill-text-slice-reconfirmed-unchanged-from-the-prior-verify-pass-recorded-again-this-re-verify-pass-as-the-accepted-gap-waiver-per-task-instructions",
+      "claimId": "kontourai-flow-agents-166-pull-work-skill-obedience-live-lane.flow-agents-workflow.live-pull-work-skill-obedience-whether-an-llm-agent-actually-runs-the-documented-preflight-claim-post-claim-recheck-steps-during-a-real-session-vs-a-technically-complete-implementation-the-agent-simply-forgets-to-invoke-is-not-machine-verifiable-without-a-live-llm-eval-lane-per-the-plan-stop-short-risk-4-and-the-fix-plan-addendum-because-emission-is-purely-skill-text-driven-the-static-skill-text-assertions-ac8-62-62-passing-this-pass-prove-the-instructions-exist-not-that-they-are-followed-the-honest-limit-of-a-skill-text-slice-reconfirmed-unchanged-from-the-prior-verify-pass-recorded-again-this-re-verify-pass-as-the-accepted-gap-waiver-per-task-instructions",
+      "evidenceType": "attestation",
+      "method": "attestation",
+      "sourceRef": "kontourai-flow-agents-166/evidence.json",
+      "excerptOrSummary": "Live pull-work skill-obedience (whether an LLM agent actually runs the documented preflight/claim/post-claim-recheck steps during a real session, vs. a technically complete implementation the agent simply forgets to invoke) is not machine-verifiable without a live LLM eval lane. Per the plan Stop-Short Risk 4 and the fix-plan addendum: because emission is purely skill-text-driven, the static skill-text assertions (AC8, 62/62 passing this pass) prove the instructions exist, not that they are followed - the honest limit of a skill-text slice. Reconfirmed unchanged from the prior verify pass; recorded again this re-verify pass as the accepted-gap waiver per task instructions.",
+      "observedAt": "2026-07-03T05:50:40Z",
       "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "npm run check:decisions --",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes",
-      "claimId": "promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "promote-gate/evidence.json",
-      "excerptOrSummary": "cleanup-audit promote-then-archive gate integration passes",
-      "observedAt": "2026-07-03T05:25:54Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_workflow_artifact_cleanup_audit.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary",
-      "claimId": "promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary",
-      "evidenceType": "policy_rule",
-      "method": "auditability",
-      "sourceRef": "promote-gate/evidence.json",
-      "excerptOrSummary": "Promoted the promote-then-archive gate decision + lifecycle doc + vocabulary",
-      "observedAt": "2026-07-03T05:25:54Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
+      "passing": false
     }
   ],
   "policies": [
     {
-      "id": "policy:workflow.check.command:test_output",
-      "claimType": "workflow.check.command",
-      "requiredEvidence": [
-        "test_output"
-      ],
-      "acceptanceCriteria": [
-        "A verified verification event must support a workflow.check.command claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "high"
-    },
-    {
-      "id": "policy:workflow.check.policy:policy_rule",
+      "id": "policy:workflow.check.policy:attestation",
       "claimType": "workflow.check.policy",
       "requiredEvidence": [
-        "policy_rule"
+        "attestation"
       ],
       "acceptanceCriteria": [
         "A verified verification event must support a workflow.check.policy claim."
@@ -207,69 +195,110 @@
       "stalenessTriggers": [],
       "conflictRules": [],
       "impactLevel": "high"
-    },
-    {
-      "id": "policy:workflow.critique.review",
-      "claimType": "workflow.critique.review",
-      "requiredEvidence": [],
-      "acceptanceCriteria": [
-        "A verified verification event must support a workflow.critique.review claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "medium"
     }
   ],
   "events": [
     {
-      "id": "evt:promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic",
-      "claimId": "promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic",
-      "status": "verified",
+      "id": "evt:kontourai-flow-agents-166-pull-work-skill-obedience-live-lane.flow-agents-workflow.live-pull-work-skill-obedience-whether-an-llm-agent-actually-runs-the-documented-preflight-claim-post-claim-recheck-steps-during-a-real-session-vs-a-technically-complete-implementation-the-agent-simply-forgets-to-invoke-is-not-machine-verifiable-without-a-live-llm-eval-lane-per-the-plan-stop-short-risk-4-and-the-fix-plan-addendum-because-emission-is-purely-skill-text-driven-the-static-skill-text-assertions-ac8-62-62-passing-this-pass-prove-the-instructions-exist-not-that-they-are-followed-the-honest-limit-of-a-skill-text-slice-reconfirmed-unchanged-from-the-prior-verify-pass-recorded-again-this-re-verify-pass-as-the-accepted-gap-waiver-per-task-instructions",
+      "claimId": "kontourai-flow-agents-166-pull-work-skill-obedience-live-lane.flow-agents-workflow.live-pull-work-skill-obedience-whether-an-llm-agent-actually-runs-the-documented-preflight-claim-post-claim-recheck-steps-during-a-real-session-vs-a-technically-complete-implementation-the-agent-simply-forgets-to-invoke-is-not-machine-verifiable-without-a-live-llm-eval-lane-per-the-plan-stop-short-risk-4-and-the-fix-plan-addendum-because-emission-is-purely-skill-text-driven-the-static-skill-text-assertions-ac8-62-62-passing-this-pass-prove-the-instructions-exist-not-that-they-are-followed-the-honest-limit-of-a-skill-text-slice-reconfirmed-unchanged-from-the-prior-verify-pass-recorded-again-this-re-verify-pass-as-the-accepted-gap-waiver-per-task-instructions",
+      "status": "assumed",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic"
+        "ev:kontourai-flow-agents-166-pull-work-skill-obedience-live-lane.flow-agents-workflow.live-pull-work-skill-obedience-whether-an-llm-agent-actually-runs-the-documented-preflight-claim-post-claim-recheck-steps-during-a-real-session-vs-a-technically-complete-implementation-the-agent-simply-forgets-to-invoke-is-not-machine-verifiable-without-a-live-llm-eval-lane-per-the-plan-stop-short-risk-4-and-the-fix-plan-addendum-because-emission-is-purely-skill-text-driven-the-static-skill-text-assertions-ac8-62-62-passing-this-pass-prove-the-instructions-exist-not-that-they-are-followed-the-honest-limit-of-a-skill-text-slice-reconfirmed-unchanged-from-the-prior-verify-pass-recorded-again-this-re-verify-pass-as-the-accepted-gap-waiver-per-task-instructions"
       ],
-      "createdAt": "2026-07-03T05:25:54Z",
-      "verifiedAt": "2026-07-03T05:25:54Z"
+      "createdAt": "2026-07-03T05:50:40Z",
+      "verifiedAt": "2026-07-03T05:50:40Z"
     },
     {
-      "id": "evt:promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes",
-      "claimId": "promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes"
-      ],
-      "createdAt": "2026-07-03T05:25:54Z",
-      "verifiedAt": "2026-07-03T05:25:54Z"
-    },
-    {
-      "id": "evt:promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary",
-      "claimId": "promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary"
-      ],
-      "createdAt": "2026-07-03T05:25:54Z",
-      "verifiedAt": "2026-07-03T05:25:54Z"
-    },
-    {
-      "id": "evt:promote-gate-review.flow-agents-workflow.promote-gate-implementation-reviewed-session-local-claim-shape-gate-classification-tests-green",
-      "claimId": "promote-gate-review.flow-agents-workflow.promote-gate-implementation-reviewed-session-local-claim-shape-gate-classification-tests-green",
+      "id": "evt:kontourai-flow-agents-166-ac1-liveness-preflight-classifies-candidates-pull-work-s-new-selection-preflight.flow-agents-workflow.ac1-liveness-preflight-classifies-candidates-pull-work-s-new-selection-preflight",
+      "claimId": "kontourai-flow-agents-166-ac1-liveness-preflight-classifies-candidates-pull-work-s-new-selection-preflight.flow-agents-workflow.ac1-liveness-preflight-classifies-candidates-pull-work-s-new-selection-preflight",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-03T05:25:54Z",
-      "verifiedAt": "2026-07-03T05:25:54Z"
+      "createdAt": "2026-07-03T05:50:40Z",
+      "verifiedAt": "2026-07-03T05:50:40Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-166-ac2-held-subjects-excluded-by-default-force-overrides-held-candidates-are-excluded.flow-agents-workflow.ac2-held-subjects-excluded-by-default-force-overrides-held-candidates-are-excluded",
+      "claimId": "kontourai-flow-agents-166-ac2-held-subjects-excluded-by-default-force-overrides-held-candidates-are-excluded.flow-agents-workflow.ac2-held-subjects-excluded-by-default-force-overrides-held-candidates-are-excluded",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T05:50:40Z",
+      "verifiedAt": "2026-07-03T05:50:40Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-166-ac3-reclaimable-flagged-requires-explicit-optin-reclaimable-stale-candidates-are.flow-agents-workflow.ac3-reclaimable-flagged-requires-explicit-optin-reclaimable-stale-candidates-are",
+      "claimId": "kontourai-flow-agents-166-ac3-reclaimable-flagged-requires-explicit-optin-reclaimable-stale-candidates-are.flow-agents-workflow.ac3-reclaimable-flagged-requires-explicit-optin-reclaimable-stale-candidates-are",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T05:50:40Z",
+      "verifiedAt": "2026-07-03T05:50:40Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-166-ac4-claim-emitted-on-selection-with-matching-subjectid-on-finalized-selection-end-of.flow-agents-workflow.ac4-claim-emitted-on-selection-with-matching-subjectid-on-finalized-selection-end-of",
+      "claimId": "kontourai-flow-agents-166-ac4-claim-emitted-on-selection-with-matching-subjectid-on-finalized-selection-end-of.flow-agents-workflow.ac4-claim-emitted-on-selection-with-matching-subjectid-on-finalized-selection-end-of",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T05:50:40Z",
+      "verifiedAt": "2026-07-03T05:50:40Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-166-ac5-own-fresh-claim-is-wip-not-a-new-pick-a-candidate-with-a-verified-row-for-the.flow-agents-workflow.ac5-own-fresh-claim-is-wip-not-a-new-pick-a-candidate-with-a-verified-row-for-the",
+      "claimId": "kontourai-flow-agents-166-ac5-own-fresh-claim-is-wip-not-a-new-pick-a-candidate-with-a-verified-row-for-the.flow-agents-workflow.ac5-own-fresh-claim-is-wip-not-a-new-pick-a-candidate-with-a-verified-row-for-the",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T05:50:40Z",
+      "verifiedAt": "2026-07-03T05:50:40Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-166-ac6-no-provider-mutation-rule-preserved-with-290-seam-documented-the-existing-do-not.flow-agents-workflow.ac6-no-provider-mutation-rule-preserved-with-290-seam-documented-the-existing-do-not",
+      "claimId": "kontourai-flow-agents-166-ac6-no-provider-mutation-rule-preserved-with-290-seam-documented-the-existing-do-not.flow-agents-workflow.ac6-no-provider-mutation-rule-preserved-with-290-seam-documented-the-existing-do-not",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T05:50:40Z",
+      "verifiedAt": "2026-07-03T05:50:40Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-166-ac7-whoami-and-resolve-slug-cli-additions-covered-the-two-new-read-only-cli-actions.flow-agents-workflow.ac7-whoami-and-resolve-slug-cli-additions-covered-the-two-new-read-only-cli-actions",
+      "claimId": "kontourai-flow-agents-166-ac7-whoami-and-resolve-slug-cli-additions-covered-the-two-new-read-only-cli-actions.flow-agents-workflow.ac7-whoami-and-resolve-slug-cli-additions-covered-the-two-new-read-only-cli-actions",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T05:50:40Z",
+      "verifiedAt": "2026-07-03T05:50:40Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-166-ac8-pull-work-skill-text-statically-asserted-every-new-pull-work-behavior-above.flow-agents-workflow.ac8-pull-work-skill-text-statically-asserted-every-new-pull-work-behavior-above",
+      "claimId": "kontourai-flow-agents-166-ac8-pull-work-skill-text-statically-asserted-every-new-pull-work-behavior-above.flow-agents-workflow.ac8-pull-work-skill-text-statically-asserted-every-new-pull-work-behavior-above",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T05:50:40Z",
+      "verifiedAt": "2026-07-03T05:50:40Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-166-ac9-new-eval-file-registered-adr-0020-the-new.flow-agents-workflow.ac9-new-eval-file-registered-adr-0020-the-new",
+      "claimId": "kontourai-flow-agents-166-ac9-new-eval-file-registered-adr-0020-the-new.flow-agents-workflow.ac9-new-eval-file-registered-adr-0020-the-new",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T05:50:40Z",
+      "verifiedAt": "2026-07-03T05:50:40Z"
     }
   ]
 }

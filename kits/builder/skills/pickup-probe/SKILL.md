@@ -49,6 +49,7 @@ Challenge the selected work against the repository before planning:
 - Challenge glossary conflicts immediately: if a user or issue uses a term differently than `CONTEXT.md`, ask which meaning is authoritative before planning.
 - Discuss concrete scenarios when boundaries are fuzzy, especially around ownership, provider state, workflow gates, and stop-short behavior.
 - Check whether the selected work is still ready after WIP, conflicts, blockers, dependency freshness, and expected modified files are considered.
+- If the pull-work artifact flags the selected item `reclaimable`, treat the recorded opt-in as a decision to re-confirm (not silently accept) when material drift or time has passed since pull-work's preflight ran.
 - Keep downstream issues and non-goals out of scope unless they are explicit contract consumers for the selected work.
 - Ask one question at a time when a decision is needed, include a recommended answer, and record the answer immediately.
 - Record unresolved questions as blockers unless the user or orchestrator explicitly accepts proceeding with the gap.
