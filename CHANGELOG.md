@@ -1,5 +1,44 @@
 # Changelog
 
+## [2.4.0](https://github.com/kontourai/flow-agents/compare/v2.3.0...v2.4.0) (2026-07-03)
+
+
+### Features
+
+* **decisions:** topic-keyed living decision registry contract (Closes [#310](https://github.com/kontourai/flow-agents/issues/310)) ([#316](https://github.com/kontourai/flow-agents/issues/316)) ([0bd4e0b](https://github.com/kontourai/flow-agents/commit/0bd4e0ba593480c1e11988d2f9257082a3f06b4a))
+* **gates:** regression-lock the FlowDefinition-driven stop gate + gate-named block messages (ADR 0016 Abstraction A closeout) ([#265](https://github.com/kontourai/flow-agents/issues/265)) ([0fd0c0e](https://github.com/kontourai/flow-agents/commit/0fd0c0e56c3a8e007f116c77937f9fc61d9a6be7))
+* **kits:** cross-kit dependencies, skill-collision fixes, sidecar governance ([#264](https://github.com/kontourai/flow-agents/issues/264)) ([b2a4cc8](https://github.com/kontourai/flow-agents/commit/b2a4cc8abc1d7a822274fae90ee5e5e9e6dc7de5))
+* **kits:** veritas-governance kit — readiness→trust-bundle adapter with settled gate semantics ([#269](https://github.com/kontourai/flow-agents/issues/269)) ([7a08396](https://github.com/kontourai/flow-agents/commit/7a083966db47672ea552f13264ea3111e08fa06b))
+* **liveness:** default-on lifecycle + tool-activity heartbeats ([#288](https://github.com/kontourai/flow-agents/issues/288)) ([#306](https://github.com/kontourai/flow-agents/issues/306)) ([3134614](https://github.com/kontourai/flow-agents/commit/31346147311e829352b2219ce1a91b6babc5ec27))
+* **liveness:** runtime-agnostic actor identity; retire the "local" default ([#287](https://github.com/kontourai/flow-agents/issues/287)) ([#296](https://github.com/kontourai/flow-agents/issues/296)) ([204a4c6](https://github.com/kontourai/flow-agents/commit/204a4c68643587727b7d0c22390de4375a24ea6e))
+* promote-then-archive gate — durable-residue extraction is the archival act (Closes [#312](https://github.com/kontourai/flow-agents/issues/312)) ([#319](https://github.com/kontourai/flow-agents/issues/319)) ([490542c](https://github.com/kontourai/flow-agents/commit/490542caf461ab4e5bff1542f3e56f4fdc9fd234))
+* **pull-work:** liveness selection preflight — exclude held, claim on selection ([#329](https://github.com/kontourai/flow-agents/issues/329)) ([8c76568](https://github.com/kontourai/flow-agents/commit/8c76568407d37b145b5d3ea420c8b9746d2b5ac5))
+* **trust-anchor:** manifest-based reconcile, claim classification, loud attestations (WS8) ([55b66db](https://github.com/kontourai/flow-agents/commit/55b66dbf8c3c30f828439f1983669722981bcbae))
+* **trust-bundle:** migrate to @kontourai/surface 2.0.0 (Claim.facet rename) ([#277](https://github.com/kontourai/flow-agents/issues/277)) ([573b45e](https://github.com/kontourai/flow-agents/commit/573b45ec28453392bc11286ef7378b6627c790e0))
+* **veritas-governance:** migrate adapter to facet + schemaVersion 5 ([#285](https://github.com/kontourai/flow-agents/issues/285)) ([1948639](https://github.com/kontourai/flow-agents/commit/19486395e1c57231b9b8c9ec805d2fe2f720426e)), closes [#281](https://github.com/kontourai/flow-agents/issues/281)
+* **workflow:** branch as first-class routing state with agent/&lt;actor&gt;/&lt;slug&gt; convention ([#308](https://github.com/kontourai/flow-agents/issues/308)) ([739575c](https://github.com/kontourai/flow-agents/commit/739575c8f5f43a1f056982201cddaae699fe6409))
+
+
+### Fixes
+
+* **bundles:** resolve Codex hook script with HOME fallback; fail open with diagnostic ([e9c5993](https://github.com/kontourai/flow-agents/commit/e9c5993d84483c114641090026afaedc70afdcdb))
+* **evals:** heal integration lanes after runtime-path split ([20cdb36](https://github.com/kontourai/flow-agents/commit/20cdb36ac4b5704599faa524a5189d288b6d8a40))
+* **evals:** register WS8 fixtures with the retirement audit ([95f6baf](https://github.com/kontourai/flow-agents/commit/95f6bafe37a4eb492d6ccb70892f0038e35a3850))
+* **flow-agents:** resolve claude-code --global hook paths absolutely ([9148033](https://github.com/kontourai/flow-agents/commit/9148033f7c1e02512550f342d1bf3ac5e80fdf9d))
+* **sidecar:** preserve branch and created_at across init-plan; add field-preservation invariant sweep ([#315](https://github.com/kontourai/flow-agents/issues/315)) ([cae9c38](https://github.com/kontourai/flow-agents/commit/cae9c38d2d311e6205f665cc4943808748effaec))
+
+
+### Documentation
+
+* **adr:** ADR 0021 — assignment leases and stale-claim takeover ([#286](https://github.com/kontourai/flow-agents/issues/286)) ([df345dd](https://github.com/kontourai/flow-agents/commit/df345dd8a1dc067fff2d03334041b373057eb79c))
+* **adr:** ADR 0022 — fail-closed delivery reconciliation with governed exemptions ([#299](https://github.com/kontourai/flow-agents/issues/299)) ([046005a](https://github.com/kontourai/flow-agents/commit/046005af025663de005684c92fd825eab73fb8b1))
+* **learnings:** 2026-07 improvement-program learning review ([#284](https://github.com/kontourai/flow-agents/issues/284)) ([514b6ad](https://github.com/kontourai/flow-agents/commit/514b6ad346d0e42939b4c03bdee976fe0c166bf3))
+
+
+### Refactoring
+
+* **flow-agents:** centralize Codex home default helper ([dc9995c](https://github.com/kontourai/flow-agents/commit/dc9995cdc43a456ab6248307ef6d5ace59559313))
+
 ## [2.3.0](https://github.com/kontourai/flow-agents/compare/v2.2.0...v2.3.0) (2026-07-01)
 
 
