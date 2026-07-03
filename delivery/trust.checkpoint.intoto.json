@@ -4,7 +4,7 @@
     {
       "name": "trust.checkpoint.json",
       "digest": {
-        "sha256": "2c041ade235f5f72b152a1cd966004a188d5ea0cf5c224720cae6360ee657f2f"
+        "sha256": "ad458841249ca34cc38abca5214a5dd7a32e46f9609db712e5b0331800da6dcd"
       }
     }
   ],
@@ -14,42 +14,189 @@
     "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
     "claims": [
       {
-        "id": "kontourai-flow-agents-166-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-329-closes-166-one-fix-iteration-both-gates-pass-delivery-published",
-        "subjectType": "pull-request",
-        "subjectId": "kontourai-flow-agents-166/gate-claim-pull-request-opened",
+        "id": "kontourai-flow-agents-267-content-boundary.flow-agents-workflow.content-boundary",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-267/content-boundary",
         "facet": "flow-agents.workflow",
-        "claimType": "builder.pr-open.pull-request",
-        "fieldOrBehavior": "PR opened: https://github.com/kontourai/flow-agents/pull/329. Closes #166. One fix iteration; both gates pass; delivery/ published.",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "content boundary",
         "value": "pass",
-        "createdAt": "2026-07-03T05:52:18Z",
-        "updatedAt": "2026-07-03T05:52:18Z",
+        "createdAt": "2026-07-03T10:03:00Z",
+        "updatedAt": "2026-07-03T10:03:00Z",
         "impactLevel": "high",
-        "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
+        "verificationPolicyId": "policy:builder.verify.tests:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "command"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-267-decision-registry.flow-agents-workflow.decision-registry",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-267/decision-registry",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "decision registry",
+        "value": "pass",
+        "createdAt": "2026-07-03T10:03:00Z",
+        "updatedAt": "2026-07-03T10:03:00Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.verify.tests:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "command"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-267-source-tree-validation.flow-agents-workflow.source-tree-validation",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-267/source-tree-validation",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "source tree validation",
+        "value": "pass",
+        "createdAt": "2026-07-03T10:03:00Z",
+        "updatedAt": "2026-07-03T10:03:00Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.verify.tests:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "command"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-267-record-critique-fail-then-pass-supersedes-latest-wins-history-retained.flow-agents-workflow.record-critique-fail-then-pass-supersedes-latest-wins-history-retained",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-267/record-critique-fail-then-pass-supersedes-latest-wins-history-retained",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "record-critique fail then pass supersedes (latest wins, history retained)",
+        "value": "pending",
+        "createdAt": "2026-07-03T10:03:00Z",
+        "updatedAt": "2026-07-03T10:03:00Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.verify.tests",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "proposed"
+      },
+      {
+        "id": "kontourai-flow-agents-267-check-critique-round-trip-is-lossless-and-type-stable-under-flow-id.flow-agents-workflow.check-critique-round-trip-is-lossless-and-type-stable-under-flow-id",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-267/check-critique-round-trip-is-lossless-and-type-stable-under-flow-id",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "check/critique round-trip is lossless and type-stable under --flow-id",
+        "value": "pending",
+        "createdAt": "2026-07-03T10:03:00Z",
+        "updatedAt": "2026-07-03T10:03:00Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.verify.tests",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "proposed"
+      },
+      {
+        "id": "kontourai-flow-agents-267-superseded-historical-fail-tolerated-by-validator-live-fail-still-blocks.flow-agents-workflow.superseded-historical-fail-tolerated-by-validator-live-fail-still-blocks",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-267/superseded-historical-fail-tolerated-by-validator-live-fail-still-blocks",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "superseded historical fail tolerated by validator; live fail still blocks",
+        "value": "pending",
+        "createdAt": "2026-07-03T10:03:00Z",
+        "updatedAt": "2026-07-03T10:03:00Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.verify.tests",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "proposed"
+      },
+      {
+        "id": "kontourai-flow-agents-267-code-review.flow-agents-workflow.supersession-reviewer-scoped-round-trip-type-stable-anti-gaming-suite-green",
+        "subjectType": "artifact",
+        "subjectId": "kontourai-flow-agents-267/code-review",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.verify.policy-compliance",
+        "fieldOrBehavior": "Supersession reviewer-scoped, round-trip type-stable, anti-gaming suite green.",
+        "value": "pass",
+        "createdAt": "2026-07-03T10:03:00Z",
+        "updatedAt": "2026-07-03T10:03:00Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:builder.verify.policy-compliance",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "tool-code-reviewer",
+          "reviewed_at": "2026-07-03T10:03:00Z"
+        },
         "status": "verified"
       }
     ],
     "evidence": [
       {
-        "id": "ev:kontourai-flow-agents-166-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-329-closes-166-one-fix-iteration-both-gates-pass-delivery-published",
-        "claimId": "kontourai-flow-agents-166-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-329-closes-166-one-fix-iteration-both-gates-pass-delivery-published",
-        "evidenceType": "attestation",
-        "method": "corroboration",
-        "sourceRef": "kontourai-flow-agents-166/evidence.json",
-        "excerptOrSummary": "PR opened: https://github.com/kontourai/flow-agents/pull/329. Closes #166. One fix iteration; both gates pass; delivery/ published.",
-        "observedAt": "2026-07-03T05:52:18Z",
+        "id": "ev:kontourai-flow-agents-267-content-boundary.flow-agents-workflow.content-boundary",
+        "claimId": "kontourai-flow-agents-267-content-boundary.flow-agents-workflow.content-boundary",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-267/evidence.json",
+        "excerptOrSummary": "content boundary",
+        "observedAt": "2026-07-03T10:03:00Z",
         "collectedBy": "flow-agents/workflow-sidecar",
-        "passing": true
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "npm run check:content-boundary --",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-267-decision-registry.flow-agents-workflow.decision-registry",
+        "claimId": "kontourai-flow-agents-267-decision-registry.flow-agents-workflow.decision-registry",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-267/evidence.json",
+        "excerptOrSummary": "decision registry",
+        "observedAt": "2026-07-03T10:03:00Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "npm run check:decisions --",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-267-source-tree-validation.flow-agents-workflow.source-tree-validation",
+        "claimId": "kontourai-flow-agents-267-source-tree-validation.flow-agents-workflow.source-tree-validation",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-267/evidence.json",
+        "excerptOrSummary": "source tree validation",
+        "observedAt": "2026-07-03T10:03:00Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "npm run validate:source --",
+          "isError": false
+        }
       }
     ],
     "policies": [
       {
-        "id": "policy:workflow.check.external:attestation",
-        "claimType": "workflow.check.external",
+        "id": "policy:workflow.check.command:test_output",
+        "claimType": "workflow.check.command",
         "requiredEvidence": [
-          "attestation"
+          "test_output"
         ],
         "acceptanceCriteria": [
-          "A verified verification event must support a workflow.check.external claim."
+          "A verified verification event must support a workflow.check.command claim."
         ],
         "reviewAuthority": "system",
         "validityRule": {
@@ -60,13 +207,13 @@
         "impactLevel": "high"
       },
       {
-        "id": "policy:builder.pr-open.pull-request:attestation",
-        "claimType": "builder.pr-open.pull-request",
+        "id": "policy:builder.verify.tests:test_output",
+        "claimType": "builder.verify.tests",
         "requiredEvidence": [
-          "attestation"
+          "test_output"
         ],
         "acceptanceCriteria": [
-          "A verified verification event must support a builder.pr-open.pull-request claim."
+          "A verified verification event must support a builder.verify.tests claim."
         ],
         "reviewAuthority": "system",
         "validityRule": {
@@ -75,20 +222,114 @@
         "stalenessTriggers": [],
         "conflictRules": [],
         "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.acceptance.criterion",
+        "claimType": "workflow.acceptance.criterion",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.acceptance.criterion claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.verify.tests",
+        "claimType": "builder.verify.tests",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.verify.tests claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.critique.review",
+        "claimType": "workflow.critique.review",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.critique.review claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "medium"
+      },
+      {
+        "id": "policy:builder.verify.policy-compliance",
+        "claimType": "builder.verify.policy-compliance",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.verify.policy-compliance claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "medium"
       }
     ],
     "events": [
       {
-        "id": "evt:kontourai-flow-agents-166-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-329-closes-166-one-fix-iteration-both-gates-pass-delivery-published",
-        "claimId": "kontourai-flow-agents-166-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-329-closes-166-one-fix-iteration-both-gates-pass-delivery-published",
+        "id": "evt:kontourai-flow-agents-267-content-boundary.flow-agents-workflow.content-boundary",
+        "claimId": "kontourai-flow-agents-267-content-boundary.flow-agents-workflow.content-boundary",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:kontourai-flow-agents-166-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-329-closes-166-one-fix-iteration-both-gates-pass-delivery-published"
+          "ev:kontourai-flow-agents-267-content-boundary.flow-agents-workflow.content-boundary"
         ],
-        "createdAt": "2026-07-03T05:52:18Z",
-        "verifiedAt": "2026-07-03T05:52:18Z"
+        "createdAt": "2026-07-03T10:03:00Z",
+        "verifiedAt": "2026-07-03T10:03:00Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-267-decision-registry.flow-agents-workflow.decision-registry",
+        "claimId": "kontourai-flow-agents-267-decision-registry.flow-agents-workflow.decision-registry",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-267-decision-registry.flow-agents-workflow.decision-registry"
+        ],
+        "createdAt": "2026-07-03T10:03:00Z",
+        "verifiedAt": "2026-07-03T10:03:00Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-267-source-tree-validation.flow-agents-workflow.source-tree-validation",
+        "claimId": "kontourai-flow-agents-267-source-tree-validation.flow-agents-workflow.source-tree-validation",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-267-source-tree-validation.flow-agents-workflow.source-tree-validation"
+        ],
+        "createdAt": "2026-07-03T10:03:00Z",
+        "verifiedAt": "2026-07-03T10:03:00Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-267-code-review.flow-agents-workflow.supersession-reviewer-scoped-round-trip-type-stable-anti-gaming-suite-green",
+        "claimId": "kontourai-flow-agents-267-code-review.flow-agents-workflow.supersession-reviewer-scoped-round-trip-type-stable-anti-gaming-suite-green",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-03T10:03:00Z",
+        "verifiedAt": "2026-07-03T10:03:00Z"
       }
     ]
   }
