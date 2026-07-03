@@ -3,43 +3,57 @@
   "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
   "claims": [
     {
-      "id": "promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic",
+      "id": "knowledge-store-provider-contract-static-eval-suite.flow-agents-workflow.static-eval-lane-green-includes-providers-conformance-providers-health-health-pass-ac1-ac3-via-test-knowledge-providers-sh",
       "subjectType": "workflow-check",
-      "subjectId": "promote-gate/decisions",
+      "subjectId": "knowledge-store-provider-contract/static-eval-suite",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "decision registry validates the promotion-gate topic",
+      "claimType": "workflow.check.test",
+      "fieldOrBehavior": "Static eval lane green — includes providers/conformance + providers/health/health-pass (AC1-AC3) via test_knowledge_providers.sh",
       "value": "pass",
-      "createdAt": "2026-07-03T05:25:54Z",
-      "updatedAt": "2026-07-03T05:25:54Z",
+      "createdAt": "2026-07-03T05:53:35Z",
+      "updatedAt": "2026-07-03T05:53:35Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
+      "verificationPolicyId": "policy:workflow.check.test:test_output",
       "status": "verified"
     },
     {
-      "id": "promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes",
+      "id": "knowledge-store-provider-contract-decision-registry.flow-agents-workflow.decision-registry-3-topics-incl-knowledge-store-provider-index-regenerated",
       "subjectType": "workflow-check",
-      "subjectId": "promote-gate/cleanup-audit",
+      "subjectId": "knowledge-store-provider-contract/decision-registry",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "cleanup-audit promote-then-archive gate integration passes",
+      "claimType": "workflow.check.lint",
+      "fieldOrBehavior": "Decision registry: 3 topics incl. knowledge-store-provider; index regenerated",
       "value": "pass",
-      "createdAt": "2026-07-03T05:25:54Z",
-      "updatedAt": "2026-07-03T05:25:54Z",
+      "createdAt": "2026-07-03T05:53:35Z",
+      "updatedAt": "2026-07-03T05:53:35Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
+      "verificationPolicyId": "policy:workflow.check.lint:test_output",
       "status": "verified"
     },
     {
-      "id": "promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary",
+      "id": "knowledge-store-provider-contract-source-tree-validation.flow-agents-workflow.source-tree-validation-passed-with-new-schemas-providers-kit-json-entries",
       "subjectType": "workflow-check",
-      "subjectId": "promote-gate/promotion",
+      "subjectId": "knowledge-store-provider-contract/source-tree-validation",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.lint",
+      "fieldOrBehavior": "Source tree validation passed with new schemas/providers/kit.json entries",
+      "value": "pass",
+      "createdAt": "2026-07-03T05:53:35Z",
+      "updatedAt": "2026-07-03T05:53:35Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.lint:test_output",
+      "status": "verified"
+    },
+    {
+      "id": "knowledge-store-provider-contract-promotion.flow-agents-workflow.promoted-durable-residue-context-contracts-knowledge-store-contract-md-docs-decisions-knowledge-store-provider-md-schemas-knowledge-node-schema-json-schemas-knowledge-edge-schema-json-schemas-knowledge-proposal-schema-json-schemas-knowledge-health-report-schema-json-context-md",
+      "subjectType": "workflow-check",
+      "subjectId": "knowledge-store-provider-contract/promotion",
       "facet": "flow-agents.workflow",
       "claimType": "workflow.check.policy",
-      "fieldOrBehavior": "Promoted the promote-then-archive gate decision + lifecycle doc + vocabulary",
+      "fieldOrBehavior": "Promoted durable residue: context/contracts/knowledge-store-contract.md, docs/decisions/knowledge-store-provider.md, schemas/knowledge/node.schema.json, schemas/knowledge/edge.schema.json, schemas/knowledge/proposal.schema.json, schemas/knowledge/health-report.schema.json, CONTEXT.md",
       "value": "pass",
-      "createdAt": "2026-07-03T05:25:54Z",
-      "updatedAt": "2026-07-03T05:25:54Z",
+      "createdAt": "2026-07-03T05:53:35Z",
+      "updatedAt": "2026-07-03T05:53:35Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
       "metadata": {
@@ -47,67 +61,71 @@
           "schema_version": "1.0",
           "none": false,
           "targets": [
-            "docs/decisions/promotion-gate.md",
-            "docs/workflow-artifact-lifecycle.md",
+            "context/contracts/knowledge-store-contract.md",
+            "docs/decisions/knowledge-store-provider.md",
+            "schemas/knowledge/node.schema.json",
+            "schemas/knowledge/edge.schema.json",
+            "schemas/knowledge/proposal.schema.json",
+            "schemas/knowledge/health-report.schema.json",
             "CONTEXT.md"
           ],
-          "promoted_at": "2026-07-03T05:25:54Z"
+          "promoted_at": "2026-07-03T05:53:35Z"
         }
       },
       "status": "verified"
     },
     {
-      "id": "promote-gate-ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy.flow-agents-workflow.ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy",
+      "id": "knowledge-store-provider-contract-ac1-same-health-command-over-vault-git-repo-providers-yields-schema-valid-reports.flow-agents-workflow.ac1-same-health-command-over-vault-git-repo-providers-yields-schema-valid-reports",
       "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "promote-gate/ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy",
+      "subjectId": "knowledge-store-provider-contract/ac1-same-health-command-over-vault-git-repo-providers-yields-schema-valid-reports",
       "facet": "flow-agents.workflow",
       "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC1: unpromoted delivered session archive refused with promote remedy",
+      "fieldOrBehavior": "AC1: same health command over vault + git-repo providers yields schema-valid reports",
       "value": "pending",
-      "createdAt": "2026-07-03T05:25:54Z",
-      "updatedAt": "2026-07-03T05:25:54Z",
+      "createdAt": "2026-07-03T05:53:35Z",
+      "updatedAt": "2026-07-03T05:53:35Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.acceptance.criterion",
       "status": "proposed"
     },
     {
-      "id": "promote-gate-ac2-promoted-session-archives-cleanly-evidence-refs-resolve.flow-agents-workflow.ac2-promoted-session-archives-cleanly-evidence-refs-resolve",
+      "id": "knowledge-store-provider-contract-ac2-backlog-pass-over-work-item-adapter-flags-a-seeded-duplicate-and-a-seeded-broken-blocker-link.flow-agents-workflow.ac2-backlog-pass-over-work-item-adapter-flags-a-seeded-duplicate-and-a-seeded-broken-blocker-link",
       "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "promote-gate/ac2-promoted-session-archives-cleanly-evidence-refs-resolve",
+      "subjectId": "knowledge-store-provider-contract/ac2-backlog-pass-over-work-item-adapter-flags-a-seeded-duplicate-and-a-seeded-broken-blocker-link",
       "facet": "flow-agents.workflow",
       "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC2: promoted session archives cleanly; evidence refs resolve",
+      "fieldOrBehavior": "AC2: backlog pass over work-item adapter flags a seeded duplicate and a seeded broken blocker link",
       "value": "pending",
-      "createdAt": "2026-07-03T05:25:54Z",
-      "updatedAt": "2026-07-03T05:25:54Z",
+      "createdAt": "2026-07-03T05:53:35Z",
+      "updatedAt": "2026-07-03T05:53:35Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.acceptance.criterion",
       "status": "proposed"
     },
     {
-      "id": "promote-gate-ac3-explicit-no-residue-promotion-archives-cleanly-with-reason.flow-agents-workflow.ac3-explicit-no-residue-promotion-archives-cleanly-with-reason",
+      "id": "knowledge-store-provider-contract-ac3-provider-conformance-suite-passes-for-all-three-providers.flow-agents-workflow.ac3-provider-conformance-suite-passes-for-all-three-providers",
       "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "promote-gate/ac3-explicit-no-residue-promotion-archives-cleanly-with-reason",
+      "subjectId": "knowledge-store-provider-contract/ac3-provider-conformance-suite-passes-for-all-three-providers",
       "facet": "flow-agents.workflow",
       "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC3: explicit no-residue promotion archives cleanly with reason",
+      "fieldOrBehavior": "AC3: provider conformance suite passes for all three providers",
       "value": "pending",
-      "createdAt": "2026-07-03T05:25:54Z",
-      "updatedAt": "2026-07-03T05:25:54Z",
+      "createdAt": "2026-07-03T05:53:35Z",
+      "updatedAt": "2026-07-03T05:53:35Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.acceptance.criterion",
       "status": "proposed"
     },
     {
-      "id": "promote-gate-review.flow-agents-workflow.promote-gate-implementation-reviewed-session-local-claim-shape-gate-classification-tests-green",
+      "id": "knowledge-store-provider-contract-review.flow-agents-workflow.self-review-contract-4-schemas-3-providers-2-provider-agnostic-health-verbs-conformance-health-suites-22-tests-proposals-only-enforced-structurally-proposal-status-const-proposed-conformance-asserts-no-mutation-vault-provider-is-a-thin-wrapper-over-the-existing-store-adapter-no-regression-to-existing-skills-fixtures-seed-ac2-the-real-board-is-untouched",
       "subjectType": "workflow-critique",
-      "subjectId": "promote-gate/review",
+      "subjectId": "knowledge-store-provider-contract/review",
       "facet": "flow-agents.workflow",
       "claimType": "workflow.critique.review",
-      "fieldOrBehavior": "promote-gate implementation reviewed: session-local claim shape, gate classification, tests green",
+      "fieldOrBehavior": "Self-review: contract + 4 schemas + 3 providers + 2 provider-agnostic health verbs + conformance/health suites (22 tests). Proposals-only enforced structurally (proposal.status const 'proposed'; conformance asserts no mutation). Vault provider is a thin wrapper over the existing store adapter — no regression to existing skills. Fixtures seed AC2; the real board is untouched.",
       "value": "pass",
-      "createdAt": "2026-07-03T05:25:54Z",
-      "updatedAt": "2026-07-03T05:25:54Z",
+      "createdAt": "2026-07-03T05:53:35Z",
+      "updatedAt": "2026-07-03T05:53:35Z",
       "impactLevel": "medium",
       "verificationPolicyId": "policy:workflow.critique.review",
       "status": "verified"
@@ -115,13 +133,29 @@
   ],
   "evidence": [
     {
-      "id": "ev:promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic",
-      "claimId": "promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic",
+      "id": "ev:knowledge-store-provider-contract-static-eval-suite.flow-agents-workflow.static-eval-lane-green-includes-providers-conformance-providers-health-health-pass-ac1-ac3-via-test-knowledge-providers-sh",
+      "claimId": "knowledge-store-provider-contract-static-eval-suite.flow-agents-workflow.static-eval-lane-green-includes-providers-conformance-providers-health-health-pass-ac1-ac3-via-test-knowledge-providers-sh",
       "evidenceType": "test_output",
       "method": "validation",
-      "sourceRef": "promote-gate/evidence.json",
-      "excerptOrSummary": "decision registry validates the promotion-gate topic",
-      "observedAt": "2026-07-03T05:25:54Z",
+      "sourceRef": "knowledge-store-provider-contract/evidence.json",
+      "excerptOrSummary": "Static eval lane green — includes providers/conformance + providers/health/health-pass (AC1-AC3) via test_knowledge_providers.sh",
+      "observedAt": "2026-07-03T05:53:35Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/run.sh static",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:knowledge-store-provider-contract-decision-registry.flow-agents-workflow.decision-registry-3-topics-incl-knowledge-store-provider-index-regenerated",
+      "claimId": "knowledge-store-provider-contract-decision-registry.flow-agents-workflow.decision-registry-3-topics-incl-knowledge-store-provider-index-regenerated",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "knowledge-store-provider-contract/evidence.json",
+      "excerptOrSummary": "Decision registry: 3 topics incl. knowledge-store-provider; index regenerated",
+      "observedAt": "2026-07-03T05:53:35Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
       "execution": {
@@ -131,42 +165,59 @@
       }
     },
     {
-      "id": "ev:promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes",
-      "claimId": "promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes",
+      "id": "ev:knowledge-store-provider-contract-source-tree-validation.flow-agents-workflow.source-tree-validation-passed-with-new-schemas-providers-kit-json-entries",
+      "claimId": "knowledge-store-provider-contract-source-tree-validation.flow-agents-workflow.source-tree-validation-passed-with-new-schemas-providers-kit-json-entries",
       "evidenceType": "test_output",
       "method": "validation",
-      "sourceRef": "promote-gate/evidence.json",
-      "excerptOrSummary": "cleanup-audit promote-then-archive gate integration passes",
-      "observedAt": "2026-07-03T05:25:54Z",
+      "sourceRef": "knowledge-store-provider-contract/evidence.json",
+      "excerptOrSummary": "Source tree validation passed with new schemas/providers/kit.json entries",
+      "observedAt": "2026-07-03T05:53:35Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
       "execution": {
         "runner": "bash",
-        "label": "bash evals/integration/test_workflow_artifact_cleanup_audit.sh",
+        "label": "npm run validate:source --",
         "isError": false
       }
     },
     {
-      "id": "ev:promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary",
-      "claimId": "promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary",
+      "id": "ev:knowledge-store-provider-contract-promotion.flow-agents-workflow.promoted-durable-residue-context-contracts-knowledge-store-contract-md-docs-decisions-knowledge-store-provider-md-schemas-knowledge-node-schema-json-schemas-knowledge-edge-schema-json-schemas-knowledge-proposal-schema-json-schemas-knowledge-health-report-schema-json-context-md",
+      "claimId": "knowledge-store-provider-contract-promotion.flow-agents-workflow.promoted-durable-residue-context-contracts-knowledge-store-contract-md-docs-decisions-knowledge-store-provider-md-schemas-knowledge-node-schema-json-schemas-knowledge-edge-schema-json-schemas-knowledge-proposal-schema-json-schemas-knowledge-health-report-schema-json-context-md",
       "evidenceType": "policy_rule",
       "method": "auditability",
-      "sourceRef": "promote-gate/evidence.json",
-      "excerptOrSummary": "Promoted the promote-then-archive gate decision + lifecycle doc + vocabulary",
-      "observedAt": "2026-07-03T05:25:54Z",
+      "sourceRef": "knowledge-store-provider-contract/evidence.json",
+      "excerptOrSummary": "Promoted durable residue: context/contracts/knowledge-store-contract.md, docs/decisions/knowledge-store-provider.md, schemas/knowledge/node.schema.json, schemas/knowledge/edge.schema.json, schemas/knowledge/proposal.schema.json, schemas/knowledge/health-report.schema.json, CONTEXT.md",
+      "observedAt": "2026-07-03T05:53:35Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     }
   ],
   "policies": [
     {
-      "id": "policy:workflow.check.command:test_output",
-      "claimType": "workflow.check.command",
+      "id": "policy:workflow.check.test:test_output",
+      "claimType": "workflow.check.test",
       "requiredEvidence": [
         "test_output"
       ],
       "acceptanceCriteria": [
-        "A verified verification event must support a workflow.check.command claim."
+        "A verified verification event must support a workflow.check.test claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.lint:test_output",
+      "claimType": "workflow.check.lint",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.lint claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -226,50 +277,62 @@
   ],
   "events": [
     {
-      "id": "evt:promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic",
-      "claimId": "promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic",
+      "id": "evt:knowledge-store-provider-contract-static-eval-suite.flow-agents-workflow.static-eval-lane-green-includes-providers-conformance-providers-health-health-pass-ac1-ac3-via-test-knowledge-providers-sh",
+      "claimId": "knowledge-store-provider-contract-static-eval-suite.flow-agents-workflow.static-eval-lane-green-includes-providers-conformance-providers-health-health-pass-ac1-ac3-via-test-knowledge-providers-sh",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic"
+        "ev:knowledge-store-provider-contract-static-eval-suite.flow-agents-workflow.static-eval-lane-green-includes-providers-conformance-providers-health-health-pass-ac1-ac3-via-test-knowledge-providers-sh"
       ],
-      "createdAt": "2026-07-03T05:25:54Z",
-      "verifiedAt": "2026-07-03T05:25:54Z"
+      "createdAt": "2026-07-03T05:53:35Z",
+      "verifiedAt": "2026-07-03T05:53:35Z"
     },
     {
-      "id": "evt:promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes",
-      "claimId": "promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes",
+      "id": "evt:knowledge-store-provider-contract-decision-registry.flow-agents-workflow.decision-registry-3-topics-incl-knowledge-store-provider-index-regenerated",
+      "claimId": "knowledge-store-provider-contract-decision-registry.flow-agents-workflow.decision-registry-3-topics-incl-knowledge-store-provider-index-regenerated",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes"
+        "ev:knowledge-store-provider-contract-decision-registry.flow-agents-workflow.decision-registry-3-topics-incl-knowledge-store-provider-index-regenerated"
       ],
-      "createdAt": "2026-07-03T05:25:54Z",
-      "verifiedAt": "2026-07-03T05:25:54Z"
+      "createdAt": "2026-07-03T05:53:35Z",
+      "verifiedAt": "2026-07-03T05:53:35Z"
     },
     {
-      "id": "evt:promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary",
-      "claimId": "promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary",
+      "id": "evt:knowledge-store-provider-contract-source-tree-validation.flow-agents-workflow.source-tree-validation-passed-with-new-schemas-providers-kit-json-entries",
+      "claimId": "knowledge-store-provider-contract-source-tree-validation.flow-agents-workflow.source-tree-validation-passed-with-new-schemas-providers-kit-json-entries",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary"
+        "ev:knowledge-store-provider-contract-source-tree-validation.flow-agents-workflow.source-tree-validation-passed-with-new-schemas-providers-kit-json-entries"
       ],
-      "createdAt": "2026-07-03T05:25:54Z",
-      "verifiedAt": "2026-07-03T05:25:54Z"
+      "createdAt": "2026-07-03T05:53:35Z",
+      "verifiedAt": "2026-07-03T05:53:35Z"
     },
     {
-      "id": "evt:promote-gate-review.flow-agents-workflow.promote-gate-implementation-reviewed-session-local-claim-shape-gate-classification-tests-green",
-      "claimId": "promote-gate-review.flow-agents-workflow.promote-gate-implementation-reviewed-session-local-claim-shape-gate-classification-tests-green",
+      "id": "evt:knowledge-store-provider-contract-promotion.flow-agents-workflow.promoted-durable-residue-context-contracts-knowledge-store-contract-md-docs-decisions-knowledge-store-provider-md-schemas-knowledge-node-schema-json-schemas-knowledge-edge-schema-json-schemas-knowledge-proposal-schema-json-schemas-knowledge-health-report-schema-json-context-md",
+      "claimId": "knowledge-store-provider-contract-promotion.flow-agents-workflow.promoted-durable-residue-context-contracts-knowledge-store-contract-md-docs-decisions-knowledge-store-provider-md-schemas-knowledge-node-schema-json-schemas-knowledge-edge-schema-json-schemas-knowledge-proposal-schema-json-schemas-knowledge-health-report-schema-json-context-md",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:knowledge-store-provider-contract-promotion.flow-agents-workflow.promoted-durable-residue-context-contracts-knowledge-store-contract-md-docs-decisions-knowledge-store-provider-md-schemas-knowledge-node-schema-json-schemas-knowledge-edge-schema-json-schemas-knowledge-proposal-schema-json-schemas-knowledge-health-report-schema-json-context-md"
+      ],
+      "createdAt": "2026-07-03T05:53:35Z",
+      "verifiedAt": "2026-07-03T05:53:35Z"
+    },
+    {
+      "id": "evt:knowledge-store-provider-contract-review.flow-agents-workflow.self-review-contract-4-schemas-3-providers-2-provider-agnostic-health-verbs-conformance-health-suites-22-tests-proposals-only-enforced-structurally-proposal-status-const-proposed-conformance-asserts-no-mutation-vault-provider-is-a-thin-wrapper-over-the-existing-store-adapter-no-regression-to-existing-skills-fixtures-seed-ac2-the-real-board-is-untouched",
+      "claimId": "knowledge-store-provider-contract-review.flow-agents-workflow.self-review-contract-4-schemas-3-providers-2-provider-agnostic-health-verbs-conformance-health-suites-22-tests-proposals-only-enforced-structurally-proposal-status-const-proposed-conformance-asserts-no-mutation-vault-provider-is-a-thin-wrapper-over-the-existing-store-adapter-no-regression-to-existing-skills-fixtures-seed-ac2-the-real-board-is-untouched",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-03T05:25:54Z",
-      "verifiedAt": "2026-07-03T05:25:54Z"
+      "createdAt": "2026-07-03T05:53:35Z",
+      "verifiedAt": "2026-07-03T05:53:35Z"
     }
   ]
 }

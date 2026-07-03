@@ -91,6 +91,31 @@
       "id": "knowledge.obsidian-store",
       "path": "adapters/obsidian-store/index.js",
       "description": "Obsidian store adapter: each record is one human-canonical Obsidian markdown note. Frontmatter carries all contract fields; body rendered with callouts (raw), readable prose + Sources/Related wikilink sections (compiled/concept/snapshot). Category dots map to folder hierarchy; title-slugified filenames with collision suffix; superseded records move to archive/ (supersede-not-delete invariant). Backed by shared codec with default-store."
+    },
+    {
+      "id": "knowledge.markdown-vault-provider",
+      "path": "providers/markdown-vault/index.js",
+      "description": "Knowledge store PROVIDER (issue #317): adapts the markdown-vault store behind the typed graph model (nodes/edges/provenance). Thin read + proposals-only wrapper over an existing store adapter; existing skills unaffected."
+    },
+    {
+      "id": "knowledge.git-repo-provider",
+      "path": "providers/git-repo/index.js",
+      "description": "Knowledge store PROVIDER (issue #317): reads git-tracked docs (docs/decisions/* tombstones+evidence, CONTEXT.md glossary, docs/learnings/*) as decision/note nodes with supersedes/merged-into/evidence-of edges. Write side = decision-topic proposals shaped for the promote sub-flow."
+    },
+    {
+      "id": "knowledge.work-item-provider",
+      "path": "providers/work-item/index.js",
+      "description": "Knowledge store PROVIDER/source-sink adapter (issue #317): maps GitHub issues to issue nodes and flow-agents:work-item-metadata blockers + prose refs to blocks/relates edges via an injectable gh runner. Write side = draft comment/label proposals. Enables backlog hygiene as a knowledge-health pass."
+    },
+    {
+      "id": "knowledge.health-verbs",
+      "path": "providers/health/index.js",
+      "description": "Provider-agnostic knowledge-health verbs (issue #317): detectDuplicates + checkDependencyLinkIntegrity over any provider's graph, returning schema-valid health reports (schemas/knowledge/health-report.schema.json)."
+    },
+    {
+      "id": "knowledge.store-providers",
+      "path": "providers/index.js",
+      "description": "Public entry point for the knowledge store providers, health verbs, graph model helpers, and schema validator. See context/contracts/knowledge-store-contract.md."
     }
   ],
   "evals": [
@@ -153,6 +178,16 @@
       "id": "knowledge.hygiene-review-suite",
       "path": "evals/hygiene-review/suite.test.js",
       "description": "Eval cases for hygiene-review (#106 hygiene #5, closes the issue): opt-in orchestration (omitted audit block is skipped; empty review does nothing); each opted-in audit runs via its existing flow-runner method and its findings are collected verbatim (no detection reimplemented); proposals are normalized to adopt/retire/merge and each cites its sourceFlow + evidence; thin-orchestrator/consume-never-fork invariants — read-only by default mutates no record, no new gate is forked, the only mutation (glossary apply:true) is delegated to glossarySync's own gated propose→apply (verified via proposes-link + mutation-log on the resulting concept); sub-flow telemetry is folded in plus hygiene-review's own orchestrate-gate + review-gate; module-level export delegates to the runner."
+    },
+    {
+      "id": "knowledge.provider-conformance-suite",
+      "path": "providers/conformance/suite.test.js",
+      "description": "Conformance suite (issue #317, AC3): parameterized suite every knowledge store provider (markdown-vault, git-repo, work-item) must pass — read interface returns schema-valid nodes/edges with provenance, closed edge vocabulary, queryByType subset consistency, and proposeWrite returns a schema-valid 'proposed' proposal that mutates nothing (proposals-only)."
+    },
+    {
+      "id": "knowledge.provider-health-pass-suite",
+      "path": "providers/health/health-pass.test.js",
+      "description": "Health-pass suite (issue #317, AC1+AC2): the same health command over vault + git-repo providers yields schema-valid reports (AC1); a backlog pass over the work-item adapter driven by a seeded fixture flags a duplicate and a broken blocker link (AC2) — never the real board."
     }
   ],
   "skills": [

@@ -1,31 +1,31 @@
 {
   "schema_version": "1.0",
-  "slug": "promote-gate",
+  "slug": "knowledge-store-provider-contract",
   "work_item": null,
   "status": "delivered",
   "phase": "release",
-  "sealed_at": "2026-07-03T05:26:16Z",
-  "commit_sha": "d1bf8a30c775b15bcdedd167446617c496ae5cfa",
+  "sealed_at": "2026-07-03T05:53:35Z",
+  "commit_sha": "490542caf461ab4e5bff1542f3e56f4fdc9fd234",
   "checkpoint": {
-    "asOf": "2026-07-03T05:26:16.836Z",
+    "asOf": "2026-07-03T05:53:35.157Z",
     "statusByClaimId": {
-      "promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic": "verified",
-      "promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes": "verified",
-      "promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary": "verified",
-      "promote-gate-ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy.flow-agents-workflow.ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy": "proposed",
-      "promote-gate-ac2-promoted-session-archives-cleanly-evidence-refs-resolve.flow-agents-workflow.ac2-promoted-session-archives-cleanly-evidence-refs-resolve": "proposed",
-      "promote-gate-ac3-explicit-no-residue-promotion-archives-cleanly-with-reason.flow-agents-workflow.ac3-explicit-no-residue-promotion-archives-cleanly-with-reason": "proposed",
-      "promote-gate-review.flow-agents-workflow.promote-gate-implementation-reviewed-session-local-claim-shape-gate-classification-tests-green": "verified"
+      "knowledge-store-provider-contract-static-eval-suite.flow-agents-workflow.static-eval-lane-green-includes-providers-conformance-providers-health-health-pass-ac1-ac3-via-test-knowledge-providers-sh": "verified",
+      "knowledge-store-provider-contract-decision-registry.flow-agents-workflow.decision-registry-3-topics-incl-knowledge-store-provider-index-regenerated": "verified",
+      "knowledge-store-provider-contract-source-tree-validation.flow-agents-workflow.source-tree-validation-passed-with-new-schemas-providers-kit-json-entries": "verified",
+      "knowledge-store-provider-contract-ac1-same-health-command-over-vault-git-repo-providers-yields-schema-valid-reports.flow-agents-workflow.ac1-same-health-command-over-vault-git-repo-providers-yields-schema-valid-reports": "proposed",
+      "knowledge-store-provider-contract-ac2-backlog-pass-over-work-item-adapter-flags-a-seeded-duplicate-and-a-seeded-broken-blocker-link.flow-agents-workflow.ac2-backlog-pass-over-work-item-adapter-flags-a-seeded-duplicate-and-a-seeded-broken-blocker-link": "proposed",
+      "knowledge-store-provider-contract-ac3-provider-conformance-suite-passes-for-all-three-providers.flow-agents-workflow.ac3-provider-conformance-suite-passes-for-all-three-providers": "proposed",
+      "knowledge-store-provider-contract-review.flow-agents-workflow.self-review-contract-4-schemas-3-providers-2-provider-agnostic-health-verbs-conformance-health-suites-22-tests-proposals-only-enforced-structurally-proposal-status-const-proposed-conformance-asserts-no-mutation-vault-provider-is-a-thin-wrapper-over-the-existing-store-adapter-no-regression-to-existing-skills-fixtures-seed-ac2-the-real-board-is-untouched": "verified"
     },
-    "throughEventCreatedAt": "2026-07-03T05:25:54Z",
+    "throughEventCreatedAt": "2026-07-03T05:53:35Z",
     "throughEventCreatedAtByClaimId": {
-      "promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic": "2026-07-03T05:25:54Z",
-      "promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes": "2026-07-03T05:25:54Z",
-      "promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary": "2026-07-03T05:25:54Z",
-      "promote-gate-ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy.flow-agents-workflow.ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy": null,
-      "promote-gate-ac2-promoted-session-archives-cleanly-evidence-refs-resolve.flow-agents-workflow.ac2-promoted-session-archives-cleanly-evidence-refs-resolve": null,
-      "promote-gate-ac3-explicit-no-residue-promotion-archives-cleanly-with-reason.flow-agents-workflow.ac3-explicit-no-residue-promotion-archives-cleanly-with-reason": null,
-      "promote-gate-review.flow-agents-workflow.promote-gate-implementation-reviewed-session-local-claim-shape-gate-classification-tests-green": "2026-07-03T05:25:54Z"
+      "knowledge-store-provider-contract-static-eval-suite.flow-agents-workflow.static-eval-lane-green-includes-providers-conformance-providers-health-health-pass-ac1-ac3-via-test-knowledge-providers-sh": "2026-07-03T05:53:35Z",
+      "knowledge-store-provider-contract-decision-registry.flow-agents-workflow.decision-registry-3-topics-incl-knowledge-store-provider-index-regenerated": "2026-07-03T05:53:35Z",
+      "knowledge-store-provider-contract-source-tree-validation.flow-agents-workflow.source-tree-validation-passed-with-new-schemas-providers-kit-json-entries": "2026-07-03T05:53:35Z",
+      "knowledge-store-provider-contract-ac1-same-health-command-over-vault-git-repo-providers-yields-schema-valid-reports.flow-agents-workflow.ac1-same-health-command-over-vault-git-repo-providers-yields-schema-valid-reports": null,
+      "knowledge-store-provider-contract-ac2-backlog-pass-over-work-item-adapter-flags-a-seeded-duplicate-and-a-seeded-broken-blocker-link.flow-agents-workflow.ac2-backlog-pass-over-work-item-adapter-flags-a-seeded-duplicate-and-a-seeded-broken-blocker-link": null,
+      "knowledge-store-provider-contract-ac3-provider-conformance-suite-passes-for-all-three-providers.flow-agents-workflow.ac3-provider-conformance-suite-passes-for-all-three-providers": null,
+      "knowledge-store-provider-contract-review.flow-agents-workflow.self-review-contract-4-schemas-3-providers-2-provider-agnostic-health-verbs-conformance-health-suites-22-tests-proposals-only-enforced-structurally-proposal-status-const-proposed-conformance-asserts-no-mutation-vault-provider-is-a-thin-wrapper-over-the-existing-store-adapter-no-regression-to-existing-skills-fixtures-seed-ac2-the-real-board-is-untouched": "2026-07-03T05:53:35Z"
     },
     "statusFunctionVersion": "2"
   }
