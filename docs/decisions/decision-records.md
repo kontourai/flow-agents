@@ -7,6 +7,8 @@ evidence:
     ref: https://github.com/kontourai/flow-agents/issues/310
   - kind: session-archive
     ref: .kontourai/flow-agents/decision-registry-shape/decision-registry-shape--idea-to-backlog.md
+  - kind: pr
+    ref: https://github.com/kontourai/flow-agents/pull/316
 ---
 
 # Decision records
