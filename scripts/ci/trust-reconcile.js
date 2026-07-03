@@ -229,6 +229,11 @@ function classifyBundleClaims(bundle) {
   const seenClaims = new Set();
   for (const c of claims) {
     if (!c || !c.id || typeof c.claimType !== 'string') continue;
+    // #267/#282: a superseded critique write is HISTORY — excluded from reconcile evaluation so a
+    // resolved session converges (a fail critique that a later same-reviewer pass superseded no
+    // longer blocks). Scoped to NON-test_output claims so a command-backed claim can never launder
+    // a real failure by carrying superseded_by — a test_output claim always reconciles or diverges.
+    if (c.metadata && typeof c.metadata === 'object' && c.metadata.superseded_by && !claimHasTestOutputEvidence.has(c.id)) continue;
     if (reconcilableClaimIds.has(c.id)) continue; // handled by (A)
     if (seenClaims.has(c.id)) continue;
     const status = String(c.status || '');

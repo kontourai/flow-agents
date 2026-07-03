@@ -1,31 +1,31 @@
 {
   "schema_version": "1.0",
-  "slug": "promote-gate",
+  "slug": "kontourai-flow-agents-267",
   "work_item": null,
   "status": "delivered",
   "phase": "release",
-  "sealed_at": "2026-07-03T05:26:16Z",
-  "commit_sha": "d1bf8a30c775b15bcdedd167446617c496ae5cfa",
+  "sealed_at": "2026-07-03T10:04:00Z",
+  "commit_sha": "bee760272b8bb770df02400ccc5881bd3dbc8806",
   "checkpoint": {
-    "asOf": "2026-07-03T05:26:16.836Z",
+    "asOf": "2026-07-03T16:47:27.927Z",
     "statusByClaimId": {
-      "promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic": "verified",
-      "promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes": "verified",
-      "promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary": "verified",
-      "promote-gate-ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy.flow-agents-workflow.ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy": "proposed",
-      "promote-gate-ac2-promoted-session-archives-cleanly-evidence-refs-resolve.flow-agents-workflow.ac2-promoted-session-archives-cleanly-evidence-refs-resolve": "proposed",
-      "promote-gate-ac3-explicit-no-residue-promotion-archives-cleanly-with-reason.flow-agents-workflow.ac3-explicit-no-residue-promotion-archives-cleanly-with-reason": "proposed",
-      "promote-gate-review.flow-agents-workflow.promote-gate-implementation-reviewed-session-local-claim-shape-gate-classification-tests-green": "verified"
+      "kontourai-flow-agents-267-content-boundary.flow-agents-workflow.content-boundary": "verified",
+      "kontourai-flow-agents-267-decision-registry.flow-agents-workflow.decision-registry": "verified",
+      "kontourai-flow-agents-267-source-tree-validation.flow-agents-workflow.source-tree-validation": "verified",
+      "kontourai-flow-agents-267-record-critique-fail-then-pass-supersedes-latest-wins-history-retained.flow-agents-workflow.record-critique-fail-then-pass-supersedes-latest-wins-history-retained": "proposed",
+      "kontourai-flow-agents-267-check-critique-round-trip-is-lossless-and-type-stable-under-flow-id.flow-agents-workflow.check-critique-round-trip-is-lossless-and-type-stable-under-flow-id": "proposed",
+      "kontourai-flow-agents-267-superseded-historical-fail-tolerated-by-validator-live-fail-still-blocks.flow-agents-workflow.superseded-historical-fail-tolerated-by-validator-live-fail-still-blocks": "proposed",
+      "kontourai-flow-agents-267-code-review.flow-agents-workflow.supersession-reviewer-scoped-round-trip-type-stable-anti-gaming-suite-green": "verified"
     },
-    "throughEventCreatedAt": "2026-07-03T05:25:54Z",
+    "throughEventCreatedAt": "2026-07-03T10:03:00Z",
     "throughEventCreatedAtByClaimId": {
-      "promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic": "2026-07-03T05:25:54Z",
-      "promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes": "2026-07-03T05:25:54Z",
-      "promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary": "2026-07-03T05:25:54Z",
-      "promote-gate-ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy.flow-agents-workflow.ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy": null,
-      "promote-gate-ac2-promoted-session-archives-cleanly-evidence-refs-resolve.flow-agents-workflow.ac2-promoted-session-archives-cleanly-evidence-refs-resolve": null,
-      "promote-gate-ac3-explicit-no-residue-promotion-archives-cleanly-with-reason.flow-agents-workflow.ac3-explicit-no-residue-promotion-archives-cleanly-with-reason": null,
-      "promote-gate-review.flow-agents-workflow.promote-gate-implementation-reviewed-session-local-claim-shape-gate-classification-tests-green": "2026-07-03T05:25:54Z"
+      "kontourai-flow-agents-267-content-boundary.flow-agents-workflow.content-boundary": "2026-07-03T10:03:00Z",
+      "kontourai-flow-agents-267-decision-registry.flow-agents-workflow.decision-registry": "2026-07-03T10:03:00Z",
+      "kontourai-flow-agents-267-source-tree-validation.flow-agents-workflow.source-tree-validation": "2026-07-03T10:03:00Z",
+      "kontourai-flow-agents-267-record-critique-fail-then-pass-supersedes-latest-wins-history-retained.flow-agents-workflow.record-critique-fail-then-pass-supersedes-latest-wins-history-retained": null,
+      "kontourai-flow-agents-267-check-critique-round-trip-is-lossless-and-type-stable-under-flow-id.flow-agents-workflow.check-critique-round-trip-is-lossless-and-type-stable-under-flow-id": null,
+      "kontourai-flow-agents-267-superseded-historical-fail-tolerated-by-validator-live-fail-still-blocks.flow-agents-workflow.superseded-historical-fail-tolerated-by-validator-live-fail-still-blocks": null,
+      "kontourai-flow-agents-267-code-review.flow-agents-workflow.supersession-reviewer-scoped-round-trip-type-stable-anti-gaming-suite-green": "2026-07-03T10:03:00Z"
     },
     "statusFunctionVersion": "2"
   }
