@@ -92,7 +92,7 @@ fs.writeFileSync(path.join(root, "current.json"), JSON.stringify({
   updated_at: "2026-05-09T00:00:00Z",
 }) + "\n");
 NODE
-if run_bounded 5 flow_agents_node "$WRITER" record-agent-event \
+if run_bounded 20 flow_agents_node "$WRITER" record-agent-event \
   --artifact-root "$TRAVERSAL_ROOT" \
   --agent-id tool-worker \
   --kind note \
@@ -198,7 +198,7 @@ fi
 
 cp "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-traversal-agent.json"
 TRAVERSAL_AGENT_OUTSIDE="$TMPDIR_EVAL/repo/.kontourai/flow-agents/evil-agent-outside.jsonl"
-if run_bounded 5 flow_agents_node "$WRITER" record-agent-event \
+if run_bounded 20 flow_agents_node "$WRITER" record-agent-event \
   --artifact-root "$SESSION_ROOT" \
   --agent-id ../evil-agent-outside \
   --kind evidence \
@@ -284,7 +284,7 @@ mkdir -p "$COPIED_ROOT"
 cp -R "$ENSURED_DIR" "$COPIED_DIR"
 cp "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-copied-agent.json"
 COPIED_AGENT_EVENT_PATH="$COPIED_DIR/ag""ents/copied-worker/events.jsonl"
-if run_bounded 5 flow_agents_node "$WRITER" record-agent-event \
+if run_bounded 20 flow_agents_node "$WRITER" record-agent-event \
   --artifact-dir "$COPIED_DIR" \
   --agent-id copied-worker \
   --kind evidence \
@@ -304,7 +304,7 @@ fi
 
 cp "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-mismatch-agent.json"
 MISMATCH_AGENT_EVENT_PATH="$COPIED_DIR/ag""ents/mismatch-worker/events.jsonl"
-if run_bounded 5 flow_agents_node "$WRITER" record-agent-event \
+if run_bounded 20 flow_agents_node "$WRITER" record-agent-event \
   --artifact-root "$SESSION_ROOT" \
   --artifact-dir "$COPIED_DIR" \
   --agent-id mismatch-worker \
@@ -328,7 +328,7 @@ SYMLINK_DIR="$SESSION_ROOT/symlink-session"
 mkdir -p "$SYMLINK_TARGET"
 if ln -s "$SYMLINK_TARGET" "$SYMLINK_DIR" 2>"$TMPDIR_EVAL/symlink-create.err"; then
   cp "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-symlink-agent.json"
-  if run_bounded 5 flow_agents_node "$WRITER" record-agent-event \
+  if run_bounded 20 flow_agents_node "$WRITER" record-agent-event \
     --artifact-root "$SESSION_ROOT" \
     --artifact-dir "$SYMLINK_DIR" \
     --agent-id symlink-worker \
@@ -1025,7 +1025,7 @@ fi
 LOCK_DENIED_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/lock-denied"
 mkdir -p "$LOCK_DENIED_DIR"
 if chmod 500 "$LOCK_DENIED_DIR" 2>"$TMPDIR_EVAL/lock-denied-chmod.err"; then
-  if run_bounded 5 flow_agents_node "$WRITER" record-critique "$LOCK_DENIED_DIR" \
+  if run_bounded 20 flow_agents_node "$WRITER" record-critique "$LOCK_DENIED_DIR" \
     --id lock-denied-review \
     --reviewer tool-code-reviewer \
     --verdict pass \
@@ -2471,21 +2471,99 @@ else
   _fail "liveness status mismatch (expected held/free/free): $LIVENESS_OUT"
 fi
 
-# ─── AC7: lifecycle-driven liveness (ADR 0012) — init-plan claims, advance-state releases (opt-in) ──
+# ─── F8(i) (#288 fix iteration 2, orphan-heartbeat invariant): direct CLI `liveness
+# heartbeat`/`release` must die with remediation when no prior claim event exists for the
+# (subjectId, actor) pair — the exact reproduction the reviewer flagged ("liveness heartbeat
+# <subj> --actor <a> with no prior claim writes an orphan heartbeat"). `claim` itself is
+# unaffected (it establishes the pair). ──
+TB_ORPHAN_ROOT="$TMPDIR_EVAL/liveness-orphan/.kontourai/flow-agents"
+if flow_agents_node "$WRITER" liveness heartbeat orphan-subj --actor agent-orphan --artifact-root "$TB_ORPHAN_ROOT" >"$TMPDIR_EVAL/orphan-heartbeat.out" 2>"$TMPDIR_EVAL/orphan-heartbeat.err"; then
+  _fail "liveness (F8(i)): heartbeat with no prior claim for the (subject, actor) pair should have exited nonzero"
+elif rg -qi 'prior claim' "$TMPDIR_EVAL/orphan-heartbeat.err" && rg -qi 'liveness claim' "$TMPDIR_EVAL/orphan-heartbeat.err"   && [[ ! -f "$TB_ORPHAN_ROOT/liveness/events.jsonl" ]]; then
+  _pass "liveness (F8(i)): heartbeat with no prior claim dies with remediation naming 'liveness claim' and writes no orphan event"
+else
+  _fail "liveness (F8(i)) orphan-heartbeat rejection lacked remediation or wrote an event: $(cat "$TMPDIR_EVAL/orphan-heartbeat.out" "$TMPDIR_EVAL/orphan-heartbeat.err")"
+fi
+
+if flow_agents_node "$WRITER" liveness release orphan-release-subj --actor agent-orphan-r --artifact-root "$TB_ORPHAN_ROOT" >"$TMPDIR_EVAL/orphan-release.out" 2>"$TMPDIR_EVAL/orphan-release.err"; then
+  _fail "liveness (F8(i)): release with no prior claim for the (subject, actor) pair should have exited nonzero"
+elif rg -qi 'prior claim' "$TMPDIR_EVAL/orphan-release.err" && rg -qi 'liveness claim' "$TMPDIR_EVAL/orphan-release.err"   && ! rg -q '"subjectId":"orphan-release-subj"' "$TB_ORPHAN_ROOT/liveness/events.jsonl" 2>/dev/null; then
+  _pass "liveness (F8(i)): release with no prior claim dies with remediation naming 'liveness claim' and writes no orphan event"
+else
+  _fail "liveness (F8(i)) orphan-release rejection lacked remediation or wrote an event: $(cat "$TMPDIR_EVAL/orphan-release.out" "$TMPDIR_EVAL/orphan-release.err")"
+fi
+
+# A prior claim for the SAME subjectId but a DIFFERENT actor must not satisfy the check — the
+# invariant is per-(subject, actor) pair, not merely per-subject.
+flow_agents_node "$WRITER" liveness claim orphan-crossactor-subj --actor agent-orphan-real --artifact-root "$TB_ORPHAN_ROOT" >/dev/null 2>&1
+if flow_agents_node "$WRITER" liveness heartbeat orphan-crossactor-subj --actor agent-orphan-impostor --artifact-root "$TB_ORPHAN_ROOT" >"$TMPDIR_EVAL/orphan-crossactor.out" 2>"$TMPDIR_EVAL/orphan-crossactor.err"; then
+  _fail "liveness (F8(i)): heartbeat for a different actor than the one who claimed should have exited nonzero"
+elif rg -qi 'prior claim' "$TMPDIR_EVAL/orphan-crossactor.err"   && ! rg -q '"subjectId":"orphan-crossactor-subj","actor":"agent-orphan-impostor","at":"[^"]*","type":"heartbeat"' "$TB_ORPHAN_ROOT/liveness/events.jsonl" 2>/dev/null   && ! rg -q '"type":"heartbeat".*"subjectId":"orphan-crossactor-subj".*"actor":"agent-orphan-impostor"' "$TB_ORPHAN_ROOT/liveness/events.jsonl" 2>/dev/null; then
+  _pass "liveness (F8(i)): the prior-claim check is scoped per (subject, actor) pair — another actor's claim on the same subject does not satisfy it"
+else
+  _fail "liveness (F8(i)) cross-actor orphan-heartbeat check failed: $(cat "$TMPDIR_EVAL/orphan-crossactor.out" "$TMPDIR_EVAL/orphan-crossactor.err")"
+fi
+
+# claim itself is unaffected: it must still succeed with no prior claim of any kind.
+if flow_agents_node "$WRITER" liveness claim orphan-claim-ok-subj --actor agent-orphan-ok --artifact-root "$TB_ORPHAN_ROOT" >"$TMPDIR_EVAL/orphan-claim-ok.out" 2>"$TMPDIR_EVAL/orphan-claim-ok.err"   && rg -q '"type":"claim","subjectId":"orphan-claim-ok-subj"' "$TB_ORPHAN_ROOT/liveness/events.jsonl"; then
+  _pass "liveness (F8(i)): claim is unaffected by the prior-claim requirement — it succeeds with no prior events at all"
+else
+  _fail "liveness (F8(i)) claim regressed: $(cat "$TMPDIR_EVAL/orphan-claim-ok.out" "$TMPDIR_EVAL/orphan-claim-ok.err")"
+fi
+
+# ─── AC7: lifecycle-driven liveness (ADR 0012) — init-plan claims, advance-state releases (default-on) ──
 TB_LC_ROOT="$TMPDIR_EVAL/liveness-lifecycle/.kontourai/flow-agents"
 TB_LC_DIR="$TB_LC_ROOT/lc-task"; mkdir -p "$TB_LC_DIR"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_LC_DIR/lc-task--deliver.md"
-FLOW_AGENTS_LIVENESS=on FLOW_AGENTS_ACTOR=agent-LC flow_agents_node "$WRITER" init-plan "$TB_LC_DIR/lc-task--deliver.md" --task-slug lc-task --source-request x --summary y --next-action z --timestamp "2026-06-25T11:50:00Z" >/dev/null 2>&1
+FLOW_AGENTS_ACTOR=agent-LC flow_agents_node "$WRITER" init-plan "$TB_LC_DIR/lc-task--deliver.md" --task-slug lc-task --source-request x --summary y --next-action z --timestamp "2026-06-25T11:50:00Z" >/dev/null 2>&1
 LC_HELD=$(flow_agents_node "$WRITER" liveness status --now "2026-06-25T12:00:00Z" --artifact-root "$TB_LC_ROOT" 2>/dev/null | grep -viE "unknown format")
-FLOW_AGENTS_LIVENESS=on FLOW_AGENTS_ACTOR=agent-LC flow_agents_node "$WRITER" advance-state "$TB_LC_DIR" --status delivered --phase done --task-slug lc-task --timestamp "2026-06-25T11:55:00Z" >/dev/null 2>&1
+LC_CLAIM_EVENTS=$(cat "$TB_LC_ROOT/liveness/events.jsonl" 2>/dev/null)
+FLOW_AGENTS_ACTOR=agent-LC flow_agents_node "$WRITER" advance-state "$TB_LC_DIR" --status delivered --phase done --task-slug lc-task --timestamp "2026-06-25T11:55:00Z" >/dev/null 2>&1
 LC_FREE=$(flow_agents_node "$WRITER" liveness status --now "2026-06-25T12:00:00Z" --artifact-root "$TB_LC_ROOT" 2>/dev/null | grep -viE "unknown format")
 TB_OFF_ROOT="$TMPDIR_EVAL/liveness-off/.kontourai/flow-agents"; mkdir -p "$TB_OFF_ROOT/off-task"
 cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_OFF_ROOT/off-task/off-task--deliver.md"
-flow_agents_node "$WRITER" init-plan "$TB_OFF_ROOT/off-task/off-task--deliver.md" --task-slug off-task --source-request x --summary y --next-action z >/dev/null 2>&1
-if echo "$LC_HELD" | grep -qE "lc-task.*agent-LC.*held" && echo "$LC_FREE" | grep -qE "lc-task.*agent-LC.*free" && [ ! -f "$TB_OFF_ROOT/liveness/events.jsonl" ]; then
-  _pass "liveness lifecycle: init-plan claims (held), advance→delivered releases (free); opt-in respected (no events when disabled)"
+FLOW_AGENTS_LIVENESS=off flow_agents_node "$WRITER" init-plan "$TB_OFF_ROOT/off-task/off-task--deliver.md" --task-slug off-task --source-request x --summary y --next-action z >/dev/null 2>&1
+if echo "$LC_HELD" | grep -qE "lc-task.*agent-LC.*held" \
+  && echo "$LC_CLAIM_EVENTS" | grep -qE '"type":"claim","subjectId":"lc-task"' \
+  && echo "$LC_FREE" | grep -qE "lc-task.*agent-LC.*free" \
+  && [ ! -f "$TB_OFF_ROOT/liveness/events.jsonl" ]; then
+  _pass "liveness lifecycle: no env set → init-plan writes a claim event + shows held (default-on proof), advance→delivered releases (free); FLOW_AGENTS_LIVENESS=off respected (no events written)"
 else
-  _fail "liveness lifecycle mismatch: held=[$LC_HELD] free=[$LC_FREE] off=$([ -f "$TB_OFF_ROOT/liveness/events.jsonl" ] && echo wrote || echo none)"
+  _fail "liveness lifecycle mismatch: held=[$LC_HELD] claim-event=[$(echo "$LC_CLAIM_EVENTS" | head -c 200)] free=[$LC_FREE] off=$([ -f "$TB_OFF_ROOT/liveness/events.jsonl" ] && echo wrote || echo none)"
+fi
+
+# ─── F2 (#288 fix iteration 1, cr-HIGH coverage gap): FLOW_AGENTS_LIVENESS_TTL_SECONDS is
+# honored by the lifecycle auto-claim path — init-plan with the env var set to a custom value
+# must emit a claim event carrying that exact ttlSeconds, not the DEFAULT_TTL_SECONDS literal ──
+TB_TTL_ROOT="$TMPDIR_EVAL/liveness-ttl-env/.kontourai/flow-agents"
+TB_TTL_DIR="$TB_TTL_ROOT/ttl-task"; mkdir -p "$TB_TTL_DIR"
+cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_TTL_DIR/ttl-task--deliver.md"
+FLOW_AGENTS_ACTOR=agent-TTL FLOW_AGENTS_LIVENESS_TTL_SECONDS=300 flow_agents_node "$WRITER" init-plan "$TB_TTL_DIR/ttl-task--deliver.md" --task-slug ttl-task --source-request x --summary y --next-action z --timestamp "2026-06-25T11:50:00Z" >/dev/null 2>&1
+TTL_CLAIM_EVENTS=$(cat "$TB_TTL_ROOT/liveness/events.jsonl" 2>/dev/null)
+if echo "$TTL_CLAIM_EVENTS" | grep -qE '"type":"claim","subjectId":"ttl-task".*"ttlSeconds":300'; then
+  _pass "liveness lifecycle: FLOW_AGENTS_LIVENESS_TTL_SECONDS=300 → emitted claim carries ttlSeconds:300 (F2, AC2)"
+else
+  _fail "liveness lifecycle did not honor FLOW_AGENTS_LIVENESS_TTL_SECONDS=300: events=[$(echo "$TTL_CLAIM_EVENTS" | head -c 200)]"
+fi
+
+# ─── F5 (#288 fix iteration 1, sec-LOW): hostile subjectId is stripped from the terminal print,
+# but preserved verbatim in the persisted event (display-only concern, not a write-shape change) ──
+TB_HOSTILE_ROOT="$TMPDIR_EVAL/liveness-hostile-subject/.kontourai/flow-agents"
+HOSTILE_SUBJECT=$'hostile\x1b[31msubj\x07tail'
+HOSTILE_OUT=$(flow_agents_node "$WRITER" liveness claim "$HOSTILE_SUBJECT" --actor agent-hostile --at "2026-06-25T11:50:00Z" --ttl 1800 --artifact-root "$TB_HOSTILE_ROOT" 2>&1)
+HOSTILE_EVENT=$(cat "$TB_HOSTILE_ROOT/liveness/events.jsonl" 2>/dev/null)
+if printf '%s' "$HOSTILE_OUT" | grep -qF $'\x1b[31m'; then
+  HOSTILE_ESCAPE_LEAKED=true
+else
+  HOSTILE_ESCAPE_LEAKED=false
+fi
+if [[ "$HOSTILE_ESCAPE_LEAKED" == "false" ]] \
+  && printf '%s' "$HOSTILE_OUT" | grep -qF "hostile" \
+  && printf '%s' "$HOSTILE_OUT" | grep -qF "tail" \
+  && echo "$HOSTILE_EVENT" | grep -qF 'hostile'; then
+  _pass "liveness claim: hostile subjectId (ANSI escape + control char) is stripped from the terminal confirmation print, but preserved verbatim in the persisted event (F5)"
+else
+  _fail "liveness claim hostile-subjectId print check failed: escape-leaked=$HOSTILE_ESCAPE_LEAKED out=$(printf '%s' "$HOSTILE_OUT" | cat -v) event=$(echo "$HOSTILE_EVENT" | head -c 200)"
 fi
 
 # ─── AC5 (#287): two auto-derived sessions (no --actor, no FLOW_AGENTS_ACTOR) → two distinct held holders ──

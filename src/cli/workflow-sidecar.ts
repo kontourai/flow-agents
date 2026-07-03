@@ -2572,12 +2572,25 @@ const LIVENESS_POLICY = {
   impactLevel: "medium",
 };
 
-function livenessStreamFile(root: string): string { return path.join(root, "liveness", "events.jsonl"); }
-function appendLivenessEvent(root: string, evt: AnyObj): void {
-  const file = livenessStreamFile(root);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.appendFileSync(file, `${JSON.stringify(evt)}\n`);
+/**
+ * Delegate to the shared pure-CJS writer (scripts/hooks/lib/liveness-write.js), mirroring the
+ * createRequire pattern used by loadActorIdentityHelper() below. Deliberately NO inline duplicate
+ * fallback — the whole point of #288 Wave 2 Task 2.1 is one writer shared by the CLI and the
+ * hook wrappers' tool-activity heartbeat, not two copies of the append shape that can drift.
+ */
+function loadLivenessWriteHelper(): {
+  livenessStreamFile: (root: string) => string;
+  appendLivenessEvent: (root: string, evt: AnyObj) => void;
+} {
+  const _req = createRequire(import.meta.url);
+  const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/liveness-write.js");
+  return _req(helperPath) as {
+    livenessStreamFile: (root: string) => string;
+    appendLivenessEvent: (root: string, evt: AnyObj) => void;
+  };
 }
+function livenessStreamFile(root: string): string { return loadLivenessWriteHelper().livenessStreamFile(root); }
+function appendLivenessEvent(root: string, evt: AnyObj): void { loadLivenessWriteHelper().appendLivenessEvent(root, evt); }
 function readLivenessEvents(root: string): AnyObj[] {
   // Delegate to the shared pure-CJS helper (scripts/hooks/lib/liveness-read.js).
   // Using createRequire so the ESM sidecar can load a CJS module without bundling it.
@@ -2600,7 +2613,7 @@ function livenessLabel(status: string): string {
   return status;
 }
 
-// ─── ADR 0012 lifecycle-driven liveness (opt-in via FLOW_AGENTS_LIVENESS) ──────
+// ─── ADR 0012 lifecycle-driven liveness (default-on; opt-out via FLOW_AGENTS_LIVENESS) ──
 // init-plan claims the work-item; advance-state heartbeats (or releases on terminal),
 // so the workflow lifecycle itself maintains the liveness claim — no manual liveness calls.
 // Additive + fail-open: a liveness-emit failure never affects the workflow command.
@@ -2614,37 +2627,90 @@ const LIVENESS_TERMINAL = new Set(["delivered", "accepted", "archived"]);
 function loadActorIdentityHelper(): {
   resolveActor: (env: NodeJS.ProcessEnv) => { actor: string; source: string };
   sanitizeSegment: (value: unknown) => string;
+  isUnresolvedActor: (actor: string) => boolean;
 } {
   const _req = createRequire(import.meta.url);
   const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/actor-identity.js");
   return _req(helperPath) as {
     resolveActor: (env: NodeJS.ProcessEnv) => { actor: string; source: string };
     sanitizeSegment: (value: unknown) => string;
+    isUnresolvedActor: (actor: string) => boolean;
   };
 }
 function resolveLivenessActor(): string {
   return loadActorIdentityHelper().resolveActor(process.env).actor;
 }
-/** True when an actor is empty or the retired literal "local" (case-insensitive) — the one shared
- * definition of "unresolved" used by both the lifecycle auto-emit path and the direct CLI path so
- * they can never disagree (#287 fix iteration 1, F6). */
-function isUnresolvedActor(actor: string): boolean {
-  return !actor || actor.toLowerCase() === "local";
+// isUnresolvedActor is no longer defined locally — it is single-sourced in
+// scripts/hooks/lib/actor-identity.js (loadActorIdentityHelper().isUnresolvedActor) so the
+// lifecycle auto-emit path, the direct CLI liveness path, and the tool-activity heartbeat path
+// all consume the same predicate rather than forking their own copy (#287 re-review MEDIUM; #288
+// Wave 1 Task 1.1 single-sources it there).
+/**
+ * Delegate to the shared pure-CJS policy predicates (scripts/hooks/lib/liveness-policy.js) — the
+ * one definition of "enabled" (default-on/opt-out) and the claim TTL default, consumed by both the
+ * lifecycle auto-emit path and the manual `liveness claim --ttl` default so they can never disagree
+ * (#288).
+ */
+function loadLivenessPolicyHelper(): {
+  isLivenessEnabled: (env: NodeJS.ProcessEnv) => boolean;
+  resolveTtlSeconds: (env: NodeJS.ProcessEnv) => number;
+} {
+  const _req = createRequire(import.meta.url);
+  const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/liveness-policy.js");
+  return _req(helperPath) as {
+    isLivenessEnabled: (env: NodeJS.ProcessEnv) => boolean;
+    resolveTtlSeconds: (env: NodeJS.ProcessEnv) => number;
+  };
 }
-function livenessEnabled(): boolean { const v = String(process.env.FLOW_AGENTS_LIVENESS || "").trim().toLowerCase(); return v === "on" || v === "1" || v === "true"; }
+function livenessEnabled(): boolean { return loadLivenessPolicyHelper().isLivenessEnabled(process.env); }
+/**
+ * F1 (#288 fix iteration 1, cr-HIGH fail-open violation): the `livenessEnabled()`
+ * guard (and therefore its `loadLivenessPolicyHelper()` module load) must sit
+ * INSIDE this function's own fail-open try/catch — previously it sat outside,
+ * so a missing/broken scripts/hooks/lib/liveness-policy.js module made
+ * `init-plan`/`advance-state` exit 1 instead of degrading gracefully
+ * (repro-verified). Now: any failure here — including a failed helper load —
+ * is caught, produces one stderr diagnostic, and the lifecycle auto-emit is
+ * skipped; the workflow command's own exit code is never affected. This
+ * mirrors the #287 fail-open convention already used elsewhere in this file.
+ * The direct CLI write path (`async function liveness`, actions
+ * claim|heartbeat|release) is deliberately NOT wrapped this way — it stays
+ * fail-loud on a missing helper module, per the plan's explicit instruction
+ * that only the convenience lifecycle wiring is flag-gated/fail-open.
+ */
 function livenessLifecycle(taskDir: string, slug: string, kind: "claim" | "heartbeat" | "release", timestamp: string): void {
-  if (!livenessEnabled()) return;
   try {
+    if (!livenessEnabled()) return;
     const actor = resolveLivenessActor();
-    if (isUnresolvedActor(actor)) {
+    if (loadActorIdentityHelper().isUnresolvedActor(actor)) {
       process.stderr.write("[liveness] skipped auto-emit: actor unresolved (set FLOW_AGENTS_ACTOR or run inside a supported runtime)\n");
       return;
     }
     const root = path.dirname(taskDir); // .kontourai/flow-agents/<slug> → .kontourai/flow-agents (the shared liveness stream lives here)
     const evt: AnyObj = { type: kind, subjectId: slug, actor, at: timestamp, source: "lifecycle" };
-    if (kind === "claim") evt.ttlSeconds = 1800;
+    if (kind === "claim") evt.ttlSeconds = loadLivenessPolicyHelper().resolveTtlSeconds(process.env);
     appendLivenessEvent(root, evt);
-  } catch { /* best-effort; liveness is advisory and must never break the workflow */ }
+  } catch (err) {
+    // best-effort; liveness is advisory and must never break the workflow — but the failure
+    // itself must be visible (F1), not silently absorbed.
+    try {
+      const detail = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`[liveness] skipped auto-emit: ${detail}\n`);
+    } catch { /* best-effort diagnostic only */ }
+  }
+}
+
+/**
+ * F5 (#288 fix iteration 1, sec-LOW): strip control/escape characters before echoing a
+ * subjectId/actor to the terminal. subjectId is a raw CLI positional argument on the write path
+ * (never sanitized before this point — it is stored as-is in the event for data fidelity) and,
+ * on the `status` read path, both subjectId and actor may originate from a hand-edited or
+ * otherwise hostile liveness/events.jsonl file rather than this process's own writes. Strips the
+ * C0 control range (0x00-0x1F), DEL (0x7F), and the C1 range (0x80-0x9F, which includes
+ * ANSI-CSI-adjacent bytes) — display-only; the persisted event itself is never mutated.
+ */
+function stripControlCharsForDisplay(value: unknown): string {
+  return String(value ?? "").replace(/[\u0000-\u001F\u007F-\u009F]/g, "");
 }
 
 async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
@@ -2668,14 +2734,30 @@ async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
     }
     const explicitActor = explicitActorRaw ? helper.sanitizeSegment(explicitActorRaw) : "";
     const actor = explicitActor || helper.resolveActor(process.env).actor;
-    if (isUnresolvedActor(actor)) {
+    if (helper.isUnresolvedActor(actor)) {
       die(`liveness ${action} requires a resolvable actor — no explicit --actor flag, no FLOW_AGENTS_ACTOR override, and runtime/ancestry resolution failed. Fix: pass --actor <id>, or set FLOW_AGENTS_ACTOR=<id>, or run inside a supported runtime.`);
     }
     if (!subjectId) die(`liveness ${action} requires a subjectId`);
+    // F8(i) (#288 fix iteration 2, orphan-heartbeat invariant): heartbeat/release on the direct CLI
+    // write path must never be the FIRST liveness event ever written for a (subjectId, actor) pair —
+    // that is exactly how the reviewer-reproduced orphan-heartbeat bug arises (a bare heartbeat with
+    // no claim behind it, later mistaken for claim evidence). A full stream read here is fine: this
+    // is a rare, human/CLI-driven call, not the hot tool-activity path. `claim` itself is exempt (it
+    // is the event that ESTABLISHES the pair in the first place).
+    if (action === "heartbeat" || action === "release") {
+      const priorEvents = readLivenessEvents(root);
+      const hasPriorClaim = priorEvents.some((e) => e && e.type === "claim" && e.subjectId === subjectId && e.actor === actor);
+      if (!hasPriorClaim) {
+        die(`liveness ${action} requires a prior claim event for subjectId ${JSON.stringify(subjectId)} and actor ${JSON.stringify(actor)} — none was found in the liveness stream. Fix: run \`liveness claim ${subjectId} --actor ${actor}\` first, then retry ${action}.`);
+      }
+    }
     const evt: AnyObj = { type: action, subjectId, actor, at: opt(p, "at") || nowIso };
-    if (action === "claim") evt.ttlSeconds = Number.parseInt(opt(p, "ttl", "1800"), 10) || 1800;
+    if (action === "claim") {
+      const defaultTtl = loadLivenessPolicyHelper().resolveTtlSeconds(process.env);
+      evt.ttlSeconds = Number.parseInt(opt(p, "ttl", String(defaultTtl)), 10) || defaultTtl;
+    }
     appendLivenessEvent(root, evt);
-    console.log(`liveness ${action}: ${subjectId} by ${actor}`);
+    console.log(`liveness ${action}: ${stripControlCharsForDisplay(subjectId)} by ${stripControlCharsForDisplay(actor)}`);
     return 0;
   }
 
@@ -2704,7 +2786,7 @@ async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
       rows.push({ subjectId: g.subjectId, actor: g.actor, status, label: livenessLabel(status) });
     }
     if (p.flags.has("json")) { console.log(JSON.stringify(rows, null, 2)); return 0; }
-    for (const r of rows) console.log(`${r.subjectId}\t${r.actor}\t${r.label}`);
+    for (const r of rows) console.log(`${stripControlCharsForDisplay(r.subjectId)}\t${stripControlCharsForDisplay(r.actor)}\t${r.label}`);
     return 0;
   }
 
