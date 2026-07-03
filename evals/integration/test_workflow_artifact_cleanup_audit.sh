@@ -41,6 +41,14 @@ cat > "$ARTIFACT_ROOT/terminal-done/state.json" <<'JSON'
 }
 JSON
 
+# Promote-then-archive gate (issue #312): a delivered/accepted session stays terminal_done
+# ONLY when its trust.bundle carries a promotion claim (claim.metadata.promotion). Without
+# this, terminal-done would (correctly) reclassify as a cleanup_candidate. See the dedicated
+# WITHOUT-claim coverage in test_promote_gate.sh.
+cat > "$ARTIFACT_ROOT/terminal-done/trust.bundle" <<'JSON'
+{ "schemaVersion": 5, "claims": [ { "id": "smoke-promotion.flow-agents-workflow.promoted", "claimType": "workflow.check.policy", "status": "verified", "metadata": { "promotion": { "schema_version": "1.0", "none": false, "targets": ["docs/decisions/promotion-gate.md"], "promoted_at": "2026-06-01T00:00:00Z" } } } ], "evidence": [], "policies": [], "events": [] }
+JSON
+
 cat > "$ARTIFACT_ROOT/stale-verified/state.json" <<'JSON'
 {
   "schema_version": "1.0",
@@ -245,6 +253,7 @@ json_query() {
 
 [[ "$(json_query "$TMPDIR_EVAL/audit.json" "buckets.active_wip.0.slug")" == "active-wip" ]] && pass "json classifies active fixture" || fail "json classifies active fixture"
 [[ "$(json_query "$TMPDIR_EVAL/audit.json" "buckets.terminal_done.0.slug")" == "terminal-done" ]] && pass "json classifies terminal fixture" || fail "json classifies terminal fixture"
+grep -q "Cleanup candidates: 1" "$TMPDIR_EVAL/audit.txt" && pass "promoted terminal fixture is not a cleanup candidate" || fail "promoted terminal fixture is not a cleanup candidate"
 [[ "$(json_query "$TMPDIR_EVAL/audit.json" "buckets.cleanup_candidate.0.slug")" == "stale-verified" ]] && pass "json classifies stale verified cleanup fixture" || fail "json classifies stale verified cleanup fixture"
 [[ "$(json_query "$TMPDIR_EVAL/audit.json" "buckets.active_learning_followup.0.slug")" == "delivered-learning-followup" ]] && pass "json keeps delivered done open learning active" || fail "json keeps delivered done open learning active"
 [[ "$(json_query "$TMPDIR_EVAL/audit.json" "buckets.active_learning_followup.1.slug")" == "learning-followup" ]] && pass "json keeps open learning routing active" || fail "json keeps open learning routing active"

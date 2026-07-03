@@ -604,6 +604,12 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const policy = ensurePolicy(legacyClaimType, "high", [evClass.evidenceType]);
     const effectiveStatus = captured ? captured.observedResult : String(check.status ?? "");
     const evStatus = waiver ? "assumed" : checkStatusToEventStatus(effectiveStatus);
+    // Promotion claim marker (issue #312): a `promote` check carries a session-local
+    // _promotion object that must survive onto claim.metadata.promotion so the archive gate
+    // (workflow-artifact-cleanup-audit) and validators can detect the promotion claim without a
+    // new manifest entry. It rides alongside any waiver in a single merged metadata object.
+    const promotionMeta = (check._promotion && typeof check._promotion === "object") ? check._promotion as AnyObj : null;
+    const claimMetadata: AnyObj | null = (waiver || promotionMeta) ? { ...(waiver ? { waiver } : {}), ...(promotionMeta ? { promotion: promotionMeta } : {}) } : null;
 
     const claimEvents: AnyObj[] = [];
     if (evStatus) {
@@ -631,12 +637,12 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     if (declared) {
       // Declared kit-typed claim only — no legacy shadow (ADR 0016 P-d).
       const declaredPolicy = ensurePolicy(declared.claimType, "high", [evClass.evidenceType]);
-      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, ...(waiver ? { metadata: { waiver } } : {}) };
+      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, ...(claimMetadata ? { metadata: claimMetadata } : {}) };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
       claims.push({ ...declaredClaimObj, status: declaredStatus });
     } else {
       // No active flow step — only the workflow.* primary claim (legitimate no-flow fallback path).
-      const claimObj: AnyObj = { id: claimId, subjectType: "workflow-check", subjectId, facet: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id, ...(waiver ? { metadata: { waiver } } : {}) };
+      const claimObj: AnyObj = { id: claimId, subjectType: "workflow-check", subjectId, facet: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id, ...(claimMetadata ? { metadata: claimMetadata } : {}) };
       const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
       claims.push({ ...claimObj, status: derivedStatus });
     }
@@ -1662,6 +1668,97 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   // Log the targeted gate expectation for transparency (goes to stderr only)
   process.stderr.write(`[record-gate-claim] targeting ${activeStep.stepId}/${activeStep.gateId}/${targetExpectation.id} → claimType=${claimType} subjectType=${subjectType}${gateWaiver ? " (WAIVED accepted_gap)" : ""}\n`);
   assertBundleWritten(await writeTrustBundle(dir, slug, ts, [checkNormalized], [], []));
+  return 0;
+}
+
+/**
+ * promote — the promote-then-archive gate (issue #312). Durable-residue extraction is
+ * the archival act: this records WHAT durable residue was promoted WHERE and writes a
+ * PROMOTION CLAIM into the session trust.bundle.
+ *
+ * Claim shape (reconcile-safe by construction): the promotion check is kind="policy",
+ * so classifyEvidence maps it to evidenceType "policy_rule" (session-local, method
+ * "auditability"). It carries NO command / execution.label, so it can NEVER require a
+ * reconcile-manifest entry and can NEVER become a [not-run] / unbacked-command
+ * divergence at CI trust-reconcile. Its status derives to `verified` from that
+ * session-local policy_rule evidence item, so the reconciler classifies it session-local
+ * and accepts it as an ATTESTED claim (exit 0) — never as a test_output claim that must
+ * match the manifest. The _promotion marker rides onto claim.metadata.promotion (see
+ * buildTrustBundle) so the archive gate and validators can detect it without new manifest
+ * entries (R1).
+ *
+ * Modes:
+ *   promote <dir> --evidence-path <p> [--evidence-path <p> ...]
+ *       Records the durable doc paths written (docs/decisions/<slug>.md, CONTEXT.md,
+ *       docs/learnings/*, …). Each path MUST exist on disk at record time — a missing
+ *       path fails loud (no silent empty promotion).
+ *   promote <dir> --none --reason "<why nothing durable>"
+ *       An explicit, auditable no-residue promotion (R3).
+ */
+async function promote(p: ReturnType<typeof parseArgs>): Promise<number> {
+  const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
+  const slug = taskSlugFor(dir, opt(p, "task-slug"));
+  const ts = opt(p, "timestamp", now());
+  const none = p.flags.has("none");
+  const reason = opt(p, "reason");
+  const repoRoot = opt(p, "repo-root") ? path.resolve(opt(p, "repo-root")) : findRepoRootFromDir(dir);
+  const rawPaths = opts(p, "evidence-path");
+
+  if (none) {
+    if (rawPaths.length) die("promote --none records a no-residue claim; do not also pass --evidence-path");
+    if (!reason.trim()) die("promote --none requires --reason \"<why nothing durable was promoted>\"");
+  } else {
+    if (!rawPaths.length) die("promote requires at least one --evidence-path <durable-doc-path> (or --none --reason \"<why>\" for an explicit no-residue promotion)");
+  }
+
+  // Every evidence ref MUST exist on disk at record time (fail loud otherwise). Store
+  // repo-relative paths when the ref lives under the repo, so the claim is portable.
+  const targets: string[] = [];
+  for (const raw of rawPaths) {
+    const abs = path.isAbsolute(raw) ? raw : path.resolve(repoRoot, raw);
+    if (!fs.existsSync(abs)) die(`promote --evidence-path does not exist on disk: ${raw} (resolved: ${abs}). Promotion evidence refs must point at durable docs that were actually written.`);
+    const rel = path.relative(repoRoot, abs);
+    targets.push(rel && !rel.startsWith("..") && !path.isAbsolute(rel) ? rel : raw);
+  }
+
+  const promotionMarker: AnyObj = {
+    schema_version: "1.0",
+    none,
+    ...(none ? { reason } : {}),
+    targets,
+    promoted_at: ts,
+  };
+
+  const summary = opt(p, "summary") || (none
+    ? `Promotion (no durable residue): ${reason}`
+    : `Promoted durable residue: ${targets.join(", ")}`);
+
+  // Session-local promotion check: kind="policy" -> policy_rule evidence, no command.
+  const promotionCheck: AnyObj = { id: "promotion", kind: "policy", status: "pass", summary, _promotion: promotionMarker };
+
+  // Add the promotion claim WITHOUT dropping the session's existing verification
+  // evidence/criteria/critiques (mirror record-critique's merge pattern). Drop any prior
+  // "promotion" check so re-running promote is idempotent rather than duplicating.
+  const _dct = declaredClaimTypesFor(dir);
+  const existingChecks = checksFromBundle(dir, _dct).filter((c) => c.id !== "promotion");
+  const _acc = loadJson(path.join(dir, "acceptance.json"));
+  const criteria: AnyObj[] = Array.isArray(_acc.criteria) ? _acc.criteria : [];
+  const critiques = critiquesFromBundle(dir, _dct);
+  assertBundleWritten(await writeTrustBundle(dir, slug, ts, [...existingChecks, promotionCheck], criteria, critiques));
+
+  // Auditable record of what was promoted where (companion to the trust.bundle claim).
+  writeJson(path.join(dir, "promotion.json"), { ...sidecarBase(slug), ...promotionMarker, summary });
+
+  // Optionally republish so delivery/trust.bundle carries the promotion claim for CI.
+  if (p.flags.has("publish")) {
+    const publishRepoRoot = opt(p, "publish-repo-root") ? path.resolve(opt(p, "publish-repo-root")) : findRepoRootFromDirStrict(dir);
+    await publishDelivery(dir, publishRepoRoot).catch((err: unknown) => {
+      process.stderr.write(`[promote] WARNING: publish-delivery failed: ${err instanceof Error ? err.message : String(err)}\n`);
+    });
+  }
+
+  process.stderr.write(`[promote] recorded ${none ? "no-residue" : targets.length + " durable ref(s)"} promotion claim for ${slug}\n`);
+  printJson({ ok: true, slug, none, targets, promotion_claim: "trust.bundle" });
   return 0;
 }
 
@@ -3160,6 +3257,7 @@ async function main(): Promise<number> {
       case "init-plan": return initPlan(p);
       case "record-evidence": return recordEvidence(p);
       case "record-gate-claim": return recordGateClaim(p);
+      case "promote": return promote(p);
       case "advance-state": return advanceState(p);
       case "record-critique": return recordCritique(p);
       case "import-critique": return importCritique(p);

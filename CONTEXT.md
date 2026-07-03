@@ -265,6 +265,11 @@ _Avoid_: Numbered ADR as the format for new decisions
 
 The system of Decision Records plus the generated index at [docs/decisions/index.md](docs/decisions/index.md) (slug + one-line summary). The contract is [context/contracts/decision-registry-contract.md](context/contracts/decision-registry-contract.md); the frontmatter schema is `schemas/decision-record.schema.json`; `npm run check:decisions` validates it. Consult the index at write time to decide revise-vs-create.
 
+### Promotion Gate
+
+The gated sequence — final acceptance -> promote -> archive — that makes durable-residue extraction the archival act: a delivered session's decisions, vocabulary, learnings, and doc updates must be promoted into durable living docs before the session is archived. The `promote` step records what was promoted where and writes a session-local **promotion claim** into the session `trust.bundle` (evidence refs = the durable doc paths written, or an explicit `--none` no-residue reason). `workflow-artifact-cleanup-audit` classifies a delivered/accepted session with no promotion claim as a cleanup candidate (archive blocked), not terminal. See [docs/decisions/promotion-gate.md](docs/decisions/promotion-gate.md) and [docs/workflow-artifact-lifecycle.md](docs/workflow-artifact-lifecycle.md).
+_Avoid_: Docs-promotion as a parallel checklist chore
+
 ### Governance Adapter
 
 An optional integration that supplies policy, proof, or trust evidence without making Flow Agents own the external tool's rule semantics. Veritas is the first known governance adapter candidate.
