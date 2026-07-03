@@ -50,6 +50,135 @@ function workItemSlug(ref: string): string {
   return slugify(`${owner}-${repo}-${id}`, "work-item");
 }
 
+/** First 6 hex chars of sha256(raw) — a short deterministic disambiguator (#289 F4). Two
+ * different raw inputs that both collapse to a segment's "unknown" fallback (e.g. two distinct
+ * all-garbage --task-slug values, or two distinct raw actor strings that both resolve
+ * "unresolved") would otherwise derive the identical fallback branch — this makes them diverge
+ * while staying fully deterministic for a given raw input (same raw -> same hash every call),
+ * which is required to preserve resolveSessionBranch's no-rederive/resume-continuity semantics
+ * (a resumed session's already-recorded branch is never recomputed regardless of this helper). */
+function unknownDisambiguator(raw: string): string {
+  return createHash("sha256").update(raw).digest("hex").slice(0, 6);
+}
+
+/** Encode a value (actor string or --task-slug, neither guaranteed git-ref-safe) into a
+ * single git-check-ref-format(1)-safe branch path component (#289). Reuses
+ * actor-identity.js's sanitizeSegment (consume, don't fork) as the base, then closes the
+ * git-specific gaps sanitizeSegment's [A-Za-z0-9_.-] charset does not: the `:` delimiter
+ * serializeActor() uses (disallowed in a git ref), consecutive dots, a leading dot, a trailing
+ * dot (fix-plan iteration 1 F1 — git-check-ref-format forbids a component ending in `.`, and
+ * the prior pass only handled a run of 2+ trailing dots via the `..`-collapse step, missing the
+ * single-trailing-dot case e.g. a `--task-slug` of `my-fix.`), and a trailing `.lock`. The
+ * trailing-dot strip runs BEFORE the `.lock` rewrite so a `.lock` suffix hidden behind trailing
+ * dots (e.g. `foo.lock.`) is exposed and still rewritten rather than left dangling. Whenever the
+ * FINAL sanitized segment equals the fallback token `"unknown"` — whether because the charset
+ * filter collapsed the raw input to nothing, OR because the leading-/trailing-dot stripping
+ * above collapsed a near-miss input like `"unknown."` or `".unknown"` down to the literal
+ * `"unknown"`, OR because the raw input genuinely WAS the literal string `"unknown"` — a
+ * deterministic disambiguator (see unknownDisambiguator) is ALWAYS appended (fix-plan iteration 2
+ * F4': no literal-input carve-out). Distinct raw inputs can never collide on the bare literal
+ * `"unknown"` segment; the same raw input always re-derives the same disambiguated segment. See
+ * Design Decision 2 in the plan. */
+function sanitizeBranchSegment(value: string, helper: { sanitizeSegment: (v: unknown) => string }): string {
+  const raw = String(value ?? "");
+  const colonReplaced = raw.replace(/:/g, "-");
+  let seg = helper.sanitizeSegment(colonReplaced);
+  seg = seg.replace(/\.{2,}/g, "-").replace(/^\.+/, "").replace(/\.+$/, "").replace(/\.lock$/i, "-lock");
+  if (!seg || seg === "unknown") return `unknown-${unknownDisambiguator(raw)}`;
+  return seg;
+}
+
+/** Validate an explicit `--branch` value strictly rather than trusting it verbatim (fix-plan
+ * iteration 1 F2, tightened by iteration 2 F2'). Explicit `--branch` bypasses
+ * `sanitizeBranchSegment` entirely by design (it is caller intent, may legitimately contain `/`
+ * to nest under `agent/...`, etc.), so unlike the derived path it must be rejected outright — not
+ * silently sanitized — when it cannot be a valid git ref. Whole-string checks (iteration 1):
+ * any control character/newline, a space, a leading or trailing `/`, a `//` sequence, a leading
+ * `.`, any `..` sequence, a trailing `.`, a trailing `.lock`, or any character outside
+ * `[A-Za-z0-9_./-]`. Per-component checks (iteration 2 F2'): the whole-string checks above only
+ * examine the START/END of the full value, so a charset-legal value can still smuggle an invalid
+ * `/`-delimited component past them — e.g. `"-lead"` (a leading `-` breaks the whole git ref,
+ * applied uniformly to every component here — stricter than git strictly requires, which is fine
+ * for a caller-facing override flag), `"a/.b"` (a non-first component starting with `.`),
+ * `"foo.lock/bar"` (a non-last component ending in `.lock`), or `"a/./b"` (a component that is
+ * exactly `.`). Belt-and-braces (F2'): once the lexical checks above all pass, `git
+ * check-ref-format --branch <value>` (the real git binary) is run as the final authority — it can
+ * only ever REJECT a value the lexical checks let through (never re-legalize one they rejected),
+ * so it closes any residual gap in this hand-rolled lexical pass. When git cannot be spawned at
+ * all (e.g. not installed — `ENOENT`) or does not complete (e.g. the 5s timeout fires), the git
+ * check is skipped silently and the lexical checks above remain the sole authority. Dies with
+ * remediation, or with git's own rejection message; never mutates any artifact before this check
+ * runs (resolveSessionBranch calls this before any file write). */
+function validateExplicitBranch(value: string): void {
+  const remediation = `Pass a --branch value matching [A-Za-z0-9_./-], with no leading/trailing "/", no "//", no leading ".", no ".." sequence, and no trailing "." or ".lock" (got: ${JSON.stringify(value)}).`;
+  const fail = (reason: string): never => die(`ensure-session --branch value is not a valid git ref: ${reason}. ${remediation}`);
+  if (/[\x00-\x1F\x7F]/.test(value)) fail("contains a control character or newline");
+  if (/ /.test(value)) fail("contains a space");
+  if (value.startsWith("/") || value.endsWith("/")) fail('must not start or end with "/"');
+  if (value.includes("//")) fail('must not contain "//"');
+  if (value.startsWith(".")) fail('must not start with "."');
+  if (value.includes("..")) fail('must not contain a ".." sequence');
+  if (value.endsWith(".")) fail('must not end with "."');
+  if (/\.lock$/i.test(value)) fail('must not end with ".lock"');
+  if (/[^A-Za-z0-9_./-]/.test(value)) fail("contains a character outside [A-Za-z0-9_./-]");
+
+  // F2' per-component checks: split on "/" and validate each path component individually. The
+  // whole-string checks above cannot catch a hostile component that is not at the very start or
+  // end of the full value.
+  for (const component of value.split("/")) {
+    if (!component) fail('must not contain an empty path component ("//" or a leading/trailing "/")');
+    if (component === ".") fail('must not contain a path component that is exactly "."');
+    if (component.startsWith(".")) fail('must not contain a path component starting with "."');
+    if (component.startsWith("-")) fail('must not contain a path component starting with "-"');
+    if (component.endsWith(".")) fail('must not contain a path component ending with "."');
+    if (/\.lock$/i.test(component)) fail('must not contain a path component ending with ".lock"');
+  }
+
+  // F2' belt-and-braces: the real `git check-ref-format --branch` binary is the final authority
+  // when git is available. This can only REJECT a value that already passed every lexical check
+  // above — it never re-legalizes a value the lexical checks rejected (those `fail()` calls
+  // above already threw). argv-array form (no shell) with a 5s timeout so a hung or missing git
+  // binary cannot hang or crash session creation.
+  let result: { status: number | null; stderr: Buffer | string } | undefined;
+  try {
+    execFileSync("git", ["check-ref-format", "--branch", value], { stdio: ["ignore", "ignore", "pipe"], timeout: 5000 });
+    return; // exit 0 — git accepts the value; nothing further to check.
+  } catch (err) {
+    const spawnError = err as NodeJS.ErrnoException & { status?: number | null; stderr?: Buffer | string };
+    if (spawnError && spawnError.code === "ENOENT") return; // git not installed — lexical checks stand alone.
+    if (spawnError && typeof spawnError.status === "number") { result = { status: spawnError.status, stderr: spawnError.stderr ?? "" }; }
+    else return; // Any other spawn failure (e.g. timeout) — skip silently; lexical checks already passed.
+  }
+  if (result && result.status !== 0) {
+    const gitMessage = String(result.stderr ?? "").trim();
+    fail(gitMessage ? `git check-ref-format rejected the value: ${gitMessage}` : "git check-ref-format rejected the value");
+  }
+}
+
+/** Resolve the branch to seed a brand-new session with. Only called from ensureSession's
+ * `if (!md)` fresh-creation branch — an existing session's already-recorded branch is never
+ * recomputed (ADR 0021 §5 takeover continuity; see Design Decision 3). Precedence: explicit
+ * --branch (strictly validated, then honored verbatim — see F2) > derived agent/<actor>/<slug>.
+ * Never hard-fails session creation on actor-resolution ambiguity (Design Decision 4) — only a
+ * garbage explicit --actor, or a garbage explicit --branch, dies. */
+function resolveSessionBranch(p: ReturnType<typeof parseArgs>, slug: string): string {
+  // Deliberately NOT trimmed before validation (unlike the pre-F2 baseline): a leading/trailing
+  // space must be REJECTED, not silently trimmed away — silent trimming would let a
+  // caller-supplied value differ from what gets recorded without any diagnostic (F2).
+  const explicitBranch = opt(p, "branch");
+  if (explicitBranch) { validateExplicitBranch(explicitBranch); return explicitBranch; }
+  const helper = loadActorIdentityHelper();
+  const explicitActorRaw = opt(p, "actor", "").trim();
+  if (explicitActorRaw && !/[A-Za-z0-9_.-]/.test(explicitActorRaw)) {
+    die("ensure-session --actor value strips to empty under the allowed actor charset ([A-Za-z0-9_.-]) — pass a value containing at least one letter, digit, underscore, period, or hyphen.");
+  }
+  const actor = explicitActorRaw ? helper.sanitizeSegment(explicitActorRaw) : helper.resolveActor(process.env).actor;
+  const unresolved = helper.isUnresolvedActor(actor);
+  const safeActor = unresolved ? `unknown-actor-${unknownDisambiguator(actor)}` : sanitizeBranchSegment(actor, helper);
+  if (unresolved) process.stderr.write("[ensure-session] actor unresolved; branch uses \"unknown-actor\" segment (set --actor or FLOW_AGENTS_ACTOR for a stable branch name)\n");
+  return `agent/${safeActor}/${sanitizeBranchSegment(slug, helper)}`;
+}
+
 /**
  * Validate a Hachure trust.bundle using @kontourai/surface's canonical validator
  * (surface is the authoritative owner of trust-bundle schema validation per ADR 0010 / ADR 0015).
@@ -816,6 +945,20 @@ function definitionAcceptanceLines(markdown: string): string[] {
   }
   return out;
 }
+
+/** Extract a top-level `name: value` markdown field's value (e.g. `branch: agent/x/y`), mirroring
+ * this file's own local-regex-parsing convention for section()/definitionAcceptanceLines() (a
+ * near-duplicate of validate-workflow-artifacts.ts's field()/section() helpers — this file
+ * already keeps its own local copy of that pattern rather than sharing a module). `name` is
+ * regex-escaped before interpolation (fix-plan iteration 1 F3), mirroring
+ * validate-workflow-artifacts.ts's own field() escaping verbatim — every current call site
+ * passes a fixed literal (e.g. "branch"), but escaping keeps a future non-literal name from
+ * silently changing match semantics via unescaped regex metacharacters. Returns "" when the
+ * field is absent. */
+function markdownField(markdown: string, name: string): string {
+  const re = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:\\s*(.+)$`, "m");
+  return re.exec(markdown)?.[1]?.trim() ?? "";
+}
 function parseCriterion(line: string, index: number): AnyObj {
   let text = line.replace(/^-\s+\[[ xX]\]\s*/, "").trim();
   const m = /\s+-\s+Evidence:\s*(.+)$/i.exec(text);
@@ -922,6 +1065,10 @@ function resolveFirstStep(flowId: string, repoRoot: string): string | null {
 }
 
 function writeCurrent(root: string, dir: string, timestamp: string, owner: string, source: string, flowId?: string, stepId?: string, adHocReason?: string): void {
+  // #289: mirror the active session's already-recorded branch (state.json.branch) into
+  // current.json so consumers of current.json (which has no schema of its own — not one of the
+  // 9 schemas under schemas/) see the routing branch without re-reading state.json separately.
+  const branch = loadJson(path.join(dir, "state.json")).branch;
   writeJson(path.join(root, "current.json"), {
     schema_version: "1.0",
     active_slug: path.basename(dir),
@@ -930,6 +1077,7 @@ function writeCurrent(root: string, dir: string, timestamp: string, owner: strin
     owner,
     source,
     active_agents: [],
+    ...(branch ? { branch } : {}),
     // ADR 0016 Abstraction A (P-a): optional FlowDefinition routing keys for the producer
     // and enforcer. Both fields are optional and backward-compatible — sessions without a
     // FlowDefinition omit them and fall through to the workflow.* claim type path.
@@ -971,8 +1119,14 @@ function updateCurrentAgent(root: string, dir: string, agentId: string, status: 
 
 function initSidecars(dir: string, slug: string, sourceRequest: string, summary: string, nextAction: string, timestamp: string, markdown?: string): void {
   const criteria = markdown ? definitionAcceptanceLines(markdown).map(parseCriterion) : [];
+  // #289: whichever markdown is handed in (freshly templated by ensureSession, or externally
+  // authored/legacy for initPlan) carries the `branch:` line as the single source of truth — if
+  // present, persist it into state.json; if absent (pre-#289 legacy markdown), omit the key
+  // entirely rather than inventing a default (schema keeps it optional for this reason).
+  const branch = markdown ? markdownField(markdown, "branch") : "";
   writeJson(path.join(dir, "state.json"), {
     ...sidecarBase(slug), status: "planned", phase: "planning", created_at: timestamp, updated_at: timestamp,
+    ...(branch ? { branch } : {}),
     artifact_paths: relArtifacts(dir),
     next_action: { status: "continue", summary: nextAction || summary },
   });
@@ -994,7 +1148,12 @@ function ensureSession(p: ReturnType<typeof parseArgs>): number {
   const timestamp = opt(p, "timestamp", now());
   let md = fs.existsSync(path.join(dir, `${slug}--deliver.md`)) ? read(path.join(dir, `${slug}--deliver.md`)) : "";
   if (!md) {
-    md = `# ${opt(p, "title", slug)}\n\nbranch: main\nworktree: main\ncreated: ${timestamp}\nstatus: planning\ntype: deliver\niteration: 1\n\n## Plan\n\n${opt(p, "summary", "")}\n\n## Definition Of Done\n\n- **User outcome:** ${opt(p, "summary", "Workflow session is durable.")}\n- **Scope:** Workflow session artifacts and sidecars.\n- **Acceptance criteria:**\n${opts(p, "criterion").map((c) => `  - [ ] ${c} - Evidence: pending.`).join("\n")}\n- **Usefulness checks:**\n  - [ ] User-facing workflow is documented or discoverable\n- **Stop-short risks:** Workflow artifacts could drift.\n- **Durable docs target:** not needed\n- **Sandbox mode:** local-edit\n\n## Execution Progress\n\n- [ ] Session initialized.\n\n## Verification Report\n\nBuild: [NOT_VERIFIED] Verification has not run yet.\n\n### Acceptance Criteria\n- [NOT_VERIFIED] Verification has not run yet - Evidence: pending workflow execution and checks.\n\n### Verdict: NOT_VERIFIED\n\n## Goal Fit Gate\n\n- [ ] Original user goal restated\n\n## Final Acceptance\n\n- [ ] CI/relevant checks passed or local equivalent recorded\n`;
+    // #289: derive the routing branch ONLY on fresh session creation (this `if (!md)` guard).
+    // An existing session's already-recorded `branch:` line is never touched — that whole branch
+    // of code is skipped on a resumed/taken-over session, which is what makes ADR 0021 §5
+    // takeover continuity true by construction (see Design Decision 3 in the plan).
+    const branch = resolveSessionBranch(p, slug);
+    md = `# ${opt(p, "title", slug)}\n\nbranch: ${branch}\nworktree: main\ncreated: ${timestamp}\nstatus: planning\ntype: deliver\niteration: 1\n\n## Plan\n\n${opt(p, "summary", "")}\n\n## Definition Of Done\n\n- **User outcome:** ${opt(p, "summary", "Workflow session is durable.")}\n- **Scope:** Workflow session artifacts and sidecars.\n- **Acceptance criteria:**\n${opts(p, "criterion").map((c) => `  - [ ] ${c} - Evidence: pending.`).join("\n")}\n- **Usefulness checks:**\n  - [ ] User-facing workflow is documented or discoverable\n- **Stop-short risks:** Workflow artifacts could drift.\n- **Durable docs target:** not needed\n- **Sandbox mode:** local-edit\n\n## Execution Progress\n\n- [ ] Session initialized.\n\n## Verification Report\n\nBuild: [NOT_VERIFIED] Verification has not run yet.\n\n### Acceptance Criteria\n- [NOT_VERIFIED] Verification has not run yet - Evidence: pending workflow execution and checks.\n\n### Verdict: NOT_VERIFIED\n\n## Goal Fit Gate\n\n- [ ] Original user goal restated\n\n## Final Acceptance\n\n- [ ] CI/relevant checks passed or local equivalent recorded\n`;
     fs.writeFileSync(path.join(dir, `${slug}--deliver.md`), md);
   }
   if (!fs.existsSync(path.join(dir, "state.json")) || !fs.existsSync(path.join(dir, "acceptance.json")) || !fs.existsSync(path.join(dir, "handoff.json"))) {
