@@ -43,9 +43,70 @@ Treat `state.json` as the active-work signal for local users and `pull-work`.
 | `verified` with `next_action.status: continue` | Local evidence passed, but release, final acceptance, or learning is not closed. | Active shepherding candidate. |
 | `verified` with `next_action.status: done` | Evidence passed and the next phase was completed outside the state machine or by a provider record. | Cleanup candidate; should be advanced to a terminal state during final acceptance. |
 | `accepted` with `phase: learning` and `learning.status: followup_required` | Learning was captured but at least one routed follow-up is still open or undecided. | Active learning follow-up until routed to backlog, docs, evals, skills, knowledge, or an explicit deferred trigger. |
-| `delivered`, `accepted`, or `archived` with `phase: done`, or `accepted`/`archived` with closed learning routing | Completed local workflow. | Not active WIP; retain only while useful for recovery or audit. |
+| `delivered`, `accepted`, or `archived` with `phase: done`, or `accepted`/`archived` with closed learning routing | Completed local workflow. | Terminal only once a promotion claim is recorded (see [Promote-Then-Archive Gate](#promote-then-archive-gate)); a delivered/accepted session with no promotion claim is a cleanup candidate, not terminal. Retain only while useful for recovery or audit. |
 
 `verified` is not a terminal state. It means the verifier supplied evidence. Final acceptance must still record the provider change, CI/release result, docs promotion decision, and any learning route before the workflow stops being active.
+
+## Promote-Then-Archive Gate
+
+Archiving a delivered session is not a parallel chore to promoting its durable
+residue — it is **gated on** it. The sequence is:
+
+```
+final acceptance  ->  promote  ->  archive
+```
+
+Durable-residue extraction is the archival act. A delivered session's decisions,
+vocabulary, learnings, and doc updates must be promoted into durable living docs
+(`docs/decisions/<slug>.md`, `CONTEXT.md`, `docs/learnings/*`, `README.md`,
+`context/contracts/`, schemas, provider records) before the session is retired,
+so no delivered work is retired without its knowledge extracted.
+
+### The promotion claim
+
+The `promote` step records **what was promoted where** and writes a **promotion
+claim** into the session `trust.bundle`:
+
+```bash
+# Real durable residue: each --evidence-path must exist on disk at record time.
+flow-agents workflow-sidecar promote <session-dir> \
+  --evidence-path docs/decisions/<slug>.md \
+  --evidence-path CONTEXT.md
+```
+
+The claim is **session-local by construction** (check kind `policy` ->
+`policy_rule` evidence, no command / `execution.label`). It therefore needs **no
+new reconcile-manifest entry** and can **never** become a `[not-run]` /
+unbacked-command divergence at CI `trust-reconcile`: the reconciler classifies it
+session-local and accepts it as an ATTESTED claim. The durable doc paths are the
+claim's evidence refs; each is verified to exist on disk when the claim is
+recorded (a missing path fails loud), and they are mirrored into an auditable
+`promotion.json` in the session directory. The claim is detectable by the archive
+gate and validators via `claim.metadata.promotion` without any manifest change.
+
+### Empty-promotion path
+
+When a delivered session genuinely produced **no durable residue** (e.g. a pure
+refactor with no decision, vocabulary, or doc change), record an explicit,
+auditable no-residue promotion rather than skipping the gate:
+
+```bash
+flow-agents workflow-sidecar promote <session-dir> \
+  --none --reason "<why nothing durable was promoted>"
+```
+
+This still produces a promotion claim (with `none: true` and the reason), so the
+decision that nothing needed promoting is recorded, not silently assumed.
+
+### Archive enforcement
+
+`workflow-artifact-cleanup-audit` classifies a **delivered or accepted** session
+that reached a terminal shape **without** a promotion claim as a
+`cleanup_candidate` (blocked from archive) with a reason naming the `promote`
+remedy — not `terminal_done`. With the claim (real residue **or** `--none`) it
+classifies `terminal_done` and may be archived. Already-`archived` sessions are
+past the gate and are never re-flagged; this gate is not a backfill of historical
+archives.
 
 ## Learning Closeout
 

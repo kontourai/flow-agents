@@ -11,3 +11,4 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | Topic | Status | Decision |
 | --- | --- | --- |
 | [decision-records](./decision-records.md) | current | Decision records |
+| [promotion-gate](./promotion-gate.md) | current | Promotion gate |
