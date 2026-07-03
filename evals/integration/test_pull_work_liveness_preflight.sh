@@ -372,7 +372,7 @@ require_text "$PULL" '.reclaimable_override.: recorded only when a .reclaimable.
 require_text "$PULL" '### Post-Claim Conflict Re-check' "pull-work documents the Post-Claim Conflict Re-check subsection (F6, AC8)"
 require_text "$PULL" 'coexists with this session.s own just-emitted claim on the same subject' "pull-work's post-claim re-check detects a double-hold against the just-emitted claim (F6, AC8)"
 require_text "$PULL" 'surface the conflict prominently in the user-facing output and instruct the user to coordinate before proceeding' "pull-work instructs surfacing the post-claim conflict prominently and coordinating before proceeding, not silently continuing (F6, AC8)"
-require_text "$PULL" 'advisory best-effort plus this post-claim detection' "pull-work's honesty note states the exclusion guarantee is advisory best-effort plus post-claim detection, not true mutual exclusion (F6, AC8)"
+require_text "$PULL" 'does not provide true mutual exclusion across the read-then-write race window itself' "pull-work's honesty note states the exclusion guarantee still does not provide true mutual exclusion across the read-then-write race window (F6, AC8; updated #320 wording — see also test_liveness_verdict.sh)"
 require_text "$PULL" 'True mutual exclusion arrives with the provider assignment lease \(#290\) and the .verify-hold. publish gate \(#293\)' "pull-work names #290/#293 as where true mutual exclusion actually arrives (F6, AC8)"
 
 

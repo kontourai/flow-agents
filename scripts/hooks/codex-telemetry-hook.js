@@ -38,13 +38,34 @@ function hookEventName(raw) {
   }
 }
 
-function codexSuccessOutput(event) {
+function codexSuccessOutput(event, conflict) {
   if (event === 'SessionStart') {
     return {
       continue: true,
       hookSpecificOutput: {
         hookEventName: 'SessionStart',
         additionalContext: 'Flow Agents telemetry hooks are active for this session.',
+      },
+    };
+  }
+  // Mid-turn conflict injection (issue #320, AC4): fold a detected liveness conflict into the
+  // real hookSpecificOutput.additionalContext channel on PostToolUse, matching the precedent
+  // codex-hook-adapter.js:69-77 already establishes for policy hooks. Guarded on a well-formed
+  // `conflict` shape so a malformed value degrades to the unchanged fixed no-conflict output
+  // below, never a thrown error (AC8, fail-open). Subject to the "Codex live hook influence"
+  // caveat (docs/spec/runtime-hook-surface.md §2.1): the wrapper still emits this; effectiveness
+  // is a separate, already-tracked residual.
+  if (
+    event === 'PostToolUse' &&
+    conflict &&
+    typeof conflict.actor === 'string' &&
+    typeof conflict.lastAt === 'string'
+  ) {
+    return {
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: 'PostToolUse',
+        additionalContext: `[LIVENESS CONFLICT] actor "${conflict.actor}" claimed this subject at "${conflict.lastAt}" — run \`liveness verdict\` and coordinate.`,
       },
     };
   }
@@ -60,9 +81,14 @@ async function main() {
   const event = hookEventName(raw);
   const telemetryScript = path.resolve(__dirname, '..', 'telemetry', 'telemetry.sh');
 
+  let conflict;
   if (eventType === 'PostToolUse') {
     try {
-      require('./lib/liveness-heartbeat').maybeEmitHeartbeat({ cwd: process.cwd(), env: process.env });
+      const heartbeatResult = require('./lib/liveness-heartbeat').maybeEmitHeartbeat({
+        cwd: process.cwd(),
+        env: process.env,
+      });
+      conflict = heartbeatResult && heartbeatResult.conflict;
     } catch (err) {
       process.stderr.write(`[CodexTelemetryHook] liveness heartbeat error: ${err.message}\n`);
     }
@@ -93,7 +119,7 @@ async function main() {
     process.stderr.write(`[CodexTelemetryHook] failed open: ${detail}\n`);
   }
 
-  const output = codexSuccessOutput(event);
+  const output = codexSuccessOutput(event, conflict);
   if (output) process.stdout.write(`${JSON.stringify(output)}\n`);
 }
 
