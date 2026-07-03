@@ -3,85 +3,125 @@
   "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
   "claims": [
     {
-      "id": "decision-registry-contract-decision-registry-validator.flow-agents-workflow.npm-run-check-decisions-validates-the-pilot-topic-file-refuses-secret-shaped-evidence-unknown-status-and-dangling-tombstones-and-asserts-the-generated-index-is-current-wired-into-the-required-source-and-static-ci-lane",
+      "id": "promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic",
       "subjectType": "workflow-check",
-      "subjectId": "decision-registry-contract/decision-registry-validator",
+      "subjectId": "promote-gate/decisions",
       "facet": "flow-agents.workflow",
       "claimType": "workflow.check.command",
-      "fieldOrBehavior": "npm run check:decisions validates the pilot topic file, refuses secret-shaped evidence, unknown status, and dangling tombstones, and asserts the generated index is current; wired into the required source-and-static CI lane.",
+      "fieldOrBehavior": "decision registry validates the promotion-gate topic",
       "value": "pass",
-      "createdAt": "2026-07-03T04:55:49Z",
-      "updatedAt": "2026-07-03T04:55:49Z",
+      "createdAt": "2026-07-03T05:25:54Z",
+      "updatedAt": "2026-07-03T05:25:54Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.check.command:test_output",
       "status": "verified"
     },
     {
-      "id": "decision-registry-contract-ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails.flow-agents-workflow.ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "decision-registry-contract/ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails",
+      "id": "promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes",
+      "subjectType": "workflow-check",
+      "subjectId": "promote-gate/cleanup-audit",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC1: valid topic file passes validator; invalid (bad status/missing subject/secret-shaped evidence) fails",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "cleanup-audit promote-then-archive gate integration passes",
       "value": "pass",
-      "createdAt": "2026-07-03T04:55:49Z",
-      "updatedAt": "2026-07-03T04:55:49Z",
+      "createdAt": "2026-07-03T05:25:54Z",
+      "updatedAt": "2026-07-03T05:25:54Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:workflow.check.command:test_output",
       "status": "verified"
     },
     {
-      "id": "decision-registry-contract-ac2-index-regeneration-is-idempotent-and-diff-clean.flow-agents-workflow.ac2-index-regeneration-is-idempotent-and-diff-clean",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "decision-registry-contract/ac2-index-regeneration-is-idempotent-and-diff-clean",
+      "id": "promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary",
+      "subjectType": "workflow-check",
+      "subjectId": "promote-gate/promotion",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC2: index regeneration is idempotent and diff-clean",
+      "claimType": "workflow.check.policy",
+      "fieldOrBehavior": "Promoted the promote-then-archive gate decision + lifecycle doc + vocabulary",
       "value": "pass",
-      "createdAt": "2026-07-03T04:55:49Z",
-      "updatedAt": "2026-07-03T04:55:49Z",
+      "createdAt": "2026-07-03T05:25:54Z",
+      "updatedAt": "2026-07-03T05:25:54Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
+      "metadata": {
+        "promotion": {
+          "schema_version": "1.0",
+          "none": false,
+          "targets": [
+            "docs/decisions/promotion-gate.md",
+            "docs/workflow-artifact-lifecycle.md",
+            "CONTEXT.md"
+          ],
+          "promoted_at": "2026-07-03T05:25:54Z"
+        }
+      },
       "status": "verified"
     },
     {
-      "id": "decision-registry-contract-ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable.flow-agents-workflow.ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable",
+      "id": "promote-gate-ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy.flow-agents-workflow.ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy",
       "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "decision-registry-contract/ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable",
+      "subjectId": "promote-gate/ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy",
       "facet": "flow-agents.workflow",
       "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC3: pilot decision file exists, indexed, linked from CONTEXT.md, evidence resolvable",
-      "value": "pass",
-      "createdAt": "2026-07-03T04:55:49Z",
-      "updatedAt": "2026-07-03T04:55:49Z",
+      "fieldOrBehavior": "AC1: unpromoted delivered session archive refused with promote remedy",
+      "value": "pending",
+      "createdAt": "2026-07-03T05:25:54Z",
+      "updatedAt": "2026-07-03T05:25:54Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.acceptance.criterion",
-      "status": "verified"
+      "status": "proposed"
     },
     {
-      "id": "decision-registry-contract-ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples.flow-agents-workflow.ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples",
+      "id": "promote-gate-ac2-promoted-session-archives-cleanly-evidence-refs-resolve.flow-agents-workflow.ac2-promoted-session-archives-cleanly-evidence-refs-resolve",
       "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "decision-registry-contract/ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples",
+      "subjectId": "promote-gate/ac2-promoted-session-archives-cleanly-evidence-refs-resolve",
       "facet": "flow-agents.workflow",
       "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC4: contract covers supersession-by-edit and both tombstone forms with examples",
-      "value": "pass",
-      "createdAt": "2026-07-03T04:55:49Z",
-      "updatedAt": "2026-07-03T04:55:49Z",
+      "fieldOrBehavior": "AC2: promoted session archives cleanly; evidence refs resolve",
+      "value": "pending",
+      "createdAt": "2026-07-03T05:25:54Z",
+      "updatedAt": "2026-07-03T05:25:54Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "proposed"
+    },
+    {
+      "id": "promote-gate-ac3-explicit-no-residue-promotion-archives-cleanly-with-reason.flow-agents-workflow.ac3-explicit-no-residue-promotion-archives-cleanly-with-reason",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "promote-gate/ac3-explicit-no-residue-promotion-archives-cleanly-with-reason",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC3: explicit no-residue promotion archives cleanly with reason",
+      "value": "pending",
+      "createdAt": "2026-07-03T05:25:54Z",
+      "updatedAt": "2026-07-03T05:25:54Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "proposed"
+    },
+    {
+      "id": "promote-gate-review.flow-agents-workflow.promote-gate-implementation-reviewed-session-local-claim-shape-gate-classification-tests-green",
+      "subjectType": "workflow-critique",
+      "subjectId": "promote-gate/review",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "promote-gate implementation reviewed: session-local claim shape, gate classification, tests green",
+      "value": "pass",
+      "createdAt": "2026-07-03T05:25:54Z",
+      "updatedAt": "2026-07-03T05:25:54Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
       "status": "verified"
     }
   ],
   "evidence": [
     {
-      "id": "ev:decision-registry-contract-decision-registry-validator.flow-agents-workflow.npm-run-check-decisions-validates-the-pilot-topic-file-refuses-secret-shaped-evidence-unknown-status-and-dangling-tombstones-and-asserts-the-generated-index-is-current-wired-into-the-required-source-and-static-ci-lane",
-      "claimId": "decision-registry-contract-decision-registry-validator.flow-agents-workflow.npm-run-check-decisions-validates-the-pilot-topic-file-refuses-secret-shaped-evidence-unknown-status-and-dangling-tombstones-and-asserts-the-generated-index-is-current-wired-into-the-required-source-and-static-ci-lane",
+      "id": "ev:promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic",
+      "claimId": "promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic",
       "evidenceType": "test_output",
       "method": "validation",
-      "sourceRef": "decision-registry-contract/evidence.json",
-      "excerptOrSummary": "npm run check:decisions validates the pilot topic file, refuses secret-shaped evidence, unknown status, and dangling tombstones, and asserts the generated index is current; wired into the required source-and-static CI lane.",
-      "observedAt": "2026-07-03T04:55:49Z",
+      "sourceRef": "promote-gate/evidence.json",
+      "excerptOrSummary": "decision registry validates the promotion-gate topic",
+      "observedAt": "2026-07-03T05:25:54Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
       "execution": {
@@ -89,6 +129,33 @@
         "label": "npm run check:decisions --",
         "isError": false
       }
+    },
+    {
+      "id": "ev:promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes",
+      "claimId": "promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "promote-gate/evidence.json",
+      "excerptOrSummary": "cleanup-audit promote-then-archive gate integration passes",
+      "observedAt": "2026-07-03T05:25:54Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_workflow_artifact_cleanup_audit.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary",
+      "claimId": "promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary",
+      "evidenceType": "policy_rule",
+      "method": "auditability",
+      "sourceRef": "promote-gate/evidence.json",
+      "excerptOrSummary": "Promoted the promote-then-archive gate decision + lifecycle doc + vocabulary",
+      "observedAt": "2026-07-03T05:25:54Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
     }
   ],
   "policies": [
@@ -100,6 +167,23 @@
       ],
       "acceptanceCriteria": [
         "A verified verification event must support a workflow.check.command claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.policy:policy_rule",
+      "claimType": "workflow.check.policy",
+      "requiredEvidence": [
+        "policy_rule"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.policy claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -123,60 +207,69 @@
       "stalenessTriggers": [],
       "conflictRules": [],
       "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
     }
   ],
   "events": [
     {
-      "id": "evt:decision-registry-contract-decision-registry-validator.flow-agents-workflow.npm-run-check-decisions-validates-the-pilot-topic-file-refuses-secret-shaped-evidence-unknown-status-and-dangling-tombstones-and-asserts-the-generated-index-is-current-wired-into-the-required-source-and-static-ci-lane",
-      "claimId": "decision-registry-contract-decision-registry-validator.flow-agents-workflow.npm-run-check-decisions-validates-the-pilot-topic-file-refuses-secret-shaped-evidence-unknown-status-and-dangling-tombstones-and-asserts-the-generated-index-is-current-wired-into-the-required-source-and-static-ci-lane",
+      "id": "evt:promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic",
+      "claimId": "promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:decision-registry-contract-decision-registry-validator.flow-agents-workflow.npm-run-check-decisions-validates-the-pilot-topic-file-refuses-secret-shaped-evidence-unknown-status-and-dangling-tombstones-and-asserts-the-generated-index-is-current-wired-into-the-required-source-and-static-ci-lane"
+        "ev:promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic"
       ],
-      "createdAt": "2026-07-03T04:55:49Z",
-      "verifiedAt": "2026-07-03T04:55:49Z"
+      "createdAt": "2026-07-03T05:25:54Z",
+      "verifiedAt": "2026-07-03T05:25:54Z"
     },
     {
-      "id": "evt:decision-registry-contract-ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails.flow-agents-workflow.ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails",
-      "claimId": "decision-registry-contract-ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails.flow-agents-workflow.ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails",
+      "id": "evt:promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes",
+      "claimId": "promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes"
+      ],
+      "createdAt": "2026-07-03T05:25:54Z",
+      "verifiedAt": "2026-07-03T05:25:54Z"
+    },
+    {
+      "id": "evt:promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary",
+      "claimId": "promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary"
+      ],
+      "createdAt": "2026-07-03T05:25:54Z",
+      "verifiedAt": "2026-07-03T05:25:54Z"
+    },
+    {
+      "id": "evt:promote-gate-review.flow-agents-workflow.promote-gate-implementation-reviewed-session-local-claim-shape-gate-classification-tests-green",
+      "claimId": "promote-gate-review.flow-agents-workflow.promote-gate-implementation-reviewed-session-local-claim-shape-gate-classification-tests-green",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-03T04:55:49Z",
-      "verifiedAt": "2026-07-03T04:55:49Z"
-    },
-    {
-      "id": "evt:decision-registry-contract-ac2-index-regeneration-is-idempotent-and-diff-clean.flow-agents-workflow.ac2-index-regeneration-is-idempotent-and-diff-clean",
-      "claimId": "decision-registry-contract-ac2-index-regeneration-is-idempotent-and-diff-clean.flow-agents-workflow.ac2-index-regeneration-is-idempotent-and-diff-clean",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-03T04:55:49Z",
-      "verifiedAt": "2026-07-03T04:55:49Z"
-    },
-    {
-      "id": "evt:decision-registry-contract-ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable.flow-agents-workflow.ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable",
-      "claimId": "decision-registry-contract-ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable.flow-agents-workflow.ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-03T04:55:49Z",
-      "verifiedAt": "2026-07-03T04:55:49Z"
-    },
-    {
-      "id": "evt:decision-registry-contract-ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples.flow-agents-workflow.ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples",
-      "claimId": "decision-registry-contract-ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples.flow-agents-workflow.ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-03T04:55:49Z",
-      "verifiedAt": "2026-07-03T04:55:49Z"
+      "createdAt": "2026-07-03T05:25:54Z",
+      "verifiedAt": "2026-07-03T05:25:54Z"
     }
   ]
 }
