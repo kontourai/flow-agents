@@ -329,7 +329,7 @@ require_text "$PULL" 'liveness claim <subjectId>' "pull-work references liveness
 require_text "$PULL" 'reading each row.s raw .status. field \(never .label.\)' "pull-work instructs consuming raw status, never label (AC1, AC8)"
 require_text "$PULL" 'a .verified. row for an actor other than self.*.held.' "pull-work documents held classification (AC1, AC2, AC8)"
 require_text "$PULL" 'excluded from the ready set by default' "pull-work excludes held candidates by default (AC2, AC8)"
-require_text "$PULL" 'a .stale. row \(any actor\).*.reclaimable.' "pull-work documents reclaimable classification (AC1, AC3, AC8)"
+require_text "$PULL" 'effective_state: .reclaimable.' "pull-work documents reclaimable classification via the assignment-provider join (AC1, AC3, AC8, #290)"
 require_text "$PULL" 'requires an explicit recorded opt-in' "pull-work requires an explicit recorded opt-in for reclaimable selection (AC3, AC8)"
 require_text "$PULL" 'never a silent normal pick' "pull-work states reclaimable is never a silent normal pick (AC3, AC8)"
 require_text "$PULL" 'a .verified. row for the resolved self actor.*.mine.' "pull-work documents mine classification (AC1, AC5, AC8)"
@@ -348,10 +348,15 @@ require_text "$PICKUP_PROBE" 'flags the selected item .reclaimable., treat the r
 # ─── F2-F6 (fix-plan iteration 1) static assertions ─────────────────────────
 require_text "$PULL" 'group all rows for that .subjectId. by subject' "pull-work classifies per-subject (grouped rows), not per-row (F2, AC1, AC8)"
 require_text "$PULL" 'classify in this precedence order' "pull-work states the classification is an ordered precedence rule (F2, AC8)"
-require_text "$PULL" '^1\. a .verified. row for an actor other than self' "pull-work's precedence rule step 1 (held) is numbered verbatim (F2, AC8)"
-require_text "$PULL" '^2\. else, a .verified. row for the resolved self actor' "pull-work's precedence rule step 2 (mine) is numbered verbatim (F2, AC8)"
-require_text "$PULL" '^3\. else, a .stale. row' "pull-work's precedence rule step 3 (reclaimable) is numbered verbatim (F2, AC8)"
-require_text "$PULL" '^4\. else \(a .revoked.-only row' "pull-work's precedence rule step 4 (free) is numbered verbatim (F2, AC8)"
+# F2's original numbered precedence list was liveness-only (#166); #290 (Wave 3) replaced it with
+# the full ADR 0021 §1 assignment ⋈ liveness join, computed via `assignment-provider status`'s
+# `effective_state`/`reason` fields. These assertions are updated to match the new five-row list
+# (mine/held/reclaimable/human-held/free) rather than the old four-row liveness-only list.
+require_text "$PULL" '^1\. .effective_state: .held.. with .reason: .self_is_holder..' "pull-work's precedence rule step 1 (mine, via self_is_holder) is numbered verbatim (F2, #290, AC8)"
+require_text "$PULL" '^2\. else .effective_state: .held..' "pull-work's precedence rule step 2 (held, excluded) is numbered verbatim (F2, #290, AC8)"
+require_text "$PULL" '^3\. else .effective_state: .reclaimable..' "pull-work's precedence rule step 3 (reclaimable) is numbered verbatim (F2, #290, AC8)"
+require_text "$PULL" '^4\. else .effective_state: .human-held..' "pull-work's precedence rule step 4 (human-held) is numbered verbatim (F2, #290, AC11, AC8)"
+require_text "$PULL" '^5\. else .effective_state: .free..' "pull-work's precedence rule step 5 (free) is numbered verbatim (F2, #290, AC8)"
 require_text "$PULL" 'double-hold' "pull-work names the own-actor + other-actor co-existing row combination a double-hold (F2, AC8)"
 require_text "$PULL" 'explicit conflict warning \(per ADR 0012 §4 detection' "pull-work cites ADR 0012 §4 detection for the double-hold conflict warning (F2, AC8)"
 require_text "$PULL" 'never silently resolve it to .mine.' "pull-work states a double-hold is never silently resolved to mine (F2, AC8)"
@@ -373,7 +378,10 @@ require_text "$PULL" '### Post-Claim Conflict Re-check' "pull-work documents the
 require_text "$PULL" 'coexists with this session.s own just-emitted claim on the same subject' "pull-work's post-claim re-check detects a double-hold against the just-emitted claim (F6, AC8)"
 require_text "$PULL" 'surface the conflict prominently in the user-facing output and instruct the user to coordinate before proceeding' "pull-work instructs surfacing the post-claim conflict prominently and coordinating before proceeding, not silently continuing (F6, AC8)"
 require_text "$PULL" 'does not provide true mutual exclusion across the read-then-write race window itself' "pull-work's honesty note states the exclusion guarantee still does not provide true mutual exclusion across the read-then-write race window (F6, AC8; updated #320 wording — see also test_liveness_verdict.sh)"
-require_text "$PULL" 'True mutual exclusion arrives with the provider assignment lease \(#290\) and the .verify-hold. publish gate \(#293\)' "pull-work names #290/#293 as where true mutual exclusion actually arrives (F6, AC8)"
+require_text "$PULL" '.#290.\x27s provider assignment lease closes this gap for the .{0,2}local-file.{0,2} provider only' "pull-work scopes true mutual exclusion to the local-file provider only, via #290's lock (fix-plan iteration 1, F5, AC8)"
+require_text "$PULL" 'two concurrent local-file .claim. calls on the same subject genuinely cannot both win' "pull-work states local-file claim/claim races genuinely cannot both win under #290's lock (fix-plan iteration 1, F5, AC8)"
+require_text "$PULL" 'The .{0,2}GitHub.{0,2} provider \(assignee/label/claim-comment\) remains advisory/last-writer' "pull-work does NOT overclaim true mutual exclusion for the GitHub provider — advisory/last-writer, detect not prevent (fix-plan iteration 1, F5, AC8)"
+require_text "$PULL" 'Do not read .provider assignment lease. as closing the GitHub race; only the .verify-hold. publish gate \(#293\)' "pull-work explicitly warns not to read #290 as closing the GitHub race — only #293's verify-hold gate would (fix-plan iteration 1, F5, AC8)"
 
 
 echo ""

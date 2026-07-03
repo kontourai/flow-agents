@@ -10,6 +10,8 @@ Select ready backlog work and prepare a bounded execution handoff without implem
 ## Contract
 
 - Use `context/contracts/work-item-contract.md` as the source vocabulary for provider-backed work item shape, provider roles, and capability flags.
+- Use `context/contracts/assignment-provider-contract.md` as the second source vocabulary for durable ownership: the `AssignmentProvider` operations (`claim`/`release`/`supersede`/`status`/`list`), the assignment ⋈ liveness join's effective-state enum (`held`/`reclaimable`/`human-held`/`free`), and the versioned claim-record format come from that contract, not from this skill.
+- `pull-work` may perform exactly two provider-adjacent writes at selection: the liveness claim (ADR 0012, ephemeral, local runtime presence stream — see "1a. Liveness Selection Preflight" / "Liveness Claim On Selection") and the durable assignment claim (`context/contracts/assignment-provider-contract.md`, GitHub assignee/label/comment or a local-file record — see "Assignment Claim On Selection"); no other provider mutation is added to this skill.
 - Read the configured backlog provider dynamically.
 - Select one issue or a coherent issue group.
 - Do not implement code.
@@ -37,9 +39,10 @@ Create or update `.kontourai/flow-agents/<slug>/<slug>--pull-work.md` with:
 
 - `board_snapshot`: filters, issue list, labels, milestone/provider milestone state, project fields, state, blockers
 - `wip_assessment`: active work, reviews, verification, CI remediation, with personal WIP separated from global conflict context
-- `liveness_preflight`: per-candidate `{subjectId, state: held|reclaimable|free|mine, holder_actor?, status_raw}` plus `self_actor`/`self_actor_source`, computed via `liveness status --json` + `liveness whoami --json`; `self_actor` is captured exactly once per pull-work pass and pinned for reuse (see "1a. Liveness Selection Preflight" and "Liveness Claim On Selection" — never re-derived per claim call); this is the liveness-only projection of ADR 0021 §1's join, pending #290's assignment dimension
+- `liveness_preflight`: per-candidate `{subjectId, state: held|reclaimable|human-held|free|mine, holder_actor?, status_raw, effective_reason?}` plus `self_actor`/`self_actor_source`, computed via `liveness status --json` + `liveness whoami --json` joined with `assignment-provider status`'s `effective_state`/`reason` (see "1a. Liveness Selection Preflight"); `self_actor` is captured exactly once per pull-work pass and pinned for reuse (see "1a. Liveness Selection Preflight" and "Liveness Claim On Selection" — never re-derived per claim call); this is now the **full** ADR 0021 §1 `assignment ⋈ liveness` join (previously liveness-only pending #290 — #290 has landed)
 - `reclaimable_override`: recorded only when a `reclaimable` (stale) candidate is selected, or when `--force`/an explicit user instruction overrides a `held` exclusion — the explicit opt-in decision and its stated reason (see "1a. Liveness Selection Preflight")
 - `liveness_claim`: per selected item, `{subjectId, actor, emitted_at, ttl_seconds}`; on any claim-emit failure, `{skipped: <stderr reason>}` instead — fail-open (never block selection on a liveness-emit failure) but never silent: the skip reason is also surfaced in pull-work's user-facing output, and an unresolved-actor failure additionally names the remediation (`--actor <id>` / `FLOW_AGENTS_ACTOR=<id>` / a supported runtime), matching ADR 0012; also carries an optional `post_claim_conflict: {other_actor, detected_at}` when the post-claim re-check (see "Post-Claim Conflict Re-check") detects a double-hold
+- `assignment_claim`: per selected item, `{provider: "github"|"local-file", subject_id, actor, command_evidence, confirmed_status}` — the durable-claim analog of `selected_item_ids`: provider kind, subject id, actor, the rendered/executed command evidence (`gh_commands`/`claim_comment_body` for `github`, the local-file `claim` invocation for `local-file`), and the confirmed `assignment-provider status` result for each selected item, recorded once the post-claim confirmation in "Assignment Claim On Selection" succeeds; see `context/contracts/assignment-provider-contract.md` for the underlying claim-record shape
 - `my_active_work`: local worktrees, dirty branches, open PRs by the current user, active sidecars, and in-flight review/verification/release work owned by the current user
 - `shepherding_candidates`: personal PRs, worktrees, or sidecars that should be reviewed, fixed, published, merged, abandoned, or cleaned before starting more work
 - `stale_worktrees`: worktrees with no open PR, no recent activity, merged/abandoned branches, or unclear ownership that need an explicit keep/remove decision
@@ -136,18 +139,33 @@ For each ready candidate, derive `subjectId` via:
 npm run workflow:sidecar -- resolve-slug <owner>/<repo>#<issue-number>
 ```
 
-then group all rows for that `subjectId` by subject (classify per subject, not per row) and classify in this precedence order, reading each row's raw `status` field (never `label`):
+then group all rows for that `subjectId` by subject (classify per subject, not per row), reading each row's raw `status` field (never `label`). Detect the liveness-only double-hold case first, before computing the full assignment ⋈ liveness join below: when a `verified` row for an actor other than self and a `verified` row for the resolved self actor both exist on the same subject, that is a double-hold — surface it as `held` plus an explicit conflict warning (per ADR 0012 §4 detection: "a false-stale double-hold ... is detected ... not prevented"), never silently resolve it to `mine`.
 
-1. a `verified` row for an actor other than self ⇒ `held`, excluded from the ready set by default, even when a `verified` row for the resolved self actor also exists on the same subject — that combination is a double-hold: surface it as `held` plus an explicit conflict warning (per ADR 0012 §4 detection: "a false-stale double-hold ... is detected ... not prevented"), never silently resolve it to `mine`.
-2. else, a `verified` row for the resolved self actor ⇒ `mine`: hand to `### 2. Enforce WIP And Shepherding`'s existing personal-WIP logic; do not re-offer as new, do not exclude as held-by-other.
-3. else, a `stale` row (any actor) ⇒ `reclaimable`: offered, flagged, with a warning; selecting it requires an explicit recorded opt-in (record in `reclaimable_override`, and/or `alignment_questions`), never a silent normal pick.
-4. else (a `revoked`-only row, a `superseded` row, or no row at all) ⇒ `free`, offered normally — except a `superseded` row is surfaced but never auto-selected (full takeover semantics are #294; this is an accepted gap, not silently ignored).
+Otherwise, compute the full ADR 0021 §1 `assignment ⋈ liveness` join per candidate via `assignment-provider status` (using the effective provider kind, repo, artifact root, `label_name`, and `claim_comment_marker` from `effective-assignment-provider-settings` — see "Assignment Claim On Selection" below — joined against the same liveness stream already read above):
 
-An explicit user instruction to proceed despite a `held` or `reclaimable` classification (`--force`, "take it anyway", equivalent) overrides the exclusion/opt-in requirement; the override and its stated reason must be recorded in the artifact (`liveness_preflight`, `reclaimable_override`, and/or `priority_rationale`).
+```bash
+npm run assignment-provider -- status \
+  --provider <github|local-file> \
+  --subject-id <subjectId> \
+  --liveness-stream <path-to-events.jsonl> \
+  --self-actor <self_actor>
+  # github: --issue-json <path-to-gh-issue-view-json|-> --label-name <label> --claim-comment-marker <marker>
+  # local-file: --artifact-root <dir>
+```
 
-This preflight computes the **liveness-only** projection of ADR 0021 §1's `assignment ⋈ liveness` join. The assignment dimension is #290's `AssignmentProvider` (durable GitHub-side claim); until it lands, assignment is treated as always-unassigned, which ADR 0021 §1's own table shows is safe because staleness — not assignment — is what excludes.
+Read the returned `.effective.effective_state` and `.effective.reason` and classify in this precedence order:
 
-`liveness claim`/`status`/`whoami` read/write the local runtime liveness stream, never GitHub issue/label/assignee state — this is not a provider mutation, and the existing no-provider-mutation rule (see below) is unchanged by this slice. #290 will add the one narrow, audited GitHub-side mutation that pairs with this liveness emit.
+1. `effective_state: "held"` with `reason: "self_is_holder"` ⇒ `mine`: hand to `### 2. Enforce WIP And Shepherding`'s existing personal-WIP logic; do not re-offer as new, do not exclude as held-by-other.
+2. else `effective_state: "held"` (`reason: "fresh_liveness_heartbeat"` or `"liveness_claim_present_assignment_lagging"`) ⇒ excluded from the ready set by default.
+3. else `effective_state: "reclaimable"` ⇒ offered, flagged, with a warning; selecting it requires an explicit recorded opt-in (record in `reclaimable_override`, and/or `alignment_questions`), never a silent normal pick. This issue does not implement takeover — offering a `reclaimable` candidate, never auto-reclaiming it, is the correct scope boundary (Design Decision 2; full takeover protocol is ADR 0021 §5 / #294).
+4. else `effective_state: "human-held"` ⇒ surfaced, never auto-reclaimed (Design Decision 3 / ADR 0021 §6): record the assignee identity and idle duration (`effective.holder.assignee`, `effective.holder.idle_days`) in `alignment_questions` with a recommended answer (e.g. "assigned to `<assignee>`, idle `<idle_days>` days — reclaim?" recommending confirmation before proceeding), and select only on the user's explicit confirmation.
+5. else `effective_state: "free"` ⇒ offered normally — except a `superseded` liveness row (no active assignment, no fresh liveness) is surfaced but never auto-selected (full takeover semantics are #294; this is an accepted gap, not silently ignored), exactly as before this join upgrade.
+
+An explicit user instruction to proceed despite a `held` or `reclaimable` classification (`--force`, "take it anyway", equivalent) overrides the exclusion/opt-in requirement; the override and its stated reason must be recorded in the artifact (`liveness_preflight`, `reclaimable_override`, and/or `priority_rationale`). A `human-held` classification is never overridden by `--force` alone — only the user's explicit answer to the recorded `alignment_questions` entry authorizes selecting it.
+
+This preflight now computes the **full** ADR 0021 §1 `assignment ⋈ liveness` join (previously liveness-only, pending #290): the assignment dimension is `#290`'s `AssignmentProvider` `status()` (`context/contracts/assignment-provider-contract.md`), joined against the same liveness stream this preflight already reads.
+
+`liveness claim`/`status`/`whoami` read/write the local runtime liveness stream, never GitHub issue/label/assignee state — this is not a provider mutation, and the two-provider-writes-only invariant in `## Contract` is unchanged by this slice. `#290` adds the one narrow, audited durable assignment claim that pairs with this liveness emit — see "Assignment Claim On Selection" below.
 
 ### 2. Enforce WIP And Shepherding
 
@@ -260,7 +278,57 @@ Branch on the returned `winner.actor`:
 - If `winner.actor !== self_actor`, this session is the loser: immediately run `npm run workflow:sidecar -- liveness release <subjectId> --actor <self_actor>`, extend `post_claim_conflict` with `{verdict_reason, winner_actor, conceded: true}`, and return to `### 3. Select Work` to reselect within the same `pull-work` pass — excluding the just-released subject — before any handoff to `plan-work`.
 - If `winner.actor === self_actor`, this session wins: record the verdict for transparency (`{verdict_reason, winner_actor: self_actor, conceded: false}`) in `post_claim_conflict` and proceed normally; do not release.
 
-Honesty note: this re-check narrows, but does not close, the read-then-write race between the preflight's read and the claim's write. The verdict-and-release loop above closes the "detected but advisory-only" gap ADR 0012 §4 names for THIS session's own double-hold — the loser deterministically concedes and re-selects within the same pass, a new convergence guarantee this slice adds — but it still does not provide true mutual exclusion across the read-then-write race window itself; that residual is unchanged from before. True mutual exclusion arrives with the provider assignment lease (#290) and the `verify-hold` publish gate (#293).
+Honesty note: this re-check narrows, but does not close, the read-then-write race between the preflight's read and the claim's write. The verdict-and-release loop above closes the "detected but advisory-only" gap ADR 0012 §4 names for THIS session's own double-hold — the loser deterministically concedes and re-selects within the same pass, a new convergence guarantee this slice adds — but it still does not provide true mutual exclusion across the read-then-write race window itself; that residual is unchanged from before. `#290`'s provider assignment lease closes this gap for the **local-file** provider only: `claim`/`release`/`supersede` there are wrapped in a per-subject `mkdir`-lock (atomic create, EEXIST-spin, staleness reclaim), so two concurrent local-file `claim` calls on the same subject genuinely cannot both win — true mutual exclusion, not just detection. The **GitHub** provider (assignee/label/claim-comment) remains advisory/last-writer: `render-claim`/`render-supersede` emit `gh` argv for the calling skill to run, and nothing about a GitHub issue's assignee/label/comment state gives atomic compare-and-swap across two concurrent skill invocations — the post-claim `status` re-check above still only *detects* a lost race after the fact, it does not *prevent* one. Do not read "provider assignment lease" as closing the GitHub race; only the `verify-hold` publish gate (#293), not yet implemented, would do that for GitHub.
+
+### Assignment Claim On Selection
+
+After the post-claim liveness conflict re-check above resolves (no double-hold detected, or this session won the deterministic tiebreaker and any loser has reselected) and `selected_item_ids` is otherwise ready to finalize, perform the durable assignment claim — the second and last provider-adjacent write this skill performs (see `## Contract`) — before recording `selected_item_ids` as final and before any handoff to `plan-work`.
+
+Resolve the effective assignment provider settings once per pass:
+
+```bash
+npm run effective-assignment-provider-settings -- --repo-path . --json
+```
+
+If the result is `status: ask_user`, ask the user which `AssignmentProvider` (`github` or `local-file`) to use before claiming; do not silently assume. If `status: configured`, use the returned `settings.provider.kind`, `settings.provider.repo`, `settings.policy.label_name`, and `settings.policy.claim_comment_marker` for every call below.
+
+For each selected item's `subjectId` (the same `subjectId` resolved via `resolve-slug` and used throughout this pass):
+
+- **`kind: "github"`**: build an `--input-json` payload with `repo` (`{owner, name}`), `issue_number`, `assignee_login` (the current actor's GitHub login when known), `existing_assignee_login` and `existing_comment_id` (only when superseding an already-recorded `reclaimable`/confirmed `human-held` candidate — otherwise omit), `label_name`, `claim_comment_marker`, `ttl_seconds`, `branch`, and `artifact_dir`, then render:
+
+  ```bash
+  npm run assignment-provider -- render-claim \
+    --provider github \
+    --subject-id <subjectId> \
+    --input-json <path> \
+    --actor-json <path>
+  ```
+
+  Execute every command in the returned `gh_commands` array **verbatim** via the Bash tool, in order — never freehand `gh` text. Each `gh_commands` entry is an **argv array** (one element per argument, e.g. `["gh", "issue", "comment", "9101", "--repo", "kontourai/flow-agents", "--body", "..."]`) and MUST be executed as argv — every element passed as its own separate Bash-tool argument — **never** concatenated into a single shell-command string, and **never** run via `bash -c "..."` or any other shell re-interpretation of the joined elements. `claim_comment_body` (and, when superseding, `previous_record`) can carry attacker-influenced text (see the GitHub claim-record sanitization note in `context/contracts/assignment-provider-contract.md`); concatenating argv elements into a shell string before execution would reintroduce a shell-injection surface this render/execute split is designed to avoid. Record the rendered `record`, `claim_comment_body`, and each executed `gh_commands` entry as evidence.
+
+- **`kind: "local-file"`**: call the local-file `claim` subcommand directly — no render step, since this is the one path that performs real I/O inside the CLI itself:
+
+  ```bash
+  npm run assignment-provider -- claim \
+    --provider local-file \
+    --artifact-root <artifact-root> \
+    --subject-id <subjectId> \
+    --branch <branch> \
+    --artifact-dir <artifact_dir> \
+    --actor-json <path>
+  ```
+
+  A non-zero exit (already claimed by a different actor) must not be silently retried or overwritten — treat it exactly like a `held`/`reclaimable` conflict and return to `### 3. Select Work` to reselect.
+
+Then, regardless of provider kind, re-fetch current state — re-fetch the GitHub issue via `gh issue view --json assignees,labels,comments` for `github` (the local-file record is already current on disk) — and call `assignment-provider status` again, passing the same pinned `self_actor`, to **confirm** the claim landed before treating `selected_item_ids` as final:
+
+```bash
+npm run assignment-provider -- status --provider <github|local-file> --subject-id <subjectId> --self-actor <self_actor> ...
+```
+
+Confirm `effective.effective_state === "held"` with `effective.reason === "self_is_holder"` (the join function's signal that this session's own actor is the confirmed holder). Only after this confirmation does `selected_item_ids` become final for handoff. If confirmation fails — the claim did not land, or a different actor's record now appears — treat this exactly like a liveness double-hold: do not proceed to `plan-work` with this subject; return to `### 3. Select Work` to reselect, excluding the contested subject.
+
+Record the render/status evidence — provider kind, subject id, actor, the rendered/executed command(s), and the confirmed `status()` result — for every selected item under `selection` and in the dedicated `assignment_claim` artifact field (see Artifact Contract above).
 
 ### 4. Anchor Check
 

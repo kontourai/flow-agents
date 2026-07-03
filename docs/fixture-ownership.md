@@ -13,6 +13,7 @@ run `npm run validate:source --` and `npm run fixture:retirement-audit --`.
 
 | Fixture directory | Classification | Owners | Cleanup rule |
 | --- | --- | --- | --- |
+| `evals/fixtures/assignment-provider` | AssignmentProvider local-file and GitHub render/status fixtures (#290) | `evals/integration/test_assignment_provider_local_file.sh`, `evals/integration/test_assignment_provider_github.sh`, `evals/integration/test_pull_work_assignment_join.sh` | Keep while the assignment provider contract's claim/release/supersede/status/list operations and the assignment ⋈ liveness join are tested against local-file and GitHub fixture inputs. |
 | `evals/fixtures/backlog-provider-settings` | settings precedence fixtures | `evals/integration/test_effective_backlog_settings.sh` | Keep while backlog provider settings resolution supports global defaults and project overrides. |
 | `evals/fixtures/builder-kit-workflow-state` | Builder Kit workflow-state fixtures | `evals/static/test_workflow_skills.sh` | Keep while Builder Kit state contract and resume behavior are documented in workflow skill contracts. |
 | `evals/fixtures/console-learning-projection` | console learning projection fixtures | `evals/integration/test_console_learning_projection.sh` | Keep while learning projection supports correction and open-route examples. |
