@@ -3,215 +3,57 @@
   "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
   "claims": [
     {
-      "id": "kontourai-flow-agents-289-eval-workflow-sidecar-writer.flow-agents-workflow.iteration-2-re-verify-163-163-assertions-pass-incl-f2-four-fuzz-escape-classes-lead-a-b-foo-lock-bar-a-b-die-pre-mutation-an-accepted-nested-branch-value-passes-the-real-git-check-ref-format-binary-and-f4-three-unknown-collapsing-actors-unknown-unknown-unknown-derive-distinct-git-valid-branches-iteration-1-f1-f2-f4-and-ac2-ac5-ac7-regressions-still-green",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-289/eval-workflow-sidecar-writer",
+      "id": "kontourai-flow-agents-309-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-0-exit-compiles-ts-build-then-runs-source-tree-validator-source-tree-validation-passed-build-tsc-also-succeeded-standalone-0-exit-as-its-prerequisite",
+      "subjectType": "work-item",
+      "subjectId": "kontourai-flow-agents-309/source-tree-validation",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
-      "fieldOrBehavior": "Iteration-2 re-verify: 163/163 assertions pass, incl. F2' four fuzz-escape classes (-lead, a/.b, foo.lock/bar, a/./b) die pre-mutation, an accepted nested --branch value passes the real git check-ref-format binary, and F4' three unknown-collapsing actors (unknown, unknown., .unknown) derive distinct git-valid branches; iteration-1 F1/F2/F4 and AC2-AC5/AC7 regressions still green.",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "npm run validate:source -- passed (0 exit); compiles TS build then runs source-tree validator: Source tree validation passed. Build (tsc) also succeeded standalone (0 exit) as its prerequisite.",
       "value": "pass",
-      "createdAt": "2026-07-03T03:56:29Z",
-      "updatedAt": "2026-07-03T03:56:29Z",
+      "createdAt": "2026-07-03T04:35:01Z",
+      "updatedAt": "2026-07-03T04:35:01Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-289-eval-workflow-artifacts.flow-agents-workflow.validator-eval-untouched-by-iteration-2-ac1-schema-optional-branch-field-and-ac6-legacy-state-json-without-branch-still-warns-exit-0-remain-green-28-28-assertions-pass",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-289/eval-workflow-artifacts",
+      "id": "kontourai-flow-agents-309-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-passed-167-assertions-0-failures-exit-0-including-the-4-new-309-specific-regression-checks-setup-derive-init-plan-preserves-branch-with-branchless-plan-artifact-advance-state-preserves-branch-and-current-json-mirror-backfill-repair-of-pre-fix-broken-session-static-suite-bash-evals-run-sh-static-folded-in-as-supporting-non-manifest-evidence-also-passed-31-pass-lines-1049-checkmark-assertions-0-failures-exit-0-manual-scratch-root-probes-a-full-ensure-session-init-plan-advance-state-lifecycle-b-hand-seeded-broken-fixture-repair-via-init-plan-c-fresh-derive-branch-override-no-rederive-regression-checks-all-reproduced-the-expected-309-fixed-behavior-against-the-built-cli-build-src-cli-workflow-sidecar-js",
+      "subjectType": "work-item",
+      "subjectId": "kontourai-flow-agents-309/workflow-sidecar-writer-integration",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
-      "fieldOrBehavior": "Validator eval untouched by iteration 2; AC1 (schema optional branch field) and AC6 (legacy state.json without branch still warns, exit 0) remain green: 28/28 assertions pass.",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "bash evals/integration/test_workflow_sidecar_writer.sh passed: 167 assertions, 0 failures, exit 0, including the 4 new #309-specific regression checks (setup-derive, init-plan-preserves-branch-with-branchless-plan-artifact, advance-state-preserves-branch-and-current.json-mirror, backfill-repair-of-pre-fix-broken-session). Static suite (bash evals/run.sh static, folded in as supporting non-manifest evidence) also passed: 31 PASS lines + 1049 checkmark assertions, 0 failures, exit 0. Manual scratch-root probes (a) full ensure-session->init-plan->advance-state lifecycle, (b) hand-seeded broken-fixture repair via init-plan, (c) fresh-derive/--branch-override/no-rederive regression checks all reproduced the expected #309-fixed behavior against the built CLI (build/src/cli/workflow-sidecar.js).",
       "value": "pass",
-      "createdAt": "2026-07-03T03:56:29Z",
-      "updatedAt": "2026-07-03T03:56:29Z",
+      "createdAt": "2026-07-03T04:35:01Z",
+      "updatedAt": "2026-07-03T04:35:01Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-289-validate-source.flow-agents-workflow.source-tree-validation-passed-flow-schema-not-configured-container-top-level-shape-check-only",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-289/validate-source",
+      "id": "kontourai-flow-agents-309-after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence.flow-agents-workflow.after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence",
+      "subjectType": "work-item",
+      "subjectId": "kontourai-flow-agents-309/after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "Source-tree validation passed (Flow schema not configured; container/top-level shape check only).",
+      "claimType": "builder.pull-work.selected",
+      "fieldOrBehavior": "After ensure-session then init-plan, state.json still carries branch; eval asserts the full sequence",
       "value": "pass",
-      "createdAt": "2026-07-03T03:56:29Z",
-      "updatedAt": "2026-07-03T03:56:29Z",
+      "createdAt": "2026-07-03T04:35:01Z",
+      "updatedAt": "2026-07-03T04:35:01Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-289-gate-summary.flow-agents-workflow.fold-of-remaining-gates-manual-scratch-probes-non-manifest-session-local-npm-run-build-clean-tsc-exit-0-bash-evals-run-sh-static-65-65-pass-0-fail-bash-evals-integration-test-actor-identity-sh-11-11-pass-bash-evals-integration-test-liveness-heartbeat-sh-43-43-pass-scratch-probes-on-a-throwaway-artifact-root-built-cli-no-git-worktree-ops-a-the-four-f2-fuzz-escape-classes-each-died-pre-mutation-with-the-expected-per-component-diagnostic-and-wrote-no-session-artifact-b-a-valid-nested-branch-feature-nested-deep-path-v2-1-was-recorded-verbatim-in-state-json-and-independently-passed-the-real-git-check-ref-format-binary-c-actors-unknown-unknown-unknown-each-derived-a-distinct-disambiguated-branch-agent-unknown-b23a6a-agent-unknown-4dd633-agent-unknown-2a9676-each-git-valid-and-the-same-three-hashes-reproduced-identically-on-a-second-ensure-session-run-against-fresh-slugs-deterministic-d-regression-checks-all-held-derived-branch-round-trip-identical-across-state-json-deliver-md-current-json-branch-verbatim-recording-no-rederive-on-takeover-by-a-different-actor-f1-trailing-dot-slug-still-derives-a-git-valid-branch-and-a-garbage-actor-died-fail-closed-with-zero-artifacts-written-ac1-ac6-ac8-spot-checked-directly-against-schemas-workflow-state-schema-json-the-four-skill-md-files-and-docs-workflow-usage-guide-md-no-regression-from-iteration-1-baseline",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-289/gate-summary",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.external",
-      "fieldOrBehavior": "Fold of remaining gates + manual scratch probes (non-manifest, session-local): npm run build clean (tsc exit 0); bash evals/run.sh static 65/65 pass (0 fail); bash evals/integration/test_actor_identity.sh 11/11 pass; bash evals/integration/test_liveness_heartbeat.sh 43/43 pass. Scratch probes on a throwaway artifact-root (built CLI, no git worktree ops): (a) the four F2' fuzz-escape classes each died pre-mutation with the expected per-component diagnostic and wrote no session artifact; (b) a valid nested --branch (feature/nested/deep-path_v2.1) was recorded verbatim in state.json and independently passed the real git check-ref-format binary; (c) actors unknown / unknown. / .unknown each derived a distinct disambiguated branch (agent/unknown-b23a6a/*, agent/unknown-4dd633/*, agent/unknown-2a9676/*), each git-valid, and the same three hashes reproduced identically on a second ensure-session run against fresh slugs (deterministic); (d) regression checks all held: derived-branch round-trip identical across state.json/deliver.md/current.json, --branch verbatim recording, no-rederive on takeover by a different actor, F1 trailing-dot slug still derives a git-valid branch, and a garbage --actor (:::) died fail-closed with zero artifacts written. AC1/AC6/AC8 spot-checked directly against schemas/workflow-state.schema.json, the four SKILL.md files, and docs/workflow-usage-guide.md — no regression from iteration-1 baseline.",
-      "value": "pass",
-      "createdAt": "2026-07-03T03:56:29Z",
-      "updatedAt": "2026-07-03T03:56:29Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.external:attestation",
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-289-ac1-schema-branch-optional-field-workflow-state-schema-json-declares-branch-as-an-optional-string-property-not-in-required-schema-version-stays-1-0.flow-agents-workflow.ac1-schema-branch-optional-field-workflow-state-schema-json-declares-branch-as-an-optional-string-property-not-in-required-schema-version-stays-1-0",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-289/ac1-schema-branch-optional-field-workflow-state-schema-json-declares-branch-as-an-optional-string-property-not-in-required-schema-version-stays-1-0",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC1 `schema-branch-optional-field`: `workflow-state.schema.json` declares `branch` as an optional string property (not in `required`); `schema_version` stays `\"1.0\"`",
-      "value": "pass",
-      "createdAt": "2026-07-03T03:56:29Z",
-      "updatedAt": "2026-07-03T03:56:29Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-289-ac2-ensure-session-derives-agent-actor-slug-branch-a-freshly-created-session-s-state-json-branch-and-seeded-slug-deliver-md-branch-line-both-equal-agent-branch-safe-actor-slug.flow-agents-workflow.ac2-ensure-session-derives-agent-actor-slug-branch-a-freshly-created-session-s-state-json-branch-and-seeded-slug-deliver-md-branch-line-both-equal-agent-branch-safe-actor-slug",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-289/ac2-ensure-session-derives-agent-actor-slug-branch-a-freshly-created-session-s-state-json-branch-and-seeded-slug-deliver-md-branch-line-both-equal-agent-branch-safe-actor-slug",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC2 `ensure-session-derives-agent-actor-slug-branch`: a freshly created session's `state.json.branch` and seeded `<slug>--deliver.md` `branch:` line both equal `agent/<branch-safe-actor>/<slug>`",
-      "value": "pass",
-      "createdAt": "2026-07-03T03:56:29Z",
-      "updatedAt": "2026-07-03T03:56:29Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-289-ac3-explicit-branch-flag-overrides-ensure-session-branch-value-on-a-brand-new-session-records-value-verbatim-instead-of-a-derived-name.flow-agents-workflow.ac3-explicit-branch-flag-overrides-ensure-session-branch-value-on-a-brand-new-session-records-value-verbatim-instead-of-a-derived-name",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-289/ac3-explicit-branch-flag-overrides-ensure-session-branch-value-on-a-brand-new-session-records-value-verbatim-instead-of-a-derived-name",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC3 `explicit-branch-flag-overrides`: `ensure-session --branch <value>` on a brand-new session records `<value>` verbatim instead of a derived name",
-      "value": "pass",
-      "createdAt": "2026-07-03T03:56:29Z",
-      "updatedAt": "2026-07-03T03:56:29Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-289-ac4-distinct-actors-yield-distinct-branches-two-fresh-sessions-with-different-actors-produce-different-branch-values.flow-agents-workflow.ac4-distinct-actors-yield-distinct-branches-two-fresh-sessions-with-different-actors-produce-different-branch-values",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-289/ac4-distinct-actors-yield-distinct-branches-two-fresh-sessions-with-different-actors-produce-different-branch-values",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC4 `distinct-actors-yield-distinct-branches`: two fresh sessions with different actors produce different `branch` values",
-      "value": "pass",
-      "createdAt": "2026-07-03T03:56:29Z",
-      "updatedAt": "2026-07-03T03:56:29Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-289-ac5-existing-session-continuity-branch-not-reforked-ensure-session-against-an-existing-session-directory-never-re-derives-or-overwrites-its-already-recorded-branch-regardless-of-the-calling-actor-adr-0021-5.flow-agents-workflow.ac5-existing-session-continuity-branch-not-reforked-ensure-session-against-an-existing-session-directory-never-re-derives-or-overwrites-its-already-recorded-branch-regardless-of-the-calling-actor-adr-0021-5",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-289/ac5-existing-session-continuity-branch-not-reforked-ensure-session-against-an-existing-session-directory-never-re-derives-or-overwrites-its-already-recorded-branch-regardless-of-the-calling-actor-adr-0021-5",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC5 `existing-session-continuity-branch-not-reforked`: `ensure-session` against an existing session directory never re-derives or overwrites its already-recorded `branch`, regardless of the calling actor (ADR 0021 §5)",
-      "value": "pass",
-      "createdAt": "2026-07-03T03:56:29Z",
-      "updatedAt": "2026-07-03T03:56:29Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-289-ac6-legacy-session-without-branch-still-validates-with-warning-a-pre-existing-state-json-with-no-branch-key-still-passes-workflow-validate-artifacts-exit-0-with-a-warn-line-naming-branch-on-stderr.flow-agents-workflow.ac6-legacy-session-without-branch-still-validates-with-warning-a-pre-existing-state-json-with-no-branch-key-still-passes-workflow-validate-artifacts-exit-0-with-a-warn-line-naming-branch-on-stderr",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-289/ac6-legacy-session-without-branch-still-validates-with-warning-a-pre-existing-state-json-with-no-branch-key-still-passes-workflow-validate-artifacts-exit-0-with-a-warn-line-naming-branch-on-stderr",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC6 `legacy-session-without-branch-still-validates-with-warning`: a pre-existing `state.json` with no `branch` key still passes `workflow:validate-artifacts` (exit 0) with a `WARN` line naming `branch` on stderr",
-      "value": "pass",
-      "createdAt": "2026-07-03T03:56:29Z",
-      "updatedAt": "2026-07-03T03:56:29Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-289-ac7-current-json-surfaces-active-branch-current-json-written-by-ensure-session-includes-a-branch-field-mirroring-the-active-session-s-state-json-branch.flow-agents-workflow.ac7-current-json-surfaces-active-branch-current-json-written-by-ensure-session-includes-a-branch-field-mirroring-the-active-session-s-state-json-branch",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-289/ac7-current-json-surfaces-active-branch-current-json-written-by-ensure-session-includes-a-branch-field-mirroring-the-active-session-s-state-json-branch",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC7 `current-json-surfaces-active-branch`: `current.json` written by `ensure-session` includes a `branch` field mirroring the active session's `state.json.branch`",
-      "value": "pass",
-      "createdAt": "2026-07-03T03:56:29Z",
-      "updatedAt": "2026-07-03T03:56:29Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-289-ac8-skill-and-contract-docs-point-at-recorded-branch-the-four-named-skill-md-files-session-file-templates-state-that-branch-comes-from-state-json-branch-not-a-freeform-placeholder-and-that-ensure-session-does-not-create-the-git-branch-itself-builder-kit-workflow-state-contract-md-s-routing-table-and-docs-workflow-usage-guide-md-document-the-branch-field-and-convention.flow-agents-workflow.ac8-skill-and-contract-docs-point-at-recorded-branch-the-four-named-skill-md-files-session-file-templates-state-that-branch-comes-from-state-json-branch-not-a-freeform-placeholder-and-that-ensure-session-does-not-create-the-git-branch-itself-builder-kit-workflow-state-contract-md-s-routing-table-and-docs-workflow-usage-guide-md-document-the-branch-field-and-convention",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-289/ac8-skill-and-contract-docs-point-at-recorded-branch-the-four-named-skill-md-files-session-file-templates-state-that-branch-comes-from-state-json-branch-not-a-freeform-placeholder-and-that-ensure-session-does-not-create-the-git-branch-itself-builder-kit-workflow-state-contract-md-s-routing-table-and-docs-workflow-usage-guide-md-document-the-branch-field-and-convention",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC8 `skill-and-contract-docs-point-at-recorded-branch`: the four named `SKILL.md` files' session-file templates state that `<branch>` comes from `state.json.branch`, not a freeform placeholder, and that `ensure-session` does not create the git branch itself; `builder-kit-workflow-state-contract.md`'s routing table and `docs/workflow-usage-guide.md` document the `branch` field and convention",
-      "value": "pass",
-      "createdAt": "2026-07-03T03:56:29Z",
-      "updatedAt": "2026-07-03T03:56:29Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:builder.pull-work.selected",
       "status": "verified"
     }
   ],
   "evidence": [
     {
-      "id": "ev:kontourai-flow-agents-289-eval-workflow-sidecar-writer.flow-agents-workflow.iteration-2-re-verify-163-163-assertions-pass-incl-f2-four-fuzz-escape-classes-lead-a-b-foo-lock-bar-a-b-die-pre-mutation-an-accepted-nested-branch-value-passes-the-real-git-check-ref-format-binary-and-f4-three-unknown-collapsing-actors-unknown-unknown-unknown-derive-distinct-git-valid-branches-iteration-1-f1-f2-f4-and-ac2-ac5-ac7-regressions-still-green",
-      "claimId": "kontourai-flow-agents-289-eval-workflow-sidecar-writer.flow-agents-workflow.iteration-2-re-verify-163-163-assertions-pass-incl-f2-four-fuzz-escape-classes-lead-a-b-foo-lock-bar-a-b-die-pre-mutation-an-accepted-nested-branch-value-passes-the-real-git-check-ref-format-binary-and-f4-three-unknown-collapsing-actors-unknown-unknown-unknown-derive-distinct-git-valid-branches-iteration-1-f1-f2-f4-and-ac2-ac5-ac7-regressions-still-green",
+      "id": "ev:kontourai-flow-agents-309-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-0-exit-compiles-ts-build-then-runs-source-tree-validator-source-tree-validation-passed-build-tsc-also-succeeded-standalone-0-exit-as-its-prerequisite",
+      "claimId": "kontourai-flow-agents-309-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-0-exit-compiles-ts-build-then-runs-source-tree-validator-source-tree-validation-passed-build-tsc-also-succeeded-standalone-0-exit-as-its-prerequisite",
       "evidenceType": "test_output",
       "method": "validation",
-      "sourceRef": "kontourai-flow-agents-289/evidence.json",
-      "excerptOrSummary": "Iteration-2 re-verify: 163/163 assertions pass, incl. F2' four fuzz-escape classes (-lead, a/.b, foo.lock/bar, a/./b) die pre-mutation, an accepted nested --branch value passes the real git check-ref-format binary, and F4' three unknown-collapsing actors (unknown, unknown., .unknown) derive distinct git-valid branches; iteration-1 F1/F2/F4 and AC2-AC5/AC7 regressions still green.",
-      "observedAt": "2026-07-03T03:56:29Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_workflow_sidecar_writer.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:kontourai-flow-agents-289-eval-workflow-artifacts.flow-agents-workflow.validator-eval-untouched-by-iteration-2-ac1-schema-optional-branch-field-and-ac6-legacy-state-json-without-branch-still-warns-exit-0-remain-green-28-28-assertions-pass",
-      "claimId": "kontourai-flow-agents-289-eval-workflow-artifacts.flow-agents-workflow.validator-eval-untouched-by-iteration-2-ac1-schema-optional-branch-field-and-ac6-legacy-state-json-without-branch-still-warns-exit-0-remain-green-28-28-assertions-pass",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "kontourai-flow-agents-289/evidence.json",
-      "excerptOrSummary": "Validator eval untouched by iteration 2; AC1 (schema optional branch field) and AC6 (legacy state.json without branch still warns, exit 0) remain green: 28/28 assertions pass.",
-      "observedAt": "2026-07-03T03:56:29Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_workflow_artifacts.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:kontourai-flow-agents-289-validate-source.flow-agents-workflow.source-tree-validation-passed-flow-schema-not-configured-container-top-level-shape-check-only",
-      "claimId": "kontourai-flow-agents-289-validate-source.flow-agents-workflow.source-tree-validation-passed-flow-schema-not-configured-container-top-level-shape-check-only",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "kontourai-flow-agents-289/evidence.json",
-      "excerptOrSummary": "Source-tree validation passed (Flow schema not configured; container/top-level shape check only).",
-      "observedAt": "2026-07-03T03:56:29Z",
+      "sourceRef": "kontourai-flow-agents-309/evidence.json",
+      "excerptOrSummary": "npm run validate:source -- passed (0 exit); compiles TS build then runs source-tree validator: Source tree validation passed. Build (tsc) also succeeded standalone (0 exit) as its prerequisite.",
+      "observedAt": "2026-07-03T04:35:01Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
       "execution": {
@@ -221,18 +63,57 @@
       }
     },
     {
-      "id": "ev:kontourai-flow-agents-289-gate-summary.flow-agents-workflow.fold-of-remaining-gates-manual-scratch-probes-non-manifest-session-local-npm-run-build-clean-tsc-exit-0-bash-evals-run-sh-static-65-65-pass-0-fail-bash-evals-integration-test-actor-identity-sh-11-11-pass-bash-evals-integration-test-liveness-heartbeat-sh-43-43-pass-scratch-probes-on-a-throwaway-artifact-root-built-cli-no-git-worktree-ops-a-the-four-f2-fuzz-escape-classes-each-died-pre-mutation-with-the-expected-per-component-diagnostic-and-wrote-no-session-artifact-b-a-valid-nested-branch-feature-nested-deep-path-v2-1-was-recorded-verbatim-in-state-json-and-independently-passed-the-real-git-check-ref-format-binary-c-actors-unknown-unknown-unknown-each-derived-a-distinct-disambiguated-branch-agent-unknown-b23a6a-agent-unknown-4dd633-agent-unknown-2a9676-each-git-valid-and-the-same-three-hashes-reproduced-identically-on-a-second-ensure-session-run-against-fresh-slugs-deterministic-d-regression-checks-all-held-derived-branch-round-trip-identical-across-state-json-deliver-md-current-json-branch-verbatim-recording-no-rederive-on-takeover-by-a-different-actor-f1-trailing-dot-slug-still-derives-a-git-valid-branch-and-a-garbage-actor-died-fail-closed-with-zero-artifacts-written-ac1-ac6-ac8-spot-checked-directly-against-schemas-workflow-state-schema-json-the-four-skill-md-files-and-docs-workflow-usage-guide-md-no-regression-from-iteration-1-baseline",
-      "claimId": "kontourai-flow-agents-289-gate-summary.flow-agents-workflow.fold-of-remaining-gates-manual-scratch-probes-non-manifest-session-local-npm-run-build-clean-tsc-exit-0-bash-evals-run-sh-static-65-65-pass-0-fail-bash-evals-integration-test-actor-identity-sh-11-11-pass-bash-evals-integration-test-liveness-heartbeat-sh-43-43-pass-scratch-probes-on-a-throwaway-artifact-root-built-cli-no-git-worktree-ops-a-the-four-f2-fuzz-escape-classes-each-died-pre-mutation-with-the-expected-per-component-diagnostic-and-wrote-no-session-artifact-b-a-valid-nested-branch-feature-nested-deep-path-v2-1-was-recorded-verbatim-in-state-json-and-independently-passed-the-real-git-check-ref-format-binary-c-actors-unknown-unknown-unknown-each-derived-a-distinct-disambiguated-branch-agent-unknown-b23a6a-agent-unknown-4dd633-agent-unknown-2a9676-each-git-valid-and-the-same-three-hashes-reproduced-identically-on-a-second-ensure-session-run-against-fresh-slugs-deterministic-d-regression-checks-all-held-derived-branch-round-trip-identical-across-state-json-deliver-md-current-json-branch-verbatim-recording-no-rederive-on-takeover-by-a-different-actor-f1-trailing-dot-slug-still-derives-a-git-valid-branch-and-a-garbage-actor-died-fail-closed-with-zero-artifacts-written-ac1-ac6-ac8-spot-checked-directly-against-schemas-workflow-state-schema-json-the-four-skill-md-files-and-docs-workflow-usage-guide-md-no-regression-from-iteration-1-baseline",
-      "evidenceType": "attestation",
-      "method": "corroboration",
-      "sourceRef": "kontourai-flow-agents-289/evidence.json",
-      "excerptOrSummary": "Fold of remaining gates + manual scratch probes (non-manifest, session-local): npm run build clean (tsc exit 0); bash evals/run.sh static 65/65 pass (0 fail); bash evals/integration/test_actor_identity.sh 11/11 pass; bash evals/integration/test_liveness_heartbeat.sh 43/43 pass. Scratch probes on a throwaway artifact-root (built CLI, no git worktree ops): (a) the four F2' fuzz-escape classes each died pre-mutation with the expected per-component diagnostic and wrote no session artifact; (b) a valid nested --branch (feature/nested/deep-path_v2.1) was recorded verbatim in state.json and independently passed the real git check-ref-format binary; (c) actors unknown / unknown. / .unknown each derived a distinct disambiguated branch (agent/unknown-b23a6a/*, agent/unknown-4dd633/*, agent/unknown-2a9676/*), each git-valid, and the same three hashes reproduced identically on a second ensure-session run against fresh slugs (deterministic); (d) regression checks all held: derived-branch round-trip identical across state.json/deliver.md/current.json, --branch verbatim recording, no-rederive on takeover by a different actor, F1 trailing-dot slug still derives a git-valid branch, and a garbage --actor (:::) died fail-closed with zero artifacts written. AC1/AC6/AC8 spot-checked directly against schemas/workflow-state.schema.json, the four SKILL.md files, and docs/workflow-usage-guide.md — no regression from iteration-1 baseline.",
-      "observedAt": "2026-07-03T03:56:29Z",
+      "id": "ev:kontourai-flow-agents-309-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-passed-167-assertions-0-failures-exit-0-including-the-4-new-309-specific-regression-checks-setup-derive-init-plan-preserves-branch-with-branchless-plan-artifact-advance-state-preserves-branch-and-current-json-mirror-backfill-repair-of-pre-fix-broken-session-static-suite-bash-evals-run-sh-static-folded-in-as-supporting-non-manifest-evidence-also-passed-31-pass-lines-1049-checkmark-assertions-0-failures-exit-0-manual-scratch-root-probes-a-full-ensure-session-init-plan-advance-state-lifecycle-b-hand-seeded-broken-fixture-repair-via-init-plan-c-fresh-derive-branch-override-no-rederive-regression-checks-all-reproduced-the-expected-309-fixed-behavior-against-the-built-cli-build-src-cli-workflow-sidecar-js",
+      "claimId": "kontourai-flow-agents-309-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-passed-167-assertions-0-failures-exit-0-including-the-4-new-309-specific-regression-checks-setup-derive-init-plan-preserves-branch-with-branchless-plan-artifact-advance-state-preserves-branch-and-current-json-mirror-backfill-repair-of-pre-fix-broken-session-static-suite-bash-evals-run-sh-static-folded-in-as-supporting-non-manifest-evidence-also-passed-31-pass-lines-1049-checkmark-assertions-0-failures-exit-0-manual-scratch-root-probes-a-full-ensure-session-init-plan-advance-state-lifecycle-b-hand-seeded-broken-fixture-repair-via-init-plan-c-fresh-derive-branch-override-no-rederive-regression-checks-all-reproduced-the-expected-309-fixed-behavior-against-the-built-cli-build-src-cli-workflow-sidecar-js",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-309/evidence.json",
+      "excerptOrSummary": "bash evals/integration/test_workflow_sidecar_writer.sh passed: 167 assertions, 0 failures, exit 0, including the 4 new #309-specific regression checks (setup-derive, init-plan-preserves-branch-with-branchless-plan-artifact, advance-state-preserves-branch-and-current.json-mirror, backfill-repair-of-pre-fix-broken-session). Static suite (bash evals/run.sh static, folded in as supporting non-manifest evidence) also passed: 31 PASS lines + 1049 checkmark assertions, 0 failures, exit 0. Manual scratch-root probes (a) full ensure-session->init-plan->advance-state lifecycle, (b) hand-seeded broken-fixture repair via init-plan, (c) fresh-derive/--branch-override/no-rederive regression checks all reproduced the expected #309-fixed behavior against the built CLI (build/src/cli/workflow-sidecar.js).",
+      "observedAt": "2026-07-03T04:35:01Z",
       "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_workflow_sidecar_writer.sh",
+        "isError": false
+      }
     }
   ],
   "policies": [
+    {
+      "id": "policy:workflow.check.build:test_output",
+      "claimType": "workflow.check.build",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.build claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pull-work.selected:test_output",
+      "claimType": "builder.pull-work.selected",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pull-work.selected claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
     {
       "id": "policy:workflow.check.test:test_output",
       "claimType": "workflow.check.test",
@@ -241,40 +122,6 @@
       ],
       "acceptanceCriteria": [
         "A verified verification event must support a workflow.check.test claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "high"
-    },
-    {
-      "id": "policy:workflow.check.command:test_output",
-      "claimType": "workflow.check.command",
-      "requiredEvidence": [
-        "test_output"
-      ],
-      "acceptanceCriteria": [
-        "A verified verification event must support a workflow.check.command claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "high"
-    },
-    {
-      "id": "policy:workflow.check.external:attestation",
-      "claimType": "workflow.check.external",
-      "requiredEvidence": [
-        "attestation"
-      ],
-      "acceptanceCriteria": [
-        "A verified verification event must support a workflow.check.external claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -298,136 +145,57 @@
       "stalenessTriggers": [],
       "conflictRules": [],
       "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pull-work.selected",
+      "claimType": "builder.pull-work.selected",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pull-work.selected claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
     }
   ],
   "events": [
     {
-      "id": "evt:kontourai-flow-agents-289-eval-workflow-sidecar-writer.flow-agents-workflow.iteration-2-re-verify-163-163-assertions-pass-incl-f2-four-fuzz-escape-classes-lead-a-b-foo-lock-bar-a-b-die-pre-mutation-an-accepted-nested-branch-value-passes-the-real-git-check-ref-format-binary-and-f4-three-unknown-collapsing-actors-unknown-unknown-unknown-derive-distinct-git-valid-branches-iteration-1-f1-f2-f4-and-ac2-ac5-ac7-regressions-still-green",
-      "claimId": "kontourai-flow-agents-289-eval-workflow-sidecar-writer.flow-agents-workflow.iteration-2-re-verify-163-163-assertions-pass-incl-f2-four-fuzz-escape-classes-lead-a-b-foo-lock-bar-a-b-die-pre-mutation-an-accepted-nested-branch-value-passes-the-real-git-check-ref-format-binary-and-f4-three-unknown-collapsing-actors-unknown-unknown-unknown-derive-distinct-git-valid-branches-iteration-1-f1-f2-f4-and-ac2-ac5-ac7-regressions-still-green",
+      "id": "evt:kontourai-flow-agents-309-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-0-exit-compiles-ts-build-then-runs-source-tree-validator-source-tree-validation-passed-build-tsc-also-succeeded-standalone-0-exit-as-its-prerequisite",
+      "claimId": "kontourai-flow-agents-309-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-0-exit-compiles-ts-build-then-runs-source-tree-validator-source-tree-validation-passed-build-tsc-also-succeeded-standalone-0-exit-as-its-prerequisite",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-289-eval-workflow-sidecar-writer.flow-agents-workflow.iteration-2-re-verify-163-163-assertions-pass-incl-f2-four-fuzz-escape-classes-lead-a-b-foo-lock-bar-a-b-die-pre-mutation-an-accepted-nested-branch-value-passes-the-real-git-check-ref-format-binary-and-f4-three-unknown-collapsing-actors-unknown-unknown-unknown-derive-distinct-git-valid-branches-iteration-1-f1-f2-f4-and-ac2-ac5-ac7-regressions-still-green"
+        "ev:kontourai-flow-agents-309-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-0-exit-compiles-ts-build-then-runs-source-tree-validator-source-tree-validation-passed-build-tsc-also-succeeded-standalone-0-exit-as-its-prerequisite"
       ],
-      "createdAt": "2026-07-03T03:56:29Z",
-      "verifiedAt": "2026-07-03T03:56:29Z"
+      "createdAt": "2026-07-03T04:35:01Z",
+      "verifiedAt": "2026-07-03T04:35:01Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-289-eval-workflow-artifacts.flow-agents-workflow.validator-eval-untouched-by-iteration-2-ac1-schema-optional-branch-field-and-ac6-legacy-state-json-without-branch-still-warns-exit-0-remain-green-28-28-assertions-pass",
-      "claimId": "kontourai-flow-agents-289-eval-workflow-artifacts.flow-agents-workflow.validator-eval-untouched-by-iteration-2-ac1-schema-optional-branch-field-and-ac6-legacy-state-json-without-branch-still-warns-exit-0-remain-green-28-28-assertions-pass",
+      "id": "evt:kontourai-flow-agents-309-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-passed-167-assertions-0-failures-exit-0-including-the-4-new-309-specific-regression-checks-setup-derive-init-plan-preserves-branch-with-branchless-plan-artifact-advance-state-preserves-branch-and-current-json-mirror-backfill-repair-of-pre-fix-broken-session-static-suite-bash-evals-run-sh-static-folded-in-as-supporting-non-manifest-evidence-also-passed-31-pass-lines-1049-checkmark-assertions-0-failures-exit-0-manual-scratch-root-probes-a-full-ensure-session-init-plan-advance-state-lifecycle-b-hand-seeded-broken-fixture-repair-via-init-plan-c-fresh-derive-branch-override-no-rederive-regression-checks-all-reproduced-the-expected-309-fixed-behavior-against-the-built-cli-build-src-cli-workflow-sidecar-js",
+      "claimId": "kontourai-flow-agents-309-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-passed-167-assertions-0-failures-exit-0-including-the-4-new-309-specific-regression-checks-setup-derive-init-plan-preserves-branch-with-branchless-plan-artifact-advance-state-preserves-branch-and-current-json-mirror-backfill-repair-of-pre-fix-broken-session-static-suite-bash-evals-run-sh-static-folded-in-as-supporting-non-manifest-evidence-also-passed-31-pass-lines-1049-checkmark-assertions-0-failures-exit-0-manual-scratch-root-probes-a-full-ensure-session-init-plan-advance-state-lifecycle-b-hand-seeded-broken-fixture-repair-via-init-plan-c-fresh-derive-branch-override-no-rederive-regression-checks-all-reproduced-the-expected-309-fixed-behavior-against-the-built-cli-build-src-cli-workflow-sidecar-js",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-289-eval-workflow-artifacts.flow-agents-workflow.validator-eval-untouched-by-iteration-2-ac1-schema-optional-branch-field-and-ac6-legacy-state-json-without-branch-still-warns-exit-0-remain-green-28-28-assertions-pass"
+        "ev:kontourai-flow-agents-309-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-passed-167-assertions-0-failures-exit-0-including-the-4-new-309-specific-regression-checks-setup-derive-init-plan-preserves-branch-with-branchless-plan-artifact-advance-state-preserves-branch-and-current-json-mirror-backfill-repair-of-pre-fix-broken-session-static-suite-bash-evals-run-sh-static-folded-in-as-supporting-non-manifest-evidence-also-passed-31-pass-lines-1049-checkmark-assertions-0-failures-exit-0-manual-scratch-root-probes-a-full-ensure-session-init-plan-advance-state-lifecycle-b-hand-seeded-broken-fixture-repair-via-init-plan-c-fresh-derive-branch-override-no-rederive-regression-checks-all-reproduced-the-expected-309-fixed-behavior-against-the-built-cli-build-src-cli-workflow-sidecar-js"
       ],
-      "createdAt": "2026-07-03T03:56:29Z",
-      "verifiedAt": "2026-07-03T03:56:29Z"
+      "createdAt": "2026-07-03T04:35:01Z",
+      "verifiedAt": "2026-07-03T04:35:01Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-289-validate-source.flow-agents-workflow.source-tree-validation-passed-flow-schema-not-configured-container-top-level-shape-check-only",
-      "claimId": "kontourai-flow-agents-289-validate-source.flow-agents-workflow.source-tree-validation-passed-flow-schema-not-configured-container-top-level-shape-check-only",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:kontourai-flow-agents-289-validate-source.flow-agents-workflow.source-tree-validation-passed-flow-schema-not-configured-container-top-level-shape-check-only"
-      ],
-      "createdAt": "2026-07-03T03:56:29Z",
-      "verifiedAt": "2026-07-03T03:56:29Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-289-gate-summary.flow-agents-workflow.fold-of-remaining-gates-manual-scratch-probes-non-manifest-session-local-npm-run-build-clean-tsc-exit-0-bash-evals-run-sh-static-65-65-pass-0-fail-bash-evals-integration-test-actor-identity-sh-11-11-pass-bash-evals-integration-test-liveness-heartbeat-sh-43-43-pass-scratch-probes-on-a-throwaway-artifact-root-built-cli-no-git-worktree-ops-a-the-four-f2-fuzz-escape-classes-each-died-pre-mutation-with-the-expected-per-component-diagnostic-and-wrote-no-session-artifact-b-a-valid-nested-branch-feature-nested-deep-path-v2-1-was-recorded-verbatim-in-state-json-and-independently-passed-the-real-git-check-ref-format-binary-c-actors-unknown-unknown-unknown-each-derived-a-distinct-disambiguated-branch-agent-unknown-b23a6a-agent-unknown-4dd633-agent-unknown-2a9676-each-git-valid-and-the-same-three-hashes-reproduced-identically-on-a-second-ensure-session-run-against-fresh-slugs-deterministic-d-regression-checks-all-held-derived-branch-round-trip-identical-across-state-json-deliver-md-current-json-branch-verbatim-recording-no-rederive-on-takeover-by-a-different-actor-f1-trailing-dot-slug-still-derives-a-git-valid-branch-and-a-garbage-actor-died-fail-closed-with-zero-artifacts-written-ac1-ac6-ac8-spot-checked-directly-against-schemas-workflow-state-schema-json-the-four-skill-md-files-and-docs-workflow-usage-guide-md-no-regression-from-iteration-1-baseline",
-      "claimId": "kontourai-flow-agents-289-gate-summary.flow-agents-workflow.fold-of-remaining-gates-manual-scratch-probes-non-manifest-session-local-npm-run-build-clean-tsc-exit-0-bash-evals-run-sh-static-65-65-pass-0-fail-bash-evals-integration-test-actor-identity-sh-11-11-pass-bash-evals-integration-test-liveness-heartbeat-sh-43-43-pass-scratch-probes-on-a-throwaway-artifact-root-built-cli-no-git-worktree-ops-a-the-four-f2-fuzz-escape-classes-each-died-pre-mutation-with-the-expected-per-component-diagnostic-and-wrote-no-session-artifact-b-a-valid-nested-branch-feature-nested-deep-path-v2-1-was-recorded-verbatim-in-state-json-and-independently-passed-the-real-git-check-ref-format-binary-c-actors-unknown-unknown-unknown-each-derived-a-distinct-disambiguated-branch-agent-unknown-b23a6a-agent-unknown-4dd633-agent-unknown-2a9676-each-git-valid-and-the-same-three-hashes-reproduced-identically-on-a-second-ensure-session-run-against-fresh-slugs-deterministic-d-regression-checks-all-held-derived-branch-round-trip-identical-across-state-json-deliver-md-current-json-branch-verbatim-recording-no-rederive-on-takeover-by-a-different-actor-f1-trailing-dot-slug-still-derives-a-git-valid-branch-and-a-garbage-actor-died-fail-closed-with-zero-artifacts-written-ac1-ac6-ac8-spot-checked-directly-against-schemas-workflow-state-schema-json-the-four-skill-md-files-and-docs-workflow-usage-guide-md-no-regression-from-iteration-1-baseline",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:kontourai-flow-agents-289-gate-summary.flow-agents-workflow.fold-of-remaining-gates-manual-scratch-probes-non-manifest-session-local-npm-run-build-clean-tsc-exit-0-bash-evals-run-sh-static-65-65-pass-0-fail-bash-evals-integration-test-actor-identity-sh-11-11-pass-bash-evals-integration-test-liveness-heartbeat-sh-43-43-pass-scratch-probes-on-a-throwaway-artifact-root-built-cli-no-git-worktree-ops-a-the-four-f2-fuzz-escape-classes-each-died-pre-mutation-with-the-expected-per-component-diagnostic-and-wrote-no-session-artifact-b-a-valid-nested-branch-feature-nested-deep-path-v2-1-was-recorded-verbatim-in-state-json-and-independently-passed-the-real-git-check-ref-format-binary-c-actors-unknown-unknown-unknown-each-derived-a-distinct-disambiguated-branch-agent-unknown-b23a6a-agent-unknown-4dd633-agent-unknown-2a9676-each-git-valid-and-the-same-three-hashes-reproduced-identically-on-a-second-ensure-session-run-against-fresh-slugs-deterministic-d-regression-checks-all-held-derived-branch-round-trip-identical-across-state-json-deliver-md-current-json-branch-verbatim-recording-no-rederive-on-takeover-by-a-different-actor-f1-trailing-dot-slug-still-derives-a-git-valid-branch-and-a-garbage-actor-died-fail-closed-with-zero-artifacts-written-ac1-ac6-ac8-spot-checked-directly-against-schemas-workflow-state-schema-json-the-four-skill-md-files-and-docs-workflow-usage-guide-md-no-regression-from-iteration-1-baseline"
-      ],
-      "createdAt": "2026-07-03T03:56:29Z",
-      "verifiedAt": "2026-07-03T03:56:29Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-289-ac1-schema-branch-optional-field-workflow-state-schema-json-declares-branch-as-an-optional-string-property-not-in-required-schema-version-stays-1-0.flow-agents-workflow.ac1-schema-branch-optional-field-workflow-state-schema-json-declares-branch-as-an-optional-string-property-not-in-required-schema-version-stays-1-0",
-      "claimId": "kontourai-flow-agents-289-ac1-schema-branch-optional-field-workflow-state-schema-json-declares-branch-as-an-optional-string-property-not-in-required-schema-version-stays-1-0.flow-agents-workflow.ac1-schema-branch-optional-field-workflow-state-schema-json-declares-branch-as-an-optional-string-property-not-in-required-schema-version-stays-1-0",
+      "id": "evt:kontourai-flow-agents-309-after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence.flow-agents-workflow.after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence",
+      "claimId": "kontourai-flow-agents-309-after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence.flow-agents-workflow.after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-03T03:56:29Z",
-      "verifiedAt": "2026-07-03T03:56:29Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-289-ac2-ensure-session-derives-agent-actor-slug-branch-a-freshly-created-session-s-state-json-branch-and-seeded-slug-deliver-md-branch-line-both-equal-agent-branch-safe-actor-slug.flow-agents-workflow.ac2-ensure-session-derives-agent-actor-slug-branch-a-freshly-created-session-s-state-json-branch-and-seeded-slug-deliver-md-branch-line-both-equal-agent-branch-safe-actor-slug",
-      "claimId": "kontourai-flow-agents-289-ac2-ensure-session-derives-agent-actor-slug-branch-a-freshly-created-session-s-state-json-branch-and-seeded-slug-deliver-md-branch-line-both-equal-agent-branch-safe-actor-slug.flow-agents-workflow.ac2-ensure-session-derives-agent-actor-slug-branch-a-freshly-created-session-s-state-json-branch-and-seeded-slug-deliver-md-branch-line-both-equal-agent-branch-safe-actor-slug",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-03T03:56:29Z",
-      "verifiedAt": "2026-07-03T03:56:29Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-289-ac3-explicit-branch-flag-overrides-ensure-session-branch-value-on-a-brand-new-session-records-value-verbatim-instead-of-a-derived-name.flow-agents-workflow.ac3-explicit-branch-flag-overrides-ensure-session-branch-value-on-a-brand-new-session-records-value-verbatim-instead-of-a-derived-name",
-      "claimId": "kontourai-flow-agents-289-ac3-explicit-branch-flag-overrides-ensure-session-branch-value-on-a-brand-new-session-records-value-verbatim-instead-of-a-derived-name.flow-agents-workflow.ac3-explicit-branch-flag-overrides-ensure-session-branch-value-on-a-brand-new-session-records-value-verbatim-instead-of-a-derived-name",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-03T03:56:29Z",
-      "verifiedAt": "2026-07-03T03:56:29Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-289-ac4-distinct-actors-yield-distinct-branches-two-fresh-sessions-with-different-actors-produce-different-branch-values.flow-agents-workflow.ac4-distinct-actors-yield-distinct-branches-two-fresh-sessions-with-different-actors-produce-different-branch-values",
-      "claimId": "kontourai-flow-agents-289-ac4-distinct-actors-yield-distinct-branches-two-fresh-sessions-with-different-actors-produce-different-branch-values.flow-agents-workflow.ac4-distinct-actors-yield-distinct-branches-two-fresh-sessions-with-different-actors-produce-different-branch-values",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-03T03:56:29Z",
-      "verifiedAt": "2026-07-03T03:56:29Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-289-ac5-existing-session-continuity-branch-not-reforked-ensure-session-against-an-existing-session-directory-never-re-derives-or-overwrites-its-already-recorded-branch-regardless-of-the-calling-actor-adr-0021-5.flow-agents-workflow.ac5-existing-session-continuity-branch-not-reforked-ensure-session-against-an-existing-session-directory-never-re-derives-or-overwrites-its-already-recorded-branch-regardless-of-the-calling-actor-adr-0021-5",
-      "claimId": "kontourai-flow-agents-289-ac5-existing-session-continuity-branch-not-reforked-ensure-session-against-an-existing-session-directory-never-re-derives-or-overwrites-its-already-recorded-branch-regardless-of-the-calling-actor-adr-0021-5.flow-agents-workflow.ac5-existing-session-continuity-branch-not-reforked-ensure-session-against-an-existing-session-directory-never-re-derives-or-overwrites-its-already-recorded-branch-regardless-of-the-calling-actor-adr-0021-5",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-03T03:56:29Z",
-      "verifiedAt": "2026-07-03T03:56:29Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-289-ac6-legacy-session-without-branch-still-validates-with-warning-a-pre-existing-state-json-with-no-branch-key-still-passes-workflow-validate-artifacts-exit-0-with-a-warn-line-naming-branch-on-stderr.flow-agents-workflow.ac6-legacy-session-without-branch-still-validates-with-warning-a-pre-existing-state-json-with-no-branch-key-still-passes-workflow-validate-artifacts-exit-0-with-a-warn-line-naming-branch-on-stderr",
-      "claimId": "kontourai-flow-agents-289-ac6-legacy-session-without-branch-still-validates-with-warning-a-pre-existing-state-json-with-no-branch-key-still-passes-workflow-validate-artifacts-exit-0-with-a-warn-line-naming-branch-on-stderr.flow-agents-workflow.ac6-legacy-session-without-branch-still-validates-with-warning-a-pre-existing-state-json-with-no-branch-key-still-passes-workflow-validate-artifacts-exit-0-with-a-warn-line-naming-branch-on-stderr",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-03T03:56:29Z",
-      "verifiedAt": "2026-07-03T03:56:29Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-289-ac7-current-json-surfaces-active-branch-current-json-written-by-ensure-session-includes-a-branch-field-mirroring-the-active-session-s-state-json-branch.flow-agents-workflow.ac7-current-json-surfaces-active-branch-current-json-written-by-ensure-session-includes-a-branch-field-mirroring-the-active-session-s-state-json-branch",
-      "claimId": "kontourai-flow-agents-289-ac7-current-json-surfaces-active-branch-current-json-written-by-ensure-session-includes-a-branch-field-mirroring-the-active-session-s-state-json-branch.flow-agents-workflow.ac7-current-json-surfaces-active-branch-current-json-written-by-ensure-session-includes-a-branch-field-mirroring-the-active-session-s-state-json-branch",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-03T03:56:29Z",
-      "verifiedAt": "2026-07-03T03:56:29Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-289-ac8-skill-and-contract-docs-point-at-recorded-branch-the-four-named-skill-md-files-session-file-templates-state-that-branch-comes-from-state-json-branch-not-a-freeform-placeholder-and-that-ensure-session-does-not-create-the-git-branch-itself-builder-kit-workflow-state-contract-md-s-routing-table-and-docs-workflow-usage-guide-md-document-the-branch-field-and-convention.flow-agents-workflow.ac8-skill-and-contract-docs-point-at-recorded-branch-the-four-named-skill-md-files-session-file-templates-state-that-branch-comes-from-state-json-branch-not-a-freeform-placeholder-and-that-ensure-session-does-not-create-the-git-branch-itself-builder-kit-workflow-state-contract-md-s-routing-table-and-docs-workflow-usage-guide-md-document-the-branch-field-and-convention",
-      "claimId": "kontourai-flow-agents-289-ac8-skill-and-contract-docs-point-at-recorded-branch-the-four-named-skill-md-files-session-file-templates-state-that-branch-comes-from-state-json-branch-not-a-freeform-placeholder-and-that-ensure-session-does-not-create-the-git-branch-itself-builder-kit-workflow-state-contract-md-s-routing-table-and-docs-workflow-usage-guide-md-document-the-branch-field-and-convention.flow-agents-workflow.ac8-skill-and-contract-docs-point-at-recorded-branch-the-four-named-skill-md-files-session-file-templates-state-that-branch-comes-from-state-json-branch-not-a-freeform-placeholder-and-that-ensure-session-does-not-create-the-git-branch-itself-builder-kit-workflow-state-contract-md-s-routing-table-and-docs-workflow-usage-guide-md-document-the-branch-field-and-convention",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-03T03:56:29Z",
-      "verifiedAt": "2026-07-03T03:56:29Z"
+      "createdAt": "2026-07-03T04:35:01Z",
+      "verifiedAt": "2026-07-03T04:35:01Z"
     }
   ]
 }
