@@ -1,0 +1,30 @@
+[
+  {
+    "number": 14,
+    "title": "Add dark mode toggle to settings",
+    "state": "OPEN",
+    "labels": [{ "name": "enhancement" }],
+    "body": "Users want a dark mode toggle in the settings screen.\n\n<!-- flow-agents:work-item-metadata\n{\n  \"schema_version\": \"1.0\",\n  \"blockers\": []\n}\n-->"
+  },
+  {
+    "number": 15,
+    "title": "Add dark-mode toggle to settings page",
+    "state": "OPEN",
+    "labels": [{ "name": "enhancement" }],
+    "body": "Duplicate of the dark mode toggle request. Settings page needs a dark-mode toggle."
+  },
+  {
+    "number": 20,
+    "title": "Ship theme system",
+    "state": "OPEN",
+    "labels": [{ "name": "feature" }],
+    "body": "Overarching theme work. Relates to #14.\n\n<!-- flow-agents:work-item-metadata\n{\n  \"schema_version\": \"1.0\",\n  \"blockers\": [\n    { \"repo\": \"seed/fixture\", \"number\": 14 },\n    { \"repo\": \"seed/fixture\", \"number\": 999 }\n  ]\n}\n-->"
+  },
+  {
+    "number": 21,
+    "title": "Document theme tokens",
+    "state": "OPEN",
+    "labels": [],
+    "body": "Blocked by #20. Also see #14 for the toggle."
+  }
+]

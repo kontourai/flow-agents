@@ -56,6 +56,16 @@ A configured implementation of a capability, such as GitHub for backlog, Obsidia
 
 The declared capabilities, defaults, conventions, and limits of a provider type. Provider contracts make integrations predictable and testable without requiring the live provider.
 
+### Knowledge Graph
+
+The Knowledge Kit's storage-independent model: typed nodes (recommended core: note, decision, issue, session, person — extensible) and typed edges (supersedes, merged-into, blocks, evidence-of, mentions, relates — a closed vocabulary), each carrying provenance so every assertion is traceable to the store it came from. Storage and synchronisation are provider concerns; the same ingest, link, and health verbs run over every provider.
+_Avoid_: Graph database as the generic term (the model is provider-independent; a graph-database provider is a separate spike)
+
+### Knowledge Store Provider
+
+A configured implementation of the knowledge-store capability behind the Knowledge Graph model. Providers expose a read interface (nodes, edges, query-by-type) and a proposals-only write interface (proposeWrite returns a proposal, never mutating a human-curated store). The reference providers are markdown-vault (the Obsidian-shaped vault), git-repo (decision registry, CONTEXT.md vocabulary, learnings), and work-item (GitHub issues as a source/sink adapter). See context/contracts/knowledge-store-contract.md.
+_Avoid_: Knowledge adapter when contrasting the provider interface with a single store adapter
+
 ### Kontour Resource Contract
 
 A versioned Kontour record shape for durable machine-readable configuration, scope, run state, evidence, provider output, and cross-product interchange. Kontour Resource Contracts are the default for new pre-public durable contracts unless a product records why a native shape is clearer.

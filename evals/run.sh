@@ -146,6 +146,8 @@ run_static() {
   bash "$EVAL_DIR/static/test_flowdef_codeowners_coverage.sh" || result=1
   echo ""
   bash "$EVAL_DIR/static/test_unit_helpers.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/static/test_knowledge_providers.sh" || result=1
   return $result
 }
 
