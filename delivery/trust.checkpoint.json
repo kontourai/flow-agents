@@ -1,31 +1,31 @@
 {
   "schema_version": "1.0",
-  "slug": "kontourai-flow-agents-267",
+  "slug": "knowledge-store-provider-contract",
   "work_item": null,
   "status": "delivered",
   "phase": "release",
-  "sealed_at": "2026-07-03T10:04:00Z",
-  "commit_sha": "bee760272b8bb770df02400ccc5881bd3dbc8806",
+  "sealed_at": "2026-07-03T05:53:35Z",
+  "commit_sha": "490542caf461ab4e5bff1542f3e56f4fdc9fd234",
   "checkpoint": {
-    "asOf": "2026-07-03T16:47:27.927Z",
+    "asOf": "2026-07-03T05:53:35.157Z",
     "statusByClaimId": {
-      "kontourai-flow-agents-267-content-boundary.flow-agents-workflow.content-boundary": "verified",
-      "kontourai-flow-agents-267-decision-registry.flow-agents-workflow.decision-registry": "verified",
-      "kontourai-flow-agents-267-source-tree-validation.flow-agents-workflow.source-tree-validation": "verified",
-      "kontourai-flow-agents-267-record-critique-fail-then-pass-supersedes-latest-wins-history-retained.flow-agents-workflow.record-critique-fail-then-pass-supersedes-latest-wins-history-retained": "proposed",
-      "kontourai-flow-agents-267-check-critique-round-trip-is-lossless-and-type-stable-under-flow-id.flow-agents-workflow.check-critique-round-trip-is-lossless-and-type-stable-under-flow-id": "proposed",
-      "kontourai-flow-agents-267-superseded-historical-fail-tolerated-by-validator-live-fail-still-blocks.flow-agents-workflow.superseded-historical-fail-tolerated-by-validator-live-fail-still-blocks": "proposed",
-      "kontourai-flow-agents-267-code-review.flow-agents-workflow.supersession-reviewer-scoped-round-trip-type-stable-anti-gaming-suite-green": "verified"
+      "knowledge-store-provider-contract-static-eval-suite.flow-agents-workflow.static-eval-lane-green-includes-providers-conformance-providers-health-health-pass-ac1-ac3-via-test-knowledge-providers-sh": "verified",
+      "knowledge-store-provider-contract-decision-registry.flow-agents-workflow.decision-registry-3-topics-incl-knowledge-store-provider-index-regenerated": "verified",
+      "knowledge-store-provider-contract-source-tree-validation.flow-agents-workflow.source-tree-validation-passed-with-new-schemas-providers-kit-json-entries": "verified",
+      "knowledge-store-provider-contract-ac1-same-health-command-over-vault-git-repo-providers-yields-schema-valid-reports.flow-agents-workflow.ac1-same-health-command-over-vault-git-repo-providers-yields-schema-valid-reports": "proposed",
+      "knowledge-store-provider-contract-ac2-backlog-pass-over-work-item-adapter-flags-a-seeded-duplicate-and-a-seeded-broken-blocker-link.flow-agents-workflow.ac2-backlog-pass-over-work-item-adapter-flags-a-seeded-duplicate-and-a-seeded-broken-blocker-link": "proposed",
+      "knowledge-store-provider-contract-ac3-provider-conformance-suite-passes-for-all-three-providers.flow-agents-workflow.ac3-provider-conformance-suite-passes-for-all-three-providers": "proposed",
+      "knowledge-store-provider-contract-review.flow-agents-workflow.self-review-contract-4-schemas-3-providers-2-provider-agnostic-health-verbs-conformance-health-suites-22-tests-proposals-only-enforced-structurally-proposal-status-const-proposed-conformance-asserts-no-mutation-vault-provider-is-a-thin-wrapper-over-the-existing-store-adapter-no-regression-to-existing-skills-fixtures-seed-ac2-the-real-board-is-untouched": "verified"
     },
-    "throughEventCreatedAt": "2026-07-03T10:03:00Z",
+    "throughEventCreatedAt": "2026-07-03T05:53:35Z",
     "throughEventCreatedAtByClaimId": {
-      "kontourai-flow-agents-267-content-boundary.flow-agents-workflow.content-boundary": "2026-07-03T10:03:00Z",
-      "kontourai-flow-agents-267-decision-registry.flow-agents-workflow.decision-registry": "2026-07-03T10:03:00Z",
-      "kontourai-flow-agents-267-source-tree-validation.flow-agents-workflow.source-tree-validation": "2026-07-03T10:03:00Z",
-      "kontourai-flow-agents-267-record-critique-fail-then-pass-supersedes-latest-wins-history-retained.flow-agents-workflow.record-critique-fail-then-pass-supersedes-latest-wins-history-retained": null,
-      "kontourai-flow-agents-267-check-critique-round-trip-is-lossless-and-type-stable-under-flow-id.flow-agents-workflow.check-critique-round-trip-is-lossless-and-type-stable-under-flow-id": null,
-      "kontourai-flow-agents-267-superseded-historical-fail-tolerated-by-validator-live-fail-still-blocks.flow-agents-workflow.superseded-historical-fail-tolerated-by-validator-live-fail-still-blocks": null,
-      "kontourai-flow-agents-267-code-review.flow-agents-workflow.supersession-reviewer-scoped-round-trip-type-stable-anti-gaming-suite-green": "2026-07-03T10:03:00Z"
+      "knowledge-store-provider-contract-static-eval-suite.flow-agents-workflow.static-eval-lane-green-includes-providers-conformance-providers-health-health-pass-ac1-ac3-via-test-knowledge-providers-sh": "2026-07-03T05:53:35Z",
+      "knowledge-store-provider-contract-decision-registry.flow-agents-workflow.decision-registry-3-topics-incl-knowledge-store-provider-index-regenerated": "2026-07-03T05:53:35Z",
+      "knowledge-store-provider-contract-source-tree-validation.flow-agents-workflow.source-tree-validation-passed-with-new-schemas-providers-kit-json-entries": "2026-07-03T05:53:35Z",
+      "knowledge-store-provider-contract-ac1-same-health-command-over-vault-git-repo-providers-yields-schema-valid-reports.flow-agents-workflow.ac1-same-health-command-over-vault-git-repo-providers-yields-schema-valid-reports": null,
+      "knowledge-store-provider-contract-ac2-backlog-pass-over-work-item-adapter-flags-a-seeded-duplicate-and-a-seeded-broken-blocker-link.flow-agents-workflow.ac2-backlog-pass-over-work-item-adapter-flags-a-seeded-duplicate-and-a-seeded-broken-blocker-link": null,
+      "knowledge-store-provider-contract-ac3-provider-conformance-suite-passes-for-all-three-providers.flow-agents-workflow.ac3-provider-conformance-suite-passes-for-all-three-providers": null,
+      "knowledge-store-provider-contract-review.flow-agents-workflow.self-review-contract-4-schemas-3-providers-2-provider-agnostic-health-verbs-conformance-health-suites-22-tests-proposals-only-enforced-structurally-proposal-status-const-proposed-conformance-asserts-no-mutation-vault-provider-is-a-thin-wrapper-over-the-existing-store-adapter-no-regression-to-existing-skills-fixtures-seed-ac2-the-real-board-is-untouched": "2026-07-03T05:53:35Z"
     },
     "statusFunctionVersion": "2"
   }

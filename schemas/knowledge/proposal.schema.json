@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://flow-agents.dev/schemas/knowledge/proposal.schema.json",
+  "title": "Knowledge Store Write Proposal",
+  "description": "The ONLY write artifact a knowledge store provider may emit. Providers over human-curated stores are proposals-only: proposeWrite() never mutates the store and can only ever return a Proposal whose status is the const \"proposed\". Enactment happens downstream (a human edit, the decision-registry promote step, or a gh comment/label the operator files) — never inside the provider. The `rendered` field carries the provider-native form the enactor would apply (decision-registry topic frontmatter for git-repo; an issue comment/label body for work-item; a vault note with frontmatter+wikilinks for markdown-vault).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "provider", "kind", "target", "status", "provenance"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "provider": { "type": "string", "minLength": 1 },
+    "kind": {
+      "type": "string",
+      "enum": ["create-node", "update-node", "add-edge", "comment", "label", "decision-topic"],
+      "description": "The shape of the proposed change."
+    },
+    "target": {
+      "type": "object",
+      "description": "Where the change would land if enacted (file path, issue number, store id). Descriptive only — the provider does not touch it."
+    },
+    "payload": {
+      "type": "object",
+      "description": "The structured node/edge/field the proposal would introduce."
+    },
+    "rendered": {
+      "type": "string",
+      "description": "The provider-native rendered form an enactor would apply (topic-file frontmatter, gh comment body, vault note)."
+    },
+    "status": {
+      "const": "proposed",
+      "description": "Always the literal \"proposed\". A provider can NEVER return an applied proposal — this const is the structural expression of proposals-only discipline."
+    },
+    "rationale": {
+      "type": "string",
+      "description": "Why the change is proposed."
+    },
+    "provenance": { "$ref": "#/$defs/provenance" }
+  },
+  "$defs": {
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "source", "retrieved_at"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1 },
+        "source": { "type": "string", "minLength": 1 },
+        "locator": { "type": "string" },
+        "retrieved_at": { "type": "string", "minLength": 1 },
+        "agent": { "type": "string" }
+      }
+    }
+  }
+}
