@@ -545,6 +545,134 @@ else
   _fail "sidecar writer re-derived or overwrote an existing session's branch on takeover: $(cat "$TMPDIR_EVAL/branch-no-rederive.out" "$TMPDIR_EVAL/branch-no-rederive.err")"
 fi
 
+# ─── #309: init-plan (and advance-state) must never drop an already-recorded branch ────
+# Regression cover for the full ensure-session -> init-plan -> advance-state lifecycle every
+# real session goes through. init-plan is invoked (per plan-work/SKILL.md) against the
+# PLAN artifact the tool-planner writes (e.g. "<slug>--plan-work.md"), a DIFFERENT file than
+# the session "<slug>--deliver.md" that carries the "branch:" line ensure-session seeded — that
+# plan artifact below deliberately carries NO "branch:" field, reproducing the exact shape of
+# the live kontourai-flow-agents-166 regression. state.json (and current.json's mirror) must
+# still carry the derived branch after init-plan, and again after a subsequent advance-state.
+BRANCH_SEQ_DIR="$SESSION_ROOT/branch-full-sequence"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$SESSION_ROOT" \
+  --task-slug branch-full-sequence \
+  --actor seq-actor \
+  --source-request "Establish a session whose branch must survive init-plan and advance-state." \
+  --summary "Fresh session for the full ensure-session -> init-plan -> advance-state sequence." \
+  --timestamp "2026-07-01T00:04:20Z" >"$TMPDIR_EVAL/branch-seq-ensure.out" 2>"$TMPDIR_EVAL/branch-seq-ensure.err" \
+  && rg -q '"branch": "agent/seq-actor/branch-full-sequence"' "$BRANCH_SEQ_DIR/state.json"; then
+  _pass "sidecar writer (#309 setup) seeds branch-full-sequence with a derived branch via ensure-session"
+else
+  _fail "sidecar writer (#309 setup) failed to seed branch-full-sequence: $(cat "$TMPDIR_EVAL/branch-seq-ensure.out" "$TMPDIR_EVAL/branch-seq-ensure.err")"
+fi
+
+BRANCH_SEQ_PLAN_ARTIFACT="$BRANCH_SEQ_DIR/branch-full-sequence--plan-work.md"
+cat > "$BRANCH_SEQ_PLAN_ARTIFACT" <<'MARKDOWN'
+---
+role: plan
+parent: branch-full-sequence--deliver
+created: 2026-07-01
+---
+
+# Plan: #309 branch survival fixture
+
+## Plan
+
+A plan artifact deliberately carrying no `branch:` line (mirrors the real tool-planner output).
+
+## Definition Of Done
+
+- **Acceptance criteria:**
+  - [ ] init-plan preserves the already-recorded branch - Evidence: pending.
+MARKDOWN
+
+if flow_agents_node "$WRITER" init-plan "$BRANCH_SEQ_PLAN_ARTIFACT" \
+  --source-request "Plan artifact carries no branch: line." \
+  --summary "Planning sidecars initialized from a branch-less plan artifact." \
+  --next-action "Advance to execution." \
+  --timestamp "2026-07-01T00:04:21Z" >"$TMPDIR_EVAL/branch-seq-initplan.out" 2>"$TMPDIR_EVAL/branch-seq-initplan.err" \
+  && rg -q '"branch": "agent/seq-actor/branch-full-sequence"' "$BRANCH_SEQ_DIR/state.json"; then
+  _pass "sidecar writer (#309) preserves the already-recorded branch across init-plan even when the plan artifact carries no branch: line"
+else
+  _fail "sidecar writer (#309) DROPPED the branch on init-plan: $(cat "$TMPDIR_EVAL/branch-seq-initplan.out" "$TMPDIR_EVAL/branch-seq-initplan.err"); state.json=$(cat "$BRANCH_SEQ_DIR/state.json" 2>/dev/null)"
+fi
+
+if flow_agents_node "$WRITER" advance-state "$BRANCH_SEQ_DIR" \
+  --status in_progress \
+  --phase execution \
+  --summary "Execution started." \
+  --next-action "Run checks." \
+  --timestamp "2026-07-01T00:04:22Z" >"$TMPDIR_EVAL/branch-seq-advance.out" 2>"$TMPDIR_EVAL/branch-seq-advance.err" \
+  && rg -q '"branch": "agent/seq-actor/branch-full-sequence"' "$BRANCH_SEQ_DIR/state.json" \
+  && rg -q '"branch": "agent/seq-actor/branch-full-sequence"' "$SESSION_ROOT/current.json"; then
+  _pass "sidecar writer (#309) still carries the branch in state.json and its current.json mirror after advance-state"
+else
+  _fail "sidecar writer (#309) lost the branch by advance-state, or current.json mirror drifted: $(cat "$TMPDIR_EVAL/branch-seq-advance.out" "$TMPDIR_EVAL/branch-seq-advance.err"); state.json=$(cat "$BRANCH_SEQ_DIR/state.json" 2>/dev/null)"
+fi
+
+# #309 backfill repro: an ALREADY-BROKEN pre-fix session (state.json has no branch key at all,
+# matching kontourai-flow-agents-166/-290) can be repaired by re-running init-plan against the
+# SAME branch-less plan artifact that dropped the branch in the first place -- WITHOUT any direct
+# file edit -- because initSidecars falls back to reading the session's own canonical
+# "<slug>--deliver.md" from disk when neither the existing state.json nor the passed-in markdown
+# carries a branch.
+BRANCH_BACKFILL_DIR="$SESSION_ROOT/branch-backfill-repro"
+mkdir -p "$BRANCH_BACKFILL_DIR"
+cat > "$BRANCH_BACKFILL_DIR/branch-backfill-repro--deliver.md" <<'MARKDOWN'
+# branch-backfill-repro
+
+branch: agent/seq-actor/branch-backfill-repro
+worktree: main
+created: 2026-07-01T00:04:23Z
+status: planning
+type: deliver
+iteration: 1
+
+## Plan
+
+Pre-fix victim fixture: state.json below was written WITHOUT a branch key (simulating #309).
+MARKDOWN
+cat > "$BRANCH_BACKFILL_DIR/state.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "branch-backfill-repro",
+  "repo": "kontourai/flow-agents",
+  "status": "planned",
+  "phase": "planning",
+  "created_at": "2026-07-01T00:04:23Z",
+  "updated_at": "2026-07-01T00:04:23Z",
+  "artifact_paths": ["state.json"],
+  "next_action": { "status": "continue", "summary": "pre-fix victim fixture" }
+}
+JSON
+BRANCH_BACKFILL_PLAN_ARTIFACT="$BRANCH_BACKFILL_DIR/branch-backfill-repro--plan-work.md"
+cat > "$BRANCH_BACKFILL_PLAN_ARTIFACT" <<'MARKDOWN'
+---
+role: plan
+parent: branch-backfill-repro--deliver
+created: 2026-07-01
+---
+
+# Plan: #309 backfill repro fixture
+
+## Definition Of Done
+
+- **Acceptance criteria:**
+  - [ ] backfill repairs the dropped branch - Evidence: pending.
+MARKDOWN
+
+if flow_agents_node "$WRITER" init-plan "$BRANCH_BACKFILL_PLAN_ARTIFACT" \
+  --source-request "Re-run init-plan against the same branch-less plan artifact to backfill." \
+  --summary "Backfill re-run." \
+  --next-action "n/a" \
+  --timestamp "2026-07-01T00:04:23Z" >"$TMPDIR_EVAL/branch-backfill.out" 2>"$TMPDIR_EVAL/branch-backfill.err" \
+  && rg -q '"branch": "agent/seq-actor/branch-backfill-repro"' "$BRANCH_BACKFILL_DIR/state.json"; then
+  _pass "sidecar writer (#309) backfills a pre-fix-broken session's branch via a sanctioned init-plan re-run (no direct file edit)"
+else
+  _fail "sidecar writer (#309) failed to backfill an already-broken session's branch: $(cat "$TMPDIR_EVAL/branch-backfill.out" "$TMPDIR_EVAL/branch-backfill.err"); state.json=$(cat "$BRANCH_BACKFILL_DIR/state.json" 2>/dev/null)"
+fi
+
 # Actor charset guard: an explicit --actor value that strips to empty under the allowed
 # charset dies before any session artifact is written (mirrors the liveness write path's
 # existing F7 test coverage).

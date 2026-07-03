@@ -1119,13 +1119,37 @@ function updateCurrentAgent(root: string, dir: string, agentId: string, status: 
 
 function initSidecars(dir: string, slug: string, sourceRequest: string, summary: string, nextAction: string, timestamp: string, markdown?: string): void {
   const criteria = markdown ? definitionAcceptanceLines(markdown).map(parseCriterion) : [];
-  // #289: whichever markdown is handed in (freshly templated by ensureSession, or externally
-  // authored/legacy for initPlan) carries the `branch:` line as the single source of truth — if
-  // present, persist it into state.json; if absent (pre-#289 legacy markdown), omit the key
-  // entirely rather than inventing a default (schema keeps it optional for this reason).
-  const branch = markdown ? markdownField(markdown, "branch") : "";
+  // #289/#309: `markdown` here is NOT always the session `<slug>--deliver.md` that
+  // ensureSession seeds the `branch:` line into — initPlan is called against the tool-planner's
+  // PLAN artifact (`<slug>--plan-work.md` etc.), a different file that typically carries no
+  // `branch:` line at all. Since this function fully rewrites state.json (no merge with the
+  // prior contents), naively re-deriving branch from `markdown` alone would clobber whatever
+  // ensure-session already recorded there moments earlier (#309 regression). Resolve branch with
+  // a three-tier fallback, preferring the most durable source first:
+  //   1. EXISTING state.json.branch — once recorded, it is never re-derived or clobbered.
+  //   2. The session's OWN canonical `<dir>/<slug>--deliver.md` on disk — the file ensureSession
+  //      always seeds the `branch:` line into, independent of whatever `markdown` was passed in.
+  //      Reading it directly (rather than trusting `markdown`) is what makes a repaired/backfilled
+  //      init-plan call (re-run against the same branch-less plan artifact, after a #309-era
+  //      session lost its state.json branch) recover the branch without a direct file edit.
+  //   3. The `markdown` param itself (covers ensureSession's fresh-creation call, before
+  //      `<slug>--deliver.md` differs from `markdown`, and any direct/legacy caller that passes
+  //      the deliver markdown itself as the init-plan artifact).
+  // This makes the branch survive every subsequent initSidecars call (init-plan, or a resumed
+  // ensure-session) at this single choke point, without patching every other writer.
+  const existingState = loadJson(path.join(dir, "state.json"));
+  const existingBranch = existingState.branch;
+  const deliverMdPath = path.join(dir, `${slug}--deliver.md`);
+  const deliverBranch = fs.existsSync(deliverMdPath) ? markdownField(read(deliverMdPath), "branch") : "";
+  const branch = existingBranch || deliverBranch || (markdown ? markdownField(markdown, "branch") : "");
+  // #309 (scope addition): created_at is write-once, same class as the branch-drop bug above —
+  // initSidecars fully rewrites state.json on every call (including a repair/backfill re-run of
+  // init-plan against an already-existing session), so naively re-stamping created_at from the
+  // current call's timestamp silently rewrites a session's original creation time. Preserve the
+  // existing state.json's created_at when present; stamp only on true first-creation.
+  // updated_at still reflects "now" on every call — that field is intentionally mutable.
   writeJson(path.join(dir, "state.json"), {
-    ...sidecarBase(slug), status: "planned", phase: "planning", created_at: timestamp, updated_at: timestamp,
+    ...sidecarBase(slug), status: "planned", phase: "planning", created_at: existingState.created_at || timestamp, updated_at: timestamp,
     ...(branch ? { branch } : {}),
     artifact_paths: relArtifacts(dir),
     next_action: { status: "continue", summary: nextAction || summary },
