@@ -2791,6 +2791,85 @@ else
   _fail "trust.bundle capture-authoritative setup failed: $(cat "$TMPDIR_EVAL/tb-capture-evidence.out" "$TMPDIR_EVAL/tb-capture-evidence.err")"
 fi
 
+# ---- #347: hard cutover -- an unstamped (pre-#344) claim in a session trust bundle is a loud,
+# typed error; checksFromBundle/critiquesFromBundle carry NO claimType-derivation fallback (that
+# fallback WAS the #268 defect kept reachable). ----------------------------------------------
+TB_UNSTAMPED_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/trust-bundle-unstamped"
+mkdir -p "$TB_UNSTAMPED_DIR"
+cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_UNSTAMPED_DIR/trust-bundle-unstamped--deliver.md"
+flow_agents_node "$WRITER" init-plan "$TB_UNSTAMPED_DIR/trust-bundle-unstamped--deliver.md" \
+  --source-request "Unstamped bundle regression fixture." \
+  --summary "Unstamped bundle regression fixture." \
+  --next-action "Seed a stamped check, then strip its origin stamp to simulate a pre-#344 bundle." \
+  --timestamp "2026-05-09T00:00:00Z" >"$TMPDIR_EVAL/tb-unstamped-init.out" 2>"$TMPDIR_EVAL/tb-unstamped-init.err"
+flow_agents_node "$WRITER" record-evidence "$TB_UNSTAMPED_DIR" \
+  --verdict pass \
+  --check-json '{"id":"tb-unstamped-check","kind":"test","status":"pass","summary":"Stamped check, about to be corrupted."}' \
+  --timestamp "2026-05-09T00:01:00Z" >"$TMPDIR_EVAL/tb-unstamped-evidence.out" 2>"$TMPDIR_EVAL/tb-unstamped-evidence.err"
+
+# Simulate a pre-#344 bundle by stripping the origin/check_kind stamp from every claim -- never
+# done by hand-editing production sessions, only here to recreate the on-disk shape of a bundle
+# recorded before #344 shipped stamping.
+export UNSTAMPED_TARGET="$TB_UNSTAMPED_DIR/trust.bundle"
+node --input-type=module <<NODEOF
+import { readFileSync, writeFileSync } from 'node:fs';
+const target = process.env.UNSTAMPED_TARGET;
+const data = JSON.parse(readFileSync(target, 'utf8'));
+data.claims = (data.claims || []).map((c) => {
+  if (c && c.metadata && typeof c.metadata === 'object') {
+    const rest = { ...c.metadata };
+    delete rest.origin;
+    delete rest.check_kind;
+    return { ...c, metadata: rest };
+  }
+  return c;
+});
+writeFileSync(target, JSON.stringify(data, null, 2) + '\n');
+NODEOF
+
+if flow_agents_node "$WRITER" record-critique "$TB_UNSTAMPED_DIR" \
+  --id tb-unstamped-review \
+  --reviewer tool-code-reviewer \
+  --verdict pass \
+  --summary "Should never be recorded -- the bundle is unstamped." \
+  --timestamp "2026-05-09T00:02:00Z" >"$TMPDIR_EVAL/tb-unstamped-critique.out" 2>"$TMPDIR_EVAL/tb-unstamped-critique.err"; then
+  _fail "record-critique should refuse to read an unstamped (pre-#344) trust.bundle, not silently reclassify it by claimType"
+elif rg -q 'pre-supersession trust\.bundle' "$TMPDIR_EVAL/tb-unstamped-critique.out" "$TMPDIR_EVAL/tb-unstamped-critique.err" \
+  && rg -qF "$TB_UNSTAMPED_DIR" "$TMPDIR_EVAL/tb-unstamped-critique.out" "$TMPDIR_EVAL/tb-unstamped-critique.err" \
+  && rg -q 're-record evidence to regenerate' "$TMPDIR_EVAL/tb-unstamped-critique.out" "$TMPDIR_EVAL/tb-unstamped-critique.err" \
+  && rg -q 'record-evidence' "$TMPDIR_EVAL/tb-unstamped-critique.out" "$TMPDIR_EVAL/tb-unstamped-critique.err"; then
+  _pass "record-critique refuses an unstamped (pre-#344) trust.bundle: typed error names the session dir and the record-evidence remedy (no claimType-derivation fallback, #347)"
+else
+  _fail "record-critique on an unstamped bundle failed for the wrong reason: $(cat "$TMPDIR_EVAL/tb-unstamped-critique.out" "$TMPDIR_EVAL/tb-unstamped-critique.err")"
+fi
+
+# The same unstamped bundle also refuses promote (checksFromBundle) -- not just
+# record-critique/critiquesFromBundle.
+if flow_agents_node "$WRITER" promote "$TB_UNSTAMPED_DIR" --none --reason "regression probe" \
+  --timestamp "2026-05-09T00:03:00Z" >"$TMPDIR_EVAL/tb-unstamped-promote.out" 2>"$TMPDIR_EVAL/tb-unstamped-promote.err"; then
+  _fail "promote should refuse to read an unstamped (pre-#344) trust.bundle via checksFromBundle"
+elif rg -q 'pre-supersession trust\.bundle' "$TMPDIR_EVAL/tb-unstamped-promote.out" "$TMPDIR_EVAL/tb-unstamped-promote.err"; then
+  _pass "promote (checksFromBundle) also refuses an unstamped (pre-#344) trust.bundle with the same typed error"
+else
+  _fail "promote on an unstamped bundle failed for the wrong reason: $(cat "$TMPDIR_EVAL/tb-unstamped-promote.out" "$TMPDIR_EVAL/tb-unstamped-promote.err")"
+fi
+
+# (b) STAMPED bundles are unaffected: the earlier, still-stamped trust-bundle-critique fixture
+# carries the origin stamp on every claim -- the normal write path was never touched by this cutover.
+export STAMPED_TARGET="$TB_CRITIQUE_DIR/trust.bundle"
+if [[ -f "$STAMPED_TARGET" ]] && node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/tb-stamped-unaffected.err"
+import { readFileSync } from 'node:fs';
+const target = process.env.STAMPED_TARGET;
+const bundle = JSON.parse(readFileSync(target, 'utf8'));
+const unstamped = bundle.claims.filter((c) => !(c.metadata && typeof c.metadata === 'object' && typeof c.metadata.origin === 'string' && c.metadata.origin.length > 0));
+if (unstamped.length > 0) { process.stderr.write('found ' + unstamped.length + ' claim(s) with no origin stamp in a normally-written bundle\n'); process.exit(1); }
+NODEOF
+then
+  _pass "stamped bundles are unaffected: every claim in a normally-written trust bundle carries the origin stamp (#347)"
+else
+  _fail "stamped-bundle regression: $(cat "$TMPDIR_EVAL/tb-stamped-unaffected.err")"
+fi
+
 # ─── AC4: render-trust-panel projects the bundle to a standalone Surface Trust Panel (ADR 0010 Phase 3) ──
 if [[ -f "$TB_CAPTURE_DIR/trust.bundle" ]] && flow_agents_node "$WRITER" render-trust-panel "$TB_CAPTURE_DIR" --out "$TB_CAPTURE_DIR/trust-panel.html" >"$TMPDIR_EVAL/tb-panel.out" 2>"$TMPDIR_EVAL/tb-panel.err"; then
   PANEL="$TB_CAPTURE_DIR/trust-panel.html"
