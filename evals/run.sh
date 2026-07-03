@@ -183,6 +183,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_workflow_artifact_cleanup_audit.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_promote_gate.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_fixture_retirement_audit.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_publish_change_helper.sh" || result=1
