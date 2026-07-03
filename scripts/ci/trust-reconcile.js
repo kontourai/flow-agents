@@ -16,13 +16,56 @@
  *           e. checkpoint-only bundle (no evidence/claims) → DIVERGENCE (full bundle required)
  *
  * Exit codes:
- *   0 — fresh verify passed AND no divergence (or no bundle present)
- *   1 — fresh verify failed OR any divergence detected OR compile-only fallback
+ *   0 — fresh verify passed AND no divergence (bundle reconciled clean, OR bundle
+ *       absence is covered by a well-formed, in-scope delivery/DECLARED marker)
+ *   1 — fresh verify failed OR any divergence detected OR compile-only fallback OR
+ *       bundle absent with no valid delivery/DECLARED marker (bundle-required by default)
  *
- * Fail-open on bundle absence: if no bundle is provided (and none auto-discovered at
- * delivery/trust.bundle or delivery/trust.checkpoint.json), only the fresh verify is
- * enforced. Fail-closed on divergence: any claimed-pass command CI cannot confirm blocks.
- * Fail-closed on compile-only: if no comprehensive verify is configured, exits 1.
+ * Bundle-required by default (ADR 0022 §1): if no bundle is provided (and none
+ * auto-discovered at delivery/trust.bundle or delivery/trust.checkpoint.json), the
+ * reconciler no longer fails open. It looks for a delivery/DECLARED no-agent-delivery
+ * marker (ADR 0022 §2) — a single {scope, reason, approved_by, declared_at} object, or a
+ * JSON array of such objects, resolved via the same path seam bundle discovery uses (see
+ * resolveDeliveryCandidates()). A well-formed marker whose `scope` matches this change
+ * (`ref:`, `commit:`/`commit:a..b`, `author:`, or `branch-prefix:` — see matchesScope())
+ * exempts Step 2 ONLY; Step 1 (fresh verify) still runs unconditionally and is never
+ * skipped. An absent, malformed (missing any required field), or out-of-scope marker is
+ * treated the same as bundle-absence-with-no-exemption: it produces a
+ * `bundle-required-no-declared-marker` issue and exits 1. Fail-closed on divergence: any
+ * claimed-pass command CI cannot confirm blocks. Fail-closed on compile-only: if no
+ * comprehensive verify is configured, exits 1.
+ *
+ * "Bundle-required" means a bundle FOR THIS CHANGE (ADR 0022 addendum §2), not merely a
+ * bundle reachable at the checkout: an AUTO-DISCOVERED bundle whose trust.checkpoint.json
+ * `commit_sha` neither equals nor is a git-ancestor of this change's own commit sha
+ * (TRUST_RECONCILE_SHA/GITHUB_SHA) is treated as ABSENT, not present — see
+ * bundleAttestsThisChange(). Without this, a bundle inherited unchanged from main via
+ * update-branch/rebase (live incident: PR #278) would satisfy Step 2 trivially for every
+ * dependabot/release-please PR, since neither bot's branch ever runs the deliver skill
+ * itself. A stale bundle prints a loud `stale bundle ignored — attests <theirs>, this
+ * change is <ours>` line and then falls through to delivery/DECLARED resolution exactly
+ * as if no bundle had been discovered at all. This check applies ONLY to auto-discovery —
+ * an explicit --bundle/TRUST_RECONCILE_BUNDLE is a deliberate caller choice (tests,
+ * programmatic callers), not something silently inherited from committed git tree state.
+ *
+ * Event-scoped enforcement (ADR 0022 addendum, part 4): bundle-required enforcement (the
+ * `bundle-required-no-declared-marker` fail-closed branch, and the staleness-gate
+ * consequence of it above) applies ONLY when this run is gating a proposed change —
+ * TRUST_RECONCILE_EVENT (set from `github.event_name` by
+ * .github/workflows/trust-reconcile.yml) resolving to anything other than 'push'
+ * (conservative default: unknown/absent → enforce; see resolveEnforcementEvent()). On a
+ * 'push' event, an absent or stale auto-discovered bundle is a LOUD NO-OP (`push event:
+ * ... — skipping Step 2 (gating happened on the PR run)`, exit 0), never a failure and
+ * never a delivery/DECLARED requirement — a push run on a protected branch happens AFTER
+ * the gating PR run already passed (branch protection already excludes direct pushes),
+ * and after a squash-merge the merge commit almost never has git ancestry back to the
+ * feature-branch commit a checkpoint was sealed against, so bundle absence/staleness on
+ * push is the EXPECTED case, not a divergence (reproduced empirically as a HIGH
+ * launch-blocker: without this scoping, every delivery would fail Trust Reconcile on
+ * `main` immediately post-merge and Phase 2 attestation minting would stop). Step 1
+ * (fresh verify) is unaffected by event scoping — it always runs. A fresh auto-discovered
+ * bundle on push still reconciles normally (Step 2 runs, forming the Phase 2 attestation
+ * basis) — only absence/staleness is treated differently by event.
  *
  * Inputs (CLI args take precedence over env):
  *   --bundle <path>      Delivered trust.bundle (JSON) path. May also be a
@@ -38,10 +81,21 @@
  *   TRUST_RECONCILE_COMMAND_TIMEOUT_MS    Timeout (ms) for each canonical/manifest command
  *                                         run (Step 1 fresh-verify + on-demand manifest
  *                                         reconcile). Default: 600000 (10 min).
+ *   TRUST_RECONCILE_REF/_ACTOR/_SHA       Override the delivery/DECLARED scope-matching
+ *                                         context (ref / actor / commit sha) that otherwise
+ *                                         falls back to GITHUB_HEAD_REF|GITHUB_REF,
+ *                                         GITHUB_ACTOR, GITHUB_SHA respectively — for
+ *                                         deterministic local/eval testing.
+ *   TRUST_RECONCILE_EVENT                 CI event name (`github.event_name`) driving
+ *                                         event-scoped bundle-required enforcement (ADR
+ *                                         0022 addendum, part 4) — see
+ *                                         resolveEnforcementEvent(). Default (unset/
+ *                                         unrecognized): treated as a gating event.
  *
  * Auto-discovery (when no --bundle or TRUST_RECONCILE_BUNDLE is set):
- *   Checks delivery/trust.bundle, then delivery/trust.checkpoint.json under repo root.
- *   If neither exists, continues fail-open (fresh verify only).
+ *   Checks delivery/trust.bundle, then delivery/trust.checkpoint.json under repo root
+ *   (via the resolveDeliveryCandidates() seam). If neither exists, falls through to
+ *   delivery/DECLARED marker resolution — see "Bundle-required by default" above.
  *
  * Canonical commands resolution (fail-closed on compile-only):
  *   Priority: CLI --commands > TRUST_RECONCILE_COMMANDS env > package.json
@@ -49,9 +103,11 @@
  *   "no comprehensive trust-reconcile-verify configured" — refuses to attest a
  *   compile-only check.
  *
- * NOTE: This job is intended to be a REQUIRED status check in GitHub branch
- * protection (making it the un-disablable CI anchor). Enabling it as required is
- * a server-side branch-protection step — see .github/workflows/trust-reconcile.yml.
+ * NOTE: This job IS ALREADY a required status check in GitHub branch protection on
+ * `main` (verified via the GitHub branch-protection API — required_status_checks.contexts
+ * includes "Trust Reconcile", enforce_admins: true). Disabling or downgrading that
+ * requirement is a server-side branch-protection change — it cannot be done by editing
+ * this file or .github/workflows/trust-reconcile.yml.
  *
  * Programmatic use:
  *   const { runTrustReconcile } = require('./trust-reconcile.js');
@@ -458,20 +514,368 @@ function resolveCanonicalCommands(args, repoRoot) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// delivery/ path-resolution seam (#335-aware) + ADR 0022 DECLARED-marker support.
+// ---------------------------------------------------------------------------
+
+const DELIVERY_DIR = 'delivery';
+
+/**
+ * Single seam: every delivery/ path resolution in this file routes through here.
+ * #335 (per-session delivery paths, e.g. delivery/<session-slug>/<filename> instead of
+ * one shared path) is expected to change ONLY this function's body — e.g. glob
+ * delivery/<slug-glob>/<filename> and return every match in a defined precedence order,
+ * or
+ * resolve the current PR's session slug and return its single subpath. discoverBundle()
+ * and discoverDeclaredMarker() both iterate whatever candidates this returns and pick the
+ * first existing one, so a future per-session layout composes with zero call-site changes.
+ */
+function resolveDeliveryCandidates(repoRoot, filename) {
+  return [path.join(repoRoot, DELIVERY_DIR, filename)];
+}
+
 /**
  * Auto-discover the delivery bundle when no explicit path is provided.
- * Checks delivery/trust.bundle, then delivery/trust.checkpoint.json under repo root.
- * Returns null if neither is present (fail-open on bundle absence).
+ * Checks delivery/trust.bundle, then delivery/trust.checkpoint.json under repo root
+ * (via resolveDeliveryCandidates()). Returns null if neither is present — the caller
+ * then falls through to delivery/DECLARED marker resolution (ADR 0022 §1); bundle
+ * absence is no longer fail-open on its own.
  */
 function discoverBundle(repoRoot) {
-  const candidates = [
-    path.join(repoRoot, 'delivery', 'trust.bundle'),
-    path.join(repoRoot, 'delivery', 'trust.checkpoint.json'),
-  ];
-  for (const candidate of candidates) {
+  for (const filename of ['trust.bundle', 'trust.checkpoint.json']) {
+    for (const candidate of resolveDeliveryCandidates(repoRoot, filename)) {
+      if (fs.existsSync(candidate)) return candidate;
+    }
+  }
+  return null;
+}
+
+/**
+ * Auto-discover the delivery/DECLARED no-agent-delivery marker (ADR 0022 §2) via the
+ * same resolveDeliveryCandidates() seam bundle discovery uses. Returns null if absent.
+ */
+function discoverDeclaredMarker(repoRoot) {
+  for (const candidate of resolveDeliveryCandidates(repoRoot, 'DECLARED')) {
     if (fs.existsSync(candidate)) return candidate;
   }
   return null;
+}
+
+/** Required, non-empty-string fields on every delivery/DECLARED marker entry (ADR 0022 §2). */
+const DECLARED_REQUIRED_FIELDS = ['scope', 'reason', 'approved_by', 'declared_at'];
+
+/**
+ * Parse and validate a delivery/DECLARED marker file. Accepts either a single
+ * {scope, reason, approved_by, declared_at} object, or a JSON array of such objects
+ * (small, backward-compatible extension so one marker file can cover multiple
+ * non-agent-delivery scopes, e.g. dependabot AND release-please, without a blanket scope).
+ *
+ * @returns {{ok:false, reason:string}} on unreadable/malformed-JSON input, else
+ *   {{ok:true, wellFormed:object[], malformed:{entry:*, missing:string[]}[], totalEntries:number}}
+ *   — every entry is validated; malformed entries are reported individually rather than
+ *   invalidating the whole file (so one bad entry cannot silently mask a good one).
+ */
+function parseDeclaredMarker(markerPath) {
+  let raw;
+  try {
+    raw = fs.readFileSync(markerPath, 'utf8');
+  } catch (err) {
+    return { ok: false, reason: `delivery/DECLARED marker is malformed: not valid JSON (unreadable: ${err.message})` };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, reason: 'delivery/DECLARED marker is malformed: not valid JSON' };
+  }
+  if (Array.isArray(parsed) && parsed.length === 0) {
+    return { ok: false, reason: 'delivery/DECLARED marker is malformed: array contains zero entries' };
+  }
+  const entries = Array.isArray(parsed) ? parsed : [parsed];
+  const wellFormed = [];
+  const malformed = [];
+  for (const entry of entries) {
+    const missing = DECLARED_REQUIRED_FIELDS.filter((field) => {
+      const value = entry && typeof entry === 'object' ? entry[field] : undefined;
+      return typeof value !== 'string' || value.trim() === '';
+    });
+    if (missing.length > 0) {
+      malformed.push({ entry, missing });
+    } else {
+      wellFormed.push(entry);
+    }
+  }
+  return { ok: true, wellFormed, malformed, totalEntries: entries.length };
+}
+
+/**
+ * Resolve the scope-matching context for delivery/DECLARED evaluation:
+ * ref = TRUST_RECONCILE_REF || GITHUB_HEAD_REF || GITHUB_REF stripped of 'refs/heads/' || ''
+ * actor = TRUST_RECONCILE_ACTOR || GITHUB_ACTOR || ''
+ * sha = TRUST_RECONCILE_SHA || GITHUB_SHA || ''
+ * An empty context value never matches any scope segment (see matchesScope) — this
+ * prevents an empty-string scope segment from becoming an accidental wildcard.
+ */
+function resolveScopeContext(repoRoot) {
+  const githubRef = process.env.GITHUB_REF || '';
+  const strippedGithubRef = githubRef.startsWith('refs/heads/')
+    ? githubRef.slice('refs/heads/'.length)
+    : githubRef;
+  const ref = process.env.TRUST_RECONCILE_REF
+    || process.env.GITHUB_HEAD_REF
+    || strippedGithubRef
+    || '';
+  const actor = process.env.TRUST_RECONCILE_ACTOR || process.env.GITHUB_ACTOR || '';
+  const sha = process.env.TRUST_RECONCILE_SHA || process.env.GITHUB_SHA || '';
+  return { ref, actor, sha, repoRoot };
+}
+
+/**
+ * Resolve the CI event this run is gating (ADR 0022 addendum, part 4 — event-scoped
+ * bundle-required enforcement). `TRUST_RECONCILE_EVENT` (set by
+ * .github/workflows/trust-reconcile.yml from `github.event_name`) is the source.
+ *
+ * Conservative default: an unknown/absent event value is treated as a GATING event
+ * (enforce) — every existing local/test caller that sets no TRUST_RECONCILE_EVENT keeps
+ * today's fail-closed behavior unchanged, and a misconfigured/unrecognized CI event fails
+ * toward the STRICTER gate, never the looser post-merge one. Only the literal value
+ * 'push' is treated as a post-merge run — bundle-required enforcement (and its
+ * staleness-gate consequence) applies to every other event, including
+ * `workflow_dispatch`, which is not guaranteed to be post-merge.
+ *
+ * Residual (HIGH, documented not solved): the VALUE `github.event_name` resolves to is
+ * authoritative GitHub Actions context, but the WORKFLOW FILE that sets
+ * `TRUST_RECONCILE_EVENT: ${{ github.event_name }}` is itself PR-editable content on a
+ * `pull_request` run — a PR could hardcode `TRUST_RECONCILE_EVENT: push` in its own copy
+ * of the workflow to fake the post-merge no-op path. This is closed by required
+ * code-owner review on `.github/workflows/trust-reconcile.yml` (#225, not yet server-side
+ * enforced), the same residual class as every other self-asserted CI input in this file.
+ * Step 1 (fresh verify) is unaffected by event scoping either way — it always runs and
+ * must pass regardless of which branch this function's caller takes.
+ */
+function resolveEnforcementEvent() {
+  return (process.env.TRUST_RECONCILE_EVENT || '').trim() || 'pull_request';
+}
+
+/**
+ * Best-effort single-direction ancestor check: is `ancestorSha` an ancestor of (or equal
+ * to) `descendantSha`? Uses `git merge-base --is-ancestor` (a commit is its own ancestor).
+ * Never throws — underivable (git missing, shallow clone, unknown sha, etc.) → false.
+ * Shared by isShaInRange() (commit: scope ranges) and bundleAttestsThisChange() (the
+ * bundle-ownership staleness check, ADR 0022 addendum §2).
+ */
+function isAncestorCommit(repoRoot, ancestorSha, descendantSha) {
+  if (!ancestorSha || !descendantSha) return false;
+  try {
+    const res = spawnSync('git', ['merge-base', '--is-ancestor', ancestorSha, descendantSha], {
+      cwd: repoRoot, stdio: 'ignore',
+    });
+    return !!res && !res.error && res.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Best-effort commit-range membership check: is `sha` reachable from `to` AND is `from`
+ * an ancestor of `sha`? (a commit is its own ancestor, so sha === from or sha === to both
+ * count as in-range). Never throws — underivable → false, never a match.
+ */
+function isShaInRange(repoRoot, sha, from, to) {
+  if (!sha || !from || !to) return false;
+  return isAncestorCommit(repoRoot, from, sha) && isAncestorCommit(repoRoot, sha, to);
+}
+
+/**
+ * Match a SINGLE scope condition (one of the four forms) against the resolved context.
+ * Extracted from matchesScope() so a compound (space-separated, AND) scope can validate
+ * each condition independently and still fail closed if any one is unrecognized.
+ * String equality/prefix ops ONLY — zero RegExp construction from marker content (AC4).
+ * Supported forms: `ref:<exact>`, `commit:<sha>` or `commit:<from>..<to>` (range, via
+ * isShaInRange), `author:<exact>`, `branch-prefix:<prefix>` (via String#startsWith).
+ * An unrecognized prefix does not match (not an error — fails closed silently). Every
+ * arm requires the COMPARED CONTEXT value to be non-empty, so an empty ref/actor/sha
+ * (e.g. running outside CI with no override) can never be treated as a wildcard match.
+ */
+function matchesScopeCondition(condition, ctx) {
+  const s = typeof condition === 'string' ? condition : '';
+
+  if (s.startsWith('ref:')) {
+    const want = s.slice('ref:'.length);
+    return !!want && !!ctx.ref && ctx.ref === want;
+  }
+
+  if (s.startsWith('commit:')) {
+    const want = s.slice('commit:'.length);
+    if (!want || !ctx.sha) return false;
+    const rangeSep = want.indexOf('..');
+    if (rangeSep === -1) {
+      return ctx.sha === want;
+    }
+    const from = want.slice(0, rangeSep);
+    const to = want.slice(rangeSep + 2);
+    if (!from || !to) return false;
+    return isShaInRange(ctx.repoRoot, ctx.sha, from, to);
+  }
+
+  if (s.startsWith('author:')) {
+    const want = s.slice('author:'.length);
+    return !!want && !!ctx.actor && ctx.actor === want;
+  }
+
+  if (s.startsWith('branch-prefix:')) {
+    const want = s.slice('branch-prefix:'.length);
+    return !!want && !!ctx.ref && ctx.ref.startsWith(want);
+  }
+
+  // Unrecognized prefix (or empty condition) — does not match, not an error.
+  return false;
+}
+
+/**
+ * Match a delivery/DECLARED marker's `scope` string against the resolved context.
+ *
+ * `scope` is either a single condition (backward compatible, unchanged behavior) OR
+ * multiple space-separated conditions that must ALL match (AND) — e.g.
+ * `"author:github-actions[bot] branch-prefix:release-please--"` binds an identity claim
+ * (`author:`, bound to the platform-set `GITHUB_ACTOR`, not attacker-controlled) to a
+ * narrower blast radius (`branch-prefix:`) rather than trusting either alone. This
+ * closes a security-review finding: `ref:`/`branch-prefix:` ALONE match against
+ * `GITHUB_HEAD_REF`, which is PUSHER-CONTROLLED on a fork PR — a `ref:`-only or
+ * `branch-prefix:`-only scope can therefore be satisfied by anyone who can name a
+ * branch, not just the bot the marker is meant to identify. Compound (AND) scopes let a
+ * marker require both signals. Any unrecognized-prefix condition anywhere in a compound
+ * scope makes the WHOLE scope never match (fail closed) — see matchesScopeCondition().
+ * Zero RegExp construction from marker content (AC4) — space-splitting uses a plain
+ * string split, not a marker-derived pattern.
+ */
+function matchesScope(scope, ctx) {
+  const s = typeof scope === 'string' ? scope : '';
+  const conditions = s.split(' ').map((c) => c.trim()).filter(Boolean);
+  if (conditions.length === 0) return false;
+  return conditions.every((condition) => matchesScopeCondition(condition, ctx));
+}
+
+/**
+ * Orchestrate delivery/DECLARED resolution for the bundle-absent path: discover → parse
+ * → scope-match → return {exempt, marker?, diagnostic?}. First in-scope, well-formed
+ * entry wins (array form); every entry is validated regardless, and malformed entries
+ * are logged individually so a bad entry never silently masks a good one.
+ *
+ * Diagnostic strings below are pinned (grepped by callers/evals) — do not reword.
+ */
+function resolveDeclaredExemption(repoRoot, ctx) {
+  const markerPath = discoverDeclaredMarker(repoRoot);
+  if (!markerPath) {
+    return {
+      exempt: false,
+      diagnostic: 'no bundle present and no delivery/DECLARED marker found — bundle-required by default (ADR 0022 §1); publish delivery/trust.bundle, or add a well-formed, in-scope delivery/DECLARED marker',
+    };
+  }
+
+  const parsed = parseDeclaredMarker(markerPath);
+  if (!parsed.ok) {
+    return { exempt: false, diagnostic: parsed.reason };
+  }
+
+  for (const { missing } of parsed.malformed) {
+    process.stderr.write(`[trust-reconcile] delivery/DECLARED marker is malformed: missing required field(s) [${missing.join(', ')}]\n`);
+  }
+
+  if (parsed.wellFormed.length === 0) {
+    const first = parsed.malformed[0];
+    const diagnostic = first
+      ? `delivery/DECLARED marker is malformed: missing required field(s) [${first.missing.join(', ')}]`
+      : 'delivery/DECLARED marker is malformed: not valid JSON';
+    return { exempt: false, diagnostic };
+  }
+
+  for (const marker of parsed.wellFormed) {
+    if (matchesScope(marker.scope, ctx)) {
+      return { exempt: true, marker };
+    }
+  }
+
+  return {
+    exempt: false,
+    diagnostic: 'delivery/DECLARED marker present but out of scope for this change',
+  };
+}
+
+/**
+ * Extract the strongest available commit-identity binding from a discovered bundle/
+ * checkpoint, for the bundle-ownership staleness check (ADR 0022 addendum §2). Returns
+ * the commit sha string the bundle/checkpoint attests to, or null if no usable binding
+ * exists (fail-closed: the caller treats null the same as a mismatch — stale/absent).
+ *
+ * trust.checkpoint.json's envelope carries `commit_sha` directly (stamped by
+ * sealTrustCheckpoint() from `git rev-parse HEAD` at seal time —
+ * src/cli/workflow-sidecar.ts). trust.bundle itself carries NO commit/branch metadata
+ * (schemaVersion 5: {schemaVersion, source, claims, evidence, policies, events} — confirmed
+ * by inspection), so when the discovered bundle IS trust.bundle, this falls through to its
+ * sibling delivery/trust.checkpoint.json (same resolveDeliveryCandidates() seam) for the
+ * binding — publishDelivery() always copies both together.
+ */
+function extractBundleCommitSha(repoRoot, bundlePath, bundleJson) {
+  if (bundleJson && typeof bundleJson.commit_sha === 'string' && bundleJson.commit_sha.trim()) {
+    return bundleJson.commit_sha.trim();
+  }
+  for (const candidate of resolveDeliveryCandidates(repoRoot, 'trust.checkpoint.json')) {
+    if (candidate === bundlePath || !fs.existsSync(candidate)) continue;
+    try {
+      const checkpoint = JSON.parse(fs.readFileSync(candidate, 'utf8'));
+      if (checkpoint && typeof checkpoint.commit_sha === 'string' && checkpoint.commit_sha.trim()) {
+        return checkpoint.commit_sha.trim();
+      }
+    } catch {
+      // Malformed sibling checkpoint — no usable binding from it; keep looking / fall through.
+    }
+  }
+  return null;
+}
+
+/**
+ * Does the discovered bundle/checkpoint attest THIS change? "Bundle-required" (ADR 0022
+ * §1) means a bundle FOR THIS CHANGE, not any bundle merely reachable at the checkout — a
+ * bundle inherited unchanged from main via update-branch/rebase (live incident: PR #278, a
+ * dependabot PR whose stale main-authored trust.checkpoint.json otherwise satisfied Step 2
+ * trivially) must NOT be treated as owned by this change.
+ *
+ * "Attests this change" = the bundle's commit_sha equals this change's own sha, OR is an
+ * ancestor of it (the bundle was sealed earlier in the SAME open PR's own linear commit
+ * history, before a later delivery commit — the normal, legitimate shape; sealTrustCheckpoint
+ * necessarily stamps a commit that precedes its own delivery commit, so exact equality alone
+ * would reject every legitimate delivery). Reuses the same `git merge-base --is-ancestor`
+ * primitive `commit:` scope ranges already use (isAncestorCommit()) rather than a new check.
+ *
+ * FAIL CLOSED on ambiguity: no extractable commit_sha (bundle/checkpoint carries none, or
+ * this change's own sha is unresolvable) → never treated as fresh/owned.
+ *
+ * CORRECTNESS REQUIRES the caller's CI context to provide two things (see
+ * .github/workflows/trust-reconcile.yml's "CI-context contract" comment for the concrete
+ * settings this repo's own required check uses):
+ *   1. A full-history (non-shallow) checkout. `git merge-base --is-ancestor` needs the
+ *      parent commit objects; a shallow clone (the common `fetch-depth: 1` default) does
+ *      not have them, so the underlying `git merge-base` call exits 128 (unresolvable).
+ *   2. `changeSha` bound to the actual commit a checkpoint could plausibly have been
+ *      sealed against — on a GitHub `pull_request` trigger this is the PR's own HEAD
+ *      commit, NOT the synthetic merge commit `GITHUB_SHA` resolves to by default (a
+ *      seal-checkpoint run never stamps a merge commit that did not exist yet).
+ * Shallow-clone / missing-object conditions are DEGRADED-BUT-SAFE, never silently
+ * accepted: isAncestorCommit() (and therefore this function) fails toward STALE, the same
+ * as any other unresolvable ancestry, so a real fresh bundle under a misconfigured shallow
+ * checkout is loudly, diagnosably rejected (the `stale bundle ignored — attests <theirs>,
+ * this change is <ours>` line still names both shas — an operator can immediately see the
+ * mismatch is a checkout-depth artifact, not a real staleness), rather than a bundle CI
+ * cannot actually verify slipping through as accepted.
+ *
+ * @returns {{fresh: boolean, bundleSha: string|null}}
+ */
+function bundleAttestsThisChange(repoRoot, bundlePath, bundleJson, changeSha) {
+  const bundleSha = extractBundleCommitSha(repoRoot, bundlePath, bundleJson);
+  if (!bundleSha || !changeSha) return { fresh: false, bundleSha };
+  const fresh = bundleSha === changeSha || isAncestorCommit(repoRoot, bundleSha, changeSha);
+  return { fresh, bundleSha };
 }
 
 // ---------------------------------------------------------------------------
@@ -496,11 +900,57 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
     repoRoot || process.env.TRUST_RECONCILE_REPO_ROOT || process.cwd()
   );
 
-  // Resolve bundle path: explicit arg > env > auto-discovery > null (fail-open)
-  const bundlePath = bundle
-    || process.env.TRUST_RECONCILE_BUNDLE
-    || discoverBundle(resolvedRepoRoot)
-    || null;
+  // Resolve bundle path: explicit arg > env > auto-discovery > null. The staleness check
+  // below (ADR 0022 addendum §2) applies ONLY to the auto-discovered case — an explicit
+  // --bundle/TRUST_RECONCILE_BUNDLE is a deliberate caller choice (tests, programmatic
+  // callers), not something silently picked up from committed git tree state, and real CI
+  // (.github/workflows/trust-reconcile.yml) never passes --bundle; it always relies on
+  // auto-discovery, which is exactly the path PR #278's stale-bundle incident went through.
+  const explicitBundlePath = bundle || process.env.TRUST_RECONCILE_BUNDLE || null;
+  let bundlePath = explicitBundlePath || discoverBundle(resolvedRepoRoot) || null;
+  const bundleWasAutoDiscovered = !explicitBundlePath && !!bundlePath;
+
+  // Scope-matching context (ref/actor/sha) — resolved once, reused by both the
+  // bundle-ownership staleness check below and the delivery/DECLARED exemption path
+  // further down (bundle-absent branch).
+  const scopeCtx = resolveScopeContext(resolvedRepoRoot);
+
+  // Event-scoped enforcement (ADR 0022 addendum, part 4): bundle-required enforcement
+  // (and the staleness-gate consequence of it, immediately below) applies ONLY when this
+  // run is gating a proposed change. A push run on main happens AFTER the gating PR run
+  // already passed — see the isPostMergeEvent branch further down for the full rationale.
+  const enforcementEvent = resolveEnforcementEvent();
+  const isPostMergeEvent = enforcementEvent === 'push';
+
+  // Bundle-ownership staleness check (ADR 0022 addendum §2): an AUTO-DISCOVERED bundle
+  // must attest THIS change, not a historically-committed bundle inherited via
+  // update-branch/rebase (live incident: PR #278). A stale bundle is treated as ABSENT —
+  // on a gating event it falls through to the exact same DECLARED/fail-closed branch as
+  // no-bundle-at-all; on a push event it falls through to a loud no-op instead (below).
+  // A bundle that fails to parse here is NOT treated as stale (left alone so the existing
+  // Step 2 "failed to read bundle" diagnostic still fires with its own clearer message).
+  // bundleWasDiscardedAsStale is tracked only to word the push-event no-op line accurately
+  // (an auto-discovered-but-stale bundle vs. no bundle ever being found are both a no-op
+  // on push, but "inherited bundle does not attest" is only true of the former).
+  let bundleWasDiscardedAsStale = false;
+  if (bundlePath && bundleWasAutoDiscovered) {
+    let bundleJsonForStaleness = null;
+    try {
+      bundleJsonForStaleness = JSON.parse(fs.readFileSync(bundlePath, 'utf8'));
+    } catch {
+      bundleJsonForStaleness = null;
+    }
+    if (bundleJsonForStaleness) {
+      const { fresh, bundleSha } = bundleAttestsThisChange(resolvedRepoRoot, bundlePath, bundleJsonForStaleness, scopeCtx.sha);
+      if (!fresh) {
+        const theirs = bundleSha || 'no usable commit binding';
+        const ours = scopeCtx.sha || 'unknown (no TRUST_RECONCILE_SHA/GITHUB_SHA)';
+        process.stdout.write(`[trust-reconcile] stale bundle ignored — attests ${theirs}, this change is ${ours}\n`);
+        bundlePath = null;
+        bundleWasDiscardedAsStale = true;
+      }
+    }
+  }
 
   const canonicalCommands = resolveCanonicalCommands({ commands: commands || [] }, resolvedRepoRoot);
 
@@ -533,8 +983,10 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
   }
   if (bundlePath) {
     process.stdout.write(`[trust-reconcile] bundle: ${bundlePath}\n`);
+  } else if (isPostMergeEvent) {
+    process.stdout.write('[trust-reconcile] no bundle present — push event (post-merge run): Step 1 still runs; Step 2/delivery-DECLARED enforcement does not apply here (ADR 0022 addendum, part 4)\n');
   } else {
-    process.stdout.write('[trust-reconcile] no bundle present — fresh verify only (fail-open on bundle absence)\n');
+    process.stdout.write('[trust-reconcile] no bundle present — bundle-required by default (ADR 0022 §1); Step 1 still runs, then checking delivery/DECLARED for a Step-2 exemption\n');
   }
 
   // -------------------------------------------------------------------------
@@ -823,6 +1275,46 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
       // with zero attested claims is distinguishable in the log from one where the count line
       // is simply absent (grep-stable for downstream tooling / reviewers).
       process.stdout.write(`[trust-reconcile] ${attestedCount} attested claim(s) accepted without independent verification\n`);
+    }
+  } else if (isPostMergeEvent) {
+    // Event-scoped enforcement (ADR 0022 addendum, part 4): bundle-required enforcement
+    // (and delivery/DECLARED as its only exemption) exists to gate a PROPOSED change —
+    // it applies on pull_request (and any other/unknown event, conservatively). A push
+    // run on `main` happens AFTER the gating PR run already passed: branch protection
+    // already excludes direct pushes from anyone but the merge machinery, so this run's
+    // job is Step 1 fresh-verify (unconditional, already ran above) plus, IF the
+    // just-merged bundle happens to still attest this exact commit, Step 2 reconcile as
+    // the basis for Phase 2 attestation minting (handled by the `if (bundlePath)` branch
+    // above when fresh — unaffected by this branch). A squash-merge commit on main almost
+    // never has git ancestry back to the feature-branch commit a checkpoint was sealed
+    // against (squash discards the original commit graph — see the staleness-check
+    // addendum), so bundlePath being null here on push is the EXPECTED, common case, not
+    // a divergence — reproduced empirically (synthetic squash pair) as a HIGH
+    // launch-blocker: without this branch, EVERY delivery would falsely fail Trust
+    // Reconcile on main immediately post-merge and Phase 2 attestation minting would stop
+    // entirely. Requiring a delivery/DECLARED marker on every push to main would also be
+    // nonsensical — there is no "change" being gated here to declare an exemption from.
+    // This is a loud no-op: exit 0, no issue pushed.
+    const detail = bundleWasDiscardedAsStale
+      ? 'inherited bundle does not attest this commit'
+      : 'no bundle to reconcile';
+    process.stdout.write(`[trust-reconcile] push event: ${detail} — skipping Step 2 (gating happened on the PR run)\n`);
+  } else {
+    // Bundle absent (ADR 0022 §1) — either never discovered, or discovered-but-stale and
+    // nulled out above. The ONLY exemption is a well-formed, in-scope delivery/DECLARED
+    // marker, and it exempts Step 2 ONLY — Step 1 (fresh verify, above) already ran
+    // unconditionally and was never skipped. Reuses the scopeCtx resolved above (same
+    // context the staleness check already used).
+    const exemption = resolveDeclaredExemption(resolvedRepoRoot, scopeCtx);
+    if (exemption.exempt) {
+      const { scope, reason, approved_by, declared_at } = exemption.marker;
+      process.stdout.write(`[trust-reconcile] DECLARED (no-agent-delivery): ${scope} — ${reason} (approved by ${approved_by}, declared ${declared_at})\n`);
+    } else {
+      process.stderr.write(`[trust-reconcile] ${exemption.diagnostic}\n`);
+      issues.push({
+        type: 'bundle-required-no-declared-marker',
+        message: exemption.diagnostic,
+      });
     }
   }
 

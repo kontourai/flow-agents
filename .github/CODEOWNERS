@@ -13,6 +13,14 @@
 /evals/ci/                      @briananderson1222
 /scripts/ci/                    @briananderson1222
 
+# delivery/DECLARED (ADR 0022 §2) is the no-agent-delivery exemption marker
+# trust-reconcile.js reads to skip Step 2 when no bundle is delivered — a
+# self-asserted governance artifact naming approved_by, so it gets the same
+# owner-review protection as the other verify-config/anchor paths above. This
+# closes #301's file-level half; branch-protection enforcement of CODEOWNERS
+# review itself remains #225 (server-side, not code).
+/delivery/DECLARED               @briananderson1222
+
 # The verification config the CI anchor depends on — an agent must not redefine
 # trust-reconcile-verify to a fake/laundered command or rewire the lane runner
 # without owner review (convergence red-team finding).
