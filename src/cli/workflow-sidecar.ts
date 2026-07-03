@@ -618,7 +618,11 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     // (workflow-artifact-cleanup-audit) and validators can detect the promotion claim without a
     // new manifest entry. It rides alongside any waiver in a single merged metadata object.
     const promotionMeta = (check._promotion && typeof check._promotion === "object") ? check._promotion as AnyObj : null;
-    const claimMetadata: AnyObj | null = (waiver || promotionMeta) ? { ...(waiver ? { waiver } : {}), ...(promotionMeta ? { promotion: promotionMeta } : {}) } : null;
+    // #268: stamp a stable origin discriminator so checksFromBundle / critiquesFromBundle can
+    // distinguish check vs critique vs acceptance claims across round-trips even under --flow-id,
+    // where all three collapse onto the same declared claimType (and a command-less critique claim
+    // would otherwise be re-absorbed as a test_output check → permanent [not-run] divergence).
+    const claimMetadata: AnyObj = { origin: "check", check_kind: String(check.kind ?? "external"), ...(waiver ? { waiver } : {}), ...(promotionMeta ? { promotion: promotionMeta } : {}) };
 
     const claimEvents: AnyObj[] = [];
     if (evStatus) {
@@ -678,12 +682,12 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     if (declared) {
       // Declared kit-typed claim only — no legacy shadow (ADR 0016 P-d).
       const declaredPolicy = ensurePolicy(declared.claimType, "high", []);
-      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id };
+      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, metadata: { origin: "acceptance" } };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
       claims.push({ ...declaredClaimObj, status: declaredStatus });
     } else {
       // No active flow step — only the workflow.* primary claim (legitimate no-flow fallback path).
-      const claimObj: AnyObj = { id: claimId, subjectType: "workflow-acceptance-criterion", subjectId, facet: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id };
+      const claimObj: AnyObj = { id: claimId, subjectType: "workflow-acceptance-criterion", subjectId, facet: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id, metadata: { origin: "acceptance" } };
       const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
       claims.push({ ...claimObj, status: derivedStatus });
     }
@@ -694,10 +698,23 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     if (!c.id) continue;
     const subjectId = `${slug}/${c.id}`;
     const fieldOrBehavior = String(c.summary ?? c.verdict ?? c.id);
-    const claimId = generateClaimId(subjectId, "flow-agents.workflow", fieldOrBehavior);
+    // #267/#282: a critique carrying `superseded_by` is retained as HISTORY — a prior write for
+    // this critique id that a later, same-reviewer critique resolved. It is preserved structurally
+    // (status "superseded" + first-class metadata.superseded_by), but is excluded from reconcile
+    // evaluation and from the "critique pass cannot include fail members" validator rule.
+    const supersededBy = typeof c.superseded_by === "string" && c.superseded_by.length > 0 ? c.superseded_by : null;
+    const critiqueReviewer = String(c.reviewer ?? "tool-code-reviewer");
+    const critiqueReviewedAt = String(c.reviewed_at ?? ts);
+    const critMeta: AnyObj = { origin: "critique", reviewer: critiqueReviewer, reviewed_at: critiqueReviewedAt, ...(supersededBy ? { superseded_by: supersededBy } : {}) };
+    // A superseded historical write gets a distinct, stable claimId so it co-exists with the live
+    // claim of the same critique id (never overwrites or duplicates it). The salt is reproducible
+    // across rebuilds because superseded_by + reviewed_at are preserved in metadata.
+    const claimIdSalt = supersededBy ? `${fieldOrBehavior}::superseded::${supersededBy}::${critiqueReviewedAt}` : fieldOrBehavior;
+    const claimId = generateClaimId(subjectId, "flow-agents.workflow", claimIdSalt);
     const legacyClaimType = "workflow.critique.review";
     const policy = ensurePolicy(legacyClaimType, "medium", []);
-    const evStatus = critiqueToEventStatus(String(c.verdict ?? ""), c.findings ?? []);
+    // A superseded write emits NO verification event (its status is "superseded" directly).
+    const evStatus = supersededBy ? null : critiqueToEventStatus(String(c.verdict ?? ""), c.findings ?? []);
     const claimEvents: AnyObj[] = [];
     if (evStatus) {
       const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: "flow-agents/workflow-sidecar", method: "validation", evidenceIds: [], createdAt: ts, verifiedAt: ts };
@@ -707,16 +724,15 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
 
     // P-d: declared-only when active flow/step present (shadow retired); no-flow path unchanged.
     const declared = matchExpectsEntry("critique");
-    if (declared) {
-      // Declared kit-typed claim only — no legacy shadow (ADR 0016 P-d).
-      const declaredPolicy = ensurePolicy(declared.claimType, "medium", []);
-      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: c.verdict, createdAt: ts, updatedAt: ts, impactLevel: "medium", verificationPolicyId: declaredPolicy.id };
-      const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
-      claims.push({ ...declaredClaimObj, status: declaredStatus });
+    const claimType = declared ? declared.claimType : legacyClaimType;
+    const subjectType = declared ? declared.subjectType : "workflow-critique";
+    const claimPolicy = declared ? ensurePolicy(declared.claimType, "medium", []) : policy;
+    const claimObj: AnyObj = { id: claimId, subjectType, subjectId, facet: "flow-agents.workflow", claimType, fieldOrBehavior, value: c.verdict, createdAt: ts, updatedAt: ts, impactLevel: "medium", verificationPolicyId: claimPolicy.id, metadata: critMeta };
+    if (supersededBy) {
+      // History: status is "superseded" directly (no verification event); excluded from evaluation.
+      claims.push({ ...claimObj, status: "superseded" });
     } else {
-      // No active flow step — only the workflow.* primary claim (legitimate no-flow fallback path).
-      const claimObj: AnyObj = { id: claimId, subjectType: "workflow-critique", subjectId, facet: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: c.verdict, createdAt: ts, updatedAt: ts, impactLevel: "medium", verificationPolicyId: policy.id };
-      const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
+      const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [claimPolicy] as Record<string, unknown>[] });
       claims.push({ ...claimObj, status: derivedStatus });
     }
   }
@@ -1439,96 +1455,99 @@ export function writeState(dir: string, slug: string, status: string, phase: str
 // Extract checks and critiques from the existing trust.bundle for callers that
 // need to rebuild the bundle (e.g. record-critique, record-learning).
 
-// ADR 0016 Abstraction A (Step 0 Q3 carry-forward): build the set of declared
-// claimTypes from the active flow step for the session at `dir`. When no active
-// flow is present (workflow.* sessions), returns an empty set so every existing
-// predicate is unchanged. When a FlowDefinition-driven session (builder.build)
-// is active, the set contains the kit-typed claimTypes (e.g. "builder.verify.tests",
-// "builder.verify.policy-compliance") so round-trip helpers broaden their filters
-// to include declared claims alongside the legacy workflow.* ones.
+// #268/#344: buildTrustBundle stamps a stable origin discriminator ("check" | "acceptance" |
+// "critique") plus check_kind (for origin "check") on EVERY claim it writes. These stamps are
+// AUTHORITATIVE and the ONLY way checksFromBundle/critiquesFromBundle (and evidenceClean/
+// critiqueClean below) classify a claim.
 //
-// Safety guard: current.json in the runtime artifact root records the CURRENTLY ACTIVE
-// session via artifact_dir. If current.json points to a different session than `dir`
-// (e.g. another session was the last to call advance-state --flow-definition), we
-// return an empty set so declared-type predicates are NOT applied to the wrong session.
-// This prevents a cross-session active_flow_id from broadening claim filters for
-// unrelated sessions (which would cause spurious evidence/critique check behavior).
-function declaredClaimTypesFor(dir: string): Set<string> {
-  const flowAgentsDir = path.dirname(dir);
-  // Verify that current.json points to `dir` before reading active flow step.
-  // If it points to a different session, return empty set (zero behavior change).
-  const currentFile = path.join(flowAgentsDir, "current.json");
-  try {
-    const current = JSON.parse(fs.readFileSync(currentFile, "utf8")) as Record<string, unknown>;
-    const artDir = typeof current["artifact_dir"] === "string" ? current["artifact_dir"] : null;
-    if (!artDir) return new Set<string>();
-    const resolvedCurrent = path.resolve(flowAgentsDir, artDir);
-    if (path.resolve(dir) !== resolvedCurrent) return new Set<string>();
-  } catch {
-    return new Set<string>();
-  }
-  const activeStep = resolveActiveFlowStep(flowAgentsDir);
-  if (!activeStep || activeStep.gateExpects.length === 0) return new Set<string>();
-  return new Set<string>(activeStep.gateExpects.map((e) => e.bundle_claim.claimType));
+// Hard cutover (owner directive, no legacy fallbacks): there is deliberately no claimType-
+// derivation fallback for unstamped claims. A prior version of this file fell back to
+// classifying an unstamped claim by claimType heuristic — that fallback WAS the #268 defect
+// kept reachable (a no-evidence declared claim silently re-absorbed as a command-less
+// test_output check, and a critique claim silently re-absorbed as a check, corrupting the
+// round-trip catastrophically under --flow-id). An unstamped claim means the bundle predates
+// #344 and must be regenerated, not silently reclassified — see requireStampedClaim below.
+function claimOrigin(claim: AnyObj): string | null {
+  const md = claim && (claim as AnyObj).metadata;
+  return md && typeof md === "object" && typeof (md as AnyObj).origin === "string" && (md as AnyObj).origin.length > 0 ? String((md as AnyObj).origin) : null;
 }
-
-function checksFromBundle(dir: string, declaredClaimTypes: Set<string> = new Set()): AnyObj[] {
+// Fails loud — never silent, never a heuristic reclassification — when a claim in `dir`'s
+// trust.bundle lacks its metadata.origin stamp, or (for an origin==="check" claim) its
+// metadata.check_kind stamp. Names the session dir and the remedy so the caller can regenerate
+// a fresh, fully-stamped bundle instead of reading a pre-supersession one.
+function requireStampedClaim(claim: AnyObj, dir: string): string {
+  if (!claim || typeof claim !== "object") die(`trust.bundle in ${dir} contains a malformed claim entry — cannot read.`);
+  const remedy = `re-record evidence to regenerate: npm run workflow:sidecar -- record-evidence ${dir} --verdict <verdict> --check-json <...>`;
+  const origin = claimOrigin(claim);
+  if (!origin) {
+    die(`pre-supersession trust.bundle in ${dir}: claim '${claim.id ?? "<unknown>"}' has no metadata.origin stamp (this bundle predates #344's origin/check_kind stamping and cannot be read authoritatively) — ${remedy}`);
+  }
+  if (origin === "check") {
+    const md = (claim.metadata && typeof claim.metadata === "object") ? claim.metadata as AnyObj : {};
+    if (typeof md.check_kind !== "string" || md.check_kind.length === 0) {
+      die(`pre-supersession trust.bundle in ${dir}: check claim '${claim.id ?? "<unknown>"}' has metadata.origin but no metadata.check_kind stamp (this bundle predates #344's stamping and cannot be read authoritatively) — ${remedy}`);
+    }
+  }
+  return origin;
+}
+function checksFromBundle(dir: string): AnyObj[] {
   const bundle = loadJson(path.join(dir, "trust.bundle"));
-  if (!Array.isArray(bundle.evidence)) return [];
   const allClaims: AnyObj[] = Array.isArray(bundle.claims) ? bundle.claims : [];
+  // Validate stamps on every claim up front — any unstamped claim anywhere in the bundle marks
+  // it pre-supersession, regardless of whether it is check/acceptance/critique-typed.
+  for (const claim of allClaims) requireStampedClaim(claim, dir);
+  if (!Array.isArray(bundle.evidence)) return [];
   const claimById = new Map<string, AnyObj>();
   for (const c of allClaims) if (c && c.id) claimById.set(c.id, c);
   const seen = new Set<string>();
   const checks: AnyObj[] = [];
+  const kindOf = (claim: AnyObj): string => String((claim.metadata as AnyObj).check_kind);
   for (const ev of bundle.evidence) {
     if (!ev || !ev.claimId) continue;
     const claim = claimById.get(ev.claimId);
     if (!claim) continue;
-    const ct = String(claim.claimType || "");
-    // ADR 0016 Step 0: broaden to include declared kit-typed claims alongside workflow.check.*
-    if (!ct.startsWith("workflow.check.") && !declaredClaimTypes.has(ct)) continue;
+    if (claimOrigin(claim) !== "check") continue;
     if (seen.has(ev.claimId)) continue;
     seen.add(ev.claimId);
-    const kind = ct.startsWith("workflow.check.") ? (ct.replace("workflow.check.", "") || "external") : (ct.split(".").pop() || "external");
+    const kind = kindOf(claim);
     const status = claim.value ?? "not_verified";
     const check: AnyObj = { id: String(claim.subjectId || "").split("/").pop() || ev.claimId, kind, status, summary: claim.fieldOrBehavior || "" };
     if (ev.execution && typeof ev.execution.label === "string") check.command = ev.execution.label;
     if (ev.evidenceType) check.evidenceType = ev.evidenceType;
     checks.push(check);
   }
-  // Also include check claims that have no evidence item (surface_trust_refs style)
+  // Also include check claims that have no evidence item (surface_trust_refs style).
   for (const claim of allClaims) {
     if (!claim) continue;
-    const ct = String(claim.claimType || "");
-    // ADR 0016 Step 0: broaden to include declared kit-typed claims alongside workflow.check.*
-    if (!ct.startsWith("workflow.check.") && !declaredClaimTypes.has(ct)) continue;
+    if (claimOrigin(claim) !== "check") continue;
     if (seen.has(claim.id)) continue;
     seen.add(claim.id);
-    const kind = ct.startsWith("workflow.check.") ? (ct.replace("workflow.check.", "") || "external") : (ct.split(".").pop() || "external");
+    const kind = kindOf(claim);
     checks.push({ id: String(claim.subjectId || "").split("/").pop() || claim.id, kind, status: claim.value ?? "not_verified", summary: claim.fieldOrBehavior || "" });
   }
   return checks;
 }
-function critiquesFromBundle(dir: string, declaredClaimTypes: Set<string> = new Set()): AnyObj[] {
+function critiquesFromBundle(dir: string): AnyObj[] {
   const bundle = loadJson(path.join(dir, "trust.bundle"));
   if (!Array.isArray(bundle.claims)) return [];
-  // ADR 0016 Step 0: broaden to include declared kit-typed critique claims alongside workflow.critique.review.
-  // P-d: exclude claims that have evidence items (evidence = check claims, not critique claims).
-  // This prevents check-type declared claims (e.g. builder.verify.tests) from being read back
-  // as critiques when declaredClaimTypes includes all gate expects[] types.
-  const evidenceClaimIds = new Set<string>(
-    Array.isArray(bundle.evidence) ? bundle.evidence.map((e: AnyObj) => e?.claimId).filter((id: unknown): id is string => typeof id === "string") : []
-  );
-  const critiqueClaims = bundle.claims.filter((c: AnyObj) => c && (c.claimType === "workflow.critique.review" || declaredClaimTypes.has(c.claimType)) && !evidenceClaimIds.has(c.id));
-  return critiqueClaims.map((c: AnyObj) => ({
-    id: String(c.subjectId || "").split("/").pop() || c.id,
-    verdict: c.value ?? "not_verified",
-    summary: c.fieldOrBehavior || "",
-    findings: [],
-    reviewer: "tool-code-reviewer",
-    reviewed_at: c.updatedAt || c.createdAt || now(),
-    artifact_refs: [],
-  }));
+  for (const c of bundle.claims) requireStampedClaim(c, dir);
+  // A claim is a CRITIQUE when its origin is "critique" (authoritative — see requireStampedClaim
+  // above). reviewer / reviewed_at / superseded_by are read back from metadata so supersession
+  // (#267/#282) round-trips losslessly.
+  const critiqueClaims = bundle.claims.filter((c: AnyObj) => c && claimOrigin(c) === "critique");
+  return critiqueClaims.map((c: AnyObj) => {
+    const md = (c.metadata && typeof c.metadata === "object") ? c.metadata as AnyObj : {};
+    return {
+      id: String(c.subjectId || "").split("/").pop() || c.id,
+      verdict: c.value ?? "not_verified",
+      summary: c.fieldOrBehavior || "",
+      findings: [],
+      reviewer: typeof md.reviewer === "string" ? md.reviewer : "tool-code-reviewer",
+      reviewed_at: typeof md.reviewed_at === "string" ? md.reviewed_at : (c.updatedAt || c.createdAt || now()),
+      artifact_refs: [],
+      ...(typeof md.superseded_by === "string" && md.superseded_by.length > 0 ? { superseded_by: md.superseded_by } : {}),
+    };
+  });
 }
 // ─────────────────────────────────────────────────────────────────────────────
 /**
@@ -1579,7 +1598,11 @@ async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> 
   const _existingCriteria: AnyObj[] = Array.isArray(_existingAcceptance.criteria) ? _existingAcceptance.criteria : [];
   const _criteriaStatus = verdict === "pass" ? "pass" : verdict === "fail" ? "fail" : "not_verified";
   const _criteriaForBundle: AnyObj[] = _existingCriteria.map((c: AnyObj) => ({ ...c, status: _criteriaStatus }));
-  assertBundleWritten(await writeTrustBundle(dir, slug, ts, checks, _criteriaForBundle, []));
+  // #268: preserve any existing critique claims (including superseded history) instead of dropping
+  // them — record-evidence previously hardcoded critiques:[] here, silently erasing finding history
+  // whenever it ran after a critique existed.
+  const _existingCritiques: AnyObj[] = critiquesFromBundle(dir);
+  assertBundleWritten(await writeTrustBundle(dir, slug, ts, checks, _criteriaForBundle, _existingCritiques));
   const stateStatus = verdict === "pass" ? "verified" : verdict === "fail" ? "failed" : "not_verified";
   writeState(dir, slug, stateStatus, "verification", ts, "Evidence recorded.");
   return 0;
@@ -1748,11 +1771,10 @@ async function promote(p: ReturnType<typeof parseArgs>): Promise<number> {
   // Add the promotion claim WITHOUT dropping the session's existing verification
   // evidence/criteria/critiques (mirror record-critique's merge pattern). Drop any prior
   // "promotion" check so re-running promote is idempotent rather than duplicating.
-  const _dct = declaredClaimTypesFor(dir);
-  const existingChecks = checksFromBundle(dir, _dct).filter((c) => c.id !== "promotion");
+  const existingChecks = checksFromBundle(dir).filter((c) => c.id !== "promotion");
   const _acc = loadJson(path.join(dir, "acceptance.json"));
   const criteria: AnyObj[] = Array.isArray(_acc.criteria) ? _acc.criteria : [];
-  const critiques = critiquesFromBundle(dir, _dct);
+  const critiques = critiquesFromBundle(dir);
   assertBundleWritten(await writeTrustBundle(dir, slug, ts, [...existingChecks, promotionCheck], criteria, critiques));
 
   // Auditable record of what was promoted where (companion to the trust.bundle claim).
@@ -1845,13 +1867,29 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   // Fall back to critique.json for legacy sessions that still have it on disk.
   const existingCritiqueJson = loadJson(path.join(dir, "critique.json"), { critiques: [] });
   const legacyCritiques: AnyObj[] = Array.isArray(existingCritiqueJson.critiques) ? existingCritiqueJson.critiques : [];
-  const _dctCritique = declaredClaimTypesFor(dir);
-  const bundleCritiques = legacyCritiques.length === 0 ? critiquesFromBundle(dir, _dctCritique) : legacyCritiques;
+  const bundleCritiques = legacyCritiques.length === 0 ? critiquesFromBundle(dir) : legacyCritiques;
   const critique = { id: opt(p, "id") || "review", reviewer: opt(p, "reviewer", "tool-code-reviewer"), reviewed_at: opt(p, "timestamp", now()), verdict: opt(p, "verdict", "pass"), summary: opt(p, "summary"), artifact_refs: opts(p, "artifact-ref"), findings: opts(p, "finding-json").map((v) => normalizeFinding(parseJson(v, "--finding-json"))) };
-  const critiques = [...bundleCritiques, critique];
   if (critique.verdict === "pass" && critique.findings.some((f: AnyObj) => f.status === "open")) die("required critique must pass");
+  // #267/#282: supersede-by-critique-id. The latest write for a critique id wins for
+  // reconcile / status / validator purposes; each prior LIVE write for the same id is RETAINED as
+  // history (status "superseded", first-class metadata.superseded_by) but excluded from evaluation.
+  // Supersession is REVIEWER-SCOPED (anti-gaming): a write may only supersede a prior live critique
+  // of the same id written by the SAME reviewer — a different reviewer's disputed finding is never
+  // buried, so it stays live and continues to block. DOCUMENTED GAP: reviewer identity is the
+  // free-form --reviewer string (with a default); there is no cryptographic worker-vs-reviewer
+  // distinction yet — that lands with the runtime actor-identity slice (#287/#290). Same-reviewer-
+  // string scoping is the strongest honest enforcement available today and matches the granularity
+  // the critique record already has.
+  const _supersedeMarker = `${critique.id}@${critique.reviewed_at}`;
+  const _mergedCritiques = bundleCritiques.map((e: AnyObj) => {
+    const eSuperseded = typeof e.superseded_by === "string" && e.superseded_by.length > 0;
+    const eReviewer = String(e.reviewer ?? "tool-code-reviewer");
+    if (e.id === critique.id && !eSuperseded && eReviewer === critique.reviewer) return { ...e, superseded_by: _supersedeMarker };
+    return e;
+  });
+  const critiques = [..._mergedCritiques, critique];
   // Phase 4c: build bundle from raw inputs; read checks from trust.bundle (evidence.json no longer written).
-  const _critiqueEvChecks: AnyObj[] = checksFromBundle(dir, _dctCritique);
+  const _critiqueEvChecks: AnyObj[] = checksFromBundle(dir);
   const _critiqueAccCriteria: AnyObj[] = Array.isArray(loadJson(path.join(dir, "acceptance.json")).criteria) ? loadJson(path.join(dir, "acceptance.json")).criteria : [];
   assertBundleWritten(await writeTrustBundle(dir, slug, critique.reviewed_at, _critiqueEvChecks, _critiqueAccCriteria, critiques));
   return 0;
@@ -2242,45 +2280,49 @@ async function recordLearning(p: ReturnType<typeof parseArgs>): Promise<number> 
   writeJson(path.join(dir, "learning.json"), { ...sidecarBase(slug), status, updated_at: timestamp, records });
   writeState(dir, slug, "accepted", "learning", timestamp, opt(p, "summary"));
   // Phase 4c: build bundle from raw inputs; read checks/critiques from trust.bundle (bespoke sidecars no longer written).
-  // ADR 0016 Step 0: pass declaredClaimTypes so declared builder.* claims survive the round-trip.
-  const _dctLearning = declaredClaimTypesFor(dir);
-  const _learningChecks: AnyObj[] = checksFromBundle(dir, _dctLearning);
+  // #268/#344: declared builder.* claims survive the round-trip via their authoritative origin stamp.
+  const _learningChecks: AnyObj[] = checksFromBundle(dir);
   const _learningCriteria: AnyObj[] = Array.isArray(loadJson(path.join(dir, "acceptance.json")).criteria) ? loadJson(path.join(dir, "acceptance.json")).criteria : [];
-  const _learningCritiques: AnyObj[] = critiquesFromBundle(dir, _dctLearning);
+  const _learningCritiques: AnyObj[] = critiquesFromBundle(dir);
   assertBundleWritten(await writeTrustBundle(dir, slug, timestamp, _learningChecks, _learningCriteria, _learningCritiques));
   return 0;
 }
-function evidenceClean(dir: string, declaredClaimTypes: Set<string> = new Set()): boolean {
-  // Phase 4c: read from trust.bundle (sole verification artifact); fall back to evidence.json for legacy sessions.
-  // ADR 0016 Step 0: declaredClaimTypes broadens the filter to include kit-typed check claims
-  // (e.g. builder.verify.tests) in addition to workflow.check.* for FlowDefinition-driven sessions.
+function evidenceClean(dir: string): boolean {
+  // Phase 4c: read from trust.bundle (sole verification artifact); fall back to evidence.json for
+  // legacy (pre-bundle-era) sessions that never wrote a trust.bundle at all — unrelated to origin
+  // stamping. When a trust.bundle IS present, every claim must be stamped (requireStampedClaim);
+  // there is no claimType-derivation fallback for an unstamped claim (#268/#344).
   const bundle = loadJson(path.join(dir, "trust.bundle"));
   if (Array.isArray(bundle.claims)) {
-    const checkClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => {
-      if (!c) return false;
-      const ct = String(c.claimType || "");
-      return ct.startsWith("workflow.check.") || declaredClaimTypes.has(ct);
-    });
+    for (const c of bundle.claims) requireStampedClaim(c, dir);
+    const checkClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => c && claimOrigin(c) === "check");
     if (checkClaims.length === 0) return false;
     return checkClaims.every((c: AnyObj) => {
       const v = String(c.value || "");
       return v === "pass" || v === "skip";
     });
   }
-  // Legacy fallback: evidence.json
+  // Legacy fallback: evidence.json (pre-bundle-era sessions with no trust.bundle at all)
   const e = loadJson(path.join(dir, "evidence.json"), {});
   return e.verdict === "pass" && Array.isArray(e.checks) && e.checks.length > 0 && e.checks.every((c: AnyObj) => {
     if (!(c.status === "pass" || c.status === "skip")) return false;
     return !Array.isArray(c.standard_refs) || c.standard_refs.every((r: AnyObj) => ["junit", "sarif", "coverage", "veritas"].includes(r.standard));
   });
 }
-function critiqueClean(dir: string, declaredClaimTypes: Set<string> = new Set()): boolean {
-  // Phase 4c: read from trust.bundle (sole verification artifact); fall back to critique.json for legacy sessions.
-  // ADR 0016 Step 0: declaredClaimTypes broadens the filter to include kit-typed critique claims
-  // (e.g. builder.verify.policy-compliance) in addition to workflow.critique.review.
+function critiqueClean(dir: string): boolean {
+  // Phase 4c: read from trust.bundle (sole verification artifact); fall back to critique.json for
+  // legacy (pre-bundle-era) sessions — unrelated to origin stamping. When a trust.bundle IS
+  // present, every claim must be stamped (requireStampedClaim); no claimType-derivation fallback
+  // for an unstamped claim (#268/#344).
   const bundle = loadJson(path.join(dir, "trust.bundle"));
   if (Array.isArray(bundle.claims)) {
-    const critiqueClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => c && (c.claimType === "workflow.critique.review" || declaredClaimTypes.has(c.claimType)));
+    for (const c of bundle.claims) requireStampedClaim(c, dir);
+    const critiqueClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => {
+      if (!c) return false;
+      // #267/#282: superseded history is not evaluated for cleanliness.
+      if (c.metadata && typeof c.metadata === "object" && (c.metadata as AnyObj).superseded_by) return false;
+      return claimOrigin(c) === "critique";
+    });
     if (critiqueClaims.length === 0) return false; // no critique written yet
     return critiqueClaims.every((c: AnyObj) => {
       const v = String(c.value || "");
@@ -2314,10 +2356,9 @@ async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
     const checks = opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json")));
     if (checks.some((c) => c.status !== "pass" && c.status !== "skip")) die("clean evidence requires all non-skipped checks to pass");
     // Phase 4c: evidence check reads from trust.bundle (sole verification artifact); legacy evidence.json fallback in evidenceClean.
-    // ADR 0016 Step 0: pass declaredClaimTypes so builder.* check/critique claims count as clean evidence.
-    const _dctDogfood = declaredClaimTypesFor(dir);
-    const _hasBundleEvidence = fs.existsSync(path.join(dir, "trust.bundle")) && evidenceClean(dir, _dctDogfood);
-    const _hasLegacyEvidence = fs.existsSync(path.join(dir, "evidence.json")) && evidenceClean(dir, _dctDogfood);
+    // #268/#344: builder.* check/critique claims count as clean evidence via their authoritative origin stamp.
+    const _hasBundleEvidence = fs.existsSync(path.join(dir, "trust.bundle")) && evidenceClean(dir);
+    const _hasLegacyEvidence = fs.existsSync(path.join(dir, "evidence.json")) && evidenceClean(dir);
     if (!_hasBundleEvidence && !_hasLegacyEvidence && fs.existsSync(path.join(dir, "trust.bundle"))) die("cannot mark clean without passing evidence");
     if (!_hasBundleEvidence && !_hasLegacyEvidence && !fs.existsSync(path.join(dir, "trust.bundle")) && fs.existsSync(path.join(dir, "evidence.json"))) die("cannot mark clean without passing evidence");
     if (!_hasBundleEvidence && !_hasLegacyEvidence && !fs.existsSync(path.join(dir, "trust.bundle")) && !fs.existsSync(path.join(dir, "evidence.json")) && checks.length === 0) die("cannot mark clean without passing evidence");
@@ -2325,9 +2366,9 @@ async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
       const newCritiqueVerdict = opt(p, "critique-verdict", "pass");
       for (const value of opts(p, "finding-json")) normalizeFinding(parseJson(value, "--finding-json"));
       if (newCritiqueVerdict !== "pass") die(opt(p, "release-decision") ? "requires clean critique" : "requires clean critique before recording pass evidence");
-      if (!opt(p, "critique-id") && !critiqueClean(dir, _dctDogfood)) die("requires passing critique");
+      if (!opt(p, "critique-id") && !critiqueClean(dir)) die("requires passing critique");
       // Phase 4c: if existing state has a dirty critique (in bundle or legacy critique.json), block even when adding a new critique-id.
-      if (!critiqueClean(dir, _dctDogfood) && (fs.existsSync(path.join(dir, "trust.bundle")) || fs.existsSync(path.join(dir, "critique.json")))) die(opt(p, "release-decision") ? "requires clean critique" : "requires clean critique before recording pass evidence");
+      if (!critiqueClean(dir) && (fs.existsSync(path.join(dir, "trust.bundle")) || fs.existsSync(path.join(dir, "critique.json")))) die(opt(p, "release-decision") ? "requires clean critique" : "requires clean critique before recording pass evidence");
     }
   }
   const learningRecords = opts(p, "learning-record-json").map((v) => normalizeLearning(parseJson(v, "--learning-record-json"), opt(p, "timestamp", now())));

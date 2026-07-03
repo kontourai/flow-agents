@@ -1,5 +1,7 @@
 # Verification Contract
 
+> Read [`context/contracts/standing-directives.md`](standing-directives.md) — ratified owner directives that override default engineering conservatism.
+
 Verification is report-only. It proves whether the implementation satisfies the plan, the Definition Of Done, and the original user outcome.
 
 ## Required Inputs

@@ -1,5 +1,7 @@
 # Execution Contract
 
+> Read [`context/contracts/standing-directives.md`](standing-directives.md) — ratified owner directives that override default engineering conservatism.
+
 Execution turns an approved plan artifact into code and local evidence while preserving parallel safety.
 
 ## Required Inputs

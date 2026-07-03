@@ -1,0 +1,27 @@
+{
+  "number": 4242,
+  "state": "OPEN",
+  "assignees": [
+    {
+      "login": "flow-agents-fixture-bot"
+    }
+  ],
+  "labels": [
+    {
+      "name": "agent:claimed"
+    },
+    {
+      "name": "kind:enhancement"
+    }
+  ],
+  "comments": [
+    {
+      "id": 90001,
+      "body": "An unrelated human comment on this fixture issue."
+    },
+    {
+      "id": 90002,
+      "body": "<!-- flow-agents:assignment-claim -->\n**Assignment claim** — Claimed by an automated agent session (claude-code).\n\n- actor: `claude-code:fixture-actor-a-session:fixture-host`\n- claimed_at: 2026-06-01T12:00:00Z\n- ttl_seconds: 1800\n- branch: `agent/claude-code-fixture-actor-a-session-fixture-host/flow-agents-4242`\n\n```json\n{\n  \"schema_version\": \"1.0\",\n  \"role\": \"AssignmentClaimRecord\",\n  \"subject_id\": \"kontourai/flow-agents#4242\",\n  \"actor\": {\n    \"runtime\": \"claude-code\",\n    \"session_id\": \"fixture-actor-a-session\",\n    \"host\": \"fixture-host\",\n    \"human\": null\n  },\n  \"claimed_at\": \"2026-06-01T12:00:00Z\",\n  \"ttl_seconds\": 1800,\n  \"branch\": \"agent/claude-code-fixture-actor-a-session-fixture-host/flow-agents-4242\",\n  \"artifact_dir\": \".kontourai/flow-agents/flow-agents-4242\",\n  \"status\": \"claimed\"\n}\n```"
+    }
+  ]
+}

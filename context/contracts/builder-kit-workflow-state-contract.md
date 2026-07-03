@@ -1,5 +1,7 @@
 # Builder Kit Workflow State Contract
 
+> Read [`context/contracts/standing-directives.md`](standing-directives.md) — ratified owner directives that override default engineering conservatism.
+
 This contract defines the durable routing state for Builder Kit build-flow pickup and resume. It keeps `state.json` limited to canonical Flow Agents workflow routing and stores rich pickup decisions in a documented Probe record sidecar referenced by `state.json`, `handoff.json`, and the session artifact.
 
 Builder Kit owns product-level build-flow coordination. Flow Agents owns the workflow harness, artifact conventions, primitive execution, and evidence gates. Flow remains the owner of Flow gate semantics. Builder Kit contracts may route to Flow Agents primitives, but must not redefine pass, fail, approval, or release authority semantics.
