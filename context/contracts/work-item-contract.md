@@ -1,5 +1,7 @@
 # Work Item Contract
 
+> Read [`context/contracts/standing-directives.md`](standing-directives.md) — ratified owner directives that override default engineering conservatism.
+
 This contract defines the provider-neutral vocabulary for selecting, planning, and handing off backlog work. It is the source shape for provider-backed workflows such as `pull-work`; provider-specific adapters map into this model without making GitHub, Jira, Linear, or any other provider the generic language.
 
 ## Provider Roles

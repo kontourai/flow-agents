@@ -1,5 +1,7 @@
 # Delivery Contract
 
+> Read [`context/contracts/standing-directives.md`](standing-directives.md) — ratified owner directives that override default engineering conservatism.
+
 Delivery chains planning, execution, review, verification, Goal Fit, and final acceptance until the user-facing goal is genuinely handled.
 
 ## Workflow

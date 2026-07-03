@@ -1,5 +1,7 @@
 # Workflow Artifact Contract
 
+> Read [`context/contracts/standing-directives.md`](standing-directives.md) — ratified owner directives that override default engineering conservatism.
+
 Workflow artifacts are the resumable local handoff surface between orchestrators, workers, verifiers, hooks, evals, and future sessions.
 
 ## Artifact Root
