@@ -1,0 +1,6 @@
+{
+  "runtime": "claude-code",
+  "session_id": "eval-actor-a-session",
+  "host": "eval-host",
+  "human": null
+}

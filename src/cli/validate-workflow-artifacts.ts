@@ -395,7 +395,11 @@ function validateSidecarGroup(inputs: string[], markdown: string[], requireSidec
         if (bundleValue) {
           const claims = Array.isArray(bundleValue.claims) ? bundleValue.claims : [];
           const critiqueClaims = claims.filter((c: any) => c && c.claimType === "workflow.critique.review");
-          if (critiqueClaims.some((c: any) => c.value === "fail" || c.status === "disputed")) issues.push({ path: trustBundlePath, message: "required critique must pass" });
+          // #282: a historical fail/disputed critique that has been explicitly superseded by a later
+          // resolving write (metadata.superseded_by) is retained structurally as history and does NOT
+          // block a top-level pass — only a LIVE (non-superseded) fail/disputed critique blocks.
+          const isSuperseded = (c: any) => c && c.metadata && typeof c.metadata === "object" && c.metadata.superseded_by;
+          if (critiqueClaims.some((c: any) => (c.value === "fail" || c.status === "disputed") && !isSuperseded(c))) issues.push({ path: trustBundlePath, message: "required critique must pass" });
         }
       }
       const acceptance = path.join(dir, "acceptance.json");

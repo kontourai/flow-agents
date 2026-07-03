@@ -1,5 +1,7 @@
 # Governance Adapter Contract
 
+> Read [`context/contracts/standing-directives.md`](standing-directives.md) — ratified owner directives that override default engineering conservatism.
+
 Governance adapters let Flow Agents ask an external tool for policy, proof, or trust evidence without baking repo-specific policy into Flow Agents core.
 
 ## Boundary

@@ -1,0 +1,33 @@
+{
+  "$schema": "../../schemas/assignment-provider-settings.schema.json",
+  "schema_version": "1.0",
+  "projects": [
+    {
+      "project": {
+        "repo": {
+          "owner": "kontourai",
+          "name": "flow-agents",
+          "url": "https://github.com/kontourai/flow-agents"
+        }
+      },
+      "provider": {
+        "kind": "github",
+        "repo": {
+          "owner": "kontourai",
+          "name": "flow-agents",
+          "url": "https://github.com/kontourai/flow-agents"
+        },
+        "capabilities": ["assignees", "labels", "comments"]
+      },
+      "policy": {
+        "label_name": "agent:claimed",
+        "claim_comment_marker": "<!-- flow-agents:assignment-claim -->",
+        "human_assignee_policy": {
+          "behavior": "ask_first",
+          "idle_threshold_days": 3
+        },
+        "comment_refresh_on_phase_transition": false
+      }
+    }
+  ]
+}

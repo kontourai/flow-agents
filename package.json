@@ -110,6 +110,8 @@
     "workflow:sidecar": "npm run build --silent && node build/src/cli/workflow-sidecar.js",
     "workflow:validate-artifacts": "npm run build --silent && node build/src/cli/validate-workflow-artifacts.js",
     "effective-backlog-settings": "npm run build --silent && node build/src/cli.js effective-backlog-settings",
+    "assignment-provider": "npm run build --silent && node build/src/cli.js assignment-provider",
+    "effective-assignment-provider-settings": "npm run build --silent && node build/src/cli.js effective-assignment-provider-settings",
     "pull-work-provider": "npm run build --silent && node build/src/cli.js pull-work-provider",
     "publish-change": "npm run build --silent && node build/src/cli.js publish-change",
     "promote-workflow-artifact": "npm run build --silent && node build/src/cli.js promote-workflow-artifact",

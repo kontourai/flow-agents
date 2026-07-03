@@ -1,5 +1,7 @@
 # Decision Registry Contract
 
+> Read [`context/contracts/standing-directives.md`](standing-directives.md) — ratified owner directives that override default engineering conservatism.
+
 Normative contract for the topic-keyed decision registry. This is the source of
 truth for how NEW decisions are recorded in a Kontour repository. Numbered ADRs
 under `docs/adr/` are frozen history and are never written for new decisions

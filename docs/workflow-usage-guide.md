@@ -114,6 +114,12 @@ Expected artifact:
 
 When a repository has backlog provider settings, `pull-work` should use those settings without requiring the user to name the board. In Flow Agents, `npm run effective-backlog-settings -- --repo-path . --json` resolves `kontourai/flow-agents` to GitHub Project `kontourai/1`, so a prompt like `use pull-work` is enough for the configured provider path.
 
+### Assignment ownership: the third provider leg
+
+Beside the `WorkItemProvider` (what work exists) and `BoardProvider` (how it is grouped/ranked) settings above, `pull-work` also reads `AssignmentProvider` settings to decide who currently owns a candidate work item before offering it. This is durable, human-visible ownership — a GitHub issue assignee, an `agent:claimed` label, and a versioned machine-readable claim comment (or, for tracker-less repos and evals, an equivalent local JSON record) — joined against the ephemeral liveness presence layer so a crashed session's stale claim never blocks a second session from picking up the same work.
+
+Settings live at `context/settings/assignment-provider-settings.json` (validated by `schemas/assignment-provider-settings.schema.json`), mirroring the same `defaults`/`projects[]` shape as the backlog provider settings above; resolve them with `npm run effective-assignment-provider-settings -- --repo-path . --json`. See `context/contracts/assignment-provider-contract.md` for the full `claim`/`release`/`supersede`/`status`/`list` vocabulary, the assignment ⋈ liveness join table, and the human-assignee ask-first policy.
+
 Direct `pull-work` remains a normal workflow primitive. The Builder Kit build path adds the pickup Probe/design-probe handoff before planning; it does not require Surface/Veritas trust-backed gates and does not replace direct primitive use.
 
 Builder Kit build is the product-level entry point for implementation pickup. In that mode, `pull-work` may guide the next step automatically as `pull-work -> design-probe / pickup-probe`; direct `pull-work` still stops with a `plan-work` handoff unless you ask to continue.

@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flow-agents.dev/schemas/assignment-provider-settings.schema.json",
+  "title": "Flow Agents Assignment Provider Settings",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "schema_version": { "const": "1.0" },
+    "defaults": { "$ref": "#/$defs/assignment_settings" },
+    "projects": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/project_assignment_settings" }
+    }
+  },
+  "anyOf": [{ "required": ["defaults"] }, { "required": ["projects"] }],
+  "$defs": {
+    "project_assignment_settings": {
+      "allOf": [
+        { "$ref": "#/$defs/assignment_settings" },
+        { "type": "object", "required": ["project"] }
+      ]
+    },
+    "assignment_settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "policy"],
+      "properties": {
+        "project": { "$ref": "#/$defs/project_match" },
+        "provider": { "$ref": "#/$defs/provider" },
+        "policy": { "$ref": "#/$defs/policy" }
+      }
+    },
+    "project_match": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo"],
+      "properties": {
+        "repo": { "$ref": "#/$defs/repo" },
+        "paths": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "provider": {
+      "oneOf": [
+        { "$ref": "#/$defs/github_provider" },
+        { "$ref": "#/$defs/local_file_provider" }
+      ]
+    },
+    "github_provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "repo", "capabilities"],
+      "properties": {
+        "kind": { "const": "github" },
+        "repo": { "$ref": "#/$defs/repo" },
+        "capabilities": { "$ref": "#/$defs/capabilities" }
+      }
+    },
+    "local_file_provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "capabilities"],
+      "properties": {
+        "kind": { "const": "local-file" },
+        "capabilities": { "$ref": "#/$defs/capabilities" }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label_name", "claim_comment_marker", "human_assignee_policy"],
+      "properties": {
+        "label_name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Label attached to a claimed subject on providers that support labels. Default: \"agent:claimed\"."
+        },
+        "claim_comment_marker": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Fixed marker used to locate the machine-readable claim comment among human comments. Default: \"<!-- flow-agents:assignment-claim -->\"."
+        },
+        "human_assignee_policy": { "$ref": "#/$defs/human_assignee_policy" },
+        "comment_refresh_on_phase_transition": {
+          "type": "boolean",
+          "description": "Whether an explicit render-claim/render-supersede call at a phase transition also refreshes the claim comment body. Default: false. No new mechanism; this reuses the same render path already built for claim."
+        }
+      }
+    },
+    "human_assignee_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["behavior", "idle_threshold_days"],
+      "properties": {
+        "behavior": {
+          "enum": ["ask_first", "never_reclaim"],
+          "description": "Default: \"ask_first\". A human assignee is never auto-superseded regardless of this value; this knob only governs whether idle human assignments are ever surfaced for possible reclaim confirmation (ask_first) or left untouched (never_reclaim)."
+        },
+        "idle_threshold_days": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Days of no linked activity before an idle human assignment is surfaced for confirmation. Default: 3."
+        }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "enum": ["assignees", "labels", "comments"]
+      },
+      "uniqueItems": true
+    },
+    "repo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["owner", "name"],
+      "properties": {
+        "owner": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "url": { "type": "string" }
+      }
+    }
+  }
+}
