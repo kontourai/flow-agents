@@ -3096,7 +3096,94 @@ async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
     return 0;
   }
 
-  die("liveness action must be one of: claim | heartbeat | release | status | whoami");
+  if (action === "verdict") {
+    // Read-only, lock-free CLI helper (#320 AC1) — mirrors `whoami`'s lock-bypass (see
+    // isLivenessVerdict in main() below): computes {subjectId, winner, losers, reason, holders}
+    // as a PURE function of the shared liveness stream. Among the subject's currently-fresh
+    // claim holders (via the shared `freshHolders` helper — the exact canonical
+    // freshness/grouping/release-handling logic `workflow-steering.js`'s ambient digest already
+    // uses, not a re-derived rule), the holder whose most recent `claim` event has the earliest
+    // `at` wins; an exact-timestamp tie breaks by ascending plain string comparison of actor id
+    // (never locale-aware collation, for cross-machine determinism). Same stream state ⇒ same
+    // verdict, regardless of which actor invokes it — no actor-specific input is read here.
+    if (!subjectId) die("liveness verdict requires a subjectId");
+    const events = readLivenessEvents(root);
+    const nowMs = opt(p, "now") ? Date.parse(opt(p, "now")) : Date.now();
+    const _req = createRequire(import.meta.url);
+    const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/liveness-read.js");
+    const { freshHolders } = _req(helperPath) as { freshHolders: (events: AnyObj[], slug: string, selfActor: string, nowMs: number) => AnyObj[] };
+    // Impossible-sentinel selfActor: real actors are sanitized to [A-Za-z0-9_.-]+ and can never be
+    // empty (enforced on every write path above), so passing "" excludes nothing.
+    const fresh = freshHolders(events, subjectId, "", nowMs);
+    // freshHolders' `lastAt` tracks the group's latest event of ANY type (heartbeat-updated); the
+    // tiebreak instead operates on each holder's most recent `claim`-type event `at` — the
+    // "current claim timestamp", distinct from lastAt.
+    const latestClaimAt = (actor: string): string => {
+      let best = "";
+      for (const e of events) {
+        if (e && e.subjectId === subjectId && e.actor === actor && e.type === "claim" && typeof e.at === "string") {
+          if (!best || e.at > best) best = e.at;
+        }
+      }
+      return best;
+    };
+    const holders: AnyObj[] = fresh
+      .map((h) => ({ actor: String(h.actor), claimAt: latestClaimAt(String(h.actor)) || String(h.lastAt), lastAt: String(h.lastAt), ttlSeconds: Number(h.ttlSeconds) }))
+      .sort((a, b) => (a.claimAt < b.claimAt ? -1 : a.claimAt > b.claimAt ? 1 : a.actor < b.actor ? -1 : a.actor > b.actor ? 1 : 0));
+    let winner: AnyObj | null = null;
+    let losers: AnyObj[] = [];
+    let reason = "no-conflict";
+    if (holders.length >= 2) {
+      winner = holders[0];
+      const tie = holders.filter((h) => h.claimAt === winner!.claimAt).length > 1;
+      reason = tie ? "tie-actor-lexicographic" : "earlier-claim";
+      losers = holders.filter((h) => h.actor !== winner!.actor);
+    }
+    if (p.flags.has("json")) {
+      // #320 fix iteration 1 (sec-HIGH F3): `winner`/`losers`/`holders` carry raw actor/claimAt/
+      // lastAt strings sourced straight from the multi-writer append-only liveness/events.jsonl
+      // stream (see stripControlCharsForDisplay's header above — any process can append a
+      // hostile line, bypassing the CLI write-side sanitizeSegment entirely). The pull-work
+      // SKILL.md's Post-Claim Conflict Re-check instructs an LLM to read `winner.actor` /
+      // `losers[].actor` straight out of THIS `--json` output into its own context — a second,
+      // LLM-facing injection path alongside the mid-turn conflict hook (liveness-heartbeat.js's
+      // computeConflict). Build a sanitized COPY for JSON emission only: control-char strip
+      // (matching the text branch's existing stripControlCharsForDisplay treatment below) plus a
+      // 64-char cap (matching sanitizeSegment's cap on the write side) on actor/claimAt/lastAt.
+      // `reason`/`subjectId`/`ttlSeconds` are left as-is (enum/number, never free text). Never
+      // mutates `result`/`holders`/`winner`/`losers` themselves — the text branch below still
+      // needs the untouched originals for its own per-line rendering, and winner/loser identity
+      // (already sanitizeSegment-clean for legitimate actors) is unaffected, so the loser-release
+      // contract still works.
+      const sanitizeVerdictHolderForJson = (h: AnyObj | null): AnyObj | null =>
+        h
+          ? {
+              ...h,
+              actor: stripControlCharsForDisplay(h.actor).slice(0, 64),
+              claimAt: stripControlCharsForDisplay(h.claimAt).slice(0, 64),
+              lastAt: stripControlCharsForDisplay(h.lastAt).slice(0, 64),
+            }
+          : h;
+      const jsonResult = {
+        subjectId,
+        winner: sanitizeVerdictHolderForJson(winner),
+        losers: losers.map((l) => sanitizeVerdictHolderForJson(l)),
+        reason,
+        holders: holders.map((h) => sanitizeVerdictHolderForJson(h)),
+      };
+      console.log(JSON.stringify(jsonResult));
+      return 0;
+    }
+    for (const h of holders) {
+      const tag = winner && h.actor === (winner as AnyObj).actor ? "WINNER" : (holders.length >= 2 ? "LOSER" : "HOLDER");
+      console.log(`${stripControlCharsForDisplay(h.actor)}\tclaimAt=${stripControlCharsForDisplay(h.claimAt)}\t${tag}`);
+    }
+    if (winner) console.log(`WINNER: ${stripControlCharsForDisplay((winner as AnyObj).actor)}`);
+    for (const l of losers) console.log(`LOSER: ${stripControlCharsForDisplay(l.actor)}`);
+    return 0;
+  }
+
+  die("liveness action must be one of: claim | heartbeat | release | status | whoami | verdict");
   return 1;
 }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3283,9 +3370,13 @@ async function main(): Promise<number> {
   // keeps its pre-existing lock behavior unchanged (out of scope for this fix — see fix-plan
   // iteration 1, F1), and `liveness claim` / `heartbeat` / `release` (write paths) are untouched.
   const isLivenessWhoami = p.command === "liveness" && p.positional[0] === "whoami";
-  const lockRoot = (["ensure-session", "current", "dogfood-pass", "liveness"].includes(p.command) && !isLivenessWhoami)
+  // #320 AC1: `liveness verdict` is read-only and lock-free, exactly like `whoami` above — it
+  // must never acquire the workflow-sidecar lock. Same bypass shape, scoped to the `verdict`
+  // action only; `liveness status` (also a read path) keeps its pre-existing lock behavior.
+  const isLivenessVerdict = p.command === "liveness" && p.positional[0] === "verdict";
+  const lockRoot = (["ensure-session", "current", "dogfood-pass", "liveness"].includes(p.command) && !isLivenessWhoami && !isLivenessVerdict)
     ? (opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : (p.command === "ensure-session" ? flowAgentsArtifactRoot() : defaultArtifactRootForRead()))
-    : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.command === "claim" ? (p.positional[1] ? path.resolve(p.positional[1]) : "") : p.command === "resolve-slug" ? "" : isLivenessWhoami ? "" : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
+    : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.command === "claim" ? (p.positional[1] ? path.resolve(p.positional[1]) : "") : p.command === "resolve-slug" ? "" : (isLivenessWhoami || isLivenessVerdict) ? "" : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
   return withLock(lockRoot, ["ensure-session", "record-agent-event", "dogfood-pass"].includes(p.command), p.command, () => {
     switch (p.command) {
       case "ensure-session": return ensureSession(p);

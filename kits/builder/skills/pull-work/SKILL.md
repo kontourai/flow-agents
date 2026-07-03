@@ -247,7 +247,20 @@ npm run workflow:sidecar -- liveness status --json --subject <subjectId>
 
 If another actor's fresh (`verified`) claim now coexists with this session's own just-emitted claim on the same subject — a double-hold, per ADR 0012 §4 ("a false-stale double-hold (two fresh claims on one subject) is detected ... via Hachure `conflictRules`/`conflictedClaims`, not prevented") — surface the conflict prominently in the user-facing output and instruct the user to coordinate before proceeding; do not silently continue as if the selection were exclusive. Record the detected conflict in `liveness_claim`'s `post_claim_conflict` field.
 
-Honesty note: this re-check narrows, but does not close, the read-then-write race between the preflight's read and the claim's write. The exclusion guarantee this slice provides is advisory best-effort plus this post-claim detection — not true mutual exclusion. True mutual exclusion arrives with the provider assignment lease (#290) and the `verify-hold` publish gate (#293).
+When a double-hold is detected, immediately run the deterministic tiebreaker using the same pinned `self_actor` and the same `subjectId` already in scope:
+
+```bash
+npm run workflow:sidecar -- liveness verdict <subjectId> --json
+```
+
+`liveness verdict` is a read-only, lock-free CLI action that computes `{subjectId, winner, losers, reason, holders}` as a pure function of the shared liveness stream: among the subject's currently-fresh claim holders, the one whose current `claim` event has the earliest `at` wins; an exact-timestamp tie breaks by ascending actor-id string comparison (`reason: "tie-actor-lexicographic"`) — the SAME verdict for the SAME stream state regardless of which actor invokes it.
+
+Branch on the returned `winner.actor`:
+
+- If `winner.actor !== self_actor`, this session is the loser: immediately run `npm run workflow:sidecar -- liveness release <subjectId> --actor <self_actor>`, extend `post_claim_conflict` with `{verdict_reason, winner_actor, conceded: true}`, and return to `### 3. Select Work` to reselect within the same `pull-work` pass — excluding the just-released subject — before any handoff to `plan-work`.
+- If `winner.actor === self_actor`, this session wins: record the verdict for transparency (`{verdict_reason, winner_actor: self_actor, conceded: false}`) in `post_claim_conflict` and proceed normally; do not release.
+
+Honesty note: this re-check narrows, but does not close, the read-then-write race between the preflight's read and the claim's write. The verdict-and-release loop above closes the "detected but advisory-only" gap ADR 0012 §4 names for THIS session's own double-hold — the loser deterministically concedes and re-selects within the same pass, a new convergence guarantee this slice adds — but it still does not provide true mutual exclusion across the read-then-write race window itself; that residual is unchanged from before. True mutual exclusion arrives with the provider assignment lease (#290) and the `verify-hold` publish gate (#293).
 
 ### 4. Anchor Check
 

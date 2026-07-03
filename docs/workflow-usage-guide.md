@@ -668,6 +668,34 @@ changes a wrapper's exit code. It also does not read or depend on `TELEMETRY_ENA
 disabling telemetry does not disable liveness heartbeats, and vice versa; the two are
 independent, sibling concerns.
 
+### Overlap detection and correction
+
+Two composable mechanisms (#320) tighten the gap ADR 0012 §4 names — a false-stale
+double-hold is *detected*, not *prevented*, and liveness stays advisory, never a lock: a
+deterministic **tiebreaker CLI** (`liveness verdict`) that lets a losing session
+self-correct within the same `pull-work` pass, and a **mid-turn conflict injection** that
+surfaces another actor's fresh claim on a session's own held subject inside its own
+tool-call context, on the runtimes whose hook contract supports it. Neither mechanism
+mutates GitHub/provider state or introduces a new state file (ADR 0012 §5); each closes
+one of the cross-cutting liveness touchpoints ADR 0021 §3 lists, without implementing
+that ADR's still-Draft takeover/supersede or publish-gate slices.
+
+The table below documents the full selection/mid-flight/publish latency budget — where a
+double-hold can occur, what detects it, what corrects it, and the typical latency before
+correction happens:
+
+| Window | What can go wrong | Detector | Corrector | Typical latency |
+| --- | --- | --- | --- | --- |
+| **Selection** | Two sessions both select and claim the same subject in the same narrow read-then-write window (#166). | `pull-work`'s preflight (`### 1a. Liveness Selection Preflight`) plus its post-claim re-check (`### Post-Claim Conflict Re-check`), both reading `liveness status`. | `liveness verdict` computes the deterministic winner; the losing session runs `liveness release` and returns to `### 3. Select Work` to reselect in the same pass (#320). | One `pull-work` pass — seconds. |
+| **Mid-flight** | After selection, another actor claims the same subject while this session is mid-execution, before its next natural checkpoint. | The tool-activity heartbeat's bounded tail read (#288), extended to also run the conflict check on the same in-memory buffer, zero added I/O (#320). | Claude Code and Codex: mid-turn hook feedback (`hookSpecificOutput.additionalContext`) surfaced on the very next tool call. opencode and pi: a stderr diagnostic only today (their generated plugin/extension does not consume telemetry-wrapper stdout — a disclosed gap, tracked in #333, not closed by this issue); all four runtimes still fall back to the pre-existing next-turn `workflow-steering.js` `[LIVENESS WARNING: ...]` digest. | Claude Code/Codex: next tool call. opencode/pi: next `SessionStart` or a manual check, plus the stderr diagnostic at the time of the conflicting tool call. |
+| **Publish** | Two sessions both believe they hold exclusive claim at the moment of publish (merge/release). | Not yet implemented. | Not yet implemented — the `verify-hold` publish gate (ADR 0021 §3, tracked as #293). | Would be blocking, at publish time. |
+
+The Publish row is **not implemented by this issue** — it is named here so the table is
+read as an honest latency-budget map, not mistaken for a claim that overlap detection is
+fully closed end-to-end. See [ADR 0012](adr/0012-agent-coordination-as-liveness-claims.md)
+§4 and [ADR 0021](adr/0021-assignment-leases-and-stale-claim-takeover.md) §3 for the
+underlying design rationale.
+
 ### Actor identity and liveness writes
 
 Liveness claims/heartbeats/releases are attributed to a runtime-agnostic **actor struct**

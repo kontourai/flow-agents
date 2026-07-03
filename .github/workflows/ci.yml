@@ -282,6 +282,14 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check pull-work-liveness-preflight-integration
 
+      - name: Liveness verdict integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check liveness-verdict-integration
+
+      - name: Liveness conflict injection integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check liveness-conflict-injection-integration
+
       - name: Veritas governance kit integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check veritas-governance-kit-integration
