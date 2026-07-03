@@ -1,27 +1,31 @@
 {
   "schema_version": "1.0",
-  "slug": "decision-registry-contract",
+  "slug": "promote-gate",
   "work_item": null,
   "status": "delivered",
   "phase": "release",
-  "sealed_at": "2026-07-03T04:56:25Z",
-  "commit_sha": "739575c8f5f43a1f056982201cddaae699fe6409",
+  "sealed_at": "2026-07-03T05:26:16Z",
+  "commit_sha": "d1bf8a30c775b15bcdedd167446617c496ae5cfa",
   "checkpoint": {
-    "asOf": "2026-07-03T04:56:25.688Z",
+    "asOf": "2026-07-03T05:26:16.836Z",
     "statusByClaimId": {
-      "decision-registry-contract-decision-registry-validator.flow-agents-workflow.npm-run-check-decisions-validates-the-pilot-topic-file-refuses-secret-shaped-evidence-unknown-status-and-dangling-tombstones-and-asserts-the-generated-index-is-current-wired-into-the-required-source-and-static-ci-lane": "verified",
-      "decision-registry-contract-ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails.flow-agents-workflow.ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails": "verified",
-      "decision-registry-contract-ac2-index-regeneration-is-idempotent-and-diff-clean.flow-agents-workflow.ac2-index-regeneration-is-idempotent-and-diff-clean": "verified",
-      "decision-registry-contract-ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable.flow-agents-workflow.ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable": "verified",
-      "decision-registry-contract-ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples.flow-agents-workflow.ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples": "verified"
+      "promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic": "verified",
+      "promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes": "verified",
+      "promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary": "verified",
+      "promote-gate-ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy.flow-agents-workflow.ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy": "proposed",
+      "promote-gate-ac2-promoted-session-archives-cleanly-evidence-refs-resolve.flow-agents-workflow.ac2-promoted-session-archives-cleanly-evidence-refs-resolve": "proposed",
+      "promote-gate-ac3-explicit-no-residue-promotion-archives-cleanly-with-reason.flow-agents-workflow.ac3-explicit-no-residue-promotion-archives-cleanly-with-reason": "proposed",
+      "promote-gate-review.flow-agents-workflow.promote-gate-implementation-reviewed-session-local-claim-shape-gate-classification-tests-green": "verified"
     },
-    "throughEventCreatedAt": "2026-07-03T04:55:49Z",
+    "throughEventCreatedAt": "2026-07-03T05:25:54Z",
     "throughEventCreatedAtByClaimId": {
-      "decision-registry-contract-decision-registry-validator.flow-agents-workflow.npm-run-check-decisions-validates-the-pilot-topic-file-refuses-secret-shaped-evidence-unknown-status-and-dangling-tombstones-and-asserts-the-generated-index-is-current-wired-into-the-required-source-and-static-ci-lane": "2026-07-03T04:55:49Z",
-      "decision-registry-contract-ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails.flow-agents-workflow.ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails": "2026-07-03T04:55:49Z",
-      "decision-registry-contract-ac2-index-regeneration-is-idempotent-and-diff-clean.flow-agents-workflow.ac2-index-regeneration-is-idempotent-and-diff-clean": "2026-07-03T04:55:49Z",
-      "decision-registry-contract-ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable.flow-agents-workflow.ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable": "2026-07-03T04:55:49Z",
-      "decision-registry-contract-ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples.flow-agents-workflow.ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples": "2026-07-03T04:55:49Z"
+      "promote-gate-decisions.flow-agents-workflow.decision-registry-validates-the-promotion-gate-topic": "2026-07-03T05:25:54Z",
+      "promote-gate-cleanup-audit.flow-agents-workflow.cleanup-audit-promote-then-archive-gate-integration-passes": "2026-07-03T05:25:54Z",
+      "promote-gate-promotion.flow-agents-workflow.promoted-the-promote-then-archive-gate-decision-lifecycle-doc-vocabulary": "2026-07-03T05:25:54Z",
+      "promote-gate-ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy.flow-agents-workflow.ac1-unpromoted-delivered-session-archive-refused-with-promote-remedy": null,
+      "promote-gate-ac2-promoted-session-archives-cleanly-evidence-refs-resolve.flow-agents-workflow.ac2-promoted-session-archives-cleanly-evidence-refs-resolve": null,
+      "promote-gate-ac3-explicit-no-residue-promotion-archives-cleanly-with-reason.flow-agents-workflow.ac3-explicit-no-residue-promotion-archives-cleanly-with-reason": null,
+      "promote-gate-review.flow-agents-workflow.promote-gate-implementation-reviewed-session-local-claim-shape-gate-classification-tests-green": "2026-07-03T05:25:54Z"
     },
     "statusFunctionVersion": "2"
   }

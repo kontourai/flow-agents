@@ -183,6 +183,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_workflow_artifact_cleanup_audit.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_promote_gate.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_fixture_retirement_audit.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_publish_change_helper.sh" || result=1
@@ -194,6 +196,12 @@ run_integration() {
   bash "$EVAL_DIR/integration/test_actor_identity.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_liveness_heartbeat.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_pull_work_liveness_preflight.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_liveness_verdict.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_liveness_conflict_injection.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_veritas_governance_adapter.sh" || result=1
   echo ""

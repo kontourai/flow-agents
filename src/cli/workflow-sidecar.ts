@@ -50,6 +50,15 @@ function workItemSlug(ref: string): string {
   return slugify(`${owner}-${repo}-${id}`, "work-item");
 }
 
+/** Pure, lock-free, side-effect-free CLI wrapper around workItemSlug() — the single source of
+ * truth for the deterministic subjectId/session-directory-name slug. Named resolveSlugCmd (not
+ * resolveSlug) to avoid colliding with any future export named resolveSlug. */
+function resolveSlugCmd(p: ReturnType<typeof parseArgs>): number {
+  const ref = p.positional[0] || die("resolve-slug requires an owner/repo#id ref");
+  console.log(workItemSlug(ref));
+  return 0;
+}
+
 /** First 6 hex chars of sha256(raw) — a short deterministic disambiguator (#289 F4). Two
  * different raw inputs that both collapse to a segment's "unknown" fallback (e.g. two distinct
  * all-garbage --task-slug values, or two distinct raw actor strings that both resolve
@@ -604,6 +613,12 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const policy = ensurePolicy(legacyClaimType, "high", [evClass.evidenceType]);
     const effectiveStatus = captured ? captured.observedResult : String(check.status ?? "");
     const evStatus = waiver ? "assumed" : checkStatusToEventStatus(effectiveStatus);
+    // Promotion claim marker (issue #312): a `promote` check carries a session-local
+    // _promotion object that must survive onto claim.metadata.promotion so the archive gate
+    // (workflow-artifact-cleanup-audit) and validators can detect the promotion claim without a
+    // new manifest entry. It rides alongside any waiver in a single merged metadata object.
+    const promotionMeta = (check._promotion && typeof check._promotion === "object") ? check._promotion as AnyObj : null;
+    const claimMetadata: AnyObj | null = (waiver || promotionMeta) ? { ...(waiver ? { waiver } : {}), ...(promotionMeta ? { promotion: promotionMeta } : {}) } : null;
 
     const claimEvents: AnyObj[] = [];
     if (evStatus) {
@@ -631,12 +646,12 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     if (declared) {
       // Declared kit-typed claim only — no legacy shadow (ADR 0016 P-d).
       const declaredPolicy = ensurePolicy(declared.claimType, "high", [evClass.evidenceType]);
-      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, ...(waiver ? { metadata: { waiver } } : {}) };
+      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, ...(claimMetadata ? { metadata: claimMetadata } : {}) };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
       claims.push({ ...declaredClaimObj, status: declaredStatus });
     } else {
       // No active flow step — only the workflow.* primary claim (legitimate no-flow fallback path).
-      const claimObj: AnyObj = { id: claimId, subjectType: "workflow-check", subjectId, facet: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id, ...(waiver ? { metadata: { waiver } } : {}) };
+      const claimObj: AnyObj = { id: claimId, subjectType: "workflow-check", subjectId, facet: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id, ...(claimMetadata ? { metadata: claimMetadata } : {}) };
       const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
       claims.push({ ...claimObj, status: derivedStatus });
     }
@@ -1662,6 +1677,97 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   // Log the targeted gate expectation for transparency (goes to stderr only)
   process.stderr.write(`[record-gate-claim] targeting ${activeStep.stepId}/${activeStep.gateId}/${targetExpectation.id} → claimType=${claimType} subjectType=${subjectType}${gateWaiver ? " (WAIVED accepted_gap)" : ""}\n`);
   assertBundleWritten(await writeTrustBundle(dir, slug, ts, [checkNormalized], [], []));
+  return 0;
+}
+
+/**
+ * promote — the promote-then-archive gate (issue #312). Durable-residue extraction is
+ * the archival act: this records WHAT durable residue was promoted WHERE and writes a
+ * PROMOTION CLAIM into the session trust.bundle.
+ *
+ * Claim shape (reconcile-safe by construction): the promotion check is kind="policy",
+ * so classifyEvidence maps it to evidenceType "policy_rule" (session-local, method
+ * "auditability"). It carries NO command / execution.label, so it can NEVER require a
+ * reconcile-manifest entry and can NEVER become a [not-run] / unbacked-command
+ * divergence at CI trust-reconcile. Its status derives to `verified` from that
+ * session-local policy_rule evidence item, so the reconciler classifies it session-local
+ * and accepts it as an ATTESTED claim (exit 0) — never as a test_output claim that must
+ * match the manifest. The _promotion marker rides onto claim.metadata.promotion (see
+ * buildTrustBundle) so the archive gate and validators can detect it without new manifest
+ * entries (R1).
+ *
+ * Modes:
+ *   promote <dir> --evidence-path <p> [--evidence-path <p> ...]
+ *       Records the durable doc paths written (docs/decisions/<slug>.md, CONTEXT.md,
+ *       docs/learnings/*, …). Each path MUST exist on disk at record time — a missing
+ *       path fails loud (no silent empty promotion).
+ *   promote <dir> --none --reason "<why nothing durable>"
+ *       An explicit, auditable no-residue promotion (R3).
+ */
+async function promote(p: ReturnType<typeof parseArgs>): Promise<number> {
+  const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
+  const slug = taskSlugFor(dir, opt(p, "task-slug"));
+  const ts = opt(p, "timestamp", now());
+  const none = p.flags.has("none");
+  const reason = opt(p, "reason");
+  const repoRoot = opt(p, "repo-root") ? path.resolve(opt(p, "repo-root")) : findRepoRootFromDir(dir);
+  const rawPaths = opts(p, "evidence-path");
+
+  if (none) {
+    if (rawPaths.length) die("promote --none records a no-residue claim; do not also pass --evidence-path");
+    if (!reason.trim()) die("promote --none requires --reason \"<why nothing durable was promoted>\"");
+  } else {
+    if (!rawPaths.length) die("promote requires at least one --evidence-path <durable-doc-path> (or --none --reason \"<why>\" for an explicit no-residue promotion)");
+  }
+
+  // Every evidence ref MUST exist on disk at record time (fail loud otherwise). Store
+  // repo-relative paths when the ref lives under the repo, so the claim is portable.
+  const targets: string[] = [];
+  for (const raw of rawPaths) {
+    const abs = path.isAbsolute(raw) ? raw : path.resolve(repoRoot, raw);
+    if (!fs.existsSync(abs)) die(`promote --evidence-path does not exist on disk: ${raw} (resolved: ${abs}). Promotion evidence refs must point at durable docs that were actually written.`);
+    const rel = path.relative(repoRoot, abs);
+    targets.push(rel && !rel.startsWith("..") && !path.isAbsolute(rel) ? rel : raw);
+  }
+
+  const promotionMarker: AnyObj = {
+    schema_version: "1.0",
+    none,
+    ...(none ? { reason } : {}),
+    targets,
+    promoted_at: ts,
+  };
+
+  const summary = opt(p, "summary") || (none
+    ? `Promotion (no durable residue): ${reason}`
+    : `Promoted durable residue: ${targets.join(", ")}`);
+
+  // Session-local promotion check: kind="policy" -> policy_rule evidence, no command.
+  const promotionCheck: AnyObj = { id: "promotion", kind: "policy", status: "pass", summary, _promotion: promotionMarker };
+
+  // Add the promotion claim WITHOUT dropping the session's existing verification
+  // evidence/criteria/critiques (mirror record-critique's merge pattern). Drop any prior
+  // "promotion" check so re-running promote is idempotent rather than duplicating.
+  const _dct = declaredClaimTypesFor(dir);
+  const existingChecks = checksFromBundle(dir, _dct).filter((c) => c.id !== "promotion");
+  const _acc = loadJson(path.join(dir, "acceptance.json"));
+  const criteria: AnyObj[] = Array.isArray(_acc.criteria) ? _acc.criteria : [];
+  const critiques = critiquesFromBundle(dir, _dct);
+  assertBundleWritten(await writeTrustBundle(dir, slug, ts, [...existingChecks, promotionCheck], criteria, critiques));
+
+  // Auditable record of what was promoted where (companion to the trust.bundle claim).
+  writeJson(path.join(dir, "promotion.json"), { ...sidecarBase(slug), ...promotionMarker, summary });
+
+  // Optionally republish so delivery/trust.bundle carries the promotion claim for CI.
+  if (p.flags.has("publish")) {
+    const publishRepoRoot = opt(p, "publish-repo-root") ? path.resolve(opt(p, "publish-repo-root")) : findRepoRootFromDirStrict(dir);
+    await publishDelivery(dir, publishRepoRoot).catch((err: unknown) => {
+      process.stderr.write(`[promote] WARNING: publish-delivery failed: ${err instanceof Error ? err.message : String(err)}\n`);
+    });
+  }
+
+  process.stderr.write(`[promote] recorded ${none ? "no-residue" : targets.length + " durable ref(s)"} promotion claim for ${slug}\n`);
+  printJson({ ok: true, slug, none, targets, promotion_claim: "trust.bundle" });
   return 0;
 }
 
@@ -2902,6 +3008,23 @@ async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
   const subjectId = p.positional[1] || "";
   const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 
+  if (action === "whoami") {
+    // Read-only, lock-free, write-free advisory surface: reuses the identical resolution chain
+    // as the write paths (loadActorIdentityHelper().resolveActor) but deliberately never dies on
+    // an unresolved actor — the enforcement point stays at `liveness claim`, which already dies
+    // loudly (see below). This lets a skill learn "who am I" during a read-only preflight without
+    // emitting a bogus claim first.
+    const helper = loadActorIdentityHelper();
+    const explicitActorRaw = opt(p, "actor", "");
+    const explicitActor = explicitActorRaw ? helper.sanitizeSegment(explicitActorRaw) : "";
+    const resolved = explicitActor
+      ? { actor: explicitActor, source: "explicit-override" }
+      : helper.resolveActor(process.env);
+    if (p.flags.has("json")) { console.log(JSON.stringify(resolved)); return 0; }
+    console.log(`${stripControlCharsForDisplay(resolved.actor || "unresolved")}\t${stripControlCharsForDisplay(resolved.source)}`);
+    return 0;
+  }
+
   if (action === "claim" || action === "heartbeat" || action === "release") {
     // Actor resolution happens only for write actions (F5, #287 fix iteration 1) — "status" is a
     // read path and must not shell out via resolveLivenessActor()/resolveActor().
@@ -2973,7 +3096,94 @@ async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
     return 0;
   }
 
-  die("liveness action must be one of: claim | heartbeat | release | status");
+  if (action === "verdict") {
+    // Read-only, lock-free CLI helper (#320 AC1) — mirrors `whoami`'s lock-bypass (see
+    // isLivenessVerdict in main() below): computes {subjectId, winner, losers, reason, holders}
+    // as a PURE function of the shared liveness stream. Among the subject's currently-fresh
+    // claim holders (via the shared `freshHolders` helper — the exact canonical
+    // freshness/grouping/release-handling logic `workflow-steering.js`'s ambient digest already
+    // uses, not a re-derived rule), the holder whose most recent `claim` event has the earliest
+    // `at` wins; an exact-timestamp tie breaks by ascending plain string comparison of actor id
+    // (never locale-aware collation, for cross-machine determinism). Same stream state ⇒ same
+    // verdict, regardless of which actor invokes it — no actor-specific input is read here.
+    if (!subjectId) die("liveness verdict requires a subjectId");
+    const events = readLivenessEvents(root);
+    const nowMs = opt(p, "now") ? Date.parse(opt(p, "now")) : Date.now();
+    const _req = createRequire(import.meta.url);
+    const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/liveness-read.js");
+    const { freshHolders } = _req(helperPath) as { freshHolders: (events: AnyObj[], slug: string, selfActor: string, nowMs: number) => AnyObj[] };
+    // Impossible-sentinel selfActor: real actors are sanitized to [A-Za-z0-9_.-]+ and can never be
+    // empty (enforced on every write path above), so passing "" excludes nothing.
+    const fresh = freshHolders(events, subjectId, "", nowMs);
+    // freshHolders' `lastAt` tracks the group's latest event of ANY type (heartbeat-updated); the
+    // tiebreak instead operates on each holder's most recent `claim`-type event `at` — the
+    // "current claim timestamp", distinct from lastAt.
+    const latestClaimAt = (actor: string): string => {
+      let best = "";
+      for (const e of events) {
+        if (e && e.subjectId === subjectId && e.actor === actor && e.type === "claim" && typeof e.at === "string") {
+          if (!best || e.at > best) best = e.at;
+        }
+      }
+      return best;
+    };
+    const holders: AnyObj[] = fresh
+      .map((h) => ({ actor: String(h.actor), claimAt: latestClaimAt(String(h.actor)) || String(h.lastAt), lastAt: String(h.lastAt), ttlSeconds: Number(h.ttlSeconds) }))
+      .sort((a, b) => (a.claimAt < b.claimAt ? -1 : a.claimAt > b.claimAt ? 1 : a.actor < b.actor ? -1 : a.actor > b.actor ? 1 : 0));
+    let winner: AnyObj | null = null;
+    let losers: AnyObj[] = [];
+    let reason = "no-conflict";
+    if (holders.length >= 2) {
+      winner = holders[0];
+      const tie = holders.filter((h) => h.claimAt === winner!.claimAt).length > 1;
+      reason = tie ? "tie-actor-lexicographic" : "earlier-claim";
+      losers = holders.filter((h) => h.actor !== winner!.actor);
+    }
+    if (p.flags.has("json")) {
+      // #320 fix iteration 1 (sec-HIGH F3): `winner`/`losers`/`holders` carry raw actor/claimAt/
+      // lastAt strings sourced straight from the multi-writer append-only liveness/events.jsonl
+      // stream (see stripControlCharsForDisplay's header above — any process can append a
+      // hostile line, bypassing the CLI write-side sanitizeSegment entirely). The pull-work
+      // SKILL.md's Post-Claim Conflict Re-check instructs an LLM to read `winner.actor` /
+      // `losers[].actor` straight out of THIS `--json` output into its own context — a second,
+      // LLM-facing injection path alongside the mid-turn conflict hook (liveness-heartbeat.js's
+      // computeConflict). Build a sanitized COPY for JSON emission only: control-char strip
+      // (matching the text branch's existing stripControlCharsForDisplay treatment below) plus a
+      // 64-char cap (matching sanitizeSegment's cap on the write side) on actor/claimAt/lastAt.
+      // `reason`/`subjectId`/`ttlSeconds` are left as-is (enum/number, never free text). Never
+      // mutates `result`/`holders`/`winner`/`losers` themselves — the text branch below still
+      // needs the untouched originals for its own per-line rendering, and winner/loser identity
+      // (already sanitizeSegment-clean for legitimate actors) is unaffected, so the loser-release
+      // contract still works.
+      const sanitizeVerdictHolderForJson = (h: AnyObj | null): AnyObj | null =>
+        h
+          ? {
+              ...h,
+              actor: stripControlCharsForDisplay(h.actor).slice(0, 64),
+              claimAt: stripControlCharsForDisplay(h.claimAt).slice(0, 64),
+              lastAt: stripControlCharsForDisplay(h.lastAt).slice(0, 64),
+            }
+          : h;
+      const jsonResult = {
+        subjectId,
+        winner: sanitizeVerdictHolderForJson(winner),
+        losers: losers.map((l) => sanitizeVerdictHolderForJson(l)),
+        reason,
+        holders: holders.map((h) => sanitizeVerdictHolderForJson(h)),
+      };
+      console.log(JSON.stringify(jsonResult));
+      return 0;
+    }
+    for (const h of holders) {
+      const tag = winner && h.actor === (winner as AnyObj).actor ? "WINNER" : (holders.length >= 2 ? "LOSER" : "HOLDER");
+      console.log(`${stripControlCharsForDisplay(h.actor)}\tclaimAt=${stripControlCharsForDisplay(h.claimAt)}\t${tag}`);
+    }
+    if (winner) console.log(`WINNER: ${stripControlCharsForDisplay((winner as AnyObj).actor)}`);
+    for (const l of losers) console.log(`LOSER: ${stripControlCharsForDisplay(l.actor)}`);
+    return 0;
+  }
+
+  die("liveness action must be one of: claim | heartbeat | release | status | whoami | verdict");
   return 1;
 }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3149,9 +3359,24 @@ Available claim ids:
 async function main(): Promise<number> {
   const p = parseArgs(process.argv.slice(2));
   if (!p.command) die("workflow-sidecar command is required");
-  const lockRoot = ["ensure-session", "current", "dogfood-pass", "liveness"].includes(p.command)
+  // F1 (#166 fix iteration 1): `liveness whoami` is a read-only, lock-free, write-free advisory
+  // surface (see the `action === "whoami"` branch inside `liveness()` above) — it must never
+  // acquire the workflow-sidecar lock, regardless of whether the artifact root already exists on
+  // disk. Without this action-level bypass, `liveness` was blanket-included in the lock-routing
+  // branch below, so `whoami` against an EXISTING artifact root would still resolve a real
+  // lockRoot and go through `withLock`'s mkdir/lockdir path — the opposite of "genuinely
+  // lock-free". This bypass mirrors `resolve-slug`'s existing empty-lockRoot special case
+  // immediately below and is scoped to the `whoami` action only: `liveness status` (a read path)
+  // keeps its pre-existing lock behavior unchanged (out of scope for this fix — see fix-plan
+  // iteration 1, F1), and `liveness claim` / `heartbeat` / `release` (write paths) are untouched.
+  const isLivenessWhoami = p.command === "liveness" && p.positional[0] === "whoami";
+  // #320 AC1: `liveness verdict` is read-only and lock-free, exactly like `whoami` above — it
+  // must never acquire the workflow-sidecar lock. Same bypass shape, scoped to the `verdict`
+  // action only; `liveness status` (also a read path) keeps its pre-existing lock behavior.
+  const isLivenessVerdict = p.command === "liveness" && p.positional[0] === "verdict";
+  const lockRoot = (["ensure-session", "current", "dogfood-pass", "liveness"].includes(p.command) && !isLivenessWhoami && !isLivenessVerdict)
     ? (opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : (p.command === "ensure-session" ? flowAgentsArtifactRoot() : defaultArtifactRootForRead()))
-    : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.command === "claim" ? (p.positional[1] ? path.resolve(p.positional[1]) : "") : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
+    : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.command === "claim" ? (p.positional[1] ? path.resolve(p.positional[1]) : "") : p.command === "resolve-slug" ? "" : (isLivenessWhoami || isLivenessVerdict) ? "" : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
   return withLock(lockRoot, ["ensure-session", "record-agent-event", "dogfood-pass"].includes(p.command), p.command, () => {
     switch (p.command) {
       case "ensure-session": return ensureSession(p);
@@ -3160,6 +3385,7 @@ async function main(): Promise<number> {
       case "init-plan": return initPlan(p);
       case "record-evidence": return recordEvidence(p);
       case "record-gate-claim": return recordGateClaim(p);
+      case "promote": return promote(p);
       case "advance-state": return advanceState(p);
       case "record-critique": return recordCritique(p);
       case "import-critique": return importCritique(p);
@@ -3171,6 +3397,7 @@ async function main(): Promise<number> {
       case "trust-mcp": return trustMcp(p);
       case "liveness": return liveness(p);
       case "claim": return claimLookup(p);
+      case "resolve-slug": return resolveSlugCmd(p);
       case "seal-checkpoint": return sealCheckpoint(p);
       case "publish-delivery": return publishDeliveryCmd(p);
       default: die(`unknown command: ${p.command}`);

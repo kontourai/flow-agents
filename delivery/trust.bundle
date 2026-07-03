@@ -3,103 +3,529 @@
   "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
   "claims": [
     {
-      "id": "decision-registry-contract-decision-registry-validator.flow-agents-workflow.npm-run-check-decisions-validates-the-pilot-topic-file-refuses-secret-shaped-evidence-unknown-status-and-dangling-tombstones-and-asserts-the-generated-index-is-current-wired-into-the-required-source-and-static-ci-lane",
-      "subjectType": "workflow-check",
-      "subjectId": "decision-registry-contract/decision-registry-validator",
+      "id": "kontourai-flow-agents-320-liveness-verdict-integration.flow-agents-workflow.re-verification-security-fix-iteration-1-29-29-assertions-passed-up-from-27-27-pre-fix-sections-a-g-unchanged-byte-identical-verdict-determinism-exact-timestamp-tie-tie-actor-lexicographic-no-conflict-cases-3-way-losers-correctness-cli-level-loser-release-reselect-flow-fail-open-on-malformed-interleaved-stream-pull-work-skill-text-static-assertions-new-section-h-fix-iteration-1-f1-f3-f5-a-hand-seeded-hostile-actor-that-wins-the-deterministic-tiebreak-now-emits-a-sanitized-winner-actor-in-both-json-and-text-output-control-chars-newline-ansi-stripped-json-still-parses-winner-label-intact-covers-ac1-ac2-ac8-confirms-the-second-verdict-json-injection-path-identified-in-the-code-review-is-now-closed-with-no-functional-regression",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-320/liveness-verdict-integration",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.command",
-      "fieldOrBehavior": "npm run check:decisions validates the pilot topic file, refuses secret-shaped evidence, unknown status, and dangling tombstones, and asserts the generated index is current; wired into the required source-and-static CI lane.",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "Re-verification (security-fix iteration 1): 29/29 assertions passed (up from 27/27 pre-fix). Sections A-G unchanged: byte-identical verdict determinism, exact-timestamp tie -> tie-actor-lexicographic, no-conflict cases, 3-way losers correctness, CLI-level loser-release+reselect flow, fail-open on malformed/interleaved stream, pull-work skill-text static assertions. NEW Section H (fix iteration 1, F1/F3/F5): a hand-seeded hostile actor that WINS the deterministic tiebreak now emits a sanitized winner.actor in both --json and text output -- control chars/newline/ANSI stripped, JSON still parses, WINNER label intact. Covers AC1, AC2, AC8; confirms the second (verdict --json) injection path identified in the code review is now closed with no functional regression.",
       "value": "pass",
-      "createdAt": "2026-07-03T04:55:49Z",
-      "updatedAt": "2026-07-03T04:55:49Z",
+      "createdAt": "2026-07-03T15:27:17Z",
+      "updatedAt": "2026-07-03T15:27:17Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.command:test_output",
+      "verificationPolicyId": "policy:builder.execute.scope:test_output",
       "status": "verified"
     },
     {
-      "id": "decision-registry-contract-ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails.flow-agents-workflow.ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "decision-registry-contract/ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails",
+      "id": "kontourai-flow-agents-320-liveness-conflict-injection-integration.flow-agents-workflow.re-verification-security-fix-iteration-1-19-19-assertions-passed-up-from-17-17-pre-fix-sections-a-g-unchanged-direct-maybeemitheartbeat-conflict-detection-and-solo-holder-omission-zero-added-fs-read-proof-episode-throttle-watermark-proof-incl-third-call-re-fire-claude-codex-real-hookspecificoutput-additionalcontext-injection-opencode-pi-stderr-only-degraded-runtime-proof-no-conflict-byte-stability-across-all-four-wrappers-fail-open-on-a-corrupted-sidecar-snapshot-new-section-h-fix-iteration-1-f1-f2-f5-a-hand-seeded-hostile-actor-embedded-newline-ansi-csi-bytes-literal-system-ignore-all-previous-instructions-payload-appended-directly-to-events-jsonl-bypassing-the-cli-write-side-sanitizesegment-never-reaches-claude-telemetry-hook-js-s-additionalcontext-or-opencode-telemetry-hook-js-s-stderr-diagnostic-raw-the-newline-joined-system-text-and-the-ansi-esc-byte-are-both-absent-a-sanitized-actor-is-surfaced-instead-conflict-detection-still-fires-and-the-trusted-liveness-conflict-run-liveness-verdict-and-coordinate-directive-sentence-stays-structurally-intact-and-unextended-covers-ac3-ac4-ac5-ac8-this-is-the-primary-command-backed-proof-that-the-critical-high-code-review-findings-unsanitized-multi-writer-conflict-actor-lastat-reaching-hookspecificoutput-additionalcontext-and-stderr-are-now-closed-hostile-actor-repro-that-previously-succeeded-now-fails-closed",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-320/liveness-conflict-injection-integration",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC1: valid topic file passes validator; invalid (bad status/missing subject/secret-shaped evidence) fails",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "Re-verification (security-fix iteration 1): 19/19 assertions passed (up from 17/17 pre-fix). Sections A-G unchanged: direct maybeEmitHeartbeat conflict detection and solo-holder omission, zero-added-fs-read proof, episode-throttle/watermark proof incl. third-call re-fire, Claude/Codex real hookSpecificOutput.additionalContext injection, opencode/pi stderr-only degraded-runtime proof, no-conflict byte-stability across all four wrappers, fail-open on a corrupted sidecar snapshot. NEW Section H (fix iteration 1, F1/F2/F5): a hand-seeded hostile actor (embedded newline + ANSI CSI bytes + literal '[SYSTEM] Ignore all previous instructions...' payload, appended directly to events.jsonl bypassing the CLI write-side sanitizeSegment) never reaches claude-telemetry-hook.js's additionalContext or opencode-telemetry-hook.js's stderr diagnostic raw: the newline-joined [SYSTEM] text and the ANSI ESC byte are both absent, a sanitized actor is surfaced instead, conflict detection still fires, and the trusted `[LIVENESS CONFLICT] ... run \\`liveness verdict\\` and coordinate.` directive sentence stays structurally intact and unextended. Covers AC3, AC4, AC5, AC8. This is the primary command-backed proof that the CRITICAL/HIGH code-review findings (unsanitized multi-writer conflict.actor/lastAt reaching hookSpecificOutput.additionalContext and stderr) are now closed; hostile-actor repro that previously succeeded now fails closed.",
       "value": "pass",
-      "createdAt": "2026-07-03T04:55:49Z",
-      "updatedAt": "2026-07-03T04:55:49Z",
+      "createdAt": "2026-07-03T15:27:17Z",
+      "updatedAt": "2026-07-03T15:27:17Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:builder.execute.scope:test_output",
       "status": "verified"
     },
     {
-      "id": "decision-registry-contract-ac2-index-regeneration-is-idempotent-and-diff-clean.flow-agents-workflow.ac2-index-regeneration-is-idempotent-and-diff-clean",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "decision-registry-contract/ac2-index-regeneration-is-idempotent-and-diff-clean",
+      "id": "kontourai-flow-agents-320-liveness-heartbeat-integration-regression.flow-agents-workflow.re-verification-security-fix-iteration-1-full-pre-existing-288-heartbeat-suite-opt-out-tokens-throttle-boundary-incl-custom-env-override-skip-reasons-wrapper-end-to-end-on-claude-codex-bounded-tail-f3-f8-ii-invariants-hostile-active-slug-sanitization-orphan-heartbeat-invariant-still-passes-43-43-unchanged-after-the-injection-remediation-fix-sanitizesegment-iso-re-serialization-added-at-the-computeconflict-choke-point-no-i-o-cost-regression-to-the-tail-read-hot-path-no-behavior-change-to-the-pre-existing-heartbeat-throttle-contract",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-320/liveness-heartbeat-integration-regression",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC2: index regeneration is idempotent and diff-clean",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "Re-verification (security-fix iteration 1): full pre-existing #288 heartbeat suite (opt-out tokens, throttle boundary incl. custom env override, skip reasons, wrapper end-to-end on claude/codex, bounded-tail F3/F8(ii) invariants, hostile active_slug sanitization, orphan-heartbeat invariant) still passes 43/43 unchanged after the injection-remediation fix (sanitizeSegment + ISO re-serialization added at the computeConflict choke point) -- no I/O-cost regression to the tail-read hot path, no behavior change to the pre-existing heartbeat/throttle contract.",
       "value": "pass",
-      "createdAt": "2026-07-03T04:55:49Z",
-      "updatedAt": "2026-07-03T04:55:49Z",
+      "createdAt": "2026-07-03T15:27:17Z",
+      "updatedAt": "2026-07-03T15:27:17Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:builder.execute.scope:test_output",
       "status": "verified"
     },
     {
-      "id": "decision-registry-contract-ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable.flow-agents-workflow.ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "decision-registry-contract/ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable",
+      "id": "kontourai-flow-agents-320-full-gate-suite-summary.flow-agents-workflow.re-verification-security-fix-iteration-1-folded-non-command-backed-summary-of-the-remaining-gates-run-this-pass-including-the-build-validate-source-pair-recast-here-non-command-backed-after-ci-trust-reconcile-flagged-the-prior-iteration-s-composite-npm-run-build-silent-npm-run-validate-source-command-backed-check-as-not-in-manifest-source-tree-validation-and-static-eval-suite-are-already-separate-independently-reconciled-manifest-entries-so-this-composite-is-folded-as-an-attested-summary-instead-of-a-fake-reconcilable-command-npm-run-build-tsc-clean-npm-run-validate-source-passed-with-only-the-pre-existing-flow-cli-root-advisory-warning-unrelated-to-this-issue-bash-evals-run-sh-static-1049-checkmark-assertions-across-30-pass-labeled-static-preset-sections-incl-35-35-node-test-unit-tests-0-failures-exit-0-test-pull-work-liveness-preflight-sh-64-64-full-pass-unchanged-since-prior-pass-test-sidecar-field-preservation-sh-8-8-identity-field-survival-checks-unchanged-test-trust-reconcile-manifest-sh-39-manifest-entries-39-required-ci-yml-check-invocations-self-check-pass-unchanged-npm-run-context-map-check-docs-context-map-md-current-no-drift-diff-review-of-the-fix-git-diff-scripts-hooks-lib-liveness-heartbeat-js-scripts-hooks-claude-codex-opencode-pi-telemetry-hook-js-src-cli-workflow-sidecar-ts-confirms-sanitization-is-applied-at-the-single-computeconflict-choke-point-all-four-wrappers-inherit-it-the-directive-sentence-in-all-four-wrappers-now-quotes-the-actor-lastat-values-and-the-verdict-json-branch-sanitizes-winner-losers-holders-before-json-stringify-grepped-the-full-fix-diff-plus-both-new-eval-files-for-provider-network-call-patterns-fetch-http-s-axios-child-process-exec-spawn-api-openai-anthropic-zero-matches-no-provider-or-network-calls-were-added-by-this-fix",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-320/full-gate-suite-summary",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC3: pilot decision file exists, indexed, linked from CONTEXT.md, evidence resolvable",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "Re-verification (security-fix iteration 1), folded non-command-backed summary of the remaining gates run this pass, including the build+validate:source pair (recast here, non-command-backed, after CI Trust Reconcile flagged the prior iteration's composite 'npm run build --silent && npm run validate:source' command-backed check as not-in-manifest -- source-tree-validation and static-eval-suite are already separate, independently-reconciled manifest entries, so this composite is folded as an attested summary instead of a fake reconcilable command): npm run build (tsc, clean); npm run validate:source (passed with only the pre-existing FLOW_CLI_ROOT advisory warning, unrelated to this issue); bash evals/run.sh static (1049 checkmark assertions across 30 PASS-labeled static-preset sections incl. 35/35 node --test unit tests, 0 failures, exit 0); test_pull_work_liveness_preflight.sh (64/64, full pass, unchanged since prior PASS); test_sidecar_field_preservation.sh (8/8 identity-field-survival checks, unchanged); test_trust_reconcile_manifest.sh (39 manifest entries == 39 required ci.yml --check invocations, self-check pass, unchanged); npm run context-map:check (docs/context-map.md current, no drift). Diff review of the fix (git diff scripts/hooks/lib/liveness-heartbeat.js, scripts/hooks/{claude,codex,opencode,pi}-telemetry-hook.js, src/cli/workflow-sidecar.ts) confirms sanitization is applied at the single computeConflict choke point (all four wrappers inherit it), the directive sentence in all four wrappers now quotes the actor/lastAt values, and the verdict --json branch sanitizes winner/losers/holders before JSON.stringify. Grepped the full fix diff plus both new eval files for provider/network call patterns (fetch, http(s), axios, child_process, exec/spawn, api.openai, anthropic) -- zero matches; no provider or network calls were added by this fix.",
       "value": "pass",
-      "createdAt": "2026-07-03T04:55:49Z",
-      "updatedAt": "2026-07-03T04:55:49Z",
+      "createdAt": "2026-07-03T15:27:17Z",
+      "updatedAt": "2026-07-03T15:27:17Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:builder.execute.scope:source_excerpt",
       "status": "verified"
     },
     {
-      "id": "decision-registry-contract-ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples.flow-agents-workflow.ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "decision-registry-contract/ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples",
+      "id": "kontourai-flow-agents-320-ac7-manifest-registration-grep-proof.flow-agents-workflow.reconfirmed-this-pass-security-fix-iteration-1-command-re-run-bash-evals-ci-run-baseline-sh-manifest-json-grep-c-liveness-verdict-liveness-conflict-1-both-liveness-verdict-integration-and-liveness-conflict-injection-integration-ids-present-in-the-emitted-manifest-lane-runtime-and-kit-satisfying-ac7-s-exact-plan-specified-evidence-command-unchanged-by-the-security-fix-confirmed-also-via-github-workflows-ci-yml-diff-adding-both-as-continue-on-error-required-lane-steps",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-320/ac7-manifest-registration-grep-proof",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC4: contract covers supersession-by-edit and both tombstone forms with examples",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "Reconfirmed this pass (security-fix iteration 1, command re-run): `bash evals/ci/run-baseline.sh --manifest-json | grep -c \"liveness-verdict|liveness-conflict\"` = 1 (both liveness-verdict-integration and liveness-conflict-injection-integration ids present in the emitted manifest, lane=runtime-and-kit), satisfying AC7's exact plan-specified evidence command; unchanged by the security fix. Confirmed also via .github/workflows/ci.yml diff adding both as continue-on-error required-lane steps.",
       "value": "pass",
-      "createdAt": "2026-07-03T04:55:49Z",
-      "updatedAt": "2026-07-03T04:55:49Z",
+      "createdAt": "2026-07-03T15:27:17Z",
+      "updatedAt": "2026-07-03T15:27:17Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:builder.execute.scope:policy_rule",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-320-docs-latency-budget-table.flow-agents-workflow.carried-over-unchanged-from-the-prior-verification-pass-docs-workflow-usage-guide-md-is-not-touched-by-this-security-fix-iteration-s-diff-section-line-671-overlap-detection-and-correction-placed-after-tool-activity-heartbeat-and-before-actor-identity-and-liveness-writes-as-planned-documents-the-selection-mid-flight-publish-latency-budget-table-cites-adr-0012-ss4-and-adr-0021-ss3-and-states-explicitly-that-the-publish-row-is-not-implemented-by-this-issue-ac6-not-independently-re-read-this-iteration-re-verification-scope-was-the-injection-fix-and-its-regression-surface",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-320/docs-latency-budget-table",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "Carried over unchanged from the prior verification pass (docs/workflow-usage-guide.md is not touched by this security-fix iteration's diff): section (line 671) \"### Overlap detection and correction\", placed after \"Tool-activity heartbeat\" and before \"Actor identity and liveness writes\" as planned, documents the Selection / Mid-flight / Publish latency-budget table, cites ADR 0012 SS4 and ADR 0021 SS3, and states explicitly that the Publish row is not implemented by this issue (AC6). Not independently re-read this iteration; re-verification scope was the injection fix and its regression surface.",
+      "value": "pass",
+      "createdAt": "2026-07-03T15:27:17Z",
+      "updatedAt": "2026-07-03T15:27:17Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:policy_rule",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-320-direct-cli-and-wrapper-probes.flow-agents-workflow.carried-over-unchanged-from-the-prior-verification-pass-s-independent-scratch-root-probes-headline-convergence-exact-timestamp-tie-claude-opencode-hook-probes-byte-stable-no-conflict-wrapper-output-not-independently-re-run-this-iteration-this-pass-s-ad-hoc-verification-effort-was-directed-at-the-hostile-actor-injection-repro-now-closed-see-liveness-conflict-injection-integration-and-liveness-verdict-integration-checks-and-the-automated-regression-suite-not-at-re-running-the-already-covered-functional-scratch-probes-from-the-prior-pass",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-320/direct-cli-and-wrapper-probes",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "Carried over unchanged from the prior verification pass's independent scratch-root probes (headline convergence, exact-timestamp tie, claude/opencode hook probes, byte-stable no-conflict wrapper output). Not independently re-run this iteration: this pass's ad hoc verification effort was directed at the hostile-actor injection repro (now closed, see liveness-conflict-injection-integration and liveness-verdict-integration checks) and the automated regression suite, not at re-running the already-covered functional scratch probes from the prior pass.",
+      "value": "pass",
+      "createdAt": "2026-07-03T15:27:17Z",
+      "updatedAt": "2026-07-03T15:27:17Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:attestation",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-320-opencode-pi-live-skill-obedience-gap.flow-agents-workflow.accepted-gap-not-a-defect-carried-over-unchanged-opencode-s-and-pi-s-generated-plugin-extension-do-not-consume-any-telemetry-wrapper-stdout-today-so-the-mid-turn-conflict-signal-cannot-be-obeyed-live-on-those-two-runtimes-only-the-disclosed-stderr-diagnostic-plus-the-next-turn-workflow-steering-js-digest-fallback-are-real-there-disclosed-in-the-plan-s-unresolved-questions-1-docs-workflow-usage-guide-md-s-mid-flight-row-follow-up-333-and-the-definition-of-done-s-explicit-exclusion-list-unaffected-by-this-security-fix-iteration-the-stderr-diagnostic-itself-is-now-sanitized-see-liveness-conflict-injection-integration-section-h-but-the-underlying-live-obedience-gap-on-opencode-pi-is-unchanged-approved-by-brian-anderson1222-gmail-com-session-approved",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-320/opencode-pi-live-skill-obedience-gap",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "ACCEPTED GAP, not a defect, carried over unchanged: opencode's and pi's generated plugin/extension do not consume ANY telemetry-wrapper stdout today, so the mid-turn conflict signal cannot be obeyed live on those two runtimes -- only the disclosed stderr diagnostic plus the next-turn workflow-steering.js digest fallback are real there. Disclosed in the plan's Unresolved Questions #1, docs/workflow-usage-guide.md's Mid-flight row (follow-up #333), and the Definition Of Done's explicit exclusion list. Unaffected by this security-fix iteration (the stderr diagnostic itself is now sanitized -- see liveness-conflict-injection-integration Section H -- but the underlying live-obedience gap on opencode/pi is unchanged). approved_by: brian.anderson1222@gmail.com (session-approved).",
+      "value": "skip",
+      "createdAt": "2026-07-03T15:27:17Z",
+      "updatedAt": "2026-07-03T15:27:17Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:attestation",
+      "metadata": {
+        "waiver": {
+          "reason": "the disclosed opencode/pi live-obedience gap: generated plugin/extension do not consume telemetry wrapper stdout; only sanitized stderr diagnostic + next-turn workflow-steering fallback are live there; disclosed in plan Unresolved Q1, docs Mid-flight row, follow-up #333; out of this issue's DoD",
+          "approved_by": "brian.anderson1222@gmail.com (session-approved)",
+          "approved_at": "2026-07-03T15:26:33Z"
+        }
+      },
+      "status": "assumed"
+    },
+    {
+      "id": "kontourai-flow-agents-320-security-fix-injection-remediation-iter1.flow-agents-workflow.fix-plan-iteration-1-critical-high-med-code-review-findings-verified-resolved-by-diff-read-against-scripts-hooks-lib-liveness-heartbeat-js-scripts-hooks-claude-codex-opencode-pi-telemetry-hook-js-and-src-cli-workflow-sidecar-ts-1-critical-liveness-heartbeat-js-s-new-computeconflict-is-the-single-choke-point-where-conflict-actor-conflict-lastat-are-constructed-from-the-multi-writer-append-only-events-jsonl-stream-it-now-applies-sanitizesegment-the-same-allowlist-64-char-cap-the-write-side-already-applies-to-legitimate-actors-to-actor-and-re-serializes-lastat-via-date-parse-new-date-toisostring-structurally-eliminating-control-chars-ansi-on-a-timestamp-so-all-four-wrapper-call-sites-inherit-sanitized-values-with-no-per-wrapper-defense-to-forget-f1-2-high-all-four-wrapper-interpolation-sites-now-render-the-actor-lastat-inside-double-quotes-within-the-fixed-liveness-conflict-actor-claimed-this-subject-at-run-liveness-verdict-and-coordinate-directive-sentence-because-the-values-are-pre-sanitized-no-control-chars-newlines-survive-sanitizesegment-iso-reserialization-a-hostile-actor-cannot-escape-the-quotes-or-splice-a-forged-system-style-directive-into-the-trusted-instruction-text-f2-3-high-workflow-sidecar-ts-s-liveness-verdict-json-branch-now-runs-winner-losers-holders-actor-claimat-lastat-through-a-dedicated-sanitizeverdictholderforjson-stripcontrolcharsfordisplay-slice-0-64-before-json-stringify-closing-the-second-llm-facing-injection-path-the-pull-work-skill-s-json-consumption-opened-while-leaving-the-underlying-result-holders-winner-losers-objects-unsanitized-for-internal-use-loser-release-contract-unaffected-f3-4-med-length-cap-enforced-consistently-via-sanitizesegment-s-64-char-cap-and-matching-slice-0-64-calls-on-the-json-path-f4-5-med-both-evals-integration-test-liveness-conflict-injection-sh-and-test-liveness-verdict-sh-gained-a-new-adversarial-section-h-hand-seeded-hostile-actor-embedded-newline-ansi-csi-literal-system-ignore-all-previous-instructions-payload-asserting-the-hostile-text-never-appears-raw-in-additionalcontext-stderr-verdict-output-text-and-json-and-that-the-directive-sentence-stays-structurally-intact-both-pass-f5-independently-confirmed-no-provider-network-calls-were-introduced-anywhere-in-the-fix-diff-or-the-two-new-eval-files-grepped-for-fetch-http-s-axios-child-process-exec-spawn-api-openai-anthropic-zero-matches-full-regression-suite-static-preset-heartbeat-preflight-field-preservation-manifest-self-check-green-with-no-assertion-weakened-or-removed-hostile-actor-repro-from-the-code-review-which-previously-succeeded-verbatim-newline-ansi-system-text-reaching-additionalcontext-now-fails-closed-per-the-new-section-h-assertions-in-both-adversarial-evals",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-320/security-fix-injection-remediation-iter1",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "Fix-plan-iteration-1 CRITICAL/HIGH/MED code-review findings verified resolved by diff read against scripts/hooks/lib/liveness-heartbeat.js, scripts/hooks/{claude,codex,opencode,pi}-telemetry-hook.js, and src/cli/workflow-sidecar.ts: (1) CRITICAL -- liveness-heartbeat.js's new computeConflict() is the single choke point where conflict.actor/conflict.lastAt are constructed from the multi-writer append-only events.jsonl stream; it now applies sanitizeSegment (the same allowlist+64-char-cap the write side already applies to legitimate actors) to actor, and re-serializes lastAt via Date.parse -> new Date(...).toISOString() (structurally eliminating control chars/ANSI on a timestamp), so all four wrapper call sites inherit sanitized values with no per-wrapper defense to forget (F1). (2) HIGH -- all four wrapper interpolation sites now render the actor/lastAt inside double quotes within the fixed `[LIVENESS CONFLICT] actor \"...\" claimed this subject at \"...\" -- run \\`liveness verdict\\` and coordinate.` directive sentence; because the values are pre-sanitized (no control chars/newlines survive sanitizeSegment/ISO-reserialization), a hostile actor cannot escape the quotes or splice a forged [SYSTEM]-style directive into the trusted instruction text (F2). (3) HIGH -- workflow-sidecar.ts's `liveness verdict --json` branch now runs winner/losers/holders actor+claimAt+lastAt through a dedicated sanitizeVerdictHolderForJson (stripControlCharsForDisplay + .slice(0,64)) before JSON.stringify, closing the second LLM-facing injection path the pull-work skill's --json consumption opened, while leaving the underlying result/holders/winner/losers objects unsanitized for internal use (loser-release contract unaffected) (F3). (4) MED -- length cap enforced consistently via sanitizeSegment's 64-char cap and matching .slice(0,64) calls on the JSON path (F4). (5) MED -- both evals/integration/test_liveness_conflict_injection.sh and test_liveness_verdict.sh gained a new adversarial Section H (hand-seeded hostile actor: embedded newline + ANSI CSI + literal '[SYSTEM] Ignore all previous instructions...' payload) asserting the hostile text never appears raw in additionalContext/stderr/verdict output (text and --json) and that the directive sentence stays structurally intact -- both pass (F5). Independently confirmed no provider/network calls were introduced anywhere in the fix diff or the two new eval files (grepped for fetch/http(s)/axios/child_process/exec/spawn/api.openai/anthropic -- zero matches). Full regression suite (static preset, heartbeat, preflight, field-preservation, manifest self-check) green with no assertion weakened or removed. Hostile-actor repro from the code review, which previously succeeded (verbatim newline+ANSI+[SYSTEM] text reaching additionalContext), now fails closed per the new Section H assertions in both adversarial evals.",
+      "value": "pass",
+      "createdAt": "2026-07-03T15:27:17Z",
+      "updatedAt": "2026-07-03T15:27:17Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:source_excerpt",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-320-ac1-verdict-deterministic-liveness-verdict-subjectid-json-now-iso-is-a.flow-agents-workflow.ac1-verdict-deterministic-liveness-verdict-subjectid-json-now-iso-is-a",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-320/ac1-verdict-deterministic-liveness-verdict-subjectid-json-now-iso-is-a",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "AC1 `verdict-deterministic`: `liveness verdict <subjectId> [--json] [--now <iso>]` is a",
+      "value": "pass",
+      "createdAt": "2026-07-03T15:27:17Z",
+      "updatedAt": "2026-07-03T15:27:17Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-320-ac2-loser-release-reselect-skill-text-kits-builder-skills-pull-work-skill-md-s.flow-agents-workflow.ac2-loser-release-reselect-skill-text-kits-builder-skills-pull-work-skill-md-s",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-320/ac2-loser-release-reselect-skill-text-kits-builder-skills-pull-work-skill-md-s",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "AC2 `loser-release-reselect-skill-text`: `kits/builder/skills/pull-work/SKILL.md`'s",
+      "value": "pass",
+      "createdAt": "2026-07-03T15:27:17Z",
+      "updatedAt": "2026-07-03T15:27:17Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-320-ac3-mid-turn-conflict-detection-zero-io-maybeemitheartbeat-detects-a-fresher.flow-agents-workflow.ac3-mid-turn-conflict-detection-zero-io-maybeemitheartbeat-detects-a-fresher",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-320/ac3-mid-turn-conflict-detection-zero-io-maybeemitheartbeat-detects-a-fresher",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "AC3 `mid-turn-conflict-detection-zero-io`: `maybeEmitHeartbeat` detects a fresher",
+      "value": "pass",
+      "createdAt": "2026-07-03T15:27:17Z",
+      "updatedAt": "2026-07-03T15:27:17Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-320-ac4-hook-feedback-injection-per-runtime-the-four-telemetry-hook-wrappers.flow-agents-workflow.ac4-hook-feedback-injection-per-runtime-the-four-telemetry-hook-wrappers",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-320/ac4-hook-feedback-injection-per-runtime-the-four-telemetry-hook-wrappers",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "AC4 `hook-feedback-injection-per-runtime`: the four telemetry hook wrappers",
+      "value": "pass",
+      "createdAt": "2026-07-03T15:27:17Z",
+      "updatedAt": "2026-07-03T15:27:17Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-320-ac5-episode-throttle-stream-derived-the-conflict-signal-fires-only-when-the.flow-agents-workflow.ac5-episode-throttle-stream-derived-the-conflict-signal-fires-only-when-the",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-320/ac5-episode-throttle-stream-derived-the-conflict-signal-fires-only-when-the",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "AC5 `episode-throttle-stream-derived`: the conflict signal fires only when the",
+      "value": "pass",
+      "createdAt": "2026-07-03T15:27:17Z",
+      "updatedAt": "2026-07-03T15:27:17Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-320-ac6-latency-budget-documented-docs-workflow-usage-guide-md-documents-a.flow-agents-workflow.ac6-latency-budget-documented-docs-workflow-usage-guide-md-documents-a",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-320/ac6-latency-budget-documented-docs-workflow-usage-guide-md-documents-a",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "AC6 `latency-budget-documented`: `docs/workflow-usage-guide.md` documents a",
+      "value": "pass",
+      "createdAt": "2026-07-03T15:27:17Z",
+      "updatedAt": "2026-07-03T15:27:17Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-320-ac7-adr-0020-eval-registration-the-two-new-integration-eval-files-are-registered-in.flow-agents-workflow.ac7-adr-0020-eval-registration-the-two-new-integration-eval-files-are-registered-in",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-320/ac7-adr-0020-eval-registration-the-two-new-integration-eval-files-are-registered-in",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "AC7 `adr-0020-eval-registration`: the two new integration eval files are registered in",
+      "value": "pass",
+      "createdAt": "2026-07-03T15:27:17Z",
+      "updatedAt": "2026-07-03T15:27:17Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-320-ac8-fail-open-no-provider-mutation-every-new-changed-code-path-the-verdict-cli.flow-agents-workflow.ac8-fail-open-no-provider-mutation-every-new-changed-code-path-the-verdict-cli",
+      "subjectType": "change",
+      "subjectId": "kontourai-flow-agents-320/ac8-fail-open-no-provider-mutation-every-new-changed-code-path-the-verdict-cli",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "AC8 `fail-open-no-provider-mutation`: every new/changed code path (the `verdict` CLI",
+      "value": "pass",
+      "createdAt": "2026-07-03T15:27:17Z",
+      "updatedAt": "2026-07-03T15:27:17Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
       "status": "verified"
     }
   ],
   "evidence": [
     {
-      "id": "ev:decision-registry-contract-decision-registry-validator.flow-agents-workflow.npm-run-check-decisions-validates-the-pilot-topic-file-refuses-secret-shaped-evidence-unknown-status-and-dangling-tombstones-and-asserts-the-generated-index-is-current-wired-into-the-required-source-and-static-ci-lane",
-      "claimId": "decision-registry-contract-decision-registry-validator.flow-agents-workflow.npm-run-check-decisions-validates-the-pilot-topic-file-refuses-secret-shaped-evidence-unknown-status-and-dangling-tombstones-and-asserts-the-generated-index-is-current-wired-into-the-required-source-and-static-ci-lane",
+      "id": "ev:kontourai-flow-agents-320-liveness-verdict-integration.flow-agents-workflow.re-verification-security-fix-iteration-1-29-29-assertions-passed-up-from-27-27-pre-fix-sections-a-g-unchanged-byte-identical-verdict-determinism-exact-timestamp-tie-tie-actor-lexicographic-no-conflict-cases-3-way-losers-correctness-cli-level-loser-release-reselect-flow-fail-open-on-malformed-interleaved-stream-pull-work-skill-text-static-assertions-new-section-h-fix-iteration-1-f1-f3-f5-a-hand-seeded-hostile-actor-that-wins-the-deterministic-tiebreak-now-emits-a-sanitized-winner-actor-in-both-json-and-text-output-control-chars-newline-ansi-stripped-json-still-parses-winner-label-intact-covers-ac1-ac2-ac8-confirms-the-second-verdict-json-injection-path-identified-in-the-code-review-is-now-closed-with-no-functional-regression",
+      "claimId": "kontourai-flow-agents-320-liveness-verdict-integration.flow-agents-workflow.re-verification-security-fix-iteration-1-29-29-assertions-passed-up-from-27-27-pre-fix-sections-a-g-unchanged-byte-identical-verdict-determinism-exact-timestamp-tie-tie-actor-lexicographic-no-conflict-cases-3-way-losers-correctness-cli-level-loser-release-reselect-flow-fail-open-on-malformed-interleaved-stream-pull-work-skill-text-static-assertions-new-section-h-fix-iteration-1-f1-f3-f5-a-hand-seeded-hostile-actor-that-wins-the-deterministic-tiebreak-now-emits-a-sanitized-winner-actor-in-both-json-and-text-output-control-chars-newline-ansi-stripped-json-still-parses-winner-label-intact-covers-ac1-ac2-ac8-confirms-the-second-verdict-json-injection-path-identified-in-the-code-review-is-now-closed-with-no-functional-regression",
       "evidenceType": "test_output",
       "method": "validation",
-      "sourceRef": "decision-registry-contract/evidence.json",
-      "excerptOrSummary": "npm run check:decisions validates the pilot topic file, refuses secret-shaped evidence, unknown status, and dangling tombstones, and asserts the generated index is current; wired into the required source-and-static CI lane.",
-      "observedAt": "2026-07-03T04:55:49Z",
+      "sourceRef": "kontourai-flow-agents-320/evidence.json",
+      "excerptOrSummary": "Re-verification (security-fix iteration 1): 29/29 assertions passed (up from 27/27 pre-fix). Sections A-G unchanged: byte-identical verdict determinism, exact-timestamp tie -> tie-actor-lexicographic, no-conflict cases, 3-way losers correctness, CLI-level loser-release+reselect flow, fail-open on malformed/interleaved stream, pull-work skill-text static assertions. NEW Section H (fix iteration 1, F1/F3/F5): a hand-seeded hostile actor that WINS the deterministic tiebreak now emits a sanitized winner.actor in both --json and text output -- control chars/newline/ANSI stripped, JSON still parses, WINNER label intact. Covers AC1, AC2, AC8; confirms the second (verdict --json) injection path identified in the code review is now closed with no functional regression.",
+      "observedAt": "2026-07-03T15:27:17Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
       "execution": {
         "runner": "bash",
-        "label": "npm run check:decisions --",
+        "label": "bash evals/integration/test_liveness_verdict.sh",
         "isError": false
       }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-320-liveness-conflict-injection-integration.flow-agents-workflow.re-verification-security-fix-iteration-1-19-19-assertions-passed-up-from-17-17-pre-fix-sections-a-g-unchanged-direct-maybeemitheartbeat-conflict-detection-and-solo-holder-omission-zero-added-fs-read-proof-episode-throttle-watermark-proof-incl-third-call-re-fire-claude-codex-real-hookspecificoutput-additionalcontext-injection-opencode-pi-stderr-only-degraded-runtime-proof-no-conflict-byte-stability-across-all-four-wrappers-fail-open-on-a-corrupted-sidecar-snapshot-new-section-h-fix-iteration-1-f1-f2-f5-a-hand-seeded-hostile-actor-embedded-newline-ansi-csi-bytes-literal-system-ignore-all-previous-instructions-payload-appended-directly-to-events-jsonl-bypassing-the-cli-write-side-sanitizesegment-never-reaches-claude-telemetry-hook-js-s-additionalcontext-or-opencode-telemetry-hook-js-s-stderr-diagnostic-raw-the-newline-joined-system-text-and-the-ansi-esc-byte-are-both-absent-a-sanitized-actor-is-surfaced-instead-conflict-detection-still-fires-and-the-trusted-liveness-conflict-run-liveness-verdict-and-coordinate-directive-sentence-stays-structurally-intact-and-unextended-covers-ac3-ac4-ac5-ac8-this-is-the-primary-command-backed-proof-that-the-critical-high-code-review-findings-unsanitized-multi-writer-conflict-actor-lastat-reaching-hookspecificoutput-additionalcontext-and-stderr-are-now-closed-hostile-actor-repro-that-previously-succeeded-now-fails-closed",
+      "claimId": "kontourai-flow-agents-320-liveness-conflict-injection-integration.flow-agents-workflow.re-verification-security-fix-iteration-1-19-19-assertions-passed-up-from-17-17-pre-fix-sections-a-g-unchanged-direct-maybeemitheartbeat-conflict-detection-and-solo-holder-omission-zero-added-fs-read-proof-episode-throttle-watermark-proof-incl-third-call-re-fire-claude-codex-real-hookspecificoutput-additionalcontext-injection-opencode-pi-stderr-only-degraded-runtime-proof-no-conflict-byte-stability-across-all-four-wrappers-fail-open-on-a-corrupted-sidecar-snapshot-new-section-h-fix-iteration-1-f1-f2-f5-a-hand-seeded-hostile-actor-embedded-newline-ansi-csi-bytes-literal-system-ignore-all-previous-instructions-payload-appended-directly-to-events-jsonl-bypassing-the-cli-write-side-sanitizesegment-never-reaches-claude-telemetry-hook-js-s-additionalcontext-or-opencode-telemetry-hook-js-s-stderr-diagnostic-raw-the-newline-joined-system-text-and-the-ansi-esc-byte-are-both-absent-a-sanitized-actor-is-surfaced-instead-conflict-detection-still-fires-and-the-trusted-liveness-conflict-run-liveness-verdict-and-coordinate-directive-sentence-stays-structurally-intact-and-unextended-covers-ac3-ac4-ac5-ac8-this-is-the-primary-command-backed-proof-that-the-critical-high-code-review-findings-unsanitized-multi-writer-conflict-actor-lastat-reaching-hookspecificoutput-additionalcontext-and-stderr-are-now-closed-hostile-actor-repro-that-previously-succeeded-now-fails-closed",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-320/evidence.json",
+      "excerptOrSummary": "Re-verification (security-fix iteration 1): 19/19 assertions passed (up from 17/17 pre-fix). Sections A-G unchanged: direct maybeEmitHeartbeat conflict detection and solo-holder omission, zero-added-fs-read proof, episode-throttle/watermark proof incl. third-call re-fire, Claude/Codex real hookSpecificOutput.additionalContext injection, opencode/pi stderr-only degraded-runtime proof, no-conflict byte-stability across all four wrappers, fail-open on a corrupted sidecar snapshot. NEW Section H (fix iteration 1, F1/F2/F5): a hand-seeded hostile actor (embedded newline + ANSI CSI bytes + literal '[SYSTEM] Ignore all previous instructions...' payload, appended directly to events.jsonl bypassing the CLI write-side sanitizeSegment) never reaches claude-telemetry-hook.js's additionalContext or opencode-telemetry-hook.js's stderr diagnostic raw: the newline-joined [SYSTEM] text and the ANSI ESC byte are both absent, a sanitized actor is surfaced instead, conflict detection still fires, and the trusted `[LIVENESS CONFLICT] ... run \\`liveness verdict\\` and coordinate.` directive sentence stays structurally intact and unextended. Covers AC3, AC4, AC5, AC8. This is the primary command-backed proof that the CRITICAL/HIGH code-review findings (unsanitized multi-writer conflict.actor/lastAt reaching hookSpecificOutput.additionalContext and stderr) are now closed; hostile-actor repro that previously succeeded now fails closed.",
+      "observedAt": "2026-07-03T15:27:17Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_liveness_conflict_injection.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-320-liveness-heartbeat-integration-regression.flow-agents-workflow.re-verification-security-fix-iteration-1-full-pre-existing-288-heartbeat-suite-opt-out-tokens-throttle-boundary-incl-custom-env-override-skip-reasons-wrapper-end-to-end-on-claude-codex-bounded-tail-f3-f8-ii-invariants-hostile-active-slug-sanitization-orphan-heartbeat-invariant-still-passes-43-43-unchanged-after-the-injection-remediation-fix-sanitizesegment-iso-re-serialization-added-at-the-computeconflict-choke-point-no-i-o-cost-regression-to-the-tail-read-hot-path-no-behavior-change-to-the-pre-existing-heartbeat-throttle-contract",
+      "claimId": "kontourai-flow-agents-320-liveness-heartbeat-integration-regression.flow-agents-workflow.re-verification-security-fix-iteration-1-full-pre-existing-288-heartbeat-suite-opt-out-tokens-throttle-boundary-incl-custom-env-override-skip-reasons-wrapper-end-to-end-on-claude-codex-bounded-tail-f3-f8-ii-invariants-hostile-active-slug-sanitization-orphan-heartbeat-invariant-still-passes-43-43-unchanged-after-the-injection-remediation-fix-sanitizesegment-iso-re-serialization-added-at-the-computeconflict-choke-point-no-i-o-cost-regression-to-the-tail-read-hot-path-no-behavior-change-to-the-pre-existing-heartbeat-throttle-contract",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-320/evidence.json",
+      "excerptOrSummary": "Re-verification (security-fix iteration 1): full pre-existing #288 heartbeat suite (opt-out tokens, throttle boundary incl. custom env override, skip reasons, wrapper end-to-end on claude/codex, bounded-tail F3/F8(ii) invariants, hostile active_slug sanitization, orphan-heartbeat invariant) still passes 43/43 unchanged after the injection-remediation fix (sanitizeSegment + ISO re-serialization added at the computeConflict choke point) -- no I/O-cost regression to the tail-read hot path, no behavior change to the pre-existing heartbeat/throttle contract.",
+      "observedAt": "2026-07-03T15:27:17Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_liveness_heartbeat.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-320-full-gate-suite-summary.flow-agents-workflow.re-verification-security-fix-iteration-1-folded-non-command-backed-summary-of-the-remaining-gates-run-this-pass-including-the-build-validate-source-pair-recast-here-non-command-backed-after-ci-trust-reconcile-flagged-the-prior-iteration-s-composite-npm-run-build-silent-npm-run-validate-source-command-backed-check-as-not-in-manifest-source-tree-validation-and-static-eval-suite-are-already-separate-independently-reconciled-manifest-entries-so-this-composite-is-folded-as-an-attested-summary-instead-of-a-fake-reconcilable-command-npm-run-build-tsc-clean-npm-run-validate-source-passed-with-only-the-pre-existing-flow-cli-root-advisory-warning-unrelated-to-this-issue-bash-evals-run-sh-static-1049-checkmark-assertions-across-30-pass-labeled-static-preset-sections-incl-35-35-node-test-unit-tests-0-failures-exit-0-test-pull-work-liveness-preflight-sh-64-64-full-pass-unchanged-since-prior-pass-test-sidecar-field-preservation-sh-8-8-identity-field-survival-checks-unchanged-test-trust-reconcile-manifest-sh-39-manifest-entries-39-required-ci-yml-check-invocations-self-check-pass-unchanged-npm-run-context-map-check-docs-context-map-md-current-no-drift-diff-review-of-the-fix-git-diff-scripts-hooks-lib-liveness-heartbeat-js-scripts-hooks-claude-codex-opencode-pi-telemetry-hook-js-src-cli-workflow-sidecar-ts-confirms-sanitization-is-applied-at-the-single-computeconflict-choke-point-all-four-wrappers-inherit-it-the-directive-sentence-in-all-four-wrappers-now-quotes-the-actor-lastat-values-and-the-verdict-json-branch-sanitizes-winner-losers-holders-before-json-stringify-grepped-the-full-fix-diff-plus-both-new-eval-files-for-provider-network-call-patterns-fetch-http-s-axios-child-process-exec-spawn-api-openai-anthropic-zero-matches-no-provider-or-network-calls-were-added-by-this-fix",
+      "claimId": "kontourai-flow-agents-320-full-gate-suite-summary.flow-agents-workflow.re-verification-security-fix-iteration-1-folded-non-command-backed-summary-of-the-remaining-gates-run-this-pass-including-the-build-validate-source-pair-recast-here-non-command-backed-after-ci-trust-reconcile-flagged-the-prior-iteration-s-composite-npm-run-build-silent-npm-run-validate-source-command-backed-check-as-not-in-manifest-source-tree-validation-and-static-eval-suite-are-already-separate-independently-reconciled-manifest-entries-so-this-composite-is-folded-as-an-attested-summary-instead-of-a-fake-reconcilable-command-npm-run-build-tsc-clean-npm-run-validate-source-passed-with-only-the-pre-existing-flow-cli-root-advisory-warning-unrelated-to-this-issue-bash-evals-run-sh-static-1049-checkmark-assertions-across-30-pass-labeled-static-preset-sections-incl-35-35-node-test-unit-tests-0-failures-exit-0-test-pull-work-liveness-preflight-sh-64-64-full-pass-unchanged-since-prior-pass-test-sidecar-field-preservation-sh-8-8-identity-field-survival-checks-unchanged-test-trust-reconcile-manifest-sh-39-manifest-entries-39-required-ci-yml-check-invocations-self-check-pass-unchanged-npm-run-context-map-check-docs-context-map-md-current-no-drift-diff-review-of-the-fix-git-diff-scripts-hooks-lib-liveness-heartbeat-js-scripts-hooks-claude-codex-opencode-pi-telemetry-hook-js-src-cli-workflow-sidecar-ts-confirms-sanitization-is-applied-at-the-single-computeconflict-choke-point-all-four-wrappers-inherit-it-the-directive-sentence-in-all-four-wrappers-now-quotes-the-actor-lastat-values-and-the-verdict-json-branch-sanitizes-winner-losers-holders-before-json-stringify-grepped-the-full-fix-diff-plus-both-new-eval-files-for-provider-network-call-patterns-fetch-http-s-axios-child-process-exec-spawn-api-openai-anthropic-zero-matches-no-provider-or-network-calls-were-added-by-this-fix",
+      "evidenceType": "source_excerpt",
+      "method": "extraction",
+      "sourceRef": "kontourai-flow-agents-320/evidence.json",
+      "excerptOrSummary": "Re-verification (security-fix iteration 1), folded non-command-backed summary of the remaining gates run this pass, including the build+validate:source pair (recast here, non-command-backed, after CI Trust Reconcile flagged the prior iteration's composite 'npm run build --silent && npm run validate:source' command-backed check as not-in-manifest -- source-tree-validation and static-eval-suite are already separate, independently-reconciled manifest entries, so this composite is folded as an attested summary instead of a fake reconcilable command): npm run build (tsc, clean); npm run validate:source (passed with only the pre-existing FLOW_CLI_ROOT advisory warning, unrelated to this issue); bash evals/run.sh static (1049 checkmark assertions across 30 PASS-labeled static-preset sections incl. 35/35 node --test unit tests, 0 failures, exit 0); test_pull_work_liveness_preflight.sh (64/64, full pass, unchanged since prior PASS); test_sidecar_field_preservation.sh (8/8 identity-field-survival checks, unchanged); test_trust_reconcile_manifest.sh (39 manifest entries == 39 required ci.yml --check invocations, self-check pass, unchanged); npm run context-map:check (docs/context-map.md current, no drift). Diff review of the fix (git diff scripts/hooks/lib/liveness-heartbeat.js, scripts/hooks/{claude,codex,opencode,pi}-telemetry-hook.js, src/cli/workflow-sidecar.ts) confirms sanitization is applied at the single computeConflict choke point (all four wrappers inherit it), the directive sentence in all four wrappers now quotes the actor/lastAt values, and the verdict --json branch sanitizes winner/losers/holders before JSON.stringify. Grepped the full fix diff plus both new eval files for provider/network call patterns (fetch, http(s), axios, child_process, exec/spawn, api.openai, anthropic) -- zero matches; no provider or network calls were added by this fix.",
+      "observedAt": "2026-07-03T15:27:17Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-320-ac7-manifest-registration-grep-proof.flow-agents-workflow.reconfirmed-this-pass-security-fix-iteration-1-command-re-run-bash-evals-ci-run-baseline-sh-manifest-json-grep-c-liveness-verdict-liveness-conflict-1-both-liveness-verdict-integration-and-liveness-conflict-injection-integration-ids-present-in-the-emitted-manifest-lane-runtime-and-kit-satisfying-ac7-s-exact-plan-specified-evidence-command-unchanged-by-the-security-fix-confirmed-also-via-github-workflows-ci-yml-diff-adding-both-as-continue-on-error-required-lane-steps",
+      "claimId": "kontourai-flow-agents-320-ac7-manifest-registration-grep-proof.flow-agents-workflow.reconfirmed-this-pass-security-fix-iteration-1-command-re-run-bash-evals-ci-run-baseline-sh-manifest-json-grep-c-liveness-verdict-liveness-conflict-1-both-liveness-verdict-integration-and-liveness-conflict-injection-integration-ids-present-in-the-emitted-manifest-lane-runtime-and-kit-satisfying-ac7-s-exact-plan-specified-evidence-command-unchanged-by-the-security-fix-confirmed-also-via-github-workflows-ci-yml-diff-adding-both-as-continue-on-error-required-lane-steps",
+      "evidenceType": "policy_rule",
+      "method": "auditability",
+      "sourceRef": "kontourai-flow-agents-320/evidence.json",
+      "excerptOrSummary": "Reconfirmed this pass (security-fix iteration 1, command re-run): `bash evals/ci/run-baseline.sh --manifest-json | grep -c \"liveness-verdict|liveness-conflict\"` = 1 (both liveness-verdict-integration and liveness-conflict-injection-integration ids present in the emitted manifest, lane=runtime-and-kit), satisfying AC7's exact plan-specified evidence command; unchanged by the security fix. Confirmed also via .github/workflows/ci.yml diff adding both as continue-on-error required-lane steps.",
+      "observedAt": "2026-07-03T15:27:17Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-320-docs-latency-budget-table.flow-agents-workflow.carried-over-unchanged-from-the-prior-verification-pass-docs-workflow-usage-guide-md-is-not-touched-by-this-security-fix-iteration-s-diff-section-line-671-overlap-detection-and-correction-placed-after-tool-activity-heartbeat-and-before-actor-identity-and-liveness-writes-as-planned-documents-the-selection-mid-flight-publish-latency-budget-table-cites-adr-0012-ss4-and-adr-0021-ss3-and-states-explicitly-that-the-publish-row-is-not-implemented-by-this-issue-ac6-not-independently-re-read-this-iteration-re-verification-scope-was-the-injection-fix-and-its-regression-surface",
+      "claimId": "kontourai-flow-agents-320-docs-latency-budget-table.flow-agents-workflow.carried-over-unchanged-from-the-prior-verification-pass-docs-workflow-usage-guide-md-is-not-touched-by-this-security-fix-iteration-s-diff-section-line-671-overlap-detection-and-correction-placed-after-tool-activity-heartbeat-and-before-actor-identity-and-liveness-writes-as-planned-documents-the-selection-mid-flight-publish-latency-budget-table-cites-adr-0012-ss4-and-adr-0021-ss3-and-states-explicitly-that-the-publish-row-is-not-implemented-by-this-issue-ac6-not-independently-re-read-this-iteration-re-verification-scope-was-the-injection-fix-and-its-regression-surface",
+      "evidenceType": "policy_rule",
+      "method": "auditability",
+      "sourceRef": "kontourai-flow-agents-320/evidence.json",
+      "excerptOrSummary": "Carried over unchanged from the prior verification pass (docs/workflow-usage-guide.md is not touched by this security-fix iteration's diff): section (line 671) \"### Overlap detection and correction\", placed after \"Tool-activity heartbeat\" and before \"Actor identity and liveness writes\" as planned, documents the Selection / Mid-flight / Publish latency-budget table, cites ADR 0012 SS4 and ADR 0021 SS3, and states explicitly that the Publish row is not implemented by this issue (AC6). Not independently re-read this iteration; re-verification scope was the injection fix and its regression surface.",
+      "observedAt": "2026-07-03T15:27:17Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-320-direct-cli-and-wrapper-probes.flow-agents-workflow.carried-over-unchanged-from-the-prior-verification-pass-s-independent-scratch-root-probes-headline-convergence-exact-timestamp-tie-claude-opencode-hook-probes-byte-stable-no-conflict-wrapper-output-not-independently-re-run-this-iteration-this-pass-s-ad-hoc-verification-effort-was-directed-at-the-hostile-actor-injection-repro-now-closed-see-liveness-conflict-injection-integration-and-liveness-verdict-integration-checks-and-the-automated-regression-suite-not-at-re-running-the-already-covered-functional-scratch-probes-from-the-prior-pass",
+      "claimId": "kontourai-flow-agents-320-direct-cli-and-wrapper-probes.flow-agents-workflow.carried-over-unchanged-from-the-prior-verification-pass-s-independent-scratch-root-probes-headline-convergence-exact-timestamp-tie-claude-opencode-hook-probes-byte-stable-no-conflict-wrapper-output-not-independently-re-run-this-iteration-this-pass-s-ad-hoc-verification-effort-was-directed-at-the-hostile-actor-injection-repro-now-closed-see-liveness-conflict-injection-integration-and-liveness-verdict-integration-checks-and-the-automated-regression-suite-not-at-re-running-the-already-covered-functional-scratch-probes-from-the-prior-pass",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-320/evidence.json",
+      "excerptOrSummary": "Carried over unchanged from the prior verification pass's independent scratch-root probes (headline convergence, exact-timestamp tie, claude/opencode hook probes, byte-stable no-conflict wrapper output). Not independently re-run this iteration: this pass's ad hoc verification effort was directed at the hostile-actor injection repro (now closed, see liveness-conflict-injection-integration and liveness-verdict-integration checks) and the automated regression suite, not at re-running the already-covered functional scratch probes from the prior pass.",
+      "observedAt": "2026-07-03T15:27:17Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-320-opencode-pi-live-skill-obedience-gap.flow-agents-workflow.accepted-gap-not-a-defect-carried-over-unchanged-opencode-s-and-pi-s-generated-plugin-extension-do-not-consume-any-telemetry-wrapper-stdout-today-so-the-mid-turn-conflict-signal-cannot-be-obeyed-live-on-those-two-runtimes-only-the-disclosed-stderr-diagnostic-plus-the-next-turn-workflow-steering-js-digest-fallback-are-real-there-disclosed-in-the-plan-s-unresolved-questions-1-docs-workflow-usage-guide-md-s-mid-flight-row-follow-up-333-and-the-definition-of-done-s-explicit-exclusion-list-unaffected-by-this-security-fix-iteration-the-stderr-diagnostic-itself-is-now-sanitized-see-liveness-conflict-injection-integration-section-h-but-the-underlying-live-obedience-gap-on-opencode-pi-is-unchanged-approved-by-brian-anderson1222-gmail-com-session-approved",
+      "claimId": "kontourai-flow-agents-320-opencode-pi-live-skill-obedience-gap.flow-agents-workflow.accepted-gap-not-a-defect-carried-over-unchanged-opencode-s-and-pi-s-generated-plugin-extension-do-not-consume-any-telemetry-wrapper-stdout-today-so-the-mid-turn-conflict-signal-cannot-be-obeyed-live-on-those-two-runtimes-only-the-disclosed-stderr-diagnostic-plus-the-next-turn-workflow-steering-js-digest-fallback-are-real-there-disclosed-in-the-plan-s-unresolved-questions-1-docs-workflow-usage-guide-md-s-mid-flight-row-follow-up-333-and-the-definition-of-done-s-explicit-exclusion-list-unaffected-by-this-security-fix-iteration-the-stderr-diagnostic-itself-is-now-sanitized-see-liveness-conflict-injection-integration-section-h-but-the-underlying-live-obedience-gap-on-opencode-pi-is-unchanged-approved-by-brian-anderson1222-gmail-com-session-approved",
+      "evidenceType": "attestation",
+      "method": "attestation",
+      "sourceRef": "kontourai-flow-agents-320/evidence.json",
+      "excerptOrSummary": "ACCEPTED GAP, not a defect, carried over unchanged: opencode's and pi's generated plugin/extension do not consume ANY telemetry-wrapper stdout today, so the mid-turn conflict signal cannot be obeyed live on those two runtimes -- only the disclosed stderr diagnostic plus the next-turn workflow-steering.js digest fallback are real there. Disclosed in the plan's Unresolved Questions #1, docs/workflow-usage-guide.md's Mid-flight row (follow-up #333), and the Definition Of Done's explicit exclusion list. Unaffected by this security-fix iteration (the stderr diagnostic itself is now sanitized -- see liveness-conflict-injection-integration Section H -- but the underlying live-obedience gap on opencode/pi is unchanged). approved_by: brian.anderson1222@gmail.com (session-approved).",
+      "observedAt": "2026-07-03T15:27:17Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": false
+    },
+    {
+      "id": "ev:kontourai-flow-agents-320-security-fix-injection-remediation-iter1.flow-agents-workflow.fix-plan-iteration-1-critical-high-med-code-review-findings-verified-resolved-by-diff-read-against-scripts-hooks-lib-liveness-heartbeat-js-scripts-hooks-claude-codex-opencode-pi-telemetry-hook-js-and-src-cli-workflow-sidecar-ts-1-critical-liveness-heartbeat-js-s-new-computeconflict-is-the-single-choke-point-where-conflict-actor-conflict-lastat-are-constructed-from-the-multi-writer-append-only-events-jsonl-stream-it-now-applies-sanitizesegment-the-same-allowlist-64-char-cap-the-write-side-already-applies-to-legitimate-actors-to-actor-and-re-serializes-lastat-via-date-parse-new-date-toisostring-structurally-eliminating-control-chars-ansi-on-a-timestamp-so-all-four-wrapper-call-sites-inherit-sanitized-values-with-no-per-wrapper-defense-to-forget-f1-2-high-all-four-wrapper-interpolation-sites-now-render-the-actor-lastat-inside-double-quotes-within-the-fixed-liveness-conflict-actor-claimed-this-subject-at-run-liveness-verdict-and-coordinate-directive-sentence-because-the-values-are-pre-sanitized-no-control-chars-newlines-survive-sanitizesegment-iso-reserialization-a-hostile-actor-cannot-escape-the-quotes-or-splice-a-forged-system-style-directive-into-the-trusted-instruction-text-f2-3-high-workflow-sidecar-ts-s-liveness-verdict-json-branch-now-runs-winner-losers-holders-actor-claimat-lastat-through-a-dedicated-sanitizeverdictholderforjson-stripcontrolcharsfordisplay-slice-0-64-before-json-stringify-closing-the-second-llm-facing-injection-path-the-pull-work-skill-s-json-consumption-opened-while-leaving-the-underlying-result-holders-winner-losers-objects-unsanitized-for-internal-use-loser-release-contract-unaffected-f3-4-med-length-cap-enforced-consistently-via-sanitizesegment-s-64-char-cap-and-matching-slice-0-64-calls-on-the-json-path-f4-5-med-both-evals-integration-test-liveness-conflict-injection-sh-and-test-liveness-verdict-sh-gained-a-new-adversarial-section-h-hand-seeded-hostile-actor-embedded-newline-ansi-csi-literal-system-ignore-all-previous-instructions-payload-asserting-the-hostile-text-never-appears-raw-in-additionalcontext-stderr-verdict-output-text-and-json-and-that-the-directive-sentence-stays-structurally-intact-both-pass-f5-independently-confirmed-no-provider-network-calls-were-introduced-anywhere-in-the-fix-diff-or-the-two-new-eval-files-grepped-for-fetch-http-s-axios-child-process-exec-spawn-api-openai-anthropic-zero-matches-full-regression-suite-static-preset-heartbeat-preflight-field-preservation-manifest-self-check-green-with-no-assertion-weakened-or-removed-hostile-actor-repro-from-the-code-review-which-previously-succeeded-verbatim-newline-ansi-system-text-reaching-additionalcontext-now-fails-closed-per-the-new-section-h-assertions-in-both-adversarial-evals",
+      "claimId": "kontourai-flow-agents-320-security-fix-injection-remediation-iter1.flow-agents-workflow.fix-plan-iteration-1-critical-high-med-code-review-findings-verified-resolved-by-diff-read-against-scripts-hooks-lib-liveness-heartbeat-js-scripts-hooks-claude-codex-opencode-pi-telemetry-hook-js-and-src-cli-workflow-sidecar-ts-1-critical-liveness-heartbeat-js-s-new-computeconflict-is-the-single-choke-point-where-conflict-actor-conflict-lastat-are-constructed-from-the-multi-writer-append-only-events-jsonl-stream-it-now-applies-sanitizesegment-the-same-allowlist-64-char-cap-the-write-side-already-applies-to-legitimate-actors-to-actor-and-re-serializes-lastat-via-date-parse-new-date-toisostring-structurally-eliminating-control-chars-ansi-on-a-timestamp-so-all-four-wrapper-call-sites-inherit-sanitized-values-with-no-per-wrapper-defense-to-forget-f1-2-high-all-four-wrapper-interpolation-sites-now-render-the-actor-lastat-inside-double-quotes-within-the-fixed-liveness-conflict-actor-claimed-this-subject-at-run-liveness-verdict-and-coordinate-directive-sentence-because-the-values-are-pre-sanitized-no-control-chars-newlines-survive-sanitizesegment-iso-reserialization-a-hostile-actor-cannot-escape-the-quotes-or-splice-a-forged-system-style-directive-into-the-trusted-instruction-text-f2-3-high-workflow-sidecar-ts-s-liveness-verdict-json-branch-now-runs-winner-losers-holders-actor-claimat-lastat-through-a-dedicated-sanitizeverdictholderforjson-stripcontrolcharsfordisplay-slice-0-64-before-json-stringify-closing-the-second-llm-facing-injection-path-the-pull-work-skill-s-json-consumption-opened-while-leaving-the-underlying-result-holders-winner-losers-objects-unsanitized-for-internal-use-loser-release-contract-unaffected-f3-4-med-length-cap-enforced-consistently-via-sanitizesegment-s-64-char-cap-and-matching-slice-0-64-calls-on-the-json-path-f4-5-med-both-evals-integration-test-liveness-conflict-injection-sh-and-test-liveness-verdict-sh-gained-a-new-adversarial-section-h-hand-seeded-hostile-actor-embedded-newline-ansi-csi-literal-system-ignore-all-previous-instructions-payload-asserting-the-hostile-text-never-appears-raw-in-additionalcontext-stderr-verdict-output-text-and-json-and-that-the-directive-sentence-stays-structurally-intact-both-pass-f5-independently-confirmed-no-provider-network-calls-were-introduced-anywhere-in-the-fix-diff-or-the-two-new-eval-files-grepped-for-fetch-http-s-axios-child-process-exec-spawn-api-openai-anthropic-zero-matches-full-regression-suite-static-preset-heartbeat-preflight-field-preservation-manifest-self-check-green-with-no-assertion-weakened-or-removed-hostile-actor-repro-from-the-code-review-which-previously-succeeded-verbatim-newline-ansi-system-text-reaching-additionalcontext-now-fails-closed-per-the-new-section-h-assertions-in-both-adversarial-evals",
+      "evidenceType": "source_excerpt",
+      "method": "extraction",
+      "sourceRef": "kontourai-flow-agents-320/evidence.json",
+      "excerptOrSummary": "Fix-plan-iteration-1 CRITICAL/HIGH/MED code-review findings verified resolved by diff read against scripts/hooks/lib/liveness-heartbeat.js, scripts/hooks/{claude,codex,opencode,pi}-telemetry-hook.js, and src/cli/workflow-sidecar.ts: (1) CRITICAL -- liveness-heartbeat.js's new computeConflict() is the single choke point where conflict.actor/conflict.lastAt are constructed from the multi-writer append-only events.jsonl stream; it now applies sanitizeSegment (the same allowlist+64-char-cap the write side already applies to legitimate actors) to actor, and re-serializes lastAt via Date.parse -> new Date(...).toISOString() (structurally eliminating control chars/ANSI on a timestamp), so all four wrapper call sites inherit sanitized values with no per-wrapper defense to forget (F1). (2) HIGH -- all four wrapper interpolation sites now render the actor/lastAt inside double quotes within the fixed `[LIVENESS CONFLICT] actor \"...\" claimed this subject at \"...\" -- run \\`liveness verdict\\` and coordinate.` directive sentence; because the values are pre-sanitized (no control chars/newlines survive sanitizeSegment/ISO-reserialization), a hostile actor cannot escape the quotes or splice a forged [SYSTEM]-style directive into the trusted instruction text (F2). (3) HIGH -- workflow-sidecar.ts's `liveness verdict --json` branch now runs winner/losers/holders actor+claimAt+lastAt through a dedicated sanitizeVerdictHolderForJson (stripControlCharsForDisplay + .slice(0,64)) before JSON.stringify, closing the second LLM-facing injection path the pull-work skill's --json consumption opened, while leaving the underlying result/holders/winner/losers objects unsanitized for internal use (loser-release contract unaffected) (F3). (4) MED -- length cap enforced consistently via sanitizeSegment's 64-char cap and matching .slice(0,64) calls on the JSON path (F4). (5) MED -- both evals/integration/test_liveness_conflict_injection.sh and test_liveness_verdict.sh gained a new adversarial Section H (hand-seeded hostile actor: embedded newline + ANSI CSI + literal '[SYSTEM] Ignore all previous instructions...' payload) asserting the hostile text never appears raw in additionalContext/stderr/verdict output (text and --json) and that the directive sentence stays structurally intact -- both pass (F5). Independently confirmed no provider/network calls were introduced anywhere in the fix diff or the two new eval files (grepped for fetch/http(s)/axios/child_process/exec/spawn/api.openai/anthropic -- zero matches). Full regression suite (static preset, heartbeat, preflight, field-preservation, manifest self-check) green with no assertion weakened or removed. Hostile-actor repro from the code review, which previously succeeded (verbatim newline+ANSI+[SYSTEM] text reaching additionalContext), now fails closed per the new Section H assertions in both adversarial evals.",
+      "observedAt": "2026-07-03T15:27:17Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
     }
   ],
   "policies": [
     {
-      "id": "policy:workflow.check.command:test_output",
-      "claimType": "workflow.check.command",
+      "id": "policy:workflow.check.test:test_output",
+      "claimType": "workflow.check.test",
       "requiredEvidence": [
         "test_output"
       ],
       "acceptanceCriteria": [
-        "A verified verification event must support a workflow.check.command claim."
+        "A verified verification event must support a workflow.check.test claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.execute.scope:test_output",
+      "claimType": "builder.execute.scope",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.execute.scope claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.security:test_output",
+      "claimType": "workflow.check.security",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.security claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.diff:source_excerpt",
+      "claimType": "workflow.check.diff",
+      "requiredEvidence": [
+        "source_excerpt"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.diff claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.execute.scope:source_excerpt",
+      "claimType": "builder.execute.scope",
+      "requiredEvidence": [
+        "source_excerpt"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.execute.scope claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.policy:policy_rule",
+      "claimType": "workflow.check.policy",
+      "requiredEvidence": [
+        "policy_rule"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.policy claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.execute.scope:policy_rule",
+      "claimType": "builder.execute.scope",
+      "requiredEvidence": [
+        "policy_rule"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.execute.scope claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.execute.scope:attestation",
+      "claimType": "builder.execute.scope",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.execute.scope claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.policy:attestation",
+      "claimType": "workflow.check.policy",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.policy claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -123,60 +549,211 @@
       "stalenessTriggers": [],
       "conflictRules": [],
       "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.execute.scope",
+      "claimType": "builder.execute.scope",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.execute.scope claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
     }
   ],
   "events": [
     {
-      "id": "evt:decision-registry-contract-decision-registry-validator.flow-agents-workflow.npm-run-check-decisions-validates-the-pilot-topic-file-refuses-secret-shaped-evidence-unknown-status-and-dangling-tombstones-and-asserts-the-generated-index-is-current-wired-into-the-required-source-and-static-ci-lane",
-      "claimId": "decision-registry-contract-decision-registry-validator.flow-agents-workflow.npm-run-check-decisions-validates-the-pilot-topic-file-refuses-secret-shaped-evidence-unknown-status-and-dangling-tombstones-and-asserts-the-generated-index-is-current-wired-into-the-required-source-and-static-ci-lane",
+      "id": "evt:kontourai-flow-agents-320-liveness-verdict-integration.flow-agents-workflow.re-verification-security-fix-iteration-1-29-29-assertions-passed-up-from-27-27-pre-fix-sections-a-g-unchanged-byte-identical-verdict-determinism-exact-timestamp-tie-tie-actor-lexicographic-no-conflict-cases-3-way-losers-correctness-cli-level-loser-release-reselect-flow-fail-open-on-malformed-interleaved-stream-pull-work-skill-text-static-assertions-new-section-h-fix-iteration-1-f1-f3-f5-a-hand-seeded-hostile-actor-that-wins-the-deterministic-tiebreak-now-emits-a-sanitized-winner-actor-in-both-json-and-text-output-control-chars-newline-ansi-stripped-json-still-parses-winner-label-intact-covers-ac1-ac2-ac8-confirms-the-second-verdict-json-injection-path-identified-in-the-code-review-is-now-closed-with-no-functional-regression",
+      "claimId": "kontourai-flow-agents-320-liveness-verdict-integration.flow-agents-workflow.re-verification-security-fix-iteration-1-29-29-assertions-passed-up-from-27-27-pre-fix-sections-a-g-unchanged-byte-identical-verdict-determinism-exact-timestamp-tie-tie-actor-lexicographic-no-conflict-cases-3-way-losers-correctness-cli-level-loser-release-reselect-flow-fail-open-on-malformed-interleaved-stream-pull-work-skill-text-static-assertions-new-section-h-fix-iteration-1-f1-f3-f5-a-hand-seeded-hostile-actor-that-wins-the-deterministic-tiebreak-now-emits-a-sanitized-winner-actor-in-both-json-and-text-output-control-chars-newline-ansi-stripped-json-still-parses-winner-label-intact-covers-ac1-ac2-ac8-confirms-the-second-verdict-json-injection-path-identified-in-the-code-review-is-now-closed-with-no-functional-regression",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:decision-registry-contract-decision-registry-validator.flow-agents-workflow.npm-run-check-decisions-validates-the-pilot-topic-file-refuses-secret-shaped-evidence-unknown-status-and-dangling-tombstones-and-asserts-the-generated-index-is-current-wired-into-the-required-source-and-static-ci-lane"
+        "ev:kontourai-flow-agents-320-liveness-verdict-integration.flow-agents-workflow.re-verification-security-fix-iteration-1-29-29-assertions-passed-up-from-27-27-pre-fix-sections-a-g-unchanged-byte-identical-verdict-determinism-exact-timestamp-tie-tie-actor-lexicographic-no-conflict-cases-3-way-losers-correctness-cli-level-loser-release-reselect-flow-fail-open-on-malformed-interleaved-stream-pull-work-skill-text-static-assertions-new-section-h-fix-iteration-1-f1-f3-f5-a-hand-seeded-hostile-actor-that-wins-the-deterministic-tiebreak-now-emits-a-sanitized-winner-actor-in-both-json-and-text-output-control-chars-newline-ansi-stripped-json-still-parses-winner-label-intact-covers-ac1-ac2-ac8-confirms-the-second-verdict-json-injection-path-identified-in-the-code-review-is-now-closed-with-no-functional-regression"
       ],
-      "createdAt": "2026-07-03T04:55:49Z",
-      "verifiedAt": "2026-07-03T04:55:49Z"
+      "createdAt": "2026-07-03T15:27:17Z",
+      "verifiedAt": "2026-07-03T15:27:17Z"
     },
     {
-      "id": "evt:decision-registry-contract-ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails.flow-agents-workflow.ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails",
-      "claimId": "decision-registry-contract-ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails.flow-agents-workflow.ac1-valid-topic-file-passes-validator-invalid-bad-status-missing-subject-secret-shaped-evidence-fails",
+      "id": "evt:kontourai-flow-agents-320-liveness-conflict-injection-integration.flow-agents-workflow.re-verification-security-fix-iteration-1-19-19-assertions-passed-up-from-17-17-pre-fix-sections-a-g-unchanged-direct-maybeemitheartbeat-conflict-detection-and-solo-holder-omission-zero-added-fs-read-proof-episode-throttle-watermark-proof-incl-third-call-re-fire-claude-codex-real-hookspecificoutput-additionalcontext-injection-opencode-pi-stderr-only-degraded-runtime-proof-no-conflict-byte-stability-across-all-four-wrappers-fail-open-on-a-corrupted-sidecar-snapshot-new-section-h-fix-iteration-1-f1-f2-f5-a-hand-seeded-hostile-actor-embedded-newline-ansi-csi-bytes-literal-system-ignore-all-previous-instructions-payload-appended-directly-to-events-jsonl-bypassing-the-cli-write-side-sanitizesegment-never-reaches-claude-telemetry-hook-js-s-additionalcontext-or-opencode-telemetry-hook-js-s-stderr-diagnostic-raw-the-newline-joined-system-text-and-the-ansi-esc-byte-are-both-absent-a-sanitized-actor-is-surfaced-instead-conflict-detection-still-fires-and-the-trusted-liveness-conflict-run-liveness-verdict-and-coordinate-directive-sentence-stays-structurally-intact-and-unextended-covers-ac3-ac4-ac5-ac8-this-is-the-primary-command-backed-proof-that-the-critical-high-code-review-findings-unsanitized-multi-writer-conflict-actor-lastat-reaching-hookspecificoutput-additionalcontext-and-stderr-are-now-closed-hostile-actor-repro-that-previously-succeeded-now-fails-closed",
+      "claimId": "kontourai-flow-agents-320-liveness-conflict-injection-integration.flow-agents-workflow.re-verification-security-fix-iteration-1-19-19-assertions-passed-up-from-17-17-pre-fix-sections-a-g-unchanged-direct-maybeemitheartbeat-conflict-detection-and-solo-holder-omission-zero-added-fs-read-proof-episode-throttle-watermark-proof-incl-third-call-re-fire-claude-codex-real-hookspecificoutput-additionalcontext-injection-opencode-pi-stderr-only-degraded-runtime-proof-no-conflict-byte-stability-across-all-four-wrappers-fail-open-on-a-corrupted-sidecar-snapshot-new-section-h-fix-iteration-1-f1-f2-f5-a-hand-seeded-hostile-actor-embedded-newline-ansi-csi-bytes-literal-system-ignore-all-previous-instructions-payload-appended-directly-to-events-jsonl-bypassing-the-cli-write-side-sanitizesegment-never-reaches-claude-telemetry-hook-js-s-additionalcontext-or-opencode-telemetry-hook-js-s-stderr-diagnostic-raw-the-newline-joined-system-text-and-the-ansi-esc-byte-are-both-absent-a-sanitized-actor-is-surfaced-instead-conflict-detection-still-fires-and-the-trusted-liveness-conflict-run-liveness-verdict-and-coordinate-directive-sentence-stays-structurally-intact-and-unextended-covers-ac3-ac4-ac5-ac8-this-is-the-primary-command-backed-proof-that-the-critical-high-code-review-findings-unsanitized-multi-writer-conflict-actor-lastat-reaching-hookspecificoutput-additionalcontext-and-stderr-are-now-closed-hostile-actor-repro-that-previously-succeeded-now-fails-closed",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-320-liveness-conflict-injection-integration.flow-agents-workflow.re-verification-security-fix-iteration-1-19-19-assertions-passed-up-from-17-17-pre-fix-sections-a-g-unchanged-direct-maybeemitheartbeat-conflict-detection-and-solo-holder-omission-zero-added-fs-read-proof-episode-throttle-watermark-proof-incl-third-call-re-fire-claude-codex-real-hookspecificoutput-additionalcontext-injection-opencode-pi-stderr-only-degraded-runtime-proof-no-conflict-byte-stability-across-all-four-wrappers-fail-open-on-a-corrupted-sidecar-snapshot-new-section-h-fix-iteration-1-f1-f2-f5-a-hand-seeded-hostile-actor-embedded-newline-ansi-csi-bytes-literal-system-ignore-all-previous-instructions-payload-appended-directly-to-events-jsonl-bypassing-the-cli-write-side-sanitizesegment-never-reaches-claude-telemetry-hook-js-s-additionalcontext-or-opencode-telemetry-hook-js-s-stderr-diagnostic-raw-the-newline-joined-system-text-and-the-ansi-esc-byte-are-both-absent-a-sanitized-actor-is-surfaced-instead-conflict-detection-still-fires-and-the-trusted-liveness-conflict-run-liveness-verdict-and-coordinate-directive-sentence-stays-structurally-intact-and-unextended-covers-ac3-ac4-ac5-ac8-this-is-the-primary-command-backed-proof-that-the-critical-high-code-review-findings-unsanitized-multi-writer-conflict-actor-lastat-reaching-hookspecificoutput-additionalcontext-and-stderr-are-now-closed-hostile-actor-repro-that-previously-succeeded-now-fails-closed"
+      ],
+      "createdAt": "2026-07-03T15:27:17Z",
+      "verifiedAt": "2026-07-03T15:27:17Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-320-liveness-heartbeat-integration-regression.flow-agents-workflow.re-verification-security-fix-iteration-1-full-pre-existing-288-heartbeat-suite-opt-out-tokens-throttle-boundary-incl-custom-env-override-skip-reasons-wrapper-end-to-end-on-claude-codex-bounded-tail-f3-f8-ii-invariants-hostile-active-slug-sanitization-orphan-heartbeat-invariant-still-passes-43-43-unchanged-after-the-injection-remediation-fix-sanitizesegment-iso-re-serialization-added-at-the-computeconflict-choke-point-no-i-o-cost-regression-to-the-tail-read-hot-path-no-behavior-change-to-the-pre-existing-heartbeat-throttle-contract",
+      "claimId": "kontourai-flow-agents-320-liveness-heartbeat-integration-regression.flow-agents-workflow.re-verification-security-fix-iteration-1-full-pre-existing-288-heartbeat-suite-opt-out-tokens-throttle-boundary-incl-custom-env-override-skip-reasons-wrapper-end-to-end-on-claude-codex-bounded-tail-f3-f8-ii-invariants-hostile-active-slug-sanitization-orphan-heartbeat-invariant-still-passes-43-43-unchanged-after-the-injection-remediation-fix-sanitizesegment-iso-re-serialization-added-at-the-computeconflict-choke-point-no-i-o-cost-regression-to-the-tail-read-hot-path-no-behavior-change-to-the-pre-existing-heartbeat-throttle-contract",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-320-liveness-heartbeat-integration-regression.flow-agents-workflow.re-verification-security-fix-iteration-1-full-pre-existing-288-heartbeat-suite-opt-out-tokens-throttle-boundary-incl-custom-env-override-skip-reasons-wrapper-end-to-end-on-claude-codex-bounded-tail-f3-f8-ii-invariants-hostile-active-slug-sanitization-orphan-heartbeat-invariant-still-passes-43-43-unchanged-after-the-injection-remediation-fix-sanitizesegment-iso-re-serialization-added-at-the-computeconflict-choke-point-no-i-o-cost-regression-to-the-tail-read-hot-path-no-behavior-change-to-the-pre-existing-heartbeat-throttle-contract"
+      ],
+      "createdAt": "2026-07-03T15:27:17Z",
+      "verifiedAt": "2026-07-03T15:27:17Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-320-full-gate-suite-summary.flow-agents-workflow.re-verification-security-fix-iteration-1-folded-non-command-backed-summary-of-the-remaining-gates-run-this-pass-including-the-build-validate-source-pair-recast-here-non-command-backed-after-ci-trust-reconcile-flagged-the-prior-iteration-s-composite-npm-run-build-silent-npm-run-validate-source-command-backed-check-as-not-in-manifest-source-tree-validation-and-static-eval-suite-are-already-separate-independently-reconciled-manifest-entries-so-this-composite-is-folded-as-an-attested-summary-instead-of-a-fake-reconcilable-command-npm-run-build-tsc-clean-npm-run-validate-source-passed-with-only-the-pre-existing-flow-cli-root-advisory-warning-unrelated-to-this-issue-bash-evals-run-sh-static-1049-checkmark-assertions-across-30-pass-labeled-static-preset-sections-incl-35-35-node-test-unit-tests-0-failures-exit-0-test-pull-work-liveness-preflight-sh-64-64-full-pass-unchanged-since-prior-pass-test-sidecar-field-preservation-sh-8-8-identity-field-survival-checks-unchanged-test-trust-reconcile-manifest-sh-39-manifest-entries-39-required-ci-yml-check-invocations-self-check-pass-unchanged-npm-run-context-map-check-docs-context-map-md-current-no-drift-diff-review-of-the-fix-git-diff-scripts-hooks-lib-liveness-heartbeat-js-scripts-hooks-claude-codex-opencode-pi-telemetry-hook-js-src-cli-workflow-sidecar-ts-confirms-sanitization-is-applied-at-the-single-computeconflict-choke-point-all-four-wrappers-inherit-it-the-directive-sentence-in-all-four-wrappers-now-quotes-the-actor-lastat-values-and-the-verdict-json-branch-sanitizes-winner-losers-holders-before-json-stringify-grepped-the-full-fix-diff-plus-both-new-eval-files-for-provider-network-call-patterns-fetch-http-s-axios-child-process-exec-spawn-api-openai-anthropic-zero-matches-no-provider-or-network-calls-were-added-by-this-fix",
+      "claimId": "kontourai-flow-agents-320-full-gate-suite-summary.flow-agents-workflow.re-verification-security-fix-iteration-1-folded-non-command-backed-summary-of-the-remaining-gates-run-this-pass-including-the-build-validate-source-pair-recast-here-non-command-backed-after-ci-trust-reconcile-flagged-the-prior-iteration-s-composite-npm-run-build-silent-npm-run-validate-source-command-backed-check-as-not-in-manifest-source-tree-validation-and-static-eval-suite-are-already-separate-independently-reconciled-manifest-entries-so-this-composite-is-folded-as-an-attested-summary-instead-of-a-fake-reconcilable-command-npm-run-build-tsc-clean-npm-run-validate-source-passed-with-only-the-pre-existing-flow-cli-root-advisory-warning-unrelated-to-this-issue-bash-evals-run-sh-static-1049-checkmark-assertions-across-30-pass-labeled-static-preset-sections-incl-35-35-node-test-unit-tests-0-failures-exit-0-test-pull-work-liveness-preflight-sh-64-64-full-pass-unchanged-since-prior-pass-test-sidecar-field-preservation-sh-8-8-identity-field-survival-checks-unchanged-test-trust-reconcile-manifest-sh-39-manifest-entries-39-required-ci-yml-check-invocations-self-check-pass-unchanged-npm-run-context-map-check-docs-context-map-md-current-no-drift-diff-review-of-the-fix-git-diff-scripts-hooks-lib-liveness-heartbeat-js-scripts-hooks-claude-codex-opencode-pi-telemetry-hook-js-src-cli-workflow-sidecar-ts-confirms-sanitization-is-applied-at-the-single-computeconflict-choke-point-all-four-wrappers-inherit-it-the-directive-sentence-in-all-four-wrappers-now-quotes-the-actor-lastat-values-and-the-verdict-json-branch-sanitizes-winner-losers-holders-before-json-stringify-grepped-the-full-fix-diff-plus-both-new-eval-files-for-provider-network-call-patterns-fetch-http-s-axios-child-process-exec-spawn-api-openai-anthropic-zero-matches-no-provider-or-network-calls-were-added-by-this-fix",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-320-full-gate-suite-summary.flow-agents-workflow.re-verification-security-fix-iteration-1-folded-non-command-backed-summary-of-the-remaining-gates-run-this-pass-including-the-build-validate-source-pair-recast-here-non-command-backed-after-ci-trust-reconcile-flagged-the-prior-iteration-s-composite-npm-run-build-silent-npm-run-validate-source-command-backed-check-as-not-in-manifest-source-tree-validation-and-static-eval-suite-are-already-separate-independently-reconciled-manifest-entries-so-this-composite-is-folded-as-an-attested-summary-instead-of-a-fake-reconcilable-command-npm-run-build-tsc-clean-npm-run-validate-source-passed-with-only-the-pre-existing-flow-cli-root-advisory-warning-unrelated-to-this-issue-bash-evals-run-sh-static-1049-checkmark-assertions-across-30-pass-labeled-static-preset-sections-incl-35-35-node-test-unit-tests-0-failures-exit-0-test-pull-work-liveness-preflight-sh-64-64-full-pass-unchanged-since-prior-pass-test-sidecar-field-preservation-sh-8-8-identity-field-survival-checks-unchanged-test-trust-reconcile-manifest-sh-39-manifest-entries-39-required-ci-yml-check-invocations-self-check-pass-unchanged-npm-run-context-map-check-docs-context-map-md-current-no-drift-diff-review-of-the-fix-git-diff-scripts-hooks-lib-liveness-heartbeat-js-scripts-hooks-claude-codex-opencode-pi-telemetry-hook-js-src-cli-workflow-sidecar-ts-confirms-sanitization-is-applied-at-the-single-computeconflict-choke-point-all-four-wrappers-inherit-it-the-directive-sentence-in-all-four-wrappers-now-quotes-the-actor-lastat-values-and-the-verdict-json-branch-sanitizes-winner-losers-holders-before-json-stringify-grepped-the-full-fix-diff-plus-both-new-eval-files-for-provider-network-call-patterns-fetch-http-s-axios-child-process-exec-spawn-api-openai-anthropic-zero-matches-no-provider-or-network-calls-were-added-by-this-fix"
+      ],
+      "createdAt": "2026-07-03T15:27:17Z",
+      "verifiedAt": "2026-07-03T15:27:17Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-320-ac7-manifest-registration-grep-proof.flow-agents-workflow.reconfirmed-this-pass-security-fix-iteration-1-command-re-run-bash-evals-ci-run-baseline-sh-manifest-json-grep-c-liveness-verdict-liveness-conflict-1-both-liveness-verdict-integration-and-liveness-conflict-injection-integration-ids-present-in-the-emitted-manifest-lane-runtime-and-kit-satisfying-ac7-s-exact-plan-specified-evidence-command-unchanged-by-the-security-fix-confirmed-also-via-github-workflows-ci-yml-diff-adding-both-as-continue-on-error-required-lane-steps",
+      "claimId": "kontourai-flow-agents-320-ac7-manifest-registration-grep-proof.flow-agents-workflow.reconfirmed-this-pass-security-fix-iteration-1-command-re-run-bash-evals-ci-run-baseline-sh-manifest-json-grep-c-liveness-verdict-liveness-conflict-1-both-liveness-verdict-integration-and-liveness-conflict-injection-integration-ids-present-in-the-emitted-manifest-lane-runtime-and-kit-satisfying-ac7-s-exact-plan-specified-evidence-command-unchanged-by-the-security-fix-confirmed-also-via-github-workflows-ci-yml-diff-adding-both-as-continue-on-error-required-lane-steps",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-320-ac7-manifest-registration-grep-proof.flow-agents-workflow.reconfirmed-this-pass-security-fix-iteration-1-command-re-run-bash-evals-ci-run-baseline-sh-manifest-json-grep-c-liveness-verdict-liveness-conflict-1-both-liveness-verdict-integration-and-liveness-conflict-injection-integration-ids-present-in-the-emitted-manifest-lane-runtime-and-kit-satisfying-ac7-s-exact-plan-specified-evidence-command-unchanged-by-the-security-fix-confirmed-also-via-github-workflows-ci-yml-diff-adding-both-as-continue-on-error-required-lane-steps"
+      ],
+      "createdAt": "2026-07-03T15:27:17Z",
+      "verifiedAt": "2026-07-03T15:27:17Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-320-docs-latency-budget-table.flow-agents-workflow.carried-over-unchanged-from-the-prior-verification-pass-docs-workflow-usage-guide-md-is-not-touched-by-this-security-fix-iteration-s-diff-section-line-671-overlap-detection-and-correction-placed-after-tool-activity-heartbeat-and-before-actor-identity-and-liveness-writes-as-planned-documents-the-selection-mid-flight-publish-latency-budget-table-cites-adr-0012-ss4-and-adr-0021-ss3-and-states-explicitly-that-the-publish-row-is-not-implemented-by-this-issue-ac6-not-independently-re-read-this-iteration-re-verification-scope-was-the-injection-fix-and-its-regression-surface",
+      "claimId": "kontourai-flow-agents-320-docs-latency-budget-table.flow-agents-workflow.carried-over-unchanged-from-the-prior-verification-pass-docs-workflow-usage-guide-md-is-not-touched-by-this-security-fix-iteration-s-diff-section-line-671-overlap-detection-and-correction-placed-after-tool-activity-heartbeat-and-before-actor-identity-and-liveness-writes-as-planned-documents-the-selection-mid-flight-publish-latency-budget-table-cites-adr-0012-ss4-and-adr-0021-ss3-and-states-explicitly-that-the-publish-row-is-not-implemented-by-this-issue-ac6-not-independently-re-read-this-iteration-re-verification-scope-was-the-injection-fix-and-its-regression-surface",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-320-docs-latency-budget-table.flow-agents-workflow.carried-over-unchanged-from-the-prior-verification-pass-docs-workflow-usage-guide-md-is-not-touched-by-this-security-fix-iteration-s-diff-section-line-671-overlap-detection-and-correction-placed-after-tool-activity-heartbeat-and-before-actor-identity-and-liveness-writes-as-planned-documents-the-selection-mid-flight-publish-latency-budget-table-cites-adr-0012-ss4-and-adr-0021-ss3-and-states-explicitly-that-the-publish-row-is-not-implemented-by-this-issue-ac6-not-independently-re-read-this-iteration-re-verification-scope-was-the-injection-fix-and-its-regression-surface"
+      ],
+      "createdAt": "2026-07-03T15:27:17Z",
+      "verifiedAt": "2026-07-03T15:27:17Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-320-direct-cli-and-wrapper-probes.flow-agents-workflow.carried-over-unchanged-from-the-prior-verification-pass-s-independent-scratch-root-probes-headline-convergence-exact-timestamp-tie-claude-opencode-hook-probes-byte-stable-no-conflict-wrapper-output-not-independently-re-run-this-iteration-this-pass-s-ad-hoc-verification-effort-was-directed-at-the-hostile-actor-injection-repro-now-closed-see-liveness-conflict-injection-integration-and-liveness-verdict-integration-checks-and-the-automated-regression-suite-not-at-re-running-the-already-covered-functional-scratch-probes-from-the-prior-pass",
+      "claimId": "kontourai-flow-agents-320-direct-cli-and-wrapper-probes.flow-agents-workflow.carried-over-unchanged-from-the-prior-verification-pass-s-independent-scratch-root-probes-headline-convergence-exact-timestamp-tie-claude-opencode-hook-probes-byte-stable-no-conflict-wrapper-output-not-independently-re-run-this-iteration-this-pass-s-ad-hoc-verification-effort-was-directed-at-the-hostile-actor-injection-repro-now-closed-see-liveness-conflict-injection-integration-and-liveness-verdict-integration-checks-and-the-automated-regression-suite-not-at-re-running-the-already-covered-functional-scratch-probes-from-the-prior-pass",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-320-direct-cli-and-wrapper-probes.flow-agents-workflow.carried-over-unchanged-from-the-prior-verification-pass-s-independent-scratch-root-probes-headline-convergence-exact-timestamp-tie-claude-opencode-hook-probes-byte-stable-no-conflict-wrapper-output-not-independently-re-run-this-iteration-this-pass-s-ad-hoc-verification-effort-was-directed-at-the-hostile-actor-injection-repro-now-closed-see-liveness-conflict-injection-integration-and-liveness-verdict-integration-checks-and-the-automated-regression-suite-not-at-re-running-the-already-covered-functional-scratch-probes-from-the-prior-pass"
+      ],
+      "createdAt": "2026-07-03T15:27:17Z",
+      "verifiedAt": "2026-07-03T15:27:17Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-320-opencode-pi-live-skill-obedience-gap.flow-agents-workflow.accepted-gap-not-a-defect-carried-over-unchanged-opencode-s-and-pi-s-generated-plugin-extension-do-not-consume-any-telemetry-wrapper-stdout-today-so-the-mid-turn-conflict-signal-cannot-be-obeyed-live-on-those-two-runtimes-only-the-disclosed-stderr-diagnostic-plus-the-next-turn-workflow-steering-js-digest-fallback-are-real-there-disclosed-in-the-plan-s-unresolved-questions-1-docs-workflow-usage-guide-md-s-mid-flight-row-follow-up-333-and-the-definition-of-done-s-explicit-exclusion-list-unaffected-by-this-security-fix-iteration-the-stderr-diagnostic-itself-is-now-sanitized-see-liveness-conflict-injection-integration-section-h-but-the-underlying-live-obedience-gap-on-opencode-pi-is-unchanged-approved-by-brian-anderson1222-gmail-com-session-approved",
+      "claimId": "kontourai-flow-agents-320-opencode-pi-live-skill-obedience-gap.flow-agents-workflow.accepted-gap-not-a-defect-carried-over-unchanged-opencode-s-and-pi-s-generated-plugin-extension-do-not-consume-any-telemetry-wrapper-stdout-today-so-the-mid-turn-conflict-signal-cannot-be-obeyed-live-on-those-two-runtimes-only-the-disclosed-stderr-diagnostic-plus-the-next-turn-workflow-steering-js-digest-fallback-are-real-there-disclosed-in-the-plan-s-unresolved-questions-1-docs-workflow-usage-guide-md-s-mid-flight-row-follow-up-333-and-the-definition-of-done-s-explicit-exclusion-list-unaffected-by-this-security-fix-iteration-the-stderr-diagnostic-itself-is-now-sanitized-see-liveness-conflict-injection-integration-section-h-but-the-underlying-live-obedience-gap-on-opencode-pi-is-unchanged-approved-by-brian-anderson1222-gmail-com-session-approved",
+      "status": "assumed",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-320-opencode-pi-live-skill-obedience-gap.flow-agents-workflow.accepted-gap-not-a-defect-carried-over-unchanged-opencode-s-and-pi-s-generated-plugin-extension-do-not-consume-any-telemetry-wrapper-stdout-today-so-the-mid-turn-conflict-signal-cannot-be-obeyed-live-on-those-two-runtimes-only-the-disclosed-stderr-diagnostic-plus-the-next-turn-workflow-steering-js-digest-fallback-are-real-there-disclosed-in-the-plan-s-unresolved-questions-1-docs-workflow-usage-guide-md-s-mid-flight-row-follow-up-333-and-the-definition-of-done-s-explicit-exclusion-list-unaffected-by-this-security-fix-iteration-the-stderr-diagnostic-itself-is-now-sanitized-see-liveness-conflict-injection-integration-section-h-but-the-underlying-live-obedience-gap-on-opencode-pi-is-unchanged-approved-by-brian-anderson1222-gmail-com-session-approved"
+      ],
+      "createdAt": "2026-07-03T15:27:17Z",
+      "verifiedAt": "2026-07-03T15:27:17Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-320-security-fix-injection-remediation-iter1.flow-agents-workflow.fix-plan-iteration-1-critical-high-med-code-review-findings-verified-resolved-by-diff-read-against-scripts-hooks-lib-liveness-heartbeat-js-scripts-hooks-claude-codex-opencode-pi-telemetry-hook-js-and-src-cli-workflow-sidecar-ts-1-critical-liveness-heartbeat-js-s-new-computeconflict-is-the-single-choke-point-where-conflict-actor-conflict-lastat-are-constructed-from-the-multi-writer-append-only-events-jsonl-stream-it-now-applies-sanitizesegment-the-same-allowlist-64-char-cap-the-write-side-already-applies-to-legitimate-actors-to-actor-and-re-serializes-lastat-via-date-parse-new-date-toisostring-structurally-eliminating-control-chars-ansi-on-a-timestamp-so-all-four-wrapper-call-sites-inherit-sanitized-values-with-no-per-wrapper-defense-to-forget-f1-2-high-all-four-wrapper-interpolation-sites-now-render-the-actor-lastat-inside-double-quotes-within-the-fixed-liveness-conflict-actor-claimed-this-subject-at-run-liveness-verdict-and-coordinate-directive-sentence-because-the-values-are-pre-sanitized-no-control-chars-newlines-survive-sanitizesegment-iso-reserialization-a-hostile-actor-cannot-escape-the-quotes-or-splice-a-forged-system-style-directive-into-the-trusted-instruction-text-f2-3-high-workflow-sidecar-ts-s-liveness-verdict-json-branch-now-runs-winner-losers-holders-actor-claimat-lastat-through-a-dedicated-sanitizeverdictholderforjson-stripcontrolcharsfordisplay-slice-0-64-before-json-stringify-closing-the-second-llm-facing-injection-path-the-pull-work-skill-s-json-consumption-opened-while-leaving-the-underlying-result-holders-winner-losers-objects-unsanitized-for-internal-use-loser-release-contract-unaffected-f3-4-med-length-cap-enforced-consistently-via-sanitizesegment-s-64-char-cap-and-matching-slice-0-64-calls-on-the-json-path-f4-5-med-both-evals-integration-test-liveness-conflict-injection-sh-and-test-liveness-verdict-sh-gained-a-new-adversarial-section-h-hand-seeded-hostile-actor-embedded-newline-ansi-csi-literal-system-ignore-all-previous-instructions-payload-asserting-the-hostile-text-never-appears-raw-in-additionalcontext-stderr-verdict-output-text-and-json-and-that-the-directive-sentence-stays-structurally-intact-both-pass-f5-independently-confirmed-no-provider-network-calls-were-introduced-anywhere-in-the-fix-diff-or-the-two-new-eval-files-grepped-for-fetch-http-s-axios-child-process-exec-spawn-api-openai-anthropic-zero-matches-full-regression-suite-static-preset-heartbeat-preflight-field-preservation-manifest-self-check-green-with-no-assertion-weakened-or-removed-hostile-actor-repro-from-the-code-review-which-previously-succeeded-verbatim-newline-ansi-system-text-reaching-additionalcontext-now-fails-closed-per-the-new-section-h-assertions-in-both-adversarial-evals",
+      "claimId": "kontourai-flow-agents-320-security-fix-injection-remediation-iter1.flow-agents-workflow.fix-plan-iteration-1-critical-high-med-code-review-findings-verified-resolved-by-diff-read-against-scripts-hooks-lib-liveness-heartbeat-js-scripts-hooks-claude-codex-opencode-pi-telemetry-hook-js-and-src-cli-workflow-sidecar-ts-1-critical-liveness-heartbeat-js-s-new-computeconflict-is-the-single-choke-point-where-conflict-actor-conflict-lastat-are-constructed-from-the-multi-writer-append-only-events-jsonl-stream-it-now-applies-sanitizesegment-the-same-allowlist-64-char-cap-the-write-side-already-applies-to-legitimate-actors-to-actor-and-re-serializes-lastat-via-date-parse-new-date-toisostring-structurally-eliminating-control-chars-ansi-on-a-timestamp-so-all-four-wrapper-call-sites-inherit-sanitized-values-with-no-per-wrapper-defense-to-forget-f1-2-high-all-four-wrapper-interpolation-sites-now-render-the-actor-lastat-inside-double-quotes-within-the-fixed-liveness-conflict-actor-claimed-this-subject-at-run-liveness-verdict-and-coordinate-directive-sentence-because-the-values-are-pre-sanitized-no-control-chars-newlines-survive-sanitizesegment-iso-reserialization-a-hostile-actor-cannot-escape-the-quotes-or-splice-a-forged-system-style-directive-into-the-trusted-instruction-text-f2-3-high-workflow-sidecar-ts-s-liveness-verdict-json-branch-now-runs-winner-losers-holders-actor-claimat-lastat-through-a-dedicated-sanitizeverdictholderforjson-stripcontrolcharsfordisplay-slice-0-64-before-json-stringify-closing-the-second-llm-facing-injection-path-the-pull-work-skill-s-json-consumption-opened-while-leaving-the-underlying-result-holders-winner-losers-objects-unsanitized-for-internal-use-loser-release-contract-unaffected-f3-4-med-length-cap-enforced-consistently-via-sanitizesegment-s-64-char-cap-and-matching-slice-0-64-calls-on-the-json-path-f4-5-med-both-evals-integration-test-liveness-conflict-injection-sh-and-test-liveness-verdict-sh-gained-a-new-adversarial-section-h-hand-seeded-hostile-actor-embedded-newline-ansi-csi-literal-system-ignore-all-previous-instructions-payload-asserting-the-hostile-text-never-appears-raw-in-additionalcontext-stderr-verdict-output-text-and-json-and-that-the-directive-sentence-stays-structurally-intact-both-pass-f5-independently-confirmed-no-provider-network-calls-were-introduced-anywhere-in-the-fix-diff-or-the-two-new-eval-files-grepped-for-fetch-http-s-axios-child-process-exec-spawn-api-openai-anthropic-zero-matches-full-regression-suite-static-preset-heartbeat-preflight-field-preservation-manifest-self-check-green-with-no-assertion-weakened-or-removed-hostile-actor-repro-from-the-code-review-which-previously-succeeded-verbatim-newline-ansi-system-text-reaching-additionalcontext-now-fails-closed-per-the-new-section-h-assertions-in-both-adversarial-evals",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-320-security-fix-injection-remediation-iter1.flow-agents-workflow.fix-plan-iteration-1-critical-high-med-code-review-findings-verified-resolved-by-diff-read-against-scripts-hooks-lib-liveness-heartbeat-js-scripts-hooks-claude-codex-opencode-pi-telemetry-hook-js-and-src-cli-workflow-sidecar-ts-1-critical-liveness-heartbeat-js-s-new-computeconflict-is-the-single-choke-point-where-conflict-actor-conflict-lastat-are-constructed-from-the-multi-writer-append-only-events-jsonl-stream-it-now-applies-sanitizesegment-the-same-allowlist-64-char-cap-the-write-side-already-applies-to-legitimate-actors-to-actor-and-re-serializes-lastat-via-date-parse-new-date-toisostring-structurally-eliminating-control-chars-ansi-on-a-timestamp-so-all-four-wrapper-call-sites-inherit-sanitized-values-with-no-per-wrapper-defense-to-forget-f1-2-high-all-four-wrapper-interpolation-sites-now-render-the-actor-lastat-inside-double-quotes-within-the-fixed-liveness-conflict-actor-claimed-this-subject-at-run-liveness-verdict-and-coordinate-directive-sentence-because-the-values-are-pre-sanitized-no-control-chars-newlines-survive-sanitizesegment-iso-reserialization-a-hostile-actor-cannot-escape-the-quotes-or-splice-a-forged-system-style-directive-into-the-trusted-instruction-text-f2-3-high-workflow-sidecar-ts-s-liveness-verdict-json-branch-now-runs-winner-losers-holders-actor-claimat-lastat-through-a-dedicated-sanitizeverdictholderforjson-stripcontrolcharsfordisplay-slice-0-64-before-json-stringify-closing-the-second-llm-facing-injection-path-the-pull-work-skill-s-json-consumption-opened-while-leaving-the-underlying-result-holders-winner-losers-objects-unsanitized-for-internal-use-loser-release-contract-unaffected-f3-4-med-length-cap-enforced-consistently-via-sanitizesegment-s-64-char-cap-and-matching-slice-0-64-calls-on-the-json-path-f4-5-med-both-evals-integration-test-liveness-conflict-injection-sh-and-test-liveness-verdict-sh-gained-a-new-adversarial-section-h-hand-seeded-hostile-actor-embedded-newline-ansi-csi-literal-system-ignore-all-previous-instructions-payload-asserting-the-hostile-text-never-appears-raw-in-additionalcontext-stderr-verdict-output-text-and-json-and-that-the-directive-sentence-stays-structurally-intact-both-pass-f5-independently-confirmed-no-provider-network-calls-were-introduced-anywhere-in-the-fix-diff-or-the-two-new-eval-files-grepped-for-fetch-http-s-axios-child-process-exec-spawn-api-openai-anthropic-zero-matches-full-regression-suite-static-preset-heartbeat-preflight-field-preservation-manifest-self-check-green-with-no-assertion-weakened-or-removed-hostile-actor-repro-from-the-code-review-which-previously-succeeded-verbatim-newline-ansi-system-text-reaching-additionalcontext-now-fails-closed-per-the-new-section-h-assertions-in-both-adversarial-evals"
+      ],
+      "createdAt": "2026-07-03T15:27:17Z",
+      "verifiedAt": "2026-07-03T15:27:17Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-320-ac1-verdict-deterministic-liveness-verdict-subjectid-json-now-iso-is-a.flow-agents-workflow.ac1-verdict-deterministic-liveness-verdict-subjectid-json-now-iso-is-a",
+      "claimId": "kontourai-flow-agents-320-ac1-verdict-deterministic-liveness-verdict-subjectid-json-now-iso-is-a.flow-agents-workflow.ac1-verdict-deterministic-liveness-verdict-subjectid-json-now-iso-is-a",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-03T04:55:49Z",
-      "verifiedAt": "2026-07-03T04:55:49Z"
+      "createdAt": "2026-07-03T15:27:17Z",
+      "verifiedAt": "2026-07-03T15:27:17Z"
     },
     {
-      "id": "evt:decision-registry-contract-ac2-index-regeneration-is-idempotent-and-diff-clean.flow-agents-workflow.ac2-index-regeneration-is-idempotent-and-diff-clean",
-      "claimId": "decision-registry-contract-ac2-index-regeneration-is-idempotent-and-diff-clean.flow-agents-workflow.ac2-index-regeneration-is-idempotent-and-diff-clean",
+      "id": "evt:kontourai-flow-agents-320-ac2-loser-release-reselect-skill-text-kits-builder-skills-pull-work-skill-md-s.flow-agents-workflow.ac2-loser-release-reselect-skill-text-kits-builder-skills-pull-work-skill-md-s",
+      "claimId": "kontourai-flow-agents-320-ac2-loser-release-reselect-skill-text-kits-builder-skills-pull-work-skill-md-s.flow-agents-workflow.ac2-loser-release-reselect-skill-text-kits-builder-skills-pull-work-skill-md-s",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-03T04:55:49Z",
-      "verifiedAt": "2026-07-03T04:55:49Z"
+      "createdAt": "2026-07-03T15:27:17Z",
+      "verifiedAt": "2026-07-03T15:27:17Z"
     },
     {
-      "id": "evt:decision-registry-contract-ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable.flow-agents-workflow.ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable",
-      "claimId": "decision-registry-contract-ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable.flow-agents-workflow.ac3-pilot-decision-file-exists-indexed-linked-from-context-md-evidence-resolvable",
+      "id": "evt:kontourai-flow-agents-320-ac3-mid-turn-conflict-detection-zero-io-maybeemitheartbeat-detects-a-fresher.flow-agents-workflow.ac3-mid-turn-conflict-detection-zero-io-maybeemitheartbeat-detects-a-fresher",
+      "claimId": "kontourai-flow-agents-320-ac3-mid-turn-conflict-detection-zero-io-maybeemitheartbeat-detects-a-fresher.flow-agents-workflow.ac3-mid-turn-conflict-detection-zero-io-maybeemitheartbeat-detects-a-fresher",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-03T04:55:49Z",
-      "verifiedAt": "2026-07-03T04:55:49Z"
+      "createdAt": "2026-07-03T15:27:17Z",
+      "verifiedAt": "2026-07-03T15:27:17Z"
     },
     {
-      "id": "evt:decision-registry-contract-ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples.flow-agents-workflow.ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples",
-      "claimId": "decision-registry-contract-ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples.flow-agents-workflow.ac4-contract-covers-supersession-by-edit-and-both-tombstone-forms-with-examples",
+      "id": "evt:kontourai-flow-agents-320-ac4-hook-feedback-injection-per-runtime-the-four-telemetry-hook-wrappers.flow-agents-workflow.ac4-hook-feedback-injection-per-runtime-the-four-telemetry-hook-wrappers",
+      "claimId": "kontourai-flow-agents-320-ac4-hook-feedback-injection-per-runtime-the-four-telemetry-hook-wrappers.flow-agents-workflow.ac4-hook-feedback-injection-per-runtime-the-four-telemetry-hook-wrappers",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-03T04:55:49Z",
-      "verifiedAt": "2026-07-03T04:55:49Z"
+      "createdAt": "2026-07-03T15:27:17Z",
+      "verifiedAt": "2026-07-03T15:27:17Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-320-ac5-episode-throttle-stream-derived-the-conflict-signal-fires-only-when-the.flow-agents-workflow.ac5-episode-throttle-stream-derived-the-conflict-signal-fires-only-when-the",
+      "claimId": "kontourai-flow-agents-320-ac5-episode-throttle-stream-derived-the-conflict-signal-fires-only-when-the.flow-agents-workflow.ac5-episode-throttle-stream-derived-the-conflict-signal-fires-only-when-the",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T15:27:17Z",
+      "verifiedAt": "2026-07-03T15:27:17Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-320-ac6-latency-budget-documented-docs-workflow-usage-guide-md-documents-a.flow-agents-workflow.ac6-latency-budget-documented-docs-workflow-usage-guide-md-documents-a",
+      "claimId": "kontourai-flow-agents-320-ac6-latency-budget-documented-docs-workflow-usage-guide-md-documents-a.flow-agents-workflow.ac6-latency-budget-documented-docs-workflow-usage-guide-md-documents-a",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T15:27:17Z",
+      "verifiedAt": "2026-07-03T15:27:17Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-320-ac7-adr-0020-eval-registration-the-two-new-integration-eval-files-are-registered-in.flow-agents-workflow.ac7-adr-0020-eval-registration-the-two-new-integration-eval-files-are-registered-in",
+      "claimId": "kontourai-flow-agents-320-ac7-adr-0020-eval-registration-the-two-new-integration-eval-files-are-registered-in.flow-agents-workflow.ac7-adr-0020-eval-registration-the-two-new-integration-eval-files-are-registered-in",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T15:27:17Z",
+      "verifiedAt": "2026-07-03T15:27:17Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-320-ac8-fail-open-no-provider-mutation-every-new-changed-code-path-the-verdict-cli.flow-agents-workflow.ac8-fail-open-no-provider-mutation-every-new-changed-code-path-the-verdict-cli",
+      "claimId": "kontourai-flow-agents-320-ac8-fail-open-no-provider-mutation-every-new-changed-code-path-the-verdict-cli.flow-agents-workflow.ac8-fail-open-no-provider-mutation-every-new-changed-code-path-the-verdict-cli",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T15:27:17Z",
+      "verifiedAt": "2026-07-03T15:27:17Z"
     }
   ]
 }

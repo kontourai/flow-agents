@@ -160,6 +160,33 @@ function invalidItem(slug: string, workflowPath: string, reason: string): AuditI
   };
 }
 
+// Promote-then-archive gate (issue #312). A delivered session's durable residue
+// (decisions, vocabulary, learnings, doc updates) must be PROMOTED before the session
+// is archived. Promotion is recorded as a session-local promotion claim in the session
+// trust.bundle (workflow-sidecar promote), detectable here via claim.metadata.promotion
+// — no new manifest entry required. A delivered/accepted session that reached a terminal
+// shape WITHOUT that claim is a cleanup_candidate (blocked from archive) with a remedy
+// naming the promote step. Already-`archived` sessions are past the gate and are never
+// re-flagged (issue #312 non-goal: do not backfill already-archived sessions).
+const PROMOTE_REMEDY =
+  "run `flow-agents workflow-sidecar promote <dir> --evidence-path <durable-doc> ...`" +
+  " (or `promote --none --reason \"<why nothing durable>\"`) to record the promotion claim before archiving";
+
+function hasPromotionClaim(workflowDir: string): boolean {
+  const bundlePath = path.join(workflowDir, "trust.bundle");
+  if (!fs.existsSync(bundlePath)) return false;
+  const parsed = readJson(bundlePath, "trust.bundle");
+  if (!parsed.ok) return false;
+  const bundle = objectValue(parsed.value);
+  if (!bundle || !Array.isArray(bundle.claims)) return false;
+  return bundle.claims.some((entry) => {
+    const claim = objectValue(entry);
+    if (!claim) return false;
+    const meta = objectValue(claim.metadata);
+    return meta !== null && objectValue(meta.promotion) !== null;
+  });
+}
+
 function classifyWorkflow(slug: string, workflowPath: string): AuditItem {
   const statePath = path.join(workflowPath, "state.json");
   if (!fs.existsSync(statePath)) return invalidItem(slug, workflowPath, "missing state.json");
@@ -193,9 +220,15 @@ function classifyWorkflow(slug: string, workflowPath: string): AuditItem {
     return { ...base, classification: "cleanup_candidate", reasons: ["verified workflow has next_action.status done"] };
   }
   if (["delivered", "accepted", "archived"].includes(status) && phase === "done") {
+    if (status !== "archived" && !hasPromotionClaim(workflowPath)) {
+      return { ...base, classification: "cleanup_candidate", reasons: [`${status} workflow reached phase done without a promotion claim; ${PROMOTE_REMEDY}`] };
+    }
     return { ...base, classification: "terminal_done", reasons: [`${status} workflow is in phase done`] };
   }
   if ((status === "accepted" || status === "archived") && learning.reasons.length === 0) {
+    if (status !== "archived" && !hasPromotionClaim(workflowPath)) {
+      return { ...base, classification: "cleanup_candidate", reasons: [`${status} workflow has closed learning routing but no promotion claim; ${PROMOTE_REMEDY}`] };
+    }
     return { ...base, classification: "terminal_done", reasons: [`${status} workflow has no open learning routing`] };
   }
   return { ...base, classification: "invalid", reasons: [`unrecognized lifecycle shape: status=${status}, phase=${phase}, next_action.status=${nextStatus ?? "missing"}`] };
