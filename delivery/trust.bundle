@@ -3,125 +3,175 @@
   "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
   "claims": [
     {
-      "id": "kontourai-flow-agents-309-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-0-exit-compiles-ts-build-then-runs-source-tree-validator-source-tree-validation-passed-build-tsc-also-succeeded-standalone-0-exit-as-its-prerequisite",
-      "subjectType": "work-item",
-      "subjectId": "kontourai-flow-agents-309/source-tree-validation",
+      "id": "kontourai-flow-agents-166-pull-work-skill-obedience-live-lane.flow-agents-workflow.live-pull-work-skill-obedience-whether-an-llm-agent-actually-runs-the-documented-preflight-claim-post-claim-recheck-steps-during-a-real-session-vs-a-technically-complete-implementation-the-agent-simply-forgets-to-invoke-is-not-machine-verifiable-without-a-live-llm-eval-lane-per-the-plan-stop-short-risk-4-and-the-fix-plan-addendum-because-emission-is-purely-skill-text-driven-the-static-skill-text-assertions-ac8-62-62-passing-this-pass-prove-the-instructions-exist-not-that-they-are-followed-the-honest-limit-of-a-skill-text-slice-reconfirmed-unchanged-from-the-prior-verify-pass-recorded-again-this-re-verify-pass-as-the-accepted-gap-waiver-per-task-instructions",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-166/pull-work-skill-obedience-live-lane",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
-      "fieldOrBehavior": "npm run validate:source -- passed (0 exit); compiles TS build then runs source-tree validator: Source tree validation passed. Build (tsc) also succeeded standalone (0 exit) as its prerequisite.",
-      "value": "pass",
-      "createdAt": "2026-07-03T04:35:01Z",
-      "updatedAt": "2026-07-03T04:35:01Z",
+      "claimType": "workflow.check.policy",
+      "fieldOrBehavior": "Live pull-work skill-obedience (whether an LLM agent actually runs the documented preflight/claim/post-claim-recheck steps during a real session, vs. a technically complete implementation the agent simply forgets to invoke) is not machine-verifiable without a live LLM eval lane. Per the plan Stop-Short Risk 4 and the fix-plan addendum: because emission is purely skill-text-driven, the static skill-text assertions (AC8, 62/62 passing this pass) prove the instructions exist, not that they are followed - the honest limit of a skill-text slice. Reconfirmed unchanged from the prior verify pass; recorded again this re-verify pass as the accepted-gap waiver per task instructions.",
+      "value": "skip",
+      "createdAt": "2026-07-03T05:50:40Z",
+      "updatedAt": "2026-07-03T05:50:40Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
+      "verificationPolicyId": "policy:workflow.check.policy:attestation",
+      "metadata": {
+        "waiver": {
+          "reason": "Live LLM skill-obedience (whether a real pull-work session actually invokes the documented liveness preflight/claim/post-claim-recheck steps) requires a live LLM eval lane that does not exist in this repo's deterministic, no-model-spend eval suite; the static skill-text assertions (AC8) can only prove the instructions exist, not that an agent follows them in a live session. Named in the plan's Stop-Short Risk 4 and unresolved by design in a skill-text-only slice.",
+          "approved_by": "brian.anderson1222@gmail.com session-approved",
+          "approved_at": "2026-07-03T05:50:40Z"
+        }
+      },
+      "status": "assumed"
+    },
+    {
+      "id": "kontourai-flow-agents-166-ac1-liveness-preflight-classifies-candidates-pull-work-s-new-selection-preflight.flow-agents-workflow.ac1-liveness-preflight-classifies-candidates-pull-work-s-new-selection-preflight",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-166/ac1-liveness-preflight-classifies-candidates-pull-work-s-new-selection-preflight",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC1 `liveness-preflight-classifies-candidates`: `pull-work`'s new selection preflight",
+      "value": "pass",
+      "createdAt": "2026-07-03T05:50:40Z",
+      "updatedAt": "2026-07-03T05:50:40Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-309-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-passed-167-assertions-0-failures-exit-0-including-the-4-new-309-specific-regression-checks-setup-derive-init-plan-preserves-branch-with-branchless-plan-artifact-advance-state-preserves-branch-and-current-json-mirror-backfill-repair-of-pre-fix-broken-session-static-suite-bash-evals-run-sh-static-folded-in-as-supporting-non-manifest-evidence-also-passed-31-pass-lines-1049-checkmark-assertions-0-failures-exit-0-manual-scratch-root-probes-a-full-ensure-session-init-plan-advance-state-lifecycle-b-hand-seeded-broken-fixture-repair-via-init-plan-c-fresh-derive-branch-override-no-rederive-regression-checks-all-reproduced-the-expected-309-fixed-behavior-against-the-built-cli-build-src-cli-workflow-sidecar-js",
-      "subjectType": "work-item",
-      "subjectId": "kontourai-flow-agents-309/workflow-sidecar-writer-integration",
+      "id": "kontourai-flow-agents-166-ac2-held-subjects-excluded-by-default-force-overrides-held-candidates-are-excluded.flow-agents-workflow.ac2-held-subjects-excluded-by-default-force-overrides-held-candidates-are-excluded",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-166/ac2-held-subjects-excluded-by-default-force-overrides-held-candidates-are-excluded",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
-      "fieldOrBehavior": "bash evals/integration/test_workflow_sidecar_writer.sh passed: 167 assertions, 0 failures, exit 0, including the 4 new #309-specific regression checks (setup-derive, init-plan-preserves-branch-with-branchless-plan-artifact, advance-state-preserves-branch-and-current.json-mirror, backfill-repair-of-pre-fix-broken-session). Static suite (bash evals/run.sh static, folded in as supporting non-manifest evidence) also passed: 31 PASS lines + 1049 checkmark assertions, 0 failures, exit 0. Manual scratch-root probes (a) full ensure-session->init-plan->advance-state lifecycle, (b) hand-seeded broken-fixture repair via init-plan, (c) fresh-derive/--branch-override/no-rederive regression checks all reproduced the expected #309-fixed behavior against the built CLI (build/src/cli/workflow-sidecar.js).",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC2 `held-subjects-excluded-by-default-force-overrides`: `held` candidates are excluded",
       "value": "pass",
-      "createdAt": "2026-07-03T04:35:01Z",
-      "updatedAt": "2026-07-03T04:35:01Z",
+      "createdAt": "2026-07-03T05:50:40Z",
+      "updatedAt": "2026-07-03T05:50:40Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-309-after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence.flow-agents-workflow.after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence",
-      "subjectType": "work-item",
-      "subjectId": "kontourai-flow-agents-309/after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence",
+      "id": "kontourai-flow-agents-166-ac3-reclaimable-flagged-requires-explicit-optin-reclaimable-stale-candidates-are.flow-agents-workflow.ac3-reclaimable-flagged-requires-explicit-optin-reclaimable-stale-candidates-are",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-166/ac3-reclaimable-flagged-requires-explicit-optin-reclaimable-stale-candidates-are",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.pull-work.selected",
-      "fieldOrBehavior": "After ensure-session then init-plan, state.json still carries branch; eval asserts the full sequence",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC3 `reclaimable-flagged-requires-explicit-optin`: `reclaimable` (stale) candidates are",
       "value": "pass",
-      "createdAt": "2026-07-03T04:35:01Z",
-      "updatedAt": "2026-07-03T04:35:01Z",
+      "createdAt": "2026-07-03T05:50:40Z",
+      "updatedAt": "2026-07-03T05:50:40Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.pull-work.selected",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-166-ac4-claim-emitted-on-selection-with-matching-subjectid-on-finalized-selection-end-of.flow-agents-workflow.ac4-claim-emitted-on-selection-with-matching-subjectid-on-finalized-selection-end-of",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-166/ac4-claim-emitted-on-selection-with-matching-subjectid-on-finalized-selection-end-of",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC4 `claim-emitted-on-selection-with-matching-subjectid`: on finalized selection (end of",
+      "value": "pass",
+      "createdAt": "2026-07-03T05:50:40Z",
+      "updatedAt": "2026-07-03T05:50:40Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-166-ac5-own-fresh-claim-is-wip-not-a-new-pick-a-candidate-with-a-verified-row-for-the.flow-agents-workflow.ac5-own-fresh-claim-is-wip-not-a-new-pick-a-candidate-with-a-verified-row-for-the",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-166/ac5-own-fresh-claim-is-wip-not-a-new-pick-a-candidate-with-a-verified-row-for-the",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC5 `own-fresh-claim-is-wip-not-a-new-pick`: a candidate with a `verified` row for the",
+      "value": "pass",
+      "createdAt": "2026-07-03T05:50:40Z",
+      "updatedAt": "2026-07-03T05:50:40Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-166-ac6-no-provider-mutation-rule-preserved-with-290-seam-documented-the-existing-do-not.flow-agents-workflow.ac6-no-provider-mutation-rule-preserved-with-290-seam-documented-the-existing-do-not",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-166/ac6-no-provider-mutation-rule-preserved-with-290-seam-documented-the-existing-do-not",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC6 `no-provider-mutation-rule-preserved-with-290-seam-documented`: the existing \"do not",
+      "value": "pass",
+      "createdAt": "2026-07-03T05:50:40Z",
+      "updatedAt": "2026-07-03T05:50:40Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-166-ac7-whoami-and-resolve-slug-cli-additions-covered-the-two-new-read-only-cli-actions.flow-agents-workflow.ac7-whoami-and-resolve-slug-cli-additions-covered-the-two-new-read-only-cli-actions",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-166/ac7-whoami-and-resolve-slug-cli-additions-covered-the-two-new-read-only-cli-actions",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC7 `whoami-and-resolve-slug-cli-additions-covered`: the two new read-only CLI actions",
+      "value": "pass",
+      "createdAt": "2026-07-03T05:50:40Z",
+      "updatedAt": "2026-07-03T05:50:40Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-166-ac8-pull-work-skill-text-statically-asserted-every-new-pull-work-behavior-above.flow-agents-workflow.ac8-pull-work-skill-text-statically-asserted-every-new-pull-work-behavior-above",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-166/ac8-pull-work-skill-text-statically-asserted-every-new-pull-work-behavior-above",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC8 `pull-work-skill-text-statically-asserted`: every new pull-work behavior above",
+      "value": "pass",
+      "createdAt": "2026-07-03T05:50:40Z",
+      "updatedAt": "2026-07-03T05:50:40Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-166-ac9-new-eval-file-registered-adr-0020-the-new.flow-agents-workflow.ac9-new-eval-file-registered-adr-0020-the-new",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-166/ac9-new-eval-file-registered-adr-0020-the-new",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "AC9 `new-eval-file-registered-adr-0020`: the new",
+      "value": "pass",
+      "createdAt": "2026-07-03T05:50:40Z",
+      "updatedAt": "2026-07-03T05:50:40Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
       "status": "verified"
     }
   ],
   "evidence": [
     {
-      "id": "ev:kontourai-flow-agents-309-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-0-exit-compiles-ts-build-then-runs-source-tree-validator-source-tree-validation-passed-build-tsc-also-succeeded-standalone-0-exit-as-its-prerequisite",
-      "claimId": "kontourai-flow-agents-309-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-0-exit-compiles-ts-build-then-runs-source-tree-validator-source-tree-validation-passed-build-tsc-also-succeeded-standalone-0-exit-as-its-prerequisite",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "kontourai-flow-agents-309/evidence.json",
-      "excerptOrSummary": "npm run validate:source -- passed (0 exit); compiles TS build then runs source-tree validator: Source tree validation passed. Build (tsc) also succeeded standalone (0 exit) as its prerequisite.",
-      "observedAt": "2026-07-03T04:35:01Z",
+      "id": "ev:kontourai-flow-agents-166-pull-work-skill-obedience-live-lane.flow-agents-workflow.live-pull-work-skill-obedience-whether-an-llm-agent-actually-runs-the-documented-preflight-claim-post-claim-recheck-steps-during-a-real-session-vs-a-technically-complete-implementation-the-agent-simply-forgets-to-invoke-is-not-machine-verifiable-without-a-live-llm-eval-lane-per-the-plan-stop-short-risk-4-and-the-fix-plan-addendum-because-emission-is-purely-skill-text-driven-the-static-skill-text-assertions-ac8-62-62-passing-this-pass-prove-the-instructions-exist-not-that-they-are-followed-the-honest-limit-of-a-skill-text-slice-reconfirmed-unchanged-from-the-prior-verify-pass-recorded-again-this-re-verify-pass-as-the-accepted-gap-waiver-per-task-instructions",
+      "claimId": "kontourai-flow-agents-166-pull-work-skill-obedience-live-lane.flow-agents-workflow.live-pull-work-skill-obedience-whether-an-llm-agent-actually-runs-the-documented-preflight-claim-post-claim-recheck-steps-during-a-real-session-vs-a-technically-complete-implementation-the-agent-simply-forgets-to-invoke-is-not-machine-verifiable-without-a-live-llm-eval-lane-per-the-plan-stop-short-risk-4-and-the-fix-plan-addendum-because-emission-is-purely-skill-text-driven-the-static-skill-text-assertions-ac8-62-62-passing-this-pass-prove-the-instructions-exist-not-that-they-are-followed-the-honest-limit-of-a-skill-text-slice-reconfirmed-unchanged-from-the-prior-verify-pass-recorded-again-this-re-verify-pass-as-the-accepted-gap-waiver-per-task-instructions",
+      "evidenceType": "attestation",
+      "method": "attestation",
+      "sourceRef": "kontourai-flow-agents-166/evidence.json",
+      "excerptOrSummary": "Live pull-work skill-obedience (whether an LLM agent actually runs the documented preflight/claim/post-claim-recheck steps during a real session, vs. a technically complete implementation the agent simply forgets to invoke) is not machine-verifiable without a live LLM eval lane. Per the plan Stop-Short Risk 4 and the fix-plan addendum: because emission is purely skill-text-driven, the static skill-text assertions (AC8, 62/62 passing this pass) prove the instructions exist, not that they are followed - the honest limit of a skill-text slice. Reconfirmed unchanged from the prior verify pass; recorded again this re-verify pass as the accepted-gap waiver per task instructions.",
+      "observedAt": "2026-07-03T05:50:40Z",
       "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "npm run validate:source --",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:kontourai-flow-agents-309-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-passed-167-assertions-0-failures-exit-0-including-the-4-new-309-specific-regression-checks-setup-derive-init-plan-preserves-branch-with-branchless-plan-artifact-advance-state-preserves-branch-and-current-json-mirror-backfill-repair-of-pre-fix-broken-session-static-suite-bash-evals-run-sh-static-folded-in-as-supporting-non-manifest-evidence-also-passed-31-pass-lines-1049-checkmark-assertions-0-failures-exit-0-manual-scratch-root-probes-a-full-ensure-session-init-plan-advance-state-lifecycle-b-hand-seeded-broken-fixture-repair-via-init-plan-c-fresh-derive-branch-override-no-rederive-regression-checks-all-reproduced-the-expected-309-fixed-behavior-against-the-built-cli-build-src-cli-workflow-sidecar-js",
-      "claimId": "kontourai-flow-agents-309-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-passed-167-assertions-0-failures-exit-0-including-the-4-new-309-specific-regression-checks-setup-derive-init-plan-preserves-branch-with-branchless-plan-artifact-advance-state-preserves-branch-and-current-json-mirror-backfill-repair-of-pre-fix-broken-session-static-suite-bash-evals-run-sh-static-folded-in-as-supporting-non-manifest-evidence-also-passed-31-pass-lines-1049-checkmark-assertions-0-failures-exit-0-manual-scratch-root-probes-a-full-ensure-session-init-plan-advance-state-lifecycle-b-hand-seeded-broken-fixture-repair-via-init-plan-c-fresh-derive-branch-override-no-rederive-regression-checks-all-reproduced-the-expected-309-fixed-behavior-against-the-built-cli-build-src-cli-workflow-sidecar-js",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "kontourai-flow-agents-309/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_workflow_sidecar_writer.sh passed: 167 assertions, 0 failures, exit 0, including the 4 new #309-specific regression checks (setup-derive, init-plan-preserves-branch-with-branchless-plan-artifact, advance-state-preserves-branch-and-current.json-mirror, backfill-repair-of-pre-fix-broken-session). Static suite (bash evals/run.sh static, folded in as supporting non-manifest evidence) also passed: 31 PASS lines + 1049 checkmark assertions, 0 failures, exit 0. Manual scratch-root probes (a) full ensure-session->init-plan->advance-state lifecycle, (b) hand-seeded broken-fixture repair via init-plan, (c) fresh-derive/--branch-override/no-rederive regression checks all reproduced the expected #309-fixed behavior against the built CLI (build/src/cli/workflow-sidecar.js).",
-      "observedAt": "2026-07-03T04:35:01Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_workflow_sidecar_writer.sh",
-        "isError": false
-      }
+      "passing": false
     }
   ],
   "policies": [
     {
-      "id": "policy:workflow.check.build:test_output",
-      "claimType": "workflow.check.build",
+      "id": "policy:workflow.check.policy:attestation",
+      "claimType": "workflow.check.policy",
       "requiredEvidence": [
-        "test_output"
+        "attestation"
       ],
       "acceptanceCriteria": [
-        "A verified verification event must support a workflow.check.build claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "high"
-    },
-    {
-      "id": "policy:builder.pull-work.selected:test_output",
-      "claimType": "builder.pull-work.selected",
-      "requiredEvidence": [
-        "test_output"
-      ],
-      "acceptanceCriteria": [
-        "A verified verification event must support a builder.pull-work.selected claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "high"
-    },
-    {
-      "id": "policy:workflow.check.test:test_output",
-      "claimType": "workflow.check.test",
-      "requiredEvidence": [
-        "test_output"
-      ],
-      "acceptanceCriteria": [
-        "A verified verification event must support a workflow.check.test claim."
+        "A verified verification event must support a workflow.check.policy claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -145,57 +195,110 @@
       "stalenessTriggers": [],
       "conflictRules": [],
       "impactLevel": "high"
-    },
-    {
-      "id": "policy:builder.pull-work.selected",
-      "claimType": "builder.pull-work.selected",
-      "requiredEvidence": [],
-      "acceptanceCriteria": [
-        "A verified verification event must support a builder.pull-work.selected claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "high"
     }
   ],
   "events": [
     {
-      "id": "evt:kontourai-flow-agents-309-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-0-exit-compiles-ts-build-then-runs-source-tree-validator-source-tree-validation-passed-build-tsc-also-succeeded-standalone-0-exit-as-its-prerequisite",
-      "claimId": "kontourai-flow-agents-309-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-0-exit-compiles-ts-build-then-runs-source-tree-validator-source-tree-validation-passed-build-tsc-also-succeeded-standalone-0-exit-as-its-prerequisite",
-      "status": "verified",
+      "id": "evt:kontourai-flow-agents-166-pull-work-skill-obedience-live-lane.flow-agents-workflow.live-pull-work-skill-obedience-whether-an-llm-agent-actually-runs-the-documented-preflight-claim-post-claim-recheck-steps-during-a-real-session-vs-a-technically-complete-implementation-the-agent-simply-forgets-to-invoke-is-not-machine-verifiable-without-a-live-llm-eval-lane-per-the-plan-stop-short-risk-4-and-the-fix-plan-addendum-because-emission-is-purely-skill-text-driven-the-static-skill-text-assertions-ac8-62-62-passing-this-pass-prove-the-instructions-exist-not-that-they-are-followed-the-honest-limit-of-a-skill-text-slice-reconfirmed-unchanged-from-the-prior-verify-pass-recorded-again-this-re-verify-pass-as-the-accepted-gap-waiver-per-task-instructions",
+      "claimId": "kontourai-flow-agents-166-pull-work-skill-obedience-live-lane.flow-agents-workflow.live-pull-work-skill-obedience-whether-an-llm-agent-actually-runs-the-documented-preflight-claim-post-claim-recheck-steps-during-a-real-session-vs-a-technically-complete-implementation-the-agent-simply-forgets-to-invoke-is-not-machine-verifiable-without-a-live-llm-eval-lane-per-the-plan-stop-short-risk-4-and-the-fix-plan-addendum-because-emission-is-purely-skill-text-driven-the-static-skill-text-assertions-ac8-62-62-passing-this-pass-prove-the-instructions-exist-not-that-they-are-followed-the-honest-limit-of-a-skill-text-slice-reconfirmed-unchanged-from-the-prior-verify-pass-recorded-again-this-re-verify-pass-as-the-accepted-gap-waiver-per-task-instructions",
+      "status": "assumed",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-309-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-0-exit-compiles-ts-build-then-runs-source-tree-validator-source-tree-validation-passed-build-tsc-also-succeeded-standalone-0-exit-as-its-prerequisite"
+        "ev:kontourai-flow-agents-166-pull-work-skill-obedience-live-lane.flow-agents-workflow.live-pull-work-skill-obedience-whether-an-llm-agent-actually-runs-the-documented-preflight-claim-post-claim-recheck-steps-during-a-real-session-vs-a-technically-complete-implementation-the-agent-simply-forgets-to-invoke-is-not-machine-verifiable-without-a-live-llm-eval-lane-per-the-plan-stop-short-risk-4-and-the-fix-plan-addendum-because-emission-is-purely-skill-text-driven-the-static-skill-text-assertions-ac8-62-62-passing-this-pass-prove-the-instructions-exist-not-that-they-are-followed-the-honest-limit-of-a-skill-text-slice-reconfirmed-unchanged-from-the-prior-verify-pass-recorded-again-this-re-verify-pass-as-the-accepted-gap-waiver-per-task-instructions"
       ],
-      "createdAt": "2026-07-03T04:35:01Z",
-      "verifiedAt": "2026-07-03T04:35:01Z"
+      "createdAt": "2026-07-03T05:50:40Z",
+      "verifiedAt": "2026-07-03T05:50:40Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-309-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-passed-167-assertions-0-failures-exit-0-including-the-4-new-309-specific-regression-checks-setup-derive-init-plan-preserves-branch-with-branchless-plan-artifact-advance-state-preserves-branch-and-current-json-mirror-backfill-repair-of-pre-fix-broken-session-static-suite-bash-evals-run-sh-static-folded-in-as-supporting-non-manifest-evidence-also-passed-31-pass-lines-1049-checkmark-assertions-0-failures-exit-0-manual-scratch-root-probes-a-full-ensure-session-init-plan-advance-state-lifecycle-b-hand-seeded-broken-fixture-repair-via-init-plan-c-fresh-derive-branch-override-no-rederive-regression-checks-all-reproduced-the-expected-309-fixed-behavior-against-the-built-cli-build-src-cli-workflow-sidecar-js",
-      "claimId": "kontourai-flow-agents-309-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-passed-167-assertions-0-failures-exit-0-including-the-4-new-309-specific-regression-checks-setup-derive-init-plan-preserves-branch-with-branchless-plan-artifact-advance-state-preserves-branch-and-current-json-mirror-backfill-repair-of-pre-fix-broken-session-static-suite-bash-evals-run-sh-static-folded-in-as-supporting-non-manifest-evidence-also-passed-31-pass-lines-1049-checkmark-assertions-0-failures-exit-0-manual-scratch-root-probes-a-full-ensure-session-init-plan-advance-state-lifecycle-b-hand-seeded-broken-fixture-repair-via-init-plan-c-fresh-derive-branch-override-no-rederive-regression-checks-all-reproduced-the-expected-309-fixed-behavior-against-the-built-cli-build-src-cli-workflow-sidecar-js",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:kontourai-flow-agents-309-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-passed-167-assertions-0-failures-exit-0-including-the-4-new-309-specific-regression-checks-setup-derive-init-plan-preserves-branch-with-branchless-plan-artifact-advance-state-preserves-branch-and-current-json-mirror-backfill-repair-of-pre-fix-broken-session-static-suite-bash-evals-run-sh-static-folded-in-as-supporting-non-manifest-evidence-also-passed-31-pass-lines-1049-checkmark-assertions-0-failures-exit-0-manual-scratch-root-probes-a-full-ensure-session-init-plan-advance-state-lifecycle-b-hand-seeded-broken-fixture-repair-via-init-plan-c-fresh-derive-branch-override-no-rederive-regression-checks-all-reproduced-the-expected-309-fixed-behavior-against-the-built-cli-build-src-cli-workflow-sidecar-js"
-      ],
-      "createdAt": "2026-07-03T04:35:01Z",
-      "verifiedAt": "2026-07-03T04:35:01Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-309-after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence.flow-agents-workflow.after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence",
-      "claimId": "kontourai-flow-agents-309-after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence.flow-agents-workflow.after-ensure-session-then-init-plan-state-json-still-carries-branch-eval-asserts-the-full-sequence",
+      "id": "evt:kontourai-flow-agents-166-ac1-liveness-preflight-classifies-candidates-pull-work-s-new-selection-preflight.flow-agents-workflow.ac1-liveness-preflight-classifies-candidates-pull-work-s-new-selection-preflight",
+      "claimId": "kontourai-flow-agents-166-ac1-liveness-preflight-classifies-candidates-pull-work-s-new-selection-preflight.flow-agents-workflow.ac1-liveness-preflight-classifies-candidates-pull-work-s-new-selection-preflight",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-03T04:35:01Z",
-      "verifiedAt": "2026-07-03T04:35:01Z"
+      "createdAt": "2026-07-03T05:50:40Z",
+      "verifiedAt": "2026-07-03T05:50:40Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-166-ac2-held-subjects-excluded-by-default-force-overrides-held-candidates-are-excluded.flow-agents-workflow.ac2-held-subjects-excluded-by-default-force-overrides-held-candidates-are-excluded",
+      "claimId": "kontourai-flow-agents-166-ac2-held-subjects-excluded-by-default-force-overrides-held-candidates-are-excluded.flow-agents-workflow.ac2-held-subjects-excluded-by-default-force-overrides-held-candidates-are-excluded",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T05:50:40Z",
+      "verifiedAt": "2026-07-03T05:50:40Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-166-ac3-reclaimable-flagged-requires-explicit-optin-reclaimable-stale-candidates-are.flow-agents-workflow.ac3-reclaimable-flagged-requires-explicit-optin-reclaimable-stale-candidates-are",
+      "claimId": "kontourai-flow-agents-166-ac3-reclaimable-flagged-requires-explicit-optin-reclaimable-stale-candidates-are.flow-agents-workflow.ac3-reclaimable-flagged-requires-explicit-optin-reclaimable-stale-candidates-are",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T05:50:40Z",
+      "verifiedAt": "2026-07-03T05:50:40Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-166-ac4-claim-emitted-on-selection-with-matching-subjectid-on-finalized-selection-end-of.flow-agents-workflow.ac4-claim-emitted-on-selection-with-matching-subjectid-on-finalized-selection-end-of",
+      "claimId": "kontourai-flow-agents-166-ac4-claim-emitted-on-selection-with-matching-subjectid-on-finalized-selection-end-of.flow-agents-workflow.ac4-claim-emitted-on-selection-with-matching-subjectid-on-finalized-selection-end-of",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T05:50:40Z",
+      "verifiedAt": "2026-07-03T05:50:40Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-166-ac5-own-fresh-claim-is-wip-not-a-new-pick-a-candidate-with-a-verified-row-for-the.flow-agents-workflow.ac5-own-fresh-claim-is-wip-not-a-new-pick-a-candidate-with-a-verified-row-for-the",
+      "claimId": "kontourai-flow-agents-166-ac5-own-fresh-claim-is-wip-not-a-new-pick-a-candidate-with-a-verified-row-for-the.flow-agents-workflow.ac5-own-fresh-claim-is-wip-not-a-new-pick-a-candidate-with-a-verified-row-for-the",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T05:50:40Z",
+      "verifiedAt": "2026-07-03T05:50:40Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-166-ac6-no-provider-mutation-rule-preserved-with-290-seam-documented-the-existing-do-not.flow-agents-workflow.ac6-no-provider-mutation-rule-preserved-with-290-seam-documented-the-existing-do-not",
+      "claimId": "kontourai-flow-agents-166-ac6-no-provider-mutation-rule-preserved-with-290-seam-documented-the-existing-do-not.flow-agents-workflow.ac6-no-provider-mutation-rule-preserved-with-290-seam-documented-the-existing-do-not",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T05:50:40Z",
+      "verifiedAt": "2026-07-03T05:50:40Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-166-ac7-whoami-and-resolve-slug-cli-additions-covered-the-two-new-read-only-cli-actions.flow-agents-workflow.ac7-whoami-and-resolve-slug-cli-additions-covered-the-two-new-read-only-cli-actions",
+      "claimId": "kontourai-flow-agents-166-ac7-whoami-and-resolve-slug-cli-additions-covered-the-two-new-read-only-cli-actions.flow-agents-workflow.ac7-whoami-and-resolve-slug-cli-additions-covered-the-two-new-read-only-cli-actions",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T05:50:40Z",
+      "verifiedAt": "2026-07-03T05:50:40Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-166-ac8-pull-work-skill-text-statically-asserted-every-new-pull-work-behavior-above.flow-agents-workflow.ac8-pull-work-skill-text-statically-asserted-every-new-pull-work-behavior-above",
+      "claimId": "kontourai-flow-agents-166-ac8-pull-work-skill-text-statically-asserted-every-new-pull-work-behavior-above.flow-agents-workflow.ac8-pull-work-skill-text-statically-asserted-every-new-pull-work-behavior-above",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T05:50:40Z",
+      "verifiedAt": "2026-07-03T05:50:40Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-166-ac9-new-eval-file-registered-adr-0020-the-new.flow-agents-workflow.ac9-new-eval-file-registered-adr-0020-the-new",
+      "claimId": "kontourai-flow-agents-166-ac9-new-eval-file-registered-adr-0020-the-new.flow-agents-workflow.ac9-new-eval-file-registered-adr-0020-the-new",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-03T05:50:40Z",
+      "verifiedAt": "2026-07-03T05:50:40Z"
     }
   ]
 }

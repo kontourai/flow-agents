@@ -193,6 +193,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_liveness_heartbeat.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_pull_work_liveness_preflight.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_veritas_governance_adapter.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_workflow_steering_hook.sh" || result=1

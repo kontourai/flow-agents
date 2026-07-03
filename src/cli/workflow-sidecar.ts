@@ -50,6 +50,15 @@ function workItemSlug(ref: string): string {
   return slugify(`${owner}-${repo}-${id}`, "work-item");
 }
 
+/** Pure, lock-free, side-effect-free CLI wrapper around workItemSlug() — the single source of
+ * truth for the deterministic subjectId/session-directory-name slug. Named resolveSlugCmd (not
+ * resolveSlug) to avoid colliding with any future export named resolveSlug. */
+function resolveSlugCmd(p: ReturnType<typeof parseArgs>): number {
+  const ref = p.positional[0] || die("resolve-slug requires an owner/repo#id ref");
+  console.log(workItemSlug(ref));
+  return 0;
+}
+
 /** First 6 hex chars of sha256(raw) — a short deterministic disambiguator (#289 F4). Two
  * different raw inputs that both collapse to a segment's "unknown" fallback (e.g. two distinct
  * all-garbage --task-slug values, or two distinct raw actor strings that both resolve
@@ -2902,6 +2911,23 @@ async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
   const subjectId = p.positional[1] || "";
   const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 
+  if (action === "whoami") {
+    // Read-only, lock-free, write-free advisory surface: reuses the identical resolution chain
+    // as the write paths (loadActorIdentityHelper().resolveActor) but deliberately never dies on
+    // an unresolved actor — the enforcement point stays at `liveness claim`, which already dies
+    // loudly (see below). This lets a skill learn "who am I" during a read-only preflight without
+    // emitting a bogus claim first.
+    const helper = loadActorIdentityHelper();
+    const explicitActorRaw = opt(p, "actor", "");
+    const explicitActor = explicitActorRaw ? helper.sanitizeSegment(explicitActorRaw) : "";
+    const resolved = explicitActor
+      ? { actor: explicitActor, source: "explicit-override" }
+      : helper.resolveActor(process.env);
+    if (p.flags.has("json")) { console.log(JSON.stringify(resolved)); return 0; }
+    console.log(`${stripControlCharsForDisplay(resolved.actor || "unresolved")}\t${stripControlCharsForDisplay(resolved.source)}`);
+    return 0;
+  }
+
   if (action === "claim" || action === "heartbeat" || action === "release") {
     // Actor resolution happens only for write actions (F5, #287 fix iteration 1) — "status" is a
     // read path and must not shell out via resolveLivenessActor()/resolveActor().
@@ -2973,7 +2999,7 @@ async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
     return 0;
   }
 
-  die("liveness action must be one of: claim | heartbeat | release | status");
+  die("liveness action must be one of: claim | heartbeat | release | status | whoami");
   return 1;
 }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3149,9 +3175,20 @@ Available claim ids:
 async function main(): Promise<number> {
   const p = parseArgs(process.argv.slice(2));
   if (!p.command) die("workflow-sidecar command is required");
-  const lockRoot = ["ensure-session", "current", "dogfood-pass", "liveness"].includes(p.command)
+  // F1 (#166 fix iteration 1): `liveness whoami` is a read-only, lock-free, write-free advisory
+  // surface (see the `action === "whoami"` branch inside `liveness()` above) — it must never
+  // acquire the workflow-sidecar lock, regardless of whether the artifact root already exists on
+  // disk. Without this action-level bypass, `liveness` was blanket-included in the lock-routing
+  // branch below, so `whoami` against an EXISTING artifact root would still resolve a real
+  // lockRoot and go through `withLock`'s mkdir/lockdir path — the opposite of "genuinely
+  // lock-free". This bypass mirrors `resolve-slug`'s existing empty-lockRoot special case
+  // immediately below and is scoped to the `whoami` action only: `liveness status` (a read path)
+  // keeps its pre-existing lock behavior unchanged (out of scope for this fix — see fix-plan
+  // iteration 1, F1), and `liveness claim` / `heartbeat` / `release` (write paths) are untouched.
+  const isLivenessWhoami = p.command === "liveness" && p.positional[0] === "whoami";
+  const lockRoot = (["ensure-session", "current", "dogfood-pass", "liveness"].includes(p.command) && !isLivenessWhoami)
     ? (opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : (p.command === "ensure-session" ? flowAgentsArtifactRoot() : defaultArtifactRootForRead()))
-    : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.command === "claim" ? (p.positional[1] ? path.resolve(p.positional[1]) : "") : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
+    : p.command === "record-agent-event" ? explicitArtifactRoot(p) : p.command === "claim" ? (p.positional[1] ? path.resolve(p.positional[1]) : "") : p.command === "resolve-slug" ? "" : isLivenessWhoami ? "" : p.positional[0] ? artifactDirFrom(p.positional[0]) : "";
   return withLock(lockRoot, ["ensure-session", "record-agent-event", "dogfood-pass"].includes(p.command), p.command, () => {
     switch (p.command) {
       case "ensure-session": return ensureSession(p);
@@ -3171,6 +3208,7 @@ async function main(): Promise<number> {
       case "trust-mcp": return trustMcp(p);
       case "liveness": return liveness(p);
       case "claim": return claimLookup(p);
+      case "resolve-slug": return resolveSlugCmd(p);
       case "seal-checkpoint": return sealCheckpoint(p);
       case "publish-delivery": return publishDeliveryCmd(p);
       default: die(`unknown command: ${p.command}`);
