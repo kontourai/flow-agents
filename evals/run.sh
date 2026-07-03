@@ -187,6 +187,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_workflow_sidecar_writer.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_sidecar_field_preservation.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_actor_identity.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_liveness_heartbeat.sh" || result=1
