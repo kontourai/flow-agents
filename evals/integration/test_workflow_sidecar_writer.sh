@@ -92,7 +92,7 @@ fs.writeFileSync(path.join(root, "current.json"), JSON.stringify({
   updated_at: "2026-05-09T00:00:00Z",
 }) + "\n");
 NODE
-if run_bounded 5 flow_agents_node "$WRITER" record-agent-event \
+if run_bounded 20 flow_agents_node "$WRITER" record-agent-event \
   --artifact-root "$TRAVERSAL_ROOT" \
   --agent-id tool-worker \
   --kind note \
@@ -198,7 +198,7 @@ fi
 
 cp "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-traversal-agent.json"
 TRAVERSAL_AGENT_OUTSIDE="$TMPDIR_EVAL/repo/.kontourai/flow-agents/evil-agent-outside.jsonl"
-if run_bounded 5 flow_agents_node "$WRITER" record-agent-event \
+if run_bounded 20 flow_agents_node "$WRITER" record-agent-event \
   --artifact-root "$SESSION_ROOT" \
   --agent-id ../evil-agent-outside \
   --kind evidence \
@@ -284,7 +284,7 @@ mkdir -p "$COPIED_ROOT"
 cp -R "$ENSURED_DIR" "$COPIED_DIR"
 cp "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-copied-agent.json"
 COPIED_AGENT_EVENT_PATH="$COPIED_DIR/ag""ents/copied-worker/events.jsonl"
-if run_bounded 5 flow_agents_node "$WRITER" record-agent-event \
+if run_bounded 20 flow_agents_node "$WRITER" record-agent-event \
   --artifact-dir "$COPIED_DIR" \
   --agent-id copied-worker \
   --kind evidence \
@@ -304,7 +304,7 @@ fi
 
 cp "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-mismatch-agent.json"
 MISMATCH_AGENT_EVENT_PATH="$COPIED_DIR/ag""ents/mismatch-worker/events.jsonl"
-if run_bounded 5 flow_agents_node "$WRITER" record-agent-event \
+if run_bounded 20 flow_agents_node "$WRITER" record-agent-event \
   --artifact-root "$SESSION_ROOT" \
   --artifact-dir "$COPIED_DIR" \
   --agent-id mismatch-worker \
@@ -328,7 +328,7 @@ SYMLINK_DIR="$SESSION_ROOT/symlink-session"
 mkdir -p "$SYMLINK_TARGET"
 if ln -s "$SYMLINK_TARGET" "$SYMLINK_DIR" 2>"$TMPDIR_EVAL/symlink-create.err"; then
   cp "$SESSION_ROOT/current.json" "$TMPDIR_EVAL/current-before-symlink-agent.json"
-  if run_bounded 5 flow_agents_node "$WRITER" record-agent-event \
+  if run_bounded 20 flow_agents_node "$WRITER" record-agent-event \
     --artifact-root "$SESSION_ROOT" \
     --artifact-dir "$SYMLINK_DIR" \
     --agent-id symlink-worker \
@@ -1025,7 +1025,7 @@ fi
 LOCK_DENIED_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/lock-denied"
 mkdir -p "$LOCK_DENIED_DIR"
 if chmod 500 "$LOCK_DENIED_DIR" 2>"$TMPDIR_EVAL/lock-denied-chmod.err"; then
-  if run_bounded 5 flow_agents_node "$WRITER" record-critique "$LOCK_DENIED_DIR" \
+  if run_bounded 20 flow_agents_node "$WRITER" record-critique "$LOCK_DENIED_DIR" \
     --id lock-denied-review \
     --reviewer tool-code-reviewer \
     --verdict pass \

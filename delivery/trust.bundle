@@ -4,310 +4,331 @@
   "claims": [
     {
       "id": "kontourai-flow-agents-288-re-verify-288-iter2.flow-agents-workflow.iteration-2-re-verify-authoritative-fresh-pass-isolated-build-43-43-checks-passed-exit-0-covers-f8-orphan-invariant-sections-c-h-j-f2-ttl-throttle-env-overrides-f3-bounded-tail-f5-hostile-active-slug-sanitization-ac1-ac3-ac4-ac5",
-      "subjectType": "workflow-check",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/re-verify-288-iter2",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
-      "fieldOrBehavior": "Iteration-2 re-verify (authoritative, fresh pass, isolated build): 43/43 checks passed, exit 0. Covers F8 orphan-invariant sections C/H/J, F2 TTL+throttle env overrides, F3 bounded-tail, F5 hostile active_slug sanitization, AC1/AC3/AC4/AC5.",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "Iteration-2 re-verify (authoritative, fresh, pass, isolated build): 43/43 checks passed, exit 0. Covers F8 orphan invariant (sections C/H/J), F2 TTL throttle/env overrides, F3 bounded tail, F5 hostile active_slug sanitization. AC1/AC3/AC4/AC5.",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:test_output",
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-288-re-verify-288-iter2-sidecar-writer.flow-agents-workflow.isolated-re-run-no-concurrent-builds-after-an-earlier-contaminated-parallel-run-produced-1-transient-ac7-mismatch-146-146-checks-passed-exit-0-confirms-f1-fail-open-f8-i-cli-orphan-heartbeat-die-with-remediation-f5-hostile-subjectid-strip-on-display-data-fidelity-ac2-ttl-300-ac7-default-on-lifecycle-proof-explicit-off-case",
-      "subjectType": "workflow-check",
+      "id": "kontourai-flow-agents-288-re-verify-288-iter2-sidecar-writer.flow-agents-workflow.isolated-re-run-no-concurrent-builds-an-earlier-contaminated-parallel-run-produced-1-transient-ac7-mismatch-146-146-checks-passed-exit-0-confirms-f1-fail-open-f8-i-cli-orphan-heartbeat-die-with-remediation-f5-hostile-subjectid-strip-on-display-data-fidelity-ac2-ttl-300-ac7-default-on-lifecycle-proof-explicit-off-case",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/re-verify-288-iter2-sidecar-writer",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
-      "fieldOrBehavior": "Isolated re-run (no concurrent builds) after an earlier contaminated parallel run produced 1 transient AC7 mismatch: 146/146 checks passed, exit 0. Confirms F1 fail-open, F8(i) CLI orphan-heartbeat die() with remediation, F5 hostile subjectId strip-on-display + data fidelity, AC2 TTL=300, AC7 default-on lifecycle proof + explicit off-case.",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "Isolated re-run (no concurrent builds; an earlier contaminated parallel run produced 1 transient AC7 mismatch): 146/146 checks passed, exit 0. Confirms F1 fail-open, F8(i) CLI orphan heartbeat die with remediation, F5 hostile subjectId strip-on-display data fidelity, AC2 TTL=300, AC7 default-on lifecycle proof + explicit-off case.",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:test_output",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-288-re-verify-288-iter2-validate-source.flow-agents-workflow.source-tree-validation-passed-cleanly-includes-typecheck-build",
-      "subjectType": "workflow-check",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/re-verify-288-iter2-validate-source",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.build",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "Source tree validation passed cleanly (includes typecheck + build).",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.build:test_output",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:test_output",
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-288-re-verify-288-iter2-build.flow-agents-workflow.npm-run-build-exits-0-no-type-errors",
-      "subjectType": "workflow-check",
+      "id": "kontourai-flow-agents-288-re-verify-288-iter2-build.flow-agents-workflow.npm-run-build-silent-exits-0-no-type-errors-session-local-local-build-check-not-a-run-baseline-sh-manifest-required-lane-command-so-not-asserted-as-ci-reconcilable",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/re-verify-288-iter2-build",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.build",
-      "fieldOrBehavior": "npm run build exits 0, no type errors.",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "npm run build --silent exits 0, no type errors (session-local local build check; not a run-baseline.sh manifest/required-lane command, so not asserted as CI-reconcilable).",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.build:test_output",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-288-re-verify-288-iter2-static.flow-agents-workflow.static-suite-clean-80-80-43-43-35-35-pure-helper-unit-tests-passed-exit-0-one-transient-bundle-reproducibility-diff-on-an-earlier-contaminated-run-was-proven-to-be-concurrent-tree-mutation-artifact-not-reproducible-in-isolation",
-      "subjectType": "workflow-check",
+      "id": "kontourai-flow-agents-288-re-verify-288-iter2-static.flow-agents-workflow.static-suite-clean-80-80-43-43-35-35-pure-helper-unit-tests-passed-exit-0-one-transient-bundle-reproducibility-diff-on-an-earlier-contaminated-run-was-proven-to-be-a-concurrent-tree-mutation-artifact-not-reproducible-in-isolation",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/re-verify-288-iter2-static",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
-      "fieldOrBehavior": "Static suite clean: 80/80 + 43/43 + 35/35 pure-helper unit tests passed, exit 0. (One transient bundle-reproducibility diff on an earlier contaminated run was proven to be concurrent-tree-mutation artifact, not reproducible in isolation.)",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "Static suite clean: 80/80 + 43/43 + 35/35 pure-helper unit tests passed, exit 0. One transient bundle-reproducibility diff on an earlier contaminated run was proven to be a concurrent-tree-mutation artifact, not reproducible in isolation.",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:test_output",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-288-re-verify-288-iter2-actor-identity.flow-agents-workflow.11-11-checks-passed-exit-0",
-      "subjectType": "workflow-check",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/re-verify-288-iter2-actor-identity",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "11/11 checks passed, exit 0.",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:test_output",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-288-re-verify-288-iter2-cleanup-audit.flow-agents-workflow.33-33-checks-passed-exit-0-confirms-ac6-liveness-directory-never-appears-in-any-bucket",
-      "subjectType": "workflow-check",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/re-verify-288-iter2-cleanup-audit",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
-      "fieldOrBehavior": "33/33 checks passed, exit 0. Confirms AC6: liveness directory never appears in any bucket.",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "33/33 checks passed, exit 0. Confirms AC6 (liveness/ directory never appears in any bucket).",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:test_output",
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-288-re-verify-288-iter2-trust-reconcile-manifest.flow-agents-workflow.manifest-ci-yml-parity-confirmed-34-manifest-entries-34-ci-yml-required-check-invocations-including-liveness-heartbeat-integration-ac8-exit-0",
-      "subjectType": "workflow-check",
+      "id": "kontourai-flow-agents-288-re-verify-288-iter2-trust-reconcile-manifest.flow-agents-workflow.bash-evals-integration-test-trust-reconcile-manifest-sh-manifest-ci-yml-parity-confirmed-34-manifest-entries-34-ci-yml-required-check-invocations-including-liveness-heartbeat-integration-for-ac8-exit-0-session-local-this-eval-is-not-itself-a-run-baseline-sh-manifest-required-lane-entry-so-it-is-not-asserted-as-ci-reconcilable",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/re-verify-288-iter2-trust-reconcile-manifest",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
-      "fieldOrBehavior": "Manifest/ci.yml parity confirmed: 34 manifest entries == 34 ci.yml required --check invocations, including liveness-heartbeat-integration (AC8). Exit 0.",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "bash evals/integration/test_trust_reconcile_manifest.sh: manifest/ci.yml parity confirmed (34 manifest entries == 34 ci.yml required --check invocations, including liveness-heartbeat-integration for AC8), exit 0. (Session-local: this eval is not itself a run-baseline.sh manifest/required-lane entry, so it is not asserted as CI-reconcilable.)",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-288-re-verify-288-iter2-context-map.flow-agents-workflow.docs-context-map-md-is-current",
-      "subjectType": "workflow-check",
+      "id": "kontourai-flow-agents-288-re-verify-288-iter2-context-map.flow-agents-workflow.docs-context-map-md-is-current-checked-locally-via-npm-run-context-map-check-session-local-not-asserted-as-a-ci-reconcilable-manifest-command",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/re-verify-288-iter2-context-map",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.build",
-      "fieldOrBehavior": "docs/context-map.md is current.",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "docs/context-map.md is current (checked locally via npm run context-map:check; session-local, not asserted as a CI-reconcilable manifest command).",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.build:test_output",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-288-re-verify-288-iter2-build-bundles.flow-agents-workflow.all-6-bundles-base-kiro-claude-code-codex-opencode-pi-built-successfully-exit-0-dist-is-gitignored-no-diff-noise",
-      "subjectType": "workflow-check",
+      "id": "kontourai-flow-agents-288-re-verify-288-iter2-build-bundles.flow-agents-workflow.all-6-bundles-base-kiro-claude-code-codex-opencode-pi-built-successfully-via-npm-run-build-bundles-silent-exit-0-dist-is-gitignored-no-diff-noise-session-local-not-a-ci-reconcilable-manifest-command",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/re-verify-288-iter2-build-bundles",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.build",
-      "fieldOrBehavior": "All 6 bundles (base/kiro/claude-code/codex/opencode/pi) built successfully, exit 0. dist/ is gitignored (no diff noise).",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "All 6 bundles (base/kiro/claude-code/codex/opencode/pi) built successfully via npm run build:bundles --silent, exit 0. dist/ is gitignored (no diff noise). (Session-local; not a CI-reconcilable manifest command.)",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.build:test_output",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-288-re-verify-288-iter2-full-integration.flow-agents-workflow.full-evals-run-sh-integration-890-909-assertions-passed-the-19-failures-are-confined-to-exactly-3-scripts-test-goal-fit-hook-sh-1-test-goal-fit-escape-hatch-sh-5-test-session-resume-roundtrip-sh-13-and-were-proven-byte-identical-when-reproduced-against-base-commit-204a4c6-git-stash-of-the-full-288-diff-rebuild-re-run-then-stash-pop-restored-the-diff-exactly-i-e-pre-existing-and-independent-of-the-288-liveness-default-on-change-not-caused-or-worsened-by-this-diff-all-other-49-integration-scripts-including-every-liveness-touching-one-pass-cleanly",
-      "subjectType": "workflow-check",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/re-verify-288-iter2-full-integration",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "Full evals/run.sh integration: 890/909 assertions passed. The 19 failures are confined to exactly 3 scripts (test_goal_fit_hook.sh:1, test_goal_fit_escape_hatch.sh:5, test_session_resume_roundtrip.sh:13) and were proven byte-identical when reproduced against base commit 204a4c6 (git stash of the full #288 diff, rebuild, re-run, then stash pop restored the diff exactly) -- i.e. pre-existing and independent of the #288 liveness-default-on change, not caused or worsened by this diff. All other 49 integration scripts, including every liveness-touching one, pass cleanly.",
-      "value": "fail",
-      "createdAt": "2026-07-03T01:09:39Z",
-      "updatedAt": "2026-07-03T01:09:39Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
-      "status": "disputed"
-    },
-    {
-      "id": "kontourai-flow-agents-288-re-verify-288-iter2-probes.flow-agents-workflow.manual-scratch-root-probes-a-f8-cli-orphan-heartbeat-release-die-nonzero-remediation-with-no-stream-write-claim-heartbeat-release-succeeds-maybeemitheartbeat-on-a-heartbeat-only-no-claim-stream-skips-reason-no-claim-without-mutating-the-stream-b-f1-renaming-liveness-policy-js-makes-init-plan-exit-0-with-one-stderr-diagnostic-naming-the-missing-module-and-writes-no-claim-file-restored-and-git-status-verified-back-to-the-original-untracked-state-c-zero-env-config-lifecycle-emits-claim-heartbeat-release-default-on-flow-agents-liveness-off-and-off-u-200b-both-produce-zero-events-across-the-same-lifecycle-d-flow-agents-liveness-ttl-seconds-300-ttlseconds-300-on-the-claim-custom-throttle-10s-9s-throttled-11s-emits-with-injected-now-e-ttl-300-with-tool-activity-heartbeats-every-100s-keeps-the-holder-held-at-t0-301s-without-activity-the-same-claim-goes-free-at-t0-301s-f-hostile-ansi-newline-active-slug-is-sanitized-before-being-used-as-the-emitted-heartbeat-subjectid-raw-esc-newline-bytes-never-appear-in-the-stream-cli-liveness-status-claim-strip-control-chars-from-terminal-display-while-the-persisted-event-retains-the-raw-value-for-data-fidelity",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-288/re-verify-288-iter2-probes",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.runtime",
-      "fieldOrBehavior": "Manual scratch-root probes: (a) F8 CLI orphan heartbeat/release die() nonzero+remediation with no stream write, claim->heartbeat->release succeeds; maybeEmitHeartbeat on a heartbeat-only (no-claim) stream skips reason=no-claim without mutating the stream. (b) F1: renaming liveness-policy.js makes init-plan exit 0 with one stderr diagnostic naming the missing module and writes no claim; file restored and git status verified back to the original untracked state. (c) Zero-env-config lifecycle emits claim+heartbeat+release (default-on); FLOW_AGENTS_LIVENESS=off and off+U+200B both produce zero events across the same lifecycle. (d) FLOW_AGENTS_LIVENESS_TTL_SECONDS=300 -> ttlSeconds:300 on the claim; custom throttle=10s -> 9s throttled, 11s emits, with injected now. (e) TTL=300 with tool-activity heartbeats every 100s keeps the holder held at T0+301s; without activity the same claim goes free at T0+301s. (f) Hostile ANSI/newline active_slug is sanitized before being used as the emitted heartbeat subjectId (raw ESC/newline bytes never appear in the stream); CLI liveness status/claim strip control chars from terminal display while the persisted event retains the raw value for data fidelity.",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.runtime:test_output",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
+      "metadata": {
+        "waiver": {
+          "reason": "Full evals/run.sh integration is not a single run-baseline.sh manifest/required-lane command (its constituent scripts are registered individually), and it carries 19 pre-existing, unrelated baseline-fixture failures across exactly 3 scripts (test_goal_fit_hook.sh, test_goal_fit_escape_hatch.sh, test_session_resume_roundtrip.sh) that predate and are independent of this change (issue #297; byte-identical reproduction against base commit 204a4c6 confirms this). Accepting as a disclosed pre-existing gap rather than a blocking fail claim; all liveness-touching and manifest-registered scripts pass cleanly on their own.",
+          "approved_by": "brian.anderson1222@gmail.com session-approved",
+          "approved_at": "2026-07-03T01:09:39Z"
+        }
+      },
+      "status": "assumed"
+    },
+    {
+      "id": "kontourai-flow-agents-288-re-verify-288-iter2-probes.flow-agents-workflow.manual-scratch-root-probes-see-verifier-report-a-f8-cli-orphan-heartbeat-release-die-nonzero-remediation-with-no-stream-write-claim-heartbeat-release-succeeds-maybeemitheartbeat-on-a-heartbeat-only-no-claim-stream-skips-reason-no-claim-without-mutating-the-stream-b-f1-renaming-liveness-policy-js-makes-init-plan-exit-0-with-one-stderr-diagnostic-naming-the-missing-module-and-writes-no-claim-file-restored-and-git-status-verified-back-to-the-original-untracked-state-c-zero-env-config-lifecycle-emits-claim-heartbeat-release-default-on-flow-agents-liveness-off-and-off-u-200b-both-produce-zero-events-across-the-same-lifecycle-d-flow-agents-liveness-ttl-seconds-300-ttlseconds-300-on-the-claim-custom-throttle-10s-9s-throttled-11s-emits-with-injected-now-e-ttl-300-with-tool-activity-heartbeats-every-100s-keeps-the-holder-held-at-t0-301s-without-activity-the-same-claim-goes-free-at-t0-301s-f-hostile-ansi-newline-active-slug-is-sanitized-before-being-used-as-the-emitted-heartbeat-subjectid-raw-esc-newline-bytes-never-appear-in-the-stream-cli-liveness-status-claim-strip-control-chars-from-terminal-display-while-the-persisted-event-retains-the-raw-value-for-data-fidelity-session-local-manual-probes-not-a-re-runnable-command",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-288/re-verify-288-iter2-probes",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "Manual scratch-root probes (see verifier report): (a) F8 CLI orphan heartbeat/release die() nonzero+remediation with no stream write, claim->heartbeat->release succeeds; maybeEmitHeartbeat on a heartbeat-only (no-claim) stream skips reason=no-claim without mutating the stream. (b) F1: renaming liveness-policy.js makes init-plan exit 0 with one stderr diagnostic naming the missing module and writes no claim; file restored and git status verified back to the original untracked state. (c) Zero-env-config lifecycle emits claim+heartbeat+release (default-on); FLOW_AGENTS_LIVENESS=off and off+U+200B both produce zero events across the same lifecycle. (d) FLOW_AGENTS_LIVENESS_TTL_SECONDS=300 -> ttlSeconds:300 on the claim; custom throttle=10s -> 9s throttled, 11s emits, with injected now. (e) TTL=300 with tool-activity heartbeats every 100s keeps the holder held at T0+301s; without activity the same claim goes free at T0+301s. (f) Hostile ANSI/newline active_slug is sanitized before being used as the emitted heartbeat subjectId (raw ESC/newline bytes never appear in the stream); CLI liveness status/claim strip control chars from terminal display while the persisted event retains the raw value for data fidelity. (Session-local manual probes; not a re-runnable command.)",
+      "value": "pass",
+      "createdAt": "2026-07-03T01:09:39Z",
+      "updatedAt": "2026-07-03T01:09:39Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-288-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-306-closes-288-two-review-iterations-authoritative-verify-pass-clean-delivery-published",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-288/gate-claim-pull-request-opened",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "PR opened: https://github.com/kontourai/flow-agents/pull/306. Closes #288. Two review iterations + authoritative verify pass clean; delivery/ published.",
+      "value": "pass",
+      "createdAt": "2026-07-03T01:09:39Z",
+      "updatedAt": "2026-07-03T01:09:39Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-288-ac1-flag-flips-default-on-flow-agents-liveness-unset-or-any-value-other-than-an-explicit-off-token-enables-lifecycle-auto-emit-off-0-false-no-disabled-disables-it.flow-agents-workflow.ac1-flag-flips-default-on-flow-agents-liveness-unset-or-any-value-other-than-an-explicit-off-token-enables-lifecycle-auto-emit-off-0-false-no-disabled-disables-it",
-      "subjectType": "workflow-acceptance-criterion",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/ac1-flag-flips-default-on-flow-agents-liveness-unset-or-any-value-other-than-an-explicit-off-token-enables-lifecycle-auto-emit-off-0-false-no-disabled-disables-it",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC1 `flag-flips-default-on`: FLOW_AGENTS_LIVENESS unset (or any value other than an explicit off-token) enables lifecycle auto-emit; off/0/false/no/disabled disables it",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-288-ac2-ttl-configurable-env-liveness-claim-ttl-stays-1800s-by-default-and-is-configurable-via-a-new-flow-agents-liveness-ttl-seconds-env-var.flow-agents-workflow.ac2-ttl-configurable-env-liveness-claim-ttl-stays-1800s-by-default-and-is-configurable-via-a-new-flow-agents-liveness-ttl-seconds-env-var",
-      "subjectType": "workflow-acceptance-criterion",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/ac2-ttl-configurable-env-liveness-claim-ttl-stays-1800s-by-default-and-is-configurable-via-a-new-flow-agents-liveness-ttl-seconds-env-var",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC2 `ttl-configurable-env`: liveness claim TTL stays 1800s by default and is configurable via a new FLOW_AGENTS_LIVENESS_TTL_SECONDS env var",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-288-ac3-heartbeat-throttled-on-tool-activity-a-posttooluse-equivalent-hook-event-in-all-four-runtime-telemetry-wrappers-appends-a-throttled-60s-per-subject-actor-heartbeat-for-the-current-session-s-resolved-actor-subject-fail-open.flow-agents-workflow.ac3-heartbeat-throttled-on-tool-activity-a-posttooluse-equivalent-hook-event-in-all-four-runtime-telemetry-wrappers-appends-a-throttled-60s-per-subject-actor-heartbeat-for-the-current-session-s-resolved-actor-subject-fail-open",
-      "subjectType": "workflow-acceptance-criterion",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/ac3-heartbeat-throttled-on-tool-activity-a-posttooluse-equivalent-hook-event-in-all-four-runtime-telemetry-wrappers-appends-a-throttled-60s-per-subject-actor-heartbeat-for-the-current-session-s-resolved-actor-subject-fail-open",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC3 `heartbeat-throttled-on-tool-activity`: a postToolUse-equivalent hook event in all four runtime telemetry wrappers appends a throttled (>=60s per subject+actor) heartbeat for the current session's resolved actor/subject, fail-open",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-288-ac4-heartbeat-requires-fresh-current-claim-a-heartbeat-only-fires-when-current-json-s-active-slug-names-a-subject-with-a-prior-claim-from-the-resolved-actor-whose-last-event-is-not-release-heartbeats-never-create-a-new-claim.flow-agents-workflow.ac4-heartbeat-requires-fresh-current-claim-a-heartbeat-only-fires-when-current-json-s-active-slug-names-a-subject-with-a-prior-claim-from-the-resolved-actor-whose-last-event-is-not-release-heartbeats-never-create-a-new-claim",
-      "subjectType": "workflow-acceptance-criterion",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/ac4-heartbeat-requires-fresh-current-claim-a-heartbeat-only-fires-when-current-json-s-active-slug-names-a-subject-with-a-prior-claim-from-the-resolved-actor-whose-last-event-is-not-release-heartbeats-never-create-a-new-claim",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC4 `heartbeat-requires-fresh-current-claim`: a heartbeat only fires when current.json's active_slug names a subject with a prior claim from the resolved actor whose last event is not release; heartbeats never create a new claim",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-288-ac5-heartbeat-decoupled-from-telemetry-toggle-heartbeat-emission-does-not-depend-on-telemetry-enabled.flow-agents-workflow.ac5-heartbeat-decoupled-from-telemetry-toggle-heartbeat-emission-does-not-depend-on-telemetry-enabled",
-      "subjectType": "workflow-acceptance-criterion",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/ac5-heartbeat-decoupled-from-telemetry-toggle-heartbeat-emission-does-not-depend-on-telemetry-enabled",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC5 `heartbeat-decoupled-from-telemetry-toggle`: heartbeat emission does not depend on TELEMETRY_ENABLED",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-288-ac6-root-scan-skips-liveness-dir-workflow-artifact-cleanup-audit-ts-and-workflow-learning-projection-ts-both-skip-the-root-level-liveness-directory.flow-agents-workflow.ac6-root-scan-skips-liveness-dir-workflow-artifact-cleanup-audit-ts-and-workflow-learning-projection-ts-both-skip-the-root-level-liveness-directory",
-      "subjectType": "workflow-acceptance-criterion",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/ac6-root-scan-skips-liveness-dir-workflow-artifact-cleanup-audit-ts-and-workflow-learning-projection-ts-both-skip-the-root-level-liveness-directory",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC6 `root-scan-skips-liveness-dir`: workflow-artifact-cleanup-audit.ts and workflow-learning-projection.ts both skip the root-level liveness/ directory",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-288-ac7-sidecar-eval-flips-to-default-on-proof-test-workflow-sidecar-writer-sh-s-lifecycle-liveness-assertion-proves-default-on-and-a-separate-explicit-off-case.flow-agents-workflow.ac7-sidecar-eval-flips-to-default-on-proof-test-workflow-sidecar-writer-sh-s-lifecycle-liveness-assertion-proves-default-on-and-a-separate-explicit-off-case",
-      "subjectType": "workflow-acceptance-criterion",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/ac7-sidecar-eval-flips-to-default-on-proof-test-workflow-sidecar-writer-sh-s-lifecycle-liveness-assertion-proves-default-on-and-a-separate-explicit-off-case",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC7 `sidecar-eval-flips-to-default-on-proof`: test_workflow_sidecar_writer.sh's lifecycle liveness assertion proves default-on and a separate explicit-off case",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-288-ac8-heartbeat-eval-registered-in-manifest-new-test-liveness-heartbeat-sh-covers-throttle-no-claim-disabled-default-on-and-is-registered-in-evals-run-sh-and-evals-ci-run-baseline-sh-checks-lane-runtime-and-kit.flow-agents-workflow.ac8-heartbeat-eval-registered-in-manifest-new-test-liveness-heartbeat-sh-covers-throttle-no-claim-disabled-default-on-and-is-registered-in-evals-run-sh-and-evals-ci-run-baseline-sh-checks-lane-runtime-and-kit",
-      "subjectType": "workflow-acceptance-criterion",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/ac8-heartbeat-eval-registered-in-manifest-new-test-liveness-heartbeat-sh-covers-throttle-no-claim-disabled-default-on-and-is-registered-in-evals-run-sh-and-evals-ci-run-baseline-sh-checks-lane-runtime-and-kit",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC8 `heartbeat-eval-registered-in-manifest`: new test_liveness_heartbeat.sh covers throttle/no-claim/disabled/default-on and is registered in evals/run.sh and evals/ci/run-baseline.sh (CHECKS + LANE_RUNTIME_AND_KIT)",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-288-ac9-docs-liveness-section-updated-docs-workflow-usage-guide-md-documents-default-on-opt-out-semantics-the-two-new-env-vars-and-fixes-the-stale-liveness-path-references.flow-agents-workflow.ac9-docs-liveness-section-updated-docs-workflow-usage-guide-md-documents-default-on-opt-out-semantics-the-two-new-env-vars-and-fixes-the-stale-liveness-path-references",
-      "subjectType": "workflow-acceptance-criterion",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/ac9-docs-liveness-section-updated-docs-workflow-usage-guide-md-documents-default-on-opt-out-semantics-the-two-new-env-vars-and-fixes-the-stale-liveness-path-references",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC9 `docs-liveness-section-updated`: docs/workflow-usage-guide.md documents default-on/opt-out semantics, the two new env vars, and fixes the stale liveness path references",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "status": "verified"
     },
     {
       "id": "kontourai-flow-agents-288-ac10-full-regression-clean-full-static-integration-eval-suites-source-tree-validation-and-bundle-build-all-pass-after-the-flip.flow-agents-workflow.ac10-full-regression-clean-full-static-integration-eval-suites-source-tree-validation-and-bundle-build-all-pass-after-the-flip",
-      "subjectType": "workflow-acceptance-criterion",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-288/ac10-full-regression-clean-full-static-integration-eval-suites-source-tree-validation-and-bundle-build-all-pass-after-the-flip",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC10 `full-regression-clean`: full static + integration eval suites, source-tree validation, and bundle build all pass after the flip",
       "value": "pass",
       "createdAt": "2026-07-03T01:09:39Z",
       "updatedAt": "2026-07-03T01:09:39Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "status": "verified"
     }
   ],
@@ -318,7 +339,7 @@
       "evidenceType": "test_output",
       "method": "validation",
       "sourceRef": "kontourai-flow-agents-288/evidence.json",
-      "excerptOrSummary": "Iteration-2 re-verify (authoritative, fresh pass, isolated build): 43/43 checks passed, exit 0. Covers F8 orphan-invariant sections C/H/J, F2 TTL+throttle env overrides, F3 bounded-tail, F5 hostile active_slug sanitization, AC1/AC3/AC4/AC5.",
+      "excerptOrSummary": "Iteration-2 re-verify (authoritative, fresh, pass, isolated build): 43/43 checks passed, exit 0. Covers F8 orphan invariant (sections C/H/J), F2 TTL throttle/env overrides, F3 bounded tail, F5 hostile active_slug sanitization. AC1/AC3/AC4/AC5.",
       "observedAt": "2026-07-03T01:09:39Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
@@ -329,12 +350,12 @@
       }
     },
     {
-      "id": "ev:kontourai-flow-agents-288-re-verify-288-iter2-sidecar-writer.flow-agents-workflow.isolated-re-run-no-concurrent-builds-after-an-earlier-contaminated-parallel-run-produced-1-transient-ac7-mismatch-146-146-checks-passed-exit-0-confirms-f1-fail-open-f8-i-cli-orphan-heartbeat-die-with-remediation-f5-hostile-subjectid-strip-on-display-data-fidelity-ac2-ttl-300-ac7-default-on-lifecycle-proof-explicit-off-case",
-      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-sidecar-writer.flow-agents-workflow.isolated-re-run-no-concurrent-builds-after-an-earlier-contaminated-parallel-run-produced-1-transient-ac7-mismatch-146-146-checks-passed-exit-0-confirms-f1-fail-open-f8-i-cli-orphan-heartbeat-die-with-remediation-f5-hostile-subjectid-strip-on-display-data-fidelity-ac2-ttl-300-ac7-default-on-lifecycle-proof-explicit-off-case",
+      "id": "ev:kontourai-flow-agents-288-re-verify-288-iter2-sidecar-writer.flow-agents-workflow.isolated-re-run-no-concurrent-builds-an-earlier-contaminated-parallel-run-produced-1-transient-ac7-mismatch-146-146-checks-passed-exit-0-confirms-f1-fail-open-f8-i-cli-orphan-heartbeat-die-with-remediation-f5-hostile-subjectid-strip-on-display-data-fidelity-ac2-ttl-300-ac7-default-on-lifecycle-proof-explicit-off-case",
+      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-sidecar-writer.flow-agents-workflow.isolated-re-run-no-concurrent-builds-an-earlier-contaminated-parallel-run-produced-1-transient-ac7-mismatch-146-146-checks-passed-exit-0-confirms-f1-fail-open-f8-i-cli-orphan-heartbeat-die-with-remediation-f5-hostile-subjectid-strip-on-display-data-fidelity-ac2-ttl-300-ac7-default-on-lifecycle-proof-explicit-off-case",
       "evidenceType": "test_output",
       "method": "validation",
       "sourceRef": "kontourai-flow-agents-288/evidence.json",
-      "excerptOrSummary": "Isolated re-run (no concurrent builds) after an earlier contaminated parallel run produced 1 transient AC7 mismatch: 146/146 checks passed, exit 0. Confirms F1 fail-open, F8(i) CLI orphan-heartbeat die() with remediation, F5 hostile subjectId strip-on-display + data fidelity, AC2 TTL=300, AC7 default-on lifecycle proof + explicit off-case.",
+      "excerptOrSummary": "Isolated re-run (no concurrent builds; an earlier contaminated parallel run produced 1 transient AC7 mismatch): 146/146 checks passed, exit 0. Confirms F1 fail-open, F8(i) CLI orphan heartbeat die with remediation, F5 hostile subjectId strip-on-display data fidelity, AC2 TTL=300, AC7 default-on lifecycle proof + explicit-off case.",
       "observedAt": "2026-07-03T01:09:39Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
@@ -361,28 +382,23 @@
       }
     },
     {
-      "id": "ev:kontourai-flow-agents-288-re-verify-288-iter2-build.flow-agents-workflow.npm-run-build-exits-0-no-type-errors",
-      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-build.flow-agents-workflow.npm-run-build-exits-0-no-type-errors",
-      "evidenceType": "test_output",
-      "method": "validation",
+      "id": "ev:kontourai-flow-agents-288-re-verify-288-iter2-build.flow-agents-workflow.npm-run-build-silent-exits-0-no-type-errors-session-local-local-build-check-not-a-run-baseline-sh-manifest-required-lane-command-so-not-asserted-as-ci-reconcilable",
+      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-build.flow-agents-workflow.npm-run-build-silent-exits-0-no-type-errors-session-local-local-build-check-not-a-run-baseline-sh-manifest-required-lane-command-so-not-asserted-as-ci-reconcilable",
+      "evidenceType": "attestation",
+      "method": "corroboration",
       "sourceRef": "kontourai-flow-agents-288/evidence.json",
-      "excerptOrSummary": "npm run build exits 0, no type errors.",
+      "excerptOrSummary": "npm run build --silent exits 0, no type errors (session-local local build check; not a run-baseline.sh manifest/required-lane command, so not asserted as CI-reconcilable).",
       "observedAt": "2026-07-03T01:09:39Z",
       "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "npm run build --silent",
-        "isError": false
-      }
+      "passing": true
     },
     {
-      "id": "ev:kontourai-flow-agents-288-re-verify-288-iter2-static.flow-agents-workflow.static-suite-clean-80-80-43-43-35-35-pure-helper-unit-tests-passed-exit-0-one-transient-bundle-reproducibility-diff-on-an-earlier-contaminated-run-was-proven-to-be-concurrent-tree-mutation-artifact-not-reproducible-in-isolation",
-      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-static.flow-agents-workflow.static-suite-clean-80-80-43-43-35-35-pure-helper-unit-tests-passed-exit-0-one-transient-bundle-reproducibility-diff-on-an-earlier-contaminated-run-was-proven-to-be-concurrent-tree-mutation-artifact-not-reproducible-in-isolation",
+      "id": "ev:kontourai-flow-agents-288-re-verify-288-iter2-static.flow-agents-workflow.static-suite-clean-80-80-43-43-35-35-pure-helper-unit-tests-passed-exit-0-one-transient-bundle-reproducibility-diff-on-an-earlier-contaminated-run-was-proven-to-be-a-concurrent-tree-mutation-artifact-not-reproducible-in-isolation",
+      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-static.flow-agents-workflow.static-suite-clean-80-80-43-43-35-35-pure-helper-unit-tests-passed-exit-0-one-transient-bundle-reproducibility-diff-on-an-earlier-contaminated-run-was-proven-to-be-a-concurrent-tree-mutation-artifact-not-reproducible-in-isolation",
       "evidenceType": "test_output",
       "method": "validation",
       "sourceRef": "kontourai-flow-agents-288/evidence.json",
-      "excerptOrSummary": "Static suite clean: 80/80 + 43/43 + 35/35 pure-helper unit tests passed, exit 0. (One transient bundle-reproducibility diff on an earlier contaminated run was proven to be concurrent-tree-mutation artifact, not reproducible in isolation.)",
+      "excerptOrSummary": "Static suite clean: 80/80 + 43/43 + 35/35 pure-helper unit tests passed, exit 0. One transient bundle-reproducibility diff on an earlier contaminated run was proven to be a concurrent-tree-mutation artifact, not reproducible in isolation.",
       "observedAt": "2026-07-03T01:09:39Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
@@ -414,7 +430,7 @@
       "evidenceType": "test_output",
       "method": "validation",
       "sourceRef": "kontourai-flow-agents-288/evidence.json",
-      "excerptOrSummary": "33/33 checks passed, exit 0. Confirms AC6: liveness directory never appears in any bucket.",
+      "excerptOrSummary": "33/33 checks passed, exit 0. Confirms AC6 (liveness/ directory never appears in any bucket).",
       "observedAt": "2026-07-03T01:09:39Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
@@ -425,84 +441,70 @@
       }
     },
     {
-      "id": "ev:kontourai-flow-agents-288-re-verify-288-iter2-trust-reconcile-manifest.flow-agents-workflow.manifest-ci-yml-parity-confirmed-34-manifest-entries-34-ci-yml-required-check-invocations-including-liveness-heartbeat-integration-ac8-exit-0",
-      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-trust-reconcile-manifest.flow-agents-workflow.manifest-ci-yml-parity-confirmed-34-manifest-entries-34-ci-yml-required-check-invocations-including-liveness-heartbeat-integration-ac8-exit-0",
-      "evidenceType": "test_output",
-      "method": "validation",
+      "id": "ev:kontourai-flow-agents-288-re-verify-288-iter2-trust-reconcile-manifest.flow-agents-workflow.bash-evals-integration-test-trust-reconcile-manifest-sh-manifest-ci-yml-parity-confirmed-34-manifest-entries-34-ci-yml-required-check-invocations-including-liveness-heartbeat-integration-for-ac8-exit-0-session-local-this-eval-is-not-itself-a-run-baseline-sh-manifest-required-lane-entry-so-it-is-not-asserted-as-ci-reconcilable",
+      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-trust-reconcile-manifest.flow-agents-workflow.bash-evals-integration-test-trust-reconcile-manifest-sh-manifest-ci-yml-parity-confirmed-34-manifest-entries-34-ci-yml-required-check-invocations-including-liveness-heartbeat-integration-for-ac8-exit-0-session-local-this-eval-is-not-itself-a-run-baseline-sh-manifest-required-lane-entry-so-it-is-not-asserted-as-ci-reconcilable",
+      "evidenceType": "attestation",
+      "method": "corroboration",
       "sourceRef": "kontourai-flow-agents-288/evidence.json",
-      "excerptOrSummary": "Manifest/ci.yml parity confirmed: 34 manifest entries == 34 ci.yml required --check invocations, including liveness-heartbeat-integration (AC8). Exit 0.",
+      "excerptOrSummary": "bash evals/integration/test_trust_reconcile_manifest.sh: manifest/ci.yml parity confirmed (34 manifest entries == 34 ci.yml required --check invocations, including liveness-heartbeat-integration for AC8), exit 0. (Session-local: this eval is not itself a run-baseline.sh manifest/required-lane entry, so it is not asserted as CI-reconcilable.)",
       "observedAt": "2026-07-03T01:09:39Z",
       "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_trust_reconcile_manifest.sh",
-        "isError": false
-      }
+      "passing": true
     },
     {
-      "id": "ev:kontourai-flow-agents-288-re-verify-288-iter2-context-map.flow-agents-workflow.docs-context-map-md-is-current",
-      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-context-map.flow-agents-workflow.docs-context-map-md-is-current",
-      "evidenceType": "test_output",
-      "method": "validation",
+      "id": "ev:kontourai-flow-agents-288-re-verify-288-iter2-context-map.flow-agents-workflow.docs-context-map-md-is-current-checked-locally-via-npm-run-context-map-check-session-local-not-asserted-as-a-ci-reconcilable-manifest-command",
+      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-context-map.flow-agents-workflow.docs-context-map-md-is-current-checked-locally-via-npm-run-context-map-check-session-local-not-asserted-as-a-ci-reconcilable-manifest-command",
+      "evidenceType": "attestation",
+      "method": "corroboration",
       "sourceRef": "kontourai-flow-agents-288/evidence.json",
-      "excerptOrSummary": "docs/context-map.md is current.",
+      "excerptOrSummary": "docs/context-map.md is current (checked locally via npm run context-map:check; session-local, not asserted as a CI-reconcilable manifest command).",
       "observedAt": "2026-07-03T01:09:39Z",
       "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "npm run context-map:check",
-        "isError": false
-      }
+      "passing": true
     },
     {
-      "id": "ev:kontourai-flow-agents-288-re-verify-288-iter2-build-bundles.flow-agents-workflow.all-6-bundles-base-kiro-claude-code-codex-opencode-pi-built-successfully-exit-0-dist-is-gitignored-no-diff-noise",
-      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-build-bundles.flow-agents-workflow.all-6-bundles-base-kiro-claude-code-codex-opencode-pi-built-successfully-exit-0-dist-is-gitignored-no-diff-noise",
-      "evidenceType": "test_output",
-      "method": "validation",
+      "id": "ev:kontourai-flow-agents-288-re-verify-288-iter2-build-bundles.flow-agents-workflow.all-6-bundles-base-kiro-claude-code-codex-opencode-pi-built-successfully-via-npm-run-build-bundles-silent-exit-0-dist-is-gitignored-no-diff-noise-session-local-not-a-ci-reconcilable-manifest-command",
+      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-build-bundles.flow-agents-workflow.all-6-bundles-base-kiro-claude-code-codex-opencode-pi-built-successfully-via-npm-run-build-bundles-silent-exit-0-dist-is-gitignored-no-diff-noise-session-local-not-a-ci-reconcilable-manifest-command",
+      "evidenceType": "attestation",
+      "method": "corroboration",
       "sourceRef": "kontourai-flow-agents-288/evidence.json",
-      "excerptOrSummary": "All 6 bundles (base/kiro/claude-code/codex/opencode/pi) built successfully, exit 0. dist/ is gitignored (no diff noise).",
+      "excerptOrSummary": "All 6 bundles (base/kiro/claude-code/codex/opencode/pi) built successfully via npm run build:bundles --silent, exit 0. dist/ is gitignored (no diff noise). (Session-local; not a CI-reconcilable manifest command.)",
       "observedAt": "2026-07-03T01:09:39Z",
       "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "npm run build:bundles --silent",
-        "isError": false
-      }
+      "passing": true
     },
     {
       "id": "ev:kontourai-flow-agents-288-re-verify-288-iter2-full-integration.flow-agents-workflow.full-evals-run-sh-integration-890-909-assertions-passed-the-19-failures-are-confined-to-exactly-3-scripts-test-goal-fit-hook-sh-1-test-goal-fit-escape-hatch-sh-5-test-session-resume-roundtrip-sh-13-and-were-proven-byte-identical-when-reproduced-against-base-commit-204a4c6-git-stash-of-the-full-288-diff-rebuild-re-run-then-stash-pop-restored-the-diff-exactly-i-e-pre-existing-and-independent-of-the-288-liveness-default-on-change-not-caused-or-worsened-by-this-diff-all-other-49-integration-scripts-including-every-liveness-touching-one-pass-cleanly",
       "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-full-integration.flow-agents-workflow.full-evals-run-sh-integration-890-909-assertions-passed-the-19-failures-are-confined-to-exactly-3-scripts-test-goal-fit-hook-sh-1-test-goal-fit-escape-hatch-sh-5-test-session-resume-roundtrip-sh-13-and-were-proven-byte-identical-when-reproduced-against-base-commit-204a4c6-git-stash-of-the-full-288-diff-rebuild-re-run-then-stash-pop-restored-the-diff-exactly-i-e-pre-existing-and-independent-of-the-288-liveness-default-on-change-not-caused-or-worsened-by-this-diff-all-other-49-integration-scripts-including-every-liveness-touching-one-pass-cleanly",
-      "evidenceType": "test_output",
-      "method": "validation",
+      "evidenceType": "attestation",
+      "method": "attestation",
       "sourceRef": "kontourai-flow-agents-288/evidence.json",
       "excerptOrSummary": "Full evals/run.sh integration: 890/909 assertions passed. The 19 failures are confined to exactly 3 scripts (test_goal_fit_hook.sh:1, test_goal_fit_escape_hatch.sh:5, test_session_resume_roundtrip.sh:13) and were proven byte-identical when reproduced against base commit 204a4c6 (git stash of the full #288 diff, rebuild, re-run, then stash pop restored the diff exactly) -- i.e. pre-existing and independent of the #288 liveness-default-on change, not caused or worsened by this diff. All other 49 integration scripts, including every liveness-touching one, pass cleanly.",
       "observedAt": "2026-07-03T01:09:39Z",
       "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": false,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/run.sh integration",
-        "isError": true
-      }
+      "passing": true
     },
     {
-      "id": "ev:kontourai-flow-agents-288-re-verify-288-iter2-probes.flow-agents-workflow.manual-scratch-root-probes-a-f8-cli-orphan-heartbeat-release-die-nonzero-remediation-with-no-stream-write-claim-heartbeat-release-succeeds-maybeemitheartbeat-on-a-heartbeat-only-no-claim-stream-skips-reason-no-claim-without-mutating-the-stream-b-f1-renaming-liveness-policy-js-makes-init-plan-exit-0-with-one-stderr-diagnostic-naming-the-missing-module-and-writes-no-claim-file-restored-and-git-status-verified-back-to-the-original-untracked-state-c-zero-env-config-lifecycle-emits-claim-heartbeat-release-default-on-flow-agents-liveness-off-and-off-u-200b-both-produce-zero-events-across-the-same-lifecycle-d-flow-agents-liveness-ttl-seconds-300-ttlseconds-300-on-the-claim-custom-throttle-10s-9s-throttled-11s-emits-with-injected-now-e-ttl-300-with-tool-activity-heartbeats-every-100s-keeps-the-holder-held-at-t0-301s-without-activity-the-same-claim-goes-free-at-t0-301s-f-hostile-ansi-newline-active-slug-is-sanitized-before-being-used-as-the-emitted-heartbeat-subjectid-raw-esc-newline-bytes-never-appear-in-the-stream-cli-liveness-status-claim-strip-control-chars-from-terminal-display-while-the-persisted-event-retains-the-raw-value-for-data-fidelity",
-      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-probes.flow-agents-workflow.manual-scratch-root-probes-a-f8-cli-orphan-heartbeat-release-die-nonzero-remediation-with-no-stream-write-claim-heartbeat-release-succeeds-maybeemitheartbeat-on-a-heartbeat-only-no-claim-stream-skips-reason-no-claim-without-mutating-the-stream-b-f1-renaming-liveness-policy-js-makes-init-plan-exit-0-with-one-stderr-diagnostic-naming-the-missing-module-and-writes-no-claim-file-restored-and-git-status-verified-back-to-the-original-untracked-state-c-zero-env-config-lifecycle-emits-claim-heartbeat-release-default-on-flow-agents-liveness-off-and-off-u-200b-both-produce-zero-events-across-the-same-lifecycle-d-flow-agents-liveness-ttl-seconds-300-ttlseconds-300-on-the-claim-custom-throttle-10s-9s-throttled-11s-emits-with-injected-now-e-ttl-300-with-tool-activity-heartbeats-every-100s-keeps-the-holder-held-at-t0-301s-without-activity-the-same-claim-goes-free-at-t0-301s-f-hostile-ansi-newline-active-slug-is-sanitized-before-being-used-as-the-emitted-heartbeat-subjectid-raw-esc-newline-bytes-never-appear-in-the-stream-cli-liveness-status-claim-strip-control-chars-from-terminal-display-while-the-persisted-event-retains-the-raw-value-for-data-fidelity",
-      "evidenceType": "test_output",
-      "method": "validation",
+      "id": "ev:kontourai-flow-agents-288-re-verify-288-iter2-probes.flow-agents-workflow.manual-scratch-root-probes-see-verifier-report-a-f8-cli-orphan-heartbeat-release-die-nonzero-remediation-with-no-stream-write-claim-heartbeat-release-succeeds-maybeemitheartbeat-on-a-heartbeat-only-no-claim-stream-skips-reason-no-claim-without-mutating-the-stream-b-f1-renaming-liveness-policy-js-makes-init-plan-exit-0-with-one-stderr-diagnostic-naming-the-missing-module-and-writes-no-claim-file-restored-and-git-status-verified-back-to-the-original-untracked-state-c-zero-env-config-lifecycle-emits-claim-heartbeat-release-default-on-flow-agents-liveness-off-and-off-u-200b-both-produce-zero-events-across-the-same-lifecycle-d-flow-agents-liveness-ttl-seconds-300-ttlseconds-300-on-the-claim-custom-throttle-10s-9s-throttled-11s-emits-with-injected-now-e-ttl-300-with-tool-activity-heartbeats-every-100s-keeps-the-holder-held-at-t0-301s-without-activity-the-same-claim-goes-free-at-t0-301s-f-hostile-ansi-newline-active-slug-is-sanitized-before-being-used-as-the-emitted-heartbeat-subjectid-raw-esc-newline-bytes-never-appear-in-the-stream-cli-liveness-status-claim-strip-control-chars-from-terminal-display-while-the-persisted-event-retains-the-raw-value-for-data-fidelity-session-local-manual-probes-not-a-re-runnable-command",
+      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-probes.flow-agents-workflow.manual-scratch-root-probes-see-verifier-report-a-f8-cli-orphan-heartbeat-release-die-nonzero-remediation-with-no-stream-write-claim-heartbeat-release-succeeds-maybeemitheartbeat-on-a-heartbeat-only-no-claim-stream-skips-reason-no-claim-without-mutating-the-stream-b-f1-renaming-liveness-policy-js-makes-init-plan-exit-0-with-one-stderr-diagnostic-naming-the-missing-module-and-writes-no-claim-file-restored-and-git-status-verified-back-to-the-original-untracked-state-c-zero-env-config-lifecycle-emits-claim-heartbeat-release-default-on-flow-agents-liveness-off-and-off-u-200b-both-produce-zero-events-across-the-same-lifecycle-d-flow-agents-liveness-ttl-seconds-300-ttlseconds-300-on-the-claim-custom-throttle-10s-9s-throttled-11s-emits-with-injected-now-e-ttl-300-with-tool-activity-heartbeats-every-100s-keeps-the-holder-held-at-t0-301s-without-activity-the-same-claim-goes-free-at-t0-301s-f-hostile-ansi-newline-active-slug-is-sanitized-before-being-used-as-the-emitted-heartbeat-subjectid-raw-esc-newline-bytes-never-appear-in-the-stream-cli-liveness-status-claim-strip-control-chars-from-terminal-display-while-the-persisted-event-retains-the-raw-value-for-data-fidelity-session-local-manual-probes-not-a-re-runnable-command",
+      "evidenceType": "attestation",
+      "method": "corroboration",
       "sourceRef": "kontourai-flow-agents-288/evidence.json",
-      "excerptOrSummary": "Manual scratch-root probes: (a) F8 CLI orphan heartbeat/release die() nonzero+remediation with no stream write, claim->heartbeat->release succeeds; maybeEmitHeartbeat on a heartbeat-only (no-claim) stream skips reason=no-claim without mutating the stream. (b) F1: renaming liveness-policy.js makes init-plan exit 0 with one stderr diagnostic naming the missing module and writes no claim; file restored and git status verified back to the original untracked state. (c) Zero-env-config lifecycle emits claim+heartbeat+release (default-on); FLOW_AGENTS_LIVENESS=off and off+U+200B both produce zero events across the same lifecycle. (d) FLOW_AGENTS_LIVENESS_TTL_SECONDS=300 -> ttlSeconds:300 on the claim; custom throttle=10s -> 9s throttled, 11s emits, with injected now. (e) TTL=300 with tool-activity heartbeats every 100s keeps the holder held at T0+301s; without activity the same claim goes free at T0+301s. (f) Hostile ANSI/newline active_slug is sanitized before being used as the emitted heartbeat subjectId (raw ESC/newline bytes never appear in the stream); CLI liveness status/claim strip control chars from terminal display while the persisted event retains the raw value for data fidelity.",
+      "excerptOrSummary": "Manual scratch-root probes (see verifier report): (a) F8 CLI orphan heartbeat/release die() nonzero+remediation with no stream write, claim->heartbeat->release succeeds; maybeEmitHeartbeat on a heartbeat-only (no-claim) stream skips reason=no-claim without mutating the stream. (b) F1: renaming liveness-policy.js makes init-plan exit 0 with one stderr diagnostic naming the missing module and writes no claim; file restored and git status verified back to the original untracked state. (c) Zero-env-config lifecycle emits claim+heartbeat+release (default-on); FLOW_AGENTS_LIVENESS=off and off+U+200B both produce zero events across the same lifecycle. (d) FLOW_AGENTS_LIVENESS_TTL_SECONDS=300 -> ttlSeconds:300 on the claim; custom throttle=10s -> 9s throttled, 11s emits, with injected now. (e) TTL=300 with tool-activity heartbeats every 100s keeps the holder held at T0+301s; without activity the same claim goes free at T0+301s. (f) Hostile ANSI/newline active_slug is sanitized before being used as the emitted heartbeat subjectId (raw ESC/newline bytes never appear in the stream); CLI liveness status/claim strip control chars from terminal display while the persisted event retains the raw value for data fidelity. (Session-local manual probes; not a re-runnable command.)",
       "observedAt": "2026-07-03T01:09:39Z",
       "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "scratch probes (see verifier report)",
-        "isError": false
-      }
+      "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-288-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-306-closes-288-two-review-iterations-authoritative-verify-pass-clean-delivery-published",
+      "claimId": "kontourai-flow-agents-288-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-306-closes-288-two-review-iterations-authoritative-verify-pass-clean-delivery-published",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-288/evidence.json",
+      "excerptOrSummary": "PR opened: https://github.com/kontourai/flow-agents/pull/306. Closes #288. Two review iterations + authoritative verify pass clean; delivery/ published.",
+      "observedAt": "2026-07-03T01:09:39Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
     }
   ],
   "policies": [
@@ -514,6 +516,23 @@
       ],
       "acceptanceCriteria": [
         "A verified verification event must support a workflow.check.test claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pr-open.pull-request:test_output",
+      "claimType": "builder.pr-open.pull-request",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pr-open.pull-request claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -541,13 +560,30 @@
       "impactLevel": "high"
     },
     {
-      "id": "policy:workflow.check.runtime:test_output",
-      "claimType": "workflow.check.runtime",
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
       "requiredEvidence": [
-        "test_output"
+        "attestation"
       ],
       "acceptanceCriteria": [
-        "A verified verification event must support a workflow.check.runtime claim."
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pr-open.pull-request:attestation",
+      "claimType": "builder.pr-open.pull-request",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pr-open.pull-request claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -563,6 +599,21 @@
       "requiredEvidence": [],
       "acceptanceCriteria": [
         "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pr-open.pull-request",
+      "claimType": "builder.pr-open.pull-request",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pr-open.pull-request claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -587,13 +638,13 @@
       "verifiedAt": "2026-07-03T01:09:39Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-288-re-verify-288-iter2-sidecar-writer.flow-agents-workflow.isolated-re-run-no-concurrent-builds-after-an-earlier-contaminated-parallel-run-produced-1-transient-ac7-mismatch-146-146-checks-passed-exit-0-confirms-f1-fail-open-f8-i-cli-orphan-heartbeat-die-with-remediation-f5-hostile-subjectid-strip-on-display-data-fidelity-ac2-ttl-300-ac7-default-on-lifecycle-proof-explicit-off-case",
-      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-sidecar-writer.flow-agents-workflow.isolated-re-run-no-concurrent-builds-after-an-earlier-contaminated-parallel-run-produced-1-transient-ac7-mismatch-146-146-checks-passed-exit-0-confirms-f1-fail-open-f8-i-cli-orphan-heartbeat-die-with-remediation-f5-hostile-subjectid-strip-on-display-data-fidelity-ac2-ttl-300-ac7-default-on-lifecycle-proof-explicit-off-case",
+      "id": "evt:kontourai-flow-agents-288-re-verify-288-iter2-sidecar-writer.flow-agents-workflow.isolated-re-run-no-concurrent-builds-an-earlier-contaminated-parallel-run-produced-1-transient-ac7-mismatch-146-146-checks-passed-exit-0-confirms-f1-fail-open-f8-i-cli-orphan-heartbeat-die-with-remediation-f5-hostile-subjectid-strip-on-display-data-fidelity-ac2-ttl-300-ac7-default-on-lifecycle-proof-explicit-off-case",
+      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-sidecar-writer.flow-agents-workflow.isolated-re-run-no-concurrent-builds-an-earlier-contaminated-parallel-run-produced-1-transient-ac7-mismatch-146-146-checks-passed-exit-0-confirms-f1-fail-open-f8-i-cli-orphan-heartbeat-die-with-remediation-f5-hostile-subjectid-strip-on-display-data-fidelity-ac2-ttl-300-ac7-default-on-lifecycle-proof-explicit-off-case",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-288-re-verify-288-iter2-sidecar-writer.flow-agents-workflow.isolated-re-run-no-concurrent-builds-after-an-earlier-contaminated-parallel-run-produced-1-transient-ac7-mismatch-146-146-checks-passed-exit-0-confirms-f1-fail-open-f8-i-cli-orphan-heartbeat-die-with-remediation-f5-hostile-subjectid-strip-on-display-data-fidelity-ac2-ttl-300-ac7-default-on-lifecycle-proof-explicit-off-case"
+        "ev:kontourai-flow-agents-288-re-verify-288-iter2-sidecar-writer.flow-agents-workflow.isolated-re-run-no-concurrent-builds-an-earlier-contaminated-parallel-run-produced-1-transient-ac7-mismatch-146-146-checks-passed-exit-0-confirms-f1-fail-open-f8-i-cli-orphan-heartbeat-die-with-remediation-f5-hostile-subjectid-strip-on-display-data-fidelity-ac2-ttl-300-ac7-default-on-lifecycle-proof-explicit-off-case"
       ],
       "createdAt": "2026-07-03T01:09:39Z",
       "verifiedAt": "2026-07-03T01:09:39Z"
@@ -611,25 +662,25 @@
       "verifiedAt": "2026-07-03T01:09:39Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-288-re-verify-288-iter2-build.flow-agents-workflow.npm-run-build-exits-0-no-type-errors",
-      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-build.flow-agents-workflow.npm-run-build-exits-0-no-type-errors",
+      "id": "evt:kontourai-flow-agents-288-re-verify-288-iter2-build.flow-agents-workflow.npm-run-build-silent-exits-0-no-type-errors-session-local-local-build-check-not-a-run-baseline-sh-manifest-required-lane-command-so-not-asserted-as-ci-reconcilable",
+      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-build.flow-agents-workflow.npm-run-build-silent-exits-0-no-type-errors-session-local-local-build-check-not-a-run-baseline-sh-manifest-required-lane-command-so-not-asserted-as-ci-reconcilable",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-288-re-verify-288-iter2-build.flow-agents-workflow.npm-run-build-exits-0-no-type-errors"
+        "ev:kontourai-flow-agents-288-re-verify-288-iter2-build.flow-agents-workflow.npm-run-build-silent-exits-0-no-type-errors-session-local-local-build-check-not-a-run-baseline-sh-manifest-required-lane-command-so-not-asserted-as-ci-reconcilable"
       ],
       "createdAt": "2026-07-03T01:09:39Z",
       "verifiedAt": "2026-07-03T01:09:39Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-288-re-verify-288-iter2-static.flow-agents-workflow.static-suite-clean-80-80-43-43-35-35-pure-helper-unit-tests-passed-exit-0-one-transient-bundle-reproducibility-diff-on-an-earlier-contaminated-run-was-proven-to-be-concurrent-tree-mutation-artifact-not-reproducible-in-isolation",
-      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-static.flow-agents-workflow.static-suite-clean-80-80-43-43-35-35-pure-helper-unit-tests-passed-exit-0-one-transient-bundle-reproducibility-diff-on-an-earlier-contaminated-run-was-proven-to-be-concurrent-tree-mutation-artifact-not-reproducible-in-isolation",
+      "id": "evt:kontourai-flow-agents-288-re-verify-288-iter2-static.flow-agents-workflow.static-suite-clean-80-80-43-43-35-35-pure-helper-unit-tests-passed-exit-0-one-transient-bundle-reproducibility-diff-on-an-earlier-contaminated-run-was-proven-to-be-a-concurrent-tree-mutation-artifact-not-reproducible-in-isolation",
+      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-static.flow-agents-workflow.static-suite-clean-80-80-43-43-35-35-pure-helper-unit-tests-passed-exit-0-one-transient-bundle-reproducibility-diff-on-an-earlier-contaminated-run-was-proven-to-be-a-concurrent-tree-mutation-artifact-not-reproducible-in-isolation",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-288-re-verify-288-iter2-static.flow-agents-workflow.static-suite-clean-80-80-43-43-35-35-pure-helper-unit-tests-passed-exit-0-one-transient-bundle-reproducibility-diff-on-an-earlier-contaminated-run-was-proven-to-be-concurrent-tree-mutation-artifact-not-reproducible-in-isolation"
+        "ev:kontourai-flow-agents-288-re-verify-288-iter2-static.flow-agents-workflow.static-suite-clean-80-80-43-43-35-35-pure-helper-unit-tests-passed-exit-0-one-transient-bundle-reproducibility-diff-on-an-earlier-contaminated-run-was-proven-to-be-a-concurrent-tree-mutation-artifact-not-reproducible-in-isolation"
       ],
       "createdAt": "2026-07-03T01:09:39Z",
       "verifiedAt": "2026-07-03T01:09:39Z"
@@ -659,37 +710,37 @@
       "verifiedAt": "2026-07-03T01:09:39Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-288-re-verify-288-iter2-trust-reconcile-manifest.flow-agents-workflow.manifest-ci-yml-parity-confirmed-34-manifest-entries-34-ci-yml-required-check-invocations-including-liveness-heartbeat-integration-ac8-exit-0",
-      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-trust-reconcile-manifest.flow-agents-workflow.manifest-ci-yml-parity-confirmed-34-manifest-entries-34-ci-yml-required-check-invocations-including-liveness-heartbeat-integration-ac8-exit-0",
+      "id": "evt:kontourai-flow-agents-288-re-verify-288-iter2-trust-reconcile-manifest.flow-agents-workflow.bash-evals-integration-test-trust-reconcile-manifest-sh-manifest-ci-yml-parity-confirmed-34-manifest-entries-34-ci-yml-required-check-invocations-including-liveness-heartbeat-integration-for-ac8-exit-0-session-local-this-eval-is-not-itself-a-run-baseline-sh-manifest-required-lane-entry-so-it-is-not-asserted-as-ci-reconcilable",
+      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-trust-reconcile-manifest.flow-agents-workflow.bash-evals-integration-test-trust-reconcile-manifest-sh-manifest-ci-yml-parity-confirmed-34-manifest-entries-34-ci-yml-required-check-invocations-including-liveness-heartbeat-integration-for-ac8-exit-0-session-local-this-eval-is-not-itself-a-run-baseline-sh-manifest-required-lane-entry-so-it-is-not-asserted-as-ci-reconcilable",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-288-re-verify-288-iter2-trust-reconcile-manifest.flow-agents-workflow.manifest-ci-yml-parity-confirmed-34-manifest-entries-34-ci-yml-required-check-invocations-including-liveness-heartbeat-integration-ac8-exit-0"
+        "ev:kontourai-flow-agents-288-re-verify-288-iter2-trust-reconcile-manifest.flow-agents-workflow.bash-evals-integration-test-trust-reconcile-manifest-sh-manifest-ci-yml-parity-confirmed-34-manifest-entries-34-ci-yml-required-check-invocations-including-liveness-heartbeat-integration-for-ac8-exit-0-session-local-this-eval-is-not-itself-a-run-baseline-sh-manifest-required-lane-entry-so-it-is-not-asserted-as-ci-reconcilable"
       ],
       "createdAt": "2026-07-03T01:09:39Z",
       "verifiedAt": "2026-07-03T01:09:39Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-288-re-verify-288-iter2-context-map.flow-agents-workflow.docs-context-map-md-is-current",
-      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-context-map.flow-agents-workflow.docs-context-map-md-is-current",
+      "id": "evt:kontourai-flow-agents-288-re-verify-288-iter2-context-map.flow-agents-workflow.docs-context-map-md-is-current-checked-locally-via-npm-run-context-map-check-session-local-not-asserted-as-a-ci-reconcilable-manifest-command",
+      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-context-map.flow-agents-workflow.docs-context-map-md-is-current-checked-locally-via-npm-run-context-map-check-session-local-not-asserted-as-a-ci-reconcilable-manifest-command",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-288-re-verify-288-iter2-context-map.flow-agents-workflow.docs-context-map-md-is-current"
+        "ev:kontourai-flow-agents-288-re-verify-288-iter2-context-map.flow-agents-workflow.docs-context-map-md-is-current-checked-locally-via-npm-run-context-map-check-session-local-not-asserted-as-a-ci-reconcilable-manifest-command"
       ],
       "createdAt": "2026-07-03T01:09:39Z",
       "verifiedAt": "2026-07-03T01:09:39Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-288-re-verify-288-iter2-build-bundles.flow-agents-workflow.all-6-bundles-base-kiro-claude-code-codex-opencode-pi-built-successfully-exit-0-dist-is-gitignored-no-diff-noise",
-      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-build-bundles.flow-agents-workflow.all-6-bundles-base-kiro-claude-code-codex-opencode-pi-built-successfully-exit-0-dist-is-gitignored-no-diff-noise",
+      "id": "evt:kontourai-flow-agents-288-re-verify-288-iter2-build-bundles.flow-agents-workflow.all-6-bundles-base-kiro-claude-code-codex-opencode-pi-built-successfully-via-npm-run-build-bundles-silent-exit-0-dist-is-gitignored-no-diff-noise-session-local-not-a-ci-reconcilable-manifest-command",
+      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-build-bundles.flow-agents-workflow.all-6-bundles-base-kiro-claude-code-codex-opencode-pi-built-successfully-via-npm-run-build-bundles-silent-exit-0-dist-is-gitignored-no-diff-noise-session-local-not-a-ci-reconcilable-manifest-command",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-288-re-verify-288-iter2-build-bundles.flow-agents-workflow.all-6-bundles-base-kiro-claude-code-codex-opencode-pi-built-successfully-exit-0-dist-is-gitignored-no-diff-noise"
+        "ev:kontourai-flow-agents-288-re-verify-288-iter2-build-bundles.flow-agents-workflow.all-6-bundles-base-kiro-claude-code-codex-opencode-pi-built-successfully-via-npm-run-build-bundles-silent-exit-0-dist-is-gitignored-no-diff-noise-session-local-not-a-ci-reconcilable-manifest-command"
       ],
       "createdAt": "2026-07-03T01:09:39Z",
       "verifiedAt": "2026-07-03T01:09:39Z"
@@ -697,7 +748,7 @@
     {
       "id": "evt:kontourai-flow-agents-288-re-verify-288-iter2-full-integration.flow-agents-workflow.full-evals-run-sh-integration-890-909-assertions-passed-the-19-failures-are-confined-to-exactly-3-scripts-test-goal-fit-hook-sh-1-test-goal-fit-escape-hatch-sh-5-test-session-resume-roundtrip-sh-13-and-were-proven-byte-identical-when-reproduced-against-base-commit-204a4c6-git-stash-of-the-full-288-diff-rebuild-re-run-then-stash-pop-restored-the-diff-exactly-i-e-pre-existing-and-independent-of-the-288-liveness-default-on-change-not-caused-or-worsened-by-this-diff-all-other-49-integration-scripts-including-every-liveness-touching-one-pass-cleanly",
       "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-full-integration.flow-agents-workflow.full-evals-run-sh-integration-890-909-assertions-passed-the-19-failures-are-confined-to-exactly-3-scripts-test-goal-fit-hook-sh-1-test-goal-fit-escape-hatch-sh-5-test-session-resume-roundtrip-sh-13-and-were-proven-byte-identical-when-reproduced-against-base-commit-204a4c6-git-stash-of-the-full-288-diff-rebuild-re-run-then-stash-pop-restored-the-diff-exactly-i-e-pre-existing-and-independent-of-the-288-liveness-default-on-change-not-caused-or-worsened-by-this-diff-all-other-49-integration-scripts-including-every-liveness-touching-one-pass-cleanly",
-      "status": "disputed",
+      "status": "assumed",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
@@ -707,13 +758,25 @@
       "verifiedAt": "2026-07-03T01:09:39Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-288-re-verify-288-iter2-probes.flow-agents-workflow.manual-scratch-root-probes-a-f8-cli-orphan-heartbeat-release-die-nonzero-remediation-with-no-stream-write-claim-heartbeat-release-succeeds-maybeemitheartbeat-on-a-heartbeat-only-no-claim-stream-skips-reason-no-claim-without-mutating-the-stream-b-f1-renaming-liveness-policy-js-makes-init-plan-exit-0-with-one-stderr-diagnostic-naming-the-missing-module-and-writes-no-claim-file-restored-and-git-status-verified-back-to-the-original-untracked-state-c-zero-env-config-lifecycle-emits-claim-heartbeat-release-default-on-flow-agents-liveness-off-and-off-u-200b-both-produce-zero-events-across-the-same-lifecycle-d-flow-agents-liveness-ttl-seconds-300-ttlseconds-300-on-the-claim-custom-throttle-10s-9s-throttled-11s-emits-with-injected-now-e-ttl-300-with-tool-activity-heartbeats-every-100s-keeps-the-holder-held-at-t0-301s-without-activity-the-same-claim-goes-free-at-t0-301s-f-hostile-ansi-newline-active-slug-is-sanitized-before-being-used-as-the-emitted-heartbeat-subjectid-raw-esc-newline-bytes-never-appear-in-the-stream-cli-liveness-status-claim-strip-control-chars-from-terminal-display-while-the-persisted-event-retains-the-raw-value-for-data-fidelity",
-      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-probes.flow-agents-workflow.manual-scratch-root-probes-a-f8-cli-orphan-heartbeat-release-die-nonzero-remediation-with-no-stream-write-claim-heartbeat-release-succeeds-maybeemitheartbeat-on-a-heartbeat-only-no-claim-stream-skips-reason-no-claim-without-mutating-the-stream-b-f1-renaming-liveness-policy-js-makes-init-plan-exit-0-with-one-stderr-diagnostic-naming-the-missing-module-and-writes-no-claim-file-restored-and-git-status-verified-back-to-the-original-untracked-state-c-zero-env-config-lifecycle-emits-claim-heartbeat-release-default-on-flow-agents-liveness-off-and-off-u-200b-both-produce-zero-events-across-the-same-lifecycle-d-flow-agents-liveness-ttl-seconds-300-ttlseconds-300-on-the-claim-custom-throttle-10s-9s-throttled-11s-emits-with-injected-now-e-ttl-300-with-tool-activity-heartbeats-every-100s-keeps-the-holder-held-at-t0-301s-without-activity-the-same-claim-goes-free-at-t0-301s-f-hostile-ansi-newline-active-slug-is-sanitized-before-being-used-as-the-emitted-heartbeat-subjectid-raw-esc-newline-bytes-never-appear-in-the-stream-cli-liveness-status-claim-strip-control-chars-from-terminal-display-while-the-persisted-event-retains-the-raw-value-for-data-fidelity",
+      "id": "evt:kontourai-flow-agents-288-re-verify-288-iter2-probes.flow-agents-workflow.manual-scratch-root-probes-see-verifier-report-a-f8-cli-orphan-heartbeat-release-die-nonzero-remediation-with-no-stream-write-claim-heartbeat-release-succeeds-maybeemitheartbeat-on-a-heartbeat-only-no-claim-stream-skips-reason-no-claim-without-mutating-the-stream-b-f1-renaming-liveness-policy-js-makes-init-plan-exit-0-with-one-stderr-diagnostic-naming-the-missing-module-and-writes-no-claim-file-restored-and-git-status-verified-back-to-the-original-untracked-state-c-zero-env-config-lifecycle-emits-claim-heartbeat-release-default-on-flow-agents-liveness-off-and-off-u-200b-both-produce-zero-events-across-the-same-lifecycle-d-flow-agents-liveness-ttl-seconds-300-ttlseconds-300-on-the-claim-custom-throttle-10s-9s-throttled-11s-emits-with-injected-now-e-ttl-300-with-tool-activity-heartbeats-every-100s-keeps-the-holder-held-at-t0-301s-without-activity-the-same-claim-goes-free-at-t0-301s-f-hostile-ansi-newline-active-slug-is-sanitized-before-being-used-as-the-emitted-heartbeat-subjectid-raw-esc-newline-bytes-never-appear-in-the-stream-cli-liveness-status-claim-strip-control-chars-from-terminal-display-while-the-persisted-event-retains-the-raw-value-for-data-fidelity-session-local-manual-probes-not-a-re-runnable-command",
+      "claimId": "kontourai-flow-agents-288-re-verify-288-iter2-probes.flow-agents-workflow.manual-scratch-root-probes-see-verifier-report-a-f8-cli-orphan-heartbeat-release-die-nonzero-remediation-with-no-stream-write-claim-heartbeat-release-succeeds-maybeemitheartbeat-on-a-heartbeat-only-no-claim-stream-skips-reason-no-claim-without-mutating-the-stream-b-f1-renaming-liveness-policy-js-makes-init-plan-exit-0-with-one-stderr-diagnostic-naming-the-missing-module-and-writes-no-claim-file-restored-and-git-status-verified-back-to-the-original-untracked-state-c-zero-env-config-lifecycle-emits-claim-heartbeat-release-default-on-flow-agents-liveness-off-and-off-u-200b-both-produce-zero-events-across-the-same-lifecycle-d-flow-agents-liveness-ttl-seconds-300-ttlseconds-300-on-the-claim-custom-throttle-10s-9s-throttled-11s-emits-with-injected-now-e-ttl-300-with-tool-activity-heartbeats-every-100s-keeps-the-holder-held-at-t0-301s-without-activity-the-same-claim-goes-free-at-t0-301s-f-hostile-ansi-newline-active-slug-is-sanitized-before-being-used-as-the-emitted-heartbeat-subjectid-raw-esc-newline-bytes-never-appear-in-the-stream-cli-liveness-status-claim-strip-control-chars-from-terminal-display-while-the-persisted-event-retains-the-raw-value-for-data-fidelity-session-local-manual-probes-not-a-re-runnable-command",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-288-re-verify-288-iter2-probes.flow-agents-workflow.manual-scratch-root-probes-a-f8-cli-orphan-heartbeat-release-die-nonzero-remediation-with-no-stream-write-claim-heartbeat-release-succeeds-maybeemitheartbeat-on-a-heartbeat-only-no-claim-stream-skips-reason-no-claim-without-mutating-the-stream-b-f1-renaming-liveness-policy-js-makes-init-plan-exit-0-with-one-stderr-diagnostic-naming-the-missing-module-and-writes-no-claim-file-restored-and-git-status-verified-back-to-the-original-untracked-state-c-zero-env-config-lifecycle-emits-claim-heartbeat-release-default-on-flow-agents-liveness-off-and-off-u-200b-both-produce-zero-events-across-the-same-lifecycle-d-flow-agents-liveness-ttl-seconds-300-ttlseconds-300-on-the-claim-custom-throttle-10s-9s-throttled-11s-emits-with-injected-now-e-ttl-300-with-tool-activity-heartbeats-every-100s-keeps-the-holder-held-at-t0-301s-without-activity-the-same-claim-goes-free-at-t0-301s-f-hostile-ansi-newline-active-slug-is-sanitized-before-being-used-as-the-emitted-heartbeat-subjectid-raw-esc-newline-bytes-never-appear-in-the-stream-cli-liveness-status-claim-strip-control-chars-from-terminal-display-while-the-persisted-event-retains-the-raw-value-for-data-fidelity"
+        "ev:kontourai-flow-agents-288-re-verify-288-iter2-probes.flow-agents-workflow.manual-scratch-root-probes-see-verifier-report-a-f8-cli-orphan-heartbeat-release-die-nonzero-remediation-with-no-stream-write-claim-heartbeat-release-succeeds-maybeemitheartbeat-on-a-heartbeat-only-no-claim-stream-skips-reason-no-claim-without-mutating-the-stream-b-f1-renaming-liveness-policy-js-makes-init-plan-exit-0-with-one-stderr-diagnostic-naming-the-missing-module-and-writes-no-claim-file-restored-and-git-status-verified-back-to-the-original-untracked-state-c-zero-env-config-lifecycle-emits-claim-heartbeat-release-default-on-flow-agents-liveness-off-and-off-u-200b-both-produce-zero-events-across-the-same-lifecycle-d-flow-agents-liveness-ttl-seconds-300-ttlseconds-300-on-the-claim-custom-throttle-10s-9s-throttled-11s-emits-with-injected-now-e-ttl-300-with-tool-activity-heartbeats-every-100s-keeps-the-holder-held-at-t0-301s-without-activity-the-same-claim-goes-free-at-t0-301s-f-hostile-ansi-newline-active-slug-is-sanitized-before-being-used-as-the-emitted-heartbeat-subjectid-raw-esc-newline-bytes-never-appear-in-the-stream-cli-liveness-status-claim-strip-control-chars-from-terminal-display-while-the-persisted-event-retains-the-raw-value-for-data-fidelity-session-local-manual-probes-not-a-re-runnable-command"
+      ],
+      "createdAt": "2026-07-03T01:09:39Z",
+      "verifiedAt": "2026-07-03T01:09:39Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-288-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-306-closes-288-two-review-iterations-authoritative-verify-pass-clean-delivery-published",
+      "claimId": "kontourai-flow-agents-288-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-306-closes-288-two-review-iterations-authoritative-verify-pass-clean-delivery-published",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-288-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-306-closes-288-two-review-iterations-authoritative-verify-pass-clean-delivery-published"
       ],
       "createdAt": "2026-07-03T01:09:39Z",
       "verifiedAt": "2026-07-03T01:09:39Z"
