@@ -1,5 +1,7 @@
 # Review Contract
 
+> Read [`context/contracts/standing-directives.md`](standing-directives.md) — ratified owner directives that override default engineering conservatism.
+
 Review is report-only critique. It asks whether the changed code is maintainable, secure, consistent with project standards, and structurally sound before verification proves behavior.
 
 ## Purpose

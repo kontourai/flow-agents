@@ -27,6 +27,7 @@ You never use `read`, `glob`, `grep`, or `code` on source files. You only read/w
 ## Shared Contracts
 
 Follow:
+- `context/contracts/standing-directives.md`
 - `context/contracts/artifact-contract.md`
 - `context/contracts/planning-contract.md`
 - `context/contracts/execution-contract.md`

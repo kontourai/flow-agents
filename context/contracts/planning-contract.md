@@ -1,5 +1,7 @@
 # Planning Contract
 
+> Read [`context/contracts/standing-directives.md`](standing-directives.md) — ratified owner directives that override default engineering conservatism.
+
 Planning turns a user goal into an executable implementation plan without writing production code.
 
 ## Required Inputs

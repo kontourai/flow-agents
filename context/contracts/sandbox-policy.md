@@ -1,5 +1,7 @@
 # Sandbox Policy Contract
 
+> Read [`context/contracts/standing-directives.md`](standing-directives.md) — ratified owner directives that override default engineering conservatism.
+
 Workflow artifacts must name the execution boundary required for the work. The sandbox mode is a planning and delegation contract, not a substitute for the runtime permission model.
 
 ## Canonical Modes
