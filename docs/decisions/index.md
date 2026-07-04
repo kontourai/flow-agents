@@ -18,6 +18,7 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [flow-flow-agents-boundary](./flow-flow-agents-boundary.md) | needs-decision | Flow / Flow Agents boundary |
 | [flow-kit](./flow-kit.md) | needs-decision | Flow Kit |
 | [flow-skill-kit-tool-boundary](./flow-skill-kit-tool-boundary.md) | needs-decision | Flow / Skill / Kit / Tool boundary |
+| [graph-knowledge-provider](./graph-knowledge-provider.md) | current | Graph knowledge provider |
 | [hook-core-kit-boundary](./hook-core-kit-boundary.md) | needs-decision | Hook core/kit boundary |
 | [kit-dependency-ownership](./kit-dependency-ownership.md) | needs-decision | Kit dependency ownership |
 | [kit-operation-boundary](./kit-operation-boundary.md) | needs-decision | Kit operation boundary |

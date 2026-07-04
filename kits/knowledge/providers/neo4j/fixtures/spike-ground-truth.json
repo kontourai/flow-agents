@@ -1,0 +1,29 @@
+{
+  "_comment": "Compact graph encoding the #318 spike's ground-truth cases for the five canonical queries (docs/spikes/graph-provider-2026-07.md). Not the full 200-node portfolio; the KEY findings each query proved. Used by both the JS backend (CI) and the live Cypher backend (integration) so AC3 asserts the same results in both.",
+  "nodes": [
+    { "id": "issue:310", "type": "issue", "title": "Decision registry shape", "attributes": { "state": "CLOSED" }, "provenance": { "provider": "work-item", "source": "fixture#310", "retrieved_at": "2026-07-03T05:14:42Z" } },
+    { "id": "issue:312", "type": "issue", "title": "Flow-agents build lane", "attributes": { "state": "OPEN" }, "provenance": { "provider": "work-item", "source": "fixture#312", "retrieved_at": "2026-07-03T05:14:42Z" } },
+    { "id": "issue:313", "type": "issue", "title": "Knowledge promote sub-flow", "attributes": { "state": "OPEN" }, "provenance": { "provider": "work-item", "source": "fixture#313", "retrieved_at": "2026-07-03T05:14:42Z" } },
+    { "id": "issue:317", "type": "issue", "title": "Knowledge store provider interface", "attributes": { "state": "OPEN" }, "provenance": { "provider": "work-item", "source": "fixture#317", "retrieved_at": "2026-07-03T05:14:42Z" } },
+    { "id": "issue:137", "type": "issue", "title": "Core vs domain boundary", "attributes": { "state": "OPEN" }, "provenance": { "provider": "work-item", "source": "fixture#137", "retrieved_at": "2026-07-03T05:14:42Z" } },
+    { "id": "issue:traverse-8", "type": "issue", "title": "Chunk extraction dedup", "attributes": { "state": "OPEN" }, "provenance": { "provider": "work-item", "source": "traverse#8", "retrieved_at": "2026-07-03T05:14:42Z" } },
+    { "id": "issue:traverse-14", "type": "issue", "title": "Chunking extractor deduplication", "attributes": { "state": "OPEN" }, "provenance": { "provider": "work-item", "source": "traverse#14", "retrieved_at": "2026-07-03T05:14:42Z" } },
+    { "id": "decision:adr-0007", "type": "decision", "title": "Flow Skill Kit Tool Boundary", "attributes": { "status": "Accepted" }, "provenance": { "provider": "git-repo", "source": "docs/adr/0007.md", "retrieved_at": "2026-07-03T05:14:42Z" } },
+    { "id": "decision:adr-0007b", "type": "decision", "title": "Flow Skill Kit Tool Boundary", "attributes": { "status": "" }, "provenance": { "provider": "git-repo", "source": "docs/adr/0007b.md", "retrieved_at": "2026-07-03T05:14:42Z" } },
+    { "id": "decision:adr-0011", "type": "decision", "title": "Trust reconcile and delivery", "attributes": { "status": "Accepted" }, "provenance": { "provider": "git-repo", "source": "docs/adr/0011.md", "retrieved_at": "2026-07-03T05:14:42Z" } },
+    { "id": "decision:adr-0021", "type": "decision", "title": "Assignment leases and takeover", "attributes": { "status": "Draft" }, "provenance": { "provider": "git-repo", "source": "docs/adr/0021.md", "retrieved_at": "2026-07-03T05:14:42Z" } },
+    { "id": "decision:orphan-adr", "type": "decision", "title": "Undiscoverable stale decision", "attributes": { "status": "Accepted" }, "provenance": { "provider": "git-repo", "source": "docs/adr/orphan.md", "retrieved_at": "2026-07-03T05:14:42Z" } },
+    { "id": "session:s1", "type": "session", "title": "Session 2026-07-02 sweep", "provenance": { "provider": "markdown-vault", "source": "archive#s1", "retrieved_at": "2026-07-03T05:14:42Z" } },
+    { "id": "learning:l1", "type": "learning", "title": "Improvement program note", "provenance": { "provider": "git-repo", "source": "docs/learnings/2026-07.md", "retrieved_at": "2026-07-03T05:14:42Z" } }
+  ],
+  "edges": [
+    { "id": "e1", "type": "blocks", "from": "issue:310", "to": "issue:312", "provenance": { "provider": "work-item", "source": "fixture#312", "locator": "metadata.blockers", "retrieved_at": "2026-07-03T05:14:42Z" } },
+    { "id": "e2", "type": "blocks", "from": "issue:312", "to": "issue:313", "provenance": { "provider": "work-item", "source": "fixture#313", "locator": "metadata.blockers", "retrieved_at": "2026-07-03T05:14:42Z" } },
+    { "id": "e3", "type": "mentions", "from": "decision:adr-0011", "to": "issue:137", "provenance": { "provider": "git-repo", "source": "docs/adr/0011.md", "retrieved_at": "2026-07-03T05:14:42Z" } },
+    { "id": "e4", "type": "mentions", "from": "decision:adr-0021", "to": "issue:137", "provenance": { "provider": "git-repo", "source": "docs/adr/0021.md", "retrieved_at": "2026-07-03T05:14:42Z" } },
+    { "id": "e5", "type": "evidence-of", "from": "session:s1", "to": "decision:adr-0011", "provenance": { "provider": "markdown-vault", "source": "archive#s1", "retrieved_at": "2026-07-03T05:14:42Z" } },
+    { "id": "e6", "type": "evidence-of", "from": "session:s1", "to": "decision:adr-0021", "provenance": { "provider": "markdown-vault", "source": "archive#s1", "retrieved_at": "2026-07-03T05:14:42Z" } },
+    { "id": "e7", "type": "mentions", "from": "learning:l1", "to": "decision:adr-0007", "provenance": { "provider": "git-repo", "source": "docs/learnings/2026-07.md", "retrieved_at": "2026-07-03T05:14:42Z" } },
+    { "id": "e8", "type": "mentions", "from": "learning:l1", "to": "decision:adr-0007b", "provenance": { "provider": "git-repo", "source": "docs/learnings/2026-07.md", "retrieved_at": "2026-07-03T05:14:42Z" } }
+  ]
+}

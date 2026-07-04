@@ -326,3 +326,88 @@ const detector = createVectorSimilarityDetector({
 
 The `embed` function is called once per `synthesize`/`consolidate` call with all texts in a
 single batch (concept first, then candidates).
+
+---
+
+## Graph provider (opt-in)
+
+The `neo4j` provider is a real, queryable graph implementation of the store
+provider read interface (issue #327). It is the **owner's opt-in personal
+default** — the file providers (`markdown-vault`, `git-repo`, `work-item`) remain
+the portfolio default. The graph is a **materialized view** synced from those
+providers: the file stores stay the source of truth, and the write side stays
+proposals-only. `neo4j-driver` is an optional dependency; with no Neo4j reachable
+everything degrades to the file providers with a clear message — it is never a
+hard dependency.
+
+### 1. Start Neo4j (Docker)
+
+```bash
+docker run -d --name kg-neo4j -p 7474:7474 -p 7687:7687 \
+  -e NEO4J_AUTH=neo4j/testpassword neo4j:5-community
+```
+
+### 2. Point the provider at it (connection by reference — never hardcoded)
+
+```bash
+export NEO4J_URI=bolt://localhost:7687
+export NEO4J_USER=neo4j
+export NEO4J_PASSWORD=testpassword   # use your own secret; this is an example
+export KNOWLEDGE_PROVIDER=neo4j      # opt in (repo/user-level); default is `file`
+npm install neo4j-driver             # optional dependency, only if not already present
+```
+
+### 3. Sync the file stores into the graph (idempotent)
+
+`sync` reads the other providers and MERGEs their combined graph into Neo4j. A
+re-sync of unchanged stores reports **zero writes** (content-keyed hash guard);
+a snapshot digest + timestamp is recorded on the graph.
+
+```js
+import { GitRepoProvider } from "./kits/knowledge/providers/git-repo/index.js";
+import { WorkItemProvider } from "./kits/knowledge/providers/work-item/index.js";
+import { syncToNeo4j } from "./kits/knowledge/providers/neo4j/index.js";
+import { resolveNeo4jConfig, createDriver } from "./kits/knowledge/providers/neo4j/index.js";
+
+const driver = await createDriver(resolveNeo4jConfig());
+const providers = [
+  new GitRepoProvider({ repoRoot: process.cwd() }),
+  new WorkItemProvider({ repo: "kontourai/flow-agents" }), // reads via gh
+];
+console.log(await syncToNeo4j({ driver, providers })); // { writes, unchanged, digest, ... }
+```
+
+### 4. Query it — Neo4j Browser or the provider verbs
+
+Open `http://localhost:7474` for the interactive Browser, or use the provider's
+Cypher-backed query/health verbs (they fall back to a portable JS spelling with
+identical answers when no Neo4j is reachable):
+
+```js
+import { Neo4jProvider } from "./kits/knowledge/providers/neo4j/index.js";
+const kg = new Neo4jProvider({ driver });
+await kg.transitiveBlockers("issue:313");     // Q1 transitive blocker closure
+await kg.contradictionCandidates();           // Q2 divergent status over one subject
+await kg.orphans();                           // Q3 node-type-aware orphans
+await kg.duplicateCandidates();               // Q4 duplicate candidates WITH stemming
+await kg.shortestPath("decision:adr-0011", "decision:adr-0021"); // Q5 shortest path
+```
+
+Example Cypher session in the Browser (the blocker subgraph the spike visualised):
+
+```cypher
+MATCH p=(a:Issue)-[:BLOCKS]->(b:Issue) RETURN p LIMIT 60;
+```
+
+### Running the full live integration locally
+
+CI has no Neo4j, so the conformance + unit tests run against an injected fake
+driver and the live integration test skips loudly. To run the live path:
+
+```bash
+docker run -d --name kg-neo4j -p 7474:7474 -p 7687:7687 \
+  -e NEO4J_AUTH=neo4j/testpassword neo4j:5-community
+NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j NEO4J_PASSWORD=testpassword \
+  node --test kits/knowledge/providers/neo4j/integration.test.js
+docker rm -f kg-neo4j
+```

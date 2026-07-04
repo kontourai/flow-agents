@@ -17,6 +17,9 @@ import { fileURLToPath } from "node:url";
 import { MarkdownVaultProvider } from "../markdown-vault/index.js";
 import { GitRepoProvider } from "../git-repo/index.js";
 import { WorkItemProvider } from "../work-item/index.js";
+import { Neo4jProvider } from "../neo4j/index.js";
+import { syncToNeo4j } from "../neo4j/sync.js";
+import { makeFakeDriver } from "../neo4j/fake-driver.js";
 import DefaultKnowledgeStore from "../../adapters/default-store/index.js";
 import { loadSchemas, EDGE_TYPES } from "../lib/model.js";
 import { validate } from "../lib/schema-validate.js";
@@ -54,10 +57,25 @@ async function buildWorkItem() {
   return { provider, proposeIntent: { issue: 14, commentBody: "draft comment" }, cleanup: () => {} };
 }
 
+async function buildNeo4j() {
+  // Materialize the same git-repo + work-item fixtures the other providers use
+  // into an injected fake driver, then read them back through the neo4j provider.
+  // This exercises the read side over the graph store with no Docker (issue #327
+  // CI proof: conformance passes for the neo4j read side via an injected mock).
+  const gitRepo = new GitRepoProvider({ repoRoot: path.join(FIXTURES, "git-repo"), agent: "test" });
+  const issues = fs.readFileSync(path.join(FIXTURES, "work-item", "issues.json"), "utf8");
+  const workItem = new WorkItemProvider({ repo: "seed/fixture", runner: async () => issues, agent: "test" });
+  const driver = makeFakeDriver();
+  await syncToNeo4j({ driver, providers: [gitRepo, workItem] });
+  const provider = new Neo4jProvider({ driver, agent: "test" });
+  return { provider, proposeIntent: { kind: "create-node", type: "note", title: "Proposed graph note" }, cleanup: () => {} };
+}
+
 const PROVIDERS = [
   { name: "markdown-vault", build: buildVault, expectedId: "markdown-vault" },
   { name: "git-repo", build: buildGitRepo, expectedId: "git-repo" },
   { name: "work-item", build: buildWorkItem, expectedId: "work-item" },
+  { name: "neo4j", build: buildNeo4j, expectedId: "neo4j" },
 ];
 
 for (const { name, build, expectedId } of PROVIDERS) {
