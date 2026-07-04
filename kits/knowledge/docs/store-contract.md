@@ -1355,3 +1355,118 @@ never stale) hold; `{ stale: true }` listing returns exactly the expired records
 record is queryable as superseded. The suite is parameterized by `KNOWLEDGE_ADAPTER`, so conformance
 is required of every bundled adapter. Backward compatibility (R5) is covered by the unmodified
 `contract-suite`, `audit-freshness`, and `retirement` suites continuing to pass.
+
+---
+
+## Addendum K — Supersede/Retire Citer Propagation (flag inbound citers, #342)
+
+### K.1 Motivation
+
+The `supersede` op (Addendum A.5) and the `retire` op with `supersededByRef` (Addendum B.4) preserve
+the affected record (supersede-not-delete / retire-not-delete) and make **store-internal** citers
+discoverable via the reverse-link index (§5, `getLinks(id).reverse`). But nothing enumerated or
+flagged the **docs** citing a superseded record — so a superseded decision could leave every citer
+silently pointing at dead or outdated authority.
+
+Field evidence (design partner `kontourai/ops`, knowledge record `0e439c57`): the 6/17 "sell the
+combination" decision became unresolvable after a store restructure and **four docs** (`NOW.md` ×2,
+`strategy/vision.md`, `strategy/2026-06-18-market-fork-decision.md`) cited it invisibly for weeks —
+the citers kept presenting a dead record as live authority. This addendum closes that loop: on a
+superseded/retired record it enumerates first-degree inbound citers from **both** indexes and emits a
+supersession-aware flag per citer.
+
+This is a **read-only** enumeration in the hygiene-flow style (Addenda D–G): the existing gated
+`supersede` and `retire` ops are unchanged, and no new mutation path is forked. It does **not**
+auto-edit citing docs, does **not** cascade status changes, and does **not** follow citers-of-citers
+(first-degree only). Fixing a citation is the operator's or a downstream flow's gated action.
+
+### K.2 `flagSupersededCiters` Flow-Runner Operation
+
+`KnowledgeFlowRunner.flagSupersededCiters(recordId, options)` (also the module-level
+`flagSupersededCiters(recordId, { store, ... })`):
+
+**Options:**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `docGlobs` | `string[]` | `[]` | Globs to scan for doc citers via the #340 citation index. Opt-in: `[]` = store citers only, no doc scan. |
+| `docsRoot` | `string` | workspace, then cwd | Root the globs resolve against. |
+| `markers` | `string[]` | `DEFAULT_CITATION_MARKERS` | Citation marker prefixes forwarded to the inbound-reference scan (Addendum I). |
+| `agent` | `string` | runner agent | Agent recorded on the flow telemetry. |
+
+`recordId` accepts a full id or any Addendum-H handle (short-id prefix / slug alias); the returned
+`recordId` is the resolved full id. A record that does not exist throws (`MISSING_EVIDENCE`) — never a
+silent empty pass.
+
+**Supersession evidence** (at least one is required for any flag to be emitted):
+- **supersede op** (A.5): a reverse link of kind `"supersedes"` from the superseding record, mirrored
+  by a `"superseded-by"` mutation-log entry carrying `new_id`. Both sources are read; their union is
+  `supersededByIds`.
+- **retire-with-supersededByRef** (B.4): a `"retire"` mutation-log entry whose
+  `evidence.supersededByRef` names the superseding artifact; surfaced as `supersededByRef` (and
+  `retiredStatus: "retired"`).
+
+**Citer enumeration** (first-degree only):
+- **store records** — `getLinks(id).reverse`, EXCLUDING the `"supersedes"` link itself and any link
+  originating from a superseding record (the replacement authority is not a silent dead citer). Every
+  other inbound link is a citer, tagged with its `linkKind`.
+- **docs** — `checkInboundReferences({ docGlobs, ... }).byRecord[id]` (Addendum I). The superseded
+  record is preserved, so its citations still resolve. Opt-in via `docGlobs`.
+
+### K.3 Flag Evidence Guarantee
+
+Every flag carries the superseding context that produced it — the flag-gate refuses to emit a flag
+without it. Consequently a record with **no** supersession evidence yields `superseded: false` and an
+**empty** flag list (no false flags, fail closed); a superseded record with no citers likewise yields
+an empty flag list. The enumerated citer counts (`storeCiters` / `docCiters`) are reported regardless
+of gating, so a caller can see the inbound edges independent of supersession state.
+
+```ts
+interface SupersededCiterFlag {
+  citerRef: string;              // record id, or "doc:line:column"
+  citerKind: "record" | "doc";
+  citedId: string;               // full id of the superseded / retired record
+  supersededByIds: string[];     // superseding record id(s) from the supersede op
+  supersededByRef: string | null; // the retire supersededByRef, when present
+  // record citer:
+  linkKind?: string;             // the reverse link kind that made it a citer
+  // doc citer (from the #340 citation index):
+  doc?: string; line?: number; column?: number; token?: string; form?: string;
+}
+```
+
+`flagSupersededCiters` returns:
+
+```ts
+{
+  recordId: string;              // resolved full id
+  superseded: boolean;           // whether supersession evidence exists
+  supersededByIds: string[];
+  supersededByRef: string | null;
+  retiredStatus: "retired" | null;
+  storeCiters: number;           // count from the reverse-link index
+  docCiters: number;             // count from the citation index (0 when no globs)
+  flags: SupersededCiterFlag[];  // gated by the evidence guarantee
+  telemetryEvents: object[];
+}
+```
+
+Gate telemetry is emitted at `collect-gate` and `flag-gate` (`knowledge.flag-superseded-citers`);
+when doc globs are configured, the folded `knowledge.check-inbound-references` gate events (Addendum
+I) also appear in the trail.
+
+### K.4 Read-Only Invariant
+
+`flagSupersededCiters` reads the store's query surface (`get`, `getLinks`) and — when doc globs are
+configured — the #340 inbound-reference scan (doc files + `get`). It mutates no record and appends no
+mutation-log entry. The store tree is byte-identical before and after the call.
+
+### K.5 Conformance
+
+An adapter conforms to this addendum when the supersede-propagation suite
+(`evals/supersede-propagation/suite.test.js`) passes against it — AC1 (store-record + doc citer
+enumerated from the two indexes), AC2 (every flag carries citer ref + cited id + superseding context;
+superseded-with-no-citers and non-superseded both yield zero flags), AC3 (read-only), and the
+retire-with-supersededByRef path. The suite is parameterized by `KNOWLEDGE_ADAPTER`, so conformance is
+required of every adapter (AC4). Because it reuses `get`/`getLinks` and the Addendum-I check, any
+adapter conforming to Addenda A, B, H, and I satisfies it without new storage.
