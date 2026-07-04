@@ -1,0 +1,84 @@
+{
+  "id": "knowledge.promote",
+  "version": "1.0",
+  "description": "Knowledge Kit promote sub-flow (the codebase-facing 'flow within a flow'): ingest a delivered session's artifacts -> distill durable draft deltas (decision topics per the registry contract, CONTEXT.md vocabulary, learnings) -> link provenance (PR, merge SHA, session archive, touched topics) -> health-check the registry for contradictions (overlapping subject nouns with divergent status/content) and propose merge-repair. Invokable standalone AND composable from the Builder promote step via uses_flow. PROPOSALS-ONLY: every output lands as a draft under <session>/proposals/ for the promote step's human/agent to apply; the sub-flow never writes docs directly.",
+  "steps": [
+    { "id": "ingest", "next": "distill" },
+    { "id": "distill", "next": "link" },
+    { "id": "link", "next": "health" },
+    { "id": "health", "next": "done" },
+    { "id": "done", "next": null }
+  ],
+  "exports": [
+    "knowledge.promote.ingest",
+    "knowledge.promote.distill",
+    "knowledge.promote.link",
+    "knowledge.promote.health"
+  ],
+  "gates": {
+    "ingest-gate": {
+      "step": "ingest",
+      "expects": [
+        {
+          "id": "session-residue-ingested",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "A completed session directory has been read (read-only) and its durable residue collected: the plan / Definition Of Done, verification evidence, review critique, learning records, and delegate transcripts. Ingest never mutates the session and never reads outside the given session directory. The residue is the raw material the remaining steps distill — nothing is proposed yet.",
+          "bundle_claim": {
+            "claimType": "knowledge.promote.ingest",
+            "subjectType": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "distill-gate": {
+      "step": "distill",
+      "expects": [
+        {
+          "id": "draft-deltas-schema-valid",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "The distilled residue is rendered as DRAFT deltas that validate BEFORE they are proposed: decision-registry topic files whose frontmatter satisfies schemas/decision-record.schema.json (one file per decision SUBJECT, the subject a CONTEXT.md vocabulary noun), CONTEXT.md vocabulary additions for any new subject noun, and docs/learnings entries. At least one schema-valid draft decision delta is produced for a session that ratified a durable decision. Every draft is written ONLY under <session>/proposals/ — the sub-flow proposes, it never writes into docs/.",
+          "bundle_claim": {
+            "claimType": "knowledge.promote.distill",
+            "subjectType": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "link-gate": {
+      "step": "link",
+      "expects": [
+        {
+          "id": "provenance-links-attached",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "Every draft delta carries its provenance: the pull request, the merge commit SHA, the archived session artifact path, and the touched decision topics. Links become evidence[] refs on the draft decision topics (kinds pr / commit / session-archive / doc) so a reader can trace each proposed delta back to the delivery that produced it. Secret-shaped refs are refused.",
+          "bundle_claim": {
+            "claimType": "knowledge.promote.link",
+            "subjectType": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    },
+    "health-gate": {
+      "step": "health",
+      "expects": [
+        {
+          "id": "contradiction-report-and-merge-proposal",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "The registry is health-checked over the #317 git-repo provider interface (the SAME reader every provider shares — no forked reader): the proposed draft decisions are folded into the existing registry graph and the duplicate-detection health verb flags topics with overlapping subject nouns. Where two CURRENT decisions collide over one subject with divergent content, the step emits a merge-repair PROPOSAL naming BOTH topics and a merge target. Merge-repair is a proposal, never an auto-edit; it lands under <session>/proposals/health/ for the operator to apply through the registry's supersede/merge edit.",
+          "bundle_claim": {
+            "claimType": "knowledge.promote.health",
+            "subjectType": "artifact",
+            "accepted_statuses": ["trusted", "accepted"]
+          }
+        }
+      ]
+    }
+  }
+}

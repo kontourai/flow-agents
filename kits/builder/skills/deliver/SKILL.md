@@ -277,6 +277,23 @@ After CI passes and the work is merged or otherwise accepted:
 2. Archive the working artifacts under `.kontourai/flow-agents/<slug>/archive/` or keep a stable link to them.
 3. Record provider records, verification evidence, durable docs targets, accepted gaps, and follow-up routing in durable docs or provider records.
 4. Promote the relevant plan, decision, evidence, and usage notes into long-lived docs such as `docs/`, `README.md`, or a project decision record.
+
+   **Assisted promotion path (Knowledge Kit `knowledge.promote` sub-flow).** Rather than
+   deciding WHAT to promote by ad-hoc judgement, run the Knowledge Kit promote sub-flow
+   (`kits/knowledge/flows/promote.flow.json`, id `knowledge.promote`) over the session
+   directory. It ingests the session's plan/evidence/critique/learnings/transcripts,
+   distills schema-valid DRAFT decision-registry deltas (per
+   `context/contracts/decision-registry-contract.md`), CONTEXT.md vocabulary additions,
+   and learning entries, links each to the PR + merge SHA + session archive + touched
+   topics, and health-checks the registry for contradictions (proposing merge-repair).
+   It is PROPOSALS-ONLY: every output lands under `<session>/proposals/` — it never writes
+   docs directly. You apply the drafts you accept, then record what was promoted where with
+   the `promote` CLI (below), which stays the recording mechanism. The sub-flow is the
+   assisted path; the `promote` claim is the gate. `knowledge.promote` is a true composable
+   FlowDefinition (a parent step can `uses_flow: "knowledge.promote"`); it is invoked here
+   from the promote step rather than nested as a builder gate because the `promote` CLI —
+   not a flow gate — is #312's recording mechanism and the sub-flow's outputs are proposals
+   a human/agent applies.
 5. Link the long-lived doc back to the provider record, archived plan artifact, or accepted evidence when useful so future readers can see why and how the feature was built.
 6. Confirm `.kontourai/flow-agents/` runtime artifacts remain untracked before merge to `main`.
 7. **Clean up the workspace once the merge is confirmed.** First verify the merge actually happened from the provider's own record (a merge commit / `mergedAt`) — not a green check or a watcher's exit code. Then honor the `worktree_lifecycle` recorded by `pull-work` (`retain_until: pr_merged`): remove the isolated worktree (`git worktree remove <path>`) and delete the now-merged branch locally and on the remote. Never delete a branch or worktree before the merge is confirmed — a closed-but-unmerged PR or a prematurely deleted branch loses work. The task is not done while it leaves a stale worktree or merged branch behind.

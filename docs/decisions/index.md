@@ -21,6 +21,7 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [hook-core-kit-boundary](./hook-core-kit-boundary.md) | needs-decision | Hook core/kit boundary |
 | [kit-dependency-ownership](./kit-dependency-ownership.md) | needs-decision | Kit dependency ownership |
 | [kit-operation-boundary](./kit-operation-boundary.md) | needs-decision | Kit operation boundary |
+| [knowledge-promote-sub-flow](./knowledge-promote-sub-flow.md) | current | Knowledge promote sub-flow |
 | [knowledge-store-provider](./knowledge-store-provider.md) | current | Knowledge store provider |
 | [kontour-resource-contract](./kontour-resource-contract.md) | needs-decision | Kontour Resource Contract |
 | [mcp-posture](./mcp-posture.md) | needs-decision | MCP posture |

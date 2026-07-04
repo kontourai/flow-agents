@@ -59,6 +59,11 @@
       "id": "knowledge.hygiene-review",
       "path": "flows/hygiene-review.flow.json",
       "description": "Hygiene orchestrator (#106 #5, closes the issue): a THIN, opt-in orchestrator over the four hygiene flows (audit-freshness, detect-contradictions, glossary-sync, canonicalize-category). orchestrate → review-gate. Runs each opted-in audit via its EXISTING flow-runner method + gates (reimplements no detection), folds their findings into one operator-facing review of proposed actions normalized to adopt / retire / merge, each citing its sourceFlow + the evidence its origin flow's gate already vouched. Read-only by default; forks NO propose→approve gate — the operator enacts each decision through the source flow's existing gated op (retire via knowledge.retire; adopt via capture/compile or glossary-sync apply; merge via update/recategorize). The only mutation it can trigger is glossary apply, delegated verbatim to knowledge.glossary-sync's propose→apply lineage (consume-never-fork)."
+    },
+    {
+      "id": "knowledge.promote",
+      "path": "flows/promote.flow.json",
+      "description": "Knowledge promote sub-flow (issue #313, the codebase-facing 'flow within a flow'): ingest a delivered session's artifacts -> distill schema-valid DRAFT decision/vocabulary/learning deltas per the decision-registry contract -> link provenance (PR, merge SHA, session archive, touched topics) -> health-check the registry for contradictions (overlapping subject nouns + divergent content) and propose merge-repair. Invokable standalone AND composable from the Builder promote step via uses_flow. PROPOSALS-ONLY: outputs land under <session>/proposals/ for the promote step to apply; the sub-flow never writes docs directly. Executable logic: promote/index.js."
     }
   ],
   "docs": [
@@ -116,6 +121,11 @@
       "id": "knowledge.store-providers",
       "path": "providers/index.js",
       "description": "Public entry point for the knowledge store providers, health verbs, graph model helpers, and schema validator. See context/contracts/knowledge-store-contract.md."
+    },
+    {
+      "id": "knowledge.promote-runner",
+      "path": "promote/index.js",
+      "description": "Executable logic for the knowledge.promote sub-flow (issue #313): runPromote({sessionDir, repoRoot, provenance}) runs ingest -> distill -> link -> health and writes DRAFT proposals ONLY under <session>/proposals/. Builds on the #317 knowledge-store provider interface (git-repo provider as the shared registry reader; provider-agnostic duplicate-detection health verb) and validates every draft decision delta against schemas/decision-record.schema.json before proposing. Proposals-only by construction; never mutates docs/, CONTEXT.md, or any path outside the session dir."
     }
   ],
   "evals": [
@@ -188,6 +198,11 @@
       "id": "knowledge.provider-health-pass-suite",
       "path": "providers/health/health-pass.test.js",
       "description": "Health-pass suite (issue #317, AC1+AC2): the same health command over vault + git-repo providers yields schema-valid reports (AC1); a backlog pass over the work-item adapter driven by a seeded fixture flags a duplicate and a broken blocker link (AC2) — never the real board."
+    },
+    {
+      "id": "knowledge.promote-suite",
+      "path": "promote/promote.test.js",
+      "description": "Eval cases for the knowledge.promote sub-flow (issue #313): AC1 (a real-modeled completed session dir yields >=1 schema-valid draft decision delta with PR/merge-SHA/session-archive provenance, validated against the real #310 registry validator); AC2 (a seeded-contradiction registry fixture yields a duplicate-detection report naming BOTH topics + a schema-valid merge-repair proposal naming a merge target; a resolved supersede/merge pair is not re-flagged); AC3 (filesystem diff proves zero writes outside the session/proposal dir); R1 (the FlowDefinition exports every gate claim so a parent uses_flow step resolves it)."
     }
   ],
   "skills": [
