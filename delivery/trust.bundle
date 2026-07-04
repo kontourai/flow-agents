@@ -3,33 +3,15 @@
   "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
   "claims": [
     {
-      "id": "kontourai-flow-agents-291-context-map-drift.flow-agents-workflow.npm-run-context-map-check-exit-0-docs-context-map-md-is-current-unaffected-by-f1-f5-fix",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-291/context-map-drift",
+      "id": "i339-record-identity-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-manifest-static-eval-suite-green-includes-knowledge-store-provider-conformance-test-knowledge-providers-sh-ci-reconcilable-ac-covering-static-proof",
+      "subjectType": "flow-step",
+      "subjectId": "i339-record-identity/knowledge-static-eval-suite",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.lint",
-      "fieldOrBehavior": "npm run context-map -- --check exit 0, \"docs/context-map.md is current.\" (unaffected by F1-F5 fix)",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Static eval lane (manifest static-eval-suite) green — includes knowledge store provider conformance test_knowledge_providers.sh; CI-reconcilable AC-covering static proof",
       "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.lint:test_output",
-      "metadata": {
-        "origin": "check",
-        "check_kind": "lint"
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-291-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-30-pass-0-fail-exit-0-including-35-35-node-test-pure-helper-unit-tests-unchanged-count-vs-prior-verify",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-291/static-eval-suite",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
-      "fieldOrBehavior": "bash evals/run.sh static: 30 PASS / 0 FAIL, exit 0, including 35/35 node --test pure-helper unit tests (unchanged count vs prior verify)",
-      "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
+      "createdAt": "2026-07-04T15:59:01Z",
+      "updatedAt": "2026-07-04T15:59:01Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:builder.verify.tests:test_output",
       "metadata": {
@@ -39,15 +21,15 @@
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-291-ensure-session-ownership-guard-integration.flow-agents-workflow.bash-evals-integration-test-ensure-session-ownership-guard-sh-36-36-assertions-pass-0-fail-exit-0-ac1-2-3-4-5-6-9-now-includes-new-section-3b-f1-cross-tool-self-recognition-fix-plan-iteration-1-verifying-assignment-provider-status-self-actor-bare-recognizes-an-ensure-session-claim-made-under-flow-agents-actor-override",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-291/ensure-session-ownership-guard-integration",
+      "id": "i339-record-identity-contract-suite-default.flow-agents-workflow.contract-suite-default-adapter-67-67-pass-0-fail-exit-0-covers-ac1-prefix-ambiguous-ac3-post-move-ac4-unmodified-sections-records-uuid-md",
+      "subjectType": "flow-step",
+      "subjectId": "i339-record-identity/contract-suite-default",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
-      "fieldOrBehavior": "bash evals/integration/test_ensure_session_ownership_guard.sh: 36/36 assertions PASS, 0 FAIL, exit 0 (AC1,2,3,4,5,6,9) -- now includes new section 3b (F1 cross-tool self-recognition, fix-plan iteration 1) verifying assignment-provider status --self-actor <bare> recognizes an ensure-session claim made under FLOW_AGENTS_ACTOR override",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Contract-suite default adapter: 67/67 pass, 0 fail, exit 0 — covers AC1 (prefix/ambiguous), AC3 (post-move), AC4 (unmodified sections + records/<uuid>.md)",
       "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
+      "createdAt": "2026-07-04T15:59:01Z",
+      "updatedAt": "2026-07-04T15:59:01Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:builder.verify.tests:attestation",
       "metadata": {
@@ -57,218 +39,15 @@
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-291-current-json-per-actor-integration.flow-agents-workflow.bash-evals-integration-test-current-json-per-actor-sh-22-22-assertions-pass-0-fail-exit-0-ac7-8-10-11-now-includes-new-section-6-f3-fix-plan-iteration-1-pinning-the-legacy-current-json-wins-over-newer-state-json-behavior-for-a-resolved-single-actor",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-291/current-json-per-actor-integration",
+      "id": "i339-record-identity-contract-suite-obsidian.flow-agents-workflow.contract-suite-obsidian-adapter-64-pass-0-fail-3-adapter-scoped-skips-reindex-not-implemented-on-obsidian-exit-0-covers-ac2-slug-round-trip-ac3-file-relocation",
+      "subjectType": "flow-step",
+      "subjectId": "i339-record-identity/contract-suite-obsidian",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
-      "fieldOrBehavior": "bash evals/integration/test_current_json_per_actor.sh: 22/22 assertions PASS, 0 FAIL, exit 0 (AC7,8,10,11) -- now includes new section 6 (F3, fix-plan iteration 1) pinning the legacy-current.json-wins-over-newer-state.json behavior for a resolved single actor",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Contract-suite obsidian adapter: 64 pass, 0 fail, 3 adapter-scoped skips (reindex not implemented on obsidian), exit 0 — covers AC2 (slug round-trip) + AC3 (file relocation)",
       "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
-      "metadata": {
-        "origin": "check",
-        "check_kind": "test"
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-291-assignment-provider-local-file-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-local-file-sh-34-34-assertions-pass-0-fail-exit-0-290-back-compat-suite-stays-green-after-the-actor-key-additive-field-fix",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-291/assignment-provider-local-file-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
-      "fieldOrBehavior": "bash evals/integration/test_assignment_provider_local_file.sh: 34/34 assertions PASS, 0 FAIL, exit 0 -- #290 back-compat suite stays green after the actor_key additive-field fix",
-      "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
-      "metadata": {
-        "origin": "check",
-        "check_kind": "test"
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-291-assignment-provider-github-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-github-sh-45-45-assertions-pass-0-fail-exit-0-290-back-compat-suite-unaffected",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-291/assignment-provider-github-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
-      "fieldOrBehavior": "bash evals/integration/test_assignment_provider_github.sh: 45/45 assertions PASS, 0 FAIL, exit 0 -- #290 back-compat suite unaffected",
-      "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
-      "metadata": {
-        "origin": "check",
-        "check_kind": "test"
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-291-pull-work-assignment-join-integration.flow-agents-workflow.bash-evals-integration-test-pull-work-assignment-join-sh-10-10-assertions-pass-0-fail-exit-0-290-back-compat-suite-unaffected",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-291/pull-work-assignment-join-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
-      "fieldOrBehavior": "bash evals/integration/test_pull_work_assignment_join.sh: 10/10 assertions PASS, 0 FAIL, exit 0 -- #290 back-compat suite unaffected",
-      "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
-      "metadata": {
-        "origin": "check",
-        "check_kind": "test"
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-291-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-all-checks-passed-exit-0",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-291/workflow-sidecar-writer-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
-      "fieldOrBehavior": "bash evals/integration/test_workflow_sidecar_writer.sh: all checks passed, exit 0",
-      "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
-      "metadata": {
-        "origin": "check",
-        "check_kind": "test"
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-291-liveness-heartbeat-integration.flow-agents-workflow.bash-evals-integration-test-liveness-heartbeat-sh-all-checks-passed-exit-0-includes-f4-hot-path-short-circuit-restoration-coverage-mighthaveactivesession-peek-before-resolveactor",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-291/liveness-heartbeat-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
-      "fieldOrBehavior": "bash evals/integration/test_liveness_heartbeat.sh: all checks passed, exit 0 -- includes F4 hot-path short-circuit restoration coverage (mightHaveActiveSession peek before resolveActor())",
-      "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
-      "metadata": {
-        "origin": "check",
-        "check_kind": "test"
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-291-workflow-steering-hook-integration.flow-agents-workflow.bash-evals-integration-test-workflow-steering-hook-sh-9-9-pass-exit-0",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-291/workflow-steering-hook-integration",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
-      "fieldOrBehavior": "bash evals/integration/test_workflow_steering_hook.sh: 9/9 PASS, exit 0",
-      "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
-      "metadata": {
-        "origin": "check",
-        "check_kind": "test"
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-291-source-tree-validation-summary.flow-agents-workflow.ci-reconcile-fix-recast-adr-0020-class-320-356-the-prior-recording-named-a-command-backed-check-with-command-npm-run-validate-source-no-trailing-which-does-not-literally-match-the-manifest-s-source-tree-validation-entry-npm-run-validate-source-and-would-be-redundant-with-that-manifest-lane-s-own-fresh-reconciliation-on-every-run-even-if-renamed-to-match-verbatim-recast-as-a-non-command-backed-folded-summary-carrying-no-command-field-at-all-dropped-not-renamed-to-the-form-per-coordinator-direction-result-observed-this-pass-npm-run-validate-source-exit-0-source-tree-validation-passed-the-manifest-s-own-source-tree-validation-lane-entry-reconciles-this-independently-every-ci-run-this-check-exists-only-as-a-session-local-narrative-confirmation-never-a-second-reconcilable-claim-for-the-same-command",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-291/source-tree-validation-summary",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.diff",
-      "fieldOrBehavior": "CI reconcile fix (recast, ADR-0020 class #320/#356): the prior recording named a command-backed check with command \"npm run validate:source\" (no trailing --), which does not literally match the manifest's source-tree-validation entry (\"npm run validate:source --\") -- and would be redundant with that manifest lane's own fresh reconciliation on every run even if renamed to match verbatim. Recast as a non-command-backed folded summary carrying no command field at all (dropped, not renamed to the -- form) per coordinator direction. Result observed this pass: npm run validate:source exit 0, \"Source tree validation passed.\" -- the manifest's own source-tree-validation lane entry reconciles this independently every CI run; this check exists only as a session-local narrative confirmation, never a second reconcilable claim for the same command.",
-      "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.diff:source_excerpt",
-      "metadata": {
-        "origin": "check",
-        "check_kind": "diff"
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-291-trust-reconcile-manifest-parity-summary.flow-agents-workflow.ci-reconcile-fix-recast-adr-0020-class-320-356-bash-evals-integration-test-trust-reconcile-manifest-sh-is-a-meta-manifest-parity-self-check-not-itself-a-manifest-required-lane-command-so-it-cannot-be-a-command-backed-test-output-reconcilable-claim-recast-as-a-non-command-backed-folded-summary-result-observed-this-pass-manifest-entries-44-ci-yml-required-check-invocations-44-44-44-exit-0-ws8-manifest-self-check-parity-holds-unchanged-from-the-prior-recording",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-291/trust-reconcile-manifest-parity-summary",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.diff",
-      "fieldOrBehavior": "CI reconcile fix (recast, ADR-0020 class #320/#356): bash evals/integration/test_trust_reconcile_manifest.sh is a meta manifest-parity self-check, not itself a manifest/required-lane command, so it cannot be a command-backed (test_output) reconcilable claim -- recast as a non-command-backed folded summary. Result observed this pass: manifest entries == 44, ci.yml required --check invocations == 44 (44==44), exit 0 -- WS8 manifest self-check parity holds, unchanged from the prior recording.",
-      "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.diff:source_excerpt",
-      "metadata": {
-        "origin": "check",
-        "check_kind": "diff"
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-291-full-gate-summary.flow-agents-workflow.iteration-1-re-verify-full-gate-narrative-not-command-backed-by-design-npm-run-build-silent-exit-0-folded-here-not-recorded-as-a-standalone-command-backed-check-since-it-is-already-a-prerequisite-step-inside-every-npm-run-manifest-command-above-independently-reproduced-a-the-high-fix-claimed-under-flow-agents-actor-xcheck-override-actor-via-ensure-session-then-assignment-provider-status-self-actor-xcheck-override-actor-bare-with-a-fresh-liveness-heartbeat-stream-effective-state-held-reason-self-is-holder-would-have-been-reclaimable-pre-fix-confirmed-by-stripping-actor-key-from-the-same-record-and-re-running-the-identical-status-check-b-290-back-compat-the-same-record-with-actor-key-stripped-falls-back-to-serializeactor-record-actor-and-reproduces-the-pre-fix-reclaimable-classification-exactly-confirming-the-fallback-path-not-a-new-default-is-what-keeps-every-290-fixture-green-c-the-liveness-join-matches-the-override-actor-s-fresh-heartbeat-once-actor-key-is-present-re-confirmed-ac6-concurrency-independent-30-30-iteration-two-process-race-harness-one-winner-each-time-17-13-split-and-ac9-sanitization-2-verifier-authored-hostile-payloads-distinct-from-the-eval-s-own-fixtures-del-c1-byte-on-a-liveness-holder-actor-osc-8-hyperlink-bel-on-an-effective-state-json-assignee-zero-raw-control-codepoints-leaked-in-either-case-sanitized-non-control-text-still-present-after-the-guard-s-own-code-path-changed-under-f1",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-291/full-gate-summary",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.diff",
-      "fieldOrBehavior": "iteration-1 re-verify full-gate narrative (NOT command-backed by design): npm run build --silent exit 0 (folded here, not recorded as a standalone command-backed check, since it is already a prerequisite step inside every npm-run-* manifest command above). Independently reproduced (a) the HIGH fix -- claimed under FLOW_AGENTS_ACTOR=xcheck-override-actor via ensure-session, then assignment-provider status --self-actor xcheck-override-actor (bare) with a fresh liveness heartbeat stream: effective_state=held, reason=self_is_holder (would have been reclaimable pre-fix, confirmed by stripping actor_key from the same record and re-running the identical status check); (b) #290 back-compat -- the same record with actor_key stripped falls back to serializeActor(record.actor) and reproduces the pre-fix reclaimable classification exactly, confirming the fallback path (not a new default) is what keeps every #290 fixture green; (c) the liveness join matches the override actor's fresh heartbeat once actor_key is present. Re-confirmed AC6 concurrency (independent 30/30-iteration two-process race harness, one winner each time, 17/13 split) and AC9 sanitization (2 verifier-authored hostile payloads distinct from the eval's own fixtures -- DEL+C1 byte on a liveness holder actor, OSC-8 hyperlink+BEL on an --effective-state-json assignee -- zero raw control codepoints leaked in either case, sanitized non-control text still present) after the guard's own code path changed under F1.",
-      "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.diff:source_excerpt",
-      "metadata": {
-        "origin": "check",
-        "check_kind": "diff"
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-291-pre-existing-failure-baseline.flow-agents-workflow.three-eval-suites-carry-failures-independently-reproduced-as-pre-existing-baselines-unrelated-to-the-291-iteration-1-fix-test-goal-fit-hook-sh-1-fail-exit-1-test-goal-fit-escape-hatch-sh-5-fail-exit-1-test-session-resume-roundtrip-sh-13-fail-exit-1-identical-failure-counts-to-the-prior-pre-fix-verify-pass-confirming-the-iteration-1-changes-introduced-no-new-regressions-in-these-suites",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-291/pre-existing-failure-baseline",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.policy",
-      "fieldOrBehavior": "Three eval suites carry failures independently reproduced as pre-existing baselines, unrelated to the #291 iteration-1 fix: test_goal_fit_hook.sh (1 FAIL, exit 1), test_goal_fit_escape_hatch.sh (5 FAIL, exit 1), test_session_resume_roundtrip.sh (13 FAIL, exit 1) -- identical failure counts to the prior (pre-fix) verify pass, confirming the iteration-1 changes introduced no new regressions in these suites.",
-      "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.policy:attestation",
-      "metadata": {
-        "origin": "check",
-        "check_kind": "policy",
-        "waiver": {
-          "reason": "goal_fit_hook (1 FAIL), goal_fit_escape_hatch (5 FAIL), and session_resume_roundtrip (13 FAIL) are pre-existing failures independently reproduced against a clean git-worktree checkout of pre-#291 main (commit fe41e3c) during the original verify pass; the iteration-1 fix (F1-F5) touches none of the failing assertions' exercised code paths (confirmed: goal_fit_hook's failing scenario never creates any current.json/current/<actor>.json at all; goal_fit_escape_hatch's failing set has no #291-modified file in its exercised path; session_resume_roundtrip's failing assertions are RESUME-block formatting/liveness-warning-text, unrelated to the actor-scoped-preference code path F1/F3 touch). Re-confirmed at iteration 1: exact same failure counts (1/5/13) as the pre-fix verify pass, not merely present but unchanged.",
-          "approved_by": "tool-verifier (re-verify iteration 1, kontourai-flow-agents-291)",
-          "approved_at": "2026-07-04T15:18:23Z"
-        }
-      },
-      "status": "assumed"
-    },
-    {
-      "id": "kontourai-flow-agents-291-ac1-ensure-session-refuses-fresh-other-actor-ensure-session-on-a-subject-with-a-fresh-other-actor-local-file-assignment-claim-liveness-fresh-actor-differs-exits-nonzero-with-a-remediation-message-naming-the-holder-and-suggesting-other-work-or-takeover-source-new-guard-block-in-src-cli-workflow-sidecar-ts-ensuresession-inserted-before-fs-mkdirsync-dir.flow-agents-workflow.ac1-ensure-session-refuses-fresh-other-actor-ensure-session-on-a-subject-with-a-fresh-other-actor-local-file-assignment-claim-liveness-fresh-actor-differs-exits-nonzero-with-a-remediation-message-naming-the-holder-and-suggesting-other-work-or-takeover-source-new-guard-block-in-src-cli-workflow-sidecar-ts-ensuresession-inserted-before-fs-mkdirsync-dir",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-291/ac1-ensure-session-refuses-fresh-other-actor-ensure-session-on-a-subject-with-a-fresh-other-actor-local-file-assignment-claim-liveness-fresh-actor-differs-exits-nonzero-with-a-remediation-message-naming-the-holder-and-suggesting-other-work-or-takeover-source-new-guard-block-in-src-cli-workflow-sidecar-ts-ensuresession-inserted-before-fs-mkdirsync-dir",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC1 `ensure-session-refuses-fresh-other-actor`: `ensure-session` on a subject with a fresh OTHER-actor local-file assignment claim (liveness fresh, actor differs) exits nonzero with a remediation message naming the holder and suggesting other work or takeover (source: new guard block in `src/cli/workflow-sidecar.ts` `ensureSession()`, inserted before `fs.mkdirSync(dir, ...)`)",
-      "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
+      "createdAt": "2026-07-04T15:59:01Z",
+      "updatedAt": "2026-07-04T15:59:01Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:builder.verify.tests:attestation",
       "metadata": {
@@ -313,15 +92,15 @@
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-291-ac2-ensure-session-supersede-stale-only-ensure-session-on-a-reclaimable-stale-subject-refuses-without-supersede-stale-remediation-names-the-flag-and-succeeds-transitioning-the-assignment-record-to-the-new-actor-via-the-reused-supersede-logic-when-supersede-stale-is-passed-source-src-cli-assignment-provider-ts-performlocalsupersede-new-export-called-from-ensuresession.flow-agents-workflow.ac2-ensure-session-supersede-stale-only-ensure-session-on-a-reclaimable-stale-subject-refuses-without-supersede-stale-remediation-names-the-flag-and-succeeds-transitioning-the-assignment-record-to-the-new-actor-via-the-reused-supersede-logic-when-supersede-stale-is-passed-source-src-cli-assignment-provider-ts-performlocalsupersede-new-export-called-from-ensuresession",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-291/ac2-ensure-session-supersede-stale-only-ensure-session-on-a-reclaimable-stale-subject-refuses-without-supersede-stale-remediation-names-the-flag-and-succeeds-transitioning-the-assignment-record-to-the-new-actor-via-the-reused-supersede-logic-when-supersede-stale-is-passed-source-src-cli-assignment-provider-ts-performlocalsupersede-new-export-called-from-ensuresession",
+      "id": "i339-record-identity-ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters.flow-agents-workflow.ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters",
+      "subjectType": "flow-step",
+      "subjectId": "i339-record-identity/ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC2 `ensure-session-supersede-stale-only`: `ensure-session` on a `reclaimable` (stale) subject refuses without `--supersede-stale` (remediation names the flag) and succeeds, transitioning the assignment record to the new actor via the reused supersede logic, when `--supersede-stale` is passed (source: `src/cli/assignment-provider.ts` `performLocalSupersede`, new export, called from `ensureSession()`)",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC2 (R2): slug alias resolves via get/getLinks; round-trips on default + obsidian adapters",
       "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
+      "createdAt": "2026-07-04T15:59:01Z",
+      "updatedAt": "2026-07-04T15:59:01Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:builder.verify.tests",
       "metadata": {
@@ -330,15 +109,15 @@
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-291-ac3-ensure-session-human-held-ask-first-ensure-session-on-a-human-held-subject-refuses-never-auto-reclaims-remediation-asks-the-user-to-confirm-before-proceeding-source-the-same-guard-block-s-human-held-branch.flow-agents-workflow.ac3-ensure-session-human-held-ask-first-ensure-session-on-a-human-held-subject-refuses-never-auto-reclaims-remediation-asks-the-user-to-confirm-before-proceeding-source-the-same-guard-block-s-human-held-branch",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-291/ac3-ensure-session-human-held-ask-first-ensure-session-on-a-human-held-subject-refuses-never-auto-reclaims-remediation-asks-the-user-to-confirm-before-proceeding-source-the-same-guard-block-s-human-held-branch",
+      "id": "i339-record-identity-ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters.flow-agents-workflow.ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters",
+      "subjectType": "flow-step",
+      "subjectId": "i339-record-identity/ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC3 `ensure-session-human-held-ask-first`: `ensure-session` on a `human-held` subject refuses (never auto-reclaims), remediation asks the user to confirm before proceeding (source: the same guard block's `human-held` branch)",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC3 (R3): after update recategorizes (obsidian file relocates), old slug + short-id prefix still resolve; both adapters",
       "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
+      "createdAt": "2026-07-04T15:59:01Z",
+      "updatedAt": "2026-07-04T15:59:01Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:builder.verify.tests",
       "metadata": {
@@ -347,134 +126,15 @@
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-291-ac4-ensure-session-self-reentry-ensure-session-resuming-a-session-under-the-same-actor-s-own-fresh-claim-succeeds-with-no-spurious-refusal-source-guard-s-self-is-holder-branch.flow-agents-workflow.ac4-ensure-session-self-reentry-ensure-session-resuming-a-session-under-the-same-actor-s-own-fresh-claim-succeeds-with-no-spurious-refusal-source-guard-s-self-is-holder-branch",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-291/ac4-ensure-session-self-reentry-ensure-session-resuming-a-session-under-the-same-actor-s-own-fresh-claim-succeeds-with-no-spurious-refusal-source-guard-s-self-is-holder-branch",
+      "id": "i339-record-identity-ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md.flow-agents-workflow.ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md",
+      "subjectType": "flow-step",
+      "subjectId": "i339-record-identity/ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC4 `ensure-session-self-reentry`: `ensure-session` resuming a session under the SAME actor's own fresh claim succeeds with no spurious refusal (source: guard's `self_is_holder` branch)",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC4 (R4): existing contract-suite sections pass unmodified; default-adapter files remain records/<uuid>.md",
       "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
-      "metadata": {
-        "origin": "acceptance"
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-291-ac5-ensure-session-claims-on-free-ensure-session-on-a-free-subject-succeeds-and-establishes-a-durable-local-file-assignment-claim-for-the-entering-actor-verified-via-assignment-provider-status-immediately-after-source-guard-s-free-branch-calling-performlocalclaim.flow-agents-workflow.ac5-ensure-session-claims-on-free-ensure-session-on-a-free-subject-succeeds-and-establishes-a-durable-local-file-assignment-claim-for-the-entering-actor-verified-via-assignment-provider-status-immediately-after-source-guard-s-free-branch-calling-performlocalclaim",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-291/ac5-ensure-session-claims-on-free-ensure-session-on-a-free-subject-succeeds-and-establishes-a-durable-local-file-assignment-claim-for-the-entering-actor-verified-via-assignment-provider-status-immediately-after-source-guard-s-free-branch-calling-performlocalclaim",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC5 `ensure-session-claims-on-free`: `ensure-session` on a `free` subject succeeds AND establishes a durable local-file assignment claim for the entering actor, verified via `assignment-provider status` immediately after (source: guard's `free` branch calling `performLocalClaim`)",
-      "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
-      "metadata": {
-        "origin": "acceptance"
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-291-ac6-ensure-session-concurrent-race-safety-two-concurrent-ensure-session-invocations-on-the-same-fresh-free-subject-never-both-become-the-claim-holder-one-wins-and-the-loser-sees-a-held-refused-outcome-on-retry-source-existing-root-level-withlock-in-workflow-sidecar-ts-main-unchanged-plus-withsubjectlock-in-assignment-provider-ts-unchanged-now-reached-via-the-new-exported-performlocalclaim-performlocalsupersede.flow-agents-workflow.ac6-ensure-session-concurrent-race-safety-two-concurrent-ensure-session-invocations-on-the-same-fresh-free-subject-never-both-become-the-claim-holder-one-wins-and-the-loser-sees-a-held-refused-outcome-on-retry-source-existing-root-level-withlock-in-workflow-sidecar-ts-main-unchanged-plus-withsubjectlock-in-assignment-provider-ts-unchanged-now-reached-via-the-new-exported-performlocalclaim-performlocalsupersede",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-291/ac6-ensure-session-concurrent-race-safety-two-concurrent-ensure-session-invocations-on-the-same-fresh-free-subject-never-both-become-the-claim-holder-one-wins-and-the-loser-sees-a-held-refused-outcome-on-retry-source-existing-root-level-withlock-in-workflow-sidecar-ts-main-unchanged-plus-withsubjectlock-in-assignment-provider-ts-unchanged-now-reached-via-the-new-exported-performlocalclaim-performlocalsupersede",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC6 `ensure-session-concurrent-race-safety`: two concurrent `ensure-session` invocations on the same fresh-free subject never both become the claim holder, one wins and the loser sees a `held`/refused outcome on retry (source: existing root-level `withLock` in `workflow-sidecar.ts` `main()`, unchanged, plus `withSubjectLock` in `assignment-provider.ts`, unchanged, now reached via the new exported `performLocalClaim`/`performLocalSupersede`)",
-      "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
-      "metadata": {
-        "origin": "acceptance"
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-291-ac7-current-json-per-actor-isolation-after-actor-b-runs-ensure-session-on-a-different-subject-actor-a-s-own-current-session-resolution-workflow-sidecar-current-actor-aware-still-resolves-to-a-s-own-session-directory-source-per-actor-dual-write-read-in-writecurrent-currentdir-src-cli-workflow-sidecar-ts.flow-agents-workflow.ac7-current-json-per-actor-isolation-after-actor-b-runs-ensure-session-on-a-different-subject-actor-a-s-own-current-session-resolution-workflow-sidecar-current-actor-aware-still-resolves-to-a-s-own-session-directory-source-per-actor-dual-write-read-in-writecurrent-currentdir-src-cli-workflow-sidecar-ts",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-291/ac7-current-json-per-actor-isolation-after-actor-b-runs-ensure-session-on-a-different-subject-actor-a-s-own-current-session-resolution-workflow-sidecar-current-actor-aware-still-resolves-to-a-s-own-session-directory-source-per-actor-dual-write-read-in-writecurrent-currentdir-src-cli-workflow-sidecar-ts",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC7 `current-json-per-actor-isolation`: after actor B runs `ensure-session` on a different subject, actor A's own current-session resolution (`workflow:sidecar -- current`, actor-aware) still resolves to A's own session directory (source: per-actor dual-write/read in `writeCurrent()`/`currentDir()`, `src/cli/workflow-sidecar.ts`)",
-      "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
-      "metadata": {
-        "origin": "acceptance"
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-291-ac8-current-json-compat-shim-fallback-an-actor-with-no-per-actor-current-file-yet-or-an-unresolved-actor-still-resolves-via-the-legacy-global-current-json-exactly-as-before-this-change-every-named-existing-consumer-stop-goal-fit-js-evidence-capture-js-liveness-heartbeat-js-flow-agents-statusline-js-produces-identical-output-against-a-legacy-only-pre-migration-artifact-root-fixture-source-fallback-branch-in-scripts-hooks-lib-current-pointer-js-readcurrentpointer.flow-agents-workflow.ac8-current-json-compat-shim-fallback-an-actor-with-no-per-actor-current-file-yet-or-an-unresolved-actor-still-resolves-via-the-legacy-global-current-json-exactly-as-before-this-change-every-named-existing-consumer-stop-goal-fit-js-evidence-capture-js-liveness-heartbeat-js-flow-agents-statusline-js-produces-identical-output-against-a-legacy-only-pre-migration-artifact-root-fixture-source-fallback-branch-in-scripts-hooks-lib-current-pointer-js-readcurrentpointer",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-291/ac8-current-json-compat-shim-fallback-an-actor-with-no-per-actor-current-file-yet-or-an-unresolved-actor-still-resolves-via-the-legacy-global-current-json-exactly-as-before-this-change-every-named-existing-consumer-stop-goal-fit-js-evidence-capture-js-liveness-heartbeat-js-flow-agents-statusline-js-produces-identical-output-against-a-legacy-only-pre-migration-artifact-root-fixture-source-fallback-branch-in-scripts-hooks-lib-current-pointer-js-readcurrentpointer",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC8 `current-json-compat-shim-fallback`: an actor with no per-actor current file yet, or an unresolved actor, still resolves via the legacy global `current.json` exactly as before this change; every named existing consumer (`stop-goal-fit.js`, `evidence-capture.js`, `liveness-heartbeat.js`, `flow-agents-statusline.js`) produces identical output against a legacy-only pre-migration artifact root fixture (source: fallback branch in `scripts/hooks/lib/current-pointer.js` `readCurrentPointer()`)",
-      "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
-      "metadata": {
-        "origin": "acceptance"
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-291-ac9-remediation-sanitized-refusal-remediation-messages-never-contain-raw-control-ansi-bytes-from-actor-holder-assignee-reason-fields-verified-against-a-crafted-hostile-liveness-event-and-a-hostile-effective-state-json-fixture-source-reuse-of-stripcontrolcharsfordisplay-already-in-workflow-sidecar-ts-at-every-interpolation-site-in-the-new-guard-s-die-messages.flow-agents-workflow.ac9-remediation-sanitized-refusal-remediation-messages-never-contain-raw-control-ansi-bytes-from-actor-holder-assignee-reason-fields-verified-against-a-crafted-hostile-liveness-event-and-a-hostile-effective-state-json-fixture-source-reuse-of-stripcontrolcharsfordisplay-already-in-workflow-sidecar-ts-at-every-interpolation-site-in-the-new-guard-s-die-messages",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-291/ac9-remediation-sanitized-refusal-remediation-messages-never-contain-raw-control-ansi-bytes-from-actor-holder-assignee-reason-fields-verified-against-a-crafted-hostile-liveness-event-and-a-hostile-effective-state-json-fixture-source-reuse-of-stripcontrolcharsfordisplay-already-in-workflow-sidecar-ts-at-every-interpolation-site-in-the-new-guard-s-die-messages",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC9 `remediation-sanitized`: refusal/remediation messages never contain raw control/ANSI bytes from actor/holder/assignee/reason fields, verified against a crafted hostile liveness event and a hostile `--effective-state-json` fixture (source: reuse of `stripControlCharsForDisplay`, already in `workflow-sidecar.ts`, at every interpolation site in the new guard's `die()` messages)",
-      "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
-      "metadata": {
-        "origin": "acceptance"
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-291-ac10-config-protection-covers-per-actor-current-config-protection-js-s-protected-path-and-bash-redirect-detectors-block-direct-writes-redirects-to-kontourai-flow-agents-current-actor-json-exactly-as-they-already-do-for-kontourai-flow-agents-current-json-source-new-pattern-in-checkprotectedpathpattern-and-redirect-protected-re.flow-agents-workflow.ac10-config-protection-covers-per-actor-current-config-protection-js-s-protected-path-and-bash-redirect-detectors-block-direct-writes-redirects-to-kontourai-flow-agents-current-actor-json-exactly-as-they-already-do-for-kontourai-flow-agents-current-json-source-new-pattern-in-checkprotectedpathpattern-and-redirect-protected-re",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-291/ac10-config-protection-covers-per-actor-current-config-protection-js-s-protected-path-and-bash-redirect-detectors-block-direct-writes-redirects-to-kontourai-flow-agents-current-actor-json-exactly-as-they-already-do-for-kontourai-flow-agents-current-json-source-new-pattern-in-checkprotectedpathpattern-and-redirect-protected-re",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC10 `config-protection-covers-per-actor-current`: `config-protection.js`'s protected-path and Bash-redirect detectors block direct writes/redirects to `.kontourai/flow-agents/current/<actor>.json` exactly as they already do for `.kontourai/flow-agents/current.json` (source: new pattern in `checkProtectedPathPattern` and `REDIRECT_PROTECTED_RE`)",
-      "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
-      "metadata": {
-        "origin": "acceptance"
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-291-ac11-gate-scoping-actor-correct-record-gate-claim-writetrustbundle-s-flowdefinition-dual-emit-scoping-resolves-active-flow-id-active-step-id-from-the-calling-actor-s-own-current-pointer-not-a-different-actor-s-more-recently-written-legacy-pointer-source-actor-aware-update-to-declaredclaimtypesfor-writetrustbundle-s-scopedflowagentsdir-check-and-resolveactiveflowstep-in-src-lib-flow-resolver-ts.flow-agents-workflow.ac11-gate-scoping-actor-correct-record-gate-claim-writetrustbundle-s-flowdefinition-dual-emit-scoping-resolves-active-flow-id-active-step-id-from-the-calling-actor-s-own-current-pointer-not-a-different-actor-s-more-recently-written-legacy-pointer-source-actor-aware-update-to-declaredclaimtypesfor-writetrustbundle-s-scopedflowagentsdir-check-and-resolveactiveflowstep-in-src-lib-flow-resolver-ts",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-291/ac11-gate-scoping-actor-correct-record-gate-claim-writetrustbundle-s-flowdefinition-dual-emit-scoping-resolves-active-flow-id-active-step-id-from-the-calling-actor-s-own-current-pointer-not-a-different-actor-s-more-recently-written-legacy-pointer-source-actor-aware-update-to-declaredclaimtypesfor-writetrustbundle-s-scopedflowagentsdir-check-and-resolveactiveflowstep-in-src-lib-flow-resolver-ts",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC11 `gate-scoping-actor-correct`: `record-gate-claim` / `writeTrustBundle`'s FlowDefinition dual-emit scoping resolves `active_flow_id`/`active_step_id` from the CALLING actor's own current-pointer, not a different actor's more-recently-written legacy pointer (source: actor-aware update to `declaredClaimTypesFor()`, `writeTrustBundle`'s `_scopedFlowAgentsDir` check, and `resolveActiveFlowStep()` in `src/lib/flow-resolver.ts`)",
-      "value": "pass",
-      "createdAt": "2026-07-04T16:05:00Z",
-      "updatedAt": "2026-07-04T16:05:00Z",
+      "createdAt": "2026-07-04T15:59:01Z",
+      "updatedAt": "2026-07-04T15:59:01Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:builder.verify.tests",
       "metadata": {
@@ -502,30 +162,14 @@
   ],
   "evidence": [
     {
-      "id": "ev:kontourai-flow-agents-291-context-map-drift.flow-agents-workflow.npm-run-context-map-check-exit-0-docs-context-map-md-is-current-unaffected-by-f1-f5-fix",
-      "claimId": "kontourai-flow-agents-291-context-map-drift.flow-agents-workflow.npm-run-context-map-check-exit-0-docs-context-map-md-is-current-unaffected-by-f1-f5-fix",
+      "id": "ev:i339-record-identity-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-manifest-static-eval-suite-green-includes-knowledge-store-provider-conformance-test-knowledge-providers-sh-ci-reconcilable-ac-covering-static-proof",
+      "claimId": "i339-record-identity-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-manifest-static-eval-suite-green-includes-knowledge-store-provider-conformance-test-knowledge-providers-sh-ci-reconcilable-ac-covering-static-proof",
       "evidenceType": "test_output",
       "method": "validation",
-      "sourceRef": "kontourai-flow-agents-291/evidence.json",
-      "excerptOrSummary": "npm run context-map -- --check exit 0, \"docs/context-map.md is current.\" (unaffected by F1-F5 fix)",
-      "observedAt": "2026-07-04T16:05:00Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "npm run context-map -- --check",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:kontourai-flow-agents-291-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-30-pass-0-fail-exit-0-including-35-35-node-test-pure-helper-unit-tests-unchanged-count-vs-prior-verify",
-      "claimId": "kontourai-flow-agents-291-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-30-pass-0-fail-exit-0-including-35-35-node-test-pure-helper-unit-tests-unchanged-count-vs-prior-verify",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "kontourai-flow-agents-291/evidence.json",
-      "excerptOrSummary": "bash evals/run.sh static: 30 PASS / 0 FAIL, exit 0, including 35/35 node --test pure-helper unit tests (unchanged count vs prior verify)",
-      "observedAt": "2026-07-04T16:05:00Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
+      "sourceRef": "i339-record-identity/command-log.jsonl",
+      "excerptOrSummary": "Static eval lane (manifest static-eval-suite) green — includes knowledge store provider conformance test_knowledge_providers.sh; CI-reconcilable AC-covering static proof",
+      "observedAt": "2026-07-04T15:59:01Z",
+      "collectedBy": "flow-agents/evidence-capture",
       "passing": true,
       "execution": {
         "runner": "bash",
@@ -535,199 +179,55 @@
       }
     },
     {
-      "id": "ev:kontourai-flow-agents-291-ensure-session-ownership-guard-integration.flow-agents-workflow.bash-evals-integration-test-ensure-session-ownership-guard-sh-36-36-assertions-pass-0-fail-exit-0-ac1-2-3-4-5-6-9-now-includes-new-section-3b-f1-cross-tool-self-recognition-fix-plan-iteration-1-verifying-assignment-provider-status-self-actor-bare-recognizes-an-ensure-session-claim-made-under-flow-agents-actor-override",
-      "claimId": "kontourai-flow-agents-291-ensure-session-ownership-guard-integration.flow-agents-workflow.bash-evals-integration-test-ensure-session-ownership-guard-sh-36-36-assertions-pass-0-fail-exit-0-ac1-2-3-4-5-6-9-now-includes-new-section-3b-f1-cross-tool-self-recognition-fix-plan-iteration-1-verifying-assignment-provider-status-self-actor-bare-recognizes-an-ensure-session-claim-made-under-flow-agents-actor-override",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "kontourai-flow-agents-291/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_ensure_session_ownership_guard.sh: 36/36 assertions PASS, 0 FAIL, exit 0 (AC1,2,3,4,5,6,9) -- now includes new section 3b (F1 cross-tool self-recognition, fix-plan iteration 1) verifying assignment-provider status --self-actor <bare> recognizes an ensure-session claim made under FLOW_AGENTS_ACTOR override",
-      "observedAt": "2026-07-04T16:05:00Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_ensure_session_ownership_guard.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:kontourai-flow-agents-291-current-json-per-actor-integration.flow-agents-workflow.bash-evals-integration-test-current-json-per-actor-sh-22-22-assertions-pass-0-fail-exit-0-ac7-8-10-11-now-includes-new-section-6-f3-fix-plan-iteration-1-pinning-the-legacy-current-json-wins-over-newer-state-json-behavior-for-a-resolved-single-actor",
-      "claimId": "kontourai-flow-agents-291-current-json-per-actor-integration.flow-agents-workflow.bash-evals-integration-test-current-json-per-actor-sh-22-22-assertions-pass-0-fail-exit-0-ac7-8-10-11-now-includes-new-section-6-f3-fix-plan-iteration-1-pinning-the-legacy-current-json-wins-over-newer-state-json-behavior-for-a-resolved-single-actor",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "kontourai-flow-agents-291/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_current_json_per_actor.sh: 22/22 assertions PASS, 0 FAIL, exit 0 (AC7,8,10,11) -- now includes new section 6 (F3, fix-plan iteration 1) pinning the legacy-current.json-wins-over-newer-state.json behavior for a resolved single actor",
-      "observedAt": "2026-07-04T16:05:00Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_current_json_per_actor.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:kontourai-flow-agents-291-assignment-provider-local-file-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-local-file-sh-34-34-assertions-pass-0-fail-exit-0-290-back-compat-suite-stays-green-after-the-actor-key-additive-field-fix",
-      "claimId": "kontourai-flow-agents-291-assignment-provider-local-file-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-local-file-sh-34-34-assertions-pass-0-fail-exit-0-290-back-compat-suite-stays-green-after-the-actor-key-additive-field-fix",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "kontourai-flow-agents-291/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_assignment_provider_local_file.sh: 34/34 assertions PASS, 0 FAIL, exit 0 -- #290 back-compat suite stays green after the actor_key additive-field fix",
-      "observedAt": "2026-07-04T16:05:00Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_assignment_provider_local_file.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:kontourai-flow-agents-291-assignment-provider-github-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-github-sh-45-45-assertions-pass-0-fail-exit-0-290-back-compat-suite-unaffected",
-      "claimId": "kontourai-flow-agents-291-assignment-provider-github-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-github-sh-45-45-assertions-pass-0-fail-exit-0-290-back-compat-suite-unaffected",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "kontourai-flow-agents-291/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_assignment_provider_github.sh: 45/45 assertions PASS, 0 FAIL, exit 0 -- #290 back-compat suite unaffected",
-      "observedAt": "2026-07-04T16:05:00Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_assignment_provider_github.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:kontourai-flow-agents-291-pull-work-assignment-join-integration.flow-agents-workflow.bash-evals-integration-test-pull-work-assignment-join-sh-10-10-assertions-pass-0-fail-exit-0-290-back-compat-suite-unaffected",
-      "claimId": "kontourai-flow-agents-291-pull-work-assignment-join-integration.flow-agents-workflow.bash-evals-integration-test-pull-work-assignment-join-sh-10-10-assertions-pass-0-fail-exit-0-290-back-compat-suite-unaffected",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "kontourai-flow-agents-291/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_pull_work_assignment_join.sh: 10/10 assertions PASS, 0 FAIL, exit 0 -- #290 back-compat suite unaffected",
-      "observedAt": "2026-07-04T16:05:00Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_pull_work_assignment_join.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:kontourai-flow-agents-291-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-all-checks-passed-exit-0",
-      "claimId": "kontourai-flow-agents-291-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-all-checks-passed-exit-0",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "kontourai-flow-agents-291/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_workflow_sidecar_writer.sh: all checks passed, exit 0",
-      "observedAt": "2026-07-04T16:05:00Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_workflow_sidecar_writer.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:kontourai-flow-agents-291-liveness-heartbeat-integration.flow-agents-workflow.bash-evals-integration-test-liveness-heartbeat-sh-all-checks-passed-exit-0-includes-f4-hot-path-short-circuit-restoration-coverage-mighthaveactivesession-peek-before-resolveactor",
-      "claimId": "kontourai-flow-agents-291-liveness-heartbeat-integration.flow-agents-workflow.bash-evals-integration-test-liveness-heartbeat-sh-all-checks-passed-exit-0-includes-f4-hot-path-short-circuit-restoration-coverage-mighthaveactivesession-peek-before-resolveactor",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "kontourai-flow-agents-291/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_liveness_heartbeat.sh: all checks passed, exit 0 -- includes F4 hot-path short-circuit restoration coverage (mightHaveActiveSession peek before resolveActor())",
-      "observedAt": "2026-07-04T16:05:00Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_liveness_heartbeat.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:kontourai-flow-agents-291-workflow-steering-hook-integration.flow-agents-workflow.bash-evals-integration-test-workflow-steering-hook-sh-9-9-pass-exit-0",
-      "claimId": "kontourai-flow-agents-291-workflow-steering-hook-integration.flow-agents-workflow.bash-evals-integration-test-workflow-steering-hook-sh-9-9-pass-exit-0",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "kontourai-flow-agents-291/evidence.json",
-      "excerptOrSummary": "bash evals/integration/test_workflow_steering_hook.sh: 9/9 PASS, exit 0",
-      "observedAt": "2026-07-04T16:05:00Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true,
-      "execution": {
-        "runner": "bash",
-        "label": "bash evals/integration/test_workflow_steering_hook.sh",
-        "isError": false
-      }
-    },
-    {
-      "id": "ev:kontourai-flow-agents-291-source-tree-validation-summary.flow-agents-workflow.ci-reconcile-fix-recast-adr-0020-class-320-356-the-prior-recording-named-a-command-backed-check-with-command-npm-run-validate-source-no-trailing-which-does-not-literally-match-the-manifest-s-source-tree-validation-entry-npm-run-validate-source-and-would-be-redundant-with-that-manifest-lane-s-own-fresh-reconciliation-on-every-run-even-if-renamed-to-match-verbatim-recast-as-a-non-command-backed-folded-summary-carrying-no-command-field-at-all-dropped-not-renamed-to-the-form-per-coordinator-direction-result-observed-this-pass-npm-run-validate-source-exit-0-source-tree-validation-passed-the-manifest-s-own-source-tree-validation-lane-entry-reconciles-this-independently-every-ci-run-this-check-exists-only-as-a-session-local-narrative-confirmation-never-a-second-reconcilable-claim-for-the-same-command",
-      "claimId": "kontourai-flow-agents-291-source-tree-validation-summary.flow-agents-workflow.ci-reconcile-fix-recast-adr-0020-class-320-356-the-prior-recording-named-a-command-backed-check-with-command-npm-run-validate-source-no-trailing-which-does-not-literally-match-the-manifest-s-source-tree-validation-entry-npm-run-validate-source-and-would-be-redundant-with-that-manifest-lane-s-own-fresh-reconciliation-on-every-run-even-if-renamed-to-match-verbatim-recast-as-a-non-command-backed-folded-summary-carrying-no-command-field-at-all-dropped-not-renamed-to-the-form-per-coordinator-direction-result-observed-this-pass-npm-run-validate-source-exit-0-source-tree-validation-passed-the-manifest-s-own-source-tree-validation-lane-entry-reconciles-this-independently-every-ci-run-this-check-exists-only-as-a-session-local-narrative-confirmation-never-a-second-reconcilable-claim-for-the-same-command",
-      "evidenceType": "source_excerpt",
-      "method": "extraction",
-      "sourceRef": "kontourai-flow-agents-291/evidence.json",
-      "excerptOrSummary": "CI reconcile fix (recast, ADR-0020 class #320/#356): the prior recording named a command-backed check with command \"npm run validate:source\" (no trailing --), which does not literally match the manifest's source-tree-validation entry (\"npm run validate:source --\") -- and would be redundant with that manifest lane's own fresh reconciliation on every run even if renamed to match verbatim. Recast as a non-command-backed folded summary carrying no command field at all (dropped, not renamed to the -- form) per coordinator direction. Result observed this pass: npm run validate:source exit 0, \"Source tree validation passed.\" -- the manifest's own source-tree-validation lane entry reconciles this independently every CI run; this check exists only as a session-local narrative confirmation, never a second reconcilable claim for the same command.",
-      "observedAt": "2026-07-04T16:05:00Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
-    },
-    {
-      "id": "ev:kontourai-flow-agents-291-trust-reconcile-manifest-parity-summary.flow-agents-workflow.ci-reconcile-fix-recast-adr-0020-class-320-356-bash-evals-integration-test-trust-reconcile-manifest-sh-is-a-meta-manifest-parity-self-check-not-itself-a-manifest-required-lane-command-so-it-cannot-be-a-command-backed-test-output-reconcilable-claim-recast-as-a-non-command-backed-folded-summary-result-observed-this-pass-manifest-entries-44-ci-yml-required-check-invocations-44-44-44-exit-0-ws8-manifest-self-check-parity-holds-unchanged-from-the-prior-recording",
-      "claimId": "kontourai-flow-agents-291-trust-reconcile-manifest-parity-summary.flow-agents-workflow.ci-reconcile-fix-recast-adr-0020-class-320-356-bash-evals-integration-test-trust-reconcile-manifest-sh-is-a-meta-manifest-parity-self-check-not-itself-a-manifest-required-lane-command-so-it-cannot-be-a-command-backed-test-output-reconcilable-claim-recast-as-a-non-command-backed-folded-summary-result-observed-this-pass-manifest-entries-44-ci-yml-required-check-invocations-44-44-44-exit-0-ws8-manifest-self-check-parity-holds-unchanged-from-the-prior-recording",
-      "evidenceType": "source_excerpt",
-      "method": "extraction",
-      "sourceRef": "kontourai-flow-agents-291/evidence.json",
-      "excerptOrSummary": "CI reconcile fix (recast, ADR-0020 class #320/#356): bash evals/integration/test_trust_reconcile_manifest.sh is a meta manifest-parity self-check, not itself a manifest/required-lane command, so it cannot be a command-backed (test_output) reconcilable claim -- recast as a non-command-backed folded summary. Result observed this pass: manifest entries == 44, ci.yml required --check invocations == 44 (44==44), exit 0 -- WS8 manifest self-check parity holds, unchanged from the prior recording.",
-      "observedAt": "2026-07-04T16:05:00Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
-    },
-    {
-      "id": "ev:kontourai-flow-agents-291-full-gate-summary.flow-agents-workflow.iteration-1-re-verify-full-gate-narrative-not-command-backed-by-design-npm-run-build-silent-exit-0-folded-here-not-recorded-as-a-standalone-command-backed-check-since-it-is-already-a-prerequisite-step-inside-every-npm-run-manifest-command-above-independently-reproduced-a-the-high-fix-claimed-under-flow-agents-actor-xcheck-override-actor-via-ensure-session-then-assignment-provider-status-self-actor-xcheck-override-actor-bare-with-a-fresh-liveness-heartbeat-stream-effective-state-held-reason-self-is-holder-would-have-been-reclaimable-pre-fix-confirmed-by-stripping-actor-key-from-the-same-record-and-re-running-the-identical-status-check-b-290-back-compat-the-same-record-with-actor-key-stripped-falls-back-to-serializeactor-record-actor-and-reproduces-the-pre-fix-reclaimable-classification-exactly-confirming-the-fallback-path-not-a-new-default-is-what-keeps-every-290-fixture-green-c-the-liveness-join-matches-the-override-actor-s-fresh-heartbeat-once-actor-key-is-present-re-confirmed-ac6-concurrency-independent-30-30-iteration-two-process-race-harness-one-winner-each-time-17-13-split-and-ac9-sanitization-2-verifier-authored-hostile-payloads-distinct-from-the-eval-s-own-fixtures-del-c1-byte-on-a-liveness-holder-actor-osc-8-hyperlink-bel-on-an-effective-state-json-assignee-zero-raw-control-codepoints-leaked-in-either-case-sanitized-non-control-text-still-present-after-the-guard-s-own-code-path-changed-under-f1",
-      "claimId": "kontourai-flow-agents-291-full-gate-summary.flow-agents-workflow.iteration-1-re-verify-full-gate-narrative-not-command-backed-by-design-npm-run-build-silent-exit-0-folded-here-not-recorded-as-a-standalone-command-backed-check-since-it-is-already-a-prerequisite-step-inside-every-npm-run-manifest-command-above-independently-reproduced-a-the-high-fix-claimed-under-flow-agents-actor-xcheck-override-actor-via-ensure-session-then-assignment-provider-status-self-actor-xcheck-override-actor-bare-with-a-fresh-liveness-heartbeat-stream-effective-state-held-reason-self-is-holder-would-have-been-reclaimable-pre-fix-confirmed-by-stripping-actor-key-from-the-same-record-and-re-running-the-identical-status-check-b-290-back-compat-the-same-record-with-actor-key-stripped-falls-back-to-serializeactor-record-actor-and-reproduces-the-pre-fix-reclaimable-classification-exactly-confirming-the-fallback-path-not-a-new-default-is-what-keeps-every-290-fixture-green-c-the-liveness-join-matches-the-override-actor-s-fresh-heartbeat-once-actor-key-is-present-re-confirmed-ac6-concurrency-independent-30-30-iteration-two-process-race-harness-one-winner-each-time-17-13-split-and-ac9-sanitization-2-verifier-authored-hostile-payloads-distinct-from-the-eval-s-own-fixtures-del-c1-byte-on-a-liveness-holder-actor-osc-8-hyperlink-bel-on-an-effective-state-json-assignee-zero-raw-control-codepoints-leaked-in-either-case-sanitized-non-control-text-still-present-after-the-guard-s-own-code-path-changed-under-f1",
-      "evidenceType": "source_excerpt",
-      "method": "extraction",
-      "sourceRef": "kontourai-flow-agents-291/evidence.json",
-      "excerptOrSummary": "iteration-1 re-verify full-gate narrative (NOT command-backed by design): npm run build --silent exit 0 (folded here, not recorded as a standalone command-backed check, since it is already a prerequisite step inside every npm-run-* manifest command above). Independently reproduced (a) the HIGH fix -- claimed under FLOW_AGENTS_ACTOR=xcheck-override-actor via ensure-session, then assignment-provider status --self-actor xcheck-override-actor (bare) with a fresh liveness heartbeat stream: effective_state=held, reason=self_is_holder (would have been reclaimable pre-fix, confirmed by stripping actor_key from the same record and re-running the identical status check); (b) #290 back-compat -- the same record with actor_key stripped falls back to serializeActor(record.actor) and reproduces the pre-fix reclaimable classification exactly, confirming the fallback path (not a new default) is what keeps every #290 fixture green; (c) the liveness join matches the override actor's fresh heartbeat once actor_key is present. Re-confirmed AC6 concurrency (independent 30/30-iteration two-process race harness, one winner each time, 17/13 split) and AC9 sanitization (2 verifier-authored hostile payloads distinct from the eval's own fixtures -- DEL+C1 byte on a liveness holder actor, OSC-8 hyperlink+BEL on an --effective-state-json assignee -- zero raw control codepoints leaked in either case, sanitized non-control text still present) after the guard's own code path changed under F1.",
-      "observedAt": "2026-07-04T16:05:00Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
-    },
-    {
-      "id": "ev:kontourai-flow-agents-291-pre-existing-failure-baseline.flow-agents-workflow.three-eval-suites-carry-failures-independently-reproduced-as-pre-existing-baselines-unrelated-to-the-291-iteration-1-fix-test-goal-fit-hook-sh-1-fail-exit-1-test-goal-fit-escape-hatch-sh-5-fail-exit-1-test-session-resume-roundtrip-sh-13-fail-exit-1-identical-failure-counts-to-the-prior-pre-fix-verify-pass-confirming-the-iteration-1-changes-introduced-no-new-regressions-in-these-suites",
-      "claimId": "kontourai-flow-agents-291-pre-existing-failure-baseline.flow-agents-workflow.three-eval-suites-carry-failures-independently-reproduced-as-pre-existing-baselines-unrelated-to-the-291-iteration-1-fix-test-goal-fit-hook-sh-1-fail-exit-1-test-goal-fit-escape-hatch-sh-5-fail-exit-1-test-session-resume-roundtrip-sh-13-fail-exit-1-identical-failure-counts-to-the-prior-pre-fix-verify-pass-confirming-the-iteration-1-changes-introduced-no-new-regressions-in-these-suites",
+      "id": "ev:i339-record-identity-contract-suite-default.flow-agents-workflow.contract-suite-default-adapter-67-67-pass-0-fail-exit-0-covers-ac1-prefix-ambiguous-ac3-post-move-ac4-unmodified-sections-records-uuid-md",
+      "claimId": "i339-record-identity-contract-suite-default.flow-agents-workflow.contract-suite-default-adapter-67-67-pass-0-fail-exit-0-covers-ac1-prefix-ambiguous-ac3-post-move-ac4-unmodified-sections-records-uuid-md",
       "evidenceType": "attestation",
-      "method": "attestation",
-      "sourceRef": "kontourai-flow-agents-291/evidence.json",
-      "excerptOrSummary": "Three eval suites carry failures independently reproduced as pre-existing baselines, unrelated to the #291 iteration-1 fix: test_goal_fit_hook.sh (1 FAIL, exit 1), test_goal_fit_escape_hatch.sh (5 FAIL, exit 1), test_session_resume_roundtrip.sh (13 FAIL, exit 1) -- identical failure counts to the prior (pre-fix) verify pass, confirming the iteration-1 changes introduced no new regressions in these suites.",
-      "observedAt": "2026-07-04T16:05:00Z",
+      "method": "corroboration",
+      "sourceRef": "i339-record-identity/command-log.jsonl",
+      "excerptOrSummary": "Contract-suite default adapter: 67/67 pass, 0 fail, exit 0 — covers AC1 (prefix/ambiguous), AC3 (post-move), AC4 (unmodified sections + records/<uuid>.md)",
+      "observedAt": "2026-07-04T15:59:01Z",
+      "collectedBy": "flow-agents/evidence-capture",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "node --test kits/knowledge/evals/contract-suite/suite.test.js",
+        "isError": false,
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "ev:i339-record-identity-contract-suite-obsidian.flow-agents-workflow.contract-suite-obsidian-adapter-64-pass-0-fail-3-adapter-scoped-skips-reindex-not-implemented-on-obsidian-exit-0-covers-ac2-slug-round-trip-ac3-file-relocation",
+      "claimId": "i339-record-identity-contract-suite-obsidian.flow-agents-workflow.contract-suite-obsidian-adapter-64-pass-0-fail-3-adapter-scoped-skips-reindex-not-implemented-on-obsidian-exit-0-covers-ac2-slug-round-trip-ac3-file-relocation",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "i339-record-identity/command-log.jsonl",
+      "excerptOrSummary": "Contract-suite obsidian adapter: 64 pass, 0 fail, 3 adapter-scoped skips (reindex not implemented on obsidian), exit 0 — covers AC2 (slug round-trip) + AC3 (file relocation)",
+      "observedAt": "2026-07-04T15:59:01Z",
+      "collectedBy": "flow-agents/evidence-capture",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "KNOWLEDGE_ADAPTER=kits/knowledge/adapters/obsidian-store/index.js node --test kits/knowledge/evals/contract-suite/suite.test.js",
+        "isError": false,
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "ev:i339-record-identity-store-contract-doc-ac5.flow-agents-workflow.ac5-kits-knowledge-docs-store-contract-md-gains-identity-alias-addendum-116-and-kits-knowledge-docs-readme-md-quick-reference-38-present-in-committed-diff",
+      "claimId": "i339-record-identity-store-contract-doc-ac5.flow-agents-workflow.ac5-kits-knowledge-docs-store-contract-md-gains-identity-alias-addendum-116-and-kits-knowledge-docs-readme-md-quick-reference-38-present-in-committed-diff",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "i339-record-identity/evidence.json",
+      "excerptOrSummary": "AC5: kits/knowledge/docs/store-contract.md gains identity/alias addendum (+116) and kits/knowledge/docs/README.md quick reference (+38) — present in committed diff",
+      "observedAt": "2026-07-04T15:59:01Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     }
   ],
   "policies": [
     {
-      "id": "policy:workflow.check.lint:test_output",
-      "claimType": "workflow.check.lint",
-      "requiredEvidence": [
-        "test_output"
-      ],
-      "acceptanceCriteria": [
-        "A verified verification event must support a workflow.check.lint claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "high"
-    },
-    {
-      "id": "policy:workflow.check.test:test_output",
-      "claimType": "workflow.check.test",
+      "id": "policy:workflow.check.command:test_output",
+      "claimType": "workflow.check.command",
       "requiredEvidence": [
         "test_output"
       ],
@@ -794,40 +294,6 @@
       "impactLevel": "high"
     },
     {
-      "id": "policy:workflow.check.diff:source_excerpt",
-      "claimType": "workflow.check.diff",
-      "requiredEvidence": [
-        "source_excerpt"
-      ],
-      "acceptanceCriteria": [
-        "A verified verification event must support a workflow.check.diff claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "high"
-    },
-    {
-      "id": "policy:workflow.check.policy:attestation",
-      "claimType": "workflow.check.policy",
-      "requiredEvidence": [
-        "attestation"
-      ],
-      "acceptanceCriteria": [
-        "A verified verification event must support a workflow.check.policy claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "high"
-    },
-    {
       "id": "policy:workflow.acceptance.criterion",
       "claimType": "workflow.acceptance.criterion",
       "requiredEvidence": [],
@@ -860,282 +326,102 @@
   ],
   "events": [
     {
-      "id": "evt:kontourai-flow-agents-291-context-map-drift.flow-agents-workflow.npm-run-context-map-check-exit-0-docs-context-map-md-is-current-unaffected-by-f1-f5-fix",
-      "claimId": "kontourai-flow-agents-291-context-map-drift.flow-agents-workflow.npm-run-context-map-check-exit-0-docs-context-map-md-is-current-unaffected-by-f1-f5-fix",
+      "id": "evt:i339-record-identity-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-manifest-static-eval-suite-green-includes-knowledge-store-provider-conformance-test-knowledge-providers-sh-ci-reconcilable-ac-covering-static-proof",
+      "claimId": "i339-record-identity-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-manifest-static-eval-suite-green-includes-knowledge-store-provider-conformance-test-knowledge-providers-sh-ci-reconcilable-ac-covering-static-proof",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-291-context-map-drift.flow-agents-workflow.npm-run-context-map-check-exit-0-docs-context-map-md-is-current-unaffected-by-f1-f5-fix"
+        "ev:i339-record-identity-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-manifest-static-eval-suite-green-includes-knowledge-store-provider-conformance-test-knowledge-providers-sh-ci-reconcilable-ac-covering-static-proof"
       ],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
+      "createdAt": "2026-07-04T15:59:01Z",
+      "verifiedAt": "2026-07-04T15:59:01Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-291-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-30-pass-0-fail-exit-0-including-35-35-node-test-pure-helper-unit-tests-unchanged-count-vs-prior-verify",
-      "claimId": "kontourai-flow-agents-291-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-30-pass-0-fail-exit-0-including-35-35-node-test-pure-helper-unit-tests-unchanged-count-vs-prior-verify",
+      "id": "evt:i339-record-identity-contract-suite-default.flow-agents-workflow.contract-suite-default-adapter-67-67-pass-0-fail-exit-0-covers-ac1-prefix-ambiguous-ac3-post-move-ac4-unmodified-sections-records-uuid-md",
+      "claimId": "i339-record-identity-contract-suite-default.flow-agents-workflow.contract-suite-default-adapter-67-67-pass-0-fail-exit-0-covers-ac1-prefix-ambiguous-ac3-post-move-ac4-unmodified-sections-records-uuid-md",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-291-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-30-pass-0-fail-exit-0-including-35-35-node-test-pure-helper-unit-tests-unchanged-count-vs-prior-verify"
+        "ev:i339-record-identity-contract-suite-default.flow-agents-workflow.contract-suite-default-adapter-67-67-pass-0-fail-exit-0-covers-ac1-prefix-ambiguous-ac3-post-move-ac4-unmodified-sections-records-uuid-md"
       ],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
+      "createdAt": "2026-07-04T15:59:01Z",
+      "verifiedAt": "2026-07-04T15:59:01Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-291-ensure-session-ownership-guard-integration.flow-agents-workflow.bash-evals-integration-test-ensure-session-ownership-guard-sh-36-36-assertions-pass-0-fail-exit-0-ac1-2-3-4-5-6-9-now-includes-new-section-3b-f1-cross-tool-self-recognition-fix-plan-iteration-1-verifying-assignment-provider-status-self-actor-bare-recognizes-an-ensure-session-claim-made-under-flow-agents-actor-override",
-      "claimId": "kontourai-flow-agents-291-ensure-session-ownership-guard-integration.flow-agents-workflow.bash-evals-integration-test-ensure-session-ownership-guard-sh-36-36-assertions-pass-0-fail-exit-0-ac1-2-3-4-5-6-9-now-includes-new-section-3b-f1-cross-tool-self-recognition-fix-plan-iteration-1-verifying-assignment-provider-status-self-actor-bare-recognizes-an-ensure-session-claim-made-under-flow-agents-actor-override",
+      "id": "evt:i339-record-identity-contract-suite-obsidian.flow-agents-workflow.contract-suite-obsidian-adapter-64-pass-0-fail-3-adapter-scoped-skips-reindex-not-implemented-on-obsidian-exit-0-covers-ac2-slug-round-trip-ac3-file-relocation",
+      "claimId": "i339-record-identity-contract-suite-obsidian.flow-agents-workflow.contract-suite-obsidian-adapter-64-pass-0-fail-3-adapter-scoped-skips-reindex-not-implemented-on-obsidian-exit-0-covers-ac2-slug-round-trip-ac3-file-relocation",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-291-ensure-session-ownership-guard-integration.flow-agents-workflow.bash-evals-integration-test-ensure-session-ownership-guard-sh-36-36-assertions-pass-0-fail-exit-0-ac1-2-3-4-5-6-9-now-includes-new-section-3b-f1-cross-tool-self-recognition-fix-plan-iteration-1-verifying-assignment-provider-status-self-actor-bare-recognizes-an-ensure-session-claim-made-under-flow-agents-actor-override"
+        "ev:i339-record-identity-contract-suite-obsidian.flow-agents-workflow.contract-suite-obsidian-adapter-64-pass-0-fail-3-adapter-scoped-skips-reindex-not-implemented-on-obsidian-exit-0-covers-ac2-slug-round-trip-ac3-file-relocation"
       ],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
+      "createdAt": "2026-07-04T15:59:01Z",
+      "verifiedAt": "2026-07-04T15:59:01Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-291-current-json-per-actor-integration.flow-agents-workflow.bash-evals-integration-test-current-json-per-actor-sh-22-22-assertions-pass-0-fail-exit-0-ac7-8-10-11-now-includes-new-section-6-f3-fix-plan-iteration-1-pinning-the-legacy-current-json-wins-over-newer-state-json-behavior-for-a-resolved-single-actor",
-      "claimId": "kontourai-flow-agents-291-current-json-per-actor-integration.flow-agents-workflow.bash-evals-integration-test-current-json-per-actor-sh-22-22-assertions-pass-0-fail-exit-0-ac7-8-10-11-now-includes-new-section-6-f3-fix-plan-iteration-1-pinning-the-legacy-current-json-wins-over-newer-state-json-behavior-for-a-resolved-single-actor",
+      "id": "evt:i339-record-identity-store-contract-doc-ac5.flow-agents-workflow.ac5-kits-knowledge-docs-store-contract-md-gains-identity-alias-addendum-116-and-kits-knowledge-docs-readme-md-quick-reference-38-present-in-committed-diff",
+      "claimId": "i339-record-identity-store-contract-doc-ac5.flow-agents-workflow.ac5-kits-knowledge-docs-store-contract-md-gains-identity-alias-addendum-116-and-kits-knowledge-docs-readme-md-quick-reference-38-present-in-committed-diff",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-291-current-json-per-actor-integration.flow-agents-workflow.bash-evals-integration-test-current-json-per-actor-sh-22-22-assertions-pass-0-fail-exit-0-ac7-8-10-11-now-includes-new-section-6-f3-fix-plan-iteration-1-pinning-the-legacy-current-json-wins-over-newer-state-json-behavior-for-a-resolved-single-actor"
+        "ev:i339-record-identity-store-contract-doc-ac5.flow-agents-workflow.ac5-kits-knowledge-docs-store-contract-md-gains-identity-alias-addendum-116-and-kits-knowledge-docs-readme-md-quick-reference-38-present-in-committed-diff"
       ],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
+      "createdAt": "2026-07-04T15:59:01Z",
+      "verifiedAt": "2026-07-04T15:59:01Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-291-assignment-provider-local-file-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-local-file-sh-34-34-assertions-pass-0-fail-exit-0-290-back-compat-suite-stays-green-after-the-actor-key-additive-field-fix",
-      "claimId": "kontourai-flow-agents-291-assignment-provider-local-file-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-local-file-sh-34-34-assertions-pass-0-fail-exit-0-290-back-compat-suite-stays-green-after-the-actor-key-additive-field-fix",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:kontourai-flow-agents-291-assignment-provider-local-file-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-local-file-sh-34-34-assertions-pass-0-fail-exit-0-290-back-compat-suite-stays-green-after-the-actor-key-additive-field-fix"
-      ],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-291-assignment-provider-github-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-github-sh-45-45-assertions-pass-0-fail-exit-0-290-back-compat-suite-unaffected",
-      "claimId": "kontourai-flow-agents-291-assignment-provider-github-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-github-sh-45-45-assertions-pass-0-fail-exit-0-290-back-compat-suite-unaffected",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:kontourai-flow-agents-291-assignment-provider-github-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-github-sh-45-45-assertions-pass-0-fail-exit-0-290-back-compat-suite-unaffected"
-      ],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-291-pull-work-assignment-join-integration.flow-agents-workflow.bash-evals-integration-test-pull-work-assignment-join-sh-10-10-assertions-pass-0-fail-exit-0-290-back-compat-suite-unaffected",
-      "claimId": "kontourai-flow-agents-291-pull-work-assignment-join-integration.flow-agents-workflow.bash-evals-integration-test-pull-work-assignment-join-sh-10-10-assertions-pass-0-fail-exit-0-290-back-compat-suite-unaffected",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:kontourai-flow-agents-291-pull-work-assignment-join-integration.flow-agents-workflow.bash-evals-integration-test-pull-work-assignment-join-sh-10-10-assertions-pass-0-fail-exit-0-290-back-compat-suite-unaffected"
-      ],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-291-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-all-checks-passed-exit-0",
-      "claimId": "kontourai-flow-agents-291-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-all-checks-passed-exit-0",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:kontourai-flow-agents-291-workflow-sidecar-writer-integration.flow-agents-workflow.bash-evals-integration-test-workflow-sidecar-writer-sh-all-checks-passed-exit-0"
-      ],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-291-liveness-heartbeat-integration.flow-agents-workflow.bash-evals-integration-test-liveness-heartbeat-sh-all-checks-passed-exit-0-includes-f4-hot-path-short-circuit-restoration-coverage-mighthaveactivesession-peek-before-resolveactor",
-      "claimId": "kontourai-flow-agents-291-liveness-heartbeat-integration.flow-agents-workflow.bash-evals-integration-test-liveness-heartbeat-sh-all-checks-passed-exit-0-includes-f4-hot-path-short-circuit-restoration-coverage-mighthaveactivesession-peek-before-resolveactor",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:kontourai-flow-agents-291-liveness-heartbeat-integration.flow-agents-workflow.bash-evals-integration-test-liveness-heartbeat-sh-all-checks-passed-exit-0-includes-f4-hot-path-short-circuit-restoration-coverage-mighthaveactivesession-peek-before-resolveactor"
-      ],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-291-workflow-steering-hook-integration.flow-agents-workflow.bash-evals-integration-test-workflow-steering-hook-sh-9-9-pass-exit-0",
-      "claimId": "kontourai-flow-agents-291-workflow-steering-hook-integration.flow-agents-workflow.bash-evals-integration-test-workflow-steering-hook-sh-9-9-pass-exit-0",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:kontourai-flow-agents-291-workflow-steering-hook-integration.flow-agents-workflow.bash-evals-integration-test-workflow-steering-hook-sh-9-9-pass-exit-0"
-      ],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-291-source-tree-validation-summary.flow-agents-workflow.ci-reconcile-fix-recast-adr-0020-class-320-356-the-prior-recording-named-a-command-backed-check-with-command-npm-run-validate-source-no-trailing-which-does-not-literally-match-the-manifest-s-source-tree-validation-entry-npm-run-validate-source-and-would-be-redundant-with-that-manifest-lane-s-own-fresh-reconciliation-on-every-run-even-if-renamed-to-match-verbatim-recast-as-a-non-command-backed-folded-summary-carrying-no-command-field-at-all-dropped-not-renamed-to-the-form-per-coordinator-direction-result-observed-this-pass-npm-run-validate-source-exit-0-source-tree-validation-passed-the-manifest-s-own-source-tree-validation-lane-entry-reconciles-this-independently-every-ci-run-this-check-exists-only-as-a-session-local-narrative-confirmation-never-a-second-reconcilable-claim-for-the-same-command",
-      "claimId": "kontourai-flow-agents-291-source-tree-validation-summary.flow-agents-workflow.ci-reconcile-fix-recast-adr-0020-class-320-356-the-prior-recording-named-a-command-backed-check-with-command-npm-run-validate-source-no-trailing-which-does-not-literally-match-the-manifest-s-source-tree-validation-entry-npm-run-validate-source-and-would-be-redundant-with-that-manifest-lane-s-own-fresh-reconciliation-on-every-run-even-if-renamed-to-match-verbatim-recast-as-a-non-command-backed-folded-summary-carrying-no-command-field-at-all-dropped-not-renamed-to-the-form-per-coordinator-direction-result-observed-this-pass-npm-run-validate-source-exit-0-source-tree-validation-passed-the-manifest-s-own-source-tree-validation-lane-entry-reconciles-this-independently-every-ci-run-this-check-exists-only-as-a-session-local-narrative-confirmation-never-a-second-reconcilable-claim-for-the-same-command",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:kontourai-flow-agents-291-source-tree-validation-summary.flow-agents-workflow.ci-reconcile-fix-recast-adr-0020-class-320-356-the-prior-recording-named-a-command-backed-check-with-command-npm-run-validate-source-no-trailing-which-does-not-literally-match-the-manifest-s-source-tree-validation-entry-npm-run-validate-source-and-would-be-redundant-with-that-manifest-lane-s-own-fresh-reconciliation-on-every-run-even-if-renamed-to-match-verbatim-recast-as-a-non-command-backed-folded-summary-carrying-no-command-field-at-all-dropped-not-renamed-to-the-form-per-coordinator-direction-result-observed-this-pass-npm-run-validate-source-exit-0-source-tree-validation-passed-the-manifest-s-own-source-tree-validation-lane-entry-reconciles-this-independently-every-ci-run-this-check-exists-only-as-a-session-local-narrative-confirmation-never-a-second-reconcilable-claim-for-the-same-command"
-      ],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-291-trust-reconcile-manifest-parity-summary.flow-agents-workflow.ci-reconcile-fix-recast-adr-0020-class-320-356-bash-evals-integration-test-trust-reconcile-manifest-sh-is-a-meta-manifest-parity-self-check-not-itself-a-manifest-required-lane-command-so-it-cannot-be-a-command-backed-test-output-reconcilable-claim-recast-as-a-non-command-backed-folded-summary-result-observed-this-pass-manifest-entries-44-ci-yml-required-check-invocations-44-44-44-exit-0-ws8-manifest-self-check-parity-holds-unchanged-from-the-prior-recording",
-      "claimId": "kontourai-flow-agents-291-trust-reconcile-manifest-parity-summary.flow-agents-workflow.ci-reconcile-fix-recast-adr-0020-class-320-356-bash-evals-integration-test-trust-reconcile-manifest-sh-is-a-meta-manifest-parity-self-check-not-itself-a-manifest-required-lane-command-so-it-cannot-be-a-command-backed-test-output-reconcilable-claim-recast-as-a-non-command-backed-folded-summary-result-observed-this-pass-manifest-entries-44-ci-yml-required-check-invocations-44-44-44-exit-0-ws8-manifest-self-check-parity-holds-unchanged-from-the-prior-recording",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:kontourai-flow-agents-291-trust-reconcile-manifest-parity-summary.flow-agents-workflow.ci-reconcile-fix-recast-adr-0020-class-320-356-bash-evals-integration-test-trust-reconcile-manifest-sh-is-a-meta-manifest-parity-self-check-not-itself-a-manifest-required-lane-command-so-it-cannot-be-a-command-backed-test-output-reconcilable-claim-recast-as-a-non-command-backed-folded-summary-result-observed-this-pass-manifest-entries-44-ci-yml-required-check-invocations-44-44-44-exit-0-ws8-manifest-self-check-parity-holds-unchanged-from-the-prior-recording"
-      ],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-291-full-gate-summary.flow-agents-workflow.iteration-1-re-verify-full-gate-narrative-not-command-backed-by-design-npm-run-build-silent-exit-0-folded-here-not-recorded-as-a-standalone-command-backed-check-since-it-is-already-a-prerequisite-step-inside-every-npm-run-manifest-command-above-independently-reproduced-a-the-high-fix-claimed-under-flow-agents-actor-xcheck-override-actor-via-ensure-session-then-assignment-provider-status-self-actor-xcheck-override-actor-bare-with-a-fresh-liveness-heartbeat-stream-effective-state-held-reason-self-is-holder-would-have-been-reclaimable-pre-fix-confirmed-by-stripping-actor-key-from-the-same-record-and-re-running-the-identical-status-check-b-290-back-compat-the-same-record-with-actor-key-stripped-falls-back-to-serializeactor-record-actor-and-reproduces-the-pre-fix-reclaimable-classification-exactly-confirming-the-fallback-path-not-a-new-default-is-what-keeps-every-290-fixture-green-c-the-liveness-join-matches-the-override-actor-s-fresh-heartbeat-once-actor-key-is-present-re-confirmed-ac6-concurrency-independent-30-30-iteration-two-process-race-harness-one-winner-each-time-17-13-split-and-ac9-sanitization-2-verifier-authored-hostile-payloads-distinct-from-the-eval-s-own-fixtures-del-c1-byte-on-a-liveness-holder-actor-osc-8-hyperlink-bel-on-an-effective-state-json-assignee-zero-raw-control-codepoints-leaked-in-either-case-sanitized-non-control-text-still-present-after-the-guard-s-own-code-path-changed-under-f1",
-      "claimId": "kontourai-flow-agents-291-full-gate-summary.flow-agents-workflow.iteration-1-re-verify-full-gate-narrative-not-command-backed-by-design-npm-run-build-silent-exit-0-folded-here-not-recorded-as-a-standalone-command-backed-check-since-it-is-already-a-prerequisite-step-inside-every-npm-run-manifest-command-above-independently-reproduced-a-the-high-fix-claimed-under-flow-agents-actor-xcheck-override-actor-via-ensure-session-then-assignment-provider-status-self-actor-xcheck-override-actor-bare-with-a-fresh-liveness-heartbeat-stream-effective-state-held-reason-self-is-holder-would-have-been-reclaimable-pre-fix-confirmed-by-stripping-actor-key-from-the-same-record-and-re-running-the-identical-status-check-b-290-back-compat-the-same-record-with-actor-key-stripped-falls-back-to-serializeactor-record-actor-and-reproduces-the-pre-fix-reclaimable-classification-exactly-confirming-the-fallback-path-not-a-new-default-is-what-keeps-every-290-fixture-green-c-the-liveness-join-matches-the-override-actor-s-fresh-heartbeat-once-actor-key-is-present-re-confirmed-ac6-concurrency-independent-30-30-iteration-two-process-race-harness-one-winner-each-time-17-13-split-and-ac9-sanitization-2-verifier-authored-hostile-payloads-distinct-from-the-eval-s-own-fixtures-del-c1-byte-on-a-liveness-holder-actor-osc-8-hyperlink-bel-on-an-effective-state-json-assignee-zero-raw-control-codepoints-leaked-in-either-case-sanitized-non-control-text-still-present-after-the-guard-s-own-code-path-changed-under-f1",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:kontourai-flow-agents-291-full-gate-summary.flow-agents-workflow.iteration-1-re-verify-full-gate-narrative-not-command-backed-by-design-npm-run-build-silent-exit-0-folded-here-not-recorded-as-a-standalone-command-backed-check-since-it-is-already-a-prerequisite-step-inside-every-npm-run-manifest-command-above-independently-reproduced-a-the-high-fix-claimed-under-flow-agents-actor-xcheck-override-actor-via-ensure-session-then-assignment-provider-status-self-actor-xcheck-override-actor-bare-with-a-fresh-liveness-heartbeat-stream-effective-state-held-reason-self-is-holder-would-have-been-reclaimable-pre-fix-confirmed-by-stripping-actor-key-from-the-same-record-and-re-running-the-identical-status-check-b-290-back-compat-the-same-record-with-actor-key-stripped-falls-back-to-serializeactor-record-actor-and-reproduces-the-pre-fix-reclaimable-classification-exactly-confirming-the-fallback-path-not-a-new-default-is-what-keeps-every-290-fixture-green-c-the-liveness-join-matches-the-override-actor-s-fresh-heartbeat-once-actor-key-is-present-re-confirmed-ac6-concurrency-independent-30-30-iteration-two-process-race-harness-one-winner-each-time-17-13-split-and-ac9-sanitization-2-verifier-authored-hostile-payloads-distinct-from-the-eval-s-own-fixtures-del-c1-byte-on-a-liveness-holder-actor-osc-8-hyperlink-bel-on-an-effective-state-json-assignee-zero-raw-control-codepoints-leaked-in-either-case-sanitized-non-control-text-still-present-after-the-guard-s-own-code-path-changed-under-f1"
-      ],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-291-pre-existing-failure-baseline.flow-agents-workflow.three-eval-suites-carry-failures-independently-reproduced-as-pre-existing-baselines-unrelated-to-the-291-iteration-1-fix-test-goal-fit-hook-sh-1-fail-exit-1-test-goal-fit-escape-hatch-sh-5-fail-exit-1-test-session-resume-roundtrip-sh-13-fail-exit-1-identical-failure-counts-to-the-prior-pre-fix-verify-pass-confirming-the-iteration-1-changes-introduced-no-new-regressions-in-these-suites",
-      "claimId": "kontourai-flow-agents-291-pre-existing-failure-baseline.flow-agents-workflow.three-eval-suites-carry-failures-independently-reproduced-as-pre-existing-baselines-unrelated-to-the-291-iteration-1-fix-test-goal-fit-hook-sh-1-fail-exit-1-test-goal-fit-escape-hatch-sh-5-fail-exit-1-test-session-resume-roundtrip-sh-13-fail-exit-1-identical-failure-counts-to-the-prior-pre-fix-verify-pass-confirming-the-iteration-1-changes-introduced-no-new-regressions-in-these-suites",
-      "status": "assumed",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [
-        "ev:kontourai-flow-agents-291-pre-existing-failure-baseline.flow-agents-workflow.three-eval-suites-carry-failures-independently-reproduced-as-pre-existing-baselines-unrelated-to-the-291-iteration-1-fix-test-goal-fit-hook-sh-1-fail-exit-1-test-goal-fit-escape-hatch-sh-5-fail-exit-1-test-session-resume-roundtrip-sh-13-fail-exit-1-identical-failure-counts-to-the-prior-pre-fix-verify-pass-confirming-the-iteration-1-changes-introduced-no-new-regressions-in-these-suites"
-      ],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-291-ac1-ensure-session-refuses-fresh-other-actor-ensure-session-on-a-subject-with-a-fresh-other-actor-local-file-assignment-claim-liveness-fresh-actor-differs-exits-nonzero-with-a-remediation-message-naming-the-holder-and-suggesting-other-work-or-takeover-source-new-guard-block-in-src-cli-workflow-sidecar-ts-ensuresession-inserted-before-fs-mkdirsync-dir.flow-agents-workflow.ac1-ensure-session-refuses-fresh-other-actor-ensure-session-on-a-subject-with-a-fresh-other-actor-local-file-assignment-claim-liveness-fresh-actor-differs-exits-nonzero-with-a-remediation-message-naming-the-holder-and-suggesting-other-work-or-takeover-source-new-guard-block-in-src-cli-workflow-sidecar-ts-ensuresession-inserted-before-fs-mkdirsync-dir",
-      "claimId": "kontourai-flow-agents-291-ac1-ensure-session-refuses-fresh-other-actor-ensure-session-on-a-subject-with-a-fresh-other-actor-local-file-assignment-claim-liveness-fresh-actor-differs-exits-nonzero-with-a-remediation-message-naming-the-holder-and-suggesting-other-work-or-takeover-source-new-guard-block-in-src-cli-workflow-sidecar-ts-ensuresession-inserted-before-fs-mkdirsync-dir.flow-agents-workflow.ac1-ensure-session-refuses-fresh-other-actor-ensure-session-on-a-subject-with-a-fresh-other-actor-local-file-assignment-claim-liveness-fresh-actor-differs-exits-nonzero-with-a-remediation-message-naming-the-holder-and-suggesting-other-work-or-takeover-source-new-guard-block-in-src-cli-workflow-sidecar-ts-ensuresession-inserted-before-fs-mkdirsync-dir",
+      "id": "evt:i339-record-identity-ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0.flow-agents-workflow.ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0",
+      "claimId": "i339-record-identity-ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0.flow-agents-workflow.ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
+      "createdAt": "2026-07-04T15:59:01Z",
+      "verifiedAt": "2026-07-04T15:59:01Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-291-ac2-ensure-session-supersede-stale-only-ensure-session-on-a-reclaimable-stale-subject-refuses-without-supersede-stale-remediation-names-the-flag-and-succeeds-transitioning-the-assignment-record-to-the-new-actor-via-the-reused-supersede-logic-when-supersede-stale-is-passed-source-src-cli-assignment-provider-ts-performlocalsupersede-new-export-called-from-ensuresession.flow-agents-workflow.ac2-ensure-session-supersede-stale-only-ensure-session-on-a-reclaimable-stale-subject-refuses-without-supersede-stale-remediation-names-the-flag-and-succeeds-transitioning-the-assignment-record-to-the-new-actor-via-the-reused-supersede-logic-when-supersede-stale-is-passed-source-src-cli-assignment-provider-ts-performlocalsupersede-new-export-called-from-ensuresession",
-      "claimId": "kontourai-flow-agents-291-ac2-ensure-session-supersede-stale-only-ensure-session-on-a-reclaimable-stale-subject-refuses-without-supersede-stale-remediation-names-the-flag-and-succeeds-transitioning-the-assignment-record-to-the-new-actor-via-the-reused-supersede-logic-when-supersede-stale-is-passed-source-src-cli-assignment-provider-ts-performlocalsupersede-new-export-called-from-ensuresession.flow-agents-workflow.ac2-ensure-session-supersede-stale-only-ensure-session-on-a-reclaimable-stale-subject-refuses-without-supersede-stale-remediation-names-the-flag-and-succeeds-transitioning-the-assignment-record-to-the-new-actor-via-the-reused-supersede-logic-when-supersede-stale-is-passed-source-src-cli-assignment-provider-ts-performlocalsupersede-new-export-called-from-ensuresession",
+      "id": "evt:i339-record-identity-ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters.flow-agents-workflow.ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters",
+      "claimId": "i339-record-identity-ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters.flow-agents-workflow.ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
+      "createdAt": "2026-07-04T15:59:01Z",
+      "verifiedAt": "2026-07-04T15:59:01Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-291-ac3-ensure-session-human-held-ask-first-ensure-session-on-a-human-held-subject-refuses-never-auto-reclaims-remediation-asks-the-user-to-confirm-before-proceeding-source-the-same-guard-block-s-human-held-branch.flow-agents-workflow.ac3-ensure-session-human-held-ask-first-ensure-session-on-a-human-held-subject-refuses-never-auto-reclaims-remediation-asks-the-user-to-confirm-before-proceeding-source-the-same-guard-block-s-human-held-branch",
-      "claimId": "kontourai-flow-agents-291-ac3-ensure-session-human-held-ask-first-ensure-session-on-a-human-held-subject-refuses-never-auto-reclaims-remediation-asks-the-user-to-confirm-before-proceeding-source-the-same-guard-block-s-human-held-branch.flow-agents-workflow.ac3-ensure-session-human-held-ask-first-ensure-session-on-a-human-held-subject-refuses-never-auto-reclaims-remediation-asks-the-user-to-confirm-before-proceeding-source-the-same-guard-block-s-human-held-branch",
+      "id": "evt:i339-record-identity-ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters.flow-agents-workflow.ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters",
+      "claimId": "i339-record-identity-ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters.flow-agents-workflow.ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
+      "createdAt": "2026-07-04T15:59:01Z",
+      "verifiedAt": "2026-07-04T15:59:01Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-291-ac4-ensure-session-self-reentry-ensure-session-resuming-a-session-under-the-same-actor-s-own-fresh-claim-succeeds-with-no-spurious-refusal-source-guard-s-self-is-holder-branch.flow-agents-workflow.ac4-ensure-session-self-reentry-ensure-session-resuming-a-session-under-the-same-actor-s-own-fresh-claim-succeeds-with-no-spurious-refusal-source-guard-s-self-is-holder-branch",
-      "claimId": "kontourai-flow-agents-291-ac4-ensure-session-self-reentry-ensure-session-resuming-a-session-under-the-same-actor-s-own-fresh-claim-succeeds-with-no-spurious-refusal-source-guard-s-self-is-holder-branch.flow-agents-workflow.ac4-ensure-session-self-reentry-ensure-session-resuming-a-session-under-the-same-actor-s-own-fresh-claim-succeeds-with-no-spurious-refusal-source-guard-s-self-is-holder-branch",
+      "id": "evt:i339-record-identity-ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md.flow-agents-workflow.ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md",
+      "claimId": "i339-record-identity-ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md.flow-agents-workflow.ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
+      "createdAt": "2026-07-04T15:59:01Z",
+      "verifiedAt": "2026-07-04T15:59:01Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-291-ac5-ensure-session-claims-on-free-ensure-session-on-a-free-subject-succeeds-and-establishes-a-durable-local-file-assignment-claim-for-the-entering-actor-verified-via-assignment-provider-status-immediately-after-source-guard-s-free-branch-calling-performlocalclaim.flow-agents-workflow.ac5-ensure-session-claims-on-free-ensure-session-on-a-free-subject-succeeds-and-establishes-a-durable-local-file-assignment-claim-for-the-entering-actor-verified-via-assignment-provider-status-immediately-after-source-guard-s-free-branch-calling-performlocalclaim",
-      "claimId": "kontourai-flow-agents-291-ac5-ensure-session-claims-on-free-ensure-session-on-a-free-subject-succeeds-and-establishes-a-durable-local-file-assignment-claim-for-the-entering-actor-verified-via-assignment-provider-status-immediately-after-source-guard-s-free-branch-calling-performlocalclaim.flow-agents-workflow.ac5-ensure-session-claims-on-free-ensure-session-on-a-free-subject-succeeds-and-establishes-a-durable-local-file-assignment-claim-for-the-entering-actor-verified-via-assignment-provider-status-immediately-after-source-guard-s-free-branch-calling-performlocalclaim",
+      "id": "evt:i339-record-identity-ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated.flow-agents-workflow.ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated",
+      "claimId": "i339-record-identity-ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated.flow-agents-workflow.ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-291-ac6-ensure-session-concurrent-race-safety-two-concurrent-ensure-session-invocations-on-the-same-fresh-free-subject-never-both-become-the-claim-holder-one-wins-and-the-loser-sees-a-held-refused-outcome-on-retry-source-existing-root-level-withlock-in-workflow-sidecar-ts-main-unchanged-plus-withsubjectlock-in-assignment-provider-ts-unchanged-now-reached-via-the-new-exported-performlocalclaim-performlocalsupersede.flow-agents-workflow.ac6-ensure-session-concurrent-race-safety-two-concurrent-ensure-session-invocations-on-the-same-fresh-free-subject-never-both-become-the-claim-holder-one-wins-and-the-loser-sees-a-held-refused-outcome-on-retry-source-existing-root-level-withlock-in-workflow-sidecar-ts-main-unchanged-plus-withsubjectlock-in-assignment-provider-ts-unchanged-now-reached-via-the-new-exported-performlocalclaim-performlocalsupersede",
-      "claimId": "kontourai-flow-agents-291-ac6-ensure-session-concurrent-race-safety-two-concurrent-ensure-session-invocations-on-the-same-fresh-free-subject-never-both-become-the-claim-holder-one-wins-and-the-loser-sees-a-held-refused-outcome-on-retry-source-existing-root-level-withlock-in-workflow-sidecar-ts-main-unchanged-plus-withsubjectlock-in-assignment-provider-ts-unchanged-now-reached-via-the-new-exported-performlocalclaim-performlocalsupersede.flow-agents-workflow.ac6-ensure-session-concurrent-race-safety-two-concurrent-ensure-session-invocations-on-the-same-fresh-free-subject-never-both-become-the-claim-holder-one-wins-and-the-loser-sees-a-held-refused-outcome-on-retry-source-existing-root-level-withlock-in-workflow-sidecar-ts-main-unchanged-plus-withsubjectlock-in-assignment-provider-ts-unchanged-now-reached-via-the-new-exported-performlocalclaim-performlocalsupersede",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-291-ac7-current-json-per-actor-isolation-after-actor-b-runs-ensure-session-on-a-different-subject-actor-a-s-own-current-session-resolution-workflow-sidecar-current-actor-aware-still-resolves-to-a-s-own-session-directory-source-per-actor-dual-write-read-in-writecurrent-currentdir-src-cli-workflow-sidecar-ts.flow-agents-workflow.ac7-current-json-per-actor-isolation-after-actor-b-runs-ensure-session-on-a-different-subject-actor-a-s-own-current-session-resolution-workflow-sidecar-current-actor-aware-still-resolves-to-a-s-own-session-directory-source-per-actor-dual-write-read-in-writecurrent-currentdir-src-cli-workflow-sidecar-ts",
-      "claimId": "kontourai-flow-agents-291-ac7-current-json-per-actor-isolation-after-actor-b-runs-ensure-session-on-a-different-subject-actor-a-s-own-current-session-resolution-workflow-sidecar-current-actor-aware-still-resolves-to-a-s-own-session-directory-source-per-actor-dual-write-read-in-writecurrent-currentdir-src-cli-workflow-sidecar-ts.flow-agents-workflow.ac7-current-json-per-actor-isolation-after-actor-b-runs-ensure-session-on-a-different-subject-actor-a-s-own-current-session-resolution-workflow-sidecar-current-actor-aware-still-resolves-to-a-s-own-session-directory-source-per-actor-dual-write-read-in-writecurrent-currentdir-src-cli-workflow-sidecar-ts",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-291-ac8-current-json-compat-shim-fallback-an-actor-with-no-per-actor-current-file-yet-or-an-unresolved-actor-still-resolves-via-the-legacy-global-current-json-exactly-as-before-this-change-every-named-existing-consumer-stop-goal-fit-js-evidence-capture-js-liveness-heartbeat-js-flow-agents-statusline-js-produces-identical-output-against-a-legacy-only-pre-migration-artifact-root-fixture-source-fallback-branch-in-scripts-hooks-lib-current-pointer-js-readcurrentpointer.flow-agents-workflow.ac8-current-json-compat-shim-fallback-an-actor-with-no-per-actor-current-file-yet-or-an-unresolved-actor-still-resolves-via-the-legacy-global-current-json-exactly-as-before-this-change-every-named-existing-consumer-stop-goal-fit-js-evidence-capture-js-liveness-heartbeat-js-flow-agents-statusline-js-produces-identical-output-against-a-legacy-only-pre-migration-artifact-root-fixture-source-fallback-branch-in-scripts-hooks-lib-current-pointer-js-readcurrentpointer",
-      "claimId": "kontourai-flow-agents-291-ac8-current-json-compat-shim-fallback-an-actor-with-no-per-actor-current-file-yet-or-an-unresolved-actor-still-resolves-via-the-legacy-global-current-json-exactly-as-before-this-change-every-named-existing-consumer-stop-goal-fit-js-evidence-capture-js-liveness-heartbeat-js-flow-agents-statusline-js-produces-identical-output-against-a-legacy-only-pre-migration-artifact-root-fixture-source-fallback-branch-in-scripts-hooks-lib-current-pointer-js-readcurrentpointer.flow-agents-workflow.ac8-current-json-compat-shim-fallback-an-actor-with-no-per-actor-current-file-yet-or-an-unresolved-actor-still-resolves-via-the-legacy-global-current-json-exactly-as-before-this-change-every-named-existing-consumer-stop-goal-fit-js-evidence-capture-js-liveness-heartbeat-js-flow-agents-statusline-js-produces-identical-output-against-a-legacy-only-pre-migration-artifact-root-fixture-source-fallback-branch-in-scripts-hooks-lib-current-pointer-js-readcurrentpointer",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-291-ac9-remediation-sanitized-refusal-remediation-messages-never-contain-raw-control-ansi-bytes-from-actor-holder-assignee-reason-fields-verified-against-a-crafted-hostile-liveness-event-and-a-hostile-effective-state-json-fixture-source-reuse-of-stripcontrolcharsfordisplay-already-in-workflow-sidecar-ts-at-every-interpolation-site-in-the-new-guard-s-die-messages.flow-agents-workflow.ac9-remediation-sanitized-refusal-remediation-messages-never-contain-raw-control-ansi-bytes-from-actor-holder-assignee-reason-fields-verified-against-a-crafted-hostile-liveness-event-and-a-hostile-effective-state-json-fixture-source-reuse-of-stripcontrolcharsfordisplay-already-in-workflow-sidecar-ts-at-every-interpolation-site-in-the-new-guard-s-die-messages",
-      "claimId": "kontourai-flow-agents-291-ac9-remediation-sanitized-refusal-remediation-messages-never-contain-raw-control-ansi-bytes-from-actor-holder-assignee-reason-fields-verified-against-a-crafted-hostile-liveness-event-and-a-hostile-effective-state-json-fixture-source-reuse-of-stripcontrolcharsfordisplay-already-in-workflow-sidecar-ts-at-every-interpolation-site-in-the-new-guard-s-die-messages.flow-agents-workflow.ac9-remediation-sanitized-refusal-remediation-messages-never-contain-raw-control-ansi-bytes-from-actor-holder-assignee-reason-fields-verified-against-a-crafted-hostile-liveness-event-and-a-hostile-effective-state-json-fixture-source-reuse-of-stripcontrolcharsfordisplay-already-in-workflow-sidecar-ts-at-every-interpolation-site-in-the-new-guard-s-die-messages",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-291-ac10-config-protection-covers-per-actor-current-config-protection-js-s-protected-path-and-bash-redirect-detectors-block-direct-writes-redirects-to-kontourai-flow-agents-current-actor-json-exactly-as-they-already-do-for-kontourai-flow-agents-current-json-source-new-pattern-in-checkprotectedpathpattern-and-redirect-protected-re.flow-agents-workflow.ac10-config-protection-covers-per-actor-current-config-protection-js-s-protected-path-and-bash-redirect-detectors-block-direct-writes-redirects-to-kontourai-flow-agents-current-actor-json-exactly-as-they-already-do-for-kontourai-flow-agents-current-json-source-new-pattern-in-checkprotectedpathpattern-and-redirect-protected-re",
-      "claimId": "kontourai-flow-agents-291-ac10-config-protection-covers-per-actor-current-config-protection-js-s-protected-path-and-bash-redirect-detectors-block-direct-writes-redirects-to-kontourai-flow-agents-current-actor-json-exactly-as-they-already-do-for-kontourai-flow-agents-current-json-source-new-pattern-in-checkprotectedpathpattern-and-redirect-protected-re.flow-agents-workflow.ac10-config-protection-covers-per-actor-current-config-protection-js-s-protected-path-and-bash-redirect-detectors-block-direct-writes-redirects-to-kontourai-flow-agents-current-actor-json-exactly-as-they-already-do-for-kontourai-flow-agents-current-json-source-new-pattern-in-checkprotectedpathpattern-and-redirect-protected-re",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-291-ac11-gate-scoping-actor-correct-record-gate-claim-writetrustbundle-s-flowdefinition-dual-emit-scoping-resolves-active-flow-id-active-step-id-from-the-calling-actor-s-own-current-pointer-not-a-different-actor-s-more-recently-written-legacy-pointer-source-actor-aware-update-to-declaredclaimtypesfor-writetrustbundle-s-scopedflowagentsdir-check-and-resolveactiveflowstep-in-src-lib-flow-resolver-ts.flow-agents-workflow.ac11-gate-scoping-actor-correct-record-gate-claim-writetrustbundle-s-flowdefinition-dual-emit-scoping-resolves-active-flow-id-active-step-id-from-the-calling-actor-s-own-current-pointer-not-a-different-actor-s-more-recently-written-legacy-pointer-source-actor-aware-update-to-declaredclaimtypesfor-writetrustbundle-s-scopedflowagentsdir-check-and-resolveactiveflowstep-in-src-lib-flow-resolver-ts",
-      "claimId": "kontourai-flow-agents-291-ac11-gate-scoping-actor-correct-record-gate-claim-writetrustbundle-s-flowdefinition-dual-emit-scoping-resolves-active-flow-id-active-step-id-from-the-calling-actor-s-own-current-pointer-not-a-different-actor-s-more-recently-written-legacy-pointer-source-actor-aware-update-to-declaredclaimtypesfor-writetrustbundle-s-scopedflowagentsdir-check-and-resolveactiveflowstep-in-src-lib-flow-resolver-ts.flow-agents-workflow.ac11-gate-scoping-actor-correct-record-gate-claim-writetrustbundle-s-flowdefinition-dual-emit-scoping-resolves-active-flow-id-active-step-id-from-the-calling-actor-s-own-current-pointer-not-a-different-actor-s-more-recently-written-legacy-pointer-source-actor-aware-update-to-declaredclaimtypesfor-writetrustbundle-s-scopedflowagentsdir-check-and-resolveactiveflowstep-in-src-lib-flow-resolver-ts",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-04T16:05:00Z",
-      "verifiedAt": "2026-07-04T16:05:00Z"
+      "createdAt": "2026-07-04T15:59:01Z",
+      "verifiedAt": "2026-07-04T15:59:01Z"
     }
   ]
 }
