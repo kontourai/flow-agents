@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 5,
+  "source": "reconcile-preflight-fixture:disputed-critique-unsuperseded",
+  "note": "#356 shape 3: an un-superseded workflow.critique.review claim with a 'fail' verdict derives status 'disputed' — session-local-failed divergence (a disputed critique always blocks reconcile unless a later same-reviewer pass superseded it via metadata.superseded_by).",
+  "claims": [
+    {
+      "id": "c-disputed-critique",
+      "claimType": "workflow.critique.review",
+      "value": "fail",
+      "status": "disputed",
+      "subjectId": "reconcile-preflight-fixture/review-1",
+      "facet": "flow-agents.workflow",
+      "subjectType": "workflow-critique",
+      "fieldOrBehavior": "Found a critical security issue in the auth handler.",
+      "createdAt": "2026-07-04T00:00:00Z",
+      "updatedAt": "2026-07-04T00:00:00Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": { "origin": "critique", "reviewer": "tool-code-reviewer", "reviewed_at": "2026-07-04T00:00:00Z" }
+    }
+  ],
+  "evidence": [],
+  "policies": [
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": ["A verified verification event must support a workflow.critique.review claim."],
+      "reviewAuthority": "system",
+      "validityRule": { "kind": "manual" },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt-disputed-critique",
+      "claimId": "c-disputed-critique",
+      "status": "disputed",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-04T00:00:00Z",
+      "verifiedAt": "2026-07-04T00:00:00Z"
+    }
+  ]
+}

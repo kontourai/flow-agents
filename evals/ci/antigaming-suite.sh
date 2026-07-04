@@ -35,6 +35,7 @@ TESTS=(
   "evals/integration/test_trust_reconcile_manifest.sh"
   "evals/integration/test_trust_reconcile_mixed_bundle.sh"
   "evals/integration/test_trust_reconcile_negatives.sh"
+  "evals/integration/test_reconcile_preflight.sh"
   "evals/integration/test_goal_fit_ghost_session.sh"
 )
 

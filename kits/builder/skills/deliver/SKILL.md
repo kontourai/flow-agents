@@ -247,6 +247,25 @@ After review, verification, evidence, and Goal Fit are clean for the same diff:
    npm run workflow:sidecar -- publish-delivery .kontourai/flow-agents/<slug>
    ```
 
+   **#356 — local reconcile-shape preflight.** `publish-delivery`/`record-release` now run a
+   local, pre-push **reconcile-shape preflight** on the session's `trust.bundle` before
+   copying anything into `delivery/`. It reuses the exact same claim-shape classification
+   `scripts/ci/trust-reconcile.js` enforces in CI (`scripts/lib/reconcile-shape.js`), so it
+   can never silently drift from what the required Trust Reconcile check actually does. If
+   the bundle is ADR-0020-invalid (e.g. a command-backed claim whose command isn't in the
+   reconcile manifest, an unwaived `assumed` claim, or an un-superseded disputed critique),
+   publish is **refused, fail-closed** — non-zero exit, a loud `REFUSING to publish` message
+   naming each invalid claim and its fix, and nothing is written to `delivery/`. This is
+   distinct from the existing fail-**soft** behavior when no `trust.bundle` exists yet at all
+   (still a silent no-op). When refused: fix the named claim (re-record evidence, add a
+   missing waiver, or supersede the disputed critique), then retry — do not attempt to push
+   past the refusal. You can also run the same check manually, any time before publish, to
+   catch a shape issue locally instead of discovering it minutes later in CI:
+
+   ```bash
+   npm run workflow:sidecar -- reconcile-preflight .kontourai/flow-agents/<slug>
+   ```
+
    **#379 — per-session delivery paths.** `publishDelivery()` writes to a PER-SESSION path
    `delivery/<slug>/trust.bundle` (+ `trust.checkpoint.json` companions), where `<slug>` is
    your session artifact dir's basename — NOT the old shared flat `delivery/trust.bundle`.
