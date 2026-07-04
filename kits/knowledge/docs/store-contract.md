@@ -1142,3 +1142,103 @@ The default adapter persists it at `<store_root>/alias-index.json`
 
 An independent adapter conforms to this addendum when the `identity: *` sections of the contract
 suite (`evals/contract-suite/suite.test.js`, §15–§17) pass against it.
+
+---
+
+## Addendum I — Inbound-Reference Integrity (doc→store citations, #340)
+
+### I.1 Motivation
+
+The store's graph (§2, §5) and the hygiene audits (Addenda D–G) cover record→record links and
+survey **records**. Nothing resolves the references a human actually reads: the record ids that
+curated docs — `NOW.md`, `strategy/*.md`, a roadmap — cite **into** the store. A store restructure
+that re-files or retires a record silently severs every inbound doc citation, and every existing
+gate still reports PASS. Field evidence (design partner `kontourai/ops`): `verify-ops` stayed green
+for weeks while `NOW.md` and `strategy/vision.md` cited unresolvable short-ids (`12cc5573`,
+`f5df7b4c`). This addendum makes that rot **fail closed**.
+
+The check is a **read-only** flow (`KnowledgeFlowRunner.checkInboundReferences`) in the style of the
+Addenda D–G audits: it mutates no record, appends no mutation-log entry, and forks no mutation path.
+It resolves citations through the unchanged Addendum H identity path — it adds no new query surface.
+
+### I.2 Options
+
+| Option | Type | Default | Meaning |
+|---|---|---|---|
+| `docGlobs` | string[] | `[]` | Globs (relative to `docsRoot`) whose matching docs are scanned. **Empty = opt-in no-op pass** (Addenda D–G convention). Supports `*` (within a segment), `**` (across segments), `?`. |
+| `docsRoot` | string | `workspace`, then `cwd` | Root the globs resolve against (the docs live outside the store). |
+| `markers` | string[] | `["rec:", "record:"]` | Citation-marker prefixes that opt a following short-id/slug into **definite** citation status (I.3). |
+
+### I.3 Citation Forms — the commit-SHA precision problem
+
+A bare 8-hex token is inherently ambiguous: `12cc5573` is equally a record short-id and an
+abbreviated git commit SHA. Failing on every non-resolving 8-hex token would flag every SHA in prose
+(the gate cries wolf and gets muted); never failing on them re-opens the exact rot this closes. The
+check resolves the tension with **two tiers**:
+
+**Definite citations** — unmistakably a record reference, so resolved regardless of whether they
+currently resolve, and an unresolved one **FAILS** (fail closed):
+
+| Form | Example | Why it is SHA-safe |
+|---|---|---|
+| Full UUID (8-4-4-4-12 hex) | `aaaaaaaa-1111-4111-8111-111111111111` | The hyphenated shape never collides with a git SHA (40/abbrev hex, no hyphens) or prose. |
+| Marker + token | `rec:12cc5573`, `record:decision.strategy/gtm` | The marker is explicit intent; the token may be a short-id or slug. |
+| Wikilink | `[[decision.strategy/gtm]]` | The kit's own link syntax. |
+
+**Candidate bare short-ids** — a standalone ≥8-hex token with **no** citation form is included in
+the index **only when it already resolves** to a record. A non-resolving bare hex is indistinguishable
+from a commit SHA, so it is **ignored** — never indexed, never failed.
+
+> **Deliberate, documented miss.** A *broken* bare-hex short-id (no marker/wikilink) is invisible to
+> the check — by construction, since it does not resolve. This is a precision-over-recall choice:
+> **zero false positives on commit hashes**, at the cost of not catching bare-hex short-id rot until
+> the doc adopts a citation form. To get fail-closed protection for a short-id or slug, cite it in a
+> marker or wikilink form; full-UUID citations are protected with zero configuration. Migrating a
+> consuming repo's house style to a marker is an ops-repo change (a non-goal here).
+
+Every extracted token is resolved via `get(token)` (Addendum H: exact id → slug alias → unambiguous
+≥8-char prefix). `null` → unresolved; an `AMBIGUOUS_ID` throw is caught and reported as an unresolved
+citation with `reason: "ambiguous"` (fail closed — an ambiguous citation does not uniquely resolve).
+
+### I.4 Fail-Closed Semantics
+
+The result's `ok` is `true` **iff** `unresolved` is empty — i.e. every definite citation resolved. A
+caller (e.g. ops `verify-ops`) treats `ok === false` as a gate failure. Each `unresolved` entry names
+`doc`, `line`, `column`, `token`, `form`, and `reason` so the break is actionable. An empty scan with
+configured globs that cite nothing is a pass; an empty scan from **no** globs is the explicit opt-in
+no-op — neither is an "empty success" that masks an unresolved definite citation.
+
+### I.5 Citation Index (result shape)
+
+The result exposes the full citation index so downstream flows (supersede/retire propagation) can
+enumerate citers:
+
+```json
+{
+  "ok": true,
+  "scanned": ["NOW.md", "strategy/vision.md"],
+  "citations": [
+    { "doc": "NOW.md", "line": 3, "column": 17, "token": "aaaaaaaa-1111-4111-8111-111111111111",
+      "form": "uuid", "resolved": true, "recordId": "aaaaaaaa-1111-4111-8111-111111111111" }
+  ],
+  "unresolved": [
+    { "doc": "NOW.md", "line": 5, "column": 9, "token": "deadbeef-0000-4000-8000-000000000000",
+      "form": "uuid", "reason": "not-found" }
+  ],
+  "byDoc":    { "NOW.md": [ { "token": "…", "form": "uuid", "resolved": true, "recordId": "…", "line": 3, "column": 17 } ] },
+  "byRecord": { "aaaaaaaa-1111-4111-8111-111111111111": [ { "doc": "NOW.md", "line": 3, "column": 17, "token": "…", "form": "uuid" } ] }
+}
+```
+
+- `citations` — every recorded citation (definite ones, plus bare candidates that resolved).
+- `byDoc` — doc → its cited record ids (every scanned doc appears, even if it cites nothing).
+- `byRecord` — record id → its citers (the doc→record edge; a natural typed edge under #317).
+
+### I.6 Conformance
+
+An adapter conforms to this addendum when the inbound-reference suite
+(`evals/inbound-references/suite.test.js`) passes against it — AC1 (three forms extracted +
+resolved), AC2 (fail closed on a nonexistent id; no-op pass with no globs), AC3 (read-only), and the
+commit-SHA-safety case. The suite is parameterized by `KNOWLEDGE_ADAPTER`, so conformance is required
+of every adapter (AC4). Because the check reuses `get`, any Addendum-H-conforming adapter satisfies it
+without new storage.

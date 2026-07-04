@@ -32,6 +32,7 @@
  * @module adapters/flow-runner
  */
 
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { KnowledgeTelemetry } from "./telemetry.js";
@@ -454,6 +455,213 @@ export function defaultContradictionDetector(recordA, recordB) {
     }
   }
   return null;
+}
+
+// ===========================================================================
+// Inbound-reference integrity — doc→store citation extraction  (#340)
+//
+// The hygiene audits (Addenda D–G) survey *records*; nothing resolves the
+// references a human reads — the ids curated docs (NOW.md, strategy/*.md) cite
+// *into* the store. When a store restructure severs those citations, every gate
+// still reports PASS. This scan closes that: it extracts record citations from
+// caller-configured doc globs and resolves each via the #339 identity path
+// (exact id → slug alias → unambiguous ≥8-char prefix), failing closed on any
+// unresolvable *definite* citation.
+//
+// Extraction precision — the commit-SHA problem
+// ---------------------------------------------
+// A bare 8-hex token is ambiguous: `12cc5573` is equally a record short-id and
+// an abbreviated git commit SHA. Failing on every non-resolving 8-hex token
+// would flag every SHA in prose (the gate cries wolf and gets disabled); never
+// failing on them re-opens the exact rot this issue closes. We resolve the
+// tension by recognizing two tiers (store-contract.md Addendum I):
+//
+//   DEFINITE citation forms — a token is unmistakably a citation, so it is
+//   resolved regardless of whether it currently resolves, and a miss FAILS:
+//     • full UUID (8-4-4-4-12 hex) — the hyphenated shape never collides with a
+//       git SHA (40/abbrev hex, no hyphens) or prose, so a bare UUID qualifies;
+//     • a configured citation marker (default `rec:` / `record:`) wrapping a
+//       short-id or slug, e.g. `rec:12cc5573`, `record:decision.strategy/gtm`;
+//     • a wikilink `[[token]]` (the kit's own link syntax).
+//
+//   CANDIDATE bare short-ids — a standalone ≥8-hex token with no citation form
+//   is included in the index ONLY when it already resolves to a record. A
+//   non-resolving bare hex is indistinguishable from a commit SHA, so it is
+//   IGNORED (never failed). This is the deliberate, documented miss: a *broken*
+//   bare-hex short-id (no marker/wikilink) is invisible — cite short-ids in a
+//   marker/wikilink form to get fail-closed protection. Full-UUID citations are
+//   protected with zero configuration.
+//
+// This is a precision-over-recall choice: zero false positives on commit
+// hashes, at the cost of not catching bare-hex short-id rot until the doc
+// adopts a citation form (an ops-repo house-style change — a non-goal here).
+// ---------------------------------------------------------------------------
+
+// Default marker prefixes that opt a following short-id/slug into DEFINITE
+// citation status. Caller-overridable via `options.markers`.
+export const DEFAULT_CITATION_MARKERS = ["rec:", "record:"];
+
+// Canonical UUID (8-4-4-4-12 hex). Self-identifying — always a definite citation.
+const UUID_RE = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+
+// Wikilink target: [[token]] or [[token|label]] (label discarded).
+const WIKILINK_CITE_RE = /\[\[([^\]|\n]+?)(?:\|[^\]\n]*)?\]\]/g;
+
+// A standalone hex run 8..40 chars long — a bare short-id / SHA candidate.
+const BARE_HEX_RE = /(?<![0-9a-z-])[0-9a-f]{8,40}(?![0-9a-z-])/gi;
+
+// The token a marker may wrap: a slug/short-id character run (hex, slug chars).
+// Kept permissive — #339 resolution semantics decide what actually resolves.
+const MARKER_TOKEN_CHARS = "[A-Za-z0-9][A-Za-z0-9._/-]*";
+
+/**
+ * Translate a caller glob (`NOW.md`, `strategy/*.md`, `docs/**\/*.md`) into an
+ * anchored RegExp over POSIX-style relative paths. `*` matches within a path
+ * segment; `**` spans segments; `?` matches one non-slash char. Zero-dep.
+ */
+function globToRegExp(glob) {
+  let re = "";
+  for (let i = 0; i < glob.length; i += 1) {
+    const c = glob[i];
+    if (c === "*") {
+      if (glob[i + 1] === "*") {
+        // `**` — span zero or more path segments.
+        if (glob[i + 2] === "/") { re += "(?:.*/)?"; i += 2; }
+        else { re += ".*"; i += 1; }
+      } else {
+        re += "[^/]*";
+      }
+    } else if (c === "?") {
+      re += "[^/]";
+    } else if ("\\^$.|+()[]{}".includes(c)) {
+      re += `\\${c}`;
+    } else {
+      re += c;
+    }
+  }
+  return new RegExp(`^${re}$`);
+}
+
+/**
+ * Collect files under `rootDir` matching any of `globs`, returned as POSIX-style
+ * paths relative to `rootDir`, sorted for determinism. Walks the tree once,
+ * skipping VCS/dependency noise (`.git`, `node_modules`). A glob with no
+ * wildcard is honoured even if the walk would skip its directory.
+ */
+function collectDocs(rootDir, globs) {
+  const matchers = globs.map(globToRegExp);
+  const out = new Set();
+
+  const SKIP = new Set([".git", "node_modules"]);
+  const walk = (absDir, relDir) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(absDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const rel = relDir ? `${relDir}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (SKIP.has(entry.name)) continue;
+        walk(path.join(absDir, entry.name), rel);
+      } else if (entry.isFile()) {
+        if (matchers.some((m) => m.test(rel))) out.add(rel);
+      }
+    }
+  };
+  walk(rootDir, "");
+
+  // Also honour literal (wildcard-free) globs directly — covers a file the walk
+  // might not reach and keeps single-file configs O(1).
+  for (const glob of globs) {
+    if (!/[*?]/.test(glob)) {
+      const abs = path.join(rootDir, glob);
+      try {
+        if (fs.statSync(abs).isFile()) out.add(glob.split(path.sep).join("/"));
+      } catch { /* not present — reported as an empty scan for that glob */ }
+    }
+  }
+  return [...out].sort();
+}
+
+/**
+ * Extract DEFINITE citations (uuid | marker | wikilink) plus CANDIDATE bare
+ * short-ids from one line. Returns citation descriptors with 1-based line/column
+ * so failures can name the exact location. Overlapping spans are claimed by the
+ * higher-priority form first (marker/wikilink/uuid before bare) so a token is
+ * never double-counted.
+ *
+ * @param {string} line
+ * @param {number} lineNo   1-based line number
+ * @param {string[]} markers
+ * @returns {Array<{ line:number, column:number, token:string, form:string }>}
+ */
+function extractLineCitations(line, lineNo, markers) {
+  const found = [];
+  const claimed = []; // [start,end) offsets already consumed by a higher-priority form
+
+  const overlaps = (start, end) =>
+    claimed.some(([s, e]) => start < e && end > s);
+  const claim = (start, end, token, form) => {
+    if (overlaps(start, end)) return;
+    claimed.push([start, end]);
+    found.push({ line: lineNo, column: start + 1, token: token.trim(), form });
+  };
+
+  // 1. Wikilinks (highest priority — explicit kit link syntax).
+  for (const m of line.matchAll(WIKILINK_CITE_RE)) {
+    const token = m[1];
+    if (token && token.trim()) claim(m.index, m.index + m[0].length, token, "wikilink");
+  }
+
+  // 2. Markers (rec: / record: …) wrapping a slug/short-id.
+  for (const marker of markers) {
+    const markerRe = new RegExp(
+      `${marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(${MARKER_TOKEN_CHARS})`,
+      "g"
+    );
+    for (const m of line.matchAll(markerRe)) {
+      const token = m[1];
+      const tokenStart = m.index + m[0].length - token.length;
+      claim(tokenStart, m.index + m[0].length, token, "marker");
+    }
+  }
+
+  // 3. Full UUIDs (self-identifying; also captures a bare UUID not in a form).
+  for (const m of line.matchAll(UUID_RE)) {
+    claim(m.index, m.index + m[0].length, m[0], "uuid");
+  }
+
+  // 4. Bare hex short-id CANDIDATES — resolution decides inclusion later.
+  for (const m of line.matchAll(BARE_HEX_RE)) {
+    claim(m.index, m.index + m[0].length, m[0], "bare");
+  }
+
+  return found;
+}
+
+/**
+ * Resolve a citation token against the store via the #339 identity path.
+ * `store.get(token)` accepts an exact id, slug alias, or unambiguous ≥8-char
+ * prefix; returns `null` when it resolves to nothing and throws `AMBIGUOUS_ID`
+ * when a prefix collides. Both non-resolution modes are reported (never thrown
+ * out of the scan) so one bad token cannot abort the whole check.
+ *
+ * @returns {Promise<{ resolved:boolean, recordId:string|null, reason?:string, matches?:string[] }>}
+ */
+async function resolveCitation(store, token) {
+  let record;
+  try {
+    record = await store.get(token);
+  } catch (err) {
+    if (err && err.code === "AMBIGUOUS_ID") {
+      return { resolved: false, recordId: null, reason: "ambiguous", matches: err.matches };
+    }
+    throw err;
+  }
+  if (record && record.id) return { resolved: true, recordId: record.id };
+  return { resolved: false, recordId: null, reason: "not-found" };
 }
 
 // ---------------------------------------------------------------------------
@@ -1753,6 +1961,201 @@ export class KnowledgeFlowRunner {
       proposalClosed,
       telemetryEvents: events,
     };
+  }
+
+
+  // -------------------------------------------------------------------------
+  // knowledge.check-inbound-references flow  (#340)
+  //   Steps: scan-gate → resolve-gate → done
+  //   Gate: resolve-gate — every DEFINITE doc→store citation resolves via the
+  //         #339 identity path. Any unresolvable definite citation flips ok to
+  //         false (fail closed) and is reported with doc path + line/column +
+  //         token. Bare hex candidates are included only when they resolve
+  //         (commit-SHA safety), never contributing a failure.
+  //
+  // READ-ONLY: reads doc files + the store's query surface only; mutates no
+  // record and appends no mutation-log entry (same invariant as the Addenda D–G
+  // audits). OPT-IN: zero configured globs is a no-op pass.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Scan caller-configured doc globs for record citations and resolve each
+   * against the store, failing closed on any unresolvable definite citation.
+   *
+   * Citation forms (see the module header + store-contract.md Addendum I):
+   *   - full UUID (bare or wrapped)            → definite; miss FAILS
+   *   - `<marker>token` (default `rec:`/`record:`) → definite; miss FAILS
+   *   - `[[token]]` wikilink                   → definite; miss FAILS
+   *   - bare ≥8-hex short-id                    → candidate; included only if it
+   *     currently resolves (a non-resolving bare hex is treated as prose/commit
+   *     SHA and ignored — the documented miss).
+   *
+   * @param {object} [options]
+   *   - docGlobs: string[]   — globs (relative to docsRoot) to scan; [] = no-op pass
+   *   - docsRoot: string     — root the globs resolve against (default: workspace, then cwd)
+   *   - markers: string[]    — citation marker prefixes (default DEFAULT_CITATION_MARKERS)
+   *   - agent: string        — override agent name
+   * @returns {Promise<{
+   *   ok: boolean,
+   *   scanned: string[],
+   *   citations: Array<{ doc:string, line:number, column:number, token:string, form:string, resolved:boolean, recordId:string|null, reason?:string }>,
+   *   unresolved: Array<{ doc:string, line:number, column:number, token:string, form:string, reason:string }>,
+   *   byDoc: Record<string, Array<{ token:string, form:string, resolved:boolean, recordId:string|null, line:number, column:number }>>,
+   *   byRecord: Record<string, Array<{ doc:string, line:number, column:number, token:string, form:string }>>,
+   *   telemetryEvents: object[]
+   * }>}
+   */
+  async checkInboundReferences(options = {}) {
+    const events = [];
+    const docGlobs = Array.isArray(options.docGlobs) ? options.docGlobs : [];
+    const docsRoot = path.resolve(options.docsRoot || options.workspace || process.cwd());
+    const markers = Array.isArray(options.markers) && options.markers.length
+      ? options.markers
+      : DEFAULT_CITATION_MARKERS;
+
+    // ── Step: scan-gate ────────────────────────────────────────────────────
+    const scanGateIn = this._telemetry.emitGate(
+      "knowledge.check-inbound-references",
+      "scan-gate",
+      {
+        flow: "knowledge.check-inbound-references",
+        gate: "scan-gate",
+        docs_root: docsRoot,
+        doc_globs: docGlobs,
+        markers,
+      }
+    );
+    events.push(scanGateIn);
+
+    // OPT-IN no-op: no globs configured → nothing to check (consistent with the
+    // Addenda D–G opt-in convention). Returns an empty, PASSING index — never an
+    // empty success that masks an unconfigured gate for a definite citation.
+    if (docGlobs.length === 0) {
+      const scanGateOutEmpty = this._telemetry.emitGateResult(
+        "knowledge.check-inbound-references",
+        "scan-gate",
+        { scanned: 0, opt_out: true }
+      );
+      events.push(scanGateOutEmpty);
+      return {
+        ok: true,
+        scanned: [],
+        citations: [],
+        unresolved: [],
+        byDoc: {},
+        byRecord: {},
+        telemetryEvents: events,
+      };
+    }
+
+    const scanned = collectDocs(docsRoot, docGlobs);
+
+    // Extract every candidate citation from every scanned doc.
+    const rawCitations = [];
+    for (const doc of scanned) {
+      const text = fs.readFileSync(path.join(docsRoot, doc), "utf8");
+      const lines = text.split("\n");
+      for (let i = 0; i < lines.length; i += 1) {
+        for (const c of extractLineCitations(lines[i], i + 1, markers)) {
+          rawCitations.push({ doc, ...c });
+        }
+      }
+    }
+
+    const scanGateOut = this._telemetry.emitGateResult(
+      "knowledge.check-inbound-references",
+      "scan-gate",
+      { scanned: scanned.length, candidates: rawCitations.length }
+    );
+    events.push(scanGateOut);
+
+    // ── Step: resolve-gate ─────────────────────────────────────────────────
+    const resolveGateIn = this._telemetry.emitGate(
+      "knowledge.check-inbound-references",
+      "resolve-gate",
+      {
+        flow: "knowledge.check-inbound-references",
+        gate: "resolve-gate",
+        candidates: rawCitations.length,
+      }
+    );
+    events.push(resolveGateIn);
+
+    const citations = [];
+    const unresolved = [];
+    const byDoc = {};
+    const byRecord = {};
+
+    for (const c of rawCitations) {
+      const { resolved, recordId, reason, matches } = await resolveCitation(this._store, c.token);
+
+      // A bare candidate that does NOT resolve is prose / a commit SHA — drop it
+      // entirely (never indexed, never failed). Every other case is recorded.
+      if (c.form === "bare" && !resolved) continue;
+
+      const entry = {
+        doc: c.doc,
+        line: c.line,
+        column: c.column,
+        token: c.token,
+        form: c.form,
+        resolved,
+        recordId,
+        ...(reason ? { reason } : {}),
+        ...(matches ? { matches } : {}),
+      };
+      citations.push(entry);
+
+      (byDoc[c.doc] ||= []).push({
+        token: c.token,
+        form: c.form,
+        resolved,
+        recordId,
+        line: c.line,
+        column: c.column,
+      });
+
+      if (resolved) {
+        (byRecord[recordId] ||= []).push({
+          doc: c.doc,
+          line: c.line,
+          column: c.column,
+          token: c.token,
+          form: c.form,
+        });
+      } else {
+        // Definite citation (uuid/marker/wikilink) that does not resolve → FAIL.
+        unresolved.push({
+          doc: c.doc,
+          line: c.line,
+          column: c.column,
+          token: c.token,
+          form: c.form,
+          reason: reason || "not-found",
+          ...(matches ? { matches } : {}),
+        });
+      }
+    }
+
+    // Ensure every scanned doc appears in byDoc even when it cites nothing, so a
+    // downstream consumer can distinguish "scanned, no citations" from "not scanned".
+    for (const doc of scanned) byDoc[doc] ||= [];
+
+    const ok = unresolved.length === 0;
+
+    const resolveGateOut = this._telemetry.emitGateResult(
+      "knowledge.check-inbound-references",
+      "resolve-gate",
+      {
+        ok,
+        citations: citations.length,
+        resolved: citations.length - unresolved.length,
+        unresolved: unresolved.length,
+      }
+    );
+    events.push(resolveGateOut);
+
+    return { ok, scanned, citations, unresolved, byDoc, byRecord, telemetryEvents: events };
   }
 
 
@@ -3348,6 +3751,20 @@ export async function auditFreshness(
 ) {
   const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
   return runner.auditFreshness(auditOpts);
+}
+
+/**
+ * Module-level inbound-reference integrity check: creates an ephemeral runner
+ * using the provided store. Read-only — mutates nothing. Fails closed on any
+ * unresolvable definite doc→store citation. (#340)
+ *
+ * @param {object} options  (merged into checkInboundReferences options + runner options)
+ */
+export async function checkInboundReferences(
+  { store, workspace, agent, sessionId, ...checkOpts } = {}
+) {
+  const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
+  return runner.checkInboundReferences(checkOpts);
 }
 
 /**
