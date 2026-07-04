@@ -667,6 +667,74 @@ async function resolveCitation(store, token) {
 }
 
 // ---------------------------------------------------------------------------
+// Incremental consolidation helpers  (knowledge.consolidate append-mode — #343)
+//
+// Store-contract Addendum L. The whole-body consolidate contract makes the
+// caller author the ENTIRE updated snapshot body just to add one decision —
+// heavy enough that real sessions skip it and the living decision snapshot
+// stops living (ops field report record 0e439c57). Append-mode lets the caller
+// supply only the new compiled contribution (the "appended entry"); the runner
+// regenerates the snapshot body from the snapshot's contributing records
+// (Addendum A.3 — provenance.source_ids / kind:"source" links) plus the new
+// entry. Because the body is regenerated from the CURRENT live snapshot's
+// records every time, two sequential consolidations from different sessions
+// never lose an entry (R4): each session re-reads the live snapshot's source
+// set and appends to it, rather than overwriting a stale whole body.
+//
+// The whole-body path (options.proposedBody) is unchanged and remains valid.
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize the append-mode input from consolidate options. Returns
+ * `{ recordId }` when append-mode is requested, or `null` for whole-body mode.
+ * Accepts either `appendEntryRecordId: "<id>"` or `appendEntry: { recordId }`.
+ *
+ * @param {object} [options]
+ * @returns {{ recordId: string } | null}
+ */
+export function normalizeConsolidateAppend(options = {}) {
+  if (typeof options.appendEntryRecordId === "string" && options.appendEntryRecordId.trim()) {
+    return { recordId: options.appendEntryRecordId.trim() };
+  }
+  const ae = options.appendEntry;
+  if (ae && typeof ae === "object" && typeof ae.recordId === "string" && ae.recordId.trim()) {
+    return { recordId: ae.recordId.trim() };
+  }
+  return null;
+}
+
+/**
+ * Default entry renderer for the decision-log snapshot shape: one section per
+ * contributing compiled record — a level-2 heading (the record title) followed
+ * by the record body. Pluggable via `options.entryRenderer`.
+ *
+ * @param {object} record  a compiled record ({ id, title, body, ... })
+ * @returns {string}
+ */
+export function defaultConsolidateEntryRenderer(record) {
+  const title = (record.title || record.id || "").trim();
+  const body = String(record.body || "").trim();
+  return `## ${title}\n\n${body}`;
+}
+
+/**
+ * Regenerate a snapshot body from its contributing records (in order), each
+ * rendered as one entry and joined by a horizontal rule. An optional `header`
+ * is prepended. This IS the append-mode body: prior entries (from the prior
+ * snapshot's source records) followed by the newly appended entry.
+ *
+ * @param {object[]} records
+ * @param {{ header?: string, entryRenderer?: (r: object) => string }} [options]
+ * @returns {string}
+ */
+export function regenerateSnapshotBodyFromRecords(records, options = {}) {
+  const render = options.entryRenderer || defaultConsolidateEntryRenderer;
+  const joined = records.map((r) => render(r)).join("\n\n---\n\n");
+  const header = options.header && String(options.header).trim();
+  return header ? `${header}\n\n${joined}` : joined;
+}
+
+// ---------------------------------------------------------------------------
 // KnowledgeFlowRunner
 // ---------------------------------------------------------------------------
 
@@ -1256,7 +1324,21 @@ export class KnowledgeFlowRunner {
    *   - object topicSelector: { topic } — snapshot located by topic tag.
    *     If no snapshot exists for the topic yet, a new one will be created on apply.
    * @param {object} [options]
-   *   - proposedBody: string        — the proposed snapshot body (required)
+   *   Body input — supply EXACTLY ONE of these two (mutually exclusive):
+   *   - proposedBody: string        — whole-body mode (unchanged): the full
+   *                                   replacement snapshot body.
+   *   - appendEntryRecordId: string — append mode (#343 — Addendum L): the id of
+   *                                   the new compiled record to append. The body
+   *                                   is regenerated from the current snapshot's
+   *                                   contributing records (provenance.source_ids
+   *                                   / kind:"source" links) plus this new entry,
+   *                                   so the caller does NOT author the full body.
+   *                                   `appendEntry: { recordId }` is also accepted.
+   *   - header: string              — (append mode) optional body header prepended
+   *                                   before the rendered entries.
+   *   - entryRenderer: fn           — (append mode) pluggable `(record) => string`
+   *                                   to render one entry; defaults to a decision-
+   *                                   log section (`## <title>\n\n<body>`).
    *   - rationale: string           — reason for the consolidation (required for apply)
    *   - decision: "apply"|"reject"  — gate decision (default "apply")
    *   - rejectReason: string        — reason for rejection (required when decision="reject")
@@ -1338,6 +1420,88 @@ export class KnowledgeFlowRunner {
       );
     }
 
+    // ── Mode: whole-body vs. incremental append (#343 — Addendum L) ─────────
+    // Whole-body mode (unchanged): caller supplies options.proposedBody, the
+    // full replacement snapshot body. Append mode: caller supplies the new
+    // compiled contribution (appendEntryRecordId / appendEntry.recordId) and the
+    // runner regenerates the body from the CURRENT snapshot's contributing
+    // records plus the new entry. The two are mutually exclusive.
+    const append = normalizeConsolidateAppend(options);
+    const isIncremental = append !== null;
+
+    if (isIncremental && typeof options.proposedBody === "string" && options.proposedBody.trim()) {
+      throw missingEvidenceError(
+        "consolidate: options.proposedBody and append-mode (appendEntryRecordId/appendEntry) " +
+        "are mutually exclusive — supply one or the other, not both"
+      );
+    }
+
+    // Computed in append mode; drive cluster + body below.
+    let incrementalCluster = null;
+    let incrementalBody = null;
+
+    if (isIncremental) {
+      // The appended entry MUST be an existing compiled record — it is the new
+      // contribution whose provenance the regenerated snapshot links (R3).
+      const newRecord = await this._store.get(append.recordId);
+      if (!newRecord) {
+        throw missingEvidenceError(
+          `consolidate: appended entry record not found: ${append.recordId}`
+        );
+      }
+      if (newRecord.type !== "compiled") {
+        throw missingEvidenceError(
+          `consolidate: appended entry record ${append.recordId} is type="${newRecord.type}", ` +
+          `expected "compiled"`
+        );
+      }
+
+      // Prior contributing records come from the CURRENT snapshot's provenance
+      // (Addendum A.3): source_ids first, falling back to kind:"source" links.
+      // Resolving the live snapshot per-call is what makes sequential
+      // cross-session appends lossless (R4).
+      let priorSourceIds = [];
+      if (existingSnapshot) {
+        const provIds = Array.isArray(existingSnapshot.provenance?.source_ids)
+          ? existingSnapshot.provenance.source_ids
+          : [];
+        if (provIds.length > 0) {
+          priorSourceIds = provIds;
+        } else {
+          const { forward } = await this._store.getLinks(existingSnapshot.id);
+          priorSourceIds = (forward || [])
+            .filter((l) => l.kind === "source")
+            .map((l) => l.target_id);
+        }
+      }
+
+      // New source set = prior sources ++ new entry, de-duplicated with order
+      // preserved (idempotent if the same entry is appended twice).
+      const orderedIds = [];
+      const seen = new Set();
+      for (const sid of [...priorSourceIds, append.recordId]) {
+        if (!seen.has(sid)) {
+          seen.add(sid);
+          orderedIds.push(sid);
+        }
+      }
+
+      // Regenerate the body from the resolved records, skipping any prior
+      // source id that no longer resolves (deleted upstream is impossible under
+      // supersede-not-delete, but be defensive). The new entry always resolves.
+      const entryRecords = [];
+      for (const sid of orderedIds) {
+        const rec = await this._store.get(sid);
+        if (rec) entryRecords.push(rec);
+      }
+
+      incrementalCluster = entryRecords.map((r) => r.id);
+      incrementalBody = regenerateSnapshotBodyFromRecords(entryRecords, {
+        header: options.header,
+        entryRenderer: options.entryRenderer,
+      });
+    }
+
     // ── Gate: related-event-gate ───────────────────────────────────────────
     // Run similarity detection to find compiled records related to the topic.
     // We use a concept-like proxy to run the similarity detector: a synthetic
@@ -1364,9 +1528,19 @@ export class KnowledgeFlowRunner {
     );
     events.push(relatedGateIn);
 
-    // Run the detector: pass all compiled records as candidates
-    const allCompiled = await this._store.listByType("compiled");
-    const cluster = await detector(snapshotProxy, allCompiled, this._store);
+    // Determine the cluster of contributing compiled records. In append mode
+    // (#343) the cluster is the regenerated source set (prior sources ++ the new
+    // entry) — the similarity detector is bypassed because the source set is
+    // authoritative and grows by exactly the appended entry, which is precisely
+    // what makes sequential appends lossless. In whole-body mode the detector
+    // discovers the related compiled records as before.
+    let cluster;
+    if (isIncremental) {
+      cluster = incrementalCluster;
+    } else {
+      const allCompiled = await this._store.listByType("compiled");
+      cluster = await detector(snapshotProxy, allCompiled, this._store);
+    }
 
     if (!Array.isArray(cluster) || cluster.length === 0) {
       throw missingEvidenceError(
@@ -1394,9 +1568,12 @@ export class KnowledgeFlowRunner {
     // When the snapshot does not exist yet (first consolidation for the topic),
     // we create a placeholder snapshot record to attach the proposal to.
 
-    if (!options.proposedBody || !options.proposedBody.trim()) {
+    // The effective body applied to the snapshot: the regenerated body in
+    // append mode, or the caller-supplied full body in whole-body mode.
+    if (!isIncremental && (!options.proposedBody || !options.proposedBody.trim())) {
       throw missingEvidenceError("consolidate: options.proposedBody is required");
     }
+    const effectiveBody = isIncremental ? incrementalBody : options.proposedBody;
 
     // Ensure a snapshot record exists to propose against
     if (!snapshotId) {
@@ -1439,7 +1616,7 @@ export class KnowledgeFlowRunner {
     // the store's propose method with the snapshot's id.
     await this._store.propose(snapshotId, proposerId, {
       agent,
-      proposal: options.proposedBody,
+      proposal: effectiveBody,
       ...(options.note ? { note: options.note } : {}),
     });
 
@@ -1565,7 +1742,7 @@ export class KnowledgeFlowRunner {
       newSnapshotId = await this._store.create({
         type: "snapshot",
         title: `Snapshot: ${topic}`,
-        body: options.proposedBody,
+        body: effectiveBody,
         category: existingSnapshot?.category || category || "general",
         tags: [topicTag],
         links: sourceLinks,

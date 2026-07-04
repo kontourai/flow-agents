@@ -156,7 +156,17 @@ function parseYamlLines(lines, start, baseIndent) {
 }
 
 function unquote(s) {
-  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+  if (s.startsWith('"') && s.endsWith('"')) {
+    // Double-quoted scalars are escaped by yamlScalar; reverse those escapes
+    // (backslash, quote, newline, carriage-return, tab) left-to-right so a
+    // frontmatter value can carry newlines/quotes and round-trip intact. This
+    // keeps every scalar on ONE physical line, so an embedded "\n---\n" can
+    // never be mistaken for the frontmatter/body terminator (parseMarkdown).
+    return s.slice(1, -1).replace(/\\(["\\nrt])/g, (_, c) =>
+      c === "n" ? "\n" : c === "r" ? "\r" : c === "t" ? "\t" : c
+    );
+  }
+  if (s.startsWith("'") && s.endsWith("'")) {
     return s.slice(1, -1);
   }
   return s;
@@ -214,9 +224,20 @@ function serializeYaml(obj, indent = 0) {
 
 function yamlScalar(v) {
   if (typeof v === "string") {
-    // Quote if it contains special chars
-    if (/[:#\[\]{},&*?|<>=!%@`"'\n]/.test(v) || v.trim() !== v || v === "") {
-      return `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+    // Quote if it contains special chars (incl. any whitespace control char that
+    // would otherwise span lines — newline, carriage-return, tab).
+    if (/[:#\[\]{},&*?|<>=!%@`"'\n\r\t]/.test(v) || v.trim() !== v || v === "") {
+      // Escape backslash first, then quote and the control chars, so the value
+      // stays on ONE physical line. Reversed by unquote(). Without newline
+      // escaping a value like a multi-section proposal body would inject a raw
+      // "\n---\n" into the frontmatter and corrupt the record on read.
+      const escaped = v
+        .replace(/\\/g, "\\\\")
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, "\\n")
+        .replace(/\r/g, "\\r")
+        .replace(/\t/g, "\\t");
+      return `"${escaped}"`;
     }
     return v;
   }
