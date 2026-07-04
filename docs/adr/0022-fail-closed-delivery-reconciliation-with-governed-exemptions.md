@@ -283,3 +283,183 @@ ADR 0018 §Decision.
 - #274 — the issue this ADR resolves; #269 — the first live capture-backed bundle publish
   cited in Context; #265 — the last PR to merge before that (i.e. the boundary of "every PR
   before #265 passed Trust Reconcile trivially via absence").
+
+## Addendum (2026-07-03): compound `scope` (space-separated AND) — security-review hardening
+
+A security review of the #300 implementation found that `ref:`/`branch-prefix:` scope
+conditions match against `GITHUB_HEAD_REF` (or the `TRUST_RECONCILE_REF` override), and on a
+**fork PR `GITHUB_HEAD_REF` is pusher-controlled** — any contributor who can open a PR can
+name their branch to satisfy a `ref:`- or `branch-prefix:`-only scope. A `delivery/DECLARED`
+entry written to exempt one specific bot (e.g. `ref:release-please--branches--main`) is
+therefore satisfiable by anyone who pushes a branch with that exact name, not only by the
+automation it names. `author:` (bound to the platform-set `GITHUB_ACTOR`, not attacker-chosen
+in the same way) does not have this weakness alone, but a single `author:` condition cannot
+express "and also narrow the blast radius to this branch pattern" — the two properties needed
+combining, not substituting for each other.
+
+**Decision:** `scope` may contain multiple space-separated conditions, each one of the four
+forms specified in §2 (`ref:`, `commit:`/`commit:a..b`, `author:`, `branch-prefix:`); a
+compound scope matches only if **every** condition matches (AND, not OR). A single-condition
+scope is unchanged and remains valid (backward compatible — it is the N=1 case of the same
+rule). Matching is still string equality/prefix only, per condition — no `RegExp` is
+constructed from marker content in either the single- or compound-condition path. An
+unrecognized-prefix condition anywhere in a compound scope makes the **whole** scope never
+match, the same fail-closed behavior a malformed single-condition scope already had.
+
+**`ref:`/`branch-prefix:` alone are insufficient for identity exemptions and MUST be combined
+with `author:`.** Per the finding above, a scope meant to identify a specific bot/automation
+actor (as opposed to a specific commit range or branch, where the identity question does not
+arise) should not rely on `ref:`/`branch-prefix:` in isolation — combine it with `author:` so
+the platform-set actor identity, not just a self-chosen branch name, has to match too. The
+migration marker this ADR's Consequences named for release-please is updated accordingly:
+
+```json
+{
+  "scope": "author:github-actions[bot] branch-prefix:release-please--",
+  "reason": "release-please automation PR; no agent delivery involved",
+  "approved_by": "briananderson1222",
+  "declared_at": "<ISO timestamp>"
+}
+```
+
+(`dependabot[bot]`'s entry, `author:dependabot[bot]`, was already a single `author:` condition
+— security-review-confirmed sound as-is and left unchanged.)
+
+**`/delivery/DECLARED` CODEOWNERS landed with #300/#301.** `.github/CODEOWNERS` now lists
+`/delivery/DECLARED` under the same owner as `/scripts/ci/`, `/package.json`, and
+`/evals/run.sh` (§2's original intent, made concrete); `evals/static/test_flowdef_codeowners_coverage.sh`
+carries a regression-lock assertion for the entry. This closes the file-level half of #301;
+server-side enforcement of CODEOWNERS review on `main` remains tracked separately (#225).
+
+## Addendum (2026-07-03, part 2): bundle-ownership staleness check — "for THIS change"
+
+Owner-approved follow-up to the compound-scope addendum above, closing a second gap the same
+security review surfaced, this time against a **live incident**: PR #278 (the same open
+dependabot PR cited in Baseline/Consequences) carries a `delivery/trust.checkpoint.json`
+inherited byte-for-byte from `main` (dependabot never runs the deliver skill on its own
+branch — the file only exists there because `main`'s tree already had it). Prior to this
+addendum, `discoverBundle()` finding *any* file at `delivery/trust.bundle` or
+`delivery/trust.checkpoint.json` — regardless of whether it says anything about the change
+actually being reconciled — was sufficient to route into Step 2. A stale, inherited
+checkpoint from a completely unrelated prior PR would therefore either (a) reconcile
+against claims/evidence that have nothing to do with the current diff (if it were a full
+`trust.bundle`), or (b), as in the checkpoint-only case, hit the existing
+`checkpoint-bypass` divergence — **coincidentally fail-closed today only because a bare
+checkpoint has no `evidence[]`/`claims[]` to reconcile**, not because the reconciler
+recognized the file as stale. A future stale *full* `trust.bundle` (not just a checkpoint)
+inherited the same way would not have that accidental protection.
+
+**Decision:** "bundle-required" (ADR 0022 §1) means a bundle **for this change**, not any
+bundle merely reachable at the checkout. `discoverBundle()`'s result is now checked against
+a commit-identity binding before Step 2 is allowed to run against it:
+
+- **Binding chosen:** `trust.checkpoint.json`'s `commit_sha` field (stamped by
+  `sealTrustCheckpoint()` in `src/cli/workflow-sidecar.ts` from `git rev-parse HEAD` at seal
+  time) — the strongest identity signal available today. `trust.bundle` itself carries no
+  commit/branch metadata (schema: `{schemaVersion, source, claims, evidence, policies,
+  events}` — confirmed by inspection), so when the auto-discovered file is `trust.bundle`,
+  the check falls through to its sibling `delivery/trust.checkpoint.json` (same
+  `resolveDeliveryCandidates()` seam; `publishDelivery()` always writes both together).
+- **Match rule:** the bundle's `commit_sha` equals this change's own sha
+  (`TRUST_RECONCILE_SHA`/`GITHUB_SHA`), OR is a git-ancestor of it, via the same `git
+  merge-base --is-ancestor` primitive `commit:` scopes already use. Exact equality alone was
+  considered and rejected: `sealTrustCheckpoint()` necessarily stamps a commit that precedes
+  its own delivery commit (a checkpoint cannot contain its own future commit's sha), so
+  requiring exact equality would reject every legitimately fresh delivery, not just stale
+  ones. Ancestor-or-equal correctly accepts "sealed earlier in this same open PR's own
+  linear history" while — because this repo squash-merges PRs into `main` — correctly
+  rejecting a checkpoint inherited from `main`: a squash-merged commit's checkpoint records
+  the pre-squash feature-branch tip as `commit_sha`, which is provably **not** an ancestor of
+  any later branch (squash discards the original commit graph), so any checkpoint that ever
+  lands on `main` becomes permanently unmatchable by a later, unrelated branch — exactly the
+  PR #278 shape.
+- **Fail closed on ambiguity:** no extractable `commit_sha` (missing from both the bundle and
+  its sibling checkpoint), or this change's own sha unresolvable — never treated as owned. A
+  stale/unowned bundle prints a loud, grep-stable line (`stale bundle ignored — attests
+  <theirs>, this change is <ours>`) and is then treated exactly as if `discoverBundle()` had
+  returned nothing: it falls through to `delivery/DECLARED` resolution.
+- **Scope:** this check applies ONLY to **auto-discovered** bundles. An explicit
+  `--bundle`/`TRUST_RECONCILE_BUNDLE` remains untouched — it is a deliberate caller choice
+  (test fixtures, a programmatic caller passing a specific bundle), not something silently
+  picked up from committed git tree state, and the real `.github/workflows/trust-reconcile.yml`
+  never passes `--bundle`; it always relies on auto-discovery, which is exactly the path the
+  incident went through.
+
+**Residual, honestly named:** this binding is still self-reported (the checkpoint's own
+`commit_sha`, not a cryptographic commit signature) and still only as strong as
+`sealTrustCheckpoint()`'s local `git rev-parse HEAD` call — an adversarial agent that
+controls its own local git state before delivery could, in principle, stamp an arbitrary
+sha. This does not reopen the PR #278 gap (a human/bot PR that never runs the deliver skill
+at all still cannot forge a checkpoint it never writes), but it is not a full defense against
+a fully agent-controlled delivery pipeline; that class of residual is the same
+"trust-the-humans boundary" ADR 0017/0020 already name, not newly introduced here.
+
+## Addendum (2026-07-03, part 3): CI-context contract for the staleness check
+
+A re-review found a launch-blocking gap in the staleness check (Addendum part 2, above):
+`isAncestorCommit()`'s `git merge-base --is-ancestor` call is only meaningful if the CI
+checkout actually has the parent commit objects, and if the sha compared against is a
+commit a checkpoint could plausibly have been sealed at. Neither held under
+`.github/workflows/trust-reconcile.yml`'s prior configuration: the default
+`actions/checkout` fetch depth is a **shallow clone (`fetch-depth: 1`)**, which has no
+parent objects — `git merge-base` against a missing object exits 128, so the ancestor
+check would be unresolvable for every real PR, not just stale ones, falsely staling
+**every legitimately fresh delivery** on a required, admin-enforced check. Separately, on
+a `pull_request` trigger `GITHUB_SHA` resolves to GitHub's synthetic merge commit
+(`refs/pull/N/merge`), a commit that never existed at the time any real `seal-checkpoint`
+run stamped `commit_sha` — so even a correctly-resolving ancestor check would compare
+against the wrong target. Both are now fixed at the workflow layer, not by loosening the
+reconciler's own fail-closed contract: the checkout step sets `fetch-depth: 0` (full
+history), and the trust-reconcile step sets `TRUST_RECONCILE_SHA:
+${{ github.event.pull_request.head.sha || github.sha }}` so the ownership comparison
+always uses the PR's own head commit on a `pull_request` trigger (falling back to
+`github.sha`, which is already correct, on `push`/`workflow_dispatch`). The checkout ref
+itself is unchanged — Step 1 (fresh verify) runs against the same tree it always has;
+only the identity used for the Step-2 ownership comparison changes. This is a narrow,
+deliberate, owner-recorded functional amendment to the "workflow YAML: comments only"
+scoping the original Wave 1 plan set for this file — an unavoidable consequence of
+closing the HIGH finding, not scope creep. `scripts/ci/trust-reconcile.js`'s own contract
+is unchanged and stays fail-closed either way: a shallow/missing-object condition still
+resolves to "not an ancestor" (never silently accepted), so a misconfigured downstream
+adopter that keeps the shallow default degrades safely (falsely stales real bundles,
+loudly, with a diagnosable line) rather than unsafely (accepting a bundle it cannot
+actually verify).
+
+## Addendum (2026-07-03, part 4): event-scoped enforcement — gates gate PRs, not `main`
+
+Final review found a second, more severe HIGH launch-blocker in the staleness check
+(Addendum part 3, above): even with full-history checkout and correct sha binding, a
+`push` run on `main` immediately after a squash-merge would still falsely stale the
+just-merged, genuinely legitimate bundle — because `git merge --squash` (this repo's
+merge strategy) discards the original commit graph, the resulting squash commit on `main`
+has **no** git ancestry back to the feature-branch commit its checkpoint was sealed
+against, by design, not by defect. Empirically reproduced with a synthetic squash pair.
+Left unfixed, every delivery would fail the required Trust Reconcile check on `main`
+immediately post-merge, and Phase 2 attestation minting (which runs only after Step 2
+passes) would stop entirely — a regression far worse than the bug this whole ADR closes.
+
+**Decision (reviewer option (a) — enforcement is event-scoped):** bundle-required
+enforcement (§1's `bundle-required-no-declared-marker` fail-closed branch, and the
+staleness-gate consequence of it, Addendum part 2) applies only when a run is **gating a
+proposed change** — detected via `TRUST_RECONCILE_EVENT` (set from `github.event_name` by
+the workflow), with a conservative default: an absent/unrecognized event value is treated
+as gating (enforce), so every existing local/test caller and any misconfigured CI event
+keeps today's stricter behavior. Only the literal value `push` is treated as a post-merge
+run. On `push`, an absent or stale auto-discovered bundle is a loud, exit-0 no-op
+(`push event: ... — skipping Step 2 (gating happened on the PR run)`) rather than a
+failure or a `delivery/DECLARED` requirement — there is no "change" being gated on a push
+to a protected branch (direct pushes are already excluded by branch protection; a push
+run's own job is Step 1 fresh-verify, which is unaffected by this scoping and always
+runs, plus Step 2 reconcile IF the bundle happens to still attest that exact commit,
+forming the Phase 2 attestation basis). `pull_request` gating is completely unaffected —
+the exact same squash-shape fixture used to prove the push no-op also proves the
+identical shape still fails closed when `TRUST_RECONCILE_EVENT=pull_request`, confirming
+this scoping narrows *when* enforcement applies, not *how strictly* it applies when it
+does. Residual (HIGH, documented not solved): `TRUST_RECONCILE_EVENT`'s
+source value (`github.event_name`) is authoritative GitHub Actions context, but the
+workflow FILE that assigns it to the env var is itself PR-editable content on a
+`pull_request` run — a PR could hardcode `TRUST_RECONCILE_EVENT: push` in its own copy of
+the workflow to fake the post-merge no-op path; this is closed by required code-owner
+review on `.github/workflows/trust-reconcile.yml` (#225, not yet server-side enforced),
+the same residual class as every other self-asserted CI input this ADR already carries.
+Step 1 (fresh verify) is unaffected by event scoping either way and always runs.

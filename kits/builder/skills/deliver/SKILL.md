@@ -20,6 +20,24 @@ Inherited from primitives:
 | tool-verifier | verify-work |
 | tool-playwright | verify-work |
 
+## Model Routing
+
+Delegates are spawned with an explicit model override resolved from
+`.datum/config.json` via `npx @kontourai/datum resolve <role> --json`
+(see `context/contracts/execution-contract.md` § Delegation: Model Routing —
+that contract is the consumption instruction, `.datum/config.json` is the
+source of truth for the mapping):
+
+| Delegate | Role |
+|---|---|
+| tool-worker | `delegate-mechanical` for fully-specified mechanical tasks, `delegate-implementation` for precisely-planned implementation, `delegate-design` when the task needs design latitude |
+| tool-planner | `delegate-design` |
+| tool-code-reviewer / tool-security-reviewer | `delegate-implementation` |
+| tool-verifier / tool-playwright | `delegate-implementation` |
+
+If datum or the config is absent, fall back to the runtime's inherited model
+and note the fallback in the session artifact.
+
 ## Orchestrator Rule
 
 You never use `read`, `glob`, `grep`, or `code` on source files. You only read/write the session file and artifact files in `.kontourai/flow-agents/<slug>/`.

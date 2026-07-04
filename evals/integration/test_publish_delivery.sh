@@ -4,8 +4,10 @@
 # Proves that:
 #   1. END-TO-END-RECORD-RELEASE: record-release auto-publishes trust.bundle.
 #   2. SUBCOMMAND: publish-delivery subcommand copies bundle to delivery/.
-#   3. RECONCILE-DIVERGENCE: delivery trust.bundle + CI fail -> exit 1.
-#   4. RECONCILE-MATCHING: delivery trust.bundle + CI pass -> exit 0.
+#   3. RECONCILE-DIVERGENCE: delivery trust.bundle (+ matching-sha checkpoint sibling, ADR
+#      0022 addendum part 2 bundle-ownership binding) + CI fail -> exit 1.
+#   4. RECONCILE-MATCHING: delivery trust.bundle (+ matching-sha checkpoint sibling) + CI
+#      pass -> exit 0.
 #   5. FAIL-SOFT: no trust.bundle -> publishDelivery skips, record-release exits 0.
 #
 # Deterministic, no model spend, self-cleaning.
@@ -61,6 +63,19 @@ with open(out, 'w') as fh:
 PY
   fi
   node "$helper" "$dest" "$label" "$passing"
+}
+
+# write_checkpoint_to <delivery_dir> <sha>
+# Writes a minimal, well-formed trust.checkpoint.json naming <sha> as commit_sha, so a
+# bare fixture trust.bundle written directly into delivery/ (TEST 3/4 below -- these do
+# NOT go through the real seal-checkpoint pipeline) still carries the commit-identity
+# binding trust-reconcile.js's bundle-ownership staleness check now requires (ADR 0022
+# addendum, part 2) for an auto-discovered bundle to be treated as owned by the change
+# under test, not stale.
+write_checkpoint_to() {
+  local delivery_dir="$1" sha="$2"
+  printf '{"schema_version":"1.0","slug":"publish-delivery-fixture","work_item":null,"status":"delivered","phase":"release","sealed_at":"2026-06-27T00:00:00Z","commit_sha":"%s","checkpoint":{"asOf":"2026-06-27T00:00:00.000Z","statusByClaimId":{}}}' \
+    "$sha" > "$delivery_dir/trust.checkpoint.json"
 }
 
 # Session setup helper
@@ -181,8 +196,9 @@ mkdir -p "$REPO3/delivery"
 # -> claimed cmd not in canonical set -> not-run divergence, AND canonical fails
 DELIVERY3="$REPO3/delivery/trust.bundle"
 write_bundle_to "$DELIVERY3" "node --version" "true"
+write_checkpoint_to "$REPO3/delivery" "1111111111111111111111111111111111111111"
 
-recon3_out=$(TRUST_RECONCILE_COMMANDS="false" \
+recon3_out=$(TRUST_RECONCILE_SHA="1111111111111111111111111111111111111111" TRUST_RECONCILE_COMMANDS="false" \
   node "$RECONCILE" --repo-root "$REPO3" 2>&1)
 recon3_exit=$?
 
@@ -208,8 +224,9 @@ mkdir -p "$REPO4/delivery"
 # Bundle claims "node --version" passed; canonical verify is ALSO "node --version" (passes)
 DELIVERY4="$REPO4/delivery/trust.bundle"
 write_bundle_to "$DELIVERY4" "node --version" "true"
+write_checkpoint_to "$REPO4/delivery" "2222222222222222222222222222222222222222"
 
-recon4_out=$(TRUST_RECONCILE_COMMANDS="node --version" \
+recon4_out=$(TRUST_RECONCILE_SHA="2222222222222222222222222222222222222222" TRUST_RECONCILE_COMMANDS="node --version" \
   node "$RECONCILE" --repo-root "$REPO4" 2>&1)
 recon4_exit=$?
 

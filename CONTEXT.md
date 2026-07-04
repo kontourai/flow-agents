@@ -383,3 +383,9 @@ The rule for which layer owns a kit's runtime dependencies, keeping dependency d
 ### Trust-reconcile and delivery reconciliation
 
 The CI-anchored reconciliation of a session's trust claims against a manifest — classifying command, session-local, and attested claims, honoring governed waivers — and the fail-closed delivery reconciliation that blocks publication on unreconciled residue unless an exemption is recorded. Subject open in the Decision Registry as [docs/decisions/trust-reconcile.md](docs/decisions/trust-reconcile.md).
+
+### Model Routing
+
+The policy that maps a delegate role name (such as `delegate-mechanical`, `delegate-implementation`, `delegate-design`, `orchestrator`, `extraction-default`) to a specific `model@provider` ref. Model Routing is data, not code: it lives in `.datum/config.json` (read by the `@kontourai/datum` registry, schema `datum.schema.json`) and never in generated files or per-agent frontmatter. The orchestrator resolves the role at delegation time (`datum resolve <role> --json`) and passes the resolved model explicitly when spawning each delegate. See [context/contracts/execution-contract.md](context/contracts/execution-contract.md) § Delegation: Model Routing and [docs/decisions/model-routing.md](docs/decisions/model-routing.md).
+_Avoid_: Generated per-agent model frontmatter, environment-variable-only model selection
+

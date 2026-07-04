@@ -27,12 +27,41 @@
 # The agent cannot self-declare success here: it cannot modify the CI environment,
 # pre-disable this job, or post-forge results after the check runs.
 #
-# THIS JOB IS INTENDED TO BE A REQUIRED STATUS CHECK (branch protection).
-# Enabling it as required is a server-side GitHub branch-protection configuration
-# step — it is not wired here by code. Once required, no PR can merge past it.
+# THIS JOB IS ALREADY A REQUIRED, ADMIN-ENFORCED STATUS CHECK on main (verified via
+# `gh api repos/kontourai/flow-agents/branches/main/protection`: "Trust Reconcile" is in
+# required_status_checks.contexts, enforce_admins.enabled: true). No PR — including from
+# admins — can merge past a failing run. Disabling/relaxing this requires a server-side
+# branch-protection change (GitHub UI/API), not a code change in this repo.
 #
 # Additive — NOT a gate-hook change. Does not modify scripts/hooks/*, kits/knowledge,
 # or continue-work. Mirrors the structure of .github/workflows/ci.yml.
+#
+# CI-context contract for the bundle-ownership staleness check (ADR 0022 addendum, part
+# 2; scripts/ci/trust-reconcile.js bundleAttestsThisChange()): an auto-discovered bundle
+# is treated as owned only if its checkpoint's commit_sha is a git-ancestor of (or equal
+# to) this change's own commit sha, checked via `git merge-base --is-ancestor`. That
+# check requires TWO things this workflow provides deliberately, not by accident:
+#   1. Checkout step below uses `fetch-depth: 0` (full history) — the default
+#      fetch-depth: 1 (shallow clone) lacks the parent commit objects merge-base needs;
+#      an ancestor check against a shallow clone exits 128 (unresolvable), which
+#      correctly fails CLOSED (treated as stale) per trust-reconcile.js's own
+#      fail-closed-on-ambiguity contract, but would falsely stale EVERY legitimate
+#      fresh bundle on this required check without full history.
+#   2. Trust reconcile step below sets TRUST_RECONCILE_SHA to the PR's own HEAD commit
+#      (github.event.pull_request.head.sha), not github.sha — on a pull_request trigger,
+#      github.sha is GitHub's synthetic merge commit (refs/pull/N/merge), which is NOT
+#      the commit a locally-run seal-checkpoint ever stamps as commit_sha (checkpoints
+#      are always sealed against a real branch commit). Falling back to github.sha only
+#      applies on push/workflow_dispatch, where it IS the real commit. The checkout ref
+#      itself is unchanged — Step 1 (fresh verify) still runs against the same tree it
+#      always has; only the identity used for the OWNERSHIP COMPARISON changes.
+#   3. Trust reconcile step below also sets TRUST_RECONCILE_EVENT to github.event_name so
+#      trust-reconcile.js can event-scope bundle-required enforcement (ADR 0022 addendum,
+#      part 4): a push run on `main` (post-merge, after a squash-merge whose commit has no
+#      git ancestry back to the feature-branch commit a checkpoint was sealed against) is
+#      a loud no-op on Step 2 instead of a false failure — gating already happened on the
+#      PR run. This does NOT weaken PR-time gating: on pull_request, enforcement is
+#      unchanged.
 
 name: Trust Reconcile
 
@@ -63,6 +92,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Full history (not the default shallow fetch-depth: 1): the bundle-ownership
+          # staleness check (ADR 0022 addendum, part 2) resolves `git merge-base
+          # --is-ancestor` against the checked-out repo, which needs parent commit
+          # objects a shallow clone does not have. See the CI-context contract note
+          # above this job.
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -80,6 +116,23 @@ jobs:
       - name: Trust reconcile
         id: trust-reconcile
         run: node scripts/ci/trust-reconcile.js
+        env:
+          # The change identity the bundle-ownership staleness check compares the
+          # discovered checkpoint's commit_sha against (ADR 0022 addendum, part 2). On a
+          # pull_request trigger, github.sha is GitHub's synthetic merge commit, not a
+          # commit any real seal-checkpoint run ever stamps — so this MUST be the PR's
+          # own head sha. On push/workflow_dispatch there is no pull_request context, and
+          # github.sha already is the real commit, so the fallback is exact, not a guess.
+          # This does NOT change what gets checked out/verified (Step 1 fresh verify is
+          # untouched) — only the sha used for the Step-2-ownership comparison.
+          TRUST_RECONCILE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Event-scoped enforcement (ADR 0022 addendum, part 4): lets trust-reconcile.js
+          # tell a gating pull_request run apart from a post-merge push run on `main` — a
+          # push run's bundle is expected to be absent/stale (squash-merge commits have no
+          # ancestry back to the feature-branch sha a checkpoint was sealed against) and
+          # must be a no-op, not a failure. Unset/unrecognized values fail toward the
+          # STRICTER (pull_request-shaped) enforcement — see resolveEnforcementEvent().
+          TRUST_RECONCILE_EVENT: ${{ github.event_name }}
         # Canonical verify: auto-discovered from package.json scripts["trust-reconcile-verify"]
         #   = npm run build && npm run eval:static
 #   (integration + the anti-gaming regression suite run in ci.yml's required
@@ -88,7 +141,12 @@ jobs:
         # compile-only check. Override via TRUST_RECONCILE_COMMANDS or --commands if needed.
         # Bundle auto-discovery: if delivery/trust.bundle or delivery/trust.checkpoint.json
         # exists in the checkout, CI reconciles per-command claimed passes against fresh
-        # results automatically. When absent, only the fresh verify is enforced (fail-open).
+        # results automatically. When absent, a bundle is REQUIRED by default (ADR 0022 §1):
+        # the job fails closed unless a well-formed, in-scope delivery/DECLARED
+        # no-agent-delivery marker is present, which exempts Step 2 (reconcile) only —
+        # Step 1 (fresh verify) still always runs. An auto-discovered bundle/checkpoint
+        # that does not attest THIS change (see the CI-context contract note above this
+        # job) is treated the same as absent (ADR 0022 addendum, part 2).
         # Phase 2: on success, writes ci-trust-reconcile-results.json to RUNNER_TEMP
         # for mint-attestation.js to consume.
 

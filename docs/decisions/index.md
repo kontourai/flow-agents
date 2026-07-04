@@ -24,6 +24,7 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [knowledge-store-provider](./knowledge-store-provider.md) | current | Knowledge store provider |
 | [kontour-resource-contract](./kontour-resource-contract.md) | needs-decision | Kontour Resource Contract |
 | [mcp-posture](./mcp-posture.md) | needs-decision | MCP posture |
+| [model-routing](./model-routing.md) | current | Model routing |
 | [promotion-gate](./promotion-gate.md) | current | Promotion gate |
 | [standing-directives](./standing-directives.md) | current | Standing directives |
 | [three-hard-boundary-model](./three-hard-boundary-model.md) | needs-decision | Three-hard-boundary model |

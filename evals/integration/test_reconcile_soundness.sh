@@ -9,8 +9,13 @@
 #  B. REAL-VERIFY-CLOSED:     build passes but a fake "real verify" (eval:static substitute)
 #     fails → trust-reconcile exits 1 (PRE-FIX this would exit 0 because only build ran).
 #
-#  C. REAL-VERIFY-PASSES:     the comprehensive verify resolves green → exits 0 (legit
-#     work is not false-blocked when package.json trust-reconcile-verify is present).
+#  C. REAL-VERIFY-PASSES:     the comprehensive verify resolves green, no bundle, but a
+#     well-formed in-scope delivery/DECLARED marker exempts Step 2 (ADR 0022 §1) → exits 0
+#     with the DECLARED (no-agent-delivery) line (legit work is not false-blocked; the
+#     bundle-absence branch is bundle-required by default post-ADR-0022, so this case is
+#     now anchored by a DECLARED marker rather than by bundle absence alone — see
+#     evals/integration/test_trust_reconcile_negatives.sh section 7 for the no-marker /
+#     out-of-scope-marker fail-closed cases this test does NOT re-cover).
 #
 #  D. CHECKPOINT-BYPASS-CLOSED: a checkpoint-only bundle (no evidence/claims, statusByClaimId
 #     all-passed) → exits 1 with checkpoint-bypass divergence (not a silent skip).
@@ -56,8 +61,14 @@ fs.writeFileSync('$PKG_NO_VERIFY/package.json', JSON.stringify(pkg, null, 2));
 "
 
 # ─── Minimal package.json WITH trust-reconcile-verify ─────────────────────────
+# ADR 0022 §1 (bundle-required by default): no bundle is written for this fixture, so a
+# well-formed, in-scope delivery/DECLARED marker (ADR 0022 §2) is seeded alongside it —
+# this is the new legitimate no-bundle path (a real human/bot PR author with no agent
+# delivery), preserving TEST C's original "no bundle" shape more faithfully than
+# switching it to a --bundle fixture would (a bundle would test Step 2 reconcile, which
+# TEST C was never about — it proves Step 1 fresh-verify success is honored).
 PKG_WITH_VERIFY="$TMP/pkg_with_verify"
-mkdir -p "$PKG_WITH_VERIFY"
+mkdir -p "$PKG_WITH_VERIFY/delivery"
 node -e "
 const fs = require('fs');
 const pkg = {
@@ -68,6 +79,13 @@ const pkg = {
   }
 };
 fs.writeFileSync('$PKG_WITH_VERIFY/package.json', JSON.stringify(pkg, null, 2));
+const declared = {
+  scope: 'ref:test-verify-passes',
+  reason: 'test fixture: real verify passes, no agent delivery bundle',
+  approved_by: 'test-harness',
+  declared_at: '2026-06-27T00:00:00Z'
+};
+fs.writeFileSync('$PKG_WITH_VERIFY/delivery/DECLARED', JSON.stringify(declared, null, 2));
 "
 
 # ─── Minimal package.json with failing verify ─────────────────────────────────
@@ -255,22 +273,28 @@ fi
 # package.json has passing trust-reconcile-verify → exits 0 (not false-blocked)
 # ═══════════════════════════════════════════════════════════════════════════════
 echo ""
-echo "=== TEST C: REAL-VERIFY-PASSES — passing verify + no bundle → exits 0 ==="
+echo "=== TEST C: REAL-VERIFY-PASSES — passing verify + in-scope delivery/DECLARED marker (no bundle) → exits 0 with DECLARED exemption ==="
 
-outC=$(node "$RECONCILE" \
+outC=$(TRUST_RECONCILE_REF="test-verify-passes" node "$RECONCILE" \
     --repo-root "$PKG_WITH_VERIFY" 2>&1)
 exitC=$?
 
 if [[ $exitC -eq 0 ]]; then
-  _pass "REAL-VERIFY-PASSES: exits 0 when real verify passes and no bundle (got $exitC)"
+  _pass "REAL-VERIFY-PASSES: exits 0 when real verify passes and a well-formed, in-scope delivery/DECLARED marker exempts Step 2 (got $exitC)"
 else
   _fail "REAL-VERIFY-PASSES: expected exit 0, got $exitC — output: $outC"
 fi
 
-if echo "$outC" | grep -q "fresh verify passed"; then
-  _pass "REAL-VERIFY-PASSES: 'fresh verify passed' message present"
+if echo "$outC" | grep -qF "DECLARED (no-agent-delivery): ref:test-verify-passes — test fixture: real verify passes, no agent delivery bundle (approved by test-harness, declared 2026-06-27T00:00:00Z)"; then
+  _pass "REAL-VERIFY-PASSES: exact DECLARED (no-agent-delivery) exemption line present"
 else
-  _fail "REAL-VERIFY-PASSES: expected 'fresh verify passed' in output, got: $outC"
+  _fail "REAL-VERIFY-PASSES: expected the exact DECLARED (no-agent-delivery) line, got: $outC"
+fi
+
+if echo "$outC" | grep -q "running: npm run trust-reconcile-verify"; then
+  _pass "REAL-VERIFY-PASSES: Step 1 (fresh verify) still ran the real trust-reconcile-verify command (not skipped by the exemption)"
+else
+  _fail "REAL-VERIFY-PASSES: expected Step 1 to have run 'npm run trust-reconcile-verify', got: $outC"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════

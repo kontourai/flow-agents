@@ -50,5 +50,11 @@ evals/acceptance/*.gif
 # the repo / accidental `git add -A` commits. Only the README is tracked. At an actual
 # delivery, the deliver skill force-adds it (`git add -f delivery/trust.bundle ...`)
 # so it lands in that one PR for CI to reconcile, without leaking from every local run.
+#
+# delivery/DECLARED (ADR 0022 §2) is the opposite of a runtime artifact: it is a
+# durable, PR-reviewed governance marker declaring specific no-agent-delivery scopes
+# (e.g. dependabot, release-please) exempt from Step 2 bundle reconciliation. It is
+# tracked like README.md, not force-added per delivery like trust.bundle.
 delivery/*
 !delivery/README.md
+!delivery/DECLARED
