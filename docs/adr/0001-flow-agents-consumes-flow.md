@@ -2,6 +2,8 @@
 title: ADR 0001: Flow Agents Consumes Flow For Workflow Enforcement
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0001: Flow Agents Consumes Flow For Workflow Enforcement
 
 Date: 2026-05-24

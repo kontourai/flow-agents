@@ -2,6 +2,8 @@
 title: "ADR 0011: MCP Posture — Enforcement Stays Hooks; Surface Owns MCP Projection; No Auto-Injected Config"
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0011: MCP Posture
 
 **Date:** 2026-06-24

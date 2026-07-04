@@ -2,6 +2,8 @@
 title: ADR 0006: TypeScript-First Source Policy
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0006: TypeScript-First Source Policy
 
 Date: 2026-05-31

@@ -2,6 +2,8 @@
 title: "ADR 0019: Kit Dependency Ownership"
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0019: Kit Dependency Ownership
 
 **Date:** 2026-07-01  

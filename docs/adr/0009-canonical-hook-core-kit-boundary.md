@@ -2,6 +2,8 @@
 title: "ADR 0009: Canonical Hook Core/Kit Boundary"
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0009: Canonical Hook Core/Kit Boundary
 
 **Date:** 2026-06-23

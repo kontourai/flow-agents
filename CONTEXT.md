@@ -328,6 +328,62 @@ The Console overview for global setup, registered projects, cross-project usage,
 
 The shared tool layer used by the Console, CLI, AI agents, and automation. The Control API owns operations such as reading effective settings, explaining provider resolution, testing provider health, previewing config changes, writing config, inspecting workflow state, and reporting usage or eval outcomes.
 
+### Workflow trust state
+
+The trust bundle a workflow gate reads to decide whether to advance — claims, evidence, verification events, and derived status expressed as a Hachure Trust Bundle — so gates consume inspectable trust state rather than raw tool output. Provenance lives in frozen ADRs; the subject is open in the Decision Registry as [docs/decisions/workflow-trust-state.md](docs/decisions/workflow-trust-state.md).
+
+### TypeScript-first source policy
+
+The policy that Flow Agents source of record is authored in TypeScript, with generated JavaScript and runtime projections treated as build output rather than hand-edited sources. Subject open in the Decision Registry as [docs/decisions/typescript-source-policy.md](docs/decisions/typescript-source-policy.md).
+
+### Flow / Skill / Kit / Tool boundary
+
+The layering that separates a Flow (workflow semantics) from a Skill (agent-facing procedure), a Flow Kit (installable bundle), and a Tool (an executable operation), so each concern has one home and does not leak into the others. Subject open in the Decision Registry as [docs/decisions/flow-skill-kit-tool-boundary.md](docs/decisions/flow-skill-kit-tool-boundary.md).
+
+### Kit operation boundary
+
+The rule for what a kit-owned operation may do versus what belongs to the core, keeping kit operations scoped to their capability and free of core enforcement responsibilities. Subject open in the Decision Registry as [docs/decisions/kit-operation-boundary.md](docs/decisions/kit-operation-boundary.md).
+
+### Hook core/kit boundary
+
+The division between canonical hook behavior owned by the core and hook contributions owned by kits, so enforcement hooks have a single authoritative implementation. Subject open in the Decision Registry as [docs/decisions/hook-core-kit-boundary.md](docs/decisions/hook-core-kit-boundary.md).
+
+### MCP posture
+
+Flow Agents' stance on the Model Context Protocol: enforcement stays in hooks, Surface owns any MCP projection, and no MCP configuration is auto-injected into a runtime. Subject open in the Decision Registry as [docs/decisions/mcp-posture.md](docs/decisions/mcp-posture.md).
+
+### Agent coordination
+
+How concurrent agents avoid stepping on each other's work, modeled as Hachure liveness claims plus assignment leases with stale-claim takeover, so a work item's holder is advisory-visible and reclaimable when stale. Subject open in the Decision Registry as [docs/decisions/agent-coordination.md](docs/decisions/agent-coordination.md).
+
+### Context lifecycle
+
+The lifecycle of an agent's working context — workflow-boundary compaction, freshness-gated reuse, and the split between durable learnings and ephemeral context — so context is refreshed rather than silently stale. Subject open in the Decision Registry as [docs/decisions/context-lifecycle.md](docs/decisions/context-lifecycle.md).
+
+### Core vs domain kit boundary
+
+The generic/kit boundary that keeps the Flow Agents core domain-agnostic while domain behavior lives in kits, so the core carries no kit-specific knowledge. Subject open in the Decision Registry as [docs/decisions/core-domain-kit-boundary.md](docs/decisions/core-domain-kit-boundary.md).
+
+### Flow / Flow Agents boundary
+
+The reconciled division of responsibility between Flow (the workflow engine consumed for enforcement) and Flow Agents (the product that consumes it), so each owns a distinct layer without duplicating the other. Subject open in the Decision Registry as [docs/decisions/flow-flow-agents-boundary.md](docs/decisions/flow-flow-agents-boundary.md).
+
+### Three-hard-boundary model
+
+The FlowDefinition-driven, kit-agnostic model that names the three hard boundaries the core enforces, unifying the individual boundary decisions into one architecture. Subject open in the Decision Registry as [docs/decisions/three-hard-boundary-model.md](docs/decisions/three-hard-boundary-model.md).
+
+### Anti-gaming trust security
+
+The layered-defense trust security model that assumes the local agent can be gamed and anchors enforcement in an external CI check, freezing the local shell-parsing heuristics and routing new enforcement to the CI anchor. Subject open in the Decision Registry as [docs/decisions/anti-gaming-trust-security.md](docs/decisions/anti-gaming-trust-security.md).
+
+### Kit dependency ownership
+
+The rule for which layer owns a kit's runtime dependencies, keeping dependency declaration and installation with the kit that needs them rather than the core. Subject open in the Decision Registry as [docs/decisions/kit-dependency-ownership.md](docs/decisions/kit-dependency-ownership.md).
+
+### Trust-reconcile and delivery reconciliation
+
+The CI-anchored reconciliation of a session's trust claims against a manifest — classifying command, session-local, and attested claims, honoring governed waivers — and the fail-closed delivery reconciliation that blocks publication on unreconciled residue unless an exemption is recorded. Subject open in the Decision Registry as [docs/decisions/trust-reconcile.md](docs/decisions/trust-reconcile.md).
+
 ### Model Routing
 
 The policy that maps a delegate role name (such as `delegate-mechanical`, `delegate-implementation`, `delegate-design`, `orchestrator`, `extraction-default`) to a specific `model@provider` ref. Model Routing is data, not code: it lives in `.datum/config.json` (read by the `@kontourai/datum` registry, schema `datum.schema.json`) and never in generated files or per-agent frontmatter. The orchestrator resolves the role at delegation time (`datum resolve <role> --json`) and passes the resolved model explicitly when spawning each delegate. See [context/contracts/execution-contract.md](context/contracts/execution-contract.md) § Delegation: Model Routing and [docs/decisions/model-routing.md](docs/decisions/model-routing.md).

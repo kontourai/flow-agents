@@ -2,6 +2,8 @@
 title: ADR 0003: Flow Agents Coordinates Kits And Adapters
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0003: Flow Agents Coordinates Kits And Adapters
 
 Flow Agents will not own the builder, or knowledge workflows as core behavior. Those out-of-the-box behaviors will be extracted into normal Flow Kits that use the same manifest, Flow Definition, skill, doc, provider, and eval contracts as third-party kits. Flow Agents owns kit validation, installation, runtime adapter selection, provider wiring, status/control commands, and runtime-specific export; Runtime Adapters own target-specific integration for local agent runtimes and API/framework agents.

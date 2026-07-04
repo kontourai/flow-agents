@@ -10,8 +10,25 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 
 | Topic | Status | Decision |
 | --- | --- | --- |
+| [agent-coordination](./agent-coordination.md) | needs-decision | Agent coordination |
+| [anti-gaming-trust-security](./anti-gaming-trust-security.md) | needs-decision | Anti-gaming trust security |
+| [context-lifecycle](./context-lifecycle.md) | needs-decision | Context lifecycle |
+| [core-domain-kit-boundary](./core-domain-kit-boundary.md) | needs-decision | Core vs domain kit boundary |
 | [decision-records](./decision-records.md) | current | Decision records |
+| [flow-flow-agents-boundary](./flow-flow-agents-boundary.md) | needs-decision | Flow / Flow Agents boundary |
+| [flow-kit](./flow-kit.md) | needs-decision | Flow Kit |
+| [flow-skill-kit-tool-boundary](./flow-skill-kit-tool-boundary.md) | needs-decision | Flow / Skill / Kit / Tool boundary |
+| [hook-core-kit-boundary](./hook-core-kit-boundary.md) | needs-decision | Hook core/kit boundary |
+| [kit-dependency-ownership](./kit-dependency-ownership.md) | needs-decision | Kit dependency ownership |
+| [kit-operation-boundary](./kit-operation-boundary.md) | needs-decision | Kit operation boundary |
 | [knowledge-store-provider](./knowledge-store-provider.md) | current | Knowledge store provider |
+| [kontour-resource-contract](./kontour-resource-contract.md) | needs-decision | Kontour Resource Contract |
+| [mcp-posture](./mcp-posture.md) | needs-decision | MCP posture |
 | [model-routing](./model-routing.md) | current | Model routing |
 | [promotion-gate](./promotion-gate.md) | current | Promotion gate |
 | [standing-directives](./standing-directives.md) | current | Standing directives |
+| [three-hard-boundary-model](./three-hard-boundary-model.md) | needs-decision | Three-hard-boundary model |
+| [trust-reconcile](./trust-reconcile.md) | needs-decision | Trust-reconcile and delivery reconciliation |
+| [typescript-source-policy](./typescript-source-policy.md) | needs-decision | TypeScript-first source policy |
+| [workflow-enforcement](./workflow-enforcement.md) | needs-decision | Workflow Enforcement |
+| [workflow-trust-state](./workflow-trust-state.md) | needs-decision | Workflow trust state |

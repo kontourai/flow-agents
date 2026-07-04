@@ -2,6 +2,8 @@
 title: ADR 0005: Kubernetes-Inspired Kontour Resource Contracts
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0005: Kubernetes-Inspired Kontour Resource Contracts
 
 Date: 2026-05-27

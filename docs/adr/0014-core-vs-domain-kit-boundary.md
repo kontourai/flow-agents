@@ -2,6 +2,8 @@
 title: "ADR 0014: Flow Agents core vs domain kits — the generic/kit boundary"
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0014: Flow Agents core vs domain kits
 
 **Date:** 2026-06-25
