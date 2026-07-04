@@ -10,5 +10,11 @@
     "reason": "release-please automation PR; no agent delivery involved",
     "approved_by": "brian.anderson1222 (AC8 option-a decision, ADR 0022 approval 2026-07-02)",
     "declared_at": "2026-07-03T16:27:21Z"
+  },
+  {
+    "scope": "subject:367 title-contains:content-boundary",
+    "reason": "Code fix to content-boundary check script; no agent delivery changes",
+    "approved_by": "issue-367-pre-approval (code fix: scans untracked files for banned terms)",
+    "declared_at": "2026-07-04T05:06:20Z"
   }
 ]
