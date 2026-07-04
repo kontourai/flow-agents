@@ -157,6 +157,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check assignment-provider-github-integration
 
+      - name: Stop hook release-with-handoff integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check stop-hook-release-with-handoff-integration
+
       - name: Pull work assignment join integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check pull-work-assignment-join-integration

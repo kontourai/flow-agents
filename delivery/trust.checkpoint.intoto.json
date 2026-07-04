@@ -4,7 +4,7 @@
     {
       "name": "trust.checkpoint.json",
       "digest": {
-        "sha256": "4c776c98547ae04c4e394094b86da1aa948845b11a1c48e6c5857a119fb27364"
+        "sha256": "eac7f369f5aba446d190d05e78233d65237ecf3f2dd2845fcd192ea7e9f243c5"
       }
     }
   ],
@@ -14,17 +14,17 @@
     "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
     "claims": [
       {
-        "id": "i340-inbound-refs-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-bash-evals-run-sh-static-green-npm-run-build-all-layer-1-static-checks-incl-knowledge-store-provider-conformance-test-knowledge-providers-sh-49-49-ci-reconcilable-manifest-lane-proof-unaffected-by-340-additive-change",
-        "subjectType": "flow-step",
-        "subjectId": "i340-inbound-refs/knowledge-static-eval-suite",
+        "id": "kontourai-flow-agents-292-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-build-succeeded-silently-source-tree-validation-passed-on-the-292-working-tree",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-292/source-tree-validation",
         "facet": "flow-agents.workflow",
-        "claimType": "builder.verify.tests",
-        "fieldOrBehavior": "Static eval lane (bash evals/run.sh static) green: npm run build + all layer-1 static checks incl. knowledge store provider conformance (test_knowledge_providers.sh 49/49). CI-reconcilable manifest-lane proof; unaffected by #340 additive change.",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "npm run validate:source -- passed (build succeeded silently, source-tree validation passed) on the #292 working tree.",
         "value": "pass",
-        "createdAt": "2026-07-04T16:52:27Z",
-        "updatedAt": "2026-07-04T16:52:27Z",
+        "createdAt": "2026-07-04T17:25:23Z",
+        "updatedAt": "2026-07-04T17:25:23Z",
         "impactLevel": "high",
-        "verificationPolicyId": "policy:builder.verify.tests:test_output",
+        "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
         "metadata": {
           "origin": "check",
           "check_kind": "command"
@@ -32,277 +32,411 @@
         "status": "verified"
       },
       {
-        "id": "i340-inbound-refs-contract-suite-default.flow-agents-workflow.regression-store-contract-suite-default-adapter-67-67-pass-0-fail-exit-0-339-identity-semantics-prior-contract-remain-green-under-340",
-        "subjectType": "flow-step",
-        "subjectId": "i340-inbound-refs/contract-suite-default",
+        "id": "kontourai-flow-agents-292-context-map-drift.flow-agents-workflow.npm-run-context-map-check-reports-docs-context-map-md-is-current",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-292/context-map-drift",
         "facet": "flow-agents.workflow",
-        "claimType": "builder.verify.tests",
-        "fieldOrBehavior": "Regression: store contract suite (default adapter) 67/67 pass, 0 fail, exit 0. #339 identity semantics + prior contract remain green under #340.",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "npm run context-map -- --check reports docs/context-map.md is current.",
         "value": "pass",
-        "createdAt": "2026-07-04T16:52:27Z",
-        "updatedAt": "2026-07-04T16:52:27Z",
+        "createdAt": "2026-07-04T17:25:23Z",
+        "updatedAt": "2026-07-04T17:25:23Z",
         "impactLevel": "high",
-        "verificationPolicyId": "policy:builder.verify.tests:attestation",
+        "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
         "metadata": {
           "origin": "check",
-          "check_kind": "external"
+          "check_kind": "command"
         },
         "status": "verified"
       },
       {
-        "id": "i340-inbound-refs-contract-suite-obsidian.flow-agents-workflow.regression-store-contract-suite-obsidian-adapter-64-pass-0-fail-exit-0",
-        "subjectType": "flow-step",
-        "subjectId": "i340-inbound-refs/contract-suite-obsidian",
+        "id": "kontourai-flow-agents-292-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-31-pass-blocks-0-fail-blocks-exit-0",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-292/static-eval-suite",
         "facet": "flow-agents.workflow",
-        "claimType": "builder.verify.tests",
-        "fieldOrBehavior": "Regression: store contract suite (obsidian adapter) 64 pass, 0 fail, exit 0.",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "bash evals/run.sh static: 31 PASS blocks / 0 FAIL blocks, exit 0.",
         "value": "pass",
-        "createdAt": "2026-07-04T16:52:27Z",
-        "updatedAt": "2026-07-04T16:52:27Z",
+        "createdAt": "2026-07-04T17:25:23Z",
+        "updatedAt": "2026-07-04T17:25:23Z",
         "impactLevel": "high",
-        "verificationPolicyId": "policy:builder.verify.tests:attestation",
+        "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
         "metadata": {
           "origin": "check",
-          "check_kind": "external"
+          "check_kind": "test"
         },
         "status": "verified"
       },
       {
-        "id": "i340-inbound-refs-inbound-references-suite-default.flow-agents-workflow.ac1-ac2-ac3-ac5-inbound-references-suite-default-adapter-9-9-pass-exit-0",
-        "subjectType": "flow-step",
-        "subjectId": "i340-inbound-refs/inbound-references-suite-default",
+        "id": "kontourai-flow-agents-292-stop-hook-release-with-handoff-integration.flow-agents-workflow.bash-evals-integration-test-stop-hook-release-sh-20-20-assertions-passed-scenarios-a-h-ac1-ac7-covered-exit-0",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-292/stop-hook-release-with-handoff-integration",
         "facet": "flow-agents.workflow",
-        "claimType": "builder.verify.tests",
-        "fieldOrBehavior": "AC1/AC2/AC3/AC5: inbound-references suite (default adapter) 9/9 pass, exit 0.",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "bash evals/integration/test_stop_hook_release.sh: 20/20 assertions passed (scenarios A-H, AC1-AC7 covered), exit 0.",
         "value": "pass",
-        "createdAt": "2026-07-04T16:52:27Z",
-        "updatedAt": "2026-07-04T16:52:27Z",
+        "createdAt": "2026-07-04T17:25:23Z",
+        "updatedAt": "2026-07-04T17:25:23Z",
         "impactLevel": "high",
-        "verificationPolicyId": "policy:builder.verify.tests:attestation",
+        "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
         "metadata": {
           "origin": "check",
-          "check_kind": "external"
+          "check_kind": "test"
         },
         "status": "verified"
       },
       {
-        "id": "i340-inbound-refs-inbound-references-suite-obsidian.flow-agents-workflow.ac4-inbound-references-suite-parameterized-on-obsidian-store-adapter-9-9-pass-exit-0-every-adapter-must-implement-the-check",
-        "subjectType": "flow-step",
-        "subjectId": "i340-inbound-refs/inbound-references-suite-obsidian",
+        "id": "kontourai-flow-agents-292-assignment-provider-local-file-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-local-file-sh-all-checks-passed-34-assertions-incl-concurrent-claim-race-exit-0-290-back-compat-holds",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-292/assignment-provider-local-file-integration",
         "facet": "flow-agents.workflow",
-        "claimType": "builder.verify.tests",
-        "fieldOrBehavior": "AC4: inbound-references suite parameterized on obsidian-store adapter 9/9 pass, exit 0 — every adapter must implement the check.",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "bash evals/integration/test_assignment_provider_local_file.sh: all checks passed (34 assertions incl. concurrent-claim race), exit 0 -- #290 back-compat holds.",
         "value": "pass",
-        "createdAt": "2026-07-04T16:52:27Z",
-        "updatedAt": "2026-07-04T16:52:27Z",
+        "createdAt": "2026-07-04T17:25:23Z",
+        "updatedAt": "2026-07-04T17:25:23Z",
         "impactLevel": "high",
-        "verificationPolicyId": "policy:builder.verify.tests:attestation",
+        "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
         "metadata": {
           "origin": "check",
-          "check_kind": "external"
+          "check_kind": "test"
         },
         "status": "verified"
       },
       {
-        "id": "i340-inbound-refs-ac1-three-citation-forms.flow-agents-workflow.ac1-r1-a-fixture-doc-tree-citing-one-record-by-full-uuid-one-by-8-char-short-id-prefix-and-one-by-slug-alias-is-scanned-all-three-are-extracted-and-resolved-via-the-339-get-path-byrecord-maps-each-to-its-full-id",
-        "subjectType": "flow-step",
-        "subjectId": "i340-inbound-refs/ac1-three-citation-forms",
+        "id": "kontourai-flow-agents-292-assignment-provider-github-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-github-sh-all-checks-passed-45-assertions-exit-0-290-back-compat-holds-render-don-t-execute-contract-unaffected",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-292/assignment-provider-github-integration",
         "facet": "flow-agents.workflow",
-        "claimType": "builder.verify.tests",
-        "fieldOrBehavior": "AC1 (R1): a fixture doc tree citing one record by full UUID, one by 8-char short-id prefix, and one by slug alias is scanned; all three are extracted and resolved via the #339 get() path; byRecord maps each to its full id.",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "bash evals/integration/test_assignment_provider_github.sh: all checks passed (45 assertions), exit 0 -- #290 back-compat holds; render-don't-execute contract unaffected.",
         "value": "pass",
-        "createdAt": "2026-07-04T16:52:27Z",
-        "updatedAt": "2026-07-04T16:52:27Z",
+        "createdAt": "2026-07-04T17:25:23Z",
+        "updatedAt": "2026-07-04T17:25:23Z",
         "impactLevel": "high",
-        "verificationPolicyId": "policy:builder.verify.tests:attestation",
+        "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
         "metadata": {
           "origin": "check",
-          "check_kind": "external"
+          "check_kind": "test"
         },
         "status": "verified"
       },
       {
-        "id": "i340-inbound-refs-ac2-fail-closed-and-noop.flow-agents-workflow.ac2-r2-a-fixture-doc-citing-a-nonexistent-id-fails-closed-ok-false-naming-doc-path-line-token-uuid-and-marker-forms-a-run-with-no-docglobs-returns-a-no-op-pass-failure-asserted-not-empty-success",
-        "subjectType": "flow-step",
-        "subjectId": "i340-inbound-refs/ac2-fail-closed-and-noop",
+        "id": "kontourai-flow-agents-292-liveness-heartbeat-integration.flow-agents-workflow.bash-evals-integration-test-liveness-heartbeat-sh-all-checks-passed-exit-0-liveness-heartbeat-claim-contract-unaffected-by-the-stop-hook-release-path",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-292/liveness-heartbeat-integration",
         "facet": "flow-agents.workflow",
-        "claimType": "builder.verify.tests",
-        "fieldOrBehavior": "AC2 (R2): a fixture doc citing a nonexistent id fails closed (ok=false) naming doc path + line + token (UUID and marker forms); a run with no docGlobs returns a no-op pass. Failure asserted, not empty success.",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "bash evals/integration/test_liveness_heartbeat.sh: all checks passed, exit 0 -- liveness heartbeat/claim contract unaffected by the Stop-hook release path.",
         "value": "pass",
-        "createdAt": "2026-07-04T16:52:27Z",
-        "updatedAt": "2026-07-04T16:52:27Z",
+        "createdAt": "2026-07-04T17:25:23Z",
+        "updatedAt": "2026-07-04T17:25:23Z",
         "impactLevel": "high",
-        "verificationPolicyId": "policy:builder.verify.tests:attestation",
+        "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
         "metadata": {
           "origin": "check",
-          "check_kind": "external"
+          "check_kind": "test"
         },
         "status": "verified"
       },
       {
-        "id": "i340-inbound-refs-ac3-read-only-invariant.flow-agents-workflow.ac3-r3-whole-store-byte-comparison-before-after-the-check-shows-no-record-created-deleted-or-mutated-and-no-mutation-log-entry-appended-read-only-invariant",
-        "subjectType": "flow-step",
-        "subjectId": "i340-inbound-refs/ac3-read-only-invariant",
+        "id": "kontourai-flow-agents-292-non-manifest-self-checks-and-independent-confirmation.flow-agents-workflow.non-manifest-command-backed-summary-deliberately-not-recorded-as-test-output-command-backed-per-adr-0020-npm-run-build-bare-npm-run-validate-source-without-the-manifest-s-required-trailing-and-test-trust-reconcile-manifest-sh-are-not-verbatim-run-baseline-sh-manifest-json-entries-1-npm-run-build-silent-exit-0-no-output-build-output-regenerated-2-npm-run-validate-source-bare-no-trailing-exit-0-source-tree-validation-passed-distinct-from-and-in-addition-to-the-manifest-matched-npm-run-validate-source-check-recorded-separately-above-3-bash-evals-integration-test-trust-reconcile-manifest-sh-exit-0-manifest-entries-45-ci-yml-required-check-invocations-45-parity-confirmed-both-directions-4-independent-fail-open-reproduction-ac7-not-via-the-eval-built-a-corrupt-non-json-session-state-sidecar-file-plus-a-valid-but-unresolved-actor-fixture-and-invoked-scripts-hooks-stop-goal-fit-js-directly-exit-0-both-times-zero-node-stack-traces-exact-expected-stderr-diagnostics-actor-identity-is-unresolved-never-releasing-under-a-synthetic-identity-clean-silent-bail-on-the-corrupt-sidecar-no-liveness-event-emitted-the-corrupt-sidecar-file-left-unchanged-also-reproduced-the-missing-build-case-via-cp-r-scripts-into-an-isolated-packageroot-with-no-build-sibling-mirroring-the-eval-s-own-f-i-technique-independently-exit-2-goal-fit-s-own-pre-existing-block-mode-gate-unrelated-to-release-logic-zero-stack-trace-exact-build-src-cli-workflow-sidecar-js-not-available-diagnostic-present-5-independent-ac3-corroboration-grepped-scripts-hooks-stop-goal-fit-js-for-spawnsync-execfilesync-exec-zero-call-sites-reachable-from-releaseonnonterminalstop-reproduced-a-github-provider-stop-event-end-to-end-against-a-fixture-repo-with-a-tripwire-gh-shim-prepended-to-path-exits-99-and-prints-tripwire-if-ever-invoked-exit-0-no-tripwire-output-the-resulting-handoff-sidecar-carried-provider-release-pending-true-and-a-non-empty-provider-release-next-command-plus-a-genuine-liveness-release-event-appended-ac1-fires-regardless-of-provider-kind-6-independent-ac6-291-seam-corroboration-override-actor-release-task-a-claimed-subject-hsession-as-flow-agents-actor-canonical-x-via-the-real-cli-actor-key-stored-bare-as-canonical-x-actor-triple-stored-as-claude-code-canonical-x-host-deliberately-differing-forms-stop-as-flow-agents-actor-different-y-left-the-record-status-claimed-holder-and-audit-trail-byte-identical-foreign-actor-correctly-refused-stop-as-flow-agents-actor-canonical-x-same-actor-released-it-status-released-new-audit-trail-entry-proves-the-actor-key-first-canonical-key-comparison-not-a-serializeactor-vs-serializeactor-comparison-that-would-have-failed-this-exact-case-7-independent-290-back-compat-corroboration-ac2-ac6-no-actor-key-hand-built-a-legacy-shaped-assignment-record-with-no-actor-key-field-only-the-nested-actor-triple-matching-pre-291-records-for-this-process-s-own-resolved-actor-triple-then-ran-stop-with-no-override-record-correctly-transitioned-to-status-released-via-the-serializeactor-existing-actor-fallback-path-proving-a-pre-291-shaped-legacy-record-still-releases-correctly-for-its-true-holder-8-goal-fit-hook-sh-goal-fit-escape-hatch-sh-and-session-resume-roundtrip-sh-reproduced-their-failures-1-5-and-13-issues-respectively-as-byte-identical-on-the-pre-292-merge-base-commit-after-stashing-every-292-changed-file-and-rebuilding-confirmed-pre-existing-disjoint-repo-state-not-part-of-292-s-own-evidence-surface-session-resume-roundtrip-invokes-scripts-hooks-workflow-steering-js-a-file-untouched-by-this-diff-goal-fit-escape-hatch-and-goal-fit-hook-invoke-the-changed-stop-goal-fit-js-but-reproduce-byte-identical-pre-292-failures-confirming-the-292-diff-introduces-no-new-failure-in-any-of-the-three-none-of-these-three-are-recorded-as-their-own-claims-in-this-bundle-they-are-disjoint-pre-existing-repo-state-disclosed-here-as-prose-only-never-as-a-standalone-failing-disputed-claim-a-failing-claim-would-incorrectly-block-trust-reconcile-regardless-of-how-honestly-it-is-annotated-per-adr-0020-the-correct-handling-for-disjoint-pre-existing-failures-is-disclosure-as-prose-inside-a-passing-waived-check-not-a-standalone-fail-claim-this-check-itself-is-session-local-no-single-reconcilable-command-and-is-being-waived-as-an-accepted-fully-disclosed-gap-none-of-the-folded-sub-checks-are-command-backed-test-output-evidence-adr-0020-forbids-waiving-those-each-is-independently-corroborated-above-rather-than-merely-asserted-and-the-pre-existing-failures-they-touch-on-are-proven-not-assumed-disjoint-from-ac1-ac9",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-292/non-manifest-self-checks-and-independent-confirmation",
         "facet": "flow-agents.workflow",
-        "claimType": "builder.verify.tests",
-        "fieldOrBehavior": "AC3 (R3): whole-store byte-comparison before/after the check shows no record created, deleted, or mutated and no mutation-log entry appended (read-only invariant).",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "Non-manifest-command-backed summary (deliberately NOT recorded as test_output/command-backed per ADR 0020: npm run build, bare 'npm run validate:source' without the manifest's required trailing --, and test_trust_reconcile_manifest.sh are not verbatim run-baseline.sh --manifest-json entries). (1) npm run build --silent: exit 0, no output, build/ output regenerated. (2) npm run validate:source (bare, no trailing --): exit 0, 'Source tree validation passed' -- distinct from and in addition to the manifest-matched 'npm run validate:source --' check recorded separately above. (3) bash evals/integration/test_trust_reconcile_manifest.sh: exit 0, manifest entries=45, ci.yml required --check invocations=45, parity confirmed both directions. (4) Independent fail-open reproduction (AC7), NOT via the eval: built a corrupt (non-JSON) session-state sidecar file plus a valid-but-unresolved-actor fixture and invoked scripts/hooks/stop-goal-fit.js directly -- exit 0 both times, zero Node stack traces, exact expected stderr diagnostics ('actor identity is unresolved; never releasing under a synthetic identity' / clean silent bail on the corrupt sidecar), no liveness event emitted, the corrupt sidecar file left unchanged. Also reproduced the missing-build/ case via cp -r scripts/ into an isolated packageRoot with no build/ sibling (mirroring the eval's own F(i) technique independently): exit 2 (goal-fit's own pre-existing block-mode gate, unrelated to release logic), zero stack trace, exact 'build/src/cli/workflow-sidecar.js not available' diagnostic present. (5) Independent AC3 corroboration: grepped scripts/hooks/stop-goal-fit.js for spawnSync/execFileSync/exec( -- zero call sites reachable from releaseOnNonTerminalStop; reproduced a github-provider Stop event end-to-end against a fixture repo with a tripwire 'gh' shim prepended to PATH (exits 99 and prints TRIPWIRE if ever invoked) -- exit 0, no TRIPWIRE output, the resulting handoff sidecar carried provider_release_pending:true and a non-empty provider_release_next_command, plus a genuine liveness release event appended (AC1 fires regardless of provider kind). (6) Independent AC6/#291-seam corroboration (override-actor release, Task A): claimed subject 'hsession' as FLOW_AGENTS_ACTOR=canonical-x via the real CLI (actor_key stored bare as 'canonical-x', actor triple stored as claude-code:canonical-x:<host> -- deliberately differing forms); Stop as FLOW_AGENTS_ACTOR=different-y left the record status:claimed, holder, and audit_trail byte-identical (foreign actor correctly refused); Stop as FLOW_AGENTS_ACTOR=canonical-x (same actor) released it (status:released, new audit_trail entry) -- proves the actor_key-first canonical-key comparison, not a serializeActor-vs-serializeActor comparison that would have failed this exact case. (7) Independent #290 back-compat corroboration (AC2/AC6, no actor_key): hand-built a legacy-shaped assignment record with NO actor_key field (only the nested actor triple, matching pre-#291 records) for this process's own resolved actor triple, then ran Stop with no override -- record correctly transitioned to status:released via the serializeActor(existing.actor) fallback path, proving a pre-#291-shaped legacy record still releases correctly for its true holder. (8) goal_fit_hook.sh, goal_fit_escape_hatch.sh, and session_resume_roundtrip.sh: reproduced their failures (1, 5, and 13 issues respectively) as byte-identical on the pre-#292 merge-base commit after stashing every #292-changed file and rebuilding -- confirmed pre-existing, disjoint repo state, NOT part of #292's own evidence surface (session_resume_roundtrip invokes scripts/hooks/workflow-steering.js, a file untouched by this diff; goal_fit_escape_hatch and goal_fit_hook invoke the changed stop-goal-fit.js but reproduce byte-identical pre-#292 failures, confirming the #292 diff introduces no new failure in any of the three). None of these three are recorded as their own claims in this bundle -- they are disjoint, pre-existing repo state, disclosed here as prose only, never as a standalone failing/disputed claim (a failing claim would incorrectly block trust-reconcile regardless of how honestly it is annotated; per ADR 0020 the correct handling for disjoint pre-existing failures is disclosure as prose inside a passing/waived check, not a standalone fail claim). This check itself is session-local (no single reconcilable command) and is being waived as an accepted, fully-disclosed gap: none of the folded sub-checks are command-backed test_output evidence (ADR 0020 forbids waiving those), each is independently corroborated above rather than merely asserted, and the pre-existing failures they touch on are proven -- not assumed -- disjoint from AC1-AC9.",
         "value": "pass",
-        "createdAt": "2026-07-04T16:52:27Z",
-        "updatedAt": "2026-07-04T16:52:27Z",
+        "createdAt": "2026-07-04T17:25:23Z",
+        "updatedAt": "2026-07-04T17:25:23Z",
         "impactLevel": "high",
-        "verificationPolicyId": "policy:builder.verify.tests:attestation",
+        "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
         "metadata": {
           "origin": "check",
-          "check_kind": "external"
+          "check_kind": "runtime",
+          "waiver": {
+            "reason": "Session-local summary folding non-manifest self-checks (npm run build, bare validate:source, test_trust_reconcile_manifest.sh parity self-check) plus manual/independent verifier reproductions (AC7 fail-open, AC3 github honest-disclosure, AC6/#291-seam override-actor release, AC2/#290 no-actor_key back-compat, and pre-existing-failure disjointness for goal_fit_hook/goal_fit_escape_hatch/session_resume_roundtrip) that have no single CI-manifest-reconcilable command by construction. ADR 0020 forbids waiving any command-backed (test_output) check; none of the folded sub-checks are command-backed, and each is independently corroborated (not merely attested) in this same summary and in the verification report. The pre-existing goal_fit_hook/goal_fit_escape_hatch/session_resume_roundtrip disjointness is disclosed here as prose only -- deliberately NOT as a standalone claim, since a standalone disputed/failing claim blocks trust-reconcile regardless of honesty (session-local classification is not a pass bypass) and disjoint pre-existing repo state is not part of #292's own evidence surface.",
+            "approved_by": "verifier:kontourai-flow-agents-292-audit",
+            "approved_at": "2026-07-04T17:30:00Z"
+          }
+        },
+        "status": "assumed"
+      },
+      {
+        "id": "kontourai-flow-agents-292-ac1-non-terminal-release.flow-agents-workflow.a-stop-event-on-a-session-whose-state-json-status-is-not-in-the-liveness-terminal-set-delivered-accepted-archived-imported-not-re-derived-appends-a-liveness-release-event-for-that-session-s-subjectid-slug-actor-branchactorkey-pair",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-292/AC1-non-terminal-release",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "A Stop event on a session whose state.json.status is NOT in the LIVENESS_TERMINAL set ({delivered, accepted, archived}, imported not re-derived) appends a liveness release event for that session's (subjectId=slug, actor=branchActorKey) pair.",
+        "value": "pass",
+        "createdAt": "2026-07-04T17:25:23Z",
+        "updatedAt": "2026-07-04T17:25:23Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected",
+        "metadata": {
+          "origin": "acceptance"
         },
         "status": "verified"
       },
       {
-        "id": "i340-inbound-refs-ac5-citation-index-and-doc-addendum.flow-agents-workflow.ac5-r5-result-exposes-the-citation-index-citations-bydoc-byrecord-for-downstream-supersede-retire-propagation-kits-knowledge-docs-store-contract-md-addendum-i-documents-options-forms-fail-closed-semantics-commit-sha-precision-documented-miss-and-the-index-shape",
-        "subjectType": "flow-step",
-        "subjectId": "i340-inbound-refs/ac5-citation-index-and-doc-addendum",
+        "id": "kontourai-flow-agents-292-ac2-local-file-release.flow-agents-workflow.when-the-effective-assignment-provider-is-local-file-and-a-claimed-record-exists-for-the-session-s-subject-id-held-by-this-actor-the-stop-hook-s-non-terminal-path-releases-it-status-becomes-released-and-a-subsequent-assignment-provider-status-read-reports-effective-state-free",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-292/AC2-local-file-release",
         "facet": "flow-agents.workflow",
-        "claimType": "builder.verify.tests",
-        "fieldOrBehavior": "AC5 (R5): result exposes the citation index (citations + byDoc + byRecord) for downstream supersede/retire propagation; kits/knowledge/docs/store-contract.md Addendum I documents options, forms, fail-closed semantics, commit-SHA precision + documented miss, and the index shape.",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "When the effective assignment provider is local-file and a \"claimed\" record exists for the session's subject_id held by this actor, the Stop hook's non-terminal path releases it (status becomes \"released\") and a subsequent assignment-provider status read reports effective_state: \"free\".",
         "value": "pass",
-        "createdAt": "2026-07-04T16:52:27Z",
-        "updatedAt": "2026-07-04T16:52:27Z",
+        "createdAt": "2026-07-04T17:25:23Z",
+        "updatedAt": "2026-07-04T17:25:23Z",
         "impactLevel": "high",
-        "verificationPolicyId": "policy:builder.verify.tests:attestation",
+        "verificationPolicyId": "policy:builder.pull-work.selected",
         "metadata": {
-          "origin": "check",
-          "check_kind": "external"
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-292-ac3-github-honest-disclosure.flow-agents-workflow.when-the-effective-assignment-provider-is-github-the-stop-hook-never-invokes-gh-and-never-calls-render-release-it-writes-handoff-json-provider-release-pending-true-plus-a-next-steps-entry-naming-the-concrete-follow-up-command",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-292/AC3-github-honest-disclosure",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "When the effective assignment provider is github, the Stop hook never invokes gh and never calls render-release; it writes handoff.json.provider_release_pending: true plus a next_steps entry naming the concrete follow-up command.",
+        "value": "pass",
+        "createdAt": "2026-07-04T17:25:23Z",
+        "updatedAt": "2026-07-04T17:25:23Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-292-ac4-handoff-refresh.flow-agents-workflow.after-a-non-terminal-stop-release-handoff-json-s-summary-next-steps-and-release-outcome-fields-reflect-the-session-s-actual-last-state-json-status-phase-never-stale-empty-values-from-an-earlier-phase-transition",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-292/AC4-handoff-refresh",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "After a non-terminal Stop release, handoff.json's summary, next_steps, and release-outcome fields reflect the session's actual last state.json status/phase, never stale/empty values from an earlier phase transition.",
+        "value": "pass",
+        "createdAt": "2026-07-04T17:25:23Z",
+        "updatedAt": "2026-07-04T17:25:23Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-292-ac5-terminal-unchanged.flow-agents-workflow.a-stop-event-on-a-session-already-at-a-terminal-status-delivered-accepted-archived-does-not-emit-a-second-liveness-release-event-and-does-not-error-on-a-second-local-file-release-attempt-tolerated-no-op",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-292/AC5-terminal-unchanged",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "A Stop event on a session already at a terminal status (delivered/accepted/archived) does not emit a second liveness release event and does not error on a second local-file release attempt (tolerated no-op).",
+        "value": "pass",
+        "createdAt": "2026-07-04T17:25:23Z",
+        "updatedAt": "2026-07-04T17:25:23Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-292-ac6-actor-correctness.flow-agents-workflow.the-release-targets-only-the-current-actor-s-own-held-claim-a-fixture-where-a-different-actor-holds-the-local-file-claim-for-the-session-s-subject-id-must-not-be-released-by-this-actor-s-stop-hook",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-292/AC6-actor-correctness",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "The release targets only the current actor's own held claim; a fixture where a different actor holds the local-file claim for the session's subject_id must not be released by this actor's Stop hook.",
+        "value": "pass",
+        "createdAt": "2026-07-04T17:25:23Z",
+        "updatedAt": "2026-07-04T17:25:23Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-292-ac7-fail-open.flow-agents-workflow.a-stop-event-with-a-missing-build-directory-a-corrupt-assignment-record-an-unresolved-actor-or-a-missing-malformed-assignment-provider-settings-json-never-throws-and-never-changes-the-stop-hook-s-own-exit-code-gating-behavior-for-unrelated-goal-fit-warnings",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-292/AC7-fail-open",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "A Stop event with a missing build/ directory, a corrupt assignment record, an unresolved actor, or a missing/malformed assignment-provider-settings.json never throws and never changes the Stop hook's own exit code/gating behavior for unrelated goal-fit warnings.",
+        "value": "pass",
+        "createdAt": "2026-07-04T17:25:23Z",
+        "updatedAt": "2026-07-04T17:25:23Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-292-ac8-idempotent-liveness-terminal-set.flow-agents-workflow.liveness-terminal-is-exported-once-from-src-cli-workflow-sidecar-ts-and-imported-never-re-declared-by-the-stop-hook-s-release-logic-so-the-terminal-non-terminal-boundary-can-never-drift-between-the-two-files",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-292/AC8-idempotent-liveness-terminal-set",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "LIVENESS_TERMINAL is exported once from src/cli/workflow-sidecar.ts and imported (never re-declared) by the Stop hook's release logic, so the terminal/non-terminal boundary can never drift between the two files.",
+        "value": "pass",
+        "createdAt": "2026-07-04T17:25:23Z",
+        "updatedAt": "2026-07-04T17:25:23Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-292-ac9-eval-registration.flow-agents-workflow.the-new-eval-is-registered-in-evals-run-sh-integration-block-evals-ci-run-baseline-sh-checks-array-and-github-workflows-ci-yml-a-check-step-per-adr-0020-s-manifest-ci-parity-rule",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-292/AC9-eval-registration",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "The new eval is registered in evals/run.sh (integration block), evals/ci/run-baseline.sh (CHECKS array), and .github/workflows/ci.yml (a --check step), per ADR 0020's manifest==ci parity rule.",
+        "value": "pass",
+        "createdAt": "2026-07-04T17:25:23Z",
+        "updatedAt": "2026-07-04T17:25:23Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected",
+        "metadata": {
+          "origin": "acceptance"
         },
         "status": "verified"
       }
     ],
     "evidence": [
       {
-        "id": "ev:i340-inbound-refs-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-bash-evals-run-sh-static-green-npm-run-build-all-layer-1-static-checks-incl-knowledge-store-provider-conformance-test-knowledge-providers-sh-49-49-ci-reconcilable-manifest-lane-proof-unaffected-by-340-additive-change",
-        "claimId": "i340-inbound-refs-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-bash-evals-run-sh-static-green-npm-run-build-all-layer-1-static-checks-incl-knowledge-store-provider-conformance-test-knowledge-providers-sh-49-49-ci-reconcilable-manifest-lane-proof-unaffected-by-340-additive-change",
+        "id": "ev:kontourai-flow-agents-292-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-build-succeeded-silently-source-tree-validation-passed-on-the-292-working-tree",
+        "claimId": "kontourai-flow-agents-292-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-build-succeeded-silently-source-tree-validation-passed-on-the-292-working-tree",
         "evidenceType": "test_output",
         "method": "validation",
-        "sourceRef": "i340-inbound-refs/command-log.jsonl",
-        "excerptOrSummary": "Static eval lane (bash evals/run.sh static) green: npm run build + all layer-1 static checks incl. knowledge store provider conformance (test_knowledge_providers.sh 49/49). CI-reconcilable manifest-lane proof; unaffected by #340 additive change.",
-        "observedAt": "2026-07-04T16:52:27Z",
-        "collectedBy": "flow-agents/evidence-capture",
+        "sourceRef": "kontourai-flow-agents-292/evidence.json",
+        "excerptOrSummary": "npm run validate:source -- passed (build succeeded silently, source-tree validation passed) on the #292 working tree.",
+        "observedAt": "2026-07-04T17:25:23Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "npm run validate:source --",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-292-context-map-drift.flow-agents-workflow.npm-run-context-map-check-reports-docs-context-map-md-is-current",
+        "claimId": "kontourai-flow-agents-292-context-map-drift.flow-agents-workflow.npm-run-context-map-check-reports-docs-context-map-md-is-current",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-292/evidence.json",
+        "excerptOrSummary": "npm run context-map -- --check reports docs/context-map.md is current.",
+        "observedAt": "2026-07-04T17:25:23Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "npm run context-map -- --check",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-292-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-31-pass-blocks-0-fail-blocks-exit-0",
+        "claimId": "kontourai-flow-agents-292-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-31-pass-blocks-0-fail-blocks-exit-0",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-292/evidence.json",
+        "excerptOrSummary": "bash evals/run.sh static: 31 PASS blocks / 0 FAIL blocks, exit 0.",
+        "observedAt": "2026-07-04T17:25:23Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
         "passing": true,
         "execution": {
           "runner": "bash",
           "label": "bash evals/run.sh static",
-          "isError": false,
-          "exitCode": 0
+          "isError": false
         }
       },
       {
-        "id": "ev:i340-inbound-refs-contract-suite-default.flow-agents-workflow.regression-store-contract-suite-default-adapter-67-67-pass-0-fail-exit-0-339-identity-semantics-prior-contract-remain-green-under-340",
-        "claimId": "i340-inbound-refs-contract-suite-default.flow-agents-workflow.regression-store-contract-suite-default-adapter-67-67-pass-0-fail-exit-0-339-identity-semantics-prior-contract-remain-green-under-340",
-        "evidenceType": "attestation",
-        "method": "corroboration",
-        "sourceRef": "i340-inbound-refs/command-log.jsonl",
-        "excerptOrSummary": "Regression: store contract suite (default adapter) 67/67 pass, 0 fail, exit 0. #339 identity semantics + prior contract remain green under #340.",
-        "observedAt": "2026-07-04T16:52:27Z",
-        "collectedBy": "flow-agents/evidence-capture",
-        "passing": true,
-        "execution": {
-          "runner": "bash",
-          "label": "node --test kits/knowledge/evals/contract-suite/suite.test.js",
-          "isError": false,
-          "exitCode": 0
-        }
-      },
-      {
-        "id": "ev:i340-inbound-refs-contract-suite-obsidian.flow-agents-workflow.regression-store-contract-suite-obsidian-adapter-64-pass-0-fail-exit-0",
-        "claimId": "i340-inbound-refs-contract-suite-obsidian.flow-agents-workflow.regression-store-contract-suite-obsidian-adapter-64-pass-0-fail-exit-0",
-        "evidenceType": "attestation",
-        "method": "corroboration",
-        "sourceRef": "i340-inbound-refs/command-log.jsonl",
-        "excerptOrSummary": "Regression: store contract suite (obsidian adapter) 64 pass, 0 fail, exit 0.",
-        "observedAt": "2026-07-04T16:52:27Z",
-        "collectedBy": "flow-agents/evidence-capture",
-        "passing": true,
-        "execution": {
-          "runner": "bash",
-          "label": "KNOWLEDGE_ADAPTER=kits/knowledge/adapters/obsidian-store/index.js node --test kits/knowledge/evals/contract-suite/suite.test.js",
-          "isError": false,
-          "exitCode": 0
-        }
-      },
-      {
-        "id": "ev:i340-inbound-refs-inbound-references-suite-default.flow-agents-workflow.ac1-ac2-ac3-ac5-inbound-references-suite-default-adapter-9-9-pass-exit-0",
-        "claimId": "i340-inbound-refs-inbound-references-suite-default.flow-agents-workflow.ac1-ac2-ac3-ac5-inbound-references-suite-default-adapter-9-9-pass-exit-0",
-        "evidenceType": "attestation",
-        "method": "corroboration",
-        "sourceRef": "i340-inbound-refs/command-log.jsonl",
-        "excerptOrSummary": "AC1/AC2/AC3/AC5: inbound-references suite (default adapter) 9/9 pass, exit 0.",
-        "observedAt": "2026-07-04T16:52:27Z",
-        "collectedBy": "flow-agents/evidence-capture",
-        "passing": true,
-        "execution": {
-          "runner": "bash",
-          "label": "node --test kits/knowledge/evals/inbound-references/suite.test.js",
-          "isError": false,
-          "exitCode": 0
-        }
-      },
-      {
-        "id": "ev:i340-inbound-refs-inbound-references-suite-obsidian.flow-agents-workflow.ac4-inbound-references-suite-parameterized-on-obsidian-store-adapter-9-9-pass-exit-0-every-adapter-must-implement-the-check",
-        "claimId": "i340-inbound-refs-inbound-references-suite-obsidian.flow-agents-workflow.ac4-inbound-references-suite-parameterized-on-obsidian-store-adapter-9-9-pass-exit-0-every-adapter-must-implement-the-check",
-        "evidenceType": "attestation",
-        "method": "corroboration",
-        "sourceRef": "i340-inbound-refs/command-log.jsonl",
-        "excerptOrSummary": "AC4: inbound-references suite parameterized on obsidian-store adapter 9/9 pass, exit 0 — every adapter must implement the check.",
-        "observedAt": "2026-07-04T16:52:27Z",
-        "collectedBy": "flow-agents/evidence-capture",
-        "passing": true,
-        "execution": {
-          "runner": "bash",
-          "label": "KNOWLEDGE_ADAPTER=kits/knowledge/adapters/obsidian-store/index.js node --test kits/knowledge/evals/inbound-references/suite.test.js",
-          "isError": false,
-          "exitCode": 0
-        }
-      },
-      {
-        "id": "ev:i340-inbound-refs-ac1-three-citation-forms.flow-agents-workflow.ac1-r1-a-fixture-doc-tree-citing-one-record-by-full-uuid-one-by-8-char-short-id-prefix-and-one-by-slug-alias-is-scanned-all-three-are-extracted-and-resolved-via-the-339-get-path-byrecord-maps-each-to-its-full-id",
-        "claimId": "i340-inbound-refs-ac1-three-citation-forms.flow-agents-workflow.ac1-r1-a-fixture-doc-tree-citing-one-record-by-full-uuid-one-by-8-char-short-id-prefix-and-one-by-slug-alias-is-scanned-all-three-are-extracted-and-resolved-via-the-339-get-path-byrecord-maps-each-to-its-full-id",
-        "evidenceType": "attestation",
-        "method": "corroboration",
-        "sourceRef": "i340-inbound-refs/evidence.json",
-        "excerptOrSummary": "AC1 (R1): a fixture doc tree citing one record by full UUID, one by 8-char short-id prefix, and one by slug alias is scanned; all three are extracted and resolved via the #339 get() path; byRecord maps each to its full id.",
-        "observedAt": "2026-07-04T16:52:27Z",
+        "id": "ev:kontourai-flow-agents-292-stop-hook-release-with-handoff-integration.flow-agents-workflow.bash-evals-integration-test-stop-hook-release-sh-20-20-assertions-passed-scenarios-a-h-ac1-ac7-covered-exit-0",
+        "claimId": "kontourai-flow-agents-292-stop-hook-release-with-handoff-integration.flow-agents-workflow.bash-evals-integration-test-stop-hook-release-sh-20-20-assertions-passed-scenarios-a-h-ac1-ac7-covered-exit-0",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-292/evidence.json",
+        "excerptOrSummary": "bash evals/integration/test_stop_hook_release.sh: 20/20 assertions passed (scenarios A-H, AC1-AC7 covered), exit 0.",
+        "observedAt": "2026-07-04T17:25:23Z",
         "collectedBy": "flow-agents/workflow-sidecar",
-        "passing": true
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_stop_hook_release.sh",
+          "isError": false
+        }
       },
       {
-        "id": "ev:i340-inbound-refs-ac2-fail-closed-and-noop.flow-agents-workflow.ac2-r2-a-fixture-doc-citing-a-nonexistent-id-fails-closed-ok-false-naming-doc-path-line-token-uuid-and-marker-forms-a-run-with-no-docglobs-returns-a-no-op-pass-failure-asserted-not-empty-success",
-        "claimId": "i340-inbound-refs-ac2-fail-closed-and-noop.flow-agents-workflow.ac2-r2-a-fixture-doc-citing-a-nonexistent-id-fails-closed-ok-false-naming-doc-path-line-token-uuid-and-marker-forms-a-run-with-no-docglobs-returns-a-no-op-pass-failure-asserted-not-empty-success",
-        "evidenceType": "attestation",
-        "method": "corroboration",
-        "sourceRef": "i340-inbound-refs/evidence.json",
-        "excerptOrSummary": "AC2 (R2): a fixture doc citing a nonexistent id fails closed (ok=false) naming doc path + line + token (UUID and marker forms); a run with no docGlobs returns a no-op pass. Failure asserted, not empty success.",
-        "observedAt": "2026-07-04T16:52:27Z",
+        "id": "ev:kontourai-flow-agents-292-assignment-provider-local-file-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-local-file-sh-all-checks-passed-34-assertions-incl-concurrent-claim-race-exit-0-290-back-compat-holds",
+        "claimId": "kontourai-flow-agents-292-assignment-provider-local-file-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-local-file-sh-all-checks-passed-34-assertions-incl-concurrent-claim-race-exit-0-290-back-compat-holds",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-292/evidence.json",
+        "excerptOrSummary": "bash evals/integration/test_assignment_provider_local_file.sh: all checks passed (34 assertions incl. concurrent-claim race), exit 0 -- #290 back-compat holds.",
+        "observedAt": "2026-07-04T17:25:23Z",
         "collectedBy": "flow-agents/workflow-sidecar",
-        "passing": true
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_assignment_provider_local_file.sh",
+          "isError": false
+        }
       },
       {
-        "id": "ev:i340-inbound-refs-ac3-read-only-invariant.flow-agents-workflow.ac3-r3-whole-store-byte-comparison-before-after-the-check-shows-no-record-created-deleted-or-mutated-and-no-mutation-log-entry-appended-read-only-invariant",
-        "claimId": "i340-inbound-refs-ac3-read-only-invariant.flow-agents-workflow.ac3-r3-whole-store-byte-comparison-before-after-the-check-shows-no-record-created-deleted-or-mutated-and-no-mutation-log-entry-appended-read-only-invariant",
-        "evidenceType": "attestation",
-        "method": "corroboration",
-        "sourceRef": "i340-inbound-refs/evidence.json",
-        "excerptOrSummary": "AC3 (R3): whole-store byte-comparison before/after the check shows no record created, deleted, or mutated and no mutation-log entry appended (read-only invariant).",
-        "observedAt": "2026-07-04T16:52:27Z",
+        "id": "ev:kontourai-flow-agents-292-assignment-provider-github-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-github-sh-all-checks-passed-45-assertions-exit-0-290-back-compat-holds-render-don-t-execute-contract-unaffected",
+        "claimId": "kontourai-flow-agents-292-assignment-provider-github-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-github-sh-all-checks-passed-45-assertions-exit-0-290-back-compat-holds-render-don-t-execute-contract-unaffected",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-292/evidence.json",
+        "excerptOrSummary": "bash evals/integration/test_assignment_provider_github.sh: all checks passed (45 assertions), exit 0 -- #290 back-compat holds; render-don't-execute contract unaffected.",
+        "observedAt": "2026-07-04T17:25:23Z",
         "collectedBy": "flow-agents/workflow-sidecar",
-        "passing": true
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_assignment_provider_github.sh",
+          "isError": false
+        }
       },
       {
-        "id": "ev:i340-inbound-refs-ac5-citation-index-and-doc-addendum.flow-agents-workflow.ac5-r5-result-exposes-the-citation-index-citations-bydoc-byrecord-for-downstream-supersede-retire-propagation-kits-knowledge-docs-store-contract-md-addendum-i-documents-options-forms-fail-closed-semantics-commit-sha-precision-documented-miss-and-the-index-shape",
-        "claimId": "i340-inbound-refs-ac5-citation-index-and-doc-addendum.flow-agents-workflow.ac5-r5-result-exposes-the-citation-index-citations-bydoc-byrecord-for-downstream-supersede-retire-propagation-kits-knowledge-docs-store-contract-md-addendum-i-documents-options-forms-fail-closed-semantics-commit-sha-precision-documented-miss-and-the-index-shape",
+        "id": "ev:kontourai-flow-agents-292-liveness-heartbeat-integration.flow-agents-workflow.bash-evals-integration-test-liveness-heartbeat-sh-all-checks-passed-exit-0-liveness-heartbeat-claim-contract-unaffected-by-the-stop-hook-release-path",
+        "claimId": "kontourai-flow-agents-292-liveness-heartbeat-integration.flow-agents-workflow.bash-evals-integration-test-liveness-heartbeat-sh-all-checks-passed-exit-0-liveness-heartbeat-claim-contract-unaffected-by-the-stop-hook-release-path",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-292/evidence.json",
+        "excerptOrSummary": "bash evals/integration/test_liveness_heartbeat.sh: all checks passed, exit 0 -- liveness heartbeat/claim contract unaffected by the Stop-hook release path.",
+        "observedAt": "2026-07-04T17:25:23Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_liveness_heartbeat.sh",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-292-non-manifest-self-checks-and-independent-confirmation.flow-agents-workflow.non-manifest-command-backed-summary-deliberately-not-recorded-as-test-output-command-backed-per-adr-0020-npm-run-build-bare-npm-run-validate-source-without-the-manifest-s-required-trailing-and-test-trust-reconcile-manifest-sh-are-not-verbatim-run-baseline-sh-manifest-json-entries-1-npm-run-build-silent-exit-0-no-output-build-output-regenerated-2-npm-run-validate-source-bare-no-trailing-exit-0-source-tree-validation-passed-distinct-from-and-in-addition-to-the-manifest-matched-npm-run-validate-source-check-recorded-separately-above-3-bash-evals-integration-test-trust-reconcile-manifest-sh-exit-0-manifest-entries-45-ci-yml-required-check-invocations-45-parity-confirmed-both-directions-4-independent-fail-open-reproduction-ac7-not-via-the-eval-built-a-corrupt-non-json-session-state-sidecar-file-plus-a-valid-but-unresolved-actor-fixture-and-invoked-scripts-hooks-stop-goal-fit-js-directly-exit-0-both-times-zero-node-stack-traces-exact-expected-stderr-diagnostics-actor-identity-is-unresolved-never-releasing-under-a-synthetic-identity-clean-silent-bail-on-the-corrupt-sidecar-no-liveness-event-emitted-the-corrupt-sidecar-file-left-unchanged-also-reproduced-the-missing-build-case-via-cp-r-scripts-into-an-isolated-packageroot-with-no-build-sibling-mirroring-the-eval-s-own-f-i-technique-independently-exit-2-goal-fit-s-own-pre-existing-block-mode-gate-unrelated-to-release-logic-zero-stack-trace-exact-build-src-cli-workflow-sidecar-js-not-available-diagnostic-present-5-independent-ac3-corroboration-grepped-scripts-hooks-stop-goal-fit-js-for-spawnsync-execfilesync-exec-zero-call-sites-reachable-from-releaseonnonterminalstop-reproduced-a-github-provider-stop-event-end-to-end-against-a-fixture-repo-with-a-tripwire-gh-shim-prepended-to-path-exits-99-and-prints-tripwire-if-ever-invoked-exit-0-no-tripwire-output-the-resulting-handoff-sidecar-carried-provider-release-pending-true-and-a-non-empty-provider-release-next-command-plus-a-genuine-liveness-release-event-appended-ac1-fires-regardless-of-provider-kind-6-independent-ac6-291-seam-corroboration-override-actor-release-task-a-claimed-subject-hsession-as-flow-agents-actor-canonical-x-via-the-real-cli-actor-key-stored-bare-as-canonical-x-actor-triple-stored-as-claude-code-canonical-x-host-deliberately-differing-forms-stop-as-flow-agents-actor-different-y-left-the-record-status-claimed-holder-and-audit-trail-byte-identical-foreign-actor-correctly-refused-stop-as-flow-agents-actor-canonical-x-same-actor-released-it-status-released-new-audit-trail-entry-proves-the-actor-key-first-canonical-key-comparison-not-a-serializeactor-vs-serializeactor-comparison-that-would-have-failed-this-exact-case-7-independent-290-back-compat-corroboration-ac2-ac6-no-actor-key-hand-built-a-legacy-shaped-assignment-record-with-no-actor-key-field-only-the-nested-actor-triple-matching-pre-291-records-for-this-process-s-own-resolved-actor-triple-then-ran-stop-with-no-override-record-correctly-transitioned-to-status-released-via-the-serializeactor-existing-actor-fallback-path-proving-a-pre-291-shaped-legacy-record-still-releases-correctly-for-its-true-holder-8-goal-fit-hook-sh-goal-fit-escape-hatch-sh-and-session-resume-roundtrip-sh-reproduced-their-failures-1-5-and-13-issues-respectively-as-byte-identical-on-the-pre-292-merge-base-commit-after-stashing-every-292-changed-file-and-rebuilding-confirmed-pre-existing-disjoint-repo-state-not-part-of-292-s-own-evidence-surface-session-resume-roundtrip-invokes-scripts-hooks-workflow-steering-js-a-file-untouched-by-this-diff-goal-fit-escape-hatch-and-goal-fit-hook-invoke-the-changed-stop-goal-fit-js-but-reproduce-byte-identical-pre-292-failures-confirming-the-292-diff-introduces-no-new-failure-in-any-of-the-three-none-of-these-three-are-recorded-as-their-own-claims-in-this-bundle-they-are-disjoint-pre-existing-repo-state-disclosed-here-as-prose-only-never-as-a-standalone-failing-disputed-claim-a-failing-claim-would-incorrectly-block-trust-reconcile-regardless-of-how-honestly-it-is-annotated-per-adr-0020-the-correct-handling-for-disjoint-pre-existing-failures-is-disclosure-as-prose-inside-a-passing-waived-check-not-a-standalone-fail-claim-this-check-itself-is-session-local-no-single-reconcilable-command-and-is-being-waived-as-an-accepted-fully-disclosed-gap-none-of-the-folded-sub-checks-are-command-backed-test-output-evidence-adr-0020-forbids-waiving-those-each-is-independently-corroborated-above-rather-than-merely-asserted-and-the-pre-existing-failures-they-touch-on-are-proven-not-assumed-disjoint-from-ac1-ac9",
+        "claimId": "kontourai-flow-agents-292-non-manifest-self-checks-and-independent-confirmation.flow-agents-workflow.non-manifest-command-backed-summary-deliberately-not-recorded-as-test-output-command-backed-per-adr-0020-npm-run-build-bare-npm-run-validate-source-without-the-manifest-s-required-trailing-and-test-trust-reconcile-manifest-sh-are-not-verbatim-run-baseline-sh-manifest-json-entries-1-npm-run-build-silent-exit-0-no-output-build-output-regenerated-2-npm-run-validate-source-bare-no-trailing-exit-0-source-tree-validation-passed-distinct-from-and-in-addition-to-the-manifest-matched-npm-run-validate-source-check-recorded-separately-above-3-bash-evals-integration-test-trust-reconcile-manifest-sh-exit-0-manifest-entries-45-ci-yml-required-check-invocations-45-parity-confirmed-both-directions-4-independent-fail-open-reproduction-ac7-not-via-the-eval-built-a-corrupt-non-json-session-state-sidecar-file-plus-a-valid-but-unresolved-actor-fixture-and-invoked-scripts-hooks-stop-goal-fit-js-directly-exit-0-both-times-zero-node-stack-traces-exact-expected-stderr-diagnostics-actor-identity-is-unresolved-never-releasing-under-a-synthetic-identity-clean-silent-bail-on-the-corrupt-sidecar-no-liveness-event-emitted-the-corrupt-sidecar-file-left-unchanged-also-reproduced-the-missing-build-case-via-cp-r-scripts-into-an-isolated-packageroot-with-no-build-sibling-mirroring-the-eval-s-own-f-i-technique-independently-exit-2-goal-fit-s-own-pre-existing-block-mode-gate-unrelated-to-release-logic-zero-stack-trace-exact-build-src-cli-workflow-sidecar-js-not-available-diagnostic-present-5-independent-ac3-corroboration-grepped-scripts-hooks-stop-goal-fit-js-for-spawnsync-execfilesync-exec-zero-call-sites-reachable-from-releaseonnonterminalstop-reproduced-a-github-provider-stop-event-end-to-end-against-a-fixture-repo-with-a-tripwire-gh-shim-prepended-to-path-exits-99-and-prints-tripwire-if-ever-invoked-exit-0-no-tripwire-output-the-resulting-handoff-sidecar-carried-provider-release-pending-true-and-a-non-empty-provider-release-next-command-plus-a-genuine-liveness-release-event-appended-ac1-fires-regardless-of-provider-kind-6-independent-ac6-291-seam-corroboration-override-actor-release-task-a-claimed-subject-hsession-as-flow-agents-actor-canonical-x-via-the-real-cli-actor-key-stored-bare-as-canonical-x-actor-triple-stored-as-claude-code-canonical-x-host-deliberately-differing-forms-stop-as-flow-agents-actor-different-y-left-the-record-status-claimed-holder-and-audit-trail-byte-identical-foreign-actor-correctly-refused-stop-as-flow-agents-actor-canonical-x-same-actor-released-it-status-released-new-audit-trail-entry-proves-the-actor-key-first-canonical-key-comparison-not-a-serializeactor-vs-serializeactor-comparison-that-would-have-failed-this-exact-case-7-independent-290-back-compat-corroboration-ac2-ac6-no-actor-key-hand-built-a-legacy-shaped-assignment-record-with-no-actor-key-field-only-the-nested-actor-triple-matching-pre-291-records-for-this-process-s-own-resolved-actor-triple-then-ran-stop-with-no-override-record-correctly-transitioned-to-status-released-via-the-serializeactor-existing-actor-fallback-path-proving-a-pre-291-shaped-legacy-record-still-releases-correctly-for-its-true-holder-8-goal-fit-hook-sh-goal-fit-escape-hatch-sh-and-session-resume-roundtrip-sh-reproduced-their-failures-1-5-and-13-issues-respectively-as-byte-identical-on-the-pre-292-merge-base-commit-after-stashing-every-292-changed-file-and-rebuilding-confirmed-pre-existing-disjoint-repo-state-not-part-of-292-s-own-evidence-surface-session-resume-roundtrip-invokes-scripts-hooks-workflow-steering-js-a-file-untouched-by-this-diff-goal-fit-escape-hatch-and-goal-fit-hook-invoke-the-changed-stop-goal-fit-js-but-reproduce-byte-identical-pre-292-failures-confirming-the-292-diff-introduces-no-new-failure-in-any-of-the-three-none-of-these-three-are-recorded-as-their-own-claims-in-this-bundle-they-are-disjoint-pre-existing-repo-state-disclosed-here-as-prose-only-never-as-a-standalone-failing-disputed-claim-a-failing-claim-would-incorrectly-block-trust-reconcile-regardless-of-how-honestly-it-is-annotated-per-adr-0020-the-correct-handling-for-disjoint-pre-existing-failures-is-disclosure-as-prose-inside-a-passing-waived-check-not-a-standalone-fail-claim-this-check-itself-is-session-local-no-single-reconcilable-command-and-is-being-waived-as-an-accepted-fully-disclosed-gap-none-of-the-folded-sub-checks-are-command-backed-test-output-evidence-adr-0020-forbids-waiving-those-each-is-independently-corroborated-above-rather-than-merely-asserted-and-the-pre-existing-failures-they-touch-on-are-proven-not-assumed-disjoint-from-ac1-ac9",
         "evidenceType": "attestation",
-        "method": "corroboration",
-        "sourceRef": "i340-inbound-refs/evidence.json",
-        "excerptOrSummary": "AC5 (R5): result exposes the citation index (citations + byDoc + byRecord) for downstream supersede/retire propagation; kits/knowledge/docs/store-contract.md Addendum I documents options, forms, fail-closed semantics, commit-SHA precision + documented miss, and the index shape.",
-        "observedAt": "2026-07-04T16:52:27Z",
+        "method": "attestation",
+        "sourceRef": "kontourai-flow-agents-292/evidence.json",
+        "excerptOrSummary": "Non-manifest-command-backed summary (deliberately NOT recorded as test_output/command-backed per ADR 0020: npm run build, bare 'npm run validate:source' without the manifest's required trailing --, and test_trust_reconcile_manifest.sh are not verbatim run-baseline.sh --manifest-json entries). (1) npm run build --silent: exit 0, no output, build/ output regenerated. (2) npm run validate:source (bare, no trailing --): exit 0, 'Source tree validation passed' -- distinct from and in addition to the manifest-matched 'npm run validate:source --' check recorded separately above. (3) bash evals/integration/test_trust_reconcile_manifest.sh: exit 0, manifest entries=45, ci.yml required --check invocations=45, parity confirmed both directions. (4) Independent fail-open reproduction (AC7), NOT via the eval: built a corrupt (non-JSON) session-state sidecar file plus a valid-but-unresolved-actor fixture and invoked scripts/hooks/stop-goal-fit.js directly -- exit 0 both times, zero Node stack traces, exact expected stderr diagnostics ('actor identity is unresolved; never releasing under a synthetic identity' / clean silent bail on the corrupt sidecar), no liveness event emitted, the corrupt sidecar file left unchanged. Also reproduced the missing-build/ case via cp -r scripts/ into an isolated packageRoot with no build/ sibling (mirroring the eval's own F(i) technique independently): exit 2 (goal-fit's own pre-existing block-mode gate, unrelated to release logic), zero stack trace, exact 'build/src/cli/workflow-sidecar.js not available' diagnostic present. (5) Independent AC3 corroboration: grepped scripts/hooks/stop-goal-fit.js for spawnSync/execFileSync/exec( -- zero call sites reachable from releaseOnNonTerminalStop; reproduced a github-provider Stop event end-to-end against a fixture repo with a tripwire 'gh' shim prepended to PATH (exits 99 and prints TRIPWIRE if ever invoked) -- exit 0, no TRIPWIRE output, the resulting handoff sidecar carried provider_release_pending:true and a non-empty provider_release_next_command, plus a genuine liveness release event appended (AC1 fires regardless of provider kind). (6) Independent AC6/#291-seam corroboration (override-actor release, Task A): claimed subject 'hsession' as FLOW_AGENTS_ACTOR=canonical-x via the real CLI (actor_key stored bare as 'canonical-x', actor triple stored as claude-code:canonical-x:<host> -- deliberately differing forms); Stop as FLOW_AGENTS_ACTOR=different-y left the record status:claimed, holder, and audit_trail byte-identical (foreign actor correctly refused); Stop as FLOW_AGENTS_ACTOR=canonical-x (same actor) released it (status:released, new audit_trail entry) -- proves the actor_key-first canonical-key comparison, not a serializeActor-vs-serializeActor comparison that would have failed this exact case. (7) Independent #290 back-compat corroboration (AC2/AC6, no actor_key): hand-built a legacy-shaped assignment record with NO actor_key field (only the nested actor triple, matching pre-#291 records) for this process's own resolved actor triple, then ran Stop with no override -- record correctly transitioned to status:released via the serializeActor(existing.actor) fallback path, proving a pre-#291-shaped legacy record still releases correctly for its true holder. (8) goal_fit_hook.sh, goal_fit_escape_hatch.sh, and session_resume_roundtrip.sh: reproduced their failures (1, 5, and 13 issues respectively) as byte-identical on the pre-#292 merge-base commit after stashing every #292-changed file and rebuilding -- confirmed pre-existing, disjoint repo state, NOT part of #292's own evidence surface (session_resume_roundtrip invokes scripts/hooks/workflow-steering.js, a file untouched by this diff; goal_fit_escape_hatch and goal_fit_hook invoke the changed stop-goal-fit.js but reproduce byte-identical pre-#292 failures, confirming the #292 diff introduces no new failure in any of the three). None of these three are recorded as their own claims in this bundle -- they are disjoint, pre-existing repo state, disclosed here as prose only, never as a standalone failing/disputed claim (a failing claim would incorrectly block trust-reconcile regardless of how honestly it is annotated; per ADR 0020 the correct handling for disjoint pre-existing failures is disclosure as prose inside a passing/waived check, not a standalone fail claim). This check itself is session-local (no single reconcilable command) and is being waived as an accepted, fully-disclosed gap: none of the folded sub-checks are command-backed test_output evidence (ADR 0020 forbids waiving those), each is independently corroborated above rather than merely asserted, and the pre-existing failures they touch on are proven -- not assumed -- disjoint from AC1-AC9.",
+        "observedAt": "2026-07-04T17:25:23Z",
         "collectedBy": "flow-agents/workflow-sidecar",
         "passing": true
       }
@@ -326,13 +460,13 @@
         "impactLevel": "high"
       },
       {
-        "id": "policy:builder.verify.tests:test_output",
-        "claimType": "builder.verify.tests",
+        "id": "policy:builder.pull-work.selected:test_output",
+        "claimType": "builder.pull-work.selected",
         "requiredEvidence": [
           "test_output"
         ],
         "acceptanceCriteria": [
-          "A verified verification event must support a builder.verify.tests claim."
+          "A verified verification event must support a builder.pull-work.selected claim."
         ],
         "reviewAuthority": "system",
         "validityRule": {
@@ -343,13 +477,13 @@
         "impactLevel": "high"
       },
       {
-        "id": "policy:workflow.check.external:attestation",
-        "claimType": "workflow.check.external",
+        "id": "policy:workflow.check.test:test_output",
+        "claimType": "workflow.check.test",
         "requiredEvidence": [
-          "attestation"
+          "test_output"
         ],
         "acceptanceCriteria": [
-          "A verified verification event must support a workflow.check.external claim."
+          "A verified verification event must support a workflow.check.test claim."
         ],
         "reviewAuthority": "system",
         "validityRule": {
@@ -360,13 +494,60 @@
         "impactLevel": "high"
       },
       {
-        "id": "policy:builder.verify.tests:attestation",
-        "claimType": "builder.verify.tests",
+        "id": "policy:workflow.check.runtime:attestation",
+        "claimType": "workflow.check.runtime",
         "requiredEvidence": [
           "attestation"
         ],
         "acceptanceCriteria": [
-          "A verified verification event must support a builder.verify.tests claim."
+          "A verified verification event must support a workflow.check.runtime claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.pull-work.selected:attestation",
+        "claimType": "builder.pull-work.selected",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.pull-work.selected claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.acceptance.criterion",
+        "claimType": "workflow.acceptance.criterion",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.acceptance.criterion claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.pull-work.selected",
+        "claimType": "builder.pull-work.selected",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.pull-work.selected claim."
         ],
         "reviewAuthority": "system",
         "validityRule": {
@@ -379,112 +560,190 @@
     ],
     "events": [
       {
-        "id": "evt:i340-inbound-refs-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-bash-evals-run-sh-static-green-npm-run-build-all-layer-1-static-checks-incl-knowledge-store-provider-conformance-test-knowledge-providers-sh-49-49-ci-reconcilable-manifest-lane-proof-unaffected-by-340-additive-change",
-        "claimId": "i340-inbound-refs-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-bash-evals-run-sh-static-green-npm-run-build-all-layer-1-static-checks-incl-knowledge-store-provider-conformance-test-knowledge-providers-sh-49-49-ci-reconcilable-manifest-lane-proof-unaffected-by-340-additive-change",
+        "id": "evt:kontourai-flow-agents-292-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-build-succeeded-silently-source-tree-validation-passed-on-the-292-working-tree",
+        "claimId": "kontourai-flow-agents-292-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-build-succeeded-silently-source-tree-validation-passed-on-the-292-working-tree",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:i340-inbound-refs-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-bash-evals-run-sh-static-green-npm-run-build-all-layer-1-static-checks-incl-knowledge-store-provider-conformance-test-knowledge-providers-sh-49-49-ci-reconcilable-manifest-lane-proof-unaffected-by-340-additive-change"
+          "ev:kontourai-flow-agents-292-source-tree-validation.flow-agents-workflow.npm-run-validate-source-passed-build-succeeded-silently-source-tree-validation-passed-on-the-292-working-tree"
         ],
-        "createdAt": "2026-07-04T16:52:27Z",
-        "verifiedAt": "2026-07-04T16:52:27Z"
+        "createdAt": "2026-07-04T17:25:23Z",
+        "verifiedAt": "2026-07-04T17:25:23Z"
       },
       {
-        "id": "evt:i340-inbound-refs-contract-suite-default.flow-agents-workflow.regression-store-contract-suite-default-adapter-67-67-pass-0-fail-exit-0-339-identity-semantics-prior-contract-remain-green-under-340",
-        "claimId": "i340-inbound-refs-contract-suite-default.flow-agents-workflow.regression-store-contract-suite-default-adapter-67-67-pass-0-fail-exit-0-339-identity-semantics-prior-contract-remain-green-under-340",
+        "id": "evt:kontourai-flow-agents-292-context-map-drift.flow-agents-workflow.npm-run-context-map-check-reports-docs-context-map-md-is-current",
+        "claimId": "kontourai-flow-agents-292-context-map-drift.flow-agents-workflow.npm-run-context-map-check-reports-docs-context-map-md-is-current",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:i340-inbound-refs-contract-suite-default.flow-agents-workflow.regression-store-contract-suite-default-adapter-67-67-pass-0-fail-exit-0-339-identity-semantics-prior-contract-remain-green-under-340"
+          "ev:kontourai-flow-agents-292-context-map-drift.flow-agents-workflow.npm-run-context-map-check-reports-docs-context-map-md-is-current"
         ],
-        "createdAt": "2026-07-04T16:52:27Z",
-        "verifiedAt": "2026-07-04T16:52:27Z"
+        "createdAt": "2026-07-04T17:25:23Z",
+        "verifiedAt": "2026-07-04T17:25:23Z"
       },
       {
-        "id": "evt:i340-inbound-refs-contract-suite-obsidian.flow-agents-workflow.regression-store-contract-suite-obsidian-adapter-64-pass-0-fail-exit-0",
-        "claimId": "i340-inbound-refs-contract-suite-obsidian.flow-agents-workflow.regression-store-contract-suite-obsidian-adapter-64-pass-0-fail-exit-0",
+        "id": "evt:kontourai-flow-agents-292-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-31-pass-blocks-0-fail-blocks-exit-0",
+        "claimId": "kontourai-flow-agents-292-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-31-pass-blocks-0-fail-blocks-exit-0",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:i340-inbound-refs-contract-suite-obsidian.flow-agents-workflow.regression-store-contract-suite-obsidian-adapter-64-pass-0-fail-exit-0"
+          "ev:kontourai-flow-agents-292-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-31-pass-blocks-0-fail-blocks-exit-0"
         ],
-        "createdAt": "2026-07-04T16:52:27Z",
-        "verifiedAt": "2026-07-04T16:52:27Z"
+        "createdAt": "2026-07-04T17:25:23Z",
+        "verifiedAt": "2026-07-04T17:25:23Z"
       },
       {
-        "id": "evt:i340-inbound-refs-inbound-references-suite-default.flow-agents-workflow.ac1-ac2-ac3-ac5-inbound-references-suite-default-adapter-9-9-pass-exit-0",
-        "claimId": "i340-inbound-refs-inbound-references-suite-default.flow-agents-workflow.ac1-ac2-ac3-ac5-inbound-references-suite-default-adapter-9-9-pass-exit-0",
+        "id": "evt:kontourai-flow-agents-292-stop-hook-release-with-handoff-integration.flow-agents-workflow.bash-evals-integration-test-stop-hook-release-sh-20-20-assertions-passed-scenarios-a-h-ac1-ac7-covered-exit-0",
+        "claimId": "kontourai-flow-agents-292-stop-hook-release-with-handoff-integration.flow-agents-workflow.bash-evals-integration-test-stop-hook-release-sh-20-20-assertions-passed-scenarios-a-h-ac1-ac7-covered-exit-0",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:i340-inbound-refs-inbound-references-suite-default.flow-agents-workflow.ac1-ac2-ac3-ac5-inbound-references-suite-default-adapter-9-9-pass-exit-0"
+          "ev:kontourai-flow-agents-292-stop-hook-release-with-handoff-integration.flow-agents-workflow.bash-evals-integration-test-stop-hook-release-sh-20-20-assertions-passed-scenarios-a-h-ac1-ac7-covered-exit-0"
         ],
-        "createdAt": "2026-07-04T16:52:27Z",
-        "verifiedAt": "2026-07-04T16:52:27Z"
+        "createdAt": "2026-07-04T17:25:23Z",
+        "verifiedAt": "2026-07-04T17:25:23Z"
       },
       {
-        "id": "evt:i340-inbound-refs-inbound-references-suite-obsidian.flow-agents-workflow.ac4-inbound-references-suite-parameterized-on-obsidian-store-adapter-9-9-pass-exit-0-every-adapter-must-implement-the-check",
-        "claimId": "i340-inbound-refs-inbound-references-suite-obsidian.flow-agents-workflow.ac4-inbound-references-suite-parameterized-on-obsidian-store-adapter-9-9-pass-exit-0-every-adapter-must-implement-the-check",
+        "id": "evt:kontourai-flow-agents-292-assignment-provider-local-file-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-local-file-sh-all-checks-passed-34-assertions-incl-concurrent-claim-race-exit-0-290-back-compat-holds",
+        "claimId": "kontourai-flow-agents-292-assignment-provider-local-file-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-local-file-sh-all-checks-passed-34-assertions-incl-concurrent-claim-race-exit-0-290-back-compat-holds",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:i340-inbound-refs-inbound-references-suite-obsidian.flow-agents-workflow.ac4-inbound-references-suite-parameterized-on-obsidian-store-adapter-9-9-pass-exit-0-every-adapter-must-implement-the-check"
+          "ev:kontourai-flow-agents-292-assignment-provider-local-file-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-local-file-sh-all-checks-passed-34-assertions-incl-concurrent-claim-race-exit-0-290-back-compat-holds"
         ],
-        "createdAt": "2026-07-04T16:52:27Z",
-        "verifiedAt": "2026-07-04T16:52:27Z"
+        "createdAt": "2026-07-04T17:25:23Z",
+        "verifiedAt": "2026-07-04T17:25:23Z"
       },
       {
-        "id": "evt:i340-inbound-refs-ac1-three-citation-forms.flow-agents-workflow.ac1-r1-a-fixture-doc-tree-citing-one-record-by-full-uuid-one-by-8-char-short-id-prefix-and-one-by-slug-alias-is-scanned-all-three-are-extracted-and-resolved-via-the-339-get-path-byrecord-maps-each-to-its-full-id",
-        "claimId": "i340-inbound-refs-ac1-three-citation-forms.flow-agents-workflow.ac1-r1-a-fixture-doc-tree-citing-one-record-by-full-uuid-one-by-8-char-short-id-prefix-and-one-by-slug-alias-is-scanned-all-three-are-extracted-and-resolved-via-the-339-get-path-byrecord-maps-each-to-its-full-id",
+        "id": "evt:kontourai-flow-agents-292-assignment-provider-github-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-github-sh-all-checks-passed-45-assertions-exit-0-290-back-compat-holds-render-don-t-execute-contract-unaffected",
+        "claimId": "kontourai-flow-agents-292-assignment-provider-github-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-github-sh-all-checks-passed-45-assertions-exit-0-290-back-compat-holds-render-don-t-execute-contract-unaffected",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:i340-inbound-refs-ac1-three-citation-forms.flow-agents-workflow.ac1-r1-a-fixture-doc-tree-citing-one-record-by-full-uuid-one-by-8-char-short-id-prefix-and-one-by-slug-alias-is-scanned-all-three-are-extracted-and-resolved-via-the-339-get-path-byrecord-maps-each-to-its-full-id"
+          "ev:kontourai-flow-agents-292-assignment-provider-github-integration.flow-agents-workflow.bash-evals-integration-test-assignment-provider-github-sh-all-checks-passed-45-assertions-exit-0-290-back-compat-holds-render-don-t-execute-contract-unaffected"
         ],
-        "createdAt": "2026-07-04T16:52:27Z",
-        "verifiedAt": "2026-07-04T16:52:27Z"
+        "createdAt": "2026-07-04T17:25:23Z",
+        "verifiedAt": "2026-07-04T17:25:23Z"
       },
       {
-        "id": "evt:i340-inbound-refs-ac2-fail-closed-and-noop.flow-agents-workflow.ac2-r2-a-fixture-doc-citing-a-nonexistent-id-fails-closed-ok-false-naming-doc-path-line-token-uuid-and-marker-forms-a-run-with-no-docglobs-returns-a-no-op-pass-failure-asserted-not-empty-success",
-        "claimId": "i340-inbound-refs-ac2-fail-closed-and-noop.flow-agents-workflow.ac2-r2-a-fixture-doc-citing-a-nonexistent-id-fails-closed-ok-false-naming-doc-path-line-token-uuid-and-marker-forms-a-run-with-no-docglobs-returns-a-no-op-pass-failure-asserted-not-empty-success",
+        "id": "evt:kontourai-flow-agents-292-liveness-heartbeat-integration.flow-agents-workflow.bash-evals-integration-test-liveness-heartbeat-sh-all-checks-passed-exit-0-liveness-heartbeat-claim-contract-unaffected-by-the-stop-hook-release-path",
+        "claimId": "kontourai-flow-agents-292-liveness-heartbeat-integration.flow-agents-workflow.bash-evals-integration-test-liveness-heartbeat-sh-all-checks-passed-exit-0-liveness-heartbeat-claim-contract-unaffected-by-the-stop-hook-release-path",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:i340-inbound-refs-ac2-fail-closed-and-noop.flow-agents-workflow.ac2-r2-a-fixture-doc-citing-a-nonexistent-id-fails-closed-ok-false-naming-doc-path-line-token-uuid-and-marker-forms-a-run-with-no-docglobs-returns-a-no-op-pass-failure-asserted-not-empty-success"
+          "ev:kontourai-flow-agents-292-liveness-heartbeat-integration.flow-agents-workflow.bash-evals-integration-test-liveness-heartbeat-sh-all-checks-passed-exit-0-liveness-heartbeat-claim-contract-unaffected-by-the-stop-hook-release-path"
         ],
-        "createdAt": "2026-07-04T16:52:27Z",
-        "verifiedAt": "2026-07-04T16:52:27Z"
+        "createdAt": "2026-07-04T17:25:23Z",
+        "verifiedAt": "2026-07-04T17:25:23Z"
       },
       {
-        "id": "evt:i340-inbound-refs-ac3-read-only-invariant.flow-agents-workflow.ac3-r3-whole-store-byte-comparison-before-after-the-check-shows-no-record-created-deleted-or-mutated-and-no-mutation-log-entry-appended-read-only-invariant",
-        "claimId": "i340-inbound-refs-ac3-read-only-invariant.flow-agents-workflow.ac3-r3-whole-store-byte-comparison-before-after-the-check-shows-no-record-created-deleted-or-mutated-and-no-mutation-log-entry-appended-read-only-invariant",
-        "status": "verified",
+        "id": "evt:kontourai-flow-agents-292-non-manifest-self-checks-and-independent-confirmation.flow-agents-workflow.non-manifest-command-backed-summary-deliberately-not-recorded-as-test-output-command-backed-per-adr-0020-npm-run-build-bare-npm-run-validate-source-without-the-manifest-s-required-trailing-and-test-trust-reconcile-manifest-sh-are-not-verbatim-run-baseline-sh-manifest-json-entries-1-npm-run-build-silent-exit-0-no-output-build-output-regenerated-2-npm-run-validate-source-bare-no-trailing-exit-0-source-tree-validation-passed-distinct-from-and-in-addition-to-the-manifest-matched-npm-run-validate-source-check-recorded-separately-above-3-bash-evals-integration-test-trust-reconcile-manifest-sh-exit-0-manifest-entries-45-ci-yml-required-check-invocations-45-parity-confirmed-both-directions-4-independent-fail-open-reproduction-ac7-not-via-the-eval-built-a-corrupt-non-json-session-state-sidecar-file-plus-a-valid-but-unresolved-actor-fixture-and-invoked-scripts-hooks-stop-goal-fit-js-directly-exit-0-both-times-zero-node-stack-traces-exact-expected-stderr-diagnostics-actor-identity-is-unresolved-never-releasing-under-a-synthetic-identity-clean-silent-bail-on-the-corrupt-sidecar-no-liveness-event-emitted-the-corrupt-sidecar-file-left-unchanged-also-reproduced-the-missing-build-case-via-cp-r-scripts-into-an-isolated-packageroot-with-no-build-sibling-mirroring-the-eval-s-own-f-i-technique-independently-exit-2-goal-fit-s-own-pre-existing-block-mode-gate-unrelated-to-release-logic-zero-stack-trace-exact-build-src-cli-workflow-sidecar-js-not-available-diagnostic-present-5-independent-ac3-corroboration-grepped-scripts-hooks-stop-goal-fit-js-for-spawnsync-execfilesync-exec-zero-call-sites-reachable-from-releaseonnonterminalstop-reproduced-a-github-provider-stop-event-end-to-end-against-a-fixture-repo-with-a-tripwire-gh-shim-prepended-to-path-exits-99-and-prints-tripwire-if-ever-invoked-exit-0-no-tripwire-output-the-resulting-handoff-sidecar-carried-provider-release-pending-true-and-a-non-empty-provider-release-next-command-plus-a-genuine-liveness-release-event-appended-ac1-fires-regardless-of-provider-kind-6-independent-ac6-291-seam-corroboration-override-actor-release-task-a-claimed-subject-hsession-as-flow-agents-actor-canonical-x-via-the-real-cli-actor-key-stored-bare-as-canonical-x-actor-triple-stored-as-claude-code-canonical-x-host-deliberately-differing-forms-stop-as-flow-agents-actor-different-y-left-the-record-status-claimed-holder-and-audit-trail-byte-identical-foreign-actor-correctly-refused-stop-as-flow-agents-actor-canonical-x-same-actor-released-it-status-released-new-audit-trail-entry-proves-the-actor-key-first-canonical-key-comparison-not-a-serializeactor-vs-serializeactor-comparison-that-would-have-failed-this-exact-case-7-independent-290-back-compat-corroboration-ac2-ac6-no-actor-key-hand-built-a-legacy-shaped-assignment-record-with-no-actor-key-field-only-the-nested-actor-triple-matching-pre-291-records-for-this-process-s-own-resolved-actor-triple-then-ran-stop-with-no-override-record-correctly-transitioned-to-status-released-via-the-serializeactor-existing-actor-fallback-path-proving-a-pre-291-shaped-legacy-record-still-releases-correctly-for-its-true-holder-8-goal-fit-hook-sh-goal-fit-escape-hatch-sh-and-session-resume-roundtrip-sh-reproduced-their-failures-1-5-and-13-issues-respectively-as-byte-identical-on-the-pre-292-merge-base-commit-after-stashing-every-292-changed-file-and-rebuilding-confirmed-pre-existing-disjoint-repo-state-not-part-of-292-s-own-evidence-surface-session-resume-roundtrip-invokes-scripts-hooks-workflow-steering-js-a-file-untouched-by-this-diff-goal-fit-escape-hatch-and-goal-fit-hook-invoke-the-changed-stop-goal-fit-js-but-reproduce-byte-identical-pre-292-failures-confirming-the-292-diff-introduces-no-new-failure-in-any-of-the-three-none-of-these-three-are-recorded-as-their-own-claims-in-this-bundle-they-are-disjoint-pre-existing-repo-state-disclosed-here-as-prose-only-never-as-a-standalone-failing-disputed-claim-a-failing-claim-would-incorrectly-block-trust-reconcile-regardless-of-how-honestly-it-is-annotated-per-adr-0020-the-correct-handling-for-disjoint-pre-existing-failures-is-disclosure-as-prose-inside-a-passing-waived-check-not-a-standalone-fail-claim-this-check-itself-is-session-local-no-single-reconcilable-command-and-is-being-waived-as-an-accepted-fully-disclosed-gap-none-of-the-folded-sub-checks-are-command-backed-test-output-evidence-adr-0020-forbids-waiving-those-each-is-independently-corroborated-above-rather-than-merely-asserted-and-the-pre-existing-failures-they-touch-on-are-proven-not-assumed-disjoint-from-ac1-ac9",
+        "claimId": "kontourai-flow-agents-292-non-manifest-self-checks-and-independent-confirmation.flow-agents-workflow.non-manifest-command-backed-summary-deliberately-not-recorded-as-test-output-command-backed-per-adr-0020-npm-run-build-bare-npm-run-validate-source-without-the-manifest-s-required-trailing-and-test-trust-reconcile-manifest-sh-are-not-verbatim-run-baseline-sh-manifest-json-entries-1-npm-run-build-silent-exit-0-no-output-build-output-regenerated-2-npm-run-validate-source-bare-no-trailing-exit-0-source-tree-validation-passed-distinct-from-and-in-addition-to-the-manifest-matched-npm-run-validate-source-check-recorded-separately-above-3-bash-evals-integration-test-trust-reconcile-manifest-sh-exit-0-manifest-entries-45-ci-yml-required-check-invocations-45-parity-confirmed-both-directions-4-independent-fail-open-reproduction-ac7-not-via-the-eval-built-a-corrupt-non-json-session-state-sidecar-file-plus-a-valid-but-unresolved-actor-fixture-and-invoked-scripts-hooks-stop-goal-fit-js-directly-exit-0-both-times-zero-node-stack-traces-exact-expected-stderr-diagnostics-actor-identity-is-unresolved-never-releasing-under-a-synthetic-identity-clean-silent-bail-on-the-corrupt-sidecar-no-liveness-event-emitted-the-corrupt-sidecar-file-left-unchanged-also-reproduced-the-missing-build-case-via-cp-r-scripts-into-an-isolated-packageroot-with-no-build-sibling-mirroring-the-eval-s-own-f-i-technique-independently-exit-2-goal-fit-s-own-pre-existing-block-mode-gate-unrelated-to-release-logic-zero-stack-trace-exact-build-src-cli-workflow-sidecar-js-not-available-diagnostic-present-5-independent-ac3-corroboration-grepped-scripts-hooks-stop-goal-fit-js-for-spawnsync-execfilesync-exec-zero-call-sites-reachable-from-releaseonnonterminalstop-reproduced-a-github-provider-stop-event-end-to-end-against-a-fixture-repo-with-a-tripwire-gh-shim-prepended-to-path-exits-99-and-prints-tripwire-if-ever-invoked-exit-0-no-tripwire-output-the-resulting-handoff-sidecar-carried-provider-release-pending-true-and-a-non-empty-provider-release-next-command-plus-a-genuine-liveness-release-event-appended-ac1-fires-regardless-of-provider-kind-6-independent-ac6-291-seam-corroboration-override-actor-release-task-a-claimed-subject-hsession-as-flow-agents-actor-canonical-x-via-the-real-cli-actor-key-stored-bare-as-canonical-x-actor-triple-stored-as-claude-code-canonical-x-host-deliberately-differing-forms-stop-as-flow-agents-actor-different-y-left-the-record-status-claimed-holder-and-audit-trail-byte-identical-foreign-actor-correctly-refused-stop-as-flow-agents-actor-canonical-x-same-actor-released-it-status-released-new-audit-trail-entry-proves-the-actor-key-first-canonical-key-comparison-not-a-serializeactor-vs-serializeactor-comparison-that-would-have-failed-this-exact-case-7-independent-290-back-compat-corroboration-ac2-ac6-no-actor-key-hand-built-a-legacy-shaped-assignment-record-with-no-actor-key-field-only-the-nested-actor-triple-matching-pre-291-records-for-this-process-s-own-resolved-actor-triple-then-ran-stop-with-no-override-record-correctly-transitioned-to-status-released-via-the-serializeactor-existing-actor-fallback-path-proving-a-pre-291-shaped-legacy-record-still-releases-correctly-for-its-true-holder-8-goal-fit-hook-sh-goal-fit-escape-hatch-sh-and-session-resume-roundtrip-sh-reproduced-their-failures-1-5-and-13-issues-respectively-as-byte-identical-on-the-pre-292-merge-base-commit-after-stashing-every-292-changed-file-and-rebuilding-confirmed-pre-existing-disjoint-repo-state-not-part-of-292-s-own-evidence-surface-session-resume-roundtrip-invokes-scripts-hooks-workflow-steering-js-a-file-untouched-by-this-diff-goal-fit-escape-hatch-and-goal-fit-hook-invoke-the-changed-stop-goal-fit-js-but-reproduce-byte-identical-pre-292-failures-confirming-the-292-diff-introduces-no-new-failure-in-any-of-the-three-none-of-these-three-are-recorded-as-their-own-claims-in-this-bundle-they-are-disjoint-pre-existing-repo-state-disclosed-here-as-prose-only-never-as-a-standalone-failing-disputed-claim-a-failing-claim-would-incorrectly-block-trust-reconcile-regardless-of-how-honestly-it-is-annotated-per-adr-0020-the-correct-handling-for-disjoint-pre-existing-failures-is-disclosure-as-prose-inside-a-passing-waived-check-not-a-standalone-fail-claim-this-check-itself-is-session-local-no-single-reconcilable-command-and-is-being-waived-as-an-accepted-fully-disclosed-gap-none-of-the-folded-sub-checks-are-command-backed-test-output-evidence-adr-0020-forbids-waiving-those-each-is-independently-corroborated-above-rather-than-merely-asserted-and-the-pre-existing-failures-they-touch-on-are-proven-not-assumed-disjoint-from-ac1-ac9",
+        "status": "assumed",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
         "evidenceIds": [
-          "ev:i340-inbound-refs-ac3-read-only-invariant.flow-agents-workflow.ac3-r3-whole-store-byte-comparison-before-after-the-check-shows-no-record-created-deleted-or-mutated-and-no-mutation-log-entry-appended-read-only-invariant"
+          "ev:kontourai-flow-agents-292-non-manifest-self-checks-and-independent-confirmation.flow-agents-workflow.non-manifest-command-backed-summary-deliberately-not-recorded-as-test-output-command-backed-per-adr-0020-npm-run-build-bare-npm-run-validate-source-without-the-manifest-s-required-trailing-and-test-trust-reconcile-manifest-sh-are-not-verbatim-run-baseline-sh-manifest-json-entries-1-npm-run-build-silent-exit-0-no-output-build-output-regenerated-2-npm-run-validate-source-bare-no-trailing-exit-0-source-tree-validation-passed-distinct-from-and-in-addition-to-the-manifest-matched-npm-run-validate-source-check-recorded-separately-above-3-bash-evals-integration-test-trust-reconcile-manifest-sh-exit-0-manifest-entries-45-ci-yml-required-check-invocations-45-parity-confirmed-both-directions-4-independent-fail-open-reproduction-ac7-not-via-the-eval-built-a-corrupt-non-json-session-state-sidecar-file-plus-a-valid-but-unresolved-actor-fixture-and-invoked-scripts-hooks-stop-goal-fit-js-directly-exit-0-both-times-zero-node-stack-traces-exact-expected-stderr-diagnostics-actor-identity-is-unresolved-never-releasing-under-a-synthetic-identity-clean-silent-bail-on-the-corrupt-sidecar-no-liveness-event-emitted-the-corrupt-sidecar-file-left-unchanged-also-reproduced-the-missing-build-case-via-cp-r-scripts-into-an-isolated-packageroot-with-no-build-sibling-mirroring-the-eval-s-own-f-i-technique-independently-exit-2-goal-fit-s-own-pre-existing-block-mode-gate-unrelated-to-release-logic-zero-stack-trace-exact-build-src-cli-workflow-sidecar-js-not-available-diagnostic-present-5-independent-ac3-corroboration-grepped-scripts-hooks-stop-goal-fit-js-for-spawnsync-execfilesync-exec-zero-call-sites-reachable-from-releaseonnonterminalstop-reproduced-a-github-provider-stop-event-end-to-end-against-a-fixture-repo-with-a-tripwire-gh-shim-prepended-to-path-exits-99-and-prints-tripwire-if-ever-invoked-exit-0-no-tripwire-output-the-resulting-handoff-sidecar-carried-provider-release-pending-true-and-a-non-empty-provider-release-next-command-plus-a-genuine-liveness-release-event-appended-ac1-fires-regardless-of-provider-kind-6-independent-ac6-291-seam-corroboration-override-actor-release-task-a-claimed-subject-hsession-as-flow-agents-actor-canonical-x-via-the-real-cli-actor-key-stored-bare-as-canonical-x-actor-triple-stored-as-claude-code-canonical-x-host-deliberately-differing-forms-stop-as-flow-agents-actor-different-y-left-the-record-status-claimed-holder-and-audit-trail-byte-identical-foreign-actor-correctly-refused-stop-as-flow-agents-actor-canonical-x-same-actor-released-it-status-released-new-audit-trail-entry-proves-the-actor-key-first-canonical-key-comparison-not-a-serializeactor-vs-serializeactor-comparison-that-would-have-failed-this-exact-case-7-independent-290-back-compat-corroboration-ac2-ac6-no-actor-key-hand-built-a-legacy-shaped-assignment-record-with-no-actor-key-field-only-the-nested-actor-triple-matching-pre-291-records-for-this-process-s-own-resolved-actor-triple-then-ran-stop-with-no-override-record-correctly-transitioned-to-status-released-via-the-serializeactor-existing-actor-fallback-path-proving-a-pre-291-shaped-legacy-record-still-releases-correctly-for-its-true-holder-8-goal-fit-hook-sh-goal-fit-escape-hatch-sh-and-session-resume-roundtrip-sh-reproduced-their-failures-1-5-and-13-issues-respectively-as-byte-identical-on-the-pre-292-merge-base-commit-after-stashing-every-292-changed-file-and-rebuilding-confirmed-pre-existing-disjoint-repo-state-not-part-of-292-s-own-evidence-surface-session-resume-roundtrip-invokes-scripts-hooks-workflow-steering-js-a-file-untouched-by-this-diff-goal-fit-escape-hatch-and-goal-fit-hook-invoke-the-changed-stop-goal-fit-js-but-reproduce-byte-identical-pre-292-failures-confirming-the-292-diff-introduces-no-new-failure-in-any-of-the-three-none-of-these-three-are-recorded-as-their-own-claims-in-this-bundle-they-are-disjoint-pre-existing-repo-state-disclosed-here-as-prose-only-never-as-a-standalone-failing-disputed-claim-a-failing-claim-would-incorrectly-block-trust-reconcile-regardless-of-how-honestly-it-is-annotated-per-adr-0020-the-correct-handling-for-disjoint-pre-existing-failures-is-disclosure-as-prose-inside-a-passing-waived-check-not-a-standalone-fail-claim-this-check-itself-is-session-local-no-single-reconcilable-command-and-is-being-waived-as-an-accepted-fully-disclosed-gap-none-of-the-folded-sub-checks-are-command-backed-test-output-evidence-adr-0020-forbids-waiving-those-each-is-independently-corroborated-above-rather-than-merely-asserted-and-the-pre-existing-failures-they-touch-on-are-proven-not-assumed-disjoint-from-ac1-ac9"
         ],
-        "createdAt": "2026-07-04T16:52:27Z",
-        "verifiedAt": "2026-07-04T16:52:27Z"
+        "createdAt": "2026-07-04T17:25:23Z",
+        "verifiedAt": "2026-07-04T17:25:23Z"
       },
       {
-        "id": "evt:i340-inbound-refs-ac5-citation-index-and-doc-addendum.flow-agents-workflow.ac5-r5-result-exposes-the-citation-index-citations-bydoc-byrecord-for-downstream-supersede-retire-propagation-kits-knowledge-docs-store-contract-md-addendum-i-documents-options-forms-fail-closed-semantics-commit-sha-precision-documented-miss-and-the-index-shape",
-        "claimId": "i340-inbound-refs-ac5-citation-index-and-doc-addendum.flow-agents-workflow.ac5-r5-result-exposes-the-citation-index-citations-bydoc-byrecord-for-downstream-supersede-retire-propagation-kits-knowledge-docs-store-contract-md-addendum-i-documents-options-forms-fail-closed-semantics-commit-sha-precision-documented-miss-and-the-index-shape",
+        "id": "evt:kontourai-flow-agents-292-ac1-non-terminal-release.flow-agents-workflow.a-stop-event-on-a-session-whose-state-json-status-is-not-in-the-liveness-terminal-set-delivered-accepted-archived-imported-not-re-derived-appends-a-liveness-release-event-for-that-session-s-subjectid-slug-actor-branchactorkey-pair",
+        "claimId": "kontourai-flow-agents-292-ac1-non-terminal-release.flow-agents-workflow.a-stop-event-on-a-session-whose-state-json-status-is-not-in-the-liveness-terminal-set-delivered-accepted-archived-imported-not-re-derived-appends-a-liveness-release-event-for-that-session-s-subjectid-slug-actor-branchactorkey-pair",
         "status": "verified",
         "actor": "flow-agents/workflow-sidecar",
         "method": "validation",
-        "evidenceIds": [
-          "ev:i340-inbound-refs-ac5-citation-index-and-doc-addendum.flow-agents-workflow.ac5-r5-result-exposes-the-citation-index-citations-bydoc-byrecord-for-downstream-supersede-retire-propagation-kits-knowledge-docs-store-contract-md-addendum-i-documents-options-forms-fail-closed-semantics-commit-sha-precision-documented-miss-and-the-index-shape"
-        ],
-        "createdAt": "2026-07-04T16:52:27Z",
-        "verifiedAt": "2026-07-04T16:52:27Z"
+        "evidenceIds": [],
+        "createdAt": "2026-07-04T17:25:23Z",
+        "verifiedAt": "2026-07-04T17:25:23Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-292-ac2-local-file-release.flow-agents-workflow.when-the-effective-assignment-provider-is-local-file-and-a-claimed-record-exists-for-the-session-s-subject-id-held-by-this-actor-the-stop-hook-s-non-terminal-path-releases-it-status-becomes-released-and-a-subsequent-assignment-provider-status-read-reports-effective-state-free",
+        "claimId": "kontourai-flow-agents-292-ac2-local-file-release.flow-agents-workflow.when-the-effective-assignment-provider-is-local-file-and-a-claimed-record-exists-for-the-session-s-subject-id-held-by-this-actor-the-stop-hook-s-non-terminal-path-releases-it-status-becomes-released-and-a-subsequent-assignment-provider-status-read-reports-effective-state-free",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-04T17:25:23Z",
+        "verifiedAt": "2026-07-04T17:25:23Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-292-ac3-github-honest-disclosure.flow-agents-workflow.when-the-effective-assignment-provider-is-github-the-stop-hook-never-invokes-gh-and-never-calls-render-release-it-writes-handoff-json-provider-release-pending-true-plus-a-next-steps-entry-naming-the-concrete-follow-up-command",
+        "claimId": "kontourai-flow-agents-292-ac3-github-honest-disclosure.flow-agents-workflow.when-the-effective-assignment-provider-is-github-the-stop-hook-never-invokes-gh-and-never-calls-render-release-it-writes-handoff-json-provider-release-pending-true-plus-a-next-steps-entry-naming-the-concrete-follow-up-command",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-04T17:25:23Z",
+        "verifiedAt": "2026-07-04T17:25:23Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-292-ac4-handoff-refresh.flow-agents-workflow.after-a-non-terminal-stop-release-handoff-json-s-summary-next-steps-and-release-outcome-fields-reflect-the-session-s-actual-last-state-json-status-phase-never-stale-empty-values-from-an-earlier-phase-transition",
+        "claimId": "kontourai-flow-agents-292-ac4-handoff-refresh.flow-agents-workflow.after-a-non-terminal-stop-release-handoff-json-s-summary-next-steps-and-release-outcome-fields-reflect-the-session-s-actual-last-state-json-status-phase-never-stale-empty-values-from-an-earlier-phase-transition",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-04T17:25:23Z",
+        "verifiedAt": "2026-07-04T17:25:23Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-292-ac5-terminal-unchanged.flow-agents-workflow.a-stop-event-on-a-session-already-at-a-terminal-status-delivered-accepted-archived-does-not-emit-a-second-liveness-release-event-and-does-not-error-on-a-second-local-file-release-attempt-tolerated-no-op",
+        "claimId": "kontourai-flow-agents-292-ac5-terminal-unchanged.flow-agents-workflow.a-stop-event-on-a-session-already-at-a-terminal-status-delivered-accepted-archived-does-not-emit-a-second-liveness-release-event-and-does-not-error-on-a-second-local-file-release-attempt-tolerated-no-op",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-04T17:25:23Z",
+        "verifiedAt": "2026-07-04T17:25:23Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-292-ac6-actor-correctness.flow-agents-workflow.the-release-targets-only-the-current-actor-s-own-held-claim-a-fixture-where-a-different-actor-holds-the-local-file-claim-for-the-session-s-subject-id-must-not-be-released-by-this-actor-s-stop-hook",
+        "claimId": "kontourai-flow-agents-292-ac6-actor-correctness.flow-agents-workflow.the-release-targets-only-the-current-actor-s-own-held-claim-a-fixture-where-a-different-actor-holds-the-local-file-claim-for-the-session-s-subject-id-must-not-be-released-by-this-actor-s-stop-hook",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-04T17:25:23Z",
+        "verifiedAt": "2026-07-04T17:25:23Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-292-ac7-fail-open.flow-agents-workflow.a-stop-event-with-a-missing-build-directory-a-corrupt-assignment-record-an-unresolved-actor-or-a-missing-malformed-assignment-provider-settings-json-never-throws-and-never-changes-the-stop-hook-s-own-exit-code-gating-behavior-for-unrelated-goal-fit-warnings",
+        "claimId": "kontourai-flow-agents-292-ac7-fail-open.flow-agents-workflow.a-stop-event-with-a-missing-build-directory-a-corrupt-assignment-record-an-unresolved-actor-or-a-missing-malformed-assignment-provider-settings-json-never-throws-and-never-changes-the-stop-hook-s-own-exit-code-gating-behavior-for-unrelated-goal-fit-warnings",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-04T17:25:23Z",
+        "verifiedAt": "2026-07-04T17:25:23Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-292-ac8-idempotent-liveness-terminal-set.flow-agents-workflow.liveness-terminal-is-exported-once-from-src-cli-workflow-sidecar-ts-and-imported-never-re-declared-by-the-stop-hook-s-release-logic-so-the-terminal-non-terminal-boundary-can-never-drift-between-the-two-files",
+        "claimId": "kontourai-flow-agents-292-ac8-idempotent-liveness-terminal-set.flow-agents-workflow.liveness-terminal-is-exported-once-from-src-cli-workflow-sidecar-ts-and-imported-never-re-declared-by-the-stop-hook-s-release-logic-so-the-terminal-non-terminal-boundary-can-never-drift-between-the-two-files",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-04T17:25:23Z",
+        "verifiedAt": "2026-07-04T17:25:23Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-292-ac9-eval-registration.flow-agents-workflow.the-new-eval-is-registered-in-evals-run-sh-integration-block-evals-ci-run-baseline-sh-checks-array-and-github-workflows-ci-yml-a-check-step-per-adr-0020-s-manifest-ci-parity-rule",
+        "claimId": "kontourai-flow-agents-292-ac9-eval-registration.flow-agents-workflow.the-new-eval-is-registered-in-evals-run-sh-integration-block-evals-ci-run-baseline-sh-checks-array-and-github-workflows-ci-yml-a-check-step-per-adr-0020-s-manifest-ci-parity-rule",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-04T17:25:23Z",
+        "verifiedAt": "2026-07-04T17:25:23Z"
       }
     ]
   }

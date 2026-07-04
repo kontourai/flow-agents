@@ -25,6 +25,7 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const crypto = require('crypto');
@@ -42,7 +43,7 @@ const {
   flowAgentsArtifactRoot,
   flowAgentsArtifactRootsForRead,
 } = require('./lib/local-artifact-paths');
-const { resolveActor } = require('./lib/actor-identity.js');
+const { resolveActor, isUnresolvedActor, detectRuntime } = require('./lib/actor-identity.js');
 const { readCurrentPointer } = require('./lib/current-pointer.js');
 
 const MAX_STDIN = 1024 * 1024;
@@ -1671,7 +1672,7 @@ async function analyze(root, now = Date.now()) {
     artifacts = artifacts.filter(a => a && hasSidecarPresence(path.dirname(a.file)));
   }
 
-  if (artifacts.length === 0) return { warnings: [], blocking: false };
+  if (artifacts.length === 0) return { warnings: [], blocking: false, latestArtifactDir: null };
 
   const latest = artifacts[0];
   const latestArtifactDir = path.dirname(latest.file);
@@ -1745,7 +1746,7 @@ async function analyze(root, now = Date.now()) {
     if (/\[backstop in warn mode — not blocking\]/.test(w)) return false;
     return blockRe.test(w);
   });
-  return { warnings, blocking, preExecution, gatePrefix: gateLabel(activeFlowStep) };
+  return { warnings, blocking, preExecution, gatePrefix: gateLabel(activeFlowStep), latestArtifactDir };
 }
 
 /**
@@ -1844,12 +1845,266 @@ function remediationFor(warning) {
   return null;
 }
 
+// ─── #292 Wave 2: Stop-hook non-terminal release-with-handoff ────────────────
+//
+// When a session's Stop event fires and the session's state.json status is NOT
+// one of workflow-sidecar.ts's LIVENESS_TERMINAL statuses (delivered/accepted/
+// archived — the SAME set advance-state's terminal path already tests against,
+// imported here rather than re-declared, per AC8), the liveness claim and (for
+// the local-file assignment provider) the durable assignment claim would
+// otherwise sit held until TTL, even though the session has genuinely ended.
+// This closes that gap: always emit a provider-agnostic liveness release (AC1),
+// and for local-file additionally perform the real release inline (AC2), while
+// honestly disclosing (never executing) the equivalent GitHub-provider release
+// as a pending handoff.json intent (AC3). See the plan artifact
+// (.kontourai/flow-agents/kontourai-flow-agents-292/kontourai-flow-agents-292--plan-work.md,
+// "Wave 2") for the full design rationale and the render-don't-execute
+// constraint this deliberately does not cross.
+//
+// Fail-open (AC7): the ENTIRE body runs under one try/catch. Any failure —
+// missing build/, corrupt assignment record, unresolved actor, missing/
+// malformed provider settings — degrades to a single stderr diagnostic and
+// returns, never throwing, never affecting the Stop hook's own exit code or
+// goal-fit's warnings/blocking output (this function's return value is not
+// consumed by that contract at all — it is a pure side effect).
+
+/**
+ * require() the compiled workflow-sidecar.js the same hasBuild/fs.existsSync-guarded
+ * way loadActiveFlowStep() already requires flow-resolver.js. Returns null (never
+ * throws) when build/ is absent or the require fails — the caller treats null as
+ * "the LIVENESS_TERMINAL boundary is unknown; do not guess it" and skips the whole
+ * release (fail-open, never a re-derived duplicate Set — AC8).
+ */
+function loadWorkflowSidecarBuilt() {
+  const packageRoot = path.resolve(__dirname, '..', '..');
+  const builtSidecar = path.join(packageRoot, 'build', 'src', 'cli', 'workflow-sidecar.js');
+  if (!fs.existsSync(builtSidecar)) return null; // hasBuild guard
+  try {
+    const mod = require(builtSidecar);
+    if (!(mod.LIVENESS_TERMINAL instanceof Set)) return null;
+    return mod;
+  } catch {
+    return null; // require failed — fail-open
+  }
+}
+
+/** Same hasBuild-guarded require idiom, for build/src/cli/assignment-provider.js. */
+function loadAssignmentProviderBuilt() {
+  const packageRoot = path.resolve(__dirname, '..', '..');
+  const builtProvider = path.join(packageRoot, 'build', 'src', 'cli', 'assignment-provider.js');
+  if (!fs.existsSync(builtProvider)) return null;
+  try {
+    const mod = require(builtProvider);
+    if (typeof mod.performLocalRelease !== 'function') return null;
+    return mod;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the effective assignment-provider kind for this repo ('local-file' | 'github'),
+ * or null when it cannot be determined. Prefers reading context/settings/
+ * assignment-provider-settings.json directly (project settings first, matching
+ * effective-assignment-provider-settings.ts's own lookup precedence) rather than shelling
+ * out to or refactoring that CLI-shaped file (see plan Unresolved Question 1) — this task's
+ * scope is the Stop hook, not that file. Returns null (never guesses) when no settings file
+ * is present/parseable or names no provider kind for a project entry.
+ *
+ * Deliberately reads ONLY the project settings file (context/settings/
+ * assignment-provider-settings.json relative to repo root) — the common case for this repo
+ * and the one confirmed present. The effective() merge/repo-matching logic in
+ * effective-assignment-provider-settings.ts is intentionally NOT reimplemented here (that
+ * would fork a second merge algorithm); a repo whose provider kind can only be resolved via
+ * global settings or multi-project merge degrades to "unknown, skip assignment-layer
+ * release" rather than guessing.
+ */
+function resolveAssignmentProviderKind(root) {
+  const settingsFile = path.join(root, 'context', 'settings', 'assignment-provider-settings.json');
+  const settings = readJsonFile(settingsFile);
+  if (!settings) return null;
+  const candidates = [];
+  if (settings.defaults && settings.defaults.provider) candidates.push(settings.defaults.provider);
+  if (Array.isArray(settings.projects)) {
+    for (const project of settings.projects) {
+      if (project && project.provider) candidates.push(project.provider);
+    }
+  }
+  const kind = candidates.map(p => p && p.kind).find(k => k === 'local-file' || k === 'github');
+  return kind || null;
+}
+
+/**
+ * Refresh handoff.json by merge (read+spread the existing file's JSON, overwrite only the
+ * fields this task owns), mirroring advanceState's own handoff-write shape
+ * (`{ ...loadJson(...), ...sidecarBase(slug), summary, current_state_ref: "state.json",
+ * next_steps, blockers: [], warnings: [] }`) and current-pointer.js's writePerActorCurrent
+ * write idiom (`fs.writeFileSync(file, JSON.stringify(payload, null, 2) + "\n")`). next_steps
+ * is appended to (not clobbered) when a provider-release next-step is due.
+ */
+function refreshHandoffAfterRelease(artifactDir, slug, state, providerReleasePending, providerReleaseNextCommand) {
+  const file = path.join(artifactDir, 'handoff.json');
+  const existing = readJsonFile(file) || {};
+  const status = state ? normalizedStatus(state.status || 'unknown') : 'unknown';
+  const phase = state ? normalizedStatus(state.phase || 'unknown') : 'unknown';
+  const summary = (state && state.next_action && state.next_action.summary)
+    ? String(state.next_action.summary)
+    : `session ended at status:${status} phase:${phase}`;
+  const existingNextSteps = Array.isArray(existing.next_steps) ? existing.next_steps.slice() : [];
+  const nextSteps = existingNextSteps.slice();
+  if (providerReleasePending && providerReleaseNextCommand && !nextSteps.includes(providerReleaseNextCommand)) {
+    nextSteps.push(providerReleaseNextCommand);
+  }
+  const payload = {
+    ...existing,
+    schema_version: existing.schema_version || '1.0',
+    task_slug: existing.task_slug || slug,
+    summary,
+    current_state_ref: 'state.json',
+    next_steps: nextSteps,
+    ...(providerReleasePending ? { provider_release_pending: true } : {}),
+    ...(providerReleaseNextCommand ? { provider_release_next_command: providerReleaseNextCommand } : {}),
+  };
+  fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`);
+}
+
+/**
+ * #292 Wave 2: on a Stop event whose resolved session is at a NON-terminal status, release
+ * the session's liveness claim (always, provider-agnostic — AC1) and, for the local-file
+ * assignment provider, its durable assignment claim too (AC2), then refresh handoff.json
+ * (AC4). A terminal-status session (already released by advance-state) is a deliberate no-op
+ * (AC5). For the github provider, never calls render-release or gh — only records an
+ * honestly-labeled pending intent in handoff.json (AC3). Actor-scoped: only ever releases
+ * the CURRENT actor's own held claim (AC6, enforced inside performLocalRelease).
+ *
+ * Called once from run(), reusing analyze()'s already-resolved latestArtifactDir — this
+ * function does not re-derive "what is the active session" a second time.
+ *
+ * Fail-open (AC7): the entire body is wrapped in one try/catch. Any failure degrades to a
+ * single stderr diagnostic and returns, never throwing, never affecting the Stop hook's exit
+ * code or goal-fit's warnings/blocking contract (this function's return value is unused by
+ * that contract).
+ *
+ * @param {string} root - repo root (as resolved by findRepoRoot)
+ * @param {string|null} artifactDir - analyze()'s already-resolved latestArtifactDir
+ */
+function releaseOnNonTerminalStop(root, artifactDir) {
+  try {
+    if (!artifactDir) return; // no active session resolved — nothing to release.
+
+    const state = readJsonFile(path.join(artifactDir, 'state.json'));
+    if (!state) return; // AC5: no state.json — nothing to gate a release decision on.
+
+    const sidecar = loadWorkflowSidecarBuilt();
+    if (!sidecar) {
+      process.stderr.write('[Hook] Goal Fit: stop-hook release skipped — build/src/cli/workflow-sidecar.js not available (LIVENESS_TERMINAL boundary unknown).\n');
+      return;
+    }
+
+    const status = normalizedStatus(state.status || 'unknown');
+    if (sidecar.LIVENESS_TERMINAL.has(status)) return; // AC5: terminal — advance-state already released.
+
+    // Slug: artifact dir's basename, or state.json's own task_slug field — reuse whichever
+    // this file already has, never a new slug-derivation rule.
+    const slug = (state.task_slug && String(state.task_slug).trim()) || path.basename(artifactDir);
+
+    const { actor } = resolveActor(process.env);
+    if (isUnresolvedActor(actor)) {
+      process.stderr.write(`[Hook] Goal Fit: stop-hook release skipped for "${safeOneLine(slug, 80)}" — actor identity is unresolved; never releasing under a synthetic identity.\n`);
+      return;
+    }
+
+    const flowAgentsDir = path.dirname(artifactDir);
+    const nowIso = new Date().toISOString();
+
+    // AC1: ALWAYS emit the liveness release, regardless of provider kind — liveness is
+    // provider-agnostic and this is the ONE shared writer every other liveness emitter uses.
+    try {
+      require('./lib/liveness-write.js').appendLivenessEvent(flowAgentsDir, {
+        type: 'release',
+        subjectId: slug,
+        actor,
+        at: nowIso,
+        source: 'stop-hook',
+      });
+    } catch (err) {
+      process.stderr.write(`[Hook] Goal Fit: stop-hook liveness release failed for "${safeOneLine(slug, 80)}": ${safeOneLine(err && err.message || err, 160)}\n`);
+    }
+
+    // Resolve the effective assignment-provider kind — unknown means "do not guess",
+    // skip the assignment-layer release entirely (fail-open).
+    const providerKind = resolveAssignmentProviderKind(root);
+    if (!providerKind) {
+      process.stderr.write(`[Hook] Goal Fit: stop-hook release — provider kind unknown for "${safeOneLine(slug, 80)}", skipping assignment-layer release (liveness release already emitted).\n`);
+      refreshHandoffAfterRelease(artifactDir, slug, state, false, null);
+      return;
+    }
+
+    let providerReleasePending = false;
+    let providerReleaseNextCommand = null;
+
+    if (providerKind === 'local-file') {
+      const provider = loadAssignmentProviderBuilt();
+      if (!provider) {
+        process.stderr.write('[Hook] Goal Fit: stop-hook local-file release skipped — build/src/cli/assignment-provider.js not available.\n');
+      } else {
+        try {
+          // Mirror assignment-provider.ts's loadActorStruct() exactly: runtime is derived via
+          // detectRuntime (not a literal 'unknown'), since serializeActor()'s comparison key
+          // includes runtime — a mismatched runtime segment here would make performLocalRelease's
+          // AC6 actor-match check wrongly treat this session's own claim as foreign.
+          //
+          // actorKey: opts.actorKey MUST be the same canonical `resolveActor(env).actor` string
+          // already resolved above (`actor`) — the identical bare-or-triple form
+          // computeEffectiveState()'s holderActorKey preference (`record.actor_key ||
+          // serializeActor(record.actor)`) and performLocalRelease's mirrored ownership check
+          // both key on. Without this, an explicit-override actor's release-side comparison
+          // would fall back to serializeActor(releasedBy) — a re-derived triple that never
+          // equals the stored bare actor_key — and this hook would wrongly treat its own claim
+          // as foreign (the #291 seam, relocated to the release path; see performLocalRelease's
+          // doc comment in src/cli/assignment-provider.ts).
+          const releasedBy = { runtime: detectRuntime(process.env), session_id: actor, host: os.hostname(), human: null };
+          const artifactRoot = flowAgentsArtifactRoot(root);
+          provider.performLocalRelease(artifactRoot, slug, releasedBy, {
+            reason: 'stop-hook non-terminal release',
+            tolerateNoActiveClaim: true,
+            actorKey: actor,
+          });
+        } catch (err) {
+          process.stderr.write(`[Hook] Goal Fit: stop-hook local-file release failed for "${safeOneLine(slug, 80)}": ${safeOneLine(err && err.message || err, 160)}\n`);
+        }
+      }
+    } else {
+      // AC3: github (or any non-local-file kind) — render-don't-execute. Never call
+      // render-release, never invoke gh. Disclose the pending intent honestly.
+      providerReleasePending = true;
+      providerReleaseNextCommand = `npm run workflow -- assignment-provider status --provider github --subject-id "${slug}" ...   # then: assignment-provider render-release --provider github --subject-id "${slug}" ... (emits the gh argv to run)`;
+    }
+
+    // AC4: refresh handoff.json — merge, never fully overwrite.
+    refreshHandoffAfterRelease(artifactDir, slug, state, providerReleasePending, providerReleaseNextCommand);
+  } catch (err) {
+    // Fail-open (AC7): any unexpected failure anywhere above (JSON parse error, fs error,
+    // etc.) must never crash the Stop hook or affect its exit code / goal-fit's output.
+    try {
+      process.stderr.write(`[Hook] Goal Fit: stop-hook release logic error (fail-open): ${safeOneLine(err && err.message || err, 160)}\n`);
+    } catch { /* best-effort diagnostic only */ }
+  }
+}
+
 async function run(rawInput) {
   const input = parseJson(rawInput);
   const root = findRepoRoot(input.cwd || process.cwd());
   const mode = resolveGoalFitMode();
   if (mode === 'off') return rawInput;
   const result = await analyze(root);
+  // #292 Wave 2: additive side effect only — never changes analyze()'s warnings/blocking
+  // contract or this function's return value. Reuses analyze()'s already-resolved
+  // latestArtifactDir rather than re-deriving a second "what is the active session" path.
+  // Runs regardless of whether goal-fit itself has any warnings this turn (AC1: the
+  // liveness release must always be attempted on a non-terminal Stop, independent of
+  // whether goal-fit found anything to warn about).
+  releaseOnNonTerminalStop(root, result.latestArtifactDir || null);
   if (result.warnings.length === 0) {
     clearBlockStreak(root);
     return rawInput;
@@ -1939,4 +2194,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator };
+module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop };
