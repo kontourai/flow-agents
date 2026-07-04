@@ -1,5 +1,28 @@
 # Changelog
 
+## [3.0.0](https://github.com/kontourai/flow-agents/compare/v2.4.0...v3.0.0) (2026-07-04)
+
+
+### ⚠ BREAKING CHANGES
+
+* **trust:** require origin/check_kind stamps — remove pre-supersession read fallback ([#355](https://github.com/kontourai/flow-agents/issues/355))
+
+### Features
+
+* **routing:** model-routing policy as datum roles — orchestrator resolves at delegation ([#365](https://github.com/kontourai/flow-agents/issues/365)) ([7acf663](https://github.com/kontourai/flow-agents/commit/7acf6635125623505097eb0f7d2b0da7026c1b00))
+* **trust-anchor:** fail-closed delivery reconciliation with governed exemptions (ADR 0022 §1) ([#358](https://github.com/kontourai/flow-agents/issues/358)) ([0631050](https://github.com/kontourai/flow-agents/commit/0631050c7d88f3dd38d7c90ee1af5adf63410334))
+
+
+### Fixes
+
+* **trust:** critique supersession + lossless check/critique round-trip (closes [#267](https://github.com/kontourai/flow-agents/issues/267), [#268](https://github.com/kontourai/flow-agents/issues/268), [#282](https://github.com/kontourai/flow-agents/issues/282)) ([#344](https://github.com/kontourai/flow-agents/issues/344)) ([c2c3fd5](https://github.com/kontourai/flow-agents/commit/c2c3fd5d322d2537847d67a6fefc6daae6893070))
+* **trust:** require origin/check_kind stamps — remove pre-supersession read fallback ([#355](https://github.com/kontourai/flow-agents/issues/355)) ([ab27f71](https://github.com/kontourai/flow-agents/commit/ab27f71ac1ee652b7125ce01336895d34162472b))
+
+
+### Documentation
+
+* **contracts:** standing owner directives — durable home for ratified policy ([#351](https://github.com/kontourai/flow-agents/issues/351)) ([e335d54](https://github.com/kontourai/flow-agents/commit/e335d540378ba7eaae5bb7162427d8db16f58e4b))
+
 ## [2.4.0](https://github.com/kontourai/flow-agents/compare/v2.3.0...v2.4.0) (2026-07-03)
 
 
