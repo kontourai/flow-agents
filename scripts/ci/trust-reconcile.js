@@ -522,32 +522,139 @@ const DELIVERY_DIR = 'delivery';
 
 /**
  * Single seam: every delivery/ path resolution in this file routes through here.
- * #335 (per-session delivery paths, e.g. delivery/<session-slug>/<filename> instead of
- * one shared path) is expected to change ONLY this function's body — e.g. glob
- * delivery/<slug-glob>/<filename> and return every match in a defined precedence order,
- * or
- * resolve the current PR's session slug and return its single subpath. discoverBundle()
- * and discoverDeclaredMarker() both iterate whatever candidates this returns and pick the
- * first existing one, so a future per-session layout composes with zero call-site changes.
+ *
+ * #335/#379 (per-session delivery paths) is IMPLEMENTED here now, not deferred: a shared
+ * `delivery/<filename>` guarantees a git merge conflict between ANY two concurrent
+ * deliveries — and a conflicting (DIRTY) PR gets NO `pull_request` workflows scheduled, so
+ * the required Trust Reconcile check silently never runs (field incidents #330/#358/#378).
+ * The fix is per-session paths so concurrent deliveries write to DISTINCT files and never
+ * contend.
+ *
+ * Returned candidate order (precedence, first is highest):
+ *   1. the flat `delivery/<filename>` — kept FIRST for full back-compat. A repo that never
+ *      adopts per-session layout sees byte-identical behavior; an already-committed flat
+ *      bundle from before this change still resolves.
+ *   2. `delivery/<slug>/<filename>` for every immediate subdirectory of `delivery/`, sorted
+ *      by name for determinism.
+ *
+ * Ordering here is ONLY the tie-break / fallback. Which candidate actually reconciles is
+ * decided by COMMIT-OWNERSHIP (discoverBundle() + bundleAttestsThisChange()), not directory
+ * order: among the candidates, the one whose checkpoint attests an ancestor-or-equal commit
+ * of THIS change wins, and stale siblings from other concurrent sessions are ignored.
+ * discoverBundle() and discoverDeclaredMarker() both iterate whatever this returns, so the
+ * per-session layout composes with zero call-site changes.
  */
 function resolveDeliveryCandidates(repoRoot, filename) {
-  return [path.join(repoRoot, DELIVERY_DIR, filename)];
+  const deliveryRoot = path.join(repoRoot, DELIVERY_DIR);
+  const candidates = [path.join(deliveryRoot, filename)];
+  // #379: append delivery/<slug>/<filename> for each immediate subdirectory of delivery/.
+  // readdirSync is best-effort — a missing delivery/ (or an unreadable one) yields just the
+  // flat candidate, never throws.
+  let entries = [];
+  try {
+    entries = fs.readdirSync(deliveryRoot, { withFileTypes: true });
+  } catch {
+    entries = [];
+  }
+  const subdirs = entries
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort();
+  for (const name of subdirs) {
+    candidates.push(path.join(deliveryRoot, name, filename));
+  }
+  return candidates;
 }
 
 /**
  * Auto-discover the delivery bundle when no explicit path is provided.
- * Checks delivery/trust.bundle, then delivery/trust.checkpoint.json under repo root
- * (via resolveDeliveryCandidates()). Returns null if neither is present — the caller
- * then falls through to delivery/DECLARED marker resolution (ADR 0022 §1); bundle
- * absence is no longer fail-open on its own.
+ *
+ * Gathers every existing candidate — flat `delivery/trust.bundle`, flat
+ * `delivery/trust.checkpoint.json`, and their `delivery/<slug>/…` per-session siblings (via
+ * resolveDeliveryCandidates()) — with trust.bundle preferred over trust.checkpoint.json.
+ *
+ * #379 (per-session, ownership-aware selection): when `changeSha` is known, the candidate
+ * whose checkpoint attests an ancestor-or-equal commit of THIS change wins (same
+ * bundleAttestsThisChange() semantics the flat staleness gate already uses). Stale/older
+ * siblings from OTHER concurrent sessions are ignored.
+ *
+ * PREFER-NEWEST among owning candidates. More than one candidate can legitimately "own" the
+ * change at once: an inherited FLAT bundle's commit_sha can be a real ancestor of HEAD in a
+ * merge-commit repo (it was committed on the trunk's linear history before this branch
+ * point), AND this session's fresh per-session bundle attests a NEWER ancestor (the delivery
+ * commit right before HEAD). "First-fresh-wins" would then select the STALE inherited flat
+ * bundle purely because it sorts first — reconciling last delivery's claims against this
+ * change's CI. So among all owning candidates we pick the one attesting the NEWEST commit
+ * (the descendant-most: the owning candidate whose commit_sha every other owning candidate's
+ * commit_sha is an ancestor of), via the same `git merge-base --is-ancestor` primitive. This
+ * makes an inherited/older owning bundle HARMLESS whether or not it was ever pruned — the
+ * fresh per-session bundle wins on recency, not on being deleted first.
+ *
+ * When no candidate owns this change (or `changeSha` is unknown, e.g. a local run with no
+ * TRUST_RECONCILE_SHA), the first existing candidate is returned so the caller's staleness
+ * gate below handles it exactly as before: a stale bundle is treated as absent, a malformed
+ * one still raises the Step 2 read error.
+ *
+ * Returns null if no candidate exists at all — the caller then falls through to
+ * delivery/DECLARED marker resolution (ADR 0022 §1); bundle absence is not fail-open.
  */
-function discoverBundle(repoRoot) {
+function discoverBundle(repoRoot, changeSha) {
+  const candidates = [];
   for (const filename of ['trust.bundle', 'trust.checkpoint.json']) {
     for (const candidate of resolveDeliveryCandidates(repoRoot, filename)) {
-      if (fs.existsSync(candidate)) return candidate;
+      if (fs.existsSync(candidate)) candidates.push(candidate);
     }
   }
-  return null;
+  if (candidates.length === 0) return null;
+
+  const deliveryRoot = path.join(repoRoot, DELIVERY_DIR);
+  const hasPerSession = candidates.some((c) => path.dirname(c) !== deliveryRoot);
+
+  // Ownership-aware selection (#379). Only meaningful when we know this change's sha; a
+  // candidate that fails to parse is skipped here (never treated as owning) — if it turns
+  // out to be the only candidate, it is still returned below so Step 2's "failed to read
+  // bundle" diagnostic fires unchanged.
+  if (changeSha) {
+    const owning = []; // { candidate, bundleSha } — every candidate that attests this change
+    for (const candidate of candidates) {
+      let json = null;
+      try {
+        json = JSON.parse(fs.readFileSync(candidate, 'utf8'));
+      } catch {
+        json = null;
+      }
+      if (!json) continue;
+      const { fresh, bundleSha } = bundleAttestsThisChange(repoRoot, candidate, json, changeSha);
+      if (fresh) owning.push({ candidate, bundleSha });
+    }
+    if (owning.length > 0) {
+      // Prefer the owning candidate attesting the NEWEST (descendant-most) commit. `best` is
+      // upgraded to a candidate whose commit is a strict descendant of the current best's —
+      // i.e. best.sha is an ancestor of cand.sha. Every owning entry has a non-null bundleSha
+      // (bundleAttestsThisChange returns fresh=false otherwise). Ties / incomparable siblings
+      // keep the earlier (candidate-order) entry, so the flat path still wins a genuine tie.
+      let best = owning[0];
+      for (let i = 1; i < owning.length; i++) {
+        const cand = owning[i];
+        if (cand.bundleSha !== best.bundleSha && isAncestorCommit(repoRoot, best.bundleSha, cand.bundleSha)) {
+          best = cand;
+        }
+      }
+      if (hasPerSession) {
+        process.stdout.write(`[trust-reconcile] #379: selected delivery candidate ${path.relative(repoRoot, best.candidate)} — attests this change ${changeSha} (${candidates.length} candidate(s) present across flat + per-session delivery/<slug>/; ${owning.length} owning, newest wins; older/stale ignored)\n`);
+      }
+      return best.candidate;
+    }
+    // No candidate attests this change. When per-session candidates were in play, emit a
+    // loud, grep-stable concurrency hint (#379) so the next agent can tell a concurrent
+    // per-session collision apart from a plain stale/absent bundle — the per-candidate
+    // stale line still prints in runTrustReconcile's staleness gate for the returned one.
+    if (hasPerSession) {
+      const rels = candidates.map((c) => path.relative(repoRoot, c)).join(', ');
+      process.stdout.write(`[trust-reconcile] #379: examined ${candidates.length} delivery candidate(s) (flat + per-session delivery/<slug>/); none attests this change ${changeSha}. If this is a concurrent-delivery collision, the OWNING session's bundle is not on this ref — re-publish this session's delivery, or check whether main moved under the PR. Candidates: ${rels}\n`);
+    }
+  }
+  return candidates[0];
 }
 
 /**
@@ -813,22 +920,30 @@ function resolveDeclaredExemption(repoRoot, ctx) {
  * src/cli/workflow-sidecar.ts). trust.bundle itself carries NO commit/branch metadata
  * (schemaVersion 5: {schemaVersion, source, claims, evidence, policies, events} — confirmed
  * by inspection), so when the discovered bundle IS trust.bundle, this falls through to its
- * sibling delivery/trust.checkpoint.json (same resolveDeliveryCandidates() seam) for the
- * binding — publishDelivery() always copies both together.
+ * SIBLING trust.checkpoint.json for the binding — publishDelivery() always writes both
+ * together into the SAME directory.
+ *
+ * #379: the sibling is resolved from the bundle's OWN directory (path.dirname(bundlePath)),
+ * not from a global resolveDeliveryCandidates() scan. In the per-session layout each session
+ * gets its own delivery/<slug>/ dir, and a global scan would cross-contaminate — pairing a
+ * per-session trust.bundle with the FLAT (or a different session's) trust.checkpoint.json and
+ * reading the wrong commit binding. Same-directory resolution is identical to the prior
+ * behavior for the flat layout (delivery/trust.bundle ↔ delivery/trust.checkpoint.json) and
+ * correct for per-session.
  */
 function extractBundleCommitSha(repoRoot, bundlePath, bundleJson) {
   if (bundleJson && typeof bundleJson.commit_sha === 'string' && bundleJson.commit_sha.trim()) {
     return bundleJson.commit_sha.trim();
   }
-  for (const candidate of resolveDeliveryCandidates(repoRoot, 'trust.checkpoint.json')) {
-    if (candidate === bundlePath || !fs.existsSync(candidate)) continue;
+  const siblingCheckpoint = path.join(path.dirname(bundlePath), 'trust.checkpoint.json');
+  if (siblingCheckpoint !== bundlePath && fs.existsSync(siblingCheckpoint)) {
     try {
-      const checkpoint = JSON.parse(fs.readFileSync(candidate, 'utf8'));
+      const checkpoint = JSON.parse(fs.readFileSync(siblingCheckpoint, 'utf8'));
       if (checkpoint && typeof checkpoint.commit_sha === 'string' && checkpoint.commit_sha.trim()) {
         return checkpoint.commit_sha.trim();
       }
     } catch {
-      // Malformed sibling checkpoint — no usable binding from it; keep looking / fall through.
+      // Malformed sibling checkpoint — no usable binding from it; fall through to null.
     }
   }
   return null;
@@ -907,13 +1022,16 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
   // (.github/workflows/trust-reconcile.yml) never passes --bundle; it always relies on
   // auto-discovery, which is exactly the path PR #278's stale-bundle incident went through.
   const explicitBundlePath = bundle || process.env.TRUST_RECONCILE_BUNDLE || null;
-  let bundlePath = explicitBundlePath || discoverBundle(resolvedRepoRoot) || null;
-  const bundleWasAutoDiscovered = !explicitBundlePath && !!bundlePath;
 
-  // Scope-matching context (ref/actor/sha) — resolved once, reused by both the
-  // bundle-ownership staleness check below and the delivery/DECLARED exemption path
-  // further down (bundle-absent branch).
+  // Scope-matching context (ref/actor/sha) — resolved once, reused by ownership-aware
+  // auto-discovery (#379, immediately below), the bundle-ownership staleness check further
+  // down (ADR 0022 addendum §2), and the delivery/DECLARED exemption path (bundle-absent
+  // branch). Resolved BEFORE auto-discovery because discoverBundle() now uses scopeCtx.sha
+  // to pick, among per-session candidates, the one that attests THIS change.
   const scopeCtx = resolveScopeContext(resolvedRepoRoot);
+
+  let bundlePath = explicitBundlePath || discoverBundle(resolvedRepoRoot, scopeCtx.sha) || null;
+  const bundleWasAutoDiscovered = !explicitBundlePath && !!bundlePath;
 
   // Event-scoped enforcement (ADR 0022 addendum, part 4): bundle-required enforcement
   // (and the staleness-gate consequence of it, immediately below) applies ONLY when this

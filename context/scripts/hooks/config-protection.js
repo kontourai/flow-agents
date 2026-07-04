@@ -180,7 +180,9 @@ function checkProtectedPathPattern(filePath) {
   // copy a forged bundle here to corrupt the CI trust check.
   // SAFE: publishDelivery writes via fs.copyFileSync (not Write/Edit tool).
   // RESIDUAL: runtime-constructed paths and fs writes are unaffected.
-  if (/(?:^|\/)delivery\/trust\.bundle$/.test(norm)) {
+  // #379: the optional (?:[^/]+\/)? segment also covers the per-session path
+  // delivery/<slug>/trust.bundle — the forgery surface moved with the write path.
+  if (/(?:^|\/)delivery\/(?:[^/]+\/)?trust\.bundle$/.test(norm)) {
     return {
       name: "delivery/trust.bundle",
       reason: "an agent could write a forged bundle to corrupt the CI trust-reconcile anchor",
@@ -189,7 +191,8 @@ function checkProtectedPathPattern(filePath) {
 
   // delivery/trust.checkpoint.json -- the signed checkpoint companion.
   // SAFE: publishDelivery writes via fs.copyFileSync, NOT via Write/Edit tool.
-  if (/(?:^|\/)delivery\/trust\.checkpoint\.json$/.test(norm)) {
+  // #379: optional (?:[^/]+\/)? segment also covers delivery/<slug>/trust.checkpoint.json.
+  if (/(?:^|\/)delivery\/(?:[^/]+\/)?trust\.checkpoint\.json$/.test(norm)) {
     return {
       name: "delivery/trust.checkpoint.json",
       reason: "an agent could forge a signed delivery by writing a tampered checkpoint",
@@ -421,7 +424,9 @@ function checkCommandForBypass(command) {
  * .kontourai/flow-agents/<slug>/trust.bundle, and deprecated runtime-shaped
  * .flow-agents equivalents.
  */
-const REDIRECT_PROTECTED_RE = /(?:^|\/|~\/)(\.bash_profile|\.bashrc|\.profile|\.zprofile|\.zshrc)$|(?:^|\/)\.claude\/settings(?:\.local)?\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\/[^/]+\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/\.goal-fit-block-streak\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/state\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/trust\.bundle$|(?:^|\/)delivery\/trust\.bundle$|(?:^|\/)delivery\/trust\.checkpoint\.json$/;
+// #379: the delivery/ arms carry an optional (?:[^/]+\/)? segment so redirects/tee to the
+// per-session path delivery/<slug>/trust.bundle (+ checkpoint) are caught, not just the flat path.
+const REDIRECT_PROTECTED_RE = /(?:^|\/|~\/)(\.bash_profile|\.bashrc|\.profile|\.zprofile|\.zshrc)$|(?:^|\/)\.claude\/settings(?:\.local)?\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\/[^/]+\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/\.goal-fit-block-streak\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/state\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.checkpoint\.json$/;
 
 /**
  * Return true when a token (an unquoted redirect target or tee argument) matches
@@ -569,8 +574,10 @@ function checkInterpreterWriteToProtected(command) {
  * Delivery-protected path regex: delivery/trust.bundle and delivery/trust.checkpoint.json.
  * These are the CI anchor files whose contents must not be agent-forged.
  * Used by checkCopyMoveToProtected to catch `cp x delivery/trust.bundle`.
+ * #379: the optional (?:[^/]+\/)? segment also catches the per-session path
+ * `cp forged.json delivery/<slug>/trust.bundle`.
  */
-const DELIVERY_COPY_PROTECTED_RE = /(?:^|\/)delivery\/trust\.bundle$|(?:^|\/)delivery\/trust\.checkpoint\.json$/;
+const DELIVERY_COPY_PROTECTED_RE = /(?:^|\/)delivery\/(?:[^/]+\/)?trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.checkpoint\.json$/;
 
 /**
  * Return true when a normalized token matches a delivery-protected path.

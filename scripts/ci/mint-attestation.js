@@ -105,22 +105,49 @@ function loadCiResults(repoRoot) {
 }
 
 /**
+ * Discover the delivery trust.bundle across the flat and per-session (#379) layouts.
+ * Prefers the flat `delivery/trust.bundle` (back-compat), then `delivery/<slug>/trust.bundle`
+ * for each immediate subdirectory (sorted). Returns the first existing path, or null.
+ * This mirrors scripts/ci/trust-reconcile.js resolveDeliveryCandidates() precedence so the
+ * attestation subject binds to the same bundle the reconciler read. best-effort — a missing
+ * or unreadable delivery/ yields null.
+ */
+function discoverDeliveryBundle(repoRoot) {
+  const deliveryRoot = path.join(repoRoot, 'delivery');
+  const flat = path.join(deliveryRoot, 'trust.bundle');
+  if (fs.existsSync(flat)) return flat;
+  let entries = [];
+  try {
+    entries = fs.readdirSync(deliveryRoot, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+  const subdirs = entries.filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  for (const name of subdirs) {
+    const candidate = path.join(deliveryRoot, name, 'trust.bundle');
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
  * Determine the subject artifact for the in-toto statement.
  *
- * If delivery/trust.bundle is present, use it as the subject (sha256 of its bytes).
- * Otherwise synthesize a results artifact from the predicate and use that.
+ * If a delivery trust.bundle is present (flat or per-session, #379), use it as the subject
+ * (sha256 of its bytes). Otherwise synthesize a results artifact from the predicate.
  *
  * @param {object} predicate  — the predicate that will appear in the statement
  * @param {string} repoRoot
  * @returns {{ subjectName: string, subjectDigest: string, fromBundle: boolean }}
  */
 function resolveSubject(predicate, repoRoot) {
-  const bundlePath = path.join(repoRoot, 'delivery', 'trust.bundle');
-  if (fs.existsSync(bundlePath)) {
+  const bundlePath = discoverDeliveryBundle(repoRoot);
+  if (bundlePath) {
     const bundleBytes = fs.readFileSync(bundlePath);
     const digest = sha256hex(bundleBytes);
-    process.stdout.write(`[mint-attestation] subject: delivery/trust.bundle sha256=${digest.slice(0, 16)}...\n`);
-    return { subjectName: 'delivery/trust.bundle', subjectDigest: digest, fromBundle: true };
+    const rel = path.relative(repoRoot, bundlePath);
+    process.stdout.write(`[mint-attestation] subject: ${rel} sha256=${digest.slice(0, 16)}...\n`);
+    return { subjectName: rel, subjectDigest: digest, fromBundle: true };
   }
 
   // No bundle present: synthesize subject from predicate JSON (self-attesting the results).

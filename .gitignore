@@ -42,14 +42,19 @@ evals/acceptance/*.mp4
 evals/acceptance/*.gif
 
 # delivery/ is the CI trust-anchor transport. The trust-reconcile.yml job reads
-# delivery/trust.bundle (or trust.checkpoint.json) to reconcile agent-claimed passes
-# against fresh CI results (scripts/ci/trust-reconcile.js).
+# delivery/<slug>/trust.bundle (or the legacy flat delivery/trust.bundle, or a
+# trust.checkpoint.json) to reconcile agent-claimed passes against fresh CI results
+# (scripts/ci/trust-reconcile.js).
 #
 # The bundle is a RUNTIME artifact: publishDelivery writes it locally on every
 # record-release/delivered, so we IGNORE the contents by default to avoid polluting
 # the repo / accidental `git add -A` commits. Only the README is tracked. At an actual
-# delivery, the deliver skill force-adds it (`git add -f delivery/trust.bundle ...`)
+# delivery, the deliver skill force-adds it (`git add -f delivery/<slug>/trust.bundle ...`)
 # so it lands in that one PR for CI to reconcile, without leaking from every local run.
+# `delivery/*` already ignores per-session delivery/<slug>/ dirs (and their contents)
+# exactly like the flat path — #379 moved the write path to a per-session dir so
+# concurrent deliveries no longer merge-conflict on one shared file; the gitignore posture
+# is unchanged (still force-added deliberately per delivery).
 #
 # delivery/DECLARED (ADR 0022 §2) is the opposite of a runtime artifact: it is a
 # durable, PR-reviewed governance marker declaring specific no-agent-delivery scopes
