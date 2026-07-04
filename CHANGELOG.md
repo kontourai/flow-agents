@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.2.0](https://github.com/kontourai/flow-agents/compare/v3.1.0...v3.2.0) (2026-07-04)
+
+
+### Features
+
+* **builder:** per-step model-routing hints + escalate-on-gate-failure ladder ([#376](https://github.com/kontourai/flow-agents/issues/376)) ([8182dc6](https://github.com/kontourai/flow-agents/commit/8182dc66da10f3bfd731aef93d7cbd38b63ddd06))
+* **knowledge:** inbound-reference integrity check, fail closed ([#340](https://github.com/kontourai/flow-agents/issues/340)) ([02932ab](https://github.com/kontourai/flow-agents/commit/02932abec98fcc43ae3755d2281697e21c7451a6))
+* **knowledge:** incremental append-mode consolidate (Closes [#343](https://github.com/kontourai/flow-agents/issues/343)) ([9b972f5](https://github.com/kontourai/flow-agents/commit/9b972f5bf9d7a41d1de4af23d5e27619db3b1635))
+* **knowledge:** incremental append-mode consolidate, regenerate snapshot from records ([#343](https://github.com/kontourai/flow-agents/issues/343)) ([32cc263](https://github.com/kontourai/flow-agents/commit/32cc263aedc4c3727b144ced24872bc102a13383))
+* **knowledge:** record-carried freshness + Hachure-aligned status semantics ([#341](https://github.com/kontourai/flow-agents/issues/341)) ([32ff45e](https://github.com/kontourai/flow-agents/commit/32ff45eb9244fa1879a0b32784e95e5e5c80de71))
+
+
+### Fixes
+
+* **delivery:** per-session delivery paths so concurrent deliveries stop contending ([#379](https://github.com/kontourai/flow-agents/issues/379)) ([fedf4db](https://github.com/kontourai/flow-agents/commit/fedf4db5c41c7e45dcf9db949176be076131a09e))
+* **delivery:** per-session delivery paths so concurrent deliveries stop contending ([#379](https://github.com/kontourai/flow-agents/issues/379)) ([a03026f](https://github.com/kontourai/flow-agents/commit/a03026fccf940da2129a3b82e979443c37b87456))
+
 ## [3.1.0](https://github.com/kontourai/flow-agents/compare/v3.0.0...v3.1.0) (2026-07-04)
 
 
