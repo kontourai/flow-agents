@@ -66,6 +66,11 @@ _Avoid_: Graph database as the generic term (the model is provider-independent; 
 A configured implementation of the knowledge-store capability behind the Knowledge Graph model. Providers expose a read interface (nodes, edges, query-by-type) and a proposals-only write interface (proposeWrite returns a proposal, never mutating a human-curated store). The reference providers are markdown-vault (the Obsidian-shaped vault), git-repo (decision registry, CONTEXT.md vocabulary, learnings), and work-item (GitHub issues as a source/sink adapter). See context/contracts/knowledge-store-contract.md.
 _Avoid_: Knowledge adapter when contrasting the provider interface with a single store adapter
 
+### Knowledge Promote Sub-Flow
+
+The Knowledge Kit's codebase-facing pipeline (the "flow within a flow") that a delivered session's promotion runs through: ingest the session artifacts, distill schema-valid draft decision/vocabulary/learning deltas, link their provenance (PR, merge SHA, session archive, touched topics), and health-check the registry for contradictions with a merge-repair proposal. It is proposals-only — every output is a draft under the session's proposals directory that the promote step applies; the sub-flow never writes docs directly. Invokable standalone and composable from the Builder promote step. See docs/decisions/knowledge-promote-sub-flow.md.
+_Avoid_: Promotion gate as a synonym (the gate is the recorded promote claim; this is the assisted pipeline)
+
 ### Kontour Resource Contract
 
 A versioned Kontour record shape for durable machine-readable configuration, scope, run state, evidence, provider output, and cross-product interchange. Kontour Resource Contracts are the default for new pre-public durable contracts unless a product records why a native shape is clearer.

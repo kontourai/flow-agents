@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "task_slug": "kontourai-flow-agents-287",
+  "repo": "kontourai/flow-agents",
+  "status": "learned",
+  "updated_at": "2026-07-02T22:40:06Z",
+  "records": [
+    {
+      "recorded_at": "2026-07-02T22:40:06Z",
+      "id": "learn-287-ci-eval-gap",
+      "outcome": "mixed",
+      "summary": "Integration eval suite not wired into CI; resume-roundtrip eval broken at baseline invisibly. Manifest registration is what makes agent evidence reconcilable.",
+      "source_refs": ["evals/run.sh", "evals/ci/run-baseline.sh"],
+      "correction": {
+        "needed": true,
+        "type": "tooling",
+        "recurrence_key": "integration-evals-not-in-ci",
+        "prevention": { "target": "backlog", "action": "wire integration evals into CI required lanes", "status": "completed" }
+      }
+    },
+    {
+      "recorded_at": "2026-07-02T22:40:06Z",
+      "id": "learn-287-env-drift",
+      "outcome": "mixed",
+      "summary": "node_modules drifted from lockfile: phantom eval failures and record-evidence hard-blocked until npm ci.",
+      "source_refs": ["package-lock.json"],
+      "correction": {
+        "needed": true,
+        "type": "process",
+        "recurrence_key": "node-modules-lockfile-drift",
+        "prevention": { "target": "docs", "action": "document npm ci before verification phases", "status": "completed" }
+      }
+    }
+  ]
+}
