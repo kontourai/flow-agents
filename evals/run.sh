@@ -280,6 +280,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_publish_delivery.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_reconcile_preflight.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_mint_attestation.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_verify_cli.sh" || result=1

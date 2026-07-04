@@ -40,6 +40,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT/evals/lib/node.sh"
 RECONCILE="$ROOT/scripts/ci/trust-reconcile.js"
 FX="$ROOT/evals/fixtures/trust-reconcile-exploits"
 WS3="$ROOT/evals/fixtures/trust-reconcile-ws3/ws3-bundle.json"
@@ -918,6 +919,96 @@ if echo "$out8d" | grep -qF "owning, newest wins"; then
 else
   _fail "prefer-newest: expected 'owning, newest wins' in the selection line -- output: $out8d"
 fi
+
+# 9. [iteration-1 F1 CRITICAL regression guard] CI trust-reconcile.js MUST stay fail-closed
+#   when scripts/ci/derive-claim-status.mjs is unavailable (Surface unresolvable, spawn
+#   failure, malformed bundle, etc.) -- deriveClaimStatuses() returns null in that case, and
+#   BEFORE #356's extraction the inline session-local loop turned every session-local
+#   pass-asserting claim into a `status-underivable` divergence (hard FAIL). The extraction's
+#   shared sessionLocalShapeIssues() briefly made that a caller-controlled `onUnderivable` mode
+#   (see reconcile-shape.js) -- this section proves CI still defaults/forces the safe 'fail'
+#   mode, and (paired) that the LOCAL reconcile-preflight intentionally diverges into the
+#   'reduce' mode on the exact same bundle. Without the fix, case 9a below FAILS (exits 0
+#   instead of 1) -- this is the single regression eval that let the CRITICAL through
+#   code-review-356 iteration 0.
+echo ""
+echo "=== 9. derive-claim-status.mjs unavailable: CI fail-closed vs local-preflight reduced-coverage (iteration-1 F1) ==="
+
+DERIVE_HELPER="$ROOT/scripts/ci/derive-claim-status.mjs"
+DERIVE_HELPER_HIDDEN="$DERIVE_HELPER.hidden-by-test-9"
+
+# hide_derive_helper / restore_derive_helper: rename the real ESM helper out of the way so
+# scripts/ci/trust-reconcile.js's deriveClaimStatuses() -- which does fs.existsSync(helper)
+# before ever spawning it -- returns null exactly as it would if Surface could not resolve.
+# Always restored via trap, including on a hard failure of this script.
+hide_derive_helper() {
+  if [[ -f "$DERIVE_HELPER" ]]; then
+    mv "$DERIVE_HELPER" "$DERIVE_HELPER_HIDDEN"
+  fi
+}
+restore_derive_helper() {
+  if [[ -f "$DERIVE_HELPER_HIDDEN" ]]; then
+    mv "$DERIVE_HELPER_HIDDEN" "$DERIVE_HELPER"
+  fi
+}
+trap 'cleanup_declared; rm -rf "$PERSESSION_TMPROOT"; restore_derive_helper' EXIT
+
+# A one-claim, session-local, pass-asserting bundle (reuses the finding-3 exploit fixture --
+# a human_attestation-backed claim asserting status "verified"; any session-local
+# pass-asserting claim exercises this path since the whole derivedStatus map is null, not a
+# single claim's lookup).
+CASE9_BUNDLE="$FX/status-misassertion.json"
+
+hide_derive_helper
+
+# 9a. CI (real scripts/ci/trust-reconcile.js): derive-claim-status.mjs unavailable -> MUST
+#     still exit non-zero (status-underivable, fail-closed) -- the pre-#356 guarantee.
+out9a="$(TRUST_RECONCILE_COMMANDS="node -e 'process.exit(0)'" \
+  node "$RECONCILE" --bundle "$CASE9_BUNDLE" --repo-root "$ROOT" 2>&1)"
+code9a=$?
+if [[ $code9a -ne 0 ]]; then
+  _pass "derive-unavailable-ci: reconciler exits non-zero ($code9a) -- fail-closed preserved when re-derivation is unavailable"
+else
+  _fail "derive-unavailable-ci: expected non-zero exit (fail-closed), got 0 -- output: $out9a"
+fi
+if echo "$out9a" | grep -qF "[status-underivable]"; then
+  _pass "derive-unavailable-ci: emitted the status-underivable divergence"
+else
+  _fail "derive-unavailable-ci: expected a [status-underivable] divergence -- output: $out9a"
+fi
+if echo "$out9a" | grep -qF "refusing to trust a self-reported status (fail-closed)"; then
+  _pass "derive-unavailable-ci: emitted the verbatim fail-closed message"
+else
+  _fail "derive-unavailable-ci: expected the verbatim fail-closed message -- output: $out9a"
+fi
+
+# 9b. Paired proof the modes diverge intentionally: the LOCAL reconcile-preflight, on the
+#     SAME bundle with the SAME helper hidden, DEGRADES -- it does not hard-fail on the
+#     underivable-status dimension (it opts into reduce mode explicitly; see
+#     src/cli/workflow-sidecar.ts's runReconcilePreflight).
+# Nested under a subdirectory (not the raw mktemp -d path) -- mktemp -d's own
+# "tmp.XXXXXXXXXX" basename contains a dot that path.extname()/artifactDirFrom() would
+# misparse as a file extension, incorrectly stripping the directory segment.
+CASE9_TMPROOT="$(mktemp -d)"
+CASE9_SESSION="$CASE9_TMPROOT/session"
+mkdir -p "$CASE9_SESSION"
+cp "$CASE9_BUNDLE" "$CASE9_SESSION/trust.bundle"
+out9b="$(flow_agents_node workflow-sidecar reconcile-preflight "$CASE9_SESSION" --repo-root "$ROOT" 2>&1)"
+code9b=$?
+rm -rf "$CASE9_TMPROOT"
+if [[ $code9b -eq 0 ]]; then
+  _pass "derive-unavailable-local-preflight: reconcile-preflight exits 0 (reduced-coverage degrade, not a hard fail) -- proves the CI/local modes diverge intentionally"
+else
+  _fail "derive-unavailable-local-preflight: expected exit 0 (reduced-coverage degrade), got $code9b -- output: $out9b"
+fi
+if echo "$out9b" | grep -qF "status-underivable"; then
+  _fail "derive-unavailable-local-preflight: must NOT emit status-underivable in reduced-coverage mode -- output: $out9b"
+else
+  _pass "derive-unavailable-local-preflight: does not emit status-underivable (reduced-coverage checks only)"
+fi
+
+restore_derive_helper
+
 
 echo ""
 if [[ $errors -eq 0 ]]; then

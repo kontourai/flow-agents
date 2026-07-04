@@ -124,6 +124,18 @@ const path = require('path');
 // copy here had drifted (it was missing the trailing `/bin/true` check), which is
 // exactly why this is now imported rather than duplicated.
 const { hasLaunderingOperator } = require('../lib/command-log-chain.js');
+// #356: the bundle-shape classification (classifyBundleClaims) and the pure,
+// shape-level divergence-construction helpers used by Step 2 below are shared with a
+// local pre-push preflight (reconcile-preflight) via this module, so the preflight can
+// never drift from what this CI reconciler actually enforces. See that module's own
+// header comment for the extraction rationale.
+const {
+  classifyBundleClaims,
+  waiverOnCommandIssues,
+  noEvidenceCommandIssues,
+  reconcilableManifestIssues,
+  sessionLocalShapeIssues,
+} = require('../lib/reconcile-shape.js');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -197,138 +209,6 @@ function runCommand(cmd, repoRoot) {
     stdout: result.stdout || '',
     stderr: result.stderr || '',
   };
-}
-
-/**
- * Classify a trust.bundle's claims into: reconcilable command claims (test_output +
- * execution.label), session-local claims (attestation/observation/citation), never-captured
- * or unbacked command claims (not-run divergence), and command-backed claims carrying a
- * waiver (waiver-on-command divergence). Returns
- *   { reconcilable, sessionLocal, noEvidenceCommand, waiverOnCommand }.
- *
- * Source of truth: evidence[].execution.label is the command string recorded at capture time.
- * evidence[].passing (normalized) means the agent claimed this passed. `claim.status` is NOT
- * trusted here — the caller re-derives it CI-side (see derive-claim-status.mjs / finding-3).
- *
- * WS8 iteration-2 hardening:
- *   - finding 1: ANY pass-asserting claim whose evidence is `evidenceType: test_output`
- *     (Surface's default when unset) but which did NOT reconcile — i.e. it has no
- *     manifest-matchable execution.label — is a divergence, NOT session-local. A test_output
- *     claim either reconciles against the manifest or is a divergence; it is never accepted on
- *     self-reported status. (Previously only the literal claimType `workflow.check.command`
- *     was guarded, so a fabricated kind:"test" claim with no command slipped through.)
- *   - finding 4: a command-backed (test_output) claim carrying a waiver is a divergence — a
- *     command-backed check reconciles against CI or fails; it cannot be waived.
- */
-function classifyBundleClaims(bundle) {
-  const evidence = Array.isArray(bundle.evidence) ? bundle.evidence : [];
-  const claims = Array.isArray(bundle.claims) ? bundle.claims : [];
-
-  const claimById = new Map();
-  for (const c of claims) if (c && c.id) claimById.set(c.id, c);
-
-  // Evidence indexing. A missing evidenceType defaults to test_output for backward
-  // compatibility with pre-classification bundles (same default classifyEvidence uses).
-  const claimHasLabeledTestOutput = new Set(); // test_output evidence WITH an execution.label
-  const claimHasTestOutputEvidence = new Set(); // ANY test_output evidence (label or not)
-  // WS8 iteration-4 (converged finding): the session-local (non-test_output) evidenceType per
-  // claim, so the reconciler can name it on the loud ATTESTED marker below — a fabricated
-  // human_attestation/attestation/external claim with no --command is otherwise
-  // indistinguishable, in the reconciler's own output, from a genuinely re-runnable check.
-  const claimEvidenceType = new Map();
-  for (const ev of evidence) {
-    if (!ev || !ev.claimId) continue;
-    const evType = ev.evidenceType || 'test_output';
-    if (evType !== 'test_output') {
-      if (!claimEvidenceType.has(ev.claimId)) claimEvidenceType.set(ev.claimId, evType);
-      continue;
-    }
-    claimHasTestOutputEvidence.add(ev.claimId);
-    if (ev.execution && ev.execution.label) claimHasLabeledTestOutput.add(ev.claimId);
-  }
-
-  // finding 4: a command-backed (test_output-evidence) claim that also carries a waiver.
-  const waiverOnCommand = [];
-  for (const c of claims) {
-    if (!c || !c.id) continue;
-    const waiver = (c.metadata && typeof c.metadata === 'object') ? c.metadata.waiver : undefined;
-    if (waiver && typeof waiver === 'object' && claimHasTestOutputEvidence.has(c.id)) {
-      waiverOnCommand.push({ claimId: c.id, claimType: String(c.claimType || ''), subject: c.subjectId || c.fieldOrBehavior || c.id });
-    }
-  }
-
-  // (A) Reconcilable claimed-passes: evidence items that are test_output (CI-reconcilable),
-  // carry an execution.label, and assert pass. Session-local evidenceTypes
-  // (crawl_observation, human_attestation, attestation, policy_rule, source_excerpt,
-  // document_citation, calculation_trace) are NOT reconciled per-command — they are handled
-  // by the session-local/waiver path below.
-  const reconcilable = [];
-  const reconcilableClaimIds = new Set();
-  const seen = new Set();
-  for (const ev of evidence) {
-    if (!ev || !ev.execution || !ev.execution.label) continue;
-    if (!isPassingValue(ev.passing)) continue;
-    const evType = ev.evidenceType || 'test_output';
-    if (evType !== 'test_output') continue; // session-local — not CI-reconcilable
-    const cmd = normalizeCmd(ev.execution.label);
-    if (!cmd) continue;
-    reconcilableClaimIds.add(ev.claimId);
-    if (seen.has(cmd)) continue;
-    seen.add(cmd);
-    const claim = claimById.get(ev.claimId);
-    reconcilable.push({ cmd, claimId: ev.claimId, evId: ev.id, claimType: claim ? String(claim.claimType || '') : '' });
-  }
-
-  // (B) Session-local claims, never-captured command claims, and unreconciled test_output.
-  const sessionLocal = [];
-  const noEvidenceCommand = [];
-  const seenClaims = new Set();
-  for (const c of claims) {
-    if (!c || !c.id || typeof c.claimType !== 'string') continue;
-    // #267/#282: a superseded critique write is HISTORY — excluded from reconcile evaluation so a
-    // resolved session converges (a fail critique that a later same-reviewer pass superseded no
-    // longer blocks). Scoped to NON-test_output claims so a command-backed claim can never launder
-    // a real failure by carrying superseded_by — a test_output claim always reconciles or diverges.
-    if (c.metadata && typeof c.metadata === 'object' && c.metadata.superseded_by && !claimHasTestOutputEvidence.has(c.id)) continue;
-    if (reconcilableClaimIds.has(c.id)) continue; // handled by (A)
-    if (seenClaims.has(c.id)) continue;
-    const status = String(c.status || '');
-    const assertsPass = isPassingValue(c.value) || status === 'verified' || status === 'assumed';
-    const isFailing = status === 'disputed' || status === 'rejected';
-    if (!assertsPass && !isFailing) continue; // pending/unknown non-asserting — ignore (as before)
-    seenClaims.add(c.id);
-
-    // finding 1: a pass-asserting claim backed by test_output evidence that did NOT reconcile
-    // (it has test_output evidence but no manifest-matchable execution.label — otherwise it
-    // would be in bucket A) is a not-run divergence. A test_output claim reconciles against the
-    // manifest or it is a divergence — it is NEVER accepted as session-local on self-report.
-    if (assertsPass && claimHasTestOutputEvidence.has(c.id)) {
-      const rawCmd = normalizeCmd(c.fieldOrBehavior || c.value || '');
-      noEvidenceCommand.push({ cmd: rawCmd || `[claim:${c.id}]`, claimId: c.id, claimType: c.claimType, reason: 'test_output-unreconciled' });
-      continue;
-    }
-
-    // A workflow.check.command claim with no captured (labeled) evidence is a never-captured
-    // claimed pass — not-run divergence (anti-gaming teeth preserved).
-    if (assertsPass && c.claimType === 'workflow.check.command' && !claimHasLabeledTestOutput.has(c.id)) {
-      const rawCmd = normalizeCmd(c.fieldOrBehavior || c.value || '');
-      noEvidenceCommand.push({ cmd: rawCmd || `[claim:${c.id}:${c.claimType}]`, claimId: c.id, claimType: c.claimType, reason: 'no-evidence-command' });
-      continue;
-    }
-
-    const waiver = (c.metadata && typeof c.metadata === 'object') ? c.metadata.waiver : undefined;
-    sessionLocal.push({
-      claimId: c.id,
-      claimType: c.claimType,
-      assertedStatus: status,
-      value: c.value,
-      waiver: (waiver && typeof waiver === 'object') ? waiver : null,
-      subject: c.subjectId || c.fieldOrBehavior || c.id,
-      evidenceType: claimEvidenceType.get(c.id) || 'unknown',
-    });
-  }
-
-  return { reconcilable, sessionLocal, noEvidenceCommand, waiverOnCommand };
 }
 
 /**
@@ -1224,49 +1104,23 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
       }
 
       // finding 4 (server-side): a command-backed (test_output-evidence) claim carrying a
-      // waiver is a divergence — a command-backed check reconciles against CI or fails; it
-      // cannot be waived away.
-      for (const { claimId, claimType, subject } of waiverOnCommand) {
-        issues.push({
-          type: 'waiver-on-command-check',
-          message: `trust divergence: claim '${claimId}' (${subject}, claimType: ${claimType}) carries a waiver but is backed by test_output evidence — a command-backed check reconciles against CI or fails and cannot be waived`,
-        });
-      }
+      // waiver is a divergence — shape-only, delegated to scripts/lib/reconcile-shape.js
+      // (used byte-identically here and by the local reconcile-preflight).
+      issues.push(...waiverOnCommandIssues(waiverOnCommand));
 
       // not-run divergences: never-captured command claims (no evidence) AND test_output
-      // claims that did not reconcile (no manifest-matchable execution.label).
-      for (const { cmd, claimId, claimType, reason } of noEvidenceCommand) {
-        const message = reason === 'test_output-unreconciled'
-          ? `trust divergence: claim '${claimId}' (claimType: ${claimType}) asserts pass with test_output evidence but has no manifest-matched execution.label — a test_output claim must reconcile against the manifest or it is a divergence (never accepted as session-local)`
-          : `trust divergence: claim '${claimId}' (claimType: ${claimType}) asserts pass but has no supporting evidence item — command never captured`;
-        issues.push({ type: 'not-run', cmd, message });
-      }
+      // claims that did not reconcile (no manifest-matchable execution.label). Shape-only,
+      // delegated to scripts/lib/reconcile-shape.js.
+      issues.push(...noEvidenceCommandIssues(noEvidenceCommand));
 
-      // Reconcilable test_output claims: laundering → manifest match → CI fresh result.
-      for (const { cmd } of reconcilable) {
+      // Reconcilable test_output claims: laundering → manifest match (shape-only, delegated
+      // to scripts/lib/reconcile-shape.js) → CI fresh result (CI-only, stays here — requires
+      // a live command execution the local preflight must not perform).
+      const { issues: manifestIssues, unresolved: reconcilableUnresolved } =
+        reconcilableManifestIssues(reconcilable, manifestByCmd);
+      issues.push(...manifestIssues);
+      for (const { cmd, manifestEntry: entry } of reconcilableUnresolved) {
         const normalCmd = normalizeCmd(cmd);
-
-        // (a) Laundering operator check — must come first (most specific signal).
-        if (hasLaunderingOperator(cmd)) {
-          issues.push({
-            type: 'laundering',
-            cmd,
-            message: `trust divergence: agent claimed '${cmd}' passed; command contains exit-code-laundering operator (|| ... / ; true / ; exit 0 / etc.)`,
-          });
-          continue;
-        }
-
-        // A test_output claim MUST name a manifest (required-lane) command. An agent
-        // cannot self-label an arbitrary command test_output to dodge the manifest.
-        const entry = manifestByCmd.get(normalCmd);
-        if (!entry) {
-          issues.push({
-            type: 'not-run',
-            cmd,
-            message: `trust divergence: agent claimed '${cmd}' passed; command is not in the reconcile manifest — a test_output claim must name a manifest/required-lane command (CI cannot self-declare an arbitrary command)`,
-          });
-          continue;
-        }
 
         // Prefer the fresh-verify Step 1 result; otherwise re-run this (manifest, and
         // therefore required-lane) command fresh now. Only manifest commands are ever
@@ -1303,90 +1157,26 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
         process.stdout.write(`[trust-reconcile]   RECONCILED: '${cmd}' (manifest id: ${entry.id}) — claimed pass, CI fresh run = PASS\n`);
       }
 
-      // Session-local claims: not CI-reconcilable, but NOT a pass bypass. Each must either
-      // (a) carry a loud, justified waiver, or (b) resolve a real CI-RE-DERIVED `verified`
-      // status. WS8 iteration-2 hardening:
-      //   - finding 3: the status used here is RE-DERIVED CI-side, never the self-reported
-      //     claim.status. A mismatch is a `status-misassertion` divergence. If re-derivation
-      //     is unavailable we fail closed (`status-underivable`) — we never fall back to
-      //     trusting the bundle's own status.
-      //   - finding 2: `assumed` alone is NO LONGER a silent pass. `assumed` is acceptable
-      //     ONLY with a waiver (printed as a loud WAIVED line). An unwaived `assumed` claim is
-      //     an `unwaived-assumed` divergence (restores pre-WS8 semantics where `assumed` alone
-      //     never satisfied assertsPass).
-      //
-      // WS8 iteration-4 (converged iteration-3 finding, both gates): a session-local claim
-      // that re-derives `verified` with NO waiver is, by definition, backed only by
-      // human_attestation/attestation/external/etc. evidence with no --command — i.e.
-      // `deriveClaimStatus` only proves the bundle is internally self-consistent, never that
-      // the underlying attestation is true. A fully fabricated bundle (fake claim + fake
-      // evidence + fake event, all hand-authored to agree) is INDISTINGUISHABLE from a real
-      // one at this layer. This was previously printed as a quiet `SESSION-LOCAL OK` line
-      // indistinguishable from a genuinely reconciled check. It is now always printed as a
-      // loud, distinct `ATTESTED (not independently verifiable at L0)` marker — see ADR 0020
-      // Residuals. This does NOT change the exit code (attestations are not blocked at L0;
-      // blocking every honest human-attestation use is not the fix) — it is a visibility-only
-      // change so a reviewer/downstream tool can grep for and count exactly how many claims in
-      // a passing bundle rest on bundle-internal consistency alone rather than independent
-      // (CI fresh-run or cryptographically-signed) verification.
-      let attestedCount = 0;
-      for (const { claimId, claimType, assertedStatus, waiver, subject, evidenceType } of sessionLocal) {
-        // finding 3: re-derive; never trust the asserted status.
-        let status;
-        if (!derivedStatus) {
-          issues.push({
-            type: 'status-underivable',
-            message: `trust divergence: session-local claim '${claimId}' (claimType: ${claimType}) asserts status '${assertedStatus || 'unknown'}' but CI-side re-derivation is unavailable — refusing to trust a self-reported status (fail-closed)`,
-          });
-          continue;
-        }
-        const derived = derivedStatus.get(claimId);
-        if (derived === undefined || derived === null) {
-          issues.push({
-            type: 'status-underivable',
-            message: `trust divergence: session-local claim '${claimId}' (claimType: ${claimType}) could not be re-derived CI-side from the bundle's own evidence/events/policies — refusing to trust its self-reported status '${assertedStatus || 'unknown'}' (fail-closed)`,
-          });
-          continue;
-        }
-        if (derived !== assertedStatus) {
-          issues.push({
-            type: 'status-misassertion',
-            message: `trust divergence: session-local claim '${claimId}' (claimType: ${claimType}) asserts status '${assertedStatus || 'unknown'}' but CI re-derivation from the bundle's own evidence/events/policies yields '${derived}' — the reconciler does not trust self-reported claim.status`,
-          });
-          continue;
-        }
-        status = derived;
-
-        if (status === 'disputed' || status === 'rejected') {
-          issues.push({
-            type: 'session-local-failed',
-            message: `trust divergence: session-local claim '${claimId}' (claimType: ${claimType}) has re-derived status '${status}' — a failing/rejected claim blocks (session-local classification is not a pass bypass)`,
-          });
-          continue;
-        }
-        // finding 2: a waiver is the ONLY way an `assumed` (or otherwise non-`verified`)
-        // session-local claim passes, and it is printed loudly. `verified` still passes on its
-        // own re-derived status.
-        if (waiver && waiver.reason && waiver.approved_by) {
+      // Session-local claims: not CI-reconcilable, but NOT a pass bypass. Shape-only,
+      // delegated to scripts/lib/reconcile-shape.js (sessionLocalShapeIssues) — see that
+      // module for the full WS8 finding-2/finding-3/iteration-4 rationale (waiver-only pass
+      // for non-`verified` status, CI-re-derived status never self-reported, loud ATTESTED
+      // marker for bundle-internal-only consistency). iteration-1 F1: CI MUST pass
+      // `onUnderivable: 'fail'` explicitly — this is CI's trust anchor and must never silently
+      // degrade to trusting a self-reported status when re-derivation is unavailable (that
+      // reduced-coverage mode is opt-in only, for the LOCAL preflight — see reconcile-shape.js).
+      // iteration-1 F3: the WAIVED/ATTESTED log lines below are driven by the shared function's
+      // own `logEvents` classification (not a parallel re-derivation) so CI's stdout narrative
+      // can never drift from what sessionLocalShapeIssues actually decided.
+      const { issues: sessionLocalIssues, attestedCount, logEvents } =
+        sessionLocalShapeIssues(sessionLocal, derivedStatus, { onUnderivable: 'fail' });
+      issues.push(...sessionLocalIssues);
+      for (const { kind, claimId, claimType, subject, evidenceType, status, waiver } of logEvents) {
+        if (kind === 'waived') {
           process.stdout.write(`[trust-reconcile] WAIVED: ${subject} (${claimType}) status=${status} — ${waiver.reason} (approved by ${waiver.approved_by})\n`);
-          continue;
-        }
-        if (status === 'verified') {
-          attestedCount++;
+        } else if (kind === 'attested') {
           process.stdout.write(`[trust-reconcile] ATTESTED (not independently verifiable at L0): '${claimId}' (${claimType}) evidenceType=${evidenceType} — accepted on bundle-internal consistency only; see ADR 0020 Residuals\n`);
-          continue;
         }
-        if (status === 'assumed') {
-          issues.push({
-            type: 'unwaived-assumed',
-            message: `trust divergence: session-local claim '${claimId}' (claimType: ${claimType}) has re-derived status 'assumed' but carries no waiver — 'assumed' alone is not a pass; it requires a documented waiver (--accepted-gap-reason/--waived-by) to be accepted`,
-          });
-          continue;
-        }
-        issues.push({
-          type: 'unwaived-session-local',
-          message: `trust divergence: session-local claim '${claimId}' (claimType: ${claimType}) asserts pass with re-derived status '${status || 'unknown'}' but has no waiver and no CI-re-derived verified status`,
-        });
       }
 
       // WS8 iteration-4: always emit the summary count, even when zero, so a passing bundle
@@ -1495,6 +1285,41 @@ function main() {
 // Export core function for programmatic use (e.g. flow-agents verify CLI subcommand).
 // The direct-CLI behavior is preserved: when run as a script, main() is called below.
 module.exports.runTrustReconcile = runTrustReconcile;
+
+// #356: manifest-resolution helpers exported for reuse by the local reconcile-preflight
+// (Wave 2) so it resolves the manifest via the EXACT SAME priority chain this CI reconciler
+// uses (CLI --manifest > TRUST_RECONCILE_MANIFEST > package.json > run-baseline.sh
+// --manifest-json > legacy fresh-verify-commands fallback) — never a second implementation.
+// These stay defined here (not moved to scripts/lib/reconcile-shape.js) because they are
+// CI-adjacent resolution logic (they may spawn `evals/ci/run-baseline.sh --manifest-json`,
+// a cheap static-registry emit, not a fresh test run) rather than pure bundle-shape
+// classification.
+module.exports.resolveManifest = resolveManifest;
+module.exports.runBaselineManifest = runBaselineManifest;
+module.exports.normalizeManifestEntries = normalizeManifestEntries;
+module.exports.slugifyLabel = slugifyLabel;
+module.exports.normalizeCmd = normalizeCmd;
+module.exports.isAncestorCommit = isAncestorCommit;
+// #356: resolveManifest's legacy fallback tier (tier 5, "legacy:fresh-verify-commands")
+// folds the CANONICAL verify commands into the manifest when no dedicated manifest source
+// resolves. Exporting resolveCanonicalCommands too so the local preflight's manifest
+// resolution has genuine parity with CI on that fallback tier as well — otherwise a repo (or
+// a fixture/test repo) with no run-baseline.sh/package.json manifest source would silently
+// resolve an EMPTY legacy-fallback manifest locally while CI's own resolution (which always
+// threads its own resolved canonicalCommands into this same fallback) resolves a non-empty
+// one, a real parity gap, not merely a fixture quirk.
+module.exports.resolveCanonicalCommands = resolveCanonicalCommands;
+
+// #356: re-export the shared bundle-shape classification/issue-construction functions
+// (primary home: scripts/lib/reconcile-shape.js) so a caller that already requires
+// trust-reconcile.js (e.g. an existing test harness) can reach them without also needing
+// to know the shared module's path. This is a re-export, not a second implementation —
+// the single definition lives in scripts/lib/reconcile-shape.js.
+module.exports.classifyBundleClaims = classifyBundleClaims;
+module.exports.waiverOnCommandIssues = waiverOnCommandIssues;
+module.exports.noEvidenceCommandIssues = noEvidenceCommandIssues;
+module.exports.reconcilableManifestIssues = reconcilableManifestIssues;
+module.exports.sessionLocalShapeIssues = sessionLocalShapeIssues;
 
 if (require.main === module) {
   main();

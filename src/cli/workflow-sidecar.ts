@@ -1879,6 +1879,14 @@ function checksFromBundle(dir: string): AnyObj[] {
   const seen = new Set<string>();
   const checks: AnyObj[] = [];
   const kindOf = (claim: AnyObj): string => String((claim.metadata as AnyObj).check_kind);
+  // Read side of the buildTrustBundle waiver round-trip (write side: buildTrustBundle reads
+  // check._waiver at line ~689 and stamps it onto claimMetadata.waiver at line ~705). Without
+  // this, any caller that rebuilds checks via checksFromBundle() (recordCritique/recordLearning)
+  // silently drops a previously-recorded waiver on the next bundle write.
+  const waiverOf = (claim: AnyObj): AnyObj | undefined => {
+    const md = claim.metadata as AnyObj;
+    return md && typeof md === "object" && md.waiver && typeof md.waiver === "object" ? md.waiver as AnyObj : undefined;
+  };
   for (const ev of bundle.evidence) {
     if (!ev || !ev.claimId) continue;
     const claim = claimById.get(ev.claimId);
@@ -1891,6 +1899,8 @@ function checksFromBundle(dir: string): AnyObj[] {
     const check: AnyObj = { id: String(claim.subjectId || "").split("/").pop() || ev.claimId, kind, status, summary: claim.fieldOrBehavior || "" };
     if (ev.execution && typeof ev.execution.label === "string") check.command = ev.execution.label;
     if (ev.evidenceType) check.evidenceType = ev.evidenceType;
+    const waiver = waiverOf(claim);
+    if (waiver) check._waiver = waiver;
     checks.push(check);
   }
   // Also include check claims that have no evidence item (surface_trust_refs style).
@@ -1900,7 +1910,10 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (seen.has(claim.id)) continue;
     seen.add(claim.id);
     const kind = kindOf(claim);
-    checks.push({ id: String(claim.subjectId || "").split("/").pop() || claim.id, kind, status: claim.value ?? "not_verified", summary: claim.fieldOrBehavior || "" });
+    const check: AnyObj = { id: String(claim.subjectId || "").split("/").pop() || claim.id, kind, status: claim.value ?? "not_verified", summary: claim.fieldOrBehavior || "" };
+    const waiver = waiverOf(claim);
+    if (waiver) check._waiver = waiver;
+    checks.push(check);
   }
   return checks;
 }
@@ -2165,7 +2178,12 @@ async function promote(p: ReturnType<typeof parseArgs>): Promise<number> {
   // Optionally republish so delivery/trust.bundle carries the promotion claim for CI.
   if (p.flags.has("publish")) {
     const publishRepoRoot = opt(p, "publish-repo-root") ? path.resolve(opt(p, "publish-repo-root")) : findRepoRootFromDirStrict(dir);
+    // #356 AC6: an InvalidBundleShapeError refusal must be LOUD (rethrown, so `promote`
+    // itself fails/exits non-zero) — it is NOT one of the best-effort failure modes (missing
+    // kits/ ancestor, I/O) this catch otherwise tolerates. A `.catch(() => {})`-style swallow
+    // here would silently defeat the whole preflight for the --publish path.
     await publishDelivery(dir, publishRepoRoot).catch((err: unknown) => {
+      if (err instanceof InvalidBundleShapeError) throw err;
       process.stderr.write(`[promote] WARNING: publish-delivery failed: ${err instanceof Error ? err.message : String(err)}\n`);
     });
   }
@@ -2233,8 +2251,13 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
     // publishDelivery below. An explicit --repo-root (e.g. for a scratch/test artifact dir
     // with no kits/ ancestor of its own) always wins, matching publishDeliveryCmd. Failures
     // are visible (stderr warning), not silently swallowed.
+    // #356 AC6: an InvalidBundleShapeError refusal is NOT one of those best-effort failure
+    // modes — it must be LOUD and cause advance-state itself to fail (rethrown here so the
+    // outer command surfaces a non-zero exit), never silently swallowed alongside a genuine
+    // repo-root-resolution/I-O failure.
     const publishRepoRoot = opt(p, "repo-root") ? path.resolve(opt(p, "repo-root")) : findRepoRootFromDirStrict(dir);
     await publishDelivery(dir, publishRepoRoot).catch((err: unknown) => {
+      if (err instanceof InvalidBundleShapeError) throw err;
       process.stderr.write(`[advance-state] WARNING: publish-delivery failed: ${err instanceof Error ? err.message : String(err)}\n`);
     });
   }
@@ -2323,8 +2346,13 @@ async function recordRelease(p: ReturnType<typeof parseArgs>): Promise<number> {
   // publishDelivery below. An explicit --repo-root (e.g. for a scratch/test artifact dir with
   // no kits/ ancestor of its own) always wins, matching publishDeliveryCmd. Failures are
   // visible (stderr warning), not silently swallowed.
+  // #356 AC6: an InvalidBundleShapeError refusal is NOT best-effort — rethrow so record-release
+  // itself fails loudly (non-zero exit) rather than silently publishing nothing while reporting
+  // success. This is the crux of AC6: record-release is one of the auto-publish paths that must
+  // never let a shape-invalid bundle slip past unnoticed.
   const publishRepoRoot = opt(p, "repo-root") ? path.resolve(opt(p, "repo-root")) : findRepoRootFromDirStrict(dir);
   await publishDelivery(dir, publishRepoRoot).catch((err: unknown) => {
+    if (err instanceof InvalidBundleShapeError) throw err;
     process.stderr.write(`[record-release] WARNING: publish-delivery failed: ${err instanceof Error ? err.message : String(err)}\n`);
   });
   return 0;
@@ -2539,6 +2567,288 @@ async function sealCheckpoint(p: ReturnType<typeof parseArgs>): Promise<number> 
   return 0;
 }
 
+
+// ─── Reconcile Preflight (#356) ───────────────────────────────────────────────
+// Local, pre-push shape-only preflight for a session's trust.bundle, reusing
+// scripts/lib/reconcile-shape.js (WS8/#356 extraction) and scripts/ci/trust-reconcile.js's
+// own exported manifest resolver — never a forked reimplementation, so this can never
+// silently drift from what the CI trust-reconcile job actually enforces. Deliberately
+// shape-only: it never spawns a fresh manifest/CI command (AC5) — only the already-cheap
+// `run-baseline.sh --manifest-json` static registry emit, which prints the manifest, not
+// test results.
+
+/**
+ * Delegate to the shared pure-CJS bundle-shape module (scripts/lib/reconcile-shape.js),
+ * mirroring the createRequire pattern used by loadActorIdentityHelper()/
+ * loadLivenessWriteHelper() above — the one repo/runtime boundary #356's plan flagged as
+ * worth double-checking (workflow-sidecar.ts is TS→ESM-compiled-to-CJS-compatible-output;
+ * scripts/lib/reconcile-shape.js is plain CommonJS). Verified clean via `npm run build`
+ * + a require() smoke against build/src/cli/workflow-sidecar.js before this was wired in.
+ */
+function loadReconcileShapeHelper(): {
+  classifyBundleClaims: (bundle: AnyObj) => {
+    reconcilable: AnyObj[];
+    sessionLocal: AnyObj[];
+    noEvidenceCommand: AnyObj[];
+    waiverOnCommand: AnyObj[];
+  };
+  normalizeCmd: (cmd: string) => string;
+  waiverOnCommandIssues: (waiverOnCommand: AnyObj[]) => AnyObj[];
+  noEvidenceCommandIssues: (noEvidenceCommand: AnyObj[]) => AnyObj[];
+  reconcilableManifestIssues: (reconcilable: AnyObj[], manifestByCmd: Map<string, AnyObj>) => { issues: AnyObj[]; unresolved: AnyObj[] };
+  sessionLocalShapeIssues: (
+    sessionLocal: AnyObj[],
+    derivedStatus: Map<string, string | null> | null,
+    opts?: { onUnderivable?: "fail" | "reduce" }
+  ) => { issues: AnyObj[]; attestedCount: number; logEvents: AnyObj[] };
+} {
+  const _req = createRequire(import.meta.url);
+  const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/lib/reconcile-shape.js");
+  return _req(helperPath);
+}
+
+/**
+ * Delegate to scripts/ci/trust-reconcile.js's own EXPORTED pure helpers (manifest
+ * resolution + the git-ancestor primitive) — same createRequire idiom as
+ * loadReconcileShapeHelper() above. trust-reconcile.js is CommonJS; these exports were
+ * added alongside `runTrustReconcile` specifically so a local caller (this preflight)
+ * never needs a second implementation of "how the manifest is resolved" (Q1/AC5).
+ */
+function loadTrustReconcileHelper(): {
+  resolveManifest: (args: { manifest?: string | null }, repoRoot: string, canonicalCommands: string[]) => { entries: Array<{ id: string; command: string }>; source: string };
+  runBaselineManifest: (repoRoot: string) => Array<{ id: string; command: string }> | null;
+  normalizeManifestEntries: (raw: unknown) => Array<{ id: string; command: string }> | null;
+  slugifyLabel: (s: string) => string;
+  normalizeCmd: (cmd: string) => string;
+  isAncestorCommit: (repoRoot: string, ancestorSha: string, descendantSha: string) => boolean;
+  resolveCanonicalCommands: (args: { commands: string[] }, repoRoot: string) => string[] | null;
+} {
+  const _req = createRequire(import.meta.url);
+  const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/ci/trust-reconcile.js");
+  return _req(helperPath);
+}
+
+/**
+ * Shell to scripts/ci/derive-claim-status.mjs exactly as trust-reconcile.js's own
+ * deriveClaimStatuses() does (Q1's recommendation: full status-misassertion/unwaived-assumed
+ * parity with CI, at the cost of one cheap local-only spawn — no CI command execution, just
+ * Surface's pure deriveClaimStatus over the bundle's own evidence/events/policies). Returns
+ * null when re-derivation is unavailable (Surface could not load / helper failed) — callers
+ * degrade to reconcile-shape.js's documented reduced-coverage mode, they do not fail the
+ * whole preflight over this.
+ */
+function derivePreflightClaimStatuses(bundlePath: string, repoRoot: string): Map<string, string | null> | null {
+  const helper = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/ci/derive-claim-status.mjs");
+  if (!fs.existsSync(helper)) return null;
+  let stdout: string;
+  try {
+    stdout = execFileSync(process.execPath, [helper, bundlePath], { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 60000 });
+  } catch {
+    return null;
+  }
+  if (!stdout) return null;
+  try {
+    const obj = JSON.parse(stdout);
+    const m = new Map<string, string | null>();
+    for (const [k, v] of Object.entries(obj)) m.set(k, v as string | null);
+    return m;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Distinct, identifiable error for a shape-invalid trust.bundle — NOT a generic Error, so
+ * every publishDelivery() call site (advanceState/recordRelease/promote/publishDeliveryCmd)
+ * can positively distinguish "refuses to publish an invalid bundle" (must be LOUD, fail
+ * closed, AC6) from the other failure modes those call sites already tolerate as best-effort
+ * (missing kits/ ancestor for a scratch dir, I/O errors, etc — see each catch's own comment).
+ * A bare `instanceof Error` check would not suffice since every thrown failure in this file is
+ * already an Error; `code` is the recognizable, grep-stable discriminator.
+ */
+export class InvalidBundleShapeError extends Error {
+  readonly code = "RECONCILE_PREFLIGHT_INVALID_SHAPE" as const;
+  readonly issues: string[];
+  constructor(issues: string[]) {
+    super(`trust.bundle failed the reconcile-preflight shape check (${issues.length} issue(s)) — see .issues for the full report`);
+    this.name = "InvalidBundleShapeError";
+    this.issues = issues;
+  }
+}
+
+/**
+ * Human-actionable fix text per divergence type (Q2: unwaived-assumed's message always
+ * carries the "waiver voided by a mixed record-evidence call" root-cause hint — shape #5 is
+ * NOT a distinct predicate, it is #2 enriched, per the plan's Q2 resolution).
+ */
+function preflightFixHint(type: string): string {
+  switch (type) {
+    case "unwaived-assumed":
+      return "FIX: make it pass for real, or re-record with --accepted-gap-reason/--waived-by on a SEPARATE record-evidence call — a command-backed check in the SAME call voids/rejects the waiver (see the command-backed-waiver guard in workflow-sidecar.ts's recordEvidence).";
+    case "waiver-on-command-check":
+      return "FIX: a command-backed (test_output) check cannot be waived — either drop the waiver metadata and let it reconcile against the manifest for real, or record it as a session-local (non-command) claim if it genuinely cannot be re-run.";
+    case "not-run":
+      return "FIX: fold this into a non-command summary (session-local claim, no execution.label), or name the EXACT verbatim manifest command in evidence.execution.label so it reconciles.";
+    case "laundering":
+      return "FIX: remove the exit-code-laundering operator (||, ; true, ; exit 0, etc.) from the command — a laundered command cannot be trusted to reconcile.";
+    case "session-local-failed":
+      return "FIX: a disputed/failing claim always blocks reconcile. Document a disjoint pre-existing failure as prose in a WAIVED non-command summary, not as a standalone claim.";
+    case "status-misassertion":
+      return "FIX: the claim's asserted status does not match what Surface re-derives from the bundle's own evidence/events/policies — re-record evidence so the bundle's own data supports the asserted status; do not hand-edit status.";
+    case "status-underivable":
+      return "FIX: CI-side status re-derivation failed for this claim — ensure @kontourai/surface is installed/resolvable and the claim's evidence/events are well-formed, then re-record.";
+    case "unwaived-session-local":
+      return "FIX: this claim asserts pass but has neither a waiver nor a CI-re-derived 'verified' status — add a waiver (--accepted-gap-reason/--waived-by) or resolve it so Surface derives 'verified'.";
+    default:
+      return "FIX: see the divergence message above for the specific shape defect.";
+  }
+}
+
+/**
+ * Callable core shared by BOTH the `reconcile-preflight` CLI handler and
+ * publishDelivery()'s fail-closed gate (#356 Wave 3) — one implementation, not two entry
+ * points that could drift. SHAPE-only: never spawns a fresh manifest/CI command (AC5) — the
+ * only subprocess calls here are the already-cheap run-baseline.sh --manifest-json static
+ * registry emit (inside resolveManifest, reused unchanged from trust-reconcile.js) and the
+ * local-only derive-claim-status.mjs re-derivation (no CI command execution either).
+ *
+ * @param dir artifact/session directory containing trust.bundle
+ * @param repoRoot repo root used for manifest resolution + the optional ancestor warning
+ * @param manifestOverride optional --manifest JSON string (CLI passthrough)
+ */
+type TrustReconcileHelper = ReturnType<typeof loadTrustReconcileHelper>;
+
+/**
+ * F4 (iteration-1): extracted from runReconcilePreflight so the main function stays under
+ * the 50-line guideline. Q3 (optional, non-blocking): warn if the checkpoint's commit_sha is
+ * not yet an ancestor of local HEAD — never affects ok/exit code, best-effort only. Already a
+ * self-contained try/catch with no effect on the caller's `ok`/`issues`.
+ */
+function checkpointStalenessWarning(dir: string, repoRoot: string, tr: TrustReconcileHelper): string[] {
+  const warnings: string[] = [];
+  try {
+    const checkpointPath = path.join(dir, "trust.checkpoint.json");
+    if (fs.existsSync(checkpointPath)) {
+      const checkpoint = loadJson(checkpointPath);
+      const commitSha = checkpoint && typeof checkpoint === "object" ? (checkpoint as AnyObj).commit_sha : undefined;
+      if (typeof commitSha === "string" && commitSha) {
+        let headSha = "";
+        try {
+          headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+        } catch {
+          headSha = "";
+        }
+        if (headSha && !tr.isAncestorCommit(repoRoot, commitSha, headSha)) {
+          warnings.push(`NON-BLOCKING: trust.checkpoint.json commit_sha '${commitSha}' is not an ancestor of local HEAD '${headSha}' — the checkpoint may be stale (e.g. after an amend/rebase). Consider re-sealing (seal-checkpoint) before publishing. This is a warning only — see #335 for the full checkpoint-staleness ownership check.`);
+        }
+      }
+    }
+  } catch {
+    // best-effort only — never affects ok/exit code.
+  }
+  return warnings;
+}
+
+export function runReconcilePreflight(
+  dir: string,
+  repoRoot: string,
+  manifestOverride?: string | null
+): { ok: boolean; issues: string[]; warnings: string[] } {
+  const bundlePath = path.join(dir, "trust.bundle");
+  if (!fs.existsSync(bundlePath)) {
+    // A preflight with nothing to check is a usage error, not a soft pass — an agent must
+    // never read "no bundle" as "bundle is valid" (see reconcilePreflightCmd for the CLI-side
+    // die()). The library entrypoint throws too, since publishDelivery() itself already has
+    // its OWN, separate, pre-existing fail-soft branch for bundle-absence (guarded before this
+    // function is ever called there) — this function is never invoked without a bundle.
+    throw new Error(`reconcile-preflight: no trust.bundle found at ${bundlePath} — nothing to check. This is a usage error, not a soft pass.`);
+  }
+
+  const bundle = loadJson(bundlePath);
+  const shape = loadReconcileShapeHelper();
+  const tr = loadTrustReconcileHelper();
+
+  // Resolve the SAME canonical (fresh-verify) commands CI would fall back to feeding into
+  // resolveManifest's legacy tier (tier 5), for genuine parity on that fallback path too —
+  // CLI --commands is not a preflight concept, so only the TRUST_RECONCILE_COMMANDS env /
+  // package.json trust-reconcile-verify tiers apply locally; a repo with neither and no
+  // manifest source resolves to the same empty legacy fallback CI itself would in that case.
+  const canonicalCommands = tr.resolveCanonicalCommands({ commands: [] }, repoRoot) ?? [];
+  const manifestResolution = tr.resolveManifest({ manifest: manifestOverride ?? null }, repoRoot, canonicalCommands);
+  const manifestByCmd = new Map<string, AnyObj>();
+  for (const e of manifestResolution.entries) manifestByCmd.set(tr.normalizeCmd(e.command), e);
+
+  const derivedStatus = derivePreflightClaimStatuses(bundlePath, repoRoot);
+
+  const { reconcilable, sessionLocal, noEvidenceCommand, waiverOnCommand } = shape.classifyBundleClaims(bundle);
+
+  const issues: AnyObj[] = [];
+  issues.push(...shape.waiverOnCommandIssues(waiverOnCommand));
+  issues.push(...shape.noEvidenceCommandIssues(noEvidenceCommand));
+  const { issues: manifestIssues } = shape.reconcilableManifestIssues(reconcilable, manifestByCmd);
+  issues.push(...manifestIssues);
+  // iteration-1 F1: the local preflight explicitly opts into reduced-coverage degradation
+  // when re-derivation is unavailable (Surface not installed, spawn failure, etc.) — CI's
+  // trust-reconcile.js does NOT opt in and stays fail-closed on the same condition (see
+  // reconcile-shape.js's sessionLocalShapeIssues docstring for the full mode contract).
+  const { issues: sessionLocalIssues } = shape.sessionLocalShapeIssues(sessionLocal, derivedStatus, { onUnderivable: "reduce" });
+  issues.push(...sessionLocalIssues);
+
+  const report = issues.map((i) => `${i.message} — ${preflightFixHint(i.type)}`);
+  const warnings = checkpointStalenessWarning(dir, repoRoot, tr);
+
+  return { ok: report.length === 0, issues: report, warnings };
+}
+
+/**
+ * reconcile-preflight <artifact-dir> [--manifest <json>] [--repo-root <path>]
+ *
+ * Local, pre-push shape-only check of the session's trust.bundle — reuses
+ * scripts/lib/reconcile-shape.js and scripts/ci/trust-reconcile.js's own exported
+ * classification/manifest-resolution so this can never silently drift from what CI's
+ * Trust Reconcile job enforces. Prints every divergence with the claim id, divergence
+ * type, and a human fix instruction; exits 0 with zero issues, 1 otherwise. Never spawns a
+ * fresh manifest/CI command re-run (AC5) — resolves the manifest and re-derives status
+ * (both local-only, no CI command execution) but never re-runs a manifest command itself.
+ *
+ * Usage: workflow-sidecar reconcile-preflight <artifactDir> [--manifest <json>] [--repo-root <path>]
+ */
+async function reconcilePreflightCmd(p: ReturnType<typeof parseArgs>): Promise<number> {
+  if (p.flags.has("help") || (!p.positional[0] && !p.opts["help"])) {
+    if (p.flags.has("help")) {
+      console.log("Usage: workflow-sidecar reconcile-preflight <artifactDir> [--manifest <json>] [--repo-root <path>]");
+      console.log("Local, pre-push shape-only check of <artifactDir>/trust.bundle. Exits 0 with no issues, 1 otherwise.");
+      return 0;
+    }
+  }
+  const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
+  const repoRoot = opt(p, "repo-root") ? path.resolve(opt(p, "repo-root")) : findRepoRootFromDirStrict(dir);
+  if (!repoRoot) die(`reconcile-preflight: no kits/ ancestor found from ${dir}; pass --repo-root explicitly.`);
+  const manifestOverride = p.opts["manifest"]?.at(-1) ?? null;
+
+  const bundlePath = path.join(dir, "trust.bundle");
+  if (!fs.existsSync(bundlePath)) {
+    die(`reconcile-preflight: no trust.bundle at ${bundlePath} — a preflight with nothing to check is a usage error, not a soft pass. Record evidence first (record-evidence) before running reconcile-preflight.`);
+  }
+
+  const result = runReconcilePreflight(dir, repoRoot, manifestOverride);
+
+  for (const w of result.warnings) {
+    process.stderr.write(`[reconcile-preflight] ${w}\n`);
+  }
+
+  if (result.ok) {
+    console.log(`[reconcile-preflight] OK — no shape issues found in ${bundlePath}`);
+    return 0;
+  }
+
+  process.stderr.write(`[reconcile-preflight] FAILED — ${result.issues.length} shape issue(s) found in ${bundlePath}:\n`);
+  for (const issue of result.issues) {
+    process.stderr.write(`[reconcile-preflight]   - ${issue}\n`);
+  }
+  return 1;
+}
+
 // ─── Publish Delivery Bundle ──────────────────────────────────────────────────
 // Copies the session's trust.bundle (+ checkpoint companions) from the gitignored
 // session artifact dir (.kontourai/flow-agents/<slug>/) to the committed delivery/ transport
@@ -2621,6 +2931,16 @@ function pruneSupersededSeals(deliveryDir: string, keepSlug: string): void {
  * evals/integration/test_checkpoint_signing.sh TEST 2 and the WS5 session findings at
  * .kontourai/flow-agents/ws5-governance-kit-slice1 for the root cause this fixes).
  * Idempotent: overwrites on re-delivery to the same slug.
+ *
+ * #356 Wave 3 (AC6): Fail-CLOSED on bundle SHAPE. After the fail-soft absence guard below,
+ * runs the SAME reconcile-preflight shape check (runReconcilePreflight) the
+ * `reconcile-preflight` CLI subcommand exposes, BEFORE copying anything into delivery/. A
+ * shape-invalid bundle throws InvalidBundleShapeError (a distinct, identifiable error — see
+ * its own doc comment) rather than silently publishing a bundle CI's Trust Reconcile job
+ * would reject anyway. This is intentionally a NEW, additive fail-closed branch — it must
+ * never be conflated with the pre-existing fail-soft absence/repo-root branches above/below,
+ * which stay exactly as before (see each publishDelivery call site's catch handler for how
+ * the distinction is preserved end-to-end).
  */
 export async function publishDelivery(dir: string, repoRoot: string | null): Promise<void> {
   const bundleSrc = path.join(dir, "trust.bundle");
@@ -2629,6 +2949,19 @@ export async function publishDelivery(dir: string, repoRoot: string | null): Pro
   if (!repoRoot) {
     process.stderr.write(`[publish-delivery] WARNING: no kits/ ancestor found from ${dir}; skipping publish. Refusing to fall back to process.cwd() to avoid clobbering an unrelated repo's delivery/ seal. Pass --repo-root explicitly if this session dir is intentionally outside a repo checkout.\n`);
     return;
+  }
+
+  // #356 AC6: fail-CLOSED on shape-invalidity — runs AFTER the fail-soft absence/repo-root
+  // guards above (both preserved unchanged) and BEFORE any copy into delivery/. Throws
+  // InvalidBundleShapeError (never a generic Error) so every call site can positively
+  // distinguish this from the failure modes they already tolerate as best-effort.
+  const preflight = runReconcilePreflight(dir, repoRoot);
+  if (!preflight.ok) {
+    process.stderr.write(`[publish-delivery] REFUSING to publish — trust.bundle failed the reconcile-preflight shape check (${preflight.issues.length} issue(s)):\n`);
+    for (const issue of preflight.issues) {
+      process.stderr.write(`[publish-delivery]   - ${issue}\n`);
+    }
+    throw new InvalidBundleShapeError(preflight.issues);
   }
 
   const deliveryDir = path.join(repoRoot, "delivery");
@@ -3927,6 +4260,7 @@ async function main(): Promise<number> {
       case "resolve-slug": return resolveSlugCmd(p);
       case "seal-checkpoint": return sealCheckpoint(p);
       case "publish-delivery": return publishDeliveryCmd(p);
+      case "reconcile-preflight": return reconcilePreflightCmd(p);
       default: die(`unknown command: ${p.command}`);
     }
   });

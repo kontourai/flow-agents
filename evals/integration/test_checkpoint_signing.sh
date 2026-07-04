@@ -278,14 +278,22 @@ flow_agents_node "$WRITER" init-plan "$SESSION_DIR2/${SLUG2}--deliver.md" \
   --source-request "Test" --summary "Test" \
   --timestamp "2026-06-26T11:01:00Z" >/dev/null 2>&1
 
+# #356: the check-json below carries a real "command" so its test_output evidence
+# has a manifest-matchable execution.label (evidence.execution.label) -- otherwise the new
+# reconcile-preflight gate inside publishDelivery() (#356 Wave 3, AC6) correctly refuses to
+# publish a "kind":"build" claim with test_output evidence but no captured command (a
+# genuinely shape-invalid claim CI's own trust-reconcile.js would ALSO reject -- this is not
+# a preflight-specific false positive, see reconcile-shape.js's finding-1 hardening).
+# TRUST_RECONCILE_COMMANDS makes "node --version" resolve via resolveManifest's legacy
+# fallback tier, matching what a real repo configured with that canonical verify would do.
 flow_agents_node "$WRITER" record-evidence "$SESSION_DIR2" \
   --verdict pass \
-  --check-json '{"id":"build","kind":"build","status":"pass","summary":"build passed"}' \
+  --check-json '{"id":"build","kind":"build","status":"pass","summary":"build passed","command":"node --version"}' \
   --timestamp "2026-06-26T11:02:00Z" >/dev/null 2>&1
 
 # advance-state to delivered: this is the other code path that seals the checkpoint
 SEAL_EXIT=0
-flow_agents_node "$WRITER" advance-state "$SESSION_DIR2" \
+TRUST_RECONCILE_COMMANDS="node --version" flow_agents_node "$WRITER" advance-state "$SESSION_DIR2" \
   --status delivered \
   --phase release \
   --summary "Delivered." \
