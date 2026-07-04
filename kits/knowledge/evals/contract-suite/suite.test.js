@@ -873,4 +873,180 @@ describe("Knowledge Kit Store Contract Suite", () => {
       assert.ok(typeof record.body === "string", "body is a string");
     });
   });
+
+  // -----------------------------------------------------------------------
+  // §15  identity resolution — short-id prefix (AC1, R1)
+  //
+  // `get`/`getLinks` accept an unambiguous id prefix (>= 8 chars). An ambiguous
+  // prefix throws AMBIGUOUS_ID (a distinct code), never guesses or returns null.
+  // On-disk identity is unchanged (R4): records are still keyed by full id.
+  // -----------------------------------------------------------------------
+  describe("identity: short-id prefix resolution (AC1)", () => {
+    let dir, store;
+    before(() => { dir = makeTempDir(); store = makeStore(dir); });
+    after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    test("get resolves a unique 8-char id prefix to the record", async () => {
+      const id = await store.create({
+        type: "concept", title: "Prefix Target", body: "b",
+        category: "decision.strategy", provenance: { agent: "tester" },
+      });
+      const prefix = id.slice(0, 8);
+      assert.equal(prefix.length, 8, "sanity: prefix is 8 chars");
+      const rec = await store.get(prefix);
+      assert.ok(rec, "8-char prefix resolves to a record");
+      assert.equal(rec.id, id, "prefix resolves to the correct full id");
+    });
+
+    test("getLinks resolves a unique 8-char id prefix", async () => {
+      const targetId = await store.create({
+        type: "concept", title: "PrefixLinkTarget", body: "t",
+        category: "test", provenance: { agent: "tester" },
+      });
+      const sourceId = await store.create({
+        type: "raw", title: "PrefixLinkSource", body: "s", category: "test",
+        links: [{ target_id: targetId, kind: "related" }],
+        provenance: { agent: "tester" },
+      });
+      const { forward } = await store.getLinks(sourceId.slice(0, 8));
+      assert.ok(forward.some((l) => l.target_id === targetId && l.kind === "related"),
+        "getLinks via an 8-char prefix returns the record's forward links");
+    });
+
+    test("an ambiguous prefix throws AMBIGUOUS_ID (never returns null)", async () => {
+      // Two records whose full ids deliberately share an 8-char prefix. create
+      // accepts an explicit id (§1.1: adapter MAY generate), so the collision is
+      // deterministic without depending on random UUIDs colliding.
+      await store.create({
+        id: "abcdef12-0000-0000-0000-000000000001",
+        type: "raw", title: "Ambiguous One", body: "1", category: "test",
+        provenance: { agent: "tester" },
+      });
+      await store.create({
+        id: "abcdef12-0000-0000-0000-000000000002",
+        type: "raw", title: "Ambiguous Two", body: "2", category: "test",
+        provenance: { agent: "tester" },
+      });
+      await assert.rejects(
+        () => store.get("abcdef12"),
+        (err) => {
+          assert.equal(err.code, "AMBIGUOUS_ID",
+            `expected AMBIGUOUS_ID, got code=${err.code}: ${err.message}`);
+          return true;
+        }
+      );
+    });
+
+    test("a prefix shorter than the 8-char minimum does not resolve (null)", async () => {
+      await store.create({
+        id: "deadbeef-1111-1111-1111-111111111111",
+        type: "raw", title: "Short Prefix Guard", body: "x", category: "test",
+        provenance: { agent: "tester" },
+      });
+      assert.equal(await store.get("dead"), null, "a <8-char token is never a prefix match");
+    });
+
+    test("exact full-id get is unchanged (R4)", async () => {
+      const id = await store.create({
+        type: "raw", title: "Exact Id", body: "e", category: "test",
+        provenance: { agent: "tester" },
+      });
+      const rec = await store.get(id);
+      assert.equal(rec.id, id, "exact-id get still returns the record");
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // §16  identity resolution — slug aliases (AC2, R2)
+  //
+  // Records carry human-readable, category-scoped slug aliases; `get`/`getLinks`
+  // resolve them through the same surface, whether set at create or via update.
+  // -----------------------------------------------------------------------
+  describe("identity: slug alias resolution (AC2)", () => {
+    let dir, store;
+    before(() => { dir = makeTempDir(); store = makeStore(dir); });
+    after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    test("a record created with a slug alias resolves via get(slug) and getLinks(slug)", async () => {
+      const slug = "decision.strategy/2026-07-03-gtm-direction";
+      const targetId = await store.create({
+        type: "concept", title: "GTM Target", body: "t",
+        category: "decision.strategy", provenance: { agent: "tester" },
+      });
+      const id = await store.create({
+        type: "compiled", title: "GTM Direction", body: "the decision",
+        category: "decision.strategy", aliases: [slug],
+        links: [{ target_id: targetId, kind: "related" }],
+        provenance: { agent: "tester" },
+      });
+
+      const rec = await store.get(slug);
+      assert.ok(rec, "slug resolves to a record");
+      assert.equal(rec.id, id, "get(slug) returns the aliased record");
+
+      const { forward } = await store.getLinks(slug);
+      assert.ok(forward.some((l) => l.target_id === targetId),
+        "getLinks(slug) returns the aliased record's links");
+    });
+
+    test("a slug alias added via update resolves through the same surface", async () => {
+      const id = await store.create({
+        type: "concept", title: "Later Slug", body: "b",
+        category: "decision.strategy", provenance: { agent: "tester" },
+      });
+      await store.update(id, { aliases: ["decision.strategy/added-later"] }, { agent: "tester" });
+      const rec = await store.get("decision.strategy/added-later");
+      assert.ok(rec, "update-added slug resolves");
+      assert.equal(rec.id, id, "get(added slug) returns the record");
+    });
+
+    test("a malformed slug alias is rejected at create (MISSING_EVIDENCE)", () =>
+      assertMissingEvidence(
+        () => store.create({
+          type: "raw", title: "Bad Slug", body: "b", category: "test",
+          aliases: ["Not A Valid Slug!"], provenance: { agent: "tester" },
+        }),
+        "malformed slug alias"
+      ));
+  });
+
+  // -----------------------------------------------------------------------
+  // §17  identity resolution — survives restructure (AC3, R3)
+  //
+  // After `update` recategorizes a record (obsidian: the file relocates folders),
+  // the previously issued slug AND short-id prefix still resolve to the same
+  // record — the alias map is keyed by full id, never by category or path.
+  // -----------------------------------------------------------------------
+  describe("identity: alias resolution survives restructure (AC3)", () => {
+    let dir, store;
+    before(() => { dir = makeTempDir(); store = makeStore(dir); });
+    after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    test("old slug and short-id prefix still resolve after a recategorize", async () => {
+      const slug = "decision.strategy/2026-06-18-market-fork";
+      const id = await store.create({
+        type: "concept", title: "Market Fork Decision", body: "original",
+        category: "decision.strategy", aliases: [slug],
+        provenance: { agent: "tester" },
+      });
+      const prefix = id.slice(0, 8);
+
+      // Pre-move sanity: both handles resolve.
+      assert.equal((await store.get(slug)).id, id, "slug resolves before move");
+      assert.equal((await store.get(prefix)).id, id, "prefix resolves before move");
+
+      // Restructure: recategorize. In the obsidian adapter this relocates the
+      // note from decision/strategy/ to decision/gtm/.
+      await store.update(id, { category: "decision.gtm" }, { agent: "tester" });
+      const moved = await store.get(id);
+      assert.equal(moved.category, "decision.gtm", "category changed on disk");
+
+      // The whole point of the alias map: old handles survive the restructure.
+      assert.equal((await store.get(slug)).id, id, "old slug survives the restructure");
+      assert.equal((await store.get(prefix)).id, id, "short-id prefix survives the restructure");
+
+      const { reverse } = await store.getLinks(id);
+      assert.ok(Array.isArray(reverse), "getLinks still answers for the moved record");
+    });
+  });
 });

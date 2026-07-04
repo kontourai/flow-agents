@@ -16,6 +16,18 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 
+// Record-identity resolution layer (short-id prefix + slug aliases, issue #339).
+// Single-sourced in the shared codec so both bundled adapters resolve
+// identically; the rest of this adapter keeps its own zero-import helpers.
+import {
+  resolveRecordId,
+  normalizeAliases,
+  emptyAliasIndex,
+  loadAliasIndex,
+  saveAliasIndex,
+  registerAliases,
+} from "../shared/codec.js";
+
 // ---------------------------------------------------------------------------
 // Error helpers
 // ---------------------------------------------------------------------------
@@ -340,6 +352,7 @@ export class DefaultKnowledgeStore {
     this._root = path.resolve(storeRoot);
     this._recordsDir = path.join(this._root, "records");
     this._graphPath = path.join(this._root, "graph-index.json");
+    this._aliasPath = path.join(this._root, "alias-index.json");
     fs.mkdirSync(this._recordsDir, { recursive: true });
   }
 
@@ -349,6 +362,35 @@ export class DefaultKnowledgeStore {
 
   _recordPath(id) {
     return path.join(this._recordsDir, `${id}.md`);
+  }
+
+  // -- Record-identity resolution (short-id prefix + slug alias, issue #339) --
+
+  /** Does a record file exist for this exact full id? */
+  _idExists(id) {
+    return fs.existsSync(this._recordPath(id));
+  }
+
+  /** All full record ids, derived cheaply from the records/ directory. */
+  _listIds() {
+    if (!fs.existsSync(this._recordsDir)) return [];
+    return fs.readdirSync(this._recordsDir)
+      .filter((f) => f.endsWith(".md"))
+      .map((f) => f.slice(0, -3));
+  }
+
+  /**
+   * Resolve a query token (exact id, slug alias, or unambiguous id prefix) to a
+   * single full record id, or null when it resolves to nothing. Throws
+   * AMBIGUOUS_ID when a prefix matches more than one record.
+   */
+  _resolveId(input) {
+    const aliasIndex = loadAliasIndex(this._aliasPath);
+    return resolveRecordId(input, {
+      idExists: (rid) => this._idExists(rid),
+      listIds: () => this._listIds(),
+      bySlug: aliasIndex.by_slug,
+    });
   }
 
   _readRecord(id) {
@@ -393,6 +435,15 @@ export class DefaultKnowledgeStore {
     const id = input.id || randomUUID();
     const now = this._now();
 
+    // Validate slug aliases (issue #339) and reserve them in the alias map
+    // BEFORE any write, so a SLUG_CONFLICT aborts create without a partial record.
+    const aliases = normalizeAliases(input.aliases);
+    let aliasIndex = null;
+    if (aliases.length) {
+      aliasIndex = loadAliasIndex(this._aliasPath);
+      registerAliases(aliasIndex, id, aliases);
+    }
+
     // Merge explicit links + wikilinks from body
     const explicitLinks = input.links || [];
     const wikilinks = extractWikilinks(input.body || "");
@@ -404,6 +455,7 @@ export class DefaultKnowledgeStore {
       title: input.title,
       category: input.category,
       tags: input.tags || [],
+      ...(aliases.length ? { aliases } : {}),
       status: "active",
       created_at: now,
       updated_at: now,
@@ -425,6 +477,9 @@ export class DefaultKnowledgeStore {
     addLinksToGraph(graph, id, links);
     saveGraph(this._graphPath, graph);
 
+    // Persist the alias map only after the record is on disk.
+    if (aliasIndex) saveAliasIndex(this._aliasPath, aliasIndex);
+
     return id;
   }
 
@@ -439,7 +494,7 @@ export class DefaultKnowledgeStore {
     const record = this._readRecord(id);
     if (!record) throw notFoundError(id);
 
-    const mutableKeys = ["title", "body", "category", "tags", "links"];
+    const mutableKeys = ["title", "body", "category", "tags", "links", "aliases"];
     const supplied = mutableKeys.filter((k) => fields[k] !== undefined);
     if (supplied.length === 0)
       throw missingEvidenceError("update: at least one mutable field must be supplied");
@@ -448,6 +503,18 @@ export class DefaultKnowledgeStore {
       throw missingEvidenceError(`update: invalid category: ${fields.category}`);
 
     const now = this._now();
+
+    // Slug aliases are append-only: supplied aliases are UNIONED with existing
+    // ones so a previously issued slug keeps resolving after a restructure (R3).
+    let mergedAliases = Array.isArray(record.aliases) ? record.aliases.slice() : [];
+    let aliasIndex = null;
+    if (fields.aliases !== undefined) {
+      const incoming = normalizeAliases(fields.aliases);
+      const seen = new Set(mergedAliases);
+      for (const s of incoming) if (!seen.has(s)) { seen.add(s); mergedAliases.push(s); }
+      aliasIndex = loadAliasIndex(this._aliasPath);
+      registerAliases(aliasIndex, id, mergedAliases);
+    }
 
     // Merge links if updated
     let newLinks = record.links || [];
@@ -465,6 +532,7 @@ export class DefaultKnowledgeStore {
       ...(fields.body !== undefined ? { body: fields.body } : {}),
       ...(fields.category !== undefined ? { category: fields.category } : {}),
       ...(fields.tags !== undefined ? { tags: fields.tags } : {}),
+      ...(mergedAliases.length ? { aliases: mergedAliases } : {}),
       links: newLinks,
       updated_at: now,
       mutation_log: [
@@ -486,6 +554,8 @@ export class DefaultKnowledgeStore {
     saveGraph(this._graphPath, graph);
 
     this._writeRecord(updated);
+
+    if (aliasIndex) saveAliasIndex(this._aliasPath, aliasIndex);
   }
 
   // -------------------------------------------------------------------------
@@ -843,7 +913,12 @@ export class DefaultKnowledgeStore {
   // -------------------------------------------------------------------------
 
   async get(id) {
-    return this._readRecord(id);
+    // Accept an exact id, a slug alias, or an unambiguous id prefix (issue #339).
+    // Unresolved → null (unchanged missing-record semantics); ambiguous prefix
+    // → throws AMBIGUOUS_ID.
+    const resolvedId = this._resolveId(id);
+    if (!resolvedId) return null;
+    return this._readRecord(resolvedId);
   }
 
   // -------------------------------------------------------------------------
@@ -851,10 +926,13 @@ export class DefaultKnowledgeStore {
   // -------------------------------------------------------------------------
 
   async getLinks(id) {
+    // Resolve prefix/slug to a full id; fall back to the raw token when it
+    // resolves to nothing so unknown ids still return empty arrays (not throw).
+    const key = this._resolveId(id) || id;
     const graph = loadGraph(this._graphPath);
     return {
-      forward: (graph.forward[id] || []).map((l) => ({ ...l })),
-      reverse: (graph.reverse[id] || []).map((l) => ({ ...l })),
+      forward: (graph.forward[key] || []).map((l) => ({ ...l })),
+      reverse: (graph.reverse[key] || []).map((l) => ({ ...l })),
     };
   }
 
@@ -911,6 +989,16 @@ export class DefaultKnowledgeStore {
     const links = Object.values(rebuilt.forward).reduce((n, arr) => n + arr.length, 0);
     const changed = canonicalGraph(loadGraph(this._graphPath)) !== canonicalGraph(rebuilt);
     saveGraph(this._graphPath, rebuilt);
+
+    // The alias map is likewise derived from records' `aliases` — rebuild it so
+    // a lost/hand-edited alias-index.json recovers on the same recovery path.
+    const rebuiltAliases = emptyAliasIndex();
+    for (const record of records) {
+      const slugs = normalizeAliases(record.aliases);
+      if (slugs.length) registerAliases(rebuiltAliases, record.id, slugs);
+    }
+    saveAliasIndex(this._aliasPath, rebuiltAliases);
+
     return {
       records: records.length,
       links,
