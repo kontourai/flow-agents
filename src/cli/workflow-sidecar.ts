@@ -2527,51 +2527,117 @@ async function sealCheckpoint(p: ReturnType<typeof parseArgs>): Promise<number> 
 // Also exposed as the `publish-delivery <artifact-dir>` subcommand for explicit use.
 
 /**
+ * #379 supersede-on-publish cleanup: keep delivery/ bounded by pruning inherited PER-SESSION
+ * seal dirs (the growth vector), scoped to avoid any cross-PR conflict.
+ *
+ * An inherited per-session seal dir (`delivery/<other-slug>/`) is UNIQUELY named, so pruning
+ * it can never conflict with a concurrent PR: two branches deleting the same inherited dir is
+ * a delete/delete (auto-merges), and each new delivery adds its OWN distinct
+ * `delivery/<slug>/`. And it is HARMLESS to leave: trust-reconcile.js's prefer-newest
+ * ownership selection always picks THIS session's fresher bundle over an older inherited one.
+ * Pruning is therefore purely to stop unbounded accumulation of permanently-superseded dirs.
+ *
+ * The SHARED FLAT path (`delivery/trust.bundle` + checkpoints) is deliberately NOT pruned
+ * here. During the migration window other concurrent PRs may still seal to the flat path;
+ * deleting it would produce a modify/delete conflict → a DIRTY PR → the no-CI failure this
+ * whole change fixes. The flat path is a single fixed location (not a growth vector) and the
+ * reconciler treats a stale flat bundle as non-owning / older-owning, so leaving it is safe.
+ * Removing the flat legacy seals is a one-time cleanup for a dedicated PR once no open PR
+ * still seals to it — intentionally NOT bundled into every delivery.
+ *
+ * Best-effort: a prune failure is logged, never fatal to the delivery. Never touches
+ * README.md, DECLARED, the flat seal files, or any subdir that is not itself a seal dir.
+ */
+function pruneSupersededSeals(deliveryDir: string, keepSlug: string): void {
+  let entries: fs.Dirent[] = [];
+  try {
+    entries = fs.readdirSync(deliveryDir, { withFileTypes: true });
+  } catch {
+    entries = [];
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name === keepSlug) continue;
+    const subdir = path.join(deliveryDir, entry.name);
+    // Only prune dirs that actually look like a seal dir (contain a trust.bundle or
+    // trust.checkpoint.json) — never an unrelated directory a human placed under delivery/.
+    const looksLikeSeal =
+      fs.existsSync(path.join(subdir, "trust.bundle")) ||
+      fs.existsSync(path.join(subdir, "trust.checkpoint.json"));
+    if (!looksLikeSeal) continue;
+    try {
+      fs.rmSync(subdir, { recursive: true, force: true });
+      process.stderr.write(`[publish-delivery] #379: pruned superseded per-session seal delivery/${entry.name}/ (older-owning/stale; the reconciler selects the newest bundle regardless)\n`);
+    } catch (err) {
+      process.stderr.write(`[publish-delivery] #379: could not prune per-session seal delivery/${entry.name}/ (non-fatal): ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+  }
+}
+
+/**
  * Publish the session's trust artifacts to the committed delivery/ path.
  *
+ * #379: writes to a PER-SESSION path `<repoRoot>/delivery/<slug>/` (slug = the session
+ * artifact dir's basename) rather than the shared flat `delivery/`. A shared path guarantees
+ * a git conflict between ANY two concurrent deliveries, and a conflicting (DIRTY) PR gets NO
+ * pull_request workflows — the required Trust Reconcile check silently never runs (field
+ * incidents #330/#358/#378). Per-session paths make concurrent deliveries write DISTINCT
+ * files that never contend. trust-reconcile.js reads both the flat (back-compat) and
+ * per-session layouts via resolveDeliveryCandidates() and selects the owning candidate by
+ * commit ancestry.
+ *
  * Copies trust.bundle, trust.checkpoint.json, and (if present)
- * trust.checkpoint.intoto.json / trust.checkpoint.sig.json from the
- * session artifact dir to <repoRoot>/delivery/.
+ * trust.checkpoint.intoto.json / trust.checkpoint.sig.json / trust.checkpoint.attestation.json
+ * from the session artifact dir to <repoRoot>/delivery/<slug>/.
  *
  * Fail-soft on a missing bundle: if trust.bundle is absent, returns without throwing.
  * Fail-CLOSED on repo-root resolution: repoRoot must be a real, resolved kits/ ancestor
  * (see findRepoRootFromDirStrict) — null (no ancestor found) skips the publish with a
  * visible warning instead of writing to whatever process.cwd() happens to be. This
  * prevents a scratch/test session dir (no kits/ ancestor) from silently clobbering an
- * unrelated real repo's delivery/trust.bundle when invoked with that repo as cwd (see
+ * unrelated real repo's delivery/ seal when invoked with that repo as cwd (see
  * evals/integration/test_checkpoint_signing.sh TEST 2 and the WS5 session findings at
  * .kontourai/flow-agents/ws5-governance-kit-slice1 for the root cause this fixes).
- * Idempotent: overwrites on re-delivery.
+ * Idempotent: overwrites on re-delivery to the same slug.
  */
 export async function publishDelivery(dir: string, repoRoot: string | null): Promise<void> {
   const bundleSrc = path.join(dir, "trust.bundle");
   if (!fs.existsSync(bundleSrc)) return; // no bundle — skip gracefully
 
   if (!repoRoot) {
-    process.stderr.write(`[publish-delivery] WARNING: no kits/ ancestor found from ${dir}; skipping publish. Refusing to fall back to process.cwd() to avoid clobbering an unrelated repo's delivery/trust.bundle. Pass --repo-root explicitly if this session dir is intentionally outside a repo checkout.\n`);
+    process.stderr.write(`[publish-delivery] WARNING: no kits/ ancestor found from ${dir}; skipping publish. Refusing to fall back to process.cwd() to avoid clobbering an unrelated repo's delivery/ seal. Pass --repo-root explicitly if this session dir is intentionally outside a repo checkout.\n`);
     return;
   }
 
   const deliveryDir = path.join(repoRoot, "delivery");
+  // #379: slug is the session artifact dir's basename — the same human-meaningful id used
+  // throughout the session (.kontourai/flow-agents/<slug>/). The per-session dir NAME is only
+  // a collision-avoidance handle; ownership is decided by commit ancestry, not by name.
+  const slug = path.basename(path.resolve(dir));
+  const sessionDeliveryDir = path.join(deliveryDir, slug);
+
   fs.mkdirSync(deliveryDir, { recursive: true });
+  // Supersede inherited/flat seals BEFORE writing this session's dir (keepSlug = our own).
+  pruneSupersededSeals(deliveryDir, slug);
+  fs.mkdirSync(sessionDeliveryDir, { recursive: true });
 
   // Required: trust.bundle (the CI anchor)
-  fs.copyFileSync(bundleSrc, path.join(deliveryDir, "trust.bundle"));
+  fs.copyFileSync(bundleSrc, path.join(sessionDeliveryDir, "trust.bundle"));
 
   // Optional companions: checkpoint + signing artifacts
   const companions = [
     "trust.checkpoint.json",
     "trust.checkpoint.intoto.json",
     "trust.checkpoint.sig.json",
+    "trust.checkpoint.attestation.json",
   ];
   for (const filename of companions) {
     const src = path.join(dir, filename);
     if (fs.existsSync(src)) {
-      fs.copyFileSync(src, path.join(deliveryDir, filename));
+      fs.copyFileSync(src, path.join(sessionDeliveryDir, filename));
     }
   }
 
-  process.stderr.write(`[publish-delivery] published trust.bundle and companions to ${deliveryDir}\n`);
+  process.stderr.write(`[publish-delivery] published trust.bundle and companions to ${sessionDeliveryDir} (per-session path, #379)\n`);
 }
 
 /**

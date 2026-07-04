@@ -131,11 +131,19 @@ else
   _fail "END-TO-END-RECORD-RELEASE: record-release exited $rr_exit1 -- $rr_out1"
 fi
 
-DELIVERY_BUNDLE1="$REPO1/delivery/trust.bundle"
+# #379: publishDelivery now writes to the PER-SESSION path delivery/<slug>/trust.bundle
+# (slug = the session artifact dir basename) so concurrent deliveries never contend on one
+# shared file. The flat path is no longer written.
+DELIVERY_BUNDLE1="$REPO1/delivery/$SLUG1/trust.bundle"
 if [[ -f "$DELIVERY_BUNDLE1" ]]; then
-  _pass "END-TO-END-RECORD-RELEASE: delivery/trust.bundle exists after record-release"
+  _pass "END-TO-END-RECORD-RELEASE: delivery/$SLUG1/trust.bundle exists after record-release (#379 per-session path)"
 else
-  _fail "END-TO-END-RECORD-RELEASE: delivery/trust.bundle NOT found at $DELIVERY_BUNDLE1"
+  _fail "END-TO-END-RECORD-RELEASE: delivery/$SLUG1/trust.bundle NOT found at $DELIVERY_BUNDLE1"
+fi
+if [[ ! -f "$REPO1/delivery/trust.bundle" ]]; then
+  _pass "END-TO-END-RECORD-RELEASE: flat delivery/trust.bundle NOT written (#379 migrated off the shared path)"
+else
+  _fail "END-TO-END-RECORD-RELEASE: flat delivery/trust.bundle was written — the shared-path contention #379 fixes is back"
 fi
 
 if [[ -f "$DELIVERY_BUNDLE1" && -f "$SESSION_DIR1/trust.bundle" ]]; then
@@ -170,11 +178,11 @@ else
   _fail "SUBCOMMAND: publish-delivery exited $pd_exit -- $pd_out"
 fi
 
-DELIVERY_BUNDLE2="$REPO2/delivery/trust.bundle"
+DELIVERY_BUNDLE2="$REPO2/delivery/$SLUG2/trust.bundle"
 if [[ -f "$DELIVERY_BUNDLE2" ]]; then
-  _pass "SUBCOMMAND: delivery/trust.bundle exists after publish-delivery"
+  _pass "SUBCOMMAND: delivery/$SLUG2/trust.bundle exists after publish-delivery (#379 per-session path)"
 else
-  _fail "SUBCOMMAND: delivery/trust.bundle NOT found at $DELIVERY_BUNDLE2"
+  _fail "SUBCOMMAND: delivery/$SLUG2/trust.bundle NOT found at $DELIVERY_BUNDLE2"
 fi
 
 if [[ -f "$DELIVERY_BUNDLE2" && -f "$SESSION_DIR2/trust.bundle" ]]; then

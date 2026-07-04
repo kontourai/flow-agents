@@ -298,10 +298,11 @@ else
   _fail "advance-state --status delivered exited $SEAL_EXIT (signing must not break the seal)"
 fi
 
-if [[ -f "$REPO_ROOT2/delivery/trust.bundle" ]]; then
-  _pass "publish-delivery published into the explicit scratch --repo-root ($REPO_ROOT2/delivery/trust.bundle), not process.cwd()"
+# #379: publishDelivery writes to the per-session path delivery/<slug>/trust.bundle.
+if [[ -f "$REPO_ROOT2/delivery/$SLUG2/trust.bundle" ]]; then
+  _pass "publish-delivery published into the explicit scratch --repo-root ($REPO_ROOT2/delivery/$SLUG2/trust.bundle, #379 per-session), not process.cwd()"
 else
-  _fail "publish-delivery did not write to the explicit scratch --repo-root ($REPO_ROOT2/delivery/trust.bundle) — check the --repo-root plumbing in advanceState"
+  _fail "publish-delivery did not write to the explicit scratch --repo-root ($REPO_ROOT2/delivery/$SLUG2/trust.bundle) — check the --repo-root plumbing in advanceState"
 fi
 
 if [[ -f "$SESSION_DIR2/trust.checkpoint.json" ]]; then

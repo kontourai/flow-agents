@@ -707,6 +707,42 @@ else
 fi
 
 echo ""
+echo "--- AC1.26b: #379 per-session Write to delivery/<slug>/trust.bundle BLOCKED ---"
+set +e
+prot_out=$(echo '{"tool_name":"Write","tool_input":{"path":"/repo/delivery/i379-delivery-paths/trust.bundle"}}' | node "$PROT" 2>&1)
+prot_exit=$?
+set -e
+if [ "$prot_exit" -eq 2 ] && echo "$prot_out" | grep -q "BLOCKED"; then
+  _pass "AC1.26b: Write to delivery/<slug>/trust.bundle blocked (exit 2) — #379 forgery surface moved with the write path"
+else
+  _fail "AC1.26b: Write to delivery/<slug>/trust.bundle NOT blocked (exit=$prot_exit, out=$prot_out)"
+fi
+
+echo ""
+echo "--- AC1.26c: #379 per-session cp to delivery/<slug>/trust.checkpoint.json BLOCKED ---"
+set +e
+prot_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"cp forged.json delivery/some-session/trust.checkpoint.json"}}' | node "$PROT" 2>&1)
+prot_exit=$?
+set -e
+if [ "$prot_exit" -eq 2 ] && echo "$prot_out" | grep -q "BLOCKED"; then
+  _pass "AC1.26c: cp to delivery/<slug>/trust.checkpoint.json blocked (exit 2)"
+else
+  _fail "AC1.26c: cp to delivery/<slug>/trust.checkpoint.json NOT blocked (exit=$prot_exit, out=$prot_out)"
+fi
+
+echo ""
+echo "--- AC1.26d: #379 per-session redirect > delivery/<slug>/trust.bundle BLOCKED ---"
+set +e
+prot_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"echo {} > delivery/some-session/trust.bundle"}}' | node "$PROT" 2>&1)
+prot_exit=$?
+set -e
+if [ "$prot_exit" -eq 2 ] && echo "$prot_out" | grep -q "BLOCKED"; then
+  _pass "AC1.26d: redirect > delivery/<slug>/trust.bundle blocked (exit 2)"
+else
+  _fail "AC1.26d: redirect > delivery/<slug>/trust.bundle NOT blocked (exit=$prot_exit)"
+fi
+
+echo ""
 echo "--- AC1.27: cp x src/foo.ts ALLOWED (no over-block on normal copy) ---"
 set +e
 prot_out=$(echo '{"tool_name":"Bash","tool_input":{"command":"cp x src/foo.ts"}}' | node "$PROT" 2>&1)

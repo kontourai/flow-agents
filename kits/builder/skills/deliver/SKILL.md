@@ -236,23 +236,59 @@ Record the final local state with `advance-state`. Use `status: verified` only w
 After review, verification, evidence, and Goal Fit are clean for the same diff:
 
 1. Confirm the working tree contains only verified scope.
-2. Publish the session trust bundle to `delivery/` so the CI trust-reconcile job can verify what the agent claimed. `record-release` (via the sidecar writer) does this automatically (best-effort). To publish or re-publish explicitly:
+2. Publish the session trust bundle so the CI trust-reconcile job can verify what the agent claimed. `record-release` (via the sidecar writer) does this automatically (best-effort). To publish or re-publish explicitly:
 
    ```bash
    npm run workflow:sidecar -- publish-delivery .kontourai/flow-agents/<slug>
    ```
 
-   Then force-stage the trust artifacts for the delivery commit. They are gitignored
-   by default (they are runtime artifacts written on every local delivery) — `-f`
-   commits them deliberately into THIS delivery PR so CI's trust-reconcile job can
-   reconcile the session's claims against fresh CI results:
+   **#379 — per-session delivery paths.** `publishDelivery()` writes to a PER-SESSION path
+   `delivery/<slug>/trust.bundle` (+ `trust.checkpoint.json` companions), where `<slug>` is
+   your session artifact dir's basename — NOT the old shared flat `delivery/trust.bundle`.
+   This is deliberate: a shared path guaranteed a git merge conflict between ANY two
+   concurrent deliveries, and a conflicting PR gets no CI (see the loud callout below). The
+   CI reconciler discovers both the flat (back-compat) and per-session layouts and selects
+   the NEWEST candidate whose checkpoint attests THIS change by commit ancestry — so an older
+   inherited bundle that also happens to be an ancestor of your change is ignored in favour of
+   your fresh one, and stale siblings from other sessions are ignored. `publishDelivery()`
+   also prunes inherited per-session sibling seal dirs (unique-named, never a cross-PR
+   conflict) so `delivery/` stays small; it deliberately does NOT delete the shared flat
+   `delivery/trust.bundle` legacy path (a concurrent PR may still seal there, and deleting it
+   would cause the DIRTY→no-CI conflict in the callout below).
+
+   Then force-stage the per-session trust dir for the delivery commit. It is gitignored by
+   default (runtime artifacts written on every local delivery) — `-f` commits it
+   deliberately into THIS delivery PR so CI's trust-reconcile job can reconcile the
+   session's claims against fresh CI results:
 
    ```bash
-   git add -f delivery/trust.bundle delivery/trust.checkpoint.json
+   git add -f delivery/<slug>/
    ```
 
-3. Commit the verified diff, including the force-added `delivery/trust.bundle` and `delivery/trust.checkpoint.json`.
+   (If `publishDelivery()` pruned a superseded per-session SIBLING dir, stage that deletion
+   too — `git add -A delivery/` after the force-add. Do NOT hand-delete the flat
+   `delivery/trust.bundle` in a delivery PR while other PRs may still seal to it.)
+
+3. Commit the verified diff, including the force-added `delivery/<slug>/` trust artifacts.
 4. Push the branch.
+
+   > **⚠ LOUD FAILURE MODE — a DIRTY PR gets NO CI, silently (#335/#379).** If `main` moves
+   > under your open PR and produces a merge conflict, GitHub marks the PR `DIRTY` and
+   > **schedules NO `pull_request` workflows for it** — zero checks, no error, nothing. The
+   > required **Trust Reconcile** gate then silently never runs, and the PR sits unbuildable
+   > looking like "CI vanished" rather than "conflict." Per-session delivery paths (#379)
+   > remove the STRUCTURAL cause for delivery-artifact conflicts (concurrent seals no longer
+   > share a file), but ANY other same-file conflict with `main` can still trigger it.
+   > **Diagnose it explicitly — do not assume a missing required check means "not run yet":**
+   >
+   > ```bash
+   > gh pr view <pr> --json mergeStateStatus,mergeable,statusCheckRollup
+   > ```
+   >
+   > `mergeStateStatus: DIRTY` (or `CONFLICTING`) with an ABSENT Trust Reconcile check is the
+   > signature. Fix by rebasing/merging `main` to clear the conflict and re-pushing — that
+   > re-triggers the `pull_request` workflows. A green-looking PR with the required gate simply
+   > MISSING is not "pending"; it is this failure mode until proven otherwise.
 5. Open or update the provider change record with issue links, closing refs, evidence links, and verification summary, or record an explicit no-provider-change reason.
 6. Wait for provider checks/CI or record missing checks as `NOT_VERIFIED`.
 7. Record the gate claim for the Builder Kit `pr-open` step immediately after the PR is opened or updated:

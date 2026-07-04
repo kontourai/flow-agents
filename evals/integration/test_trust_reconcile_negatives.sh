@@ -749,6 +749,176 @@ else
   _fail "push-event-failing-verify: expected the push-event no-op line -- output: $out7v"
 fi
 
+# 8. #379 per-session delivery paths — concurrent-delivery collision resolution.
+#   resolveDeliveryCandidates() now discovers delivery/<slug>/trust.bundle per-session dirs
+#   in addition to the flat path; discoverBundle() selects the candidate whose checkpoint
+#   attests THIS change (ancestor-or-equal, same bundleAttestsThisChange() semantics the flat
+#   staleness gate uses), ignoring stale siblings from OTHER concurrent sessions. A shared
+#   flat path guaranteed a git conflict between any two concurrent deliveries → a DIRTY PR →
+#   NO pull_request workflows → the required check silently never ran (field #330/#358/#378).
+echo ""
+echo "=== 8. #379 per-session delivery paths (concurrent-delivery collision) ==="
+
+PERSESSION_TMPROOT="$(mktemp -d)"
+# Chain per-session cleanup onto the existing DECLARED cleanup without clobbering the trap.
+trap 'cleanup_declared; rm -rf "$PERSESSION_TMPROOT"' EXIT
+
+# write_session_seal <repo_root> <slug> <label> <commit_sha>
+# Writes delivery/<slug>/trust.bundle (a well-formed schemaVersion-5 bundle whose only
+# claimed-pass command is <label>) + delivery/<slug>/trust.checkpoint.json (naming
+# <commit_sha>) — the per-session analogue of write_fresh_bundle + write_stale_checkpoint.
+write_session_seal() {
+  local repo_root="$1" slug="$2" label="$3" sha="$4"
+  local sdir="$repo_root/delivery/$slug"
+  mkdir -p "$sdir"
+  cat > "$sdir/trust.bundle" << EOF
+{
+  "schemaVersion": 5,
+  "source": "test-fixture:per-session:$slug",
+  "claims": [
+    {
+      "id": "c1", "claimType": "workflow.check.build", "value": "pass", "status": "verified",
+      "subjectId": "$slug/build", "facet": "flow-agents.workflow", "subjectType": "workflow-check",
+      "fieldOrBehavior": "build", "createdAt": "2026-07-01T00:00:00Z", "updatedAt": "2026-07-01T00:00:00Z",
+      "impactLevel": "high", "verificationPolicyId": "policy:workflow.check.build"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev1", "claimId": "c1", "evidenceType": "test_output", "method": "validation",
+      "sourceRef": "$slug/command-log.jsonl", "excerptOrSummary": "build",
+      "observedAt": "2026-07-01T00:00:00Z", "collectedBy": "flow-agents/evidence-capture",
+      "passing": true,
+      "execution": { "runner": "bash", "label": "$label", "isError": false, "exitCode": 0 }
+    }
+  ],
+  "policies": [], "events": []
+}
+EOF
+  printf '{"schema_version":"1.0","slug":"%s","work_item":null,"status":"delivered","phase":"release","sealed_at":"2026-01-01T00:00:00Z","commit_sha":"%s","checkpoint":{"asOf":"2026-01-01T00:00:00.000Z","statusByClaimId":{}}}' \
+    "$slug" "$sha" > "$sdir/trust.checkpoint.json"
+}
+
+FRESH_LABEL_8="node -e 'process.exit(0)'"
+
+# 8a. OWNER WINS: two sibling session dirs — one OWNING (checkpoint commit_sha == this
+#     change's sha), one STALE (a different sha). The reconciler MUST pick the owner and
+#     reconcile it; the stale sibling is ignored, NOT a failure.
+CASE8A="$PERSESSION_TMPROOT/collision-owner-wins"
+write_session_seal "$CASE8A" "owning-session" "$FRESH_LABEL_8" "$OURS_SHA"
+write_session_seal "$CASE8A" "stale-sibling" "echo stale-should-never-be-reconciled" "$STALE_SHA"
+out8a="$(TRUST_RECONCILE_SHA="$OURS_SHA" TRUST_RECONCILE_COMMANDS="$FRESH_LABEL_8" \
+  node "$RECONCILE" --repo-root "$CASE8A" 2>&1)"
+code8a=$?
+if [[ $code8a -eq 0 ]]; then
+  _pass "persession-owner-wins: reconciler exits 0 (owning per-session candidate selected, stale sibling ignored)"
+else
+  _fail "persession-owner-wins: expected exit 0, got $code8a -- output: $out8a"
+fi
+if echo "$out8a" | grep -qF "selected delivery candidate delivery/owning-session/trust.bundle"; then
+  _pass "persession-owner-wins: emitted the #379 selection line naming the owning session dir"
+else
+  _fail "persession-owner-wins: expected the #379 selection line for delivery/owning-session/trust.bundle -- output: $out8a"
+fi
+if echo "$out8a" | grep -qF "RECONCILED"; then
+  _pass "persession-owner-wins: Step 2 reconciled the owning candidate's claimed-pass command"
+else
+  _fail "persession-owner-wins: expected RECONCILED -- output: $out8a"
+fi
+if echo "$out8a" | grep -qF "bundle-required-no-declared-marker"; then
+  _fail "persession-owner-wins: must NOT fail closed — an owning candidate exists"
+else
+  _pass "persession-owner-wins: does not fail closed (owning candidate found)"
+fi
+
+# 8b. NO OWNER: two sibling session dirs, BOTH stale (neither attests this change), no
+#     DECLARED marker -> fail closed EXACTLY as bundle-absence, plus the #379 concurrency
+#     hint so the next agent can diagnose a collision rather than a plain stale bundle.
+CASE8B="$PERSESSION_TMPROOT/collision-no-owner"
+OTHER_STALE_SHA="1111111111111111111111111111111111111111"
+write_session_seal "$CASE8B" "session-a" "echo a" "$STALE_SHA"
+write_session_seal "$CASE8B" "session-b" "echo b" "$OTHER_STALE_SHA"
+out8b="$(TRUST_RECONCILE_SHA="$OURS_SHA" TRUST_RECONCILE_COMMANDS="$FRESH_LABEL_8" \
+  node "$RECONCILE" --repo-root "$CASE8B" 2>&1)"
+code8b=$?
+if [[ $code8b -ne 0 ]]; then
+  _pass "persession-no-owner: reconciler exits non-zero ($code8b) -- no candidate attests this change, fail closed"
+else
+  _fail "persession-no-owner: expected non-zero exit, got 0 -- output: $out8b"
+fi
+if echo "$out8b" | grep -qF "none attests this change $OURS_SHA"; then
+  _pass "persession-no-owner: emitted the #379 concurrency hint (none attests this change)"
+else
+  _fail "persession-no-owner: expected the #379 'none attests this change' hint -- output: $out8b"
+fi
+if echo "$out8b" | grep -qF "bundle-required-no-declared-marker"; then
+  _pass "persession-no-owner: emitted 'bundle-required-no-declared-marker' (same fail-closed path as bundle-absence)"
+else
+  _fail "persession-no-owner: expected 'bundle-required-no-declared-marker' -- output: $out8b"
+fi
+
+# 8c. BACK-COMPAT COEXISTENCE: a flat legacy owner (delivery/trust.bundle) alongside a stale
+#     per-session sibling -> the flat owner is still selected and reconciled (the flat path
+#     stays supported; per-session discovery does not break it).
+CASE8C="$PERSESSION_TMPROOT/flat-owner-persession-stale"
+write_fresh_bundle "$CASE8C" "$FRESH_LABEL_8"          # flat delivery/trust.bundle
+write_stale_checkpoint "$CASE8C" "$OURS_SHA"           # flat delivery/trust.checkpoint.json (owns)
+write_session_seal "$CASE8C" "stale-session" "echo ignored" "$STALE_SHA"  # per-session stale sibling
+out8c="$(TRUST_RECONCILE_SHA="$OURS_SHA" TRUST_RECONCILE_COMMANDS="$FRESH_LABEL_8" \
+  node "$RECONCILE" --repo-root "$CASE8C" 2>&1)"
+code8c=$?
+if [[ $code8c -eq 0 ]]; then
+  _pass "flat-owner-coexist: reconciler exits 0 (flat legacy owner selected despite a stale per-session sibling)"
+else
+  _fail "flat-owner-coexist: expected exit 0, got $code8c -- output: $out8c"
+fi
+if echo "$out8c" | grep -qF "RECONCILED"; then
+  _pass "flat-owner-coexist: Step 2 reconciled the flat owner (back-compat preserved)"
+else
+  _fail "flat-owner-coexist: expected RECONCILED -- output: $out8c"
+fi
+
+# 8d. PREFER-NEWEST among multiple OWNING candidates (the merge-commit-repo / concurrent-PR
+#   coexistence case). An inherited FLAT bundle can attest a REAL ANCESTOR of this change
+#   (committed on the trunk before this branch), AND this session's per-session bundle attests
+#   a NEWER ancestor. "First-fresh-wins" would wrongly pick the stale flat bundle because it
+#   sorts first; the reconciler must instead pick the NEWEST-owning candidate (the per-session
+#   one). Uses a REAL git repo so `git merge-base --is-ancestor` resolves the parent→child
+#   relationship (synthetic shas cannot exercise the ancestor comparison).
+NEWEST_REPO="$PERSESSION_TMPROOT/prefer-newest-git"
+mkdir -p "$NEWEST_REPO"
+git -C "$NEWEST_REPO" init -q
+git -C "$NEWEST_REPO" config user.email "test@example.com"
+git -C "$NEWEST_REPO" config user.name "Test"
+echo "base" > "$NEWEST_REPO/f.txt"; git -C "$NEWEST_REPO" add f.txt; git -C "$NEWEST_REPO" commit -q -m "base (inherited flat seal sealed here)"
+FLAT_ANCESTOR_SHA="$(git -C "$NEWEST_REPO" rev-parse HEAD)"
+echo "delivery" >> "$NEWEST_REPO/f.txt"; git -C "$NEWEST_REPO" add f.txt; git -C "$NEWEST_REPO" commit -q -m "this session's delivery commit"
+PERSESSION_OWNER_SHA="$(git -C "$NEWEST_REPO" rev-parse HEAD)"
+echo "head" >> "$NEWEST_REPO/f.txt"; git -C "$NEWEST_REPO" add f.txt; git -C "$NEWEST_REPO" commit -q -m "seal commit (HEAD)"
+NEWEST_HEAD_SHA="$(git -C "$NEWEST_REPO" rev-parse HEAD)"
+# Flat owner attesting the OLD ancestor; per-session owner attesting the NEWER ancestor.
+write_fresh_bundle "$NEWEST_REPO" "$FRESH_LABEL_8"                 # flat delivery/trust.bundle
+write_stale_checkpoint "$NEWEST_REPO" "$FLAT_ANCESTOR_SHA"          # flat checkpoint -> OLD ancestor
+write_session_seal "$NEWEST_REPO" "this-session" "$FRESH_LABEL_8" "$PERSESSION_OWNER_SHA"  # per-session -> NEWER ancestor
+out8d="$(TRUST_RECONCILE_SHA="$NEWEST_HEAD_SHA" TRUST_RECONCILE_COMMANDS="$FRESH_LABEL_8" \
+  node "$RECONCILE" --repo-root "$NEWEST_REPO" 2>&1)"
+code8d=$?
+if [[ $code8d -eq 0 ]]; then
+  _pass "prefer-newest: reconciler exits 0 (both flat and per-session own; newest selected)"
+else
+  _fail "prefer-newest: expected exit 0, got $code8d -- output: $out8d"
+fi
+if echo "$out8d" | grep -qF "selected delivery candidate delivery/this-session/trust.bundle"; then
+  _pass "prefer-newest: selected the NEWER per-session bundle over the older inherited flat bundle"
+else
+  _fail "prefer-newest: expected the per-session bundle to be selected (newest-owning) -- output: $out8d"
+fi
+if echo "$out8d" | grep -qF "owning, newest wins"; then
+  _pass "prefer-newest: emitted the 'owning, newest wins' selection detail"
+else
+  _fail "prefer-newest: expected 'owning, newest wins' in the selection line -- output: $out8d"
+fi
+
 echo ""
 if [[ $errors -eq 0 ]]; then
   echo "test_trust_reconcile_negatives: all checks passed."

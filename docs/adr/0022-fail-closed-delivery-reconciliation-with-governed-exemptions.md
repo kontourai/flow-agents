@@ -463,3 +463,114 @@ the workflow to fake the post-merge no-op path; this is closed by required code-
 review on `.github/workflows/trust-reconcile.yml` (#225, not yet server-side enforced),
 the same residual class as every other self-asserted CI input this ADR already carries.
 Step 1 (fresh verify) is unaffected by event scoping either way and always runs.
+
+## Addendum (2026-07-04, part 5): per-session delivery paths — concurrent deliveries stop contending (#379)
+
+Owner-approved follow-up closing a structural defect the fail-closed gate's first real
+deliveries surfaced repeatedly: the delivery transport used a SINGLE shared path
+(`delivery/trust.bundle` + `delivery/trust.checkpoint.json`), so every sealed delivery
+force-committed to the SAME two files. Any two concurrent deliveries therefore
+merge-conflict by construction — three seal collisions inside 24h (#330, #358, #378) each
+needed manual conflict resolution. Worse than the conflict itself: **GitHub schedules NO
+`pull_request` workflows for a conflicting (DIRTY) PR** — zero checks, no error — so the
+required Trust Reconcile check silently never re-runs. The symptom reads as "CI vanished,"
+not "conflict." This collision class scales with delivery frequency; ADR 0021's own "work
+area" vocabulary predicted it, and #335 named the `resolveDeliveryCandidates()` seam as the
+fix site.
+
+**Decision (structural): per-session delivery paths.** `publishDelivery()`
+(`src/cli/workflow-sidecar.ts`) writes to `delivery/<slug>/trust.bundle` (+ checkpoint
+companions), where `<slug>` is the session artifact dir's basename, instead of the shared
+flat path. Concurrent deliveries write to DISTINCT files and cannot contend: two deliveries
+add different `delivery/<slug>/` dirs (add/add of different paths — not a conflict), and both
+deleting the same inherited flat/legacy file is a delete/delete (auto-merges — not a
+conflict). The per-session dir NAME is only a collision-avoidance handle; it carries no
+trust weight.
+
+**Reconciler side: ownership-aware discovery, prefer-newest, not first-match.**
+`resolveDeliveryCandidates()` now returns the flat path (FIRST, for full back-compat)
+followed by every `delivery/<slug>/<filename>` (sorted). `discoverBundle()` no longer returns
+the first-existing candidate; it collects every candidate that attests THIS change
+(ancestor-or-equal, the SAME `bundleAttestsThisChange()` binding Addendum part 2 defined) and
+selects the one attesting the **NEWEST** (descendant-most) commit. This prefer-newest rule is
+load-bearing in a **merge-commit** repo (this repo's own history has merge commits, e.g.
+release-please merges): an inherited FLAT bundle's `commit_sha` can be a REAL ancestor of HEAD
+— it was committed on the trunk's linear history before this branch point — so it legitimately
+"owns" the change too, and a naive first-fresh-wins would select that STALE inherited bundle
+purely because it sorts first, reconciling the PREVIOUS delivery's claims against THIS change's
+CI. Prefer-newest makes the fresh per-session bundle win on recency, not on being deleted
+first — which in turn is what lets the cleanup policy leave the flat path in place (below)
+without corrupting selection. (Addendum parts 2/4's squash-merge reasoning still holds for
+squash repos; prefer-newest is the strict generalization that also covers merge-commit repos,
+where "inherited ⇒ non-ancestor" is NOT guaranteed.) `extractBundleCommitSha()` now resolves a
+bundle's sibling checkpoint from the bundle's OWN directory (`path.dirname(bundlePath)`), not a
+global scan — a global scan would pair a per-session bundle with the wrong session's (or the
+flat) checkpoint and read the wrong commit binding. For the flat layout this is byte-identical
+to the prior behavior; for per-session it is the only correct pairing.
+
+**Back-compat (retained, deprecation-noted).** The flat `delivery/trust.bundle` path stays
+fully supported on the READ side: an already-committed flat bundle from before this change,
+or an external adopter that has not migrated, still resolves and reconciles exactly as
+before (regression-locked by the negatives suite's flat-owner-coexist case and the
+unchanged `test_publish_delivery.sh` TEST 3/4 flat-fixture cases). Only the WRITE side moved
+to per-session — writing to both flat and per-session would re-introduce the very contention
+this closes, so the flat path is write-deprecated, read-supported.
+
+**Cleanup policy: supersede-on-publish, per-session dirs only (delivery/ stays bounded).** A
+publishing session prunes every inherited **per-session** seal dir except its own, then
+commits only `delivery/<slug>/`. Per-session dirs are the growth vector (one per delivery) and
+are UNIQUELY named, so pruning one can never conflict with a concurrent PR: two branches
+deleting the same inherited dir is a delete/delete (auto-merges), and each delivery adds its
+own distinct dir. Leaving an inherited per-session dir would be harmless anyway (prefer-newest
+ignores it) — pruning is purely to stop unbounded accumulation. The alternative,
+retain-as-history, was rejected as unbounded growth of permanently-superseded dirs with no
+reader. Pruning is best-effort: a prune failure is logged, never fatal to the delivery.
+
+**The shared flat path is deliberately NOT pruned per-delivery.** An earlier iteration of this
+addendum also pruned the flat `delivery/trust.bundle` legacy seals on every publish (to
+"migrate off" the shared path). That was reverted: during the migration window a concurrent PR
+may still seal to the flat path (this was written while PR #370 had an open flat-path seal),
+and a per-delivery deletion of that file is a **modify/delete conflict** against such a PR → a
+DIRTY PR → precisely the no-CI failure mode this whole change exists to remove. Because the
+flat path is a single fixed location (not a growth vector) and prefer-newest selection makes a
+lingering flat bundle harmless, retaining it costs nothing. Removing the flat legacy seals is a
+one-time cleanup for a **dedicated** PR once no open PR still seals to the flat path — not
+something safely bundled into every delivery.
+
+**The SILENT failure mode (documented, not "solved").** No repo-side code can make GitHub
+run `pull_request` workflows on a conflicted PR — that is platform behavior. Per-session
+paths remove the STRUCTURAL cause (the shared-path conflict) for agent-vs-agent delivery
+contention, which is the overwhelming majority of the incidents. The residual — a PR that
+goes DIRTY for some OTHER reason (a genuine same-file edit conflict with `main`) still gets
+no CI silently — is addressed by making the failure mode LOUD where we can: the deliver
+skill now documents the DIRTY→no-CI symptom and its diagnosis (`gh pr view --json
+mergeStateStatus`), and `discoverBundle()` emits a grep-stable `#379: examined N delivery
+candidate(s) … none attests this change …` concurrency hint so the next agent can tell a
+per-session collision apart from a plain stale/absent bundle. #335's detectability half
+(treating `mergeStateStatus=DIRTY` as a first-class steering/doctor input) remains open and
+is explicitly NOT claimed closed here.
+
+**Security: the forgery surface moved with the write path.** `scripts/hooks/config-protection.js`
+(and its `context/` mirror) protected only the flat `delivery/trust.bundle` /
+`delivery/trust.checkpoint.json` from direct agent Write/Edit/cp/redirect. Its three
+delivery regexes now carry an optional `(?:[^/]+\/)?` segment so `delivery/<slug>/trust.*`
+is equally blocked — otherwise moving the write path would have opened a hand-forgery hole
+one directory down. Regression-locked by `test_gate_lockdown.sh` AC1.26b/c/d. The
+`delivery/*` gitignore already covers per-session dirs (they are force-added deliberately per
+delivery exactly like the flat path).
+
+**Residuals (honest):** (1) the DIRTY→no-CI platform behavior for non-per-session conflicts
+is documented, not eliminated (above). (2) The per-session dir name is derived from the
+local session slug; a colliding slug across two sessions would re-share a path — acceptable
+because ownership is still decided by commit ancestry (a stale same-named sibling is ignored,
+not trusted), and slugs are session-unique in practice. (3) Selection correctness does NOT
+depend on merge strategy: prefer-newest resolves the owning candidate for both squash-merge
+(inherited seals are non-ancestors, trivially not-owning) and merge-commit (inherited seals
+can be ancestors, but attest an OLDER commit than this session's, so they lose on recency)
+histories — the merge-commit case was the concrete defect that forced prefer-newest and is
+regression-locked by `test_trust_reconcile_negatives.sh` §8d against a real git repo. (4) The
+flat legacy seals still on `main` are retained by design (see cleanup policy above) and remain
+until a dedicated one-time cleanup PR; they are harmless (prefer-newest) but do accumulate as a
+single fixed path, not a growth vector. This addendum changes WHERE seals live and HOW the
+owning one is chosen; it does not touch Step 1 (fresh verify), the DECLARED exemption path, or
+any fail-closed verdict — all of which are regression-locked unchanged.
