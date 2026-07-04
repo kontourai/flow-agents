@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 5,
+  "source": "veritas-governance-kit/exemption-fixture",
+  "claims": [
+    {
+      "id": "exemption-fixture.no-agent-delivery-exemption-approval.author-test-bot",
+      "subjectType": "delivery-scope",
+      "subjectId": "author:test-bot[bot]",
+      "facet": "veritas-governance.exemption",
+      "claimType": "no-agent-delivery-exemption-approval",
+      "fieldOrBehavior": "exemptionApproval",
+      "value": {
+        "scope": "author:test-bot[bot]",
+        "reason": "test-bot automation PR; no agent delivery involved",
+        "approved_by": "eval-fixture-approver"
+      },
+      "createdAt": "2026-07-01T00:00:00Z",
+      "updatedAt": "2026-07-01T00:00:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:no-agent-delivery-exemption-approval",
+      "metadata": {
+        "producer": "human-approver",
+        "source": "exemption-issuance-fixture"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:exemption-fixture.no-agent-delivery-exemption-approval.author-test-bot",
+      "claimId": "exemption-fixture.no-agent-delivery-exemption-approval.author-test-bot",
+      "evidenceType": "policy_rule",
+      "method": "auditability",
+      "sourceRef": "human-approver:exemption-issuance-fixture",
+      "excerptOrSummary": "A human maintainer approved a no-agent-delivery exemption for scope author:test-bot[bot].",
+      "observedAt": "2026-07-01T00:00:00Z",
+      "collectedBy": "veritas-governance-kit/exemption-fixture",
+      "passing": true
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:exemption-fixture.no-agent-delivery-exemption-approval.author-test-bot",
+      "claimId": "exemption-fixture.no-agent-delivery-exemption-approval.author-test-bot",
+      "status": "verified",
+      "actor": "veritas-governance-kit/exemption-fixture",
+      "method": "auditability",
+      "evidenceIds": [
+        "ev:exemption-fixture.no-agent-delivery-exemption-approval.author-test-bot"
+      ],
+      "createdAt": "2026-07-01T00:00:00Z",
+      "verifiedAt": "2026-07-01T00:00:00Z"
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:no-agent-delivery-exemption-approval",
+      "claimType": "no-agent-delivery-exemption-approval",
+      "requiredEvidence": [
+        "policy_rule"
+      ],
+      "acceptanceCriteria": [
+        "A human maintainer has approved this delivery-scope exemption from Trust Reconcile's bundle-required enforcement."
+      ],
+      "reviewAuthority": "human",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    }
+  ]
+}

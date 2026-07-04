@@ -1,8 +1,10 @@
 # Veritas Governance Kit
 
 Turns a repo's **Veritas-governed Repo Standards** into deterministic, agentless **gate
-evidence**. Slice 1 ships the thinnest useful surface: one flow, one gate, that gates a real
-`veritas readiness` verdict.
+evidence**, and gives operators a documented, gated path to **issue** the human-approval
+exemptions ADR 0022 §2/§3 lets `delivery/DECLARED` carry. Slice 1 shipped the thinnest useful
+surface: one flow, one gate, that gates a real `veritas readiness` verdict. This slice adds a
+second, agentless flow for exemption issuance.
 
 This kit **wraps** [`@kontourai/veritas`](https://www.npmjs.com/package/@kontourai/veritas) via
 CLI invocation plus a small kit-local trust.bundle adapter. It does **not** fork, vendor, or
@@ -16,6 +18,7 @@ only projects Veritas's own recorded verdict into the Flow trust.bundle vocabula
 | Flow | `flows/readiness-check.flow.json` | Single-gate agentless flow `readiness -> gate-check`. The gate requires a **verified** `software-readiness-verdict` trust.bundle claim. |
 | Adapter | `adapter/readiness-to-trust-bundle.mjs` | Projects a `veritas readiness --check evidence --working-tree` evidence report into a Hachure `trust.bundle` (via `@kontourai/surface`), deriving the claim status from Veritas's own blocking-failure signal. |
 | Fixtures | `fixtures/readiness/*.readiness-report.json` | Captured **real** Veritas readiness reports (a ready clean tree, and a not-ready tree with a required CLI artifact deleted) used by the eval. |
+| Flow | `flows/exemption-issuance.flow.json` | Single-gate agentless flow `request -> human-approval-gate -> issue`. The gate requires a **verified** `no-agent-delivery-exemption-approval` trust.bundle claim (`subjectType: "delivery-scope"`) before the `issue` step's write is flow-sanctioned. Issues a `delivery/DECLARED` exemption entry per ADR 0022 §2/§3. |
 
 The gate uses provider-neutral Flow vocabulary (`kind: "trust.bundle"`, `bundle_claim`) — the
 same vocabulary `kits/builder/flows/build.flow.json` uses. Veritas is simply the producer that
@@ -41,6 +44,79 @@ flow attach-evidence readiness --gate gate-check-gate --file readiness.bundle --
 flow evaluate readiness --gate gate-check-gate --exit-code
 #    exit 0 when readiness is ready (claim verified); exit 1 (block) otherwise.
 ```
+
+## How to issue a no-agent-delivery exemption
+
+`flows/exemption-issuance.flow.json` (ADR 0022 §3, "the kit issues, the anchor enforces") gives
+an operator who needs to declare a `no-agent-delivery` exemption — e.g. dependabot,
+release-please, or another non-agent actor class — a documented, gated path instead of
+hand-writing `delivery/DECLARED` JSON blind. See `delivery/README.md` for how `delivery/`
+itself is used by CI, and ADR 0022 §3 for why issuance/audit live in this kit while enforcement
+stays anchor-side (`scripts/ci/trust-reconcile.js`, unmodified and unaware of this kit).
+
+```bash
+# 1. A human approver authors a Hachure trust.bundle asserting the exemption approval.
+#    (No adapter script exists for this slice -- the bundle is hand-authored or produced
+#    by whatever approval tooling records the decision; see "Human-approval evidence: what
+#    is and is not enforced" below for why this is convention, not a structural human-only
+#    guarantee.)
+#    Minimal bundle shape: {schemaVersion, source, claims:[{claimType:
+#    "no-agent-delivery-exemption-approval", subjectType: "delivery-scope",
+#    status: "verified", ...}], evidence:[...], policies:[...], events:[...]}
+
+# 2. Gate it (agentless, CI-callable).
+flow init
+flow start kits/veritas-governance/flows/exemption-issuance.flow.json --run-id exemption
+flow attach-evidence exemption --gate human-approval-gate --file approval.bundle --bundle
+flow evaluate exemption --gate human-approval-gate --exit-code
+#    exit 0 once the approval claim is verified; exit 1 (block) otherwise.
+
+# 3. Once the gate passes, append the approved entry to delivery/DECLARED (append, do NOT
+#    overwrite an existing array -- see delivery/DECLARED's current 2-entry file on main).
+#    All four fields are required: scope, reason, approved_by, declared_at. Compound scope
+#    forms (space-separated, ANDed -- e.g. "author:github-actions[bot]
+#    branch-prefix:release-please--") are supported by the reconciler's scope matcher; see
+#    ADR 0022's compound-scope addendum.
+```
+
+Example appended entry (third element of the existing `delivery/DECLARED` array — never a
+replacement of it):
+
+```json
+{
+  "scope": "author:some-bot[bot]",
+  "reason": "why this actor class needs the exemption",
+  "approved_by": "<human approver identity/decision reference>",
+  "declared_at": "<ISO 8601 timestamp>"
+}
+```
+
+## Human-approval evidence: what is and is not enforced
+
+The `human-approval-gate`'s `expects[]` entry only requires a **verified** trust.bundle claim
+of the right `claimType` (`no-agent-delivery-exemption-approval`) and `subjectType`
+(`delivery-scope`). **Flow's schema and CLI do not distinguish a human-authored bundle from an
+agent-authored one** — `trust-bundle.schema.json`'s `source` and `producerId` fields are
+free-text, with no enum, no cryptographic binding, and no CLI-side identity check.
+"Human-attached" is an **operating convention** this flow's `description`/`explore_hint` text
+encode (the gate's own copy tells an operator this evidence is meant to be authored by a human
+approver out-of-band), not a mechanism the gate itself enforces. Anyone who can run `flow
+attach-evidence --bundle` with a conforming bundle can satisfy this gate, exactly as anyone with
+commit access could already hand-author `delivery/DECLARED` directly.
+
+This is the same class of residual ADR 0022 already carries honestly for the marker file
+itself: `approved_by` on `delivery/DECLARED` is free text, not bound to an authenticated
+identity, mitigated by the loud, un-suppressible DECLARED line plus CODEOWNERS review on
+`/delivery/DECLARED` — not by identity attestation. This flow adds **guidance and an audit
+trail** (a named gate, a named claim type, a documented sequence) on top of that same
+mitigation, not a new authentication boundary. Structural producer authentication — binding
+gate satisfaction to an authenticated producer identity, rather than to a schema-valid claim
+attached by anyone with CLI access — is upstream **Flow trusted-producer** work
+(`docs/operating-layers.md`, `docs/flow-kit-repository-contract.md` in this repo describe the
+config surface; the config itself is Flow-core, tracked at #225/#293-family), not something
+this kit's `.flow.json` can itself express. Do not read a passing `human-approval-gate` as a
+structural guarantee that a human attached the evidence — read it as "a verified claim of the
+right shape was attached," full stop.
 
 ## Semantics
 
@@ -72,4 +148,6 @@ decision deferred to a later slice (see the WS5 shaping's open decisions).
 
 Skills (`consult-standards`, `governance-evidence`), the fuller `merge-readiness` flow, the
 `standards-authoring` flow, and the `knowledge` dependency are later slices — see the WS5
-backlog.
+backlog. The `exemption-usage-review` periodic audit flow/skill named in ADR 0022 §3 (walks
+`delivery/DECLARED` history and surfaces standing exemptions for owner re-confirmation —
+process visibility, not enforcement) is also a separate, later slice, not shipped here.

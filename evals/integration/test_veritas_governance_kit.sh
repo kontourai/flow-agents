@@ -77,6 +77,263 @@ echo "--- captured real-veritas-output fixtures ---"
 gate_case "$KIT/fixtures/readiness/ready.readiness-report.json"     "positive" 0
 gate_case "$KIT/fixtures/readiness/not-ready.readiness-report.json" "negative" 1
 
+# --- exemption-issuance flow: registration/K0 validity ---------------------------
+EXEMPTION_FLOWDEF="$KIT/flows/exemption-issuance.flow.json"
+if node -e "const f=require('$EXEMPTION_FLOWDEF'); if(f.id!=='veritas-governance.exemption-issuance') process.exit(1);" 2>/dev/null; then
+  pass "exemption-issuance flow file has id veritas-governance.exemption-issuance"
+else
+  fail "exemption-issuance flow file missing or has unexpected id"
+fi
+if rg -q '"id": *"veritas-governance\.exemption-issuance"' "$KIT/kit.json" && rg -q '"path": *"flows/exemption-issuance\.flow\.json"' "$KIT/kit.json"; then
+  pass "exemption-issuance flow is registered in kit.json flows[]"
+else
+  fail "exemption-issuance flow is NOT registered in kit.json flows[]"
+fi
+# Re-run the whole-kit container validation (already covers the new flow file too, since
+# `flow kit validate` walks every flows[] entry) — a second explicit assertion, scoped to
+# this flow's own gate shape, per AC2.
+if node -e "
+const f=require('$EXEMPTION_FLOWDEF');
+const g=Object.values(f.gates)[0];
+const bc=g.expects[0].bundle_claim;
+if (g.expects[0].kind!=='trust.bundle') process.exit(1);
+if (bc.claimType!=='no-agent-delivery-exemption-approval') process.exit(1);
+if (bc.subjectType!=='delivery-scope') process.exit(1);
+if (JSON.stringify(bc.accepted_statuses)!=='[\"verified\"]') process.exit(1);
+" 2>/dev/null; then
+  pass "exemption-issuance gate expects[] kind is trust.bundle and pins claimType/subjectType/accepted_statuses exactly"
+else
+  fail "exemption-issuance gate expects[] shape does not match the pinned claim selector"
+fi
+
+# --- exemption-issuance flow: positive/negative gate cases (AC3) -----------------
+# gate_case() above is readiness-check-specific (drives the readiness adapter + fixed gate
+# id gate-check-gate). The exemption-issuance flow has no adapter (issue's Files list does
+# not add one — the approval bundle is hand-authored/fixture-authored) and a different gate
+# id, so it gets its own small helper.
+# $1 bundle fixture path, $2 label, $3 expected exit (0=pass, 1=block)
+exemption_gate_case() {
+  local bundle="$1" label="$2" expect="$3"
+  local work="$TMP_DIR/$label"; mkdir -p "$work"; ( cd "$work" && node "$FLOW_CLI" init >/dev/null 2>&1 )
+  ( cd "$work" && node "$FLOW_CLI" start "$EXEMPTION_FLOWDEF" --run-id "$label" >/dev/null 2>&1 )
+  ( cd "$work" && node "$FLOW_CLI" attach-evidence "$label" --gate human-approval-gate --file "$bundle" --bundle >"$work/attach.out" 2>&1 )
+  if ! rg -q 'kind: trust.bundle' "$work/attach.out"; then
+    fail "[$label] evidence did not attach as kind: trust.bundle"; sed -n '1,20p' "$work/attach.out"; return
+  fi
+  ( cd "$work" && node "$FLOW_CLI" evaluate "$label" --gate human-approval-gate --exit-code >"$work/eval.out" 2>&1 )
+  local got=$?
+  if [[ "$got" == "$expect" ]]; then
+    pass "[$label] exemption-issuance gate evaluate exit $got as expected ($(rg -o '^(pass|block|route-back) human-approval-gate.*' "$work/eval.out" | head -1))"
+  else
+    fail "[$label] exemption-issuance gate evaluate exit $got, expected $expect"; sed -n '1,20p' "$work/eval.out"
+  fi
+}
+
+echo "--- exemption-issuance: gate blocks without a verified approval, passes with one ---"
+exemption_gate_case "$KIT/fixtures/exemption/approved.trust-bundle.json"     "exemption-positive" 0
+exemption_gate_case "$KIT/fixtures/exemption/not-approved.trust-bundle.json" "exemption-negative" 1
+
+# --- exemption-issuance: issue-step DECLARED append semantics (AC4) --------------
+# Seed a scratch delivery/DECLARED with main's real 2-entry array (inlined here, not read
+# live from the repo, so this eval is not coupled to that file's future contents), then
+# simulate the issue step's write: append a third, well-formed entry. Assert append, not
+# clobber: length 3, and the first two entries byte-identical pre/post.
+echo "--- exemption-issuance: issue step appends to delivery/DECLARED, does not clobber ---"
+DECLARED_WORK="$TMP_DIR/declared-append"
+mkdir -p "$DECLARED_WORK/delivery"
+SEEDED_DECLARED='[
+  {
+    "scope": "author:dependabot[bot]",
+    "reason": "dependabot dependency-update PRs; no agent delivery involved",
+    "approved_by": "brian.anderson1222 (AC8 option-a decision, ADR 0022 approval 2026-07-02)",
+    "declared_at": "2026-07-03T16:27:21Z"
+  },
+  {
+    "scope": "author:github-actions[bot] branch-prefix:release-please--",
+    "reason": "release-please automation PR; no agent delivery involved",
+    "approved_by": "brian.anderson1222 (AC8 option-a decision, ADR 0022 approval 2026-07-02)",
+    "declared_at": "2026-07-03T16:27:21Z"
+  }
+]'
+printf '%s' "$SEEDED_DECLARED" > "$DECLARED_WORK/delivery/DECLARED.seed"
+
+NEW_ENTRY_SCOPE="author:exemption-eval-bot[bot]"
+NEW_ENTRY_ACTOR="exemption-eval-bot[bot]"
+NEW_ENTRY_REASON="exemption-issuance eval: no-agent-delivery exemption for a test bot scope"
+NEW_ENTRY_APPROVED_BY="eval-fixture-approver (exemption-issuance flow)"
+NEW_ENTRY_DECLARED_AT="2026-07-01T00:00:00Z"
+
+# Simulate the issue step: read-modify-write (parse the existing array, append one entry).
+node -e "
+const fs = require('fs');
+const seedPath = '$DECLARED_WORK/delivery/DECLARED.seed';
+const outPath = '$DECLARED_WORK/delivery/DECLARED';
+const existing = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
+const appended = existing.concat([{
+  scope: '$NEW_ENTRY_SCOPE',
+  reason: '$NEW_ENTRY_REASON',
+  approved_by: '$NEW_ENTRY_APPROVED_BY',
+  declared_at: '$NEW_ENTRY_DECLARED_AT'
+}]);
+fs.writeFileSync(outPath, JSON.stringify(appended, null, 2) + '\n');
+"
+
+if node -e "
+const fs = require('fs');
+const seeded = JSON.parse(fs.readFileSync('$DECLARED_WORK/delivery/DECLARED.seed', 'utf8'));
+const appended = JSON.parse(fs.readFileSync('$DECLARED_WORK/delivery/DECLARED', 'utf8'));
+if (!Array.isArray(appended) || appended.length !== 3) process.exit(1);
+if (JSON.stringify(appended[0]) !== JSON.stringify(seeded[0])) process.exit(1);
+if (JSON.stringify(appended[1]) !== JSON.stringify(seeded[1])) process.exit(1);
+"; then
+  pass "issue-step append: 3 entries present, first two byte-identical to the seeded 2-entry array (append, not clobber)"
+else
+  fail "issue-step append: entry count or pre-existing entries diverged from the seeded array"
+fi
+
+if node -e "
+const fs = require('fs');
+const appended = JSON.parse(fs.readFileSync('$DECLARED_WORK/delivery/DECLARED', 'utf8'));
+const entry = appended[2];
+const required = ['scope', 'reason', 'approved_by', 'declared_at'];
+for (const f of required) {
+  if (typeof entry[f] !== 'string' || entry[f].trim() === '') process.exit(1);
+}
+"; then
+  pass "issue-step append: appended entry is well-formed (scope/reason/approved_by/declared_at all present, non-empty)"
+else
+  fail "issue-step append: appended entry is missing/empty a required field"
+fi
+
+# --- exemption-issuance: REAL trust-reconcile.js reads the appended marker (AC5) -
+# Reuse test_trust_reconcile_negatives.sh section 7's write_declared/env-override pattern:
+# TRUST_RECONCILE_COMMANDS is a trivial pass so Step 1 always succeeds; TRUST_RECONCILE_ACTOR
+# is set to match the appended entry's author: scope exactly (the bare actor name, without
+# the "author:" prefix, matching matchesScope()'s author: condition contract).
+echo "--- exemption-issuance: REAL trust-reconcile.js reads the appended marker as well-formed and in-scope ---"
+RECONCILE="$ROOT/scripts/ci/trust-reconcile.js"
+RECONCILE_CMD="node -e 'process.exit(0)'"
+
+reconcile_out="$(TRUST_RECONCILE_ACTOR="$NEW_ENTRY_ACTOR" TRUST_RECONCILE_COMMANDS="$RECONCILE_CMD" \
+  node "$RECONCILE" --repo-root "$DECLARED_WORK" 2>&1)"
+reconcile_code=$?
+if [[ "$reconcile_code" -eq 0 ]]; then
+  pass "trust-reconcile.js exits 0 against the appended 3-entry delivery/DECLARED (in-scope match)"
+else
+  fail "trust-reconcile.js expected exit 0, got $reconcile_code — output: $reconcile_out"
+fi
+if echo "$reconcile_out" | grep -qF "DECLARED (no-agent-delivery): $NEW_ENTRY_SCOPE — $NEW_ENTRY_REASON (approved by $NEW_ENTRY_APPROVED_BY, declared $NEW_ENTRY_DECLARED_AT)"; then
+  pass "trust-reconcile.js emits the exact DECLARED (no-agent-delivery) line for the appended entry"
+else
+  fail "trust-reconcile.js did not emit the expected DECLARED (no-agent-delivery) line — output: $reconcile_out"
+fi
+
+# --- exemption-issuance: negative — malformed/out-of-scope append still fails closed (AC6) --
+# This case's DECLARED file has the two pre-existing WELL-FORMED entries (dependabot,
+# release-please) plus a malformed appended (third) entry (missing approved_by). The
+# malformed entry is excluded from parseDeclaredMarker()'s wellFormed[] bucket entirely (its
+# "missing required field(s)" line is only a non-fatal stderr warning, logged so one bad
+# entry cannot silently mask a good one -- see resolveDeclaredExemption()); scope-matching
+# then proceeds against the two remaining well-formed entries, neither of which matches this
+# case's TRUST_RECONCILE_ACTOR context, so the FATAL diagnostic that actually fires is the
+# scope-mismatch path, not the missing-field path. This proves: a malformed appended entry
+# is ignored as an entry (does not itself exempt Step 2), and with no other in-scope
+# well-formed entry present, the reconciler still fails closed overall.
+echo "--- exemption-issuance: malformed appended entry is ignored; no in-scope entry remains -> fails closed ---"
+DECLARED_NEG_WORK="$TMP_DIR/declared-append-negative"
+mkdir -p "$DECLARED_NEG_WORK/delivery"
+# Same seed, but the appended (third) entry is missing approved_by — malformed.
+SEEDED_DECLARED_JSON="$SEEDED_DECLARED" NEW_ENTRY_SCOPE="$NEW_ENTRY_SCOPE" NEW_ENTRY_REASON="$NEW_ENTRY_REASON" NEW_ENTRY_DECLARED_AT="$NEW_ENTRY_DECLARED_AT" OUT_PATH="$DECLARED_NEG_WORK/delivery/DECLARED" node -e "
+const fs = require('fs');
+const existing = JSON.parse(process.env.SEEDED_DECLARED_JSON);
+const appended = existing.concat([{
+  scope: process.env.NEW_ENTRY_SCOPE,
+  reason: process.env.NEW_ENTRY_REASON,
+  declared_at: process.env.NEW_ENTRY_DECLARED_AT
+}]);
+fs.writeFileSync(process.env.OUT_PATH, JSON.stringify(appended, null, 2) + '\n');
+"
+neg_out="$(TRUST_RECONCILE_ACTOR="$NEW_ENTRY_ACTOR" TRUST_RECONCILE_COMMANDS="$RECONCILE_CMD" \
+  node "$RECONCILE" --repo-root "$DECLARED_NEG_WORK" 2>&1)"
+neg_code=$?
+if [[ "$neg_code" -ne 0 ]]; then
+  pass "trust-reconcile.js fails closed ($neg_code): malformed appended entry ignored, no in-scope well-formed entry remains"
+else
+  fail "trust-reconcile.js expected non-zero exit on a malformed appended entry, got 0 — output: $neg_out"
+fi
+if echo "$neg_out" | grep -qF "[bundle-required-no-declared-marker] delivery/DECLARED marker present but out of scope for this change"; then
+  pass "trust-reconcile.js's FATAL diagnostic is the out-of-scope path (the malformed entry itself never satisfies the gate)"
+else
+  fail "trust-reconcile.js did not emit the expected out-of-scope FATAL diagnostic — output: $neg_out"
+fi
+
+# Companion variant (true missing-field proof): a DECLARED file whose ONLY entry is the
+# malformed one (no other well-formed entry to fall through to) — here the FATAL diagnostic
+# IS the malformed/missing-field path itself, naming approved_by, per the merged reconciler's
+# exact string (resolveDeclaredExemption(), wellFormed.length === 0 branch).
+echo "--- exemption-issuance: DECLARED file with ONLY a malformed entry -> the missing-field diagnostic itself is fatal ---"
+DECLARED_ONLY_MALFORMED_WORK="$TMP_DIR/declared-only-malformed"
+mkdir -p "$DECLARED_ONLY_MALFORMED_WORK/delivery"
+NEW_ENTRY_SCOPE="$NEW_ENTRY_SCOPE" NEW_ENTRY_REASON="$NEW_ENTRY_REASON" NEW_ENTRY_DECLARED_AT="$NEW_ENTRY_DECLARED_AT" OUT_PATH="$DECLARED_ONLY_MALFORMED_WORK/delivery/DECLARED" node -e "
+const fs = require('fs');
+const onlyEntry = [{
+  scope: process.env.NEW_ENTRY_SCOPE,
+  reason: process.env.NEW_ENTRY_REASON,
+  declared_at: process.env.NEW_ENTRY_DECLARED_AT
+}];
+fs.writeFileSync(process.env.OUT_PATH, JSON.stringify(onlyEntry, null, 2) + '\n');
+"
+only_malformed_out="$(TRUST_RECONCILE_ACTOR="$NEW_ENTRY_ACTOR" TRUST_RECONCILE_COMMANDS="$RECONCILE_CMD" \
+  node "$RECONCILE" --repo-root "$DECLARED_ONLY_MALFORMED_WORK" 2>&1)"
+only_malformed_code=$?
+if [[ "$only_malformed_code" -ne 0 ]]; then
+  pass "trust-reconcile.js fails closed ($only_malformed_code) when DECLARED's only entry is malformed"
+else
+  fail "trust-reconcile.js expected non-zero exit when DECLARED's only entry is malformed, got 0 — output: $only_malformed_out"
+fi
+if echo "$only_malformed_out" | grep -qF "[bundle-required-no-declared-marker] delivery/DECLARED marker is malformed: missing required field(s) [approved_by]"; then
+  pass "trust-reconcile.js's FATAL diagnostic IS the missing-field path, naming approved_by (true missing-field proof)"
+else
+  fail "trust-reconcile.js did not emit the expected FATAL missing-field diagnostic naming approved_by — output: $only_malformed_out"
+fi
+
+# Second negative variant: well-formed but out-of-scope append (resolved context does not
+# match the new entry's scope) — proves scope-mismatch also fails closed, not just malformed
+# fields.
+DECLARED_NEG_SCOPE_WORK="$TMP_DIR/declared-append-out-of-scope"
+mkdir -p "$DECLARED_NEG_SCOPE_WORK/delivery"
+SEEDED_DECLARED_JSON="$SEEDED_DECLARED" NEW_ENTRY_SCOPE="$NEW_ENTRY_SCOPE" NEW_ENTRY_REASON="$NEW_ENTRY_REASON" NEW_ENTRY_APPROVED_BY="$NEW_ENTRY_APPROVED_BY" NEW_ENTRY_DECLARED_AT="$NEW_ENTRY_DECLARED_AT" OUT_PATH="$DECLARED_NEG_SCOPE_WORK/delivery/DECLARED" node -e "
+const fs = require('fs');
+const existing = JSON.parse(process.env.SEEDED_DECLARED_JSON);
+const appended = existing.concat([{
+  scope: process.env.NEW_ENTRY_SCOPE,
+  reason: process.env.NEW_ENTRY_REASON,
+  approved_by: process.env.NEW_ENTRY_APPROVED_BY,
+  declared_at: process.env.NEW_ENTRY_DECLARED_AT
+}]);
+fs.writeFileSync(process.env.OUT_PATH, JSON.stringify(appended, null, 2) + '\n');
+"
+neg_scope_out="$(TRUST_RECONCILE_ACTOR="not-the-right-actor[bot]" TRUST_RECONCILE_COMMANDS="$RECONCILE_CMD" \
+  node "$RECONCILE" --repo-root "$DECLARED_NEG_SCOPE_WORK" 2>&1)"
+neg_scope_code=$?
+if [[ "$neg_scope_code" -ne 0 ]]; then
+  pass "trust-reconcile.js fails closed ($neg_scope_code) when the resolved context does not match the appended entry's scope"
+else
+  fail "trust-reconcile.js expected non-zero exit for an out-of-scope append, got 0 — output: $neg_scope_out"
+fi
+if echo "$neg_scope_out" | grep -qF "out of scope" || echo "$neg_scope_out" | grep -qF "bundle-required-no-declared-marker"; then
+  pass "trust-reconcile.js emits 'out of scope' or 'bundle-required-no-declared-marker' for the out-of-scope append"
+else
+  fail "trust-reconcile.js did not emit the expected out-of-scope diagnostic — output: $neg_scope_out"
+fi
+
+# --- exemption-issuance: no-fork check, specific to this task's new assets (AC8) -
+if grep -rn "veritas-governance" "$ROOT/scripts/ci/trust-reconcile.js" >/dev/null 2>&1; then
+  fail "scripts/ci/trust-reconcile.js references kits/veritas-governance (no-fork/layering violated)"
+else
+  pass "no-fork: scripts/ci/trust-reconcile.js has zero references to veritas-governance (anchor stays kit-agnostic)"
+fi
+
 # --- Optional live Veritas leg --------------------------------------------------
 VBIN="${VERITAS_BIN:-veritas}"
 if command -v "$VBIN" >/dev/null 2>&1 && [[ -n "${VERITAS_GOVERNED_REPO:-}" && -d "${VERITAS_GOVERNED_REPO:-}/.veritas" ]]; then
