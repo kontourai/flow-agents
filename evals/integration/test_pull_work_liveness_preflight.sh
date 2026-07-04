@@ -151,7 +151,12 @@ if flow_agents_node "$WRITER" ensure-session \
   --title "Parity Check" \
   --summary "resolve-slug parity fixture." \
   --timestamp "2026-07-01T00:00:00Z" >"$TMPDIR_EVAL/b-ensure.out" 2>"$TMPDIR_EVAL/b-ensure.err"; then
-  B_SESSION_DIR="$(find "$B_ROOT" -mindepth 1 -maxdepth 1 -type d ! -name liveness | head -n1)"
+  # #291: ensure-session (when an ambient actor resolves, even without an explicit --actor)
+  # now also creates artifact-root-level "assignment/" (the ownership-guard's durable local-file
+  # claim record dir) and "current/" (the per-actor current.json projection dir) sibling
+  # directories, alongside the pre-existing "liveness/" dir -- all three must be excluded here so
+  # this find still lands on the real session slug directory, not a sibling artifact dir.
+  B_SESSION_DIR="$(find "$B_ROOT" -mindepth 1 -maxdepth 1 -type d ! -name liveness ! -name assignment ! -name current | head -n1)"
   B_SLUG_FROM_DIR="$(basename "$B_SESSION_DIR")"
   B_SLUG_FROM_RESOLVE="$(flow_agents_node "$WRITER" resolve-slug 'owner/repo#42' 2>"$TMPDIR_EVAL/b-resolve.err")"
   if [[ -n "$B_SESSION_DIR" ]] && [[ "$B_SLUG_FROM_DIR" == "$B_SLUG_FROM_RESOLVE" ]]; then

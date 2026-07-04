@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -8,6 +9,11 @@ import { fileURLToPath } from "node:url";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
 import { resolveActiveFlowStep, resolveFlowFilePath, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
+// #291 Wave 1 Task 1.1 exports: ensure-session's ownership guard reuses the EXACT same
+// assignment ⋈ liveness join / claim / supersede logic #290 already ships for the
+// `assignment-provider` CLI, rather than reimplementing a second, parallel join (static ESM
+// import — same idiom already used above for ../lib/flow-resolver.js).
+import { computeEffectiveState, performLocalClaim, performLocalSupersede, readLocalAssignmentStatus, type ActorStruct, type EffectiveState, type FreshHolder } from "./assignment-provider.js";
 
 type AnyObj = Record<string, any>;
 
@@ -164,6 +170,78 @@ function validateExplicitBranch(value: string): void {
   }
 }
 
+/**
+ * #291 Wave 2 Task 2.1: the single shared actor resolver for ensure-session — used by BOTH
+ * resolveSessionBranch() (below) and the new ownership guard inside ensureSession(), so the
+ * branch-naming actor and the assignment-claim actor are ALWAYS derived from the same one
+ * resolution pass (never re-derived twice with any risk of divergence). Same explicit-actor
+ * validation/die behavior as before this refactor (garbage --actor still dies; ambiguous/
+ * unresolved actor never hard-fails session creation — Design Decision 4).
+ *
+ * Returns TWO distinct identity strings, not one, because this repo already has two genuinely
+ * different actor-identity conventions in play and reconciling them into a single string would
+ * either break existing branch-naming byte-for-byte (see test_workflow_sidecar_writer.sh AC4) or
+ * break self-recognition against a durable assignment-claim record:
+ *   - `branchActorKey`: the flat, single-token-or-triple string this file has ALWAYS used for
+ *     branch naming, liveness `--actor`, and (Wave 2 Task 2.1 §6) per-actor current.json
+ *     partitioning — exactly `resolveActor(env).actor`, or the bare sanitized explicit --actor
+ *     override, unchanged from before this refactor.
+ *   - `actorStruct` / `claimActorKey` (`= serializeActor(actorStruct)`): a structured ActorStruct
+ *     for the assignment-provider claim record's `actor` field (Wave 1's `performLocalClaim`/
+ *     `performLocalSupersede` require one), and the identity string passed as `computeEffectiveState`'s
+ *     `selfActor` param. For the common/default case (no explicit --actor override — the ambient
+ *     runtime-session-id or process-ancestry derivation), this is reconstructed from the SAME
+ *     exported primitives `resolveActor()` uses internally, so `claimActorKey` reproduces
+ *     `branchActorKey` bit-for-bit. For an explicit --actor override, no ambient ActorStruct
+ *     exists (resolveActor()'s override branch is a flat bypass, never a serializeActor() triple),
+ *     so a synthetic-but-deterministic wrapper is used instead — self-recognition on reentry still
+ *     holds (same override value always re-derives the same claimActorKey), but this synthetic key
+ *     will not equal a DIFFERENT process's flat `liveness claim --actor <sameOverrideValue>` actor
+ *     string (that command's own `--actor` bypass strips the same override value's ':' or wraps it
+ *     no differently — a pre-existing seam between the liveness-actor and assignment-actor
+ *     identity domains, not introduced by this task; see Wave 2 Task 2.1 plan Conflict #3).
+ */
+function resolveEnsureSessionActor(p: ReturnType<typeof parseArgs>): { actorStruct: ActorStruct; actorKey: string; branchActorKey: string; unresolved: boolean } {
+  const helper = loadActorIdentityHelper();
+  const explicitActorRaw = opt(p, "actor", "").trim();
+  if (explicitActorRaw && !/[A-Za-z0-9_.-]/.test(explicitActorRaw)) {
+    die("ensure-session --actor value strips to empty under the allowed actor charset ([A-Za-z0-9_.-]) — pass a value containing at least one letter, digit, underscore, period, or hyphen.");
+  }
+  const explicitActor = explicitActorRaw ? helper.sanitizeSegment(explicitActorRaw) : "";
+  const resolved = explicitActor ? { actor: explicitActor, source: "explicit-override" } : helper.resolveActor(process.env);
+  const unresolved = helper.isUnresolvedActor(resolved.actor);
+  const branchActorKey = unresolved ? `unknown-actor-${unknownDisambiguator(resolved.actor)}` : resolved.actor;
+
+  if (unresolved) {
+    // Design Decision 4 (unchanged): never hard-fail session creation on actor ambiguity. No real
+    // ActorStruct exists for "unresolved" — the guard (ensureSession) is responsible for skipping
+    // the ownership guard entirely when unresolved, rather than claiming under a synthetic identity.
+    return { actorStruct: { runtime: "unresolved", session_id: branchActorKey, host: os.hostname() }, actorKey: resolved.actor, branchActorKey, unresolved: true };
+  }
+
+  const actorStruct: ActorStruct = resolved.source === "explicit-override"
+    ? { runtime: "explicit-override", session_id: resolved.actor, host: os.hostname() }
+    : { runtime: helper.detectRuntime(process.env), session_id: helper.runtimeSessionId(process.env) || (() => { const seed = helper.ancestorActorSeed(); return seed ? `anc-${seed}` : ""; })(), host: os.hostname() };
+  const actorKey = helper.serializeActor(actorStruct);
+  return { actorStruct, actorKey, branchActorKey, unresolved: false };
+}
+
+/**
+ * Resolve an actor key for a READ-ONLY consumer (current(), currentDir(), recordAgentEvent(),
+ * writeTrustBundle()'s default) — deliberately lenient (never
+ * dies on a garbage --actor value; that enforcement belongs only to the write/claim path in
+ * resolveEnsureSessionActor above). Falls back to resolveActor(process.env) exactly like every
+ * write path already does. The returned value is passed straight into
+ * scripts/hooks/lib/current-pointer.js's readCurrentPointer(), which already tolerates an empty
+ * or unresolved actor by falling straight through to the legacy current.json branch — so an
+ * unresolved actor here reproduces exactly today's (pre-#291) legacy-only read behavior.
+ */
+function resolveReadActorKey(p: ReturnType<typeof parseArgs>): string {
+  const helper = loadActorIdentityHelper();
+  const explicit = opt(p, "actor", "").trim();
+  return explicit ? helper.sanitizeSegment(explicit) : helper.resolveActor(process.env).actor;
+}
+
 /** Resolve the branch to seed a brand-new session with. Only called from ensureSession's
  * `if (!md)` fresh-creation branch — an existing session's already-recorded branch is never
  * recomputed (ADR 0021 §5 takeover continuity; see Design Decision 3). Precedence: explicit
@@ -177,13 +255,12 @@ function resolveSessionBranch(p: ReturnType<typeof parseArgs>, slug: string): st
   const explicitBranch = opt(p, "branch");
   if (explicitBranch) { validateExplicitBranch(explicitBranch); return explicitBranch; }
   const helper = loadActorIdentityHelper();
-  const explicitActorRaw = opt(p, "actor", "").trim();
-  if (explicitActorRaw && !/[A-Za-z0-9_.-]/.test(explicitActorRaw)) {
-    die("ensure-session --actor value strips to empty under the allowed actor charset ([A-Za-z0-9_.-]) — pass a value containing at least one letter, digit, underscore, period, or hyphen.");
-  }
-  const actor = explicitActorRaw ? helper.sanitizeSegment(explicitActorRaw) : helper.resolveActor(process.env).actor;
-  const unresolved = helper.isUnresolvedActor(actor);
-  const safeActor = unresolved ? `unknown-actor-${unknownDisambiguator(actor)}` : sanitizeBranchSegment(actor, helper);
+  // #291 Wave 2 Task 2.1: actor resolution is now single-sourced via resolveEnsureSessionActor()
+  // (shared with the new ownership guard) — branchActorKey reproduces EXACTLY what this function's
+  // own inline `actor` variable used to compute, so branch naming is byte-identical to before this
+  // refactor (proven by test_workflow_sidecar_writer.sh's AC2/AC4/AC5 branch-naming assertions).
+  const { branchActorKey, unresolved } = resolveEnsureSessionActor(p);
+  const safeActor = unresolved ? branchActorKey : sanitizeBranchSegment(branchActorKey, helper);
   if (unresolved) process.stderr.write("[ensure-session] actor unresolved; branch uses \"unknown-actor\" segment (set --actor or FLOW_AGENTS_ACTOR for a stable branch name)\n");
   return `agent/${safeActor}/${sanitizeBranchSegment(slug, helper)}`;
 }
@@ -444,7 +521,7 @@ function critiqueToEventStatus(verdict: string, findings: AnyObj[]): string | nu
  * @param critiques  Critique objects (from critique.json .critiques array)
  * @param commandLog Optional parsed command-log.jsonl entries (capture-authoritative fold)
  */
-export async function buildTrustBundle(slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], commandLog?: AnyObj[], flowAgentsDir?: string): Promise<AnyObj | null> {
+export async function buildTrustBundle(slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], commandLog?: AnyObj[], flowAgentsDir?: string, actorKey?: string): Promise<AnyObj | null> {
   const surface = await tryLoadSurface();
   if (!surface) return null;
   const { deriveClaimStatus, generateClaimId, statusFunctionVersion } = surface;
@@ -454,7 +531,10 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
   // each produced claim gets a DECLARED primary claim (kit-typed) plus a legacy shadow
   // (workflow.* type, claimId suffix "-legacy") for backward compatibility. When null,
   // only the existing workflow.* claims are produced (zero behavior change).
-  const activeStep: ActiveFlowStep | null = flowAgentsDir ? resolveActiveFlowStep(flowAgentsDir) : null;
+  // #291 Wave 2 Task 2.1 (§7)/Task 2.2: actorKey (when the caller already resolved one — see
+  // writeTrustBundle below) threads through to resolveActiveFlowStep's per-actor-first,
+  // legacy-fallback current.json read; omitted, this is IDENTICAL to pre-#291 behavior.
+  const activeStep: ActiveFlowStep | null = flowAgentsDir ? resolveActiveFlowStep(flowAgentsDir, actorKey) : null;
 
   const claims: AnyObj[] = [];
   const evidenceItems: AnyObj[] = [];
@@ -760,7 +840,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
  * @param criteria   Acceptance criteria objects (same as buildTrustBundle)
  * @param critiques  Critique objects (same as buildTrustBundle)
  */
-export async function writeTrustBundle(dir: string, slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[]): Promise<{ written: boolean; errors: string[] }> {
+export async function writeTrustBundle(dir: string, slug: string, timestamp: string, checks: AnyObj[], criteria: AnyObj[], critiques: AnyObj[], actorKey?: string): Promise<{ written: boolean; errors: string[] }> {
   try {
     // Fold the deterministic capture log (PostToolUse evidence-capture) into the
     // bundle so capture is authoritative over claimed status. Best-effort read.
@@ -772,16 +852,22 @@ export async function writeTrustBundle(dir: string, slug: string, timestamp: str
     // ADR 0016 Abstraction A (P-d): pass the runtime artifact root ONLY when current.json
     // points to this session (scoped active-flow guard). If current.json.artifact_dir
     // resolves to a different session, pass null — no active-flow claim mapping for this bundle.
+    // #291 Wave 2 Task 2.1 (§7): the SOURCE of "what does current.json say" now prefers the
+    // resolved actor's own per-actor projection (falling back to the legacy global file) via the
+    // shared readCurrentPointer() helper — the "does artifact_dir match dir?" comparison itself is
+    // UNCHANGED. actorKey defaults to resolveActor(process.env) when the caller (below) does not
+    // already have one resolved, exactly like every other read-path consumer in this file.
     const _flowAgentsDir = path.dirname(dir);
+    const _effectiveActorKey = actorKey ?? loadActorIdentityHelper().resolveActor(process.env).actor;
     let _scopedFlowAgentsDir: string | undefined = undefined;
     try {
-      const _currentRaw = JSON.parse(fs.readFileSync(path.join(_flowAgentsDir, "current.json"), "utf8")) as Record<string, unknown>;
-      const _artDir = typeof _currentRaw["artifact_dir"] === "string" ? _currentRaw["artifact_dir"] : null;
+      const _currentRaw = loadCurrentPointerHelper().readCurrentPointer(_flowAgentsDir, _effectiveActorKey).payload;
+      const _artDir = _currentRaw && typeof _currentRaw["artifact_dir"] === "string" ? (_currentRaw["artifact_dir"] as string) : null;
       if (_artDir && path.resolve(_flowAgentsDir, _artDir) === path.resolve(dir)) {
         _scopedFlowAgentsDir = _flowAgentsDir;
       }
     } catch { /* current.json absent or unreadable — no scoping */ }
-    const bundle = await buildTrustBundle(slug, timestamp, checks, criteria, critiques, commandLog, _scopedFlowAgentsDir);
+    const bundle = await buildTrustBundle(slug, timestamp, checks, criteria, critiques, commandLog, _scopedFlowAgentsDir, _effectiveActorKey);
     if (!bundle) return { written: false, errors: [] }; // Surface unavailable — fail-open, skip write
     const result = await validateTrustBundle(bundle);
     if (result.available && !result.valid) {
@@ -1095,12 +1181,43 @@ function resolveFirstStep(flowId: string, repoRoot: string): string | null {
   }
 }
 
-function writeCurrent(root: string, dir: string, timestamp: string, owner: string, source: string, flowId?: string, stepId?: string, adHocReason?: string): void {
+/**
+ * Delegate to the shared pure-CJS per-actor current-pointer helper
+ * (scripts/hooks/lib/current-pointer.js), mirroring the createRequire pattern already used above
+ * by loadActorIdentityHelper()/loadLivenessWriteHelper() for cross-boundary CJS helper reuse
+ * (#291 Wave 2 Task 2.1). This is the ONE place every current.json reader/writer in this file
+ * goes through from here on — the per-actor-first/legacy-fallback compat-shim rule (and its
+ * write-side counterpart) can never drift between call sites.
+ */
+function loadCurrentPointerHelper(): {
+  perActorCurrentFile: (flowAgentsDir: string, actorKey: string) => string;
+  readCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: AnyObj | null; source: "per-actor" | "legacy" | "none"; file: string | null };
+  writePerActorCurrent: (flowAgentsDir: string, actorKey: string, payload: AnyObj) => void;
+} {
+  const _req = createRequire(import.meta.url);
+  const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/current-pointer.js");
+  return _req(helperPath) as {
+    perActorCurrentFile: (flowAgentsDir: string, actorKey: string) => string;
+    readCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: AnyObj | null; source: "per-actor" | "legacy" | "none"; file: string | null };
+    writePerActorCurrent: (flowAgentsDir: string, actorKey: string, payload: AnyObj) => void;
+  };
+}
+
+/**
+ * #291 Wave 2 Task 2.1 (§5): writes the UNCHANGED legacy global `<root>/current.json` (the
+ * compat-shim's write-side half — every existing consumer without an actorKey keeps reading
+ * exactly this file, exactly as before this change), then ADDITIONALLY projects the SAME payload
+ * into the caller's own `current/<actor>.json` when `actorKey` resolves to a real (not
+ * unresolved) actor. When `actorKey` is omitted or unresolved, only the legacy file is written —
+ * byte-identical to this function's pre-#291 behavior — with a stderr note mirroring the existing
+ * unresolved-actor branch-naming diagnostic.
+ */
+function writeCurrent(root: string, dir: string, timestamp: string, owner: string, source: string, flowId?: string, stepId?: string, adHocReason?: string, actorKey?: string): void {
   // #289: mirror the active session's already-recorded branch (state.json.branch) into
   // current.json so consumers of current.json (which has no schema of its own — not one of the
   // 9 schemas under schemas/) see the routing branch without re-reading state.json separately.
   const branch = loadJson(path.join(dir, "state.json")).branch;
-  writeJson(path.join(root, "current.json"), {
+  const payload: AnyObj = {
     schema_version: "1.0",
     active_slug: path.basename(dir),
     artifact_dir: path.relative(root, dir) || ".",
@@ -1119,15 +1236,35 @@ function writeCurrent(root: string, dir: string, timestamp: string, owner: strin
     // gate-review can distinguish an intentional direct entry (e.g. a planning-only
     // session that skips pull-work) from a stale/mis-stamped active_step_id.
     ...(adHocReason ? { ad_hoc_entry: true, ad_hoc_reason: adHocReason } : {}),
-  });
+  };
+  writeJson(path.join(root, "current.json"), payload);
+  if (actorKey && !loadActorIdentityHelper().isUnresolvedActor(actorKey)) {
+    try {
+      loadCurrentPointerHelper().writePerActorCurrent(root, actorKey, payload);
+    } catch (err) {
+      // Best-effort projection only — the legacy file above is already durable and authoritative;
+      // a failure here must never affect ensure-session's own exit code (fail-open, visible).
+      process.stderr.write(`[ensure-session] failed to write per-actor current pointer: ${err instanceof Error ? err.message : String(err)}\n`);
+    }
+  } else {
+    process.stderr.write("[ensure-session] actor unresolved or not provided; per-actor current.json projection skipped (legacy current.json remains authoritative)\n");
+  }
 }
 function loadCurrent(root: string): AnyObj | null {
   const file = path.join(root, "current.json");
   if (!fs.existsSync(file)) return null;
   return JSON.parse(read(file));
 }
-function currentDir(root: string): string | null {
-  const c = loadCurrent(root);
+/**
+ * #291 Wave 2 Task 2.1 (§6): resolves the active session directory via the shared
+ * per-actor-first/legacy-fallback compat shim (readCurrentPointer) instead of the unconditional
+ * legacy-only loadCurrent() this function used before #291. When `actorKey` is omitted, empty, or
+ * unresolved, `readCurrentPointer` falls straight through to the legacy file — IDENTICAL to this
+ * function's pre-#291 behavior.
+ */
+function currentDir(root: string, actorKey?: string): string | null {
+  const pointer = loadCurrentPointerHelper().readCurrentPointer(root, actorKey);
+  const c = pointer.payload;
   if (!c) return null;
   const dir = path.resolve(root, c.artifact_dir ?? c.active_slug ?? "");
   if (!fs.existsSync(dir)) return null;
@@ -1138,14 +1275,34 @@ function currentDir(root: string): string | null {
   }
   return dir;
 }
-function updateCurrentAgent(root: string, dir: string, agentId: string, status: string, timestamp: string): void {
+/**
+ * #291 Wave 2 Task 2.1 (§6): updates BOTH the legacy current.json (when IT points at `dir` — the
+ * exact, unchanged existing check/write) AND the resolved actor's own per-actor current.json
+ * (independently, when IT points at `dir`) — never silently drops the legacy-file update path.
+ * The two checks are independent: either, both, or neither may fire depending on which
+ * pointer(s) currently reference `dir`.
+ */
+function updateCurrentAgent(root: string, dir: string, agentId: string, status: string, timestamp: string, actorKey?: string): void {
+  const applyAgentUpdate = (payload: AnyObj): AnyObj => {
+    const active = Array.isArray(payload.active_agents) ? payload.active_agents.filter((a: AnyObj) => a.agent_id !== agentId) : [];
+    if (status === "active" || status === "blocked") active.push({ agent_id: agentId, status, updated_at: timestamp });
+    return { ...payload, active_agents: active, updated_at: timestamp };
+  };
+
   const cur = loadCurrent(root);
-  if (!cur || path.resolve(root, cur.artifact_dir ?? "") !== path.resolve(dir)) return;
-  const active = Array.isArray(cur.active_agents) ? cur.active_agents.filter((a: AnyObj) => a.agent_id !== agentId) : [];
-  if (status === "active" || status === "blocked") active.push({ agent_id: agentId, status, updated_at: timestamp });
-  cur.active_agents = active;
-  cur.updated_at = timestamp;
-  writeJson(path.join(root, "current.json"), cur);
+  if (cur && path.resolve(root, cur.artifact_dir ?? "") === path.resolve(dir)) {
+    writeJson(path.join(root, "current.json"), applyAgentUpdate(cur));
+  }
+
+  if (actorKey && !loadActorIdentityHelper().isUnresolvedActor(actorKey)) {
+    const helper = loadCurrentPointerHelper();
+    const perActorFile = helper.perActorCurrentFile(root, actorKey);
+    let perActor: AnyObj | null = null;
+    try { perActor = fs.existsSync(perActorFile) ? (JSON.parse(fs.readFileSync(perActorFile, "utf8")) as AnyObj) : null; } catch { perActor = null; }
+    if (perActor && path.resolve(root, perActor.artifact_dir ?? "") === path.resolve(dir)) {
+      helper.writePerActorCurrent(root, actorKey, applyAgentUpdate(perActor));
+    }
+  }
 }
 
 function initSidecars(dir: string, slug: string, sourceRequest: string, summary: string, nextAction: string, timestamp: string, markdown?: string): void {
@@ -1195,10 +1352,201 @@ function initSidecars(dir: string, slug: string, sourceRequest: string, summary:
   });
 }
 
+/** Read a `--*-json` flag's value as a file path (or `-` for stdin), mirroring
+ * assignment-provider.ts's own `loadJsonInput` convention — this file's OTHER `--*-json` flags
+ * (e.g. `--check-json`) instead take a literal inline JSON string via parseJson(), a DIFFERENT
+ * convention; `--effective-state-json` deliberately follows assignment-provider's file/stdin
+ * convention instead, since its value is the literal JSON `assignment-provider status
+ * --provider github ...` already prints to a file (or pipe), not something a caller would want to
+ * inline as a shell argument. */
+function loadJsonInputFile(file: string): unknown {
+  return file === "-" ? JSON.parse(fs.readFileSync(0, "utf8")) : JSON.parse(read(file));
+}
+
+/**
+ * #291 Wave 2 Task 2.1 (§4): ensure-session's pre-entry ownership guard. MUST be called before
+ * any directory or file is created (a refusal must never leave a stray empty session dir) —
+ * ensureSession() calls this immediately, before `fs.mkdirSync(dir, ...)`. Reuses #290's
+ * assignment ⋈ liveness join (`computeEffectiveState`, Wave 1 export) so a fresh OTHER-actor claim
+ * refuses entry, a human assignment always asks first (never auto-reclaims), a stale
+ * (`reclaimable`) claim requires the explicit `--supersede-stale` takeover flag, and a `free`
+ * subject establishes a durable claim for the entering actor — ensure-session becomes a SECOND
+ * claim point, alongside pull-work (closing the loophole where a session entered without going
+ * through pull-work never gets a durable claim at all).
+ *
+ * Runs INSIDE ensureSession's existing root-level `withLock` (main(), unchanged) — no second/
+ * competing lock is introduced here. `performLocalClaim`/`performLocalSupersede`'s OWN internal
+ * `withSubjectLock` (a DIFFERENT lockdir, under `<root>/assignment/.<subject>.lockdir`) is what
+ * protects against a concurrent bare `assignment-provider claim` CLI invocation (e.g. from
+ * pull-work) racing this guard — two independent, non-conflicting lock resources.
+ *
+ * Every interpolated actor/holder/assignee/reason field in this function's die() messages is run
+ * through stripControlCharsForDisplay + a 64-char cap (AC9 — the #287/#320/#290 prompt-injection
+ * mitigation class: a hostile liveness event or a hand-crafted --effective-state-json fixture must
+ * never be able to smuggle raw control/ANSI bytes into this process's stderr/thrown message).
+ */
+function enforceEnsureSessionOwnership(
+  p: ReturnType<typeof parseArgs>,
+  root: string,
+  slug: string,
+  dir: string,
+  resolution: { actorStruct: ActorStruct; actorKey: string; branchActorKey: string; unresolved: boolean },
+): void {
+  if (p.flags.has("skip-ownership-guard")) {
+    process.stderr.write("[ensure-session] ownership guard skipped via --skip-ownership-guard\n");
+    return;
+  }
+  // Design Decision 4 (unchanged from resolveSessionBranch): actor-resolution ambiguity never
+  // hard-fails session creation. Without a resolvable actor there is no safe identity to claim
+  // under, so the guard is skipped entirely (documented scope boundary, not a silent hole) rather
+  // than claiming under a synthetic/unstable identity.
+  if (resolution.unresolved) {
+    process.stderr.write("[ensure-session] ownership guard not evaluated: actor is unresolved (set --actor or FLOW_AGENTS_ACTOR, or run inside a supported runtime) — proceeding without a durable claim, exactly as ensure-session behaved before #291\n");
+    return;
+  }
+
+  // F5 fix (fix-plan iteration 1, LOW): match assignment-provider.ts's sanitizeDisplayField
+  // two-tier convention (64 for id-like fields, 240 for free text) rather than asserting one
+  // uniform cap applies to every field class regardless of content. `sanitize` below is 64 chars —
+  // deliberately, not by uniform-cap default — because every value this function actually
+  // interpolates into a die()/stderr message is id-like (holder/actor key, subject slug, assignee,
+  // a claimed_at/last_at timestamp, the provider-kind enum); none of them is free text, so the
+  // id-like tier is the correct (not merely convenient) cap here. sanitizeDisplayField's 240
+  // free-text tier is for fields like a claim record's audit-trail `reason` (see
+  // assignment-provider.ts's sanitizeAuditEntryForDisplay) — this guard never echoes `--reason`
+  // into a die() message, so it has no free-text field requiring the 240 tier today.
+  const sanitize = (value: unknown): string => stripControlCharsForDisplay(value).slice(0, 64);
+  const nowMs = opt(p, "now") ? Date.parse(opt(p, "now")) : Date.now();
+  const assignmentProviderKind = opt(p, "assignment-provider", "local-file");
+
+  type EffectiveResult = { effective_state: EffectiveState; reason: string; holder?: { actor?: string; assignee?: string | null; idle_days?: number | null; last_at?: string } };
+  let effective: EffectiveResult;
+
+  const effectiveStateJsonFlag = opt(p, "effective-state-json");
+  if (effectiveStateJsonFlag) {
+    const parsed = loadJsonInputFile(effectiveStateJsonFlag) as AnyObj;
+    const candidate = parsed && typeof parsed === "object" ? (parsed.effective as AnyObj | undefined) : undefined;
+    const validStates = new Set(["held", "reclaimable", "human-held", "free"]);
+    if (!candidate || typeof candidate.effective_state !== "string" || !validStates.has(candidate.effective_state)) {
+      die(`ensure-session --effective-state-json must contain an .effective object with a recognized effective_state (held|reclaimable|human-held|free); got ${JSON.stringify(candidate ? candidate.effective_state : candidate)}`);
+    }
+    effective = candidate as EffectiveResult;
+  } else if (assignmentProviderKind === "local-file") {
+    // Conflict #3 (plan): subjectId for BOTH the assignment lookup and the liveness freshHolders
+    // slug filter is `slug` — the ALREADY-COMPUTED session slug (workItemSlug()'s output), the
+    // exact same identifier pull-work itself uses for both halves of this same join. Never a
+    // second, independently-derived identifier.
+    // F1 fix (fix-plan iteration 1, HIGH): the guard's own self-check and the liveness join must
+    // key on `resolution.branchActorKey` — the canonical `resolveActor(env).actor` string — NOT
+    // `resolution.actorKey` (`serializeActor(actorStruct)`). For an explicit-override actor
+    // (FLOW_AGENTS_ACTOR) those two diverge: `actorKey` serializes to a triple
+    // (`explicit-override:<value>:<host>`) while `branchActorKey` is the bare value every other
+    // tool (`liveness whoami`, `liveness claim --actor`, per-actor current.json, pull-work's
+    // --self-actor) already uses. freshHolders' `selfActor` param and computeEffectiveState's
+    // `selfActor` param must both be the same canonical string the claim record's `actor_key` is
+    // written as (see the performLocalClaim/performLocalSupersede calls below) — otherwise a
+    // fresh heartbeat for this exact actor would never match the join, and
+    // `assignment-provider status --self-actor <branchActorKey>` run by a DIFFERENT tool
+    // afterward would never recognize this guard's own claim as self.
+    const assignment = readLocalAssignmentStatus(root, slug);
+    const events = readLivenessEvents(root);
+    const freshList = loadLivenessReadHelper().freshHolders(events, slug, resolution.branchActorKey, nowMs);
+    effective = computeEffectiveState(assignment, freshList, resolution.branchActorKey, nowMs);
+  } else {
+    // Conflict #5 (plan): GitHub-provider (and any other non-local-file) subjects get no LIVE
+    // guard check here — assignment-provider.ts is deliberately render-don't-execute (no `gh`
+    // calls from any CLI file). A precomputed --effective-state-json is the escape hatch; when
+    // neither applies, this is a documented scope boundary (today's pre-#291 baseline behavior),
+    // never a silent hole.
+    process.stderr.write(`[ensure-session] ownership guard not evaluated: provider "${sanitize(assignmentProviderKind)}" requires --effective-state-json\n`);
+    return;
+  }
+
+  const resolveBranchForClaim = (): string => {
+    const existingBranch = fs.existsSync(path.join(dir, "state.json")) ? (loadJson(path.join(dir, "state.json")).branch as string | undefined) : undefined;
+    return existingBranch || resolveSessionBranch(p, slug);
+  };
+
+  switch (effective.effective_state) {
+    case "held": {
+      // F1 fix (fix-plan iteration 1, HIGH): compare against branchActorKey — the same canonical
+      // string just passed as computeEffectiveState's selfActor above — not actorKey (the wrapped
+      // ActorStruct triple), so this redundant belt-and-suspenders check agrees with the
+      // effective_state computation instead of silently using a different identity.
+      const isSelf = effective.reason === "self_is_holder" || (!!effective.holder?.actor && effective.holder.actor === resolution.branchActorKey);
+      if (isSelf) return; // resume own session — no refusal
+      const holderActor = sanitize(effective.holder?.actor ?? "unknown");
+      const lastAtSuffix = effective.holder?.last_at ? ` (last_at ${sanitize(effective.holder.last_at)})` : "";
+      die(`ensure-session refused: subject ${sanitize(slug)} is currently held by a different, still-live actor (${holderActor}${lastAtSuffix}). Pick a different work item, or confirm the holder session is truly gone before considering a takeover.`);
+      return;
+    }
+    case "human-held": {
+      const assignee = effective.holder?.assignee ? sanitize(effective.holder.assignee) : "an assigned human";
+      const idleSuffix = effective.holder?.idle_days != null ? ` (idle ${Number(effective.holder.idle_days)} day(s))` : "";
+      die(`ensure-session refused: subject ${sanitize(slug)} is assigned to ${assignee}${idleSuffix}. This guard never auto-reclaims a human assignment — confirm with the user before proceeding.`);
+      return;
+    }
+    case "reclaimable": {
+      const holderActor = sanitize(effective.holder?.actor ?? "unknown");
+      const claimedAtSuffix = effective.holder?.last_at ? ` (claimed_at ${sanitize(effective.holder.last_at)})` : "";
+      if (!p.flags.has("supersede-stale")) {
+        die(`ensure-session refused: subject ${sanitize(slug)}'s existing claim (held by ${holderActor}${claimedAtSuffix}) is stale. Pass --supersede-stale to take it over explicitly.`);
+      }
+      const assignment = readLocalAssignmentStatus(root, slug);
+      const fromActor = assignment.record?.actor;
+      if (!fromActor) die(`ensure-session --supersede-stale: no existing local-file claim record found for subject ${sanitize(slug)} to supersede`);
+      performLocalSupersede(root, slug, fromActor, resolution.actorStruct, {
+        branch: resolveBranchForClaim(),
+        artifactDir: path.relative(root, dir) || ".",
+        reason: opt(p, "reason", "ensure-session takeover: stale claim"),
+        // F1 fix (fix-plan iteration 1, HIGH): persist the canonical actor_key on the record so
+        // computeEffectiveState's holderActorKey (assignment-provider.ts) matches this same
+        // branchActorKey string on the next status/guard check, cross-tool.
+        actorKey: resolution.branchActorKey,
+      });
+      return;
+    }
+    case "free": {
+      performLocalClaim(root, slug, resolution.actorStruct, {
+        ttlSeconds: opt(p, "claim-ttl-seconds") ? Number(opt(p, "claim-ttl-seconds")) : loadLivenessPolicyHelper().resolveTtlSeconds(process.env),
+        branch: resolveBranchForClaim(),
+        artifactDir: path.relative(root, dir) || ".",
+        reason: opt(p, "reason", "ensure-session entry"),
+        // F1 fix (fix-plan iteration 1, HIGH): see the performLocalSupersede call above.
+        actorKey: resolution.branchActorKey,
+      });
+      return;
+    }
+    default:
+      die(`ensure-session ownership guard: unrecognized effective_state ${JSON.stringify(effective.effective_state)}`);
+  }
+}
+
+/**
+ * ensure-session flags added by #291 Wave 2 Task 2.1 (no printed --help/usage text exists in this
+ * file to update — this doc comment is the discoverable reference instead):
+ *   --skip-ownership-guard         Skip the pre-entry ownership guard entirely (logged, not silent).
+ *   --effective-state-json <path|-> Precomputed `{ effective: {...} }` JSON (the exact shape
+ *                                  `assignment-provider status` prints) — required to evaluate the
+ *                                  guard for any --assignment-provider other than local-file.
+ *   --assignment-provider <kind>   Defaults to "local-file"; see Conflict #5 in the plan for the
+ *                                  GitHub-provider scope boundary.
+ *   --now <iso>                    Deterministic "now" for freshness/idle-day computation (else
+ *                                  Date.now()).
+ *   --supersede-stale              Required to take over a `reclaimable` (stale) claim.
+ *   --claim-ttl-seconds <n>        Overrides the liveness-policy TTL default for a new claim.
+ *   --reason <text>                Audit-trail reason recorded on the claim/supersede record.
+ */
 function ensureSession(p: ReturnType<typeof parseArgs>): number {
   const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : flowAgentsArtifactRoot();
   const slug = opt(p, "task-slug") || (opt(p, "work-item") ? workItemSlug(opt(p, "work-item")) : die("--task-slug is required (or pass --work-item to derive it)"));
   const dir = sessionDirFor(root, slug);
+  // #291 Wave 2 Task 2.1 (§3, §4): resolve the actor ONCE, then run the ownership guard BEFORE
+  // any directory/file is created — a refusal must never leave a stray empty session dir. Reused
+  // below (writeCurrent's per-actor dual-write) so the branch-naming actor and the
+  // assignment-claim actor are always the same identity.
+  const actorResolution = resolveEnsureSessionActor(p);
+  enforceEnsureSessionOwnership(p, root, slug, dir, actorResolution);
   fs.mkdirSync(dir, { recursive: true });
   const timestamp = opt(p, "timestamp", now());
   let md = fs.existsSync(path.join(dir, `${slug}--deliver.md`)) ? read(path.join(dir, `${slug}--deliver.md`)) : "";
@@ -1241,14 +1589,19 @@ function ensureSession(p: ReturnType<typeof parseArgs>): number {
       adHocReason = opt(p, "ad-hoc-reason") || `direct entry at step "${explicitStep}" via --step-id (flow first step is "${firstStep}")`;
     }
   }
-  writeCurrent(root, dir, timestamp, "workflow-sidecar", "ensure-session", flowId || undefined, stepId || undefined, adHocReason);
+  writeCurrent(root, dir, timestamp, "workflow-sidecar", "ensure-session", flowId || undefined, stepId || undefined, adHocReason, actorResolution.unresolved ? undefined : actorResolution.branchActorKey);
   console.log(dir);
   return 0;
 }
 
 function current(p: ReturnType<typeof parseArgs>): number {
   const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : defaultArtifactRootForRead();
-  const dir = currentDir(root);
+  // #291 Wave 2 Task 2.1 (§6): new optional --actor override (same convention as
+  // resolveSessionBranch's existing --actor), falling back to resolveActor(process.env). Only the
+  // SOURCE of "what does current.json say" changes (per-actor-first, legacy-fallback) — this
+  // command's existing --format slug|path output is unchanged.
+  const actorKey = resolveReadActorKey(p);
+  const dir = currentDir(root, actorKey);
   if (!dir) die("no current workflow session is recorded");
   const format = opt(p, "format", "path");
   console.log(format === "slug" ? path.basename(dir) : dir);
@@ -1259,7 +1612,8 @@ function recordAgentEvent(p: ReturnType<typeof parseArgs>): number {
   const hasExplicitRoot = !!opt(p, "artifact-root");
   const root = explicitArtifactRoot(p);
   const explicit = opt(p, "artifact-dir");
-  const dir = explicit ? path.resolve(explicit) : currentDir(root);
+  const actorKey = resolveReadActorKey(p);
+  const dir = explicit ? path.resolve(explicit) : currentDir(root, actorKey);
   if (!dir || !fs.existsSync(dir)) die("artifact directory does not exist");
   if (explicit && fs.lstatSync(dir).isSymbolicLink()) die(`artifact directory must not be a symlink: ${dir}`);
   if (hasExplicitRoot || !explicit) requireArtifactDirUnderRoot(dir, root);
@@ -1267,7 +1621,7 @@ function recordAgentEvent(p: ReturnType<typeof parseArgs>): number {
   const agent = validateAgentId(opt(p, "agent-id"));
   const event = { timestamp, agent_id: agent, kind: opt(p, "kind", "note"), status: opt(p, "status", "info"), summary: opt(p, "summary"), ...(opt(p, "ref") ? { ref: opt(p, "ref") } : {}) };
   appendJsonl(path.join(dir, "agents", agent, "events.jsonl"), event);
-  updateCurrentAgent(root, dir, agent, event.status, timestamp);
+  updateCurrentAgent(root, dir, agent, event.status, timestamp, actorKey);
   return 0;
 }
 
@@ -1649,9 +2003,14 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   const summary = opt(p, "summary") || die("--summary is required");
   const expectationId = opt(p, "expectation");
 
-  // Resolve the active flow step from current.json
+  // Resolve the active flow step from current.json. #291 Wave 2 Task 2.1 (§7)/Task 2.2: resolve
+  // the CALLING actor's own current-pointer (per-actor-first, legacy-fallback) rather than an
+  // unconditional legacy-only read — this is the fix for record-gate-claim's pre-existing (#291
+  // Stop-short risk) lack of a dir-scoping guard: it now resolves ITS OWN actor's current.json
+  // view, not a different actor's more-recently-written legacy pointer.
   const flowAgentsDir = path.dirname(dir);
-  const activeStep = resolveActiveFlowStep(flowAgentsDir);
+  const gateClaimActorKey = resolveReadActorKey(p);
+  const activeStep = resolveActiveFlowStep(flowAgentsDir, gateClaimActorKey);
   if (!activeStep) die("record-gate-claim requires an active flow step in current.json (set via ensure-session --flow-id or advance-state --flow-definition)");
 
   const expects = activeStep.gateExpects;
@@ -1699,7 +2058,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   if (gateWaiver) checkNormalized._waiver = gateWaiver;
   // Log the targeted gate expectation for transparency (goes to stderr only)
   process.stderr.write(`[record-gate-claim] targeting ${activeStep.stepId}/${activeStep.gateId}/${targetExpectation.id} → claimType=${claimType} subjectType=${subjectType}${gateWaiver ? " (WAIVED accepted_gap)" : ""}\n`);
-  assertBundleWritten(await writeTrustBundle(dir, slug, ts, [checkNormalized], [], []));
+  assertBundleWritten(await writeTrustBundle(dir, slug, ts, [checkNormalized], [], [], gateClaimActorKey));
   return 0;
 }
 
@@ -1835,7 +2194,11 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
     const phaseMap = resolvePhaseMap(flow, repoRoot);
     const stepId = phaseMap?.[phase] ?? undefined;
     if (stepId) {
-      writeCurrent(root, dir, timestamp, "workflow-sidecar", "advance-state", flow, stepId);
+      // #291 Wave 2 Task 2.1 (§5): thread the calling actor through so this second writeCurrent()
+      // call site ALSO dual-writes the per-actor projection, not only ensure-session's call site —
+      // otherwise a session that only ever calls advance-state (never re-running ensure-session)
+      // would never get a per-actor current.json mirror for its own FlowDefinition routing keys.
+      writeCurrent(root, dir, timestamp, "workflow-sidecar", "advance-state", flow, stepId, undefined, resolveReadActorKey(p));
     }
   }
   livenessLifecycle(dir, slug, LIVENESS_TERMINAL.has(status) ? "release" : "heartbeat", timestamp);
@@ -2943,6 +3306,26 @@ function livenessLabel(status: string): string {
   return status;
 }
 
+/**
+ * Delegate to the shared pure-CJS liveness reader's freshHolders() (scripts/hooks/lib/liveness-read.js),
+ * mirroring the exact loader shape assignment-provider.ts already uses for the same helper (#291
+ * Wave 2 Task 2.1) — so ensure-session's ownership guard computes freshness identically to
+ * `assignment-provider status`'s own join, a single implementation. `readLivenessEvents` above
+ * already loads this same module inline for its own narrower need (just the events reader); this
+ * loader additionally exposes `freshHolders` for the guard's `computeEffectiveState` call.
+ */
+function loadLivenessReadHelper(): {
+  readLivenessEvents: (streamPath: string) => AnyObj[];
+  freshHolders: (events: AnyObj[], slug: string, selfActor: string, nowMs: number) => FreshHolder[];
+} {
+  const _req = createRequire(import.meta.url);
+  const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/liveness-read.js");
+  return _req(helperPath) as {
+    readLivenessEvents: (streamPath: string) => AnyObj[];
+    freshHolders: (events: AnyObj[], slug: string, selfActor: string, nowMs: number) => FreshHolder[];
+  };
+}
+
 // ─── ADR 0012 lifecycle-driven liveness (default-on; opt-out via FLOW_AGENTS_LIVENESS) ──
 // init-plan claims the work-item; advance-state heartbeats (or releases on terminal),
 // so the workflow lifecycle itself maintains the liveness claim — no manual liveness calls.
@@ -2958,6 +3341,16 @@ function loadActorIdentityHelper(): {
   resolveActor: (env: NodeJS.ProcessEnv) => { actor: string; source: string };
   sanitizeSegment: (value: unknown) => string;
   isUnresolvedActor: (actor: string) => boolean;
+  // #291 Wave 2 Task 2.1: widened (additive only — every existing caller above keeps using only
+  // the three fields already destructured) so resolveEnsureSessionActor() can reconstruct a real
+  // ActorStruct {runtime, session_id, host} from the SAME exported primitives resolveActor()
+  // already uses internally, and so serializeActor() is available for the ownership guard's
+  // assignment-claim identity (a DIFFERENT identity concept from the flat actorKey used for
+  // branch-naming/liveness — see resolveEnsureSessionActor's doc comment for why both exist).
+  serializeActor: (actor: Partial<ActorStruct> | undefined) => string;
+  detectRuntime: (env: NodeJS.ProcessEnv) => string;
+  runtimeSessionId: (env: NodeJS.ProcessEnv) => string;
+  ancestorActorSeed: () => string;
 } {
   const _req = createRequire(import.meta.url);
   const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/actor-identity.js");
@@ -2965,6 +3358,10 @@ function loadActorIdentityHelper(): {
     resolveActor: (env: NodeJS.ProcessEnv) => { actor: string; source: string };
     sanitizeSegment: (value: unknown) => string;
     isUnresolvedActor: (actor: string) => boolean;
+    serializeActor: (actor: Partial<ActorStruct> | undefined) => string;
+    detectRuntime: (env: NodeJS.ProcessEnv) => string;
+    runtimeSessionId: (env: NodeJS.ProcessEnv) => string;
+    ancestorActorSeed: () => string;
   };
 }
 function resolveLivenessActor(): string {

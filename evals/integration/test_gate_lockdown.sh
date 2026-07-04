@@ -829,6 +829,13 @@ mkdir -p "$ISO_DIR/repo/.kontourai/flow-agents/surftest"
 mkdir -p "$ISO_DIR/lib"
 cp "$GATE" "$ISO_DIR/stop-goal-fit.js"
 cp "$ROOT/scripts/hooks/lib/local-artifact-paths.js" "$ISO_DIR/lib/"
+# #291: stop-goal-fit.js now also requires scripts/hooks/lib/actor-identity.js and
+# scripts/hooks/lib/current-pointer.js (the per-actor current.json compat-shim read helper)
+# -- both must be mirrored into this isolated copy too, or the isolated gate crashes on
+# MODULE_NOT_FOUND before it ever reaches the surface-unavailable fail-closed path this
+# section is testing.
+cp "$ROOT/scripts/hooks/lib/actor-identity.js" "$ISO_DIR/lib/"
+cp "$ROOT/scripts/hooks/lib/current-pointer.js" "$ISO_DIR/lib/"
 printf '# Repo\n' > "$ISO_DIR/repo/AGENTS.md"
 # Non-terminal session (execution phase, in_progress status)
 printf '%s' '{"schema_version":"1.0","task_slug":"surftest","status":"in_progress","phase":"execution","updated_at":"2026-06-27T00:00:00Z","next_action":{"status":"in_progress","summary":"running"}}' \
@@ -875,6 +882,9 @@ mkdir -p "$ISO2_DIR/repo/.kontourai/flow-agents/lowtest"
 mkdir -p "$ISO2_DIR/lib"
 cp "$GATE" "$ISO2_DIR/stop-goal-fit.js"
 cp "$ROOT/scripts/hooks/lib/local-artifact-paths.js" "$ISO2_DIR/lib/"
+# #291: same rationale as ISO_DIR above -- mirror the two new scripts/hooks/lib dependencies.
+cp "$ROOT/scripts/hooks/lib/actor-identity.js" "$ISO2_DIR/lib/"
+cp "$ROOT/scripts/hooks/lib/current-pointer.js" "$ISO2_DIR/lib/"
 printf '# Repo\n' > "$ISO2_DIR/repo/AGENTS.md"
 printf '%s' '{"schema_version":"1.0","task_slug":"lowtest","status":"in_progress","phase":"execution","updated_at":"2026-06-27T00:00:00Z","next_action":{"status":"in_progress","summary":"running"}}' \
   > "$ISO2_DIR/repo/.kontourai/flow-agents/lowtest/state.json"

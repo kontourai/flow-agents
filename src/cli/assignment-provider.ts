@@ -24,7 +24,7 @@ import { readJson, writeJson, isoNow } from "../lib/fs.js";
 
 type AnyObj = Record<string, unknown>;
 
-type ActorStruct = {
+export type ActorStruct = {
   runtime: string;
   session_id: string;
   host: string;
@@ -45,12 +45,21 @@ type AssignmentAuditEntry = {
  * The versioned claim-record shape from the contract doc's "Versioned claim-record format"
  * section (Design Decision 2). `schema_version` is bumped only on an incompatible change, per
  * artifact-contract.md's existing sidecar rule.
+ *
+ * `actor_key` (F1 fix, fix-plan iteration 1, HIGH — additive field, schema_version unchanged):
+ * the canonical `resolveActor(env).actor` string for the claiming actor — the SAME flat/bare
+ * token every other tool (`liveness whoami`, `liveness claim --actor`, per-actor current.json,
+ * pull-work's `--self-actor`) already uses. Optional so every pre-fix record and every #290 eval
+ * fixture with no `actor_key` still parses; `computeEffectiveState` falls back to
+ * `serializeActor(record.actor)` (today's behavior) whenever it's absent. Present, it is the ONLY
+ * correct self-recognition/liveness-join key — see computeEffectiveState's holderActorKey.
  */
-type AssignmentClaimRecord = {
+export type AssignmentClaimRecord = {
   schema_version: "1.0";
   role: "AssignmentClaimRecord";
   subject_id: string;
   actor: ActorStruct;
+  actor_key?: string;
   claimed_at: string;
   ttl_seconds: number;
   branch: string;
@@ -59,12 +68,12 @@ type AssignmentClaimRecord = {
   audit_trail?: AssignmentAuditEntry[];
 };
 
-type FreshHolder = { actor: string; lastAt: string; ttlSeconds: number; fresh: boolean };
+export type FreshHolder = { actor: string; lastAt: string; ttlSeconds: number; fresh: boolean };
 
-type EffectiveState = "held" | "reclaimable" | "human-held" | "free";
+export type EffectiveState = "held" | "reclaimable" | "human-held" | "free";
 
 /** Provider-neutral assignment-layer read, before any liveness join (contract doc's status()). */
-type AssignmentStatus = {
+export type AssignmentStatus = {
   subject_id: string;
   provider: "local-file" | "github";
   assignee: string | null;
@@ -176,22 +185,29 @@ function loadActorStructFromFile(file: string): ActorStruct {
  * fixture-friendly path (used by evals and any caller that already knows its own struct);
  * when omitted, auto-derive from the live environment via the shared resolver, mirroring
  * (never forking) the exact struct fields serializeActor() already defines.
+ *
+ * F1 fix (fix-plan iteration 1, HIGH): also returns `actorKey` — set to the canonical
+ * `resolveActor(env).actor` string ONLY on the auto-derive path (pull-work's real path, and any
+ * other caller with no --actor-json), so a claim made via `assignment-provider claim` and one
+ * made via ensure-session share the same canonical key. `--actor-json` explicit fixtures leave
+ * `actorKey` unset — `performLocalClaim`/`performLocalSupersede` then fall back to
+ * `serializeActor(actor)` for the record's `actor_key`, preserving existing fixture behavior.
  */
-function loadActorStruct(args: ParsedArgs): ActorStruct {
+function loadActorStruct(args: ParsedArgs): { actor: ActorStruct; actorKey?: string } {
   const actorJsonPath = flagString(args.flags, "actor-json");
-  if (actorJsonPath) return loadActorStructFromFile(actorJsonPath);
+  if (actorJsonPath) return { actor: loadActorStructFromFile(actorJsonPath) };
   const helper = loadActorIdentityHelper();
   const resolved = helper.resolveActor(process.env);
   if (helper.isUnresolvedActor(resolved.actor)) throw new Error("could not resolve an actor identity (no --actor-json and no resolvable environment actor); pass --actor-json explicitly");
-  return { runtime: helper.detectRuntime(process.env), session_id: resolved.actor, host: os.hostname(), human: null };
+  return { actor: { runtime: helper.detectRuntime(process.env), session_id: resolved.actor, host: os.hostname(), human: null }, actorKey: resolved.actor };
 }
 
-function assignmentFilePath(artifactRoot: string, subjectId: string): string {
+export function assignmentFilePath(artifactRoot: string, subjectId: string): string {
   const sanitized = loadActorIdentityHelper().sanitizeSegment(subjectId);
   return path.join(artifactRoot, "assignment", `${sanitized}.json`);
 }
 
-function readLocalRecord(artifactRoot: string, subjectId: string): AssignmentClaimRecord | null {
+export function readLocalRecord(artifactRoot: string, subjectId: string): AssignmentClaimRecord | null {
   const file = assignmentFilePath(artifactRoot, subjectId);
   if (!fs.existsSync(file)) return null;
   let data: unknown;
@@ -208,7 +224,7 @@ function readLocalRecord(artifactRoot: string, subjectId: string): AssignmentCla
   return record;
 }
 
-function writeLocalRecord(artifactRoot: string, subjectId: string, record: AssignmentClaimRecord): void {
+export function writeLocalRecord(artifactRoot: string, subjectId: string, record: AssignmentClaimRecord): void {
   // writeJson throws on any mkdir/writeFileSync failure; that error is intentionally allowed to
   // propagate to main()'s top-level try/catch and exit non-zero. Durable writes must fail loud,
   // never fail open (artifact-contract.md).
@@ -254,7 +270,7 @@ function subjectLockDir(artifactRoot: string, subjectId: string): string {
  * the write) of all three local-file mutators in this, since all three mutate the same record
  * file for a given subject.
  */
-function withSubjectLock<T>(artifactRoot: string, subjectId: string, body: () => T): T {
+export function withSubjectLock<T>(artifactRoot: string, subjectId: string, body: () => T): T {
   const lockDir = subjectLockDir(artifactRoot, subjectId);
   const staleMs = Number(process.env.FLOW_AGENTS_ASSIGNMENT_STALE_LOCK_MS ?? 5 * 60 * 1000);
   const deadline = Date.now() + 30000;
@@ -305,7 +321,7 @@ function withSubjectLock<T>(artifactRoot: string, subjectId: string, body: () =>
  * through here too means `--now` deterministically governs idle_days as well as liveness
  * freshness, rather than idle_days silently reading the real wall clock regardless of `--now`.
  */
-function computeEffectiveState(assignment: AssignmentStatus, freshHoldersList: FreshHolder[], selfActor: string | undefined, nowMs: number): {
+export function computeEffectiveState(assignment: AssignmentStatus, freshHoldersList: FreshHolder[], selfActor: string | undefined, nowMs: number): {
   effective_state: EffectiveState;
   reason: string;
   holder?: { actor?: string; assignee?: string | null; idle_days?: number | null; last_at?: string };
@@ -339,7 +355,14 @@ function computeEffectiveState(assignment: AssignmentStatus, freshHoldersList: F
     return { effective_state: "human-held", reason: "assignee_without_claim_record", holder: { assignee: assignment.assignee } };
   }
 
-  const holderActorKey = loadActorIdentityHelper().serializeActor(record.actor);
+  // F1 fix (fix-plan iteration 1, HIGH): prefer the canonical actor_key over re-serializing
+  // record.actor. record.actor_key IS resolveActor(env).actor for records written by the fixed
+  // performLocalClaim/performLocalSupersede paths (below) — the same flat/bare string liveness
+  // whoami, `liveness claim --actor`, per-actor current.json, and pull-work's --self-actor all
+  // use — so for an explicit-override actor the self-check and the liveness join now agree with
+  // every other tool. BACK-COMPAT: records with no actor_key (every pre-fix record, every #290
+  // eval fixture) fall back to serializeActor(record.actor) exactly as before this fix.
+  const holderActorKey = record.actor_key || loadActorIdentityHelper().serializeActor(record.actor);
   if (selfActor && holderActorKey === selfActor) return { effective_state: "held", reason: "self_is_holder", holder: { actor: holderActorKey } };
 
   const fresh = freshHoldersList.find((holder) => holder.actor === holderActorKey);
@@ -466,26 +489,27 @@ function loadLivenessInputs(args: ParsedArgs): { events: AnyObj[] | null; selfAc
 // ─── local-file: claim | release | supersede (the durable-write path; real I/O by design — no
 // external mutation to defer to a skill for this provider kind, per Design Decision 1) ─────────
 
-function claimLocalFile(argv: string[]): number {
-  const args = parseArgs(argv);
-  const provider = flagString(args.flags, "provider", "local-file");
-  if (provider !== "local-file") throw new Error(`claim: --provider must be local-file (use render-claim for github); got ${provider}`);
-  const artifactRoot = requireFlag(args, "artifact-root");
-  const subjectId = requireFlag(args, "subject-id");
-  const actor = loadActorStruct(args);
+/**
+ * Wave 1 (#291) extraction: the durable-write body previously inlined inside claimLocalFile's
+ * withSubjectLock() closure, now a parameter-driven pure function so ensure-session's ownership
+ * guard (workflow-sidecar.ts, Wave 2) can reuse the EXACT same claim logic — same-actor idempotent
+ * refresh, different-actor throw, atomic write under withSubjectLock — rather than reimplementing
+ * a second, parallel claim path. claimLocalFile (CLI wrapper, below) is now a thin
+ * parse-args/print-envelope shell around this.
+ */
+export function performLocalClaim(
+  artifactRoot: string,
+  subjectId: string,
+  actor: ActorStruct,
+  opts: { ttlSeconds: number; branch: string; artifactDir: string; reason?: string; actorKey?: string },
+): AssignmentClaimRecord {
   const helper = loadActorIdentityHelper();
-
-  const ttlSecondsRaw = flagString(args.flags, "ttl-seconds", "1800") ?? "1800";
-  const ttlSeconds = Number(ttlSecondsRaw);
-  if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) throw new Error(`--ttl-seconds must be a positive number; got ${ttlSecondsRaw}`);
-  const branch = requireFlag(args, "branch");
-  const artifactDir = requireFlag(args, "artifact-dir");
-  const reason = flagString(args.flags, "reason") ?? "claim";
+  const reason = opts.reason ?? "claim";
 
   // F1 fix (fix-plan iteration 1, CRITICAL): the existing-claim check AND the write must happen
   // atomically with respect to any other `assignment-provider` invocation on the same subject —
   // see withSubjectLock()'s doc comment for the full rationale.
-  return withSubjectLock(artifactRoot, subjectId, (): number => {
+  return withSubjectLock(artifactRoot, subjectId, (): AssignmentClaimRecord => {
     const existing = readLocalRecord(artifactRoot, subjectId);
     if (existing && existing.status === "claimed") {
       const existingActorKey = helper.serializeActor(existing.actor);
@@ -502,17 +526,37 @@ function claimLocalFile(argv: string[]): number {
       role: "AssignmentClaimRecord",
       subject_id: subjectId,
       actor,
+      ...(opts.actorKey ? { actor_key: opts.actorKey } : {}),
       claimed_at: isoNow(),
-      ttl_seconds: ttlSeconds,
-      branch,
-      artifact_dir: artifactDir,
+      ttl_seconds: opts.ttlSeconds,
+      branch: opts.branch,
+      artifact_dir: opts.artifactDir,
       status: "claimed",
       audit_trail: [...(existing?.audit_trail ?? []), { at: isoNow(), transition: "claim", from_actor: null, to_actor: actor, reason }],
     };
     writeLocalRecord(artifactRoot, subjectId, record);
-    console.log(JSON.stringify({ role: "AssignmentClaimResult", subject_id: subjectId, record }, null, 2));
-    return 0;
+    return record;
   });
+}
+
+function claimLocalFile(argv: string[]): number {
+  const args = parseArgs(argv);
+  const provider = flagString(args.flags, "provider", "local-file");
+  if (provider !== "local-file") throw new Error(`claim: --provider must be local-file (use render-claim for github); got ${provider}`);
+  const artifactRoot = requireFlag(args, "artifact-root");
+  const subjectId = requireFlag(args, "subject-id");
+  const { actor, actorKey } = loadActorStruct(args);
+
+  const ttlSecondsRaw = flagString(args.flags, "ttl-seconds", "1800") ?? "1800";
+  const ttlSeconds = Number(ttlSecondsRaw);
+  if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) throw new Error(`--ttl-seconds must be a positive number; got ${ttlSecondsRaw}`);
+  const branch = requireFlag(args, "branch");
+  const artifactDir = requireFlag(args, "artifact-dir");
+  const reason = flagString(args.flags, "reason") ?? "claim";
+
+  const record = performLocalClaim(artifactRoot, subjectId, actor, { ttlSeconds, branch, artifactDir, reason, actorKey });
+  console.log(JSON.stringify({ role: "AssignmentClaimResult", subject_id: subjectId, record }, null, 2));
+  return 0;
 }
 
 function releaseLocalFile(argv: string[]): number {
@@ -540,23 +584,28 @@ function releaseLocalFile(argv: string[]): number {
   });
 }
 
-function supersedeLocalFile(argv: string[]): number {
-  const args = parseArgs(argv);
-  const provider = flagString(args.flags, "provider", "local-file");
-  if (provider !== "local-file") throw new Error(`supersede: --provider must be local-file (use render-supersede for github); got ${provider}`);
-  const artifactRoot = requireFlag(args, "artifact-root");
-  const subjectId = requireFlag(args, "subject-id");
+/**
+ * Wave 1 (#291) extraction: the durable-write body previously inlined inside supersedeLocalFile's
+ * withSubjectLock() closure, now a parameter-driven pure function so ensure-session's
+ * `--supersede-stale` takeover path (workflow-sidecar.ts, Wave 2) can reuse the EXACT same
+ * supersede logic — from-actor holder verification, ttl/branch/artifact_dir carry-forward,
+ * audit-trail append, atomic write under withSubjectLock — rather than reimplementing a second,
+ * parallel supersede path. supersedeLocalFile (CLI wrapper, below) is now a thin
+ * parse-args/print-envelope shell around this.
+ */
+export function performLocalSupersede(
+  artifactRoot: string,
+  subjectId: string,
+  fromActor: ActorStruct,
+  toActor: ActorStruct,
+  opts: { ttlSeconds?: number; branch?: string; artifactDir?: string; reason?: string; actorKey?: string } = {},
+): AssignmentClaimRecord {
   const helper = loadActorIdentityHelper();
-  const fromActor = loadActorStructFromFile(requireFlag(args, "from-actor-json"));
-  const toActor = loadActorStructFromFile(requireFlag(args, "to-actor-json"));
-  const reason = flagString(args.flags, "reason") ?? "supersede";
-  const ttlSecondsOverride = flagString(args.flags, "ttl-seconds");
-  const branchOverride = flagString(args.flags, "branch");
-  const artifactDirOverride = flagString(args.flags, "artifact-dir");
+  const reason = opts.reason ?? "supersede";
 
   // F1 fix (fix-plan iteration 1, CRITICAL): supersede mutates the same record file claim/release
   // do, under the same per-subject lock (see withSubjectLock()'s doc comment).
-  return withSubjectLock(artifactRoot, subjectId, (): number => {
+  return withSubjectLock(artifactRoot, subjectId, (): AssignmentClaimRecord => {
     const existing = readLocalRecord(artifactRoot, subjectId);
     if (!existing || existing.status !== "claimed") throw new Error(`no active claim to supersede for subject: ${subjectId}`);
 
@@ -564,7 +613,7 @@ function supersedeLocalFile(argv: string[]): number {
       throw new Error(`--from-actor-json does not match the current holder (${helper.serializeActor(existing.actor)}); refusing to supersede a claim held by someone else`);
     }
 
-    const ttlSecondsRaw = ttlSecondsOverride ?? String(existing.ttl_seconds);
+    const ttlSecondsRaw = opts.ttlSeconds != null ? String(opts.ttlSeconds) : String(existing.ttl_seconds);
     const ttlSeconds = Number(ttlSecondsRaw);
     if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) throw new Error(`--ttl-seconds must be a positive number; got ${ttlSecondsRaw}`);
 
@@ -573,17 +622,40 @@ function supersedeLocalFile(argv: string[]): number {
       role: "AssignmentClaimRecord",
       subject_id: subjectId,
       actor: toActor,
+      ...(opts.actorKey ? { actor_key: opts.actorKey } : {}),
       claimed_at: isoNow(),
       ttl_seconds: ttlSeconds,
-      branch: branchOverride ?? existing.branch,
-      artifact_dir: artifactDirOverride ?? existing.artifact_dir,
+      branch: opts.branch ?? existing.branch,
+      artifact_dir: opts.artifactDir ?? existing.artifact_dir,
       status: "claimed",
       audit_trail: [...(existing.audit_trail ?? []), { at: isoNow(), transition: "supersede", from_actor: fromActor, to_actor: toActor, reason }],
     };
     writeLocalRecord(artifactRoot, subjectId, record);
-    console.log(JSON.stringify({ role: "AssignmentSupersedeResult", subject_id: subjectId, record }, null, 2));
-    return 0;
+    return record;
   });
+}
+
+function supersedeLocalFile(argv: string[]): number {
+  const args = parseArgs(argv);
+  const provider = flagString(args.flags, "provider", "local-file");
+  if (provider !== "local-file") throw new Error(`supersede: --provider must be local-file (use render-supersede for github); got ${provider}`);
+  const artifactRoot = requireFlag(args, "artifact-root");
+  const subjectId = requireFlag(args, "subject-id");
+  const fromActor = loadActorStructFromFile(requireFlag(args, "from-actor-json"));
+  const toActor = loadActorStructFromFile(requireFlag(args, "to-actor-json"));
+  const reason = flagString(args.flags, "reason") ?? "supersede";
+  const ttlSecondsOverride = flagString(args.flags, "ttl-seconds");
+  const branchOverride = flagString(args.flags, "branch");
+  const artifactDirOverride = flagString(args.flags, "artifact-dir");
+
+  const record = performLocalSupersede(artifactRoot, subjectId, fromActor, toActor, {
+    ttlSeconds: ttlSecondsOverride != null ? Number(ttlSecondsOverride) : undefined,
+    branch: branchOverride ?? undefined,
+    artifactDir: artifactDirOverride ?? undefined,
+    reason,
+  });
+  console.log(JSON.stringify({ role: "AssignmentSupersedeResult", subject_id: subjectId, record }, null, 2));
+  return 0;
 }
 
 // ─── GitHub: render-claim | render-release | render-supersede (render, don't execute — Design
@@ -745,6 +817,18 @@ function renderSupersede(argv: string[]): number {
 
 // ─── status | list (both provider kinds) ────────────────────────────────────────────────────
 
+/**
+ * Wave 1 (#291) extraction: the local-file branch of statusCommand's assignment-layer read,
+ * mirrored exactly so ensure-session's ownership guard (workflow-sidecar.ts, Wave 2) derives an
+ * AssignmentStatus identically to the `assignment-provider status` CLI command — a single
+ * implementation, not a second parallel local-file read.
+ */
+export function readLocalAssignmentStatus(artifactRoot: string, subjectId: string): AssignmentStatus {
+  const record = readLocalRecord(artifactRoot, subjectId);
+  const active = record && record.status === "claimed" ? record : null;
+  return { subject_id: subjectId, provider: "local-file", assignee: active ? loadActorIdentityHelper().serializeActor(active.actor) : null, record: active };
+}
+
 function statusCommand(argv: string[]): number {
   const args = parseArgs(argv);
   const provider = requireFlag(args, "provider");
@@ -754,9 +838,7 @@ function statusCommand(argv: string[]): number {
   if (provider === "local-file") {
     const artifactRoot = requireFlag(args, "artifact-root");
     if (!requestedSubjectId) throw new Error("--subject-id is required for status --provider local-file");
-    const record = readLocalRecord(artifactRoot, requestedSubjectId);
-    const active = record && record.status === "claimed" ? record : null;
-    assignment = { subject_id: requestedSubjectId, provider: "local-file", assignee: active ? loadActorIdentityHelper().serializeActor(active.actor) : null, record: active };
+    assignment = readLocalAssignmentStatus(artifactRoot, requestedSubjectId);
   } else if (provider === "github") {
     const issueJsonPath = requireFlag(args, "issue-json");
     const issue = loadJsonInput(issueJsonPath) as GithubIssueDoc;
