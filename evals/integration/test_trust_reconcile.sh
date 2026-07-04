@@ -6,8 +6,9 @@
 #      Exit 1 with "trust divergence" message naming the command.
 #   2. MATCHING-PASSES:    bundle claims a command passed; CI re-runs it and it PASSES.
 #      Exit 0 (no divergence).
-#   3. NO-CHECKPOINT:      no bundle present; canonical verify passes.
-#      Exit 0 (fail-open on bundle absence, enforce fresh verify only).
+#   3. NO-CHECKPOINT:      no bundle present, no delivery/DECLARED marker; canonical
+#      verify passes. Exit 1 — bundle required by default (ADR 0022 §1); the
+#      'bundle-required-no-declared-marker' issue fires (no more fail-open on absence).
 #   4. LAUNDERING-CAUGHT:  bundle claims "something || true" passed.
 #      Exit 1 with laundering message (checked before "CI never ran" check).
 #   YAML-VALID:            .github/workflows/trust-reconcile.yml parses as valid YAML.
@@ -158,16 +159,16 @@ out3=$(TRUST_RECONCILE_COMMANDS="node -e 'process.exit(0)'" \
     --repo-root "$TMP" 2>&1)
 exit3=$?
 
-if [[ $exit3 -eq 0 ]]; then
-  _pass "NO-CHECKPOINT: exits 0 (fresh verify passes, no bundle)"
+if [[ $exit3 -ne 0 ]]; then
+  _pass "NO-CHECKPOINT: exits 1 (bundle required by default, no bundle, no marker) — got $exit3"
 else
-  _fail "NO-CHECKPOINT: expected exit 0, got $exit3 — output: $out3"
+  _fail "NO-CHECKPOINT: expected exit 1 (bundle-required by default, ADR 0022 §1), got 0 — output: $out3"
 fi
 
-if echo "$out3" | grep -q "fail-open"; then
-  _pass "NO-CHECKPOINT: output notes fail-open on bundle absence"
+if echo "$out3" | grep -q "bundle-required-no-declared-marker"; then
+  _pass "NO-CHECKPOINT: output contains 'bundle-required-no-declared-marker'"
 else
-  _fail "NO-CHECKPOINT: expected 'fail-open' in output, got: $out3"
+  _fail "NO-CHECKPOINT: expected 'bundle-required-no-declared-marker' in output, got: $out3"
 fi
 
 # Also verify: no-bundle + failing fresh verify still exits 1

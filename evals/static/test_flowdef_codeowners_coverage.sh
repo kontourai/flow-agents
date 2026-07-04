@@ -53,4 +53,10 @@ require_codeowner "src/li""b/flow-resolver.ts" "src/li""b/flow-resolver.ts"
 require_codeowner "src/cli/workflow-sidecar.ts" "src/cli/workflow-sidecar.ts"
 require_codeowner "kits/*/flows/*.flow.json" "kits/*/flows/*.flow.json (kit FlowDefinitions)"
 
+# ADR 0022 §2: delivery/DECLARED is the no-agent-delivery exemption marker
+# scripts/ci/trust-reconcile.js reads — a self-asserted governance artifact (names
+# approved_by) that must stay owner-review-gated the same as the other verify-config/
+# anchor paths above (#301's file-level half; server-side review enforcement is #225).
+require_codeowner "delivery/DECLARED" "delivery/DECLARED (ADR 0022 §2 no-agent-delivery marker)"
+
 echo "FlowDefinition-related CODEOWNERS coverage checks passed."
