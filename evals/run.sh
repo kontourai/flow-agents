@@ -201,6 +201,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_assignment_provider_github.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_stop_hook_release.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_pull_work_assignment_join.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_ensure_session_ownership_guard.sh" || result=1

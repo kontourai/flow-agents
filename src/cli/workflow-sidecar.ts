@@ -3396,7 +3396,7 @@ function loadLivenessReadHelper(): {
 // init-plan claims the work-item; advance-state heartbeats (or releases on terminal),
 // so the workflow lifecycle itself maintains the liveness claim — no manual liveness calls.
 // Additive + fail-open: a liveness-emit failure never affects the workflow command.
-const LIVENESS_TERMINAL = new Set(["delivered", "accepted", "archived"]);
+export const LIVENESS_TERMINAL = new Set(["delivered", "accepted", "archived"]);
 /**
  * Delegate to the shared pure-CJS resolver (scripts/hooks/lib/actor-identity.js), mirroring the
  * createRequire pattern used by readLivenessEvents() above. Deliberately NO inline duplicate
