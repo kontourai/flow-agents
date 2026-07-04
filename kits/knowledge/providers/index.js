@@ -11,6 +11,7 @@
 export { MarkdownVaultProvider } from "./markdown-vault/index.js";
 export { GitRepoProvider } from "./git-repo/index.js";
 export { WorkItemProvider, parseWorkItemMetadata } from "./work-item/index.js";
+export { Neo4jProvider } from "./neo4j/index.js";
 export { detectDuplicates, checkDependencyLinkIntegrity, HEALTH_VERBS } from "./health/index.js";
 export {
   EDGE_TYPES,

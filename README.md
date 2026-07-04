@@ -217,6 +217,10 @@ See [Repository Structure](docs/repository-structure.md) for the canonical map. 
 - `kits/`, `schemas/`, `packaging/`, `evals/`, `docs/`, and `integrations/` hold Flow Kit assets, contracts, package metadata, evals, durable docs, and optional integrations.
 - `dist/`, `build/`, and `_site/` are generated output. Local `.kontourai/`, `.flow-agents/`, `.codex/`, `.claude/`, telemetry, promptfoo, Veritas, and cache directories stay ignored; durable outcomes belong in docs, source, schemas, or provider records.
 
+## Graph provider (opt-in)
+
+The Knowledge Kit ships an optional `neo4j` graph provider — the owner's opt-in personal default, while the file providers remain the portfolio default. It is a queryable **materialized view** synced from the file/work-item stores (which stay the source of truth), with Cypher-backed health/query verbs when selected and graceful degradation to the file providers when no Neo4j is reachable (never a hard dependency). Opt in with `KNOWLEDGE_PROVIDER=neo4j` and see [Graph provider (opt-in)](kits/knowledge/docs/README.md#graph-provider-opt-in) for the `docker run` one-liner, env vars, sync command, and an example Cypher session.
+
 ## Documentation
 
 The [GitHub Pages site](https://kontourai.github.io/flow-agents/) is the product overview and quickstart. The repository docs are the developer reference for contracts, workflow behavior, evals, and integration boundaries. For the gate semantics underneath — definitions, runs, evidence, route-back — read the [Kontour Flow documentation](https://kontourai.github.io/flow/).
