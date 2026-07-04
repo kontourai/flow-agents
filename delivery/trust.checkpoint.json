@@ -1,29 +1,29 @@
 {
   "schema_version": "1.0",
-  "slug": "kontourai-flow-agents-313",
+  "slug": "kontourai-flow-agents-327",
   "work_item": null,
   "status": "verified",
   "phase": "verification",
-  "sealed_at": "2026-07-04T04:14:20Z",
-  "commit_sha": "445f3d11dd9c9f77dafb1e23d59d1b1e6436e84b",
+  "sealed_at": "2026-07-04T04:49:25Z",
+  "commit_sha": "fd6ab19b6e6510faf62d456fda1eda6d8c0a80a9",
   "checkpoint": {
-    "asOf": "2026-07-04T04:14:20.186Z",
+    "asOf": "2026-07-04T04:49:25.240Z",
     "statusByClaimId": {
-      "kontourai-flow-agents-313-ac1-schema-valid-delta.flow-agents-workflow.ac1-promote-sub-flow-on-a-real-modeled-session-kontourai-flow-agents-287-emits-a-schema-valid-draft-decision-delta-with-pr-merge-sha-session-archive-provenance-validated-against-the-real-check-decisions-cjs-node-test-kits-knowledge-promote-promote-test-js-green-part-of-eval-static": "verified",
-      "kontourai-flow-agents-313-ac2-contradiction-report.flow-agents-workflow.ac2-seeded-contradiction-fixture-yields-a-duplicate-detection-report-naming-both-topics-plus-a-schema-valid-merge-repair-proposal-naming-a-merge-target": "verified",
-      "kontourai-flow-agents-313-ac3-zero-external-writes.flow-agents-workflow.ac3-filesystem-diff-shows-zero-writes-outside-the-session-proposal-dir-source-repo-registry-byte-identical-before-after": "verified",
-      "kontourai-flow-agents-313-registry-green.flow-agents-workflow.check-decisions-green-23-topics-knowledge-static-lane-29-passing-eval-static-exit-0": "verified",
-      "kontourai-flow-agents-313-promotion.flow-agents-workflow.promoted-durable-residue-for-313-knowledge-promote-sub-flow-decision-topic-context-md-subject-noun": "verified",
-      "kontourai-flow-agents-313-draft-delta-with-provenance-contradiction-report-merge-proposal-zero-writes-outside-session-proposal-dir.flow-agents-workflow.draft-delta-with-provenance-contradiction-report-merge-proposal-zero-writes-outside-session-proposal-dir": "proposed"
+      "kontourai-flow-agents-327-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-green-includes-kits-knowledge-providers-conformance-neo4j-read-side-ac2-neo4j-unit-suite-sync-idempotency-ac1-canonical-queries-ac3-degradation-ac4": "verified",
+      "kontourai-flow-agents-327-decision-registry.flow-agents-workflow.npm-run-check-decisions-green-24-topics-graph-knowledge-provider-decision-topic-added": "verified",
+      "kontourai-flow-agents-327-ac1.flow-agents-workflow.ac1": "verified",
+      "kontourai-flow-agents-327-ac2.flow-agents-workflow.ac2": "verified",
+      "kontourai-flow-agents-327-ac3.flow-agents-workflow.ac3": "verified",
+      "kontourai-flow-agents-327-ac4.flow-agents-workflow.ac4": "verified"
     },
-    "throughEventCreatedAt": "2026-07-04T04:14:10Z",
+    "throughEventCreatedAt": "2026-07-04T04:49:25Z",
     "throughEventCreatedAtByClaimId": {
-      "kontourai-flow-agents-313-ac1-schema-valid-delta.flow-agents-workflow.ac1-promote-sub-flow-on-a-real-modeled-session-kontourai-flow-agents-287-emits-a-schema-valid-draft-decision-delta-with-pr-merge-sha-session-archive-provenance-validated-against-the-real-check-decisions-cjs-node-test-kits-knowledge-promote-promote-test-js-green-part-of-eval-static": "2026-07-04T04:14:10Z",
-      "kontourai-flow-agents-313-ac2-contradiction-report.flow-agents-workflow.ac2-seeded-contradiction-fixture-yields-a-duplicate-detection-report-naming-both-topics-plus-a-schema-valid-merge-repair-proposal-naming-a-merge-target": "2026-07-04T04:14:10Z",
-      "kontourai-flow-agents-313-ac3-zero-external-writes.flow-agents-workflow.ac3-filesystem-diff-shows-zero-writes-outside-the-session-proposal-dir-source-repo-registry-byte-identical-before-after": "2026-07-04T04:14:10Z",
-      "kontourai-flow-agents-313-registry-green.flow-agents-workflow.check-decisions-green-23-topics-knowledge-static-lane-29-passing-eval-static-exit-0": "2026-07-04T04:14:10Z",
-      "kontourai-flow-agents-313-promotion.flow-agents-workflow.promoted-durable-residue-for-313-knowledge-promote-sub-flow-decision-topic-context-md-subject-noun": "2026-07-04T04:14:10Z",
-      "kontourai-flow-agents-313-draft-delta-with-provenance-contradiction-report-merge-proposal-zero-writes-outside-session-proposal-dir.flow-agents-workflow.draft-delta-with-provenance-contradiction-report-merge-proposal-zero-writes-outside-session-proposal-dir": null
+      "kontourai-flow-agents-327-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-green-includes-kits-knowledge-providers-conformance-neo4j-read-side-ac2-neo4j-unit-suite-sync-idempotency-ac1-canonical-queries-ac3-degradation-ac4": "2026-07-04T04:49:25Z",
+      "kontourai-flow-agents-327-decision-registry.flow-agents-workflow.npm-run-check-decisions-green-24-topics-graph-knowledge-provider-decision-topic-added": "2026-07-04T04:49:25Z",
+      "kontourai-flow-agents-327-ac1.flow-agents-workflow.ac1": "2026-07-04T04:49:25Z",
+      "kontourai-flow-agents-327-ac2.flow-agents-workflow.ac2": "2026-07-04T04:49:25Z",
+      "kontourai-flow-agents-327-ac3.flow-agents-workflow.ac3": "2026-07-04T04:49:25Z",
+      "kontourai-flow-agents-327-ac4.flow-agents-workflow.ac4": "2026-07-04T04:49:25Z"
     },
     "statusFunctionVersion": "2"
   }

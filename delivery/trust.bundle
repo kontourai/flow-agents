@@ -3,205 +3,153 @@
   "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
   "claims": [
     {
-      "id": "kontourai-flow-agents-313-ac1-schema-valid-delta.flow-agents-workflow.ac1-promote-sub-flow-on-a-real-modeled-session-kontourai-flow-agents-287-emits-a-schema-valid-draft-decision-delta-with-pr-merge-sha-session-archive-provenance-validated-against-the-real-check-decisions-cjs-node-test-kits-knowledge-promote-promote-test-js-green-part-of-eval-static",
-      "subjectType": "artifact",
-      "subjectId": "kontourai-flow-agents-313/ac1-schema-valid-delta",
+      "id": "kontourai-flow-agents-327-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-green-includes-kits-knowledge-providers-conformance-neo4j-read-side-ac2-neo4j-unit-suite-sync-idempotency-ac1-canonical-queries-ac3-degradation-ac4",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-327/static-eval-suite",
       "facet": "flow-agents.workflow",
-      "claimType": "knowledge.promote.ingest",
-      "fieldOrBehavior": "AC1: promote sub-flow on a real-modeled session (kontourai-flow-agents-287) emits a schema-valid draft decision delta with PR/merge-SHA/session-archive provenance; validated against the real check-decisions.cjs. node --test kits/knowledge/promote/promote.test.js green (part of eval:static).",
+      "claimType": "workflow.check.test",
+      "fieldOrBehavior": "bash evals/run.sh static green — includes kits/knowledge providers conformance (neo4j read side AC2), neo4j unit suite (sync idempotency AC1, canonical queries AC3, degradation AC4)",
       "value": "pass",
-      "createdAt": "2026-07-04T04:14:10Z",
-      "updatedAt": "2026-07-04T04:14:10Z",
+      "createdAt": "2026-07-04T04:49:25Z",
+      "updatedAt": "2026-07-04T04:49:25Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:knowledge.promote.ingest:policy_rule",
+      "verificationPolicyId": "policy:workflow.check.test:test_output",
       "metadata": {
         "origin": "check",
-        "check_kind": "policy"
+        "check_kind": "test"
       },
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-313-ac2-contradiction-report.flow-agents-workflow.ac2-seeded-contradiction-fixture-yields-a-duplicate-detection-report-naming-both-topics-plus-a-schema-valid-merge-repair-proposal-naming-a-merge-target",
-      "subjectType": "artifact",
-      "subjectId": "kontourai-flow-agents-313/ac2-contradiction-report",
+      "id": "kontourai-flow-agents-327-decision-registry.flow-agents-workflow.npm-run-check-decisions-green-24-topics-graph-knowledge-provider-decision-topic-added",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-327/decision-registry",
       "facet": "flow-agents.workflow",
-      "claimType": "knowledge.promote.ingest",
-      "fieldOrBehavior": "AC2: seeded contradiction fixture yields a duplicate-detection report naming both topics plus a schema-valid merge-repair proposal naming a merge target.",
+      "claimType": "workflow.check.test",
+      "fieldOrBehavior": "npm run check:decisions green (24 topics) — graph-knowledge-provider decision topic added",
       "value": "pass",
-      "createdAt": "2026-07-04T04:14:10Z",
-      "updatedAt": "2026-07-04T04:14:10Z",
+      "createdAt": "2026-07-04T04:49:25Z",
+      "updatedAt": "2026-07-04T04:49:25Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:knowledge.promote.ingest:policy_rule",
+      "verificationPolicyId": "policy:workflow.check.test:test_output",
       "metadata": {
         "origin": "check",
-        "check_kind": "policy"
+        "check_kind": "test"
       },
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-313-ac3-zero-external-writes.flow-agents-workflow.ac3-filesystem-diff-shows-zero-writes-outside-the-session-proposal-dir-source-repo-registry-byte-identical-before-after",
-      "subjectType": "artifact",
-      "subjectId": "kontourai-flow-agents-313/ac3-zero-external-writes",
+      "id": "kontourai-flow-agents-327-ac1.flow-agents-workflow.ac1",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-327/ac1",
       "facet": "flow-agents.workflow",
-      "claimType": "knowledge.promote.ingest",
-      "fieldOrBehavior": "AC3: filesystem diff shows zero writes outside the session/proposal dir; source repo registry byte-identical before/after.",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "ac1",
       "value": "pass",
-      "createdAt": "2026-07-04T04:14:10Z",
-      "updatedAt": "2026-07-04T04:14:10Z",
+      "createdAt": "2026-07-04T04:49:25Z",
+      "updatedAt": "2026-07-04T04:49:25Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:knowledge.promote.ingest:policy_rule",
-      "metadata": {
-        "origin": "check",
-        "check_kind": "policy"
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-313-registry-green.flow-agents-workflow.check-decisions-green-23-topics-knowledge-static-lane-29-passing-eval-static-exit-0",
-      "subjectType": "artifact",
-      "subjectId": "kontourai-flow-agents-313/registry-green",
-      "facet": "flow-agents.workflow",
-      "claimType": "knowledge.promote.ingest",
-      "fieldOrBehavior": "check:decisions green (23 topics); knowledge static lane 29 passing; eval:static exit 0.",
-      "value": "pass",
-      "createdAt": "2026-07-04T04:14:10Z",
-      "updatedAt": "2026-07-04T04:14:10Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:knowledge.promote.ingest:policy_rule",
-      "metadata": {
-        "origin": "check",
-        "check_kind": "policy"
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-313-promotion.flow-agents-workflow.promoted-durable-residue-for-313-knowledge-promote-sub-flow-decision-topic-context-md-subject-noun",
-      "subjectType": "artifact",
-      "subjectId": "kontourai-flow-agents-313/promotion",
-      "facet": "flow-agents.workflow",
-      "claimType": "knowledge.promote.ingest",
-      "fieldOrBehavior": "Promoted durable residue for #313: knowledge-promote-sub-flow decision topic + CONTEXT.md subject noun.",
-      "value": "pass",
-      "createdAt": "2026-07-04T04:14:10Z",
-      "updatedAt": "2026-07-04T04:14:10Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:knowledge.promote.ingest:policy_rule",
-      "metadata": {
-        "origin": "check",
-        "check_kind": "policy",
-        "promotion": {
-          "schema_version": "1.0",
-          "none": false,
-          "targets": [
-            "docs/decisions/knowledge-promote-sub-flow.md",
-            "CONTEXT.md"
-          ],
-          "promoted_at": "2026-07-04T04:14:10Z"
-        }
-      },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-313-draft-delta-with-provenance-contradiction-report-merge-proposal-zero-writes-outside-session-proposal-dir.flow-agents-workflow.draft-delta-with-provenance-contradiction-report-merge-proposal-zero-writes-outside-session-proposal-dir",
-      "subjectType": "artifact",
-      "subjectId": "kontourai-flow-agents-313/draft-delta-with-provenance-contradiction-report-merge-proposal-zero-writes-outside-session-proposal-dir",
-      "facet": "flow-agents.workflow",
-      "claimType": "knowledge.promote.ingest",
-      "fieldOrBehavior": "Draft delta with provenance; contradiction report+merge proposal; zero writes outside session/proposal dir",
-      "value": "pending",
-      "createdAt": "2026-07-04T04:14:10Z",
-      "updatedAt": "2026-07-04T04:14:10Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:knowledge.promote.ingest",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
       "metadata": {
         "origin": "acceptance"
       },
-      "status": "proposed"
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-327-ac2.flow-agents-workflow.ac2",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-327/ac2",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "ac2",
+      "value": "pass",
+      "createdAt": "2026-07-04T04:49:25Z",
+      "updatedAt": "2026-07-04T04:49:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-327-ac3.flow-agents-workflow.ac3",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-327/ac3",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "ac3",
+      "value": "pass",
+      "createdAt": "2026-07-04T04:49:25Z",
+      "updatedAt": "2026-07-04T04:49:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-327-ac4.flow-agents-workflow.ac4",
+      "subjectType": "workflow-acceptance-criterion",
+      "subjectId": "kontourai-flow-agents-327/ac4",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.acceptance.criterion",
+      "fieldOrBehavior": "ac4",
+      "value": "pass",
+      "createdAt": "2026-07-04T04:49:25Z",
+      "updatedAt": "2026-07-04T04:49:25Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
     }
   ],
   "evidence": [
     {
-      "id": "ev:kontourai-flow-agents-313-ac1-schema-valid-delta.flow-agents-workflow.ac1-promote-sub-flow-on-a-real-modeled-session-kontourai-flow-agents-287-emits-a-schema-valid-draft-decision-delta-with-pr-merge-sha-session-archive-provenance-validated-against-the-real-check-decisions-cjs-node-test-kits-knowledge-promote-promote-test-js-green-part-of-eval-static",
-      "claimId": "kontourai-flow-agents-313-ac1-schema-valid-delta.flow-agents-workflow.ac1-promote-sub-flow-on-a-real-modeled-session-kontourai-flow-agents-287-emits-a-schema-valid-draft-decision-delta-with-pr-merge-sha-session-archive-provenance-validated-against-the-real-check-decisions-cjs-node-test-kits-knowledge-promote-promote-test-js-green-part-of-eval-static",
-      "evidenceType": "policy_rule",
-      "method": "auditability",
-      "sourceRef": "kontourai-flow-agents-313/evidence.json",
-      "excerptOrSummary": "AC1: promote sub-flow on a real-modeled session (kontourai-flow-agents-287) emits a schema-valid draft decision delta with PR/merge-SHA/session-archive provenance; validated against the real check-decisions.cjs. node --test kits/knowledge/promote/promote.test.js green (part of eval:static).",
-      "observedAt": "2026-07-04T04:14:10Z",
+      "id": "ev:kontourai-flow-agents-327-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-green-includes-kits-knowledge-providers-conformance-neo4j-read-side-ac2-neo4j-unit-suite-sync-idempotency-ac1-canonical-queries-ac3-degradation-ac4",
+      "claimId": "kontourai-flow-agents-327-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-green-includes-kits-knowledge-providers-conformance-neo4j-read-side-ac2-neo4j-unit-suite-sync-idempotency-ac1-canonical-queries-ac3-degradation-ac4",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-327/evidence.json",
+      "excerptOrSummary": "bash evals/run.sh static green — includes kits/knowledge providers conformance (neo4j read side AC2), neo4j unit suite (sync idempotency AC1, canonical queries AC3, degradation AC4)",
+      "observedAt": "2026-07-04T04:49:25Z",
       "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/run.sh static",
+        "isError": false
+      }
     },
     {
-      "id": "ev:kontourai-flow-agents-313-ac2-contradiction-report.flow-agents-workflow.ac2-seeded-contradiction-fixture-yields-a-duplicate-detection-report-naming-both-topics-plus-a-schema-valid-merge-repair-proposal-naming-a-merge-target",
-      "claimId": "kontourai-flow-agents-313-ac2-contradiction-report.flow-agents-workflow.ac2-seeded-contradiction-fixture-yields-a-duplicate-detection-report-naming-both-topics-plus-a-schema-valid-merge-repair-proposal-naming-a-merge-target",
-      "evidenceType": "policy_rule",
-      "method": "auditability",
-      "sourceRef": "kontourai-flow-agents-313/evidence.json",
-      "excerptOrSummary": "AC2: seeded contradiction fixture yields a duplicate-detection report naming both topics plus a schema-valid merge-repair proposal naming a merge target.",
-      "observedAt": "2026-07-04T04:14:10Z",
+      "id": "ev:kontourai-flow-agents-327-decision-registry.flow-agents-workflow.npm-run-check-decisions-green-24-topics-graph-knowledge-provider-decision-topic-added",
+      "claimId": "kontourai-flow-agents-327-decision-registry.flow-agents-workflow.npm-run-check-decisions-green-24-topics-graph-knowledge-provider-decision-topic-added",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-327/evidence.json",
+      "excerptOrSummary": "npm run check:decisions green (24 topics) — graph-knowledge-provider decision topic added",
+      "observedAt": "2026-07-04T04:49:25Z",
       "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
-    },
-    {
-      "id": "ev:kontourai-flow-agents-313-ac3-zero-external-writes.flow-agents-workflow.ac3-filesystem-diff-shows-zero-writes-outside-the-session-proposal-dir-source-repo-registry-byte-identical-before-after",
-      "claimId": "kontourai-flow-agents-313-ac3-zero-external-writes.flow-agents-workflow.ac3-filesystem-diff-shows-zero-writes-outside-the-session-proposal-dir-source-repo-registry-byte-identical-before-after",
-      "evidenceType": "policy_rule",
-      "method": "auditability",
-      "sourceRef": "kontourai-flow-agents-313/evidence.json",
-      "excerptOrSummary": "AC3: filesystem diff shows zero writes outside the session/proposal dir; source repo registry byte-identical before/after.",
-      "observedAt": "2026-07-04T04:14:10Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
-    },
-    {
-      "id": "ev:kontourai-flow-agents-313-registry-green.flow-agents-workflow.check-decisions-green-23-topics-knowledge-static-lane-29-passing-eval-static-exit-0",
-      "claimId": "kontourai-flow-agents-313-registry-green.flow-agents-workflow.check-decisions-green-23-topics-knowledge-static-lane-29-passing-eval-static-exit-0",
-      "evidenceType": "policy_rule",
-      "method": "auditability",
-      "sourceRef": "kontourai-flow-agents-313/evidence.json",
-      "excerptOrSummary": "check:decisions green (23 topics); knowledge static lane 29 passing; eval:static exit 0.",
-      "observedAt": "2026-07-04T04:14:10Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
-    },
-    {
-      "id": "ev:kontourai-flow-agents-313-promotion.flow-agents-workflow.promoted-durable-residue-for-313-knowledge-promote-sub-flow-decision-topic-context-md-subject-noun",
-      "claimId": "kontourai-flow-agents-313-promotion.flow-agents-workflow.promoted-durable-residue-for-313-knowledge-promote-sub-flow-decision-topic-context-md-subject-noun",
-      "evidenceType": "policy_rule",
-      "method": "auditability",
-      "sourceRef": "kontourai-flow-agents-313/evidence.json",
-      "excerptOrSummary": "Promoted durable residue for #313: knowledge-promote-sub-flow decision topic + CONTEXT.md subject noun.",
-      "observedAt": "2026-07-04T04:14:10Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
-      "passing": true
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "npm run check:decisions --",
+        "isError": false
+      }
     }
   ],
   "policies": [
     {
-      "id": "policy:workflow.check.policy:policy_rule",
-      "claimType": "workflow.check.policy",
+      "id": "policy:workflow.check.test:test_output",
+      "claimType": "workflow.check.test",
       "requiredEvidence": [
-        "policy_rule"
+        "test_output"
       ],
       "acceptanceCriteria": [
-        "A verified verification event must support a workflow.check.policy claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "high"
-    },
-    {
-      "id": "policy:knowledge.promote.ingest:policy_rule",
-      "claimType": "knowledge.promote.ingest",
-      "requiredEvidence": [
-        "policy_rule"
-      ],
-      "acceptanceCriteria": [
-        "A verified verification event must support a knowledge.promote.ingest claim."
+        "A verified verification event must support a workflow.check.test claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -225,83 +173,72 @@
       "stalenessTriggers": [],
       "conflictRules": [],
       "impactLevel": "high"
-    },
-    {
-      "id": "policy:knowledge.promote.ingest",
-      "claimType": "knowledge.promote.ingest",
-      "requiredEvidence": [],
-      "acceptanceCriteria": [
-        "A verified verification event must support a knowledge.promote.ingest claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "high"
     }
   ],
   "events": [
     {
-      "id": "evt:kontourai-flow-agents-313-ac1-schema-valid-delta.flow-agents-workflow.ac1-promote-sub-flow-on-a-real-modeled-session-kontourai-flow-agents-287-emits-a-schema-valid-draft-decision-delta-with-pr-merge-sha-session-archive-provenance-validated-against-the-real-check-decisions-cjs-node-test-kits-knowledge-promote-promote-test-js-green-part-of-eval-static",
-      "claimId": "kontourai-flow-agents-313-ac1-schema-valid-delta.flow-agents-workflow.ac1-promote-sub-flow-on-a-real-modeled-session-kontourai-flow-agents-287-emits-a-schema-valid-draft-decision-delta-with-pr-merge-sha-session-archive-provenance-validated-against-the-real-check-decisions-cjs-node-test-kits-knowledge-promote-promote-test-js-green-part-of-eval-static",
+      "id": "evt:kontourai-flow-agents-327-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-green-includes-kits-knowledge-providers-conformance-neo4j-read-side-ac2-neo4j-unit-suite-sync-idempotency-ac1-canonical-queries-ac3-degradation-ac4",
+      "claimId": "kontourai-flow-agents-327-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-green-includes-kits-knowledge-providers-conformance-neo4j-read-side-ac2-neo4j-unit-suite-sync-idempotency-ac1-canonical-queries-ac3-degradation-ac4",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-313-ac1-schema-valid-delta.flow-agents-workflow.ac1-promote-sub-flow-on-a-real-modeled-session-kontourai-flow-agents-287-emits-a-schema-valid-draft-decision-delta-with-pr-merge-sha-session-archive-provenance-validated-against-the-real-check-decisions-cjs-node-test-kits-knowledge-promote-promote-test-js-green-part-of-eval-static"
+        "ev:kontourai-flow-agents-327-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-green-includes-kits-knowledge-providers-conformance-neo4j-read-side-ac2-neo4j-unit-suite-sync-idempotency-ac1-canonical-queries-ac3-degradation-ac4"
       ],
-      "createdAt": "2026-07-04T04:14:10Z",
-      "verifiedAt": "2026-07-04T04:14:10Z"
+      "createdAt": "2026-07-04T04:49:25Z",
+      "verifiedAt": "2026-07-04T04:49:25Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-313-ac2-contradiction-report.flow-agents-workflow.ac2-seeded-contradiction-fixture-yields-a-duplicate-detection-report-naming-both-topics-plus-a-schema-valid-merge-repair-proposal-naming-a-merge-target",
-      "claimId": "kontourai-flow-agents-313-ac2-contradiction-report.flow-agents-workflow.ac2-seeded-contradiction-fixture-yields-a-duplicate-detection-report-naming-both-topics-plus-a-schema-valid-merge-repair-proposal-naming-a-merge-target",
+      "id": "evt:kontourai-flow-agents-327-decision-registry.flow-agents-workflow.npm-run-check-decisions-green-24-topics-graph-knowledge-provider-decision-topic-added",
+      "claimId": "kontourai-flow-agents-327-decision-registry.flow-agents-workflow.npm-run-check-decisions-green-24-topics-graph-knowledge-provider-decision-topic-added",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-313-ac2-contradiction-report.flow-agents-workflow.ac2-seeded-contradiction-fixture-yields-a-duplicate-detection-report-naming-both-topics-plus-a-schema-valid-merge-repair-proposal-naming-a-merge-target"
+        "ev:kontourai-flow-agents-327-decision-registry.flow-agents-workflow.npm-run-check-decisions-green-24-topics-graph-knowledge-provider-decision-topic-added"
       ],
-      "createdAt": "2026-07-04T04:14:10Z",
-      "verifiedAt": "2026-07-04T04:14:10Z"
+      "createdAt": "2026-07-04T04:49:25Z",
+      "verifiedAt": "2026-07-04T04:49:25Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-313-ac3-zero-external-writes.flow-agents-workflow.ac3-filesystem-diff-shows-zero-writes-outside-the-session-proposal-dir-source-repo-registry-byte-identical-before-after",
-      "claimId": "kontourai-flow-agents-313-ac3-zero-external-writes.flow-agents-workflow.ac3-filesystem-diff-shows-zero-writes-outside-the-session-proposal-dir-source-repo-registry-byte-identical-before-after",
+      "id": "evt:kontourai-flow-agents-327-ac1.flow-agents-workflow.ac1",
+      "claimId": "kontourai-flow-agents-327-ac1.flow-agents-workflow.ac1",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
-      "evidenceIds": [
-        "ev:kontourai-flow-agents-313-ac3-zero-external-writes.flow-agents-workflow.ac3-filesystem-diff-shows-zero-writes-outside-the-session-proposal-dir-source-repo-registry-byte-identical-before-after"
-      ],
-      "createdAt": "2026-07-04T04:14:10Z",
-      "verifiedAt": "2026-07-04T04:14:10Z"
+      "evidenceIds": [],
+      "createdAt": "2026-07-04T04:49:25Z",
+      "verifiedAt": "2026-07-04T04:49:25Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-313-registry-green.flow-agents-workflow.check-decisions-green-23-topics-knowledge-static-lane-29-passing-eval-static-exit-0",
-      "claimId": "kontourai-flow-agents-313-registry-green.flow-agents-workflow.check-decisions-green-23-topics-knowledge-static-lane-29-passing-eval-static-exit-0",
+      "id": "evt:kontourai-flow-agents-327-ac2.flow-agents-workflow.ac2",
+      "claimId": "kontourai-flow-agents-327-ac2.flow-agents-workflow.ac2",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
-      "evidenceIds": [
-        "ev:kontourai-flow-agents-313-registry-green.flow-agents-workflow.check-decisions-green-23-topics-knowledge-static-lane-29-passing-eval-static-exit-0"
-      ],
-      "createdAt": "2026-07-04T04:14:10Z",
-      "verifiedAt": "2026-07-04T04:14:10Z"
+      "evidenceIds": [],
+      "createdAt": "2026-07-04T04:49:25Z",
+      "verifiedAt": "2026-07-04T04:49:25Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-313-promotion.flow-agents-workflow.promoted-durable-residue-for-313-knowledge-promote-sub-flow-decision-topic-context-md-subject-noun",
-      "claimId": "kontourai-flow-agents-313-promotion.flow-agents-workflow.promoted-durable-residue-for-313-knowledge-promote-sub-flow-decision-topic-context-md-subject-noun",
+      "id": "evt:kontourai-flow-agents-327-ac3.flow-agents-workflow.ac3",
+      "claimId": "kontourai-flow-agents-327-ac3.flow-agents-workflow.ac3",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
-      "evidenceIds": [
-        "ev:kontourai-flow-agents-313-promotion.flow-agents-workflow.promoted-durable-residue-for-313-knowledge-promote-sub-flow-decision-topic-context-md-subject-noun"
-      ],
-      "createdAt": "2026-07-04T04:14:10Z",
-      "verifiedAt": "2026-07-04T04:14:10Z"
+      "evidenceIds": [],
+      "createdAt": "2026-07-04T04:49:25Z",
+      "verifiedAt": "2026-07-04T04:49:25Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-327-ac4.flow-agents-workflow.ac4",
+      "claimId": "kontourai-flow-agents-327-ac4.flow-agents-workflow.ac4",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-04T04:49:25Z",
+      "verifiedAt": "2026-07-04T04:49:25Z"
     }
   ]
 }
