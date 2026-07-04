@@ -20,6 +20,23 @@ Inherited from primitives + diagnosis:
 | tool-verifier | verify-work |
 | tool-playwright | diagnosis (reproduce) + verify-work |
 
+## Model Routing
+
+Delegates are spawned with an explicit model override resolved from
+`.datum/config.json` via `npx @kontourai/datum resolve <role> --json` — see
+`context/contracts/execution-contract.md` § Delegation: Model Routing:
+
+| Delegate | Role |
+|---|---|
+| tool-worker | `delegate-mechanical` for fully-specified mechanical slices, `delegate-implementation` for precisely-planned implementation, `delegate-design` when a slice needs design latitude |
+| tool-planner | `delegate-design` |
+| tool-code-reviewer / tool-security-reviewer | `delegate-implementation` by default, raised to the worker's tier when higher — never below the tier of the checked work (Goodhart guard) |
+| tool-verifier / tool-playwright | `delegate-implementation` by default, raised to the worker's tier when higher — never below the tier of the checked work (Goodhart guard) |
+
+On a review/verify gate failure, re-dispatch the fix one tier higher and record
+the escalation (contract § Escalation on gate failure). Fallback: inherit the
+session model when datum/config is absent, noted in the artifact.
+
 ## Orchestrator Rule
 
 You never use `read`, `glob`, `grep`, or `code` on source files. All codebase analysis goes through tool-planner. All review goes through review-work. All verification goes through tool-verifier or tool-playwright.

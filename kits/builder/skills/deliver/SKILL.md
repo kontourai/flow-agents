@@ -32,11 +32,16 @@ source of truth for the mapping):
 |---|---|
 | tool-worker | `delegate-mechanical` for fully-specified mechanical tasks, `delegate-implementation` for precisely-planned implementation, `delegate-design` when the task needs design latitude |
 | tool-planner | `delegate-design` |
-| tool-code-reviewer / tool-security-reviewer | `delegate-implementation` |
-| tool-verifier / tool-playwright | `delegate-implementation` |
+| tool-code-reviewer / tool-security-reviewer | `delegate-implementation` by default, raised to the worker's tier when higher — never below the tier of the checked work (Goodhart guard) |
+| tool-verifier / tool-playwright | `delegate-implementation` by default, raised to the worker's tier when higher — never below the tier of the checked work (Goodhart guard) |
 
-If datum or the config is absent, fall back to the runtime's inherited model
-and note the fallback in the session artifact.
+On a review/verify gate failure, re-dispatch the fix one tier higher on the
+ladder and record the escalation in the session artifact via
+`record-agent-event --kind escalation --role <higher> --escalated-from <lower>`
+(see `context/contracts/execution-contract.md` § Escalation on gate failure and
+§ Routing decisions in the run artifact). If datum or the config is absent, fall
+back to the runtime's inherited model and note the fallback in the session
+artifact.
 
 ## Orchestrator Rule
 

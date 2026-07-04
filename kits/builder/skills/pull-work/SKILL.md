@@ -26,6 +26,16 @@ Select ready backlog work and prepare a bounded execution handoff without implem
 - Every pull-work artifact must correlate to selected backlog refs, shepherding refs for active PRs/sidecars/issues being finished before new work, or `backlog_gap=true` with a route to `idea-to-backlog`; direct audits with no new selection must record `shepherding_item_ids` or `backlog_gap`, not free-floating implementation scope.
 - A stale broad continuation instruction, such as "keep going", "pick up the next two", or "continue after merge", may allow queue inspection but must not bypass per-item pickup Probe evidence.
 
+## Model Routing
+
+Board selection, WIP/shepherding scans, dependency joins, liveness preflight, and
+issue-sync-style bookkeeping are fully-specified mechanical work: when this skill
+delegates them, resolve the `delegate-mechanical` role from `.datum/config.json`
+(`npx @kontourai/datum resolve delegate-mechanical --json`) and pass the resolved
+model explicitly. See `context/contracts/execution-contract.md` § Delegation:
+Model Routing. Fallback: inherit the session model when datum/config is absent,
+noted in the artifact.
+
 ## Inputs
 
 - Repository or working directory.

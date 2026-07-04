@@ -24,6 +24,16 @@ This skill is modeled after Matt Pocock's `grill-me`: interview the user relentl
 - Stop when shared understanding exists, or when the remaining uncertainty is explicitly recorded as an accepted gap.
 - Do not silently convert uncertainty into implementation work.
 
+## Model Routing
+
+When this skill delegates its probing/alignment work, resolve the
+`delegate-design` role from `.datum/config.json`
+(`npx @kontourai/datum resolve delegate-design --json`) and pass the resolved
+model explicitly — probing a goal, design, or recovery path needs design
+latitude, so it routes to the design tier. See
+`context/contracts/execution-contract.md` § Delegation: Model Routing. Fallback:
+inherit the session model when datum/config is absent, noted in the artifact.
+
 ## When To Use
 
 Use this skill for:

@@ -21,6 +21,16 @@ Convert raw ideas into shaped, prioritized, executable backlog without starting 
 - Keep separate ideas separate until a shared outcome, hard dependency, or sequencing reason justifies bundling them.
 - Push back when the user blends unrelated ideas, and ask them to justify why the ideas belong together before shaping bundled work.
 
+## Model Routing
+
+When this skill delegates its shaping work (opportunity review, option
+exploration, slicing), resolve the `delegate-design` role from
+`.datum/config.json` (`npx @kontourai/datum resolve delegate-design --json`) and
+pass the resolved model explicitly — shaping a raw idea into a backlog needs
+design latitude, so it routes to the design tier. See
+`context/contracts/execution-contract.md` § Delegation: Model Routing. Fallback:
+inherit the session model when datum/config is absent, noted in the artifact.
+
 ## Artifact Contract
 
 Create or update `.kontourai/flow-agents/<slug>/<slug>--idea-to-backlog.md` with:

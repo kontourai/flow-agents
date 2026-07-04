@@ -25,6 +25,23 @@ Same as deliver (inherited from primitives):
 | tool-verifier | verify-work (with coverage check) |
 | tool-playwright | verify-work (if UI) |
 
+## Model Routing
+
+Delegates are spawned with an explicit model override resolved from
+`.datum/config.json` via `npx @kontourai/datum resolve <role> --json` — see
+`context/contracts/execution-contract.md` § Delegation: Model Routing:
+
+| Delegate | Role |
+|---|---|
+| tool-worker | `delegate-mechanical` for fully-specified mechanical slices, `delegate-implementation` for precisely-planned implementation (RED/GREEN/REFACTOR), `delegate-design` when a slice needs design latitude |
+| tool-planner | `delegate-design` |
+| tool-code-reviewer / tool-security-reviewer | `delegate-implementation` by default, raised to the worker's tier when higher — never below the tier of the checked work (Goodhart guard) |
+| tool-verifier / tool-playwright | `delegate-implementation` by default, raised to the worker's tier when higher — never below the tier of the checked work (Goodhart guard) |
+
+On a review/verify gate failure, re-dispatch the fix one tier higher and record
+the escalation (contract § Escalation on gate failure). Fallback: inherit the
+session model when datum/config is absent, noted in the artifact.
+
 ## Orchestrator Rule
 
 Same as deliver: you never touch source files. You coordinate the primitives with TDD-specific context.
