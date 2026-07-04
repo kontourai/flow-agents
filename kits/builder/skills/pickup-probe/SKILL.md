@@ -115,15 +115,15 @@ When the gate fails, record `--status fail` with `--expectation pickup-probe-rea
 
 
 
-## Docs And ADR Policy
+## Docs-Write Policy: Two-Delta Emission
 
-`pickup-probe` may identify durable terminology and decision gaps, but it must keep documentation changes narrow:
+`pickup-probe` may identify durable terminology and decision gaps, but it must keep documentation changes narrow. Per `context/contracts/probe-docs-write-contract.md`, a **decision subject** crystallizing during pickup probing (a durable, reusable answer to a named domain question — not an implementation detail or transient planning choice) gets both deltas in the same motion:
 
-- Update `CONTEXT.md` inline only for glossary-style durable terminology decisions, using tight one- or two-sentence definitions and `_Avoid_` terms when useful. Keep implementation details out of `CONTEXT.md`.
+- Update `CONTEXT.md` inline only for glossary-style durable terminology decisions, using tight one- or two-sentence definitions and `_Avoid_` terms when useful. Keep implementation details out of `CONTEXT.md`. Coin the subject term first if it is not already a glossary entry — vocabulary is the decision registry's topic namespace (`context/contracts/decision-registry-contract.md` § Slug rules) — or refine the existing entry when a decision changes what it says.
 - If a `CONTEXT-MAP.md` exists, update the relevant context instead of assuming the root glossary owns the term.
 - Create a lazy context file only when a resolved term or workflow concept has no existing home.
 - Do not create context files for transient planning notes, open questions, or provider snapshots.
-- Propose or create ADRs sparingly, only when all three are true: the decision is hard to reverse, surprising without context, and the result of a real trade-off.
+- Record a decision delta at `docs/decisions/<slug>.md`: consult `docs/decisions/index.md` first and propose revise-vs-create (an existing topic file, including a `needs-decision` stub, is revised in place; only an uncovered subject gets a new file), then run `npm run gen:decisions-index && npm run check:decisions`. Link this Probe's own session artifact as a `session-archive` evidence ref (transcript provenance). Never propose or create a numbered ADR — `docs/adr/` is frozen history; decisions go into the topic-keyed registry.
 - Prefer workflow artifacts for pickup decisions, unresolved questions, accepted gaps, and route reasons until the work is accepted.
 
 ## Handoff To Plan Work

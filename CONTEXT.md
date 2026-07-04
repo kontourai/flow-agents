@@ -225,7 +225,7 @@ A reason code for a Gate that cannot be evaluated or cannot pass because a requi
 
 ### Probe
 
-A Builder Kit Alignment Gate that explores context, challenges assumptions, and records aligned decisions before the process continues. A Probe asks one question at a time, recommends an answer, and uses repository context before asking when the answer can be discovered.
+A Builder Kit Alignment Gate that explores context, challenges assumptions, and records aligned decisions before the process continues. A Probe asks one question at a time, recommends an answer, and uses repository context before asking when the answer can be discovered. As understanding crystallizes, a Probe writes it into durable docs in the same motion: a vocabulary delta into this glossary and a decision delta into the Decision Registry, per [context/contracts/probe-docs-write-contract.md](context/contracts/probe-docs-write-contract.md).
 _Avoid_: Grill, interrogation
 
 ### Flow
@@ -334,7 +334,7 @@ The trust bundle a workflow gate reads to decide whether to advance — claims, 
 
 ### TypeScript-first source policy
 
-The policy that Flow Agents source of record is authored in TypeScript, with generated JavaScript and runtime projections treated as build output rather than hand-edited sources. Subject open in the Decision Registry as [docs/decisions/typescript-source-policy.md](docs/decisions/typescript-source-policy.md).
+The policy that Kontour product and runtime source defaults to TypeScript, with narrow JavaScript/MJS exceptions (config/tooling, generated assets, thin launchers, fixtures, historical artifacts) and staged per-repo migration for existing non-TypeScript source. Ratified in the Decision Registry as [docs/decisions/typescript-source-policy.md](docs/decisions/typescript-source-policy.md).
 
 ### Flow / Skill / Kit / Tool boundary
 
