@@ -1,29 +1,35 @@
 {
   "schema_version": "1.0",
-  "slug": "kontourai-flow-agents-327",
+  "slug": "i339-record-identity",
   "work_item": null,
-  "status": "verified",
-  "phase": "verification",
-  "sealed_at": "2026-07-04T04:49:25Z",
-  "commit_sha": "fd6ab19b6e6510faf62d456fda1eda6d8c0a80a9",
+  "status": "delivered",
+  "phase": "release",
+  "sealed_at": "2026-07-04T16:00:20Z",
+  "commit_sha": "ff54bc74f893321f13276cd147d500f91e1fc133",
   "checkpoint": {
-    "asOf": "2026-07-04T04:49:25.240Z",
+    "asOf": "2026-07-04T16:00:20.765Z",
     "statusByClaimId": {
-      "kontourai-flow-agents-327-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-green-includes-kits-knowledge-providers-conformance-neo4j-read-side-ac2-neo4j-unit-suite-sync-idempotency-ac1-canonical-queries-ac3-degradation-ac4": "verified",
-      "kontourai-flow-agents-327-decision-registry.flow-agents-workflow.npm-run-check-decisions-green-24-topics-graph-knowledge-provider-decision-topic-added": "verified",
-      "kontourai-flow-agents-327-ac1.flow-agents-workflow.ac1": "verified",
-      "kontourai-flow-agents-327-ac2.flow-agents-workflow.ac2": "verified",
-      "kontourai-flow-agents-327-ac3.flow-agents-workflow.ac3": "verified",
-      "kontourai-flow-agents-327-ac4.flow-agents-workflow.ac4": "verified"
+      "i339-record-identity-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-manifest-static-eval-suite-green-includes-knowledge-store-provider-conformance-test-knowledge-providers-sh-ci-reconcilable-ac-covering-static-proof": "verified",
+      "i339-record-identity-contract-suite-default.flow-agents-workflow.contract-suite-default-adapter-67-67-pass-0-fail-exit-0-covers-ac1-prefix-ambiguous-ac3-post-move-ac4-unmodified-sections-records-uuid-md": "verified",
+      "i339-record-identity-contract-suite-obsidian.flow-agents-workflow.contract-suite-obsidian-adapter-64-pass-0-fail-3-adapter-scoped-skips-reindex-not-implemented-on-obsidian-exit-0-covers-ac2-slug-round-trip-ac3-file-relocation": "verified",
+      "i339-record-identity-store-contract-doc-ac5.flow-agents-workflow.ac5-kits-knowledge-docs-store-contract-md-gains-identity-alias-addendum-116-and-kits-knowledge-docs-readme-md-quick-reference-38-present-in-committed-diff": "verified",
+      "i339-record-identity-ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0.flow-agents-workflow.ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0": "verified",
+      "i339-record-identity-ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters.flow-agents-workflow.ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters": "verified",
+      "i339-record-identity-ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters.flow-agents-workflow.ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters": "verified",
+      "i339-record-identity-ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md.flow-agents-workflow.ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md": "verified",
+      "i339-record-identity-ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated.flow-agents-workflow.ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated": "verified"
     },
-    "throughEventCreatedAt": "2026-07-04T04:49:25Z",
+    "throughEventCreatedAt": "2026-07-04T15:59:01Z",
     "throughEventCreatedAtByClaimId": {
-      "kontourai-flow-agents-327-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-green-includes-kits-knowledge-providers-conformance-neo4j-read-side-ac2-neo4j-unit-suite-sync-idempotency-ac1-canonical-queries-ac3-degradation-ac4": "2026-07-04T04:49:25Z",
-      "kontourai-flow-agents-327-decision-registry.flow-agents-workflow.npm-run-check-decisions-green-24-topics-graph-knowledge-provider-decision-topic-added": "2026-07-04T04:49:25Z",
-      "kontourai-flow-agents-327-ac1.flow-agents-workflow.ac1": "2026-07-04T04:49:25Z",
-      "kontourai-flow-agents-327-ac2.flow-agents-workflow.ac2": "2026-07-04T04:49:25Z",
-      "kontourai-flow-agents-327-ac3.flow-agents-workflow.ac3": "2026-07-04T04:49:25Z",
-      "kontourai-flow-agents-327-ac4.flow-agents-workflow.ac4": "2026-07-04T04:49:25Z"
+      "i339-record-identity-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-manifest-static-eval-suite-green-includes-knowledge-store-provider-conformance-test-knowledge-providers-sh-ci-reconcilable-ac-covering-static-proof": "2026-07-04T15:59:01Z",
+      "i339-record-identity-contract-suite-default.flow-agents-workflow.contract-suite-default-adapter-67-67-pass-0-fail-exit-0-covers-ac1-prefix-ambiguous-ac3-post-move-ac4-unmodified-sections-records-uuid-md": "2026-07-04T15:59:01Z",
+      "i339-record-identity-contract-suite-obsidian.flow-agents-workflow.contract-suite-obsidian-adapter-64-pass-0-fail-3-adapter-scoped-skips-reindex-not-implemented-on-obsidian-exit-0-covers-ac2-slug-round-trip-ac3-file-relocation": "2026-07-04T15:59:01Z",
+      "i339-record-identity-store-contract-doc-ac5.flow-agents-workflow.ac5-kits-knowledge-docs-store-contract-md-gains-identity-alias-addendum-116-and-kits-knowledge-docs-readme-md-quick-reference-38-present-in-committed-diff": "2026-07-04T15:59:01Z",
+      "i339-record-identity-ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0.flow-agents-workflow.ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0": "2026-07-04T15:59:01Z",
+      "i339-record-identity-ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters.flow-agents-workflow.ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters": "2026-07-04T15:59:01Z",
+      "i339-record-identity-ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters.flow-agents-workflow.ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters": "2026-07-04T15:59:01Z",
+      "i339-record-identity-ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md.flow-agents-workflow.ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md": "2026-07-04T15:59:01Z",
+      "i339-record-identity-ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated.flow-agents-workflow.ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated": "2026-07-04T15:59:01Z"
     },
     "statusFunctionVersion": "2"
   }

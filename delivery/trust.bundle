@@ -3,104 +3,157 @@
   "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
   "claims": [
     {
-      "id": "kontourai-flow-agents-327-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-green-includes-kits-knowledge-providers-conformance-neo4j-read-side-ac2-neo4j-unit-suite-sync-idempotency-ac1-canonical-queries-ac3-degradation-ac4",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-327/static-eval-suite",
+      "id": "i339-record-identity-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-manifest-static-eval-suite-green-includes-knowledge-store-provider-conformance-test-knowledge-providers-sh-ci-reconcilable-ac-covering-static-proof",
+      "subjectType": "flow-step",
+      "subjectId": "i339-record-identity/knowledge-static-eval-suite",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
-      "fieldOrBehavior": "bash evals/run.sh static green — includes kits/knowledge providers conformance (neo4j read side AC2), neo4j unit suite (sync idempotency AC1, canonical queries AC3, degradation AC4)",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Static eval lane (manifest static-eval-suite) green — includes knowledge store provider conformance test_knowledge_providers.sh; CI-reconcilable AC-covering static proof",
       "value": "pass",
-      "createdAt": "2026-07-04T04:49:25Z",
-      "updatedAt": "2026-07-04T04:49:25Z",
+      "createdAt": "2026-07-04T15:59:01Z",
+      "updatedAt": "2026-07-04T15:59:01Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "verificationPolicyId": "policy:builder.verify.tests:test_output",
       "metadata": {
         "origin": "check",
-        "check_kind": "test"
+        "check_kind": "command"
       },
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-327-decision-registry.flow-agents-workflow.npm-run-check-decisions-green-24-topics-graph-knowledge-provider-decision-topic-added",
-      "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-327/decision-registry",
+      "id": "i339-record-identity-contract-suite-default.flow-agents-workflow.contract-suite-default-adapter-67-67-pass-0-fail-exit-0-covers-ac1-prefix-ambiguous-ac3-post-move-ac4-unmodified-sections-records-uuid-md",
+      "subjectType": "flow-step",
+      "subjectId": "i339-record-identity/contract-suite-default",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
-      "fieldOrBehavior": "npm run check:decisions green (24 topics) — graph-knowledge-provider decision topic added",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Contract-suite default adapter: 67/67 pass, 0 fail, exit 0 — covers AC1 (prefix/ambiguous), AC3 (post-move), AC4 (unmodified sections + records/<uuid>.md)",
       "value": "pass",
-      "createdAt": "2026-07-04T04:49:25Z",
-      "updatedAt": "2026-07-04T04:49:25Z",
+      "createdAt": "2026-07-04T15:59:01Z",
+      "updatedAt": "2026-07-04T15:59:01Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
       "metadata": {
         "origin": "check",
-        "check_kind": "test"
+        "check_kind": "external"
       },
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-327-ac1.flow-agents-workflow.ac1",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-327/ac1",
+      "id": "i339-record-identity-contract-suite-obsidian.flow-agents-workflow.contract-suite-obsidian-adapter-64-pass-0-fail-3-adapter-scoped-skips-reindex-not-implemented-on-obsidian-exit-0-covers-ac2-slug-round-trip-ac3-file-relocation",
+      "subjectType": "flow-step",
+      "subjectId": "i339-record-identity/contract-suite-obsidian",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "ac1",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Contract-suite obsidian adapter: 64 pass, 0 fail, 3 adapter-scoped skips (reindex not implemented on obsidian), exit 0 — covers AC2 (slug round-trip) + AC3 (file relocation)",
       "value": "pass",
-      "createdAt": "2026-07-04T04:49:25Z",
-      "updatedAt": "2026-07-04T04:49:25Z",
+      "createdAt": "2026-07-04T15:59:01Z",
+      "updatedAt": "2026-07-04T15:59:01Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "i339-record-identity-store-contract-doc-ac5.flow-agents-workflow.ac5-kits-knowledge-docs-store-contract-md-gains-identity-alias-addendum-116-and-kits-knowledge-docs-readme-md-quick-reference-38-present-in-committed-diff",
+      "subjectType": "flow-step",
+      "subjectId": "i339-record-identity/store-contract-doc-ac5",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC5: kits/knowledge/docs/store-contract.md gains identity/alias addendum (+116) and kits/knowledge/docs/README.md quick reference (+38) — present in committed diff",
+      "value": "pass",
+      "createdAt": "2026-07-04T15:59:01Z",
+      "updatedAt": "2026-07-04T15:59:01Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "i339-record-identity-ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0.flow-agents-workflow.ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0",
+      "subjectType": "flow-step",
+      "subjectId": "i339-record-identity/ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC1 (R1): unique 8-char prefix get returns record; ambiguous prefix throws distinct error; contract-suite exits 0",
+      "value": "pass",
+      "createdAt": "2026-07-04T15:59:01Z",
+      "updatedAt": "2026-07-04T15:59:01Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
       "metadata": {
         "origin": "acceptance"
       },
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-327-ac2.flow-agents-workflow.ac2",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-327/ac2",
+      "id": "i339-record-identity-ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters.flow-agents-workflow.ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters",
+      "subjectType": "flow-step",
+      "subjectId": "i339-record-identity/ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "ac2",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC2 (R2): slug alias resolves via get/getLinks; round-trips on default + obsidian adapters",
       "value": "pass",
-      "createdAt": "2026-07-04T04:49:25Z",
-      "updatedAt": "2026-07-04T04:49:25Z",
+      "createdAt": "2026-07-04T15:59:01Z",
+      "updatedAt": "2026-07-04T15:59:01Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:builder.verify.tests",
       "metadata": {
         "origin": "acceptance"
       },
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-327-ac3.flow-agents-workflow.ac3",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-327/ac3",
+      "id": "i339-record-identity-ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters.flow-agents-workflow.ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters",
+      "subjectType": "flow-step",
+      "subjectId": "i339-record-identity/ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "ac3",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC3 (R3): after update recategorizes (obsidian file relocates), old slug + short-id prefix still resolve; both adapters",
       "value": "pass",
-      "createdAt": "2026-07-04T04:49:25Z",
-      "updatedAt": "2026-07-04T04:49:25Z",
+      "createdAt": "2026-07-04T15:59:01Z",
+      "updatedAt": "2026-07-04T15:59:01Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:builder.verify.tests",
       "metadata": {
         "origin": "acceptance"
       },
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-327-ac4.flow-agents-workflow.ac4",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-327/ac4",
+      "id": "i339-record-identity-ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md.flow-agents-workflow.ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md",
+      "subjectType": "flow-step",
+      "subjectId": "i339-record-identity/ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "ac4",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC4 (R4): existing contract-suite sections pass unmodified; default-adapter files remain records/<uuid>.md",
       "value": "pass",
-      "createdAt": "2026-07-04T04:49:25Z",
-      "updatedAt": "2026-07-04T04:49:25Z",
+      "createdAt": "2026-07-04T15:59:01Z",
+      "updatedAt": "2026-07-04T15:59:01Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "i339-record-identity-ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated.flow-agents-workflow.ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated",
+      "subjectType": "flow-step",
+      "subjectId": "i339-record-identity/ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC5 (R5): store-contract.md identity/alias addendum + docs/README.md quick reference updated",
+      "value": "pass",
+      "createdAt": "2026-07-04T15:59:01Z",
+      "updatedAt": "2026-07-04T15:59:01Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
       "metadata": {
         "origin": "acceptance"
       },
@@ -109,47 +162,128 @@
   ],
   "evidence": [
     {
-      "id": "ev:kontourai-flow-agents-327-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-green-includes-kits-knowledge-providers-conformance-neo4j-read-side-ac2-neo4j-unit-suite-sync-idempotency-ac1-canonical-queries-ac3-degradation-ac4",
-      "claimId": "kontourai-flow-agents-327-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-green-includes-kits-knowledge-providers-conformance-neo4j-read-side-ac2-neo4j-unit-suite-sync-idempotency-ac1-canonical-queries-ac3-degradation-ac4",
+      "id": "ev:i339-record-identity-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-manifest-static-eval-suite-green-includes-knowledge-store-provider-conformance-test-knowledge-providers-sh-ci-reconcilable-ac-covering-static-proof",
+      "claimId": "i339-record-identity-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-manifest-static-eval-suite-green-includes-knowledge-store-provider-conformance-test-knowledge-providers-sh-ci-reconcilable-ac-covering-static-proof",
       "evidenceType": "test_output",
       "method": "validation",
-      "sourceRef": "kontourai-flow-agents-327/evidence.json",
-      "excerptOrSummary": "bash evals/run.sh static green — includes kits/knowledge providers conformance (neo4j read side AC2), neo4j unit suite (sync idempotency AC1, canonical queries AC3, degradation AC4)",
-      "observedAt": "2026-07-04T04:49:25Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
+      "sourceRef": "i339-record-identity/command-log.jsonl",
+      "excerptOrSummary": "Static eval lane (manifest static-eval-suite) green — includes knowledge store provider conformance test_knowledge_providers.sh; CI-reconcilable AC-covering static proof",
+      "observedAt": "2026-07-04T15:59:01Z",
+      "collectedBy": "flow-agents/evidence-capture",
       "passing": true,
       "execution": {
         "runner": "bash",
         "label": "bash evals/run.sh static",
-        "isError": false
+        "isError": false,
+        "exitCode": 0
       }
     },
     {
-      "id": "ev:kontourai-flow-agents-327-decision-registry.flow-agents-workflow.npm-run-check-decisions-green-24-topics-graph-knowledge-provider-decision-topic-added",
-      "claimId": "kontourai-flow-agents-327-decision-registry.flow-agents-workflow.npm-run-check-decisions-green-24-topics-graph-knowledge-provider-decision-topic-added",
-      "evidenceType": "test_output",
-      "method": "validation",
-      "sourceRef": "kontourai-flow-agents-327/evidence.json",
-      "excerptOrSummary": "npm run check:decisions green (24 topics) — graph-knowledge-provider decision topic added",
-      "observedAt": "2026-07-04T04:49:25Z",
-      "collectedBy": "flow-agents/workflow-sidecar",
+      "id": "ev:i339-record-identity-contract-suite-default.flow-agents-workflow.contract-suite-default-adapter-67-67-pass-0-fail-exit-0-covers-ac1-prefix-ambiguous-ac3-post-move-ac4-unmodified-sections-records-uuid-md",
+      "claimId": "i339-record-identity-contract-suite-default.flow-agents-workflow.contract-suite-default-adapter-67-67-pass-0-fail-exit-0-covers-ac1-prefix-ambiguous-ac3-post-move-ac4-unmodified-sections-records-uuid-md",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "i339-record-identity/command-log.jsonl",
+      "excerptOrSummary": "Contract-suite default adapter: 67/67 pass, 0 fail, exit 0 — covers AC1 (prefix/ambiguous), AC3 (post-move), AC4 (unmodified sections + records/<uuid>.md)",
+      "observedAt": "2026-07-04T15:59:01Z",
+      "collectedBy": "flow-agents/evidence-capture",
       "passing": true,
       "execution": {
         "runner": "bash",
-        "label": "npm run check:decisions --",
-        "isError": false
+        "label": "node --test kits/knowledge/evals/contract-suite/suite.test.js",
+        "isError": false,
+        "exitCode": 0
       }
+    },
+    {
+      "id": "ev:i339-record-identity-contract-suite-obsidian.flow-agents-workflow.contract-suite-obsidian-adapter-64-pass-0-fail-3-adapter-scoped-skips-reindex-not-implemented-on-obsidian-exit-0-covers-ac2-slug-round-trip-ac3-file-relocation",
+      "claimId": "i339-record-identity-contract-suite-obsidian.flow-agents-workflow.contract-suite-obsidian-adapter-64-pass-0-fail-3-adapter-scoped-skips-reindex-not-implemented-on-obsidian-exit-0-covers-ac2-slug-round-trip-ac3-file-relocation",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "i339-record-identity/command-log.jsonl",
+      "excerptOrSummary": "Contract-suite obsidian adapter: 64 pass, 0 fail, 3 adapter-scoped skips (reindex not implemented on obsidian), exit 0 — covers AC2 (slug round-trip) + AC3 (file relocation)",
+      "observedAt": "2026-07-04T15:59:01Z",
+      "collectedBy": "flow-agents/evidence-capture",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "KNOWLEDGE_ADAPTER=kits/knowledge/adapters/obsidian-store/index.js node --test kits/knowledge/evals/contract-suite/suite.test.js",
+        "isError": false,
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "ev:i339-record-identity-store-contract-doc-ac5.flow-agents-workflow.ac5-kits-knowledge-docs-store-contract-md-gains-identity-alias-addendum-116-and-kits-knowledge-docs-readme-md-quick-reference-38-present-in-committed-diff",
+      "claimId": "i339-record-identity-store-contract-doc-ac5.flow-agents-workflow.ac5-kits-knowledge-docs-store-contract-md-gains-identity-alias-addendum-116-and-kits-knowledge-docs-readme-md-quick-reference-38-present-in-committed-diff",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "i339-record-identity/evidence.json",
+      "excerptOrSummary": "AC5: kits/knowledge/docs/store-contract.md gains identity/alias addendum (+116) and kits/knowledge/docs/README.md quick reference (+38) — present in committed diff",
+      "observedAt": "2026-07-04T15:59:01Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
     }
   ],
   "policies": [
     {
-      "id": "policy:workflow.check.test:test_output",
-      "claimType": "workflow.check.test",
+      "id": "policy:workflow.check.command:test_output",
+      "claimType": "workflow.check.command",
       "requiredEvidence": [
         "test_output"
       ],
       "acceptanceCriteria": [
-        "A verified verification event must support a workflow.check.test claim."
+        "A verified verification event must support a workflow.check.command claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.verify.tests:test_output",
+      "claimType": "builder.verify.tests",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.tests claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.verify.tests:attestation",
+      "claimType": "builder.verify.tests",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.tests claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -173,72 +307,121 @@
       "stalenessTriggers": [],
       "conflictRules": [],
       "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.verify.tests",
+      "claimType": "builder.verify.tests",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.tests claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
     }
   ],
   "events": [
     {
-      "id": "evt:kontourai-flow-agents-327-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-green-includes-kits-knowledge-providers-conformance-neo4j-read-side-ac2-neo4j-unit-suite-sync-idempotency-ac1-canonical-queries-ac3-degradation-ac4",
-      "claimId": "kontourai-flow-agents-327-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-green-includes-kits-knowledge-providers-conformance-neo4j-read-side-ac2-neo4j-unit-suite-sync-idempotency-ac1-canonical-queries-ac3-degradation-ac4",
+      "id": "evt:i339-record-identity-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-manifest-static-eval-suite-green-includes-knowledge-store-provider-conformance-test-knowledge-providers-sh-ci-reconcilable-ac-covering-static-proof",
+      "claimId": "i339-record-identity-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-manifest-static-eval-suite-green-includes-knowledge-store-provider-conformance-test-knowledge-providers-sh-ci-reconcilable-ac-covering-static-proof",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-327-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-green-includes-kits-knowledge-providers-conformance-neo4j-read-side-ac2-neo4j-unit-suite-sync-idempotency-ac1-canonical-queries-ac3-degradation-ac4"
+        "ev:i339-record-identity-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-manifest-static-eval-suite-green-includes-knowledge-store-provider-conformance-test-knowledge-providers-sh-ci-reconcilable-ac-covering-static-proof"
       ],
-      "createdAt": "2026-07-04T04:49:25Z",
-      "verifiedAt": "2026-07-04T04:49:25Z"
+      "createdAt": "2026-07-04T15:59:01Z",
+      "verifiedAt": "2026-07-04T15:59:01Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-327-decision-registry.flow-agents-workflow.npm-run-check-decisions-green-24-topics-graph-knowledge-provider-decision-topic-added",
-      "claimId": "kontourai-flow-agents-327-decision-registry.flow-agents-workflow.npm-run-check-decisions-green-24-topics-graph-knowledge-provider-decision-topic-added",
+      "id": "evt:i339-record-identity-contract-suite-default.flow-agents-workflow.contract-suite-default-adapter-67-67-pass-0-fail-exit-0-covers-ac1-prefix-ambiguous-ac3-post-move-ac4-unmodified-sections-records-uuid-md",
+      "claimId": "i339-record-identity-contract-suite-default.flow-agents-workflow.contract-suite-default-adapter-67-67-pass-0-fail-exit-0-covers-ac1-prefix-ambiguous-ac3-post-move-ac4-unmodified-sections-records-uuid-md",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-327-decision-registry.flow-agents-workflow.npm-run-check-decisions-green-24-topics-graph-knowledge-provider-decision-topic-added"
+        "ev:i339-record-identity-contract-suite-default.flow-agents-workflow.contract-suite-default-adapter-67-67-pass-0-fail-exit-0-covers-ac1-prefix-ambiguous-ac3-post-move-ac4-unmodified-sections-records-uuid-md"
       ],
-      "createdAt": "2026-07-04T04:49:25Z",
-      "verifiedAt": "2026-07-04T04:49:25Z"
+      "createdAt": "2026-07-04T15:59:01Z",
+      "verifiedAt": "2026-07-04T15:59:01Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-327-ac1.flow-agents-workflow.ac1",
-      "claimId": "kontourai-flow-agents-327-ac1.flow-agents-workflow.ac1",
+      "id": "evt:i339-record-identity-contract-suite-obsidian.flow-agents-workflow.contract-suite-obsidian-adapter-64-pass-0-fail-3-adapter-scoped-skips-reindex-not-implemented-on-obsidian-exit-0-covers-ac2-slug-round-trip-ac3-file-relocation",
+      "claimId": "i339-record-identity-contract-suite-obsidian.flow-agents-workflow.contract-suite-obsidian-adapter-64-pass-0-fail-3-adapter-scoped-skips-reindex-not-implemented-on-obsidian-exit-0-covers-ac2-slug-round-trip-ac3-file-relocation",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:i339-record-identity-contract-suite-obsidian.flow-agents-workflow.contract-suite-obsidian-adapter-64-pass-0-fail-3-adapter-scoped-skips-reindex-not-implemented-on-obsidian-exit-0-covers-ac2-slug-round-trip-ac3-file-relocation"
+      ],
+      "createdAt": "2026-07-04T15:59:01Z",
+      "verifiedAt": "2026-07-04T15:59:01Z"
+    },
+    {
+      "id": "evt:i339-record-identity-store-contract-doc-ac5.flow-agents-workflow.ac5-kits-knowledge-docs-store-contract-md-gains-identity-alias-addendum-116-and-kits-knowledge-docs-readme-md-quick-reference-38-present-in-committed-diff",
+      "claimId": "i339-record-identity-store-contract-doc-ac5.flow-agents-workflow.ac5-kits-knowledge-docs-store-contract-md-gains-identity-alias-addendum-116-and-kits-knowledge-docs-readme-md-quick-reference-38-present-in-committed-diff",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:i339-record-identity-store-contract-doc-ac5.flow-agents-workflow.ac5-kits-knowledge-docs-store-contract-md-gains-identity-alias-addendum-116-and-kits-knowledge-docs-readme-md-quick-reference-38-present-in-committed-diff"
+      ],
+      "createdAt": "2026-07-04T15:59:01Z",
+      "verifiedAt": "2026-07-04T15:59:01Z"
+    },
+    {
+      "id": "evt:i339-record-identity-ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0.flow-agents-workflow.ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0",
+      "claimId": "i339-record-identity-ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0.flow-agents-workflow.ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-04T04:49:25Z",
-      "verifiedAt": "2026-07-04T04:49:25Z"
+      "createdAt": "2026-07-04T15:59:01Z",
+      "verifiedAt": "2026-07-04T15:59:01Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-327-ac2.flow-agents-workflow.ac2",
-      "claimId": "kontourai-flow-agents-327-ac2.flow-agents-workflow.ac2",
+      "id": "evt:i339-record-identity-ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters.flow-agents-workflow.ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters",
+      "claimId": "i339-record-identity-ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters.flow-agents-workflow.ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-04T04:49:25Z",
-      "verifiedAt": "2026-07-04T04:49:25Z"
+      "createdAt": "2026-07-04T15:59:01Z",
+      "verifiedAt": "2026-07-04T15:59:01Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-327-ac3.flow-agents-workflow.ac3",
-      "claimId": "kontourai-flow-agents-327-ac3.flow-agents-workflow.ac3",
+      "id": "evt:i339-record-identity-ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters.flow-agents-workflow.ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters",
+      "claimId": "i339-record-identity-ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters.flow-agents-workflow.ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-04T04:49:25Z",
-      "verifiedAt": "2026-07-04T04:49:25Z"
+      "createdAt": "2026-07-04T15:59:01Z",
+      "verifiedAt": "2026-07-04T15:59:01Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-327-ac4.flow-agents-workflow.ac4",
-      "claimId": "kontourai-flow-agents-327-ac4.flow-agents-workflow.ac4",
+      "id": "evt:i339-record-identity-ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md.flow-agents-workflow.ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md",
+      "claimId": "i339-record-identity-ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md.flow-agents-workflow.ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-04T04:49:25Z",
-      "verifiedAt": "2026-07-04T04:49:25Z"
+      "createdAt": "2026-07-04T15:59:01Z",
+      "verifiedAt": "2026-07-04T15:59:01Z"
+    },
+    {
+      "id": "evt:i339-record-identity-ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated.flow-agents-workflow.ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated",
+      "claimId": "i339-record-identity-ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated.flow-agents-workflow.ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-04T15:59:01Z",
+      "verifiedAt": "2026-07-04T15:59:01Z"
     }
   ]
 }
