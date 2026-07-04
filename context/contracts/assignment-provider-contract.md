@@ -93,9 +93,17 @@ delivers all four:
 | Transition | Mutator | When | Owning issue |
 | --- | --- | --- | --- |
 | `claim` | the claiming session | at selection | **#290 (this issue)** |
+| `claim` / `supersede` | `ensure-session`'s pre-entry ownership guard (a SECOND mutator, alongside `assignment-provider claim`) | on session entry, before any session directory is created — `free` establishes a claim, `reclaimable` requires explicit `--supersede-stale` | **#291** |
 | `clean_release` | the incumbent (Stop hook / terminal `advance-state`) | session end — unassign + handoff comment | #292 |
 | `supersede` | the successor, inside the takeover protocol | after the grace beat | #294 |
 | `crash_no_successor` | nobody, initially; corrected by the next actor to want the subject, or the janitor | lazily, or on a janitor sweep | out of scope — the Console relay's first cross-machine duty (ADR 0021 §4/§7) |
+
+`ensure-session`'s guard reuses this file's own `computeEffectiveState`/`performLocalClaim`/
+`performLocalSupersede` (Wave 1 exports) rather than a parallel implementation — see
+`docs/adr/0021-assignment-leases-and-stale-claim-takeover.md` §3 for why a second claim point
+was needed (a session entered without going through `pull-work` previously got no durable claim
+at all) and the canonical `actor_key` field (below) that keeps its self-recognition consistent
+with every other tool that reads or writes a claim record.
 
 Lazy correction is *safe* by the join rule above (stale assignment excludes nothing), but leaves
 the human-visible board stale in the crash case until the next claim attempt or a janitor sweep
@@ -146,6 +154,7 @@ detect an incompatible future shape before parsing fields it does not understand
 | `role` | yes | Constant `"AssignmentClaimRecord"`, for readers scanning mixed content (e.g. a GitHub comment thread) for this record type. |
 | `subject_id` | yes | The claimed work item, in `owner/repo#id` form — the same string `workItemSlug` derives the deterministic session slug from. |
 | `actor` | yes | `{ runtime, session_id, host, human? }` — the exact struct `actor-identity.js` defines. `human` is set (non-null) only for a human assignee; its presence, not a username heuristic, gates the human-held join state. |
+| `actor_key` | no (additive, #291) | The canonical `resolveActor(env).actor` string for the claiming actor — the same flat/bare token `liveness whoami`, `liveness claim --actor`, per-actor `current.json`, and pull-work's `--self-actor` all use. When present, `computeEffectiveState` compares against THIS (not a re-serialization of `actor`) for both self-recognition and the liveness join, because `serializeActor(actor)` and `resolveActor(env).actor` diverge for an explicit-override actor (a bare token vs. a `explicit-override:<value>:<host>` triple) while agreeing for a derived actor. Absent on any pre-#291 record or fixture — `computeEffectiveState` falls back to `serializeActor(actor)` in that case, reproducing pre-#291 behavior exactly. |
 | `claimed_at` | yes | ISO-8601 timestamp the claim was recorded. Mirrors the liveness stream's own claim-event field so a reader compares freshness with one mental model across both layers, even though the two are stored in different media. |
 | `ttl_seconds` | yes | Same field name/semantics as the liveness stream's `ttlSeconds` (default `1800`). |
 | `branch` | yes | The branch this actor is working on, per the `agent/<actor>/<slug>` convention. |

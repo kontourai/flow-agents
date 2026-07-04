@@ -83,6 +83,7 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/lib/actor-identity.js", { category: "shared hook library", requiredNeedles: ["resolveActor", "FLOW_AGENTS_ACTOR"] }],
   ["scripts/hooks/lib/audit-transport.sh", { category: "shared hook library", requiredNeedles: ["audit_emit"] }],
   ["scripts/hooks/lib/config-protection-remedies.js", { category: "shared hook library", requiredNeedles: ["SANCTIONED_REMEDIES", "REMEDY_COMMAND_CANDIDATES"] }],
+  ["scripts/hooks/lib/current-pointer.js", { category: "shared hook library", requiredNeedles: ["readCurrentPointer", "perActorCurrentFile"] }],
   ["scripts/hooks/lib/hook-flags.js", { category: "shared hook library", requiredNeedles: ["isHookEnabled"] }],
   ["scripts/hooks/lib/liveness-heartbeat.js", { category: "shared hook library", requiredNeedles: ["maybeEmitHeartbeat", "resolveHeartbeatThrottleSeconds"] }],
   ["scripts/hooks/lib/liveness-policy.js", { category: "shared hook library", requiredNeedles: ["isLivenessEnabled", "resolveTtlSeconds"] }],
@@ -93,7 +94,7 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/lib/resolve-formatter.js", { category: "shared hook library", requiredNeedles: ["resolveFormatter"] }],
 ]);
 const fixtureOwnerPolicies = new Map<string, { owners: string[]; classification: string }>([
-  ["evals/fixtures/assignment-provider", { owners: ["evals/integration/test_assignment_provider_local_file.sh", "evals/integration/test_assignment_provider_github.sh", "evals/integration/test_pull_work_assignment_join.sh"], classification: "AssignmentProvider local-file and GitHub render/status fixtures (#290)" }],
+  ["evals/fixtures/assignment-provider", { owners: ["evals/integration/test_assignment_provider_local_file.sh", "evals/integration/test_assignment_provider_github.sh", "evals/integration/test_pull_work_assignment_join.sh", "evals/integration/test_ensure_session_ownership_guard.sh"], classification: "AssignmentProvider local-file and GitHub render/status fixtures (#290); hostile-effective-state.json is the #291 ensure-session ownership guard's AC9 sanitization fixture" }],
   ["evals/fixtures/backlog-provider-settings", { owners: ["evals/integration/test_effective_backlog_settings.sh"], classification: "settings precedence fixtures" }],
   ["evals/fixtures/builder-kit-workflow-state", { owners: ["evals/static/test_workflow_skills.sh"], classification: "Builder Kit workflow-state fixtures" }],
   ["evals/fixtures/console-learning-projection", { owners: ["evals/integration/test_console_learning_projection.sh"], classification: "console learning projection fixtures" }],

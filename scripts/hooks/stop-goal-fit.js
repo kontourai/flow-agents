@@ -42,6 +42,8 @@ const {
   flowAgentsArtifactRoot,
   flowAgentsArtifactRootsForRead,
 } = require('./lib/local-artifact-paths');
+const { resolveActor } = require('./lib/actor-identity.js');
+const { readCurrentPointer } = require('./lib/current-pointer.js');
 
 const MAX_STDIN = 1024 * 1024;
 const ACTIVE_STATUSES = new Set([
@@ -1531,7 +1533,7 @@ async function bundleEnforcement(artifactDir, activeFlowStep) {
  * to scanning all of .kontourai/flow-agents (newest-mtime).
  */
 function preferredArtifactDir(flowAgentsDir) {
-  const current = readJsonFile(path.join(flowAgentsDir, 'current.json'));
+  const { payload: current } = readCurrentPointer(flowAgentsDir, resolveActor(process.env).actor);
   if (!current) return null;
   const slug = current.artifact_dir || current.active_slug;
   if (typeof slug !== 'string' || !slug.trim()) return null;
@@ -1549,7 +1551,7 @@ function hasSidecarPresence(artifactDir) {
 // return that slug so analyze() can log the staleness rather than silently falling back to
 // a global mtime scan that could resurface an abandoned/never-real session as active.
 function staleCurrentSlug(flowAgentsDir) {
-  const current = readJsonFile(path.join(flowAgentsDir, 'current.json'));
+  const { payload: current } = readCurrentPointer(flowAgentsDir, resolveActor(process.env).actor);
   if (!current) return null;
   const slug = current.artifact_dir || current.active_slug;
   if (typeof slug !== 'string' || !slug.trim()) return null;

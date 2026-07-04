@@ -18,10 +18,24 @@
  * the actor-scoped stream has no shared-write race.
  *
  * Hot-path ordering + bounded read (F3, #288 fix iteration 1, sec-MED +
- * cr-MED): steps run enabled? -> current.json active_slug present? ->
- * resolveActor() -> bounded tail read, in that order, so a repo with liveness
- * disabled or no active session never pays the `resolveActor()` process-
- * ancestry `ps` spawn cost.
+ * cr-MED; restored by F4, fix-plan iteration 1): steps run enabled? ->
+ * mightHaveActiveSession() peek -> resolveActor() -> current.json
+ * active_slug present? -> bounded tail read, in that order, so a repo with
+ * liveness disabled OR no active session never pays the `resolveActor()`
+ * process-ancestry `ps` spawn cost. (#291 initially moved resolveActor()
+ * ahead of the active_slug check unconditionally, since the current-pointer
+ * read became actor-aware and needs the resolved actor to choose per-actor
+ * vs. legacy `current.json` — this silently dropped the "no active session"
+ * half of the short-circuit for every liveness-enabled call, not just the
+ * "disabled" half. F4 restores it: `mightHaveActiveSession()` is a plain,
+ * actor-free `fs.existsSync` peek of the legacy `current.json` file and the
+ * `current/` per-actor directory — when NEITHER exists, no actor could
+ * possibly have an active session (per-actor files only ever live under
+ * `current/`), so resolveActor() is skipped entirely, exactly restoring the
+ * pre-#291 short-circuit for the common "enabled, no session yet" case. Only
+ * once a current-pointer file might exist does resolveActor() run, still
+ * exactly once, reused for both the actor-scoped current-pointer read and the
+ * actor-unresolved gate below.)
  *
  * Orphan-heartbeat invariant (F8(ii), #288 fix iteration 2): a heartbeat must
  * never be treated as its own evidence of a claim. The reviewer-reproduced
@@ -74,12 +88,12 @@
 
 const fs = require('fs');
 const path = require('path');
-
 const { isLivenessEnabled, resolveHeartbeatThrottleSeconds } = require('./liveness-policy');
 const { livenessStreamFile, appendLivenessEvent } = require('./liveness-write');
 const { readLivenessEvents, readLivenessEventsTail, freshHolders } = require('./liveness-read');
 const { resolveActor, isUnresolvedActor, sanitizeSegment } = require('./actor-identity');
 const { flowAgentsArtifactRoot } = require('./local-artifact-paths');
+const { readCurrentPointer } = require('./current-pointer');
 
 /**
  * Resolve a caller-supplied `now` (Date, ISO string, or omitted) to epoch ms.
@@ -101,35 +115,50 @@ function resolveNowMs(now) {
 }
 
 /**
- * Read `current.json`'s `active_slug` from the given artifact root, sanitized through the same
- * charset+cap restriction as actor-identity.js's `sanitizeSegment` (F5, #288 fix iteration 1,
- * sec-LOW: `current.json` is a local file that could be hand-edited or otherwise hostile —
- * `active_slug` must never be trusted verbatim before it is used as a JSONL grouping key /
- * emitted `subjectId` or compared against event data). Tolerates a missing file or malformed
- * JSON (returns "").
+ * Read the active_slug from the actor-scoped "current" pointer (#291: per-actor
+ * `current/<actor>.json` preferred over the legacy global `current.json`, via
+ * `readCurrentPointer` — the single choke point for that preference rule), sanitized through the
+ * same charset+cap restriction as actor-identity.js's `sanitizeSegment` (F5, #288 fix iteration 1,
+ * sec-LOW: this is a local file that could be hand-edited or otherwise hostile — `active_slug`
+ * must never be trusted verbatim before it is used as a JSONL grouping key / emitted `subjectId`
+ * or compared against event data). Tolerates a missing file or malformed JSON (returns "") exactly
+ * like the plain-`fs.readFileSync` read this replaces; when `actorKey` is empty/unresolved,
+ * `readCurrentPointer` falls straight to the legacy global file, so behavior for that case is
+ * unchanged from before #291.
  *
  * @param {string} root
+ * @param {string} [actorKey]
  * @returns {string}
  */
-function readActiveSlug(root) {
-  let raw = '';
-  try {
-    raw = fs.readFileSync(path.join(root, 'current.json'), 'utf8');
-  } catch {
-    return '';
-  }
-  try {
-    const parsed = JSON.parse(raw);
-    const activeSlug = (parsed && parsed.active_slug) || '';
-    if (!activeSlug) return '';
-    // sanitizeSegment falls back to the literal "unknown" for an all-stripped input; that
-    // fallback is not a legitimate slug, so treat it as "no active slug" here rather than
-    // matching against a subject that was never really claimed.
-    const sanitized = sanitizeSegment(activeSlug);
-    return sanitized === 'unknown' ? '' : sanitized;
-  } catch {
-    return '';
-  }
+/**
+ * F4 fix (fix-plan iteration 1, MED): a cheap, actor-free existence peek restoring the module's
+ * documented "no active session never pays resolveActor()" invariant. `readCurrentPointer`'s
+ * actor-aware preference genuinely needs a resolved actor to choose per-actor vs. legacy — but
+ * that choice is only ever relevant when SOME current-pointer file might exist at all. When
+ * neither the legacy global `<root>/current.json` file NOR the `<root>/current/` per-actor
+ * directory exists, there is provably no active session for any actor (per-actor files are only
+ * ever written into that directory — see current-pointer.js's writePerActorCurrent), so this
+ * function returns false without calling resolveActor() at all, exactly restoring the pre-#291
+ * short-circuit for the common "liveness enabled, no session yet" case. Two plain fs.existsSync
+ * calls — no ps/proc ancestry cost, no JSON parse.
+ *
+ * @param {string} root
+ * @returns {boolean}
+ */
+function mightHaveActiveSession(root) {
+  return fs.existsSync(path.join(root, 'current.json')) || fs.existsSync(path.join(root, 'current'));
+}
+
+function readActiveSlug(root, actorKey) {
+  const { payload: current } = readCurrentPointer(root, actorKey);
+  if (!current) return '';
+  const activeSlug = (current && current.active_slug) || '';
+  if (!activeSlug) return '';
+  // sanitizeSegment falls back to the literal "unknown" for an all-stripped input; that
+  // fallback is not a legitimate slug, so treat it as "no active slug" here rather than
+  // matching against a subject that was never really claimed.
+  const sanitized = sanitizeSegment(activeSlug);
+  return sanitized === 'unknown' ? '' : sanitized;
 }
 
 /**
@@ -221,9 +250,10 @@ function attachConflictField(result, conflict) {
  * object, never throws.
  *
  * See the module header for the full F8(ii) throttle/emit split. Summary:
- *   - enabled? -> slug present? -> resolveActor() -> bounded tail read, in
- *     that order (F3), so a disabled repo or one with no active session
- *     never pays the resolveActor() ancestry `ps` spawn cost.
+ *   - enabled? -> mightHaveActiveSession() peek -> resolveActor() -> slug
+ *     present? -> bounded tail read, in that order (F3, restored by F4), so
+ *     a disabled repo or one with no active session never pays the
+ *     resolveActor() ancestry `ps` spawn cost.
  *   - THROTTLE decision reads only the bounded tail (never a full read):
  *     a release found there refuses; a fresh event there throttles.
  *   - EMIT decision requires an actual `claim` event for the pair: taken
@@ -248,12 +278,22 @@ function maybeEmitHeartbeat(opts = {}) {
     }
 
     const root = flowAgentsArtifactRoot(cwd);
-    const slug = readActiveSlug(root);
-    if (!slug) {
+    // F4 fix (fix-plan iteration 1, MED): restore the "no active session never pays
+    // resolveActor()" invariant. mightHaveActiveSession() is a plain fs.existsSync peek of the
+    // LEGACY current.json / current/ dir — no actor needed — so a repo with liveness enabled but
+    // no session at all (the common case this invariant exists for) short-circuits here, exactly
+    // like pre-#291. Only once a current-pointer file MIGHT exist do we pay for resolveActor(),
+    // needed to decide per-actor vs. legacy preference via readActiveSlug/readCurrentPointer.
+    if (!mightHaveActiveSession(root)) {
       return { emitted: false, reason: 'no-current' };
     }
 
     const { actor } = resolveActor(env);
+    const slug = readActiveSlug(root, actor);
+    if (!slug) {
+      return { emitted: false, reason: 'no-current' };
+    }
+
     if (isUnresolvedActor(actor)) {
       return { emitted: false, reason: 'actor-unresolved' };
     }

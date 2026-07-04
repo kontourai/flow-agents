@@ -161,6 +161,14 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check pull-work-assignment-join-integration
 
+      - name: Ensure-session ownership guard integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check ensure-session-ownership-guard-integration
+
+      - name: Current.json per-actor integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check current-json-per-actor-integration
+
       - name: Finalize CI evidence
         if: always()
         run: bash evals/ci/run-baseline.sh --finalize
