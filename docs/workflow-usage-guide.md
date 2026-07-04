@@ -255,7 +255,7 @@ When verification or evidence gates route work backward, the handoff must name b
 
 For pickup or planning alignment gaps, `decision_gap -> design-probe` means returning to the pickup Probe record, resolving the missing decision or recording an accepted gap, and only then retrying `plan-work`.
 
-Pickup Probe may update durable docs only when the decision is no longer a transient planning note. Use `CONTEXT.md` for glossary-style terminology decisions, create context files lazily only when a resolved term has no existing home, and create ADRs only for hard-to-reverse, surprising decisions that came from a real trade-off. Keep selected-work details, provider snapshots, unresolved questions, and accepted gaps in workflow artifacts until the work is accepted.
+Pickup Probe may update durable docs only when the decision is no longer a transient planning note. Use `CONTEXT.md` for glossary-style terminology decisions, create context files lazily only when a resolved term has no existing home, and record decision subjects as decision-registry deltas (`docs/decisions/<slug>.md`, revise-vs-create against `docs/decisions/index.md`) rather than numbered ADRs — see `context/contracts/probe-docs-write-contract.md`. Keep selected-work details, provider snapshots, unresolved questions, and accepted gaps in workflow artifacts until the work is accepted.
 
 ## 7. Check Goal Fit Before Stopping
 

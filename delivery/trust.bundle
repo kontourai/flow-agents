@@ -3,33 +3,105 @@
   "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
   "claims": [
     {
-      "id": "kontourai-flow-agents-332-decision-registry.flow-agents-workflow.decision-registry-validates-all-22-topic-files-17-new-needs-decision-adr-subject-stubs-plus-the-5-pre-existing-living-topics-including-origin-main-s-model-routing-md-and-the-regenerated-index-re-run-fresh-against-the-merged-tree",
+      "id": "kontourai-flow-agents-311-content-boundary.flow-agents-workflow.content-boundary-check-passed-after-contract-skill-context-md-decision-file-edits",
       "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-332/decision-registry",
+      "subjectId": "kontourai-flow-agents-311/content-boundary",
       "facet": "flow-agents.workflow",
-      "claimType": "workflow.check.test",
-      "fieldOrBehavior": "Decision registry validates all 22 topic files (17 new needs-decision ADR-subject stubs plus the 5 pre-existing living topics, including origin/main's model-routing.md) and the regenerated index; re-run fresh against the merged tree.",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "Content boundary check passed after contract/skill/CONTEXT.md/decision-file edits.",
       "value": "pass",
-      "createdAt": "2026-07-04T03:13:32Z",
-      "updatedAt": "2026-07-04T03:13:32Z",
+      "createdAt": "2026-07-04T03:43:47Z",
+      "updatedAt": "2026-07-04T03:43:47Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.check.test:test_output",
+      "verificationPolicyId": "policy:workflow.check.command:test_output",
       "metadata": {
         "origin": "check",
-        "check_kind": "test"
+        "check_kind": "command"
       },
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-332-promotion.flow-agents-workflow.promoted-the-adr-freeze-cutover-durable-residue-rebuilt-against-the-post-merge-tree-origin-main-358-365-346-frozen-adr-provenance-index-17-needs-decision-registry-stubs-regenerated-decision-index-22-topics-total-incl-origin-s-model-routing-md-docs-adr-readme-redirect-and-the-context-md-glossary-terms-the-new-stub-subjects-reference",
+      "id": "kontourai-flow-agents-311-decision-registry.flow-agents-workflow.decision-registry-check-passed-22-topics-after-upgrading-typescript-source-policy-to-current-and-regenerating-the-index",
       "subjectType": "workflow-check",
-      "subjectId": "kontourai-flow-agents-332/promotion",
+      "subjectId": "kontourai-flow-agents-311/decision-registry",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "Decision registry check passed (22 topics) after upgrading typescript-source-policy to current and regenerating the index.",
+      "value": "pass",
+      "createdAt": "2026-07-04T03:43:47Z",
+      "updatedAt": "2026-07-04T03:43:47Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.command:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "command"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-311-source-tree-validation.flow-agents-workflow.source-tree-validation-passed-includes-npm-run-build",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-311/source-tree-validation",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "Source tree validation passed (includes npm run build).",
+      "value": "pass",
+      "createdAt": "2026-07-04T03:43:47Z",
+      "updatedAt": "2026-07-04T03:43:47Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.command:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "command"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-311-context-map-drift.flow-agents-workflow.docs-context-map-md-is-current-after-the-context-md-vocabulary-deltas",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-311/context-map-drift",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "docs/context-map.md is current after the CONTEXT.md vocabulary deltas.",
+      "value": "pass",
+      "createdAt": "2026-07-04T03:43:47Z",
+      "updatedAt": "2026-07-04T03:43:47Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.command:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "command"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-311-static-eval-suite.flow-agents-workflow.full-static-eval-suite-passed-including-updated-evals-static-test-workflow-skills-sh-assertions-for-the-new-probe-docs-write-contract-and-two-delta-emission-text-in-design-probe-pickup-probe",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-311/static-eval-suite",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "Full static eval suite passed, including updated evals/static/test_workflow_skills.sh assertions for the new probe docs-write contract and two-delta emission text in design-probe/pickup-probe.",
+      "value": "pass",
+      "createdAt": "2026-07-04T03:43:47Z",
+      "updatedAt": "2026-07-04T03:43:47Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.command:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "command"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-311-promotion.flow-agents-workflow.promoted-the-probe-docs-write-contract-design-probe-pickup-probe-skill-md-updates-docs-adr-readme-md-workflow-usage-guide-cross-links-context-md-vocabulary-deltas-the-upgraded-typescript-source-policy-decision-record-regenerated-index-and-the-updated-static-eval-assertions",
+      "subjectType": "workflow-check",
+      "subjectId": "kontourai-flow-agents-311/promotion",
       "facet": "flow-agents.workflow",
       "claimType": "workflow.check.policy",
-      "fieldOrBehavior": "Promoted the ADR-freeze cutover durable residue (rebuilt against the post-merge tree, origin/main #358/#365/#346): frozen ADR provenance + index, 17 needs-decision registry stubs + regenerated decision index (22 topics total incl. origin's model-routing.md), docs/adr/README redirect, and the CONTEXT.md glossary terms the new stub subjects reference.",
+      "fieldOrBehavior": "Promoted the probe docs-write contract, design-probe/pickup-probe SKILL.md updates, docs/adr/README.md + workflow-usage-guide cross-links, CONTEXT.md vocabulary deltas, the upgraded typescript-source-policy decision record + regenerated index, and the updated static eval assertions.",
       "value": "pass",
-      "createdAt": "2026-07-04T03:13:32Z",
-      "updatedAt": "2026-07-04T03:13:32Z",
+      "createdAt": "2026-07-04T03:43:47Z",
+      "updatedAt": "2026-07-04T03:43:47Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.check.policy:policy_rule",
       "metadata": {
@@ -39,97 +111,98 @@
           "schema_version": "1.0",
           "none": false,
           "targets": [
+            "context/contracts/probe-docs-write-contract.md",
+            "kits/builder/skills/design-probe/SKILL.md",
+            "kits/builder/skills/pickup-probe/SKILL.md",
+            "docs/workflow-usage-guide.md",
             "docs/adr/README.md",
-            "docs/adr/index.md",
-            "docs/decisions/index.md",
-            "docs/decisions/agent-coordination.md",
-            "docs/decisions/trust-reconcile.md",
             "CONTEXT.md",
-            "scripts/freeze-adrs.mjs"
+            "docs/decisions/typescript-source-policy.md",
+            "docs/decisions/index.md",
+            "evals/static/test_workflow_skills.sh"
           ],
-          "promoted_at": "2026-07-04T03:13:32Z"
+          "promoted_at": "2026-07-04T03:43:47Z"
         }
       },
       "status": "verified"
     },
     {
-      "id": "kontourai-flow-agents-332-ac1-banner-only-adr-diffs-second-freeze-run-is-a-no-op-check-decisions-green.flow-agents-workflow.ac1-banner-only-adr-diffs-second-freeze-run-is-a-no-op-check-decisions-green",
+      "id": "kontourai-flow-agents-311-ac1-a-probe-session-produces-a-context-md-vocabulary-delta-and-a-registry-topic-write-that-passes-check-decisions.flow-agents-workflow.ac1-a-probe-session-produces-a-context-md-vocabulary-delta-and-a-registry-topic-write-that-passes-check-decisions",
       "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-332/ac1-banner-only-adr-diffs-second-freeze-run-is-a-no-op-check-decisions-green",
+      "subjectId": "kontourai-flow-agents-311/ac1-a-probe-session-produces-a-context-md-vocabulary-delta-and-a-registry-topic-write-that-passes-check-decisions",
       "facet": "flow-agents.workflow",
       "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC1 banner-only ADR diffs; second freeze run is a no-op; check:decisions green",
-      "value": "pass",
-      "createdAt": "2026-07-04T03:13:32Z",
-      "updatedAt": "2026-07-04T03:13:32Z",
+      "fieldOrBehavior": "AC1: a probe session produces a CONTEXT.md vocabulary delta and a registry topic write that passes check:decisions",
+      "value": "pending",
+      "createdAt": "2026-07-04T03:43:47Z",
+      "updatedAt": "2026-07-04T03:43:47Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.acceptance.criterion",
       "metadata": {
         "origin": "acceptance"
       },
-      "status": "verified"
+      "status": "proposed"
     },
     {
-      "id": "kontourai-flow-agents-332-ac2-stubs-index-valid-no-duplicate-topics-vs-existing-registry-files.flow-agents-workflow.ac2-stubs-index-valid-no-duplicate-topics-vs-existing-registry-files",
+      "id": "kontourai-flow-agents-311-ac2-revising-an-existing-topic-needs-decision-stub-proposes-revision-not-a-duplicate-file.flow-agents-workflow.ac2-revising-an-existing-topic-needs-decision-stub-proposes-revision-not-a-duplicate-file",
       "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-332/ac2-stubs-index-valid-no-duplicate-topics-vs-existing-registry-files",
+      "subjectId": "kontourai-flow-agents-311/ac2-revising-an-existing-topic-needs-decision-stub-proposes-revision-not-a-duplicate-file",
       "facet": "flow-agents.workflow",
       "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC2 stubs + index valid; no duplicate topics vs existing registry files",
-      "value": "pass",
-      "createdAt": "2026-07-04T03:13:32Z",
-      "updatedAt": "2026-07-04T03:13:32Z",
+      "fieldOrBehavior": "AC2: revising an existing topic (needs-decision stub) proposes revision, not a duplicate file",
+      "value": "pending",
+      "createdAt": "2026-07-04T03:43:47Z",
+      "updatedAt": "2026-07-04T03:43:47Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.acceptance.criterion",
       "metadata": {
         "origin": "acceptance"
       },
-      "status": "verified"
+      "status": "proposed"
     },
     {
-      "id": "kontourai-flow-agents-332-ac3-docs-adr-readme-redirect-exists-and-names-the-registry-contract.flow-agents-workflow.ac3-docs-adr-readme-redirect-exists-and-names-the-registry-contract",
+      "id": "kontourai-flow-agents-311-ac3-the-written-decision-file-s-evidence-refs-include-the-probe-session-artifact.flow-agents-workflow.ac3-the-written-decision-file-s-evidence-refs-include-the-probe-session-artifact",
       "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-332/ac3-docs-adr-readme-redirect-exists-and-names-the-registry-contract",
+      "subjectId": "kontourai-flow-agents-311/ac3-the-written-decision-file-s-evidence-refs-include-the-probe-session-artifact",
       "facet": "flow-agents.workflow",
       "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC3 docs/adr/README redirect exists and names the registry contract",
-      "value": "pass",
-      "createdAt": "2026-07-04T03:13:32Z",
-      "updatedAt": "2026-07-04T03:13:32Z",
+      "fieldOrBehavior": "AC3: the written decision file's evidence refs include the probe session artifact",
+      "value": "pending",
+      "createdAt": "2026-07-04T03:43:47Z",
+      "updatedAt": "2026-07-04T03:43:47Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:workflow.acceptance.criterion",
       "metadata": {
         "origin": "acceptance"
       },
-      "status": "verified"
-    },
-    {
-      "id": "kontourai-flow-agents-332-ac4-liveness-experiment-recorded-claim-succeeded-probe-pull-work-excluded-while-held-selectable-post-merge.flow-agents-workflow.ac4-liveness-experiment-recorded-claim-succeeded-probe-pull-work-excluded-while-held-selectable-post-merge",
-      "subjectType": "workflow-acceptance-criterion",
-      "subjectId": "kontourai-flow-agents-332/ac4-liveness-experiment-recorded-claim-succeeded-probe-pull-work-excluded-while-held-selectable-post-merge",
-      "facet": "flow-agents.workflow",
-      "claimType": "workflow.acceptance.criterion",
-      "fieldOrBehavior": "AC4 liveness experiment recorded: claim succeeded, probe pull-work excluded while held, selectable post-merge",
-      "value": "pass",
-      "createdAt": "2026-07-04T03:13:32Z",
-      "updatedAt": "2026-07-04T03:13:32Z",
-      "impactLevel": "high",
-      "verificationPolicyId": "policy:workflow.acceptance.criterion",
-      "metadata": {
-        "origin": "acceptance"
-      },
-      "status": "verified"
+      "status": "proposed"
     }
   ],
   "evidence": [
     {
-      "id": "ev:kontourai-flow-agents-332-decision-registry.flow-agents-workflow.decision-registry-validates-all-22-topic-files-17-new-needs-decision-adr-subject-stubs-plus-the-5-pre-existing-living-topics-including-origin-main-s-model-routing-md-and-the-regenerated-index-re-run-fresh-against-the-merged-tree",
-      "claimId": "kontourai-flow-agents-332-decision-registry.flow-agents-workflow.decision-registry-validates-all-22-topic-files-17-new-needs-decision-adr-subject-stubs-plus-the-5-pre-existing-living-topics-including-origin-main-s-model-routing-md-and-the-regenerated-index-re-run-fresh-against-the-merged-tree",
+      "id": "ev:kontourai-flow-agents-311-content-boundary.flow-agents-workflow.content-boundary-check-passed-after-contract-skill-context-md-decision-file-edits",
+      "claimId": "kontourai-flow-agents-311-content-boundary.flow-agents-workflow.content-boundary-check-passed-after-contract-skill-context-md-decision-file-edits",
       "evidenceType": "test_output",
       "method": "validation",
-      "sourceRef": "kontourai-flow-agents-332/evidence.json",
-      "excerptOrSummary": "Decision registry validates all 22 topic files (17 new needs-decision ADR-subject stubs plus the 5 pre-existing living topics, including origin/main's model-routing.md) and the regenerated index; re-run fresh against the merged tree.",
-      "observedAt": "2026-07-04T03:13:32Z",
+      "sourceRef": "kontourai-flow-agents-311/evidence.json",
+      "excerptOrSummary": "Content boundary check passed after contract/skill/CONTEXT.md/decision-file edits.",
+      "observedAt": "2026-07-04T03:43:47Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "npm run check:content-boundary --",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-311-decision-registry.flow-agents-workflow.decision-registry-check-passed-22-topics-after-upgrading-typescript-source-policy-to-current-and-regenerating-the-index",
+      "claimId": "kontourai-flow-agents-311-decision-registry.flow-agents-workflow.decision-registry-check-passed-22-topics-after-upgrading-typescript-source-policy-to-current-and-regenerating-the-index",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-311/evidence.json",
+      "excerptOrSummary": "Decision registry check passed (22 topics) after upgrading typescript-source-policy to current and regenerating the index.",
+      "observedAt": "2026-07-04T03:43:47Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
       "execution": {
@@ -139,26 +212,74 @@
       }
     },
     {
-      "id": "ev:kontourai-flow-agents-332-promotion.flow-agents-workflow.promoted-the-adr-freeze-cutover-durable-residue-rebuilt-against-the-post-merge-tree-origin-main-358-365-346-frozen-adr-provenance-index-17-needs-decision-registry-stubs-regenerated-decision-index-22-topics-total-incl-origin-s-model-routing-md-docs-adr-readme-redirect-and-the-context-md-glossary-terms-the-new-stub-subjects-reference",
-      "claimId": "kontourai-flow-agents-332-promotion.flow-agents-workflow.promoted-the-adr-freeze-cutover-durable-residue-rebuilt-against-the-post-merge-tree-origin-main-358-365-346-frozen-adr-provenance-index-17-needs-decision-registry-stubs-regenerated-decision-index-22-topics-total-incl-origin-s-model-routing-md-docs-adr-readme-redirect-and-the-context-md-glossary-terms-the-new-stub-subjects-reference",
+      "id": "ev:kontourai-flow-agents-311-source-tree-validation.flow-agents-workflow.source-tree-validation-passed-includes-npm-run-build",
+      "claimId": "kontourai-flow-agents-311-source-tree-validation.flow-agents-workflow.source-tree-validation-passed-includes-npm-run-build",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-311/evidence.json",
+      "excerptOrSummary": "Source tree validation passed (includes npm run build).",
+      "observedAt": "2026-07-04T03:43:47Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "npm run validate:source --",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-311-context-map-drift.flow-agents-workflow.docs-context-map-md-is-current-after-the-context-md-vocabulary-deltas",
+      "claimId": "kontourai-flow-agents-311-context-map-drift.flow-agents-workflow.docs-context-map-md-is-current-after-the-context-md-vocabulary-deltas",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-311/evidence.json",
+      "excerptOrSummary": "docs/context-map.md is current after the CONTEXT.md vocabulary deltas.",
+      "observedAt": "2026-07-04T03:43:47Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "npm run context-map -- --check",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-311-static-eval-suite.flow-agents-workflow.full-static-eval-suite-passed-including-updated-evals-static-test-workflow-skills-sh-assertions-for-the-new-probe-docs-write-contract-and-two-delta-emission-text-in-design-probe-pickup-probe",
+      "claimId": "kontourai-flow-agents-311-static-eval-suite.flow-agents-workflow.full-static-eval-suite-passed-including-updated-evals-static-test-workflow-skills-sh-assertions-for-the-new-probe-docs-write-contract-and-two-delta-emission-text-in-design-probe-pickup-probe",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-311/evidence.json",
+      "excerptOrSummary": "Full static eval suite passed, including updated evals/static/test_workflow_skills.sh assertions for the new probe docs-write contract and two-delta emission text in design-probe/pickup-probe.",
+      "observedAt": "2026-07-04T03:43:47Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/run.sh static",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-311-promotion.flow-agents-workflow.promoted-the-probe-docs-write-contract-design-probe-pickup-probe-skill-md-updates-docs-adr-readme-md-workflow-usage-guide-cross-links-context-md-vocabulary-deltas-the-upgraded-typescript-source-policy-decision-record-regenerated-index-and-the-updated-static-eval-assertions",
+      "claimId": "kontourai-flow-agents-311-promotion.flow-agents-workflow.promoted-the-probe-docs-write-contract-design-probe-pickup-probe-skill-md-updates-docs-adr-readme-md-workflow-usage-guide-cross-links-context-md-vocabulary-deltas-the-upgraded-typescript-source-policy-decision-record-regenerated-index-and-the-updated-static-eval-assertions",
       "evidenceType": "policy_rule",
       "method": "auditability",
-      "sourceRef": "kontourai-flow-agents-332/evidence.json",
-      "excerptOrSummary": "Promoted the ADR-freeze cutover durable residue (rebuilt against the post-merge tree, origin/main #358/#365/#346): frozen ADR provenance + index, 17 needs-decision registry stubs + regenerated decision index (22 topics total incl. origin's model-routing.md), docs/adr/README redirect, and the CONTEXT.md glossary terms the new stub subjects reference.",
-      "observedAt": "2026-07-04T03:13:32Z",
+      "sourceRef": "kontourai-flow-agents-311/evidence.json",
+      "excerptOrSummary": "Promoted the probe docs-write contract, design-probe/pickup-probe SKILL.md updates, docs/adr/README.md + workflow-usage-guide cross-links, CONTEXT.md vocabulary deltas, the upgraded typescript-source-policy decision record + regenerated index, and the updated static eval assertions.",
+      "observedAt": "2026-07-04T03:43:47Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     }
   ],
   "policies": [
     {
-      "id": "policy:workflow.check.test:test_output",
-      "claimType": "workflow.check.test",
+      "id": "policy:workflow.check.command:test_output",
+      "claimType": "workflow.check.command",
       "requiredEvidence": [
         "test_output"
       ],
       "acceptanceCriteria": [
-        "A verified verification event must support a workflow.check.test claim."
+        "A verified verification event must support a workflow.check.command claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -203,68 +324,76 @@
   ],
   "events": [
     {
-      "id": "evt:kontourai-flow-agents-332-decision-registry.flow-agents-workflow.decision-registry-validates-all-22-topic-files-17-new-needs-decision-adr-subject-stubs-plus-the-5-pre-existing-living-topics-including-origin-main-s-model-routing-md-and-the-regenerated-index-re-run-fresh-against-the-merged-tree",
-      "claimId": "kontourai-flow-agents-332-decision-registry.flow-agents-workflow.decision-registry-validates-all-22-topic-files-17-new-needs-decision-adr-subject-stubs-plus-the-5-pre-existing-living-topics-including-origin-main-s-model-routing-md-and-the-regenerated-index-re-run-fresh-against-the-merged-tree",
+      "id": "evt:kontourai-flow-agents-311-content-boundary.flow-agents-workflow.content-boundary-check-passed-after-contract-skill-context-md-decision-file-edits",
+      "claimId": "kontourai-flow-agents-311-content-boundary.flow-agents-workflow.content-boundary-check-passed-after-contract-skill-context-md-decision-file-edits",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-332-decision-registry.flow-agents-workflow.decision-registry-validates-all-22-topic-files-17-new-needs-decision-adr-subject-stubs-plus-the-5-pre-existing-living-topics-including-origin-main-s-model-routing-md-and-the-regenerated-index-re-run-fresh-against-the-merged-tree"
+        "ev:kontourai-flow-agents-311-content-boundary.flow-agents-workflow.content-boundary-check-passed-after-contract-skill-context-md-decision-file-edits"
       ],
-      "createdAt": "2026-07-04T03:13:32Z",
-      "verifiedAt": "2026-07-04T03:13:32Z"
+      "createdAt": "2026-07-04T03:43:47Z",
+      "verifiedAt": "2026-07-04T03:43:47Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-332-promotion.flow-agents-workflow.promoted-the-adr-freeze-cutover-durable-residue-rebuilt-against-the-post-merge-tree-origin-main-358-365-346-frozen-adr-provenance-index-17-needs-decision-registry-stubs-regenerated-decision-index-22-topics-total-incl-origin-s-model-routing-md-docs-adr-readme-redirect-and-the-context-md-glossary-terms-the-new-stub-subjects-reference",
-      "claimId": "kontourai-flow-agents-332-promotion.flow-agents-workflow.promoted-the-adr-freeze-cutover-durable-residue-rebuilt-against-the-post-merge-tree-origin-main-358-365-346-frozen-adr-provenance-index-17-needs-decision-registry-stubs-regenerated-decision-index-22-topics-total-incl-origin-s-model-routing-md-docs-adr-readme-redirect-and-the-context-md-glossary-terms-the-new-stub-subjects-reference",
+      "id": "evt:kontourai-flow-agents-311-decision-registry.flow-agents-workflow.decision-registry-check-passed-22-topics-after-upgrading-typescript-source-policy-to-current-and-regenerating-the-index",
+      "claimId": "kontourai-flow-agents-311-decision-registry.flow-agents-workflow.decision-registry-check-passed-22-topics-after-upgrading-typescript-source-policy-to-current-and-regenerating-the-index",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:kontourai-flow-agents-332-promotion.flow-agents-workflow.promoted-the-adr-freeze-cutover-durable-residue-rebuilt-against-the-post-merge-tree-origin-main-358-365-346-frozen-adr-provenance-index-17-needs-decision-registry-stubs-regenerated-decision-index-22-topics-total-incl-origin-s-model-routing-md-docs-adr-readme-redirect-and-the-context-md-glossary-terms-the-new-stub-subjects-reference"
+        "ev:kontourai-flow-agents-311-decision-registry.flow-agents-workflow.decision-registry-check-passed-22-topics-after-upgrading-typescript-source-policy-to-current-and-regenerating-the-index"
       ],
-      "createdAt": "2026-07-04T03:13:32Z",
-      "verifiedAt": "2026-07-04T03:13:32Z"
+      "createdAt": "2026-07-04T03:43:47Z",
+      "verifiedAt": "2026-07-04T03:43:47Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-332-ac1-banner-only-adr-diffs-second-freeze-run-is-a-no-op-check-decisions-green.flow-agents-workflow.ac1-banner-only-adr-diffs-second-freeze-run-is-a-no-op-check-decisions-green",
-      "claimId": "kontourai-flow-agents-332-ac1-banner-only-adr-diffs-second-freeze-run-is-a-no-op-check-decisions-green.flow-agents-workflow.ac1-banner-only-adr-diffs-second-freeze-run-is-a-no-op-check-decisions-green",
+      "id": "evt:kontourai-flow-agents-311-source-tree-validation.flow-agents-workflow.source-tree-validation-passed-includes-npm-run-build",
+      "claimId": "kontourai-flow-agents-311-source-tree-validation.flow-agents-workflow.source-tree-validation-passed-includes-npm-run-build",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-04T03:13:32Z",
-      "verifiedAt": "2026-07-04T03:13:32Z"
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-311-source-tree-validation.flow-agents-workflow.source-tree-validation-passed-includes-npm-run-build"
+      ],
+      "createdAt": "2026-07-04T03:43:47Z",
+      "verifiedAt": "2026-07-04T03:43:47Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-332-ac2-stubs-index-valid-no-duplicate-topics-vs-existing-registry-files.flow-agents-workflow.ac2-stubs-index-valid-no-duplicate-topics-vs-existing-registry-files",
-      "claimId": "kontourai-flow-agents-332-ac2-stubs-index-valid-no-duplicate-topics-vs-existing-registry-files.flow-agents-workflow.ac2-stubs-index-valid-no-duplicate-topics-vs-existing-registry-files",
+      "id": "evt:kontourai-flow-agents-311-context-map-drift.flow-agents-workflow.docs-context-map-md-is-current-after-the-context-md-vocabulary-deltas",
+      "claimId": "kontourai-flow-agents-311-context-map-drift.flow-agents-workflow.docs-context-map-md-is-current-after-the-context-md-vocabulary-deltas",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-04T03:13:32Z",
-      "verifiedAt": "2026-07-04T03:13:32Z"
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-311-context-map-drift.flow-agents-workflow.docs-context-map-md-is-current-after-the-context-md-vocabulary-deltas"
+      ],
+      "createdAt": "2026-07-04T03:43:47Z",
+      "verifiedAt": "2026-07-04T03:43:47Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-332-ac3-docs-adr-readme-redirect-exists-and-names-the-registry-contract.flow-agents-workflow.ac3-docs-adr-readme-redirect-exists-and-names-the-registry-contract",
-      "claimId": "kontourai-flow-agents-332-ac3-docs-adr-readme-redirect-exists-and-names-the-registry-contract.flow-agents-workflow.ac3-docs-adr-readme-redirect-exists-and-names-the-registry-contract",
+      "id": "evt:kontourai-flow-agents-311-static-eval-suite.flow-agents-workflow.full-static-eval-suite-passed-including-updated-evals-static-test-workflow-skills-sh-assertions-for-the-new-probe-docs-write-contract-and-two-delta-emission-text-in-design-probe-pickup-probe",
+      "claimId": "kontourai-flow-agents-311-static-eval-suite.flow-agents-workflow.full-static-eval-suite-passed-including-updated-evals-static-test-workflow-skills-sh-assertions-for-the-new-probe-docs-write-contract-and-two-delta-emission-text-in-design-probe-pickup-probe",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-04T03:13:32Z",
-      "verifiedAt": "2026-07-04T03:13:32Z"
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-311-static-eval-suite.flow-agents-workflow.full-static-eval-suite-passed-including-updated-evals-static-test-workflow-skills-sh-assertions-for-the-new-probe-docs-write-contract-and-two-delta-emission-text-in-design-probe-pickup-probe"
+      ],
+      "createdAt": "2026-07-04T03:43:47Z",
+      "verifiedAt": "2026-07-04T03:43:47Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-332-ac4-liveness-experiment-recorded-claim-succeeded-probe-pull-work-excluded-while-held-selectable-post-merge.flow-agents-workflow.ac4-liveness-experiment-recorded-claim-succeeded-probe-pull-work-excluded-while-held-selectable-post-merge",
-      "claimId": "kontourai-flow-agents-332-ac4-liveness-experiment-recorded-claim-succeeded-probe-pull-work-excluded-while-held-selectable-post-merge.flow-agents-workflow.ac4-liveness-experiment-recorded-claim-succeeded-probe-pull-work-excluded-while-held-selectable-post-merge",
+      "id": "evt:kontourai-flow-agents-311-promotion.flow-agents-workflow.promoted-the-probe-docs-write-contract-design-probe-pickup-probe-skill-md-updates-docs-adr-readme-md-workflow-usage-guide-cross-links-context-md-vocabulary-deltas-the-upgraded-typescript-source-policy-decision-record-regenerated-index-and-the-updated-static-eval-assertions",
+      "claimId": "kontourai-flow-agents-311-promotion.flow-agents-workflow.promoted-the-probe-docs-write-contract-design-probe-pickup-probe-skill-md-updates-docs-adr-readme-md-workflow-usage-guide-cross-links-context-md-vocabulary-deltas-the-upgraded-typescript-source-policy-decision-record-regenerated-index-and-the-updated-static-eval-assertions",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-04T03:13:32Z",
-      "verifiedAt": "2026-07-04T03:13:32Z"
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-311-promotion.flow-agents-workflow.promoted-the-probe-docs-write-contract-design-probe-pickup-probe-skill-md-updates-docs-adr-readme-md-workflow-usage-guide-cross-links-context-md-vocabulary-deltas-the-upgraded-typescript-source-policy-decision-record-regenerated-index-and-the-updated-static-eval-assertions"
+      ],
+      "createdAt": "2026-07-04T03:43:47Z",
+      "verifiedAt": "2026-07-04T03:43:47Z"
     }
   ]
 }

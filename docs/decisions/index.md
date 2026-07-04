@@ -29,6 +29,6 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [standing-directives](./standing-directives.md) | current | Standing directives |
 | [three-hard-boundary-model](./three-hard-boundary-model.md) | needs-decision | Three-hard-boundary model |
 | [trust-reconcile](./trust-reconcile.md) | needs-decision | Trust-reconcile and delivery reconciliation |
-| [typescript-source-policy](./typescript-source-policy.md) | needs-decision | TypeScript-first source policy |
+| [typescript-source-policy](./typescript-source-policy.md) | current | TypeScript-first source policy |
 | [workflow-enforcement](./workflow-enforcement.md) | needs-decision | Workflow Enforcement |
 | [workflow-trust-state](./workflow-trust-state.md) | needs-decision | Workflow trust state |

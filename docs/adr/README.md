@@ -40,6 +40,10 @@ records** under [`docs/decisions/`](../decisions/index.md), one file per decisio
    `needs-decision` stub's `evidence[]`; flip that stub's `status` to `current`
    and add rationale rather than starting a new file.
 
-Agent **probes** gain a dedicated docs-write contract for authoring decision
-records in [#311](https://github.com/kontourai/flow-agents/issues/311); until
-then, decisions are recorded by the mechanism above.
+Agent **probes** (`design-probe`, `pickup-probe`) author decision records
+directly per
+[`context/contracts/probe-docs-write-contract.md`](../../context/contracts/probe-docs-write-contract.md)
+(issue [#311](https://github.com/kontourai/flow-agents/issues/311)): each
+crystallized understanding emits a `CONTEXT.md` vocabulary delta, a
+`docs/decisions/<slug>.md` decision delta (revise-vs-create against the index),
+and a transcript-provenance link back to the Probe's session artifact.

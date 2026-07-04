@@ -82,6 +82,43 @@ Maintain a compact running record in the active artifact or conversation when no
 
 When workflow artifacts exist, update the appropriate session, handoff, Probe record, or planning artifact according to the local artifact contract. Do not invent a project-specific storage format when the repository already defines one.
 
+## Docs-Write: Two-Delta Emission
+
+Per `context/contracts/probe-docs-write-contract.md`, when a `decisions` entry above is a **decision subject** — a durable, reusable answer to a named domain question, not an implementation detail or transient planning choice — emit two deltas into durable docs in the same motion, before moving to the next branch:
+
+1. **Vocabulary delta**: the subject noun must exist as a `CONTEXT.md` glossary term. If absent, coin it first (a tight one- or two-sentence `### <Term>` entry); if present, refine the definition when the crystallized decision changes what it says (e.g. an "open" pointer becoming a stated answer).
+2. **Decision delta**: consult `docs/decisions/index.md` and propose revise-vs-create against the existing topic slugs (this includes any `needs-decision` stub already naming the subject); revise the existing topic file in place, or create `docs/decisions/<slug>.md` per `context/contracts/decision-registry-contract.md`. Run `npm run gen:decisions-index && npm run check:decisions` after writing.
+3. **Transcript provenance**: add a `session-archive` evidence ref pointing at this Probe's own session artifact (the live `.kontourai/flow-agents/<slug>/...` path — it does not need to be archived yet).
+
+Example — coining a new term and creating its topic file:
+
+```markdown
+### Retry Budget
+
+The maximum number of automatic retries a workflow step may attempt before routing back to the user. Configured per Flow Definition step, not globally.
+```
+
+```markdown
+---
+status: current
+subject: Retry budget
+decided: 2026-07-03
+evidence:
+  - kind: session-archive
+    ref: .kontourai/flow-agents/<slug>/<slug>--design-probe.md
+  - kind: issue
+    ref: https://github.com/kontourai/flow-agents/issues/<n>
+---
+
+# Retry budget
+
+Each Flow Definition step declares its own retry budget; there is no global default. Set during design-probe alignment on <n>.
+```
+
+Example — revising a `needs-decision` stub seeded by the ADR-freeze cutover (issue #314) once its frozen ADR's decision is confirmed still current: flip `status: needs-decision` to `current`, set `decided` to today, keep the existing `adr` evidence ref, and append the `session-archive` ref for this Probe session plus a `pr` ref once one exists. See `context/contracts/probe-docs-write-contract.md` § Worked Example for the full step-by-step.
+
+Do not write a numbered ADR — `docs/adr/` is frozen history (`docs/adr/README.md`); every decision delta targets the topic-keyed registry.
+
 ## Stop Conditions
 
 Stop probing when one of these is true:
