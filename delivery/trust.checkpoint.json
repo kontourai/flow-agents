@@ -1,31 +1,29 @@
 {
   "schema_version": "1.0",
-  "slug": "kontourai-flow-agents-267",
+  "slug": "kontourai-flow-agents-332",
   "work_item": null,
-  "status": "delivered",
-  "phase": "release",
-  "sealed_at": "2026-07-03T10:04:00Z",
-  "commit_sha": "bee760272b8bb770df02400ccc5881bd3dbc8806",
+  "status": "verified",
+  "phase": "verification",
+  "sealed_at": "2026-07-04T03:14:17Z",
+  "commit_sha": "72696c2ced8f25bbbfdaf27a35cd88511cf480e0",
   "checkpoint": {
-    "asOf": "2026-07-03T16:47:27.927Z",
+    "asOf": "2026-07-04T03:14:17.067Z",
     "statusByClaimId": {
-      "kontourai-flow-agents-267-content-boundary.flow-agents-workflow.content-boundary": "verified",
-      "kontourai-flow-agents-267-decision-registry.flow-agents-workflow.decision-registry": "verified",
-      "kontourai-flow-agents-267-source-tree-validation.flow-agents-workflow.source-tree-validation": "verified",
-      "kontourai-flow-agents-267-record-critique-fail-then-pass-supersedes-latest-wins-history-retained.flow-agents-workflow.record-critique-fail-then-pass-supersedes-latest-wins-history-retained": "proposed",
-      "kontourai-flow-agents-267-check-critique-round-trip-is-lossless-and-type-stable-under-flow-id.flow-agents-workflow.check-critique-round-trip-is-lossless-and-type-stable-under-flow-id": "proposed",
-      "kontourai-flow-agents-267-superseded-historical-fail-tolerated-by-validator-live-fail-still-blocks.flow-agents-workflow.superseded-historical-fail-tolerated-by-validator-live-fail-still-blocks": "proposed",
-      "kontourai-flow-agents-267-code-review.flow-agents-workflow.supersession-reviewer-scoped-round-trip-type-stable-anti-gaming-suite-green": "verified"
+      "kontourai-flow-agents-332-decision-registry.flow-agents-workflow.decision-registry-validates-all-22-topic-files-17-new-needs-decision-adr-subject-stubs-plus-the-5-pre-existing-living-topics-including-origin-main-s-model-routing-md-and-the-regenerated-index-re-run-fresh-against-the-merged-tree": "verified",
+      "kontourai-flow-agents-332-promotion.flow-agents-workflow.promoted-the-adr-freeze-cutover-durable-residue-rebuilt-against-the-post-merge-tree-origin-main-358-365-346-frozen-adr-provenance-index-17-needs-decision-registry-stubs-regenerated-decision-index-22-topics-total-incl-origin-s-model-routing-md-docs-adr-readme-redirect-and-the-context-md-glossary-terms-the-new-stub-subjects-reference": "verified",
+      "kontourai-flow-agents-332-ac1-banner-only-adr-diffs-second-freeze-run-is-a-no-op-check-decisions-green.flow-agents-workflow.ac1-banner-only-adr-diffs-second-freeze-run-is-a-no-op-check-decisions-green": "verified",
+      "kontourai-flow-agents-332-ac2-stubs-index-valid-no-duplicate-topics-vs-existing-registry-files.flow-agents-workflow.ac2-stubs-index-valid-no-duplicate-topics-vs-existing-registry-files": "verified",
+      "kontourai-flow-agents-332-ac3-docs-adr-readme-redirect-exists-and-names-the-registry-contract.flow-agents-workflow.ac3-docs-adr-readme-redirect-exists-and-names-the-registry-contract": "verified",
+      "kontourai-flow-agents-332-ac4-liveness-experiment-recorded-claim-succeeded-probe-pull-work-excluded-while-held-selectable-post-merge.flow-agents-workflow.ac4-liveness-experiment-recorded-claim-succeeded-probe-pull-work-excluded-while-held-selectable-post-merge": "verified"
     },
-    "throughEventCreatedAt": "2026-07-03T10:03:00Z",
+    "throughEventCreatedAt": "2026-07-04T03:13:32Z",
     "throughEventCreatedAtByClaimId": {
-      "kontourai-flow-agents-267-content-boundary.flow-agents-workflow.content-boundary": "2026-07-03T10:03:00Z",
-      "kontourai-flow-agents-267-decision-registry.flow-agents-workflow.decision-registry": "2026-07-03T10:03:00Z",
-      "kontourai-flow-agents-267-source-tree-validation.flow-agents-workflow.source-tree-validation": "2026-07-03T10:03:00Z",
-      "kontourai-flow-agents-267-record-critique-fail-then-pass-supersedes-latest-wins-history-retained.flow-agents-workflow.record-critique-fail-then-pass-supersedes-latest-wins-history-retained": null,
-      "kontourai-flow-agents-267-check-critique-round-trip-is-lossless-and-type-stable-under-flow-id.flow-agents-workflow.check-critique-round-trip-is-lossless-and-type-stable-under-flow-id": null,
-      "kontourai-flow-agents-267-superseded-historical-fail-tolerated-by-validator-live-fail-still-blocks.flow-agents-workflow.superseded-historical-fail-tolerated-by-validator-live-fail-still-blocks": null,
-      "kontourai-flow-agents-267-code-review.flow-agents-workflow.supersession-reviewer-scoped-round-trip-type-stable-anti-gaming-suite-green": "2026-07-03T10:03:00Z"
+      "kontourai-flow-agents-332-decision-registry.flow-agents-workflow.decision-registry-validates-all-22-topic-files-17-new-needs-decision-adr-subject-stubs-plus-the-5-pre-existing-living-topics-including-origin-main-s-model-routing-md-and-the-regenerated-index-re-run-fresh-against-the-merged-tree": "2026-07-04T03:13:32Z",
+      "kontourai-flow-agents-332-promotion.flow-agents-workflow.promoted-the-adr-freeze-cutover-durable-residue-rebuilt-against-the-post-merge-tree-origin-main-358-365-346-frozen-adr-provenance-index-17-needs-decision-registry-stubs-regenerated-decision-index-22-topics-total-incl-origin-s-model-routing-md-docs-adr-readme-redirect-and-the-context-md-glossary-terms-the-new-stub-subjects-reference": "2026-07-04T03:13:32Z",
+      "kontourai-flow-agents-332-ac1-banner-only-adr-diffs-second-freeze-run-is-a-no-op-check-decisions-green.flow-agents-workflow.ac1-banner-only-adr-diffs-second-freeze-run-is-a-no-op-check-decisions-green": "2026-07-04T03:13:32Z",
+      "kontourai-flow-agents-332-ac2-stubs-index-valid-no-duplicate-topics-vs-existing-registry-files.flow-agents-workflow.ac2-stubs-index-valid-no-duplicate-topics-vs-existing-registry-files": "2026-07-04T03:13:32Z",
+      "kontourai-flow-agents-332-ac3-docs-adr-readme-redirect-exists-and-names-the-registry-contract.flow-agents-workflow.ac3-docs-adr-readme-redirect-exists-and-names-the-registry-contract": "2026-07-04T03:13:32Z",
+      "kontourai-flow-agents-332-ac4-liveness-experiment-recorded-claim-succeeded-probe-pull-work-excluded-while-held-selectable-post-merge.flow-agents-workflow.ac4-liveness-experiment-recorded-claim-succeeded-probe-pull-work-excluded-while-held-selectable-post-merge": "2026-07-04T03:13:32Z"
     },
     "statusFunctionVersion": "2"
   }

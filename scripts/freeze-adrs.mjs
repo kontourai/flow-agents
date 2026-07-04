@@ -8,7 +8,7 @@
 // Origin & provenance: this is the portable, zero-runtime-dependency standalone
 // script (node >=22, ESM) piloted in kontourai/traverse per
 // https://github.com/kontourai/flow-agents/issues/314 and rolled out across the
-// portfolio (traverse#17, surface#115, flow#103, survey#108, campfit#45). This
+// portfolio (traverse#17, surface#115, flow#103, survey#108, and a fifth repo). This
 // copy is the flow-agents cutover (https://github.com/kontourai/flow-agents/issues/332),
 // the 6th application. It carries the two rollout fixes proven in the prior
 // applications (surface#115 / flow#103):
