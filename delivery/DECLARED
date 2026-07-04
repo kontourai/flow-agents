@@ -12,9 +12,9 @@
     "declared_at": "2026-07-03T16:27:21Z"
   },
   {
-    "scope": "subject:367 title-contains:content-boundary",
-    "reason": "Code fix to content-boundary check script; no agent delivery changes",
-    "approved_by": "issue-367-pre-approval (code fix: scans untracked files for banned terms)",
+    "scope": "branch-prefix:fix/content-boundary",
+    "reason": "Issue #367 code fix to content-boundary check script; no agent delivery changes",
+    "approved_by": "issue-367-pre-approval (scans untracked files for banned terms)",
     "declared_at": "2026-07-04T05:06:20Z"
   }
 ]
