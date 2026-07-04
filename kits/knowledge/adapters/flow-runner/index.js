@@ -42,6 +42,8 @@ import {
   isExactMatch,
   isPossibleDuplicate,
 } from "./entity-extractor.js";
+// Record-carried effective expiry (issue #341, store-contract Addendum J).
+import { effectiveExpiryMs } from "../shared/codec.js";
 
 // ---------------------------------------------------------------------------
 // Error helpers
@@ -2451,7 +2453,9 @@ export class KnowledgeFlowRunner {
    *   flags: Array<{
    *     recordId: string, title: string, type: string, category: string,
    *     status: string, lastMutationAt: string, ageDays: number,
-   *     thresholdDays: number, matchedThresholdKey: string,
+   *     thresholdDays: number|null, matchedThresholdKey: string,
+   *     reason: "threshold"|"expiry",  // which path fired (#341)
+   *     expiresAt?: string,            // present on expiry flags: the cited expiry
    *     proposedAction: "archive"|"refresh"
    *   }>,
    *   telemetryEvents: object[]
@@ -2523,9 +2527,18 @@ export class KnowledgeFlowRunner {
     let audited = 0;
 
     for (const record of records) {
+      // Record-carried expiry (#341): a record's own `expires_at` / `ttl_seconds`
+      // is the strongest freshness signal and fires WITHOUT any caller-supplied
+      // threshold (Addendum J). Effective expiry: explicit expires_at, else
+      // created_at + ttl_seconds; null when the record carries no freshness field.
+      const expiryMs = effectiveExpiryMs(record);
+      const hasExpiry = expiryMs !== null;
       const resolved = resolveThreshold(record.category, thresholds, defaultThresholdDays);
-      if (resolved === null) {
-        // No threshold configured for this category (and no default) → opt out.
+
+      // A record is opt-out only when it has NEITHER a record-carried expiry NOR
+      // a resolvable per-category threshold. This preserves the pre-#341 skip
+      // semantics for records without freshness fields.
+      if (!hasExpiry && resolved === null) {
         skipped += 1;
         continue;
       }
@@ -2537,13 +2550,35 @@ export class KnowledgeFlowRunner {
       const ageDays = Number.isNaN(lastMs)
         ? 0
         : Math.floor((nowMs - lastMs) / 86_400_000);
+      const proposedAction = resolveAction(record.category, actions, defaultAction);
 
-      // Flag only when STRICTLY past the threshold. Evidence (last-mutation +
-      // the threshold key/value that fired) is carried on every flag — the
-      // flag-gate requires both, so a flag can never be emitted without them.
-      if (ageDays > resolved.thresholdDays) {
-        const proposedAction =
-          resolveAction(record.category, actions, defaultAction);
+      // Expiry path takes precedence: when a record is past its OWN expiry, flag
+      // it citing that expiry (`expiresAt`) as the threshold that fired. Boundary
+      // is inclusive (nowMs >= expiry), matching isRecordStale (Addendum J).
+      if (hasExpiry && nowMs >= expiryMs) {
+        flags.push({
+          recordId: record.id,
+          title: record.title,
+          type: record.type,
+          category: record.category,
+          status: record.status || "active",
+          lastMutationAt,
+          ageDays,
+          // Expiry flags cite `expiresAt` rather than a day-count threshold, so
+          // `thresholdDays` is null and `matchedThresholdKey` names the field.
+          thresholdDays: null,
+          matchedThresholdKey: "expires_at",
+          expiresAt: new Date(expiryMs).toISOString(),
+          reason: "expiry",
+          proposedAction,
+        });
+        continue;
+      }
+
+      // Threshold path (unchanged, #106): flag only when STRICTLY past the
+      // resolved per-category threshold. Evidence (last-mutation + the threshold
+      // key/value that fired) is carried on every flag.
+      if (resolved !== null && ageDays > resolved.thresholdDays) {
         flags.push({
           recordId: record.id,
           title: record.title,
@@ -2554,6 +2589,7 @@ export class KnowledgeFlowRunner {
           ageDays,
           thresholdDays: resolved.thresholdDays,
           matchedThresholdKey: resolved.matchedKey,
+          reason: "threshold",
           proposedAction,
         });
       }

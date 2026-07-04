@@ -221,6 +221,42 @@ describe("Knowledge Kit Store Contract Suite", () => {
   });
 
   // -----------------------------------------------------------------------
+  // §2b  freshness fields round-trip (AC1, #341 — Addendum J)
+  // -----------------------------------------------------------------------
+  describe("create/update: expires_at & ttl_seconds round-trip through get (AC1)", () => {
+    let dir, store;
+    before(() => { dir = makeTempDir(); store = makeStore(dir); });
+    after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    test("create with expires_at + ttl_seconds round-trips (typed) through get", async () => {
+      const id = await store.create({
+        type: "raw",
+        title: "Freshness raw",
+        body: "b",
+        category: "radar.signals",
+        expires_at: "2026-09-01T00:00:00.000Z",
+        ttl_seconds: 3600,
+        provenance: { agent: "tester" },
+      });
+      const rec = await store.get(id);
+      assert.equal(rec.expires_at, "2026-09-01T00:00:00.000Z", "expires_at round-trips exactly");
+      assert.equal(rec.ttl_seconds, 3600, "ttl_seconds round-trips as a number");
+    });
+
+    test("update sets, then clears, expires_at", async () => {
+      const id = await store.create({
+        type: "raw", title: "Set/clear", body: "b", category: "radar.signals",
+        provenance: { agent: "tester" },
+      });
+      assert.equal((await store.get(id)).expires_at, undefined, "no expiry initially");
+      await store.update(id, { expires_at: "2027-01-01T00:00:00.000Z" }, { agent: "tester" });
+      assert.equal((await store.get(id)).expires_at, "2027-01-01T00:00:00.000Z", "expires_at set via update");
+      await store.update(id, { expires_at: null }, { agent: "tester" });
+      assert.equal((await store.get(id)).expires_at, undefined, "expires_at cleared via update(null)");
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // §3  links + graph index
   // -----------------------------------------------------------------------
   describe("reindex: rebuild graph index from records (recovery, #106)", () => {

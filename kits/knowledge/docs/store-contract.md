@@ -31,6 +31,10 @@ The store holds three record types. Every record, regardless of type, shares a c
 | `provenance` | Provenance | yes | Immutable creation provenance (see §4). |
 | `created_at` | ISO-8601 string | yes | Creation timestamp in UTC. |
 | `updated_at` | ISO-8601 string | yes | Last mutation timestamp in UTC. |
+| `expires_at` | ISO-8601 string | no | Optional record-carried expiry (Addendum J). When now is at or past it, the record derives to `stale`. Never silently mutates the record. |
+| `ttl_seconds` | number | no | Optional relative expiry in seconds from `created_at` (Addendum J). `expires_at`, when present, takes precedence. |
+
+Records **without** `expires_at` / `ttl_seconds` behave exactly as before this addendum — they are never derived `stale` via the expiry path.
 
 ### 1.2 `raw` Record
 
@@ -847,9 +851,17 @@ interface FreshnessFlag {
 ```
 
 `auditFreshness` returns `{ audited, skipped, flags, telemetryEvents }` where `audited` counts
-records that had a resolvable threshold, `skipped` counts opt-out categories, and `flags` lists the
-stale records. Gate telemetry is emitted at `collect-gate` and `flag-gate`
-(`knowledge.audit-freshness`).
+records that had a resolvable threshold **or a record-carried expiry**, `skipped` counts opt-out
+categories (no threshold *and* no expiry), and `flags` lists the stale records. Gate telemetry is
+emitted at `collect-gate` and `flag-gate` (`knowledge.audit-freshness`).
+
+**Extension (#341, Addendum J).** A record that carries its own `expires_at` / `ttl_seconds` is
+flagged when now is at or past that expiry — **without** any caller-supplied threshold. Such an
+expiry flag cites the expiry it fired on: it carries `reason: "expiry"`, `expiresAt` (the effective
+expiry, ISO-8601), `matchedThresholdKey: "expires_at"`, and `thresholdDays: null` (an expiry cites a
+timestamp, not a day-count). Threshold-driven flags (Addendum D above) carry `reason: "threshold"`
+and are otherwise unchanged. The expiry path takes precedence over the threshold path for a record
+that is past both.
 
 ## Addendum E — Category Canonicalization (Hygiene #4, #106)
 
@@ -1242,6 +1254,107 @@ resolved), AC2 (fail closed on a nonexistent id; no-op pass with no globs), AC3 
 commit-SHA-safety case. The suite is parameterized by `KNOWLEDGE_ADAPTER`, so conformance is required
 of every adapter (AC4). Because the check reuses `get`, any Addendum-H-conforming adapter satisfies it
 without new storage.
+
+---
+
+## Addendum J — Record Freshness & Status Semantics (Hachure alignment, #341)
+
+### J.1 Motivation — no silent rot for our own knowledge
+
+The store is strong at *filing* and, since Addendum D, at *auditing* staleness — but staleness lived
+entirely in the auditor's call: thresholds are supplied per invocation, so freshness intent lived in
+whoever remembered to pass the right options, not on the record. A record could not say "I go stale
+on 2026-09-01"; the only freshness mechanism for a long-lived store was a human remembering to run an
+audit with the right numbers (field evidence: the ops design partner's radar section carried a
+`prune monthly` *comment* as its sole freshness mechanism). Knowledge rots silently between audits.
+
+Meanwhile Kontour already owns a trust vocabulary for exactly this — **Hachure**: `expiresAt` /
+`ttlSeconds`, statuses `unknown / proposed / verified / stale / superseded`, and the "no silent rot"
+principle. This addendum makes the knowledge store **eat that vocabulary**: records carry their own
+expiry and go *visibly* stale under the same semantics our trust bundles use. It **aligns** with
+Hachure's vocabulary and semantics — it does **not** import Hachure's schema or take a format
+dependency (a non-goal). Ephemeris integration and automatic re-verification / auto-retirement are
+also non-goals: this addendum **flags**; the operator routes a flag through `knowledge.retire` or a
+fresh capture/compile, exactly as Addendum D established.
+
+### J.2 Record-carried freshness fields
+
+Two **optional** envelope fields (§1.1), round-tripped by every adapter through the shared codec:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `expires_at` | ISO-8601 string | Absolute instant the record expires. |
+| `ttl_seconds` | number (> 0) | Relative expiry: `created_at + ttl_seconds`. |
+
+- Both are settable at `create` and via `update` (they are mutable fields; `update` records them in
+  its mutation-log `fields` evidence like any other). Supplying either as `null` / `""` on `update`
+  **clears** it.
+- A malformed value (non-ISO `expires_at`, non-positive `ttl_seconds`) is rejected at the mutation
+  boundary with `error.code === "MISSING_EVIDENCE"` — bad freshness never reaches disk.
+- **Effective expiry** = `expires_at` when present, else `created_at + ttl_seconds`. An explicit
+  `expires_at` therefore **takes precedence** over `ttl_seconds`.
+- **Backward compatibility (R5):** a record carrying neither field has `null` effective expiry and is
+  never derived `stale` via the expiry path — it behaves exactly as before this addendum.
+
+### J.3 Derived states — `stale` and `superseded`
+
+`stale` and `superseded` are **derived**, never stored. They are computed on read/query and **never**
+mutate the record's `status` (Addendum B) or any other field. "No silent rot" means a record becomes
+*visibly* stale under query — not that the store silently rewrites it.
+
+- **`stale`** — the record's effective expiry exists and now is **at or past** it. The boundary is
+  **inclusive**: a record `expires_at: T` is stale from `T` onward (`now >= T`). A record may also be
+  surfaced as stale by `auditFreshness` (Addendum D + J.5). Derivation never changes the record.
+- **`superseded`** — the record is the target of an Addendum A.5 `supersede` relationship: it carries
+  a `superseded-by` mutation-log entry, equivalently an incoming `supersedes` edge in the graph
+  (`getLinks(id).reverse`). This is the cross-adapter query surface for supersession — it works
+  identically whether the adapter keeps superseded records in place (default) or archives them
+  (obsidian), because both maintain the graph. Supersession is a **derived state**, not a `status`
+  value; `supersede` remains the only op that establishes it.
+
+### J.4 Hachure vocabulary alignment
+
+The kit keeps **two orthogonal axes**, and aligns each to Hachure's vocabulary without forking a
+second lifecycle:
+
+1. **Lifecycle status** (stored; mutated only by `retire`, Addendum B): `active` / `implemented` /
+   `retired`.
+2. **Freshness/derivation state** (derived; never stored): `fresh` / `stale` / `superseded`.
+
+| Hachure term | Kit representation | Axis | Derived from |
+|---|---|---|---|
+| `verified` | `active` and not past expiry ("fresh") | lifecycle + freshness | `status === "active"` **and** not stale |
+| `stale` | `stale` | freshness (derived) | now ≥ effective expiry (`expires_at`, or `created_at + ttl_seconds`), or an `auditFreshness` flag |
+| `superseded` | `superseded` | freshness (derived) | incoming `supersedes` edge / `superseded-by` log entry (Addendum A.5) |
+| `proposed` | open proposal | flow state | a pending `proposes` link (Addenda B.7 / D) — not a record status |
+| `unknown` | *(not modelled)* | — | the kit has no "unknown" state; every record is at least `active` |
+
+`retired` (kit) has no Hachure freshness equivalent — it is a **terminal lifecycle decision**,
+orthogonal to freshness. Retired records are excluded from the default working set (Addendum B.3) and
+so from stale-filtered listings, but remain fully queryable via `includeRetired` and `get`.
+
+### J.5 Query surface
+
+- **`listByType(type, { stale: true, now? })`** and **`listByCategory(category, { stale: true, now?, prefix?, includeRetired? })`** return only records whose effective expiry is at or past `now` (default `Date.now()`; `now` is injectable for deterministic tests). Absent `stale` → unchanged
+  behaviour. The staleness filter composes with the existing status filter (retired still excluded by
+  default).
+- **`auditFreshness`** (Addendum D.2/D.3) additionally flags a record past its **own** `expires_at`
+  with **no** caller-supplied thresholds, each such flag citing the expiry as the threshold that
+  fired (`reason: "expiry"`, `expiresAt`, `matchedThresholdKey: "expires_at"`, `thresholdDays: null`).
+  Record-carried expiry thus **complements** Addendum D's caller-supplied thresholds rather than
+  replacing them.
+- **`superseded`** is queried via the existing `getLinks(id).reverse` surface (J.3) — no new storage
+  or list method; it works uniformly across adapters.
+
+### J.6 Conformance
+
+An adapter conforms to this addendum when the freshness suite
+(`evals/freshness/suite.test.js`) passes against it: `expires_at` / `ttl_seconds` round-trip through
+`get`; expiry transitions (past → stale, future → not, inclusive boundary, no-freshness-fields →
+never stale) hold; `{ stale: true }` listing returns exactly the expired records; and a superseded
+record is queryable as superseded. The suite is parameterized by `KNOWLEDGE_ADAPTER`, so conformance
+is required of every bundled adapter. Backward compatibility (R5) is covered by the unmodified
+`contract-suite`, `audit-freshness`, and `retirement` suites continuing to pass.
 
 ---
 

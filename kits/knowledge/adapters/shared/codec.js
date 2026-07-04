@@ -464,3 +464,127 @@ export function registerAliases(index, id, slugs) {
     index.by_slug[slug] = id;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Freshness + derived status  (issue #341, store-contract Addendum J)
+//
+// Optional, backward-compatible record-carried expiry aligned to Kontour's own
+// Hachure trust vocabulary (expiresAt / ttlSeconds; stale / superseded). Every
+// helper below is a no-op / null / false for a record that carries NO freshness
+// fields, so records written before this slice behave exactly as they did.
+//
+// `stale` and `superseded` are DERIVED states — computed here, never written
+// back onto the record's stored `status` (Addendum B). "No silent rot" means a
+// record goes VISIBLY stale under query, not that the store rewrites it behind
+// the operator's back.
+// ---------------------------------------------------------------------------
+
+// The optional freshness fields on the record envelope (§1.1 / Addendum J.1).
+export const FRESHNESS_KEYS = ["expires_at", "ttl_seconds"];
+
+/** Validate an `expires_at` value: a non-empty ISO-8601 string. */
+export function validateExpiresAt(value) {
+  if (typeof value !== "string" || !value.trim())
+    throw missingEvidenceError(
+      `expires_at must be a non-empty ISO-8601 string; got: ${JSON.stringify(value)}`
+    );
+  if (Number.isNaN(Date.parse(value)))
+    throw missingEvidenceError(
+      `expires_at must be a valid ISO-8601 timestamp; got: ${JSON.stringify(value)}`
+    );
+  return value;
+}
+
+/** Validate a `ttl_seconds` value: a positive, finite number of seconds. */
+export function validateTtlSeconds(value) {
+  const n = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  if (typeof n !== "number" || !Number.isFinite(n) || n <= 0)
+    throw missingEvidenceError(
+      `ttl_seconds must be a positive number of seconds; got: ${JSON.stringify(value)}`
+    );
+  return n;
+}
+
+/**
+ * Extract + validate the freshness fields from a create/update input, returning
+ * a patch object containing only the supplied keys (normalized). A key set
+ * explicitly to `null` or `""` is returned as `undefined` — the signal to CLEAR
+ * it (the YAML serializer drops undefined). Absent keys are omitted, so an input
+ * with no freshness fields yields `{}` (full backward compatibility). Throws
+ * MISSING_EVIDENCE — the contract's rejection channel — on a malformed value,
+ * at the mutation boundary, so bad freshness never reaches disk.
+ */
+export function freshnessPatch(input) {
+  const patch = {};
+  if (!input || typeof input !== "object") return patch;
+  if (Object.prototype.hasOwnProperty.call(input, "expires_at")) {
+    patch.expires_at =
+      input.expires_at === null || input.expires_at === ""
+        ? undefined
+        : validateExpiresAt(input.expires_at);
+  }
+  if (Object.prototype.hasOwnProperty.call(input, "ttl_seconds")) {
+    patch.ttl_seconds =
+      input.ttl_seconds === null || input.ttl_seconds === ""
+        ? undefined
+        : validateTtlSeconds(input.ttl_seconds);
+  }
+  return patch;
+}
+
+/**
+ * Coerce freshness fields to their canonical runtime types after a frontmatter
+ * read: the zero-dep YAML codec returns every scalar as a string, so a numeric
+ * `ttl_seconds` round-trips as text without this. Mutates and returns the
+ * record; a no-op when no freshness field is present.
+ */
+export function decodeFreshnessFields(record) {
+  if (record && record.ttl_seconds !== undefined && record.ttl_seconds !== null) {
+    const n = Number(record.ttl_seconds);
+    if (Number.isFinite(n)) record.ttl_seconds = n;
+  }
+  return record;
+}
+
+/**
+ * The record's EFFECTIVE expiry as epoch-ms, or `null` when it carries no
+ * freshness fields. Precedence: an explicit `expires_at` wins over a derived
+ * `created_at + ttl_seconds`. Returns null (never throws) on an unparseable
+ * field, so malformed freshness can neither make a record spuriously
+ * "fresh forever" nor crash a read-only audit.
+ */
+export function effectiveExpiryMs(record) {
+  if (!record || typeof record !== "object") return null;
+  if (record.expires_at) {
+    const ms = Date.parse(record.expires_at);
+    if (!Number.isNaN(ms)) return ms;
+  }
+  if (record.ttl_seconds !== undefined && record.ttl_seconds !== null && record.created_at) {
+    const base = Date.parse(record.created_at);
+    const ttl = Number(record.ttl_seconds);
+    if (!Number.isNaN(base) && Number.isFinite(ttl)) return base + ttl * 1000;
+  }
+  return null;
+}
+
+/**
+ * Is the record STALE at instant `nowMs`? Derived, never stored. A record with
+ * no freshness fields is never stale via this path (backward compat). Boundary:
+ * the expiry instant itself counts as expired (`nowMs >= expiry`) — a record
+ * "expires_at T" is stale from T onward, inclusive.
+ */
+export function isRecordStale(record, nowMs) {
+  const exp = effectiveExpiryMs(record);
+  if (exp === null) return false;
+  return nowMs >= exp;
+}
+
+/**
+ * Is the record SUPERSEDED? Derived from the Addendum A.5 supersede
+ * relationship, surfaced as the incoming `supersedes` edge in the graph
+ * (`getLinks(id).reverse`) — equivalently, the record carries a `superseded-by`
+ * mutation-log entry. Never stored as a `status`.
+ */
+export function isSupersededByLinks(reverseLinks) {
+  return Array.isArray(reverseLinks) && reverseLinks.some((l) => l && l.kind === "supersedes");
+}

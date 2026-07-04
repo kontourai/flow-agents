@@ -63,6 +63,10 @@ import {
   loadAliasIndex,
   saveAliasIndex,
   registerAliases,
+  // Record-carried freshness + derived staleness (issue #341, Addendum J).
+  freshnessPatch,
+  decodeFreshnessFields,
+  isRecordStale,
 } from "../shared/codec.js";
 
 // ---------------------------------------------------------------------------
@@ -302,7 +306,8 @@ export class ObsidianKnowledgeStore {
     // Reconstruct the record body from the rendered markdown section.
     // `meta` no longer contains `body` — the rendered text is the source of truth.
     const body = this._parseBodyFromRendered(meta.type, renderedText);
-    return { ...meta, body };
+    // Coerce record-carried freshness fields to canonical types (#341).
+    return decodeFreshnessFields({ ...meta, body });
   }
 
   /**
@@ -544,6 +549,9 @@ export class ObsidianKnowledgeStore {
       registerAliases(aliasIndex, id, aliases);
     }
 
+    // Validate optional freshness fields (#341) before any write.
+    const fresh = freshnessPatch(input);
+
     const explicitLinks = input.links || [];
     const wikilinks = extractWikilinks(input.body || "");
     const links = mergeLinks(explicitLinks, wikilinks);
@@ -558,6 +566,7 @@ export class ObsidianKnowledgeStore {
       status: "active",
       created_at: now,
       updated_at: now,
+      ...fresh,
       provenance: {
         agent: input.provenance.agent,
         ...(input.provenance.session_id ? { session_id: input.provenance.session_id } : {}),
@@ -592,13 +601,16 @@ export class ObsidianKnowledgeStore {
     const record = this._readRecord(id, pathIndex);
     if (!record) throw notFoundError(id);
 
-    const mutableKeys = ["title", "body", "category", "tags", "links", "aliases"];
+    const mutableKeys = ["title", "body", "category", "tags", "links", "aliases", "expires_at", "ttl_seconds"];
     const supplied = mutableKeys.filter((k) => fields[k] !== undefined);
     if (supplied.length === 0)
       throw missingEvidenceError("update: at least one mutable field must be supplied");
 
     if (fields.category !== undefined && !validateCategory(fields.category))
       throw missingEvidenceError(`update: invalid category: ${fields.category}`);
+
+    // Validate/normalize supplied freshness fields (#341); null/"" clears a field.
+    const fresh = freshnessPatch(fields);
 
     const now = this._now();
 
@@ -630,6 +642,7 @@ export class ObsidianKnowledgeStore {
       ...(fields.category !== undefined ? { category: fields.category } : {}),
       ...(fields.tags !== undefined ? { tags: fields.tags } : {}),
       ...(mergedAliases.length ? { aliases: mergedAliases } : {}),
+      ...fresh,
       links: newLinks,
       updated_at: now,
       mutation_log: [
@@ -1043,18 +1056,19 @@ export class ObsidianKnowledgeStore {
   async listByCategory(category, options = {}) {
     const records = this._allRecords();
     const includeRetired = options.includeRetired === true;
+    // Derived staleness filter (#341): keep only records past their own effective
+    // expiry at `now` (injectable for tests). Absent → no staleness filtering.
+    const staleOnly = options.stale === true;
+    const nowMs = options.now !== undefined ? new Date(options.now).getTime() : Date.now();
+    const keep = (r) =>
+      (includeRetired || (r.status || "active") !== "retired") &&
+      (!staleOnly || isRecordStale(r, nowMs));
     if (options.prefix) {
       return records.filter(
-        (r) =>
-          (r.category === category || r.category.startsWith(`${category}.`)) &&
-          (includeRetired || (r.status || "active") !== "retired")
+        (r) => (r.category === category || r.category.startsWith(`${category}.`)) && keep(r)
       );
     }
-    return records.filter(
-      (r) =>
-        r.category === category &&
-        (includeRetired || (r.status || "active") !== "retired")
-    );
+    return records.filter((r) => r.category === category && keep(r));
   }
 
   // -------------------------------------------------------------------------
@@ -1063,10 +1077,14 @@ export class ObsidianKnowledgeStore {
 
   async listByType(type, options = {}) {
     const includeRetired = options.includeRetired === true;
+    // Derived staleness filter (#341) — see listByCategory.
+    const staleOnly = options.stale === true;
+    const nowMs = options.now !== undefined ? new Date(options.now).getTime() : Date.now();
     return this._allRecords().filter(
       (r) =>
         r.type === type &&
-        (includeRetired || (r.status || "active") !== "retired")
+        (includeRetired || (r.status || "active") !== "retired") &&
+        (!staleOnly || isRecordStale(r, nowMs))
     );
   }
 }
