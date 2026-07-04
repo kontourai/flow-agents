@@ -31,6 +31,10 @@ The store holds three record types. Every record, regardless of type, shares a c
 | `provenance` | Provenance | yes | Immutable creation provenance (see §4). |
 | `created_at` | ISO-8601 string | yes | Creation timestamp in UTC. |
 | `updated_at` | ISO-8601 string | yes | Last mutation timestamp in UTC. |
+| `expires_at` | ISO-8601 string | no | Optional record-carried expiry (Addendum J). When now is at or past it, the record derives to `stale`. Never silently mutates the record. |
+| `ttl_seconds` | number | no | Optional relative expiry in seconds from `created_at` (Addendum J). `expires_at`, when present, takes precedence. |
+
+Records **without** `expires_at` / `ttl_seconds` behave exactly as before this addendum — they are never derived `stale` via the expiry path.
 
 ### 1.2 `raw` Record
 
@@ -847,9 +851,17 @@ interface FreshnessFlag {
 ```
 
 `auditFreshness` returns `{ audited, skipped, flags, telemetryEvents }` where `audited` counts
-records that had a resolvable threshold, `skipped` counts opt-out categories, and `flags` lists the
-stale records. Gate telemetry is emitted at `collect-gate` and `flag-gate`
-(`knowledge.audit-freshness`).
+records that had a resolvable threshold **or a record-carried expiry**, `skipped` counts opt-out
+categories (no threshold *and* no expiry), and `flags` lists the stale records. Gate telemetry is
+emitted at `collect-gate` and `flag-gate` (`knowledge.audit-freshness`).
+
+**Extension (#341, Addendum J).** A record that carries its own `expires_at` / `ttl_seconds` is
+flagged when now is at or past that expiry — **without** any caller-supplied threshold. Such an
+expiry flag cites the expiry it fired on: it carries `reason: "expiry"`, `expiresAt` (the effective
+expiry, ISO-8601), `matchedThresholdKey: "expires_at"`, and `thresholdDays: null` (an expiry cites a
+timestamp, not a day-count). Threshold-driven flags (Addendum D above) carry `reason: "threshold"`
+and are otherwise unchanged. The expiry path takes precedence over the threshold path for a record
+that is past both.
 
 ## Addendum E — Category Canonicalization (Hygiene #4, #106)
 
@@ -1242,3 +1254,293 @@ resolved), AC2 (fail closed on a nonexistent id; no-op pass with no globs), AC3 
 commit-SHA-safety case. The suite is parameterized by `KNOWLEDGE_ADAPTER`, so conformance is required
 of every adapter (AC4). Because the check reuses `get`, any Addendum-H-conforming adapter satisfies it
 without new storage.
+
+---
+
+## Addendum J — Record Freshness & Status Semantics (Hachure alignment, #341)
+
+### J.1 Motivation — no silent rot for our own knowledge
+
+The store is strong at *filing* and, since Addendum D, at *auditing* staleness — but staleness lived
+entirely in the auditor's call: thresholds are supplied per invocation, so freshness intent lived in
+whoever remembered to pass the right options, not on the record. A record could not say "I go stale
+on 2026-09-01"; the only freshness mechanism for a long-lived store was a human remembering to run an
+audit with the right numbers (field evidence: the ops design partner's radar section carried a
+`prune monthly` *comment* as its sole freshness mechanism). Knowledge rots silently between audits.
+
+Meanwhile Kontour already owns a trust vocabulary for exactly this — **Hachure**: `expiresAt` /
+`ttlSeconds`, statuses `unknown / proposed / verified / stale / superseded`, and the "no silent rot"
+principle. This addendum makes the knowledge store **eat that vocabulary**: records carry their own
+expiry and go *visibly* stale under the same semantics our trust bundles use. It **aligns** with
+Hachure's vocabulary and semantics — it does **not** import Hachure's schema or take a format
+dependency (a non-goal). Ephemeris integration and automatic re-verification / auto-retirement are
+also non-goals: this addendum **flags**; the operator routes a flag through `knowledge.retire` or a
+fresh capture/compile, exactly as Addendum D established.
+
+### J.2 Record-carried freshness fields
+
+Two **optional** envelope fields (§1.1), round-tripped by every adapter through the shared codec:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `expires_at` | ISO-8601 string | Absolute instant the record expires. |
+| `ttl_seconds` | number (> 0) | Relative expiry: `created_at + ttl_seconds`. |
+
+- Both are settable at `create` and via `update` (they are mutable fields; `update` records them in
+  its mutation-log `fields` evidence like any other). Supplying either as `null` / `""` on `update`
+  **clears** it.
+- A malformed value (non-ISO `expires_at`, non-positive `ttl_seconds`) is rejected at the mutation
+  boundary with `error.code === "MISSING_EVIDENCE"` — bad freshness never reaches disk.
+- **Effective expiry** = `expires_at` when present, else `created_at + ttl_seconds`. An explicit
+  `expires_at` therefore **takes precedence** over `ttl_seconds`.
+- **Backward compatibility (R5):** a record carrying neither field has `null` effective expiry and is
+  never derived `stale` via the expiry path — it behaves exactly as before this addendum.
+
+### J.3 Derived states — `stale` and `superseded`
+
+`stale` and `superseded` are **derived**, never stored. They are computed on read/query and **never**
+mutate the record's `status` (Addendum B) or any other field. "No silent rot" means a record becomes
+*visibly* stale under query — not that the store silently rewrites it.
+
+- **`stale`** — the record's effective expiry exists and now is **at or past** it. The boundary is
+  **inclusive**: a record `expires_at: T` is stale from `T` onward (`now >= T`). A record may also be
+  surfaced as stale by `auditFreshness` (Addendum D + J.5). Derivation never changes the record.
+- **`superseded`** — the record is the target of an Addendum A.5 `supersede` relationship: it carries
+  a `superseded-by` mutation-log entry, equivalently an incoming `supersedes` edge in the graph
+  (`getLinks(id).reverse`). This is the cross-adapter query surface for supersession — it works
+  identically whether the adapter keeps superseded records in place (default) or archives them
+  (obsidian), because both maintain the graph. Supersession is a **derived state**, not a `status`
+  value; `supersede` remains the only op that establishes it.
+
+### J.4 Hachure vocabulary alignment
+
+The kit keeps **two orthogonal axes**, and aligns each to Hachure's vocabulary without forking a
+second lifecycle:
+
+1. **Lifecycle status** (stored; mutated only by `retire`, Addendum B): `active` / `implemented` /
+   `retired`.
+2. **Freshness/derivation state** (derived; never stored): `fresh` / `stale` / `superseded`.
+
+| Hachure term | Kit representation | Axis | Derived from |
+|---|---|---|---|
+| `verified` | `active` and not past expiry ("fresh") | lifecycle + freshness | `status === "active"` **and** not stale |
+| `stale` | `stale` | freshness (derived) | now ≥ effective expiry (`expires_at`, or `created_at + ttl_seconds`), or an `auditFreshness` flag |
+| `superseded` | `superseded` | freshness (derived) | incoming `supersedes` edge / `superseded-by` log entry (Addendum A.5) |
+| `proposed` | open proposal | flow state | a pending `proposes` link (Addenda B.7 / D) — not a record status |
+| `unknown` | *(not modelled)* | — | the kit has no "unknown" state; every record is at least `active` |
+
+`retired` (kit) has no Hachure freshness equivalent — it is a **terminal lifecycle decision**,
+orthogonal to freshness. Retired records are excluded from the default working set (Addendum B.3) and
+so from stale-filtered listings, but remain fully queryable via `includeRetired` and `get`.
+
+### J.5 Query surface
+
+- **`listByType(type, { stale: true, now? })`** and **`listByCategory(category, { stale: true, now?, prefix?, includeRetired? })`** return only records whose effective expiry is at or past `now` (default `Date.now()`; `now` is injectable for deterministic tests). Absent `stale` → unchanged
+  behaviour. The staleness filter composes with the existing status filter (retired still excluded by
+  default).
+- **`auditFreshness`** (Addendum D.2/D.3) additionally flags a record past its **own** `expires_at`
+  with **no** caller-supplied thresholds, each such flag citing the expiry as the threshold that
+  fired (`reason: "expiry"`, `expiresAt`, `matchedThresholdKey: "expires_at"`, `thresholdDays: null`).
+  Record-carried expiry thus **complements** Addendum D's caller-supplied thresholds rather than
+  replacing them.
+- **`superseded`** is queried via the existing `getLinks(id).reverse` surface (J.3) — no new storage
+  or list method; it works uniformly across adapters.
+
+### J.6 Conformance
+
+An adapter conforms to this addendum when the freshness suite
+(`evals/freshness/suite.test.js`) passes against it: `expires_at` / `ttl_seconds` round-trip through
+`get`; expiry transitions (past → stale, future → not, inclusive boundary, no-freshness-fields →
+never stale) hold; `{ stale: true }` listing returns exactly the expired records; and a superseded
+record is queryable as superseded. The suite is parameterized by `KNOWLEDGE_ADAPTER`, so conformance
+is required of every bundled adapter. Backward compatibility (R5) is covered by the unmodified
+`contract-suite`, `audit-freshness`, and `retirement` suites continuing to pass.
+
+---
+
+## Addendum K — Supersede/Retire Citer Propagation (flag inbound citers, #342)
+
+### K.1 Motivation
+
+The `supersede` op (Addendum A.5) and the `retire` op with `supersededByRef` (Addendum B.4) preserve
+the affected record (supersede-not-delete / retire-not-delete) and make **store-internal** citers
+discoverable via the reverse-link index (§5, `getLinks(id).reverse`). But nothing enumerated or
+flagged the **docs** citing a superseded record — so a superseded decision could leave every citer
+silently pointing at dead or outdated authority.
+
+Field evidence (design partner `kontourai/ops`, knowledge record `0e439c57`): the 6/17 "sell the
+combination" decision became unresolvable after a store restructure and **four docs** (`NOW.md` ×2,
+`strategy/vision.md`, `strategy/2026-06-18-market-fork-decision.md`) cited it invisibly for weeks —
+the citers kept presenting a dead record as live authority. This addendum closes that loop: on a
+superseded/retired record it enumerates first-degree inbound citers from **both** indexes and emits a
+supersession-aware flag per citer.
+
+This is a **read-only** enumeration in the hygiene-flow style (Addenda D–G): the existing gated
+`supersede` and `retire` ops are unchanged, and no new mutation path is forked. It does **not**
+auto-edit citing docs, does **not** cascade status changes, and does **not** follow citers-of-citers
+(first-degree only). Fixing a citation is the operator's or a downstream flow's gated action.
+
+### K.2 `flagSupersededCiters` Flow-Runner Operation
+
+`KnowledgeFlowRunner.flagSupersededCiters(recordId, options)` (also the module-level
+`flagSupersededCiters(recordId, { store, ... })`):
+
+**Options:**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `docGlobs` | `string[]` | `[]` | Globs to scan for doc citers via the #340 citation index. Opt-in: `[]` = store citers only, no doc scan. |
+| `docsRoot` | `string` | workspace, then cwd | Root the globs resolve against. |
+| `markers` | `string[]` | `DEFAULT_CITATION_MARKERS` | Citation marker prefixes forwarded to the inbound-reference scan (Addendum I). |
+| `agent` | `string` | runner agent | Agent recorded on the flow telemetry. |
+
+`recordId` accepts a full id or any Addendum-H handle (short-id prefix / slug alias); the returned
+`recordId` is the resolved full id. A record that does not exist throws (`MISSING_EVIDENCE`) — never a
+silent empty pass.
+
+**Supersession evidence** (at least one is required for any flag to be emitted):
+- **supersede op** (A.5): a reverse link of kind `"supersedes"` from the superseding record, mirrored
+  by a `"superseded-by"` mutation-log entry carrying `new_id`. Both sources are read; their union is
+  `supersededByIds`.
+- **retire-with-supersededByRef** (B.4): a `"retire"` mutation-log entry whose
+  `evidence.supersededByRef` names the superseding artifact; surfaced as `supersededByRef` (and
+  `retiredStatus: "retired"`).
+
+**Citer enumeration** (first-degree only):
+- **store records** — `getLinks(id).reverse`, EXCLUDING the `"supersedes"` link itself and any link
+  originating from a superseding record (the replacement authority is not a silent dead citer). Every
+  other inbound link is a citer, tagged with its `linkKind`.
+- **docs** — `checkInboundReferences({ docGlobs, ... }).byRecord[id]` (Addendum I). The superseded
+  record is preserved, so its citations still resolve. Opt-in via `docGlobs`.
+
+### K.3 Flag Evidence Guarantee
+
+Every flag carries the superseding context that produced it — the flag-gate refuses to emit a flag
+without it. Consequently a record with **no** supersession evidence yields `superseded: false` and an
+**empty** flag list (no false flags, fail closed); a superseded record with no citers likewise yields
+an empty flag list. The enumerated citer counts (`storeCiters` / `docCiters`) are reported regardless
+of gating, so a caller can see the inbound edges independent of supersession state.
+
+```ts
+interface SupersededCiterFlag {
+  citerRef: string;              // record id, or "doc:line:column"
+  citerKind: "record" | "doc";
+  citedId: string;               // full id of the superseded / retired record
+  supersededByIds: string[];     // superseding record id(s) from the supersede op
+  supersededByRef: string | null; // the retire supersededByRef, when present
+  // record citer:
+  linkKind?: string;             // the reverse link kind that made it a citer
+  // doc citer (from the #340 citation index):
+  doc?: string; line?: number; column?: number; token?: string; form?: string;
+}
+```
+
+`flagSupersededCiters` returns:
+
+```ts
+{
+  recordId: string;              // resolved full id
+  superseded: boolean;           // whether supersession evidence exists
+  supersededByIds: string[];
+  supersededByRef: string | null;
+  retiredStatus: "retired" | null;
+  storeCiters: number;           // count from the reverse-link index
+  docCiters: number;             // count from the citation index (0 when no globs)
+  flags: SupersededCiterFlag[];  // gated by the evidence guarantee
+  telemetryEvents: object[];
+}
+```
+
+Gate telemetry is emitted at `collect-gate` and `flag-gate` (`knowledge.flag-superseded-citers`);
+when doc globs are configured, the folded `knowledge.check-inbound-references` gate events (Addendum
+I) also appear in the trail.
+
+### K.4 Read-Only Invariant
+
+`flagSupersededCiters` reads the store's query surface (`get`, `getLinks`) and — when doc globs are
+configured — the #340 inbound-reference scan (doc files + `get`). It mutates no record and appends no
+mutation-log entry. The store tree is byte-identical before and after the call.
+
+### K.5 Conformance
+
+An adapter conforms to this addendum when the supersede-propagation suite
+(`evals/supersede-propagation/suite.test.js`) passes against it — AC1 (store-record + doc citer
+enumerated from the two indexes), AC2 (every flag carries citer ref + cited id + superseding context;
+superseded-with-no-citers and non-superseded both yield zero flags), AC3 (read-only), and the
+retire-with-supersededByRef path. The suite is parameterized by `KNOWLEDGE_ADAPTER`, so conformance is
+required of every adapter (AC4). Because it reuses `get`/`getLinks` and the Addendum-I check, any
+adapter conforming to Addenda A, B, H, and I satisfies it without new storage.
+
+---
+
+## Addendum L — Incremental Consolidation (append mode, #343)
+
+### L.1 Problem: whole-body consolidate is heavy enough that sessions skip it
+
+The `knowledge.consolidate` flow (Addendum A) originally accepted only a **whole-body** input:
+the caller authored the *entire* updated snapshot body (`options.proposedBody`) and the runner
+replaced the snapshot with it. To add one decision, the caller had to re-read and re-emit every
+prior entry. Field evidence from the ops design partner (record `0e439c57`) showed this cost is
+high enough that real sessions **skip consolidation entirely** — the living decision snapshot
+silently stops living, defeating the flow.
+
+The snapshot already links its contributing compiled records with kind `"source"` and carries
+`provenance.source_ids` (Addendum A.3), so the body is *derivable from records*. Append mode uses
+that: the caller supplies only the new contribution and the runner regenerates the body.
+
+### L.2 Append-mode input
+
+`KnowledgeFlowRunner.consolidate(snapshotIdOrTopic, options)` accepts, as an alternative to
+`options.proposedBody`, an **appended entry** identifying the new compiled record:
+
+| Option | Type | Description |
+|---|---|---|
+| `appendEntryRecordId` | `string` | Id of the new **compiled** record to append (the appended entry). `appendEntry: { recordId }` is an accepted equivalent shape. |
+| `header` | `string` (opt) | Body header prepended before the rendered entries. |
+| `entryRenderer` | `(record) => string` (opt) | Pluggable per-entry renderer. Default renders a decision-log section: `## <title>\n\n<body>`. |
+
+`proposedBody` (whole-body mode) and the append options are **mutually exclusive**; supplying
+both throws `MISSING_EVIDENCE`. The appended record MUST exist and be type `"compiled"`
+(otherwise `MISSING_EVIDENCE`).
+
+### L.3 Body regeneration
+
+On an append-mode call the runner:
+
+1. Resolves the **current** (non-superseded) snapshot for the topic (or the given snapshot id).
+2. Reads that snapshot's contributing records: `provenance.source_ids` first, falling back to its
+   kind `"source"` links (Addendum A.3).
+3. Forms the new source set = *prior sources* ++ *appended entry*, de-duplicated with order
+   preserved (re-appending the same record is idempotent — no duplicate source id).
+4. Regenerates the body by rendering **every** source record in order (`entryRenderer`, joined by a
+   `---` rule, optional `header`). The caller never supplies prior content.
+
+The regenerated body then flows through the *unchanged* consolidate machinery
+(propose → evidence-gate → apply-or-reject, Addendum A.5): a new snapshot is created with the
+regenerated body, `provenance.source_ids` and kind `"source"` links covering every contributing
+record **including the new one** (R3), and the prior snapshot(s) are superseded, not deleted.
+
+### L.4 Back-compat
+
+Whole-body mode is unchanged: existing callers passing `options.proposedBody` work exactly as
+before, and `evals/consolidation/suite.test.js` passes unmodified. Append mode is purely additive
+— it changes how the effective body and source cluster are *computed*, not the gate shape, the
+supersede-not-delete invariant (A.5), or the telemetry gate points.
+
+### L.5 Sequential-session safety (no lost update)
+
+Because the body is regenerated from the **current live snapshot's** records on every call, two
+sequential consolidations from different sessions/agents, each appending one distinct entry, yield
+a snapshot containing **both** entries — the second session resolves the first session's snapshot,
+reads its (now-larger) source set, and appends to it rather than overwriting a stale whole body.
+
+### L.6 Conformance
+
+An adapter conforms when the incremental-consolidation suite
+(`evals/consolidate-incremental/suite.test.js`) passes against it. The suite is parameterized by
+`KNOWLEDGE_ADAPTER`; the no-lost-update case (R4) and the provenance/source-link completeness case
+(R3, asserted via the portable `get()` + reverse-`supersedes`-link guarantees of A.7) are required
+of every adapter. The default-store's additional guarantee that `listByType("snapshot")` still
+returns superseded snapshots is covered for that adapter by `evals/consolidation/suite.test.js`
+(the Obsidian adapter archives superseded snapshots out of the working set — both keep them
+reachable via `get()`).

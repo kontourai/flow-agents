@@ -26,6 +26,10 @@ import {
   loadAliasIndex,
   saveAliasIndex,
   registerAliases,
+  // Record-carried freshness + derived staleness (issue #341, Addendum J).
+  freshnessPatch,
+  decodeFreshnessFields,
+  isRecordStale,
 } from "../shared/codec.js";
 
 // ---------------------------------------------------------------------------
@@ -152,7 +156,17 @@ function parseYamlLines(lines, start, baseIndent) {
 }
 
 function unquote(s) {
-  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+  if (s.startsWith('"') && s.endsWith('"')) {
+    // Double-quoted scalars are escaped by yamlScalar; reverse those escapes
+    // (backslash, quote, newline, carriage-return, tab) left-to-right so a
+    // frontmatter value can carry newlines/quotes and round-trip intact. This
+    // keeps every scalar on ONE physical line, so an embedded "\n---\n" can
+    // never be mistaken for the frontmatter/body terminator (parseMarkdown).
+    return s.slice(1, -1).replace(/\\(["\\nrt])/g, (_, c) =>
+      c === "n" ? "\n" : c === "r" ? "\r" : c === "t" ? "\t" : c
+    );
+  }
+  if (s.startsWith("'") && s.endsWith("'")) {
     return s.slice(1, -1);
   }
   return s;
@@ -210,9 +224,20 @@ function serializeYaml(obj, indent = 0) {
 
 function yamlScalar(v) {
   if (typeof v === "string") {
-    // Quote if it contains special chars
-    if (/[:#\[\]{},&*?|<>=!%@`"'\n]/.test(v) || v.trim() !== v || v === "") {
-      return `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+    // Quote if it contains special chars (incl. any whitespace control char that
+    // would otherwise span lines — newline, carriage-return, tab).
+    if (/[:#\[\]{},&*?|<>=!%@`"'\n\r\t]/.test(v) || v.trim() !== v || v === "") {
+      // Escape backslash first, then quote and the control chars, so the value
+      // stays on ONE physical line. Reversed by unquote(). Without newline
+      // escaping a value like a multi-section proposal body would inject a raw
+      // "\n---\n" into the frontmatter and corrupt the record on read.
+      const escaped = v
+        .replace(/\\/g, "\\\\")
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, "\\n")
+        .replace(/\r/g, "\\r")
+        .replace(/\t/g, "\\t");
+      return `"${escaped}"`;
     }
     return v;
   }
@@ -398,7 +423,8 @@ export class DefaultKnowledgeStore {
     if (!fs.existsSync(p)) return null;
     const text = fs.readFileSync(p, "utf8");
     const { meta, body } = parseMarkdown(text);
-    return { ...meta, body };
+    // Coerce record-carried freshness fields to canonical types (#341).
+    return decodeFreshnessFields({ ...meta, body });
   }
 
   _writeRecord(record) {
@@ -444,6 +470,10 @@ export class DefaultKnowledgeStore {
       registerAliases(aliasIndex, id, aliases);
     }
 
+    // Validate optional freshness fields (#341) before any write, so a malformed
+    // expires_at / ttl_seconds aborts create without a partial record.
+    const fresh = freshnessPatch(input);
+
     // Merge explicit links + wikilinks from body
     const explicitLinks = input.links || [];
     const wikilinks = extractWikilinks(input.body || "");
@@ -459,6 +489,7 @@ export class DefaultKnowledgeStore {
       status: "active",
       created_at: now,
       updated_at: now,
+      ...fresh,
       provenance: {
         agent: input.provenance.agent,
         ...(input.provenance.session_id ? { session_id: input.provenance.session_id } : {}),
@@ -494,13 +525,17 @@ export class DefaultKnowledgeStore {
     const record = this._readRecord(id);
     if (!record) throw notFoundError(id);
 
-    const mutableKeys = ["title", "body", "category", "tags", "links", "aliases"];
+    const mutableKeys = ["title", "body", "category", "tags", "links", "aliases", "expires_at", "ttl_seconds"];
     const supplied = mutableKeys.filter((k) => fields[k] !== undefined);
     if (supplied.length === 0)
       throw missingEvidenceError("update: at least one mutable field must be supplied");
 
     if (fields.category !== undefined && !validateCategory(fields.category))
       throw missingEvidenceError(`update: invalid category: ${fields.category}`);
+
+    // Validate/normalize supplied freshness fields (#341). A field set to null/""
+    // clears it (patch value undefined → dropped by the serializer).
+    const fresh = freshnessPatch(fields);
 
     const now = this._now();
 
@@ -533,6 +568,7 @@ export class DefaultKnowledgeStore {
       ...(fields.category !== undefined ? { category: fields.category } : {}),
       ...(fields.tags !== undefined ? { tags: fields.tags } : {}),
       ...(mergedAliases.length ? { aliases: mergedAliases } : {}),
+      ...fresh,
       links: newLinks,
       updated_at: now,
       mutation_log: [
@@ -943,18 +979,19 @@ export class DefaultKnowledgeStore {
   async listByCategory(category, options = {}) {
     const records = this._allRecords();
     const includeRetired = options.includeRetired === true;
+    // Derived staleness filter (#341): keep only records past their own effective
+    // expiry at `now` (injectable for tests). Absent → no staleness filtering.
+    const staleOnly = options.stale === true;
+    const nowMs = options.now !== undefined ? new Date(options.now).getTime() : Date.now();
+    const keep = (r) =>
+      (includeRetired || (r.status || "active") !== "retired") &&
+      (!staleOnly || isRecordStale(r, nowMs));
     if (options.prefix) {
       return records.filter(
-        (r) =>
-          (r.category === category || r.category.startsWith(`${category}.`)) &&
-          (includeRetired || (r.status || "active") !== "retired")
+        (r) => (r.category === category || r.category.startsWith(`${category}.`)) && keep(r)
       );
     }
-    return records.filter(
-      (r) =>
-        r.category === category &&
-        (includeRetired || (r.status || "active") !== "retired")
-    );
+    return records.filter((r) => r.category === category && keep(r));
   }
 
   // -------------------------------------------------------------------------
@@ -963,10 +1000,14 @@ export class DefaultKnowledgeStore {
 
   async listByType(type, options = {}) {
     const includeRetired = options.includeRetired === true;
+    // Derived staleness filter (#341) — see listByCategory.
+    const staleOnly = options.stale === true;
+    const nowMs = options.now !== undefined ? new Date(options.now).getTime() : Date.now();
     return this._allRecords().filter(
       (r) =>
         r.type === type &&
-        (includeRetired || (r.status || "active") !== "retired")
+        (includeRetired || (r.status || "active") !== "retired") &&
+        (!staleOnly || isRecordStale(r, nowMs))
     );
   }
 

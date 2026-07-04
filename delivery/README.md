@@ -26,6 +26,17 @@ from GitHub — the required Trust Reconcile check silently never runs (field in
 #330/#358/#378; root cause #335). Per-session paths let concurrent deliveries write DISTINCT
 files that never contend.
 
+**Flat path — DEPRECATED (read-supported, write-removed):** the legacy flat
+`delivery/trust.bundle` (+ `trust.checkpoint*.json`) is **no longer written or committed in
+THIS repo** — its stale seals were removed in the #385-sanctioned one-time cleanup (see
+below). The reconciler's flat-path READ support is **deliberately retained**, because it is
+part of the cross-repo `.github/actions/trust-verify` contract: that composite action defaults
+`bundle: delivery/trust.bundle` and `docs/trust-anchor-adoption.md` instructs downstream
+adopters to publish the flat path, so an external consumer (e.g. `kontourai.io`, which pins and
+runs the shared action) may still seal flat. Removing READ support would break that public
+contract. Within this repo, prefer the per-session `delivery/<slug>/` layout; the flat path is
+for backward compatibility only and should not be re-introduced here.
+
 **Back-compat + prefer-newest selection:** the legacy flat `delivery/trust.bundle` is still
 READ and reconciled (an already-committed flat bundle, or a downstream adopter that has not
 migrated, works unchanged). Only the WRITE path moved to per-session — writing both would
@@ -46,7 +57,10 @@ legacy path is deliberately NOT pruned per-delivery: during the migration window
 PR may still seal to it, and deleting it would be a modify/delete conflict → a DIRTY PR → the
 no-CI failure this whole change fixes. The flat path is a single fixed location (not a growth
 vector) and prefer-newest makes a lingering flat bundle harmless; removing the flat legacy
-seals is a one-time cleanup for a dedicated PR once no open PR still seals there.
+seals is a one-time cleanup for a dedicated PR once no open PR still seals there. **That
+cleanup is done (#385-sanctioned):** this repo's stale flat `trust.bundle` + `trust.checkpoint*.json`
+have been removed from git tracking. The reconciler's flat READ support stays for external
+adopters (see the DEPRECATED note above); only THIS repo's stale flat files were deleted.
 
 ## Files (per `delivery/<slug>/`)
 
