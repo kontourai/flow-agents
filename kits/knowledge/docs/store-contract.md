@@ -1242,3 +1242,77 @@ resolved), AC2 (fail closed on a nonexistent id; no-op pass with no globs), AC3 
 commit-SHA-safety case. The suite is parameterized by `KNOWLEDGE_ADAPTER`, so conformance is required
 of every adapter (AC4). Because the check reuses `get`, any Addendum-H-conforming adapter satisfies it
 without new storage.
+
+---
+
+## Addendum L — Incremental Consolidation (append mode, #343)
+
+### L.1 Problem: whole-body consolidate is heavy enough that sessions skip it
+
+The `knowledge.consolidate` flow (Addendum A) originally accepted only a **whole-body** input:
+the caller authored the *entire* updated snapshot body (`options.proposedBody`) and the runner
+replaced the snapshot with it. To add one decision, the caller had to re-read and re-emit every
+prior entry. Field evidence from the ops design partner (record `0e439c57`) showed this cost is
+high enough that real sessions **skip consolidation entirely** — the living decision snapshot
+silently stops living, defeating the flow.
+
+The snapshot already links its contributing compiled records with kind `"source"` and carries
+`provenance.source_ids` (Addendum A.3), so the body is *derivable from records*. Append mode uses
+that: the caller supplies only the new contribution and the runner regenerates the body.
+
+### L.2 Append-mode input
+
+`KnowledgeFlowRunner.consolidate(snapshotIdOrTopic, options)` accepts, as an alternative to
+`options.proposedBody`, an **appended entry** identifying the new compiled record:
+
+| Option | Type | Description |
+|---|---|---|
+| `appendEntryRecordId` | `string` | Id of the new **compiled** record to append (the appended entry). `appendEntry: { recordId }` is an accepted equivalent shape. |
+| `header` | `string` (opt) | Body header prepended before the rendered entries. |
+| `entryRenderer` | `(record) => string` (opt) | Pluggable per-entry renderer. Default renders a decision-log section: `## <title>\n\n<body>`. |
+
+`proposedBody` (whole-body mode) and the append options are **mutually exclusive**; supplying
+both throws `MISSING_EVIDENCE`. The appended record MUST exist and be type `"compiled"`
+(otherwise `MISSING_EVIDENCE`).
+
+### L.3 Body regeneration
+
+On an append-mode call the runner:
+
+1. Resolves the **current** (non-superseded) snapshot for the topic (or the given snapshot id).
+2. Reads that snapshot's contributing records: `provenance.source_ids` first, falling back to its
+   kind `"source"` links (Addendum A.3).
+3. Forms the new source set = *prior sources* ++ *appended entry*, de-duplicated with order
+   preserved (re-appending the same record is idempotent — no duplicate source id).
+4. Regenerates the body by rendering **every** source record in order (`entryRenderer`, joined by a
+   `---` rule, optional `header`). The caller never supplies prior content.
+
+The regenerated body then flows through the *unchanged* consolidate machinery
+(propose → evidence-gate → apply-or-reject, Addendum A.5): a new snapshot is created with the
+regenerated body, `provenance.source_ids` and kind `"source"` links covering every contributing
+record **including the new one** (R3), and the prior snapshot(s) are superseded, not deleted.
+
+### L.4 Back-compat
+
+Whole-body mode is unchanged: existing callers passing `options.proposedBody` work exactly as
+before, and `evals/consolidation/suite.test.js` passes unmodified. Append mode is purely additive
+— it changes how the effective body and source cluster are *computed*, not the gate shape, the
+supersede-not-delete invariant (A.5), or the telemetry gate points.
+
+### L.5 Sequential-session safety (no lost update)
+
+Because the body is regenerated from the **current live snapshot's** records on every call, two
+sequential consolidations from different sessions/agents, each appending one distinct entry, yield
+a snapshot containing **both** entries — the second session resolves the first session's snapshot,
+reads its (now-larger) source set, and appends to it rather than overwriting a stale whole body.
+
+### L.6 Conformance
+
+An adapter conforms when the incremental-consolidation suite
+(`evals/consolidate-incremental/suite.test.js`) passes against it. The suite is parameterized by
+`KNOWLEDGE_ADAPTER`; the no-lost-update case (R4) and the provenance/source-link completeness case
+(R3, asserted via the portable `get()` + reverse-`supersedes`-link guarantees of A.7) are required
+of every adapter. The default-store's additional guarantee that `listByType("snapshot")` still
+returns superseded snapshots is covered for that adapter by `evals/consolidation/suite.test.js`
+(the Obsidian adapter archives superseded snapshots out of the working set — both keep them
+reachable via `get()`).
