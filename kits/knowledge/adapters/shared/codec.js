@@ -323,3 +323,144 @@ export function validateCategory(cat) {
   if (!cat || typeof cat !== "string") return false;
   return cat.split(".").every((seg) => CATEGORY_SEGMENT_RE.test(seg));
 }
+
+// ---------------------------------------------------------------------------
+// Record identity resolution — short-id prefix + slug aliases  (issue #339)
+//
+// On-disk identity is unchanged: records remain keyed by their full `id`
+// (§9). The functions below add a *resolution layer* on top of that identity
+// so a query token may be the full id, a category-scoped human-readable slug
+// alias, or an unambiguous id prefix. See store-contract.md Addendum H.
+// ---------------------------------------------------------------------------
+
+// Minimum length of an id prefix that `get`/`getLinks` will attempt to resolve.
+// Tokens shorter than this are never treated as prefixes (they resolve to null
+// rather than risk a wildly ambiguous match). The ops design partner cites
+// records by 8-char short ids, so 8 is the contract minimum.
+export const MIN_ID_PREFIX = 8;
+
+// A slug alias is a lowercase, category-scoped handle, e.g.
+// `decision.strategy/2026-07-03-gtm-direction`. It must start and end with an
+// alphanumeric and may contain dots, slashes, hyphens and underscores between.
+export const SLUG_PATTERN = "^[a-z0-9]([a-z0-9._/-]*[a-z0-9])?$";
+const SLUG_RE = new RegExp(SLUG_PATTERN);
+
+export function validateSlug(slug) {
+  return typeof slug === "string" && slug.length > 0 && slug.length <= 200 && SLUG_RE.test(slug);
+}
+
+/**
+ * Validate + de-duplicate a caller-supplied `aliases` array. Throws
+ * MISSING_EVIDENCE (the contract's rejection channel) on a non-array or a
+ * malformed slug so bad aliases are rejected at the mutation boundary.
+ * @returns {string[]} normalized, order-preserving, de-duplicated slug list
+ */
+export function normalizeAliases(input) {
+  if (input === undefined || input === null) return [];
+  if (!Array.isArray(input))
+    throw missingEvidenceError("aliases must be an array of slug strings");
+  const out = [];
+  const seen = new Set();
+  for (const raw of input) {
+    if (!validateSlug(raw))
+      throw missingEvidenceError(
+        `invalid slug alias: ${JSON.stringify(raw)} (must match ${SLUG_PATTERN})`
+      );
+    if (!seen.has(raw)) { seen.add(raw); out.push(raw); }
+  }
+  return out;
+}
+
+export function ambiguousIdError(input, matches) {
+  const shown = matches.slice(0, 5).join(", ");
+  const err = new Error(
+    `Ambiguous id prefix "${input}" matches ${matches.length} records: ${shown}${matches.length > 5 ? ", …" : ""}`
+  );
+  err.code = "AMBIGUOUS_ID";
+  err.matches = matches.slice();
+  return err;
+}
+
+/**
+ * Resolve a query token to a single record id.
+ *
+ * Resolution order (first hit wins):
+ *   1. Exact full-id match — preserves exact-id semantics and the O(1) hot path.
+ *   2. Slug alias — an entry in the alias map (`bySlug`) whose target still exists.
+ *   3. Unambiguous id prefix (length >= MIN_ID_PREFIX) matching exactly one id.
+ *
+ * @param {string} input
+ * @param {{ idExists:(id:string)=>boolean, listIds:()=>Iterable<string>, bySlug?:Record<string,string> }} ctx
+ * @returns {string|null} resolved id, or null when the token resolves to nothing
+ * @throws error with `code === "AMBIGUOUS_ID"` when a prefix matches >1 record
+ */
+export function resolveRecordId(input, ctx) {
+  if (typeof input !== "string" || input.length === 0) return null;
+  // 1. Exact full-id match.
+  if (ctx.idExists(input)) return input;
+  // 2. Slug alias.
+  const bySlug = ctx.bySlug || {};
+  if (Object.prototype.hasOwnProperty.call(bySlug, input)) {
+    const target = bySlug[input];
+    if (target && ctx.idExists(target)) return target;
+  }
+  // 3. Unambiguous id prefix.
+  if (input.length >= MIN_ID_PREFIX) {
+    const matches = [];
+    for (const id of ctx.listIds()) {
+      if (typeof id === "string" && id.startsWith(input)) matches.push(id);
+    }
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) throw ambiguousIdError(input, matches);
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Alias map (alias-index.json) — the durable slug → id mapping.
+//
+// Like the graph index, the alias map is a DERIVED cache: each record's own
+// `aliases` array is the source of truth, so the map is fully rebuildable by
+// scanning records. Keying by full id (never by category or file path) is what
+// lets aliases survive store restructures — recategorizing a record or moving
+// its file leaves the slug → id mapping untouched.
+// ---------------------------------------------------------------------------
+
+export const ALIAS_INDEX_SCHEMA_VERSION = "1.0";
+
+export function emptyAliasIndex() {
+  return { schema_version: ALIAS_INDEX_SCHEMA_VERSION, by_slug: {} };
+}
+
+export function loadAliasIndex(aliasPath) {
+  if (!fs.existsSync(aliasPath)) return emptyAliasIndex();
+  try {
+    const idx = JSON.parse(fs.readFileSync(aliasPath, "utf8"));
+    if (!idx || typeof idx.by_slug !== "object" || idx.by_slug === null) return emptyAliasIndex();
+    return idx;
+  } catch {
+    return emptyAliasIndex();
+  }
+}
+
+export function saveAliasIndex(aliasPath, index) {
+  fs.writeFileSync(aliasPath, JSON.stringify(index, null, 2) + "\n", "utf8");
+}
+
+/**
+ * Point each slug at `id` in the alias map. A slug already owned by a
+ * different record is a genuine collision — throws `SLUG_CONFLICT` (rather than
+ * silently re-pointing the alias). Re-registering a slug already owned by `id`
+ * is a no-op, so this is idempotent per record.
+ */
+export function registerAliases(index, id, slugs) {
+  for (const slug of slugs) {
+    const owner = index.by_slug[slug];
+    if (owner && owner !== id) {
+      const err = new Error(`slug alias "${slug}" already assigned to record ${owner}`);
+      err.code = "SLUG_CONFLICT";
+      throw err;
+    }
+    index.by_slug[slug] = id;
+  }
+}

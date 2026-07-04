@@ -26,6 +26,7 @@ The store holds three record types. Every record, regardless of type, shares a c
 | `body` | string | yes | Primary content. Format is type-specific (see below). |
 | `category` | string | yes | Dot-separated hierarchical category string, e.g. `"engineering.api"`. Must be non-empty. |
 | `tags` | string[] | no | Flat list of tag strings for secondary classification. |
+| `aliases` | string[] | no | Human-readable, category-scoped slug aliases resolvable via `get`/`getLinks` (Addendum H). Append-only; never changes `id`. |
 | `links` | Link[] | no | Outbound links from this record (see §2). |
 | `provenance` | Provenance | yes | Immutable creation provenance (see §4). |
 | `created_at` | ISO-8601 string | yes | Creation timestamp in UTC. |
@@ -342,10 +343,13 @@ The adapter MUST implement:
 
 | Method | Signature | Description |
 |---|---|---|
-| `get` | `(id: string) => Record \| null` | Retrieve record by id. Returns null if not found. |
-| `getLinks` | `(id: string) => { forward: Link[], reverse: Link[] }` | Return all links for a record from the graph index. |
+| `get` | `(idOrHandle: string) => Record \| null` | Retrieve a record. `idOrHandle` may be a full id, a slug alias, or an unambiguous id prefix (Addendum H). Returns null if it resolves to nothing; throws `AMBIGUOUS_ID` on an ambiguous prefix. |
+| `getLinks` | `(idOrHandle: string) => { forward: Link[], reverse: Link[] }` | Return all links for a record from the graph index. Accepts the same handle forms as `get`; an unresolved handle yields empty arrays, an ambiguous prefix throws `AMBIGUOUS_ID`. |
 | `listByCategory` | `(category: string, options?: { prefix?: boolean }) => Record[]` | List records by exact category match. If `prefix` is true, match all records whose category starts with the given string. |
 | `listByType` | `(type: RecordType) => Record[]` | List all records of a given type. |
+
+> **Identity resolution** (`get`/`getLinks`) is specified in full in **Addendum H**. The `prefix`
+> option on `listByCategory` is unrelated — it filters by *category* prefix, not by id.
 
 ---
 
@@ -374,6 +378,15 @@ missing. The thrown error MUST have a `code` property set to `"MISSING_EVIDENCE"
 human-readable `message`. This enables the contract suite to distinguish enforcement failures
 from unexpected errors.
 
+### 8.1 Error Codes
+
+| `code` | Raised by | Meaning |
+|---|---|---|
+| `MISSING_EVIDENCE` | any mutation op; `create`/`update` when an `aliases` entry is malformed | A required evidence/provenance field is missing, or supplied input is invalid. |
+| `NOT_FOUND` | `link` (unknown `target_id`) and other ops that require an existing target | A referenced record id does not exist. |
+| `AMBIGUOUS_ID` | `get`, `getLinks` | An id prefix matched more than one record (Addendum H). The error carries a `matches` array of the colliding ids. MUST NOT be swallowed into a `null` return. |
+| `SLUG_CONFLICT` | `create`, `update` | A supplied slug alias is already assigned to a *different* record. |
+
 ---
 
 ## 9. YAML Frontmatter Convention (Default Adapter)
@@ -387,6 +400,7 @@ type: <raw|compiled|concept>
 title: <title>
 category: <category>
 tags: [<tag>, ...]
+aliases: [<slug>, ...]        # optional — human-readable, category-scoped (Addendum H)
 created_at: <ISO-8601>
 updated_at: <ISO-8601>
 provenance:
@@ -409,8 +423,9 @@ mutation_log:
 <body text, may include [[wikilinks]]>
 ```
 
-Files are stored as `<store_root>/records/<id>.md`. The graph index lives at
-`<store_root>/graph-index.json`.
+Files are stored as `<store_root>/records/<id>.md` — keyed by the full `id`, unchanged by this
+addendum. The graph index lives at `<store_root>/graph-index.json`; the slug alias map (Addendum H)
+lives at `<store_root>/alias-index.json`.
 
 ---
 
@@ -1034,3 +1049,96 @@ interface ContradictionFlag {
 counts the in-scope compiled records, `compared` counts the similar pairs the contradiction fn
 judged, and `flags` lists the conflicting pairs. Gate telemetry is emitted at `collect-gate` and
 `flag-gate` (`knowledge.detect-contradictions`).
+
+## Addendum H — Record Identity Resolution (short-id prefix + slug aliases, #339)
+
+### H.1 Motivation
+
+On-disk identity is a full `id` (§1.1) plus a file path (§9). Prose that cites a record — a
+curated doc, a commit message, an issue comment — cannot practically carry a full 36-char UUID, so
+the field partner cites **8-char short ids** (`12cc5573`, `f5df7b4c`) and would prefer
+**human-readable slugs**. Neither resolves against exact-id `get`, and a store restructure that
+re-files a record silently severs every inbound short-id/slug reference.
+
+This addendum adds a **resolution layer** over the unchanged on-disk identity. It changes nothing
+about how records are stored (H.6) — it only widens what `get`/`getLinks` accept as input.
+
+### H.2 Resolvable Handle Forms
+
+`get(handle)` and `getLinks(handle)` MUST resolve, in this precedence order:
+
+1. **Exact full id** — `handle` equals a stored record `id`. (Unchanged §7 behavior; the O(1)
+   hot path.)
+2. **Slug alias** — `handle` is a registered alias in the alias map (H.4) whose target still exists.
+3. **Unambiguous id prefix** — `handle` is at least `MIN_ID_PREFIX` (**8**) characters and is a
+   prefix of **exactly one** record `id`.
+
+The first form that matches wins. A `handle` that matches none of the three resolves to *nothing*.
+
+### H.3 Resolution Outcomes
+
+| Situation | `get` | `getLinks` |
+|---|---|---|
+| Resolves to exactly one record | returns that record | returns that record's `{ forward, reverse }` |
+| Resolves to nothing (no exact id, no alias, no ≥8-char single-match prefix) | returns `null` | returns `{ forward: [], reverse: [] }` |
+| Prefix (≥8 chars) matches **more than one** record | **throws `AMBIGUOUS_ID`** | **throws `AMBIGUOUS_ID`** |
+
+An `AMBIGUOUS_ID` error MUST have `code === "AMBIGUOUS_ID"`, a human-readable `message`, and a
+`matches` array of the colliding full ids. An ambiguous prefix MUST NOT be silently resolved to one
+arbitrary record, nor collapsed to `null` — ambiguity is a distinct, surfaced condition.
+
+A `handle` **shorter than `MIN_ID_PREFIX`** is never treated as a prefix (it can still match an
+exact id or a slug). This keeps a stray short token from matching a large, surprising set.
+
+### H.4 Slug Aliases
+
+- A slug is a lowercase, category-scoped, human-readable handle, e.g.
+  `decision.strategy/2026-07-03-gtm-direction`. It MUST match
+  `^[a-z0-9]([a-z0-9._/-]*[a-z0-9])?$` (≤ 200 chars). Malformed slugs are rejected at
+  `create`/`update` with `MISSING_EVIDENCE`.
+- Slugs are **caller-supplied** via the optional `aliases: string[]` field on `create` and
+  `update`. The store does **not** auto-derive slugs (auto-slugging is a future concern) — the
+  date-stamped examples cannot be derived from title alone.
+- Aliases are **append-only**: `update` with an `aliases` field UNIONs the supplied slugs with the
+  record's existing aliases; it never drops a previously issued slug. This is what guarantees H.5.
+- A slug already assigned to a *different* record is a `SLUG_CONFLICT` (a slug identifies at most
+  one record). Re-supplying a record's own slug is an idempotent no-op.
+
+### H.5 Restructure Survival (the alias map)
+
+The alias map is a store-level structure `{ slug → id }`. It is keyed by **full id** — never by
+category or file path. Therefore:
+
+- Recategorizing a record via `update` (which, in the Obsidian adapter, **relocates the note's
+  file**) leaves both the `id` and the `slug → id` mapping untouched.
+- The id still resolves (it is the record's stable key); the short-id prefix still resolves (it is
+  a prefix of that unchanged id); the slug still resolves (the map still points it at that id).
+
+So a previously issued short-id prefix or slug MUST still resolve to the same record after a
+restructure. Note the slug is a **stable alias**, not a value recomputed from the current category:
+a slug minted under `decision.strategy/…` keeps resolving even after the record moves to
+`decision.gtm`.
+
+Like the graph index (§5.2), the alias map is a **derived cache** — each record's own `aliases`
+array is the source of truth, so an adapter that persists the map SHOULD rebuild it on `reindex()`.
+The default adapter persists it at `<store_root>/alias-index.json`
+(`{ schema_version, by_slug: { <slug>: <id> } }`).
+
+### H.6 On-Disk Identity Is Unchanged (non-goals)
+
+- The `id` in the §1.1 envelope and the `records/<id>.md` file naming (§9) are **unchanged**.
+  Aliases are a resolution layer, not a rename.
+- Exact-id `get`/`getLinks` behavior is byte-for-byte unchanged.
+- This addendum does **not** migrate existing stores or repair already-broken citations — an
+  adapter/repo may seed its own alias map for legacy short ids, but that is out of scope here.
+- Full-text/semantic search is out of scope.
+
+### H.7 Resolution Constants
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `MIN_ID_PREFIX` | `8` | Minimum handle length eligible for prefix resolution. |
+| slug pattern | `^[a-z0-9]([a-z0-9._/-]*[a-z0-9])?$` | Valid slug alias shape (≤ 200 chars). |
+
+An independent adapter conforms to this addendum when the `identity: *` sections of the contract
+suite (`evals/contract-suite/suite.test.js`, §15–§17) pass against it.

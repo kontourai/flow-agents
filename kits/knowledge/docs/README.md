@@ -49,6 +49,29 @@ See [`store-contract.md`](store-contract.md) for the full specification. Quick r
 
 Every mutation throws with `error.code === "MISSING_EVIDENCE"` when required evidence is absent.
 
+**Record identity resolution** (Addendum H)
+
+`get`/`getLinks` accept three handle forms, resolved in order: exact full `id`, then a
+category-scoped **slug alias**, then an **unambiguous id prefix** (≥ 8 chars).
+
+| Handle | Example | Resolves to |
+|---|---|---|
+| Full id | `12cc5573-1c4f-4a0e-8b6e-9d2f0a5b7c31` | the record (unchanged exact-id behavior) |
+| Slug alias | `decision.strategy/2026-07-03-gtm-direction` | the record that carries that alias |
+| Short-id prefix (≥ 8 chars, unique) | `12cc5573` | the single record whose id starts with it |
+
+Aliases are caller-supplied via the optional `aliases: string[]` field on `create`/`update`,
+append-only, and stored in an id-keyed alias map (`alias-index.json`) so a prefix or slug **still
+resolves after a store restructure** (e.g. a recategorize that moves the file). An unresolved
+handle returns `null` (`get`) / empty arrays (`getLinks`); an **ambiguous** prefix throws
+`error.code === "AMBIGUOUS_ID"` — it is never silently guessed. On-disk identity (`records/<id>.md`)
+is unchanged.
+
+| Error code | Raised when |
+|---|---|
+| `AMBIGUOUS_ID` | an id prefix matches more than one record (carries a `matches` array) |
+| `SLUG_CONFLICT` | a supplied slug alias is already assigned to a different record |
+
 ---
 
 ## Running the Contract Suite
@@ -89,6 +112,16 @@ All tests pass and exit 0. Any failure indicates a contract regression or an ada
 | AC2 | Default adapter passes contract suite (command evidence). | Run `node --test kits/knowledge/evals/contract-suite/suite.test.js` — exit 0, all tests pass. |
 | AC3 | Record round-trips raw → stored → queried with category + links intact. | Suite §2 "create: round-trip raw → stored → queried" tests this directly. |
 
+**Identity resolution (#339)** — mapped to that issue's ACs:
+
+| AC (#339) | Requirement | Evidence |
+|---|---|---|
+| AC1 | Unique 8-char prefix resolves; ambiguous prefix throws `AMBIGUOUS_ID`. | Suite §15 "identity: short-id prefix resolution (AC1)". |
+| AC2 | Slug alias resolves via `get`/`getLinks` (set at create or update). | Suite §16 "identity: slug alias resolution (AC2)". |
+| AC3 | Old slug + short-id prefix survive an `update` recategorize/move. | Suite §17 "identity: alias resolution survives restructure (AC3)". |
+| AC4 | Existing sections pass unmodified; files remain `records/<id>.md`. | §2 round-trip, §13 graph consistency, §12 missing-record unchanged; on-disk naming untouched. |
+| AC5 | Contract doc specifies prefix/slug/alias-map semantics. | [`store-contract.md`](store-contract.md) Addendum H + §1.1/§7/§8.1/§9 updates. |
+
 ---
 
 ## Default Adapter Details
@@ -103,6 +136,7 @@ built-ins only.
   records/
     <id>.md        ← one markdown file per record, YAML frontmatter + body
   graph-index.json ← forward + reverse link index, schema_version 1.0
+  alias-index.json ← slug → id alias map (Addendum H), schema_version 1.0
 ```
 
 **Constructor**
@@ -120,8 +154,8 @@ const store = new DefaultKnowledgeStore({ storeRoot: '/path/to/store' });
 - `propose(conceptId, proposerId, evidence)` → `Promise<void>`
 - `apply(conceptId, proposerId, evidence)` → `Promise<void>`
 - `reject(conceptId, proposerId, evidence)` → `Promise<void>`
-- `get(id)` → `Promise<Record | null>`
-- `getLinks(id)` → `Promise<{ forward: Link[], reverse: Link[] }>`
+- `get(idOrHandle)` → `Promise<Record | null>` (exact id, slug alias, or unambiguous id prefix — Addendum H)
+- `getLinks(idOrHandle)` → `Promise<{ forward: Link[], reverse: Link[] }>`
 - `listByCategory(category, options?)` → `Promise<Record[]>`
 - `listByType(type)` → `Promise<Record[]>`
 

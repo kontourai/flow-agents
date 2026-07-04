@@ -57,6 +57,12 @@ import {
   VALID_TYPES,
   VALID_STATUS_TRANSITIONS,
   validateCategory,
+  // Record-identity resolution layer (short-id prefix + slug aliases, issue #339)
+  resolveRecordId,
+  normalizeAliases,
+  loadAliasIndex,
+  saveAliasIndex,
+  registerAliases,
 } from "../shared/codec.js";
 
 // ---------------------------------------------------------------------------
@@ -94,7 +100,31 @@ export class ObsidianKnowledgeStore {
     this._graphPath = path.join(this._root, "graph-index.json");
     // Path index (internal): { by_id: { id: { path, archived } }, by_path: { relPath: id } }
     this._pathIndexPath = path.join(this._root, ".graph-index.json");
+    // Alias map (issue #339): { schema_version, by_slug: { slug: id } }. Keyed by
+    // full id, never by file path, so slugs survive the folder moves this adapter
+    // performs on recategorize/archive.
+    this._aliasPath = path.join(this._root, "alias-index.json");
     fs.mkdirSync(this._root, { recursive: true });
+  }
+
+  // -------------------------------------------------------------------------
+  // Record-identity resolution (short-id prefix + slug alias, issue #339)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Resolve a query token (exact id, slug alias, or unambiguous id prefix) to a
+   * single full record id, or null. Throws AMBIGUOUS_ID on a >1-match prefix.
+   * Ids and aliases are read from the persisted indexes, so resolution is
+   * unaffected by where a record's file currently lives.
+   */
+  _resolveId(input, pathIndex, aliasIndex) {
+    pathIndex = pathIndex || this._loadPathIndex();
+    aliasIndex = aliasIndex || loadAliasIndex(this._aliasPath);
+    return resolveRecordId(input, {
+      idExists: (rid) => Boolean(pathIndex.by_id[rid]),
+      listIds: () => Object.keys(pathIndex.by_id),
+      bySlug: aliasIndex.by_slug,
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -505,6 +535,15 @@ export class ObsidianKnowledgeStore {
     const id = input.id || randomUUID();
     const now = this._now();
 
+    // Validate + reserve slug aliases before any write (issue #339); a
+    // SLUG_CONFLICT aborts create without leaving a partial note behind.
+    const aliases = normalizeAliases(input.aliases);
+    let aliasIndex = null;
+    if (aliases.length) {
+      aliasIndex = loadAliasIndex(this._aliasPath);
+      registerAliases(aliasIndex, id, aliases);
+    }
+
     const explicitLinks = input.links || [];
     const wikilinks = extractWikilinks(input.body || "");
     const links = mergeLinks(explicitLinks, wikilinks);
@@ -515,6 +554,7 @@ export class ObsidianKnowledgeStore {
       title: input.title,
       category: input.category,
       tags: input.tags || [],
+      ...(aliases.length ? { aliases } : {}),
       status: "active",
       created_at: now,
       updated_at: now,
@@ -535,6 +575,8 @@ export class ObsidianKnowledgeStore {
     addLinksToGraph(graph, id, links);
     saveGraph(this._graphPath, graph);
 
+    if (aliasIndex) saveAliasIndex(this._aliasPath, aliasIndex);
+
     return id;
   }
 
@@ -550,7 +592,7 @@ export class ObsidianKnowledgeStore {
     const record = this._readRecord(id, pathIndex);
     if (!record) throw notFoundError(id);
 
-    const mutableKeys = ["title", "body", "category", "tags", "links"];
+    const mutableKeys = ["title", "body", "category", "tags", "links", "aliases"];
     const supplied = mutableKeys.filter((k) => fields[k] !== undefined);
     if (supplied.length === 0)
       throw missingEvidenceError("update: at least one mutable field must be supplied");
@@ -559,6 +601,18 @@ export class ObsidianKnowledgeStore {
       throw missingEvidenceError(`update: invalid category: ${fields.category}`);
 
     const now = this._now();
+
+    // Slug aliases are append-only: union supplied aliases with existing ones so
+    // a previously issued slug keeps resolving after the file relocates (R3).
+    let mergedAliases = Array.isArray(record.aliases) ? record.aliases.slice() : [];
+    let aliasIndex = null;
+    if (fields.aliases !== undefined) {
+      const incoming = normalizeAliases(fields.aliases);
+      const seen = new Set(mergedAliases);
+      for (const s of incoming) if (!seen.has(s)) { seen.add(s); mergedAliases.push(s); }
+      aliasIndex = loadAliasIndex(this._aliasPath);
+      registerAliases(aliasIndex, id, mergedAliases);
+    }
 
     let newLinks = record.links || [];
     if (fields.links !== undefined) {
@@ -575,6 +629,7 @@ export class ObsidianKnowledgeStore {
       ...(fields.body !== undefined ? { body: fields.body } : {}),
       ...(fields.category !== undefined ? { category: fields.category } : {}),
       ...(fields.tags !== undefined ? { tags: fields.tags } : {}),
+      ...(mergedAliases.length ? { aliases: mergedAliases } : {}),
       links: newLinks,
       updated_at: now,
       mutation_log: [
@@ -596,6 +651,8 @@ export class ObsidianKnowledgeStore {
 
     this._writeRecord(updated, pathIndex);
     this._savePathIndex(pathIndex);
+
+    if (aliasIndex) saveAliasIndex(this._aliasPath, aliasIndex);
   }
 
   // -------------------------------------------------------------------------
@@ -956,7 +1013,12 @@ export class ObsidianKnowledgeStore {
   // -------------------------------------------------------------------------
 
   async get(id) {
-    return this._readRecord(id);
+    // Accept an exact id, slug alias, or unambiguous id prefix (issue #339).
+    // Unresolved → null; ambiguous prefix → throws AMBIGUOUS_ID.
+    const pathIndex = this._loadPathIndex();
+    const resolvedId = this._resolveId(id, pathIndex);
+    if (!resolvedId) return null;
+    return this._readRecord(resolvedId, pathIndex);
   }
 
   // -------------------------------------------------------------------------
@@ -964,10 +1026,13 @@ export class ObsidianKnowledgeStore {
   // -------------------------------------------------------------------------
 
   async getLinks(id) {
+    // Resolve prefix/slug to a full id; fall back to the raw token when it
+    // resolves to nothing so unknown ids return empty arrays (not throw).
+    const key = this._resolveId(id) || id;
     const graph = loadGraph(this._graphPath);
     return {
-      forward: (graph.forward[id] || []).map((l) => ({ ...l })),
-      reverse: (graph.reverse[id] || []).map((l) => ({ ...l })),
+      forward: (graph.forward[key] || []).map((l) => ({ ...l })),
+      reverse: (graph.reverse[key] || []).map((l) => ({ ...l })),
     };
   }
 
