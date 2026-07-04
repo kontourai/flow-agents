@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.1.0](https://github.com/kontourai/flow-agents/compare/v3.0.0...v3.1.0) (2026-07-04)
+
+
+### Features
+
+* **docs:** probe docs-write contract — vocabulary + decision deltas ([#311](https://github.com/kontourai/flow-agents/issues/311)) ([#371](https://github.com/kontourai/flow-agents/issues/371)) ([867c3b5](https://github.com/kontourai/flow-agents/commit/867c3b5b645c896e5df6886177171b05e73e8fa9))
+* **knowledge:** neo4j knowledge-store provider — Cypher-backed [#317](https://github.com/kontourai/flow-agents/issues/317) interface (opt-in default) ([#373](https://github.com/kontourai/flow-agents/issues/373)) ([2ef2523](https://github.com/kontourai/flow-agents/commit/2ef2523cc65a5e56dec8dcbf84edc3718cfe190c))
+* **knowledge:** promote sub-flow — ingest→distill→link→health (flow within a flow) ([#313](https://github.com/kontourai/flow-agents/issues/313)) ([#372](https://github.com/kontourai/flow-agents/issues/372)) ([b345d89](https://github.com/kontourai/flow-agents/commit/b345d89873c99f65f00d0fe8ede6a8702b1a2b43))
+* **knowledge:** stable record identity — short-id prefix + slug aliases ([#339](https://github.com/kontourai/flow-agents/issues/339)) ([ff54bc7](https://github.com/kontourai/flow-agents/commit/ff54bc74f893321f13276cd147d500f91e1fc133))
+
+
+### Documentation
+
+* **adr:** ADR freeze cutover + liveness coordination experiment ([#332](https://github.com/kontourai/flow-agents/issues/332)) ([#368](https://github.com/kontourai/flow-agents/issues/368)) ([2c845b8](https://github.com/kontourai/flow-agents/commit/2c845b81675db02622fee8fa1efa6aa197ce96c0))
+
 ## [3.0.0](https://github.com/kontourai/flow-agents/compare/v2.4.0...v3.0.0) (2026-07-04)
 
 
