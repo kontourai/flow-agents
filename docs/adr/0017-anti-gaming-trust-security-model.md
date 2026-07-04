@@ -2,6 +2,8 @@
 title: "ADR 0017: The Anti-Gaming Trust Security Model — Layered Defense + External CI Anchor"
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0017: The Anti-Gaming Trust Security Model — Layered Defense + External CI Anchor
 
 Status: Accepted

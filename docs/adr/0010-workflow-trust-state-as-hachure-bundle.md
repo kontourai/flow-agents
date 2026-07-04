@@ -2,6 +2,8 @@
 title: "ADR 0010: Workflow Trust State as a Hachure Trust Bundle"
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0010: Workflow Trust State as a Hachure Trust Bundle
 
 **Date:** 2026-06-23

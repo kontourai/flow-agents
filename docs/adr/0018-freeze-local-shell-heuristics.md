@@ -2,6 +2,8 @@
 title: "ADR 0018: Freeze the Local Shell-Parsing Heuristics; Route New Enforcement to the CI Anchor"
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0018: Freeze the Local Shell-Parsing Heuristics; Route New Enforcement to the CI Anchor
 
 Status: Accepted

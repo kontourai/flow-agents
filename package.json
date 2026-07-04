@@ -139,6 +139,7 @@
     "check:content-boundary": "node scripts/check-content-boundary.cjs",
     "check:decisions": "node scripts/check-decisions.cjs check",
     "gen:decisions-index": "node scripts/check-decisions.cjs gen-index",
+    "freeze:adrs": "node scripts/freeze-adrs.mjs",
     "prepack": "npm run build --silent && npm run validate:source --",
     "kit": "npm run build --silent && node build/src/cli.js kit"
   },

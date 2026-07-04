@@ -2,6 +2,8 @@
 title: "ADR 0013: Context Lifecycle — Workflow-Boundary Compaction, Freshness-Gated Reuse, and the Learning Split"
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0013: Context Lifecycle
 
 **Date:** 2026-06-25

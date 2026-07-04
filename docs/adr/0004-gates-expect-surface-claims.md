@@ -2,6 +2,8 @@
 title: ADR 0004: Gates Expect Hachure Trust Bundles
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0004: Gates Expect Hachure Trust Bundles
 
 Flow-backed kits will model rich gate evidence as claim expectations using the Hachure trust.bundle format rather than provider-specific requirements. A gate expectation can require `kind: "trust.bundle"`, a domain claim type such as `builder.verify.tests`, accepted trust statuses such as `verified`, and whether the expectation blocks the transition; project or runtime config maps claim types to trusted Surface producers and authority traces. This lets the Builder Kit use repo governance, command checks, CI, human decisions, or future producers without naming a specific provider in the Flow Definition.

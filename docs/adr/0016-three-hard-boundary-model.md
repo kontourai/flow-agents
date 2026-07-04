@@ -2,6 +2,8 @@
 title: "ADR 0016: The Three-Hard-Boundary Model — a FlowDefinition-Driven, Kit-Agnostic Core"
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0016: The Three-Hard-Boundary Model — a FlowDefinition-Driven, Kit-Agnostic Core
 
 **Date:** 2026-06-26

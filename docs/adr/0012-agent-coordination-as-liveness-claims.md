@@ -2,6 +2,8 @@
 title: "ADR 0012: Agent Coordination as Hachure Liveness Claims"
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0012: Agent Coordination as Hachure Liveness Claims
 
 **Date:** 2026-06-24

@@ -2,6 +2,8 @@
 title: "ADR 0007: Flow / Skill / Kit / Tool Boundary"
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0007: Flow / Skill / Kit / Tool Boundary
 
 **Date:** 2026-06-15  

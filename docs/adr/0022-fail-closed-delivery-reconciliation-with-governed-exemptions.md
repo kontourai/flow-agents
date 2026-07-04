@@ -2,6 +2,8 @@
 title: "ADR 0022: Fail-Closed Delivery Reconciliation with Governed Exemptions"
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0022: Fail-Closed Delivery Reconciliation with Governed Exemptions
 
 **Date:** 2026-07-02

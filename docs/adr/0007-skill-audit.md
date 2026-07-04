@@ -2,6 +2,8 @@
 title: "Skill Audit 2026-06-15: Flow / Skill / Kit / Tool Boundary"
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # Skill Audit: Flow / Skill / Kit / Tool Boundary
 
 **Date:** 2026-06-15  

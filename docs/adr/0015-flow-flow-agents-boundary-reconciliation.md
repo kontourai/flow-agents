@@ -2,6 +2,8 @@
 title: "ADR 0015: Flow / Flow Agents Boundary Reconciliation"
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0015: Flow / Flow Agents Boundary Reconciliation
 
 **Date:** 2026-06-25

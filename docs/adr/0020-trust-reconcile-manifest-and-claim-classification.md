@@ -2,6 +2,8 @@
 title: "ADR 0020: Trust-Reconcile Manifest, Claim Classification, and Waivers"
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0020: Trust-Reconcile Manifest, Claim Classification, and Waivers
 
 Status: Accepted

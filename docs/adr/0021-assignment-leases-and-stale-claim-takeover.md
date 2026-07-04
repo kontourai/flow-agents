@@ -2,6 +2,8 @@
 title: "ADR 0021: Assignment Leases and Stale-Claim Takeover"
 ---
 
+> **FROZEN — immutable history.** Superseding/current decisions live in [`docs/decisions/`](../decisions/index.md). Do not edit.
+
 # ADR 0021: Assignment Leases and Stale-Claim Takeover
 
 **Date:** 2026-07-02
