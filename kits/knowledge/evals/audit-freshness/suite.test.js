@@ -61,7 +61,7 @@ function makeRunner(store, dir) {
 }
 
 function readTelemetryEvents(dir) {
-  const sinkPath = path.join(dir, ".telemetry", "full.jsonl");
+  const sinkPath = path.join(dir, ".kontourai", "telemetry", "full.jsonl");
   if (!fs.existsSync(sinkPath)) return [];
   return fs.readFileSync(sinkPath, "utf8")
     .trim()
@@ -364,5 +364,96 @@ describe("Knowledge Kit Audit-Freshness Suite (#106)", () => {
     });
     const flaggedIds = result.flags.map((f) => f.recordId).sort();
     assert.deepEqual(flaggedIds, ["decision-old", "radar-stale"]);
+  });
+});
+
+// ===========================================================================
+// Record-carried expiry (#341, store-contract Addendum J)
+//
+// Extends the audit with record-owned freshness: a record past its OWN
+// `expires_at` / `ttl_seconds` is flagged WITHOUT any caller-supplied threshold,
+// each flag citing the expiry as the threshold that fired. Isolated fixtures
+// (own temp dir) so the #106 shared-fixture counts above are untouched.
+// ===========================================================================
+
+describe("Knowledge Kit Audit-Freshness — record-carried expiry (#341)", () => {
+  let dir, store, runner;
+  let expiredId, freshId, plainId;
+
+  before(async () => {
+    dir = makeTempDir();
+    store = makeStore(dir);
+    runner = makeRunner(store, dir);
+    // A record whose OWN expires_at is in the past (relative to NOW), in a
+    // category with NO configured threshold — the expiry path must still fire.
+    expiredId = await store.create({
+      id: "own-expiry-past", type: "raw", title: "Expired by its own clock",
+      body: "b", category: "misc.scratch",
+      expires_at: "2026-06-01T00:00:00.000Z",
+      provenance: { agent: "fixture" },
+    });
+    // A record expiring in the future — not flagged.
+    freshId = await store.create({
+      id: "own-expiry-future", type: "raw", title: "Not yet expired",
+      body: "b", category: "misc.scratch",
+      expires_at: "2026-08-01T00:00:00.000Z",
+      provenance: { agent: "fixture" },
+    });
+    // A record with no freshness fields in an opt-out category — never flagged.
+    plainId = await store.create({
+      id: "own-expiry-none", type: "raw", title: "No expiry at all",
+      body: "b", category: "misc.scratch",
+      provenance: { agent: "fixture" },
+    });
+  });
+
+  after(() => { if (dir) fs.rmSync(dir, { recursive: true, force: true }); });
+
+  test("flags a record past its OWN expires_at with NO caller thresholds", async () => {
+    const result = await runner.auditFreshness({ now: NOW }); // no thresholds supplied
+    const flag = result.flags.find((f) => f.recordId === expiredId);
+    assert.ok(flag, "past-expiry record flagged without any caller-supplied threshold");
+    assert.equal(flag.reason, "expiry", "flag reason is 'expiry'");
+    assert.equal(flag.expiresAt, "2026-06-01T00:00:00.000Z",
+      "flag cites the record's own expiry as the threshold that fired");
+    assert.equal(flag.matchedThresholdKey, "expires_at");
+    assert.equal(flag.thresholdDays, null, "expiry flag cites a timestamp, not a day-count");
+  });
+
+  test("only the expired record is flagged; fresh + no-expiry are not", async () => {
+    const result = await runner.auditFreshness({ now: NOW });
+    assert.deepEqual(result.flags.map((f) => f.recordId), [expiredId]);
+    assert.ok(!result.flags.some((f) => f.recordId === freshId));
+    assert.ok(!result.flags.some((f) => f.recordId === plainId));
+  });
+
+  test("ttl_seconds derives expiry from created_at (no thresholds)", async () => {
+    const tdir = makeTempDir();
+    const tstore = makeStore(tdir);
+    const trunner = makeRunner(tstore, tdir);
+    try {
+      const id = await tstore.create({
+        type: "raw", title: "Ttl expiry", body: "b", category: "misc.scratch",
+        ttl_seconds: 60, provenance: { agent: "fixture" },
+      });
+      const rec = await tstore.get(id);
+      const expiryMs = Date.parse(rec.created_at) + 60 * 1000;
+      // Just before expiry: not flagged. At/after expiry: flagged.
+      let result = await trunner.auditFreshness({ now: expiryMs - 1000 });
+      assert.ok(!result.flags.some((f) => f.recordId === id), "not flagged before ttl expiry");
+      result = await trunner.auditFreshness({ now: expiryMs });
+      const flag = result.flags.find((f) => f.recordId === id);
+      assert.ok(flag, "flagged at ttl expiry");
+      assert.equal(flag.reason, "expiry");
+    } finally {
+      fs.rmSync(tdir, { recursive: true, force: true });
+    }
+  });
+
+  test("read-only: the expiry audit mutates no record", async () => {
+    const before = fs.readFileSync(path.join(dir, "records", `${expiredId}.md`), "utf8");
+    await runner.auditFreshness({ now: NOW });
+    const after = fs.readFileSync(path.join(dir, "records", `${expiredId}.md`), "utf8");
+    assert.equal(after, before, "the record is byte-identical after the expiry audit");
   });
 });

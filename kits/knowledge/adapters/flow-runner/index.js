@@ -42,6 +42,8 @@ import {
   isExactMatch,
   isPossibleDuplicate,
 } from "./entity-extractor.js";
+// Record-carried effective expiry (issue #341, store-contract Addendum J).
+import { effectiveExpiryMs } from "../shared/codec.js";
 
 // ---------------------------------------------------------------------------
 // Error helpers
@@ -2337,6 +2339,254 @@ export class KnowledgeFlowRunner {
 
 
   // -------------------------------------------------------------------------
+  // knowledge.flag-superseded-citers flow  (supersede/retire propagation — #342)
+  //   Steps: collect-gate → flag-gate → done
+  //   Gate: flag-gate — every flag carries the superseding context that produced
+  //         it (the superseding record id(s) from the supersede op, and/or the
+  //         retire supersededByRef). A flag can NEVER be emitted without this
+  //         evidence: when a record shows no supersession evidence, zero flags
+  //         are emitted (fail closed — the "no false flags" guarantee).
+  //
+  // READ-ONLY: reads the store's query surface (get / getLinks) and — when doc
+  // globs are configured — the #340 inbound-reference citation index. Mutates no
+  // record and appends no mutation-log entry (same invariant as the Addenda D–G
+  // audits and the #340 check). The existing gated `supersede` (Addendum A.5) and
+  // `retire` (Addendum B.4) ops are untouched: this forks no mutation path.
+  //
+  // Motivation (field report, ops record 0e439c57): a decision record became
+  // unresolvable after a store restructure and NOTHING flagged the four docs
+  // citing it — they kept presenting dead authority for weeks. Supersession
+  // preserves the record (supersede-not-delete) and makes store-internal citers
+  // discoverable via reverse links, but doc citers stayed invisible. This
+  // operation closes that loop: on a superseded/retired record it enumerates
+  // first-degree inbound citers — store records (reverse-link index, §5) AND docs
+  // (the #340 citation index) — and emits one supersession-aware flag per citer.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Enumerate first-degree inbound citers of a superseded / retired record and
+   * emit one flag per citer, each carrying the superseding context. Read-only.
+   *
+   * Supersession evidence (the flag-gate requires at least one):
+   *   - `supersede` op (Addendum A.5): a reverse link of kind `"supersedes"` from
+   *     the superseding record, mirrored by a `"superseded-by"` mutation-log entry
+   *     (`new_id`). Both are consulted; the union is `supersededByIds`.
+   *   - `retire` op with `supersededByRef` (Addendum B.4): a `"retire"` mutation-log
+   *     entry whose `evidence.supersededByRef` names the superseding artifact.
+   *
+   * Citer enumeration (first-degree only — no citers-of-citers):
+   *   - store records: `getLinks(id).reverse`, EXCLUDING the `"supersedes"` link and
+   *     any link from a superseding record itself (the new authority is not a stale
+   *     citer). Every other inbound link is a citer, tagged with its `linkKind`.
+   *   - docs: `checkInboundReferences({ docGlobs, ... }).byRecord[id]` when doc globs
+   *     are configured (opt-in; zero globs = store citers only). The superseded
+   *     record is preserved (supersede-not-delete), so its citations still resolve.
+   *
+   * Flag-gating: flags are emitted ONLY when supersession evidence exists. A
+   * record with no such evidence yields `superseded:false` and an empty flag list
+   * (no false flags); a superseded record with no citers likewise yields an empty
+   * flag list. The enumerated citer counts (`storeCiters` / `docCiters`) are
+   * always reported so a caller can see the inbound edges independent of gating.
+   *
+   * @param {string} recordId  Id (or #339 prefix/slug handle) of the record.
+   * @param {object} [options]
+   *   - docGlobs: string[]   — globs to scan for doc citers (opt-in; [] = store citers only)
+   *   - docsRoot: string     — root the globs resolve against (default: workspace, then cwd)
+   *   - markers: string[]    — citation marker prefixes (default DEFAULT_CITATION_MARKERS)
+   *   - agent: string        — override agent name
+   * @returns {Promise<{
+   *   recordId: string,
+   *   superseded: boolean,
+   *   supersededByIds: string[],
+   *   supersededByRef: string|null,
+   *   retiredStatus: string|null,
+   *   storeCiters: number,
+   *   docCiters: number,
+   *   flags: Array<{
+   *     citerRef: string, citerKind: "record"|"doc", citedId: string,
+   *     supersededByIds: string[], supersededByRef: string|null,
+   *     linkKind?: string,
+   *     doc?: string, line?: number, column?: number, token?: string, form?: string
+   *   }>,
+   *   telemetryEvents: object[]
+   * }>}
+   */
+  async flagSupersededCiters(recordId, options = {}) {
+    const events = [];
+    const agent = options.agent || this._agent;
+
+    if (!recordId || typeof recordId !== "string") {
+      throw missingEvidenceError(
+        "flag-superseded-citers: recordId must be a non-empty string"
+      );
+    }
+
+    const record = await this._store.get(recordId);
+    if (!record) {
+      throw missingEvidenceError(`flag-superseded-citers: record not found: ${recordId}`);
+    }
+    const citedId = record.id;
+    const docGlobs = Array.isArray(options.docGlobs) ? options.docGlobs : [];
+
+    // ── Step: collect-gate ─────────────────────────────────────────────────
+    const collectGateIn = this._telemetry.emitGate(
+      "knowledge.flag-superseded-citers",
+      "collect-gate",
+      {
+        flow: "knowledge.flag-superseded-citers",
+        gate: "collect-gate",
+        record_id: citedId,
+        doc_globs: docGlobs,
+      }
+    );
+    events.push(collectGateIn);
+
+    // Superseding context — the evidence every flag must carry.
+    const links = await this._store.getLinks(citedId);
+    const reverse = Array.isArray(links.reverse) ? links.reverse : [];
+
+    const supersededByIds = [
+      ...new Set(
+        reverse
+          .filter((l) => l.kind === "supersedes")
+          .map((l) => l.source_id)
+          .filter(Boolean)
+      ),
+    ];
+    // The mutation log independently records the superseding record(s); fold in
+    // any not already surfaced by the reverse index (belt-and-suspenders).
+    for (const e of record.mutation_log || []) {
+      if (e.op === "superseded-by" && e.new_id && !supersededByIds.includes(e.new_id)) {
+        supersededByIds.push(e.new_id);
+      }
+    }
+
+    // retire(…, { supersededByRef }) — Addendum B.4.
+    let supersededByRef = null;
+    for (const e of record.mutation_log || []) {
+      if (e.op === "retire" && e.evidence && e.evidence.supersededByRef) {
+        supersededByRef = e.evidence.supersededByRef;
+      }
+    }
+    const retiredStatus = (record.status || "active") === "retired" ? "retired" : null;
+
+    const superseded = supersededByIds.length > 0 || Boolean(supersededByRef);
+
+    // Store-record citers: inbound links minus the supersession relationship
+    // itself and any link originating from a superseding record (the replacement
+    // authority is not a silent dead citer).
+    const storeCiterLinks = reverse.filter(
+      (l) => l.kind !== "supersedes" && !supersededByIds.includes(l.source_id)
+    );
+
+    // Doc citers: the #340 citation index, keyed by the record's full id. Opt-in.
+    let docCiterEntries = [];
+    if (docGlobs.length > 0) {
+      const inbound = await this.checkInboundReferences({
+        docGlobs,
+        docsRoot: options.docsRoot,
+        markers: options.markers,
+        agent,
+      });
+      // Fold the inbound-check gate telemetry into this flow's event trail.
+      if (Array.isArray(inbound.telemetryEvents)) {
+        for (const ev of inbound.telemetryEvents) events.push(ev);
+      }
+      docCiterEntries = inbound.byRecord[citedId] || [];
+    }
+
+    const collectGateOut = this._telemetry.emitGateResult(
+      "knowledge.flag-superseded-citers",
+      "collect-gate",
+      {
+        record_id: citedId,
+        superseded,
+        superseded_by_count: supersededByIds.length,
+        superseded_by_ref: Boolean(supersededByRef),
+        store_citers: storeCiterLinks.length,
+        doc_citers: docCiterEntries.length,
+      }
+    );
+    events.push(collectGateOut);
+
+    // ── Step: flag-gate ────────────────────────────────────────────────────
+    const flagGateIn = this._telemetry.emitGate(
+      "knowledge.flag-superseded-citers",
+      "flag-gate",
+      {
+        flow: "knowledge.flag-superseded-citers",
+        gate: "flag-gate",
+        record_id: citedId,
+        superseded,
+        candidate_citers: storeCiterLinks.length + docCiterEntries.length,
+      }
+    );
+    events.push(flagGateIn);
+
+    const flags = [];
+    if (superseded) {
+      const context = { supersededByIds, supersededByRef };
+      for (const l of storeCiterLinks) {
+        flags.push({
+          citerRef: l.source_id,
+          citerKind: "record",
+          linkKind: l.kind,
+          citedId,
+          ...context,
+        });
+      }
+      for (const d of docCiterEntries) {
+        flags.push({
+          citerRef: `${d.doc}:${d.line}:${d.column}`,
+          citerKind: "doc",
+          doc: d.doc,
+          line: d.line,
+          column: d.column,
+          token: d.token,
+          form: d.form,
+          citedId,
+          ...context,
+        });
+      }
+      // Evidence guarantee (defensive): the flag-gate refuses any flag that does
+      // not carry superseding context. `superseded` already implies context, so
+      // this can only fire on a future regression — fail closed if it ever does.
+      for (const f of flags) {
+        if (f.supersededByIds.length === 0 && !f.supersededByRef) {
+          throw missingEvidenceError(
+            "flag-superseded-citers: refusing to emit a flag without superseding context"
+          );
+        }
+      }
+    }
+
+    const flagGateOut = this._telemetry.emitGateResult(
+      "knowledge.flag-superseded-citers",
+      "flag-gate",
+      {
+        record_id: citedId,
+        superseded,
+        flagged: flags.length,
+        agent,
+      }
+    );
+    events.push(flagGateOut);
+
+    return {
+      recordId: citedId,
+      superseded,
+      supersededByIds,
+      supersededByRef,
+      retiredStatus,
+      storeCiters: storeCiterLinks.length,
+      docCiters: docCiterEntries.length,
+      flags,
+      telemetryEvents: events,
+    };
+  }
+
+
+  // -------------------------------------------------------------------------
   // knowledge.audit-freshness flow  (hygiene #1 — #106)
   //   Steps: collect → measure → flag-gate → done
   //   Gate: flag-gate — every flag cites its evidence (last-mutation + the
@@ -2380,7 +2630,9 @@ export class KnowledgeFlowRunner {
    *   flags: Array<{
    *     recordId: string, title: string, type: string, category: string,
    *     status: string, lastMutationAt: string, ageDays: number,
-   *     thresholdDays: number, matchedThresholdKey: string,
+   *     thresholdDays: number|null, matchedThresholdKey: string,
+   *     reason: "threshold"|"expiry",  // which path fired (#341)
+   *     expiresAt?: string,            // present on expiry flags: the cited expiry
    *     proposedAction: "archive"|"refresh"
    *   }>,
    *   telemetryEvents: object[]
@@ -2452,9 +2704,18 @@ export class KnowledgeFlowRunner {
     let audited = 0;
 
     for (const record of records) {
+      // Record-carried expiry (#341): a record's own `expires_at` / `ttl_seconds`
+      // is the strongest freshness signal and fires WITHOUT any caller-supplied
+      // threshold (Addendum J). Effective expiry: explicit expires_at, else
+      // created_at + ttl_seconds; null when the record carries no freshness field.
+      const expiryMs = effectiveExpiryMs(record);
+      const hasExpiry = expiryMs !== null;
       const resolved = resolveThreshold(record.category, thresholds, defaultThresholdDays);
-      if (resolved === null) {
-        // No threshold configured for this category (and no default) → opt out.
+
+      // A record is opt-out only when it has NEITHER a record-carried expiry NOR
+      // a resolvable per-category threshold. This preserves the pre-#341 skip
+      // semantics for records without freshness fields.
+      if (!hasExpiry && resolved === null) {
         skipped += 1;
         continue;
       }
@@ -2466,13 +2727,35 @@ export class KnowledgeFlowRunner {
       const ageDays = Number.isNaN(lastMs)
         ? 0
         : Math.floor((nowMs - lastMs) / 86_400_000);
+      const proposedAction = resolveAction(record.category, actions, defaultAction);
 
-      // Flag only when STRICTLY past the threshold. Evidence (last-mutation +
-      // the threshold key/value that fired) is carried on every flag — the
-      // flag-gate requires both, so a flag can never be emitted without them.
-      if (ageDays > resolved.thresholdDays) {
-        const proposedAction =
-          resolveAction(record.category, actions, defaultAction);
+      // Expiry path takes precedence: when a record is past its OWN expiry, flag
+      // it citing that expiry (`expiresAt`) as the threshold that fired. Boundary
+      // is inclusive (nowMs >= expiry), matching isRecordStale (Addendum J).
+      if (hasExpiry && nowMs >= expiryMs) {
+        flags.push({
+          recordId: record.id,
+          title: record.title,
+          type: record.type,
+          category: record.category,
+          status: record.status || "active",
+          lastMutationAt,
+          ageDays,
+          // Expiry flags cite `expiresAt` rather than a day-count threshold, so
+          // `thresholdDays` is null and `matchedThresholdKey` names the field.
+          thresholdDays: null,
+          matchedThresholdKey: "expires_at",
+          expiresAt: new Date(expiryMs).toISOString(),
+          reason: "expiry",
+          proposedAction,
+        });
+        continue;
+      }
+
+      // Threshold path (unchanged, #106): flag only when STRICTLY past the
+      // resolved per-category threshold. Evidence (last-mutation + the threshold
+      // key/value that fired) is carried on every flag.
+      if (resolved !== null && ageDays > resolved.thresholdDays) {
         flags.push({
           recordId: record.id,
           title: record.title,
@@ -2483,6 +2766,7 @@ export class KnowledgeFlowRunner {
           ageDays,
           thresholdDays: resolved.thresholdDays,
           matchedThresholdKey: resolved.matchedKey,
+          reason: "threshold",
           proposedAction,
         });
       }
@@ -3942,6 +4226,24 @@ export async function checkInboundReferences(
 ) {
   const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
   return runner.checkInboundReferences(checkOpts);
+}
+
+/**
+ * Module-level supersede/retire citer-propagation flag: creates an ephemeral
+ * runner using the provided store. Read-only — mutates nothing. Enumerates
+ * first-degree inbound citers (store records + docs) of a superseded/retired
+ * record and emits one flag per citer, each carrying the superseding context.
+ * Fails closed: no flag without that evidence. (#342)
+ *
+ * @param {string} recordId
+ * @param {object} options  (merged into flagSupersededCiters options + runner options)
+ */
+export async function flagSupersededCiters(
+  recordId,
+  { store, workspace, agent, sessionId, ...flagOpts } = {}
+) {
+  const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
+  return runner.flagSupersededCiters(recordId, flagOpts);
 }
 
 /**
