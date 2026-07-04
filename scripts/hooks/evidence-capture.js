@@ -49,6 +49,8 @@
 const fs = require('fs');
 const path = require('path');
 const { flowAgentsArtifactRootsForRead } = require('./lib/local-artifact-paths');
+const { resolveActor } = require('./lib/actor-identity.js');
+const { readCurrentPointer } = require('./lib/current-pointer.js');
 const crypto = require('crypto');
 
 const MAX_STDIN = 1024 * 1024;
@@ -198,8 +200,9 @@ function latestStateDir(flowAgentsDir) {
  * to the newest-mtime state.json directory.
  */
 function resolveArtifactDir(root) {
+  const actorKey = resolveActor(process.env).actor;
   for (const flowAgentsDir of flowAgentsArtifactRootsForRead(root)) {
-    const current = readJsonFile(path.join(flowAgentsDir, 'current.json'));
+    const { payload: current } = readCurrentPointer(flowAgentsDir, actorKey);
     if (current) {
       const slug = current.artifact_dir || current.active_slug;
       if (typeof slug === 'string' && slug.trim()) {

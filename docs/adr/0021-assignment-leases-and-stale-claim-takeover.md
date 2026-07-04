@@ -100,7 +100,7 @@ Five touchpoints, one policy:
 |---|---|---|
 | `workflow-steering.js`, every turn | read | one-line liveness digest; "superseded" interrupt for the held subject |
 | `pull-work` | read + write | exclude held; claim (liveness + provider) on selection |
-| `ensure-session` / pickup | read + write | refuse entry to a session dir under a fresh other-actor claim; supersede-then-enter if stale |
+| `ensure-session` / pickup | read + write | refuse entry to a session dir under a fresh other-actor claim; supersede-then-enter if stale (**implemented by #291**) |
 | `advance-state` + tool activity | write | heartbeat rides existing writes; no bespoke timer |
 | **publish (push / PR / merge)** | **read, blocking** | **verify-hold**: hard-stop if not the fresh, non-superseded holder |
 

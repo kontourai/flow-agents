@@ -1,0 +1,11 @@
+{
+  "_comment": "Hostile-string fixture for #291 AC9 (ensure-session ownership guard sanitization). Simulates the precomputed .effective JSON a GitHub-provider caller would pass via --effective-state-json, where the .assignee field originates from an attacker-postable GitHub login/comment. The assignee value below embeds a real ESC (ANSI CSI lead-in) and a real BEL control byte -- both must be stripped (never echoed raw) by ensure-session's guard before this value is interpolated into any die() remediation message.",
+  "effective": {
+    "effective_state": "human-held",
+    "reason": "assignee_is_human",
+    "holder": {
+      "assignee": "hostile-assignee\u001b[31;1mFAKE-ADMIN\u0007-login",
+      "idle_days": 3
+    }
+  }
+}

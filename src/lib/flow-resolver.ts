@@ -15,6 +15,8 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 
 // ─── Security: Layer 1 traversal defense ─────────────────────────────────────
 //
@@ -324,27 +326,46 @@ function findRepoRoot(startDir: string): string {
 }
 
 /**
+ * Delegate to the shared pure-CJS per-actor current-pointer reader
+ * (scripts/hooks/lib/current-pointer.js), mirroring the exact createRequire idiom
+ * workflow-sidecar.ts already uses for its own cross-boundary CJS helper reuse (Wave 2 Task 2.2,
+ * #291). Deliberately NO inline duplicate fallback — this is the single choke point for the
+ * per-actor-first/legacy-fallback compat-shim rule; a second hand-rolled reader here would let it
+ * drift from every other consumer.
+ */
+function loadCurrentPointerHelper(): {
+  readCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: Record<string, unknown> | null; source: "per-actor" | "legacy" | "none"; file: string | null };
+} {
+  const _req = createRequire(import.meta.url);
+  const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/current-pointer.js");
+  return _req(helperPath) as {
+    readCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: Record<string, unknown> | null; source: "per-actor" | "legacy" | "none"; file: string | null };
+  };
+}
+
+/**
  * Resolve the active flow step from current.json.
  *
- * Reads active_flow_id and active_step_id from <flowAgentsDir>/current.json.
- * If both are present, delegates to resolveFlowStep. The repoRoot is derived by
- * walking upward from flowAgentsDir to find the nearest ancestor containing kits/,
- * with a fallback to process.cwd(). This handles temp dirs, CI workspaces, and
- * subproject layouts without hardcoding the repo structure.
+ * Reads active_flow_id and active_step_id via the shared per-actor current-pointer helper
+ * (#291 Wave 2 Task 2.2): when `actorKey` is a resolved actor with its own
+ * `current/<actor>.json` projection, that file is preferred; otherwise (no actorKey, an
+ * unresolved actor, or no per-actor file yet) this falls straight back to the legacy global
+ * `<flowAgentsDir>/current.json` — IDENTICAL to this function's pre-#291 behavior for every
+ * caller that does not pass `actorKey`. The repoRoot is derived by walking upward from
+ * flowAgentsDir to find the nearest ancestor containing kits/, with a fallback to
+ * process.cwd(). This handles temp dirs, CI workspaces, and subproject layouts without
+ * hardcoding the repo structure.
  *
  * @param flowAgentsDir Path to the runtime artifact root directory (contains current.json).
+ * @param actorKey Optional resolved actor identity (Wave 2 Task 2.1's `writeCurrent()` dual-write
+ *   key) — when omitted, behavior is unchanged (legacy-file-only, exactly as before #291).
  * @returns ActiveFlowStep or null when fields are absent or resolution fails.
  */
-export function resolveActiveFlowStep(flowAgentsDir: string): ActiveFlowStep | null {
+export function resolveActiveFlowStep(flowAgentsDir: string, actorKey?: string): ActiveFlowStep | null {
   if (!flowAgentsDir) return null;
-  const currentFile = path.join(flowAgentsDir, "current.json");
-  let current: Record<string, unknown>;
-  try {
-    const raw = fs.readFileSync(currentFile, "utf8");
-    current = JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
+  const pointer = loadCurrentPointerHelper().readCurrentPointer(flowAgentsDir, actorKey);
+  if (pointer.source === "none" || !pointer.payload) return null;
+  const current = pointer.payload;
 
   const flowId = typeof current["active_flow_id"] === "string" ? current["active_flow_id"] : null;
   const stepId = typeof current["active_step_id"] === "string" ? current["active_step_id"] : null;

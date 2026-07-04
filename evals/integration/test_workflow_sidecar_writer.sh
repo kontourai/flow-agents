@@ -530,19 +530,28 @@ fi
 
 # AC5 (existing-session continuity): re-running ensure-session against the SAME slug from a
 # DIFFERENT actor never re-derives or overwrites the already-recorded branch (ADR 0021 §5
-# takeover continuity — resume the incumbent's branch, never a parallel one).
+# takeover continuity — resume the incumbent's branch, never a parallel one). #291's
+# ensure-session ownership guard now classifies alpha's still-fresh-assignment/no-liveness
+# claim as `reclaimable` and refuses gamma's entry without an explicit takeover — so this
+# takeover is made explicit via --supersede-stale (ADR 0021 §5's grace-beat/auto-resume
+# protocol is still #294's scope; #291 only wires the explicit, caller-invoked takeover path).
+# The supersede updates the ASSIGNMENT record's actor (assignment/<slug>.json), never
+# state.json — state.json's `branch` field (and the rest of state.json) must stay exactly
+# alpha's, proving the takeover resumes the incumbent's branch rather than reforking one for
+# gamma.
 if flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$SESSION_ROOT" \
   --task-slug branch-derive-a \
   --actor test-actor-gamma \
+  --supersede-stale \
   --source-request "A takeover by a different actor must not refork the branch." \
   --summary "Resuming actor gamma should inherit alpha's already-recorded branch." \
   --timestamp "2026-05-09T00:03:12Z" >"$TMPDIR_EVAL/branch-no-rederive.out" 2>"$TMPDIR_EVAL/branch-no-rederive.err" \
   && rg -q '"branch": "agent/test-actor-alpha/branch-derive-a"' "$BRANCH_DERIVE_A_DIR/state.json" \
   && ! rg -q 'test-actor-gamma' "$BRANCH_DERIVE_A_DIR/state.json"; then
-  _pass "sidecar writer never re-derives an existing session's branch for a later actor (AC5, ADR 0021 §5)"
+  _pass "sidecar writer's explicit --supersede-stale takeover (#291) never re-derives or overwrites an existing session's branch for the new actor (AC5, ADR 0021 §5)"
 else
-  _fail "sidecar writer re-derived or overwrote an existing session's branch on takeover: $(cat "$TMPDIR_EVAL/branch-no-rederive.out" "$TMPDIR_EVAL/branch-no-rederive.err")"
+  _fail "sidecar writer's explicit --supersede-stale takeover re-derived or overwrote an existing session's branch: $(cat "$TMPDIR_EVAL/branch-no-rederive.out" "$TMPDIR_EVAL/branch-no-rederive.err")"
 fi
 
 # ─── #309: init-plan (and advance-state) must never drop an already-recorded branch ────

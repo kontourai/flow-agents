@@ -25,6 +25,8 @@ CHECKS=(
   "Assignment provider local-file integration|bash evals/integration/test_assignment_provider_local_file.sh"
   "Assignment provider github integration|bash evals/integration/test_assignment_provider_github.sh"
   "Pull work assignment join integration|bash evals/integration/test_pull_work_assignment_join.sh"
+  "Ensure-session ownership guard integration|bash evals/integration/test_ensure_session_ownership_guard.sh"
+  "Current.json per-actor integration|bash evals/integration/test_current_json_per_actor.sh"
   "Goal Fit hook integration|bash evals/integration/test_goal_fit_hook.sh"
   "Hook category behavior integration|bash evals/integration/test_hook_category_behaviors.sh"
   "Workflow steering hook integration|bash evals/integration/test_workflow_steering_hook.sh"
@@ -78,6 +80,8 @@ LANE_WORKFLOW_CONTRACTS=(
   "Assignment provider local-file integration"
   "Assignment provider github integration"
   "Pull work assignment join integration"
+  "Ensure-session ownership guard integration"
+  "Current.json per-actor integration"
 )
 
 LANE_RUNTIME_AND_KIT=(

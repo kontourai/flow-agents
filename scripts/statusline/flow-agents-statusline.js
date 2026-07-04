@@ -10,6 +10,8 @@
 
 const fs = require('fs');
 const path = require('path');
+const { resolveActor } = require('../hooks/lib/actor-identity.js');
+const { readCurrentPointer } = require('../hooks/lib/current-pointer.js');
 
 const MAX_SUMMARY = 72;
 
@@ -76,7 +78,7 @@ function stateFiles(workflowRoot) {
 }
 
 function chooseWorkflow(workflowRoot) {
-  const current = readJson(path.join(workflowRoot, 'current.json'));
+  const { payload: current } = readCurrentPointer(workflowRoot, resolveActor(process.env).actor);
   if (current?.active_slug || current?.artifact_dir) {
     const slug = current.active_slug || current.artifact_dir;
     const dir = path.join(workflowRoot, slug);

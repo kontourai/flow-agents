@@ -19,6 +19,7 @@ const path = require('path');
 const { readLivenessEvents, freshHolders } = require('./lib/liveness-read');
 const { resolveActor } = require('./lib/actor-identity');
 const { flowAgentsArtifactRootsForRead } = require('./lib/local-artifact-paths');
+const { readCurrentPointer } = require('./lib/current-pointer');
 
 const STEERING = {
   'tool-planner': [
@@ -102,7 +103,48 @@ function readJson(file) {
   }
 }
 
+/**
+ * #291 (Conflict #2, Wave 2 Task 2.4): actor-scoped preference consulted BEFORE the global
+ * newest-mtime scan below. For each read-root, resolve the "current" pointer via
+ * `readCurrentPointer` (per-actor `current/<actor>.json` preferred, legacy global
+ * `current.json` fallback — the same single choke point every other Wave 2 consumer uses) and,
+ * if it names a session dir whose `state.json` is still in an ACTIVE_STATE_STATUSES status,
+ * return that state immediately — so actor A's own ambient steering hint always prefers A's own
+ * current task over a globally-newer-mtime `state.json` some other actor (B) happened to touch
+ * more recently. Returns null (never throws) when no root yields an actor-scoped resolution,
+ * so the caller falls through to the unchanged global scan below — this is the compat-shim
+ * guarantee: when `actorKey` is empty/unresolved and/or no per-actor file exists yet, this
+ * degrades to the SAME legacy-`current.json`-or-nothing lookup the compat shim already performs
+ * for every other Wave 2 reader, so a single-session/CI/legacy-only fixture cannot fail to
+ * resolve here in a way it wouldn't already have resolved via the global scan.
+ *
+ * @param {string} root
+ * @param {string} actorKey
+ * @returns {{file: string, payload: object, mtimeMs: number}|null}
+ */
+function actorScopedWorkflowState(root, actorKey) {
+  for (const flowAgentsDir of flowAgentsArtifactRootsForRead(root)) {
+    const { payload: current } = readCurrentPointer(flowAgentsDir, actorKey);
+    if (!current) continue;
+    const slug = current.artifact_dir || current.active_slug;
+    if (typeof slug !== 'string' || !slug.trim()) continue;
+    const safe = slug.replace(/\.\.+/g, '').replace(/^[/\\]+/, '');
+    const dir = path.join(flowAgentsDir, safe);
+    if (!dir.startsWith(flowAgentsDir + path.sep) || !fs.existsSync(dir)) continue;
+    const file = path.join(dir, 'state.json');
+    let stat;
+    try { stat = fs.statSync(file); } catch { continue; }
+    const payload = readJson(file);
+    if (!payload || !ACTIVE_STATE_STATUSES.has(payload.status)) continue;
+    return { file, payload, mtimeMs: stat.mtimeMs };
+  }
+  return null;
+}
+
 function latestWorkflowState(root) {
+  const preferred = actorScopedWorkflowState(root, resolveActor(process.env).actor);
+  if (preferred) return preferred;
+
   const states = flowAgentsArtifactRootsForRead(root)
     .flatMap(artifactRoot => walkStateFiles(artifactRoot))
     .map(file => {

@@ -131,6 +131,18 @@ function checkProtectedPathPattern(filePath) {
     };
   }
 
+  // .kontourai/flow-agents/current/<actor>.json (#291) — the per-actor projection of the same
+  // pointer above. An agent could forge active_flow_id/active_step_id here exactly as it could
+  // via the legacy global file, so this is protected identically (same reason text).
+  // SAFE: the workflow CLI writes this via writePerActorCurrent → fs.writeFileSync,
+  // NOT via the Write/Edit tool — blocking the tool path does not break legit sidecar.
+  if (/(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\/[^/]+\.json$/.test(norm)) {
+    return {
+      name: '.kontourai/flow-agents/current/<actor>.json',
+      reason: 'an agent could forge active_flow_id/active_step_id to route the gate to a permissive FlowDefinition',
+    };
+  }
+
   // .kontourai/flow-agents/.goal-fit-block-streak.json controls soft-block
   // release counting. An agent could force early advisory-gate release by
   // writing a high count.
@@ -403,12 +415,13 @@ function checkCommandForBypass(command) {
  * Regex that matches a normalized (forward-slash) path ending with a protected
  * kill-switch file: shell profiles, .claude/settings*.json,
  * .kontourai/flow-agents/current.json,
+ * .kontourai/flow-agents/current/<actor>.json (#291 per-actor projection),
  * .kontourai/flow-agents/.goal-fit-block-streak.json,
  * .kontourai/flow-agents/<slug>/state.json,
  * .kontourai/flow-agents/<slug>/trust.bundle, and deprecated runtime-shaped
  * .flow-agents equivalents.
  */
-const REDIRECT_PROTECTED_RE = /(?:^|\/|~\/)(\.bash_profile|\.bashrc|\.profile|\.zprofile|\.zshrc)$|(?:^|\/)\.claude\/settings(?:\.local)?\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/\.goal-fit-block-streak\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/state\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/trust\.bundle$|(?:^|\/)delivery\/trust\.bundle$|(?:^|\/)delivery\/trust\.checkpoint\.json$/;
+const REDIRECT_PROTECTED_RE = /(?:^|\/|~\/)(\.bash_profile|\.bashrc|\.profile|\.zprofile|\.zshrc)$|(?:^|\/)\.claude\/settings(?:\.local)?\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\/[^/]+\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/\.goal-fit-block-streak\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/state\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/trust\.bundle$|(?:^|\/)delivery\/trust\.bundle$|(?:^|\/)delivery\/trust\.checkpoint\.json$/;
 
 /**
  * Return true when a token (an unquoted redirect target or tee argument) matches
