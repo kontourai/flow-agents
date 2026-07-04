@@ -3,15 +3,15 @@
   "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
   "claims": [
     {
-      "id": "i339-record-identity-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-manifest-static-eval-suite-green-includes-knowledge-store-provider-conformance-test-knowledge-providers-sh-ci-reconcilable-ac-covering-static-proof",
+      "id": "i340-inbound-refs-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-bash-evals-run-sh-static-green-npm-run-build-all-layer-1-static-checks-incl-knowledge-store-provider-conformance-test-knowledge-providers-sh-49-49-ci-reconcilable-manifest-lane-proof-unaffected-by-340-additive-change",
       "subjectType": "flow-step",
-      "subjectId": "i339-record-identity/knowledge-static-eval-suite",
+      "subjectId": "i340-inbound-refs/knowledge-static-eval-suite",
       "facet": "flow-agents.workflow",
       "claimType": "builder.verify.tests",
-      "fieldOrBehavior": "Static eval lane (manifest static-eval-suite) green — includes knowledge store provider conformance test_knowledge_providers.sh; CI-reconcilable AC-covering static proof",
+      "fieldOrBehavior": "Static eval lane (bash evals/run.sh static) green: npm run build + all layer-1 static checks incl. knowledge store provider conformance (test_knowledge_providers.sh 49/49). CI-reconcilable manifest-lane proof; unaffected by #340 additive change.",
       "value": "pass",
-      "createdAt": "2026-07-04T15:59:01Z",
-      "updatedAt": "2026-07-04T15:59:01Z",
+      "createdAt": "2026-07-04T16:52:27Z",
+      "updatedAt": "2026-07-04T16:52:27Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:builder.verify.tests:test_output",
       "metadata": {
@@ -21,15 +21,15 @@
       "status": "verified"
     },
     {
-      "id": "i339-record-identity-contract-suite-default.flow-agents-workflow.contract-suite-default-adapter-67-67-pass-0-fail-exit-0-covers-ac1-prefix-ambiguous-ac3-post-move-ac4-unmodified-sections-records-uuid-md",
+      "id": "i340-inbound-refs-contract-suite-default.flow-agents-workflow.regression-store-contract-suite-default-adapter-67-67-pass-0-fail-exit-0-339-identity-semantics-prior-contract-remain-green-under-340",
       "subjectType": "flow-step",
-      "subjectId": "i339-record-identity/contract-suite-default",
+      "subjectId": "i340-inbound-refs/contract-suite-default",
       "facet": "flow-agents.workflow",
       "claimType": "builder.verify.tests",
-      "fieldOrBehavior": "Contract-suite default adapter: 67/67 pass, 0 fail, exit 0 — covers AC1 (prefix/ambiguous), AC3 (post-move), AC4 (unmodified sections + records/<uuid>.md)",
+      "fieldOrBehavior": "Regression: store contract suite (default adapter) 67/67 pass, 0 fail, exit 0. #339 identity semantics + prior contract remain green under #340.",
       "value": "pass",
-      "createdAt": "2026-07-04T15:59:01Z",
-      "updatedAt": "2026-07-04T15:59:01Z",
+      "createdAt": "2026-07-04T16:52:27Z",
+      "updatedAt": "2026-07-04T16:52:27Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:builder.verify.tests:attestation",
       "metadata": {
@@ -39,15 +39,15 @@
       "status": "verified"
     },
     {
-      "id": "i339-record-identity-contract-suite-obsidian.flow-agents-workflow.contract-suite-obsidian-adapter-64-pass-0-fail-3-adapter-scoped-skips-reindex-not-implemented-on-obsidian-exit-0-covers-ac2-slug-round-trip-ac3-file-relocation",
+      "id": "i340-inbound-refs-contract-suite-obsidian.flow-agents-workflow.regression-store-contract-suite-obsidian-adapter-64-pass-0-fail-exit-0",
       "subjectType": "flow-step",
-      "subjectId": "i339-record-identity/contract-suite-obsidian",
+      "subjectId": "i340-inbound-refs/contract-suite-obsidian",
       "facet": "flow-agents.workflow",
       "claimType": "builder.verify.tests",
-      "fieldOrBehavior": "Contract-suite obsidian adapter: 64 pass, 0 fail, 3 adapter-scoped skips (reindex not implemented on obsidian), exit 0 — covers AC2 (slug round-trip) + AC3 (file relocation)",
+      "fieldOrBehavior": "Regression: store contract suite (obsidian adapter) 64 pass, 0 fail, exit 0.",
       "value": "pass",
-      "createdAt": "2026-07-04T15:59:01Z",
-      "updatedAt": "2026-07-04T15:59:01Z",
+      "createdAt": "2026-07-04T16:52:27Z",
+      "updatedAt": "2026-07-04T16:52:27Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:builder.verify.tests:attestation",
       "metadata": {
@@ -57,15 +57,15 @@
       "status": "verified"
     },
     {
-      "id": "i339-record-identity-store-contract-doc-ac5.flow-agents-workflow.ac5-kits-knowledge-docs-store-contract-md-gains-identity-alias-addendum-116-and-kits-knowledge-docs-readme-md-quick-reference-38-present-in-committed-diff",
+      "id": "i340-inbound-refs-inbound-references-suite-default.flow-agents-workflow.ac1-ac2-ac3-ac5-inbound-references-suite-default-adapter-9-9-pass-exit-0",
       "subjectType": "flow-step",
-      "subjectId": "i339-record-identity/store-contract-doc-ac5",
+      "subjectId": "i340-inbound-refs/inbound-references-suite-default",
       "facet": "flow-agents.workflow",
       "claimType": "builder.verify.tests",
-      "fieldOrBehavior": "AC5: kits/knowledge/docs/store-contract.md gains identity/alias addendum (+116) and kits/knowledge/docs/README.md quick reference (+38) — present in committed diff",
+      "fieldOrBehavior": "AC1/AC2/AC3/AC5: inbound-references suite (default adapter) 9/9 pass, exit 0.",
       "value": "pass",
-      "createdAt": "2026-07-04T15:59:01Z",
-      "updatedAt": "2026-07-04T15:59:01Z",
+      "createdAt": "2026-07-04T16:52:27Z",
+      "updatedAt": "2026-07-04T16:52:27Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:builder.verify.tests:attestation",
       "metadata": {
@@ -75,100 +75,105 @@
       "status": "verified"
     },
     {
-      "id": "i339-record-identity-ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0.flow-agents-workflow.ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0",
+      "id": "i340-inbound-refs-inbound-references-suite-obsidian.flow-agents-workflow.ac4-inbound-references-suite-parameterized-on-obsidian-store-adapter-9-9-pass-exit-0-every-adapter-must-implement-the-check",
       "subjectType": "flow-step",
-      "subjectId": "i339-record-identity/ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0",
+      "subjectId": "i340-inbound-refs/inbound-references-suite-obsidian",
       "facet": "flow-agents.workflow",
       "claimType": "builder.verify.tests",
-      "fieldOrBehavior": "AC1 (R1): unique 8-char prefix get returns record; ambiguous prefix throws distinct error; contract-suite exits 0",
+      "fieldOrBehavior": "AC4: inbound-references suite parameterized on obsidian-store adapter 9/9 pass, exit 0 — every adapter must implement the check.",
       "value": "pass",
-      "createdAt": "2026-07-04T15:59:01Z",
-      "updatedAt": "2026-07-04T15:59:01Z",
+      "createdAt": "2026-07-04T16:52:27Z",
+      "updatedAt": "2026-07-04T16:52:27Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
       "metadata": {
-        "origin": "acceptance"
+        "origin": "check",
+        "check_kind": "external"
       },
       "status": "verified"
     },
     {
-      "id": "i339-record-identity-ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters.flow-agents-workflow.ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters",
+      "id": "i340-inbound-refs-ac1-three-citation-forms.flow-agents-workflow.ac1-r1-a-fixture-doc-tree-citing-one-record-by-full-uuid-one-by-8-char-short-id-prefix-and-one-by-slug-alias-is-scanned-all-three-are-extracted-and-resolved-via-the-339-get-path-byrecord-maps-each-to-its-full-id",
       "subjectType": "flow-step",
-      "subjectId": "i339-record-identity/ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters",
+      "subjectId": "i340-inbound-refs/ac1-three-citation-forms",
       "facet": "flow-agents.workflow",
       "claimType": "builder.verify.tests",
-      "fieldOrBehavior": "AC2 (R2): slug alias resolves via get/getLinks; round-trips on default + obsidian adapters",
+      "fieldOrBehavior": "AC1 (R1): a fixture doc tree citing one record by full UUID, one by 8-char short-id prefix, and one by slug alias is scanned; all three are extracted and resolved via the #339 get() path; byRecord maps each to its full id.",
       "value": "pass",
-      "createdAt": "2026-07-04T15:59:01Z",
-      "updatedAt": "2026-07-04T15:59:01Z",
+      "createdAt": "2026-07-04T16:52:27Z",
+      "updatedAt": "2026-07-04T16:52:27Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
       "metadata": {
-        "origin": "acceptance"
+        "origin": "check",
+        "check_kind": "external"
       },
       "status": "verified"
     },
     {
-      "id": "i339-record-identity-ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters.flow-agents-workflow.ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters",
+      "id": "i340-inbound-refs-ac2-fail-closed-and-noop.flow-agents-workflow.ac2-r2-a-fixture-doc-citing-a-nonexistent-id-fails-closed-ok-false-naming-doc-path-line-token-uuid-and-marker-forms-a-run-with-no-docglobs-returns-a-no-op-pass-failure-asserted-not-empty-success",
       "subjectType": "flow-step",
-      "subjectId": "i339-record-identity/ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters",
+      "subjectId": "i340-inbound-refs/ac2-fail-closed-and-noop",
       "facet": "flow-agents.workflow",
       "claimType": "builder.verify.tests",
-      "fieldOrBehavior": "AC3 (R3): after update recategorizes (obsidian file relocates), old slug + short-id prefix still resolve; both adapters",
+      "fieldOrBehavior": "AC2 (R2): a fixture doc citing a nonexistent id fails closed (ok=false) naming doc path + line + token (UUID and marker forms); a run with no docGlobs returns a no-op pass. Failure asserted, not empty success.",
       "value": "pass",
-      "createdAt": "2026-07-04T15:59:01Z",
-      "updatedAt": "2026-07-04T15:59:01Z",
+      "createdAt": "2026-07-04T16:52:27Z",
+      "updatedAt": "2026-07-04T16:52:27Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
       "metadata": {
-        "origin": "acceptance"
+        "origin": "check",
+        "check_kind": "external"
       },
       "status": "verified"
     },
     {
-      "id": "i339-record-identity-ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md.flow-agents-workflow.ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md",
+      "id": "i340-inbound-refs-ac3-read-only-invariant.flow-agents-workflow.ac3-r3-whole-store-byte-comparison-before-after-the-check-shows-no-record-created-deleted-or-mutated-and-no-mutation-log-entry-appended-read-only-invariant",
       "subjectType": "flow-step",
-      "subjectId": "i339-record-identity/ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md",
+      "subjectId": "i340-inbound-refs/ac3-read-only-invariant",
       "facet": "flow-agents.workflow",
       "claimType": "builder.verify.tests",
-      "fieldOrBehavior": "AC4 (R4): existing contract-suite sections pass unmodified; default-adapter files remain records/<uuid>.md",
+      "fieldOrBehavior": "AC3 (R3): whole-store byte-comparison before/after the check shows no record created, deleted, or mutated and no mutation-log entry appended (read-only invariant).",
       "value": "pass",
-      "createdAt": "2026-07-04T15:59:01Z",
-      "updatedAt": "2026-07-04T15:59:01Z",
+      "createdAt": "2026-07-04T16:52:27Z",
+      "updatedAt": "2026-07-04T16:52:27Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
       "metadata": {
-        "origin": "acceptance"
+        "origin": "check",
+        "check_kind": "external"
       },
       "status": "verified"
     },
     {
-      "id": "i339-record-identity-ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated.flow-agents-workflow.ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated",
+      "id": "i340-inbound-refs-ac5-citation-index-and-doc-addendum.flow-agents-workflow.ac5-r5-result-exposes-the-citation-index-citations-bydoc-byrecord-for-downstream-supersede-retire-propagation-kits-knowledge-docs-store-contract-md-addendum-i-documents-options-forms-fail-closed-semantics-commit-sha-precision-documented-miss-and-the-index-shape",
       "subjectType": "flow-step",
-      "subjectId": "i339-record-identity/ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated",
+      "subjectId": "i340-inbound-refs/ac5-citation-index-and-doc-addendum",
       "facet": "flow-agents.workflow",
       "claimType": "builder.verify.tests",
-      "fieldOrBehavior": "AC5 (R5): store-contract.md identity/alias addendum + docs/README.md quick reference updated",
+      "fieldOrBehavior": "AC5 (R5): result exposes the citation index (citations + byDoc + byRecord) for downstream supersede/retire propagation; kits/knowledge/docs/store-contract.md Addendum I documents options, forms, fail-closed semantics, commit-SHA precision + documented miss, and the index shape.",
       "value": "pass",
-      "createdAt": "2026-07-04T15:59:01Z",
-      "updatedAt": "2026-07-04T15:59:01Z",
+      "createdAt": "2026-07-04T16:52:27Z",
+      "updatedAt": "2026-07-04T16:52:27Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
       "metadata": {
-        "origin": "acceptance"
+        "origin": "check",
+        "check_kind": "external"
       },
       "status": "verified"
     }
   ],
   "evidence": [
     {
-      "id": "ev:i339-record-identity-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-manifest-static-eval-suite-green-includes-knowledge-store-provider-conformance-test-knowledge-providers-sh-ci-reconcilable-ac-covering-static-proof",
-      "claimId": "i339-record-identity-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-manifest-static-eval-suite-green-includes-knowledge-store-provider-conformance-test-knowledge-providers-sh-ci-reconcilable-ac-covering-static-proof",
+      "id": "ev:i340-inbound-refs-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-bash-evals-run-sh-static-green-npm-run-build-all-layer-1-static-checks-incl-knowledge-store-provider-conformance-test-knowledge-providers-sh-49-49-ci-reconcilable-manifest-lane-proof-unaffected-by-340-additive-change",
+      "claimId": "i340-inbound-refs-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-bash-evals-run-sh-static-green-npm-run-build-all-layer-1-static-checks-incl-knowledge-store-provider-conformance-test-knowledge-providers-sh-49-49-ci-reconcilable-manifest-lane-proof-unaffected-by-340-additive-change",
       "evidenceType": "test_output",
       "method": "validation",
-      "sourceRef": "i339-record-identity/command-log.jsonl",
-      "excerptOrSummary": "Static eval lane (manifest static-eval-suite) green — includes knowledge store provider conformance test_knowledge_providers.sh; CI-reconcilable AC-covering static proof",
-      "observedAt": "2026-07-04T15:59:01Z",
+      "sourceRef": "i340-inbound-refs/command-log.jsonl",
+      "excerptOrSummary": "Static eval lane (bash evals/run.sh static) green: npm run build + all layer-1 static checks incl. knowledge store provider conformance (test_knowledge_providers.sh 49/49). CI-reconcilable manifest-lane proof; unaffected by #340 additive change.",
+      "observedAt": "2026-07-04T16:52:27Z",
       "collectedBy": "flow-agents/evidence-capture",
       "passing": true,
       "execution": {
@@ -179,13 +184,13 @@
       }
     },
     {
-      "id": "ev:i339-record-identity-contract-suite-default.flow-agents-workflow.contract-suite-default-adapter-67-67-pass-0-fail-exit-0-covers-ac1-prefix-ambiguous-ac3-post-move-ac4-unmodified-sections-records-uuid-md",
-      "claimId": "i339-record-identity-contract-suite-default.flow-agents-workflow.contract-suite-default-adapter-67-67-pass-0-fail-exit-0-covers-ac1-prefix-ambiguous-ac3-post-move-ac4-unmodified-sections-records-uuid-md",
+      "id": "ev:i340-inbound-refs-contract-suite-default.flow-agents-workflow.regression-store-contract-suite-default-adapter-67-67-pass-0-fail-exit-0-339-identity-semantics-prior-contract-remain-green-under-340",
+      "claimId": "i340-inbound-refs-contract-suite-default.flow-agents-workflow.regression-store-contract-suite-default-adapter-67-67-pass-0-fail-exit-0-339-identity-semantics-prior-contract-remain-green-under-340",
       "evidenceType": "attestation",
       "method": "corroboration",
-      "sourceRef": "i339-record-identity/command-log.jsonl",
-      "excerptOrSummary": "Contract-suite default adapter: 67/67 pass, 0 fail, exit 0 — covers AC1 (prefix/ambiguous), AC3 (post-move), AC4 (unmodified sections + records/<uuid>.md)",
-      "observedAt": "2026-07-04T15:59:01Z",
+      "sourceRef": "i340-inbound-refs/command-log.jsonl",
+      "excerptOrSummary": "Regression: store contract suite (default adapter) 67/67 pass, 0 fail, exit 0. #339 identity semantics + prior contract remain green under #340.",
+      "observedAt": "2026-07-04T16:52:27Z",
       "collectedBy": "flow-agents/evidence-capture",
       "passing": true,
       "execution": {
@@ -196,13 +201,13 @@
       }
     },
     {
-      "id": "ev:i339-record-identity-contract-suite-obsidian.flow-agents-workflow.contract-suite-obsidian-adapter-64-pass-0-fail-3-adapter-scoped-skips-reindex-not-implemented-on-obsidian-exit-0-covers-ac2-slug-round-trip-ac3-file-relocation",
-      "claimId": "i339-record-identity-contract-suite-obsidian.flow-agents-workflow.contract-suite-obsidian-adapter-64-pass-0-fail-3-adapter-scoped-skips-reindex-not-implemented-on-obsidian-exit-0-covers-ac2-slug-round-trip-ac3-file-relocation",
+      "id": "ev:i340-inbound-refs-contract-suite-obsidian.flow-agents-workflow.regression-store-contract-suite-obsidian-adapter-64-pass-0-fail-exit-0",
+      "claimId": "i340-inbound-refs-contract-suite-obsidian.flow-agents-workflow.regression-store-contract-suite-obsidian-adapter-64-pass-0-fail-exit-0",
       "evidenceType": "attestation",
       "method": "corroboration",
-      "sourceRef": "i339-record-identity/command-log.jsonl",
-      "excerptOrSummary": "Contract-suite obsidian adapter: 64 pass, 0 fail, 3 adapter-scoped skips (reindex not implemented on obsidian), exit 0 — covers AC2 (slug round-trip) + AC3 (file relocation)",
-      "observedAt": "2026-07-04T15:59:01Z",
+      "sourceRef": "i340-inbound-refs/command-log.jsonl",
+      "excerptOrSummary": "Regression: store contract suite (obsidian adapter) 64 pass, 0 fail, exit 0.",
+      "observedAt": "2026-07-04T16:52:27Z",
       "collectedBy": "flow-agents/evidence-capture",
       "passing": true,
       "execution": {
@@ -213,13 +218,80 @@
       }
     },
     {
-      "id": "ev:i339-record-identity-store-contract-doc-ac5.flow-agents-workflow.ac5-kits-knowledge-docs-store-contract-md-gains-identity-alias-addendum-116-and-kits-knowledge-docs-readme-md-quick-reference-38-present-in-committed-diff",
-      "claimId": "i339-record-identity-store-contract-doc-ac5.flow-agents-workflow.ac5-kits-knowledge-docs-store-contract-md-gains-identity-alias-addendum-116-and-kits-knowledge-docs-readme-md-quick-reference-38-present-in-committed-diff",
+      "id": "ev:i340-inbound-refs-inbound-references-suite-default.flow-agents-workflow.ac1-ac2-ac3-ac5-inbound-references-suite-default-adapter-9-9-pass-exit-0",
+      "claimId": "i340-inbound-refs-inbound-references-suite-default.flow-agents-workflow.ac1-ac2-ac3-ac5-inbound-references-suite-default-adapter-9-9-pass-exit-0",
       "evidenceType": "attestation",
       "method": "corroboration",
-      "sourceRef": "i339-record-identity/evidence.json",
-      "excerptOrSummary": "AC5: kits/knowledge/docs/store-contract.md gains identity/alias addendum (+116) and kits/knowledge/docs/README.md quick reference (+38) — present in committed diff",
-      "observedAt": "2026-07-04T15:59:01Z",
+      "sourceRef": "i340-inbound-refs/command-log.jsonl",
+      "excerptOrSummary": "AC1/AC2/AC3/AC5: inbound-references suite (default adapter) 9/9 pass, exit 0.",
+      "observedAt": "2026-07-04T16:52:27Z",
+      "collectedBy": "flow-agents/evidence-capture",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "node --test kits/knowledge/evals/inbound-references/suite.test.js",
+        "isError": false,
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "ev:i340-inbound-refs-inbound-references-suite-obsidian.flow-agents-workflow.ac4-inbound-references-suite-parameterized-on-obsidian-store-adapter-9-9-pass-exit-0-every-adapter-must-implement-the-check",
+      "claimId": "i340-inbound-refs-inbound-references-suite-obsidian.flow-agents-workflow.ac4-inbound-references-suite-parameterized-on-obsidian-store-adapter-9-9-pass-exit-0-every-adapter-must-implement-the-check",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "i340-inbound-refs/command-log.jsonl",
+      "excerptOrSummary": "AC4: inbound-references suite parameterized on obsidian-store adapter 9/9 pass, exit 0 — every adapter must implement the check.",
+      "observedAt": "2026-07-04T16:52:27Z",
+      "collectedBy": "flow-agents/evidence-capture",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "KNOWLEDGE_ADAPTER=kits/knowledge/adapters/obsidian-store/index.js node --test kits/knowledge/evals/inbound-references/suite.test.js",
+        "isError": false,
+        "exitCode": 0
+      }
+    },
+    {
+      "id": "ev:i340-inbound-refs-ac1-three-citation-forms.flow-agents-workflow.ac1-r1-a-fixture-doc-tree-citing-one-record-by-full-uuid-one-by-8-char-short-id-prefix-and-one-by-slug-alias-is-scanned-all-three-are-extracted-and-resolved-via-the-339-get-path-byrecord-maps-each-to-its-full-id",
+      "claimId": "i340-inbound-refs-ac1-three-citation-forms.flow-agents-workflow.ac1-r1-a-fixture-doc-tree-citing-one-record-by-full-uuid-one-by-8-char-short-id-prefix-and-one-by-slug-alias-is-scanned-all-three-are-extracted-and-resolved-via-the-339-get-path-byrecord-maps-each-to-its-full-id",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "i340-inbound-refs/evidence.json",
+      "excerptOrSummary": "AC1 (R1): a fixture doc tree citing one record by full UUID, one by 8-char short-id prefix, and one by slug alias is scanned; all three are extracted and resolved via the #339 get() path; byRecord maps each to its full id.",
+      "observedAt": "2026-07-04T16:52:27Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:i340-inbound-refs-ac2-fail-closed-and-noop.flow-agents-workflow.ac2-r2-a-fixture-doc-citing-a-nonexistent-id-fails-closed-ok-false-naming-doc-path-line-token-uuid-and-marker-forms-a-run-with-no-docglobs-returns-a-no-op-pass-failure-asserted-not-empty-success",
+      "claimId": "i340-inbound-refs-ac2-fail-closed-and-noop.flow-agents-workflow.ac2-r2-a-fixture-doc-citing-a-nonexistent-id-fails-closed-ok-false-naming-doc-path-line-token-uuid-and-marker-forms-a-run-with-no-docglobs-returns-a-no-op-pass-failure-asserted-not-empty-success",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "i340-inbound-refs/evidence.json",
+      "excerptOrSummary": "AC2 (R2): a fixture doc citing a nonexistent id fails closed (ok=false) naming doc path + line + token (UUID and marker forms); a run with no docGlobs returns a no-op pass. Failure asserted, not empty success.",
+      "observedAt": "2026-07-04T16:52:27Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:i340-inbound-refs-ac3-read-only-invariant.flow-agents-workflow.ac3-r3-whole-store-byte-comparison-before-after-the-check-shows-no-record-created-deleted-or-mutated-and-no-mutation-log-entry-appended-read-only-invariant",
+      "claimId": "i340-inbound-refs-ac3-read-only-invariant.flow-agents-workflow.ac3-r3-whole-store-byte-comparison-before-after-the-check-shows-no-record-created-deleted-or-mutated-and-no-mutation-log-entry-appended-read-only-invariant",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "i340-inbound-refs/evidence.json",
+      "excerptOrSummary": "AC3 (R3): whole-store byte-comparison before/after the check shows no record created, deleted, or mutated and no mutation-log entry appended (read-only invariant).",
+      "observedAt": "2026-07-04T16:52:27Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:i340-inbound-refs-ac5-citation-index-and-doc-addendum.flow-agents-workflow.ac5-r5-result-exposes-the-citation-index-citations-bydoc-byrecord-for-downstream-supersede-retire-propagation-kits-knowledge-docs-store-contract-md-addendum-i-documents-options-forms-fail-closed-semantics-commit-sha-precision-documented-miss-and-the-index-shape",
+      "claimId": "i340-inbound-refs-ac5-citation-index-and-doc-addendum.flow-agents-workflow.ac5-r5-result-exposes-the-citation-index-citations-bydoc-byrecord-for-downstream-supersede-retire-propagation-kits-knowledge-docs-store-contract-md-addendum-i-documents-options-forms-fail-closed-semantics-commit-sha-precision-documented-miss-and-the-index-shape",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "i340-inbound-refs/evidence.json",
+      "excerptOrSummary": "AC5 (R5): result exposes the citation index (citations + byDoc + byRecord) for downstream supersede/retire propagation; kits/knowledge/docs/store-contract.md Addendum I documents options, forms, fail-closed semantics, commit-SHA precision + documented miss, and the index shape.",
+      "observedAt": "2026-07-04T16:52:27Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     }
@@ -292,136 +364,116 @@
       "stalenessTriggers": [],
       "conflictRules": [],
       "impactLevel": "high"
-    },
-    {
-      "id": "policy:workflow.acceptance.criterion",
-      "claimType": "workflow.acceptance.criterion",
-      "requiredEvidence": [],
-      "acceptanceCriteria": [
-        "A verified verification event must support a workflow.acceptance.criterion claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "high"
-    },
-    {
-      "id": "policy:builder.verify.tests",
-      "claimType": "builder.verify.tests",
-      "requiredEvidence": [],
-      "acceptanceCriteria": [
-        "A verified verification event must support a builder.verify.tests claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "high"
     }
   ],
   "events": [
     {
-      "id": "evt:i339-record-identity-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-manifest-static-eval-suite-green-includes-knowledge-store-provider-conformance-test-knowledge-providers-sh-ci-reconcilable-ac-covering-static-proof",
-      "claimId": "i339-record-identity-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-manifest-static-eval-suite-green-includes-knowledge-store-provider-conformance-test-knowledge-providers-sh-ci-reconcilable-ac-covering-static-proof",
+      "id": "evt:i340-inbound-refs-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-bash-evals-run-sh-static-green-npm-run-build-all-layer-1-static-checks-incl-knowledge-store-provider-conformance-test-knowledge-providers-sh-49-49-ci-reconcilable-manifest-lane-proof-unaffected-by-340-additive-change",
+      "claimId": "i340-inbound-refs-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-bash-evals-run-sh-static-green-npm-run-build-all-layer-1-static-checks-incl-knowledge-store-provider-conformance-test-knowledge-providers-sh-49-49-ci-reconcilable-manifest-lane-proof-unaffected-by-340-additive-change",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:i339-record-identity-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-manifest-static-eval-suite-green-includes-knowledge-store-provider-conformance-test-knowledge-providers-sh-ci-reconcilable-ac-covering-static-proof"
+        "ev:i340-inbound-refs-knowledge-static-eval-suite.flow-agents-workflow.static-eval-lane-bash-evals-run-sh-static-green-npm-run-build-all-layer-1-static-checks-incl-knowledge-store-provider-conformance-test-knowledge-providers-sh-49-49-ci-reconcilable-manifest-lane-proof-unaffected-by-340-additive-change"
       ],
-      "createdAt": "2026-07-04T15:59:01Z",
-      "verifiedAt": "2026-07-04T15:59:01Z"
+      "createdAt": "2026-07-04T16:52:27Z",
+      "verifiedAt": "2026-07-04T16:52:27Z"
     },
     {
-      "id": "evt:i339-record-identity-contract-suite-default.flow-agents-workflow.contract-suite-default-adapter-67-67-pass-0-fail-exit-0-covers-ac1-prefix-ambiguous-ac3-post-move-ac4-unmodified-sections-records-uuid-md",
-      "claimId": "i339-record-identity-contract-suite-default.flow-agents-workflow.contract-suite-default-adapter-67-67-pass-0-fail-exit-0-covers-ac1-prefix-ambiguous-ac3-post-move-ac4-unmodified-sections-records-uuid-md",
+      "id": "evt:i340-inbound-refs-contract-suite-default.flow-agents-workflow.regression-store-contract-suite-default-adapter-67-67-pass-0-fail-exit-0-339-identity-semantics-prior-contract-remain-green-under-340",
+      "claimId": "i340-inbound-refs-contract-suite-default.flow-agents-workflow.regression-store-contract-suite-default-adapter-67-67-pass-0-fail-exit-0-339-identity-semantics-prior-contract-remain-green-under-340",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:i339-record-identity-contract-suite-default.flow-agents-workflow.contract-suite-default-adapter-67-67-pass-0-fail-exit-0-covers-ac1-prefix-ambiguous-ac3-post-move-ac4-unmodified-sections-records-uuid-md"
+        "ev:i340-inbound-refs-contract-suite-default.flow-agents-workflow.regression-store-contract-suite-default-adapter-67-67-pass-0-fail-exit-0-339-identity-semantics-prior-contract-remain-green-under-340"
       ],
-      "createdAt": "2026-07-04T15:59:01Z",
-      "verifiedAt": "2026-07-04T15:59:01Z"
+      "createdAt": "2026-07-04T16:52:27Z",
+      "verifiedAt": "2026-07-04T16:52:27Z"
     },
     {
-      "id": "evt:i339-record-identity-contract-suite-obsidian.flow-agents-workflow.contract-suite-obsidian-adapter-64-pass-0-fail-3-adapter-scoped-skips-reindex-not-implemented-on-obsidian-exit-0-covers-ac2-slug-round-trip-ac3-file-relocation",
-      "claimId": "i339-record-identity-contract-suite-obsidian.flow-agents-workflow.contract-suite-obsidian-adapter-64-pass-0-fail-3-adapter-scoped-skips-reindex-not-implemented-on-obsidian-exit-0-covers-ac2-slug-round-trip-ac3-file-relocation",
+      "id": "evt:i340-inbound-refs-contract-suite-obsidian.flow-agents-workflow.regression-store-contract-suite-obsidian-adapter-64-pass-0-fail-exit-0",
+      "claimId": "i340-inbound-refs-contract-suite-obsidian.flow-agents-workflow.regression-store-contract-suite-obsidian-adapter-64-pass-0-fail-exit-0",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:i339-record-identity-contract-suite-obsidian.flow-agents-workflow.contract-suite-obsidian-adapter-64-pass-0-fail-3-adapter-scoped-skips-reindex-not-implemented-on-obsidian-exit-0-covers-ac2-slug-round-trip-ac3-file-relocation"
+        "ev:i340-inbound-refs-contract-suite-obsidian.flow-agents-workflow.regression-store-contract-suite-obsidian-adapter-64-pass-0-fail-exit-0"
       ],
-      "createdAt": "2026-07-04T15:59:01Z",
-      "verifiedAt": "2026-07-04T15:59:01Z"
+      "createdAt": "2026-07-04T16:52:27Z",
+      "verifiedAt": "2026-07-04T16:52:27Z"
     },
     {
-      "id": "evt:i339-record-identity-store-contract-doc-ac5.flow-agents-workflow.ac5-kits-knowledge-docs-store-contract-md-gains-identity-alias-addendum-116-and-kits-knowledge-docs-readme-md-quick-reference-38-present-in-committed-diff",
-      "claimId": "i339-record-identity-store-contract-doc-ac5.flow-agents-workflow.ac5-kits-knowledge-docs-store-contract-md-gains-identity-alias-addendum-116-and-kits-knowledge-docs-readme-md-quick-reference-38-present-in-committed-diff",
+      "id": "evt:i340-inbound-refs-inbound-references-suite-default.flow-agents-workflow.ac1-ac2-ac3-ac5-inbound-references-suite-default-adapter-9-9-pass-exit-0",
+      "claimId": "i340-inbound-refs-inbound-references-suite-default.flow-agents-workflow.ac1-ac2-ac3-ac5-inbound-references-suite-default-adapter-9-9-pass-exit-0",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [
-        "ev:i339-record-identity-store-contract-doc-ac5.flow-agents-workflow.ac5-kits-knowledge-docs-store-contract-md-gains-identity-alias-addendum-116-and-kits-knowledge-docs-readme-md-quick-reference-38-present-in-committed-diff"
+        "ev:i340-inbound-refs-inbound-references-suite-default.flow-agents-workflow.ac1-ac2-ac3-ac5-inbound-references-suite-default-adapter-9-9-pass-exit-0"
       ],
-      "createdAt": "2026-07-04T15:59:01Z",
-      "verifiedAt": "2026-07-04T15:59:01Z"
+      "createdAt": "2026-07-04T16:52:27Z",
+      "verifiedAt": "2026-07-04T16:52:27Z"
     },
     {
-      "id": "evt:i339-record-identity-ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0.flow-agents-workflow.ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0",
-      "claimId": "i339-record-identity-ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0.flow-agents-workflow.ac1-r1-unique-8-char-prefix-get-returns-record-ambiguous-prefix-throws-distinct-error-contract-suite-exits-0",
+      "id": "evt:i340-inbound-refs-inbound-references-suite-obsidian.flow-agents-workflow.ac4-inbound-references-suite-parameterized-on-obsidian-store-adapter-9-9-pass-exit-0-every-adapter-must-implement-the-check",
+      "claimId": "i340-inbound-refs-inbound-references-suite-obsidian.flow-agents-workflow.ac4-inbound-references-suite-parameterized-on-obsidian-store-adapter-9-9-pass-exit-0-every-adapter-must-implement-the-check",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-04T15:59:01Z",
-      "verifiedAt": "2026-07-04T15:59:01Z"
+      "evidenceIds": [
+        "ev:i340-inbound-refs-inbound-references-suite-obsidian.flow-agents-workflow.ac4-inbound-references-suite-parameterized-on-obsidian-store-adapter-9-9-pass-exit-0-every-adapter-must-implement-the-check"
+      ],
+      "createdAt": "2026-07-04T16:52:27Z",
+      "verifiedAt": "2026-07-04T16:52:27Z"
     },
     {
-      "id": "evt:i339-record-identity-ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters.flow-agents-workflow.ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters",
-      "claimId": "i339-record-identity-ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters.flow-agents-workflow.ac2-r2-slug-alias-resolves-via-get-getlinks-round-trips-on-default-obsidian-adapters",
+      "id": "evt:i340-inbound-refs-ac1-three-citation-forms.flow-agents-workflow.ac1-r1-a-fixture-doc-tree-citing-one-record-by-full-uuid-one-by-8-char-short-id-prefix-and-one-by-slug-alias-is-scanned-all-three-are-extracted-and-resolved-via-the-339-get-path-byrecord-maps-each-to-its-full-id",
+      "claimId": "i340-inbound-refs-ac1-three-citation-forms.flow-agents-workflow.ac1-r1-a-fixture-doc-tree-citing-one-record-by-full-uuid-one-by-8-char-short-id-prefix-and-one-by-slug-alias-is-scanned-all-three-are-extracted-and-resolved-via-the-339-get-path-byrecord-maps-each-to-its-full-id",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-04T15:59:01Z",
-      "verifiedAt": "2026-07-04T15:59:01Z"
+      "evidenceIds": [
+        "ev:i340-inbound-refs-ac1-three-citation-forms.flow-agents-workflow.ac1-r1-a-fixture-doc-tree-citing-one-record-by-full-uuid-one-by-8-char-short-id-prefix-and-one-by-slug-alias-is-scanned-all-three-are-extracted-and-resolved-via-the-339-get-path-byrecord-maps-each-to-its-full-id"
+      ],
+      "createdAt": "2026-07-04T16:52:27Z",
+      "verifiedAt": "2026-07-04T16:52:27Z"
     },
     {
-      "id": "evt:i339-record-identity-ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters.flow-agents-workflow.ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters",
-      "claimId": "i339-record-identity-ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters.flow-agents-workflow.ac3-r3-after-update-recategorizes-obsidian-file-relocates-old-slug-short-id-prefix-still-resolve-both-adapters",
+      "id": "evt:i340-inbound-refs-ac2-fail-closed-and-noop.flow-agents-workflow.ac2-r2-a-fixture-doc-citing-a-nonexistent-id-fails-closed-ok-false-naming-doc-path-line-token-uuid-and-marker-forms-a-run-with-no-docglobs-returns-a-no-op-pass-failure-asserted-not-empty-success",
+      "claimId": "i340-inbound-refs-ac2-fail-closed-and-noop.flow-agents-workflow.ac2-r2-a-fixture-doc-citing-a-nonexistent-id-fails-closed-ok-false-naming-doc-path-line-token-uuid-and-marker-forms-a-run-with-no-docglobs-returns-a-no-op-pass-failure-asserted-not-empty-success",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-04T15:59:01Z",
-      "verifiedAt": "2026-07-04T15:59:01Z"
+      "evidenceIds": [
+        "ev:i340-inbound-refs-ac2-fail-closed-and-noop.flow-agents-workflow.ac2-r2-a-fixture-doc-citing-a-nonexistent-id-fails-closed-ok-false-naming-doc-path-line-token-uuid-and-marker-forms-a-run-with-no-docglobs-returns-a-no-op-pass-failure-asserted-not-empty-success"
+      ],
+      "createdAt": "2026-07-04T16:52:27Z",
+      "verifiedAt": "2026-07-04T16:52:27Z"
     },
     {
-      "id": "evt:i339-record-identity-ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md.flow-agents-workflow.ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md",
-      "claimId": "i339-record-identity-ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md.flow-agents-workflow.ac4-r4-existing-contract-suite-sections-pass-unmodified-default-adapter-files-remain-records-uuid-md",
+      "id": "evt:i340-inbound-refs-ac3-read-only-invariant.flow-agents-workflow.ac3-r3-whole-store-byte-comparison-before-after-the-check-shows-no-record-created-deleted-or-mutated-and-no-mutation-log-entry-appended-read-only-invariant",
+      "claimId": "i340-inbound-refs-ac3-read-only-invariant.flow-agents-workflow.ac3-r3-whole-store-byte-comparison-before-after-the-check-shows-no-record-created-deleted-or-mutated-and-no-mutation-log-entry-appended-read-only-invariant",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-04T15:59:01Z",
-      "verifiedAt": "2026-07-04T15:59:01Z"
+      "evidenceIds": [
+        "ev:i340-inbound-refs-ac3-read-only-invariant.flow-agents-workflow.ac3-r3-whole-store-byte-comparison-before-after-the-check-shows-no-record-created-deleted-or-mutated-and-no-mutation-log-entry-appended-read-only-invariant"
+      ],
+      "createdAt": "2026-07-04T16:52:27Z",
+      "verifiedAt": "2026-07-04T16:52:27Z"
     },
     {
-      "id": "evt:i339-record-identity-ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated.flow-agents-workflow.ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated",
-      "claimId": "i339-record-identity-ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated.flow-agents-workflow.ac5-r5-store-contract-md-identity-alias-addendum-docs-readme-md-quick-reference-updated",
+      "id": "evt:i340-inbound-refs-ac5-citation-index-and-doc-addendum.flow-agents-workflow.ac5-r5-result-exposes-the-citation-index-citations-bydoc-byrecord-for-downstream-supersede-retire-propagation-kits-knowledge-docs-store-contract-md-addendum-i-documents-options-forms-fail-closed-semantics-commit-sha-precision-documented-miss-and-the-index-shape",
+      "claimId": "i340-inbound-refs-ac5-citation-index-and-doc-addendum.flow-agents-workflow.ac5-r5-result-exposes-the-citation-index-citations-bydoc-byrecord-for-downstream-supersede-retire-propagation-kits-knowledge-docs-store-contract-md-addendum-i-documents-options-forms-fail-closed-semantics-commit-sha-precision-documented-miss-and-the-index-shape",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-04T15:59:01Z",
-      "verifiedAt": "2026-07-04T15:59:01Z"
+      "evidenceIds": [
+        "ev:i340-inbound-refs-ac5-citation-index-and-doc-addendum.flow-agents-workflow.ac5-r5-result-exposes-the-citation-index-citations-bydoc-byrecord-for-downstream-supersede-retire-propagation-kits-knowledge-docs-store-contract-md-addendum-i-documents-options-forms-fail-closed-semantics-commit-sha-precision-documented-miss-and-the-index-shape"
+      ],
+      "createdAt": "2026-07-04T16:52:27Z",
+      "verifiedAt": "2026-07-04T16:52:27Z"
     }
   ]
 }
