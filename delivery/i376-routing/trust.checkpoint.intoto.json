@@ -1,0 +1,392 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "trust.checkpoint.json",
+      "digest": {
+        "sha256": "541ff34299279918e3af2126cda645e282e7a03e57d83cc4b773e4288ec725dc"
+      }
+    }
+  ],
+  "predicateType": "https://hachure.org/v1/bundle",
+  "predicate": {
+    "schemaVersion": 5,
+    "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+    "claims": [
+      {
+        "id": "i376-routing-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-exits-0-includes-evals-static-test-model-routing-hints-sh-asserting-ac1-per-skill-model-routing-hints-naming-a-role-in-all-11-delegating-builder-skills-drift-guard-ac3-goodhart-guard-wording-in-review-work-verify-work-hints-and-the-tier-ladder-escalation-on-gate-failure-routing-record-flow-agents-349-language-in-context-contracts-execution-contract-md",
+        "subjectType": "work-item",
+        "subjectId": "i376-routing/static-eval-suite",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "bash evals/run.sh static exits 0 — includes evals/static/test_model_routing_hints.sh asserting AC1 (per-skill ## Model Routing hints naming a role in all 11 delegating builder skills + drift guard), AC3 (Goodhart-guard wording in review-work/verify-work hints), and the tier ladder + escalation-on-gate-failure + routing-record + flow-agents#349 language in context/contracts/execution-contract.md.",
+        "value": "pass",
+        "createdAt": "2026-07-04T20:53:39Z",
+        "updatedAt": "2026-07-04T20:53:39Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "test"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "i376-routing-non-manifest-self-checks.flow-agents-workflow.session-local-self-checks-with-no-single-ci-manifest-lane-adr-0020-none-are-command-backed-test-output-npm-run-build-tsc-p-tsconfig-json-exits-0-clean-bash-evals-integration-test-model-routing-escalation-sh-exits-0-the-deliver-loop-eval-records-via-record-agent-event-a-real-mechanical-delegation-a-verify-gate-failure-an-escalation-one-tier-higher-carrying-escalated-from-and-a-verify-pass-then-asserts-r2-escalation-climbed-exactly-one-tier-r3-verifier-tier-worker-tier-goodhart-guard-and-r4-per-role-economics-shape-reduction-against-the-real-agents-id-events-jsonl-and-validate-workflow-artifacts-accepts-the-additive-role-model-escalated-from-fields-npm-run-trust-reconcile-verify-build-eval-static-exits-0",
+        "subjectType": "work-item",
+        "subjectId": "i376-routing/non-manifest-self-checks",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "Session-local self-checks with no single CI-manifest lane (ADR 0020: none are command-backed test_output). npm run build (tsc -p tsconfig.json) exits 0 clean. bash evals/integration/test_model_routing_escalation.sh exits 0 — the deliver-loop eval records via record-agent-event a real mechanical delegation, a verify-gate FAILURE, an escalation one tier higher carrying escalated_from, and a verify PASS, then asserts R2 (escalation climbed exactly one tier), R3 (verifier tier >= worker tier, Goodhart guard), and R4 (per-role economics-shape reduction) against the real agents/<id>/events.jsonl, and validate-workflow-artifacts accepts the additive role/model/escalated_from fields. npm run trust-reconcile-verify (build + eval:static) exits 0.",
+        "value": "pass",
+        "createdAt": "2026-07-04T20:53:39Z",
+        "updatedAt": "2026-07-04T20:53:39Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "runtime"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "i376-routing-diff-review.flow-agents-workflow.reviewed-context-contracts-execution-contract-md-tier-ladder-escalation-on-gate-failure-goodhart-guard-routing-decisions-in-the-run-artifact-incl-flow-agents-349-all-11-delegating-builder-skills-model-routing-sections-naming-a-role-and-the-additive-src-cli-workflow-sidecar-ts-recordagentevent-role-model-escalated-from-top-level-jsonl-fields",
+        "subjectType": "work-item",
+        "subjectId": "i376-routing/diff-review",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "Reviewed context/contracts/execution-contract.md (Tier ladder, Escalation on gate failure, Goodhart guard, Routing decisions in the run artifact incl. flow-agents#349), all 11 delegating builder skills Model Routing sections naming a role, and the additive src/cli/workflow-sidecar.ts recordAgentEvent role/model/escalated_from top-level JSONL fields.",
+        "value": "pass",
+        "createdAt": "2026-07-04T20:53:39Z",
+        "updatedAt": "2026-07-04T20:53:39Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected:source_excerpt",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "diff"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "i376-routing-ac1-every-delegating-builder-skill-names-a-role-static-check-asserts-presence.flow-agents-workflow.ac1-every-delegating-builder-skill-names-a-role-static-check-asserts-presence",
+        "subjectType": "work-item",
+        "subjectId": "i376-routing/ac1-every-delegating-builder-skill-names-a-role-static-check-asserts-presence",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "AC1: every delegating builder skill names a role; static check asserts presence",
+        "value": "pass",
+        "createdAt": "2026-07-04T20:53:39Z",
+        "updatedAt": "2026-07-04T20:53:39Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "i376-routing-ac2-execution-contract-documents-the-ladder-deliver-loop-eval-shows-fail-escalate-pass-with-escalation-recorded.flow-agents-workflow.ac2-execution-contract-documents-the-ladder-deliver-loop-eval-shows-fail-escalate-pass-with-escalation-recorded",
+        "subjectType": "work-item",
+        "subjectId": "i376-routing/ac2-execution-contract-documents-the-ladder-deliver-loop-eval-shows-fail-escalate-pass-with-escalation-recorded",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "AC2: execution contract documents the ladder; deliver-loop eval shows fail->escalate->pass with escalation recorded",
+        "value": "pass",
+        "createdAt": "2026-07-04T20:53:39Z",
+        "updatedAt": "2026-07-04T20:53:39Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "i376-routing-ac3-contract-eval-assert-verify-review-role-tier-worker-tier.flow-agents-workflow.ac3-contract-eval-assert-verify-review-role-tier-worker-tier",
+        "subjectType": "work-item",
+        "subjectId": "i376-routing/ac3-contract-eval-assert-verify-review-role-tier-worker-tier",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "AC3: contract + eval assert verify/review role tier >= worker tier",
+        "value": "pass",
+        "createdAt": "2026-07-04T20:53:39Z",
+        "updatedAt": "2026-07-04T20:53:39Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "i376-routing-ac4-eval-run-session-artifact-shows-per-delegation-role-model-consumable-by-349-economics-shape.flow-agents-workflow.ac4-eval-run-session-artifact-shows-per-delegation-role-model-consumable-by-349-economics-shape",
+        "subjectType": "work-item",
+        "subjectId": "i376-routing/ac4-eval-run-session-artifact-shows-per-delegation-role-model-consumable-by-349-economics-shape",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "AC4: eval-run session artifact shows per-delegation role/model consumable by #349 economics shape",
+        "value": "pass",
+        "createdAt": "2026-07-04T20:53:39Z",
+        "updatedAt": "2026-07-04T20:53:39Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      }
+    ],
+    "evidence": [
+      {
+        "id": "ev:i376-routing-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-exits-0-includes-evals-static-test-model-routing-hints-sh-asserting-ac1-per-skill-model-routing-hints-naming-a-role-in-all-11-delegating-builder-skills-drift-guard-ac3-goodhart-guard-wording-in-review-work-verify-work-hints-and-the-tier-ladder-escalation-on-gate-failure-routing-record-flow-agents-349-language-in-context-contracts-execution-contract-md",
+        "claimId": "i376-routing-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-exits-0-includes-evals-static-test-model-routing-hints-sh-asserting-ac1-per-skill-model-routing-hints-naming-a-role-in-all-11-delegating-builder-skills-drift-guard-ac3-goodhart-guard-wording-in-review-work-verify-work-hints-and-the-tier-ladder-escalation-on-gate-failure-routing-record-flow-agents-349-language-in-context-contracts-execution-contract-md",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "i376-routing/evidence.json",
+        "excerptOrSummary": "bash evals/run.sh static exits 0 — includes evals/static/test_model_routing_hints.sh asserting AC1 (per-skill ## Model Routing hints naming a role in all 11 delegating builder skills + drift guard), AC3 (Goodhart-guard wording in review-work/verify-work hints), and the tier ladder + escalation-on-gate-failure + routing-record + flow-agents#349 language in context/contracts/execution-contract.md.",
+        "observedAt": "2026-07-04T20:53:39Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/run.sh static",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:i376-routing-non-manifest-self-checks.flow-agents-workflow.session-local-self-checks-with-no-single-ci-manifest-lane-adr-0020-none-are-command-backed-test-output-npm-run-build-tsc-p-tsconfig-json-exits-0-clean-bash-evals-integration-test-model-routing-escalation-sh-exits-0-the-deliver-loop-eval-records-via-record-agent-event-a-real-mechanical-delegation-a-verify-gate-failure-an-escalation-one-tier-higher-carrying-escalated-from-and-a-verify-pass-then-asserts-r2-escalation-climbed-exactly-one-tier-r3-verifier-tier-worker-tier-goodhart-guard-and-r4-per-role-economics-shape-reduction-against-the-real-agents-id-events-jsonl-and-validate-workflow-artifacts-accepts-the-additive-role-model-escalated-from-fields-npm-run-trust-reconcile-verify-build-eval-static-exits-0",
+        "claimId": "i376-routing-non-manifest-self-checks.flow-agents-workflow.session-local-self-checks-with-no-single-ci-manifest-lane-adr-0020-none-are-command-backed-test-output-npm-run-build-tsc-p-tsconfig-json-exits-0-clean-bash-evals-integration-test-model-routing-escalation-sh-exits-0-the-deliver-loop-eval-records-via-record-agent-event-a-real-mechanical-delegation-a-verify-gate-failure-an-escalation-one-tier-higher-carrying-escalated-from-and-a-verify-pass-then-asserts-r2-escalation-climbed-exactly-one-tier-r3-verifier-tier-worker-tier-goodhart-guard-and-r4-per-role-economics-shape-reduction-against-the-real-agents-id-events-jsonl-and-validate-workflow-artifacts-accepts-the-additive-role-model-escalated-from-fields-npm-run-trust-reconcile-verify-build-eval-static-exits-0",
+        "evidenceType": "attestation",
+        "method": "attestation",
+        "sourceRef": "i376-routing/evidence.json",
+        "excerptOrSummary": "Session-local self-checks with no single CI-manifest lane (ADR 0020: none are command-backed test_output). npm run build (tsc -p tsconfig.json) exits 0 clean. bash evals/integration/test_model_routing_escalation.sh exits 0 — the deliver-loop eval records via record-agent-event a real mechanical delegation, a verify-gate FAILURE, an escalation one tier higher carrying escalated_from, and a verify PASS, then asserts R2 (escalation climbed exactly one tier), R3 (verifier tier >= worker tier, Goodhart guard), and R4 (per-role economics-shape reduction) against the real agents/<id>/events.jsonl, and validate-workflow-artifacts accepts the additive role/model/escalated_from fields. npm run trust-reconcile-verify (build + eval:static) exits 0.",
+        "observedAt": "2026-07-04T20:53:39Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:i376-routing-diff-review.flow-agents-workflow.reviewed-context-contracts-execution-contract-md-tier-ladder-escalation-on-gate-failure-goodhart-guard-routing-decisions-in-the-run-artifact-incl-flow-agents-349-all-11-delegating-builder-skills-model-routing-sections-naming-a-role-and-the-additive-src-cli-workflow-sidecar-ts-recordagentevent-role-model-escalated-from-top-level-jsonl-fields",
+        "claimId": "i376-routing-diff-review.flow-agents-workflow.reviewed-context-contracts-execution-contract-md-tier-ladder-escalation-on-gate-failure-goodhart-guard-routing-decisions-in-the-run-artifact-incl-flow-agents-349-all-11-delegating-builder-skills-model-routing-sections-naming-a-role-and-the-additive-src-cli-workflow-sidecar-ts-recordagentevent-role-model-escalated-from-top-level-jsonl-fields",
+        "evidenceType": "source_excerpt",
+        "method": "extraction",
+        "sourceRef": "i376-routing/evidence.json",
+        "excerptOrSummary": "Reviewed context/contracts/execution-contract.md (Tier ladder, Escalation on gate failure, Goodhart guard, Routing decisions in the run artifact incl. flow-agents#349), all 11 delegating builder skills Model Routing sections naming a role, and the additive src/cli/workflow-sidecar.ts recordAgentEvent role/model/escalated_from top-level JSONL fields.",
+        "observedAt": "2026-07-04T20:53:39Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      }
+    ],
+    "policies": [
+      {
+        "id": "policy:workflow.check.test:test_output",
+        "claimType": "workflow.check.test",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.test claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.pull-work.selected:test_output",
+        "claimType": "builder.pull-work.selected",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.pull-work.selected claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.check.runtime:attestation",
+        "claimType": "workflow.check.runtime",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.runtime claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.pull-work.selected:attestation",
+        "claimType": "builder.pull-work.selected",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.pull-work.selected claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.check.diff:source_excerpt",
+        "claimType": "workflow.check.diff",
+        "requiredEvidence": [
+          "source_excerpt"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.diff claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.pull-work.selected:source_excerpt",
+        "claimType": "builder.pull-work.selected",
+        "requiredEvidence": [
+          "source_excerpt"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.pull-work.selected claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.acceptance.criterion",
+        "claimType": "workflow.acceptance.criterion",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.acceptance.criterion claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.pull-work.selected",
+        "claimType": "builder.pull-work.selected",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.pull-work.selected claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      }
+    ],
+    "events": [
+      {
+        "id": "evt:i376-routing-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-exits-0-includes-evals-static-test-model-routing-hints-sh-asserting-ac1-per-skill-model-routing-hints-naming-a-role-in-all-11-delegating-builder-skills-drift-guard-ac3-goodhart-guard-wording-in-review-work-verify-work-hints-and-the-tier-ladder-escalation-on-gate-failure-routing-record-flow-agents-349-language-in-context-contracts-execution-contract-md",
+        "claimId": "i376-routing-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-exits-0-includes-evals-static-test-model-routing-hints-sh-asserting-ac1-per-skill-model-routing-hints-naming-a-role-in-all-11-delegating-builder-skills-drift-guard-ac3-goodhart-guard-wording-in-review-work-verify-work-hints-and-the-tier-ladder-escalation-on-gate-failure-routing-record-flow-agents-349-language-in-context-contracts-execution-contract-md",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:i376-routing-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-exits-0-includes-evals-static-test-model-routing-hints-sh-asserting-ac1-per-skill-model-routing-hints-naming-a-role-in-all-11-delegating-builder-skills-drift-guard-ac3-goodhart-guard-wording-in-review-work-verify-work-hints-and-the-tier-ladder-escalation-on-gate-failure-routing-record-flow-agents-349-language-in-context-contracts-execution-contract-md"
+        ],
+        "createdAt": "2026-07-04T20:53:39Z",
+        "verifiedAt": "2026-07-04T20:53:39Z"
+      },
+      {
+        "id": "evt:i376-routing-non-manifest-self-checks.flow-agents-workflow.session-local-self-checks-with-no-single-ci-manifest-lane-adr-0020-none-are-command-backed-test-output-npm-run-build-tsc-p-tsconfig-json-exits-0-clean-bash-evals-integration-test-model-routing-escalation-sh-exits-0-the-deliver-loop-eval-records-via-record-agent-event-a-real-mechanical-delegation-a-verify-gate-failure-an-escalation-one-tier-higher-carrying-escalated-from-and-a-verify-pass-then-asserts-r2-escalation-climbed-exactly-one-tier-r3-verifier-tier-worker-tier-goodhart-guard-and-r4-per-role-economics-shape-reduction-against-the-real-agents-id-events-jsonl-and-validate-workflow-artifacts-accepts-the-additive-role-model-escalated-from-fields-npm-run-trust-reconcile-verify-build-eval-static-exits-0",
+        "claimId": "i376-routing-non-manifest-self-checks.flow-agents-workflow.session-local-self-checks-with-no-single-ci-manifest-lane-adr-0020-none-are-command-backed-test-output-npm-run-build-tsc-p-tsconfig-json-exits-0-clean-bash-evals-integration-test-model-routing-escalation-sh-exits-0-the-deliver-loop-eval-records-via-record-agent-event-a-real-mechanical-delegation-a-verify-gate-failure-an-escalation-one-tier-higher-carrying-escalated-from-and-a-verify-pass-then-asserts-r2-escalation-climbed-exactly-one-tier-r3-verifier-tier-worker-tier-goodhart-guard-and-r4-per-role-economics-shape-reduction-against-the-real-agents-id-events-jsonl-and-validate-workflow-artifacts-accepts-the-additive-role-model-escalated-from-fields-npm-run-trust-reconcile-verify-build-eval-static-exits-0",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:i376-routing-non-manifest-self-checks.flow-agents-workflow.session-local-self-checks-with-no-single-ci-manifest-lane-adr-0020-none-are-command-backed-test-output-npm-run-build-tsc-p-tsconfig-json-exits-0-clean-bash-evals-integration-test-model-routing-escalation-sh-exits-0-the-deliver-loop-eval-records-via-record-agent-event-a-real-mechanical-delegation-a-verify-gate-failure-an-escalation-one-tier-higher-carrying-escalated-from-and-a-verify-pass-then-asserts-r2-escalation-climbed-exactly-one-tier-r3-verifier-tier-worker-tier-goodhart-guard-and-r4-per-role-economics-shape-reduction-against-the-real-agents-id-events-jsonl-and-validate-workflow-artifacts-accepts-the-additive-role-model-escalated-from-fields-npm-run-trust-reconcile-verify-build-eval-static-exits-0"
+        ],
+        "createdAt": "2026-07-04T20:53:39Z",
+        "verifiedAt": "2026-07-04T20:53:39Z"
+      },
+      {
+        "id": "evt:i376-routing-diff-review.flow-agents-workflow.reviewed-context-contracts-execution-contract-md-tier-ladder-escalation-on-gate-failure-goodhart-guard-routing-decisions-in-the-run-artifact-incl-flow-agents-349-all-11-delegating-builder-skills-model-routing-sections-naming-a-role-and-the-additive-src-cli-workflow-sidecar-ts-recordagentevent-role-model-escalated-from-top-level-jsonl-fields",
+        "claimId": "i376-routing-diff-review.flow-agents-workflow.reviewed-context-contracts-execution-contract-md-tier-ladder-escalation-on-gate-failure-goodhart-guard-routing-decisions-in-the-run-artifact-incl-flow-agents-349-all-11-delegating-builder-skills-model-routing-sections-naming-a-role-and-the-additive-src-cli-workflow-sidecar-ts-recordagentevent-role-model-escalated-from-top-level-jsonl-fields",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:i376-routing-diff-review.flow-agents-workflow.reviewed-context-contracts-execution-contract-md-tier-ladder-escalation-on-gate-failure-goodhart-guard-routing-decisions-in-the-run-artifact-incl-flow-agents-349-all-11-delegating-builder-skills-model-routing-sections-naming-a-role-and-the-additive-src-cli-workflow-sidecar-ts-recordagentevent-role-model-escalated-from-top-level-jsonl-fields"
+        ],
+        "createdAt": "2026-07-04T20:53:39Z",
+        "verifiedAt": "2026-07-04T20:53:39Z"
+      },
+      {
+        "id": "evt:i376-routing-ac1-every-delegating-builder-skill-names-a-role-static-check-asserts-presence.flow-agents-workflow.ac1-every-delegating-builder-skill-names-a-role-static-check-asserts-presence",
+        "claimId": "i376-routing-ac1-every-delegating-builder-skill-names-a-role-static-check-asserts-presence.flow-agents-workflow.ac1-every-delegating-builder-skill-names-a-role-static-check-asserts-presence",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-04T20:53:39Z",
+        "verifiedAt": "2026-07-04T20:53:39Z"
+      },
+      {
+        "id": "evt:i376-routing-ac2-execution-contract-documents-the-ladder-deliver-loop-eval-shows-fail-escalate-pass-with-escalation-recorded.flow-agents-workflow.ac2-execution-contract-documents-the-ladder-deliver-loop-eval-shows-fail-escalate-pass-with-escalation-recorded",
+        "claimId": "i376-routing-ac2-execution-contract-documents-the-ladder-deliver-loop-eval-shows-fail-escalate-pass-with-escalation-recorded.flow-agents-workflow.ac2-execution-contract-documents-the-ladder-deliver-loop-eval-shows-fail-escalate-pass-with-escalation-recorded",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-04T20:53:39Z",
+        "verifiedAt": "2026-07-04T20:53:39Z"
+      },
+      {
+        "id": "evt:i376-routing-ac3-contract-eval-assert-verify-review-role-tier-worker-tier.flow-agents-workflow.ac3-contract-eval-assert-verify-review-role-tier-worker-tier",
+        "claimId": "i376-routing-ac3-contract-eval-assert-verify-review-role-tier-worker-tier.flow-agents-workflow.ac3-contract-eval-assert-verify-review-role-tier-worker-tier",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-04T20:53:39Z",
+        "verifiedAt": "2026-07-04T20:53:39Z"
+      },
+      {
+        "id": "evt:i376-routing-ac4-eval-run-session-artifact-shows-per-delegation-role-model-consumable-by-349-economics-shape.flow-agents-workflow.ac4-eval-run-session-artifact-shows-per-delegation-role-model-consumable-by-349-economics-shape",
+        "claimId": "i376-routing-ac4-eval-run-session-artifact-shows-per-delegation-role-model-consumable-by-349-economics-shape.flow-agents-workflow.ac4-eval-run-session-artifact-shows-per-delegation-role-model-consumable-by-349-economics-shape",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-04T20:53:39Z",
+        "verifiedAt": "2026-07-04T20:53:39Z"
+      }
+    ]
+  }
+}
