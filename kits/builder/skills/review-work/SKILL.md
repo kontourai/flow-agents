@@ -29,6 +29,17 @@ Keeping them separate makes failures route cleanly:
 | tool-dependencies-updater | Dependency review when package manifests, dependency manifests, package manager config, or lockfiles change |
 | configured architecture/domain/IaC/policy reviewer | Optional reviewer when the project or user configures one |
 
+## Model Routing
+
+Review roles never resolve **below** the tier of the work they check (Goodhart
+guard): default `delegate-implementation`, raised to match or exceed the tier
+that produced the work under review — a reviewer of `delegate-design` work
+resolves `delegate-design` or `orchestrator`, never a cheaper tier. Resolve the
+role from `.datum/config.json` (`npx @kontourai/datum resolve <role> --json`) and
+pass the model explicitly. See `context/contracts/execution-contract.md`
+§ Delegation: Model Routing and § Goodhart guard. Fallback: inherit the session
+model when datum/config is absent, noted in the artifact.
+
 ## Shared Contracts
 
 Follow:

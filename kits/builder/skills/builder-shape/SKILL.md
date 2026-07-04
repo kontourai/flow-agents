@@ -22,6 +22,16 @@ Invoke the Builder Kit `shape` flow for raw product ideas, vague build goals, cu
 - Compatibility: Direct `idea-to-backlog` usage remains valid and should behave exactly as described in `kits/builder/skills/idea-to-backlog/SKILL.md`.
 - Primitive recovery: if a user invokes `idea-to-backlog` or another primitive with missing shaping context and appears to want the product flow, explain that Builder Kit shape is the entry point and offer to route there.
 
+## Model Routing
+
+When this skill delegates its shaping work (to `idea-to-backlog` / `design-probe`
+alignment), resolve the `delegate-design` role from `.datum/config.json`
+(`npx @kontourai/datum resolve delegate-design --json`) and pass the resolved
+model explicitly — shaping needs design latitude, so it routes to the design
+tier. See `context/contracts/execution-contract.md` § Delegation: Model Routing.
+Fallback: inherit the session model when datum/config is absent, noted in the
+artifact.
+
 ## Invocation
 
 Use this skill when the user says things like:

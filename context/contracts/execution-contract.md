@@ -67,6 +67,84 @@ model backs which delegate role. This contract only says where to read it.
   fallback in the session/task artifact — do not block delegation on datum
   being present.
 
+### Tier ladder
+
+The delegate roles form a cost/capability ladder that both escalation and the
+Goodhart guard below reference. Lowest to highest:
+
+```
+delegate-mechanical  <  delegate-implementation  <  delegate-design
+```
+
+`orchestrator` is off-ladder — it is the session's own model (planning, gates,
+adversarial verification), typically inherited rather than overridden, and sits
+above `delegate-design` for escalation purposes. `extraction-default` is a
+non-delegate role (bulk extraction) and is not part of this ladder.
+
+### Escalation on gate failure
+
+Delegate at the step's hinted tier, then let the gates enforce cost safety:
+
+- Dispatch the delegate at the tier its skill hint names (a cheap tier for
+  mechanical/fully-specified work).
+- On a review or verify **gate FAILURE of that delegate's output**, re-dispatch
+  the **fix** one tier higher on the ladder — `delegate-mechanical` failures
+  escalate to `delegate-implementation`, `delegate-implementation` failures to
+  `delegate-design`, and a `delegate-design` failure escalates to the
+  `orchestrator` / a human decision. Do not re-dispatch the fix at the same
+  tier that already failed its gate.
+- Record every escalation in the session artifact (see *Routing decisions in
+  the run artifact* below) with the tier it climbed **from**, so the run shows
+  why a more expensive model was used.
+- This is the fail-closed cost story: cheap tiers are safe **because** the gates
+  catch their misses and escalate. Routing cheap-by-default never weakens
+  verification — an ungated cheap delegate is what this ladder exists to prevent.
+
+### Goodhart guard (review/verify never cheaper than the work)
+
+Review and verify roles resolve at a tier **greater than or equal to** the tier
+of the work they check; they never auto-downgrade below it.
+
+- If the checked work was produced at `delegate-design`, its reviewer/verifier
+  resolves `delegate-design` (or `orchestrator`) — never `delegate-implementation`
+  or `delegate-mechanical`.
+- If the checked work was produced at `delegate-implementation`, its
+  reviewer/verifier resolves at `delegate-implementation` or higher.
+- Rationale: a cheaper checker rubber-stamping a more capable worker's output
+  defeats the gate and turns the routing table into a Goodhart target (optimize
+  the cost metric, lose the thing the metric was a proxy for). The gate must be
+  at least as capable as the work, or the fail-closed escalation story above is
+  hollow.
+
+### Routing decisions in the run artifact
+
+Record each delegation's resolved role and model on the session artifact so a
+downstream economics record (`flow-agents#349`) can price role assignments and a
+baseline harness (`flow-agents#350`) can A/B tiers. Use the sidecar writer's
+`record-agent-event` (additive `--role` / `--model` / `--escalated-from` flags):
+
+```bash
+# per-delegation routing decision
+npm run workflow:sidecar -- record-agent-event \
+  --agent-id <delegate-id> --kind delegation --status active \
+  --role <resolved-role> --model "<resolved-model@provider>" \
+  --summary "<what was delegated>"
+
+# an escalate-on-gate-failure re-dispatch
+npm run workflow:sidecar -- record-agent-event \
+  --agent-id <delegate-id> --kind escalation --status active \
+  --role <higher-tier-role> --model "<resolved-model@provider>" \
+  --escalated-from <lower-tier-role> \
+  --summary "<gate that failed> failed at <lower-tier-role>; fix re-dispatched one tier higher"
+```
+
+These land as top-level `role`, `model`, and (for escalations) `escalated_from`
+fields on the JSONL event under `agents/<agent-id>/events.jsonl`. The shape is
+additive: events without a routing decision are byte-identical to before, so no
+existing consumer breaks. An economics consumer reads events where `role` is
+present as one priced delegation each; `escalated_from` marks the entries that
+cost more because a gate caught a cheaper tier.
+
 ## Completion Rules
 
 Execution is complete only when:

@@ -1619,7 +1619,30 @@ function recordAgentEvent(p: ReturnType<typeof parseArgs>): number {
   if (hasExplicitRoot || !explicit) requireArtifactDirUnderRoot(dir, root);
   const timestamp = opt(p, "timestamp", now());
   const agent = validateAgentId(opt(p, "agent-id"));
-  const event = { timestamp, agent_id: agent, kind: opt(p, "kind", "note"), status: opt(p, "status", "info"), summary: opt(p, "summary"), ...(opt(p, "ref") ? { ref: opt(p, "ref") } : {}) };
+  // #376 model routing: optionally stamp the delegate role/model resolved from
+  // .datum/config.json onto the event so a downstream economics record (#349)
+  // can price role assignments per delegation, and so an escalate-on-gate-failure
+  // re-dispatch records which tier it climbed FROM. Fully additive/optional: when
+  // no routing flag is passed the event shape is byte-identical to before.
+  // These live as TOP-LEVEL event fields (not nested) on purpose: appendJsonl's
+  // serializer (spacedLine) uses the top-level key list as a JSON.stringify array
+  // replacer, which is an allowlist applied at every nesting level — a nested
+  // routing object would have its inner keys stripped. Flat keeps the shape a
+  // simple per-event routing record a JSONL economics feed can read directly.
+  const role = opt(p, "role");
+  const model = opt(p, "model");
+  const escalatedFrom = opt(p, "escalated-from");
+  const event = {
+    timestamp,
+    agent_id: agent,
+    kind: opt(p, "kind", "note"),
+    status: opt(p, "status", "info"),
+    summary: opt(p, "summary"),
+    ...(opt(p, "ref") ? { ref: opt(p, "ref") } : {}),
+    ...(role ? { role } : {}),
+    ...(model ? { model } : {}),
+    ...(escalatedFrom ? { escalated_from: escalatedFrom } : {}),
+  };
   appendJsonl(path.join(dir, "agents", agent, "events.jsonl"), event);
   updateCurrentAgent(root, dir, agent, event.status, timestamp, actorKey);
   return 0;
