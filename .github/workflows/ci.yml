@@ -185,6 +185,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check current-json-per-actor-integration
 
+      - name: Liveness console relay integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check liveness-console-relay-integration
+
       - name: Finalize CI evidence
         if: always()
         run: bash evals/ci/run-baseline.sh --finalize
