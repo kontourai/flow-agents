@@ -49,6 +49,10 @@ The <a href="../spec/runtime-hook-surface.html">Runtime Hook Surface spec</a> de
     <strong>Knowledge Kit Live Example</strong>
     <span>End-to-end proof of the Knowledge Kit ingest + compile flows against a real Strands agent (OllamaModel / qwen3:1.7b). No API key required. Includes acceptance test with telemetry and provenance assertions.</span>
   </a>
+  <a class="doc-card" href="flow-agents-console.html">
+    <strong>Flow Agents × Console</strong>
+    <span>The optional fleet tier over the local coordination substrate: a liveness relay, team/project insight views, an in-hub janitor, and (Phase 2) a Console-backed AssignmentProvider. Local-first stands; the Console never becomes the authority.</span>
+  </a>
 </div>
 
 ---
