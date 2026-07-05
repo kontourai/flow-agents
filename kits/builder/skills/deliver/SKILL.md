@@ -266,6 +266,48 @@ After review, verification, evidence, and Goal Fit are clean for the same diff:
    npm run workflow:sidecar -- reconcile-preflight .kontourai/flow-agents/<slug>
    ```
 
+   **#381 — manifest-lane constraint: which commands may be `kind:"command"` checks.** A check/claim
+   is only CI-reconcilable as `kind:"command"` (Surface's `test_output` evidence type) if its
+   command is a registered entry in the **trust-reconcile manifest** — the same
+   `{"id":..,"command":..,"lanes":[..]}` list `evals/ci/run-baseline.sh --manifest-json` emits
+   from its `CHECKS` array (source of truth: `evals/ci/run-baseline.sh` lines 12-67 for the
+   array, 166-182 for `emit_manifest_json`). `scripts/ci/trust-reconcile.js` resolves this same
+   manifest (`resolveManifest`/`manifestByCmd`, lines 292-370, 1101-1104) and reconciles a
+   `kind:"command"` claim's `execution.label` ONLY against it — a command not in the manifest
+   can never reconcile, and CI's reconciler names it exactly this way: `trust divergence: agent
+   claimed '<cmd>' passed; command is not in the reconcile manifest — a test_output claim must
+   name a manifest/required-lane command (CI cannot self-declare an arbitrary command)`. An
+   honest capture-backed check recorded against a real, passing, non-manifest command still
+   becomes this `not-run` divergence at CI reconcile time — it is not a shape bug to route
+   around, it is the manifest boundary working as designed. Anything that is not a registered
+   manifest command records as `kind:"external"` (a session-local attestation — e.g. a manual
+   code-review judgment) or `kind:"policy"` (a policy/compliance attestation — e.g. `promote`'s
+   claim, which carries no `command`/`execution.label` and therefore can never require a
+   manifest entry). This matters at every writer call that can produce a `kind:"command"`
+   check — `record-evidence`, `record-gate-claim --command`, and `record-check` — and again at
+   the `publish-delivery`/`reconcile-preflight` step above, which is where a non-manifest
+   command surfaces as a refusal before CI ever sees it. Gate claims recorded earlier in a
+   session are not special-cased here: the compose-safe writer path keeps every prior gate
+   claim's declared claim type intact across later `record-evidence`/`record-critique`/
+   `record-learning` calls, so a gate claim never needs to be the last write of a session to
+   survive.
+
+   - `kind:"command"` (manifest-backed) example — a real, currently-registered manifest entry
+     ("Source tree validation" → `npm run validate:source --`):
+
+     ```bash
+     npm run workflow:sidecar -- record-check .kontourai/flow-agents/<slug> -- npm run validate:source --
+     ```
+
+   - `kind:"external"` (non-manifest attestation) example — no `--command`, so nothing is
+     ever executed; the prose lives in `--summary`:
+
+     ```bash
+     npm run workflow:sidecar -- record-gate-claim .kontourai/flow-agents/<slug> \
+       --status pass \
+       --summary "Manual code review confirmed no regressions in the affected module."
+     ```
+
    **#379 — per-session delivery paths.** `publishDelivery()` writes to a PER-SESSION path
    `delivery/<slug>/trust.bundle` (+ `trust.checkpoint.json` companions), where `<slug>` is
    your session artifact dir's basename — NOT the old shared flat `delivery/trust.bundle`.

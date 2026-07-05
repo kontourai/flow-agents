@@ -79,6 +79,7 @@ renamed, or changes category, update the table and the validator together.
 | `lib/local-artifact-paths.js` | shared hook library | `evals/integration/test_migrate_local_artifacts.sh`, `evals/integration/test_workflow_sidecar_writer.sh` | Shared `.kontourai/flow-agents` artifact-root helpers for CJS hooks. |
 | `lib/patterns.sh` | shared hook library | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_telemetry.sh` | Shared shell pattern constants. |
 | `lib/resolve-formatter.js` | shared hook library | `evals/integration/test_hook_category_behaviors.sh` | Shared formatter resolution helper. |
+| `lib/runnable-command.js` | shared hook library | `evals/integration/test_goal_fit_hook.sh` | Shared runnable-command-text heuristic (`isRunnableCommandText`) consumed by `stop-goal-fit.js` and `workflow-sidecar.js` so record-time and Stop-time checks never drift (issue #412). |
 
 ## Telemetry
 
