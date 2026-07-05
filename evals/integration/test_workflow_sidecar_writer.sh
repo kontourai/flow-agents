@@ -3388,6 +3388,773 @@ else
   _fail "missing slug error message lacked 'task-slug is required': $(cat "$TMPDIR_EVAL/wi-no-slug.out")"
 fi
 
+# ─── #270/#298 compose layer: gate-claim accumulation, gate-claim typing survives rebuild, ──
+# compose-two/three/four-writer round-trip, waiver + artifact_refs/standard_refs round-trip,
+# runnability rejection at record time (AC1-AC6, AC8, AC10) ──────────────────────────────────
+COMPOSE_ROOT="$TMPDIR_EVAL/compose-root"
+COMPOSE_SLUG="compose-270"
+COMPOSE_DIR="$COMPOSE_ROOT/$COMPOSE_SLUG"
+mkdir -p "$COMPOSE_ROOT"
+
+flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$COMPOSE_ROOT" \
+  --task-slug "$COMPOSE_SLUG" \
+  --actor compose-actor \
+  --flow-id builder.build \
+  --title "Compose layer session" \
+  --source-request "Compose-safe writer layer smoke session." \
+  --summary "Seed session for compose-layer round-trip assertions." \
+  --criterion "Compose layer round-trips losslessly" \
+  --timestamp "2026-07-05T09:00:00Z" >"$TMPDIR_EVAL/compose-seed.out" 2>"$TMPDIR_EVAL/compose-seed.err"
+
+_compose_claims_json() {
+  cat "$COMPOSE_DIR/trust.bundle"
+}
+
+# ─── AC3/AC6: record-evidence #1 — command-backed check carrying artifact_refs/standard_refs ──
+if flow_agents_node "$WRITER" record-evidence "$COMPOSE_DIR" \
+  --verdict pass \
+  --check-json '{"id":"compose-build-check","kind":"build","status":"pass","summary":"Build passed","command":"npm run build","artifact_refs":[{"kind":"artifact","file":"build/out.js","summary":"build output"}],"standard_refs":[{"standard":"junit","file":"build/out.xml"}]}' \
+  --timestamp "2026-07-05T09:05:00Z" >"$TMPDIR_EVAL/compose-ev1.out" 2>"$TMPDIR_EVAL/compose-ev1.err" \
+  && [[ -f "$COMPOSE_DIR/trust.bundle" ]]; then
+  _pass "compose: record-evidence #1 (command-backed check w/ artifact_refs/standard_refs) writes trust.bundle"
+else
+  _fail "compose: record-evidence #1 failed: $(cat "$TMPDIR_EVAL/compose-ev1.out" "$TMPDIR_EVAL/compose-ev1.err")"
+fi
+
+if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/compose-ev1-assert.err"
+import { readFileSync } from 'node:fs';
+const bundle = JSON.parse(readFileSync('${COMPOSE_DIR}/trust.bundle', 'utf8'));
+const claim = bundle.claims.find((c) => c.subjectId && c.subjectId.endsWith('/compose-build-check'));
+if (!claim) { process.stderr.write('missing compose-build-check claim\n'); process.exit(1); }
+const md = claim.metadata || {};
+if (!Array.isArray(md.artifact_refs) || md.artifact_refs.length !== 1) { process.stderr.write('artifact_refs did not stamp onto claim.metadata: ' + JSON.stringify(md.artifact_refs) + '\n'); process.exit(1); }
+if (!Array.isArray(md.standard_refs) || md.standard_refs.length !== 1) { process.stderr.write('standard_refs did not stamp onto claim.metadata: ' + JSON.stringify(md.standard_refs) + '\n'); process.exit(1); }
+NODEOF
+then
+  _pass "AC6: artifact_refs/standard_refs stamp onto claim.metadata on FIRST write (#298, previously silently dropped)"
+else
+  _fail "AC6: artifact_refs/standard_refs did not stamp onto claim.metadata: $(cat "$TMPDIR_EVAL/compose-ev1-assert.err")"
+fi
+
+# ─── AC5: record-evidence #2 — a SEPARATE call records a waived session-local check ──────────
+if flow_agents_node "$WRITER" record-evidence "$COMPOSE_DIR" \
+  --verdict pass \
+  --check-json '{"id":"compose-manual-check","kind":"external","status":"pass","summary":"Manual review confirmed no regressions"}' \
+  --accepted-gap-reason "manual check waived for compose eval" \
+  --waived-by "compose-tester" \
+  --timestamp "2026-07-05T09:06:00Z" >"$TMPDIR_EVAL/compose-ev2.out" 2>"$TMPDIR_EVAL/compose-ev2.err"; then
+  _pass "compose: record-evidence #2 (waived session-local check) succeeds"
+else
+  _fail "compose: record-evidence #2 failed: $(cat "$TMPDIR_EVAL/compose-ev2.out" "$TMPDIR_EVAL/compose-ev2.err")"
+fi
+
+# ─── AC3: compose-two-writer — check #1 (with artifact_refs/standard_refs) survives the SECOND
+# record-evidence call (#298's core complaint: record-evidence previously REPLACED all checks) ──
+if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/compose-two-writer.err"
+import { readFileSync } from 'node:fs';
+const bundle = JSON.parse(readFileSync('${COMPOSE_DIR}/trust.bundle', 'utf8'));
+const claims = bundle.claims;
+const buildClaim = claims.find((c) => c.subjectId && c.subjectId.endsWith('/compose-build-check'));
+const manualClaim = claims.find((c) => c.subjectId && c.subjectId.endsWith('/compose-manual-check'));
+const acClaim = claims.find((c) => c.metadata && c.metadata.origin === 'acceptance');
+if (!buildClaim) { process.stderr.write('compose-build-check claim LOST after second record-evidence call (#298 regression)\n'); process.exit(1); }
+if (!manualClaim) { process.stderr.write('compose-manual-check claim missing after its own record-evidence call\n'); process.exit(1); }
+if (!acClaim) { process.stderr.write('acceptance criterion claim LOST after second record-evidence call\n'); process.exit(1); }
+const md = buildClaim.metadata || {};
+if (!Array.isArray(md.artifact_refs) || md.artifact_refs.length !== 1) { process.stderr.write('artifact_refs did not survive the SECOND writer pass (AC6 second-writer round-trip)\n'); process.exit(1); }
+if (!Array.isArray(md.standard_refs) || md.standard_refs.length !== 1) { process.stderr.write('standard_refs did not survive the SECOND writer pass\n'); process.exit(1); }
+const waiverMd = manualClaim.metadata || {};
+if (!waiverMd.waiver || waiverMd.waiver.approved_by !== 'compose-tester') { process.stderr.write('waiver did not stamp onto compose-manual-check claim\n'); process.exit(1); }
+if (claims.length !== 3) { process.stderr.write('expected exactly 3 claims after 2 record-evidence calls (2 checks + 1 acceptance criterion), got ' + claims.length + '\n'); process.exit(1); }
+NODEOF
+then
+  _pass "AC3: compose-two-writer — record-evidence #1's check (+ artifact_refs/standard_refs) AND the acceptance criterion survive record-evidence #2's call, not replaced"
+else
+  _fail "AC3: compose-two-writer assertion failed: $(cat "$TMPDIR_EVAL/compose-two-writer.err")"
+fi
+
+# ─── AC1/AC10: record-gate-claim (pull-work-gate/selected-work) with --command ───────────────
+if flow_agents_node "$WRITER" record-gate-claim "$COMPOSE_DIR" \
+  --actor compose-actor \
+  --status pass \
+  --summary "Work item selected for compose session" \
+  --command "npm run validate:source --" \
+  --timestamp "2026-07-05T09:07:00Z" >"$TMPDIR_EVAL/compose-gate1.out" 2>"$TMPDIR_EVAL/compose-gate1.err"; then
+  _pass "compose: record-gate-claim (selected-work) with --command succeeds"
+else
+  _fail "compose: record-gate-claim (selected-work) failed: $(cat "$TMPDIR_EVAL/compose-gate1.out" "$TMPDIR_EVAL/compose-gate1.err")"
+fi
+
+if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/compose-gate1-assert.err"
+import { readFileSync } from 'node:fs';
+const bundle = JSON.parse(readFileSync('${COMPOSE_DIR}/trust.bundle', 'utf8'));
+const claims = bundle.claims;
+const buildClaim = claims.find((c) => c.subjectId && c.subjectId.endsWith('/compose-build-check'));
+const manualClaim = claims.find((c) => c.subjectId && c.subjectId.endsWith('/compose-manual-check'));
+const gateClaim = claims.find((c) => c.metadata && c.metadata.gate_claim && c.metadata.gate_claim.expectation_id === 'selected-work');
+if (!buildClaim || !manualClaim) { process.stderr.write('record-gate-claim clobbered prior checks (#270 21-claims-to-1 wipe class)\n'); process.exit(1); }
+if (!gateClaim) { process.stderr.write('gate claim missing metadata.gate_claim stamp\n'); process.exit(1); }
+if (gateClaim.claimType !== 'builder.pull-work.selected' || gateClaim.subjectType !== 'work-item') { process.stderr.write('gate claim typed incorrectly: ' + gateClaim.claimType + '/' + gateClaim.subjectType + '\n'); process.exit(1); }
+const ev = bundle.evidence.find((e) => e.claimId === gateClaim.id);
+if (!ev || !ev.execution || ev.execution.label !== 'npm run validate:source --') { process.stderr.write('AC10: --command did not stamp execution.label on the gate claim evidence\n'); process.exit(1); }
+if (claims.length !== 4) { process.stderr.write('expected exactly 4 claims after record-gate-claim (2 checks + 1 acceptance + 1 gate claim), got ' + claims.length + '\n'); process.exit(1); }
+NODEOF
+then
+  _pass "AC1/AC10: record-gate-claim accumulates (prior checks/criteria survive) and --command sets execution.label on the gate claim"
+else
+  _fail "AC1/AC10: record-gate-claim accumulation/command assertion failed: $(cat "$TMPDIR_EVAL/compose-gate1-assert.err")"
+fi
+
+# ─── advance to `plan` step (phase_map.planning → plan) so a SECOND gate claim can target a ──
+# DIFFERENT expectation than pull-work-gate's single "selected-work" entry ────────────────────
+if flow_agents_node "$WRITER" advance-state "$COMPOSE_DIR" \
+  --actor compose-actor \
+  --status in_progress \
+  --phase planning \
+  --summary "Advance to plan step for a second, different-expectation gate claim" \
+  --next-action "Continue" \
+  --flow-definition builder.build \
+  --route-back-reason implementation_defect \
+  --timestamp "2026-07-05T09:07:15Z" >"$TMPDIR_EVAL/compose-advance-plan.out" 2>"$TMPDIR_EVAL/compose-advance-plan.err"; then
+  _pass "compose: advance-state moves active step to plan"
+else
+  _fail "compose: advance-state (to plan) failed: $(cat "$TMPDIR_EVAL/compose-advance-plan.out" "$TMPDIR_EVAL/compose-advance-plan.err")"
+fi
+
+# ─── AC1: a SECOND gate claim against a DIFFERENT expectation (plan-gate/implementation-plan) ──
+# is additive, not a replacement, of the FIRST gate claim (pull-work-gate/selected-work) ───────
+if flow_agents_node "$WRITER" record-gate-claim "$COMPOSE_DIR" \
+  --actor compose-actor \
+  --status pass \
+  --summary "Implementation plan recorded for compose session" \
+  --expectation implementation-plan \
+  --timestamp "2026-07-05T09:07:30Z" >"$TMPDIR_EVAL/compose-gate2.out" 2>"$TMPDIR_EVAL/compose-gate2.err"; then
+  _pass "compose: second record-gate-claim (different expectation, implementation-plan) succeeds"
+else
+  _fail "compose: second record-gate-claim failed: $(cat "$TMPDIR_EVAL/compose-gate2.out" "$TMPDIR_EVAL/compose-gate2.err")"
+fi
+
+if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/compose-gate2-assert.err"
+import { readFileSync } from 'node:fs';
+const bundle = JSON.parse(readFileSync('${COMPOSE_DIR}/trust.bundle', 'utf8'));
+const claims = bundle.claims;
+const gate1 = claims.find((c) => c.metadata && c.metadata.gate_claim && c.metadata.gate_claim.expectation_id === 'selected-work');
+const gate2 = claims.find((c) => c.metadata && c.metadata.gate_claim && c.metadata.gate_claim.expectation_id === 'implementation-plan');
+if (!gate1) { process.stderr.write('first gate claim (selected-work) LOST after second gate-claim call (#270 wipe class)\n'); process.exit(1); }
+if (!gate2) { process.stderr.write('second gate claim (implementation-plan) missing\n'); process.exit(1); }
+if (gate2.claimType !== 'builder.plan.implementation' || gate2.subjectType !== 'artifact') { process.stderr.write('second gate claim typed incorrectly: ' + gate2.claimType + '/' + gate2.subjectType + '\n'); process.exit(1); }
+if (claims.length !== 5) { process.stderr.write('expected exactly 5 claims after 2 gate claims (2 checks + 1 acceptance + 2 gate claims), got ' + claims.length + '\n'); process.exit(1); }
+NODEOF
+then
+  _pass "AC1: two record-gate-claim calls against DIFFERENT expectations are both additive (neither clobbers the other or prior checks)"
+else
+  _fail "AC1: two-gate-claim additivity assertion failed: $(cat "$TMPDIR_EVAL/compose-gate2-assert.err")"
+fi
+
+# ─── AC2: gate-claim typing survives rebuild after the ACTIVE STEP moves to N+1 ──────────────
+if flow_agents_node "$WRITER" advance-state "$COMPOSE_DIR" \
+  --actor compose-actor \
+  --status in_progress \
+  --phase goal_fit \
+  --summary "Advance to merge-ready for AC2 rebuild assertion" \
+  --next-action "Continue" \
+  --flow-definition builder.build \
+  --timestamp "2026-07-05T09:08:00Z" >"$TMPDIR_EVAL/compose-advance.out" 2>"$TMPDIR_EVAL/compose-advance.err"; then
+  _pass "compose: advance-state moves active step to merge-ready (N+1 relative to pull-work/plan)"
+else
+  _fail "compose: advance-state failed: $(cat "$TMPDIR_EVAL/compose-advance.out" "$TMPDIR_EVAL/compose-advance.err")"
+fi
+
+# record-critique REBUILDS the bundle (checksFromBundle + writeTrustBundle) while the active
+# step is merge-ready — the gate claims recorded at pull-work/plan above must NOT be silently
+# re-typed as merge-ready claims (that re-typing IS the #270(c) defect).
+if flow_agents_node "$WRITER" record-critique "$COMPOSE_DIR" \
+  --id compose-review \
+  --reviewer compose-reviewer \
+  --verdict pass \
+  --summary "Compose review looks good" \
+  --timestamp "2026-07-05T09:09:00Z" >"$TMPDIR_EVAL/compose-critique.out" 2>"$TMPDIR_EVAL/compose-critique.err"; then
+  _pass "compose: record-critique rebuilds the bundle at the new active step (merge-ready)"
+else
+  _fail "compose: record-critique failed: $(cat "$TMPDIR_EVAL/compose-critique.out" "$TMPDIR_EVAL/compose-critique.err")"
+fi
+
+if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/compose-ac2-assert.err"
+import { readFileSync } from 'node:fs';
+const bundle = JSON.parse(readFileSync('${COMPOSE_DIR}/trust.bundle', 'utf8'));
+const claims = bundle.claims;
+const gateClaim1 = claims.find((c) => c.metadata && c.metadata.gate_claim && c.metadata.gate_claim.expectation_id === 'selected-work');
+const gateClaim2 = claims.find((c) => c.metadata && c.metadata.gate_claim && c.metadata.gate_claim.expectation_id === 'implementation-plan');
+if (!gateClaim1 || !gateClaim2) { process.stderr.write('a gate claim was LOST after rebuild at a later step\n'); process.exit(1); }
+if (gateClaim1.claimType !== 'builder.pull-work.selected' || gateClaim1.subjectType !== 'work-item') {
+  process.stderr.write('AC2 REGRESSION: gate claim recorded at pull-work was re-typed to ' + gateClaim1.claimType + '/' + gateClaim1.subjectType + ' after rebuild at merge-ready (the #270(c) defect)\n');
+  process.exit(1);
+}
+if (gateClaim2.claimType !== 'builder.plan.implementation' || gateClaim2.subjectType !== 'artifact') {
+  process.stderr.write('AC2 REGRESSION: gate claim recorded at plan was re-typed to ' + gateClaim2.claimType + '/' + gateClaim2.subjectType + ' after rebuild at merge-ready\n');
+  process.exit(1);
+}
+if (gateClaim1.metadata.gate_claim.step_id !== 'pull-work') { process.stderr.write('gate_claim.step_id was overwritten to the currently-active step instead of staying pull-work: ' + gateClaim1.metadata.gate_claim.step_id + '\n'); process.exit(1); }
+if (gateClaim2.metadata.gate_claim.step_id !== 'plan') { process.stderr.write('gate_claim.step_id was overwritten to the currently-active step instead of staying plan: ' + gateClaim2.metadata.gate_claim.step_id + '\n'); process.exit(1); }
+// Meanwhile a PLAIN check claim (no gate_claim stamp) IS correctly re-typed to the new active step —
+// this is legitimate, documented behavior (only a stamped gate claim is frozen).
+const buildClaim = claims.find((c) => c.subjectId && c.subjectId.endsWith('/compose-build-check'));
+if (!buildClaim || buildClaim.claimType !== 'builder.merge-ready.readiness') { process.stderr.write('plain check claim did not re-type to the new active step as expected (unrelated to AC2, sanity check): ' + (buildClaim && buildClaim.claimType) + '\n'); process.exit(1); }
+NODEOF
+then
+  _pass "AC2: gate-claim typing (claimType/subjectType/step_id) survives a rebuild after the active step advances — frozen at record time, not re-derived (#270(a)/(c))"
+else
+  _fail "AC2: gate-claim-typing-survives-rebuild assertion failed: $(cat "$TMPDIR_EVAL/compose-ac2-assert.err")"
+fi
+
+# ─── AC4: compose-three-writer (five writer calls total: evidence x2, gate-claim x2, critique, ──
+# then record-learning) — all claim families present and correctly typed in the final bundle ──
+if flow_agents_node "$WRITER" record-learning "$COMPOSE_DIR" \
+  --status learned \
+  --summary "Compose layer round-trips losslessly" \
+  --record-json '{"source_refs":[],"facts":["compose layer round-trips losslessly"],"routing":[],"outcome":"success","correction":{"needed":false,"evidence":"compose eval passed"}}' \
+  --timestamp "2026-07-05T09:10:00Z" >"$TMPDIR_EVAL/compose-learning.out" 2>"$TMPDIR_EVAL/compose-learning.err"; then
+  _pass "compose: record-learning (fourth distinct writer family) succeeds"
+else
+  _fail "compose: record-learning failed: $(cat "$TMPDIR_EVAL/compose-learning.out" "$TMPDIR_EVAL/compose-learning.err")"
+fi
+
+if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/compose-ac4-assert.err"
+import { readFileSync } from 'node:fs';
+const bundle = JSON.parse(readFileSync('${COMPOSE_DIR}/trust.bundle', 'utf8'));
+const claims = bundle.claims;
+const origins = claims.map((c) => (c.metadata || {}).origin);
+const originCounts = origins.reduce((acc, o) => { acc[o] = (acc[o] || 0) + 1; return acc; }, {});
+// Expect: 2 plain "check" claims (build-check, manual-check) + 2 gate-claim checks (also origin
+// "check", distinguished by metadata.gate_claim) + 1 "acceptance" + 1 "critique" = 6 total.
+if (originCounts.check !== 4) { process.stderr.write('expected 4 origin:check claims (2 plain checks + 2 gate claims), got ' + originCounts.check + ' (' + JSON.stringify(originCounts) + ')\n'); process.exit(1); }
+if (originCounts.acceptance !== 1) { process.stderr.write('expected 1 origin:acceptance claim, got ' + originCounts.acceptance + '\n'); process.exit(1); }
+if (originCounts.critique !== 1) { process.stderr.write('expected 1 origin:critique claim, got ' + originCounts.critique + '\n'); process.exit(1); }
+if (claims.length !== 6) { process.stderr.write('expected exactly 6 claims total after the full 6-writer sequence, got ' + claims.length + '\n'); process.exit(1); }
+const gateClaim1 = claims.find((c) => c.metadata && c.metadata.gate_claim && c.metadata.gate_claim.expectation_id === 'selected-work');
+const gateClaim2 = claims.find((c) => c.metadata && c.metadata.gate_claim && c.metadata.gate_claim.expectation_id === 'implementation-plan');
+const manualClaim = claims.find((c) => c.subjectId && c.subjectId.endsWith('/compose-manual-check'));
+if (!gateClaim1 || gateClaim1.claimType !== 'builder.pull-work.selected') { process.stderr.write('gate claim 1 typing did not survive the FIFTH rebuild (record-learning)\n'); process.exit(1); }
+if (!gateClaim2 || gateClaim2.claimType !== 'builder.plan.implementation') { process.stderr.write('gate claim 2 typing did not survive the FIFTH rebuild (record-learning)\n'); process.exit(1); }
+if (!manualClaim || !manualClaim.metadata.waiver) { process.stderr.write('waiver did not survive the fifth writer rebuild\n'); process.exit(1); }
+NODEOF
+then
+  _pass "AC4: compose-three-writer (six writer calls total: evidence x2, gate-claim x2, critique, learning) — all claim families present and correctly typed in the final bundle"
+else
+  _fail "AC4: compose-three-writer assertion failed: $(cat "$TMPDIR_EVAL/compose-ac4-assert.err")"
+fi
+
+# ─── AC8: a kind:"command" evidence_refs entry carrying PROSE excerpt is rejected at record ──
+# time by record-evidence (validateAcceptanceEvidenceRefs), not silently accepted for the ─────
+# Stop-hook backstop to catch later. ───────────────────────────────────────────────────────────
+AC8_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/ac8-runnability"
+mkdir -p "$AC8_DIR"
+cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$AC8_DIR/ac8-runnability--deliver.md"
+flow_agents_node "$WRITER" init-plan "$AC8_DIR/ac8-runnability--deliver.md" \
+  --source-request "AC8 runnability rejection fixture." \
+  --summary "AC8 runnability rejection fixture." \
+  --next-action "Seed a prose kind:command evidence_ref." \
+  --timestamp "2026-07-05T09:00:00Z" >"$TMPDIR_EVAL/ac8-init.out" 2>"$TMPDIR_EVAL/ac8-init.err"
+
+# Overwrite acceptance.json's criterion with a kind:"command" ref whose excerpt is prose — the
+# split-literal convention (see test_validate_source_kit_asset_scope.sh's "self-scan hazard"
+# comments) is not needed here since this file is not itself scanned for the phrase.
+node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/ac8-mutate.err"
+import { readFileSync, writeFileSync } from 'node:fs';
+const file = '${AC8_DIR}/acceptance.json';
+const data = JSON.parse(readFileSync(file, 'utf8'));
+if (!Array.isArray(data.criteria) || data.criteria.length === 0) { process.stderr.write('no criteria to mutate\n'); process.exit(1); }
+data.criteria[0].evidence_refs = [{ kind: 'command', excerpt: 'Manually confirmed the output looks correct.' }];
+writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
+NODEOF
+
+if flow_agents_node "$WRITER" record-evidence "$AC8_DIR" \
+  --verdict pass \
+  --check-json '{"id":"ac8-check","kind":"test","status":"pass","summary":"AC8 fixture check passed."}' \
+  --timestamp "2026-07-05T09:01:00Z" >"$TMPDIR_EVAL/ac8-evidence.out" 2>"$TMPDIR_EVAL/ac8-evidence.err"; then
+  _fail "AC8 REGRESSION: record-evidence accepted a kind:\"command\" evidence_ref with prose excerpt instead of rejecting it at record time"
+elif grep -qi "not a runnable shell command" "$TMPDIR_EVAL/ac8-evidence.out" "$TMPDIR_EVAL/ac8-evidence.err"; then
+  _pass "AC8: record-evidence rejects a kind:\"command\" evidence_ref with a prose excerpt at record time, with an actionable error"
+else
+  _fail "AC8: record-evidence rejected the prose ref but without the expected 'not a runnable shell command' message: $(cat "$TMPDIR_EVAL/ac8-evidence.out" "$TMPDIR_EVAL/ac8-evidence.err")"
+fi
+
+# ─── #270 MEDIUM security fix eval: --skip-evidence-ref-runnability-guard is a logged bypass, ──
+# never silent (mirrors --skip-ownership-guard's existing pattern) — reusing AC8_DIR's already-
+# mutated prose-in-excerpt fixture (same lockout AC8 above proves is otherwise unconditional).
+if flow_agents_node "$WRITER" record-evidence "$AC8_DIR" \
+  --verdict pass \
+  --check-json '{"id":"ac8-bypass-check","kind":"test","status":"pass","summary":"AC8 bypass fixture check passed."}' \
+  --skip-evidence-ref-runnability-guard \
+  --timestamp "2026-07-05T09:01:30Z" >"$TMPDIR_EVAL/ac8-bypass.out" 2>"$TMPDIR_EVAL/ac8-bypass.err"; then
+  if grep -qi "evidence-ref runnability guard skipped via --skip-evidence-ref-runnability-guard" "$TMPDIR_EVAL/ac8-bypass.out" "$TMPDIR_EVAL/ac8-bypass.err"; then
+    _pass "#270: --skip-evidence-ref-runnability-guard bypasses the lockout AND logs it loudly (never silent), mirroring --skip-ownership-guard's pattern"
+  else
+    _fail "#270: --skip-evidence-ref-runnability-guard bypassed the guard but did NOT log it (silent bypass regression): $(cat "$TMPDIR_EVAL/ac8-bypass.out" "$TMPDIR_EVAL/ac8-bypass.err")"
+  fi
+else
+  _fail "#270: --skip-evidence-ref-runnability-guard should have bypassed the lockout, but record-evidence still failed: $(cat "$TMPDIR_EVAL/ac8-bypass.out" "$TMPDIR_EVAL/ac8-bypass.err")"
+fi
+
+# ─── #270 MEDIUM fix eval: parseCriterion routes a PROSE "- Evidence:" line through the REAL ──
+# init-plan parse path (definitionAcceptanceLines -> parseCriterion), not a hand-mutated
+# acceptance.json — asserting the resulting acceptance.json ref carries the prose in `summary`
+# and has NO `excerpt` (never validated for runnability, never executed), per the #412 contract
+# ("prose belongs in ref.summary"). This is a DIRECT eval of parseCriterion's classification
+# behavior (distinct from AC8 above, which exercises the record-time REJECTION of an
+# already-mutated prose-in-excerpt ref).
+PARSE_CRITERION_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/parse-criterion-prose"
+mkdir -p "$PARSE_CRITERION_DIR"
+cat > "$PARSE_CRITERION_DIR/parse-criterion-prose--deliver.md" <<'MARKDOWN'
+# parseCriterion prose Evidence line eval
+
+status: delivered
+type: deliver
+
+## Plan
+
+Exercise parseCriterion's classification of a prose Evidence line through the real parse path.
+
+## Definition Of Done
+
+- **User outcome:** Prose evidence is classified correctly at parse time.
+- **Scope:** parseCriterion / definitionAcceptanceLines.
+- **Acceptance criteria:**
+  - [ ] Dashboard reviewed - Evidence: manual review of the dashboard.
+- **Usefulness checks:**
+  - [ ] User-facing workflow is documented or discoverable
+- **Stop-short risks:** none
+- **Durable docs target:** not needed
+- **Sandbox mode:** local-edit
+
+## Verification Report
+
+Build: [NOT_VERIFIED] pending
+
+### Verdict: NOT_VERIFIED
+
+## Goal Fit Gate
+
+- [ ] Original user goal restated
+
+## Final Acceptance
+
+- [ ] CI/relevant checks passed or local equivalent recorded
+MARKDOWN
+
+if flow_agents_node "$WRITER" init-plan "$PARSE_CRITERION_DIR/parse-criterion-prose--deliver.md"   --source-request "parseCriterion prose Evidence line eval."   --summary "Exercise the real parse path for a prose Evidence line."   --next-action "Assert the resulting acceptance.json ref."   --timestamp "2026-07-05T09:00:00Z" >"$TMPDIR_EVAL/parse-criterion-init.out" 2>"$TMPDIR_EVAL/parse-criterion-init.err"; then
+  _pass "parseCriterion eval: init-plan runs against the prose-Evidence-line fixture"
+else
+  _fail "parseCriterion eval: init-plan failed: $(cat "$TMPDIR_EVAL/parse-criterion-init.out" "$TMPDIR_EVAL/parse-criterion-init.err")"
+fi
+
+if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/parse-criterion-assert.err"
+import { readFileSync } from 'node:fs';
+const data = JSON.parse(readFileSync('${PARSE_CRITERION_DIR}/acceptance.json', 'utf8'));
+const criterion = Array.isArray(data.criteria) ? data.criteria.find((c) => c.description && c.description.includes('Dashboard reviewed')) : null;
+if (!criterion) { process.stderr.write('no matching criterion found in acceptance.json: ' + JSON.stringify(data.criteria) + '\n'); process.exit(1); }
+if (!Array.isArray(criterion.evidence_refs) || criterion.evidence_refs.length !== 1) { process.stderr.write('expected exactly one evidence_refs entry, got: ' + JSON.stringify(criterion.evidence_refs) + '\n'); process.exit(1); }
+const ref = criterion.evidence_refs[0];
+if (ref.kind !== 'command') { process.stderr.write('expected kind:"command" (still a structured ref; only WHICH field carries the text differs), got: ' + ref.kind + '\n'); process.exit(1); }
+if (typeof ref.summary !== 'string' || !ref.summary.includes('manual review of the dashboard')) { process.stderr.write('prose text did not land in ref.summary: ' + JSON.stringify(ref) + '\n'); process.exit(1); }
+if (ref.excerpt !== undefined && ref.excerpt !== '') { process.stderr.write('ref.excerpt should be absent/empty for prose evidence (prose never belongs in excerpt), got: ' + JSON.stringify(ref.excerpt) + '\n'); process.exit(1); }
+NODEOF
+then
+  _pass "#270: parseCriterion (via the real init-plan parse path) routes a prose \"- Evidence:\" line into ref.summary with no excerpt, not a hand-mutated acceptance.json"
+else
+  _fail "#270: parseCriterion prose-routing assertion failed: $(cat "$TMPDIR_EVAL/parse-criterion-assert.err")"
+fi
+
+# ─── AC10: record-gate-claim --command with PROSE is rejected at record time ─────────────────
+if flow_agents_node "$WRITER" record-gate-claim "$COMPOSE_DIR" \
+  --actor compose-actor \
+  --status pass \
+  --summary "Manual review" \
+  --expectation merge-readiness \
+  --command "Manually verified the output looks correct." \
+  --timestamp "2026-07-05T09:11:00Z" >"$TMPDIR_EVAL/compose-gate-prose.out" 2>"$TMPDIR_EVAL/compose-gate-prose.err"; then
+  _fail "AC10 REGRESSION: record-gate-claim --command accepted prose instead of rejecting it at record time"
+elif grep -qi "not a runnable shell command" "$TMPDIR_EVAL/compose-gate-prose.out" "$TMPDIR_EVAL/compose-gate-prose.err"; then
+  _pass "AC10: record-gate-claim --command rejects a prose value at record time, with an actionable error"
+else
+  _fail "AC10: record-gate-claim --command prose rejection message was unexpected: $(cat "$TMPDIR_EVAL/compose-gate-prose.out" "$TMPDIR_EVAL/compose-gate-prose.err")"
+fi
+
+# ─── #270 CRITICAL/HIGH fix evals: forged-stamp negative + pre-cluster missing-stamp negative ──
+# Both mutate a FRESH COPY of the compose session's trust.bundle (never COMPOSE_DIR itself) so
+# these negative fixtures stay isolated from the compose-layer assertions above.
+
+# ─── Forged-stamp negative: hand-edit metadata.gate_claim.expectation_id to a nonexistent ─────
+# expects[] id. Any rebuild (record-critique) must die naming the stamp AND the claim id — never
+# silently fall through to matchExpectsEntry (the exact #270 CRITICAL/HIGH defect this closes).
+# Copy the WHOLE compose root (not just COMPOSE_DIR) — current.json / current/<actor>.json live
+# in the PARENT of the session dir, and resolveActiveFlowStep (hence sessionFlowId/flowRepoRoot in
+# buildTrustBundle) needs them to resolve the flow definition for stamp validation. Copying only
+# the session dir would silently make sessionFlowId resolve to null, which changes what's being
+# tested (the "no flow definition resolvable" edge case) rather than the forged-stamp case.
+FORGED_ROOT="$TMPDIR_EVAL/forged-stamp-root"
+cp -r "$COMPOSE_ROOT" "$FORGED_ROOT"
+FORGED_DIR="$FORGED_ROOT/$COMPOSE_SLUG"
+
+node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/forged-mutate.err"
+import { readFileSync, writeFileSync } from 'node:fs';
+const file = '${FORGED_DIR}/trust.bundle';
+const bundle = JSON.parse(readFileSync(file, 'utf8'));
+const claim = bundle.claims.find((c) => c.metadata && c.metadata.gate_claim && c.metadata.gate_claim.expectation_id === 'selected-work');
+if (!claim) { process.stderr.write('setup: selected-work gate claim not found to forge\n'); process.exit(1); }
+claim.metadata.gate_claim.expectation_id = 'nonexistent-expectation-id';
+writeFileSync(file, JSON.stringify(bundle, null, 2) + '\n');
+NODEOF
+
+if [[ -s "$TMPDIR_EVAL/forged-mutate.err" ]]; then
+  _fail "eval setup: forging metadata.gate_claim.expectation_id failed: $(cat "$TMPDIR_EVAL/forged-mutate.err")"
+fi
+
+if flow_agents_node "$WRITER" record-critique "$FORGED_DIR" \
+  --id forged-stamp-review \
+  --reviewer forged-stamp-tester \
+  --verdict pass \
+  --summary "Rebuild attempt against a forged gate_claim stamp" \
+  --timestamp "2026-07-05T09:12:00Z" >"$TMPDIR_EVAL/forged-critique.out" 2>"$TMPDIR_EVAL/forged-critique.err"; then
+  _fail "FORGED-STAMP REGRESSION: record-critique succeeded against a bundle with a forged metadata.gate_claim.expectation_id (silent re-typing fall-through, the #270 CRITICAL/HIGH defect)"
+elif grep -qi "forged or corrupt" "$TMPDIR_EVAL/forged-critique.out" "$TMPDIR_EVAL/forged-critique.err" \
+  && grep -q "nonexistent-expectation-id" "$TMPDIR_EVAL/forged-critique.out" "$TMPDIR_EVAL/forged-critique.err"; then
+  _pass "#270 CRITICAL/HIGH: a forged metadata.gate_claim stamp (nonexistent expectation_id) makes any rebuild die loudly, naming the stamp — never silently re-typed"
+else
+  _fail "#270 forged-stamp rejection message was unexpected: $(cat "$TMPDIR_EVAL/forged-critique.out" "$TMPDIR_EVAL/forged-critique.err")"
+fi
+
+# ─── Pre-cluster missing-stamp negative: strip metadata.gate_claim from a gate-claim-SHAPED ────
+# claim (origin:"check", check_kind:"external", kit-typed claimType) — mimicking the real
+# kontourai-flow-agents-303 bundle shape (a claim recorded before the gate_claim stamp existed).
+# Any rebuild must die with the re-record remedy, never silently re-type via matchExpectsEntry.
+PRECLUSTER_ROOT="$TMPDIR_EVAL/precluster-missing-stamp-root"
+cp -r "$COMPOSE_ROOT" "$PRECLUSTER_ROOT"
+PRECLUSTER_DIR="$PRECLUSTER_ROOT/$COMPOSE_SLUG"
+
+node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/precluster-mutate.err"
+import { readFileSync, writeFileSync } from 'node:fs';
+const file = '${PRECLUSTER_DIR}/trust.bundle';
+const bundle = JSON.parse(readFileSync(file, 'utf8'));
+const claim = bundle.claims.find((c) => c.metadata && c.metadata.gate_claim && c.metadata.gate_claim.expectation_id === 'implementation-plan');
+if (!claim) { process.stderr.write('setup: implementation-plan gate claim not found to strip\n'); process.exit(1); }
+delete claim.metadata.gate_claim;
+writeFileSync(file, JSON.stringify(bundle, null, 2) + '\n');
+NODEOF
+
+if [[ -s "$TMPDIR_EVAL/precluster-mutate.err" ]]; then
+  _fail "eval setup: stripping metadata.gate_claim failed: $(cat "$TMPDIR_EVAL/precluster-mutate.err")"
+fi
+
+if flow_agents_node "$WRITER" record-critique "$PRECLUSTER_DIR" \
+  --id precluster-review \
+  --reviewer precluster-tester \
+  --verdict pass \
+  --summary "Rebuild attempt against a pre-cluster-270 unstamped gate claim" \
+  --timestamp "2026-07-05T09:13:00Z" >"$TMPDIR_EVAL/precluster-critique.out" 2>"$TMPDIR_EVAL/precluster-critique.err"; then
+  _fail "PRE-CLUSTER-270 REGRESSION: record-critique succeeded against a bundle with an unstamped gate-claim-shaped claim (silent re-typing fall-through)"
+elif grep -qi "pre-cluster-270 gate claim" "$TMPDIR_EVAL/precluster-critique.out" "$TMPDIR_EVAL/precluster-critique.err" \
+  && grep -qi "re-record it (record-gate-claim) to regenerate" "$TMPDIR_EVAL/precluster-critique.out" "$TMPDIR_EVAL/precluster-critique.err"; then
+  _pass "#270 pre-cluster-270 missing-stamp: an unstamped gate-claim-shaped claim makes any rebuild die with the re-record remedy — never silently re-typed"
+else
+  _fail "#270 pre-cluster missing-stamp rejection message was unexpected: $(cat "$TMPDIR_EVAL/precluster-critique.out" "$TMPDIR_EVAL/precluster-critique.err")"
+fi
+
+# ─── #270 HIGH fix (iteration 3): reserve the "gate-claim-" check-id namespace ─────────────────
+# (a) reserved-prefix rejection via record-evidence --check-json (exit + message)
+if flow_agents_node "$WRITER" record-evidence "$COMPOSE_DIR" \
+  --verdict pass \
+  --check-json '{"id":"gate-claim-caller-supplied","kind":"external","status":"pass","summary":"A caller-chosen id that collides with the reserved gate-claim- prefix"}' \
+  --timestamp "2026-07-05T09:15:30Z" >"$TMPDIR_EVAL/reserved-prefix.out" 2>"$TMPDIR_EVAL/reserved-prefix.err"; then
+  _fail "#270 HIGH REGRESSION: record-evidence --check-json accepted a caller-supplied id starting with the reserved 'gate-claim-' prefix"
+elif grep -qi 'reserved for record-gate-claim' "$TMPDIR_EVAL/reserved-prefix.out" "$TMPDIR_EVAL/reserved-prefix.err" \
+  && grep -q 'gate-claim-caller-supplied' "$TMPDIR_EVAL/reserved-prefix.out" "$TMPDIR_EVAL/reserved-prefix.err"; then
+  _pass "#270 HIGH: record-evidence --check-json rejects a caller-supplied id starting with the reserved 'gate-claim-' prefix, naming the offending id"
+else
+  _fail "#270 HIGH: reserved-prefix rejection message was unexpected: $(cat "$TMPDIR_EVAL/reserved-prefix.out" "$TMPDIR_EVAL/reserved-prefix.err")"
+fi
+
+# Confirm record-check's --id is covered by the same guard (a second writer of caller-supplied ids).
+if flow_agents_node "$WRITER" record-check "$COMPOSE_DIR" --id "gate-claim-record-check-collision" -- true \
+  >"$TMPDIR_EVAL/reserved-prefix-record-check.out" 2>"$TMPDIR_EVAL/reserved-prefix-record-check.err"; then
+  _fail "#270 HIGH REGRESSION: record-check accepted a caller-supplied --id starting with the reserved 'gate-claim-' prefix"
+elif grep -qi 'reserved for record-gate-claim' "$TMPDIR_EVAL/reserved-prefix-record-check.out" "$TMPDIR_EVAL/reserved-prefix-record-check.err"; then
+  _pass "#270 HIGH: record-check --id is covered by the same reserved-prefix guard as record-evidence"
+else
+  _fail "#270 HIGH: record-check reserved-prefix rejection message was unexpected: $(cat "$TMPDIR_EVAL/reserved-prefix-record-check.out" "$TMPDIR_EVAL/reserved-prefix-record-check.err")"
+fi
+
+# Confirm record-gate-claim's OWN internally-constructed gate-claim-<id> is still accepted — the
+# guard must reject only CALLER-supplied ids on other writers, never record-gate-claim's own path.
+# (compose-gate1's earlier record-gate-claim call above already exercises and asserts this; this
+# is a targeted re-assertion scoped to the reserved-prefix fix itself.)
+if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/reserved-prefix-gate-claim-own.err"
+import { readFileSync } from 'node:fs';
+const bundle = JSON.parse(readFileSync('${COMPOSE_DIR}/trust.bundle', 'utf8'));
+const gateClaim = bundle.claims.find((c) => c.subjectId && c.subjectId.endsWith('/gate-claim-selected-work'));
+if (!gateClaim) { process.stderr.write('record-gate-claims own gate-claim-selected-work id was not found — its own reserved-prefix construction must still succeed\n'); process.exit(1); }
+if (!gateClaim.metadata || !gateClaim.metadata.gate_claim) { process.stderr.write('record-gate-claims own claim is missing its metadata.gate_claim stamp\n'); process.exit(1); }
+NODEOF
+then
+  _pass "#270 HIGH: record-gate-claim's own internally-constructed 'gate-claim-<id>' still succeeds (the guard applies only to caller-supplied ids on OTHER writers)"
+else
+  _fail "#270 HIGH: record-gate-claim's own id-construction regressed: $(cat "$TMPDIR_EVAL/reserved-prefix-gate-claim-own.err")"
+fi
+
+# (b) collision regression scenario end-to-end: the EXACT pre-cluster-false-positive collision —
+# a caller-chosen record-evidence check id starting with "gate-claim-" that would, absent this
+# fix, get declared-typed via matchExpectsEntry's P-d fallback (kit-typed, unstamped) and then be
+# misclassified as an unstamped pre-cluster-270 gate claim on the NEXT rebuild — is now rejected
+# AT RECORD TIME instead, in a FRESH session (isolated from COMPOSE_DIR) so no rebuild landmine
+# is ever created.
+COLLISION_ROOT="$TMPDIR_EVAL/collision-root"
+COLLISION_SLUG="collision-270"
+COLLISION_DIR="$COLLISION_ROOT/$COLLISION_SLUG"
+mkdir -p "$COLLISION_ROOT"
+
+flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$COLLISION_ROOT" \
+  --task-slug "$COLLISION_SLUG" \
+  --actor collision-actor \
+  --flow-id builder.build \
+  --title "Collision regression session" \
+  --source-request "Regression: gate-claim- id collision must die at record time, not rebuild time." \
+  --summary "Seed session for the collision regression eval." \
+  --criterion "Collision regression is caught at record time" \
+  --timestamp "2026-07-05T09:16:00Z" >"$TMPDIR_EVAL/collision-seed.out" 2>"$TMPDIR_EVAL/collision-seed.err"
+
+if flow_agents_node "$WRITER" record-evidence "$COLLISION_DIR" \
+  --verdict pass \
+  --check-json '{"id":"gate-claim-my-custom-check","kind":"external","status":"pass","summary":"A caller-chosen check id colliding with the reserved prefix, at the active pull-work step (kit-typed via matchExpectsEntry fallback)"}' \
+  --timestamp "2026-07-05T09:16:15Z" >"$TMPDIR_EVAL/collision-record.out" 2>"$TMPDIR_EVAL/collision-record.err"; then
+  _fail "#270 HIGH REGRESSION: the collision scenario's record-evidence call succeeded — this recreates the pre-cluster false-positive rebuild landmine"
+elif grep -qi 'reserved for record-gate-claim' "$TMPDIR_EVAL/collision-record.out" "$TMPDIR_EVAL/collision-record.err" \
+  && [[ ! -f "$COLLISION_DIR/trust.bundle" || ! $(node --input-type=module -e "
+import { readFileSync } from 'node:fs';
+const b = JSON.parse(readFileSync('${COLLISION_DIR}/trust.bundle', 'utf8'));
+process.stdout.write(String(b.claims.some((c) => c.subjectId && c.subjectId.endsWith('/gate-claim-my-custom-check'))));
+" 2>/dev/null) == "true" ]]; then
+  _pass "#270 HIGH: the collision scenario is rejected AT RECORD TIME (record-evidence), never lands in trust.bundle, and no rebuild landmine is created"
+else
+  _fail "#270 HIGH: collision regression assertion failed: $(cat "$TMPDIR_EVAL/collision-record.out" "$TMPDIR_EVAL/collision-record.err")"
+fi
+
+# Now prove a REBUILD against the (empty/unaffected) collision session succeeds cleanly — there is
+# no landmine left behind by the rejected record-evidence call above.
+if flow_agents_node "$WRITER" record-critique "$COLLISION_DIR" \
+  --id collision-rebuild-review \
+  --reviewer collision-tester \
+  --verdict pass \
+  --summary "Rebuild after the rejected collision write — must succeed, no landmine" \
+  --timestamp "2026-07-05T09:16:30Z" >"$TMPDIR_EVAL/collision-rebuild.out" 2>"$TMPDIR_EVAL/collision-rebuild.err"; then
+  _pass "#270 HIGH: a rebuild (record-critique) after the rejected collision write succeeds cleanly — no rebuild-time landmine"
+else
+  _fail "#270 HIGH REGRESSION: rebuild after the rejected collision write unexpectedly failed: $(cat "$TMPDIR_EVAL/collision-rebuild.out" "$TMPDIR_EVAL/collision-rebuild.err")"
+fi
+
+# ─── #270 MEDIUM fix (iteration 3): unresolvable FlowDefinition dies with the dedicated ────────
+# "cannot be loaded" message, never "forged or corrupt". Create a REAL stamped gate claim first
+# (real flow, real record-gate-claim), then break resolution by pointing active_flow_id at a
+# bogus flow id that cannot resolve under kits/ (mirrors the re-reviewer's approach of pointing
+# at an unresolvable kits/ path), in an ISOLATED fixture copied from a fresh session.
+UNRESOLVABLE_ROOT="$TMPDIR_EVAL/unresolvable-root"
+UNRESOLVABLE_SLUG="unresolvable-270"
+UNRESOLVABLE_DIR="$UNRESOLVABLE_ROOT/$UNRESOLVABLE_SLUG"
+mkdir -p "$UNRESOLVABLE_ROOT"
+
+flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$UNRESOLVABLE_ROOT" \
+  --task-slug "$UNRESOLVABLE_SLUG" \
+  --actor unresolvable-actor \
+  --flow-id builder.build \
+  --title "Unresolvable FlowDefinition regression" \
+  --source-request "Regression: an unresolvable FlowDefinition must die with the dedicated cannot-be-loaded message." \
+  --summary "Seed session with a REAL flow so a real stamped gate claim can be recorded." \
+  --criterion "Unresolvable FlowDefinition dies with the dedicated message" \
+  --timestamp "2026-07-05T09:17:00Z" >"$TMPDIR_EVAL/unresolvable-seed.out" 2>"$TMPDIR_EVAL/unresolvable-seed.err"
+
+if flow_agents_node "$WRITER" record-gate-claim "$UNRESOLVABLE_DIR" \
+  --actor unresolvable-actor \
+  --status pass \
+  --summary "Work item selected for unresolvable-flow-definition regression" \
+  --timestamp "2026-07-05T09:17:15Z" >"$TMPDIR_EVAL/unresolvable-gate-claim.out" 2>"$TMPDIR_EVAL/unresolvable-gate-claim.err"; then
+  _pass "#270 MEDIUM setup: real stamped gate claim recorded before breaking FlowDefinition resolution"
+else
+  _fail "#270 MEDIUM setup: record-gate-claim (real flow) failed: $(cat "$TMPDIR_EVAL/unresolvable-gate-claim.out" "$TMPDIR_EVAL/unresolvable-gate-claim.err")"
+fi
+
+# Break resolution: point BOTH the legacy and per-actor current-pointer files at a flow id with
+# no corresponding kits/<kit>/flows/<name>.flow.json file.
+node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/unresolvable-mutate.err"
+import { readFileSync, writeFileSync } from 'node:fs';
+for (const f of ['${UNRESOLVABLE_ROOT}/current.json', '${UNRESOLVABLE_ROOT}/current/unresolvable-actor.json']) {
+  const d = JSON.parse(readFileSync(f, 'utf8'));
+  d.active_flow_id = 'builder.bogus-nonexistent-flow-270';
+  writeFileSync(f, JSON.stringify(d, null, 2) + '\n');
+}
+NODEOF
+
+if [[ -s "$TMPDIR_EVAL/unresolvable-mutate.err" ]]; then
+  _fail "eval setup: pointing active_flow_id at a bogus flow id failed: $(cat "$TMPDIR_EVAL/unresolvable-mutate.err")"
+fi
+
+if flow_agents_node "$WRITER" record-critique "$UNRESOLVABLE_DIR" \
+  --id unresolvable-review \
+  --reviewer unresolvable-tester \
+  --verdict pass \
+  --summary "Rebuild attempt against an unresolvable FlowDefinition" \
+  --timestamp "2026-07-05T09:17:30Z" >"$TMPDIR_EVAL/unresolvable-critique.out" 2>"$TMPDIR_EVAL/unresolvable-critique.err"; then
+  _fail "#270 MEDIUM REGRESSION: record-critique succeeded against a stamped gate claim whose FlowDefinition cannot be loaded"
+elif grep -qi "cannot be loaded" "$TMPDIR_EVAL/unresolvable-critique.out" "$TMPDIR_EVAL/unresolvable-critique.err" \
+  && grep -qi "cannot validate the gate-claim stamp" "$TMPDIR_EVAL/unresolvable-critique.out" "$TMPDIR_EVAL/unresolvable-critique.err" \
+  && ! grep -qi "forged or corrupt" "$TMPDIR_EVAL/unresolvable-critique.out" "$TMPDIR_EVAL/unresolvable-critique.err"; then
+  _pass "#270 MEDIUM: an unresolvable FlowDefinition dies with the dedicated 'cannot be loaded' message, naming the flow id — NEVER the 'forged or corrupt' message"
+else
+  _fail "#270 MEDIUM: unresolvable-FlowDefinition rejection message was unexpected: $(cat "$TMPDIR_EVAL/unresolvable-critique.out" "$TMPDIR_EVAL/unresolvable-critique.err")"
+fi
+
+# ─── Mutation test (#270 HIGH reserved-prefix guard): temporarily disable normalizeCheck's ──────
+# reserved-"gate-claim-"-prefix rejection in a SCRATCH COPY of the compiled build/ output,
+# confirm the reserved-prefix fixture above now SUCCEEDS against that mutated binary (eval "goes
+# red" without the guard), then restore the original compiled file immediately. Proves the eval
+# is actually exercising this specific guard, not passing vacuously for an unrelated reason.
+DIST_SIDECAR="$ROOT/build/src/cli/workflow-sidecar.js"
+RESERVED_PREFIX_SCRATCH="$TMPDIR_EVAL/reserved-prefix-mutation-scratch"
+mkdir -p "$RESERVED_PREFIX_SCRATCH"
+
+if [[ -f "$DIST_SIDECAR" ]]; then
+  cp "$DIST_SIDECAR" "$RESERVED_PREFIX_SCRATCH/workflow-sidecar.orig.js"
+  node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/reserved-prefix-mutation-patch.err"
+import { readFileSync, writeFileSync } from 'node:fs';
+const file = '${RESERVED_PREFIX_SCRATCH}/workflow-sidecar.orig.js';
+let src = readFileSync(file, 'utf8');
+const needle = 'if (!allowGateClaimPrefix && typeof check.id === "string" && check.id.startsWith("gate-claim-"))';
+if (!src.includes(needle)) { process.stderr.write('mutation: reserved-prefix guard text not found — source pattern drifted, cannot mutation-test\n'); process.exit(1); }
+src = src.split(needle).join('if (false)');
+writeFileSync('${RESERVED_PREFIX_SCRATCH}/workflow-sidecar.mutated.js', src);
+NODEOF
+
+  if [[ -s "$TMPDIR_EVAL/reserved-prefix-mutation-patch.err" ]]; then
+    _fail "mutation-test setup failed (reserved-prefix guard source pattern did not match compiled output): $(cat "$TMPDIR_EVAL/reserved-prefix-mutation-patch.err")"
+  else
+    if node --check "$RESERVED_PREFIX_SCRATCH/workflow-sidecar.mutated.js" 2>"$TMPDIR_EVAL/reserved-prefix-mutation-syntax.err"; then
+      cp "$RESERVED_PREFIX_SCRATCH/workflow-sidecar.mutated.js" "$DIST_SIDECAR"
+
+      if flow_agents_node "$WRITER" record-evidence "$COMPOSE_DIR" \
+        --verdict pass \
+        --check-json '{"id":"gate-claim-mutation-test","kind":"external","status":"pass","summary":"Mutation-test: reserved-prefix guard disabled, must go red"}' \
+        --timestamp "2026-07-05T09:17:45Z" >"$TMPDIR_EVAL/reserved-prefix-mutation.out" 2>"$TMPDIR_EVAL/reserved-prefix-mutation.err"; then
+        _pass "mutation-test: with the reserved-prefix guard neutered, a caller-supplied 'gate-claim-' id now SUCCEEDS (eval correctly goes red without the guard, proving the eval exercises it)"
+      else
+        _fail "mutation-test: reserved-prefix fixture still rejected even with the guard neutered — the eval may not be exercising the intended guard: $(cat "$TMPDIR_EVAL/reserved-prefix-mutation.out" "$TMPDIR_EVAL/reserved-prefix-mutation.err")"
+      fi
+    else
+      _fail "mutation-test setup: mutated workflow-sidecar.js (reserved-prefix guard) failed a syntax check, refusing to run it: $(cat "$TMPDIR_EVAL/reserved-prefix-mutation-syntax.err")"
+    fi
+
+    # Restore the real compiled guard immediately — never leave the mutated binary in place — and
+    # re-run the reserved-prefix negative to confirm the restored binary rejects it again.
+    cp "$RESERVED_PREFIX_SCRATCH/workflow-sidecar.orig.js" "$DIST_SIDECAR"
+    if flow_agents_node "$WRITER" record-evidence "$COMPOSE_DIR" \
+      --verdict pass \
+      --check-json '{"id":"gate-claim-restore-check","kind":"external","status":"pass","summary":"Restore check: reserved-prefix guard must be back after mutation-test cleanup"}' \
+      --timestamp "2026-07-05T09:18:00Z" >"$TMPDIR_EVAL/reserved-prefix-restore.out" 2>"$TMPDIR_EVAL/reserved-prefix-restore.err"; then
+      _fail "mutation-test cleanup REGRESSION: the reserved-prefix guard did not come back after restoring the original compiled file"
+    else
+      _pass "mutation-test cleanup: the real compiled reserved-prefix guard is restored and rejects a caller-supplied 'gate-claim-' id again"
+    fi
+  fi
+else
+  _fail "mutation-test setup: could not locate the compiled build/src/cli/workflow-sidecar.js to mutate for the reserved-prefix guard (ran 'npm run build' first?)"
+fi
+
+# ─── Mutation test (forged-stamp guard): temporarily disable assertStampedGateClaimValid's ────
+# die() in a SCRATCH COPY of the compiled build/ output, confirm the forged-stamp fixture above
+# now SUCCEEDS against that mutated binary (eval "goes red" — i.e. would no longer catch the
+# defect — without the guard), then restore the original compiled file immediately. Proves the
+# eval is actually exercising this guard, not passing vacuously for an unrelated reason.
+MUTATION_SCRATCH="$TMPDIR_EVAL/mutation-scratch"
+mkdir -p "$MUTATION_SCRATCH"
+
+if [[ -f "$DIST_SIDECAR" ]]; then
+  cp "$DIST_SIDECAR" "$MUTATION_SCRATCH/workflow-sidecar.orig.js"
+  node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/mutation-patch.err"
+import { readFileSync, writeFileSync } from 'node:fs';
+const file = '${MUTATION_SCRATCH}/workflow-sidecar.orig.js';
+let src = readFileSync(file, 'utf8');
+// Neuter the stamp-tuple-mismatch check (assertStampedGateClaimValid's SECOND die call — the
+// mismatch guard, not the no-flow-definition guard) by short-circuiting 'const match = ...' to
+// an unconditional 'const match = true;' via a simple, exact single-line string replacement (no
+// regex, no unbalanced parens) so the mutated file stays syntactically valid.
+const matchNeedle = 'const match = allExpects.some((entry) => entry.gateExpects.some((exp) => exp.id === stamp.expectationId\n            && exp.bundle_claim.claimType === stamp.claimType\n            && exp.bundle_claim.subjectType === stamp.subjectType\n            && (stamp.stepId === null || stamp.stepId === entry.stepId)));';
+if (!src.includes(matchNeedle)) { process.stderr.write('mutation: assertStampedGateClaimValid match-check text not found — source pattern drifted, cannot mutation-test\n'); process.exit(1); }
+src = src.split(matchNeedle).join('const match = true;');
+// Neuter the pre-cluster-270 unstamped-guard's if() condition the same way — exact single-line
+// string replacement, no regex.
+const unstampedNeedle = 'if (gateClaimShapeUnstampedClaimId) {';
+if (!src.includes(unstampedNeedle)) { process.stderr.write('mutation: gateClaimShapeUnstampedClaimId guard text not found — source pattern drifted\n'); process.exit(1); }
+src = src.split(unstampedNeedle).join('if (false && gateClaimShapeUnstampedClaimId) {');
+writeFileSync('${MUTATION_SCRATCH}/workflow-sidecar.mutated.js', src);
+NODEOF
+
+  if [[ -s "$TMPDIR_EVAL/mutation-patch.err" ]]; then
+    _fail "mutation-test setup failed (guard source pattern did not match compiled output): $(cat "$TMPDIR_EVAL/mutation-patch.err")"
+  else
+    # Syntax-check the mutated file before swapping it in — a broken mutation must not corrupt
+    # the eval run itself.
+    if node --check "$MUTATION_SCRATCH/workflow-sidecar.mutated.js" 2>"$TMPDIR_EVAL/mutation-syntax.err"; then
+      cp "$MUTATION_SCRATCH/workflow-sidecar.mutated.js" "$DIST_SIDECAR"
+      # Copy the WHOLE root again (see the FORGED_ROOT/PRECLUSTER_ROOT comment above) — same
+      # current.json/current/<actor>.json resolution requirement applies here.
+      MUTATION_FORGED_ROOT="$TMPDIR_EVAL/mutation-forged-root"
+      cp -r "$FORGED_ROOT" "$MUTATION_FORGED_ROOT"
+      MUTATION_FORGED_DIR="$MUTATION_FORGED_ROOT/$COMPOSE_SLUG"
+      MUTATION_PRECLUSTER_ROOT="$TMPDIR_EVAL/mutation-precluster-root"
+      cp -r "$PRECLUSTER_ROOT" "$MUTATION_PRECLUSTER_ROOT"
+      MUTATION_PRECLUSTER_DIR="$MUTATION_PRECLUSTER_ROOT/$COMPOSE_SLUG"
+
+      if flow_agents_node "$WRITER" record-critique "$MUTATION_FORGED_DIR" \
+        --id mutation-forged-review --reviewer mutation-tester --verdict pass \
+        --summary "Mutation-test: forged-stamp guard disabled, must go red" \
+        --timestamp "2026-07-05T09:14:00Z" >"$TMPDIR_EVAL/mutation-forged.out" 2>"$TMPDIR_EVAL/mutation-forged.err"; then
+        _pass "mutation-test: with the stamp-mismatch guard neutered, the forged-stamp fixture now SUCCEEDS (eval correctly goes red without the guard, proving the guard is what the eval exercises)"
+      else
+        _fail "mutation-test: forged-stamp fixture still failed even with the guard neutered — the eval may not be exercising the intended guard: $(cat "$TMPDIR_EVAL/mutation-forged.out" "$TMPDIR_EVAL/mutation-forged.err")"
+      fi
+
+      if flow_agents_node "$WRITER" record-critique "$MUTATION_PRECLUSTER_DIR" \
+        --id mutation-precluster-review --reviewer mutation-tester --verdict pass \
+        --summary "Mutation-test: pre-cluster-270 guard disabled, must go red" \
+        --timestamp "2026-07-05T09:14:30Z" >"$TMPDIR_EVAL/mutation-precluster.out" 2>"$TMPDIR_EVAL/mutation-precluster.err"; then
+        _pass "mutation-test: with the pre-cluster-270 unstamped guard neutered, the missing-stamp fixture now SUCCEEDS (eval correctly goes red without the guard)"
+      else
+        _fail "mutation-test: pre-cluster missing-stamp fixture still failed even with the guard neutered: $(cat "$TMPDIR_EVAL/mutation-precluster.out" "$TMPDIR_EVAL/mutation-precluster.err")"
+      fi
+    else
+      _fail "mutation-test setup: mutated workflow-sidecar.js failed a syntax check, refusing to run it: $(cat "$TMPDIR_EVAL/mutation-syntax.err")"
+    fi
+
+    # Restore the real compiled guard immediately — never leave the mutated binary in place, and
+    # re-run BOTH negatives to confirm the restored binary rejects them again (guard is back).
+    cp "$MUTATION_SCRATCH/workflow-sidecar.orig.js" "$DIST_SIDECAR"
+    RESTORE_FORGED_ROOT="$TMPDIR_EVAL/restore-check-forged-root"
+    cp -r "$FORGED_ROOT" "$RESTORE_FORGED_ROOT"
+    RESTORE_FORGED_DIR="$RESTORE_FORGED_ROOT/$COMPOSE_SLUG"
+    if flow_agents_node "$WRITER" record-critique "$RESTORE_FORGED_DIR" \
+      --id restore-check-review --reviewer restore-check-tester --verdict pass \
+      --summary "Restore check: forged-stamp guard must be back after mutation-test cleanup" \
+      --timestamp "2026-07-05T09:15:00Z" >"$TMPDIR_EVAL/mutation-restore.out" 2>"$TMPDIR_EVAL/mutation-restore.err"; then
+      _fail "mutation-test cleanup REGRESSION: the forged-stamp guard did not come back after restoring the original compiled file"
+    else
+      _pass "mutation-test cleanup: the real compiled guard is restored and rejects the (already-forged) fixture again"
+    fi
+  fi
+else
+  _fail "mutation-test setup: could not locate the compiled build/src/cli/workflow-sidecar.js to mutate (ran 'npm run build' first?)"
+fi
+
+
 
 if [[ "$errors" -eq 0 ]]; then
   echo "Workflow sidecar writer integration passed."

@@ -213,6 +213,70 @@ export function resolveFlowStep(flowId: string, stepId: string, repoRoot: string
   return publicStep;
 }
 
+/**
+ * A single (stepId, gateId) → expects[] tuple, as part of the FULL enumeration of every gate in
+ * a FlowDefinition (across every step — see resolveAllFlowGateExpects below), not just the
+ * currently-active one.
+ */
+export type FlowGateExpectsEntry = {
+  stepId: string;
+  gateId: string;
+  gateExpects: GateExpectation[];
+};
+
+/**
+ * Enumerate the gate expects[] for EVERY step in a FlowDefinition (#270 CRITICAL/HIGH fix) —
+ * not just the currently-active step. This is what lets a stamped gate-claim's
+ * (expectation_id, claim_type, subject_type, step_id) tuple be validated against the FULL,
+ * declared shape of the flow, instead of only against whatever step happens to be active at
+ * validation time (which is a DIFFERENT, and usually wrong, question: the stamp names the step
+ * it was ORIGINALLY recorded at, which by design may not be the currently-active one — see
+ * buildTrustBundle's #270(a)/(c) step_id-freezing comments in workflow-sidecar.ts).
+ *
+ * Walks flowDef.steps[] (in declaration order) and resolves each step's gate via the same
+ * resolveFlowStepInternal used by resolveFlowStep/resolveActiveFlowStep — including the
+ * uses_flow composed-step case, so a gate that lives in a child FlowDefinition (e.g.
+ * builder.publish-learn's pr-open-gate, composed into builder.build's "pr-open" step) is
+ * enumerated too, exports-filtered exactly as a live resolution would be.
+ *
+ * Pure and synchronous — no throws, fail-open (returns []) on any error, mirroring every other
+ * resolver in this module.
+ *
+ * Callers MUST distinguish the two null-ish outcomes (#270 MEDIUM fix, iteration 3):
+ *   - `null`  → the FlowDefinition could not be LOADED at all (missing file, unreadable, invalid
+ *     JSON, or no `steps[]` array) — the caller has no basis to validate anything against this
+ *     flow and must fail closed with a dedicated "cannot be loaded" message, never the "stamp
+ *     does not match any expects[]" (forged/corrupt) message; those are different failure
+ *     classes with different remedies (a load failure means "fix/restore the FlowDefinition
+ *     file or the flowId", not "this stamp was forged").
+ *   - `[]`    → the FlowDefinition LOADED successfully but genuinely declares no steps with
+ *     matching gates (or no gates at all) — a real, if unusual, flow shape, not an error.
+ *
+ * @param flowId   e.g. "builder.build" — kitId is extracted as the prefix before the first ".".
+ * @param repoRoot Absolute path to the repository root (kits/ lives here).
+ *                 Honored only when FLOW_AGENTS_FLOW_DEFS_DIR is not set.
+ * @returns Every (stepId, gateId, gateExpects) tuple in the flow; `[]` when the flow loads but
+ *   declares no matching gates; `null` when the FlowDefinition cannot be loaded/parsed at all.
+ */
+export function resolveAllFlowGateExpects(flowId: string, repoRoot: string): FlowGateExpectsEntry[] | null {
+  const flowDef = readFlowDefinition(flowId, repoRoot);
+  if (!flowDef || typeof flowDef !== "object" || !Array.isArray(flowDef.steps)) return null;
+  const out: FlowGateExpectsEntry[] = [];
+  const seenGateIds = new Set<string>();
+  for (const step of flowDef.steps) {
+    if (!step || typeof step.id !== "string" || !step.id) continue;
+    const resolved = resolveFlowStepInternal(flowId, step.id, repoRoot, new Set<string>());
+    if (!resolved) continue;
+    // A gate can be reached by more than one step declaration in degenerate/duplicate step
+    // lists; de-dupe by gateId so callers never see the same expects[] entries twice.
+    const dedupeKey = `${resolved.gateId}`;
+    if (seenGateIds.has(dedupeKey)) continue;
+    seenGateIds.add(dedupeKey);
+    out.push({ stepId: resolved.stepId, gateId: resolved.gateId, gateExpects: resolved.gateExpects });
+  }
+  return out;
+}
+
 function expectationExportKeys(expectation: GateExpectation): string[] {
   const keys: string[] = [];
   if (typeof expectation.id === "string" && expectation.id) keys.push(expectation.id);

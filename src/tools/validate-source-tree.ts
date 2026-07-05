@@ -92,6 +92,7 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/lib/local-artifact-paths.js", { category: "shared hook library", requiredNeedles: ["flowAgentsArtifactRoot", "defaultArtifactRootForRead"] }],
   ["scripts/hooks/lib/patterns.sh", { category: "shared hook library", requiredNeedles: ["_detect_secrets"] }],
   ["scripts/hooks/lib/resolve-formatter.js", { category: "shared hook library", requiredNeedles: ["resolveFormatter"] }],
+  ["scripts/hooks/lib/runnable-command.js", { category: "shared hook library", requiredNeedles: ["isRunnableCommandText"] }],
 ]);
 const fixtureOwnerPolicies = new Map<string, { owners: string[]; classification: string }>([
   ["evals/fixtures/assignment-provider", { owners: ["evals/integration/test_assignment_provider_local_file.sh", "evals/integration/test_assignment_provider_github.sh", "evals/integration/test_pull_work_assignment_join.sh", "evals/integration/test_ensure_session_ownership_guard.sh"], classification: "AssignmentProvider local-file and GitHub render/status fixtures (#290); hostile-effective-state.json is the #291 ensure-session ownership guard's AC9 sanitization fixture" }],
@@ -130,6 +131,9 @@ const allowedPythonCommandFiles = [
   // as prose). These are literal recognizer tokens, NOT a flow-agents Python dependency — no
   // .py file is ever invoked — so the two byte-identical mirror copies are exempt here.
   /^(context\/)?scripts\/hooks\/stop-goal-fit\.js$/,
+  // #412: the recognizer allowlist itself now lives in scripts/hooks/lib/runnable-command.js
+  // (single source of truth), so the same literal-token exemption applies there too.
+  /^scripts\/hooks\/lib\/runnable-command\.js$/,
 ];
 
 function tryLoadJson(file: string, reporter: Reporter): any {

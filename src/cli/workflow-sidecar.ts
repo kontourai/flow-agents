@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
-import { resolveActiveFlowStep, resolveFlowFilePath, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
+import { resolveActiveFlowStep, resolveAllFlowGateExpects, resolveFlowFilePath, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 // #291 Wave 1 Task 1.1 exports: ensure-session's ownership guard reuses the EXACT same
 // assignment ⋈ liveness join / claim / supersede logic #290 already ships for the
@@ -544,6 +544,104 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
   // legacy-fallback current.json read; omitted, this is IDENTICAL to pre-#291 behavior.
   const activeStep: ActiveFlowStep | null = flowAgentsDir ? resolveActiveFlowStep(flowAgentsDir, actorKey) : null;
 
+  // #270 CRITICAL/HIGH fix: resolve the session's active_flow_id independent of whether the
+  // CURRENTLY-active step resolves — a stamped gate claim names the STEP IT WAS ORIGINALLY
+  // RECORDED AT (frozen in metadata.gate_claim.step_id), which is routinely a DIFFERENT step than
+  // whatever is active now. Validating the stamp against only the currently-active step's
+  // expects[] would reject every honest round-trip the moment the session advances past the step
+  // the gate claim was recorded at — the validation must be against the FULL flow definition
+  // (every step's gate expects[], via resolveAllFlowGateExpects), not just the active one.
+  const sessionFlowId: string | null = (() => {
+    if (!flowAgentsDir) return null;
+    try {
+      const pointer = loadCurrentPointerHelper().readCurrentPointer(flowAgentsDir, actorKey);
+      const payload = pointer.payload;
+      const fid = payload && typeof payload["active_flow_id"] === "string" ? payload["active_flow_id"] : null;
+      return fid && fid.length > 0 ? fid : null;
+    } catch {
+      return null;
+    }
+  })();
+  // repoRoot resolution mirrors resolveActiveFlowStep's own internal findRepoRoot(path.dirname(
+  // flowAgentsDir)) call exactly (flow-resolver.ts) — findRepoRootFromDir is this file's
+  // fallback-to-cwd equivalent of that unexported helper. NOTE (#270 MEDIUM fix, iteration 3):
+  // findRepoRootFromDir ALWAYS returns a truthy string (it falls back to process.cwd() — see
+  // findRepoRootFromDir's own doc comment above) whenever flowAgentsDir is set, so `flowRepoRoot`
+  // is only ever null when `!flowAgentsDir`. It can therefore never by itself signal a FlowDefinition
+  // load failure; that signal now comes from resolveAllFlowGateExpects's own null return (below).
+  const flowRepoRoot: string | null = flowAgentsDir ? findRepoRootFromDir(path.dirname(flowAgentsDir)) : null;
+  // Built lazily (only when at least one check actually carries a metadata.gate_claim stamp or
+  // gate-claim shape to validate) and cached across every check in this call's loop — the
+  // FlowDefinition file is read once per buildTrustBundle call, not once per claim.
+  //
+  // #270 MEDIUM fix (iteration 3): tri-state cache — `undefined` (not yet built), `null` (the
+  // FlowDefinition could not be loaded/parsed — see resolveAllFlowGateExpects's doc comment),
+  // or an array (loaded; possibly genuinely empty). This lets assertStampedGateClaimValid tell
+  // "cannot load the flow definition" apart from "loaded fine, tuple just doesn't match" — the
+  // previous code collapsed both into `[]`, which always failed the `.some()` match below and
+  // was misreported as "forged or corrupt" even when the real cause was an unloadable
+  // FlowDefinition (e.g. a bogus/renamed active_flow_id, or a `kits/` path that no longer
+  // resolves) — a `!flowRepoRoot` check can never catch this because flowRepoRoot is always
+  // truthy here (see the note above), so that check was dead code against this failure mode.
+  let _allGateExpectsCache: import("../lib/flow-resolver.js").FlowGateExpectsEntry[] | null | undefined = undefined;
+  const allGateExpectsForSession = (): import("../lib/flow-resolver.js").FlowGateExpectsEntry[] | null => {
+    if (_allGateExpectsCache !== undefined) return _allGateExpectsCache;
+    _allGateExpectsCache = (sessionFlowId && flowRepoRoot) ? resolveAllFlowGateExpects(sessionFlowId, flowRepoRoot) : null;
+    return _allGateExpectsCache;
+  };
+  /**
+   * Validate a RESTORED metadata.gate_claim stamp's (expectation_id, claim_type, subject_type,
+   * step_id) tuple against the session's FULL flow definition (every step's gate expects[], not
+   * just the currently-active step). This is the honest round-trip check: a claim recorded by
+   * record-gate-claim/buildTrustBundle can only ever carry a tuple that matches some real
+   * expects[] entry, because that is the only place the stamp is ever written (see the
+   * declaredMetadata.gate_claim assembly below). A tuple that does NOT match a real expectation is
+   * either FORGED (a hand-edited/attacker-supplied metadata.gate_claim) or CORRUPT — never a
+   * legitimate state this code can produce — so it dies loudly naming the claim id and the
+   * invalid stamp. It must NEVER fall through to matchExpectsEntry: that silent fall-through
+   * IS the re-typing bug this fix closes (a forged/corrupt stamp would otherwise get a fresh,
+   * heuristic-derived typing instead of being rejected).
+   *
+   * Accepted residual (#270, documented not fixed — iteration 3): this check validates
+   * STRUCTURAL conformance of the stamp's tuple against the flow definition's declared
+   * expects[] shape — it does not (and cannot, at this layer) verify WHO produced the stamp. A
+   * stamp that reuses a REAL (expectation_id, claim_type, subject_type, step_id) tuple copied
+   * from a legitimately-earned claim will PASS this validation, because it is, structurally,
+   * indistinguishable from an honest one. This is an accepted floor equal to the pre-existing
+   * trust boundary: any local process with filesystem access to this session already has an
+   * equivalent capability by invoking record-gate-claim directly. This validator closes the
+   * STRICTLY WORSE case — a forged tuple that does NOT correspond to any real expects[] entry,
+   * or a stamp silently re-typed via matchExpectsEntry's heuristic fallback — not general
+   * authorship/provenance binding. Provenance binding (e.g. cryptographically tying a stamp to
+   * the actor/process that recorded it) is future work; see issue #270's review thread.
+   *
+   * #270 MEDIUM fix (iteration 3): a DIFFERENT failure class — the FlowDefinition genuinely
+   * cannot be loaded/parsed (missing kits/ file, unreadable, invalid JSON, or a since-renamed/
+   * bogus active_flow_id) — must NEVER be reported as "forged or corrupt"; that message asserts
+   * the stamp itself is untrustworthy, which is not what happened here. This case dies with its
+   * own dedicated, distinctly-worded message instead.
+   */
+  function assertStampedGateClaimValid(claimId: string, stamp: { expectationId: string; claimType: string; subjectType: string; stepId: string | null }): void {
+    if (!sessionFlowId) {
+      die(`buildTrustBundle: claim '${claimId}' carries a metadata.gate_claim stamp (expectation_id='${stamp.expectationId}') but no flow definition is resolvable for this session (no active_flow_id) — a stamped gate claim cannot be validated without the flow definition it was recorded against. This is either a legacy non-flow session or a missing --flow-id; re-record the gate claim inside a session with a resolvable --flow-id.`);
+    }
+    const allExpects = allGateExpectsForSession();
+    if (allExpects === null) {
+      die(`buildTrustBundle: claim '${claimId}' carries a metadata.gate_claim stamp (expectation_id='${stamp.expectationId}') naming flow '${sessionFlowId}', but FlowDefinition '${sessionFlowId}' cannot be loaded — cannot validate the gate-claim stamp. This is a load/parse failure (missing FlowDefinition file, unreadable, invalid JSON, or a renamed/bogus active_flow_id) — never treat this as a forged stamp. Restore or correct the '${sessionFlowId}' FlowDefinition (or the session's active_flow_id) before this claim can be validated.`);
+    }
+    const match = allExpects.some((entry) =>
+      entry.gateExpects.some((exp) =>
+        exp.id === stamp.expectationId
+        && exp.bundle_claim.claimType === stamp.claimType
+        && exp.bundle_claim.subjectType === stamp.subjectType
+        && (stamp.stepId === null || stamp.stepId === entry.stepId),
+      ),
+    );
+    if (!match) {
+      die(`buildTrustBundle: claim '${claimId}' carries a metadata.gate_claim stamp that does not match any expects[] entry declared in the '${sessionFlowId}' flow definition (expectation_id='${stamp.expectationId}', claim_type='${stamp.claimType}', subject_type='${stamp.subjectType}', step_id='${stamp.stepId ?? "<none>"}'). This stamp is forged or corrupt — it can never legitimately fail validation, since it is only ever written by this same code against a real expects[] entry. Refusing to trust it; never silently re-typing via matchExpectsEntry.`);
+    }
+  }
+
   const claims: AnyObj[] = [];
   const evidenceItems: AnyObj[] = [];
   const events: AnyObj[] = [];
@@ -706,11 +804,58 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     // (workflow-artifact-cleanup-audit) and validators can detect the promotion claim without a
     // new manifest entry. It rides alongside any waiver in a single merged metadata object.
     const promotionMeta = (check._promotion && typeof check._promotion === "object") ? check._promotion as AnyObj : null;
+    // #298: artifact_refs/standard_refs are validated on input by normalizeCheck but were
+    // previously never persisted onto the claim — silently lost on the very first write, not
+    // just on round-trip. Stamp them onto claim.metadata (additive, mirrors waiver/promotion
+    // above) so checksFromBundle can restore them for every subsequent writer.
+    const artifactRefsMeta = Array.isArray(check.artifact_refs) && check.artifact_refs.length > 0 ? check.artifact_refs : null;
+    const standardRefsMeta = Array.isArray(check.standard_refs) && check.standard_refs.length > 0 ? check.standard_refs : null;
+    // #270/#380 MEDIUM fix: record-check's captured-output sha256 digest (see recordCheck's
+    // outputSha256 computation) — hash ONLY, never the raw output text, so this is secret-safe by
+    // construction even though trust.bundle is often committed/shared. Stamped onto
+    // claim.metadata (additive, mirrors artifact_refs/standard_refs above) so checksFromBundle can
+    // restore it for every subsequent writer, and so it survives any later rebuild.
+    // NOTE (#270 LOW fix, iteration 3): this digest is over the CLAMPED capture (recordCheck's
+    // clampOutput, first RECORD_CHECK_MAX_OUTPUT / 64 KiB of combined stdout+stderr), not the full
+    // raw command output — a command producing >64KiB of output has its digest computed only over
+    // the retained prefix, so two runs whose outputs diverge only past the 64KiB boundary hash
+    // identically.
+    const outputDigestMeta = typeof check._output_sha256 === "string" && check._output_sha256.length > 0
+      ? { algorithm: "sha256", hex: check._output_sha256 }
+      : null;
+    // #270(a)/(c): a gate claim's declared claimType/subjectType, once resolved (either freshly
+    // via matchExpectsEntry below, or restored from a prior write's metadata.gate_claim stamp by
+    // checksFromBundle), is stamped here so it is frozen at record time — a later bundle rebuild
+    // (record-evidence/record-critique/record-learning) must never re-derive it from whatever
+    // step happens to be active THEN. See the matchExpectsEntry call site immediately below.
+    const gateClaimExpectationId = typeof check._gate_claim_expectation_id === "string" ? check._gate_claim_expectation_id : null;
+    const gateClaimDeclaredType = typeof check._gate_claim_declared_type === "string" ? check._gate_claim_declared_type : null;
+    const gateClaimDeclaredSubject = typeof check._gate_claim_declared_subject === "string" ? check._gate_claim_declared_subject : null;
+    const gateClaimDeclaredStepId = typeof check._gate_claim_declared_step_id === "string" ? check._gate_claim_declared_step_id : null;
+    // #270 CRITICAL/HIGH fix: checksFromBundle stamps this when it read a claim that is
+    // gate-claim-SHAPED (origin:"check", check_kind:"external", kit-typed claimType) but carries
+    // NO metadata.gate_claim stamp — a claim this code could not have produced without also
+    // writing the stamp, so it predates cluster #270/#344. Die loudly with the same remedy
+    // pattern requireStampedClaim already uses elsewhere in this file, instead of silently
+    // falling through to matchExpectsEntry (which would re-derive a FRESH, possibly-wrong typing
+    // for what is actually a previously-recorded, now-untraceable gate claim — the re-typing bug).
+    const gateClaimShapeUnstampedClaimId = typeof check._gate_claim_shape_unstamped_claim_id === "string" ? check._gate_claim_shape_unstamped_claim_id : null;
+    if (gateClaimShapeUnstampedClaimId) {
+      die(`pre-cluster-270 gate claim '${gateClaimShapeUnstampedClaimId}' has no metadata.gate_claim stamp and cannot be re-typed authoritatively — re-record it (record-gate-claim) to regenerate.`);
+    }
     // #268: stamp a stable origin discriminator so checksFromBundle / critiquesFromBundle can
     // distinguish check vs critique vs acceptance claims across round-trips even under --flow-id,
     // where all three collapse onto the same declared claimType (and a command-less critique claim
     // would otherwise be re-absorbed as a test_output check → permanent [not-run] divergence).
-    const claimMetadata: AnyObj = { origin: "check", check_kind: String(check.kind ?? "external"), ...(waiver ? { waiver } : {}), ...(promotionMeta ? { promotion: promotionMeta } : {}) };
+    const claimMetadata: AnyObj = {
+      origin: "check",
+      check_kind: String(check.kind ?? "external"),
+      ...(waiver ? { waiver } : {}),
+      ...(promotionMeta ? { promotion: promotionMeta } : {}),
+      ...(artifactRefsMeta ? { artifact_refs: artifactRefsMeta } : {}),
+      ...(standardRefsMeta ? { standard_refs: standardRefsMeta } : {}),
+      ...(outputDigestMeta ? { output_digest: outputDigestMeta } : {}),
+    };
 
     const claimEvents: AnyObj[] = [];
     if (evStatus) {
@@ -734,11 +879,47 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
 
     // P-d: declared-only when active flow/step present (shadow retired); no-flow path unchanged.
     // When record-gate-claim sets _gate_claim_expectation_id, pass it for exact lookup (ADR 0016 P-d Increment 2).
-    const declared = matchExpectsEntry("check", check.kind, typeof check._gate_claim_expectation_id === "string" ? check._gate_claim_expectation_id : undefined);
+    // #270(c): a REBUILD of a previously-recorded gate claim (both the expectation id AND its
+    // originally-declared claimType/subjectType round-tripped via checksFromBundle's
+    // metadata.gate_claim restoration) uses the STAMPED typing directly instead of re-resolving
+    // matchExpectsEntry against whatever step is active NOW — that re-resolution is the exact
+    // defect (a claim recorded at step N silently re-typed as step N+1's claim on rebuild).
+    // matchExpectsEntry is still the resolver for the FIRST write (no prior stamp to trust).
+    //
+    // #270 CRITICAL/HIGH fix: a RESTORED stamp (gateClaimDeclaredType/gateClaimDeclaredSubject
+    // both present — meaning this is a REBUILD reading back a prior write's metadata.gate_claim,
+    // not a fresh record-gate-claim call, which only ever sets gateClaimExpectationId) must be
+    // VALIDATED against the session's full flow definition before being trusted — see
+    // assertStampedGateClaimValid above. A stamp that fails validation dies loudly; it must NEVER
+    // silently fall through to matchExpectsEntry (that fall-through was the exact #270 defect:
+    // ANY invalid/forged/corrupt stamp got silently re-typed by the heuristic matcher instead of
+    // being rejected). A FRESH write (only gateClaimExpectationId set, no declared type/subject
+    // yet) has no stamp to validate — matchExpectsEntry is still the correct, and only, resolver
+    // for that case, exactly as before.
+    if (gateClaimExpectationId && gateClaimDeclaredType && gateClaimDeclaredSubject) {
+      assertStampedGateClaimValid(claimId, {
+        expectationId: gateClaimExpectationId,
+        claimType: gateClaimDeclaredType,
+        subjectType: gateClaimDeclaredSubject,
+        stepId: gateClaimDeclaredStepId,
+      });
+    }
+    const declared = (gateClaimExpectationId && gateClaimDeclaredType && gateClaimDeclaredSubject)
+      ? { claimType: gateClaimDeclaredType, subjectType: gateClaimDeclaredSubject }
+      : matchExpectsEntry("check", check.kind, gateClaimExpectationId ?? undefined);
     if (declared) {
       // Declared kit-typed claim only — no legacy shadow (ADR 0016 P-d).
       const declaredPolicy = ensurePolicy(declared.claimType, "high", [evClass.evidenceType]);
-      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, ...(claimMetadata ? { metadata: claimMetadata } : {}) };
+      // Freeze the resolved typing (fresh or restored) into metadata.gate_claim so it survives
+      // any subsequent rebuild regardless of the then-active step (#270a/c).
+      // step_id prefers the ORIGINALLY-recorded step (restored from a prior stamp) on a
+      // rebuild that has no active flow step of its own; only a genuinely first write (no
+      // restored stamp) takes the currently-active step's id.
+      const declaredStepId = gateClaimDeclaredStepId ?? (activeStep ? activeStep.stepId : null);
+      const declaredMetadata: AnyObj = gateClaimExpectationId
+        ? { ...claimMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId } }
+        : claimMetadata;
+      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, ...(declaredMetadata ? { metadata: declaredMetadata } : {}) };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
       claims.push({ ...declaredClaimObj, status: declaredStatus });
     } else {
@@ -1090,7 +1271,23 @@ function parseCriterion(line: string, index: number): AnyObj {
   const evidence = m?.[1]?.trim().replace(/\.$/, "");
   if (m) text = text.slice(0, m.index).trim().replace(/\.$/, "");
   const item: AnyObj = { id: slugify(text, `criterion-${index + 1}`), description: text, status: "pending" };
-  if (evidence) item.evidence_refs = [evidenceRef("command", { excerpt: evidence })];
+  // #412 (AC8 interaction, planning-contract.md line ~46/84): the "- Evidence: <...>" Markdown
+  // field is contractually a "test, command, screenshot, dashboard, doc, CI, or manual check" —
+  // NOT always a runnable command. Unconditionally synthesizing kind:"command" with the raw text
+  // in `excerpt` for EVERY Evidence line (the pre-existing behavior here) was already
+  // contract-incorrect for prose evidence; it is now also a hard failure at record time
+  // (validateAcceptanceEvidenceRefs's new runnability rejection targets kind:"command"'s
+  // excerpt/url), so fixing the classification here is required, not optional polish. Use the
+  // SAME isRunnableCommandText heuristic the record-time rejection itself uses (single-sourced):
+  // literally-runnable text goes in `excerpt` (reconcilable, execution.label-eligible); anything
+  // else (prose, or ensure-session's own "pending" scaffold placeholder) goes in `summary`
+  // instead (never validated for runnability, never executed) — still kind:"command" (a
+  // structured ref is still produced either way; only WHICH field carries the text changes),
+  // per the contract's own "prose belongs in ref.summary" rule.
+  if (evidence) {
+    const { isRunnableCommandText } = loadRunnableCommandHelper();
+    item.evidence_refs = [evidenceRef("command", isRunnableCommandText(evidence) ? { excerpt: evidence } : { summary: evidence })];
+  }
   return item;
 }
 function artifactDirFrom(value: string): string { return path.extname(value) ? path.dirname(value) : value; }
@@ -1209,6 +1406,20 @@ function loadCurrentPointerHelper(): {
     readCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: AnyObj | null; source: "per-actor" | "legacy" | "none"; file: string | null };
     writePerActorCurrent: (flowAgentsDir: string, actorKey: string, payload: AnyObj) => void;
   };
+}
+
+/**
+ * #412: delegate to the shared pure-CJS runnable-command-text heuristic
+ * (scripts/hooks/lib/runnable-command.js), mirroring the createRequire idiom used by
+ * loadCurrentPointerHelper()/loadActorIdentityHelper() above. Single-sources the heuristic
+ * between stop-goal-fit.js's Stop-time backstop and this file's record-time rejection
+ * (validateAcceptanceEvidenceRefs, recordGateClaim --command, recordCheck --command) — see
+ * AC9.
+ */
+function loadRunnableCommandHelper(): { isRunnableCommandText: (text: string) => boolean } {
+  const _req = createRequire(import.meta.url);
+  const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/runnable-command.js");
+  return _req(helperPath) as { isRunnableCommandText: (text: string) => boolean };
 }
 
 /**
@@ -1724,9 +1935,22 @@ export function normalizeEvidenceRefs(raw: unknown, label: string): AnyObj[] {
     return validateEvidenceRef({ ...ref as AnyObj }, label);
   });
 }
-export function normalizeCheck(raw: AnyObj): AnyObj {
+// #270 HIGH fix (iteration 3): the `gate-claim-` check-id prefix is RESERVED for
+// record-gate-claim's own internally-constructed ids (`id: \`gate-claim-${checkId}\`` — see
+// recordGateClaim below). Every OTHER writer of check ids (record-evidence --check-json,
+// record-check, dogfood-pass --check-json) flows through this same normalizeCheck, and until
+// this fix any of them could ALSO hand-supply an id starting with "gate-claim-". That collision
+// silently satisfies the id-shape half of gateClaimShapeUnstampedId's four-signal detector (see
+// its comment above) without ever having gone through record-gate-claim, so a later rebuild
+// misclassifies the caller's check as an unstamped pre-cluster-270 gate claim and dies, losing
+// the write. Rejecting the prefix HERE, at record time, for every caller-supplied id makes the
+// id-shape signal sound again: only record-gate-claim's own path can ever produce that shape.
+// record-gate-claim opts in via allowGateClaimPrefix=true since it is the sole legitimate
+// producer of that id shape; every other caller uses the default (reject).
+export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false): AnyObj {
   const check = { ...raw };
   if (!check.id || !check.kind || !check.status || !check.summary) die("check requires id, kind, status, and summary");
+  if (!allowGateClaimPrefix && typeof check.id === "string" && check.id.startsWith("gate-claim-")) die(`check id "${check.id}" starts with the reserved "gate-claim-" prefix — that namespace is reserved for record-gate-claim's own generated ids. Choose a different --id (or omit --id to let the check derive one from its command/summary).`);
     if (!checkKinds.has(check.kind)) die("kind must be one of: build, types, lint, test, command, security, diff, browser, runtime, policy, external");
   if (!checkStatuses.has(check.status)) die("status must be one of: pass, fail, not_verified, skip");
   if (Array.isArray(check.standard_refs)) for (const ref of check.standard_refs) if (!["junit", "sarif", "coverage", "veritas"].includes(ref.standard)) die("standard must be one of");
@@ -1845,13 +2069,44 @@ function surfaceCheckFromArtifact(file: string, index: number): AnyObj {
   return { id: `surface-trust-${index + 1}`, kind: "policy", status: ref.status, summary: ref.summary, surface_trust_refs: [ref] };
 }
 
-function validateAcceptanceEvidenceRefs(dir: string): void {
+/**
+ * #270 MEDIUM security fix: a `kind:"command"` evidence_refs entry whose command source is
+ * genuinely non-runnable-by-design (e.g. a screenshot/dashboard reference the record-time
+ * heuristic misclassifies) previously had NO escape hatch — this validator's die() was an
+ * unconditional lockout. Mirrors --skip-ownership-guard's existing pattern in this file exactly:
+ * a named, logged (never silent) bypass flag, not a silent fallback. `--skip-evidence-ref-
+ * runnability-guard` is intentionally verbose/unambiguous so it is never reached for
+ * accidentally — the die() message itself names the concrete remediations FIRST (move the prose
+ * to ref.summary, or reclassify as kind:"external"/"artifact"), so the bypass is a last resort,
+ * not the first thing an agent reaches for.
+ */
+function validateAcceptanceEvidenceRefs(dir: string, p?: ReturnType<typeof parseArgs>): void {
+  if (p?.flags.has("skip-evidence-ref-runnability-guard")) {
+    process.stderr.write("[record-evidence] evidence-ref runnability guard skipped via --skip-evidence-ref-runnability-guard\n");
+    return;
+  }
   const file = path.join(dir, "acceptance.json");
   if (!fs.existsSync(file)) return;
   const data = loadJson(file);
   if (!Array.isArray(data.criteria)) return;
+  const { isRunnableCommandText } = loadRunnableCommandHelper();
   data.criteria.forEach((criterion: AnyObj, index: number) => {
-    if (criterion.evidence_refs !== undefined) normalizeEvidenceRefs(criterion.evidence_refs, `acceptance.criteria[${index}].evidence_refs`);
+    if (criterion.evidence_refs === undefined) return;
+    const refs = normalizeEvidenceRefs(criterion.evidence_refs, `acceptance.criteria[${index}].evidence_refs`);
+    // #412 (AC8): a kind:"command" ref's command source (excerpt, falling back to url when that
+    // is where the command string lives) must be a literally runnable shell command, not prose
+    // describing a manual verification step — reject at RECORD time instead of letting it reach
+    // the Stop-hook backstop (stop-goal-fit.js's bundleClaimedPassCommandChecks section B), which
+    // would otherwise spawn `bash -lc "<a sentence>"` and misreport the resulting shell error as
+    // a caught false-completion. Prose belongs in `summary` (never executed).
+    refs.forEach((ref: AnyObj, refIndex: number) => {
+      if (ref.kind !== "command") return;
+      const commandSource = hasNonEmptyString(ref.excerpt) ? ref.excerpt : (hasNonEmptyString(ref.url) ? ref.url : "");
+      if (!commandSource) return; // command refs may carry only `summary` — nothing to validate
+      if (!isRunnableCommandText(commandSource)) {
+        die(`acceptance.criteria[${index}].evidence_refs[${refIndex}]: kind:"command" ref's command text is not a runnable shell command: "${commandSource}" — remediate by either (1) moving the prose to ref.summary (never executed) and dropping/emptying ref.excerpt/ref.url, or (2) reclassifying this ref as kind:"external" (session-local attestation) or kind:"artifact" (a file/screenshot/dashboard reference) instead of kind:"command". As a last resort, --skip-evidence-ref-runnability-guard bypasses this check (logged, not silent).`);
+      }
+    });
   });
 }
 export function writeState(dir: string, slug: string, status: string, phase: string, timestamp: string, summary: string, next = "continue"): void {
@@ -1917,6 +2172,82 @@ function checksFromBundle(dir: string): AnyObj[] {
     const md = claim.metadata as AnyObj;
     return md && typeof md === "object" && md.waiver && typeof md.waiver === "object" ? md.waiver as AnyObj : undefined;
   };
+  // #298: read side of the artifact_refs/standard_refs stamp (write side: buildTrustBundle's
+  // claimMetadata.artifact_refs/.standard_refs, above). Previously these were validated on input
+  // but never persisted at all — restoring them here is what makes them round-trip through a
+  // second writer's rebuild instead of vanishing on the very first write.
+  const refsOf = (claim: AnyObj): { artifact_refs?: AnyObj[]; standard_refs?: AnyObj[] } => {
+    const md = claim.metadata as AnyObj;
+    if (!md || typeof md !== "object") return {};
+    const out: { artifact_refs?: AnyObj[]; standard_refs?: AnyObj[] } = {};
+    if (Array.isArray(md.artifact_refs) && md.artifact_refs.length > 0) out.artifact_refs = md.artifact_refs;
+    if (Array.isArray(md.standard_refs) && md.standard_refs.length > 0) out.standard_refs = md.standard_refs;
+    return out;
+  };
+  // #270/#380: read side of the record-check output-digest stamp (write side: buildTrustBundle's
+  // claimMetadata.output_digest, above). Restoring it here is what makes the digest survive a
+  // subsequent writer's rebuild instead of vanishing on the very next record-evidence/
+  // record-critique/record-learning call.
+  const outputSha256Of = (claim: AnyObj): string | undefined => {
+    const md = claim.metadata as AnyObj;
+    const od = md && typeof md === "object" ? md.output_digest as AnyObj : undefined;
+    return od && typeof od === "object" && od.algorithm === "sha256" && typeof od.hex === "string" && od.hex.length > 0 ? od.hex : undefined;
+  };
+  // #270(a)/(c): read side of the gate_claim stamp (write side: buildTrustBundle's
+  // claimMetadata.gate_claim, above). Restoring expectation_id/claim_type/subject_type/step_id
+  // is what lets a REBUILD (record-evidence/record-critique/record-learning, after the recorded
+  // gate claim) recognize this as a previously-typed gate claim and reuse its frozen typing
+  // instead of re-deriving via matchExpectsEntry against whatever step is active at rebuild time.
+  const gateClaimOf = (claim: AnyObj): AnyObj | undefined => {
+    const md = claim.metadata as AnyObj;
+    return md && typeof md === "object" && md.gate_claim && typeof md.gate_claim === "object" ? md.gate_claim as AnyObj : undefined;
+  };
+  const applyGateClaimStamp = (check: AnyObj, claim: AnyObj): void => {
+    const gc = gateClaimOf(claim);
+    if (!gc) return;
+    if (typeof gc.expectation_id === "string") check._gate_claim_expectation_id = gc.expectation_id;
+    if (typeof gc.claim_type === "string") check._gate_claim_declared_type = gc.claim_type;
+    if (typeof gc.subject_type === "string") check._gate_claim_declared_subject = gc.subject_type;
+    if (typeof gc.step_id === "string") check._gate_claim_declared_step_id = gc.step_id;
+  };
+  // #270 CRITICAL/HIGH fix: a claim that is gate-claim-SHAPED but carries NO metadata.gate_claim
+  // stamp predates this cluster (#270/#344): buildTrustBundle could not have produced this shape
+  // without ALSO writing the stamp, once the stamping code shipped, EXCEPT for one legitimate,
+  // longstanding case that must NOT be flagged: a plain record-evidence check (kind:"external" or
+  // otherwise) that simply happens to auto-match a declared kit-typed claim via matchExpectsEntry's
+  // existing P-d fallback (ADR 0016) while a flow step is active — that path has ALWAYS existed,
+  // never goes through record-gate-claim, and correctly has no gate_claim stamp (there is no
+  // expectation id to freeze; matchExpectsEntry's heuristic result is expected to re-derive on
+  // every rebuild for a plain check). The ONLY structurally reliable signal that a claim was
+  // ACTUALLY produced by record-gate-claim (as opposed to a plain check that merely resembles one)
+  // is record-gate-claim's own check-id-generation convention: `id: \`gate-claim-${checkId}\``
+  // (see recordGateClaim) — no other producer in this file ever creates that id shape. Requiring
+  // ALL FOUR signals (origin:"check", check_kind:"external", a kit-typed claimType — i.e. does NOT
+  // start with "workflow." — AND a subjectId whose last path segment starts with "gate-claim-")
+  // narrows detection to exactly the pre-cluster-270 defect class, without misclassifying an
+  // ordinary declared check. Detected here (not in buildTrustBundle) because the claim's OWN
+  // claimType/origin/check_kind/subjectId — the fields the detection needs — live on the bundle
+  // claim, not on the reconstructed `check` object; buildTrustBundle only ever sees the `check`,
+  // so the detection result is threaded through as a stamp on the check object itself, exactly
+  // like every other gate_claim field above. buildTrustBundle's job is then only to die() loudly
+  // on this stamp — never to re-derive or silently re-type it (that silent re-typing IS the
+  // #268/#270 defect class).
+  const gateClaimShapeUnstampedId = (claim: AnyObj): string | null => {
+    if (claimOrigin(claim) !== "check") return null;
+    const md = (claim.metadata && typeof claim.metadata === "object") ? claim.metadata as AnyObj : {};
+    if (md.check_kind !== "external") return null;
+    const claimType = typeof claim.claimType === "string" ? claim.claimType : "";
+    if (!claimType || claimType.startsWith("workflow.")) return null;
+    const subjectId = typeof claim.subjectId === "string" ? claim.subjectId : "";
+    const lastSegment = subjectId.split("/").pop() ?? "";
+    if (!lastSegment.startsWith("gate-claim-")) return null; // not record-gate-claim-shaped at all
+    if (gateClaimOf(claim)) return null; // properly stamped — not this defect class
+    return typeof claim.id === "string" ? claim.id : "<unknown>";
+  };
+  const applyGateClaimShapeUnstamped = (check: AnyObj, claim: AnyObj): void => {
+    const unstampedId = gateClaimShapeUnstampedId(claim);
+    if (unstampedId) check._gate_claim_shape_unstamped_claim_id = unstampedId;
+  };
   for (const ev of bundle.evidence) {
     if (!ev || !ev.claimId) continue;
     const claim = claimById.get(ev.claimId);
@@ -1931,6 +2262,11 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (ev.evidenceType) check.evidenceType = ev.evidenceType;
     const waiver = waiverOf(claim);
     if (waiver) check._waiver = waiver;
+    Object.assign(check, refsOf(claim));
+    const outputSha256 = outputSha256Of(claim);
+    if (outputSha256) check._output_sha256 = outputSha256;
+    applyGateClaimStamp(check, claim);
+    applyGateClaimShapeUnstamped(check, claim);
     checks.push(check);
   }
   // Also include check claims that have no evidence item (surface_trust_refs style).
@@ -1943,9 +2279,45 @@ function checksFromBundle(dir: string): AnyObj[] {
     const check: AnyObj = { id: String(claim.subjectId || "").split("/").pop() || claim.id, kind, status: claim.value ?? "not_verified", summary: claim.fieldOrBehavior || "" };
     const waiver = waiverOf(claim);
     if (waiver) check._waiver = waiver;
+    Object.assign(check, refsOf(claim));
+    const outputSha256 = outputSha256Of(claim);
+    if (outputSha256) check._output_sha256 = outputSha256;
+    applyGateClaimStamp(check, claim);
+    applyGateClaimShapeUnstamped(check, claim);
     checks.push(check);
   }
   return checks;
+}
+
+/**
+ * #298/#270: the shared compose-safe read path every trust-bundle writer should use instead of
+ * hand-assembling its own partial slice. Reconstructs ALL THREE families losslessly from the
+ * existing bundle (checks via checksFromBundle, extended per above; criteria from
+ * acceptance.json; critiques via critiquesFromBundle) so a writer that only intends to touch ONE
+ * family never has to pass `[]` for the other two — that `[]`-for-untouched-slices pattern is
+ * exactly what caused #270's 21-claims-to-1 wipe. Generalizes the pattern recordLearning already
+ * used inline; behavior-neutral for recordLearning itself.
+ */
+function readBundleState(dir: string): { checks: AnyObj[]; criteria: AnyObj[]; critiques: AnyObj[] } {
+  const acceptance = loadJson(path.join(dir, "acceptance.json"));
+  return {
+    checks: checksFromBundle(dir),
+    criteria: Array.isArray(acceptance.criteria) ? acceptance.criteria : [],
+    critiques: critiquesFromBundle(dir),
+  };
+}
+/**
+ * #298: compose-safe merge-by-id for the `checks` slice of readBundleState — a later check
+ * with the same `id` supersedes/replaces the earlier one (same-id resupply is a legitimate
+ * update, e.g. re-recording the same gate claim or the same named check after a fix); a check
+ * with a new `id` is additive. Order is preserved (existing order, then newly-introduced ids
+ * appended) so unrelated diagnostics (e.g. CI reconcile output) do not reorder churn.
+ */
+function mergeChecksById(existing: AnyObj[], incoming: AnyObj[]): AnyObj[] {
+  const byId = new Map<string, AnyObj>();
+  for (const c of existing) if (c && c.id) byId.set(c.id, c);
+  for (const c of incoming) if (c && c.id) byId.set(c.id, c);
+  return [...byId.values()];
 }
 function critiquesFromBundle(dir: string): AnyObj[] {
   const bundle = loadJson(path.join(dir, "trust.bundle"));
@@ -2011,20 +2383,144 @@ async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> 
   }
   const checks = _checksRaw.map((c) => _waiver ? { ...c, _waiver } : c);
   if (!checks.length && opts(p, "surface-trust-json").length === 0) die("record-evidence requires at least one --check-json or --surface-trust-json");
-  validateAcceptanceEvidenceRefs(dir);
+  validateAcceptanceEvidenceRefs(dir, p);
   // Phase 4c: bundle is the sole verification artifact — stop writing evidence.json and acceptance.json update.
   const ts = opt(p, "timestamp", now());
-  const _existingAcceptance = loadJson(path.join(dir, "acceptance.json"));
-  const _existingCriteria: AnyObj[] = Array.isArray(_existingAcceptance.criteria) ? _existingAcceptance.criteria : [];
+  // #298: readBundleState + merge-by-id instead of unconditionally replacing every prior check —
+  // record-evidence previously never called checksFromBundle(dir), so it dropped every check
+  // recorded by an earlier record-evidence/record-check/record-gate-claim call. A later check
+  // with the same id supersedes the earlier one (same-id resupply); a new id is additive.
+  const _existingState = readBundleState(dir);
   const _criteriaStatus = verdict === "pass" ? "pass" : verdict === "fail" ? "fail" : "not_verified";
-  const _criteriaForBundle: AnyObj[] = _existingCriteria.map((c: AnyObj) => ({ ...c, status: _criteriaStatus }));
+  const _criteriaForBundle: AnyObj[] = _existingState.criteria.map((c: AnyObj) => ({ ...c, status: _criteriaStatus }));
+  const _mergedChecks = mergeChecksById(_existingState.checks, checks);
   // #268: preserve any existing critique claims (including superseded history) instead of dropping
   // them — record-evidence previously hardcoded critiques:[] here, silently erasing finding history
   // whenever it ran after a critique existed.
-  const _existingCritiques: AnyObj[] = critiquesFromBundle(dir);
-  assertBundleWritten(await writeTrustBundle(dir, slug, ts, checks, _criteriaForBundle, _existingCritiques));
+  assertBundleWritten(await writeTrustBundle(dir, slug, ts, _mergedChecks, _criteriaForBundle, _existingState.critiques));
   const stateStatus = verdict === "pass" ? "verified" : verdict === "fail" ? "failed" : "not_verified";
   writeState(dir, slug, stateStatus, "verification", ts, "Evidence recorded.");
+  return 0;
+}
+
+// #380: bounded stdout+stderr digest for a record-check execution, mirroring
+// scripts/hooks/evidence-capture.js's MAX_OUTPUT_SCAN bound (64 KiB) so the two capture code
+// paths (host-observed vs. self-executed) stay size-disciplined the same way, even though this
+// one runs the command itself rather than observing a host tool_response.
+const RECORD_CHECK_MAX_OUTPUT = 64 * 1024;
+function clampOutput(text: string): string {
+  return text.length > RECORD_CHECK_MAX_OUTPUT ? text.slice(0, RECORD_CHECK_MAX_OUTPUT) : text;
+}
+
+/**
+ * record-check — run a command and record a capture-backed check in one step (#380).
+ *
+ * Trust posture (#270 MEDIUM fix — was previously misdescribed): record-check EXECUTES a command
+ * ON THE AGENT'S BEHALF, in-process, right here — it is not an observer. This is a materially
+ * DIFFERENT trust posture than scripts/hooks/evidence-capture.js, which never executes anything
+ * itself; it only OBSERVES a host tool_response that some other, already-executed tool call
+ * produced (a PostToolUse hook). record-check's exitCode/observedResult classification mirrors
+ * evidence-capture.js's observeResult() heuristic (a clean integer exit code is authoritative),
+ * but the EXECUTION itself is this function's own doing, under this process's privileges — an
+ * agent invoking record-check is asking this CLI to run a command for it, not merely to attest to
+ * something that already ran. Callers and reviewers should weigh that accordingly: record-check
+ * is a convenience that collapses "run a command" + "record its result" into one step, not a
+ * passive-observation capture path.
+ *
+ * Syntax: `workflow-sidecar record-check <artifact-dir> -- <command...>` (argv after the FIRST
+ * literal `--` token is the command to execute verbatim, split by main() before parseArgs — see
+ * main()'s pre-split below) or `--command "<shell string>"` for parity with record-gate-claim
+ * when the caller already has a single shell string rather than an argv array.
+ *
+ * Captures { exitCode, observedResult } the same way evidence-capture.js's observeResult() does:
+ * a clean integer exit code drives observedResult (0 => pass, nonzero => fail). Records a
+ * kind:"command" check with a real execution.label (the executed command), composed losslessly
+ * through the same readBundleState + mergeChecksById + writeTrustBundle path every other writer
+ * in this file uses — record-check is the compose-safe pattern PLUS an execution step in front
+ * of it, not a parallel bundle-writing implementation.
+ *
+ * The captured stdout+stderr is hashed (sha256) and the digest — never the raw output — is
+ * persisted onto the resulting claim's metadata.output_digest (see buildTrustBundle's
+ * outputDigestMeta) so a later reviewer can confirm two independent runs produced byte-identical
+ * output without the trust.bundle itself ever carrying raw command output (secret-safe by
+ * construction).
+ *
+ * A non-zero exit records status "fail" (never silently swallowed) AND this command itself exits
+ * non-zero — a check that failed to run correctly must be loud, not silently recorded as if
+ * nothing happened.
+ */
+async function recordCheck(p: ReturnType<typeof parseArgs>, commandArgv: string[] | null): Promise<number> {
+  const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
+  const slug = taskSlugFor(dir, opt(p, "task-slug"));
+  const ts = opt(p, "timestamp", now());
+  const commandString = opt(p, "command");
+  if (!commandArgv?.length && !commandString) die('record-check requires a command: either `record-check <dir> -- <command...>` or `--command "<shell string>"`');
+  if (commandArgv?.length && commandString) die("record-check: pass the command via EITHER `-- <command...>` OR --command, not both");
+
+  const repoRoot = findRepoRootFromDir(dir);
+  let displayCommand: string;
+  let exitCode: number | null;
+  let stdout = "";
+  let stderr = "";
+  try {
+    if (commandArgv?.length) {
+      displayCommand = commandArgv.join(" ");
+      const out = execFileSync(commandArgv[0]!, commandArgv.slice(1), { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 600000 });
+      stdout = out;
+      exitCode = 0;
+    } else {
+      // #412: a --command shell string is validated the same way record-gate-claim's --command
+      // is (single-sourced isRunnableCommandText) — prose does not belong here either.
+      const { isRunnableCommandText } = loadRunnableCommandHelper();
+      if (!isRunnableCommandText(commandString)) die(`record-check --command "${commandString}" is not a runnable shell command.`);
+      displayCommand = commandString;
+      const out = execFileSync("bash", ["-lc", commandString], { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 600000 });
+      stdout = out;
+      exitCode = 0;
+    }
+  } catch (err) {
+    const e = err as { status?: number | null; stdout?: string; stderr?: string; message?: string };
+    exitCode = typeof e.status === "number" ? e.status : null;
+    stdout = typeof e.stdout === "string" ? e.stdout : "";
+    stderr = typeof e.stderr === "string" ? e.stderr : (e.message ?? "");
+    displayCommand = commandArgv?.length ? commandArgv.join(" ") : commandString;
+  }
+  // Mirror evidence-capture.js's observeResult(): a clean integer exit code is authoritative
+  // (0 => pass, nonzero => fail); this path always HAS a clean integer exit code because it ran
+  // the command itself (unlike the host-observation path, which sometimes only has failure
+  // indicators). See scripts/hooks/evidence-capture.js's observeResult()/cleanExitCode().
+  const status = exitCode === 0 ? "pass" : "fail";
+  // #270 MEDIUM fix: hash the captured (clamped) output — the digest itself is what gets
+  // persisted onto claim.metadata (below, via buildTrustBundle), NEVER the raw output. This is
+  // secret-safe by construction: even if the executed command's stdout/stderr contained a
+  // credential or token, only its sha256 hex digest ever reaches the trust.bundle (which is
+  // frequently committed/shared), not the text itself. The previous `_output_digest` field held
+  // the raw clamped text under a misleading "digest" name and was never actually persisted
+  // anywhere (dead code) — this replaces it with a REAL digest that IS persisted.
+  const capturedOutput = clampOutput(`${stdout}${stderr ? `
+${stderr}` : ""}`.trim());
+  const outputSha256 = capturedOutput ? createHash("sha256").update(capturedOutput, "utf8").digest("hex") : null;
+  const checkIdRaw = opt(p, "id") || displayCommand;
+  const checkId = checkIdRaw.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "record-check";
+  const summary = opt(p, "summary", `record-check: ${displayCommand}${exitCode !== null ? ` (exit ${exitCode})` : ""}`);
+  // kind:"command" + a real `command` string already derives evidenceType "test_output" via
+  // classifyEvidence in buildTrustBundle — no separate evidenceType input is consumed there.
+  const check: AnyObj = normalizeCheck({
+    id: checkId,
+    kind: "command",
+    status,
+    summary,
+    command: displayCommand,
+  });
+  if (outputSha256) check._output_sha256 = outputSha256;
+
+  const _existingState = readBundleState(dir);
+  const _mergedChecks = mergeChecksById(_existingState.checks, [check]);
+  assertBundleWritten(await writeTrustBundle(dir, slug, ts, _mergedChecks, _existingState.criteria, _existingState.critiques));
+  if (status === "fail") {
+    process.stderr.write(`[record-check] command failed (exit ${exitCode ?? "unknown"}): ${displayCommand}\n${stderr ? `${stderr}\n` : ""}`);
+    return 1;
+  }
   return 0;
 }
 
@@ -2118,13 +2614,33 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
     check.artifact_refs = evidenceRefs;
   }
 
-  const checkNormalized = normalizeCheck(check);
+  // #270(b)/#412: --command gives a gate claim a real, runnable execution.label distinct from
+  // the human --summary prose, so stop-goal-fit.js's bundleClaimedPassCommandChecks section (B)
+  // finds a real command to re-run instead of falling back to fieldOrBehavior (the --summary
+  // prose itself), which it would otherwise execute as a shell command under
+  // FLOW_AGENTS_GOAL_FIT_RECHECK. Validated at record time with the same isRunnableCommandText
+  // heuristic the Stop-hook backstop uses (single-sourced — see loadRunnableCommandHelper).
+  const gateCommand = opt(p, "command");
+  if (gateCommand) {
+    const { isRunnableCommandText } = loadRunnableCommandHelper();
+    if (!isRunnableCommandText(gateCommand)) die(`record-gate-claim --command "${gateCommand}" is not a runnable shell command — prose belongs in --summary, which is never executed.`);
+    check.command = gateCommand;
+  }
+
+  const checkNormalized = normalizeCheck(check, /* allowGateClaimPrefix */ true);
   // WS8 (ADR 0020): honor the accepted-gap waiver flags for a gate claim too.
   const gateWaiver = parseWaiver(p, ts);
   if (gateWaiver) checkNormalized._waiver = gateWaiver;
   // Log the targeted gate expectation for transparency (goes to stderr only)
   process.stderr.write(`[record-gate-claim] targeting ${activeStep.stepId}/${activeStep.gateId}/${targetExpectation.id} → claimType=${claimType} subjectType=${subjectType}${gateWaiver ? " (WAIVED accepted_gap)" : ""}\n`);
-  assertBundleWritten(await writeTrustBundle(dir, slug, ts, [checkNormalized], [], [], gateClaimActorKey));
+  // #270: accumulate into the FULL existing bundle state (checks/criteria/critiques) instead of
+  // the prior [checkNormalized], [], [] call, which clobbered every other check/criterion/critique
+  // in the bundle on every gate-claim write (the 21-claims-to-1 wipe). A gate claim against the
+  // SAME expectation id supersedes the earlier check for that expectation (mergeChecksById); a
+  // gate claim against a different expectation is additive.
+  const _existingState = readBundleState(dir);
+  const _mergedChecks = mergeChecksById(_existingState.checks, [checkNormalized]);
+  assertBundleWritten(await writeTrustBundle(dir, slug, ts, _mergedChecks, _existingState.criteria, _existingState.critiques, gateClaimActorKey));
   return 0;
 }
 
@@ -2329,10 +2845,13 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
     return e;
   });
   const critiques = [..._mergedCritiques, critique];
-  // Phase 4c: build bundle from raw inputs; read checks from trust.bundle (evidence.json no longer written).
-  const _critiqueEvChecks: AnyObj[] = checksFromBundle(dir);
-  const _critiqueAccCriteria: AnyObj[] = Array.isArray(loadJson(path.join(dir, "acceptance.json")).criteria) ? loadJson(path.join(dir, "acceptance.json")).criteria : [];
-  assertBundleWritten(await writeTrustBundle(dir, slug, critique.reviewed_at, _critiqueEvChecks, _critiqueAccCriteria, critiques));
+  // Phase 4c: build bundle from raw inputs; read checks/criteria via the shared compose-safe
+  // readBundleState path (#270 LOW consolidation) instead of hand-rolling the identical
+  // checksFromBundle + acceptance.json read inline — this is the exact pattern readBundleState
+  // already exists to share; recordLearning uses it directly (see below) and recordCritique
+  // previously duplicated it by hand for no reason.
+  const _critiqueState = readBundleState(dir);
+  assertBundleWritten(await writeTrustBundle(dir, slug, critique.reviewed_at, _critiqueState.checks, _critiqueState.criteria, critiques));
   return 0;
 }
 function frontmatter(text: string, key: string): string {
@@ -3586,12 +4105,13 @@ async function recordLearning(p: ReturnType<typeof parseArgs>): Promise<number> 
   if (status === "learned" && records.some((r) => r.correction === undefined)) die("learning status learned requires every record to include correction.needed");
   writeJson(path.join(dir, "learning.json"), { ...sidecarBase(slug), status, updated_at: timestamp, records });
   writeState(dir, slug, "accepted", "learning", timestamp, opt(p, "summary"));
-  // Phase 4c: build bundle from raw inputs; read checks/critiques from trust.bundle (bespoke sidecars no longer written).
+  // Phase 4c: build bundle from raw inputs; read checks/criteria/critiques via the shared
+  // compose-safe readBundleState path (#270 LOW consolidation — this was the literal inline
+  // pattern readBundleState was extracted FROM; using the shared helper directly keeps the two
+  // from silently drifting apart in the future).
   // #268/#344: declared builder.* claims survive the round-trip via their authoritative origin stamp.
-  const _learningChecks: AnyObj[] = checksFromBundle(dir);
-  const _learningCriteria: AnyObj[] = Array.isArray(loadJson(path.join(dir, "acceptance.json")).criteria) ? loadJson(path.join(dir, "acceptance.json")).criteria : [];
-  const _learningCritiques: AnyObj[] = critiquesFromBundle(dir);
-  assertBundleWritten(await writeTrustBundle(dir, slug, timestamp, _learningChecks, _learningCriteria, _learningCritiques));
+  const _learningState = readBundleState(dir);
+  assertBundleWritten(await writeTrustBundle(dir, slug, timestamp, _learningState.checks, _learningState.criteria, _learningState.critiques));
   return 0;
 }
 function evidenceClean(dir: string): boolean {
@@ -4743,7 +5263,23 @@ Available claim ids:
 
 
 async function main(): Promise<number> {
-  const p = parseArgs(process.argv.slice(2));
+  const _rawArgv = process.argv.slice(2);
+  // #380: `record-check <dir> -- <command...>` — argv after the FIRST literal `--` token is the
+  // command to execute verbatim (never option-parsed: a command like `npm test -- --watch`
+  // legitimately contains its OWN `--`, so only the record-check dispatcher's own separator, the
+  // first one, is consumed here). parseArgs() cannot represent this (it treats every `--foo`-
+  // shaped token as an option key, including a bare `--`), so the split happens here, before
+  // parseArgs ever sees the command's own argv.
+  let _commandArgv: string[] | null = null;
+  let _argvForParse = _rawArgv;
+  if (_rawArgv[0] === "record-check") {
+    const sepIdx = _rawArgv.indexOf("--");
+    if (sepIdx >= 0) {
+      _argvForParse = _rawArgv.slice(0, sepIdx);
+      _commandArgv = _rawArgv.slice(sepIdx + 1);
+    }
+  }
+  const p = parseArgs(_argvForParse);
   if (!p.command) die("workflow-sidecar command is required");
   // F1 (#166 fix iteration 1): `liveness whoami` is a read-only, lock-free, write-free advisory
   // surface (see the `action === "whoami"` branch inside `liveness()` above) — it must never
@@ -4771,6 +5307,7 @@ async function main(): Promise<number> {
       case "init-plan": return initPlan(p);
       case "record-evidence": return recordEvidence(p);
       case "record-gate-claim": return recordGateClaim(p);
+      case "record-check": return recordCheck(p, _commandArgv);
       case "promote": return promote(p);
       case "advance-state": return advanceState(p);
       case "record-critique": return recordCritique(p);
