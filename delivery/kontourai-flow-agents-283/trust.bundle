@@ -1,0 +1,593 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "kontourai-flow-agents-283-gate-claim-pull-request-opened.flow-agents-workflow.pr-406-open-cleanup-audit-apply-mode-closes-283",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-283/gate-claim-pull-request-opened",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "PR #406 open: cleanup-audit apply mode (closes #283).",
+      "value": "pass",
+      "createdAt": "2026-07-05T06:13:36Z",
+      "updatedAt": "2026-07-05T06:13:36Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-283-ac1.flow-agents-workflow.apply-default-dry-run-running-workflow-artifact-cleanup-audit-with-no-apply-flag-performs-zero-filesystem-writes-even-when-cleanup-candidates-exist",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-283/ac1",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "apply-default-dry-run: Running workflow-artifact-cleanup-audit with no --apply flag performs zero filesystem writes even when cleanup candidates exist.",
+      "value": "pass",
+      "createdAt": "2026-07-05T06:13:36Z",
+      "updatedAt": "2026-07-05T06:13:36Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-283-ac2.flow-agents-workflow.apply-archives-cleanup-candidates-with-apply-every-cleanup-candidate-session-directory-is-moved-not-copied-and-left-not-deleted-original-path-gone-content-byte-identical",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-283/ac2",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "apply-archives-cleanup-candidates: With --apply, every cleanup_candidate session directory is moved (not copied-and-left, not deleted); original path gone; content byte-identical.",
+      "value": "pass",
+      "createdAt": "2026-07-05T06:13:36Z",
+      "updatedAt": "2026-07-05T06:13:36Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-283-ac3.flow-agents-workflow.never-delete-guarantee-no-code-path-ever-calls-fs-rm-unlink-rmdir-rmsync-on-a-source-dir-outside-the-guarded-post-copy-verified-exdev-fallback",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-283/ac3",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "never-delete-guarantee: No code path ever calls fs.rm/unlink/rmdir/rmSync on a source dir outside the guarded post-copy-verified EXDEV fallback.",
+      "value": "pass",
+      "createdAt": "2026-07-05T06:13:36Z",
+      "updatedAt": "2026-07-05T06:13:36Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-283-ac4.flow-agents-workflow.manifest-per-run-every-apply-invocation-that-moves-1-directory-writes-manifest-md-a-no-op-run-creates-no-archive-root-subdirectory",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-283/ac4",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "manifest-per-run: Every --apply invocation that moves >=1 directory writes MANIFEST.md; a no-op run creates no archive-root subdirectory.",
+      "value": "pass",
+      "createdAt": "2026-07-05T06:13:36Z",
+      "updatedAt": "2026-07-05T06:13:36Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-283-ac5.flow-agents-workflow.never-touch-hard-excluded-classes-apply-with-or-without-apply-ambiguous-never-moves-active-wip-active-learning-followup-or-non-ambiguous-invalid-regardless-of-age-flags",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-283/ac5",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "never-touch-hard-excluded-classes: --apply (with or without --apply-ambiguous) never moves active_wip, active_learning_followup, or non-ambiguous invalid, regardless of age/flags.",
+      "value": "pass",
+      "createdAt": "2026-07-05T06:13:36Z",
+      "updatedAt": "2026-07-05T06:13:36Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-283-ac6.flow-agents-workflow.never-touch-live-liveness-claim-a-session-with-a-fresh-liveness-claim-held-by-any-actor-is-never-moved-by-apply",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-283/ac6",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "never-touch-live-liveness-claim: A session with a fresh liveness claim held by ANY actor is never moved by --apply.",
+      "value": "pass",
+      "createdAt": "2026-07-05T06:13:36Z",
+      "updatedAt": "2026-07-05T06:13:36Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-283-ac7.flow-agents-workflow.freshness-window-guard-a-session-is-never-moved-if-state-json-updated-at-is-newer-than-the-freshness-window-mtime-fallback-only-for-missing-unparsable-timestamps",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-283/ac7",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "freshness-window-guard: A session is never moved if state.json.updated_at is newer than the freshness window; mtime fallback only for missing/unparsable timestamps.",
+      "value": "pass",
+      "createdAt": "2026-07-05T06:13:36Z",
+      "updatedAt": "2026-07-05T06:13:36Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-283-ac8.flow-agents-workflow.no-env-var-loosening-freshness-window-archive-root-are-configurable-only-via-cli-flags-no-env-var-loosens-either",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-283/ac8",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "no-env-var-loosening: freshness window / archive root are configurable ONLY via CLI flags, no env var loosens either.",
+      "value": "pass",
+      "createdAt": "2026-07-05T06:13:36Z",
+      "updatedAt": "2026-07-05T06:13:36Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-283-ac9.flow-agents-workflow.never-touch-infra-paths-assignment-liveness-changes-delivery-history-current-json-current-archive-are-never-apply-targets-same-skipped-root-entries-set-as-classify",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-283/ac9",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "never-touch-infra-paths: assignment/, liveness/, changes/, delivery-history/, current.json, current/, archive/ are never apply targets (same SKIPPED_ROOT_ENTRIES set as classify).",
+      "value": "pass",
+      "createdAt": "2026-07-05T06:13:36Z",
+      "updatedAt": "2026-07-05T06:13:36Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-283-ac10.flow-agents-workflow.ambiguous-lifecycle-reported-not-moved-unrecognized-lifecycle-shape-invalid-sessions-are-reported-distinctly-and-only-moved-with-apply-ambiguous-plus-ac15-s-substantive-stub-gate",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-283/ac10",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "ambiguous-lifecycle-reported-not-moved: unrecognized-lifecycle-shape invalid sessions are reported distinctly and only moved with --apply-ambiguous plus AC15's substantive/stub gate.",
+      "value": "pass",
+      "createdAt": "2026-07-05T06:13:36Z",
+      "updatedAt": "2026-07-05T06:13:36Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-283-ac11.flow-agents-workflow.loud-apply-output-an-applied-section-names-each-move-and-the-manifest-path-json-includes-applied-true-dry-run-false-moves-dry-run-header-unchanged",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-283/ac11",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "loud-apply-output: an APPLIED section names each move and the manifest path; JSON includes applied:true/dry_run:false/moves[]; dry-run header unchanged.",
+      "value": "pass",
+      "createdAt": "2026-07-05T06:13:36Z",
+      "updatedAt": "2026-07-05T06:13:36Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-283-ac12.flow-agents-workflow.manifest-command-still-lane-covered-the-existing-evals-ci-run-baseline-sh-manifest-entry-stays-exact-string-stable",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-283/ac12",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "manifest-command-still-lane-covered: the existing evals/ci/run-baseline.sh manifest entry stays exact-string stable.",
+      "value": "pass",
+      "createdAt": "2026-07-05T06:13:36Z",
+      "updatedAt": "2026-07-05T06:13:36Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-283-ac13.flow-agents-workflow.help-and-docs-advertise-apply-help-documents-apply-apply-ambiguous-freshness-window-hours-archive-root-docs-updated-stale-sentence-removed",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-283/ac13",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "help-and-docs-advertise-apply: --help documents --apply/--apply-ambiguous/--freshness-window-hours/--archive-root; docs updated, stale sentence removed.",
+      "value": "pass",
+      "createdAt": "2026-07-05T06:13:36Z",
+      "updatedAt": "2026-07-05T06:13:36Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-283-ac14.flow-agents-workflow.structural-infrastructure-exclusion-apply-apply-ambiguous-move-zero-infrastructure-directories-structural-predicate-own-current-json-workflow-sidecar-lock-is-primary-name-list-secondary",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-283/ac14",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "structural-infrastructure-exclusion: --apply/--apply-ambiguous move zero infrastructure directories; structural predicate (own current.json/.workflow-sidecar.lock) is primary, name list secondary.",
+      "value": "pass",
+      "createdAt": "2026-07-05T06:13:36Z",
+      "updatedAt": "2026-07-05T06:13:36Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-283-ac15.flow-agents-workflow.substantive-invalid-never-archived-an-invalid-session-with-real-state-json-learning-json-or-trust-bundle-content-is-always-report-only-never-archived-under-any-flag-combination",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-283/ac15",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "substantive-invalid-never-archived: an invalid session with real state.json + (learning.json or trust.bundle) content is always report-only, never archived under any flag combination.",
+      "value": "pass",
+      "createdAt": "2026-07-05T06:13:36Z",
+      "updatedAt": "2026-07-05T06:13:36Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-283-ac16.flow-agents-workflow.confirmation-evidence-field-confirm-slug-evidence-is-recorded-verbatim-in-manifest-md-unconfirmed-moved-slugs-get-none-recorded-no-network-gh-calls",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-283/ac16",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "confirmation-evidence-field: --confirm <slug>=<evidence> is recorded verbatim in MANIFEST.md; unconfirmed moved slugs get \"none recorded\"; no network/gh calls.",
+      "value": "pass",
+      "createdAt": "2026-07-05T06:13:36Z",
+      "updatedAt": "2026-07-05T06:13:36Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-283-review-final.flow-agents-workflow.two-review-iterations-initial-changes-requested-high-two-gate-bypass-live-reproduced-medium-ordering-lock-softness-both-fixed-and-mutation-tested-final-scoped-re-review-clean-2-non-blocking-precision-notes-declined-verifier-pass-x2-incl-ramdisk-forced-exdev-and-read-only-production-root-probe",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-283/review-final",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "Two review iterations: initial CHANGES_REQUESTED (HIGH two-gate bypass, live-reproduced; MEDIUM ordering-lock softness) — both fixed and mutation-tested; final scoped re-review clean (2 non-blocking precision notes declined). Verifier PASS x2 incl. ramdisk-forced EXDEV and read-only production-root probe.",
+      "value": "pass",
+      "createdAt": "2026-07-05T06:13:36Z",
+      "updatedAt": "2026-07-05T06:13:36Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-05T06:13:36Z"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:kontourai-flow-agents-283-gate-claim-pull-request-opened.flow-agents-workflow.pr-406-open-cleanup-audit-apply-mode-closes-283",
+      "claimId": "kontourai-flow-agents-283-gate-claim-pull-request-opened.flow-agents-workflow.pr-406-open-cleanup-audit-apply-mode-closes-283",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-283/evidence.json",
+      "excerptOrSummary": "PR #406 open: cleanup-audit apply mode (closes #283).",
+      "observedAt": "2026-07-05T06:13:36Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pr-open.pull-request:attestation",
+      "claimType": "builder.pr-open.pull-request",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pr-open.pull-request claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pr-open.pull-request",
+      "claimType": "builder.pr-open.pull-request",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pr-open.pull-request claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:kontourai-flow-agents-283-gate-claim-pull-request-opened.flow-agents-workflow.pr-406-open-cleanup-audit-apply-mode-closes-283",
+      "claimId": "kontourai-flow-agents-283-gate-claim-pull-request-opened.flow-agents-workflow.pr-406-open-cleanup-audit-apply-mode-closes-283",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-283-gate-claim-pull-request-opened.flow-agents-workflow.pr-406-open-cleanup-audit-apply-mode-closes-283"
+      ],
+      "createdAt": "2026-07-05T06:13:36Z",
+      "verifiedAt": "2026-07-05T06:13:36Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-283-ac1.flow-agents-workflow.apply-default-dry-run-running-workflow-artifact-cleanup-audit-with-no-apply-flag-performs-zero-filesystem-writes-even-when-cleanup-candidates-exist",
+      "claimId": "kontourai-flow-agents-283-ac1.flow-agents-workflow.apply-default-dry-run-running-workflow-artifact-cleanup-audit-with-no-apply-flag-performs-zero-filesystem-writes-even-when-cleanup-candidates-exist",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-05T06:13:36Z",
+      "verifiedAt": "2026-07-05T06:13:36Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-283-ac2.flow-agents-workflow.apply-archives-cleanup-candidates-with-apply-every-cleanup-candidate-session-directory-is-moved-not-copied-and-left-not-deleted-original-path-gone-content-byte-identical",
+      "claimId": "kontourai-flow-agents-283-ac2.flow-agents-workflow.apply-archives-cleanup-candidates-with-apply-every-cleanup-candidate-session-directory-is-moved-not-copied-and-left-not-deleted-original-path-gone-content-byte-identical",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-05T06:13:36Z",
+      "verifiedAt": "2026-07-05T06:13:36Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-283-ac3.flow-agents-workflow.never-delete-guarantee-no-code-path-ever-calls-fs-rm-unlink-rmdir-rmsync-on-a-source-dir-outside-the-guarded-post-copy-verified-exdev-fallback",
+      "claimId": "kontourai-flow-agents-283-ac3.flow-agents-workflow.never-delete-guarantee-no-code-path-ever-calls-fs-rm-unlink-rmdir-rmsync-on-a-source-dir-outside-the-guarded-post-copy-verified-exdev-fallback",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-05T06:13:36Z",
+      "verifiedAt": "2026-07-05T06:13:36Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-283-ac4.flow-agents-workflow.manifest-per-run-every-apply-invocation-that-moves-1-directory-writes-manifest-md-a-no-op-run-creates-no-archive-root-subdirectory",
+      "claimId": "kontourai-flow-agents-283-ac4.flow-agents-workflow.manifest-per-run-every-apply-invocation-that-moves-1-directory-writes-manifest-md-a-no-op-run-creates-no-archive-root-subdirectory",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-05T06:13:36Z",
+      "verifiedAt": "2026-07-05T06:13:36Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-283-ac5.flow-agents-workflow.never-touch-hard-excluded-classes-apply-with-or-without-apply-ambiguous-never-moves-active-wip-active-learning-followup-or-non-ambiguous-invalid-regardless-of-age-flags",
+      "claimId": "kontourai-flow-agents-283-ac5.flow-agents-workflow.never-touch-hard-excluded-classes-apply-with-or-without-apply-ambiguous-never-moves-active-wip-active-learning-followup-or-non-ambiguous-invalid-regardless-of-age-flags",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-05T06:13:36Z",
+      "verifiedAt": "2026-07-05T06:13:36Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-283-ac6.flow-agents-workflow.never-touch-live-liveness-claim-a-session-with-a-fresh-liveness-claim-held-by-any-actor-is-never-moved-by-apply",
+      "claimId": "kontourai-flow-agents-283-ac6.flow-agents-workflow.never-touch-live-liveness-claim-a-session-with-a-fresh-liveness-claim-held-by-any-actor-is-never-moved-by-apply",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-05T06:13:36Z",
+      "verifiedAt": "2026-07-05T06:13:36Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-283-ac7.flow-agents-workflow.freshness-window-guard-a-session-is-never-moved-if-state-json-updated-at-is-newer-than-the-freshness-window-mtime-fallback-only-for-missing-unparsable-timestamps",
+      "claimId": "kontourai-flow-agents-283-ac7.flow-agents-workflow.freshness-window-guard-a-session-is-never-moved-if-state-json-updated-at-is-newer-than-the-freshness-window-mtime-fallback-only-for-missing-unparsable-timestamps",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-05T06:13:36Z",
+      "verifiedAt": "2026-07-05T06:13:36Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-283-ac8.flow-agents-workflow.no-env-var-loosening-freshness-window-archive-root-are-configurable-only-via-cli-flags-no-env-var-loosens-either",
+      "claimId": "kontourai-flow-agents-283-ac8.flow-agents-workflow.no-env-var-loosening-freshness-window-archive-root-are-configurable-only-via-cli-flags-no-env-var-loosens-either",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-05T06:13:36Z",
+      "verifiedAt": "2026-07-05T06:13:36Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-283-ac9.flow-agents-workflow.never-touch-infra-paths-assignment-liveness-changes-delivery-history-current-json-current-archive-are-never-apply-targets-same-skipped-root-entries-set-as-classify",
+      "claimId": "kontourai-flow-agents-283-ac9.flow-agents-workflow.never-touch-infra-paths-assignment-liveness-changes-delivery-history-current-json-current-archive-are-never-apply-targets-same-skipped-root-entries-set-as-classify",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-05T06:13:36Z",
+      "verifiedAt": "2026-07-05T06:13:36Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-283-ac10.flow-agents-workflow.ambiguous-lifecycle-reported-not-moved-unrecognized-lifecycle-shape-invalid-sessions-are-reported-distinctly-and-only-moved-with-apply-ambiguous-plus-ac15-s-substantive-stub-gate",
+      "claimId": "kontourai-flow-agents-283-ac10.flow-agents-workflow.ambiguous-lifecycle-reported-not-moved-unrecognized-lifecycle-shape-invalid-sessions-are-reported-distinctly-and-only-moved-with-apply-ambiguous-plus-ac15-s-substantive-stub-gate",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-05T06:13:36Z",
+      "verifiedAt": "2026-07-05T06:13:36Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-283-ac11.flow-agents-workflow.loud-apply-output-an-applied-section-names-each-move-and-the-manifest-path-json-includes-applied-true-dry-run-false-moves-dry-run-header-unchanged",
+      "claimId": "kontourai-flow-agents-283-ac11.flow-agents-workflow.loud-apply-output-an-applied-section-names-each-move-and-the-manifest-path-json-includes-applied-true-dry-run-false-moves-dry-run-header-unchanged",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-05T06:13:36Z",
+      "verifiedAt": "2026-07-05T06:13:36Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-283-ac12.flow-agents-workflow.manifest-command-still-lane-covered-the-existing-evals-ci-run-baseline-sh-manifest-entry-stays-exact-string-stable",
+      "claimId": "kontourai-flow-agents-283-ac12.flow-agents-workflow.manifest-command-still-lane-covered-the-existing-evals-ci-run-baseline-sh-manifest-entry-stays-exact-string-stable",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-05T06:13:36Z",
+      "verifiedAt": "2026-07-05T06:13:36Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-283-ac13.flow-agents-workflow.help-and-docs-advertise-apply-help-documents-apply-apply-ambiguous-freshness-window-hours-archive-root-docs-updated-stale-sentence-removed",
+      "claimId": "kontourai-flow-agents-283-ac13.flow-agents-workflow.help-and-docs-advertise-apply-help-documents-apply-apply-ambiguous-freshness-window-hours-archive-root-docs-updated-stale-sentence-removed",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-05T06:13:36Z",
+      "verifiedAt": "2026-07-05T06:13:36Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-283-ac14.flow-agents-workflow.structural-infrastructure-exclusion-apply-apply-ambiguous-move-zero-infrastructure-directories-structural-predicate-own-current-json-workflow-sidecar-lock-is-primary-name-list-secondary",
+      "claimId": "kontourai-flow-agents-283-ac14.flow-agents-workflow.structural-infrastructure-exclusion-apply-apply-ambiguous-move-zero-infrastructure-directories-structural-predicate-own-current-json-workflow-sidecar-lock-is-primary-name-list-secondary",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-05T06:13:36Z",
+      "verifiedAt": "2026-07-05T06:13:36Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-283-ac15.flow-agents-workflow.substantive-invalid-never-archived-an-invalid-session-with-real-state-json-learning-json-or-trust-bundle-content-is-always-report-only-never-archived-under-any-flag-combination",
+      "claimId": "kontourai-flow-agents-283-ac15.flow-agents-workflow.substantive-invalid-never-archived-an-invalid-session-with-real-state-json-learning-json-or-trust-bundle-content-is-always-report-only-never-archived-under-any-flag-combination",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-05T06:13:36Z",
+      "verifiedAt": "2026-07-05T06:13:36Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-283-ac16.flow-agents-workflow.confirmation-evidence-field-confirm-slug-evidence-is-recorded-verbatim-in-manifest-md-unconfirmed-moved-slugs-get-none-recorded-no-network-gh-calls",
+      "claimId": "kontourai-flow-agents-283-ac16.flow-agents-workflow.confirmation-evidence-field-confirm-slug-evidence-is-recorded-verbatim-in-manifest-md-unconfirmed-moved-slugs-get-none-recorded-no-network-gh-calls",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-05T06:13:36Z",
+      "verifiedAt": "2026-07-05T06:13:36Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-283-review-final.flow-agents-workflow.two-review-iterations-initial-changes-requested-high-two-gate-bypass-live-reproduced-medium-ordering-lock-softness-both-fixed-and-mutation-tested-final-scoped-re-review-clean-2-non-blocking-precision-notes-declined-verifier-pass-x2-incl-ramdisk-forced-exdev-and-read-only-production-root-probe",
+      "claimId": "kontourai-flow-agents-283-review-final.flow-agents-workflow.two-review-iterations-initial-changes-requested-high-two-gate-bypass-live-reproduced-medium-ordering-lock-softness-both-fixed-and-mutation-tested-final-scoped-re-review-clean-2-non-blocking-precision-notes-declined-verifier-pass-x2-incl-ramdisk-forced-exdev-and-read-only-production-root-probe",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-05T06:13:36Z",
+      "verifiedAt": "2026-07-05T06:13:36Z"
+    }
+  ]
+}
