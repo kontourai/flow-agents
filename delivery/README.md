@@ -71,6 +71,96 @@ adopters (see the DEPRECATED note above); only THIS repo's stale flat files were
 | `trust.checkpoint.intoto.json` | Phase-1b | Unsigned in-toto statement (local/CI without ambient OIDC). Present when signing ran locally. |
 | `trust.checkpoint.sig.json` | Phase-1b | Cosign-verifiable DSSE envelope (CI/OIDC path). Present when Sigstore keyless signing succeeded. |
 
+## `DECLARED` scope forms
+
+`delivery/DECLARED` (flat, not per-session — see "Layout" above) is the committed
+no-agent-delivery exemption marker `scripts/ci/trust-reconcile.js` auto-discovers when no
+`trust.bundle` is present (ADR 0022 §1/§2). It exempts Step 2 (bundle reconciliation) ONLY —
+Step 1 (fresh verify) is never exempted by anything documented here. This section documents
+the marker's required fields and `scope` grammar so a future exemption author does not have
+to reverse-engineer it from `trust-reconcile.js` source. The semantics below are sourced
+directly from `matchesScopeCondition()`/`matchesScope()` in `scripts/ci/trust-reconcile.js`
+(line numbers shift as the file changes; match by function name, not a pinned line range)
+— cross-check that file if this doc and the code ever appear to disagree; the code is
+authoritative.
+
+**Required fields.** Every `delivery/DECLARED` entry is a JSON object with all four of:
+
+| Field | Meaning |
+| ---- | ----------- |
+| `scope` | One or more space-separated conditions (see forms below) the reconciler matches against the resolved ref/actor/sha context. All conditions in a `scope` string must match (AND) for the entry to apply. |
+| `reason` | Free-text justification for the exemption (e.g. "dependabot dependency-update PRs; no agent delivery involved"). |
+| `approved_by` | Free-text approver identity/decision reference. Not cryptographically bound — see ADR 0022 §2's residual note; mitigated by CODEOWNERS review on this file (below), not by identity attestation. |
+| `declared_at` | ISO 8601 timestamp of when the exemption was approved. |
+
+A marker missing any of these four fields on an entry is treated as malformed and falls
+through to the fail-closed default (`bundle-required-no-declared-marker`), same as if no
+marker existed at all.
+
+**Scope forms.** A `scope` string is one or more space-separated conditions; each condition
+is one of exactly four forms (string equality/prefix matching only — **no `RegExp` is ever
+constructed from marker content**, in either the single- or compound-condition path):
+
+| Form | Matches against | Example |
+| ---- | ---------------- | ------- |
+| `ref:<exact>` | The resolved ref (`TRUST_RECONCILE_REF` \|\| `GITHUB_HEAD_REF` \|\| `GITHUB_REF` stripped of `refs/heads/`), exact string equality | `ref:release-please--branches--main` |
+| `commit:<sha>` or `commit:<from>..<to>` | The resolved sha, either exact equality or ancestor-range membership (`git merge-base --is-ancestor`) | `commit:5f2a1c9` or `commit:5f2a1c9..8b40e21` |
+| `author:<exact>` | The resolved actor (`TRUST_RECONCILE_ACTOR` \|\| `GITHUB_ACTOR`), exact string equality | `author:dependabot[bot]` |
+| `branch-prefix:<prefix>` | The resolved ref, via `String#startsWith` | `branch-prefix:release-please--` |
+
+Every arm also requires the *compared context value itself* to be non-empty — an empty
+ref/actor/sha (e.g. invoking the reconciler locally with no override set) can never be
+treated as a wildcard match. An unrecognized condition prefix anywhere in a scope — single or
+compound — makes the **whole** scope never match (fail closed), not merely that one
+condition.
+
+**Compound scope (space-separated AND).** Multiple conditions in one `scope` string are
+ANDed — every condition must match for the entry to apply; a single-condition scope is just
+the N=1 case of the same rule (unchanged, backward compatible). The production worked example
+is this repo's own `delivery/DECLARED` release-please entry:
+
+```json
+{
+  "scope": "author:github-actions[bot] branch-prefix:release-please--",
+  "reason": "release-please automation PR; no agent delivery involved",
+  "approved_by": "brian.anderson1222 (AC8 option-a decision, ADR 0022 approval 2026-07-02)",
+  "declared_at": "2026-07-03T16:27:21Z"
+}
+```
+
+**`ref:`/`branch-prefix:` alone are insufficient for identity exemptions.** Per the ADR 0022
+2026-07-03 addendum: `ref:`/`branch-prefix:` match against `GITHUB_HEAD_REF`, which is
+**pusher-controlled on a fork PR** — anyone who can open a PR can name their branch to satisfy
+a `ref:`- or `branch-prefix:`-only scope. A scope meant to identify a specific bot/automation
+actor (as opposed to a specific commit range or branch, where the identity question does not
+arise) MUST combine `branch-prefix:` (or `ref:`) with `author:`, as the release-please example
+above does, so the platform-set actor identity — not just a self-chosen branch name — also has
+to match. `author:` alone does not have this weakness (`GITHUB_ACTOR` is platform-set, not
+pusher-chosen), which is why this repo's `dependabot[bot]` entry (`author:dependabot[bot]`)
+was security-review-confirmed sufficient on its own with no `branch-prefix:` needed — identity
+alone, not branch/ref, is the relevant boundary for that actor.
+
+**Array form + append, never clobber.** `delivery/DECLARED` accepts either a single
+`{scope, reason, approved_by, declared_at}` object or a JSON array of such objects, so one
+marker file can cover multiple non-agent-delivery scopes (e.g. dependabot AND release-please)
+without a blanket scope. Every entry is validated independently — one malformed entry does
+not mask a well-formed one elsewhere in the array, and the reconciler returns the first
+in-scope, well-formed entry that matches. When adding a new exemption, **append** a new
+element to the existing array; do not overwrite or replace the entries already present.
+
+**CODEOWNERS.** `/delivery/DECLARED` is listed in `.github/CODEOWNERS` alongside the other
+verify-config/anchor paths (`/scripts/ci/`, `/package.json`, `/evals/run.sh`) — the same
+mitigation applied to every other self-asserted, unauthenticated field in this trust chain
+(ADR 0022 §2). This file (`delivery/README.md`) itself is not a protected path; only the
+`DECLARED` marker file is.
+
+**Where to go next.** To issue a new exemption through the guided, gated path (rather than
+hand-authoring JSON), see `kits/veritas-governance`'s "How to issue a no-agent-delivery
+exemption" (`kits/veritas-governance/docs/README.md`), which shows the compound-scope form in
+its own worked example and defers the full grammar here. To review which exemptions are
+currently standing and flag stale ones for re-confirmation, see this kit's
+`exemption-usage-review` skill.
+
 ## How it works
 
 1. **Agent delivers** — at delivery time, `record-release` (or `advance-state --status delivered`)

@@ -241,6 +241,16 @@ function validateLegacyRefs(reporter: Reporter): void {
   // Collect all kit-owned asset relative paths so legacy-ref scanning can skip matches
   // that are subpaths of kit-owned assets. E.g. legacyRefRe matches "skills/plan-work/SKILL.md"
   // within "kits/builder/skills/plan-work/SKILL.md"; the kit declares and validates these.
+  //
+  // Deliberately NO directory-level exemption: a ref must be an exact registered path, or a
+  // parent directory of one, to be skipped. A kit that ships a helper file living alongside a
+  // registered asset (e.g. a skill's own script next to its SKILL.md) must register that
+  // helper as its own kit.json entry (e.g. under an "assets" section) rather than relying on
+  // sibling-directory proximity — widening the exemption to "any file in the same directory
+  // as a registered path" would silence real missing-path detection for every OTHER file that
+  // happens to sit next to a registered asset, not just the intended one. See
+  // kits/veritas-governance/kit.json's "assets" section for the registration this exact case
+  // uses.
   const kitOwnedSubPaths = new Set<string>();
   const kitsDir = path.join(root, "kits");
   if (fs.existsSync(kitsDir)) {
@@ -271,7 +281,8 @@ function validateLegacyRefs(reporter: Reporter): void {
       if (ref.split(/[\\/]/).includes("node_modules")) continue;
       // Skip refs that are declared kit-owned asset paths or their parent directories
       // (e.g. "skills/plan-work/SKILL.md" or "skills/plan-work" matched inside
-      // "kits/builder/skills/plan-work/SKILL.md" in eval files).
+      // "kits/builder/skills/plan-work/SKILL.md" in eval files). No directory-level
+      // exemption — see the kitOwnedSubPaths comment above.
       if (kitOwnedSubPaths.has(ref) || [...kitOwnedSubPaths].some((p) => p.startsWith(ref + "/"))) continue;
       const candidates = [path.join(root, ref), ...(ref.startsWith("evals/") ? [] : [path.join(root, "evals", ref)])];
       if (!candidates.some(fs.existsSync)) reporter.fail(`${rel(file)}: references missing source path: ${ref}`);

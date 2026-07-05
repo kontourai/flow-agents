@@ -19,6 +19,7 @@ only projects Veritas's own recorded verdict into the Flow trust.bundle vocabula
 | Adapter | `adapter/readiness-to-trust-bundle.mjs` | Projects a `veritas readiness --check evidence --working-tree` evidence report into a Hachure `trust.bundle` (via `@kontourai/surface`), deriving the claim status from Veritas's own blocking-failure signal. |
 | Fixtures | `fixtures/readiness/*.readiness-report.json` | Captured **real** Veritas readiness reports (a ready clean tree, and a not-ready tree with a required CLI artifact deleted) used by the eval. |
 | Flow | `flows/exemption-issuance.flow.json` | Single-gate agentless flow `request -> human-approval-gate -> issue`. The gate requires a **verified** `no-agent-delivery-exemption-approval` trust.bundle claim (`subjectType: "delivery-scope"`) before the `issue` step's write is flow-sanctioned. Issues a `delivery/DECLARED` exemption entry per ADR 0022 §2/§3. |
+| Skill | `skills/exemption-usage-review/SKILL.md` | Periodic audit skill (ADR 0022 §3): walks `delivery/DECLARED` + its `git log --follow` history and reports every standing exemption (scope, reason, approver, age since `declared_at`), flagging entries overdue for owner re-confirmation against a configurable staleness threshold. Process visibility, not enforcement — read-only, never mutates `delivery/DECLARED` or the reconciler. |
 
 The gate uses provider-neutral Flow vocabulary (`kind: "trust.bundle"`, `bundle_claim`) — the
 same vocabulary `kits/builder/flows/build.flow.json` uses. Veritas is simply the producer that
@@ -91,6 +92,31 @@ replacement of it):
 }
 ```
 
+## How to run the review
+
+`skills/exemption-usage-review/SKILL.md` (ADR 0022 §3, "the kit issues, the anchor
+enforces... and the kit audits") gives an operator a periodic, read-only way to see every
+`delivery/DECLARED` exemption currently standing, how old each one is, and which are overdue
+for owner re-confirmation. This is **process visibility, not enforcement** — it never
+modifies `delivery/DECLARED` and never changes `scripts/ci/trust-reconcile.js`'s
+reconciliation decision or exit code.
+
+```bash
+# Human-readable report against this repo's real delivery/DECLARED, default 90-day threshold.
+node kits/veritas-governance/skills/exemption-usage-review/review-exemptions.mjs
+
+# Machine-readable, with a deterministic "now" and a tighter threshold.
+node kits/veritas-governance/skills/exemption-usage-review/review-exemptions.mjs \
+  --as-of 2026-07-05T00:00:00Z --stale-days 30 --json
+```
+
+Each standing exemption is reported as `{scope, reason, approved_by, declared_at, age_days,
+stale}`; a `git log --follow -- delivery/DECLARED` history walk is reported alongside it as a
+supplementary commit-level trail. See the skill's own SKILL.md for the full "what this review
+does and does not verify" statement (it does not authenticate `approved_by`, does not
+re-evaluate whether any scope currently matches a given change — that remains
+`trust-reconcile.js`'s job — and does not schedule itself; an operator runs it periodically).
+
 ## Human-approval evidence: what is and is not enforced
 
 The `human-approval-gate`'s `expects[]` entry only requires a **verified** trust.bundle claim
@@ -146,8 +172,10 @@ decision deferred to a later slice (see the WS5 shaping's open decisions).
 
 ## Not in slice 1
 
-Skills (`consult-standards`, `governance-evidence`), the fuller `merge-readiness` flow, the
+Skills `consult-standards` and `governance-evidence`, the fuller `merge-readiness` flow, the
 `standards-authoring` flow, and the `knowledge` dependency are later slices — see the WS5
-backlog. The `exemption-usage-review` periodic audit flow/skill named in ADR 0022 §3 (walks
-`delivery/DECLARED` history and surfaces standing exemptions for owner re-confirmation —
-process visibility, not enforcement) is also a separate, later slice, not shipped here.
+backlog. `exemption-usage-review` (ADR 0022 §3's periodic audit skill, walking
+`delivery/DECLARED` history and surfacing standing exemptions for owner re-confirmation —
+process visibility, not enforcement) **has now shipped** — see "What it contains" above and
+"How to run the review". Nothing schedules it automatically; an operator runs it periodically
+(see the skill's own "Accepted gap" note) — that scheduling surface remains out of scope.

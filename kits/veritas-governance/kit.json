@@ -15,6 +15,20 @@
       "description": "Agentless K0 flow issuing a delivery/DECLARED no-agent-delivery exemption (ADR 0022 §2/§3): step request -> gate human-approval-gate (requires a verified no-agent-delivery-exemption-approval trust.bundle claim, satisfiable only by a human-authored approval bundle by convention -- see docs/README.md) -> step issue, which appends the approved entry to delivery/DECLARED. CI-callable."
     }
   ],
+  "skills": [
+    {
+      "id": "veritas-governance.exemption-usage-review",
+      "path": "skills/exemption-usage-review/SKILL.md",
+      "description": "Periodic audit skill (ADR 0022 §3): walks delivery/DECLARED + its git log --follow history and reports every standing no-agent-delivery exemption (scope, reason, approver, age since declared_at), flagging entries overdue for owner re-confirmation against a configurable staleness threshold. Process visibility, not enforcement -- read-only, never mutates delivery/DECLARED or scripts/ci/trust-reconcile.js's behavior."
+    }
+  ],
+  "assets": [
+    {
+      "id": "veritas-governance.exemption-usage-review-helper",
+      "path": "skills/exemption-usage-review/review-exemptions.mjs",
+      "description": "Dependency-free ESM helper script the exemption-usage-review skill documents/invokes: reads delivery/DECLARED, computes age/staleness per entry, walks git log --follow -- delivery/DECLARED for a supplementary history trail. Read-only; never mutates delivery/DECLARED or scripts/ci/trust-reconcile.js's behavior."
+    }
+  ],
   "docs": [
     { "id": "veritas-governance.readme", "path": "docs/README.md" }
   ]

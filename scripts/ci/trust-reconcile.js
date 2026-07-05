@@ -91,6 +91,25 @@
  *                                         0022 addendum, part 4) — see
  *                                         resolveEnforcementEvent(). Default (unset/
  *                                         unrecognized): treated as a gating event.
+ *   TRUST_RECONCILE_BASE_REF              Optional PR base ref (falls back to
+ *                                         GITHUB_BASE_REF, set by GitHub Actions on
+ *                                         `pull_request` events only) used SOLELY by the
+ *                                         audit-only runtime-session-trailer diagnostic
+ *                                         below to bound its commit-log scan
+ *                                         (`git log <base>..<sha>`); unset/unresolvable →
+ *                                         diagnostic narrows to scanning just the head
+ *                                         commit's own message (documented, accepted
+ *                                         fallback — never a crash, never widens scope).
+ *                                         Never affects Step 1/Step 2/exit-code logic.
+ *
+ * Runtime-session commit-trailer diagnostic (ADR 0022 §1, issue #305 — AUDIT ONLY, never
+ * gating): every run logs a `[trust-reconcile] identified: runtime-session trailer
+ * '<trailer>' on <ref>` line for each distinct `Claude-Session:` / `Codex-Session:` /
+ * `Opencode-Session:` / `Pi-Session:` commit trailer found in the resolved commit range
+ * (see findRuntimeSessionTrailers()/logRuntimeSessionTrailers()). Logs the trailer KEY only
+ * (e.g. `Claude-Session`) — never the trailer VALUE (typically a session URL) — per the
+ * ADR's own quoted line format. This is diagnostic/attribution only: it never writes to
+ * ciResults/issues[] and never changes the exit code, on any path.
  *
  * Auto-discovery (when no --bundle or TRUST_RECONCILE_BUNDLE is set):
  *   Checks delivery/trust.bundle, then delivery/trust.checkpoint.json under repo root
@@ -674,6 +693,111 @@ function isShaInRange(repoRoot, sha, from, to) {
 }
 
 /**
+ * Runtime-session commit-trailer names this reconciler recognizes for the audit-only
+ * diagnostic below (ADR 0022 §1, table row 1). These are commit-message TRAILER keys
+ * (e.g. `Claude-Session: https://claude.ai/code/session_...`), a distinct vocabulary from
+ * scripts/hooks/lib/actor-identity.js's RUNTIME_SESSION_ID_VARS (env var names) — but the
+ * same four-runtime enumeration (claude-code/codex/opencode/pi).
+ */
+const RUNTIME_SESSION_TRAILER_NAMES = [
+  'Claude-Session',
+  'Codex-Session',
+  'Opencode-Session',
+  'Pi-Session',
+];
+
+/**
+ * Diagnostic-only (ADR 0022 §1): find runtime-session commit trailers (`Claude-Session:`,
+ * `Codex-Session:`, `Opencode-Session:`, `Pi-Session:`) across the commit range this run is
+ * evaluating, and report which trailer KEYS were found — never the trailer VALUE (typically
+ * a session URL). "Commit trailer present — logged by the reconciler ... for audit; does not
+ * change the exit path" (ADR 0022 §1). This function is write-only diagnostics: its return
+ * value / any failure NEVER feeds ciResults, issues[], or the exit code.
+ *
+ * Range resolution (accepted, documented narrower fallback — ADR 0022 §1 Residuals):
+ *   - Prefer `git log <baseRef>..<sha>` when a PR base ref is resolvable
+ *     (TRUST_RECONCILE_BASE_REF env override, else GITHUB_BASE_REF — set by GitHub Actions
+ *     on `pull_request` events only).
+ *   - No base ref resolvable (local/manual invocation, `push`/`workflow_dispatch` events,
+ *     which have no PR base) — falls back to scanning just `ctx.sha`'s own commit message.
+ *     This is a narrower-than-ideal default (misses trailers on other commits in an
+ *     unresolvable range) but is NEVER a crash and NEVER silently expands scope beyond what
+ *     is actually derivable — documented gap, not a silent limitation.
+ *   - No usable sha at all — zero trailers found (nothing to scan).
+ *
+ * @param {string} repoRoot - Repository root (cwd for git subprocess calls).
+ * @param {{ref: string, sha: string}} ctx - Resolved scope context (resolveScopeContext()).
+ * @returns {Array<{trailerName: string, ref: string}>} Distinct (trailerName) diagnostics
+ *   found in range, each paired with the ref to log against. Empty array on any failure or
+ *   when no trailer is present — never throws.
+ */
+function findRuntimeSessionTrailers(repoRoot, ctx) {
+  const sha = (ctx && ctx.sha) || '';
+  if (!sha) return [];
+  const ref = (ctx && ctx.ref) || sha;
+
+  const baseRef = (process.env.TRUST_RECONCILE_BASE_REF || process.env.GITHUB_BASE_REF || '').trim();
+
+  let commitMessages = [];
+  try {
+    if (baseRef) {
+      const res = spawnSync('git', ['log', '--format=%B%x00', `${baseRef}..${sha}`], {
+        cwd: repoRoot, encoding: 'utf8',
+      });
+      if (res && !res.error && res.status === 0 && typeof res.stdout === 'string') {
+        commitMessages = res.stdout.split('\0').map((m) => m.trim()).filter(Boolean);
+      }
+    }
+    // No base ref resolvable, or the ranged log produced nothing usable — fall back to
+    // just the head commit's own message (accepted narrower default, never a crash).
+    if (!baseRef || commitMessages.length === 0) {
+      const res = spawnSync('git', ['log', '--format=%B', '-1', sha], {
+        cwd: repoRoot, encoding: 'utf8',
+      });
+      if (res && !res.error && res.status === 0 && typeof res.stdout === 'string' && res.stdout.trim()) {
+        commitMessages = [res.stdout.trim()];
+      }
+    }
+  } catch {
+    return [];
+  }
+
+  const found = [];
+  const seen = new Set();
+  for (const message of commitMessages) {
+    for (const trailerName of RUNTIME_SESSION_TRAILER_NAMES) {
+      if (seen.has(trailerName)) continue;
+      const prefix = `${trailerName}:`;
+      const hasTrailer = message.split('\n').some((line) => line.trim().startsWith(prefix));
+      if (hasTrailer) {
+        seen.add(trailerName);
+        found.push({ trailerName, ref });
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * Diagnostic-only (ADR 0022 §1): write the audit line for each runtime-session commit
+ * trailer found in range. Never touches ciResults/issues[]/exit code — wrapped so any
+ * unexpected failure degrades to zero lines written, never a thrown error.
+ *
+ * @param {string} repoRoot
+ * @param {{ref: string, sha: string}} ctx
+ */
+function logRuntimeSessionTrailers(repoRoot, ctx) {
+  try {
+    const trailers = findRuntimeSessionTrailers(repoRoot, ctx);
+    for (const { trailerName, ref } of trailers) {
+      process.stdout.write(`[trust-reconcile] identified: runtime-session trailer '${trailerName}' on ${ref}\n`);
+    }
+  } catch {
+    // Diagnostic-only — any failure here must never affect the reconciler's outcome.
+  }
+}
+
+/**
  * Match a SINGLE scope condition (one of the four forms) against the resolved context.
  * Extracted from matchesScope() so a compound (space-separated, AND) scope can validate
  * each condition independently and still fail closed if any one is unrecognized.
@@ -909,6 +1033,13 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
   // branch). Resolved BEFORE auto-discovery because discoverBundle() now uses scopeCtx.sha
   // to pick, among per-session candidates, the one that attests THIS change.
   const scopeCtx = resolveScopeContext(resolvedRepoRoot);
+
+  // Diagnostic-only (ADR 0022 §1, issue #305): audit-log any runtime-session commit
+  // trailer found in range — logged for attribution, never gating. Runs unconditionally,
+  // regardless of bundle/DECLARED branch, immediately after scopeCtx resolves and before
+  // bundle auto-discovery/Step 1, so it always fires the same way whether or not a bundle
+  // or DECLARED exemption is later found. Never affects ciResults/issues[]/exit code.
+  logRuntimeSessionTrailers(resolvedRepoRoot, scopeCtx);
 
   let bundlePath = explicitBundlePath || discoverBundle(resolvedRepoRoot, scopeCtx.sha) || null;
   const bundleWasAutoDiscovered = !explicitBundlePath && !!bundlePath;
@@ -1320,6 +1451,11 @@ module.exports.waiverOnCommandIssues = waiverOnCommandIssues;
 module.exports.noEvidenceCommandIssues = noEvidenceCommandIssues;
 module.exports.reconcilableManifestIssues = reconcilableManifestIssues;
 module.exports.sessionLocalShapeIssues = sessionLocalShapeIssues;
+
+// Exported for evals (#305 trailer-diagnostic coverage) — read-only diagnostic helpers,
+// never gating; see the header comment's "Runtime-session commit-trailer diagnostic" note.
+module.exports.findRuntimeSessionTrailers = findRuntimeSessionTrailers;
+module.exports.logRuntimeSessionTrailers = logRuntimeSessionTrailers;
 
 if (require.main === module) {
   main();

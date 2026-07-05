@@ -145,6 +145,10 @@ run_static() {
   echo ""
   bash "$EVAL_DIR/static/test_flowdef_codeowners_coverage.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/static/test_validate_source_kit_asset_scope.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/static/test_declared_scope_forms_documented.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/static/test_unit_helpers.sh" || result=1
   echo ""
   bash "$EVAL_DIR/static/test_knowledge_providers.sh" || result=1
@@ -229,6 +233,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_veritas_governance_adapter.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_exemption_usage_review.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_workflow_steering_hook.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_session_resume_roundtrip.sh" || result=1
@@ -283,6 +289,8 @@ run_integration() {
   bash "$EVAL_DIR/integration/test_captured_fail_reconciliation.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_trust_reconcile.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_trust_reconcile_trailer_diagnostic.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_reconcile_soundness.sh" || result=1
   echo ""
