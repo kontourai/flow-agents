@@ -159,8 +159,25 @@ function latestWorkflowState(root) {
   return states[0] || null;
 }
 
+// #293 AC7 (injection discipline): strips C0 (0x00-0x1F), DEL (0x7F), and C1 (0x80-0x9F,
+// which includes ANSI-CSI-adjacent bytes) BEFORE whitespace-collapse/truncation — mirroring
+// src/cli/workflow-sidecar.ts's stripControlCharsForDisplay / assignment-provider.ts's
+// sanitizeDisplayField exactly (same charset, same rationale: holder/actor/assignee strings
+// sourced from the shared multi-writer liveness stream or an attacker-postable GitHub comment
+// are untrusted display input). Previously this function only collapsed whitespace, so a raw
+// ESC/BEL byte embedded in a hostile actor string passed through unstripped into every steering
+// notice that calls safeStateText (resumeSteering's LIVENESS WARNING block, supersessionSteering's
+// SUPERSEDED notice) — fixed here, in the one shared helper, rather than in each call site.
 function safeStateText(value, maxLength = 240) {
-  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  // Whitespace-collapse FIRST (so an embedded newline/tab becomes a joining space, preserving
+  // the existing multiline-summary neutralization behavior), THEN strip control/ANSI bytes
+  // (#293 AC7) — reversing this order would strip \n before the collapse ever sees it, losing
+  // the join-space between sentences. Only C0/DEL/C1 bytes THAT SURVIVE the collapse (ESC, BEL,
+  // and other non-whitespace control bytes — real \s already became a plain space above) are
+  // stripped, mirroring src/cli/workflow-sidecar.ts's stripControlCharsForDisplay /
+  // assignment-provider.ts's sanitizeDisplayField charset exactly.
+  const collapsed = String(value || '').replace(/\s+/g, ' ').trim();
+  const text = collapsed.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
   if (text.length <= maxLength) return text;
   return `${text.slice(0, maxLength - 3)}...`;
 }
@@ -411,6 +428,51 @@ function resumeSteering(root, current) {
   }
 }
 
+/**
+ * Compose the every-turn SUPERSEDED steering notice (issue #293).
+ *
+ * Unlike resumeSteering()'s RESUME block (SessionStart only), this notice must
+ * surface on EVERY turn (UserPromptSubmit as well as SessionStart) once another
+ * actor holds a fresh liveness claim on the caller's own subject — the
+ * "don't publish, you may be stale" signal the verify-hold gate backstops at
+ * publish time. Reuses the SAME liveness-only join resumeSteering()'s liveness
+ * advisory block already performs (freshHolders(events, slug, selfActor, now)),
+ * not a second computation.
+ *
+ * freshHolders() already excludes selfActor internally (see
+ * scripts/hooks/lib/liveness-read.js), so any holder returned here is by
+ * definition another actor — no additional self-filter is required.
+ *
+ * Fully fail-open: any error anywhere in this function returns '' rather than
+ * throwing, matching every other steering helper in this file.
+ *
+ * @param {string} root     Repository root
+ * @param {{ file: string, payload: object }} current  Latest active state entry (this actor's own)
+ * @returns {string}
+ */
+function supersessionSteering(root, current) {
+  try {
+    const state = current.payload;
+    const workflowDir = path.dirname(current.file);
+    const slug = state.task_slug || path.basename(workflowDir);
+
+    const resolved = resolveActor(process.env);
+    const selfActor = resolved.actor || 'local';
+
+    const events = flowAgentsArtifactRootsForRead(root)
+      .flatMap(artifactRoot => readLivenessEvents(path.join(artifactRoot, 'liveness', 'events.jsonl')));
+    if (events.length === 0) return '';
+
+    const holders = freshHolders(events, slug, selfActor, Date.now());
+    if (holders.length === 0) return '';
+
+    const holder = holders[0];
+    return `[SUPERSEDED: another agent appears live on this work: actor ${safeStateText(holder.actor)}, last seen ${holder.lastAt}. Your claim on this subject may be stale — do not publish until you re-verify hold (see verify-hold gate) or hand off.]`;
+  } catch {
+    return '';
+  }
+}
+
 function run(rawInput) {
   try {
     const input = JSON.parse(rawInput);
@@ -451,10 +513,19 @@ function run(rawInput) {
       }
     }
 
+    // Every-turn supersession notice (#293): fires on UserPromptSubmit (every turn),
+    // not just SessionStart, so a takeover mid-session keeps surfacing the warning.
+    if (event === 'UserPromptSubmit' && current) {
+      const supersessionHint = supersessionSteering(root, current);
+      if (supersessionHint) hints.push(supersessionHint);
+    }
+
     // SessionStart only: append the RESUME block for richer situational awareness
     if (event === 'SessionStart' && current) {
       const resumeBlock = resumeSteering(root, current);
       if (resumeBlock) hints.push(resumeBlock);
+      const supersessionHint = supersessionSteering(root, current);
+      if (supersessionHint) hints.push(supersessionHint);
     }
 
     if (shouldAppendWorkflowContext) {
@@ -492,6 +563,7 @@ module.exports = {
   safeStateText,
   stateNeedsAmbientSteering,
   resumeSteering,
+  supersessionSteering,
   promptText,
   looksLikeBuilderWork,
   builderWorkflowSteering,

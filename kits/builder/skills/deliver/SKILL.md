@@ -293,6 +293,60 @@ After review, verification, evidence, and Goal Fit are clean for the same diff:
    too — `git add -A delivery/` after the force-add. Do NOT hand-delete the flat
    `delivery/trust.bundle` in a delivery PR while other PRs may still seal to it.)
 
+   **#293 — verify-hold gate. HARD STOP.** Before committing/pushing/opening a PR/merging,
+   run the verify-hold check (it also runs automatically inside `publish-delivery` /
+   `record-release` / `advance-state --status delivered`, but run it explicitly here BEFORE
+   committing/pushing, since by the time `record-release` runs the branch may already be
+   pushed). **The command differs by this repo's configured assignment provider kind — a bare
+   `verify-hold <slug>` with no provider flag always defaults to `--assignment-provider
+   local-file` (`runVerifyHold`'s documented default), so on a `github`-provider repo it reads
+   no local claim record and silently resolves `free`/PASS regardless of the real GitHub hold
+   state. The local-file-only invocation below is NOT sufficient for a `github`-provider repo —
+   the github branch is MANDATORY for that provider kind:**
+
+   - **local-file provider** (this repo's configured assignment provider, from
+     `effective-assignment-provider-settings`, is `local-file`):
+
+     ```bash
+     npm run workflow:sidecar -- verify-hold .kontourai/flow-agents/<slug>
+     ```
+
+   - **github provider**: render-then-execute, mirroring `pull-work`'s SKILL.md claim-side
+     pattern for the same ADR 0021 §1 join — first read the effective state (no live `gh` call
+     happens inside `workflow-sidecar.ts`; the skill renders it here), then pass the rendered
+     `.effective` JSON into `verify-hold` via `--effective-state-json`:
+
+     ```bash
+     gh issue view <issue-number> --json assignees,labels,comments > /tmp/issue.json
+     npm run assignment-provider -- status \
+       --provider github \
+       --subject-id <slug> \
+       --issue-json /tmp/issue.json \
+       --liveness-stream <path-to-events.jsonl> \
+       --self-actor <actor> \
+       > /tmp/assignment-status.json
+     npm run workflow:sidecar -- verify-hold .kontourai/flow-agents/<slug> \
+       --assignment-provider github \
+       --effective-state-json /tmp/assignment-status.json
+     ```
+
+     (`/tmp/assignment-status.json`'s top-level shape is `{ role, provider, assignment,
+     effective }`; `verify-hold --effective-state-json` reads the `.effective` field, matching
+     `assignment-provider status`'s own output shape directly — no reshaping needed.)
+
+   This is the ONE point in the whole workflow that BLOCKS instead of warns (ADR 0021 §3). It
+   asks exactly one question: is this actor still the fresh, non-superseded holder of this
+   subject (or is the subject free/self-held)? **If the check reports not-fresh-holder (exit
+   non-zero, `ok:false` in the JSON result): DO NOT commit, push, open a PR, or merge.** This
+   is a different failure mode from the `publish-delivery`/reconcile-shape preflight paragraph
+   above — that one is about the trust *bundle's shape* being invalid; this one is about
+   *actor hold* — another actor holds a fresh claim on this subject, your own claim has gone
+   stale, or the subject is assigned to a human. Do not conflate the two "REFUSING to publish"
+   messages. When refused, follow the reconcile guidance (the CLI's own `guidance` field, or
+   verbatim): re-run `pull-work`/`pickup-probe` to discover the current holder and hand off
+   cleanly (`learning-review`/handoff), or, if a human confirms this session should resume
+   ownership, run `ensure-session --supersede-stale` before retrying.
+
 3. Commit the verified diff, including the force-added `delivery/<slug>/` trust artifacts.
 4. Push the branch.
 

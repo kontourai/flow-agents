@@ -2184,6 +2184,7 @@ async function promote(p: ReturnType<typeof parseArgs>): Promise<number> {
     // here would silently defeat the whole preflight for the --publish path.
     await publishDelivery(dir, publishRepoRoot).catch((err: unknown) => {
       if (err instanceof InvalidBundleShapeError) throw err;
+      if (err instanceof NotFreshHolderError) throw err;
       process.stderr.write(`[promote] WARNING: publish-delivery failed: ${err instanceof Error ? err.message : String(err)}\n`);
     });
   }
@@ -2258,6 +2259,7 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
     const publishRepoRoot = opt(p, "repo-root") ? path.resolve(opt(p, "repo-root")) : findRepoRootFromDirStrict(dir);
     await publishDelivery(dir, publishRepoRoot).catch((err: unknown) => {
       if (err instanceof InvalidBundleShapeError) throw err;
+      if (err instanceof NotFreshHolderError) throw err;
       process.stderr.write(`[advance-state] WARNING: publish-delivery failed: ${err instanceof Error ? err.message : String(err)}\n`);
     });
   }
@@ -2353,6 +2355,7 @@ async function recordRelease(p: ReturnType<typeof parseArgs>): Promise<number> {
   const publishRepoRoot = opt(p, "repo-root") ? path.resolve(opt(p, "repo-root")) : findRepoRootFromDirStrict(dir);
   await publishDelivery(dir, publishRepoRoot).catch((err: unknown) => {
     if (err instanceof InvalidBundleShapeError) throw err;
+    if (err instanceof NotFreshHolderError) throw err;
     process.stderr.write(`[record-release] WARNING: publish-delivery failed: ${err instanceof Error ? err.message : String(err)}\n`);
   });
   return 0;
@@ -2677,6 +2680,35 @@ export class InvalidBundleShapeError extends Error {
 }
 
 /**
+ * Distinct, identifiable error for a publish attempt by an actor who is NOT the fresh,
+ * non-superseded holder of the subject (issue #293, ADR 0021 §3) — NOT a generic Error and NOT
+ * `InvalidBundleShapeError` (#356), so every publishDelivery() call site can positively
+ * distinguish "refuses to publish because the bundle shape is invalid" from "refuses to publish
+ * because this actor no longer holds the subject" — two genuinely distinct fail-closed tiers
+ * that must never be conflated in a catch handler (a worker fixing a shape issue must not be
+ * told to "re-record evidence" when the real problem is a stale/superseded claim, and vice
+ * versa). Mirrors `InvalidBundleShapeError`'s shape exactly: same `extends Error` base, same
+ * `readonly code` discriminator convention, same doc-comment structure — only the payload
+ * differs (the effective-state/holder/reason/guidance `runVerifyHold()` computed, rather than a
+ * shape-issue list).
+ */
+export class NotFreshHolderError extends Error {
+  readonly code = "VERIFY_HOLD_NOT_FRESH_HOLDER" as const;
+  readonly effective_state: EffectiveState | "not_evaluated";
+  readonly holder?: { actor?: string; assignee?: string | null; idle_days?: number | null; last_at?: string };
+  readonly reason: string;
+  readonly guidance: string[];
+  constructor(result: { effective_state: EffectiveState | "not_evaluated"; holder?: { actor?: string; assignee?: string | null; idle_days?: number | null; last_at?: string }; reason: string; guidance: string[] }) {
+    super(`verify-hold refused publish — not the fresh holder of this subject (${result.reason}) — see .guidance for reconcile steps`);
+    this.name = "NotFreshHolderError";
+    this.effective_state = result.effective_state;
+    this.holder = result.holder;
+    this.reason = result.reason;
+    this.guidance = result.guidance;
+  }
+}
+
+/**
  * Human-actionable fix text per divergence type (Q2: unwaived-assumed's message always
  * carries the "waiver voided by a mixed record-evidence call" root-cause hint — shape #5 is
  * NOT a distinct predicate, it is #2 enriched, per the plan's Q2 resolution).
@@ -2849,6 +2881,298 @@ async function reconcilePreflightCmd(p: ReturnType<typeof parseArgs>): Promise<n
   return 1;
 }
 
+/**
+ * The ONE hard-stop gate (issue #293, ADR 0021 §3): "is my actor the fresh, non-superseded
+ * holder of this subject (or is the subject free/self-held)?" Reuses the SAME assignment ⋈
+ * liveness join #290/#291 already built (`computeEffectiveState` + `readLocalAssignmentStatus`
+ * + `readLivenessEvents`/`freshHolders`) — no second computation is invented here. This is the
+ * mirror-image check, at the OTHER end of the session lifecycle, of
+ * `enforceEnsureSessionOwnership`'s pre-entry guard above: that guard decides whether entry
+ * should claim/supersede/refuse; this gate decides whether PUBLISH should proceed, with a
+ * different (new) per-effective-state mapping — the ownership guard's "claim"/"supersede"
+ * actions are wrong at publish time, so this is new interpretation of the existing join output,
+ * not a new join and not a new `EffectiveState` value (there is no literal `"superseded"` state
+ * — a superseded-away actor's own re-check naturally resolves to `held`(holder=successor) or
+ * `reclaimable`, never `self_is_holder`; see assignment-provider.ts's `computeEffectiveState`).
+ *
+ * Effective-state -> publish-decision mapping (the operative spec, from the plan's table).
+ * IMPORTANT (bug fix, #397): this gate fences the durable ASSIGNMENT hold, not ambient
+ * liveness — liveness is advisory everywhere else in the system, and this is the ONE hard
+ * gate, so it must never false-block on liveness alone. A subject with fresh liveness by
+ * another actor but NO durable assignment record (`held`, reason
+ * `liveness_claim_present_assignment_lagging`) therefore PASSES, not BLOCKs — there is no
+ * durable ownership conflict to protect, only ambient presence. This does NOT weaken zombie
+ * protection: a superseded zombie always has an assignment record (either its own stale
+ * assignment — `reclaimable` — or the successor's assignment-backed `held`/
+ * `fresh_liveness_heartbeat`), both of which still BLOCK below.
+ *   - `free` (no assignment ever recorded)              -> PASS (never false-block an untracked subject)
+ *   - `held`, reason `self_is_holder`                    -> PASS (the caller IS the current holder)
+ *   - `held`, reason `liveness_claim_present_assignment_lagging`
+ *     (fresh liveness by another actor, NO durable assignment record) -> PASS (liveness alone
+ *     is never a durable ownership conflict — see #397 fix note above)
+ *   - `held`, reason `fresh_liveness_heartbeat`
+ *     (durable assignment held by another actor + fresh liveness)     -> BLOCK (a different
+ *     actor durably holds this subject and is demonstrably still live)
+ *   - `reclaimable` (assignment present, stale/absent liveness)       -> BLOCK (not proof of
+ *     self — safe default blocks; a durable assignment record exists)
+ *   - `human-held`                                        -> BLOCK (never publish over a human assignee)
+ *   - no resolvable join at all (non-local-file provider
+ *     with no --effective-state-json)                    -> `not_evaluated`, PASS (documented scope
+ *                                                             boundary, loud stderr note, never a silent block)
+ *
+ * Actor resolution mirrors `enforceEnsureSessionOwnership` EXACTLY: the bare
+ * `resolveActor(env).actor` / branchActorKey string, NEVER `serializeActor(actorStruct)`'s
+ * triple — the #291 flat-vs-triple seam. `opts.actorKey` (the CLI's --actor / FLOW_AGENTS_ACTOR
+ * override, already sanitized by the caller) takes precedence when provided.
+ *
+ * Slug/artifactRoot derivation matches `publishDelivery()`'s own `slug =
+ * path.basename(path.resolve(dir))` byte-for-byte (both must resolve the SAME assignment
+ * record) and the `artifactRoot = path.dirname(dir)` pattern already used elsewhere in this
+ * file for a `dir`-only consumer.
+ *
+ * github provider: read-only precomputed `--effective-state-json` escape hatch, matching
+ * `enforceEnsureSessionOwnership`'s existing github branch precedent exactly (render-don't-
+ * execute — assignment-provider.ts never calls `gh` directly from this CLI).
+ *
+ * Every interpolated actor/holder/reason string is sanitized via
+ * `stripControlCharsForDisplay(...).slice(0, 64)` — reusing the exact top-level helper, never a
+ * second sanitizer (AC7).
+ *
+ * SECOND CI-blocking false-block fix (this iteration): the hard gate above enforces ONLY for a
+ * STABLY-identified actor. A caller's identity is STABLE when it comes from an explicit
+ * `opts.actorKey` (a caller that hands in an actor key is asserting a stable identity — e.g. the
+ * CLI's --actor / FLOW_AGENTS_ACTOR override, or the github skill's precomputed path), from
+ * `FLOW_AGENTS_ACTOR` (`resolveActor` source `"explicit-override"`), or from a runtime-native
+ * session id (`resolveActor` source `` `runtime-session-id:${runtime}` ``, e.g. Claude Code's
+ * `CLAUDE_CODE_SESSION_ID`). It is UNSTABLE when `resolveActor` falls all the way through to the
+ * process-ancestry fallback (source `"process-ancestry"`) or fails to resolve at all (source
+ * `"unresolved"` / `isUnresolvedActor(actor)`). This mirrors `enforceEnsureSessionOwnership`'s
+ * Design Decision 4 (never hard-fail on actor ambiguity): a session that cannot stably
+ * self-identify cannot be meaningfully fenced against a durable assignment record, so hard-
+ * blocking it produces exactly the false-block CI hit (no `FLOW_AGENTS_ACTOR`/runtime session id
+ * in CI -> ancestry fallback -> a DIFFERENT ancestry-derived actor string than the one that
+ * created the claim -> `reclaimable`/not-self -> hard BLOCK of a legitimate self-publish). A
+ * real coordination participant always has a stable identity (explicit override or runtime
+ * session id), so zombie protection under a stable actor is completely unaffected — this only
+ * changes behavior for a caller that was never fenceable in the first place. When the resolved
+ * actor identity is UNSTABLE, this function short-circuits to `{ ok: true, effective_state:
+ * "not_evaluated", reason: "actor-identity-unstable-advisory-only" }` (holder included, sanitized,
+ * when one exists) BEFORE running the assignment ⋈ liveness join at all, with one loud stderr
+ * note — the gate degrades to advisory-only rather than ever false-blocking an unstable identity.
+ * When the actor identity IS stable, the effective-state -> publish-decision mapping above
+ * applies exactly as documented, unchanged.
+ */
+export function runVerifyHold(
+  dir: string,
+  repoRoot: string | null,
+  opts?: { actorKey?: string; now?: number; assignmentProviderKind?: string; effectiveStateJson?: unknown },
+): {
+  ok: boolean;
+  effective_state: EffectiveState | "not_evaluated";
+  holder?: { actor?: string; assignee?: string | null; idle_days?: number | null; last_at?: string };
+  reason: string;
+  guidance: string[];
+} {
+  // repoRoot is accepted (not derived) for signature symmetry with runReconcilePreflight(dir,
+  // repoRoot, ...) / publishDelivery(dir, repoRoot) — the local-file join below only needs
+  // artifactRoot/slug, but a future non-local-file provider branch that resolves a live
+  // repo-relative fixture would need it, so the parameter stays part of the public contract.
+  void repoRoot;
+  const sanitize = (value: unknown): string => stripControlCharsForDisplay(value).slice(0, 64);
+  const slug = path.basename(path.resolve(dir));
+  const artifactRoot = path.dirname(path.resolve(dir));
+  const nowMs = opts?.now ?? Date.now();
+  const assignmentProviderKind = opts?.assignmentProviderKind || "local-file";
+  const helper = loadActorIdentityHelper();
+  // Stability check (SECOND CI-blocking false-block fix, this iteration): an explicitly-provided
+  // opts.actorKey is treated as stable outright (the caller is asserting a stable identity — see
+  // doc comment above). Otherwise resolve BOTH the actor and its source so we can tell an
+  // explicit-override / runtime-session-id actor (stable, enforce as today) apart from a
+  // process-ancestry / unresolved one (unstable, advisory-only — never hard-block).
+  const resolved = opts?.actorKey ? { actor: opts.actorKey, source: "explicit-override" } : helper.resolveActor(process.env);
+  const actorKey = resolved.actor;
+  const isStableActor = !!opts?.actorKey
+    || resolved.source === "explicit-override"
+    || resolved.source.startsWith("runtime-session-id");
+
+  const guidanceLines = (holderActor?: string): string[] => [
+    "Re-run pull-work/pickup-probe to discover the current holder of this subject and hand off cleanly (learning-review/handoff) rather than publishing over it.",
+    holderActor
+      ? `The current holder appears to be ${sanitize(holderActor)} — confirm with them before proceeding.`
+      : "Confirm with the assigned human before proceeding.",
+    "If a human confirms this session should resume ownership, run `ensure-session --supersede-stale` to explicitly re-claim the subject before retrying publish.",
+  ];
+
+  type EffectiveResult = { effective_state: EffectiveState; reason: string; holder?: { actor?: string; assignee?: string | null; idle_days?: number | null; last_at?: string } };
+  let effective: EffectiveResult | null = null;
+
+  if (opts?.effectiveStateJson !== undefined) {
+    const parsed = opts.effectiveStateJson as AnyObj;
+    const candidate = parsed && typeof parsed === "object" ? (parsed.effective as AnyObj | undefined) : undefined;
+    const validStates = new Set(["held", "reclaimable", "human-held", "free"]);
+    if (candidate && typeof candidate.effective_state === "string" && validStates.has(candidate.effective_state)) {
+      effective = candidate as EffectiveResult;
+    }
+  } else if (assignmentProviderKind === "local-file") {
+    // Same call shape as enforceEnsureSessionOwnership's local-file branch — no second
+    // freshness/ownership computation is invented (see that function's F1 fix comment for why
+    // branchActorKey, not the serialized ActorStruct triple, is the correct selfActor here).
+    const assignment = readLocalAssignmentStatus(artifactRoot, slug);
+    const events = readLivenessEvents(artifactRoot);
+    const freshList = loadLivenessReadHelper().freshHolders(events, slug, actorKey, nowMs);
+    effective = computeEffectiveState(assignment, freshList, actorKey, nowMs);
+  }
+
+  if (!effective) {
+    // Documented scope boundary (Design Constraint): a non-local-file provider with no
+    // precomputed --effective-state-json cannot be evaluated in-CLI (render-don't-execute — no
+    // live `gh` call from workflow-sidecar.ts). PASS-through, never a silent block, with a loud
+    // stderr note — mirroring enforceEnsureSessionOwnership's existing github branch precedent.
+    process.stderr.write(`[verify-hold] not evaluated: provider "${sanitize(assignmentProviderKind)}" requires --effective-state-json (or use --assignment-provider local-file)\n`);
+    return { ok: true, effective_state: "not_evaluated", reason: "provider_not_evaluated", guidance: [] };
+  }
+
+  // F1 fix (fix-plan iteration 1, HIGH): sanitize EVERY untrusted string field of
+  // effective.holder before it reaches the returned JSON / NotFreshHolderError.holder — never
+  // spread the raw holder and override only the discriminated field. `last_at` (sourced from
+  // record.claimed_at or a liveness event's `at`, both attacker-writable in the shared
+  // multi-writer liveness/assignment stream) and `actor`/`assignee` are all display strings and
+  // go through the SAME `sanitize` helper (stripControlCharsForDisplay(...).slice(0, 64)) as
+  // enforceEnsureSessionOwnership's equivalent call sites (AC7 injection-discipline parity).
+  // `idle_days` is a `number | null` computed by computeEffectiveState from Date.parse/Math.floor
+  // arithmetic (assignment-provider.ts) — never an attacker-controlled string — so it is passed
+  // through as-is, but defensively re-coerced with `typeof === "number"` so a future shape change
+  // upstream can never smuggle a string through this field.
+  const sanitizeHolder = (
+    holder: { actor?: string; assignee?: string | null; idle_days?: number | null; last_at?: string } | undefined,
+  ): { actor?: string; assignee?: string | null; idle_days?: number | null; last_at?: string } | undefined => {
+    if (!holder) return undefined;
+    return {
+      actor: holder.actor ? sanitize(holder.actor) : undefined,
+      assignee: holder.assignee ? sanitize(holder.assignee) : holder.assignee,
+      idle_days: typeof holder.idle_days === "number" ? holder.idle_days : undefined,
+      last_at: holder.last_at ? sanitize(holder.last_at) : undefined,
+    };
+  };
+
+  // SECOND CI-blocking false-block fix (this iteration): an actor identity that cannot stably
+  // self-identify (process-ancestry fallback or unresolved) cannot be meaningfully fenced against
+  // a durable assignment record — hard-blocking it is exactly the CI false-block this fix targets
+  // (see doc comment above). Degrade to advisory-only: never hard-block, regardless of what the
+  // join above computed. This check runs AFTER the join so an existing holder (if any) can still
+  // be surfaced for visibility, but strictly BEFORE the effective-state switch below so no
+  // unstable-actor request can ever reach a `case` that returns `ok: false`.
+  if (!isStableActor) {
+    process.stderr.write(
+      "[verify-hold] actor identity is ancestry-derived/unresolved — gate is advisory only for unstable identities; not hard-blocking publish\n"
+    );
+    return {
+      ok: true,
+      effective_state: "not_evaluated",
+      reason: "actor-identity-unstable-advisory-only",
+      guidance: [],
+      ...(effective.holder ? { holder: sanitizeHolder(effective.holder) } : {}),
+    };
+  }
+
+  switch (effective.effective_state) {
+    case "free":
+      return { ok: true, effective_state: "free", reason: effective.reason, guidance: [] };
+    case "held": {
+      const isSelf = effective.reason === "self_is_holder" || (!!effective.holder?.actor && effective.holder.actor === actorKey);
+      if (isSelf) return { ok: true, effective_state: "held", holder: sanitizeHolder(effective.holder), reason: effective.reason, guidance: [] };
+      // Bug fix (#397): `liveness_claim_present_assignment_lagging` means computeEffectiveState
+      // found NO durable assignment record at all — only ambient liveness by another actor
+      // (assignment-provider.ts's `if (!isAssigned) { if (freshHoldersList.length > 0) return
+      // held/liveness_claim_present_assignment_lagging }`). Liveness alone is advisory
+      // everywhere else in this system; this ONE hard gate must fence the durable ASSIGNMENT
+      // hold, not ambient presence, so this case PASSES rather than false-blocking. Every other
+      // `held` reason (`fresh_liveness_heartbeat`) is reached only when an assignment record
+      // DOES exist (assignment-provider.ts's `isAssigned` branch) and the recorded holder is
+      // still fresh-live — a genuine durable-ownership conflict, which still BLOCKs below.
+      if (effective.reason === "liveness_claim_present_assignment_lagging") {
+        return { ok: true, effective_state: "held", holder: sanitizeHolder(effective.holder), reason: effective.reason, guidance: [] };
+      }
+      const holderActor = effective.holder?.actor;
+      return {
+        ok: false,
+        effective_state: "held",
+        holder: sanitizeHolder(effective.holder),
+        reason: `subject ${sanitize(slug)} is currently held by a different, still-live actor (${sanitize(holderActor ?? "unknown")})`,
+        guidance: guidanceLines(holderActor),
+      };
+    }
+    case "reclaimable": {
+      // Stop-short risk (plan): reclaimable is NEVER treated as PASS. A lapsed self-claim looks
+      // reclaimable, not self_is_holder, to a woken zombie's own re-check — the safe default
+      // blocks and asks for reconcile guidance rather than auto-passing a stale self-claim.
+      const holderActor = effective.holder?.actor;
+      return {
+        ok: false,
+        effective_state: "reclaimable",
+        holder: sanitizeHolder(effective.holder),
+        reason: `subject ${sanitize(slug)}'s existing claim (held by ${sanitize(holderActor ?? "unknown")}) is stale/unverified as self — not a confirmed fresh hold`,
+        guidance: guidanceLines(holderActor),
+      };
+    }
+    case "human-held": {
+      const assignee = effective.holder?.assignee;
+      return {
+        ok: false,
+        effective_state: "human-held",
+        holder: sanitizeHolder(effective.holder),
+        reason: `subject ${sanitize(slug)} is assigned to ${assignee ? sanitize(assignee) : "an assigned human"} — never publish over a human assignment without confirmation`,
+        guidance: guidanceLines(undefined),
+      };
+    }
+    default:
+      return { ok: true, effective_state: "not_evaluated", reason: "unrecognized_effective_state", guidance: [] };
+  }
+}
+
+/**
+ * verify-hold <artifact-dir> [--actor <key>] [--now <iso>] [--assignment-provider <kind>]
+ *   [--effective-state-json <path|->]
+ *
+ * CLI surface for runVerifyHold() (issue #293). Prints `{ role: "VerifyHoldResult", ... }` JSON
+ * and exits 0 when `ok` (including `not_evaluated` — a documented scope boundary is never a
+ * failure exit), 1 otherwise. NEVER throws at the CLI boundary — matches
+ * `reconcilePreflightCmd`'s existing convention of printing then exiting rather than throwing;
+ * the thrown `NotFreshHolderError` variant is reserved for the LIBRARY call inside
+ * `publishDelivery()`.
+ *
+ * Usage: workflow-sidecar verify-hold <artifactDir> [--actor <key>] [--now <iso>]
+ *   [--assignment-provider <kind>] [--effective-state-json <path|->]
+ */
+async function verifyHoldCmd(p: ReturnType<typeof parseArgs>): Promise<number> {
+  if (p.flags.has("help") || (!p.positional[0] && !p.opts["help"])) {
+    if (p.flags.has("help")) {
+      console.log("Usage: workflow-sidecar verify-hold <artifactDir> [--actor <key>] [--now <iso>] [--assignment-provider <kind>] [--effective-state-json <path|->]");
+      console.log("Checks whether the calling actor is the fresh, non-superseded holder of <artifactDir>'s subject. Exits 0 if ok (including not_evaluated), 1 otherwise.");
+      return 0;
+    }
+  }
+  const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
+  const repoRoot = opt(p, "repo-root") ? path.resolve(opt(p, "repo-root")) : findRepoRootFromDirStrict(dir);
+  // SECOND CI-blocking false-block fix (this iteration): only pass an explicit actorKey through
+  // to runVerifyHold when the CALLER explicitly passed --actor — that is the one case where an
+  // actorKey should be treated as an asserted-stable identity (see runVerifyHold's doc comment).
+  // When --actor is omitted, actorKey is left undefined so runVerifyHold performs its OWN
+  // resolveActor(process.env) call internally and can see the real `source` (explicit-override /
+  // runtime-session-id / process-ancestry / unresolved) to decide stability — calling
+  // resolveReadActorKey(p) here first would discard that source and wrongly force every ambient
+  // resolution (including an ancestry fallback) to be treated as an explicit/stable actorKey.
+  const actorKey = opt(p, "actor") ? loadActorIdentityHelper().sanitizeSegment(opt(p, "actor")) : undefined;
+  const nowMs = opt(p, "now") ? Date.parse(opt(p, "now")) : undefined;
+  const assignmentProviderKind = opt(p, "assignment-provider", "local-file");
+  const effectiveStateJsonFlag = opt(p, "effective-state-json");
+  const effectiveStateJson = effectiveStateJsonFlag ? loadJsonInputFile(effectiveStateJsonFlag) : undefined;
+
+  const result = runVerifyHold(dir, repoRoot, { actorKey, now: nowMs, assignmentProviderKind, effectiveStateJson });
+  printJson({ role: "VerifyHoldResult", ...result });
+  return result.ok ? 0 : 1;
+}
+
 // ─── Publish Delivery Bundle ──────────────────────────────────────────────────
 // Copies the session's trust.bundle (+ checkpoint companions) from the gitignored
 // session artifact dir (.kontourai/flow-agents/<slug>/) to the committed delivery/ transport
@@ -2941,6 +3265,18 @@ function pruneSupersededSeals(deliveryDir: string, keepSlug: string): void {
  * never be conflated with the pre-existing fail-soft absence/repo-root branches above/below,
  * which stay exactly as before (see each publishDelivery call site's catch handler for how
  * the distinction is preserved end-to-end).
+ *
+ * #293 (SECOND, DISTINCT fail-closed gate): immediately after the shape check above and BEFORE
+ * writing anything into delivery/, runs `runVerifyHold()` — the assignment ⋈ liveness join
+ * asking "is the calling actor the fresh, non-superseded holder of this subject (or is it
+ * free/self-held)?" A not-fresh-holder result throws `NotFreshHolderError` (distinct from
+ * `InvalidBundleShapeError` — a different `code`, a different failure mode: actor hold vs
+ * bundle shape). There are now THREE tiers here, and they must never be conflated in prose or
+ * in a call site's catch handler: (1) fail-SOFT bundle absence / repo-root resolution (silent
+ * no-op / visible warning, unchanged from before #356), (2) fail-CLOSED bundle shape (#356,
+ * `InvalidBundleShapeError`), (3) fail-CLOSED verify-hold (#293, `NotFreshHolderError`). The
+ * shape check runs first (per the plan's ordering) — a bundle that is BOTH shape-invalid and
+ * not-held throws `InvalidBundleShapeError` specifically, never `NotFreshHolderError`.
  */
 export async function publishDelivery(dir: string, repoRoot: string | null): Promise<void> {
   const bundleSrc = path.join(dir, "trust.bundle");
@@ -2962,6 +3298,17 @@ export async function publishDelivery(dir: string, repoRoot: string | null): Pro
       process.stderr.write(`[publish-delivery]   - ${issue}\n`);
     }
     throw new InvalidBundleShapeError(preflight.issues);
+  }
+
+  // #293: SECOND, DISTINCT fail-closed gate — runs after the shape check above and before any
+  // copy into delivery/. Throws NotFreshHolderError (never conflated with InvalidBundleShapeError)
+  // so every call site can positively distinguish "not the fresh holder" from "bundle shape
+  // invalid".
+  const holdCheck = runVerifyHold(dir, repoRoot);
+  if (!holdCheck.ok) {
+    process.stderr.write(`[publish-delivery] REFUSING to publish — verify-hold gate: ${holdCheck.reason}\n`);
+    for (const line of holdCheck.guidance) process.stderr.write(`[publish-delivery]   - ${line}\n`);
+    throw new NotFreshHolderError(holdCheck);
   }
 
   const deliveryDir = path.join(repoRoot, "delivery");
@@ -4261,6 +4608,7 @@ async function main(): Promise<number> {
       case "seal-checkpoint": return sealCheckpoint(p);
       case "publish-delivery": return publishDeliveryCmd(p);
       case "reconcile-preflight": return reconcilePreflightCmd(p);
+      case "verify-hold": return verifyHoldCmd(p);
       default: die(`unknown command: ${p.command}`);
     }
   });

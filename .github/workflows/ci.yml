@@ -169,6 +169,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check ensure-session-ownership-guard-integration
 
+      - name: Verify-hold gate integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check verify-hold-gate-integration
+
       - name: Current.json per-actor integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check current-json-per-actor-integration
