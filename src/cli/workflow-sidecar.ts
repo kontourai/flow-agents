@@ -1424,6 +1424,11 @@ function enforceEnsureSessionOwnership(
   // assignment-provider.ts's sanitizeAuditEntryForDisplay) — this guard never echoes `--reason`
   // into a die() message, so it has no free-text field requiring the 240 tier today.
   const sanitize = (value: unknown): string => stripControlCharsForDisplay(value).slice(0, 64);
+  // #294: the 240-char free-text tier (repo convention: 64 for id-like, 240 for free text — cf.
+  // assignment-provider.ts sanitizeDisplayField(record.branch/reason, 240)). Used for the takeover
+  // `resumed_branch` (a realistic agent/<actor>/<slug> branch exceeds 64 — truncation would produce a
+  // bad `git checkout` target) and the audit `reason` (else "resuming from trust bundle" is cut off).
+  const sanitizeWide = (value: unknown): string => stripControlCharsForDisplay(value).slice(0, 240);
   const nowMs = opt(p, "now") ? Date.parse(opt(p, "now")) : Date.now();
   const assignmentProviderKind = opt(p, "assignment-provider", "local-file");
 
@@ -1503,15 +1508,32 @@ function enforceEnsureSessionOwnership(
       const assignment = readLocalAssignmentStatus(root, slug);
       const fromActor = assignment.record?.actor;
       if (!fromActor) die(`ensure-session --supersede-stale: no existing local-file claim record found for subject ${sanitize(slug)} to supersede`);
+      // #294 (ADR 0021 §5): takeover is resumption — the successor CONTINUES the incumbent's branch,
+      // never a parallel one. Capture the incumbent's branch (from its pre-supersede record) and
+      // surface it as `resumed_branch` so the skill can `git checkout` it; default the audit reason to
+      // the ADR §5 wording (superseded actor X, last seen T, resuming from trust bundle).
+      const incumbentBranch = assignment.record?.branch;
+      const incumbentLastSeen = effective.holder?.last_at ?? assignment.record?.claimed_at;
+      const takeoverReason = opt(p, "reason") || `takeover: superseded ${holderActor}${incumbentLastSeen ? `, last seen ${sanitize(incumbentLastSeen)}` : ""}, resuming from trust bundle`;
       performLocalSupersede(root, slug, fromActor, resolution.actorStruct, {
-        branch: resolveBranchForClaim(),
+        // #294 (ADR 0021 §5): takeover is RESUMPTION — the successor continues the incumbent's branch,
+        // so the record must keep pointing at that branch, NOT be overwritten with the successor's
+        // current branch (`resolveBranchForClaim()`). At supersede time the successor has not yet
+        // `git checkout`ed the resume branch (the skill claims ownership first, then checks out), so
+        // resolveBranchForClaim() would otherwise clobber the record with a parallel branch and make a
+        // later reader (resume surface / verify-hold guidance) see the wrong branch. Preserve the
+        // incumbent's branch; fall back to the successor's only if the incumbent record had none.
+        branch: incumbentBranch || resolveBranchForClaim(),
         artifactDir: path.relative(root, dir) || ".",
-        reason: opt(p, "reason", "ensure-session takeover: stale claim"),
+        reason: takeoverReason,
         // F1 fix (fix-plan iteration 1, HIGH): persist the canonical actor_key on the record so
         // computeEffectiveState's holderActorKey (assignment-provider.ts) matches this same
         // branchActorKey string on the next status/guard check, cross-tool.
         actorKey: resolution.branchActorKey,
       });
+      // Render-don't-execute: emit the incumbent's branch so the skill continues it (never a new
+      // branch). The successor re-enters the SAME artifact dir (deterministic slug) by construction.
+      printJson({ role: "SupersedeTakeover", subject: sanitize(slug), superseded_actor: holderActor, ...(incumbentBranch ? { resumed_branch: sanitizeWide(incumbentBranch) } : {}), reason: sanitizeWide(takeoverReason) });
       return;
     }
     case "free": {
@@ -3185,6 +3207,147 @@ async function verifyHoldCmd(p: ReturnType<typeof parseArgs>): Promise<number> {
   return result.ok ? 0 : 1;
 }
 
+// ─── Takeover Preflight (#294, ADR 0021 §5) ───────────────────────────────────
+/**
+ * Render (never execute) the takeover protocol for a candidate the skill has selected. Takeover is
+ * RESUMPTION, not restart: when a subject is `reclaimable` (a durable assignment whose incumbent is
+ * no longer heartbeating), a successor must (1) grace-beat — wait one heartbeat interval and re-check,
+ * backing off if the incumbent revives — (2) supersede via `ensure-session --supersede-stale`, and
+ * (3) CONTINUE THE INCUMBENT'S BRANCH (from the incumbent's claim record), never a parallel one, and
+ * re-enter the SAME artifact dir (deterministic slug). This function computes the effective state
+ * (the same assignment ⋈ liveness join verify-hold/ensure-session use) and emits the appropriate
+ * action + the incumbent's `resume_branch`; the skill executes the beat/supersede/git steps.
+ *
+ * Race-safety is CLI-enforced at supersede time, not here: `ensure-session --supersede-stale`
+ * re-computes the state and refuses (dies on `held`) if the incumbent revived during the beat, so a
+ * successor that skipped or lost the grace race still cannot supersede a live incumbent (AC2a).
+ *
+ * ADVISORY, not a gate: the assignment ⋈ liveness JOIN is identical to verify-hold's, but this render
+ * only advises the skill which action to take — the ACTUAL enforcement is `ensure-session
+ * --supersede-stale` (re-check under a subject lock). So it deliberately does NOT replicate
+ * verify-hold's #398 `isStableActor` tiering (which exists there only because verify-hold is a hard
+ * publish BLOCK that must not false-block an unstable/ancestry identity): a wrong self-identification
+ * here yields only a wrong advisory string, never a wrong mutation.
+ *
+ * Ordering note: ADR 0021 §5's literal wording is supersede→grace→maybe-undo; this implements
+ * grace→recheck→supersede (never write until the beat confirms the incumbent stayed stale) — a
+ * deliberate, safer variant that preserves the ADR's intent ("laptop just woke resolves in the
+ * incumbent's favor") without a premature write to walk back.
+ *
+ * All untrusted fields (incumbent actor / branch / last_at, sourced from the shared multi-writer
+ * assignment+liveness stream) pass through `sanitize`/`sanitizeWide` (stripControlCharsForDisplay +
+ * the repo's 64/240 cap tiers — branch uses the 240 free-text tier so a valid long branch is never
+ * truncated into a bad checkout target) — the #287/#320/#293 injection class.
+ */
+export function runTakeoverPreflight(
+  dir: string,
+  opts?: { actorKey?: string; now?: number; graceSeconds?: number },
+): {
+  ok: boolean;
+  action: "grace-then-supersede" | "back-off" | "claim" | "ask-first" | "proceed";
+  effective_state: EffectiveState;
+  reason: string;
+  holder?: { actor?: string; last_at?: string };
+  resume_branch?: string;
+  grace_seconds?: number;
+  next_steps: string[];
+} {
+  const sanitize = (value: unknown): string => stripControlCharsForDisplay(value).slice(0, 64);
+  // Branch names use the repo's 240-char free-text tier (matching assignment-provider.ts's
+  // sanitizeDisplayField(record.branch, 240)), NOT the 64-char id tier: a realistic
+  // `agent/<actor>/<slug>` branch can exceed 64 chars, and truncating `resume_branch` would hand the
+  // skill a `git checkout <truncated>` target that does not exist — defeating the resume-the-branch
+  // guarantee. Control chars are still stripped (injection), only the cap widens.
+  const sanitizeWide = (value: unknown): string => stripControlCharsForDisplay(value).slice(0, 240);
+  const slug = path.basename(path.resolve(dir));
+  const artifactRoot = path.dirname(path.resolve(dir));
+  const nowMs = opts?.now ?? Date.now();
+  const helper = loadActorIdentityHelper();
+  const actorKey = opts?.actorKey ? helper.sanitizeSegment(opts.actorKey) : helper.resolveActor(process.env).actor;
+  const graceSeconds = opts?.graceSeconds ?? loadLivenessPolicyHelper().resolveHeartbeatThrottleSeconds(process.env);
+
+  const assignment = readLocalAssignmentStatus(artifactRoot, slug);
+  const events = readLivenessEvents(artifactRoot);
+  const freshList = loadLivenessReadHelper().freshHolders(events, slug, actorKey, nowMs);
+  const effective = computeEffectiveState(assignment, freshList, actorKey, nowMs);
+  const reason = sanitize(effective.reason);
+  const holderActor = effective.holder?.actor ? sanitize(effective.holder.actor) : undefined;
+  const holderLastAt = effective.holder?.last_at ? sanitize(effective.holder.last_at) : undefined;
+
+  switch (effective.effective_state) {
+    case "reclaimable": {
+      // The incumbent's branch is the resume target — read it from the pre-supersede record, never
+      // derive a new one (AC1: takeover continues the incumbent's branch, no parallel branch).
+      const resumeBranch = assignment.record?.branch ? sanitizeWide(assignment.record.branch) : undefined;
+      return {
+        ok: true,
+        action: "grace-then-supersede",
+        effective_state: "reclaimable",
+        reason,
+        holder: { actor: holderActor, last_at: holderLastAt },
+        ...(resumeBranch ? { resume_branch: resumeBranch } : {}),
+        grace_seconds: graceSeconds,
+        next_steps: [
+          `Grace beat: wait ${graceSeconds}s (one heartbeat interval) for the incumbent to revive.`,
+          `Re-run \`workflow-sidecar takeover-preflight ${slug}\`; if it now reports action "back-off" the incumbent revived — STOP and reselect.`,
+          `If still "grace-then-supersede", run \`ensure-session --supersede-stale\` to take over (it re-checks and refuses if the incumbent revived), recording the audit trail.`,
+          resumeBranch
+            ? `Continue the incumbent's branch: \`git fetch origin ${resumeBranch} && git checkout ${resumeBranch}\` — NEVER create a new branch. Re-enter the existing artifact dir (deterministic slug); do not restart the plan.`
+            : `Re-enter the existing artifact dir (deterministic slug) and continue the incumbent's branch from state.json.branch — never a new branch; do not restart the plan.`,
+        ],
+      };
+    }
+    case "held": {
+      const selfIsHolder = effective.reason === "self_is_holder";
+      return {
+        ok: selfIsHolder,
+        action: selfIsHolder ? "proceed" : "back-off",
+        effective_state: "held",
+        reason,
+        holder: { actor: holderActor, last_at: holderLastAt },
+        next_steps: selfIsHolder
+          ? ["This subject is already held by you — proceed with your existing session; no takeover needed."]
+          : [`The incumbent is live/revived (held by ${holderActor ?? "another actor"}). Back off — do NOT supersede a live holder — and reselect a different item.`],
+      };
+    }
+    case "human-held": {
+      return {
+        ok: false,
+        action: "ask-first",
+        effective_state: "human-held",
+        reason,
+        holder: { actor: holderActor, last_at: holderLastAt },
+        next_steps: [`A human is assigned (${holderActor ?? "assignee"}). Ask first — never auto-supersede a human assignment (ADR 0021 §6).`],
+      };
+    }
+    case "free":
+    default: {
+      return {
+        ok: true,
+        action: "claim",
+        effective_state: "free",
+        reason,
+        next_steps: ["No durable claim to supersede — this is a normal claim, not a takeover. Run `ensure-session` to claim it."],
+      };
+    }
+  }
+}
+
+async function takeoverPreflightCmd(p: ReturnType<typeof parseArgs>): Promise<number> {
+  if (p.flags.has("help")) {
+    console.log("Usage: workflow-sidecar takeover-preflight <artifactDir> [--actor <key>] [--now <iso>] [--grace-seconds <n>]");
+    console.log("Renders the ADR 0021 §5 takeover protocol (grace-then-supersede | back-off | claim | ask-first | proceed) for a reclaimable candidate. Read-only; never mutates.");
+    return 0;
+  }
+  const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
+  const actorKey = opt(p, "actor") ? loadActorIdentityHelper().sanitizeSegment(opt(p, "actor")) : undefined;
+  const nowMs = opt(p, "now") ? Date.parse(opt(p, "now")) : undefined;
+  const graceSeconds = opt(p, "grace-seconds") ? Number(opt(p, "grace-seconds")) : undefined;
+  const result = runTakeoverPreflight(dir, { actorKey, now: nowMs, graceSeconds });
+  printJson({ role: "TakeoverPreflight", ...result });
+  return result.ok ? 0 : 1;
+}
+
 // ─── Publish Delivery Bundle ──────────────────────────────────────────────────
 // Copies the session's trust.bundle (+ checkpoint companions) from the gitignored
 // session artifact dir (.kontourai/flow-agents/<slug>/) to the committed delivery/ transport
@@ -4164,12 +4327,14 @@ function resolveLivenessActor(): string {
 function loadLivenessPolicyHelper(): {
   isLivenessEnabled: (env: NodeJS.ProcessEnv) => boolean;
   resolveTtlSeconds: (env: NodeJS.ProcessEnv) => number;
+  resolveHeartbeatThrottleSeconds: (env: NodeJS.ProcessEnv) => number;
 } {
   const _req = createRequire(import.meta.url);
   const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/liveness-policy.js");
   return _req(helperPath) as {
     isLivenessEnabled: (env: NodeJS.ProcessEnv) => boolean;
     resolveTtlSeconds: (env: NodeJS.ProcessEnv) => number;
+    resolveHeartbeatThrottleSeconds: (env: NodeJS.ProcessEnv) => number;
   };
 }
 function livenessEnabled(): boolean { return loadLivenessPolicyHelper().isLivenessEnabled(process.env); }
@@ -4623,6 +4788,7 @@ async function main(): Promise<number> {
       case "publish-delivery": return publishDeliveryCmd(p);
       case "reconcile-preflight": return reconcilePreflightCmd(p);
       case "verify-hold": return verifyHoldCmd(p);
+      case "takeover-preflight": return takeoverPreflightCmd(p);
       default: die(`unknown command: ${p.command}`);
     }
   });
