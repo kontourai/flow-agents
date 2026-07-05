@@ -16,6 +16,17 @@ Verification is not critique. Run `review-work` first when the task needs mainta
 | tool-verifier | Code verification, acceptance criteria checking, structured verdicts |
 | tool-playwright | Visual verification, screenshots, accessibility checks |
 
+## Model Routing
+
+Verify roles never resolve **below** the tier of the work they check (Goodhart
+guard): default `delegate-implementation`, raised to match or exceed the tier
+that produced the work under verification — a verifier of `delegate-design` work
+resolves `delegate-design` or `orchestrator`, never a cheaper tier. Resolve the
+role from `.datum/config.json` (`npx @kontourai/datum resolve <role> --json`) and
+pass the model explicitly. See `context/contracts/execution-contract.md`
+§ Delegation: Model Routing and § Goodhart guard. Fallback: inherit the session
+model when datum/config is absent, noted in the artifact.
+
 ## Orchestrator Rule
 
 You do not review source files. You delegate to tool-verifier and tool-playwright, then read the verdict artifact.

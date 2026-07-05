@@ -32,11 +32,16 @@ source of truth for the mapping):
 |---|---|
 | tool-worker | `delegate-mechanical` for fully-specified mechanical tasks, `delegate-implementation` for precisely-planned implementation, `delegate-design` when the task needs design latitude |
 | tool-planner | `delegate-design` |
-| tool-code-reviewer / tool-security-reviewer | `delegate-implementation` |
-| tool-verifier / tool-playwright | `delegate-implementation` |
+| tool-code-reviewer / tool-security-reviewer | `delegate-implementation` by default, raised to the worker's tier when higher — never below the tier of the checked work (Goodhart guard) |
+| tool-verifier / tool-playwright | `delegate-implementation` by default, raised to the worker's tier when higher — never below the tier of the checked work (Goodhart guard) |
 
-If datum or the config is absent, fall back to the runtime's inherited model
-and note the fallback in the session artifact.
+On a review/verify gate failure, re-dispatch the fix one tier higher on the
+ladder and record the escalation in the session artifact via
+`record-agent-event --kind escalation --role <higher> --escalated-from <lower>`
+(see `context/contracts/execution-contract.md` § Escalation on gate failure and
+§ Routing decisions in the run artifact). If datum or the config is absent, fall
+back to the runtime's inherited model and note the fallback in the session
+artifact.
 
 ## Orchestrator Rule
 
@@ -242,6 +247,25 @@ After review, verification, evidence, and Goal Fit are clean for the same diff:
    npm run workflow:sidecar -- publish-delivery .kontourai/flow-agents/<slug>
    ```
 
+   **#356 — local reconcile-shape preflight.** `publish-delivery`/`record-release` now run a
+   local, pre-push **reconcile-shape preflight** on the session's `trust.bundle` before
+   copying anything into `delivery/`. It reuses the exact same claim-shape classification
+   `scripts/ci/trust-reconcile.js` enforces in CI (`scripts/lib/reconcile-shape.js`), so it
+   can never silently drift from what the required Trust Reconcile check actually does. If
+   the bundle is ADR-0020-invalid (e.g. a command-backed claim whose command isn't in the
+   reconcile manifest, an unwaived `assumed` claim, or an un-superseded disputed critique),
+   publish is **refused, fail-closed** — non-zero exit, a loud `REFUSING to publish` message
+   naming each invalid claim and its fix, and nothing is written to `delivery/`. This is
+   distinct from the existing fail-**soft** behavior when no `trust.bundle` exists yet at all
+   (still a silent no-op). When refused: fix the named claim (re-record evidence, add a
+   missing waiver, or supersede the disputed critique), then retry — do not attempt to push
+   past the refusal. You can also run the same check manually, any time before publish, to
+   catch a shape issue locally instead of discovering it minutes later in CI:
+
+   ```bash
+   npm run workflow:sidecar -- reconcile-preflight .kontourai/flow-agents/<slug>
+   ```
+
    **#379 — per-session delivery paths.** `publishDelivery()` writes to a PER-SESSION path
    `delivery/<slug>/trust.bundle` (+ `trust.checkpoint.json` companions), where `<slug>` is
    your session artifact dir's basename — NOT the old shared flat `delivery/trust.bundle`.
@@ -268,6 +292,60 @@ After review, verification, evidence, and Goal Fit are clean for the same diff:
    (If `publishDelivery()` pruned a superseded per-session SIBLING dir, stage that deletion
    too — `git add -A delivery/` after the force-add. Do NOT hand-delete the flat
    `delivery/trust.bundle` in a delivery PR while other PRs may still seal to it.)
+
+   **#293 — verify-hold gate. HARD STOP.** Before committing/pushing/opening a PR/merging,
+   run the verify-hold check (it also runs automatically inside `publish-delivery` /
+   `record-release` / `advance-state --status delivered`, but run it explicitly here BEFORE
+   committing/pushing, since by the time `record-release` runs the branch may already be
+   pushed). **The command differs by this repo's configured assignment provider kind — a bare
+   `verify-hold <slug>` with no provider flag always defaults to `--assignment-provider
+   local-file` (`runVerifyHold`'s documented default), so on a `github`-provider repo it reads
+   no local claim record and silently resolves `free`/PASS regardless of the real GitHub hold
+   state. The local-file-only invocation below is NOT sufficient for a `github`-provider repo —
+   the github branch is MANDATORY for that provider kind:**
+
+   - **local-file provider** (this repo's configured assignment provider, from
+     `effective-assignment-provider-settings`, is `local-file`):
+
+     ```bash
+     npm run workflow:sidecar -- verify-hold .kontourai/flow-agents/<slug>
+     ```
+
+   - **github provider**: render-then-execute, mirroring `pull-work`'s SKILL.md claim-side
+     pattern for the same ADR 0021 §1 join — first read the effective state (no live `gh` call
+     happens inside `workflow-sidecar.ts`; the skill renders it here), then pass the rendered
+     `.effective` JSON into `verify-hold` via `--effective-state-json`:
+
+     ```bash
+     gh issue view <issue-number> --json assignees,labels,comments > /tmp/issue.json
+     npm run assignment-provider -- status \
+       --provider github \
+       --subject-id <slug> \
+       --issue-json /tmp/issue.json \
+       --liveness-stream <path-to-events.jsonl> \
+       --self-actor <actor> \
+       > /tmp/assignment-status.json
+     npm run workflow:sidecar -- verify-hold .kontourai/flow-agents/<slug> \
+       --assignment-provider github \
+       --effective-state-json /tmp/assignment-status.json
+     ```
+
+     (`/tmp/assignment-status.json`'s top-level shape is `{ role, provider, assignment,
+     effective }`; `verify-hold --effective-state-json` reads the `.effective` field, matching
+     `assignment-provider status`'s own output shape directly — no reshaping needed.)
+
+   This is the ONE point in the whole workflow that BLOCKS instead of warns (ADR 0021 §3). It
+   asks exactly one question: is this actor still the fresh, non-superseded holder of this
+   subject (or is the subject free/self-held)? **If the check reports not-fresh-holder (exit
+   non-zero, `ok:false` in the JSON result): DO NOT commit, push, open a PR, or merge.** This
+   is a different failure mode from the `publish-delivery`/reconcile-shape preflight paragraph
+   above — that one is about the trust *bundle's shape* being invalid; this one is about
+   *actor hold* — another actor holds a fresh claim on this subject, your own claim has gone
+   stale, or the subject is assigned to a human. Do not conflate the two "REFUSING to publish"
+   messages. When refused, follow the reconcile guidance (the CLI's own `guidance` field, or
+   verbatim): re-run `pull-work`/`pickup-probe` to discover the current holder and hand off
+   cleanly (`learning-review`/handoff), or, if a human confirms this session should resume
+   ownership, run `ensure-session --supersede-stale` before retrying.
 
 3. Commit the verified diff, including the force-added `delivery/<slug>/` trust artifacts.
 4. Push the branch.

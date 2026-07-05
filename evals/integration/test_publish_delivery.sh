@@ -9,6 +9,9 @@
 #   4. RECONCILE-MATCHING: delivery trust.bundle (+ matching-sha checkpoint sibling) + CI
 #      pass -> exit 0.
 #   5. FAIL-SOFT: no trust.bundle -> publishDelivery skips, record-release exits 0.
+#   6. AC6 SHAPE-INVALID-REFUSED (#356): a shape-invalid trust.bundle (test_output claim
+#      naming a non-manifest command) is REFUSED by publishDelivery() -- non-zero exit, loud
+#      message, nothing copied to delivery/. Distinct from FAIL-SOFT (bundle absent).
 #
 # Deterministic, no model spend, self-cleaning.
 # Usage: bash evals/integration/test_publish_delivery.sh
@@ -118,7 +121,14 @@ FIXTURE1="$TMP/fixture1.json"
 write_bundle_to "$FIXTURE1" "node --version" "true"
 setup_session "$AROOT1" "$SLUG1" "$FIXTURE1"
 
-rr_out1=$(flow_agents_node "$WRITER" record-release "$SESSION_DIR1" \
+# #356: the fixture bundle's evidence.execution.label is "node --version" (a real,
+# deterministic command, not a manifest-registered one in this scratch repo) — the new
+# reconcile-preflight gate inside publishDelivery() resolves the manifest the SAME way
+# trust-reconcile.js itself does, whose legacy fallback tier folds TRUST_RECONCILE_COMMANDS
+# into the manifest. Setting it here makes this fixture genuinely shape-valid (a
+# manifest-matched command claim), matching what CI would actually accept for a repo whose
+# canonical verify is "node --version" — not a preflight-specific carve-out.
+rr_out1=$(TRUST_RECONCILE_COMMANDS="node --version" flow_agents_node "$WRITER" record-release "$SESSION_DIR1" \
   --decision merge \
   --gate-json '{"name":"merge","status":"pass","summary":"Ready."}' \
   --summary "Release." --repo-root "$REPO1" \
@@ -168,7 +178,9 @@ FIXTURE2="$TMP/fixture2.json"
 write_bundle_to "$FIXTURE2" "node --version" "true"
 setup_session "$AROOT2" "$SLUG2" "$FIXTURE2"
 
-pd_out=$(flow_agents_node "$WRITER" publish-delivery "$SESSION_DIR2" \
+# #356: same rationale as TEST 1 above — make the fixture genuinely shape-valid for the
+# new reconcile-preflight gate inside publishDelivery().
+pd_out=$(TRUST_RECONCILE_COMMANDS="node --version" flow_agents_node "$WRITER" publish-delivery "$SESSION_DIR2" \
   --repo-root "$REPO2" 2>&1)
 pd_exit=$?
 
@@ -280,6 +292,51 @@ if [[ ! -f "$REPO5/delivery/trust.bundle" ]]; then
   _pass "FAIL-SOFT: delivery/trust.bundle NOT created when session bundle absent"
 else
   _fail "FAIL-SOFT: delivery/trust.bundle was created unexpectedly"
+fi
+
+# ==== TEST 6: AC6 SHAPE-INVALID-REFUSED (#356) ======================
+# publishDelivery() now runs the reconcile-preflight shape check BEFORE copying anything
+# into delivery/ (#356 Wave 3, AC6). A bundle whose test_output-evidenced claim names a
+# command that is not in the resolved manifest (no TRUST_RECONCILE_COMMANDS/run-baseline.sh
+# entry naming it here) is shape-invalid and must be REFUSED: publish-delivery exits
+# non-zero, loudly, and nothing is copied to delivery/. This must never be confused with the
+# FAIL-SOFT (bundle-absent) case above, which stays a soft, exit-0 no-op.
+echo ""
+echo "=== TEST 6: AC6 SHAPE-INVALID-REFUSED ==="
+
+REPO6="$TMP/repo6"
+AROOT6="$REPO6/.flow-agents"
+SLUG6="pd-shape-invalid-test"
+SESSION_DIR6="$AROOT6/$SLUG6"
+mkdir -p "$REPO6/kits"
+
+FIXTURE6="$TMP/fixture6.json"
+write_bundle_to "$FIXTURE6" "node --version" "true"
+setup_session "$AROOT6" "$SLUG6" "$FIXTURE6"
+
+# Deliberately NO TRUST_RECONCILE_COMMANDS env var here — "node --version" resolves to no
+# manifest entry in this scratch repo (no run-baseline.sh/package.json manifest source
+# either), so the bundle is shape-invalid (not-run: command not in the reconcile manifest).
+shape_out=$(flow_agents_node "$WRITER" publish-delivery "$SESSION_DIR6"   --repo-root "$REPO6" 2>&1)
+shape_exit=$?
+
+if [[ $shape_exit -ne 0 ]]; then
+  _pass "AC6 SHAPE-INVALID-REFUSED: publish-delivery exits non-zero for a shape-invalid bundle"
+else
+  _fail "AC6 SHAPE-INVALID-REFUSED: expected non-zero exit, got 0 -- $shape_out"
+fi
+
+if echo "$shape_out" | grep -q "REFUSING to publish"; then
+  _pass "AC6 SHAPE-INVALID-REFUSED: output names the refusal loudly (REFUSING to publish)"
+else
+  _fail "AC6 SHAPE-INVALID-REFUSED: expected a loud REFUSING to publish message, got: $shape_out"
+fi
+
+DELIVERY_BUNDLE6="$REPO6/delivery/$SLUG6/trust.bundle"
+if [[ ! -f "$DELIVERY_BUNDLE6" ]]; then
+  _pass "AC6 SHAPE-INVALID-REFUSED: delivery/$SLUG6/trust.bundle NOT created for a shape-invalid bundle"
+else
+  _fail "AC6 SHAPE-INVALID-REFUSED: delivery/$SLUG6/trust.bundle was created despite invalid shape"
 fi
 
 # ---- Summary ----

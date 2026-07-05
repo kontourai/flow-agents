@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 5,
+  "source": "reconcile-preflight-fixture:standalone-disputed-session-local",
+  "note": "#356 shape 4 (the #292/#384 variant): a NON-critique session-local claim (workflow.check.external, human_attestation-backed) with a re-derived status of 'disputed' and no waiver. Distinct from shape 3 (an un-superseded disputed CRITIQUE) only in claimType/subject — both land on the same session-local-failed divergence, proving a disjoint pre-existing failure can never be smuggled in as a standalone claim; the fix hint directs the agent to document it as prose in a waived non-command summary instead.",
+  "claims": [
+    {
+      "id": "c-standalone-disputed",
+      "claimType": "workflow.check.external",
+      "value": "fail",
+      "status": "disputed",
+      "subjectId": "reconcile-preflight-fixture/pre-existing-flaky-integration",
+      "facet": "flow-agents.workflow",
+      "subjectType": "workflow-check",
+      "fieldOrBehavior": "pre-existing integration test failure unrelated to this change",
+      "createdAt": "2026-07-04T00:00:00Z",
+      "updatedAt": "2026-07-04T00:00:00Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.external:human_attestation"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-standalone-disputed",
+      "claimId": "c-standalone-disputed",
+      "evidenceType": "human_attestation",
+      "method": "attestation",
+      "sourceRef": "reconcile-preflight-fixture/evidence.json",
+      "excerptOrSummary": "pre-existing integration test failure, unrelated to this change, observed but not fixed",
+      "observedAt": "2026-07-04T00:00:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": false
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.external:human_attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": ["human_attestation"],
+      "acceptanceCriteria": ["A verified verification event must support a workflow.check.external claim."],
+      "reviewAuthority": "system",
+      "validityRule": { "kind": "manual" },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt-standalone-disputed",
+      "claimId": "c-standalone-disputed",
+      "status": "disputed",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "attestation",
+      "evidenceIds": ["ev-standalone-disputed"],
+      "createdAt": "2026-07-04T00:00:00Z",
+      "verifiedAt": "2026-07-04T00:00:00Z"
+    }
+  ]
+}

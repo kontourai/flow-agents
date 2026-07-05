@@ -230,6 +230,75 @@ function sanitizeSegment(value) {
 }
 
 /**
+ * #398: detect a CI-triggered session and derive a STABLE actor identity from the CI provider's
+ * published identifiers. The right granularity is the JOB/RUN (a CI job ≈ one agent session), NOT
+ * the runner machine (hostname can be shared/reused across jobs). Detection is order-independent
+ * (each provider gates on its own canonical marker env var). Returns `{ runtime, session_id }` on a
+ * recognized provider WITH a non-blank stable id, else `null` (caller falls through to
+ * process-ancestry, where #293's advisory verify-hold net still protects).
+ *
+ * Deliberately conservative: a generic/unrecognized `CI=true` returns null rather than fabricating
+ * a "stable" id from something that might shift between subprocesses — a wrong stable classification
+ * would let the #293 hard gate ENFORCE against a shifting identity, which is worse than advisory.
+ * All segments are sanitized by serializeActor at the call site (allowed charset, length-capped),
+ * so a hostile env var value cannot inject.
+ *
+ * ACCEPTED GRANULARITY GAP (matrix / parallelism): the id is job/run-granular. GitLab (`CI_JOB_ID`),
+ * Azure (`SYSTEM_JOBID`), and Buildkite (`BUILDKITE_JOB_ID`) expose a per-job-INSTANCE id that is
+ * already unique across matrix/parallel legs. CircleCI parallelism is disambiguated below via
+ * `CIRCLE_NODE_INDEX`. But GitHub Actions and Jenkins declarative-`matrix{}` cells share
+ * `GITHUB_JOB` / `BUILD_TAG` across all legs of one run+attempt — matrix values live only in the
+ * `${{ matrix }}` / axis context, not in any env var this can read — so two concurrent legs collapse
+ * to the SAME CI actor. This degrades SAFELY: worst case is idempotent self-recognition (one leg
+ * treats another's claim as its own); it never false-blocks and never injects. The coordination-
+ * relevant CI jobs (trust-reconcile / publish) run as single, non-matrix jobs today. Filed as a
+ * fast-follow to add a GitHub-matrix disambiguator if a coordination path ever runs under a matrix.
+ *
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {{runtime: string, session_id: string} | null}
+ */
+function detectCiActor(env = process.env) {
+  env = env || {};
+  const s = (v) => String(v == null ? '' : v).trim();
+  const compose = (...parts) => parts.map(s).filter(Boolean).join('-');
+
+  // GitHub Actions — run id + attempt + job is unique and stable across the whole job.
+  if (s(env.GITHUB_ACTIONS) === 'true') {
+    const id = compose(env.GITHUB_RUN_ID, env.GITHUB_RUN_ATTEMPT, env.GITHUB_JOB);
+    return id ? { runtime: 'github-actions', session_id: id } : null;
+  }
+  // GitLab CI — CI_JOB_ID is stable per job.
+  if (s(env.GITLAB_CI) === 'true') {
+    const id = s(env.CI_JOB_ID);
+    return id ? { runtime: 'gitlab-ci', session_id: id } : null;
+  }
+  // CircleCI — workflow id + job name + node index (CIRCLE_NODE_INDEX disambiguates the containers
+  // of a `parallelism: N` job; "0" for a single-container job, so it is always present and stable).
+  if (s(env.CIRCLECI) === 'true') {
+    const id = compose(env.CIRCLE_WORKFLOW_ID, env.CIRCLE_JOB, env.CIRCLE_NODE_INDEX) || s(env.CIRCLE_BUILD_NUM);
+    return id ? { runtime: 'circleci', session_id: id } : null;
+  }
+  // Jenkins — BUILD_TAG is the stable per-build identifier; fall back to job + build id.
+  if (s(env.JENKINS_URL)) {
+    const id = s(env.BUILD_TAG) || compose(env.JOB_NAME, env.BUILD_ID);
+    return id ? { runtime: 'jenkins', session_id: id } : null;
+  }
+  // Azure Pipelines — build id + system job id (SYSTEM_JOBID is a per-job-instance GUID, unique
+  // across matrix/strategy legs).
+  if (s(env.TF_BUILD) === 'true') {
+    const id = compose(env.BUILD_BUILDID, env.SYSTEM_JOBID);
+    return id ? { runtime: 'azure-pipelines', session_id: id } : null;
+  }
+  // Buildkite — job id is a stable UUID per job.
+  if (s(env.BUILDKITE) === 'true') {
+    const id = s(env.BUILDKITE_JOB_ID);
+    return id ? { runtime: 'buildkite', session_id: id } : null;
+  }
+  // Generic/unrecognized CI: do NOT fabricate stability — fall through to process-ancestry.
+  return null;
+}
+
+/**
  * Serialize a runtime-agnostic actor struct into a single string safe for
  * the existing `${subjectId}::${actor}` grouping key: each field is passed
  * through sanitizeSegment (so no raw `:` can appear inside any segment),
@@ -334,6 +403,18 @@ function resolveActor(env = process.env) {
     return { actor, source: `runtime-session-id:${runtime}` };
   }
 
+  // #398: CI-runtime tier — sits ABOVE process-ancestry (stable across every subprocess in a CI
+  // job) and BELOW an explicit override / native runtime session id (those are more specific and
+  // already returned above). A CI-triggered agent session otherwise falls to process-ancestry,
+  // whose seed differs across subprocesses within one job (a subject claimed in `ensure-session`
+  // isn't recognized as self at `publish`) — the exact instability #293 had to degrade the
+  // verify-hold gate to advisory for. A stable CI identity lets that gate ENFORCE instead.
+  const ci = detectCiActor(env);
+  if (ci && ci.session_id) {
+    const actor = serializeActor({ runtime: ci.runtime, session_id: ci.session_id, host: os.hostname() });
+    return { actor, source: `ci-runtime:${ci.runtime}` };
+  }
+
   const seed = ancestorActorSeed();
   if (seed) {
     const actor = serializeActor({ runtime, session_id: `anc-${seed}`, host: os.hostname() });
@@ -360,6 +441,7 @@ function isUnresolvedActor(actor) {
 module.exports = {
   detectRuntime,
   runtimeSessionId,
+  detectCiActor,
   ancestorActorSeed,
   sanitizeSegment,
   serializeActor,

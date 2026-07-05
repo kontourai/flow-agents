@@ -10,7 +10,7 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 
 | Topic | Status | Decision |
 | --- | --- | --- |
-| [agent-coordination](./agent-coordination.md) | needs-decision | Agent coordination |
+| [agent-coordination](./agent-coordination.md) | current | Agent coordination |
 | [anti-gaming-trust-security](./anti-gaming-trust-security.md) | needs-decision | Anti-gaming trust security |
 | [context-lifecycle](./context-lifecycle.md) | needs-decision | Context lifecycle |
 | [core-domain-kit-boundary](./core-domain-kit-boundary.md) | needs-decision | Core vs domain kit boundary |
@@ -30,7 +30,7 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [promotion-gate](./promotion-gate.md) | current | Promotion gate |
 | [standing-directives](./standing-directives.md) | current | Standing directives |
 | [three-hard-boundary-model](./three-hard-boundary-model.md) | needs-decision | Three-hard-boundary model |
-| [trust-reconcile](./trust-reconcile.md) | needs-decision | Trust-reconcile and delivery reconciliation |
+| [trust-reconcile](./trust-reconcile.md) | current | Trust-reconcile and delivery reconciliation |
 | [typescript-source-policy](./typescript-source-policy.md) | current | TypeScript-first source policy |
 | [workflow-enforcement](./workflow-enforcement.md) | needs-decision | Workflow Enforcement |
 | [workflow-trust-state](./workflow-trust-state.md) | needs-decision | Workflow trust state |

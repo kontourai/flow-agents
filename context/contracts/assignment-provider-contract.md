@@ -94,7 +94,7 @@ delivers all four:
 | --- | --- | --- | --- |
 | `claim` | the claiming session | at selection | **#290 (this issue)** |
 | `claim` / `supersede` | `ensure-session`'s pre-entry ownership guard (a SECOND mutator, alongside `assignment-provider claim`) | on session entry, before any session directory is created — `free` establishes a claim, `reclaimable` requires explicit `--supersede-stale` | **#291** |
-| `clean_release` | the incumbent (Stop hook / terminal `advance-state`) | session end — unassign + handoff comment | #292 |
+| `clean_release` | the incumbent (Stop hook / terminal `advance-state`) | session end — unassign + handoff comment | **#292** — the Stop hook (`scripts/hooks/stop-goal-fit.js`) on clean non-terminal session end: liveness release + local-file assignment release (`performLocalRelease`) run inline; for the github provider the hook cannot run `gh`, so it honestly defers via a `provider_release_pending` handoff intent rather than pretending to complete the release |
 | `supersede` | the successor, inside the takeover protocol | after the grace beat | #294 |
 | `crash_no_successor` | nobody, initially; corrected by the next actor to want the subject, or the janitor | lazily, or on a janitor sweep | out of scope — the Console relay's first cross-machine duty (ADR 0021 §4/§7) |
 

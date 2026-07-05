@@ -42,6 +42,8 @@ import {
   isExactMatch,
   isPossibleDuplicate,
 } from "./entity-extractor.js";
+// Record-carried effective expiry (issue #341, store-contract Addendum J).
+import { effectiveExpiryMs } from "../shared/codec.js";
 
 // ---------------------------------------------------------------------------
 // Error helpers
@@ -665,6 +667,74 @@ async function resolveCitation(store, token) {
 }
 
 // ---------------------------------------------------------------------------
+// Incremental consolidation helpers  (knowledge.consolidate append-mode — #343)
+//
+// Store-contract Addendum L. The whole-body consolidate contract makes the
+// caller author the ENTIRE updated snapshot body just to add one decision —
+// heavy enough that real sessions skip it and the living decision snapshot
+// stops living (ops field report record 0e439c57). Append-mode lets the caller
+// supply only the new compiled contribution (the "appended entry"); the runner
+// regenerates the snapshot body from the snapshot's contributing records
+// (Addendum A.3 — provenance.source_ids / kind:"source" links) plus the new
+// entry. Because the body is regenerated from the CURRENT live snapshot's
+// records every time, two sequential consolidations from different sessions
+// never lose an entry (R4): each session re-reads the live snapshot's source
+// set and appends to it, rather than overwriting a stale whole body.
+//
+// The whole-body path (options.proposedBody) is unchanged and remains valid.
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize the append-mode input from consolidate options. Returns
+ * `{ recordId }` when append-mode is requested, or `null` for whole-body mode.
+ * Accepts either `appendEntryRecordId: "<id>"` or `appendEntry: { recordId }`.
+ *
+ * @param {object} [options]
+ * @returns {{ recordId: string } | null}
+ */
+export function normalizeConsolidateAppend(options = {}) {
+  if (typeof options.appendEntryRecordId === "string" && options.appendEntryRecordId.trim()) {
+    return { recordId: options.appendEntryRecordId.trim() };
+  }
+  const ae = options.appendEntry;
+  if (ae && typeof ae === "object" && typeof ae.recordId === "string" && ae.recordId.trim()) {
+    return { recordId: ae.recordId.trim() };
+  }
+  return null;
+}
+
+/**
+ * Default entry renderer for the decision-log snapshot shape: one section per
+ * contributing compiled record — a level-2 heading (the record title) followed
+ * by the record body. Pluggable via `options.entryRenderer`.
+ *
+ * @param {object} record  a compiled record ({ id, title, body, ... })
+ * @returns {string}
+ */
+export function defaultConsolidateEntryRenderer(record) {
+  const title = (record.title || record.id || "").trim();
+  const body = String(record.body || "").trim();
+  return `## ${title}\n\n${body}`;
+}
+
+/**
+ * Regenerate a snapshot body from its contributing records (in order), each
+ * rendered as one entry and joined by a horizontal rule. An optional `header`
+ * is prepended. This IS the append-mode body: prior entries (from the prior
+ * snapshot's source records) followed by the newly appended entry.
+ *
+ * @param {object[]} records
+ * @param {{ header?: string, entryRenderer?: (r: object) => string }} [options]
+ * @returns {string}
+ */
+export function regenerateSnapshotBodyFromRecords(records, options = {}) {
+  const render = options.entryRenderer || defaultConsolidateEntryRenderer;
+  const joined = records.map((r) => render(r)).join("\n\n---\n\n");
+  const header = options.header && String(options.header).trim();
+  return header ? `${header}\n\n${joined}` : joined;
+}
+
+// ---------------------------------------------------------------------------
 // KnowledgeFlowRunner
 // ---------------------------------------------------------------------------
 
@@ -1254,7 +1324,21 @@ export class KnowledgeFlowRunner {
    *   - object topicSelector: { topic } — snapshot located by topic tag.
    *     If no snapshot exists for the topic yet, a new one will be created on apply.
    * @param {object} [options]
-   *   - proposedBody: string        — the proposed snapshot body (required)
+   *   Body input — supply EXACTLY ONE of these two (mutually exclusive):
+   *   - proposedBody: string        — whole-body mode (unchanged): the full
+   *                                   replacement snapshot body.
+   *   - appendEntryRecordId: string — append mode (#343 — Addendum L): the id of
+   *                                   the new compiled record to append. The body
+   *                                   is regenerated from the current snapshot's
+   *                                   contributing records (provenance.source_ids
+   *                                   / kind:"source" links) plus this new entry,
+   *                                   so the caller does NOT author the full body.
+   *                                   `appendEntry: { recordId }` is also accepted.
+   *   - header: string              — (append mode) optional body header prepended
+   *                                   before the rendered entries.
+   *   - entryRenderer: fn           — (append mode) pluggable `(record) => string`
+   *                                   to render one entry; defaults to a decision-
+   *                                   log section (`## <title>\n\n<body>`).
    *   - rationale: string           — reason for the consolidation (required for apply)
    *   - decision: "apply"|"reject"  — gate decision (default "apply")
    *   - rejectReason: string        — reason for rejection (required when decision="reject")
@@ -1336,6 +1420,88 @@ export class KnowledgeFlowRunner {
       );
     }
 
+    // ── Mode: whole-body vs. incremental append (#343 — Addendum L) ─────────
+    // Whole-body mode (unchanged): caller supplies options.proposedBody, the
+    // full replacement snapshot body. Append mode: caller supplies the new
+    // compiled contribution (appendEntryRecordId / appendEntry.recordId) and the
+    // runner regenerates the body from the CURRENT snapshot's contributing
+    // records plus the new entry. The two are mutually exclusive.
+    const append = normalizeConsolidateAppend(options);
+    const isIncremental = append !== null;
+
+    if (isIncremental && typeof options.proposedBody === "string" && options.proposedBody.trim()) {
+      throw missingEvidenceError(
+        "consolidate: options.proposedBody and append-mode (appendEntryRecordId/appendEntry) " +
+        "are mutually exclusive — supply one or the other, not both"
+      );
+    }
+
+    // Computed in append mode; drive cluster + body below.
+    let incrementalCluster = null;
+    let incrementalBody = null;
+
+    if (isIncremental) {
+      // The appended entry MUST be an existing compiled record — it is the new
+      // contribution whose provenance the regenerated snapshot links (R3).
+      const newRecord = await this._store.get(append.recordId);
+      if (!newRecord) {
+        throw missingEvidenceError(
+          `consolidate: appended entry record not found: ${append.recordId}`
+        );
+      }
+      if (newRecord.type !== "compiled") {
+        throw missingEvidenceError(
+          `consolidate: appended entry record ${append.recordId} is type="${newRecord.type}", ` +
+          `expected "compiled"`
+        );
+      }
+
+      // Prior contributing records come from the CURRENT snapshot's provenance
+      // (Addendum A.3): source_ids first, falling back to kind:"source" links.
+      // Resolving the live snapshot per-call is what makes sequential
+      // cross-session appends lossless (R4).
+      let priorSourceIds = [];
+      if (existingSnapshot) {
+        const provIds = Array.isArray(existingSnapshot.provenance?.source_ids)
+          ? existingSnapshot.provenance.source_ids
+          : [];
+        if (provIds.length > 0) {
+          priorSourceIds = provIds;
+        } else {
+          const { forward } = await this._store.getLinks(existingSnapshot.id);
+          priorSourceIds = (forward || [])
+            .filter((l) => l.kind === "source")
+            .map((l) => l.target_id);
+        }
+      }
+
+      // New source set = prior sources ++ new entry, de-duplicated with order
+      // preserved (idempotent if the same entry is appended twice).
+      const orderedIds = [];
+      const seen = new Set();
+      for (const sid of [...priorSourceIds, append.recordId]) {
+        if (!seen.has(sid)) {
+          seen.add(sid);
+          orderedIds.push(sid);
+        }
+      }
+
+      // Regenerate the body from the resolved records, skipping any prior
+      // source id that no longer resolves (deleted upstream is impossible under
+      // supersede-not-delete, but be defensive). The new entry always resolves.
+      const entryRecords = [];
+      for (const sid of orderedIds) {
+        const rec = await this._store.get(sid);
+        if (rec) entryRecords.push(rec);
+      }
+
+      incrementalCluster = entryRecords.map((r) => r.id);
+      incrementalBody = regenerateSnapshotBodyFromRecords(entryRecords, {
+        header: options.header,
+        entryRenderer: options.entryRenderer,
+      });
+    }
+
     // ── Gate: related-event-gate ───────────────────────────────────────────
     // Run similarity detection to find compiled records related to the topic.
     // We use a concept-like proxy to run the similarity detector: a synthetic
@@ -1362,9 +1528,19 @@ export class KnowledgeFlowRunner {
     );
     events.push(relatedGateIn);
 
-    // Run the detector: pass all compiled records as candidates
-    const allCompiled = await this._store.listByType("compiled");
-    const cluster = await detector(snapshotProxy, allCompiled, this._store);
+    // Determine the cluster of contributing compiled records. In append mode
+    // (#343) the cluster is the regenerated source set (prior sources ++ the new
+    // entry) — the similarity detector is bypassed because the source set is
+    // authoritative and grows by exactly the appended entry, which is precisely
+    // what makes sequential appends lossless. In whole-body mode the detector
+    // discovers the related compiled records as before.
+    let cluster;
+    if (isIncremental) {
+      cluster = incrementalCluster;
+    } else {
+      const allCompiled = await this._store.listByType("compiled");
+      cluster = await detector(snapshotProxy, allCompiled, this._store);
+    }
 
     if (!Array.isArray(cluster) || cluster.length === 0) {
       throw missingEvidenceError(
@@ -1392,9 +1568,12 @@ export class KnowledgeFlowRunner {
     // When the snapshot does not exist yet (first consolidation for the topic),
     // we create a placeholder snapshot record to attach the proposal to.
 
-    if (!options.proposedBody || !options.proposedBody.trim()) {
+    // The effective body applied to the snapshot: the regenerated body in
+    // append mode, or the caller-supplied full body in whole-body mode.
+    if (!isIncremental && (!options.proposedBody || !options.proposedBody.trim())) {
       throw missingEvidenceError("consolidate: options.proposedBody is required");
     }
+    const effectiveBody = isIncremental ? incrementalBody : options.proposedBody;
 
     // Ensure a snapshot record exists to propose against
     if (!snapshotId) {
@@ -1437,7 +1616,7 @@ export class KnowledgeFlowRunner {
     // the store's propose method with the snapshot's id.
     await this._store.propose(snapshotId, proposerId, {
       agent,
-      proposal: options.proposedBody,
+      proposal: effectiveBody,
       ...(options.note ? { note: options.note } : {}),
     });
 
@@ -1563,7 +1742,7 @@ export class KnowledgeFlowRunner {
       newSnapshotId = await this._store.create({
         type: "snapshot",
         title: `Snapshot: ${topic}`,
-        body: options.proposedBody,
+        body: effectiveBody,
         category: existingSnapshot?.category || category || "general",
         tags: [topicTag],
         links: sourceLinks,
@@ -2160,6 +2339,254 @@ export class KnowledgeFlowRunner {
 
 
   // -------------------------------------------------------------------------
+  // knowledge.flag-superseded-citers flow  (supersede/retire propagation — #342)
+  //   Steps: collect-gate → flag-gate → done
+  //   Gate: flag-gate — every flag carries the superseding context that produced
+  //         it (the superseding record id(s) from the supersede op, and/or the
+  //         retire supersededByRef). A flag can NEVER be emitted without this
+  //         evidence: when a record shows no supersession evidence, zero flags
+  //         are emitted (fail closed — the "no false flags" guarantee).
+  //
+  // READ-ONLY: reads the store's query surface (get / getLinks) and — when doc
+  // globs are configured — the #340 inbound-reference citation index. Mutates no
+  // record and appends no mutation-log entry (same invariant as the Addenda D–G
+  // audits and the #340 check). The existing gated `supersede` (Addendum A.5) and
+  // `retire` (Addendum B.4) ops are untouched: this forks no mutation path.
+  //
+  // Motivation (field report, ops record 0e439c57): a decision record became
+  // unresolvable after a store restructure and NOTHING flagged the four docs
+  // citing it — they kept presenting dead authority for weeks. Supersession
+  // preserves the record (supersede-not-delete) and makes store-internal citers
+  // discoverable via reverse links, but doc citers stayed invisible. This
+  // operation closes that loop: on a superseded/retired record it enumerates
+  // first-degree inbound citers — store records (reverse-link index, §5) AND docs
+  // (the #340 citation index) — and emits one supersession-aware flag per citer.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Enumerate first-degree inbound citers of a superseded / retired record and
+   * emit one flag per citer, each carrying the superseding context. Read-only.
+   *
+   * Supersession evidence (the flag-gate requires at least one):
+   *   - `supersede` op (Addendum A.5): a reverse link of kind `"supersedes"` from
+   *     the superseding record, mirrored by a `"superseded-by"` mutation-log entry
+   *     (`new_id`). Both are consulted; the union is `supersededByIds`.
+   *   - `retire` op with `supersededByRef` (Addendum B.4): a `"retire"` mutation-log
+   *     entry whose `evidence.supersededByRef` names the superseding artifact.
+   *
+   * Citer enumeration (first-degree only — no citers-of-citers):
+   *   - store records: `getLinks(id).reverse`, EXCLUDING the `"supersedes"` link and
+   *     any link from a superseding record itself (the new authority is not a stale
+   *     citer). Every other inbound link is a citer, tagged with its `linkKind`.
+   *   - docs: `checkInboundReferences({ docGlobs, ... }).byRecord[id]` when doc globs
+   *     are configured (opt-in; zero globs = store citers only). The superseded
+   *     record is preserved (supersede-not-delete), so its citations still resolve.
+   *
+   * Flag-gating: flags are emitted ONLY when supersession evidence exists. A
+   * record with no such evidence yields `superseded:false` and an empty flag list
+   * (no false flags); a superseded record with no citers likewise yields an empty
+   * flag list. The enumerated citer counts (`storeCiters` / `docCiters`) are
+   * always reported so a caller can see the inbound edges independent of gating.
+   *
+   * @param {string} recordId  Id (or #339 prefix/slug handle) of the record.
+   * @param {object} [options]
+   *   - docGlobs: string[]   — globs to scan for doc citers (opt-in; [] = store citers only)
+   *   - docsRoot: string     — root the globs resolve against (default: workspace, then cwd)
+   *   - markers: string[]    — citation marker prefixes (default DEFAULT_CITATION_MARKERS)
+   *   - agent: string        — override agent name
+   * @returns {Promise<{
+   *   recordId: string,
+   *   superseded: boolean,
+   *   supersededByIds: string[],
+   *   supersededByRef: string|null,
+   *   retiredStatus: string|null,
+   *   storeCiters: number,
+   *   docCiters: number,
+   *   flags: Array<{
+   *     citerRef: string, citerKind: "record"|"doc", citedId: string,
+   *     supersededByIds: string[], supersededByRef: string|null,
+   *     linkKind?: string,
+   *     doc?: string, line?: number, column?: number, token?: string, form?: string
+   *   }>,
+   *   telemetryEvents: object[]
+   * }>}
+   */
+  async flagSupersededCiters(recordId, options = {}) {
+    const events = [];
+    const agent = options.agent || this._agent;
+
+    if (!recordId || typeof recordId !== "string") {
+      throw missingEvidenceError(
+        "flag-superseded-citers: recordId must be a non-empty string"
+      );
+    }
+
+    const record = await this._store.get(recordId);
+    if (!record) {
+      throw missingEvidenceError(`flag-superseded-citers: record not found: ${recordId}`);
+    }
+    const citedId = record.id;
+    const docGlobs = Array.isArray(options.docGlobs) ? options.docGlobs : [];
+
+    // ── Step: collect-gate ─────────────────────────────────────────────────
+    const collectGateIn = this._telemetry.emitGate(
+      "knowledge.flag-superseded-citers",
+      "collect-gate",
+      {
+        flow: "knowledge.flag-superseded-citers",
+        gate: "collect-gate",
+        record_id: citedId,
+        doc_globs: docGlobs,
+      }
+    );
+    events.push(collectGateIn);
+
+    // Superseding context — the evidence every flag must carry.
+    const links = await this._store.getLinks(citedId);
+    const reverse = Array.isArray(links.reverse) ? links.reverse : [];
+
+    const supersededByIds = [
+      ...new Set(
+        reverse
+          .filter((l) => l.kind === "supersedes")
+          .map((l) => l.source_id)
+          .filter(Boolean)
+      ),
+    ];
+    // The mutation log independently records the superseding record(s); fold in
+    // any not already surfaced by the reverse index (belt-and-suspenders).
+    for (const e of record.mutation_log || []) {
+      if (e.op === "superseded-by" && e.new_id && !supersededByIds.includes(e.new_id)) {
+        supersededByIds.push(e.new_id);
+      }
+    }
+
+    // retire(…, { supersededByRef }) — Addendum B.4.
+    let supersededByRef = null;
+    for (const e of record.mutation_log || []) {
+      if (e.op === "retire" && e.evidence && e.evidence.supersededByRef) {
+        supersededByRef = e.evidence.supersededByRef;
+      }
+    }
+    const retiredStatus = (record.status || "active") === "retired" ? "retired" : null;
+
+    const superseded = supersededByIds.length > 0 || Boolean(supersededByRef);
+
+    // Store-record citers: inbound links minus the supersession relationship
+    // itself and any link originating from a superseding record (the replacement
+    // authority is not a silent dead citer).
+    const storeCiterLinks = reverse.filter(
+      (l) => l.kind !== "supersedes" && !supersededByIds.includes(l.source_id)
+    );
+
+    // Doc citers: the #340 citation index, keyed by the record's full id. Opt-in.
+    let docCiterEntries = [];
+    if (docGlobs.length > 0) {
+      const inbound = await this.checkInboundReferences({
+        docGlobs,
+        docsRoot: options.docsRoot,
+        markers: options.markers,
+        agent,
+      });
+      // Fold the inbound-check gate telemetry into this flow's event trail.
+      if (Array.isArray(inbound.telemetryEvents)) {
+        for (const ev of inbound.telemetryEvents) events.push(ev);
+      }
+      docCiterEntries = inbound.byRecord[citedId] || [];
+    }
+
+    const collectGateOut = this._telemetry.emitGateResult(
+      "knowledge.flag-superseded-citers",
+      "collect-gate",
+      {
+        record_id: citedId,
+        superseded,
+        superseded_by_count: supersededByIds.length,
+        superseded_by_ref: Boolean(supersededByRef),
+        store_citers: storeCiterLinks.length,
+        doc_citers: docCiterEntries.length,
+      }
+    );
+    events.push(collectGateOut);
+
+    // ── Step: flag-gate ────────────────────────────────────────────────────
+    const flagGateIn = this._telemetry.emitGate(
+      "knowledge.flag-superseded-citers",
+      "flag-gate",
+      {
+        flow: "knowledge.flag-superseded-citers",
+        gate: "flag-gate",
+        record_id: citedId,
+        superseded,
+        candidate_citers: storeCiterLinks.length + docCiterEntries.length,
+      }
+    );
+    events.push(flagGateIn);
+
+    const flags = [];
+    if (superseded) {
+      const context = { supersededByIds, supersededByRef };
+      for (const l of storeCiterLinks) {
+        flags.push({
+          citerRef: l.source_id,
+          citerKind: "record",
+          linkKind: l.kind,
+          citedId,
+          ...context,
+        });
+      }
+      for (const d of docCiterEntries) {
+        flags.push({
+          citerRef: `${d.doc}:${d.line}:${d.column}`,
+          citerKind: "doc",
+          doc: d.doc,
+          line: d.line,
+          column: d.column,
+          token: d.token,
+          form: d.form,
+          citedId,
+          ...context,
+        });
+      }
+      // Evidence guarantee (defensive): the flag-gate refuses any flag that does
+      // not carry superseding context. `superseded` already implies context, so
+      // this can only fire on a future regression — fail closed if it ever does.
+      for (const f of flags) {
+        if (f.supersededByIds.length === 0 && !f.supersededByRef) {
+          throw missingEvidenceError(
+            "flag-superseded-citers: refusing to emit a flag without superseding context"
+          );
+        }
+      }
+    }
+
+    const flagGateOut = this._telemetry.emitGateResult(
+      "knowledge.flag-superseded-citers",
+      "flag-gate",
+      {
+        record_id: citedId,
+        superseded,
+        flagged: flags.length,
+        agent,
+      }
+    );
+    events.push(flagGateOut);
+
+    return {
+      recordId: citedId,
+      superseded,
+      supersededByIds,
+      supersededByRef,
+      retiredStatus,
+      storeCiters: storeCiterLinks.length,
+      docCiters: docCiterEntries.length,
+      flags,
+      telemetryEvents: events,
+    };
+  }
+
+
+  // -------------------------------------------------------------------------
   // knowledge.audit-freshness flow  (hygiene #1 — #106)
   //   Steps: collect → measure → flag-gate → done
   //   Gate: flag-gate — every flag cites its evidence (last-mutation + the
@@ -2203,7 +2630,9 @@ export class KnowledgeFlowRunner {
    *   flags: Array<{
    *     recordId: string, title: string, type: string, category: string,
    *     status: string, lastMutationAt: string, ageDays: number,
-   *     thresholdDays: number, matchedThresholdKey: string,
+   *     thresholdDays: number|null, matchedThresholdKey: string,
+   *     reason: "threshold"|"expiry",  // which path fired (#341)
+   *     expiresAt?: string,            // present on expiry flags: the cited expiry
    *     proposedAction: "archive"|"refresh"
    *   }>,
    *   telemetryEvents: object[]
@@ -2275,9 +2704,18 @@ export class KnowledgeFlowRunner {
     let audited = 0;
 
     for (const record of records) {
+      // Record-carried expiry (#341): a record's own `expires_at` / `ttl_seconds`
+      // is the strongest freshness signal and fires WITHOUT any caller-supplied
+      // threshold (Addendum J). Effective expiry: explicit expires_at, else
+      // created_at + ttl_seconds; null when the record carries no freshness field.
+      const expiryMs = effectiveExpiryMs(record);
+      const hasExpiry = expiryMs !== null;
       const resolved = resolveThreshold(record.category, thresholds, defaultThresholdDays);
-      if (resolved === null) {
-        // No threshold configured for this category (and no default) → opt out.
+
+      // A record is opt-out only when it has NEITHER a record-carried expiry NOR
+      // a resolvable per-category threshold. This preserves the pre-#341 skip
+      // semantics for records without freshness fields.
+      if (!hasExpiry && resolved === null) {
         skipped += 1;
         continue;
       }
@@ -2289,13 +2727,35 @@ export class KnowledgeFlowRunner {
       const ageDays = Number.isNaN(lastMs)
         ? 0
         : Math.floor((nowMs - lastMs) / 86_400_000);
+      const proposedAction = resolveAction(record.category, actions, defaultAction);
 
-      // Flag only when STRICTLY past the threshold. Evidence (last-mutation +
-      // the threshold key/value that fired) is carried on every flag — the
-      // flag-gate requires both, so a flag can never be emitted without them.
-      if (ageDays > resolved.thresholdDays) {
-        const proposedAction =
-          resolveAction(record.category, actions, defaultAction);
+      // Expiry path takes precedence: when a record is past its OWN expiry, flag
+      // it citing that expiry (`expiresAt`) as the threshold that fired. Boundary
+      // is inclusive (nowMs >= expiry), matching isRecordStale (Addendum J).
+      if (hasExpiry && nowMs >= expiryMs) {
+        flags.push({
+          recordId: record.id,
+          title: record.title,
+          type: record.type,
+          category: record.category,
+          status: record.status || "active",
+          lastMutationAt,
+          ageDays,
+          // Expiry flags cite `expiresAt` rather than a day-count threshold, so
+          // `thresholdDays` is null and `matchedThresholdKey` names the field.
+          thresholdDays: null,
+          matchedThresholdKey: "expires_at",
+          expiresAt: new Date(expiryMs).toISOString(),
+          reason: "expiry",
+          proposedAction,
+        });
+        continue;
+      }
+
+      // Threshold path (unchanged, #106): flag only when STRICTLY past the
+      // resolved per-category threshold. Evidence (last-mutation + the threshold
+      // key/value that fired) is carried on every flag.
+      if (resolved !== null && ageDays > resolved.thresholdDays) {
         flags.push({
           recordId: record.id,
           title: record.title,
@@ -2306,6 +2766,7 @@ export class KnowledgeFlowRunner {
           ageDays,
           thresholdDays: resolved.thresholdDays,
           matchedThresholdKey: resolved.matchedKey,
+          reason: "threshold",
           proposedAction,
         });
       }
@@ -3765,6 +4226,24 @@ export async function checkInboundReferences(
 ) {
   const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
   return runner.checkInboundReferences(checkOpts);
+}
+
+/**
+ * Module-level supersede/retire citer-propagation flag: creates an ephemeral
+ * runner using the provided store. Read-only — mutates nothing. Enumerates
+ * first-degree inbound citers (store records + docs) of a superseded/retired
+ * record and emits one flag per citer, each carrying the superseding context.
+ * Fails closed: no flag without that evidence. (#342)
+ *
+ * @param {string} recordId
+ * @param {object} options  (merged into flagSupersededCiters options + runner options)
+ */
+export async function flagSupersededCiters(
+  recordId,
+  { store, workspace, agent, sessionId, ...flagOpts } = {}
+) {
+  const runner = new KnowledgeFlowRunner({ store, workspace, agent, sessionId });
+  return runner.flagSupersededCiters(recordId, flagOpts);
 }
 
 /**

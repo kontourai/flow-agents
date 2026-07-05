@@ -148,6 +148,8 @@ run_static() {
   bash "$EVAL_DIR/static/test_unit_helpers.sh" || result=1
   echo ""
   bash "$EVAL_DIR/static/test_knowledge_providers.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/static/test_model_routing_hints.sh" || result=1
   return $result
 }
 
@@ -197,13 +199,19 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_actor_identity.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_ci_actor_identity.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_assignment_provider_local_file.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_assignment_provider_github.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_stop_hook_release.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_pull_work_assignment_join.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_ensure_session_ownership_guard.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_verify_hold.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_current_json_per_actor.sh" || result=1
   echo ""
@@ -276,11 +284,15 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_publish_delivery.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_reconcile_preflight.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_mint_attestation.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_verify_cli.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_kit_identity_trust.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_model_routing_escalation.sh" || result=1
   echo ""
   bash "$EVAL_DIR/acceptance/prove-capture-teeth-declared.sh" || result=1
   return $result

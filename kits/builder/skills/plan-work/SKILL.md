@@ -13,6 +13,15 @@ Goal + directory in, structured plan artifact out. Pure planning primitive.
 |---|---|
 | tool-planner | Codebase analysis, structured execution plan, writes plan artifact |
 
+## Model Routing
+
+Planning delegation (`tool-planner`) resolves the `delegate-design` role from
+`.datum/config.json` (`npx @kontourai/datum resolve delegate-design --json`) and
+passes the resolved model explicitly — turning a goal into a plan needs design
+latitude, so it routes to the design tier. See
+`context/contracts/execution-contract.md` § Delegation: Model Routing. Fallback:
+inherit the session model when datum/config is absent, noted in the artifact.
+
 ## Orchestrator Rule
 
 You do not read source files. You delegate to tool-planner and read the artifact it produces.

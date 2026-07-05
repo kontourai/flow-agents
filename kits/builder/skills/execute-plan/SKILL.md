@@ -13,6 +13,19 @@ Plan artifact in, implemented code out. Fans out to tool-worker subagents in par
 |---|---|
 | tool-worker | Implementation per task spec (up to 4 parallel) |
 
+## Model Routing
+
+Worker slices (`tool-worker`) route by task shape: `delegate-implementation` for
+precisely-planned implementation (the default), `delegate-mechanical` for
+fully-specified mechanical slices (issue sync, doc/scan bookkeeping),
+`delegate-design` when a slice genuinely needs design latitude. Resolve the role
+from `.datum/config.json` (`npx @kontourai/datum resolve <role> --json`) and pass
+the model explicitly. On a review/verify gate failure of a slice, re-dispatch its
+fix one tier higher and record the escalation. See
+`context/contracts/execution-contract.md` § Delegation: Model Routing (and
+§ Escalation on gate failure). Fallback: inherit the session model when
+datum/config is absent, noted in the artifact.
+
 ## Orchestrator Rule
 
 You do not write source files. You read the plan artifact, fan out tasks to tool-worker, and update the session file between waves.

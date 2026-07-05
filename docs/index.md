@@ -118,6 +118,10 @@ Use fix-bug. Reproduce the problem, diagnose root cause, implement the fix, and 
     <strong>System Guidebook</strong>
     <span>The plain-language map of how Flow Agents is assembled and how it should feel to use.</span>
   </a>
+  <a class="doc-card" href="coordination-guide.html">
+    <strong>Parallel-Session Coordination</strong>
+    <span>Run many sessions against one repo without collisions: the two-stream model (liveness + assignment), the four guard points, the one hard publish fence, and how delivery defends itself.</span>
+  </a>
   <a class="doc-card" href="skills-map.html">
     <strong>Workflow Map</strong>
     <span>See the core skills, gates, artifacts, and route-back behavior.</span>

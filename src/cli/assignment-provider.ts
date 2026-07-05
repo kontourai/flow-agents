@@ -120,6 +120,7 @@ function loadActorIdentityHelper(): {
   isUnresolvedActor: (actor: string) => boolean;
   sanitizeSegment: (value: unknown) => string;
   detectRuntime: (env: NodeJS.ProcessEnv) => string;
+  detectCiActor: (env: NodeJS.ProcessEnv) => { runtime: string; session_id: string } | null;
 } {
   const _req = createRequire(import.meta.url);
   const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/actor-identity.js");
@@ -129,6 +130,7 @@ function loadActorIdentityHelper(): {
     isUnresolvedActor: (actor: string) => boolean;
     sanitizeSegment: (value: unknown) => string;
     detectRuntime: (env: NodeJS.ProcessEnv) => string;
+    detectCiActor: (env: NodeJS.ProcessEnv) => { runtime: string; session_id: string } | null;
   };
 }
 
@@ -199,7 +201,16 @@ function loadActorStruct(args: ParsedArgs): { actor: ActorStruct; actorKey?: str
   const helper = loadActorIdentityHelper();
   const resolved = helper.resolveActor(process.env);
   if (helper.isUnresolvedActor(resolved.actor)) throw new Error("could not resolve an actor identity (no --actor-json and no resolvable environment actor); pass --actor-json explicitly");
-  return { actor: { runtime: helper.detectRuntime(process.env), session_id: resolved.actor, host: os.hostname(), human: null }, actorKey: resolved.actor };
+  // #398: reconstruct the SAME struct resolveActor serialized for a CI actor, mirroring
+  // resolveEnsureSessionActor (workflow-sidecar.ts) via the shared detectCiActor. Without this the
+  // else-branch would write `record.actor = {runtime:"unknown", session_id:<the whole triple>}` for a
+  // CI session — actor_key stays correct (so no false-block), but record.actor is malformed and the
+  // audit-trail / `assignment-provider status` output for CI sessions would be corrupt.
+  const ci = resolved.source.startsWith("ci-runtime") ? helper.detectCiActor(process.env) : null;
+  const actor: ActorStruct = ci && ci.session_id
+    ? { runtime: ci.runtime, session_id: ci.session_id, host: os.hostname(), human: null }
+    : { runtime: helper.detectRuntime(process.env), session_id: resolved.actor, host: os.hostname(), human: null };
+  return { actor, actorKey: resolved.actor };
 }
 
 export function assignmentFilePath(artifactRoot: string, subjectId: string): string {
@@ -559,6 +570,115 @@ function claimLocalFile(argv: string[]): number {
   return 0;
 }
 
+/**
+ * Wave 1 (#292) extraction: the durable-write body previously inlined inside releaseLocalFile's
+ * withSubjectLock() closure, now a parameter-driven pure function so the Stop hook's non-terminal
+ * release lifecycle (scripts/hooks/stop-goal-fit.js, #292 Wave 2) can reuse the EXACT same release
+ * logic — actor-ownership verification, audit-trail append, atomic write under withSubjectLock —
+ * rather than reimplementing a second, parallel release path. releaseLocalFile (CLI wrapper,
+ * below) is now a thin parse-args/print-envelope shell around this, mirroring the
+ * performLocalSupersede/supersedeLocalFile extraction shape exactly.
+ *
+ * Two behaviors are deliberately DIFFERENT from a naive inline release, both required for the
+ * Stop hook's idempotent, actor-scoped lifecycle release (never for the interactive CLI, which
+ * keeps `tolerateNoActiveClaim` unset/false and therefore 100% of its prior throw-on-error shape):
+ *
+ * - `opts.tolerateNoActiveClaim === true` and there is no existing record, or the existing
+ *   record's status is not `"claimed"`: return `null` (a tolerated no-op) instead of throwing
+ *   "no active claim to release". This is the one deliberate idempotency change vs today's
+ *   releaseLocalFile — a second release call (e.g. a double Stop event) must be a safe no-op.
+ * - `releasedBy` is provided and does not match the existing record's holder: never force-release
+ *   a claim held by a different actor — return `null` (if tolerateNoActiveClaim) or throw
+ *   (otherwise), same as the no-active-claim case. The comparison mirrors computeEffectiveState()'s
+ *   `record.actor_key || helper.serializeActor(record.actor)` canonical-key preference EXACTLY
+ *   (actor_key-first, falling back to serializeActor only when actor_key is absent) — the read
+ *   path (status/effective-state) and this write path (release) must use the identical
+ *   canonical-key comparison, or a claim written under an explicit-override actor (`actor_key`
+ *   bare, e.g. `"canonical-x"`, but `serializeActor(record.actor)` a DIFFERENT triple, e.g.
+ *   `"explicit-override:canonical-x:host"`) can be self-recognized by computeEffectiveState() yet
+ *   fail to release here because the releaser's canonical key was compared against the wrong
+ *   (re-derived, triple) form instead of the stored actor_key. Comparing two serializeActor()
+ *   calls unconditionally — as a prior version of this function did — is NOT correct for override
+ *   actors and reintroduces the exact #291 seam on the release path.
+ *
+ * Contract: when `releasedBy` is provided AND the existing record is `actor_key`-stamped,
+ * `opts.actorKey` is REQUIRED (the canonical `resolveActor(env).actor` string) — otherwise
+ * ownership cannot be verified. A caller that passes `releasedBy` without `opts.actorKey` against
+ * an `actor_key`-stamped record would have its ownership compared as
+ * `existing.actor_key` (bare canonical) vs `serializeActor(releasedBy)` (re-derived triple), which
+ * can NEVER match even for the legitimate holder — a silent-failure trap, not a real ownership
+ * check. This is refused loudly (see the guard at the top of the `releasedBy` branch below) rather
+ * than allowed to silently no-op or wrongly refuse.
+ */
+export function performLocalRelease(
+  artifactRoot: string,
+  subjectId: string,
+  releasedBy: ActorStruct | null,
+  opts: { reason?: string; actorKey?: string; tolerateNoActiveClaim?: boolean } = {},
+): AssignmentClaimRecord | null {
+  const helper = loadActorIdentityHelper();
+  const reason = opts.reason ?? "released";
+  const tolerateNoActiveClaim = opts.tolerateNoActiveClaim ?? false;
+
+  // F1 fix (fix-plan iteration 1, CRITICAL): release mutates the same record file claim/supersede
+  // do, under the same per-subject lock (see withSubjectLock()'s doc comment).
+  return withSubjectLock(artifactRoot, subjectId, (): AssignmentClaimRecord | null => {
+    const existing = readLocalRecord(artifactRoot, subjectId);
+    if (!existing || existing.status !== "claimed") {
+      if (tolerateNoActiveClaim) return null;
+      throw new Error(`no active claim to release for subject: ${subjectId}`);
+    }
+
+    if (releasedBy) {
+      // Contract guard (hardening fix, #292 review): a caller that supplies `releasedBy` but NOT
+      // `opts.actorKey` against a record that already carries `actor_key` cannot reliably prove
+      // ownership — see this function's doc comment. This is the ONLY combination that fires: it
+      // does NOT fire when `existing.actor_key` is absent (the CLI/fixture path, where both sides
+      // fall back to serializeActor() and legitimately compare equal). Fail loudly rather than
+      // silently no-op (tolerant callers) or wrongly refuse (throwing callers) — never silent.
+      if (!opts.actorKey && existing.actor_key) {
+        if (tolerateNoActiveClaim) {
+          console.error(
+            `[performLocalRelease] cannot verify ownership of an actor_key-stamped record without opts.actorKey; skipping release for ${subjectId}`,
+          );
+          return null;
+        }
+        throw new Error(
+          "performLocalRelease: pass opts.actorKey (the canonical resolveActor().actor string) when releasedBy is set and the record carries actor_key — serializeActor(releasedBy) is not a valid ownership key for actor_key-stamped records",
+        );
+      }
+
+      // AC6: never force-release a claim held by a different actor. Mirrors
+      // computeEffectiveState()'s canonical self-recognition comparison EXACTLY —
+      // `holderActorKey` prefers the stored `actor_key` (the canonical resolveActor(env).actor
+      // string, present on records written by the fixed performLocalClaim/performLocalSupersede
+      // paths) and only falls back to `serializeActor(existing.actor)` when `actor_key` is
+      // absent (every pre-fix record, every #290 eval fixture). The releaser's side must use the
+      // SAME canonical form: `opts.actorKey` (the caller's resolveActor(env).actor string, e.g.
+      // scripts/hooks/stop-goal-fit.js's Stop hook) when provided, else re-derived via
+      // serializeActor(releasedBy) — never serializeActor() unconditionally on both sides, which
+      // would compare the bare actor_key form against a re-derived triple form for an
+      // explicit-override actor and spuriously reject a legitimate same-actor release (the #291
+      // seam, relocated to this write path).
+      const holderActorKey = existing.actor_key || helper.serializeActor(existing.actor);
+      const releasedByActorKey = opts.actorKey || helper.serializeActor(releasedBy);
+      if (holderActorKey !== releasedByActorKey) {
+        if (tolerateNoActiveClaim) return null;
+        throw new Error(`--actor-json does not match the current holder (${holderActorKey}); refusing to release a claim held by someone else`);
+      }
+    }
+
+    const record: AssignmentClaimRecord = {
+      ...existing,
+      ...(opts.actorKey ? { actor_key: opts.actorKey } : {}),
+      status: "released",
+      audit_trail: [...(existing.audit_trail ?? []), { at: isoNow(), transition: "release", from_actor: existing.actor, to_actor: releasedBy, reason }],
+    };
+    writeLocalRecord(artifactRoot, subjectId, record);
+    return record;
+  });
+}
+
 function releaseLocalFile(argv: string[]): number {
   const args = parseArgs(argv);
   const provider = flagString(args.flags, "provider", "local-file");
@@ -568,20 +688,9 @@ function releaseLocalFile(argv: string[]): number {
   const releasedBy = flagString(args.flags, "actor-json") ? loadActorStructFromFile(requireFlag(args, "actor-json")) : null;
   const reason = flagString(args.flags, "reason") ?? "released";
 
-  // F1 fix (fix-plan iteration 1, CRITICAL): release mutates the same record file claim/supersede
-  // do, under the same per-subject lock (see withSubjectLock()'s doc comment).
-  return withSubjectLock(artifactRoot, subjectId, (): number => {
-    const existing = readLocalRecord(artifactRoot, subjectId);
-    if (!existing || existing.status !== "claimed") throw new Error(`no active claim to release for subject: ${subjectId}`);
-    const record: AssignmentClaimRecord = {
-      ...existing,
-      status: "released",
-      audit_trail: [...(existing.audit_trail ?? []), { at: isoNow(), transition: "release", from_actor: existing.actor, to_actor: releasedBy, reason }],
-    };
-    writeLocalRecord(artifactRoot, subjectId, record);
-    console.log(JSON.stringify({ role: "AssignmentReleaseResult", subject_id: subjectId, record }, null, 2));
-    return 0;
-  });
+  const record = performLocalRelease(artifactRoot, subjectId, releasedBy, { reason, tolerateNoActiveClaim: false });
+  console.log(JSON.stringify({ role: "AssignmentReleaseResult", subject_id: subjectId, record }, null, 2));
+  return 0;
 }
 
 /**
