@@ -100,7 +100,7 @@
     },
     "delegations": {
       "type": "array",
-      "description": "Per-sub-agent delegation facts (#415 slice 1), one entry per delegated agent_id, joined from <slug>/agents/<agent-id>/events.jsonl (latest delegation/escalation event wins). Facts only: no per-delegation cost/outcome (telemetry does not isolate per-sub-agent tokens yet). Empty when no --agents-dir or no delegations.",
+      "description": "Per-sub-agent delegation facts (#415), one entry per delegated agent_id, joined from <slug>/agents/<agent-id>/events.jsonl (latest delegation/escalation event wins for role/model; outcome derived from the agent's full event set). No per-delegation cost (no runtime isolates per-sub-agent tokens yet — see signals.per_delegation_tokens; cost-per-(role,model) is a console projection). Empty when no --agents-dir or no delegations.",
       "items": {
         "type": "object",
         "additionalProperties": true,
@@ -110,7 +110,33 @@
           "role": { "type": "string" },
           "resolved_model": { "type": "string" },
           "summary": { "type": ["string", "null"] },
-          "escalated_from": { "type": "string" }
+          "escalated_from": { "type": "string" },
+          "dispatch_count": {
+            "type": "number",
+            "description": "How many times the orchestrator (re)dispatched this agent_id (delegation + escalation events). >1 means it was re-prompted — an orchestrator-observable rework signal that needs no sub-agent introspection."
+          },
+          "outcome": {
+            "type": "string",
+            "description": "Derived ONLY from real recorded signals, never fabricated. 'unavailable' = no terminal verdict recorded on this harness, distinct from a real accept.",
+            "enum": ["accepted", "rework", "diverged", "failed", "unavailable"]
+          }
+        }
+      }
+    },
+    "signals": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "What telemetry the current runtime actually exposed (harness-capability declaration — see docs/specs/harness-capability-matrix.md). Lets a consumer distinguish a real zero from a harness-blind gap.",
+      "properties": {
+        "runtime": { "type": ["string", "null"] },
+        "per_delegation_tokens": {
+          "type": "boolean",
+          "description": "Whether the runtime isolates per-sub-agent token usage. False on every runtime today → per-delegation cost is unavailable."
+        },
+        "per_delegation_outcome": {
+          "type": "string",
+          "enum": ["full", "partial", "none", "n/a"],
+          "description": "Coverage of the per-delegation outcome signal on this run: full=every delegation has a real outcome; partial=some; none=delegations exist but none had a verdict/escalation; n/a=no delegations observed."
         }
       }
     },

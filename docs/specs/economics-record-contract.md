@@ -109,10 +109,11 @@ the `session.usage` event.
 | `defects.findings_by_severity` | object | grouped from `critique.json .critiques[].findings[]` on `.severity` (missing → `low`) |
 | `defects.caught_false_completions` | int | claimed-pass ACs contradicted by trusted-backstop re-runs (DISTINCT counter) |
 | `defects.verification_verdict` | enum | final verify-work verdict from the sidecar (`PASS`\|`FAIL`\|`NOT_VERIFIED`) |
-| `delegations[]` | array | per-sub-agent delegation facts (#415 slice 1) — see below; `[]` when `--agents-dir` is absent |
+| `delegations[]` | array | per-sub-agent delegation facts + derived outcome (#415) — see below; `[]` when `--agents-dir` is absent |
+| `signals` | object | harness-capability declaration — what telemetry this runtime exposed (see below + `harness-capability-matrix.md`) |
 | `tenant_id` | string\|null | self-description only; the `ApiSink` stamps the authoritative tenant (ADR 0003 call 2) |
 
-## `delegations[]` — per-sub-agent routing facts (#415 slice 1)
+## `delegations[]` — per-sub-agent routing facts + outcome (#415)
 
 When the emitter is given `--agents-dir <slug>/agents`, it assembles one entry per delegated
 sub-agent, joined from each `<slug>/agents/<agent-id>/events.jsonl`:
@@ -122,24 +123,44 @@ sub-agent, joined from each `<slug>/agents/<agent-id>/events.jsonl`:
 | `agent_id` | string\|null | the sub-agent id (join key) |
 | `role` | string | routing role recorded on the delegation event (`delegate-mechanical`\|`delegate-implementation`\|`delegate-design`\|…) |
 | `resolved_model` | string | the model that role resolved to (`.datum/config.json`), e.g. `claude-haiku-4-5@anthropic` |
-| `summary` | string\|null | the delegation/escalation event's free-text summary (stands in for a structured task_type until slice 1b) |
+| `summary` | string\|null | the delegation/escalation event's free-text summary (stands in for a structured task_type) |
 | `escalated_from` | string | present only when the sub-agent escalated: the lower tier it was promoted from |
+| `dispatch_count` | int | how many times the orchestrator (re)dispatched this agent_id (delegation + escalation events); `>1` = re-prompted |
+| `outcome` | enum | `accepted`\|`rework`\|`diverged`\|`failed`\|`unavailable` — derived (see below) |
 
-**Assembly rule:** for each `agent_id`, the **latest** `delegation`/`escalation` event wins (an
-escalation supersedes the initial delegation and carries `escalated_from`); events lacking `role`
-or `model`, and non-delegation events, are ignored. Any read/parse failure degrades to `[]` — never
-fatal (local-first, best-effort).
+**Assembly rule:** all events for an `agent_id` are grouped; role/model come from the **latest**
+`delegation`/`escalation` event (an escalation supersedes and carries `escalated_from`). Any read/parse
+failure degrades to `[]` — never fatal (local-first, best-effort).
 
-**Deliberately a FACT, not a rollup (ADR 0003 call 3).** `delegations[]` records *which sub-agent
-ran on which model*, nothing more. It carries **no per-delegation cost or outcome**: telemetry does
-not isolate per-sub-agent token usage today, so inventing a per-delegation cost split would be
-fabrication. Cost attribution and routing-efficiency review are downstream:
+**Outcome — derived only from ORCHESTRATOR-OBSERVABLE signals, never fabricated.** The orchestrator
+knows what it dispatched, how often it re-dispatched, and how it corrected — so outcome holds **without
+peeking inside the sub-agent** (which most harnesses forbid — see `harness-capability-matrix.md`):
 
-- **cost per `(role, model)`** is a *console projection* — join `delegations[]` (role→model) against
-  the existing `cost.by_model` (which is 1:1 with roles under the current `.datum/config.json` map).
-- **per-delegation `outcome`** (`accepted`\|`rework`\|`diverged`\|`failed`) is **slice 1b** — it needs
-  per-sub-agent usage isolation and an evidence-derived outcome (verdict + supersession), not
-  self-report.
+- `diverged` — an explicit supersession marker (`kind:"supersession"` or `status:"diverged"`) exists.
+- `rework` — an escalation happened **or** the orchestrator re-dispatched the agent (`dispatch_count > 1`).
+- `failed` — the latest terminal verdict event (`kind` `evidence`/`verdict`) is a FAIL.
+- `accepted` — the latest terminal verdict is a PASS (and no escalation / re-dispatch / supersession).
+- `unavailable` — no terminal verdict was recorded on this harness. **Not assumed `accepted`** — absence
+  of a verdict is not evidence of success.
+
+**Per-delegation COST is still not carried here.** Token usage is *sub-agent-internal* and no runtime
+isolates it today (`signals.per_delegation_tokens = false`), so a per-delegation cost split would be
+fabrication. Cost per `(role, model)` is a **console projection** — join `delegations[]` (role→model)
+against `cost.by_model` (1:1 with roles under the current `.datum/config.json`), labeled model-granularity.
+
+## `signals` — harness-capability declaration
+
+Declares what telemetry the emitting runtime actually exposed, so a consumer distinguishes a real zero
+from a harness-blind gap (full doctrine + per-runtime matrix in `harness-capability-matrix.md`):
+
+| Field | Meaning |
+| --- | --- |
+| `runtime` | the runtime that produced the record (`claude-code`, `kiro-cli`, …), from `session.usage .agent.runtime` |
+| `per_delegation_tokens` | `true` iff the runtime isolates per-sub-agent tokens. `false` everywhere today → per-delegation cost unavailable |
+| `per_delegation_outcome` | outcome-signal coverage this run: `full`\|`partial`\|`none`\|`n/a` |
+
+Consumers MUST read `signals` before rendering a delegation metric: if the needed signal is unavailable,
+show "not measurable on this harness," never a misleading number.
 
 ## R7 Goodhart guard (structural, hard requirement)
 

@@ -62,5 +62,10 @@
     "wall_clock_s": 420
   },
   "version": "0.1",
-  "delegations": []
+  "delegations": [],
+  "signals": {
+    "runtime": "claude-code",
+    "per_delegation_tokens": false,
+    "per_delegation_outcome": "n/a"
+  }
 }

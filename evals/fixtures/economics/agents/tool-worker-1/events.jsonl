@@ -1,2 +1,2 @@
 {"timestamp":"2026-07-05T00:00:01Z","agent_id":"tool-worker-1","kind":"delegation","status":"active","role":"delegate-mechanical","model":"claude-haiku-4-5@anthropic","summary":"mechanical slice: routine config edit"}
-{"timestamp":"2026-07-05T00:00:05Z","agent_id":"tool-worker-1","kind":"note","status":"active","summary":"progress note (no role/model) — must be ignored"}
+{"timestamp":"2026-07-05T00:00:07Z","agent_id":"tool-worker-1","kind":"evidence","status":"pass","summary":"tests green"}
