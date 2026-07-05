@@ -20,6 +20,7 @@ Turn delivery outcomes into durable learning and follow-up work.
 ## Inputs
 
 - Release-readiness artifact, evidence-gate artifact, PR/issue links, deploy notes, incidents, telemetry, user feedback, and reviewer/verifier notes.
+- **Delegation routing telemetry** — the per-run economics records (`.kontourai/telemetry/economics.jsonl`) carry `delegations[]` with each sub-agent's `(role, resolved_model, outcome)`. Feed them to the routing-efficiency review (step 2a) to judge whether the model each role routes to is actually efficient.
 
 ## Artifact Contract
 
@@ -88,6 +89,26 @@ Before identifying durable learnings, write down the intended behavior, observed
 ### 2. Identify Learning
 
 Classify learnings as product, technical, operational, workflow, test, documentation, eval, or agent-behavior learning.
+
+### 2a. Review Delegation Routing Efficiency
+
+Run the routing-efficiency analyzer over the run's economics records and review its proposals — the
+internal mirror of the #409 small-model value proof, applied to our own agent fan-out:
+
+```bash
+bash scripts/telemetry/routing-efficiency.sh .kontourai/telemetry/economics.jsonl
+```
+
+It emits ADVISORY per-`(role, model)` proposals (`escalate-minimum-tier`, `keep-tier`, `monitor`,
+`insufficient-signal`) with rationales, computed only from **measurable** outcomes — `unavailable`
+outcomes are excluded (a missing verdict is neither success nor failure; see
+`docs/specs/harness-capability-matrix.md`). Fold any actionable proposal into `learning.json`:
+
+- an `escalate-minimum-tier` / demote proposal → a `routing` entry (`target: "rule"`, naming the
+  `.datum/config.json` role→model change to consider) or `correction` with `type: "agent"`.
+- **These are proposals, never auto-applied.** A human ratifies the `.datum/config.json` change, which
+  then travels the normal deliver loop (ADR 0003 call 5). `insufficient-signal` proposals are recorded
+  as coverage notes, not routing changes.
 
 ### 3. Route Follow-Up
 

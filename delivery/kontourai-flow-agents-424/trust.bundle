@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "kontourai-flow-agents-424-review.flow-agents-workflow.reviewed-415-routing-efficiency-proposals-derived-only-from-measurable-outcomes-unavailable-excluded-advisory-only-never-edits-datum-config-json-thin-sample-insufficient-signal-empty-input-safe-jq-injection-safe-sound",
+      "subjectType": "workflow-critique",
+      "subjectId": "kontourai-flow-agents-424/review",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "Reviewed #415 routing-efficiency: proposals derived only from measurable outcomes (unavailable excluded), advisory-only (never edits .datum/config.json), thin-sample→insufficient-signal, empty-input safe, jq-injection-safe. Sound.",
+      "value": "pass",
+      "createdAt": "2026-07-05T23:26:43Z",
+      "updatedAt": "2026-07-05T23:26:43Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-05T23:26:43Z"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [],
+  "policies": [
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:kontourai-flow-agents-424-review.flow-agents-workflow.reviewed-415-routing-efficiency-proposals-derived-only-from-measurable-outcomes-unavailable-excluded-advisory-only-never-edits-datum-config-json-thin-sample-insufficient-signal-empty-input-safe-jq-injection-safe-sound",
+      "claimId": "kontourai-flow-agents-424-review.flow-agents-workflow.reviewed-415-routing-efficiency-proposals-derived-only-from-measurable-outcomes-unavailable-excluded-advisory-only-never-edits-datum-config-json-thin-sample-insufficient-signal-empty-input-safe-jq-injection-safe-sound",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-05T23:26:43Z",
+      "verifiedAt": "2026-07-05T23:26:43Z"
+    }
+  ]
+}

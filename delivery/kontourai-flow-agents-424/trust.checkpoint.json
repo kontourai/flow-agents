@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "slug": "kontourai-flow-agents-424",
+  "work_item": null,
+  "status": "planned",
+  "phase": "planning",
+  "sealed_at": "2026-07-05T23:26:59Z",
+  "commit_sha": "23ea6af095d30d745a2804ac72c370f79d7924d1",
+  "checkpoint": {
+    "asOf": "2026-07-05T23:26:59.360Z",
+    "statusByClaimId": {
+      "kontourai-flow-agents-424-review.flow-agents-workflow.reviewed-415-routing-efficiency-proposals-derived-only-from-measurable-outcomes-unavailable-excluded-advisory-only-never-edits-datum-config-json-thin-sample-insufficient-signal-empty-input-safe-jq-injection-safe-sound": "verified"
+    },
+    "throughEventCreatedAt": "2026-07-05T23:26:43Z",
+    "throughEventCreatedAtByClaimId": {
+      "kontourai-flow-agents-424-review.flow-agents-workflow.reviewed-415-routing-efficiency-proposals-derived-only-from-measurable-outcomes-unavailable-excluded-advisory-only-never-edits-datum-config-json-thin-sample-insufficient-signal-empty-input-safe-jq-injection-safe-sound": "2026-07-05T23:26:43Z"
+    },
+    "statusFunctionVersion": "2"
+  }
+}
