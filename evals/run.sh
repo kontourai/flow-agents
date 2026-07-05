@@ -209,6 +209,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_ensure_session_ownership_guard.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_verify_hold.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_current_json_per_actor.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_liveness_heartbeat.sh" || result=1
