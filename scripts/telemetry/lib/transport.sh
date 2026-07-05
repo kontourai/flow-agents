@@ -46,26 +46,28 @@ console_telemetry_timeout_seconds() {
   fi
 }
 
-console_telemetry_emit() {
-  local event="$1"
-  local endpoint_url
-  endpoint_url=$(console_telemetry_endpoint_url)
+# console_post_json <endpoint_url> <body> [connect_timeout] [max_time] [tmp_dir]
+# Shared best-effort JSON POST to a Console records endpoint. BOTH the telemetry mirror
+# (console_telemetry_emit) and the liveness relay (#295, scripts/liveness/relay.sh) go through this
+# ONE core so endpoint-allow, auth (Bearer + tenant), timeouts, temp-file handling, and the detached
+# fire can never drift between the two paths (the #356 shared-not-forked discipline). Reads
+# CONSOLE_TELEMETRY_TOKEN / CONSOLE_TENANT_ID from the environment. Never blocks or fails the caller.
+console_post_json() {
+  local endpoint_url="$1"
+  local body="$2"
+  local connect_timeout max_time tmp_dir curl_config curl_body
   [[ -z "$endpoint_url" ]] && return
   console_telemetry_endpoint_allowed "$endpoint_url" || return
-
-  local processed_event
-  processed_event=$(redact_event "$event" "${CONSOLE_TELEMETRY_REDACT:-${TELEMETRY_CHANNEL_ANALYTICS_REDACT:-}}")
-
-  local curl_config curl_body connect_timeout max_time
-  connect_timeout=$(console_telemetry_timeout_seconds "${CONSOLE_TELEMETRY_CONNECT_TIMEOUT_SECONDS:-2}" 2 30)
-  max_time=$(console_telemetry_timeout_seconds "${CONSOLE_TELEMETRY_MAX_TIME_SECONDS:-5}" 5 60)
-  curl_config=$(mktemp "${TELEMETRY_SESSION_DIR}/console-curl.XXXXXX") || return
-  curl_body=$(mktemp "${TELEMETRY_SESSION_DIR}/console-body.XXXXXX") || {
+  connect_timeout=$(console_telemetry_timeout_seconds "${3:-2}" 2 30)
+  max_time=$(console_telemetry_timeout_seconds "${4:-5}" 5 60)
+  tmp_dir="${5:-${TELEMETRY_SESSION_DIR:-${TMPDIR:-/tmp}}}"
+  curl_config=$(mktemp "${tmp_dir%/}/console-curl.XXXXXX") || return
+  curl_body=$(mktemp "${tmp_dir%/}/console-body.XXXXXX") || {
     rm -f "$curl_config"
     return
   }
   chmod 600 "$curl_config" "$curl_body" 2>/dev/null
-  printf '%s' "$processed_event" > "$curl_body" || {
+  printf '%s' "$body" > "$curl_body" || {
     rm -f "$curl_config" "$curl_body"
     return
   }
@@ -92,6 +94,25 @@ console_telemetry_emit() {
     curl -s --proto =https,http --proto-redir =https,http --config "$curl_config" >/dev/null 2>&1
     rm -f "$curl_config" "$curl_body"
   ) &
+}
+
+console_telemetry_emit() {
+  local event="$1"
+  local endpoint_url
+  endpoint_url=$(console_telemetry_endpoint_url)
+  [[ -z "$endpoint_url" ]] && return
+
+  local processed_event
+  processed_event=$(redact_event "$event" "${CONSOLE_TELEMETRY_REDACT:-${TELEMETRY_CHANNEL_ANALYTICS_REDACT:-}}")
+
+  # Delegate the endpoint-allow gate, auth, timeouts, temp files, and detached POST to the shared
+  # core. Timeouts/tmp-dir are passed explicitly so telemetry behavior is byte-for-byte unchanged.
+  console_post_json \
+    "$endpoint_url" \
+    "$processed_event" \
+    "${CONSOLE_TELEMETRY_CONNECT_TIMEOUT_SECONDS:-2}" \
+    "${CONSOLE_TELEMETRY_MAX_TIME_SECONDS:-5}" \
+    "${TELEMETRY_SESSION_DIR:-}"
 }
 
 transport_emit() {

@@ -31,6 +31,7 @@ CHECKS=(
   "Verify-hold gate integration|bash evals/integration/test_verify_hold.sh"
   "Takeover protocol integration|bash evals/integration/test_takeover_protocol.sh"
   "Current.json per-actor integration|bash evals/integration/test_current_json_per_actor.sh"
+  "Liveness console relay integration|bash evals/integration/test_liveness_console_relay.sh"
   "Goal Fit hook integration|bash evals/integration/test_goal_fit_hook.sh"
   "Hook category behavior integration|bash evals/integration/test_hook_category_behaviors.sh"
   "Workflow steering hook integration|bash evals/integration/test_workflow_steering_hook.sh"
@@ -90,6 +91,7 @@ LANE_WORKFLOW_CONTRACTS=(
   "Verify-hold gate integration"
   "Takeover protocol integration"
   "Current.json per-actor integration"
+  "Liveness console relay integration"
 )
 
 LANE_RUNTIME_AND_KIT=(
