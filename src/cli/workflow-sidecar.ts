@@ -1947,10 +1947,42 @@ export function normalizeEvidenceRefs(raw: unknown, label: string): AnyObj[] {
 // id-shape signal sound again: only record-gate-claim's own path can ever produce that shape.
 // record-gate-claim opts in via allowGateClaimPrefix=true since it is the sole legitimate
 // producer of that id shape; every other caller uses the default (reject).
-export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false): AnyObj {
+//
+// #270 follow-up fix (publish-preflight, iteration 5): the rejection above must apply ONLY to
+// NEW mints, not to a correction of an id that already exists as a check claim id in the
+// session's CURRENT trust.bundle. A mis-recorded claim that already carries a `gate-claim-`
+// prefixed id (e.g. one that slipped through before this guard shipped, or was recorded via a
+// binary predating it) can otherwise NEVER be corrected: every attempt to re-record that exact
+// id — the only way to supersede/fix it — is itself rejected by this same guard, permanently
+// wedging that id.
+//
+// #270 CRITICAL fix (iteration 6, narrowing the above): "the id's identity already exists in
+// the bundle" is NOT by itself a safe supersession signal — an id that already exists MIGHT be
+// a REAL, properly-stamped claim produced by record-gate-claim itself (its own generated
+// `gate-claim-${checkId}` ids always already "exist" once minted). Exempting every existing id
+// unconditionally let record-evidence/record-check/dogfood-pass silently overwrite a live,
+// correctly-stamped gate claim — destroying its metadata.gate_claim stamp — and the caller
+// fully controls check_kind, so the replacement claim can trivially be shaped to evade
+// gateClaimShapeUnstampedId's detector (that detector requires check_kind==="external", which
+// only fires the alarm when the caller happens to pick that kind). The narrowed rule: an
+// existing id is supersedable via this path ONLY when the EXISTING claim for that id carries NO
+// metadata.gate_claim stamp — i.e. only the mis-recorded/wedged shape (the legitimate
+// correction target this exemption exists for). An existing id whose claim IS stamped is a live
+// gate claim; only record-gate-claim (allowGateClaimPrefix=true, its own unconditional opt-in)
+// may ever supersede it. Callers therefore pass `existingCheckStampById` (a Map from the
+// bundle's CURRENT check ids to whether that check's claim already carries a metadata.gate_claim
+// stamp, read via readBundleState/checksFromBundle's `_gate_claim_expectation_id` restoration
+// BEFORE normalizeCheck runs — see applyGateClaimStamp). This does not weaken new-mint
+// enforcement: a NOVEL gate-claim-* id (not already present at all) is still rejected exactly as
+// before, and superseding a STAMPED existing id is now rejected too.
+export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false, existingCheckStampById?: ReadonlyMap<string, boolean>): AnyObj {
   const check = { ...raw };
   if (!check.id || !check.kind || !check.status || !check.summary) die("check requires id, kind, status, and summary");
-  if (!allowGateClaimPrefix && typeof check.id === "string" && check.id.startsWith("gate-claim-")) die(`check id "${check.id}" starts with the reserved "gate-claim-" prefix — that namespace is reserved for record-gate-claim's own generated ids. Choose a different --id (or omit --id to let the check derive one from its command/summary).`);
+  if (!allowGateClaimPrefix && typeof check.id === "string" && check.id.startsWith("gate-claim-")) {
+    const existingHasStamp = existingCheckStampById?.get(check.id);
+    if (existingHasStamp === true) die(`check id "${check.id}" belongs to a live, properly-stamped gate claim — only record-gate-claim may supersede it. Superseding a stamped gate claim via record-evidence/record-check/dogfood-pass would silently destroy its metadata.gate_claim stamp. Re-record via record-gate-claim, or choose a different --id.`);
+    if (existingHasStamp === undefined) die(`check id "${check.id}" starts with the reserved "gate-claim-" prefix — that namespace is reserved for record-gate-claim's own generated ids. Choose a different --id (or omit --id to let the check derive one from its command/summary). Supersession of an EXISTING, UNSTAMPED check claim with this same id (a correction) is permitted — this rejection applies to newly-minted ids not already present in the session's trust.bundle, and to ids that already belong to a stamped (live) gate claim.`);
+  }
     if (!checkKinds.has(check.kind)) die("kind must be one of: build, types, lint, test, command, security, diff, browser, runtime, policy, external");
   if (!checkStatuses.has(check.status)) die("status must be one of: pass, fail, not_verified, skip");
   if (Array.isArray(check.standard_refs)) for (const ref of check.standard_refs) if (!["junit", "sarif", "coverage", "veritas"].includes(ref.standard)) die("standard must be one of");
@@ -2290,6 +2322,22 @@ function checksFromBundle(dir: string): AnyObj[] {
 }
 
 /**
+ * #270 CRITICAL fix (iteration 6): build the id -> hasStamp map normalizeCheck's narrowed
+ * reserved-prefix exemption needs. A check's reconstructed `_gate_claim_expectation_id` (set by
+ * applyGateClaimStamp above, from the claim's metadata.gate_claim) is present if and only if the
+ * bundle claim backing this check id currently carries a live stamp. Every caller of
+ * normalizeCheck (record-evidence, record-check, dogfood-pass) must derive this from the SAME
+ * readBundleState/checksFromBundle snapshot used for the compose-safe merge, taken BEFORE
+ * normalizeCheck runs, so the exemption sees the bundle state as it stands right now — not a
+ * stale or partial view.
+ */
+function existingCheckStampMap(checks: AnyObj[]): Map<string, boolean> {
+  const byId = new Map<string, boolean>();
+  for (const c of checks) if (c && typeof c.id === "string") byId.set(c.id, typeof c._gate_claim_expectation_id === "string");
+  return byId;
+}
+
+/**
  * #298/#270: the shared compose-safe read path every trust-bundle writer should use instead of
  * hand-assembling its own partial slice. Reconstructs ALL THREE families losslessly from the
  * existing bundle (checks via checksFromBundle, extended per above; criteria from
@@ -2365,7 +2413,14 @@ async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> 
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const _ts0 = opt(p, "timestamp", now());
   const _waiver = parseWaiver(p, _ts0);
-  const _checksRaw = [...opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"))), ...opts(p, "surface-trust-json").map(surfaceCheckFromArtifact)];
+  // #270 follow-up fix (iteration 5, narrowed iteration 6): read the bundle's CURRENT check ids
+  // (and stamp status) before normalizeCheck runs so a correction of an UNSTAMPED wedged id is
+  // exempted from the reserved gate-claim- prefix rejection below, while a brand-new mint of
+  // that shape, OR supersession of a STAMPED (live) gate claim, is still rejected. Reused below
+  // (not re-read) as _existingState for the compose-safe merge — one readBundleState call.
+  const _existingState = readBundleState(dir);
+  const _existingCheckStampById = existingCheckStampMap(_existingState.checks);
+  const _checksRaw = [...opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"), false, _existingCheckStampById)), ...opts(p, "surface-trust-json").map(surfaceCheckFromArtifact)];
   // WS8 (AC4, iteration 2): a command-backed check reconciles against CI or fails — it can
   // NEVER be waived. Reject --accepted-gap-reason/--waived-by on any check whose evidence
   // classifies as test_output (build/types/lint/test/command, and security/browser/runtime
@@ -2390,7 +2445,8 @@ async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> 
   // record-evidence previously never called checksFromBundle(dir), so it dropped every check
   // recorded by an earlier record-evidence/record-check/record-gate-claim call. A later check
   // with the same id supersedes the earlier one (same-id resupply); a new id is additive.
-  const _existingState = readBundleState(dir);
+  // (_existingState was already read above, before normalizeCheck ran, so the reserved-prefix
+  // exists-check sees the SAME bundle snapshot the merge below uses — no second read needed.)
   const _criteriaStatus = verdict === "pass" ? "pass" : verdict === "fail" ? "fail" : "not_verified";
   const _criteriaForBundle: AnyObj[] = _existingState.criteria.map((c: AnyObj) => ({ ...c, status: _criteriaStatus }));
   const _mergedChecks = mergeChecksById(_existingState.checks, checks);
@@ -2503,6 +2559,13 @@ ${stderr}` : ""}`.trim());
   const checkIdRaw = opt(p, "id") || displayCommand;
   const checkId = checkIdRaw.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "record-check";
   const summary = opt(p, "summary", `record-check: ${displayCommand}${exitCode !== null ? ` (exit ${exitCode})` : ""}`);
+  // #270 follow-up fix (iteration 5, narrowed iteration 6): read the bundle's CURRENT check ids
+  // (and stamp status) BEFORE normalizeCheck runs so a correction of an UNSTAMPED wedged id is
+  // exempted from the reserved gate-claim- prefix rejection, while a brand-new mint of that
+  // shape, OR supersession of a STAMPED (live) gate claim, is still rejected. Reused below (not
+  // re-read) for the compose-safe merge — one readBundleState call.
+  const _existingState = readBundleState(dir);
+  const _existingCheckStampById = existingCheckStampMap(_existingState.checks);
   // kind:"command" + a real `command` string already derives evidenceType "test_output" via
   // classifyEvidence in buildTrustBundle — no separate evidenceType input is consumed there.
   const check: AnyObj = normalizeCheck({
@@ -2511,10 +2574,9 @@ ${stderr}` : ""}`.trim());
     status,
     summary,
     command: displayCommand,
-  });
+  }, false, _existingCheckStampById);
   if (outputSha256) check._output_sha256 = outputSha256;
 
-  const _existingState = readBundleState(dir);
   const _mergedChecks = mergeChecksById(_existingState.checks, [check]);
   assertBundleWritten(await writeTrustBundle(dir, slug, ts, _mergedChecks, _existingState.criteria, _existingState.critiques));
   if (status === "fail") {
@@ -4180,7 +4242,16 @@ async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
   assertExistingLearningValid(dir);
   const verdict = opt(p, "verdict");
   if (verdict === "pass") {
-    const checks = opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json")));
+    // #270 follow-up fix (iteration 5, narrowed iteration 6): dogfood-pass's own pre-validation
+    // normalizeCheck call (before delegating the actual write to recordEvidence below) must apply
+    // the same narrowed existing-unstamped-id exemption recordEvidence/recordCheck do, or a
+    // legitimate correction of a mis-recorded, UNSTAMPED gate-claim-* id would die HERE, before
+    // ever reaching recordEvidence's own (already-fixed) guard — while supersession of a STAMPED
+    // (live) gate claim id must still die here too. readBundleState is safe to call even when
+    // trust.bundle does not yet exist (loadJson falls back to {}), exactly as
+    // recordEvidence/recordCheck rely on.
+    const _dogfoodExistingCheckStampById = existingCheckStampMap(readBundleState(dir).checks);
+    const checks = opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"), false, _dogfoodExistingCheckStampById));
     if (checks.some((c) => c.status !== "pass" && c.status !== "skip")) die("clean evidence requires all non-skipped checks to pass");
     // Phase 4c: evidence check reads from trust.bundle (sole verification artifact); legacy evidence.json fallback in evidenceClean.
     // #268/#344: builder.* check/critique claims count as clean evidence via their authoritative origin stamp.

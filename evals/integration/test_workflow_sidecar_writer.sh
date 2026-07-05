@@ -4029,9 +4029,9 @@ if [[ -f "$DIST_SIDECAR" ]]; then
 import { readFileSync, writeFileSync } from 'node:fs';
 const file = '${RESERVED_PREFIX_SCRATCH}/workflow-sidecar.orig.js';
 let src = readFileSync(file, 'utf8');
-const needle = 'if (!allowGateClaimPrefix && typeof check.id === "string" && check.id.startsWith("gate-claim-"))';
+const needle = 'if (!allowGateClaimPrefix && typeof check.id === "string" && check.id.startsWith("gate-claim-")) {';
 if (!src.includes(needle)) { process.stderr.write('mutation: reserved-prefix guard text not found — source pattern drifted, cannot mutation-test\n'); process.exit(1); }
-src = src.split(needle).join('if (false)');
+src = src.split(needle).join('if (false) {');
 writeFileSync('${RESERVED_PREFIX_SCRATCH}/workflow-sidecar.mutated.js', src);
 NODEOF
 
@@ -4067,6 +4067,385 @@ NODEOF
   fi
 else
   _fail "mutation-test setup: could not locate the compiled build/src/cli/workflow-sidecar.js to mutate for the reserved-prefix guard (ran 'npm run build' first?)"
+fi
+
+
+# ─── #270 follow-up fix (publish-preflight, iteration 5): reserved-prefix rejection applies ────
+# ONLY to NEW mints — a caller-supplied id that ALREADY EXISTS as a check claim id in the
+# session's CURRENT trust.bundle is a CORRECTION (supersession), not a new mint, and must be
+# allowed even when it starts with the reserved "gate-claim-" prefix. Without this exemption a
+# mis-recorded gate-claim-* check (e.g. one mistakenly recorded kind:"test" with no manifest
+# label, exactly the real kontourai-flow-agents-270 wedge this closes) can NEVER be corrected:
+# every attempt to re-record that exact id — the only way to supersede/fix it — is itself
+# rejected by the guard, permanently wedging that id and blocking publish-preflight forever.
+CORRECTION_ROOT="$TMPDIR_EVAL/correction-root"
+CORRECTION_SLUG="correction-270"
+CORRECTION_DIR="$CORRECTION_ROOT/$CORRECTION_SLUG"
+mkdir -p "$CORRECTION_ROOT"
+
+# A dedicated, FRESH session (never copied from COMPOSE_ROOT/COMPOSE_DIR) — COMPOSE_DIR's bundle
+# already carries the reserved-prefix mutation-test's own transient (deliberately unstamped,
+# guard-neutered) 'gate-claim-mutation-test' claim by this point in the script; copying it here
+# would poison this fixture with an unrelated pre-cluster-270 unstamped-claim landmine that has
+# nothing to do with the correction-path behavior under test.
+flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$CORRECTION_ROOT" \
+  --task-slug "$CORRECTION_SLUG" \
+  --actor correction-actor \
+  --flow-id builder.build \
+  --title "Correction-path session" \
+  --source-request "Regression: a mis-recorded gate-claim-* id (kind test, no manifest label) must be correctable via supersession, not permanently wedged." \
+  --summary "Seed session for the reserved-prefix existing-id correction eval." \
+  --criterion "Mis-recorded gate-claim-* ids are correctable via same-id supersession" \
+  --timestamp "2026-07-05T09:10:45Z" >"$TMPDIR_EVAL/correction-seed.out" 2>"$TMPDIR_EVAL/correction-seed.err"
+
+# A real record-gate-claim call creates the FIRST trust.bundle write (ensure-session alone does
+# not write trust.bundle yet) — a real, properly-stamped gate claim at pull-work-gate/selected-work,
+# exactly the compose-layer pattern above, so this session has a normal, valid bundle to seed the
+# mis-recorded claim alongside (never the sole content of the bundle).
+flow_agents_node "$WRITER" record-gate-claim "$CORRECTION_DIR" \
+  --actor correction-actor \
+  --status pass \
+  --summary "Work item selected for correction-path session" \
+  --timestamp "2026-07-05T09:10:50Z" >"$TMPDIR_EVAL/correction-gate-seed.out" 2>"$TMPDIR_EVAL/correction-gate-seed.err"
+
+if [[ ! -f "$CORRECTION_DIR/trust.bundle" ]]; then
+  _fail "eval setup: record-gate-claim did not create trust.bundle for the correction-path session: $(cat "$TMPDIR_EVAL/correction-gate-seed.out" "$TMPDIR_EVAL/correction-gate-seed.err")"
+fi
+
+# Seed the EXACT real wedge shape by hand-editing a copy of trust.bundle (the current, already-
+# fixed binary can no longer MINT a fresh gate-claim-* id via record-evidence/record-check, so a
+# hand-constructed claim is how a pre-fix mis-recording is replicated here — same idiom the
+# forged-stamp/pre-cluster-missing-stamp negatives above already use for defect-class shapes the
+# CLI itself must never be able to produce). Mirrors the real wedged claim byte-for-byte in
+# shape: origin:"check", check_kind:"test" (WS8's classifyEvidence always maps kind:"test" to
+# evidenceType:"test_output" regardless of a command), no execution.label on its evidence entry
+# (no manifest-matchable command — the "without manifest labels" defect) — exactly what makes
+# reconcile-preflight's sessionLocalShapeIssues/noEvidenceCommandIssues path a divergence
+# ('test_output-unreconciled') and blocks publish.
+CORRECTION_CHECK_ID="gate-claim-accumulates"
+node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/correction-seed-mutate.err"
+import { readFileSync, writeFileSync } from 'node:fs';
+const file = '${CORRECTION_DIR}/trust.bundle';
+const bundle = JSON.parse(readFileSync(file, 'utf8'));
+const ts = '2026-07-05T09:11:00Z';
+const claimId = 'correction-270-${CORRECTION_CHECK_ID}';
+bundle.claims.push({
+  id: claimId,
+  subjectType: 'change',
+  subjectId: '${CORRECTION_SLUG}/${CORRECTION_CHECK_ID}',
+  facet: 'flow-agents.workflow',
+  claimType: 'builder.execute.scope',
+  fieldOrBehavior: 'Mis-recorded (pre-fix) gate claim: kind test, no manifest label — the exact real wedge shape.',
+  value: 'pass',
+  createdAt: ts,
+  updatedAt: ts,
+  impactLevel: 'high',
+  verificationPolicyId: 'policy:builder.execute.scope:test_output',
+  metadata: { origin: 'check', check_kind: 'test' },
+  status: 'verified',
+});
+bundle.evidence.push({
+  id: 'ev:' + claimId,
+  claimId,
+  evidenceType: 'test_output',
+  method: 'validation',
+  sourceRef: '${CORRECTION_SLUG}/evidence.json',
+  excerptOrSummary: 'Mis-recorded (pre-fix) gate claim: kind test, no manifest label.',
+  observedAt: ts,
+  collectedBy: 'flow-agents/workflow-sidecar',
+  passing: true,
+});
+writeFileSync(file, JSON.stringify(bundle, null, 2) + '\n');
+NODEOF
+
+if [[ -s "$TMPDIR_EVAL/correction-seed-mutate.err" ]]; then
+  _fail "eval setup: seeding the mis-recorded gate-claim-* (kind:test, no manifest label) wedge claim failed: $(cat "$TMPDIR_EVAL/correction-seed-mutate.err")"
+fi
+
+# Sanity: reconcile-preflight FAILS against the wedged bundle (the real defect this closes) —
+# an unreconciled test_output claim with no manifest-matchable command is a divergence.
+if flow_agents_node "$WRITER" reconcile-preflight "$CORRECTION_DIR" --repo-root "$ROOT" \
+  >"$TMPDIR_EVAL/correction-preflight-before.out" 2>"$TMPDIR_EVAL/correction-preflight-before.err"; then
+  _fail "eval setup REGRESSION: reconcile-preflight unexpectedly PASSED against the seeded wedge claim (kind:test, no manifest label) — the wedge fixture is not actually reproducing the real defect"
+else
+  _pass "eval setup: reconcile-preflight FAILS against the seeded wedge claim (mis-recorded kind:test, no manifest label) — reproduces the real publish-preflight defect before the correction"
+fi
+
+# ─── Eval 1 (correction path): record-evidence --check-json with the SAME id, kind "policy" ────
+# (no command) — must SUCCEED and supersede the mis-recorded claim, even though the id starts
+# with the reserved "gate-claim-" prefix, because that id ALREADY EXISTS in the bundle.
+if flow_agents_node "$WRITER" record-evidence "$CORRECTION_DIR" \
+  --verdict pass \
+  --check-json "{\"id\":\"${CORRECTION_CHECK_ID}\",\"kind\":\"policy\",\"status\":\"pass\",\"summary\":\"Correction: re-recorded as a policy claim, superseding the mis-recorded kind:test entry.\"}" \
+  --timestamp "2026-07-05T09:11:15Z" >"$TMPDIR_EVAL/correction-record.out" 2>"$TMPDIR_EVAL/correction-record.err"; then
+  _pass "correction path: record-evidence supersedes an EXISTING gate-claim-* id (kind test -> policy) instead of rejecting it as a new mint"
+else
+  _fail "correction path REGRESSION: record-evidence rejected supersession of an EXISTING gate-claim-* id: $(cat "$TMPDIR_EVAL/correction-record.out" "$TMPDIR_EVAL/correction-record.err")"
+fi
+
+if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/correction-assert.err"
+import { readFileSync } from 'node:fs';
+const bundle = JSON.parse(readFileSync('${CORRECTION_DIR}/trust.bundle', 'utf8'));
+const claims = bundle.claims.filter((c) => c.subjectId && c.subjectId.endsWith('/${CORRECTION_CHECK_ID}'));
+if (claims.length !== 1) { process.stderr.write('expected exactly ONE claim for ${CORRECTION_CHECK_ID} after supersession (same-id resupply must replace, not duplicate), found ' + claims.length + '\n'); process.exit(1); }
+const claim = claims[0];
+if (!claim.metadata || claim.metadata.check_kind !== 'policy') { process.stderr.write('claim.metadata.check_kind is not policy after the correction: ' + JSON.stringify(claim.metadata) + '\n'); process.exit(1); }
+NODEOF
+then
+  _pass "correction path: the bundle's claim for gate-claim-accumulates now has check_kind:policy (superseded, not duplicated)"
+else
+  _fail "correction path assertion failed: $(cat "$TMPDIR_EVAL/correction-assert.err")"
+fi
+
+# Assert reconcile-preflight now PASSES (or at least no longer reports the corrected claim as a
+# divergence) — the correction is what publish-preflight needed to unwedge.
+if flow_agents_node "$WRITER" reconcile-preflight "$CORRECTION_DIR" --repo-root "$ROOT" \
+  >"$TMPDIR_EVAL/correction-preflight-after.out" 2>"$TMPDIR_EVAL/correction-preflight-after.err"; then
+  _pass "correction path: reconcile-preflight now PASSES after the correction (policy claim is session-local, not an unreconciled test_output divergence)"
+else
+  _fail "correction path: reconcile-preflight still fails after the correction: $(cat "$TMPDIR_EVAL/correction-preflight-after.out" "$TMPDIR_EVAL/correction-preflight-after.err")"
+fi
+
+# ─── Eval 2 (new-mint rejection still enforced): a NOVEL gate-claim-* id (never seen in this ───
+# session's bundle) is still rejected exactly as before — the exemption above must be scoped
+# strictly to ids that already exist, never a blanket bypass.
+if flow_agents_node "$WRITER" record-evidence "$CORRECTION_DIR" \
+  --verdict pass \
+  --check-json '{"id":"gate-claim-novel-never-seen-before","kind":"policy","status":"pass","summary":"A brand-new gate-claim- id that has never existed in this bundle before."}' \
+  --timestamp "2026-07-05T09:11:30Z" >"$TMPDIR_EVAL/correction-novel.out" 2>"$TMPDIR_EVAL/correction-novel.err"; then
+  _fail "new-mint REGRESSION: record-evidence accepted a NOVEL gate-claim-* id that never existed in the bundle — the existing-id exemption must not apply to brand-new mints"
+elif grep -qi 'reserved for record-gate-claim' "$TMPDIR_EVAL/correction-novel.out" "$TMPDIR_EVAL/correction-novel.err" \
+  && grep -q 'gate-claim-novel-never-seen-before' "$TMPDIR_EVAL/correction-novel.out" "$TMPDIR_EVAL/correction-novel.err"; then
+  _pass "new-mint rejection: a NOVEL gate-claim-* id (not already present) is still rejected with the reserved-prefix message"
+else
+  _fail "new-mint rejection message was unexpected: $(cat "$TMPDIR_EVAL/correction-novel.out" "$TMPDIR_EVAL/correction-novel.err")"
+fi
+
+# ─── Eval 3 (#270 CRITICAL, iteration 6 — the reviewer's exact repro): superseding a REAL, ─────
+# STAMPED gate claim via record-evidence --check-json must DIE, and the stamp must survive
+# UNTOUCHED. The iteration-5 exemption treated "id already exists in the bundle" as sufficient
+# for supersession, which also exempted overwriting a live, properly-stamped record-gate-claim
+# output — silently destroying its metadata.gate_claim stamp, and the caller fully controls
+# check_kind so the replacement claim can be shaped to evade gateClaimShapeUnstampedId's detector
+# (which requires check_kind==="external"). This eval reproduces that exact attack end-to-end
+# against the CURRENT (narrowed) binary and asserts it now dies, with the stamp intact afterward.
+STAMPED_ROOT="$TMPDIR_EVAL/stamped-claim-root"
+STAMPED_SLUG="stamped-claim-270"
+STAMPED_DIR="$STAMPED_ROOT/$STAMPED_SLUG"
+mkdir -p "$STAMPED_ROOT"
+
+flow_agents_node "$WRITER" ensure-session   --artifact-root "$STAMPED_ROOT"   --task-slug "$STAMPED_SLUG"   --actor stamped-claim-actor   --flow-id builder.build   --title "Stamped gate-claim supersession attack session"   --source-request "Regression: a REAL, stamped gate claim must never be supersedable via record-evidence/record-check/dogfood-pass."   --summary "Seed session for the stamped-claim supersession negative."   --criterion "A stamped gate claim id cannot be superseded by record-evidence"   --timestamp "2026-07-05T09:12:30Z" >"$TMPDIR_EVAL/stamped-claim-seed.out" 2>"$TMPDIR_EVAL/stamped-claim-seed.err"
+
+# Real record-gate-claim call — a genuine, properly-stamped gate claim (metadata.gate_claim is
+# stamped by buildTrustBundle itself, never hand-constructed).
+flow_agents_node "$WRITER" record-gate-claim "$STAMPED_DIR"   --actor stamped-claim-actor   --status pass   --summary "Work item selected for stamped-claim supersession session"   --timestamp "2026-07-05T09:12:35Z" >"$TMPDIR_EVAL/stamped-claim-gate.out" 2>"$TMPDIR_EVAL/stamped-claim-gate.err"
+
+if [[ ! -f "$STAMPED_DIR/trust.bundle" ]]; then
+  _fail "eval setup: record-gate-claim did not create trust.bundle for the stamped-claim session: $(cat "$TMPDIR_EVAL/stamped-claim-gate.out" "$TMPDIR_EVAL/stamped-claim-gate.err")"
+fi
+
+STAMPED_CHECK_ID="gate-claim-selected-work"
+if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/stamped-claim-preassert.err"
+import { readFileSync } from 'node:fs';
+const bundle = JSON.parse(readFileSync('${STAMPED_DIR}/trust.bundle', 'utf8'));
+const claim = bundle.claims.find((c) => c.subjectId && c.subjectId.endsWith('/${STAMPED_CHECK_ID}'));
+if (!claim) { process.stderr.write('eval setup: no claim found for ${STAMPED_CHECK_ID} after record-gate-claim\n'); process.exit(1); }
+if (!claim.metadata || !claim.metadata.gate_claim || typeof claim.metadata.gate_claim !== 'object') { process.stderr.write('eval setup: record-gate-claim did NOT stamp metadata.gate_claim — cannot exercise this eval: ' + JSON.stringify(claim.metadata) + '\n'); process.exit(1); }
+NODEOF
+then
+  _pass "eval setup: record-gate-claim produced a REAL, stamped claim for ${STAMPED_CHECK_ID} (metadata.gate_claim present)"
+else
+  _fail "eval setup: stamped-claim precondition failed: $(cat "$TMPDIR_EVAL/stamped-claim-preassert.err")"
+fi
+
+cp "$STAMPED_DIR/trust.bundle" "$TMPDIR_EVAL/stamped-claim-trust-bundle.before"
+
+# The attack: record-evidence --check-json with the SAME id, caller-chosen kind:"policy" — must
+# now DIE (the narrowed iteration-6 rule), not silently supersede and destroy the stamp.
+if flow_agents_node "$WRITER" record-evidence "$STAMPED_DIR"   --verdict pass   --check-json "{\"id\":\"${STAMPED_CHECK_ID}\",\"kind\":\"policy\",\"status\":\"pass\",\"summary\":\"Attack: attempt to supersede a live stamped gate claim via record-evidence.\"}"   --timestamp "2026-07-05T09:12:45Z" >"$TMPDIR_EVAL/stamped-claim-attack.out" 2>"$TMPDIR_EVAL/stamped-claim-attack.err"; then
+  _fail "#270 CRITICAL REGRESSION: record-evidence --check-json SUCCEEDED in superseding a live, stamped gate claim (${STAMPED_CHECK_ID}) — the narrowed guard did not fire"
+elif grep -qi 'live, properly-stamped gate claim' "$TMPDIR_EVAL/stamped-claim-attack.out" "$TMPDIR_EVAL/stamped-claim-attack.err"   && grep -q "${STAMPED_CHECK_ID}" "$TMPDIR_EVAL/stamped-claim-attack.out" "$TMPDIR_EVAL/stamped-claim-attack.err"   && grep -qi 'only record-gate-claim' "$TMPDIR_EVAL/stamped-claim-attack.out" "$TMPDIR_EVAL/stamped-claim-attack.err"; then
+  _pass "#270 CRITICAL: record-evidence --check-json dies when attempting to supersede a live, stamped gate claim, naming the id and pointing at record-gate-claim as the only legitimate path"
+else
+  _fail "#270 CRITICAL: stamped-claim supersession rejection message was unexpected: $(cat "$TMPDIR_EVAL/stamped-claim-attack.out" "$TMPDIR_EVAL/stamped-claim-attack.err")"
+fi
+
+# Assert the bundle is BYTE-IDENTICAL to before the attack — the die must happen before ANY
+# write, so the stamp (and everything else) survives completely untouched.
+if cmp -s "$TMPDIR_EVAL/stamped-claim-trust-bundle.before" "$STAMPED_DIR/trust.bundle"; then
+  _pass "#270 CRITICAL: trust.bundle is byte-identical after the rejected attack — the die is fail-closed BEFORE any write"
+else
+  _fail "#270 CRITICAL REGRESSION: trust.bundle changed after the rejected supersession attempt — the die is not fail-closed before writing"
+fi
+
+# Semantic re-assertion: metadata.gate_claim is still present and unchanged (belt-and-suspenders
+# on top of the byte-identical check above).
+if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/stamped-claim-postassert.err"
+import { readFileSync } from 'node:fs';
+const before = JSON.parse(readFileSync('${TMPDIR_EVAL}/stamped-claim-trust-bundle.before', 'utf8'));
+const after = JSON.parse(readFileSync('${STAMPED_DIR}/trust.bundle', 'utf8'));
+const claimBefore = before.claims.find((c) => c.subjectId && c.subjectId.endsWith('/${STAMPED_CHECK_ID}'));
+const claimAfter = after.claims.find((c) => c.subjectId && c.subjectId.endsWith('/${STAMPED_CHECK_ID}'));
+if (!claimAfter || !claimAfter.metadata || !claimAfter.metadata.gate_claim) { process.stderr.write('metadata.gate_claim is MISSING after the attack attempt — the stamp was destroyed\n'); process.exit(1); }
+if (JSON.stringify(claimAfter.metadata.gate_claim) !== JSON.stringify(claimBefore.metadata.gate_claim)) { process.stderr.write('metadata.gate_claim CHANGED after the attack attempt: before=' + JSON.stringify(claimBefore.metadata.gate_claim) + ' after=' + JSON.stringify(claimAfter.metadata.gate_claim) + '\n'); process.exit(1); }
+if (claimAfter.metadata.check_kind === 'policy') { process.stderr.write('claim.metadata.check_kind was overwritten to policy — the attack partially succeeded\n'); process.exit(1); }
+NODEOF
+then
+  _pass "#270 CRITICAL: metadata.gate_claim stamp is semantically intact (present, unchanged) after the rejected attack"
+else
+  _fail "#270 CRITICAL: stamp-intact semantic assertion failed: $(cat "$TMPDIR_EVAL/stamped-claim-postassert.err")"
+fi
+
+# ─── Mutation test (existing-id exists-check, iteration 5, needle updated iteration 6): neuter ──
+# the EXISTING-ID LOOKUP in a scratch copy of the compiled build/ output (force
+# existingHasStamp to always be `undefined`, i.e. always treated as "not already present") — the
+# correction eval above must go RED (the mis-recorded, unstamped wedge id becomes uncorrectable
+# again, since `undefined` now routes to the new-mint die), proving the eval actually exercises
+# the exists-check, not passing vacuously.
+EXISTS_CHECK_SCRATCH="$TMPDIR_EVAL/exists-check-mutation-scratch"
+mkdir -p "$EXISTS_CHECK_SCRATCH"
+
+if [[ -f "$DIST_SIDECAR" ]]; then
+  cp "$DIST_SIDECAR" "$EXISTS_CHECK_SCRATCH/workflow-sidecar.orig.js"
+  node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/exists-check-neuter-allowance.err"
+import { readFileSync, writeFileSync } from 'node:fs';
+const file = '${EXISTS_CHECK_SCRATCH}/workflow-sidecar.orig.js';
+let src = readFileSync(file, 'utf8');
+const needle = 'const existingHasStamp = existingCheckStampById?.get(check.id);';
+if (!src.includes(needle)) { process.stderr.write('mutation: existing-id stamp-map lookup text not found — source pattern drifted, cannot mutation-test\n'); process.exit(1); }
+src = src.split(needle).join('const existingHasStamp = undefined;');
+writeFileSync('${EXISTS_CHECK_SCRATCH}/workflow-sidecar.mutated-neuter-allowance.js', src);
+NODEOF
+
+  if [[ -s "$TMPDIR_EVAL/exists-check-neuter-allowance.err" ]]; then
+    _fail "mutation-test setup failed (existing-id allowance source pattern did not match compiled output): $(cat "$TMPDIR_EVAL/exists-check-neuter-allowance.err")"
+  else
+    if node --check "$EXISTS_CHECK_SCRATCH/workflow-sidecar.mutated-neuter-allowance.js" 2>"$TMPDIR_EVAL/exists-check-neuter-allowance-syntax.err"; then
+      cp "$EXISTS_CHECK_SCRATCH/workflow-sidecar.mutated-neuter-allowance.js" "$DIST_SIDECAR"
+
+      MUTATION_CORRECTION_ROOT="$TMPDIR_EVAL/mutation-correction-root"
+      cp -r "$CORRECTION_ROOT" "$MUTATION_CORRECTION_ROOT"
+      MUTATION_CORRECTION_DIR="$MUTATION_CORRECTION_ROOT/$CORRECTION_SLUG"
+
+      if flow_agents_node "$WRITER" record-evidence "$MUTATION_CORRECTION_DIR" \
+        --verdict pass \
+        --check-json "{\"id\":\"${CORRECTION_CHECK_ID}\",\"kind\":\"policy\",\"status\":\"pass\",\"summary\":\"Correction attempt with the existing-id allowance neutered — must go red.\"}" \
+        --timestamp "2026-07-05T09:11:45Z" >"$TMPDIR_EVAL/exists-check-neuter-allowance-run.out" 2>"$TMPDIR_EVAL/exists-check-neuter-allowance-run.err"; then
+        _fail "mutation-test: with the existing-id allowance neutered, the correction still SUCCEEDED — the eval may not be exercising the intended exists-check"
+      else
+        _pass "mutation-test: with the existing-id allowance neutered, the SAME correction that succeeded above now FAILS (eval correctly goes red without the exists-check, proving it exercises the exemption)"
+      fi
+    else
+      _fail "mutation-test setup: mutated workflow-sidecar.js (existing-id allowance) failed a syntax check, refusing to run it: $(cat "$TMPDIR_EVAL/exists-check-neuter-allowance-syntax.err")"
+    fi
+
+    # Restore the real compiled guard immediately.
+    cp "$EXISTS_CHECK_SCRATCH/workflow-sidecar.orig.js" "$DIST_SIDECAR"
+  fi
+else
+  _fail "mutation-test setup: could not locate the compiled build/src/cli/workflow-sidecar.js to mutate for the existing-id allowance (ran 'npm run build' first?)"
+fi
+
+# ─── Mutation test (new-mint rejection, iteration 5): neuter the reserved-prefix rejection ─────
+# ITSELF (force the whole `if` to false, same technique as the original reserved-prefix mutation
+# test below but re-run here against the NOVEL-id eval) — Eval 2 (new-mint rejection) must go
+# RED, proving that eval still exercises the underlying rejection and is not vacuously green
+# just because the existing-id exemption happens to be present.
+if [[ -f "$DIST_SIDECAR" ]]; then
+  cp "$DIST_SIDECAR" "$EXISTS_CHECK_SCRATCH/workflow-sidecar.orig2.js"
+  node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/exists-check-neuter-rejection.err"
+import { readFileSync, writeFileSync } from 'node:fs';
+const file = '${EXISTS_CHECK_SCRATCH}/workflow-sidecar.orig2.js';
+let src = readFileSync(file, 'utf8');
+const needle = 'if (!allowGateClaimPrefix && typeof check.id === "string" && check.id.startsWith("gate-claim-")) {';
+if (!src.includes(needle)) { process.stderr.write('mutation: reserved-prefix guard text not found — source pattern drifted, cannot mutation-test\n'); process.exit(1); }
+src = src.split(needle).join('if (false) {');
+writeFileSync('${EXISTS_CHECK_SCRATCH}/workflow-sidecar.mutated-neuter-rejection.js', src);
+NODEOF
+
+  if [[ -s "$TMPDIR_EVAL/exists-check-neuter-rejection.err" ]]; then
+    _fail "mutation-test setup failed (reserved-prefix guard source pattern did not match compiled output for the new-mint mutation test): $(cat "$TMPDIR_EVAL/exists-check-neuter-rejection.err")"
+  else
+    if node --check "$EXISTS_CHECK_SCRATCH/workflow-sidecar.mutated-neuter-rejection.js" 2>"$TMPDIR_EVAL/exists-check-neuter-rejection-syntax.err"; then
+      cp "$EXISTS_CHECK_SCRATCH/workflow-sidecar.mutated-neuter-rejection.js" "$DIST_SIDECAR"
+
+      if flow_agents_node "$WRITER" record-evidence "$CORRECTION_DIR" \
+        --verdict pass \
+        --check-json '{"id":"gate-claim-novel-mutation-red-check","kind":"policy","status":"pass","summary":"New-mint attempt with the reserved-prefix rejection neutered — must go red."}' \
+        --timestamp "2026-07-05T09:12:00Z" >"$TMPDIR_EVAL/exists-check-neuter-rejection-run.out" 2>"$TMPDIR_EVAL/exists-check-neuter-rejection-run.err"; then
+        _pass "mutation-test: with the reserved-prefix rejection neutered, a NOVEL gate-claim-* id now SUCCEEDS (eval correctly goes red without the rejection, proving Eval 2 exercises it)"
+      else
+        _fail "mutation-test: NOVEL gate-claim-* id still rejected even with the rejection neutered — Eval 2 may not be exercising the intended rejection: $(cat "$TMPDIR_EVAL/exists-check-neuter-rejection-run.out" "$TMPDIR_EVAL/exists-check-neuter-rejection-run.err")"
+      fi
+    else
+      _fail "mutation-test setup: mutated workflow-sidecar.js (reserved-prefix rejection) failed a syntax check, refusing to run it: $(cat "$TMPDIR_EVAL/exists-check-neuter-rejection-syntax.err")"
+    fi
+
+    # Restore the real compiled guard immediately, and re-run BOTH evals to confirm green again.
+    cp "$EXISTS_CHECK_SCRATCH/workflow-sidecar.orig2.js" "$DIST_SIDECAR"
+    if flow_agents_node "$WRITER" record-evidence "$CORRECTION_DIR" \
+      --verdict pass \
+      --check-json '{"id":"gate-claim-novel-restore-check","kind":"policy","status":"pass","summary":"Restore check: new-mint rejection must be back after mutation-test cleanup."}' \
+      --timestamp "2026-07-05T09:12:15Z" >"$TMPDIR_EVAL/exists-check-restore-novel.out" 2>"$TMPDIR_EVAL/exists-check-restore-novel.err"; then
+      _fail "mutation-test cleanup REGRESSION: the new-mint reserved-prefix rejection did not come back after restoring the original compiled file"
+    else
+      _pass "mutation-test cleanup: the real compiled new-mint rejection is restored and rejects a caller-supplied 'gate-claim-' id again"
+    fi
+  fi
+else
+  _fail "mutation-test setup: could not locate the compiled build/src/cli/workflow-sidecar.js to mutate for the new-mint rejection (ran 'npm run build' first?)"
+fi
+
+# ─── Mutation test (#270 CRITICAL, iteration 6): neuter the STAMPED-CLAIM GUARD itself (force ──
+# `existingHasStamp === true` to never be treated as stamped) in a scratch copy of the compiled
+# build/ output — the Eval 3 negative above (stamped-claim supersession must die) must go RED
+# (the attack SUCCEEDS against the mutated binary), proving Eval 3 actually exercises the new
+# narrowed guard and is not vacuously green for an unrelated reason.
+STAMPED_GUARD_SCRATCH="$TMPDIR_EVAL/stamped-guard-mutation-scratch"
+mkdir -p "$STAMPED_GUARD_SCRATCH"
+
+if [[ -f "$DIST_SIDECAR" ]]; then
+  cp "$DIST_SIDECAR" "$STAMPED_GUARD_SCRATCH/workflow-sidecar.orig.js"
+  node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/stamped-guard-neuter.err"
+import { readFileSync, writeFileSync } from 'node:fs';
+const file = '${STAMPED_GUARD_SCRATCH}/workflow-sidecar.orig.js';
+let src = readFileSync(file, 'utf8');
+const needle = 'if (existingHasStamp === true)';
+if (!src.includes(needle)) { process.stderr.write('mutation: stamped-claim guard text not found — source pattern drifted, cannot mutation-test\n'); process.exit(1); }
+src = src.split(needle).join('if (false)');
+writeFileSync('${STAMPED_GUARD_SCRATCH}/workflow-sidecar.mutated-neuter-stamp-guard.js', src);
+NODEOF
+
+  if [[ -s "$TMPDIR_EVAL/stamped-guard-neuter.err" ]]; then
+    _fail "mutation-test setup failed (stamped-claim guard source pattern did not match compiled output): $(cat "$TMPDIR_EVAL/stamped-guard-neuter.err")"
+  else
+    if node --check "$STAMPED_GUARD_SCRATCH/workflow-sidecar.mutated-neuter-stamp-guard.js" 2>"$TMPDIR_EVAL/stamped-guard-neuter-syntax.err"; then
+      cp "$STAMPED_GUARD_SCRATCH/workflow-sidecar.mutated-neuter-stamp-guard.js" "$DIST_SIDECAR"
+
+      MUTATION_STAMPED_ROOT="$TMPDIR_EVAL/mutation-stamped-root"
+      cp -r "$STAMPED_ROOT" "$MUTATION_STAMPED_ROOT"
+      MUTATION_STAMPED_DIR="$MUTATION_STAMPED_ROOT/$STAMPED_SLUG"
+
+      if flow_agents_node "$WRITER" record-evidence "$MUTATION_STAMPED_DIR"         --verdict pass         --check-json "{\"id\":\"${STAMPED_CHECK_ID}\",\"kind\":\"policy\",\"status\":\"pass\",\"summary\":\"Mutation-test: stamped-claim guard disabled, attack must now succeed.\"}"         --timestamp "2026-07-05T09:13:00Z" >"$TMPDIR_EVAL/stamped-guard-neuter-run.out" 2>"$TMPDIR_EVAL/stamped-guard-neuter-run.err"; then
+        _pass "mutation-test: with the stamped-claim guard neutered, superseding a live stamped gate claim now SUCCEEDS (eval correctly goes red without the guard, proving Eval 3 exercises it)"
+      else
+        _fail "mutation-test: stamped-claim supersession attack still rejected even with the guard neutered — Eval 3 may not be exercising the intended guard: $(cat "$TMPDIR_EVAL/stamped-guard-neuter-run.out" "$TMPDIR_EVAL/stamped-guard-neuter-run.err")"
+      fi
+    else
+      _fail "mutation-test setup: mutated workflow-sidecar.js (stamped-claim guard) failed a syntax check, refusing to run it: $(cat "$TMPDIR_EVAL/stamped-guard-neuter-syntax.err")"
+    fi
+
+    # Restore the real compiled guard immediately, and re-run the negative to confirm green again.
+    cp "$STAMPED_GUARD_SCRATCH/workflow-sidecar.orig.js" "$DIST_SIDECAR"
+    if flow_agents_node "$WRITER" record-evidence "$STAMPED_DIR"       --verdict pass       --check-json "{\"id\":\"${STAMPED_CHECK_ID}\",\"kind\":\"policy\",\"status\":\"pass\",\"summary\":\"Restore check: stamped-claim guard must be back after mutation-test cleanup.\"}"       --timestamp "2026-07-05T09:13:15Z" >"$TMPDIR_EVAL/stamped-guard-restore.out" 2>"$TMPDIR_EVAL/stamped-guard-restore.err"; then
+      _fail "mutation-test cleanup REGRESSION: the stamped-claim guard did not come back after restoring the original compiled file"
+    else
+      _pass "mutation-test cleanup: the real compiled stamped-claim guard is restored and rejects supersession of a live stamped gate claim again"
+    fi
+  fi
+else
+  _fail "mutation-test setup: could not locate the compiled build/src/cli/workflow-sidecar.js to mutate for the stamped-claim guard (ran 'npm run build' first?)"
 fi
 
 # ─── Mutation test (forged-stamp guard): temporarily disable assertStampedGateClaimValid's ────
