@@ -61,5 +61,6 @@
     "human_wait_s": 45,
     "wall_clock_s": 420
   },
-  "version": "0.1"
+  "version": "0.1",
+  "delegations": []
 }

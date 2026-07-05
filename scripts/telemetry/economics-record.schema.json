@@ -98,6 +98,22 @@
         }
       }
     },
+    "delegations": {
+      "type": "array",
+      "description": "Per-sub-agent delegation facts (#415 slice 1), one entry per delegated agent_id, joined from <slug>/agents/<agent-id>/events.jsonl (latest delegation/escalation event wins). Facts only: no per-delegation cost/outcome (telemetry does not isolate per-sub-agent tokens yet). Empty when no --agents-dir or no delegations.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["role", "resolved_model"],
+        "properties": {
+          "agent_id": { "type": ["string", "null"] },
+          "role": { "type": "string" },
+          "resolved_model": { "type": "string" },
+          "summary": { "type": ["string", "null"] },
+          "escalated_from": { "type": "string" }
+        }
+      }
+    },
     "tenant_id": { "type": ["string", "null"] }
   }
 }

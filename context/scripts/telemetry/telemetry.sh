@@ -356,11 +356,12 @@ add_stop_data_and_emit_usage() {
       if [[ -f "$econ_cwd/.flow-agents/current.json" ]]; then
         econ_slug=$(jq -r '.active_slug // .artifact_dir // empty' "$econ_cwd/.flow-agents/current.json" 2>/dev/null)
       fi
-      econ_state="" econ_acceptance="" econ_critique=""
+      econ_state="" econ_acceptance="" econ_critique="" econ_agents_dir=""
       if [[ -n "$econ_slug" ]]; then
-        # state.json under .kontourai/flow-agents/<slug>/ (fallback .flow-agents/<slug>/).
+        # state.json under .kontourai/flow-agents/<slug>/ (fallback .flow-agents/<slug>/); the run's
+        # per-agent event logs live alongside it in <slug>/agents/ (#415 delegations[] source).
         for d in "$econ_cwd/.kontourai/flow-agents/$econ_slug" "$econ_cwd/.flow-agents/$econ_slug"; do
-          [[ -f "$d/state.json" ]] && { econ_state="$d/state.json"; break; }
+          [[ -f "$d/state.json" ]] && { econ_state="$d/state.json"; [[ -d "$d/agents" ]] && econ_agents_dir="$d/agents"; break; }
         done
         [[ -f "$econ_cwd/.flow-agents/$econ_slug/acceptance.json" ]] && econ_acceptance="$econ_cwd/.flow-agents/$econ_slug/acceptance.json"
         [[ -f "$econ_cwd/.flow-agents/$econ_slug/critique.json" ]] && econ_critique="$econ_cwd/.flow-agents/$econ_slug/critique.json"
@@ -369,6 +370,7 @@ add_stop_data_and_emit_usage() {
       [[ -n "$econ_state" ]] && econ_args+=(--state "$econ_state")
       [[ -n "$econ_acceptance" ]] && econ_args+=(--acceptance "$econ_acceptance")
       [[ -n "$econ_critique" ]] && econ_args+=(--critique "$econ_critique")
+      [[ -n "$econ_agents_dir" ]] && econ_args+=(--agents-dir "$econ_agents_dir")
       (bash "$econ_script" "${econ_args[@]}") </dev/null >/dev/null 2>&1 &
       disown 2>/dev/null || true
     fi
