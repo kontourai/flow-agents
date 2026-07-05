@@ -267,8 +267,8 @@ else
   fail "economics emission is NOT guarded by TELEMETRY_USAGE_TRACKING in telemetry.sh"
 fi
 
-# ── AC8 (#415 slice 1): delegations[] — per-sub-agent role/model joined from agents/<id>/events.jsonl ─
-echo "--- AC8: delegations[] fact — latest-event-wins per agent, escalation supersedes, non-deleg ignored ---"
+# ── AC8 (#415): delegations[] facts + orchestrator-observable outcome + signals capability block ──────
+echo "--- AC8: delegations[] — role/model join, escalation supersession, honest outcome, signals ---"
 LOG7="$TMP/econ7.jsonl"; : > "$LOG7"
 run_emitter "$LOG7" --state "$FIX/state.json" --critique "$FIX/critique.json" --agents-dir "$FIX/agents"
 DREC="$(cat "$LOG7")"
@@ -276,7 +276,7 @@ assert_eq_d() { # <label> <jq-expr-on-DREC> <expected>
   local got; got="$(printf '%s' "$DREC" | jq -c "$2" 2>/dev/null)"
   [[ "$got" == "$3" ]] && pass "$1 ($got)" || fail "$1: expected $3 got $got"
 }
-assert_eq_d "delegations has one entry per delegated agent_id" '.delegations | length' '2'
+assert_eq_d "delegations has one entry per delegated agent_id" '.delegations | length' '5'
 assert_eq_d "mechanical delegation carries its role+model" \
   '.delegations[] | select(.agent_id=="tool-worker-1") | [.role,.resolved_model]' \
   '["delegate-mechanical","claude-haiku-4-5@anthropic"]'
@@ -288,18 +288,37 @@ assert_eq_d "escalated_from records the tier it was promoted from" \
   '"delegate-implementation"'
 assert_eq_d "non-escalated delegation has NO escalated_from key" \
   '.delegations[] | select(.agent_id=="tool-worker-1") | has("escalated_from")' 'false'
-assert_eq_d "summary carried verbatim (stands in for task_type until slice 1b)" \
-  '.delegations[] | select(.agent_id=="tool-worker-1") | .summary' \
-  '"mechanical slice: routine config edit"'
-# absent --agents-dir → delegations defaults to [] (backward compatible, the AC2 golden path)
+# outcome derivation — ONLY from real signals, never fabricated:
+assert_eq_d "outcome accepted (terminal evidence PASS, no escalation/redispatch)" \
+  '.delegations[] | select(.agent_id=="tool-worker-1") | .outcome' '"accepted"'
+assert_eq_d "outcome rework (escalation happened)" \
+  '.delegations[] | select(.agent_id=="tool-worker-2") | .outcome' '"rework"'
+assert_eq_d "outcome failed (terminal verdict FAIL)" \
+  '.delegations[] | select(.agent_id=="tool-worker-3") | .outcome' '"failed"'
+assert_eq_d "outcome UNAVAILABLE when no verdict recorded — NOT assumed accepted" \
+  '.delegations[] | select(.agent_id=="tool-worker-4") | .outcome' '"unavailable"'
+assert_eq_d "dispatch_count is orchestrator-observable (single dispatch = 1)" \
+  '.delegations[] | select(.agent_id=="tool-worker-1") | .dispatch_count' '1'
+# signals capability block — distinguishes harness-blind from real zero
+assert_eq_d "signals.per_delegation_tokens is false (no runtime isolates sub-agent tokens today)" \
+  '.signals.per_delegation_tokens' 'false'
+assert_eq_d "signals.per_delegation_outcome == partial (4 of 5 delegations have a real outcome)" \
+  '.signals.per_delegation_outcome' '"partial"'
+assert_eq_d "signals.runtime carried from the usage event" '.signals.runtime' '"claude-code"'
+# re-dispatch WITHOUT escalation is rework via dispatch_count>1 — orchestrator-observable, no sub-agent peek
+assert_eq_d "re-dispatch (2 delegations, no escalation) → dispatch_count=2, outcome rework" \
+  '.delegations[] | select(.agent_id=="tool-worker-5") | [.dispatch_count,.outcome]' \
+  '[2,"rework"]'
+# absent --agents-dir → delegations [] and signals.per_delegation_outcome n/a (backward compatible)
 assert_eq "delegations defaults to [] with no --agents-dir (golden path)" '.delegations' '[]'
+assert_eq "signals.per_delegation_outcome == n/a with no delegations" '.signals.per_delegation_outcome' '"n/a"'
 # the delegations-bearing record still validates against the schema
 DVAL="$(node -e '
 const Ajv=require("ajv"); const a=new Ajv({allErrors:true,strict:false});
 const v=a.compile(require(process.argv[1]));
 console.log(v(JSON.parse(require("fs").readFileSync(process.argv[2],"utf8")))?"VALID":"INVALID:"+JSON.stringify(v.errors));
 ' "$SCHEMA" "$LOG7" 2>&1)"
-[[ "$DVAL" == "VALID" ]] && pass "record with delegations[] validates against the schema" || fail "delegations record invalid: $DVAL"
+[[ "$DVAL" == "VALID" ]] && pass "record with delegations[] + outcome + signals validates against the schema" || fail "delegations record invalid: $DVAL"
 
 echo ""
 if [[ "$errors" -eq 0 ]]; then

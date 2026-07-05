@@ -82,29 +82,54 @@ critique_json="$(read_json_or_null "$critique_path")"
 # acceptance.json is read for future criteria/goal_fit joins; carried but not yet a required field.
 acceptance_json="$(read_json_or_null "$acceptance_path")"
 
-# --- delegations[] FACT (#415 slice 1): per-sub-agent role/model, joined from agents/<id>/events.jsonl -
-# Scan each per-agent event log for delegation/escalation events that carry role+model; the latest event
-# per agent_id wins (an escalation supersedes the initial delegation and carries escalated_from). This is
-# a pure fact assembly — no cost is attributed per delegation (telemetry does not isolate per-sub-agent
-# tokens today). Any read/parse failure degrades to an empty array; never fatal (local-first, best-effort).
+# --- delegations[] FACT (#415): per-sub-agent role/model + honestly-derived outcome ------------------
+# Scan each per-agent event log; group ALL events by agent_id. Role/model come from the latest
+# delegation/escalation event (an escalation supersedes the initial delegation, carrying escalated_from).
+#
+# `outcome` is derived ONLY from real recorded signals — NEVER fabricated (see harness-capability-matrix).
+# Crucially these are ORCHESTRATOR-OBSERVABLE — the orchestrator knows what it dispatched, how often it
+# re-dispatched, and how it corrected — so they hold WITHOUT peeking inside the sub-agent (which most
+# harnesses forbid). dispatch_count = how many times this agent_id was (re)dispatched (delegation +
+# escalation events); >1 means the orchestrator re-prompted it.
+#   diverged   — an explicit supersession marker (kind=="supersession" or status=="diverged") exists.
+#   rework     — an escalation happened, OR the orchestrator re-dispatched the agent (dispatch_count>1).
+#   failed     — the latest terminal verdict event (kind evidence/verdict) for the agent is a FAIL.
+#   accepted   — the latest terminal verdict event is a PASS (and no escalation/redispatch/supersession).
+#   unavailable— no terminal verdict was recorded for this agent on this harness. NOT assumed accepted.
+# Per-delegation COST is still not attributed here — token usage IS sub-agent-internal and no runtime
+# isolates it today (see the `signals` block); cost-per-(role,model) is a console projection.
+# Any read/parse failure degrades to an empty array; never fatal (local-first, best-effort).
 delegations_json='[]'
 if [[ -n "$agents_dir" && -d "$agents_dir" ]]; then
   assembled="$(
     { for f in "$agents_dir"/*/events.jsonl; do [[ -f "$f" ]] && cat "$f"; done; } 2>/dev/null \
     | jq -s -c '
-        [ .[]
-          | select(type == "object")
-          | select((.kind == "delegation" or .kind == "escalation")
-                   and (.role != null) and (.model != null) and (.agent_id != null))
-        ]
+        [ .[] | select(type == "object") | select(.agent_id != null) ]
         | group_by(.agent_id)
         | map(
-            (sort_by(.timestamp // "") | last) as $l
+            . as $all
+            | [ $all[] | select((.kind == "delegation" or .kind == "escalation")
+                                and (.role != null) and (.model != null)) ] as $routes
+            | select(($routes | length) > 0)
+            | ($routes | sort_by(.timestamp // "") | last) as $l
+            | ($routes | length) as $dispatch_count
+            | (any($all[]; .kind == "escalation")) as $escalated
+            | (any($all[]; .kind == "supersession" or .status == "diverged")) as $diverged
+            | ([ $all[] | select(.kind == "evidence" or .kind == "verdict") ]
+                 | sort_by(.timestamp // "") | last) as $verdict
+            | (($verdict.status // "") | ascii_downcase) as $vs
+            | (if   $diverged  then "diverged"
+               elif ($escalated or $dispatch_count > 1) then "rework"
+               elif ($verdict != null and $vs == "fail") then "failed"
+               elif ($verdict != null and $vs == "pass") then "accepted"
+               else "unavailable" end) as $outcome
             | {
                 agent_id: $l.agent_id,
                 role: $l.role,
                 resolved_model: $l.model,
-                summary: ($l.summary // null)
+                summary: ($l.summary // null),
+                dispatch_count: $dispatch_count,
+                outcome: $outcome
               }
             + (if ($l.escalated_from // null) != null then { escalated_from: $l.escalated_from } else {} end)
           )
@@ -192,6 +217,24 @@ record="$(printf '%s' "$usage_event" | jq -c \
         verification_verdict: $vv
       },
       delegations: ($delegations // []),
+      # signals: what telemetry the CURRENT runtime actually exposed, so a consumer can tell a real zero
+      # from a harness-blind gap (never fabricate — see docs/specs/harness-capability-matrix.md).
+      #   per_delegation_tokens: no runtime isolates per-sub-agent token usage today → cost-per-delegation
+      #     is unavailable; the console attributes at (role,model) granularity via cost.by_model instead.
+      #   per_delegation_outcome: coverage of the outcome signal on THIS run — "full" (every delegation has
+      #     a real outcome), "partial" (some do), "none" (delegations exist but none had a verdict/escalation),
+      #     "n/a" (no delegations observed).
+      signals: {
+        runtime: ($e.agent.runtime // null),
+        per_delegation_tokens: false,
+        per_delegation_outcome: (
+          ($delegations // []) as $d
+          | ($d | length) as $n
+          | if $n == 0 then "n/a"
+            else ([ $d[] | select(.outcome != null and .outcome != "unavailable") ] | length) as $known
+              | if $known == 0 then "none" elif $known == $n then "full" else "partial" end
+            end)
+      },
       tenant_id: (if $tenant == "" then null else $tenant end)
     }' 2>/dev/null)" || exit 0
 [[ -z "$record" || "$record" == "null" ]] && exit 0

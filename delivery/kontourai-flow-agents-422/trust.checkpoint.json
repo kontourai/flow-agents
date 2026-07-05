@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "slug": "kontourai-flow-agents-422",
+  "work_item": null,
+  "status": "planned",
+  "phase": "planning",
+  "sealed_at": "2026-07-05T23:08:30Z",
+  "commit_sha": "0091e940fc88cf0b93f5c76d71a11954201180b9",
+  "checkpoint": {
+    "asOf": "2026-07-05T23:08:30.193Z",
+    "statusByClaimId": {
+      "kontourai-flow-agents-422-review.flow-agents-workflow.reviewed-415-outcome-signals-outcome-derived-only-from-orchestrator-observable-signals-escalation-re-dispatch-verdict-supersession-unavailable-accepted-no-fabrication-per-delegation-cost-correctly-withheld-sub-agent-internal-signals-block-harness-capability-matrix-doc-sound-jq-injection-safe-best-effort-exit-0": "verified"
+    },
+    "throughEventCreatedAt": "2026-07-05T23:08:18Z",
+    "throughEventCreatedAtByClaimId": {
+      "kontourai-flow-agents-422-review.flow-agents-workflow.reviewed-415-outcome-signals-outcome-derived-only-from-orchestrator-observable-signals-escalation-re-dispatch-verdict-supersession-unavailable-accepted-no-fabrication-per-delegation-cost-correctly-withheld-sub-agent-internal-signals-block-harness-capability-matrix-doc-sound-jq-injection-safe-best-effort-exit-0": "2026-07-05T23:08:18Z"
+    },
+    "statusFunctionVersion": "2"
+  }
+}
