@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "kontourai-flow-agents-422-review.flow-agents-workflow.reviewed-415-outcome-signals-outcome-derived-only-from-orchestrator-observable-signals-escalation-re-dispatch-verdict-supersession-unavailable-accepted-no-fabrication-per-delegation-cost-correctly-withheld-sub-agent-internal-signals-block-harness-capability-matrix-doc-sound-jq-injection-safe-best-effort-exit-0",
+      "subjectType": "workflow-critique",
+      "subjectId": "kontourai-flow-agents-422/review",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.critique.review",
+      "fieldOrBehavior": "Reviewed #415 outcome+signals: outcome derived only from orchestrator-observable signals (escalation/re-dispatch/verdict/supersession), unavailable≠accepted (no fabrication), per-delegation cost correctly withheld (sub-agent-internal), signals block + harness-capability-matrix doc sound. jq-injection-safe, best-effort exit-0.",
+      "value": "pass",
+      "createdAt": "2026-07-05T23:08:18Z",
+      "updatedAt": "2026-07-05T23:08:18Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:workflow.critique.review",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-05T23:08:18Z"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [],
+  "policies": [
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:kontourai-flow-agents-422-review.flow-agents-workflow.reviewed-415-outcome-signals-outcome-derived-only-from-orchestrator-observable-signals-escalation-re-dispatch-verdict-supersession-unavailable-accepted-no-fabrication-per-delegation-cost-correctly-withheld-sub-agent-internal-signals-block-harness-capability-matrix-doc-sound-jq-injection-safe-best-effort-exit-0",
+      "claimId": "kontourai-flow-agents-422-review.flow-agents-workflow.reviewed-415-outcome-signals-outcome-derived-only-from-orchestrator-observable-signals-escalation-re-dispatch-verdict-supersession-unavailable-accepted-no-fabrication-per-delegation-cost-correctly-withheld-sub-agent-internal-signals-block-harness-capability-matrix-doc-sound-jq-injection-safe-best-effort-exit-0",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-05T23:08:18Z",
+      "verifiedAt": "2026-07-05T23:08:18Z"
+    }
+  ]
+}
