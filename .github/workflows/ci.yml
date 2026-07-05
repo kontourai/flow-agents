@@ -145,6 +145,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check sidecar-field-preservation-integration
 
+      - name: Record-check integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check record-check-integration
+
       - name: Actor identity resolver integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check actor-identity-resolver-integration
