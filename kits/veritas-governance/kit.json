@@ -8,6 +8,11 @@
       "id": "veritas-governance.readiness-check",
       "path": "flows/readiness-check.flow.json",
       "description": "Single-gate agentless flow: requires a verified software-readiness-verdict trust.bundle claim (projected from `veritas readiness --check evidence --working-tree`) before the gate-check step can pass. CI-callable, K0."
+    },
+    {
+      "id": "veritas-governance.exemption-issuance",
+      "path": "flows/exemption-issuance.flow.json",
+      "description": "Agentless K0 flow issuing a delivery/DECLARED no-agent-delivery exemption (ADR 0022 §2/§3): step request -> gate human-approval-gate (requires a verified no-agent-delivery-exemption-approval trust.bundle claim, satisfiable only by a human-authored approval bundle by convention -- see docs/README.md) -> step issue, which appends the approved entry to delivery/DECLARED. CI-callable."
     }
   ],
   "docs": [

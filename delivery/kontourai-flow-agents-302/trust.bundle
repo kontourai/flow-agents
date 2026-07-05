@@ -1,0 +1,644 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "kontourai-flow-agents-302-veritas-governance-kit-integration.flow-agents-workflow.manifest-kit-eval-all-assertions-incl-exemption-flow-end-to-end-append-semantics-real-reconciler-positive-both-fail-closed-negatives-captured-by-verifier-iterations-1-2",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-302/veritas-governance-kit-integration",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "manifest: kit eval — all assertions incl. exemption flow end-to-end, append semantics, real-reconciler positive + both fail-closed negatives (captured by verifier iterations 1-2)",
+      "value": "pass",
+      "createdAt": "2026-07-04T03:42:01Z",
+      "updatedAt": "2026-07-04T03:42:01Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-302-static-eval-suite.flow-agents-workflow.manifest-static-lane-exit-0",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-302/static-eval-suite",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "manifest: static lane exit 0",
+      "value": "pass",
+      "createdAt": "2026-07-04T03:42:01Z",
+      "updatedAt": "2026-07-04T03:42:01Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-302-source-tree-validation.flow-agents-workflow.manifest-source-tree-validation-passed",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-302/source-tree-validation",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "manifest: source tree validation passed",
+      "value": "pass",
+      "createdAt": "2026-07-04T03:42:01Z",
+      "updatedAt": "2026-07-04T03:42:01Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "lint"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-302-antigaming-and-trust-suite.flow-agents-workflow.manifest-24-tests-green-tests-array-unchanged",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-302/antigaming-and-trust-suite",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "manifest: 24 tests green, TESTS array unchanged",
+      "value": "pass",
+      "createdAt": "2026-07-04T03:42:01Z",
+      "updatedAt": "2026-07-04T03:42:01Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-302-gate-claim-pull-request-opened.flow-agents-workflow.pr-370-open-closes-302",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-302/gate-claim-pull-request-opened",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "PR #370 open (closes #302)",
+      "value": "pass",
+      "createdAt": "2026-07-04T03:42:01Z",
+      "updatedAt": "2026-07-04T03:42:01Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-302-ac1-flow-registered-k0-valid.flow-agents-workflow.flows-exemption-issuance-flow-json-exists-is-registered-in-kit-json-s-flows-and-the-kit-container-still-validates-as-k0",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-302/ac1-flow-registered-k0-valid",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "flows/exemption-issuance.flow.json exists, is registered in kit.json's flows[], and the kit container still validates as K0.",
+      "value": "pass",
+      "createdAt": "2026-07-04T03:42:01Z",
+      "updatedAt": "2026-07-04T03:42:01Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-302-ac2-gate-shape-matches-issue.flow-agents-workflow.the-gate-is-named-human-approval-gate-gates-step-issue-and-its-single-expects-entry-has-kind-trust-bundle-bundle-claim-claimtype-no-agent-delivery-exemption-approval-bundle-claim-subjecttype-delivery-scope-bundle-claim-accepted-statuses-verified",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-302/ac2-gate-shape-matches-issue",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "The gate is named human-approval-gate, gates step issue, and its single expects[] entry has kind: trust.bundle, bundle_claim.claimType == no-agent-delivery-exemption-approval, bundle_claim.subjectType == delivery-scope, bundle_claim.accepted_statuses == [\"verified\"].",
+      "value": "pass",
+      "createdAt": "2026-07-04T03:42:01Z",
+      "updatedAt": "2026-07-04T03:42:01Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-302-ac3-gate-blocks-without-evidence-passes-with-verified-claim.flow-agents-workflow.the-new-eval-section-in-test-veritas-governance-kit-sh-proves-both-directions-no-evidence-or-a-non-verified-claim-attached-flow-evaluate-exit-code-exits-1-a-verified-no-agent-delivery-exemption-approval-delivery-scope-claim-attached-exits-0",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-302/ac3-gate-blocks-without-evidence-passes-with-verified-claim",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "The new eval section in test_veritas_governance_kit.sh proves both directions: no evidence (or a non-verified claim) attached -> flow evaluate --exit-code exits 1; a verified no-agent-delivery-exemption-approval/delivery-scope claim attached -> exits 0.",
+      "value": "pass",
+      "createdAt": "2026-07-04T03:42:01Z",
+      "updatedAt": "2026-07-04T03:42:01Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-302-ac4-declared-append-not-clobber.flow-agents-workflow.the-eval-proves-the-issue-step-s-write-appends-a-new-well-formed-entry-to-an-existing-multi-entry-delivery-declared-fixture-seeded-with-1-pre-existing-entry-mirroring-main-s-real-2-entry-file-without-deleting-or-mutating-the-pre-existing-entries",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-302/ac4-declared-append-not-clobber",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "The eval proves the issue step's write appends a new well-formed entry to an existing multi-entry delivery/DECLARED fixture (seeded with >=1 pre-existing entry, mirroring main's real 2-entry file) without deleting or mutating the pre-existing entries.",
+      "value": "pass",
+      "createdAt": "2026-07-04T03:42:01Z",
+      "updatedAt": "2026-07-04T03:42:01Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-302-ac5-reconciler-reads-marker-well-formed-in-scope.flow-agents-workflow.the-produced-appended-marker-written-to-a-scratch-delivery-declared-is-read-by-the-real-scripts-ci-trust-reconcile-js-as-well-formed-and-in-scope-stdout-contains-the-literal-declared-no-agent-delivery-scope-line-and-the-process-exits-0",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-302/ac5-reconciler-reads-marker-well-formed-in-scope",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "The produced (appended) marker, written to a scratch delivery/DECLARED, is read by the real scripts/ci/trust-reconcile.js as well-formed and in-scope: stdout contains the literal 'DECLARED (no-agent-delivery): <scope>' line, and the process exits 0.",
+      "value": "pass",
+      "createdAt": "2026-07-04T03:42:01Z",
+      "updatedAt": "2026-07-04T03:42:01Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-302-ac6-negative-malformed-or-out-of-scope-still-fails-closed.flow-agents-workflow.a-companion-negative-case-missing-required-field-or-scope-not-matching-resolved-context-still-causes-trust-reconcile-js-to-fail-closed-bundle-required-no-declared-marker-or-the-malformed-field-diagnostic",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-302/ac6-negative-malformed-or-out-of-scope-still-fails-closed",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "A companion negative case (missing required field, or scope not matching resolved context) still causes trust-reconcile.js to fail closed (bundle-required-no-declared-marker or the malformed-field diagnostic).",
+      "value": "pass",
+      "createdAt": "2026-07-04T03:42:01Z",
+      "updatedAt": "2026-07-04T03:42:01Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-302-ac7-kit-readme-documents-run-sequence.flow-agents-workflow.docs-readme-md-gains-a-run-sequence-section-for-the-new-flow-showing-the-full-attach-evidence-evaluate-append-to-delivery-declared-sequence-and-states-explicitly-that-gate-satisfaction-is-not-structurally-restricted-to-human-attached-evidence-today",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-302/ac7-kit-readme-documents-run-sequence",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "docs/README.md gains a run-sequence section for the new flow showing the full attach-evidence -> evaluate -> append-to-delivery/DECLARED sequence, and states explicitly that gate satisfaction is not structurally restricted to human-attached evidence today.",
+      "value": "pass",
+      "createdAt": "2026-07-04T03:42:01Z",
+      "updatedAt": "2026-07-04T03:42:01Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-302-ac8-no-fork-anchor-untouched.flow-agents-workflow.scripts-ci-trust-reconcile-js-has-zero-references-to-kits-veritas-governance-and-the-kit-s-eval-s-existing-no-fork-assertion-continues-to-pass-unmodified-for-the-new-flow-s-assets",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-302/ac8-no-fork-anchor-untouched",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "scripts/ci/trust-reconcile.js has zero references to kits/veritas-governance, and the kit's eval's existing no-fork assertion continues to pass unmodified for the new flow's assets.",
+      "value": "pass",
+      "createdAt": "2026-07-04T03:42:01Z",
+      "updatedAt": "2026-07-04T03:42:01Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-302-ac9-existing-suites-green.flow-agents-workflow.no-regression-in-the-suites-this-touches-veritas-governance-kit-adapter-evals-trust-reconcile-negatives-anti-gaming-suite-static-suite-source-validation",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-302/ac9-existing-suites-green",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "No regression in the suites this touches: veritas governance kit + adapter evals, trust reconcile negatives, anti-gaming suite, static suite, source validation.",
+      "value": "pass",
+      "createdAt": "2026-07-04T03:42:01Z",
+      "updatedAt": "2026-07-04T03:42:01Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-302-review-final.flow-agents-workflow.two-clean-review-iterations-initial-approve-with-1-medium-eval-assertion-looseness-1-declined-low-fix-pass-re-reviewed-clean-with-character-level-string-verification-against-the-reconciler-honesty-caveat-verified-accurate-against-flow-cli-behavior-no-fork-confirmed",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-302/review-final",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "Two clean review iterations (initial APPROVE with 1 MEDIUM eval-assertion looseness + 1 declined LOW; fix pass re-reviewed clean with character-level string verification against the reconciler). Honesty caveat verified accurate against Flow CLI behavior. No-fork confirmed.",
+      "value": "pass",
+      "createdAt": "2026-07-04T03:42:01Z",
+      "updatedAt": "2026-07-04T03:42:01Z",
+      "impactLevel": "medium",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
+      "metadata": {
+        "origin": "critique",
+        "reviewer": "tool-code-reviewer",
+        "reviewed_at": "2026-07-04T03:42:01Z"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:kontourai-flow-agents-302-veritas-governance-kit-integration.flow-agents-workflow.manifest-kit-eval-all-assertions-incl-exemption-flow-end-to-end-append-semantics-real-reconciler-positive-both-fail-closed-negatives-captured-by-verifier-iterations-1-2",
+      "claimId": "kontourai-flow-agents-302-veritas-governance-kit-integration.flow-agents-workflow.manifest-kit-eval-all-assertions-incl-exemption-flow-end-to-end-append-semantics-real-reconciler-positive-both-fail-closed-negatives-captured-by-verifier-iterations-1-2",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-302/evidence.json",
+      "excerptOrSummary": "manifest: kit eval — all assertions incl. exemption flow end-to-end, append semantics, real-reconciler positive + both fail-closed negatives (captured by verifier iterations 1-2)",
+      "observedAt": "2026-07-04T03:42:01Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_veritas_governance_kit.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-302-static-eval-suite.flow-agents-workflow.manifest-static-lane-exit-0",
+      "claimId": "kontourai-flow-agents-302-static-eval-suite.flow-agents-workflow.manifest-static-lane-exit-0",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-302/evidence.json",
+      "excerptOrSummary": "manifest: static lane exit 0",
+      "observedAt": "2026-07-04T03:42:01Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/run.sh static",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-302-source-tree-validation.flow-agents-workflow.manifest-source-tree-validation-passed",
+      "claimId": "kontourai-flow-agents-302-source-tree-validation.flow-agents-workflow.manifest-source-tree-validation-passed",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-302/evidence.json",
+      "excerptOrSummary": "manifest: source tree validation passed",
+      "observedAt": "2026-07-04T03:42:01Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "npm run validate:source --",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-302-antigaming-and-trust-suite.flow-agents-workflow.manifest-24-tests-green-tests-array-unchanged",
+      "claimId": "kontourai-flow-agents-302-antigaming-and-trust-suite.flow-agents-workflow.manifest-24-tests-green-tests-array-unchanged",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-302/evidence.json",
+      "excerptOrSummary": "manifest: 24 tests green, TESTS array unchanged",
+      "observedAt": "2026-07-04T03:42:01Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/ci/antigaming-suite.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-302-gate-claim-pull-request-opened.flow-agents-workflow.pr-370-open-closes-302",
+      "claimId": "kontourai-flow-agents-302-gate-claim-pull-request-opened.flow-agents-workflow.pr-370-open-closes-302",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-302/evidence.json",
+      "excerptOrSummary": "PR #370 open (closes #302)",
+      "observedAt": "2026-07-04T03:42:01Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "gh pr view 370 --repo kontourai/flow-agents --json url,state",
+        "isError": false
+      }
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.test:test_output",
+      "claimType": "workflow.check.test",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.test claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pr-open.pull-request:test_output",
+      "claimType": "builder.pr-open.pull-request",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pr-open.pull-request claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.lint:test_output",
+      "claimType": "workflow.check.lint",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.lint claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pr-open.pull-request:attestation",
+      "claimType": "builder.pr-open.pull-request",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pr-open.pull-request claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.pr-open.pull-request",
+      "claimType": "builder.pr-open.pull-request",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.pr-open.pull-request claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.critique.review",
+      "claimType": "workflow.critique.review",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.critique.review claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "medium"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:kontourai-flow-agents-302-veritas-governance-kit-integration.flow-agents-workflow.manifest-kit-eval-all-assertions-incl-exemption-flow-end-to-end-append-semantics-real-reconciler-positive-both-fail-closed-negatives-captured-by-verifier-iterations-1-2",
+      "claimId": "kontourai-flow-agents-302-veritas-governance-kit-integration.flow-agents-workflow.manifest-kit-eval-all-assertions-incl-exemption-flow-end-to-end-append-semantics-real-reconciler-positive-both-fail-closed-negatives-captured-by-verifier-iterations-1-2",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-302-veritas-governance-kit-integration.flow-agents-workflow.manifest-kit-eval-all-assertions-incl-exemption-flow-end-to-end-append-semantics-real-reconciler-positive-both-fail-closed-negatives-captured-by-verifier-iterations-1-2"
+      ],
+      "createdAt": "2026-07-04T03:42:01Z",
+      "verifiedAt": "2026-07-04T03:42:01Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-302-static-eval-suite.flow-agents-workflow.manifest-static-lane-exit-0",
+      "claimId": "kontourai-flow-agents-302-static-eval-suite.flow-agents-workflow.manifest-static-lane-exit-0",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-302-static-eval-suite.flow-agents-workflow.manifest-static-lane-exit-0"
+      ],
+      "createdAt": "2026-07-04T03:42:01Z",
+      "verifiedAt": "2026-07-04T03:42:01Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-302-source-tree-validation.flow-agents-workflow.manifest-source-tree-validation-passed",
+      "claimId": "kontourai-flow-agents-302-source-tree-validation.flow-agents-workflow.manifest-source-tree-validation-passed",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-302-source-tree-validation.flow-agents-workflow.manifest-source-tree-validation-passed"
+      ],
+      "createdAt": "2026-07-04T03:42:01Z",
+      "verifiedAt": "2026-07-04T03:42:01Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-302-antigaming-and-trust-suite.flow-agents-workflow.manifest-24-tests-green-tests-array-unchanged",
+      "claimId": "kontourai-flow-agents-302-antigaming-and-trust-suite.flow-agents-workflow.manifest-24-tests-green-tests-array-unchanged",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-302-antigaming-and-trust-suite.flow-agents-workflow.manifest-24-tests-green-tests-array-unchanged"
+      ],
+      "createdAt": "2026-07-04T03:42:01Z",
+      "verifiedAt": "2026-07-04T03:42:01Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-302-gate-claim-pull-request-opened.flow-agents-workflow.pr-370-open-closes-302",
+      "claimId": "kontourai-flow-agents-302-gate-claim-pull-request-opened.flow-agents-workflow.pr-370-open-closes-302",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-302-gate-claim-pull-request-opened.flow-agents-workflow.pr-370-open-closes-302"
+      ],
+      "createdAt": "2026-07-04T03:42:01Z",
+      "verifiedAt": "2026-07-04T03:42:01Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-302-ac1-flow-registered-k0-valid.flow-agents-workflow.flows-exemption-issuance-flow-json-exists-is-registered-in-kit-json-s-flows-and-the-kit-container-still-validates-as-k0",
+      "claimId": "kontourai-flow-agents-302-ac1-flow-registered-k0-valid.flow-agents-workflow.flows-exemption-issuance-flow-json-exists-is-registered-in-kit-json-s-flows-and-the-kit-container-still-validates-as-k0",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-04T03:42:01Z",
+      "verifiedAt": "2026-07-04T03:42:01Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-302-ac2-gate-shape-matches-issue.flow-agents-workflow.the-gate-is-named-human-approval-gate-gates-step-issue-and-its-single-expects-entry-has-kind-trust-bundle-bundle-claim-claimtype-no-agent-delivery-exemption-approval-bundle-claim-subjecttype-delivery-scope-bundle-claim-accepted-statuses-verified",
+      "claimId": "kontourai-flow-agents-302-ac2-gate-shape-matches-issue.flow-agents-workflow.the-gate-is-named-human-approval-gate-gates-step-issue-and-its-single-expects-entry-has-kind-trust-bundle-bundle-claim-claimtype-no-agent-delivery-exemption-approval-bundle-claim-subjecttype-delivery-scope-bundle-claim-accepted-statuses-verified",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-04T03:42:01Z",
+      "verifiedAt": "2026-07-04T03:42:01Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-302-ac3-gate-blocks-without-evidence-passes-with-verified-claim.flow-agents-workflow.the-new-eval-section-in-test-veritas-governance-kit-sh-proves-both-directions-no-evidence-or-a-non-verified-claim-attached-flow-evaluate-exit-code-exits-1-a-verified-no-agent-delivery-exemption-approval-delivery-scope-claim-attached-exits-0",
+      "claimId": "kontourai-flow-agents-302-ac3-gate-blocks-without-evidence-passes-with-verified-claim.flow-agents-workflow.the-new-eval-section-in-test-veritas-governance-kit-sh-proves-both-directions-no-evidence-or-a-non-verified-claim-attached-flow-evaluate-exit-code-exits-1-a-verified-no-agent-delivery-exemption-approval-delivery-scope-claim-attached-exits-0",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-04T03:42:01Z",
+      "verifiedAt": "2026-07-04T03:42:01Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-302-ac4-declared-append-not-clobber.flow-agents-workflow.the-eval-proves-the-issue-step-s-write-appends-a-new-well-formed-entry-to-an-existing-multi-entry-delivery-declared-fixture-seeded-with-1-pre-existing-entry-mirroring-main-s-real-2-entry-file-without-deleting-or-mutating-the-pre-existing-entries",
+      "claimId": "kontourai-flow-agents-302-ac4-declared-append-not-clobber.flow-agents-workflow.the-eval-proves-the-issue-step-s-write-appends-a-new-well-formed-entry-to-an-existing-multi-entry-delivery-declared-fixture-seeded-with-1-pre-existing-entry-mirroring-main-s-real-2-entry-file-without-deleting-or-mutating-the-pre-existing-entries",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-04T03:42:01Z",
+      "verifiedAt": "2026-07-04T03:42:01Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-302-ac5-reconciler-reads-marker-well-formed-in-scope.flow-agents-workflow.the-produced-appended-marker-written-to-a-scratch-delivery-declared-is-read-by-the-real-scripts-ci-trust-reconcile-js-as-well-formed-and-in-scope-stdout-contains-the-literal-declared-no-agent-delivery-scope-line-and-the-process-exits-0",
+      "claimId": "kontourai-flow-agents-302-ac5-reconciler-reads-marker-well-formed-in-scope.flow-agents-workflow.the-produced-appended-marker-written-to-a-scratch-delivery-declared-is-read-by-the-real-scripts-ci-trust-reconcile-js-as-well-formed-and-in-scope-stdout-contains-the-literal-declared-no-agent-delivery-scope-line-and-the-process-exits-0",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-04T03:42:01Z",
+      "verifiedAt": "2026-07-04T03:42:01Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-302-ac6-negative-malformed-or-out-of-scope-still-fails-closed.flow-agents-workflow.a-companion-negative-case-missing-required-field-or-scope-not-matching-resolved-context-still-causes-trust-reconcile-js-to-fail-closed-bundle-required-no-declared-marker-or-the-malformed-field-diagnostic",
+      "claimId": "kontourai-flow-agents-302-ac6-negative-malformed-or-out-of-scope-still-fails-closed.flow-agents-workflow.a-companion-negative-case-missing-required-field-or-scope-not-matching-resolved-context-still-causes-trust-reconcile-js-to-fail-closed-bundle-required-no-declared-marker-or-the-malformed-field-diagnostic",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-04T03:42:01Z",
+      "verifiedAt": "2026-07-04T03:42:01Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-302-ac7-kit-readme-documents-run-sequence.flow-agents-workflow.docs-readme-md-gains-a-run-sequence-section-for-the-new-flow-showing-the-full-attach-evidence-evaluate-append-to-delivery-declared-sequence-and-states-explicitly-that-gate-satisfaction-is-not-structurally-restricted-to-human-attached-evidence-today",
+      "claimId": "kontourai-flow-agents-302-ac7-kit-readme-documents-run-sequence.flow-agents-workflow.docs-readme-md-gains-a-run-sequence-section-for-the-new-flow-showing-the-full-attach-evidence-evaluate-append-to-delivery-declared-sequence-and-states-explicitly-that-gate-satisfaction-is-not-structurally-restricted-to-human-attached-evidence-today",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-04T03:42:01Z",
+      "verifiedAt": "2026-07-04T03:42:01Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-302-ac8-no-fork-anchor-untouched.flow-agents-workflow.scripts-ci-trust-reconcile-js-has-zero-references-to-kits-veritas-governance-and-the-kit-s-eval-s-existing-no-fork-assertion-continues-to-pass-unmodified-for-the-new-flow-s-assets",
+      "claimId": "kontourai-flow-agents-302-ac8-no-fork-anchor-untouched.flow-agents-workflow.scripts-ci-trust-reconcile-js-has-zero-references-to-kits-veritas-governance-and-the-kit-s-eval-s-existing-no-fork-assertion-continues-to-pass-unmodified-for-the-new-flow-s-assets",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-04T03:42:01Z",
+      "verifiedAt": "2026-07-04T03:42:01Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-302-ac9-existing-suites-green.flow-agents-workflow.no-regression-in-the-suites-this-touches-veritas-governance-kit-adapter-evals-trust-reconcile-negatives-anti-gaming-suite-static-suite-source-validation",
+      "claimId": "kontourai-flow-agents-302-ac9-existing-suites-green.flow-agents-workflow.no-regression-in-the-suites-this-touches-veritas-governance-kit-adapter-evals-trust-reconcile-negatives-anti-gaming-suite-static-suite-source-validation",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-04T03:42:01Z",
+      "verifiedAt": "2026-07-04T03:42:01Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-302-review-final.flow-agents-workflow.two-clean-review-iterations-initial-approve-with-1-medium-eval-assertion-looseness-1-declined-low-fix-pass-re-reviewed-clean-with-character-level-string-verification-against-the-reconciler-honesty-caveat-verified-accurate-against-flow-cli-behavior-no-fork-confirmed",
+      "claimId": "kontourai-flow-agents-302-review-final.flow-agents-workflow.two-clean-review-iterations-initial-approve-with-1-medium-eval-assertion-looseness-1-declined-low-fix-pass-re-reviewed-clean-with-character-level-string-verification-against-the-reconciler-honesty-caveat-verified-accurate-against-flow-cli-behavior-no-fork-confirmed",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-04T03:42:01Z",
+      "verifiedAt": "2026-07-04T03:42:01Z"
+    }
+  ]
+}
