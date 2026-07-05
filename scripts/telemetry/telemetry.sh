@@ -340,6 +340,38 @@ add_stop_data_and_emit_usage() {
         })
       }')
     transport_emit "$usage_event"
+
+    # Per-run kit-economics record (#349, console ADR 0003). Best-effort + DETACHED so it can never
+    # alter existing telemetry timing or fail the stop hook: assemble one kontour.console.economics
+    # fact from this session.usage event + the run's review sidecars, write it local-first, then
+    # opt-in relay it. Resolve the sidecar paths from the run cwd's active-session pointer; the
+    # emitter defaults every field cleanly when a sidecar is absent.
+    local econ_script="${TELEMETRY_DIR}/economics-record.sh"
+    if [[ -f "$econ_script" ]]; then
+      local econ_cwd econ_slug econ_state econ_acceptance econ_critique
+      econ_cwd=$(echo "$usage_event" | jq -r '.context.cwd // ""' 2>/dev/null)
+      [[ -z "$econ_cwd" || ! -d "$econ_cwd" ]] && econ_cwd="$PWD"
+      # Active slug from the per-run current pointer (active_slug), tolerant of a missing/corrupt file.
+      econ_slug=""
+      if [[ -f "$econ_cwd/.flow-agents/current.json" ]]; then
+        econ_slug=$(jq -r '.active_slug // .artifact_dir // empty' "$econ_cwd/.flow-agents/current.json" 2>/dev/null)
+      fi
+      econ_state="" econ_acceptance="" econ_critique=""
+      if [[ -n "$econ_slug" ]]; then
+        # state.json under .kontourai/flow-agents/<slug>/ (fallback .flow-agents/<slug>/).
+        for d in "$econ_cwd/.kontourai/flow-agents/$econ_slug" "$econ_cwd/.flow-agents/$econ_slug"; do
+          [[ -f "$d/state.json" ]] && { econ_state="$d/state.json"; break; }
+        done
+        [[ -f "$econ_cwd/.flow-agents/$econ_slug/acceptance.json" ]] && econ_acceptance="$econ_cwd/.flow-agents/$econ_slug/acceptance.json"
+        [[ -f "$econ_cwd/.flow-agents/$econ_slug/critique.json" ]] && econ_critique="$econ_cwd/.flow-agents/$econ_slug/critique.json"
+      fi
+      local econ_args=("$usage_event")
+      [[ -n "$econ_state" ]] && econ_args+=(--state "$econ_state")
+      [[ -n "$econ_acceptance" ]] && econ_args+=(--acceptance "$econ_acceptance")
+      [[ -n "$econ_critique" ]] && econ_args+=(--critique "$econ_critique")
+      (bash "$econ_script" "${econ_args[@]}") </dev/null >/dev/null 2>&1 &
+      disown 2>/dev/null || true
+    fi
   fi
 
   echo "$event"

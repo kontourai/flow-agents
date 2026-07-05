@@ -1,0 +1,65 @@
+{
+  "at": "1751731200000",
+  "cost": {
+    "by_model": [
+      {
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 500000,
+        "estimated_cost_usd": 0.305,
+        "input_tokens": 1000,
+        "model": "claude-opus-4-8",
+        "output_tokens": 2000
+      },
+      {
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "estimated_cost_usd": 0.005,
+        "input_tokens": 0,
+        "model": "claude-fable-5",
+        "output_tokens": 100
+      }
+    ],
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 500000,
+    "estimated_cost_usd": 0.31,
+    "input_tokens": 1000,
+    "output_tokens": 2100
+  },
+  "defects": {
+    "caught_false_completions": 1,
+    "findings_by_severity": {
+      "critical": 1,
+      "high": 2,
+      "low": 2,
+      "medium": 1
+    },
+    "gate_fires": 3,
+    "verification_verdict": "PASS"
+  },
+  "iterations": {
+    "count": 2,
+    "route_backs": 1
+  },
+  "model": "claude-opus-4-8",
+  "phases": [
+    {
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 500000,
+      "estimated_cost_usd": 0.31,
+      "input_tokens": 1000,
+      "output_tokens": 2100,
+      "phase": "verify",
+      "wall_clock_s": 420
+    }
+  ],
+  "pricing_version": "2026-06-28",
+  "run_id": "kontourai-flow-agents-349-run-01",
+  "schema": "kontour.console.economics",
+  "task_slug": "kontourai-flow-agents-349",
+  "tenant_id": null,
+  "time": {
+    "human_wait_s": 45,
+    "wall_clock_s": 420
+  },
+  "version": "0.1"
+}

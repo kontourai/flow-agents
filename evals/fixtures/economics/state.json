@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "task_slug": "kontourai-flow-agents-349",
+  "repo": "kontourai/flow-agents",
+  "status": "verified",
+  "phase": "verify",
+  "iterations": { "count": 2, "route_backs": 1 },
+  "gate_fires": 3,
+  "human_wait_s": 45,
+  "verification_verdict": "PASS"
+}

@@ -310,6 +310,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check usage-and-cost-integration
 
+      - name: Economics record integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check economics-record-integration
+
       - name: Utterance check integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check utterance-check-integration
