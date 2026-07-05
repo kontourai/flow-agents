@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "task_slug": "kontourai-flow-agents-349",
+  "repo": "kontourai/flow-agents",
+  "source_request": "per-run kit-economics record",
+  "criteria": [
+    { "id": "AC1", "text": "golden fixture validates against the schema", "status": "pass" },
+    { "id": "AC2", "text": "cost totals equal the session.usage usage block", "status": "pass" },
+    { "id": "AC3", "text": "phase-sum invariant holds", "status": "pass" }
+  ],
+  "goal_fit": { "status": "verified", "summary": "Economics record measures the value proof." }
+}
