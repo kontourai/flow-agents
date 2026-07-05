@@ -49,6 +49,8 @@ Before doing anything else, restore the item's durable record into context throu
 
 If no durable record exists for the item, record that gap and rely on the issue body plus merged PRs/commits as the authoritative history.
 
+If the item was taken over from a stale incumbent (a `reclaimable` selection resumed via pull-work's **Takeover Protocol**, #294 / ADR 0021 §5), restoring the durable record IS the resumption: the deterministic slug points at the incumbent's existing `.kontourai/flow-agents/<slug>/`, and you continue the incumbent's branch (the `resume_branch` from `takeover-preflight`/the supersede output) — never a new branch, never a restarted plan. Takeover is resumption, not restart.
+
 ### 2. Determine the next undone slice
 
 From the issue body plus the merged PRs and commits referencing the issue, determine which slices have **landed** and which is the **next undone slice**.

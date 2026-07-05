@@ -29,6 +29,7 @@ CHECKS=(
   "Pull work assignment join integration|bash evals/integration/test_pull_work_assignment_join.sh"
   "Ensure-session ownership guard integration|bash evals/integration/test_ensure_session_ownership_guard.sh"
   "Verify-hold gate integration|bash evals/integration/test_verify_hold.sh"
+  "Takeover protocol integration|bash evals/integration/test_takeover_protocol.sh"
   "Current.json per-actor integration|bash evals/integration/test_current_json_per_actor.sh"
   "Goal Fit hook integration|bash evals/integration/test_goal_fit_hook.sh"
   "Hook category behavior integration|bash evals/integration/test_hook_category_behaviors.sh"
@@ -87,6 +88,7 @@ LANE_WORKFLOW_CONTRACTS=(
   "Pull work assignment join integration"
   "Ensure-session ownership guard integration"
   "Verify-hold gate integration"
+  "Takeover protocol integration"
   "Current.json per-actor integration"
 )
 
