@@ -267,6 +267,40 @@ else
   fail "economics emission is NOT guarded by TELEMETRY_USAGE_TRACKING in telemetry.sh"
 fi
 
+# ── AC8 (#415 slice 1): delegations[] — per-sub-agent role/model joined from agents/<id>/events.jsonl ─
+echo "--- AC8: delegations[] fact — latest-event-wins per agent, escalation supersedes, non-deleg ignored ---"
+LOG7="$TMP/econ7.jsonl"; : > "$LOG7"
+run_emitter "$LOG7" --state "$FIX/state.json" --critique "$FIX/critique.json" --agents-dir "$FIX/agents"
+DREC="$(cat "$LOG7")"
+assert_eq_d() { # <label> <jq-expr-on-DREC> <expected>
+  local got; got="$(printf '%s' "$DREC" | jq -c "$2" 2>/dev/null)"
+  [[ "$got" == "$3" ]] && pass "$1 ($got)" || fail "$1: expected $3 got $got"
+}
+assert_eq_d "delegations has one entry per delegated agent_id" '.delegations | length' '2'
+assert_eq_d "mechanical delegation carries its role+model" \
+  '.delegations[] | select(.agent_id=="tool-worker-1") | [.role,.resolved_model]' \
+  '["delegate-mechanical","claude-haiku-4-5@anthropic"]'
+assert_eq_d "escalation supersedes the initial delegation (latest-wins → design/opus)" \
+  '.delegations[] | select(.agent_id=="tool-worker-2") | [.role,.resolved_model]' \
+  '["delegate-design","claude-opus-4-8@anthropic"]'
+assert_eq_d "escalated_from records the tier it was promoted from" \
+  '.delegations[] | select(.agent_id=="tool-worker-2") | .escalated_from' \
+  '"delegate-implementation"'
+assert_eq_d "non-escalated delegation has NO escalated_from key" \
+  '.delegations[] | select(.agent_id=="tool-worker-1") | has("escalated_from")' 'false'
+assert_eq_d "summary carried verbatim (stands in for task_type until slice 1b)" \
+  '.delegations[] | select(.agent_id=="tool-worker-1") | .summary' \
+  '"mechanical slice: routine config edit"'
+# absent --agents-dir → delegations defaults to [] (backward compatible, the AC2 golden path)
+assert_eq "delegations defaults to [] with no --agents-dir (golden path)" '.delegations' '[]'
+# the delegations-bearing record still validates against the schema
+DVAL="$(node -e '
+const Ajv=require("ajv"); const a=new Ajv({allErrors:true,strict:false});
+const v=a.compile(require(process.argv[1]));
+console.log(v(JSON.parse(require("fs").readFileSync(process.argv[2],"utf8")))?"VALID":"INVALID:"+JSON.stringify(v.errors));
+' "$SCHEMA" "$LOG7" 2>&1)"
+[[ "$DVAL" == "VALID" ]] && pass "record with delegations[] validates against the schema" || fail "delegations record invalid: $DVAL"
+
 echo ""
 if [[ "$errors" -eq 0 ]]; then
   echo "test_economics_record: all checks passed."

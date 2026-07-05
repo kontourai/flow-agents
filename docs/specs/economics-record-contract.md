@@ -109,7 +109,37 @@ the `session.usage` event.
 | `defects.findings_by_severity` | object | grouped from `critique.json .critiques[].findings[]` on `.severity` (missing → `low`) |
 | `defects.caught_false_completions` | int | claimed-pass ACs contradicted by trusted-backstop re-runs (DISTINCT counter) |
 | `defects.verification_verdict` | enum | final verify-work verdict from the sidecar (`PASS`\|`FAIL`\|`NOT_VERIFIED`) |
+| `delegations[]` | array | per-sub-agent delegation facts (#415 slice 1) — see below; `[]` when `--agents-dir` is absent |
 | `tenant_id` | string\|null | self-description only; the `ApiSink` stamps the authoritative tenant (ADR 0003 call 2) |
+
+## `delegations[]` — per-sub-agent routing facts (#415 slice 1)
+
+When the emitter is given `--agents-dir <slug>/agents`, it assembles one entry per delegated
+sub-agent, joined from each `<slug>/agents/<agent-id>/events.jsonl`:
+
+| Field | Type | Source |
+| --- | --- | --- |
+| `agent_id` | string\|null | the sub-agent id (join key) |
+| `role` | string | routing role recorded on the delegation event (`delegate-mechanical`\|`delegate-implementation`\|`delegate-design`\|…) |
+| `resolved_model` | string | the model that role resolved to (`.datum/config.json`), e.g. `claude-haiku-4-5@anthropic` |
+| `summary` | string\|null | the delegation/escalation event's free-text summary (stands in for a structured task_type until slice 1b) |
+| `escalated_from` | string | present only when the sub-agent escalated: the lower tier it was promoted from |
+
+**Assembly rule:** for each `agent_id`, the **latest** `delegation`/`escalation` event wins (an
+escalation supersedes the initial delegation and carries `escalated_from`); events lacking `role`
+or `model`, and non-delegation events, are ignored. Any read/parse failure degrades to `[]` — never
+fatal (local-first, best-effort).
+
+**Deliberately a FACT, not a rollup (ADR 0003 call 3).** `delegations[]` records *which sub-agent
+ran on which model*, nothing more. It carries **no per-delegation cost or outcome**: telemetry does
+not isolate per-sub-agent token usage today, so inventing a per-delegation cost split would be
+fabrication. Cost attribution and routing-efficiency review are downstream:
+
+- **cost per `(role, model)`** is a *console projection* — join `delegations[]` (role→model) against
+  the existing `cost.by_model` (which is 1:1 with roles under the current `.datum/config.json` map).
+- **per-delegation `outcome`** (`accepted`\|`rework`\|`diverged`\|`failed`) is **slice 1b** — it needs
+  per-sub-agent usage isolation and an evidence-derived outcome (verdict + supersession), not
+  self-report.
 
 ## R7 Goodhart guard (structural, hard requirement)
 

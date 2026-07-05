@@ -19,8 +19,16 @@
 #
 # Invoked (detached, best-effort) from scripts/telemetry/telemetry.sh after the session.usage event is
 # emitted at run end. Usage:
-#   economics-record.sh '<session.usage-event-json>' [--state PATH] [--acceptance PATH] [--critique PATH]
+#   economics-record.sh '<session.usage-event-json>' [--state PATH] [--acceptance PATH]
+#                        [--critique PATH] [--agents-dir DIR]
 #   (the session.usage event may also arrive on stdin instead of $1)
+#
+# --agents-dir DIR (#415 slice 1): the run's `<slug>/agents` directory. When present, the emitter
+# assembles a `delegations[]` FACT — one entry per delegated sub-agent {agent_id, role, resolved_model,
+# summary, escalated_from?} joined from each `<DIR>/<agent-id>/events.jsonl` (latest delegation/
+# escalation event wins). This is a per-run FACT only (ADR 0003 call 3): cost-per-(role,model) rollups
+# and per-delegation outcome are console projections / a later slice, NOT fabricated here — telemetry
+# does not isolate per-sub-agent token usage today, so no per-delegation cost is invented.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" || exit 0
@@ -43,11 +51,13 @@ usage_event=""
 state_path=""
 acceptance_path=""
 critique_path=""
+agents_dir=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --state) state_path="${2:-}"; shift 2 ;;
     --acceptance) acceptance_path="${2:-}"; shift 2 ;;
     --critique) critique_path="${2:-}"; shift 2 ;;
+    --agents-dir) agents_dir="${2:-}"; shift 2 ;;
     --) shift ;;
     *) [[ -z "$usage_event" ]] && usage_event="$1"; shift ;;
   esac
@@ -72,6 +82,37 @@ critique_json="$(read_json_or_null "$critique_path")"
 # acceptance.json is read for future criteria/goal_fit joins; carried but not yet a required field.
 acceptance_json="$(read_json_or_null "$acceptance_path")"
 
+# --- delegations[] FACT (#415 slice 1): per-sub-agent role/model, joined from agents/<id>/events.jsonl -
+# Scan each per-agent event log for delegation/escalation events that carry role+model; the latest event
+# per agent_id wins (an escalation supersedes the initial delegation and carries escalated_from). This is
+# a pure fact assembly — no cost is attributed per delegation (telemetry does not isolate per-sub-agent
+# tokens today). Any read/parse failure degrades to an empty array; never fatal (local-first, best-effort).
+delegations_json='[]'
+if [[ -n "$agents_dir" && -d "$agents_dir" ]]; then
+  assembled="$(
+    { for f in "$agents_dir"/*/events.jsonl; do [[ -f "$f" ]] && cat "$f"; done; } 2>/dev/null \
+    | jq -s -c '
+        [ .[]
+          | select(type == "object")
+          | select((.kind == "delegation" or .kind == "escalation")
+                   and (.role != null) and (.model != null) and (.agent_id != null))
+        ]
+        | group_by(.agent_id)
+        | map(
+            (sort_by(.timestamp // "") | last) as $l
+            | {
+                agent_id: $l.agent_id,
+                role: $l.role,
+                resolved_model: $l.model,
+                summary: ($l.summary // null)
+              }
+            + (if ($l.escalated_from // null) != null then { escalated_from: $l.escalated_from } else {} end)
+          )
+      ' 2>/dev/null
+  )"
+  [[ -n "$assembled" && "$assembled" != "null" ]] && delegations_json="$assembled"
+fi
+
 tenant_self="${CONSOLE_TENANT_ID:-${FLOW_AGENTS_CONSOLE_TENANT:-}}"
 
 # --- assemble the record with ONE jq -c filter (injection-safe, valid JSON) -------------------------
@@ -81,6 +122,7 @@ record="$(printf '%s' "$usage_event" | jq -c \
   --argjson state "$state_json" \
   --argjson critique "$critique_json" \
   --argjson acceptance "$acceptance_json" \
+  --argjson delegations "$delegations_json" \
   --arg tenant "$tenant_self" '
   . as $e
   | ($e.usage // {}) as $u
@@ -149,6 +191,7 @@ record="$(printf '%s' "$usage_event" | jq -c \
         caught_false_completions: (($critique.caught_false_completions // $cfc) // 0),
         verification_verdict: $vv
       },
+      delegations: ($delegations // []),
       tenant_id: (if $tenant == "" then null else $tenant end)
     }' 2>/dev/null)" || exit 0
 [[ -z "$record" || "$record" == "null" ]] && exit 0
