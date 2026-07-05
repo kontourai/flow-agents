@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "task_slug": "kontourai-flow-agents-349",
+  "required": true,
+  "status": "changes_requested",
+  "critiques": [
+    {
+      "id": "review-1",
+      "reviewer": "tool-code-reviewer",
+      "verdict": "changes_requested",
+      "summary": "Findings across severities plus one caught false-completion.",
+      "findings": [
+        { "id": "f1", "severity": "critical", "description": "Injection: JSON built by string concat." },
+        { "id": "f2", "severity": "high", "description": "Local write skipped when console unset." },
+        { "id": "f3", "severity": "high", "description": "Phase sum drifts from cost total." },
+        { "id": "f4", "severity": "medium", "description": "estimated_cost_usd re-estimated from prompt length." },
+        { "id": "f5", "description": "Missing severity field defaults here to low." },
+        { "id": "f6", "severity": "low", "false_completion": true, "description": "AC3 was claimed pass but a trusted-backstop re-run contradicted it." }
+      ]
+    }
+  ]
+}

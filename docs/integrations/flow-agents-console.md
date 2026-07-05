@@ -87,6 +87,41 @@ CONSOLE_TELEMETRY_TOKEN=<bearer>   (or FLOW_AGENTS_CONSOLE_TOKEN_FILE)   ·   CO
 Untrusted fields (actor, subjectId, branch, artifact_dir) are JSON-escaped by `jq` at record
 construction, so hostile control bytes are `\u`-escaped, never emitted raw.
 
+#### Economics record — flow-agents side (shipped, #349)
+
+Every kit-driven run emits **one per-run economics record** — a `kontour.console.economics` v0.1 fact
+carrying `cost`, `time`, `iterations`, and `defects` caught — so "flow kits save money and produce
+more accurate results" becomes a **measurable, falsifiable** claim. It is the measurement substrate
+for the Kit-economics telemetry initiative and is consumed by the baseline harness (#350), the
+small-model headline (#409), and the console value view (console #117). The full field-by-field
+contract is in [`docs/specs/economics-record-contract.md`](../specs/economics-record-contract.md).
+
+The emitter (`scripts/telemetry/economics-record.sh`) is modeled byte-for-byte on the liveness relay:
+it assembles the record with a **single `jq -c` filter** (valid JSON + `\u`-escaping of every untrusted
+field — `task_slug`, model names, finding text) and hands off to the **same** `console_post_json`
+transport core (endpoint-allow gate, `Bearer` + `x-console-tenant-id`, detached fire), shared not
+forked. It is wired into the telemetry **stop path** (`add_stop_data_and_emit_usage` in
+`scripts/telemetry/telemetry.sh`): right after the `session.usage` event is emitted, the economics
+record is assembled from that event's `.usage` block (token/cost **ground truth** parsed by
+`usage_parse_transcript` from the transcript — never re-estimated) joined with the run's review
+sidecars (`critique.json` for defects, `state.json` for verdict / phase / iterations).
+
+It is **strictly local-first** (ADR 0003 call 6): the record is **always** written to the local
+economics log (`<TELEMETRY_DATA_DIR>/economics.jsonl`) *first*; only then is a **detached, opt-in,
+best-effort** POST fired — a true no-op when the relay flag is off or no console is configured, and
+`exit 0` on every failure path so it can never block, slow, or fail a run. flow-agents emits a per-run
+**fact**, never a rollup — economics aggregation and the value view are console-side **projections**
+over the immutable record stream (ADR 0003 call 3). Tenancy is stamped console-side from the verified
+principal (call 2); the record's `tenant_id` is self-description only. Structurally, `cost` and
+`defects` are **co-required** in the schema (the R7 Goodhart guard) — no consumer can render "cheaper"
+without also rendering "and here is what it caught / missed." Enable the relay with:
+
+```
+FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY=1
+FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL=<console>/records   # or FLOW_AGENTS_CONSOLE_URL / CONSOLE_TELEMETRY_URL + /records
+CONSOLE_TELEMETRY_TOKEN=<bearer>   (or FLOW_AGENTS_CONSOLE_TOKEN_FILE)   ·   CONSOLE_TENANT_ID / FLOW_AGENTS_CONSOLE_TENANT
+```
+
 The paired **console side** — ingesting `kontour.console.liveness`, the fleet OperatingState
 projection (actors + held/reclaimable subjects + last-seen + per-session cost), and the ADR 0021 §4
 janitor — is tracked in the console repo (**console #125**), and feeds the redesigned console

@@ -1,0 +1,103 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kontourai.dev/schemas/kontour.console.economics/0.1.json",
+  "title": "kontour.console.economics",
+  "description": "Per-run kit-economics record (flow-agents #349, console ADR 0003). Immutable per-run fact: cost, time, iterations, and defects caught. cost and defects are co-required (R7 Goodhart guard).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema", "version", "run_id", "cost", "time", "iterations", "defects"],
+  "properties": {
+    "schema": { "const": "kontour.console.economics" },
+    "version": { "const": "0.1" },
+    "run_id": { "type": "string" },
+    "at": { "type": ["string", "null"] },
+    "task_slug": { "type": ["string", "null"] },
+    "model": { "type": ["string", "null"] },
+    "pricing_version": { "type": ["string", "null"] },
+    "cost": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+        "estimated_cost_usd",
+        "by_model"
+      ],
+      "properties": {
+        "input_tokens": { "type": "number" },
+        "output_tokens": { "type": "number" },
+        "cache_creation_input_tokens": { "type": "number" },
+        "cache_read_input_tokens": { "type": "number" },
+        "estimated_cost_usd": { "type": "number" },
+        "by_model": { "type": "array" }
+      }
+    },
+    "time": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["wall_clock_s", "human_wait_s"],
+      "properties": {
+        "wall_clock_s": { "type": "number" },
+        "human_wait_s": { "type": "number" }
+      }
+    },
+    "phases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["phase"],
+        "properties": {
+          "phase": { "type": "string" },
+          "input_tokens": { "type": "number" },
+          "output_tokens": { "type": "number" },
+          "cache_creation_input_tokens": { "type": "number" },
+          "cache_read_input_tokens": { "type": "number" },
+          "estimated_cost_usd": { "type": "number" },
+          "wall_clock_s": { "type": "number" }
+        }
+      }
+    },
+    "iterations": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["count", "route_backs"],
+      "properties": {
+        "count": { "type": "number" },
+        "route_backs": { "type": "number" }
+      }
+    },
+    "defects": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "gate_fires",
+        "findings_by_severity",
+        "caught_false_completions",
+        "verification_verdict"
+      ],
+      "properties": {
+        "gate_fires": { "type": "number" },
+        "findings_by_severity": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["critical", "high", "medium", "low"],
+          "properties": {
+            "critical": { "type": "number" },
+            "high": { "type": "number" },
+            "medium": { "type": "number" },
+            "low": { "type": "number" }
+          }
+        },
+        "caught_false_completions": { "type": "number" },
+        "verification_verdict": {
+          "type": "string",
+          "enum": ["PASS", "FAIL", "NOT_VERIFIED"]
+        }
+      }
+    },
+    "tenant_id": { "type": ["string", "null"] }
+  }
+}
