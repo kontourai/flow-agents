@@ -80,6 +80,7 @@ LANE_WORKFLOW_CONTRACTS=(
   "Workflow sidecar writer integration"
   "Sidecar field preservation integration"
   "Actor identity resolver integration"
+  "CI-runtime actor identity integration"
   "Assignment provider local-file integration"
   "Assignment provider github integration"
   "Stop hook release-with-handoff integration"
