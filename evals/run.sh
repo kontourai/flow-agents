@@ -221,6 +221,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_current_json_per_actor.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_liveness_console_relay.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_liveness_heartbeat.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_pull_work_liveness_preflight.sh" || result=1

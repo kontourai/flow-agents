@@ -66,6 +66,33 @@ Phase 1 delivers the "see everyone's active sessions, and your own usage in team
 project/team insight views alongside individual ones — while coordination authority stays exactly
 where it is today (local + GitHub).
 
+#### Liveness relay — flow-agents side (shipped)
+
+The flow-agents EMIT half of the relay ships as an **optional, off-by-default** sink
+(`scripts/liveness/relay.sh`). When enabled, each liveness event (`claim`/`heartbeat`/`release`) is
+mirrored to the Console as a `kontour.console.liveness` record over the **same transport core** the
+telemetry mirror uses — `console_post_json` in `scripts/telemetry/lib/transport.sh` (endpoint-allow
+gate, `Authorization: Bearer` + `x-console-tenant-id`, timeouts, detached fire), shared not forked.
+
+It is **strictly local-first** (ADR 0012 §5): the relay fires *after* the durable local
+`liveness/events.jsonl` write, fully detached and best-effort, so it can never block, slow, or fail
+the local emit — and with the flag off or no console configured it is a true no-op. Enable it with:
+
+```
+FLOW_AGENTS_CONSOLE_LIVENESS_RELAY=1
+FLOW_AGENTS_CONSOLE_LIVENESS_ENDPOINT_URL=<console>/records   # or FLOW_AGENTS_CONSOLE_URL / CONSOLE_TELEMETRY_URL + /records
+CONSOLE_TELEMETRY_TOKEN=<bearer>   (or FLOW_AGENTS_CONSOLE_TOKEN_FILE)   ·   CONSOLE_TENANT_ID / FLOW_AGENTS_CONSOLE_TENANT
+```
+
+Untrusted fields (actor, subjectId, branch, artifact_dir) are JSON-escaped by `jq` at record
+construction, so hostile control bytes are `\u`-escaped, never emitted raw.
+
+The paired **console side** — ingesting `kontour.console.liveness`, the fleet OperatingState
+projection (actors + held/reclaimable subjects + last-seen + per-session cost), and the ADR 0021 §4
+janitor — is tracked in the console repo (**console #125**), and feeds the redesigned console
+**Fleet** panel (its per-actor `coordinationState` is already wired to render the pills). Two-machine
+visibility and the janitor sweep are console-side acceptance; this repo ships only the emit half.
+
 ### Phase 2 — authoritative fleet coordination
 
 Opt-in, for teams that want cross-machine assignment arbitration:

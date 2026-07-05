@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.3.0](https://github.com/kontourai/flow-agents/compare/v3.2.0...v3.3.0) (2026-07-05)
+
+
+### Features
+
+* **cleanup-audit:** apply mode — safe, reversible session archival ([#406](https://github.com/kontourai/flow-agents/issues/406)) ([3dd7550](https://github.com/kontourai/flow-agents/commit/3dd7550a664c01ee5afb6eabb75325a02de28b59))
+* **veritas-governance:** exemption-issuance flow — governed path for delivery/DECLARED (ADR 0022 §3) ([#370](https://github.com/kontourai/flow-agents/issues/370)) ([50f8f3b](https://github.com/kontourai/flow-agents/commit/50f8f3b0aa65a7b18c6d736360e93f43bb057145))
+
+
+### Documentation
+
+* unified coordination guide + console integration doc + status hygiene ([#399](https://github.com/kontourai/flow-agents/issues/399)) ([#400](https://github.com/kontourai/flow-agents/issues/400)) ([b60331e](https://github.com/kontourai/flow-agents/commit/b60331e1b10d3a417a941de836bbac01bee490bc))
+
 ## [3.2.0](https://github.com/kontourai/flow-agents/compare/v3.1.0...v3.2.0) (2026-07-04)
 
 
