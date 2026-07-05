@@ -19,9 +19,46 @@ npm run workflow-artifact-cleanup-audit -- --artifact-root .flow-agents --json
 
 The default root for local runtime artifacts is `.kontourai/flow-agents`. `.flow-agents` may hold explicit durable Flow Agents config/install state, but it is not a runtime fallback. Move old local sessions with the migration script instead of relying on automatic fallback reads.
 
-The command scans immediate workflow directories, skips non-workflow lanes such as `archive/`, and reports active WIP separately from cleanup candidates, terminal done records, active learning follow-ups, and invalid sidecars. This first slice is dry-run classification only: it does not delete, archive, move, or rewrite runtime artifacts by default, and it has no apply mode.
+The command scans immediate workflow directories, skips non-workflow lanes such as `archive/`, and reports active WIP separately from cleanup candidates, terminal done records, active learning follow-ups, and invalid sidecars.
 
 Use the Current-State Semantics and Local Retention Policy sections below to interpret each bucket. In particular, learning records with `learning.status: followup_required` or any `routing[].status: open` remain active learning follow-ups until every route is completed, opened elsewhere, deferred with a trigger, accepted, or rejected.
+
+## Apply Mode
+
+Dry-run classification is the default and remains a zero-side-effect, read-only pass. Pass `--apply` to actually archive-move the sessions the classifier already puts in `cleanup_candidate` (and aged `terminal_done` sessions past the retention window) out of the active listing:
+
+```bash
+# Dry-run (unchanged; still the default with no flags)
+npm run workflow-artifact-cleanup-audit -- --artifact-root .kontourai/flow-agents
+
+# Archive-move cleanup_candidate / aged terminal_done sessions
+npm run workflow-artifact-cleanup-audit -- --artifact-root .kontourai/flow-agents --apply
+
+# Also archive-move lifecycle-ambiguous and genuinely-stub invalid sessions (second gate)
+npm run workflow-artifact-cleanup-audit -- --artifact-root .kontourai/flow-agents --apply --apply-ambiguous
+
+# Custom retention window and destination
+npm run workflow-artifact-cleanup-audit -- --artifact-root .kontourai/flow-agents \
+  --apply --freshness-window-hours 72 --archive-root /path/to/archive
+```
+
+**Two-gate model.** `--apply` alone only ever moves `cleanup_candidate` sessions and aged `terminal_done` sessions (the same buckets the manual Session Archival Policy procedure in `context/contracts/artifact-contract.md` already selects by hand) — it never touches anything the classifier calls `active_wip`, `active_learning_followup`, or `invalid`. A session the classifier marks `invalid` with an "unrecognized lifecycle shape" reason (a delivered/accepted session whose shape doesn't fit a known terminal pattern, but is otherwise a real, substantive record) is reported separately as **ambiguous** and is moved only when `--apply-ambiguous` is *also* passed — this is a deliberate second opt-in, not a default, because confirming that kind of straggler is genuinely done (e.g. its referenced PR actually merged) is a human/flow judgment call this tool does not make for you (see `--confirm` below).
+
+**Safety rails.** Regardless of flags, `--apply`/`--apply-ambiguous` never touch:
+
+1. **Active work** — `active_wip` and `active_learning_followup` sessions are hard-excluded; no flag combination overrides this.
+2. **A session someone else is holding** — if the local liveness stream shows a fresh claim on a session's slug (any actor, not just the current one), that session is skipped and reported as blocked by a held liveness claim, even if the classifier would otherwise archive it.
+3. **Anything too recent** — a session newer than the freshness window (`--freshness-window-hours`, default 48) is never moved, using `state.json`'s `updated_at` as the primary signal; directory modification time is used only as a fallback when `state.json` is missing or unparsable, never preferred over `updated_at` when it is present (bulk worktree operations can reset file mtimes without touching the actual session content, so mtime alone is not a trustworthy freshness signal).
+4. **Infrastructure directories** — per-agent claim/assignment tracking, the runtime adapter's generated output, the skills catalog, and similar structural directories are recognized by their own shape (they carry their own top-level pointer/lock files, i.e. they are themselves a workflow-sidecar-managed root, not a session) and are never treated as sessions to begin with, so a nested runtime tree with real sub-sessions of its own is never flattened into a single misclassified entry or partially swept.
+5. **Substantive sessions with a schema nit** — an `invalid` session that actually has real `state.json` plus `learning.json` and/or `trust.bundle` content is always report-only, even under `--apply --apply-ambiguous`; only a genuinely empty/stub `invalid` directory (no state at all, or state with no sidecar content) is ever eligible for the ambiguous-archive path.
+
+**Never delete.** Every move is an archive-move (rename, or copy-then-verify-then-remove-source when a plain rename can't cross filesystems) — the tool has no delete capability of any kind, in any mode.
+
+**Where things land.** `--apply` moves matching sessions to `<archive-root>/<date>-<runid>/<slug>/`, where `--archive-root` defaults to a sibling `.kontourai/flow-agents-archive/` next to the artifact root. This is a deliberately *different* destination from the manual, in-tree `<artifact-root>/archive/<slug>/` convention the Session Archival Policy section of `context/contracts/artifact-contract.md` documents for hand-driven moves: giving every automated `--apply` invocation its own dated, run-scoped directory means two same-day runs never collide, and it keeps the artifact root's own scan set immutable while a run is in progress. A human archiving a session by hand may still use the in-tree `archive/<slug>/` path from that section; the two destinations serve the same retirement intent through different (manual vs. automated) procedures — this mode automates the `cleanup_candidate`/aged-`terminal_done` selection that section already specifies, it does not replace the manual path for everything else.
+
+**Manifest.** Any `--apply` run that moves at least one session writes `MANIFEST.md` into that run's archive directory, listing each moved session's slug, classification, last-updated timestamp, and the classifier's own reason text. A run that moves nothing writes no manifest and creates no new archive directory. `--confirm <slug>=<evidence>` (repeatable) lets the invoking human or flow record, verbatim, evidence they already independently gathered (for example, that a straggler's referenced PR is confirmed merged) into that slug's manifest row — a slug moved without a matching `--confirm` entry shows `"none recorded"` rather than a fabricated value. This tool makes no network or `gh` calls itself; it only records evidence it is told.
+
+This is the same procedure a 2026-07-05 live triage sweep of this repo's own `.kontourai/flow-agents/` tree ran by hand before `--apply` existed (see that sweep's own `MANIFEST.md` for the real cases — stale stubs, aged cleanup candidates, confirmed-merged-PR stragglers, and the infrastructure/schema-nit exclusions above) — the sweep's findings are what shaped the safety rails above; `--apply` automates exactly that already-proven procedure.
 
 ## Artifact Lanes
 

@@ -44,14 +44,28 @@ candidate selector — do not build new discovery logic. `active_wip`,
 `active_learning_followup`, `cleanup_candidate`, and `invalid` sessions are **never**
 archival candidates on age alone.
 
-Procedure (documented; archival itself remains a deliberate, non-automated move — the audit
-tool "does not delete, archive," by design):
+Procedure (manual, hand-driven):
 
 1. `node build/src/cli/workflow-artifact-cleanup-audit.js <artifact-root>` to classify.
 2. From the `terminal_done` bucket, select those whose `state.json` `updatedAt` predates the
    retention window.
 3. Move each selected `<artifact-root>/<slug>/` to `<artifact-root>/archive/<slug>/`
    (a human-reviewed or explicitly-invoked move — not a silent background job).
+
+Automated `--apply` mode: `workflow-artifact-cleanup-audit --apply` (see
+`docs/workflow-artifact-lifecycle.md`'s "Apply Mode" section) automates the
+`cleanup_candidate`/aged-`terminal_done` selection above, but archive-moves to a
+*different*, sibling destination — `.kontourai/flow-agents-archive/<date>-<runid>/<slug>/`,
+next to the artifact root, not `<artifact-root>/archive/<slug>/`. The run-scoped,
+sibling root keeps two same-day `--apply` runs from colliding and keeps the artifact
+root's own scan set stable while a run is in progress; it is not a replacement for the
+in-tree `<artifact-root>/archive/<slug>/` convention above, which remains the right
+destination for a manual, hand-driven move. `--apply` never deletes anything (archive-move
+only) and is gated by hard safety rails (never `active_wip`/`active_learning_followup`,
+never a held liveness claim, never inside the freshness window, never an infrastructure
+directory, never a substantive session misclassified `invalid` by a schema nit) — see the
+doc section for the full model, including the `--apply-ambiguous` second gate and the
+`MANIFEST.md`/`--confirm` evidence record.
 
 ## Persistence Integrity
 
