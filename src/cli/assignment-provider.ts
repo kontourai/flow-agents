@@ -120,6 +120,7 @@ function loadActorIdentityHelper(): {
   isUnresolvedActor: (actor: string) => boolean;
   sanitizeSegment: (value: unknown) => string;
   detectRuntime: (env: NodeJS.ProcessEnv) => string;
+  detectCiActor: (env: NodeJS.ProcessEnv) => { runtime: string; session_id: string } | null;
 } {
   const _req = createRequire(import.meta.url);
   const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/actor-identity.js");
@@ -129,6 +130,7 @@ function loadActorIdentityHelper(): {
     isUnresolvedActor: (actor: string) => boolean;
     sanitizeSegment: (value: unknown) => string;
     detectRuntime: (env: NodeJS.ProcessEnv) => string;
+    detectCiActor: (env: NodeJS.ProcessEnv) => { runtime: string; session_id: string } | null;
   };
 }
 
@@ -199,7 +201,16 @@ function loadActorStruct(args: ParsedArgs): { actor: ActorStruct; actorKey?: str
   const helper = loadActorIdentityHelper();
   const resolved = helper.resolveActor(process.env);
   if (helper.isUnresolvedActor(resolved.actor)) throw new Error("could not resolve an actor identity (no --actor-json and no resolvable environment actor); pass --actor-json explicitly");
-  return { actor: { runtime: helper.detectRuntime(process.env), session_id: resolved.actor, host: os.hostname(), human: null }, actorKey: resolved.actor };
+  // #398: reconstruct the SAME struct resolveActor serialized for a CI actor, mirroring
+  // resolveEnsureSessionActor (workflow-sidecar.ts) via the shared detectCiActor. Without this the
+  // else-branch would write `record.actor = {runtime:"unknown", session_id:<the whole triple>}` for a
+  // CI session — actor_key stays correct (so no false-block), but record.actor is malformed and the
+  // audit-trail / `assignment-provider status` output for CI sessions would be corrupt.
+  const ci = resolved.source.startsWith("ci-runtime") ? helper.detectCiActor(process.env) : null;
+  const actor: ActorStruct = ci && ci.session_id
+    ? { runtime: ci.runtime, session_id: ci.session_id, host: os.hostname(), human: null }
+    : { runtime: helper.detectRuntime(process.env), session_id: resolved.actor, host: os.hostname(), human: null };
+  return { actor, actorKey: resolved.actor };
 }
 
 export function assignmentFilePath(artifactRoot: string, subjectId: string): string {

@@ -219,9 +219,17 @@ function resolveEnsureSessionActor(p: ReturnType<typeof parseArgs>): { actorStru
     return { actorStruct: { runtime: "unresolved", session_id: branchActorKey, host: os.hostname() }, actorKey: resolved.actor, branchActorKey, unresolved: true };
   }
 
+  // #398: the CI-runtime tier must reconstruct the SAME struct resolveActor serialized, or
+  // `serializeActor(actorStruct)` would diverge from `resolved.actor` (the else-branch would rebuild
+  // an ANCESTRY struct — detectRuntime→unknown, runtimeSessionId→'' — so the claim's stored
+  // actor_key would not match the CI actor at publish → self not recognized → false-block, the exact
+  // bug this issue removes). Uses the SAME helper.detectCiActor as resolveActor, single-sourced.
+  const ciActor = resolved.source.startsWith("ci-runtime") ? helper.detectCiActor(process.env) : null;
   const actorStruct: ActorStruct = resolved.source === "explicit-override"
     ? { runtime: "explicit-override", session_id: resolved.actor, host: os.hostname() }
-    : { runtime: helper.detectRuntime(process.env), session_id: helper.runtimeSessionId(process.env) || (() => { const seed = helper.ancestorActorSeed(); return seed ? `anc-${seed}` : ""; })(), host: os.hostname() };
+    : ciActor && ciActor.session_id
+      ? { runtime: ciActor.runtime, session_id: ciActor.session_id, host: os.hostname() }
+      : { runtime: helper.detectRuntime(process.env), session_id: helper.runtimeSessionId(process.env) || (() => { const seed = helper.ancestorActorSeed(); return seed ? `anc-${seed}` : ""; })(), host: os.hostname() };
   const actorKey = helper.serializeActor(actorStruct);
   return { actorStruct, actorKey, branchActorKey, unresolved: false };
 }
@@ -2993,7 +3001,11 @@ export function runVerifyHold(
   const actorKey = resolved.actor;
   const isStableActor = !!opts?.actorKey
     || resolved.source === "explicit-override"
-    || resolved.source.startsWith("runtime-session-id");
+    || resolved.source.startsWith("runtime-session-id")
+    // #398: a CI-runtime actor is STABLE across every subprocess in a CI job (derived from the
+    // provider's published run/job identifiers), so the verify-hold gate ENFORCES for CI sessions
+    // instead of degrading to advisory — the root fix for the #293 CI false-block workaround.
+    || resolved.source.startsWith("ci-runtime");
 
   const guidanceLines = (holderActor?: string): string[] => [
     "Re-run pull-work/pickup-probe to discover the current holder of this subject and hand off cleanly (learning-review/handoff) rather than publishing over it.",
@@ -4119,6 +4131,7 @@ function loadActorIdentityHelper(): {
   serializeActor: (actor: Partial<ActorStruct> | undefined) => string;
   detectRuntime: (env: NodeJS.ProcessEnv) => string;
   runtimeSessionId: (env: NodeJS.ProcessEnv) => string;
+  detectCiActor: (env: NodeJS.ProcessEnv) => { runtime: string; session_id: string } | null;
   ancestorActorSeed: () => string;
 } {
   const _req = createRequire(import.meta.url);
@@ -4130,6 +4143,7 @@ function loadActorIdentityHelper(): {
     serializeActor: (actor: Partial<ActorStruct> | undefined) => string;
     detectRuntime: (env: NodeJS.ProcessEnv) => string;
     runtimeSessionId: (env: NodeJS.ProcessEnv) => string;
+    detectCiActor: (env: NodeJS.ProcessEnv) => { runtime: string; session_id: string } | null;
     ancestorActorSeed: () => string;
   };
 }

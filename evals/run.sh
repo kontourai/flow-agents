@@ -199,6 +199,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_actor_identity.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_ci_actor_identity.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_assignment_provider_local_file.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_assignment_provider_github.sh" || result=1

@@ -365,16 +365,18 @@ fi
 # false-block fix, this iteration) ──────────────────────────────────────────────────────────
 echo "--- 1d. unstable current actor (ancestry fallback) is advisory-only (ok:true); a STABLE differing actor still BLOCKS (AC1) ---"
 
-# This pins the exact CI failure this fix targets: in CI there is no FLOW_AGENTS_ACTOR and no
-# runtime session id, so resolveActor() falls through to the process-ancestry fallback -- an
-# actor identity that is NOT guaranteed to match the identity that created the claim below (even
-# though, in THIS single-process eval, the ancestry seed happens to be stable across calls; the
-# fix must not hard-block regardless, because an ancestry-derived identity can never be
-# meaningfully fenced against a durable assignment record). Seed a fresh assignment claim held by
-# a clearly different, stable actor ("eval-actor-unstable-holder"), then:
-#   (a) run verify-hold with NO --actor and NO FLOW_AGENTS_ACTOR/CLAUDE_CODE_SESSION_ID in the
-#       environment (ancestry fallback) -- must be advisory-only: ok:true, exit 0, reason
-#       actor-identity-unstable-advisory-only.
+# This pins the advisory-degradation path for an UNSTABLE actor identity: with no explicit override,
+# no native runtime session id, AND no CI-provider identity (#398), resolveActor() falls through to
+# the process-ancestry (or unresolved) layer -- an identity that is NOT guaranteed to match the
+# identity that created the claim below, so the gate must degrade to advisory (never hard-block).
+# NOTE (#398): this case must EXPLICITLY neutralize the CI-provider markers. When this suite runs in
+# real CI (GitHub Actions etc.), those markers are set and resolveActor() would now resolve a STABLE
+# `ci-runtime:*` actor -- which correctly ENFORCES (that IS the #398 payoff, covered by
+# test_ci_actor_identity.sh). Reproducing the ancestry/unstable scenario therefore requires the test
+# to control ALL identity inputs, not rely on the ambient absence of CI env vars. Seed a fresh
+# assignment claim held by a clearly different, stable actor ("eval-actor-unstable-holder"), then:
+#   (a) run verify-hold with NO override, NO native session id, and NO CI markers (ancestry fallback)
+#       -- must be advisory-only: ok:true, exit 0, reason actor-identity-unstable-advisory-only.
 #   (b) run verify-hold with a STABLE FLOW_AGENTS_ACTOR that legitimately differs from the holder
 #       -- must still BLOCK exactly as before (zombie protection intact under a stable identity).
 UNSTABLE_SLUG="verify-hold-unstable-actor"
@@ -383,9 +385,12 @@ write_assignment_record "$ARTIFACT_ROOT" "$UNSTABLE_SLUG" "unstable-holder-sessi
 append_liveness_event "$ARTIFACT_ROOT" "$UNSTABLE_SLUG" "eval-actor-unstable-holder" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" 1800
 mkdir -p "$UNSTABLE_DIR"
 
-# (a) Unstable current actor: no --actor flag, no FLOW_AGENTS_ACTOR, no CLAUDE_CODE_SESSION_ID --
-# forces resolveActor() to fall through to the process-ancestry (or unresolved) layer.
-if (unset FLOW_AGENTS_ACTOR; unset CLAUDE_CODE_SESSION_ID; flow_agents_node "$WRITER" verify-hold "$UNSTABLE_DIR") >"$TMPDIR_EVAL/vh-unstable.out" 2>"$TMPDIR_EVAL/vh-unstable.err"; then
+# (a) Unstable current actor: unset the explicit override, the native runtime session id, AND every
+# CI-provider marker (#398) so resolveActor() genuinely falls through to process-ancestry/unresolved
+# regardless of whether this suite is running inside a CI job.
+if (unset FLOW_AGENTS_ACTOR CLAUDE_CODE_SESSION_ID CODEX_SESSION_ID OPENCODE_SESSION_ID PI_SESSION_ID CLAUDECODE \
+      GITHUB_ACTIONS GITLAB_CI CIRCLECI JENKINS_URL TF_BUILD BUILDKITE; \
+    flow_agents_node "$WRITER" verify-hold "$UNSTABLE_DIR") >"$TMPDIR_EVAL/vh-unstable.out" 2>"$TMPDIR_EVAL/vh-unstable.err"; then
   pass "verify-hold with an unstable (ancestry/unresolved) current actor does NOT hard-block a subject held by a different actor (advisory-only, AC1 SECOND fix)"
 else
   fail "verify-hold with an unstable current actor incorrectly hard-blocked -- this IS the CI false-block this fix targets: $(cat "$TMPDIR_EVAL/vh-unstable.out" "$TMPDIR_EVAL/vh-unstable.err")"
