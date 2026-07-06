@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "slug": "installer-preserve-settings-conflicts",
+  "work_item": null,
+  "status": "planned",
+  "phase": "planning",
+  "sealed_at": "2026-07-06T16:14:04Z",
+  "commit_sha": "27dd76bcd666cd198e537961f3f6e181c3bb3c24",
+  "checkpoint": {
+    "asOf": "2026-07-06T16:14:04.963Z",
+    "statusByClaimId": {
+      "installer-preserve-settings-conflicts-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0": "verified",
+      "installer-preserve-settings-conflicts-bash-evals-integration-test-bundle-lifecycle-sh.flow-agents-workflow.record-check-bash-evals-integration-test-bundle-lifecycle-sh-exit-0": "verified"
+    },
+    "throughEventCreatedAt": "2026-07-06T16:12:59Z",
+    "throughEventCreatedAtByClaimId": {
+      "installer-preserve-settings-conflicts-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0": "2026-07-06T16:12:59Z",
+      "installer-preserve-settings-conflicts-bash-evals-integration-test-bundle-lifecycle-sh.flow-agents-workflow.record-check-bash-evals-integration-test-bundle-lifecycle-sh-exit-0": "2026-07-06T16:12:59Z"
+    },
+    "statusFunctionVersion": "2"
+  }
+}

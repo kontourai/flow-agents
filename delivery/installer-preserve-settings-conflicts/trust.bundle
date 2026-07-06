@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "installer-preserve-settings-conflicts-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+      "subjectType": "workflow-check",
+      "subjectId": "installer-preserve-settings-conflicts/bash-evals-run.sh-static",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "record-check: bash evals/run.sh static (exit 0)",
+      "value": "pass",
+      "createdAt": "2026-07-06T16:12:59Z",
+      "updatedAt": "2026-07-06T16:12:59Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.command:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "command",
+        "output_digest": {
+          "algorithm": "sha256",
+          "hex": "c5c1f3160c02c92c92472d3f61ae95426e7dfe6b7d7132c292c795e8add55a8e"
+        }
+      },
+      "status": "verified"
+    },
+    {
+      "id": "installer-preserve-settings-conflicts-bash-evals-integration-test-bundle-lifecycle-sh.flow-agents-workflow.record-check-bash-evals-integration-test-bundle-lifecycle-sh-exit-0",
+      "subjectType": "workflow-check",
+      "subjectId": "installer-preserve-settings-conflicts/bash-evals-integration-test_bundle_lifecycle.sh",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "record-check: bash evals/integration/test_bundle_lifecycle.sh (exit 0)",
+      "value": "pass",
+      "createdAt": "2026-07-06T16:12:59Z",
+      "updatedAt": "2026-07-06T16:12:59Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.command:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "command",
+        "output_digest": {
+          "algorithm": "sha256",
+          "hex": "765a234049a082e3ab34efd4f3ddffc5446c982111c784eb8b20fb5c2d3603b1"
+        }
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:installer-preserve-settings-conflicts-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+      "claimId": "installer-preserve-settings-conflicts-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "installer-preserve-settings-conflicts/evidence.json",
+      "excerptOrSummary": "record-check: bash evals/run.sh static (exit 0)",
+      "observedAt": "2026-07-06T16:12:59Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/run.sh static",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:installer-preserve-settings-conflicts-bash-evals-integration-test-bundle-lifecycle-sh.flow-agents-workflow.record-check-bash-evals-integration-test-bundle-lifecycle-sh-exit-0",
+      "claimId": "installer-preserve-settings-conflicts-bash-evals-integration-test-bundle-lifecycle-sh.flow-agents-workflow.record-check-bash-evals-integration-test-bundle-lifecycle-sh-exit-0",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "installer-preserve-settings-conflicts/evidence.json",
+      "excerptOrSummary": "record-check: bash evals/integration/test_bundle_lifecycle.sh (exit 0)",
+      "observedAt": "2026-07-06T16:12:59Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_bundle_lifecycle.sh",
+        "isError": false
+      }
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.command:test_output",
+      "claimType": "workflow.check.command",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.command claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:installer-preserve-settings-conflicts-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+      "claimId": "installer-preserve-settings-conflicts-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:installer-preserve-settings-conflicts-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0"
+      ],
+      "createdAt": "2026-07-06T16:12:59Z",
+      "verifiedAt": "2026-07-06T16:12:59Z"
+    },
+    {
+      "id": "evt:installer-preserve-settings-conflicts-bash-evals-integration-test-bundle-lifecycle-sh.flow-agents-workflow.record-check-bash-evals-integration-test-bundle-lifecycle-sh-exit-0",
+      "claimId": "installer-preserve-settings-conflicts-bash-evals-integration-test-bundle-lifecycle-sh.flow-agents-workflow.record-check-bash-evals-integration-test-bundle-lifecycle-sh-exit-0",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:installer-preserve-settings-conflicts-bash-evals-integration-test-bundle-lifecycle-sh.flow-agents-workflow.record-check-bash-evals-integration-test-bundle-lifecycle-sh-exit-0"
+      ],
+      "createdAt": "2026-07-06T16:12:59Z",
+      "verifiedAt": "2026-07-06T16:12:59Z"
+    }
+  ]
+}
