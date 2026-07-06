@@ -124,17 +124,13 @@ NODE
 
 # is_valid_json <string> — true if the given string parses as JSON.
 is_valid_json() {
-  printf '%s' "$1" | node - <<'NODE'
-let raw = '';
-process.stdin.on('data', c => (raw += c));
-process.stdin.on('end', () => {
-  try {
-    JSON.parse(raw);
-    process.exit(0);
-  } catch {
-    process.exit(1);
-  }
-});
+  JSON_ARG="$1" node - <<'NODE'
+try {
+  JSON.parse(process.env.JSON_ARG);
+  process.exit(0);
+} catch {
+  process.exit(1);
+}
 NODE
 }
 
@@ -358,6 +354,10 @@ echo "--- D. Wrapper-level conflict injection (Claude Code, Codex) ---"
 
 POST_TOOL_USE_PAYLOAD='{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"echo hi"},"tool_response":{"stdout":"hi"}}'
 CODEX_PAYLOAD='{"hook_event_name":"PostToolUse","tool_name":"shell","tool_input":{"command":"echo hi"}}'
+POST_TOOL_USE_PAYLOAD_FILE="$TMPDIR_EVAL/post-tool-use-payload.json"
+CODEX_PAYLOAD_FILE="$TMPDIR_EVAL/codex-payload.json"
+printf '%s' "$POST_TOOL_USE_PAYLOAD" >"$POST_TOOL_USE_PAYLOAD_FILE"
+printf '%s' "$CODEX_PAYLOAD" >"$CODEX_PAYLOAD_FILE"
 
 # seed_conflict_fixture <root> <slug> <self_actor> <other_actor>
 # Our own claim is well past the throttle window (real clock); the other actor's claim is
@@ -375,7 +375,7 @@ seed_conflict_fixture() {
 D1_ROOT="$(new_scratch)"
 seed_conflict_fixture "$D1_ROOT" "d1-subj" "agent-hb" "agent-conflict-claude"
 D1_OUT="$(cd "$D1_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb \
-  node "$CLAUDE_HOOK" PostToolUse dev <<<"$POST_TOOL_USE_PAYLOAD")"
+  node "$CLAUDE_HOOK" PostToolUse dev <"$POST_TOOL_USE_PAYLOAD_FILE")"
 D1_STATUS=$?
 D1_CONTEXT="$(field_of "$D1_OUT" hookSpecificOutput.additionalContext)"
 if [[ "$D1_STATUS" -eq 0 ]] && is_valid_json "$D1_OUT" \
@@ -390,7 +390,7 @@ fi
 D2_ROOT="$(new_scratch)"
 seed_conflict_fixture "$D2_ROOT" "d2-subj" "agent-hb" "agent-conflict-codex"
 D2_OUT="$(cd "$D2_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb \
-  node "$CODEX_HOOK" PostToolUse dev <<<"$CODEX_PAYLOAD")"
+  node "$CODEX_HOOK" PostToolUse dev <"$CODEX_PAYLOAD_FILE")"
 D2_STATUS=$?
 D2_CONTEXT="$(field_of "$D2_OUT" hookSpecificOutput.additionalContext)"
 if [[ "$D2_STATUS" -eq 0 ]] && is_valid_json "$D2_OUT" \
@@ -406,6 +406,10 @@ echo "--- E. Degraded-runtime proof (opencode, pi) ---"
 
 OPENCODE_PAYLOAD='{"hook_event_name":"tool.execute.after"}'
 PI_PAYLOAD='{"hook_event_name":"tool_result"}'
+OPENCODE_PAYLOAD_FILE="$TMPDIR_EVAL/opencode-payload.json"
+PI_PAYLOAD_FILE="$TMPDIR_EVAL/pi-payload.json"
+printf '%s' "$OPENCODE_PAYLOAD" >"$OPENCODE_PAYLOAD_FILE"
+printf '%s' "$PI_PAYLOAD" >"$PI_PAYLOAD_FILE"
 
 # E1: opencode-telemetry-hook.js — no stdout context-injection field (stdout byte-empty), but a
 # stderr diagnostic naming the conflicting actor (the plugin does not consume this wrapper's
@@ -413,7 +417,7 @@ PI_PAYLOAD='{"hook_event_name":"tool_result"}'
 E1_ROOT="$(new_scratch)"
 seed_conflict_fixture "$E1_ROOT" "e1-subj" "agent-hb" "agent-conflict-opencode"
 E1_OUT="$(cd "$E1_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb \
-  node "$OPENCODE_HOOK" 'tool.execute.after' dev <<<"$OPENCODE_PAYLOAD" 2>"$TMPDIR_EVAL/e1.err")"
+  node "$OPENCODE_HOOK" 'tool.execute.after' dev <"$OPENCODE_PAYLOAD_FILE" 2>"$TMPDIR_EVAL/e1.err")"
 E1_STATUS=$?
 E1_ERR="$(cat "$TMPDIR_EVAL/e1.err")"
 if [[ "$E1_STATUS" -eq 0 ]] && [[ -z "$E1_OUT" ]] \
@@ -427,7 +431,7 @@ fi
 E2_ROOT="$(new_scratch)"
 seed_conflict_fixture "$E2_ROOT" "e2-subj" "agent-hb" "agent-conflict-pi"
 E2_OUT="$(cd "$E2_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb \
-  node "$PI_HOOK" 'tool_result' dev <<<"$PI_PAYLOAD" 2>"$TMPDIR_EVAL/e2.err")"
+  node "$PI_HOOK" 'tool_result' dev <"$PI_PAYLOAD_FILE" 2>"$TMPDIR_EVAL/e2.err")"
 E2_STATUS=$?
 E2_ERR="$(cat "$TMPDIR_EVAL/e2.err")"
 if [[ "$E2_STATUS" -eq 0 ]] && [[ -z "$E2_OUT" ]] \
@@ -452,7 +456,7 @@ seed_solo_fixture() {
 F1_ROOT="$(new_scratch)"
 seed_solo_fixture "$F1_ROOT" "f1-subj" "agent-hb"
 F1_OUT="$(cd "$F1_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb \
-  node "$CLAUDE_HOOK" PostToolUse dev <<<"$POST_TOOL_USE_PAYLOAD")"
+  node "$CLAUDE_HOOK" PostToolUse dev <"$POST_TOOL_USE_PAYLOAD_FILE")"
 if [[ "$F1_OUT" == '{"continue":true,"suppressOutput":true}' ]]; then
   _pass "claude-telemetry-hook.js no-conflict PostToolUse output is byte-stable vs the pre-existing fixed shape (AC4)"
 else
@@ -462,7 +466,7 @@ fi
 F2_ROOT="$(new_scratch)"
 seed_solo_fixture "$F2_ROOT" "f2-subj" "agent-hb"
 F2_OUT="$(cd "$F2_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb \
-  node "$CODEX_HOOK" PostToolUse dev <<<"$CODEX_PAYLOAD")"
+  node "$CODEX_HOOK" PostToolUse dev <"$CODEX_PAYLOAD_FILE")"
 if [[ -z "$F2_OUT" ]]; then
   _pass "codex-telemetry-hook.js no-conflict PostToolUse output is byte-stable (empty stdout, unchanged) vs the pre-existing fixed shape (AC4)"
 else
@@ -472,7 +476,7 @@ fi
 F3_ROOT="$(new_scratch)"
 seed_solo_fixture "$F3_ROOT" "f3-subj" "agent-hb"
 F3_OUT="$(cd "$F3_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb \
-  node "$OPENCODE_HOOK" 'tool.execute.after' dev <<<"$OPENCODE_PAYLOAD" 2>"$TMPDIR_EVAL/f3.err")"
+  node "$OPENCODE_HOOK" 'tool.execute.after' dev <"$OPENCODE_PAYLOAD_FILE" 2>"$TMPDIR_EVAL/f3.err")"
 F3_ERR="$(cat "$TMPDIR_EVAL/f3.err")"
 if [[ -z "$F3_OUT" ]] && [[ "$F3_ERR" != *"liveness conflict"* ]]; then
   _pass "opencode-telemetry-hook.js no-conflict output is byte-stable (empty stdout, no diagnostic) vs the pre-existing fixed shape (AC4)"
@@ -483,7 +487,7 @@ fi
 F4_ROOT="$(new_scratch)"
 seed_solo_fixture "$F4_ROOT" "f4-subj" "agent-hb"
 F4_OUT="$(cd "$F4_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb \
-  node "$PI_HOOK" 'tool_result' dev <<<"$PI_PAYLOAD" 2>"$TMPDIR_EVAL/f4.err")"
+  node "$PI_HOOK" 'tool_result' dev <"$PI_PAYLOAD_FILE" 2>"$TMPDIR_EVAL/f4.err")"
 F4_ERR="$(cat "$TMPDIR_EVAL/f4.err")"
 if [[ -z "$F4_OUT" ]] && [[ "$F4_ERR" != *"liveness conflict"* ]]; then
   _pass "pi-telemetry-hook.js no-conflict output is byte-stable (empty stdout, no diagnostic) vs the pre-existing fixed shape (AC4)"
@@ -498,7 +502,7 @@ G_ROOT="$(new_scratch)"
 mkdir -p "$G_ROOT/.kontourai/flow-agents/liveness"
 printf '{not valid json' >"$G_ROOT/.kontourai/flow-agents/$SNAPSHOT_FILENAME"
 G_OUT="$(cd "$G_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb \
-  node "$CLAUDE_HOOK" PostToolUse dev <<<"$POST_TOOL_USE_PAYLOAD" 2>"$TMPDIR_EVAL/g.err")"
+  node "$CLAUDE_HOOK" PostToolUse dev <"$POST_TOOL_USE_PAYLOAD_FILE" 2>"$TMPDIR_EVAL/g.err")"
 G_STATUS=$?
 if [[ "$G_STATUS" -eq 0 ]] && is_valid_json "$G_OUT" && [[ "$(stream_line_count "$G_ROOT")" -eq 0 ]]; then
   _pass "claude-telemetry-hook.js fails open on a corrupted sidecar snapshot during the conflict check: exit 0, normal JSON contract, no heartbeat fabricated (AC8)"
@@ -546,7 +550,7 @@ H1_ROOT="$(new_scratch)"
 seed_claim "$H1_ROOT" "h1-subj" "agent-hb" "$(iso_offset_ms -300000)" 1800
 append_hostile_claim "$H1_ROOT" "h1-subj" "$HOSTILE_ACTOR" "$(iso_offset_ms -10000)" 1800
 H1_OUT="$(cd "$H1_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb \
-  node "$CLAUDE_HOOK" PostToolUse dev <<<"$POST_TOOL_USE_PAYLOAD")"
+  node "$CLAUDE_HOOK" PostToolUse dev <"$POST_TOOL_USE_PAYLOAD_FILE")"
 H1_STATUS=$?
 H1_CONTEXT="$(field_of "$H1_OUT" hookSpecificOutput.additionalContext)"
 if [[ "$H1_STATUS" -eq 0 ]] && is_valid_json "$H1_OUT" \
@@ -564,7 +568,7 @@ H2_ROOT="$(new_scratch)"
 seed_claim "$H2_ROOT" "h2-subj" "agent-hb" "$(iso_offset_ms -300000)" 1800
 append_hostile_claim "$H2_ROOT" "h2-subj" "$HOSTILE_ACTOR" "$(iso_offset_ms -10000)" 1800
 H2_OUT="$(cd "$H2_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb \
-  node "$OPENCODE_HOOK" 'tool.execute.after' dev <<<"$OPENCODE_PAYLOAD" 2>"$TMPDIR_EVAL/h2.err")"
+  node "$OPENCODE_HOOK" 'tool.execute.after' dev <"$OPENCODE_PAYLOAD_FILE" 2>"$TMPDIR_EVAL/h2.err")"
 H2_STATUS=$?
 H2_ERR="$(cat "$TMPDIR_EVAL/h2.err")"
 if [[ "$H2_STATUS" -eq 0 ]] && [[ -z "$H2_OUT" ]] \

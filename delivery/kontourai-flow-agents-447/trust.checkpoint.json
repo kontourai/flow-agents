@@ -1,0 +1,22 @@
+{
+  "schema_version": "1.0",
+  "slug": "kontourai-flow-agents-447",
+  "work_item": null,
+  "status": "delivered",
+  "phase": "release",
+  "sealed_at": "2026-07-06T23:45:24Z",
+  "commit_sha": "ee03e30c91621071349defd35d6ffb3d48835afc",
+  "checkpoint": {
+    "asOf": "2026-07-06T23:45:24.661Z",
+    "statusByClaimId": {
+      "kontourai-flow-agents-447-bash-evals-integration-test-liveness-conflict-injection-sh.flow-agents-workflow.record-check-bash-evals-integration-test-liveness-conflict-injection-sh-exit-0": "verified",
+      "kontourai-flow-agents-447-bash-evals-integration-test-liveness-heartbeat-sh.flow-agents-workflow.record-check-bash-evals-integration-test-liveness-heartbeat-sh-exit-0": "verified"
+    },
+    "throughEventCreatedAt": "2026-07-06T23:45:20Z",
+    "throughEventCreatedAtByClaimId": {
+      "kontourai-flow-agents-447-bash-evals-integration-test-liveness-conflict-injection-sh.flow-agents-workflow.record-check-bash-evals-integration-test-liveness-conflict-injection-sh-exit-0": "2026-07-06T23:45:20Z",
+      "kontourai-flow-agents-447-bash-evals-integration-test-liveness-heartbeat-sh.flow-agents-workflow.record-check-bash-evals-integration-test-liveness-heartbeat-sh-exit-0": "2026-07-06T23:45:20Z"
+    },
+    "statusFunctionVersion": "2"
+  }
+}
