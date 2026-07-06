@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "slug": "github-actions-intake-automation",
+  "work_item": null,
+  "status": "delivered",
+  "phase": "release",
+  "sealed_at": "2026-07-06T17:33:39Z",
+  "commit_sha": "cfcd0a31c14f7a26309bcb5b380a14f142f17893",
+  "checkpoint": {
+    "asOf": "2026-07-06T17:33:39.612Z",
+    "statusByClaimId": {
+      "github-actions-intake-automation-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0": "verified"
+    },
+    "throughEventCreatedAt": "2026-07-06T17:32:46Z",
+    "throughEventCreatedAtByClaimId": {
+      "github-actions-intake-automation-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0": "2026-07-06T17:32:46Z"
+    },
+    "statusFunctionVersion": "2"
+  }
+}
