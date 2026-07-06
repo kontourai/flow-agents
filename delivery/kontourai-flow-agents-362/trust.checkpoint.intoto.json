@@ -1,0 +1,1303 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "trust.checkpoint.json",
+      "digest": {
+        "sha256": "7dc862efddfaf4cc80dbe6e21770ba38d2accf076c62a637ad5d58bffbece76b"
+      }
+    }
+  ],
+  "predicateType": "https://hachure.org/v1/bundle",
+  "predicate": {
+    "schemaVersion": 5,
+    "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+    "claims": [
+      {
+        "id": "kontourai-flow-agents-362-source-tree-validation.flow-agents-workflow.manifest-id-source-tree-validation-source-tree-validation-passed",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/source-tree-validation",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Manifest id source-tree-validation. Source tree validation passed.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:policy_rule",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "policy"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-static-eval-suite.flow-agents-workflow.manifest-id-static-eval-suite-80-80-passed-2-skipped-43-43-passed-exit-0",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/static-eval-suite",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Manifest id static-eval-suite. 80/80 passed (2 skipped) + 43/43 passed, exit 0.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "test"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-anti-gaming-and-trust-suite.flow-agents-workflow.manifest-id-anti-gaming-and-trust-suite-anti-gaming-suite-passed-25-tests",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/anti-gaming-and-trust-suite",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Manifest id anti-gaming-and-trust-suite. ANTI-GAMING SUITE PASSED (25 tests).",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "security"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-goal-fit-hook-integration.flow-agents-workflow.manifest-id-goal-fit-hook-integration-run-with-env-u-flow-agents-goal-fit-mode-u-flow-agents-goal-fit-recheck-per-instructions-to-avoid-this-operator-s-ambient-env-all-critical-closure-iteration-2-item-1-negative-control-ambiguous-with-pass-claim-item-4-ac4-ac5-dialect-preservation-and-mutation-tests-pass-goal-fit-hook-integration-passed",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/goal-fit-hook-integration",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Manifest id goal-fit-hook-integration (run with env -u FLOW_AGENTS_GOAL_FIT_MODE -u FLOW_AGENTS_GOAL_FIT_RECHECK per instructions, to avoid this operator's ambient env). All CRITICAL-closure (iteration-2 item 1), negative-control, ambiguous-with-pass-claim (item 4), AC4/AC5, dialect-preservation, and mutation tests pass. Goal Fit hook integration passed.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "test"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-record-check-integration.flow-agents-workflow.manifest-id-record-check-integration-ac6-ac7-mutation-tests-green-record-check-integration-passed",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/record-check-integration",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Manifest id record-check-integration. AC6/AC7 + mutation tests green. record-check integration passed.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "test"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-workflow-sidecar-writer-integration.flow-agents-workflow.manifest-id-workflow-sidecar-writer-integration-ac7-advisory-mutation-tests-green-rerun-sequentially-after-an-initial-parallel-execution-race-with-another-suite-corrupted-the-build-output-mid-run-a-clean-sequential-rerun-passed-cleanly-workflow-sidecar-writer-integration-passed",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/workflow-sidecar-writer-integration",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Manifest id workflow-sidecar-writer-integration. AC7 advisory + mutation tests green (rerun sequentially after an initial parallel-execution race with another suite corrupted the build output mid-run; a clean sequential rerun passed cleanly). Workflow sidecar writer integration passed.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "test"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-hook-category-behavior-integration.flow-agents-workflow.manifest-id-hook-category-behavior-integration-hook-category-behavior-checks-passed",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/hook-category-behavior-integration",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Manifest id hook-category-behavior-integration. Hook category behavior checks passed.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "test"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-current-json-per-actor-integration.flow-agents-workflow.manifest-id-current-json-per-actor-integration-345-exclusion-regression-guard-test-current-json-per-actor-all-checks-passed",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/current-json-per-actor-integration",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Manifest id current-json-per-actor-integration. #345-exclusion regression guard. test_current_json_per_actor: all checks passed.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "test"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-workflow-steering-hook-integration.flow-agents-workflow.manifest-id-workflow-steering-hook-integration-345-exclusion-regression-guard-workflow-steering-hook-integration-passed",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/workflow-steering-hook-integration",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Manifest id workflow-steering-hook-integration. #345-exclusion regression guard. Workflow steering hook integration passed.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "test"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-full-integration-suite-triage.flow-agents-workflow.bash-evals-run-sh-integration-full-run-exits-1-driven-by-exactly-three-pre-existing-unrelated-to-scope-failure-groups-test-goal-fit-escape-hatch-sh-5-issues-test-session-resume-roundtrip-sh-13-issues-and-one-ambient-env-only-assertion-inside-test-goal-fit-hook-sh-s-default-mode-case-each-was-independently-re-run-against-a-freshly-checked-out-unmodified-origin-main-a974c1f-worktree-git-worktree-add-detach-from-origin-main-npm-ci-npm-run-build-with-byte-identical-failure-text-and-counts-confirming-these-are-pre-existing-baseline-conditions-not-regressions-introduced-by-this-delivery-s-8-changed-files-zero-new-failures-were-observed-anywhere-in-the-full-integration-run-beyond-these-three-known-groups-every-manifest-listed-integration-script-that-touches-362-scope-plus-both-explicitly-named-345-exclusion-regression-guards-passed-cleanly-see-sibling-checks-no-command-field-this-is-a-triage-audit-note-over-an-already-executed-non-manifest-listed-combined-run-not-a-fresh-manifest-matched-command-re-execution",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/full-integration-suite-triage",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "bash evals/run.sh integration (full run) exits 1 driven by exactly three pre-existing, unrelated-to-scope failure groups: test_goal_fit_escape_hatch.sh (5 issues), test_session_resume_roundtrip.sh (13 issues), and one ambient-env-only assertion inside test_goal_fit_hook.sh's default-mode case. Each was independently re-run against a freshly checked-out, unmodified origin/main (a974c1f) worktree (git worktree add --detach from origin/main, npm ci, npm run build) with byte-identical failure text and counts, confirming these are pre-existing baseline conditions, not regressions introduced by this delivery's 8 changed files. Zero new failures were observed anywhere in the full integration run beyond these three known groups; every manifest-listed integration script that touches #362 scope, plus both explicitly-named #345-exclusion regression guards, passed cleanly (see sibling checks). No command field: this is a triage/audit note over an already-executed non-manifest-listed combined run, not a fresh manifest-matched command re-execution.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:policy_rule",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "policy"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-scope-and-345-exclusion-audit.flow-agents-workflow.git-diff-origin-main-stat-lists-exactly-8-changed-files-context-scripts-hooks-stop-goal-fit-js-evals-integration-test-goal-fit-hook-sh-evals-integration-test-record-check-sh-evals-integration-test-workflow-sidecar-writer-sh-scripts-hooks-evidence-capture-js-scripts-hooks-lib-runnable-command-js-scripts-hooks-stop-goal-fit-js-src-cli-workflow-sidecar-ts-matching-the-plan-s-362-only-manifest-exactly-3-pure-362-files-stop-goal-fit-js-and-its-context-mirror-3-eval-files-git-diff-origin-main-stat-against-the-named-345-only-files-workflow-steering-js-config-protection-js-config-protection-remedies-js-current-pointer-js-and-their-mirrors-test-current-json-per-actor-sh-test-workflow-steering-hook-sh-returns-empty-a-full-diff-grep-for-resolveactorscope-hasotheractorpointer-ownedsessionartifactdirs-scopedtonothing-across-the-entire-diff-returns-zero-matches-the-one-textually-entangled-require-line-in-stop-goal-fit-js-was-confirmed-split-correctly-the-current-pointer-js-destructure-is-byte-identical-to-origin-main-still-just-readcurrentpointer-no-hasotheractorpointer-ownedsessionartifactdirs-added-while-only-the-runnable-command-js-destructure-gained-isambiguousabsencecommand-full-read-through-of-the-stop-goal-fit-js-diff-confirms-only-362-regions-landed-classifylogentry-readcommandlog-readlatestcommandlog-ambiguous-threading-runbackstop-tri-state-classification-dialect-preservation-invariant-comments-capturecrossreference-capturedfailreconciliation-ambiguous-branches-hard-block-full-block-regex-additions-with-no-resolveactorscope-no-refactored-preferredartifactdir-stalecurrentslug-and-no-analyze-scoping-block-no-command-field-this-is-a-diff-grep-audit-over-the-working-tree-not-a-manifest-tracked-reproducible-command",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/scope-and-345-exclusion-audit",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "git diff origin/main --stat -- . lists exactly 8 changed files: context/scripts/hooks/stop-goal-fit.js, evals/integration/test_goal_fit_hook.sh, evals/integration/test_record_check.sh, evals/integration/test_workflow_sidecar_writer.sh, scripts/hooks/evidence-capture.js, scripts/hooks/lib/runnable-command.js, scripts/hooks/stop-goal-fit.js, src/cli/workflow-sidecar.ts -- matching the plan's #362-only manifest exactly (3 pure-#362 files + stop-goal-fit.js and its context mirror + 3 eval files). git diff origin/main --stat against the named #345-only files (workflow-steering.js, config-protection.js, config-protection-remedies.js, current-pointer.js and their mirrors, test_current_json_per_actor.sh, test_workflow_steering_hook.sh) returns empty. A full-diff grep for resolveActorScope|hasOtherActorPointer|ownedSessionArtifactDirs|scopedToNothing across the entire diff returns zero matches. The one textually-entangled require() line in stop-goal-fit.js was confirmed split correctly: the current-pointer.js destructure is byte-identical to origin/main (still just readCurrentPointer, no hasOtherActorPointer/ownedSessionArtifactDirs added), while only the runnable-command.js destructure gained isAmbiguousAbsenceCommand. Full read-through of the stop-goal-fit.js diff confirms only #362 regions landed (classifyLogEntry, readCommandLog/readLatestCommandLog ambiguous threading, runBackstop tri-state classification + dialect-preservation invariant comments, captureCrossReference/capturedFailReconciliation ambiguous branches, HARD_BLOCK/FULL_BLOCK regex additions) with no resolveActorScope, no refactored preferredArtifactDir/staleCurrentSlug, and no analyze() scoping block. No command field: this is a diff/grep audit over the working tree, not a manifest-tracked reproducible command.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:source_excerpt",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "diff",
+          "artifact_refs": [
+            {
+              "kind": "source",
+              "file": "scripts/hooks/stop-goal-fit.js",
+              "line_start": 690,
+              "line_end": 712,
+              "excerpt": "classifyLogEntry (new fn) -- pure #362 exit-code/ambiguity classification, no #345 symbols referenced"
+            },
+            {
+              "kind": "source",
+              "file": "scripts/hooks/stop-goal-fit.js",
+              "line_start": 956,
+              "line_end": 972,
+              "excerpt": "resolveTrustedCommand 'acceptance' branch: DIALECT-PRESERVATION INVARIANT comment, verbatim argv[2] replay"
+            }
+          ]
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-mirror-sync-stop-goal-fit.flow-agents-workflow.diff-scripts-hooks-stop-goal-fit-js-context-scripts-hooks-stop-goal-fit-js-is-empty-exit-0-the-context-kit-mirror-stays-byte-identical-after-the-iteration-2-fix",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/mirror-sync-stop-goal-fit",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "diff scripts/hooks/stop-goal-fit.js context/scripts/hooks/stop-goal-fit.js is empty (exit 0) -- the context-kit mirror stays byte-identical after the iteration-2 fix.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:source_excerpt",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "diff"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-build.flow-agents-workflow.non-manifest-command-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-command-not-in-evals-ci-run-baseline-sh-manifest-json-ran-npm-run-build-in-the-worktree-iteration-2-fix-tree-clean-tsc-build-zero-errors",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/build",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Non-manifest command, folded to a non-command summary per reconcile-preflight's own guidance (command not in evals/ci/run-baseline.sh --manifest-json). Ran `npm run build` in the worktree: iteration-2 fix tree, clean tsc build, zero errors.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:policy_rule",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "policy"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-typecheck.flow-agents-workflow.non-manifest-command-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-ran-npm-run-typecheck-in-the-worktree-iteration-2-fix-tree-tsc-noemit-clean-zero-errors",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/typecheck",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Non-manifest command, folded to a non-command summary per reconcile-preflight's own guidance. Ran `npm run typecheck` in the worktree: iteration-2 fix tree, tsc --noEmit clean, zero errors.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:policy_rule",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "policy"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-trust-reconcile-yaml.flow-agents-workflow.non-manifest-command-not-present-in-evals-ci-run-baseline-sh-manifest-json-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-ran-bash-evals-integration-test-trust-reconcile-sh-per-iteration-2-verification-instructions-test-trust-reconcile-all-checks-passed",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/trust-reconcile-yaml",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Non-manifest command (not present in evals/ci/run-baseline.sh --manifest-json), folded to a non-command summary per reconcile-preflight's own guidance. Ran `bash evals/integration/test_trust_reconcile.sh` per iteration-2 verification instructions: test_trust_reconcile: all checks passed.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:policy_rule",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "policy"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-integration-suite-triage.flow-agents-workflow.non-manifest-aggregate-command-bash-evals-run-sh-integration-is-a-runner-not-itself-a-manifest-entry-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-full-run-exits-1-non-zero-driven-by-exactly-4-groups-test-goal-fit-hook-sh-1-ambient-env-only-test-goal-fit-escape-hatch-sh-5-test-session-resume-roundtrip-sh-13-all-3-confirmed-byte-identical-pre-existing-on-a-clean-origin-main-a974c1f-full-suite-re-run-performed-during-this-same-pass-plus-1-additional-non-reproducing-flake-in-test-liveness-conflict-injection-sh-hostile-actor-sanitization-case-that-did-not-reproduce-in-3-isolated-re-runs-on-this-worktree-did-not-reproduce-in-an-isolated-re-run-after-the-full-sweep-and-did-not-appear-at-all-in-the-clean-origin-main-full-suite-re-run-unrelated-to-any-of-the-8-362-files-liveness-telemetry-hook-machinery-is-untouched-by-this-diff-recorded-pass-because-the-full-local-eval-gate-has-zero-new-failures-attributable-to-this-delivery-the-flake-is-flagged-for-separate-follow-up-not-as-a-362-regression",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/integration-suite-triage",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Non-manifest aggregate command (bash evals/run.sh integration is a runner, not itself a manifest entry), folded to a non-command summary per reconcile-preflight's own guidance. Full run exits 1 (non-zero) driven by exactly 4 groups: test_goal_fit_hook.sh (1, ambient-env-only), test_goal_fit_escape_hatch.sh (5), test_session_resume_roundtrip.sh (13) -- all 3 confirmed byte-identical pre-existing on a clean origin/main a974c1f full-suite re-run performed during this same pass -- plus 1 additional non-reproducing flake in test_liveness_conflict_injection.sh (hostile-actor sanitization case) that did NOT reproduce in 3 isolated re-runs on this worktree, did not reproduce in an isolated re-run after the full sweep, and did NOT appear at all in the clean origin/main full-suite re-run; unrelated to any of the 8 #362 files (liveness/telemetry-hook machinery is untouched by this diff). Recorded pass because the full local eval gate has zero new failures attributable to this delivery; the flake is flagged for separate follow-up, not as a #362 regression.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:policy_rule",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "policy"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-critical-gate-closed-repro.flow-agents-workflow.independent-manual-repro-terminal-delivered-status-ambiguous-bare-grep-e-claimed-pass-evidence-json-only-no-trust-bundle-never-captured-flow-agents-goal-fit-mode-block-node-scripts-hooks-stop-goal-fit-js-exits-2-stderr-contains-stop-gate-stop-blocked-and-the-distinct-not-verified-ambiguous-re-record-this-check-as-a-self-asserting-command-message-and-never-the-caught-false-completion-accusation-confirms-iteration-1-critical-is-closed-in-the-common-non-bundle-code-path-independent-of-the-evals-integration-test-goal-fit-hook-sh-fixtures",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/critical-gate-closed-repro",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Independent manual repro (terminal delivered status, ambiguous bare grep -E claimed-pass, evidence.json-only, no trust bundle, never captured, FLOW_AGENTS_GOAL_FIT_MODE=block): node scripts/hooks/stop-goal-fit.js exits 2, stderr contains '[stop-gate] Stop blocked' and the distinct 'NOT_VERIFIED (ambiguous): re-record this check as a self-asserting command' message, and never the caught-false-completion accusation. Confirms iteration-1 CRITICAL is closed in the common (non-bundle) code path, independent of the evals/integration/test_goal_fit_hook.sh fixtures.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:policy_rule",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "policy"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-negative-control-no-over-block.flow-agents-workflow.independent-manual-repro-of-the-same-terminal-shape-but-with-a-self-asserting-absence-check-grep-q-claimed-pass-node-scripts-hooks-stop-goal-fit-js-exits-0-with-empty-stderr-confirms-the-fix-does-not-introduce-a-new-over-block-for-legitimate-self-asserting-absence-checks",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/negative-control-no-over-block",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Independent manual repro of the same terminal shape but with a self-asserting absence check (! grep -q ...) claimed pass: node scripts/hooks/stop-goal-fit.js exits 0 with empty stderr -- confirms the fix does not introduce a new over-block for legitimate self-asserting absence checks.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:policy_rule",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "policy"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-scope-audit-8-files.flow-agents-workflow.git-diff-stat-origin-main-lists-exactly-the-8-expected-362-files-context-scripts-hooks-stop-goal-fit-js-mirror-scripts-hooks-stop-goal-fit-js-scripts-hooks-evidence-capture-js-scripts-hooks-lib-runnable-command-js-src-cli-workflow-sidecar-ts-evals-integration-test-goal-fit-hook-sh-evals-integration-test-record-check-sh-evals-integration-test-workflow-sidecar-writer-sh-git-status-porcelain-shows-no-untracked-new-files-no-scope-creep",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/scope-audit-8-files",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "git diff --stat origin/main lists exactly the 8 expected #362 files (context/scripts/hooks/stop-goal-fit.js + mirror scripts/hooks/stop-goal-fit.js, scripts/hooks/evidence-capture.js, scripts/hooks/lib/runnable-command.js, src/cli/workflow-sidecar.ts, evals/integration/test_goal_fit_hook.sh, evals/integration/test_record_check.sh, evals/integration/test_workflow_sidecar_writer.sh); git status --porcelain shows no untracked/new files. No scope creep.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:source_excerpt",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "diff"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-no-345-content-grep.flow-agents-workflow.git-diff-origin-main-grep-ne-resolveactorscope-hasotheractorpointer-ownedsessionartifactdirs-config-protection-assignment-returns-zero-matches-grep-exit-1-no-345-content-present-anywhere-in-the-8-file-diff",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/no-345-content-grep",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "git diff origin/main | grep -nE 'resolveActorScope|hasOtherActorPointer|ownedSessionArtifactDirs|config-protection|assignment/' returns zero matches (grep exit 1) -- no #345 content present anywhere in the 8-file diff.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:source_excerpt",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "diff"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-ac4-exit1-not-hard-block.flow-agents-workflow.a-bare-non-negated-non-count-asserted-non-chained-grep-diff-evidence-command-that-exits-1-zero-matches-no-diff-is-never-treated-as-a-caught-false-completion-by-the-trusted-backstop-runbackstop-or-by-the-command-log-readers-readcommandlog-readlatestcommandlog-it-classifies-as-ambiguous-distinct-from-fail-and-is-surfaced-as-a-not-verified-style-warning-never-silently-dropped-and-never-coerced-to-pass",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/ac4-exit1-not-hard-block",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "A bare (non-negated, non-count-asserted, non-chained) grep/diff evidence command that exits 1 (zero matches / no diff) is never treated as a caught false-completion by the trusted backstop (runBackstop) or by the command-log readers (readCommandLog/readLatestCommandLog); it classifies as 'ambiguous', distinct from 'fail', and is surfaced as a NOT_VERIFIED-style warning, never silently dropped and never coerced to pass.",
+        "value": "pending",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "proposed"
+      },
+      {
+        "id": "kontourai-flow-agents-362-ac5-exit2-still-hard-fail.flow-agents-workflow.exit-codes-2-for-grep-diff-a-real-tool-error-e-g-missing-file-bad-regex-remain-a-hard-fail-through-the-same-code-paths-runbackstop-readcommandlog-readlatestcommandlog-capturecrossreference-capturedfailreconciliation-the-ambiguity-carve-out-is-exactly-exitcode-1-for-grep-diff-and-nothing-wider-this-is-a-regression-guard-on-the-pre-existing-behavior-not-new-behavior",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/ac5-exit2-still-hard-fail",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Exit codes >= 2 for grep/diff (a real tool error, e.g. missing file/bad regex) remain a hard FAIL through the same code paths (runBackstop, readCommandLog/readLatestCommandLog, captureCrossReference, capturedFailReconciliation) — the ambiguity carve-out is exactly exitCode===1 for grep/diff and nothing wider; this is a regression guard on the pre-existing behavior, not new behavior.",
+        "value": "pending",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "proposed"
+      },
+      {
+        "id": "kontourai-flow-agents-362-ac6-record-check-ambiguous-status.flow-agents-workflow.src-cli-workflow-sidecar-ts-recordcheck-maps-a-bare-grep-diff-exit-1-re-run-to-the-existing-not-verified-check-status-never-a-new-enum-value-consumes-the-existing-workflow-acceptance-schema-json-status-enum-adr-0008-0010-consume-never-fork-and-emits-a-loud-actionable-stderr-note-recordcheck-itself-still-exits-0-the-command-ran-this-is-not-a-tool-error",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/ac6-record-check-ambiguous-status",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "src/cli/workflow-sidecar.ts recordCheck maps a bare grep/diff exit-1 re-run to the existing 'not_verified' check status (never a new enum value — consumes the existing workflow-acceptance.schema.json status enum, ADR 0008/0010 consume-never-fork) and emits a loud, actionable stderr note; recordCheck itself still exits 0 (the command ran; this is not a tool error).",
+        "value": "pending",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "proposed"
+      },
+      {
+        "id": "kontourai-flow-agents-362-ac7-record-time-self-asserting-guidance.flow-agents-workflow.validateacceptanceevidencerefs-record-evidence-path-emits-a-non-fatal-advisory-stderr-nudge-when-a-newly-or-already-recorded-kind-command-evidence-ref-s-excerpt-is-a-bare-grep-diff-invocation-recommending-a-self-asserting-rewrite-grep-or-grep-c-grep-qx-0-the-ref-itself-is-never-rejected-or-altered-back-compat-with-412-already-recorded-refs",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/ac7-record-time-self-asserting-guidance",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "validateAcceptanceEvidenceRefs (record-evidence path) emits a non-fatal, advisory stderr nudge when a newly- or already-recorded kind:\"command\" evidence ref's excerpt is a bare grep/diff invocation, recommending a self-asserting rewrite ('! grep ...' or 'grep -c ... | grep -qx 0'); the ref itself is never rejected or altered (back-compat with #412 already-recorded refs).",
+        "value": "pending",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "proposed"
+      },
+      {
+        "id": "kontourai-flow-agents-362-ac-dialect-preservation-required-not-yet-implemented.flow-agents-workflow.required-new-work-gap-found-during-this-reshape-not-yet-implemented-anywhere-in-the-combined-tree-the-recorded-command-s-exact-flags-dialect-must-be-preserved-verbatim-on-trusted-backstop-re-run-so-an-ere-recorded-pattern-e-g-grep-e-is-never-silently-re-run-under-bre-semantics-current-state-resolvetrustedcommand-s-acceptance-source-already-re-runs-the-recorded-excerpt-string-verbatim-via-bash-lc-fromacceptance-dialect-is-not-corrupted-on-that-path-today-but-there-is-no-eval-that-pins-this-no-explicit-dialect-preservation-contract-comment-and-the-declared-manifest-target-and-model-command-backstop-sources-declaredmanifesttarget-the-flow-agents-goal-fit-recheck-free-form-path-construct-their-own-argv-rather-than-replaying-a-recorded-string-so-a-future-edit-could-silently-reintroduce-a-re-derived-re-quoted-command-that-drops-e-p-or-otherwise-changes-dialect-without-any-test-catching-it-required-1-a-source-comment-on-resolvetrustedcommand-s-acceptance-branch-stating-the-verbatim-replay-invariant-explicitly-grep-diff-dialect-flags-are-part-of-the-recorded-command-text-and-must-not-be-stripped-re-derived-or-re-quoted-2-a-regression-eval-that-records-a-grep-e-ere-evidence-ref-containing-an-ere-only-construct-e-g-an-alternation-foo-bar-without-escaping-and-asserts-the-backstop-re-run-still-matches-i-e-is-not-silently-downgraded-to-bre-which-would-either-false-fail-on-a-real-match-or-misbehave-on-the-metacharacters",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/ac-dialect-preservation-required-not-yet-implemented",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "REQUIRED NEW WORK (gap found during this reshape, not yet implemented anywhere in the combined tree): the recorded command's exact flags/dialect must be preserved verbatim on trusted-backstop re-run so an ERE-recorded pattern (e.g. grep -E) is never silently re-run under BRE semantics. Current state: resolveTrustedCommand's 'acceptance' source already re-runs the recorded excerpt string verbatim via ['bash','-lc', fromAcceptance] (dialect is not corrupted on THAT path today), but there is no eval that pins this, no explicit dialect-preservation contract/comment, and the 'declared manifest target' and 'model-command' backstop sources (declaredManifestTarget, the FLOW_AGENTS_GOAL_FIT_RECHECK free-form path) construct their OWN argv rather than replaying a recorded string, so a future edit could silently reintroduce a re-derived/re-quoted command that drops -E/-P or otherwise changes dialect without any test catching it. Required: (1) a source comment on resolveTrustedCommand's 'acceptance' branch stating the verbatim-replay invariant explicitly (grep/diff dialect flags are part of the recorded command text and MUST NOT be stripped, re-derived, or re-quoted), (2) a regression eval that records a grep -E (ERE) evidence ref containing an ERE-only construct (e.g. an alternation `(foo|bar)` without escaping) and asserts the backstop re-run still matches (i.e. is not silently downgraded to BRE, which would either false-fail on a real match or misbehave on the metacharacters).",
+        "value": "pending",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "proposed"
+      },
+      {
+        "id": "kontourai-flow-agents-362-ac-mirror-sync-context-stop-goal-fit.flow-agents-workflow.context-scripts-hooks-stop-goal-fit-js-the-context-kit-mirror-is-byte-identical-to-scripts-hooks-stop-goal-fit-js-after-the-362-only-hunks-are-applied-since-the-362-changes-to-stop-goal-fit-js-are-part-of-the-362-shippable-manifest-and-this-file-is-mirrored-today",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/ac-mirror-sync-context-stop-goal-fit",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "context/scripts/hooks/stop-goal-fit.js (the context-kit mirror) is byte-identical to scripts/hooks/stop-goal-fit.js after the #362-only hunks are applied, since the #362 changes to stop-goal-fit.js are part of the #362 shippable manifest and this file is mirrored today.",
+        "value": "pending",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "proposed"
+      },
+      {
+        "id": "kontourai-flow-agents-362-ac-no-345-content-in-362-branch.flow-agents-workflow.the-362-branch-diff-contains-none-of-the-345-only-symbols-or-files-resolveactorscope-hasotheractorpointer-ownedsessionartifactdirs-actorscopedworkflowstate-s-ownership-scan-branch-scripts-hooks-workflow-steering-js-its-context-mirror-scripts-hooks-config-protection-js-mirror-scripts-hooks-lib-config-protection-remedies-js-mirror-scripts-hooks-lib-current-pointer-js-evals-integration-test-current-json-per-actor-sh-evals-integration-test-workflow-steering-hook-sh",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/ac-no-345-content-in-362-branch",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "The #362 branch/diff contains none of the #345-only symbols or files: resolveActorScope, hasOtherActorPointer, ownedSessionArtifactDirs, actorScopedWorkflowState's ownership-scan branch, scripts/hooks/workflow-steering.js (+ its context mirror), scripts/hooks/config-protection.js (+ mirror), scripts/hooks/lib/config-protection-remedies.js (+ mirror), scripts/hooks/lib/current-pointer.js, evals/integration/test_current_json_per_actor.sh, evals/integration/test_workflow_steering_hook.sh.",
+        "value": "pending",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "proposed"
+      },
+      {
+        "id": "kontourai-flow-agents-362-ac-full-suite-green.flow-agents-workflow.the-full-local-eval-gate-static-integration-at-minimum-the-five-touched-integration-files-test-goal-fit-hook-sh-test-record-check-sh-test-workflow-sidecar-writer-sh-plus-the-untouched-by-362-test-current-json-per-actor-sh-and-test-workflow-steering-hook-sh-as-regression-guards-passes-on-the-362-only-branch-cut-from-origin-main-tip",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/ac-full-suite-green",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "The full local eval gate (static + integration, at minimum the five touched integration files: test_goal_fit_hook.sh, test_record_check.sh, test_workflow_sidecar_writer.sh, plus the untouched-by-#362 test_current_json_per_actor.sh and test_workflow_steering_hook.sh as regression guards) passes on the #362-only branch cut from origin/main tip.",
+        "value": "pending",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "proposed"
+      },
+      {
+        "id": "kontourai-flow-agents-362-iter1-security-terminal-ambiguous-not-blocked.flow-agents-workflow.critical-ambiguous-claimed-pass-bare-grep-diff-exit-1-does-not-hard-block-a-terminal-stop-in-the-common-config-evidence-json-only-or-never-captured-live-backstop-only-terminal-block-on-ambiguous-only-wired-for-the-captured-bundle-third-bucket-which-emits-not-verified-ambiguous-capturecrossreference-runbackstop-emit-plain-not-verified-that-only-full-block-non-terminal-matches-reproduced-3x-in-strict-block-mode-exit-0-no-block-exit-2-control-still-blocks-correctly-not-a-345-relocation-scope-grep-clean-fix-unify-the-ambiguous-marker-across-all-emission-sites-so-hard-block-full-block-match-in-all-configs-add-3-config-terminal-eval-coverage-self-asserting-negative-control-superseded-iter1-security-terminal-ambiguous-not-blocked-2026-07-06t03-30-02z-2026-07-06t02-37-07z",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/iter1-security-terminal-ambiguous-not-blocked",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "CRITICAL: ambiguous claimed-pass (bare grep/diff exit 1) does not HARD_BLOCK a TERMINAL stop in the common config (evidence.json-only, or never-captured live-backstop-only). Terminal-block-on-ambiguous only wired for the captured+bundle third bucket which emits NOT_VERIFIED (ambiguous); captureCrossReference/runBackstop emit plain NOT_VERIFIED — that only FULL_BLOCK (non-terminal) matches. Reproduced 3x in strict block mode, exit 0 no block; exit>=2 control still blocks correctly. NOT a #345 relocation (scope grep clean). Fix: unify the (ambiguous) marker across all emission sites so HARD_BLOCK+FULL_BLOCK match in all configs; add 3-config terminal eval coverage + self-asserting negative control.",
+        "value": "fail",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:builder.execute.scope",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "tool-security-reviewer",
+          "reviewed_at": "2026-07-06T02:37:07Z",
+          "superseded_by": "iter1-security-terminal-ambiguous-not-blocked@2026-07-06T03:30:02Z"
+        },
+        "status": "superseded"
+      },
+      {
+        "id": "kontourai-flow-agents-362-iter1-code-approve-with-findings.flow-agents-workflow.approve-with-findings-recorded-as-fail-to-gate-the-fix-pass-medium-dialect-invariant-comment-overclaims-byte-for-byte-exactly-as-recorded-upstream-normalizecommand-whitespace-collapses-first-rescope-comment-low-dialect-evals-lack-mutation-test-wrapper-siblings-have-low-remediation-message-string-duplicated-across-5-sites-single-source-it-split-integrity-itself-confirmed-clean-superseded-iter1-code-approve-with-findings-2026-07-06t03-30-03z-2026-07-06t02-37-08z",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/iter1-code-approve-with-findings",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "APPROVE with findings (recorded as fail to gate the fix pass): MEDIUM dialect invariant comment overclaims byte-for-byte-exactly-as-recorded (upstream normalizeCommand whitespace-collapses first) - rescope comment. LOW dialect evals lack mutation-test wrapper siblings have. LOW remediation message string duplicated across 5 sites - single-source it. Split integrity itself confirmed CLEAN.",
+        "value": "fail",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:builder.execute.scope",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "tool-code-reviewer",
+          "reviewed_at": "2026-07-06T02:37:08Z",
+          "superseded_by": "iter1-code-approve-with-findings@2026-07-06T03:30:03Z"
+        },
+        "status": "superseded"
+      },
+      {
+        "id": "kontourai-flow-agents-362-iter1-security-terminal-ambiguous-not-blocked.flow-agents-workflow.resolved-in-iteration-2-marker-unified-across-all-3-ambiguous-emission-sites-security-re-review-independently-reproduced-all-3-terminal-configs-now-hard-block-self-asserting-negative-control-still-passes-no-over-block-scope-clean-critical-closed",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/iter1-security-terminal-ambiguous-not-blocked",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "RESOLVED in iteration 2: marker unified across all 3 ambiguous emission sites; security re-review independently reproduced all 3 terminal configs now HARD_BLOCK + self-asserting negative control still passes (no over-block) + scope clean. CRITICAL closed.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:builder.execute.scope",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "tool-security-reviewer",
+          "reviewed_at": "2026-07-06T03:30:02Z"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-362-iter1-code-approve-with-findings.flow-agents-workflow.resolved-in-iteration-2-dialect-comment-rescoped-dialect-eval-mutation-test-added-remediation-message-single-sourced-code-re-review-clean-all-3-prior-non-blockers-confirmed-resolved",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-362/iter1-code-approve-with-findings",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "RESOLVED in iteration 2: dialect comment rescoped, dialect eval mutation-test added, remediation message single-sourced. Code re-review CLEAN, all 3 prior non-blockers confirmed resolved.",
+        "value": "pass",
+        "createdAt": "2026-07-06T03:30:03Z",
+        "updatedAt": "2026-07-06T03:30:03Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:builder.execute.scope",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "tool-code-reviewer",
+          "reviewed_at": "2026-07-06T03:30:03Z"
+        },
+        "status": "verified"
+      }
+    ],
+    "evidence": [
+      {
+        "id": "ev:kontourai-flow-agents-362-source-tree-validation.flow-agents-workflow.manifest-id-source-tree-validation-source-tree-validation-passed",
+        "claimId": "kontourai-flow-agents-362-source-tree-validation.flow-agents-workflow.manifest-id-source-tree-validation-source-tree-validation-passed",
+        "evidenceType": "policy_rule",
+        "method": "auditability",
+        "sourceRef": "kontourai-flow-agents-362/evidence.json",
+        "excerptOrSummary": "Manifest id source-tree-validation. Source tree validation passed.",
+        "observedAt": "2026-07-06T03:30:03Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "npm run validate:source --",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-362-static-eval-suite.flow-agents-workflow.manifest-id-static-eval-suite-80-80-passed-2-skipped-43-43-passed-exit-0",
+        "claimId": "kontourai-flow-agents-362-static-eval-suite.flow-agents-workflow.manifest-id-static-eval-suite-80-80-passed-2-skipped-43-43-passed-exit-0",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-362/evidence.json",
+        "excerptOrSummary": "Manifest id static-eval-suite. 80/80 passed (2 skipped) + 43/43 passed, exit 0.",
+        "observedAt": "2026-07-06T03:30:03Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/run.sh static",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-362-anti-gaming-and-trust-suite.flow-agents-workflow.manifest-id-anti-gaming-and-trust-suite-anti-gaming-suite-passed-25-tests",
+        "claimId": "kontourai-flow-agents-362-anti-gaming-and-trust-suite.flow-agents-workflow.manifest-id-anti-gaming-and-trust-suite-anti-gaming-suite-passed-25-tests",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-362/evidence.json",
+        "excerptOrSummary": "Manifest id anti-gaming-and-trust-suite. ANTI-GAMING SUITE PASSED (25 tests).",
+        "observedAt": "2026-07-06T03:30:03Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/ci/antigaming-suite.sh",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-362-goal-fit-hook-integration.flow-agents-workflow.manifest-id-goal-fit-hook-integration-run-with-env-u-flow-agents-goal-fit-mode-u-flow-agents-goal-fit-recheck-per-instructions-to-avoid-this-operator-s-ambient-env-all-critical-closure-iteration-2-item-1-negative-control-ambiguous-with-pass-claim-item-4-ac4-ac5-dialect-preservation-and-mutation-tests-pass-goal-fit-hook-integration-passed",
+        "claimId": "kontourai-flow-agents-362-goal-fit-hook-integration.flow-agents-workflow.manifest-id-goal-fit-hook-integration-run-with-env-u-flow-agents-goal-fit-mode-u-flow-agents-goal-fit-recheck-per-instructions-to-avoid-this-operator-s-ambient-env-all-critical-closure-iteration-2-item-1-negative-control-ambiguous-with-pass-claim-item-4-ac4-ac5-dialect-preservation-and-mutation-tests-pass-goal-fit-hook-integration-passed",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-362/evidence.json",
+        "excerptOrSummary": "Manifest id goal-fit-hook-integration (run with env -u FLOW_AGENTS_GOAL_FIT_MODE -u FLOW_AGENTS_GOAL_FIT_RECHECK per instructions, to avoid this operator's ambient env). All CRITICAL-closure (iteration-2 item 1), negative-control, ambiguous-with-pass-claim (item 4), AC4/AC5, dialect-preservation, and mutation tests pass. Goal Fit hook integration passed.",
+        "observedAt": "2026-07-06T03:30:03Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_goal_fit_hook.sh",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-362-record-check-integration.flow-agents-workflow.manifest-id-record-check-integration-ac6-ac7-mutation-tests-green-record-check-integration-passed",
+        "claimId": "kontourai-flow-agents-362-record-check-integration.flow-agents-workflow.manifest-id-record-check-integration-ac6-ac7-mutation-tests-green-record-check-integration-passed",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-362/evidence.json",
+        "excerptOrSummary": "Manifest id record-check-integration. AC6/AC7 + mutation tests green. record-check integration passed.",
+        "observedAt": "2026-07-06T03:30:03Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_record_check.sh",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-362-workflow-sidecar-writer-integration.flow-agents-workflow.manifest-id-workflow-sidecar-writer-integration-ac7-advisory-mutation-tests-green-rerun-sequentially-after-an-initial-parallel-execution-race-with-another-suite-corrupted-the-build-output-mid-run-a-clean-sequential-rerun-passed-cleanly-workflow-sidecar-writer-integration-passed",
+        "claimId": "kontourai-flow-agents-362-workflow-sidecar-writer-integration.flow-agents-workflow.manifest-id-workflow-sidecar-writer-integration-ac7-advisory-mutation-tests-green-rerun-sequentially-after-an-initial-parallel-execution-race-with-another-suite-corrupted-the-build-output-mid-run-a-clean-sequential-rerun-passed-cleanly-workflow-sidecar-writer-integration-passed",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-362/evidence.json",
+        "excerptOrSummary": "Manifest id workflow-sidecar-writer-integration. AC7 advisory + mutation tests green (rerun sequentially after an initial parallel-execution race with another suite corrupted the build output mid-run; a clean sequential rerun passed cleanly). Workflow sidecar writer integration passed.",
+        "observedAt": "2026-07-06T03:30:03Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_workflow_sidecar_writer.sh",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-362-hook-category-behavior-integration.flow-agents-workflow.manifest-id-hook-category-behavior-integration-hook-category-behavior-checks-passed",
+        "claimId": "kontourai-flow-agents-362-hook-category-behavior-integration.flow-agents-workflow.manifest-id-hook-category-behavior-integration-hook-category-behavior-checks-passed",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-362/evidence.json",
+        "excerptOrSummary": "Manifest id hook-category-behavior-integration. Hook category behavior checks passed.",
+        "observedAt": "2026-07-06T03:30:03Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_hook_category_behaviors.sh",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-362-current-json-per-actor-integration.flow-agents-workflow.manifest-id-current-json-per-actor-integration-345-exclusion-regression-guard-test-current-json-per-actor-all-checks-passed",
+        "claimId": "kontourai-flow-agents-362-current-json-per-actor-integration.flow-agents-workflow.manifest-id-current-json-per-actor-integration-345-exclusion-regression-guard-test-current-json-per-actor-all-checks-passed",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-362/evidence.json",
+        "excerptOrSummary": "Manifest id current-json-per-actor-integration. #345-exclusion regression guard. test_current_json_per_actor: all checks passed.",
+        "observedAt": "2026-07-06T03:30:03Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_current_json_per_actor.sh",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-362-workflow-steering-hook-integration.flow-agents-workflow.manifest-id-workflow-steering-hook-integration-345-exclusion-regression-guard-workflow-steering-hook-integration-passed",
+        "claimId": "kontourai-flow-agents-362-workflow-steering-hook-integration.flow-agents-workflow.manifest-id-workflow-steering-hook-integration-345-exclusion-regression-guard-workflow-steering-hook-integration-passed",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-362/evidence.json",
+        "excerptOrSummary": "Manifest id workflow-steering-hook-integration. #345-exclusion regression guard. Workflow steering hook integration passed.",
+        "observedAt": "2026-07-06T03:30:03Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_workflow_steering_hook.sh",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-362-full-integration-suite-triage.flow-agents-workflow.bash-evals-run-sh-integration-full-run-exits-1-driven-by-exactly-three-pre-existing-unrelated-to-scope-failure-groups-test-goal-fit-escape-hatch-sh-5-issues-test-session-resume-roundtrip-sh-13-issues-and-one-ambient-env-only-assertion-inside-test-goal-fit-hook-sh-s-default-mode-case-each-was-independently-re-run-against-a-freshly-checked-out-unmodified-origin-main-a974c1f-worktree-git-worktree-add-detach-from-origin-main-npm-ci-npm-run-build-with-byte-identical-failure-text-and-counts-confirming-these-are-pre-existing-baseline-conditions-not-regressions-introduced-by-this-delivery-s-8-changed-files-zero-new-failures-were-observed-anywhere-in-the-full-integration-run-beyond-these-three-known-groups-every-manifest-listed-integration-script-that-touches-362-scope-plus-both-explicitly-named-345-exclusion-regression-guards-passed-cleanly-see-sibling-checks-no-command-field-this-is-a-triage-audit-note-over-an-already-executed-non-manifest-listed-combined-run-not-a-fresh-manifest-matched-command-re-execution",
+        "claimId": "kontourai-flow-agents-362-full-integration-suite-triage.flow-agents-workflow.bash-evals-run-sh-integration-full-run-exits-1-driven-by-exactly-three-pre-existing-unrelated-to-scope-failure-groups-test-goal-fit-escape-hatch-sh-5-issues-test-session-resume-roundtrip-sh-13-issues-and-one-ambient-env-only-assertion-inside-test-goal-fit-hook-sh-s-default-mode-case-each-was-independently-re-run-against-a-freshly-checked-out-unmodified-origin-main-a974c1f-worktree-git-worktree-add-detach-from-origin-main-npm-ci-npm-run-build-with-byte-identical-failure-text-and-counts-confirming-these-are-pre-existing-baseline-conditions-not-regressions-introduced-by-this-delivery-s-8-changed-files-zero-new-failures-were-observed-anywhere-in-the-full-integration-run-beyond-these-three-known-groups-every-manifest-listed-integration-script-that-touches-362-scope-plus-both-explicitly-named-345-exclusion-regression-guards-passed-cleanly-see-sibling-checks-no-command-field-this-is-a-triage-audit-note-over-an-already-executed-non-manifest-listed-combined-run-not-a-fresh-manifest-matched-command-re-execution",
+        "evidenceType": "policy_rule",
+        "method": "auditability",
+        "sourceRef": "kontourai-flow-agents-362/evidence.json",
+        "excerptOrSummary": "bash evals/run.sh integration (full run) exits 1 driven by exactly three pre-existing, unrelated-to-scope failure groups: test_goal_fit_escape_hatch.sh (5 issues), test_session_resume_roundtrip.sh (13 issues), and one ambient-env-only assertion inside test_goal_fit_hook.sh's default-mode case. Each was independently re-run against a freshly checked-out, unmodified origin/main (a974c1f) worktree (git worktree add --detach from origin/main, npm ci, npm run build) with byte-identical failure text and counts, confirming these are pre-existing baseline conditions, not regressions introduced by this delivery's 8 changed files. Zero new failures were observed anywhere in the full integration run beyond these three known groups; every manifest-listed integration script that touches #362 scope, plus both explicitly-named #345-exclusion regression guards, passed cleanly (see sibling checks). No command field: this is a triage/audit note over an already-executed non-manifest-listed combined run, not a fresh manifest-matched command re-execution.",
+        "observedAt": "2026-07-06T03:30:03Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-362-scope-and-345-exclusion-audit.flow-agents-workflow.git-diff-origin-main-stat-lists-exactly-8-changed-files-context-scripts-hooks-stop-goal-fit-js-evals-integration-test-goal-fit-hook-sh-evals-integration-test-record-check-sh-evals-integration-test-workflow-sidecar-writer-sh-scripts-hooks-evidence-capture-js-scripts-hooks-lib-runnable-command-js-scripts-hooks-stop-goal-fit-js-src-cli-workflow-sidecar-ts-matching-the-plan-s-362-only-manifest-exactly-3-pure-362-files-stop-goal-fit-js-and-its-context-mirror-3-eval-files-git-diff-origin-main-stat-against-the-named-345-only-files-workflow-steering-js-config-protection-js-config-protection-remedies-js-current-pointer-js-and-their-mirrors-test-current-json-per-actor-sh-test-workflow-steering-hook-sh-returns-empty-a-full-diff-grep-for-resolveactorscope-hasotheractorpointer-ownedsessionartifactdirs-scopedtonothing-across-the-entire-diff-returns-zero-matches-the-one-textually-entangled-require-line-in-stop-goal-fit-js-was-confirmed-split-correctly-the-current-pointer-js-destructure-is-byte-identical-to-origin-main-still-just-readcurrentpointer-no-hasotheractorpointer-ownedsessionartifactdirs-added-while-only-the-runnable-command-js-destructure-gained-isambiguousabsencecommand-full-read-through-of-the-stop-goal-fit-js-diff-confirms-only-362-regions-landed-classifylogentry-readcommandlog-readlatestcommandlog-ambiguous-threading-runbackstop-tri-state-classification-dialect-preservation-invariant-comments-capturecrossreference-capturedfailreconciliation-ambiguous-branches-hard-block-full-block-regex-additions-with-no-resolveactorscope-no-refactored-preferredartifactdir-stalecurrentslug-and-no-analyze-scoping-block-no-command-field-this-is-a-diff-grep-audit-over-the-working-tree-not-a-manifest-tracked-reproducible-command",
+        "claimId": "kontourai-flow-agents-362-scope-and-345-exclusion-audit.flow-agents-workflow.git-diff-origin-main-stat-lists-exactly-8-changed-files-context-scripts-hooks-stop-goal-fit-js-evals-integration-test-goal-fit-hook-sh-evals-integration-test-record-check-sh-evals-integration-test-workflow-sidecar-writer-sh-scripts-hooks-evidence-capture-js-scripts-hooks-lib-runnable-command-js-scripts-hooks-stop-goal-fit-js-src-cli-workflow-sidecar-ts-matching-the-plan-s-362-only-manifest-exactly-3-pure-362-files-stop-goal-fit-js-and-its-context-mirror-3-eval-files-git-diff-origin-main-stat-against-the-named-345-only-files-workflow-steering-js-config-protection-js-config-protection-remedies-js-current-pointer-js-and-their-mirrors-test-current-json-per-actor-sh-test-workflow-steering-hook-sh-returns-empty-a-full-diff-grep-for-resolveactorscope-hasotheractorpointer-ownedsessionartifactdirs-scopedtonothing-across-the-entire-diff-returns-zero-matches-the-one-textually-entangled-require-line-in-stop-goal-fit-js-was-confirmed-split-correctly-the-current-pointer-js-destructure-is-byte-identical-to-origin-main-still-just-readcurrentpointer-no-hasotheractorpointer-ownedsessionartifactdirs-added-while-only-the-runnable-command-js-destructure-gained-isambiguousabsencecommand-full-read-through-of-the-stop-goal-fit-js-diff-confirms-only-362-regions-landed-classifylogentry-readcommandlog-readlatestcommandlog-ambiguous-threading-runbackstop-tri-state-classification-dialect-preservation-invariant-comments-capturecrossreference-capturedfailreconciliation-ambiguous-branches-hard-block-full-block-regex-additions-with-no-resolveactorscope-no-refactored-preferredartifactdir-stalecurrentslug-and-no-analyze-scoping-block-no-command-field-this-is-a-diff-grep-audit-over-the-working-tree-not-a-manifest-tracked-reproducible-command",
+        "evidenceType": "source_excerpt",
+        "method": "extraction",
+        "sourceRef": "kontourai-flow-agents-362/evidence.json",
+        "excerptOrSummary": "git diff origin/main --stat -- . lists exactly 8 changed files: context/scripts/hooks/stop-goal-fit.js, evals/integration/test_goal_fit_hook.sh, evals/integration/test_record_check.sh, evals/integration/test_workflow_sidecar_writer.sh, scripts/hooks/evidence-capture.js, scripts/hooks/lib/runnable-command.js, scripts/hooks/stop-goal-fit.js, src/cli/workflow-sidecar.ts -- matching the plan's #362-only manifest exactly (3 pure-#362 files + stop-goal-fit.js and its context mirror + 3 eval files). git diff origin/main --stat against the named #345-only files (workflow-steering.js, config-protection.js, config-protection-remedies.js, current-pointer.js and their mirrors, test_current_json_per_actor.sh, test_workflow_steering_hook.sh) returns empty. A full-diff grep for resolveActorScope|hasOtherActorPointer|ownedSessionArtifactDirs|scopedToNothing across the entire diff returns zero matches. The one textually-entangled require() line in stop-goal-fit.js was confirmed split correctly: the current-pointer.js destructure is byte-identical to origin/main (still just readCurrentPointer, no hasOtherActorPointer/ownedSessionArtifactDirs added), while only the runnable-command.js destructure gained isAmbiguousAbsenceCommand. Full read-through of the stop-goal-fit.js diff confirms only #362 regions landed (classifyLogEntry, readCommandLog/readLatestCommandLog ambiguous threading, runBackstop tri-state classification + dialect-preservation invariant comments, captureCrossReference/capturedFailReconciliation ambiguous branches, HARD_BLOCK/FULL_BLOCK regex additions) with no resolveActorScope, no refactored preferredArtifactDir/staleCurrentSlug, and no analyze() scoping block. No command field: this is a diff/grep audit over the working tree, not a manifest-tracked reproducible command.",
+        "observedAt": "2026-07-06T03:30:03Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-362-mirror-sync-stop-goal-fit.flow-agents-workflow.diff-scripts-hooks-stop-goal-fit-js-context-scripts-hooks-stop-goal-fit-js-is-empty-exit-0-the-context-kit-mirror-stays-byte-identical-after-the-iteration-2-fix",
+        "claimId": "kontourai-flow-agents-362-mirror-sync-stop-goal-fit.flow-agents-workflow.diff-scripts-hooks-stop-goal-fit-js-context-scripts-hooks-stop-goal-fit-js-is-empty-exit-0-the-context-kit-mirror-stays-byte-identical-after-the-iteration-2-fix",
+        "evidenceType": "source_excerpt",
+        "method": "extraction",
+        "sourceRef": "kontourai-flow-agents-362/evidence.json",
+        "excerptOrSummary": "diff scripts/hooks/stop-goal-fit.js context/scripts/hooks/stop-goal-fit.js is empty (exit 0) -- the context-kit mirror stays byte-identical after the iteration-2 fix.",
+        "observedAt": "2026-07-06T03:30:03Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-362-build.flow-agents-workflow.non-manifest-command-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-command-not-in-evals-ci-run-baseline-sh-manifest-json-ran-npm-run-build-in-the-worktree-iteration-2-fix-tree-clean-tsc-build-zero-errors",
+        "claimId": "kontourai-flow-agents-362-build.flow-agents-workflow.non-manifest-command-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-command-not-in-evals-ci-run-baseline-sh-manifest-json-ran-npm-run-build-in-the-worktree-iteration-2-fix-tree-clean-tsc-build-zero-errors",
+        "evidenceType": "policy_rule",
+        "method": "auditability",
+        "sourceRef": "kontourai-flow-agents-362/evidence.json",
+        "excerptOrSummary": "Non-manifest command, folded to a non-command summary per reconcile-preflight's own guidance (command not in evals/ci/run-baseline.sh --manifest-json). Ran `npm run build` in the worktree: iteration-2 fix tree, clean tsc build, zero errors.",
+        "observedAt": "2026-07-06T03:30:03Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-362-typecheck.flow-agents-workflow.non-manifest-command-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-ran-npm-run-typecheck-in-the-worktree-iteration-2-fix-tree-tsc-noemit-clean-zero-errors",
+        "claimId": "kontourai-flow-agents-362-typecheck.flow-agents-workflow.non-manifest-command-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-ran-npm-run-typecheck-in-the-worktree-iteration-2-fix-tree-tsc-noemit-clean-zero-errors",
+        "evidenceType": "policy_rule",
+        "method": "auditability",
+        "sourceRef": "kontourai-flow-agents-362/evidence.json",
+        "excerptOrSummary": "Non-manifest command, folded to a non-command summary per reconcile-preflight's own guidance. Ran `npm run typecheck` in the worktree: iteration-2 fix tree, tsc --noEmit clean, zero errors.",
+        "observedAt": "2026-07-06T03:30:03Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-362-trust-reconcile-yaml.flow-agents-workflow.non-manifest-command-not-present-in-evals-ci-run-baseline-sh-manifest-json-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-ran-bash-evals-integration-test-trust-reconcile-sh-per-iteration-2-verification-instructions-test-trust-reconcile-all-checks-passed",
+        "claimId": "kontourai-flow-agents-362-trust-reconcile-yaml.flow-agents-workflow.non-manifest-command-not-present-in-evals-ci-run-baseline-sh-manifest-json-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-ran-bash-evals-integration-test-trust-reconcile-sh-per-iteration-2-verification-instructions-test-trust-reconcile-all-checks-passed",
+        "evidenceType": "policy_rule",
+        "method": "auditability",
+        "sourceRef": "kontourai-flow-agents-362/evidence.json",
+        "excerptOrSummary": "Non-manifest command (not present in evals/ci/run-baseline.sh --manifest-json), folded to a non-command summary per reconcile-preflight's own guidance. Ran `bash evals/integration/test_trust_reconcile.sh` per iteration-2 verification instructions: test_trust_reconcile: all checks passed.",
+        "observedAt": "2026-07-06T03:30:03Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-362-integration-suite-triage.flow-agents-workflow.non-manifest-aggregate-command-bash-evals-run-sh-integration-is-a-runner-not-itself-a-manifest-entry-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-full-run-exits-1-non-zero-driven-by-exactly-4-groups-test-goal-fit-hook-sh-1-ambient-env-only-test-goal-fit-escape-hatch-sh-5-test-session-resume-roundtrip-sh-13-all-3-confirmed-byte-identical-pre-existing-on-a-clean-origin-main-a974c1f-full-suite-re-run-performed-during-this-same-pass-plus-1-additional-non-reproducing-flake-in-test-liveness-conflict-injection-sh-hostile-actor-sanitization-case-that-did-not-reproduce-in-3-isolated-re-runs-on-this-worktree-did-not-reproduce-in-an-isolated-re-run-after-the-full-sweep-and-did-not-appear-at-all-in-the-clean-origin-main-full-suite-re-run-unrelated-to-any-of-the-8-362-files-liveness-telemetry-hook-machinery-is-untouched-by-this-diff-recorded-pass-because-the-full-local-eval-gate-has-zero-new-failures-attributable-to-this-delivery-the-flake-is-flagged-for-separate-follow-up-not-as-a-362-regression",
+        "claimId": "kontourai-flow-agents-362-integration-suite-triage.flow-agents-workflow.non-manifest-aggregate-command-bash-evals-run-sh-integration-is-a-runner-not-itself-a-manifest-entry-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-full-run-exits-1-non-zero-driven-by-exactly-4-groups-test-goal-fit-hook-sh-1-ambient-env-only-test-goal-fit-escape-hatch-sh-5-test-session-resume-roundtrip-sh-13-all-3-confirmed-byte-identical-pre-existing-on-a-clean-origin-main-a974c1f-full-suite-re-run-performed-during-this-same-pass-plus-1-additional-non-reproducing-flake-in-test-liveness-conflict-injection-sh-hostile-actor-sanitization-case-that-did-not-reproduce-in-3-isolated-re-runs-on-this-worktree-did-not-reproduce-in-an-isolated-re-run-after-the-full-sweep-and-did-not-appear-at-all-in-the-clean-origin-main-full-suite-re-run-unrelated-to-any-of-the-8-362-files-liveness-telemetry-hook-machinery-is-untouched-by-this-diff-recorded-pass-because-the-full-local-eval-gate-has-zero-new-failures-attributable-to-this-delivery-the-flake-is-flagged-for-separate-follow-up-not-as-a-362-regression",
+        "evidenceType": "policy_rule",
+        "method": "auditability",
+        "sourceRef": "kontourai-flow-agents-362/evidence.json",
+        "excerptOrSummary": "Non-manifest aggregate command (bash evals/run.sh integration is a runner, not itself a manifest entry), folded to a non-command summary per reconcile-preflight's own guidance. Full run exits 1 (non-zero) driven by exactly 4 groups: test_goal_fit_hook.sh (1, ambient-env-only), test_goal_fit_escape_hatch.sh (5), test_session_resume_roundtrip.sh (13) -- all 3 confirmed byte-identical pre-existing on a clean origin/main a974c1f full-suite re-run performed during this same pass -- plus 1 additional non-reproducing flake in test_liveness_conflict_injection.sh (hostile-actor sanitization case) that did NOT reproduce in 3 isolated re-runs on this worktree, did not reproduce in an isolated re-run after the full sweep, and did NOT appear at all in the clean origin/main full-suite re-run; unrelated to any of the 8 #362 files (liveness/telemetry-hook machinery is untouched by this diff). Recorded pass because the full local eval gate has zero new failures attributable to this delivery; the flake is flagged for separate follow-up, not as a #362 regression.",
+        "observedAt": "2026-07-06T03:30:03Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-362-critical-gate-closed-repro.flow-agents-workflow.independent-manual-repro-terminal-delivered-status-ambiguous-bare-grep-e-claimed-pass-evidence-json-only-no-trust-bundle-never-captured-flow-agents-goal-fit-mode-block-node-scripts-hooks-stop-goal-fit-js-exits-2-stderr-contains-stop-gate-stop-blocked-and-the-distinct-not-verified-ambiguous-re-record-this-check-as-a-self-asserting-command-message-and-never-the-caught-false-completion-accusation-confirms-iteration-1-critical-is-closed-in-the-common-non-bundle-code-path-independent-of-the-evals-integration-test-goal-fit-hook-sh-fixtures",
+        "claimId": "kontourai-flow-agents-362-critical-gate-closed-repro.flow-agents-workflow.independent-manual-repro-terminal-delivered-status-ambiguous-bare-grep-e-claimed-pass-evidence-json-only-no-trust-bundle-never-captured-flow-agents-goal-fit-mode-block-node-scripts-hooks-stop-goal-fit-js-exits-2-stderr-contains-stop-gate-stop-blocked-and-the-distinct-not-verified-ambiguous-re-record-this-check-as-a-self-asserting-command-message-and-never-the-caught-false-completion-accusation-confirms-iteration-1-critical-is-closed-in-the-common-non-bundle-code-path-independent-of-the-evals-integration-test-goal-fit-hook-sh-fixtures",
+        "evidenceType": "policy_rule",
+        "method": "auditability",
+        "sourceRef": "kontourai-flow-agents-362/evidence.json",
+        "excerptOrSummary": "Independent manual repro (terminal delivered status, ambiguous bare grep -E claimed-pass, evidence.json-only, no trust bundle, never captured, FLOW_AGENTS_GOAL_FIT_MODE=block): node scripts/hooks/stop-goal-fit.js exits 2, stderr contains '[stop-gate] Stop blocked' and the distinct 'NOT_VERIFIED (ambiguous): re-record this check as a self-asserting command' message, and never the caught-false-completion accusation. Confirms iteration-1 CRITICAL is closed in the common (non-bundle) code path, independent of the evals/integration/test_goal_fit_hook.sh fixtures.",
+        "observedAt": "2026-07-06T03:30:03Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-362-negative-control-no-over-block.flow-agents-workflow.independent-manual-repro-of-the-same-terminal-shape-but-with-a-self-asserting-absence-check-grep-q-claimed-pass-node-scripts-hooks-stop-goal-fit-js-exits-0-with-empty-stderr-confirms-the-fix-does-not-introduce-a-new-over-block-for-legitimate-self-asserting-absence-checks",
+        "claimId": "kontourai-flow-agents-362-negative-control-no-over-block.flow-agents-workflow.independent-manual-repro-of-the-same-terminal-shape-but-with-a-self-asserting-absence-check-grep-q-claimed-pass-node-scripts-hooks-stop-goal-fit-js-exits-0-with-empty-stderr-confirms-the-fix-does-not-introduce-a-new-over-block-for-legitimate-self-asserting-absence-checks",
+        "evidenceType": "policy_rule",
+        "method": "auditability",
+        "sourceRef": "kontourai-flow-agents-362/evidence.json",
+        "excerptOrSummary": "Independent manual repro of the same terminal shape but with a self-asserting absence check (! grep -q ...) claimed pass: node scripts/hooks/stop-goal-fit.js exits 0 with empty stderr -- confirms the fix does not introduce a new over-block for legitimate self-asserting absence checks.",
+        "observedAt": "2026-07-06T03:30:03Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-362-scope-audit-8-files.flow-agents-workflow.git-diff-stat-origin-main-lists-exactly-the-8-expected-362-files-context-scripts-hooks-stop-goal-fit-js-mirror-scripts-hooks-stop-goal-fit-js-scripts-hooks-evidence-capture-js-scripts-hooks-lib-runnable-command-js-src-cli-workflow-sidecar-ts-evals-integration-test-goal-fit-hook-sh-evals-integration-test-record-check-sh-evals-integration-test-workflow-sidecar-writer-sh-git-status-porcelain-shows-no-untracked-new-files-no-scope-creep",
+        "claimId": "kontourai-flow-agents-362-scope-audit-8-files.flow-agents-workflow.git-diff-stat-origin-main-lists-exactly-the-8-expected-362-files-context-scripts-hooks-stop-goal-fit-js-mirror-scripts-hooks-stop-goal-fit-js-scripts-hooks-evidence-capture-js-scripts-hooks-lib-runnable-command-js-src-cli-workflow-sidecar-ts-evals-integration-test-goal-fit-hook-sh-evals-integration-test-record-check-sh-evals-integration-test-workflow-sidecar-writer-sh-git-status-porcelain-shows-no-untracked-new-files-no-scope-creep",
+        "evidenceType": "source_excerpt",
+        "method": "extraction",
+        "sourceRef": "kontourai-flow-agents-362/evidence.json",
+        "excerptOrSummary": "git diff --stat origin/main lists exactly the 8 expected #362 files (context/scripts/hooks/stop-goal-fit.js + mirror scripts/hooks/stop-goal-fit.js, scripts/hooks/evidence-capture.js, scripts/hooks/lib/runnable-command.js, src/cli/workflow-sidecar.ts, evals/integration/test_goal_fit_hook.sh, evals/integration/test_record_check.sh, evals/integration/test_workflow_sidecar_writer.sh); git status --porcelain shows no untracked/new files. No scope creep.",
+        "observedAt": "2026-07-06T03:30:03Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-362-no-345-content-grep.flow-agents-workflow.git-diff-origin-main-grep-ne-resolveactorscope-hasotheractorpointer-ownedsessionartifactdirs-config-protection-assignment-returns-zero-matches-grep-exit-1-no-345-content-present-anywhere-in-the-8-file-diff",
+        "claimId": "kontourai-flow-agents-362-no-345-content-grep.flow-agents-workflow.git-diff-origin-main-grep-ne-resolveactorscope-hasotheractorpointer-ownedsessionartifactdirs-config-protection-assignment-returns-zero-matches-grep-exit-1-no-345-content-present-anywhere-in-the-8-file-diff",
+        "evidenceType": "source_excerpt",
+        "method": "extraction",
+        "sourceRef": "kontourai-flow-agents-362/evidence.json",
+        "excerptOrSummary": "git diff origin/main | grep -nE 'resolveActorScope|hasOtherActorPointer|ownedSessionArtifactDirs|config-protection|assignment/' returns zero matches (grep exit 1) -- no #345 content present anywhere in the 8-file diff.",
+        "observedAt": "2026-07-06T03:30:03Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      }
+    ],
+    "policies": [
+      {
+        "id": "policy:workflow.check.policy:policy_rule",
+        "claimType": "workflow.check.policy",
+        "requiredEvidence": [
+          "policy_rule"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.policy claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.execute.scope:policy_rule",
+        "claimType": "builder.execute.scope",
+        "requiredEvidence": [
+          "policy_rule"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.execute.scope claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.check.test:test_output",
+        "claimType": "workflow.check.test",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.test claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.execute.scope:test_output",
+        "claimType": "builder.execute.scope",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.execute.scope claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.check.security:test_output",
+        "claimType": "workflow.check.security",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.security claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.check.diff:source_excerpt",
+        "claimType": "workflow.check.diff",
+        "requiredEvidence": [
+          "source_excerpt"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.diff claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.execute.scope:source_excerpt",
+        "claimType": "builder.execute.scope",
+        "requiredEvidence": [
+          "source_excerpt"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.execute.scope claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.acceptance.criterion",
+        "claimType": "workflow.acceptance.criterion",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.acceptance.criterion claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.execute.scope",
+        "claimType": "builder.execute.scope",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.execute.scope claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.critique.review",
+        "claimType": "workflow.critique.review",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.critique.review claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "medium"
+      }
+    ],
+    "events": [
+      {
+        "id": "evt:kontourai-flow-agents-362-source-tree-validation.flow-agents-workflow.manifest-id-source-tree-validation-source-tree-validation-passed",
+        "claimId": "kontourai-flow-agents-362-source-tree-validation.flow-agents-workflow.manifest-id-source-tree-validation-source-tree-validation-passed",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-362-source-tree-validation.flow-agents-workflow.manifest-id-source-tree-validation-source-tree-validation-passed"
+        ],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-static-eval-suite.flow-agents-workflow.manifest-id-static-eval-suite-80-80-passed-2-skipped-43-43-passed-exit-0",
+        "claimId": "kontourai-flow-agents-362-static-eval-suite.flow-agents-workflow.manifest-id-static-eval-suite-80-80-passed-2-skipped-43-43-passed-exit-0",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-362-static-eval-suite.flow-agents-workflow.manifest-id-static-eval-suite-80-80-passed-2-skipped-43-43-passed-exit-0"
+        ],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-anti-gaming-and-trust-suite.flow-agents-workflow.manifest-id-anti-gaming-and-trust-suite-anti-gaming-suite-passed-25-tests",
+        "claimId": "kontourai-flow-agents-362-anti-gaming-and-trust-suite.flow-agents-workflow.manifest-id-anti-gaming-and-trust-suite-anti-gaming-suite-passed-25-tests",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-362-anti-gaming-and-trust-suite.flow-agents-workflow.manifest-id-anti-gaming-and-trust-suite-anti-gaming-suite-passed-25-tests"
+        ],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-goal-fit-hook-integration.flow-agents-workflow.manifest-id-goal-fit-hook-integration-run-with-env-u-flow-agents-goal-fit-mode-u-flow-agents-goal-fit-recheck-per-instructions-to-avoid-this-operator-s-ambient-env-all-critical-closure-iteration-2-item-1-negative-control-ambiguous-with-pass-claim-item-4-ac4-ac5-dialect-preservation-and-mutation-tests-pass-goal-fit-hook-integration-passed",
+        "claimId": "kontourai-flow-agents-362-goal-fit-hook-integration.flow-agents-workflow.manifest-id-goal-fit-hook-integration-run-with-env-u-flow-agents-goal-fit-mode-u-flow-agents-goal-fit-recheck-per-instructions-to-avoid-this-operator-s-ambient-env-all-critical-closure-iteration-2-item-1-negative-control-ambiguous-with-pass-claim-item-4-ac4-ac5-dialect-preservation-and-mutation-tests-pass-goal-fit-hook-integration-passed",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-362-goal-fit-hook-integration.flow-agents-workflow.manifest-id-goal-fit-hook-integration-run-with-env-u-flow-agents-goal-fit-mode-u-flow-agents-goal-fit-recheck-per-instructions-to-avoid-this-operator-s-ambient-env-all-critical-closure-iteration-2-item-1-negative-control-ambiguous-with-pass-claim-item-4-ac4-ac5-dialect-preservation-and-mutation-tests-pass-goal-fit-hook-integration-passed"
+        ],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-record-check-integration.flow-agents-workflow.manifest-id-record-check-integration-ac6-ac7-mutation-tests-green-record-check-integration-passed",
+        "claimId": "kontourai-flow-agents-362-record-check-integration.flow-agents-workflow.manifest-id-record-check-integration-ac6-ac7-mutation-tests-green-record-check-integration-passed",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-362-record-check-integration.flow-agents-workflow.manifest-id-record-check-integration-ac6-ac7-mutation-tests-green-record-check-integration-passed"
+        ],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-workflow-sidecar-writer-integration.flow-agents-workflow.manifest-id-workflow-sidecar-writer-integration-ac7-advisory-mutation-tests-green-rerun-sequentially-after-an-initial-parallel-execution-race-with-another-suite-corrupted-the-build-output-mid-run-a-clean-sequential-rerun-passed-cleanly-workflow-sidecar-writer-integration-passed",
+        "claimId": "kontourai-flow-agents-362-workflow-sidecar-writer-integration.flow-agents-workflow.manifest-id-workflow-sidecar-writer-integration-ac7-advisory-mutation-tests-green-rerun-sequentially-after-an-initial-parallel-execution-race-with-another-suite-corrupted-the-build-output-mid-run-a-clean-sequential-rerun-passed-cleanly-workflow-sidecar-writer-integration-passed",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-362-workflow-sidecar-writer-integration.flow-agents-workflow.manifest-id-workflow-sidecar-writer-integration-ac7-advisory-mutation-tests-green-rerun-sequentially-after-an-initial-parallel-execution-race-with-another-suite-corrupted-the-build-output-mid-run-a-clean-sequential-rerun-passed-cleanly-workflow-sidecar-writer-integration-passed"
+        ],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-hook-category-behavior-integration.flow-agents-workflow.manifest-id-hook-category-behavior-integration-hook-category-behavior-checks-passed",
+        "claimId": "kontourai-flow-agents-362-hook-category-behavior-integration.flow-agents-workflow.manifest-id-hook-category-behavior-integration-hook-category-behavior-checks-passed",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-362-hook-category-behavior-integration.flow-agents-workflow.manifest-id-hook-category-behavior-integration-hook-category-behavior-checks-passed"
+        ],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-current-json-per-actor-integration.flow-agents-workflow.manifest-id-current-json-per-actor-integration-345-exclusion-regression-guard-test-current-json-per-actor-all-checks-passed",
+        "claimId": "kontourai-flow-agents-362-current-json-per-actor-integration.flow-agents-workflow.manifest-id-current-json-per-actor-integration-345-exclusion-regression-guard-test-current-json-per-actor-all-checks-passed",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-362-current-json-per-actor-integration.flow-agents-workflow.manifest-id-current-json-per-actor-integration-345-exclusion-regression-guard-test-current-json-per-actor-all-checks-passed"
+        ],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-workflow-steering-hook-integration.flow-agents-workflow.manifest-id-workflow-steering-hook-integration-345-exclusion-regression-guard-workflow-steering-hook-integration-passed",
+        "claimId": "kontourai-flow-agents-362-workflow-steering-hook-integration.flow-agents-workflow.manifest-id-workflow-steering-hook-integration-345-exclusion-regression-guard-workflow-steering-hook-integration-passed",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-362-workflow-steering-hook-integration.flow-agents-workflow.manifest-id-workflow-steering-hook-integration-345-exclusion-regression-guard-workflow-steering-hook-integration-passed"
+        ],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-full-integration-suite-triage.flow-agents-workflow.bash-evals-run-sh-integration-full-run-exits-1-driven-by-exactly-three-pre-existing-unrelated-to-scope-failure-groups-test-goal-fit-escape-hatch-sh-5-issues-test-session-resume-roundtrip-sh-13-issues-and-one-ambient-env-only-assertion-inside-test-goal-fit-hook-sh-s-default-mode-case-each-was-independently-re-run-against-a-freshly-checked-out-unmodified-origin-main-a974c1f-worktree-git-worktree-add-detach-from-origin-main-npm-ci-npm-run-build-with-byte-identical-failure-text-and-counts-confirming-these-are-pre-existing-baseline-conditions-not-regressions-introduced-by-this-delivery-s-8-changed-files-zero-new-failures-were-observed-anywhere-in-the-full-integration-run-beyond-these-three-known-groups-every-manifest-listed-integration-script-that-touches-362-scope-plus-both-explicitly-named-345-exclusion-regression-guards-passed-cleanly-see-sibling-checks-no-command-field-this-is-a-triage-audit-note-over-an-already-executed-non-manifest-listed-combined-run-not-a-fresh-manifest-matched-command-re-execution",
+        "claimId": "kontourai-flow-agents-362-full-integration-suite-triage.flow-agents-workflow.bash-evals-run-sh-integration-full-run-exits-1-driven-by-exactly-three-pre-existing-unrelated-to-scope-failure-groups-test-goal-fit-escape-hatch-sh-5-issues-test-session-resume-roundtrip-sh-13-issues-and-one-ambient-env-only-assertion-inside-test-goal-fit-hook-sh-s-default-mode-case-each-was-independently-re-run-against-a-freshly-checked-out-unmodified-origin-main-a974c1f-worktree-git-worktree-add-detach-from-origin-main-npm-ci-npm-run-build-with-byte-identical-failure-text-and-counts-confirming-these-are-pre-existing-baseline-conditions-not-regressions-introduced-by-this-delivery-s-8-changed-files-zero-new-failures-were-observed-anywhere-in-the-full-integration-run-beyond-these-three-known-groups-every-manifest-listed-integration-script-that-touches-362-scope-plus-both-explicitly-named-345-exclusion-regression-guards-passed-cleanly-see-sibling-checks-no-command-field-this-is-a-triage-audit-note-over-an-already-executed-non-manifest-listed-combined-run-not-a-fresh-manifest-matched-command-re-execution",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-362-full-integration-suite-triage.flow-agents-workflow.bash-evals-run-sh-integration-full-run-exits-1-driven-by-exactly-three-pre-existing-unrelated-to-scope-failure-groups-test-goal-fit-escape-hatch-sh-5-issues-test-session-resume-roundtrip-sh-13-issues-and-one-ambient-env-only-assertion-inside-test-goal-fit-hook-sh-s-default-mode-case-each-was-independently-re-run-against-a-freshly-checked-out-unmodified-origin-main-a974c1f-worktree-git-worktree-add-detach-from-origin-main-npm-ci-npm-run-build-with-byte-identical-failure-text-and-counts-confirming-these-are-pre-existing-baseline-conditions-not-regressions-introduced-by-this-delivery-s-8-changed-files-zero-new-failures-were-observed-anywhere-in-the-full-integration-run-beyond-these-three-known-groups-every-manifest-listed-integration-script-that-touches-362-scope-plus-both-explicitly-named-345-exclusion-regression-guards-passed-cleanly-see-sibling-checks-no-command-field-this-is-a-triage-audit-note-over-an-already-executed-non-manifest-listed-combined-run-not-a-fresh-manifest-matched-command-re-execution"
+        ],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-scope-and-345-exclusion-audit.flow-agents-workflow.git-diff-origin-main-stat-lists-exactly-8-changed-files-context-scripts-hooks-stop-goal-fit-js-evals-integration-test-goal-fit-hook-sh-evals-integration-test-record-check-sh-evals-integration-test-workflow-sidecar-writer-sh-scripts-hooks-evidence-capture-js-scripts-hooks-lib-runnable-command-js-scripts-hooks-stop-goal-fit-js-src-cli-workflow-sidecar-ts-matching-the-plan-s-362-only-manifest-exactly-3-pure-362-files-stop-goal-fit-js-and-its-context-mirror-3-eval-files-git-diff-origin-main-stat-against-the-named-345-only-files-workflow-steering-js-config-protection-js-config-protection-remedies-js-current-pointer-js-and-their-mirrors-test-current-json-per-actor-sh-test-workflow-steering-hook-sh-returns-empty-a-full-diff-grep-for-resolveactorscope-hasotheractorpointer-ownedsessionartifactdirs-scopedtonothing-across-the-entire-diff-returns-zero-matches-the-one-textually-entangled-require-line-in-stop-goal-fit-js-was-confirmed-split-correctly-the-current-pointer-js-destructure-is-byte-identical-to-origin-main-still-just-readcurrentpointer-no-hasotheractorpointer-ownedsessionartifactdirs-added-while-only-the-runnable-command-js-destructure-gained-isambiguousabsencecommand-full-read-through-of-the-stop-goal-fit-js-diff-confirms-only-362-regions-landed-classifylogentry-readcommandlog-readlatestcommandlog-ambiguous-threading-runbackstop-tri-state-classification-dialect-preservation-invariant-comments-capturecrossreference-capturedfailreconciliation-ambiguous-branches-hard-block-full-block-regex-additions-with-no-resolveactorscope-no-refactored-preferredartifactdir-stalecurrentslug-and-no-analyze-scoping-block-no-command-field-this-is-a-diff-grep-audit-over-the-working-tree-not-a-manifest-tracked-reproducible-command",
+        "claimId": "kontourai-flow-agents-362-scope-and-345-exclusion-audit.flow-agents-workflow.git-diff-origin-main-stat-lists-exactly-8-changed-files-context-scripts-hooks-stop-goal-fit-js-evals-integration-test-goal-fit-hook-sh-evals-integration-test-record-check-sh-evals-integration-test-workflow-sidecar-writer-sh-scripts-hooks-evidence-capture-js-scripts-hooks-lib-runnable-command-js-scripts-hooks-stop-goal-fit-js-src-cli-workflow-sidecar-ts-matching-the-plan-s-362-only-manifest-exactly-3-pure-362-files-stop-goal-fit-js-and-its-context-mirror-3-eval-files-git-diff-origin-main-stat-against-the-named-345-only-files-workflow-steering-js-config-protection-js-config-protection-remedies-js-current-pointer-js-and-their-mirrors-test-current-json-per-actor-sh-test-workflow-steering-hook-sh-returns-empty-a-full-diff-grep-for-resolveactorscope-hasotheractorpointer-ownedsessionartifactdirs-scopedtonothing-across-the-entire-diff-returns-zero-matches-the-one-textually-entangled-require-line-in-stop-goal-fit-js-was-confirmed-split-correctly-the-current-pointer-js-destructure-is-byte-identical-to-origin-main-still-just-readcurrentpointer-no-hasotheractorpointer-ownedsessionartifactdirs-added-while-only-the-runnable-command-js-destructure-gained-isambiguousabsencecommand-full-read-through-of-the-stop-goal-fit-js-diff-confirms-only-362-regions-landed-classifylogentry-readcommandlog-readlatestcommandlog-ambiguous-threading-runbackstop-tri-state-classification-dialect-preservation-invariant-comments-capturecrossreference-capturedfailreconciliation-ambiguous-branches-hard-block-full-block-regex-additions-with-no-resolveactorscope-no-refactored-preferredartifactdir-stalecurrentslug-and-no-analyze-scoping-block-no-command-field-this-is-a-diff-grep-audit-over-the-working-tree-not-a-manifest-tracked-reproducible-command",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-362-scope-and-345-exclusion-audit.flow-agents-workflow.git-diff-origin-main-stat-lists-exactly-8-changed-files-context-scripts-hooks-stop-goal-fit-js-evals-integration-test-goal-fit-hook-sh-evals-integration-test-record-check-sh-evals-integration-test-workflow-sidecar-writer-sh-scripts-hooks-evidence-capture-js-scripts-hooks-lib-runnable-command-js-scripts-hooks-stop-goal-fit-js-src-cli-workflow-sidecar-ts-matching-the-plan-s-362-only-manifest-exactly-3-pure-362-files-stop-goal-fit-js-and-its-context-mirror-3-eval-files-git-diff-origin-main-stat-against-the-named-345-only-files-workflow-steering-js-config-protection-js-config-protection-remedies-js-current-pointer-js-and-their-mirrors-test-current-json-per-actor-sh-test-workflow-steering-hook-sh-returns-empty-a-full-diff-grep-for-resolveactorscope-hasotheractorpointer-ownedsessionartifactdirs-scopedtonothing-across-the-entire-diff-returns-zero-matches-the-one-textually-entangled-require-line-in-stop-goal-fit-js-was-confirmed-split-correctly-the-current-pointer-js-destructure-is-byte-identical-to-origin-main-still-just-readcurrentpointer-no-hasotheractorpointer-ownedsessionartifactdirs-added-while-only-the-runnable-command-js-destructure-gained-isambiguousabsencecommand-full-read-through-of-the-stop-goal-fit-js-diff-confirms-only-362-regions-landed-classifylogentry-readcommandlog-readlatestcommandlog-ambiguous-threading-runbackstop-tri-state-classification-dialect-preservation-invariant-comments-capturecrossreference-capturedfailreconciliation-ambiguous-branches-hard-block-full-block-regex-additions-with-no-resolveactorscope-no-refactored-preferredartifactdir-stalecurrentslug-and-no-analyze-scoping-block-no-command-field-this-is-a-diff-grep-audit-over-the-working-tree-not-a-manifest-tracked-reproducible-command"
+        ],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-mirror-sync-stop-goal-fit.flow-agents-workflow.diff-scripts-hooks-stop-goal-fit-js-context-scripts-hooks-stop-goal-fit-js-is-empty-exit-0-the-context-kit-mirror-stays-byte-identical-after-the-iteration-2-fix",
+        "claimId": "kontourai-flow-agents-362-mirror-sync-stop-goal-fit.flow-agents-workflow.diff-scripts-hooks-stop-goal-fit-js-context-scripts-hooks-stop-goal-fit-js-is-empty-exit-0-the-context-kit-mirror-stays-byte-identical-after-the-iteration-2-fix",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-362-mirror-sync-stop-goal-fit.flow-agents-workflow.diff-scripts-hooks-stop-goal-fit-js-context-scripts-hooks-stop-goal-fit-js-is-empty-exit-0-the-context-kit-mirror-stays-byte-identical-after-the-iteration-2-fix"
+        ],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-build.flow-agents-workflow.non-manifest-command-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-command-not-in-evals-ci-run-baseline-sh-manifest-json-ran-npm-run-build-in-the-worktree-iteration-2-fix-tree-clean-tsc-build-zero-errors",
+        "claimId": "kontourai-flow-agents-362-build.flow-agents-workflow.non-manifest-command-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-command-not-in-evals-ci-run-baseline-sh-manifest-json-ran-npm-run-build-in-the-worktree-iteration-2-fix-tree-clean-tsc-build-zero-errors",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-362-build.flow-agents-workflow.non-manifest-command-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-command-not-in-evals-ci-run-baseline-sh-manifest-json-ran-npm-run-build-in-the-worktree-iteration-2-fix-tree-clean-tsc-build-zero-errors"
+        ],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-typecheck.flow-agents-workflow.non-manifest-command-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-ran-npm-run-typecheck-in-the-worktree-iteration-2-fix-tree-tsc-noemit-clean-zero-errors",
+        "claimId": "kontourai-flow-agents-362-typecheck.flow-agents-workflow.non-manifest-command-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-ran-npm-run-typecheck-in-the-worktree-iteration-2-fix-tree-tsc-noemit-clean-zero-errors",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-362-typecheck.flow-agents-workflow.non-manifest-command-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-ran-npm-run-typecheck-in-the-worktree-iteration-2-fix-tree-tsc-noemit-clean-zero-errors"
+        ],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-trust-reconcile-yaml.flow-agents-workflow.non-manifest-command-not-present-in-evals-ci-run-baseline-sh-manifest-json-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-ran-bash-evals-integration-test-trust-reconcile-sh-per-iteration-2-verification-instructions-test-trust-reconcile-all-checks-passed",
+        "claimId": "kontourai-flow-agents-362-trust-reconcile-yaml.flow-agents-workflow.non-manifest-command-not-present-in-evals-ci-run-baseline-sh-manifest-json-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-ran-bash-evals-integration-test-trust-reconcile-sh-per-iteration-2-verification-instructions-test-trust-reconcile-all-checks-passed",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-362-trust-reconcile-yaml.flow-agents-workflow.non-manifest-command-not-present-in-evals-ci-run-baseline-sh-manifest-json-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-ran-bash-evals-integration-test-trust-reconcile-sh-per-iteration-2-verification-instructions-test-trust-reconcile-all-checks-passed"
+        ],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-integration-suite-triage.flow-agents-workflow.non-manifest-aggregate-command-bash-evals-run-sh-integration-is-a-runner-not-itself-a-manifest-entry-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-full-run-exits-1-non-zero-driven-by-exactly-4-groups-test-goal-fit-hook-sh-1-ambient-env-only-test-goal-fit-escape-hatch-sh-5-test-session-resume-roundtrip-sh-13-all-3-confirmed-byte-identical-pre-existing-on-a-clean-origin-main-a974c1f-full-suite-re-run-performed-during-this-same-pass-plus-1-additional-non-reproducing-flake-in-test-liveness-conflict-injection-sh-hostile-actor-sanitization-case-that-did-not-reproduce-in-3-isolated-re-runs-on-this-worktree-did-not-reproduce-in-an-isolated-re-run-after-the-full-sweep-and-did-not-appear-at-all-in-the-clean-origin-main-full-suite-re-run-unrelated-to-any-of-the-8-362-files-liveness-telemetry-hook-machinery-is-untouched-by-this-diff-recorded-pass-because-the-full-local-eval-gate-has-zero-new-failures-attributable-to-this-delivery-the-flake-is-flagged-for-separate-follow-up-not-as-a-362-regression",
+        "claimId": "kontourai-flow-agents-362-integration-suite-triage.flow-agents-workflow.non-manifest-aggregate-command-bash-evals-run-sh-integration-is-a-runner-not-itself-a-manifest-entry-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-full-run-exits-1-non-zero-driven-by-exactly-4-groups-test-goal-fit-hook-sh-1-ambient-env-only-test-goal-fit-escape-hatch-sh-5-test-session-resume-roundtrip-sh-13-all-3-confirmed-byte-identical-pre-existing-on-a-clean-origin-main-a974c1f-full-suite-re-run-performed-during-this-same-pass-plus-1-additional-non-reproducing-flake-in-test-liveness-conflict-injection-sh-hostile-actor-sanitization-case-that-did-not-reproduce-in-3-isolated-re-runs-on-this-worktree-did-not-reproduce-in-an-isolated-re-run-after-the-full-sweep-and-did-not-appear-at-all-in-the-clean-origin-main-full-suite-re-run-unrelated-to-any-of-the-8-362-files-liveness-telemetry-hook-machinery-is-untouched-by-this-diff-recorded-pass-because-the-full-local-eval-gate-has-zero-new-failures-attributable-to-this-delivery-the-flake-is-flagged-for-separate-follow-up-not-as-a-362-regression",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-362-integration-suite-triage.flow-agents-workflow.non-manifest-aggregate-command-bash-evals-run-sh-integration-is-a-runner-not-itself-a-manifest-entry-folded-to-a-non-command-summary-per-reconcile-preflight-s-own-guidance-full-run-exits-1-non-zero-driven-by-exactly-4-groups-test-goal-fit-hook-sh-1-ambient-env-only-test-goal-fit-escape-hatch-sh-5-test-session-resume-roundtrip-sh-13-all-3-confirmed-byte-identical-pre-existing-on-a-clean-origin-main-a974c1f-full-suite-re-run-performed-during-this-same-pass-plus-1-additional-non-reproducing-flake-in-test-liveness-conflict-injection-sh-hostile-actor-sanitization-case-that-did-not-reproduce-in-3-isolated-re-runs-on-this-worktree-did-not-reproduce-in-an-isolated-re-run-after-the-full-sweep-and-did-not-appear-at-all-in-the-clean-origin-main-full-suite-re-run-unrelated-to-any-of-the-8-362-files-liveness-telemetry-hook-machinery-is-untouched-by-this-diff-recorded-pass-because-the-full-local-eval-gate-has-zero-new-failures-attributable-to-this-delivery-the-flake-is-flagged-for-separate-follow-up-not-as-a-362-regression"
+        ],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-critical-gate-closed-repro.flow-agents-workflow.independent-manual-repro-terminal-delivered-status-ambiguous-bare-grep-e-claimed-pass-evidence-json-only-no-trust-bundle-never-captured-flow-agents-goal-fit-mode-block-node-scripts-hooks-stop-goal-fit-js-exits-2-stderr-contains-stop-gate-stop-blocked-and-the-distinct-not-verified-ambiguous-re-record-this-check-as-a-self-asserting-command-message-and-never-the-caught-false-completion-accusation-confirms-iteration-1-critical-is-closed-in-the-common-non-bundle-code-path-independent-of-the-evals-integration-test-goal-fit-hook-sh-fixtures",
+        "claimId": "kontourai-flow-agents-362-critical-gate-closed-repro.flow-agents-workflow.independent-manual-repro-terminal-delivered-status-ambiguous-bare-grep-e-claimed-pass-evidence-json-only-no-trust-bundle-never-captured-flow-agents-goal-fit-mode-block-node-scripts-hooks-stop-goal-fit-js-exits-2-stderr-contains-stop-gate-stop-blocked-and-the-distinct-not-verified-ambiguous-re-record-this-check-as-a-self-asserting-command-message-and-never-the-caught-false-completion-accusation-confirms-iteration-1-critical-is-closed-in-the-common-non-bundle-code-path-independent-of-the-evals-integration-test-goal-fit-hook-sh-fixtures",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-362-critical-gate-closed-repro.flow-agents-workflow.independent-manual-repro-terminal-delivered-status-ambiguous-bare-grep-e-claimed-pass-evidence-json-only-no-trust-bundle-never-captured-flow-agents-goal-fit-mode-block-node-scripts-hooks-stop-goal-fit-js-exits-2-stderr-contains-stop-gate-stop-blocked-and-the-distinct-not-verified-ambiguous-re-record-this-check-as-a-self-asserting-command-message-and-never-the-caught-false-completion-accusation-confirms-iteration-1-critical-is-closed-in-the-common-non-bundle-code-path-independent-of-the-evals-integration-test-goal-fit-hook-sh-fixtures"
+        ],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-negative-control-no-over-block.flow-agents-workflow.independent-manual-repro-of-the-same-terminal-shape-but-with-a-self-asserting-absence-check-grep-q-claimed-pass-node-scripts-hooks-stop-goal-fit-js-exits-0-with-empty-stderr-confirms-the-fix-does-not-introduce-a-new-over-block-for-legitimate-self-asserting-absence-checks",
+        "claimId": "kontourai-flow-agents-362-negative-control-no-over-block.flow-agents-workflow.independent-manual-repro-of-the-same-terminal-shape-but-with-a-self-asserting-absence-check-grep-q-claimed-pass-node-scripts-hooks-stop-goal-fit-js-exits-0-with-empty-stderr-confirms-the-fix-does-not-introduce-a-new-over-block-for-legitimate-self-asserting-absence-checks",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-362-negative-control-no-over-block.flow-agents-workflow.independent-manual-repro-of-the-same-terminal-shape-but-with-a-self-asserting-absence-check-grep-q-claimed-pass-node-scripts-hooks-stop-goal-fit-js-exits-0-with-empty-stderr-confirms-the-fix-does-not-introduce-a-new-over-block-for-legitimate-self-asserting-absence-checks"
+        ],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-scope-audit-8-files.flow-agents-workflow.git-diff-stat-origin-main-lists-exactly-the-8-expected-362-files-context-scripts-hooks-stop-goal-fit-js-mirror-scripts-hooks-stop-goal-fit-js-scripts-hooks-evidence-capture-js-scripts-hooks-lib-runnable-command-js-src-cli-workflow-sidecar-ts-evals-integration-test-goal-fit-hook-sh-evals-integration-test-record-check-sh-evals-integration-test-workflow-sidecar-writer-sh-git-status-porcelain-shows-no-untracked-new-files-no-scope-creep",
+        "claimId": "kontourai-flow-agents-362-scope-audit-8-files.flow-agents-workflow.git-diff-stat-origin-main-lists-exactly-the-8-expected-362-files-context-scripts-hooks-stop-goal-fit-js-mirror-scripts-hooks-stop-goal-fit-js-scripts-hooks-evidence-capture-js-scripts-hooks-lib-runnable-command-js-src-cli-workflow-sidecar-ts-evals-integration-test-goal-fit-hook-sh-evals-integration-test-record-check-sh-evals-integration-test-workflow-sidecar-writer-sh-git-status-porcelain-shows-no-untracked-new-files-no-scope-creep",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-362-scope-audit-8-files.flow-agents-workflow.git-diff-stat-origin-main-lists-exactly-the-8-expected-362-files-context-scripts-hooks-stop-goal-fit-js-mirror-scripts-hooks-stop-goal-fit-js-scripts-hooks-evidence-capture-js-scripts-hooks-lib-runnable-command-js-src-cli-workflow-sidecar-ts-evals-integration-test-goal-fit-hook-sh-evals-integration-test-record-check-sh-evals-integration-test-workflow-sidecar-writer-sh-git-status-porcelain-shows-no-untracked-new-files-no-scope-creep"
+        ],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-no-345-content-grep.flow-agents-workflow.git-diff-origin-main-grep-ne-resolveactorscope-hasotheractorpointer-ownedsessionartifactdirs-config-protection-assignment-returns-zero-matches-grep-exit-1-no-345-content-present-anywhere-in-the-8-file-diff",
+        "claimId": "kontourai-flow-agents-362-no-345-content-grep.flow-agents-workflow.git-diff-origin-main-grep-ne-resolveactorscope-hasotheractorpointer-ownedsessionartifactdirs-config-protection-assignment-returns-zero-matches-grep-exit-1-no-345-content-present-anywhere-in-the-8-file-diff",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-362-no-345-content-grep.flow-agents-workflow.git-diff-origin-main-grep-ne-resolveactorscope-hasotheractorpointer-ownedsessionartifactdirs-config-protection-assignment-returns-zero-matches-grep-exit-1-no-345-content-present-anywhere-in-the-8-file-diff"
+        ],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-iter1-security-terminal-ambiguous-not-blocked.flow-agents-workflow.resolved-in-iteration-2-marker-unified-across-all-3-ambiguous-emission-sites-security-re-review-independently-reproduced-all-3-terminal-configs-now-hard-block-self-asserting-negative-control-still-passes-no-over-block-scope-clean-critical-closed",
+        "claimId": "kontourai-flow-agents-362-iter1-security-terminal-ambiguous-not-blocked.flow-agents-workflow.resolved-in-iteration-2-marker-unified-across-all-3-ambiguous-emission-sites-security-re-review-independently-reproduced-all-3-terminal-configs-now-hard-block-self-asserting-negative-control-still-passes-no-over-block-scope-clean-critical-closed",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-362-iter1-code-approve-with-findings.flow-agents-workflow.resolved-in-iteration-2-dialect-comment-rescoped-dialect-eval-mutation-test-added-remediation-message-single-sourced-code-re-review-clean-all-3-prior-non-blockers-confirmed-resolved",
+        "claimId": "kontourai-flow-agents-362-iter1-code-approve-with-findings.flow-agents-workflow.resolved-in-iteration-2-dialect-comment-rescoped-dialect-eval-mutation-test-added-remediation-message-single-sourced-code-re-review-clean-all-3-prior-non-blockers-confirmed-resolved",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-06T03:30:03Z",
+        "verifiedAt": "2026-07-06T03:30:03Z"
+      }
+    ]
+  }
+}
