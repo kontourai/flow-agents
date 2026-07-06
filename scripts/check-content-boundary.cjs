@@ -37,6 +37,11 @@ function trackedFiles() {
   return output.split("\0").filter(Boolean);
 }
 
+function untrackedFiles() {
+  const output = execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], { encoding: "utf8" });
+  return output.split("\0").filter(Boolean);
+}
+
 function isIgnoredPath(filePath) {
   return filePath === SELF || ignoredPathPatterns.some((pattern) => pattern.test(filePath));
 }
@@ -51,7 +56,9 @@ function lineNumberFor(content, index) {
 
 const findings = [];
 
-for (const filePath of trackedFiles()) {
+const allFiles = new Set([...trackedFiles(), ...untrackedFiles()]);
+
+for (const filePath of allFiles) {
   if (isWorkflowRuntimeArtifact(filePath)) {
     findings.push({
       filePath,
