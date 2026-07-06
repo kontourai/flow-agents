@@ -109,17 +109,13 @@ NODE
 
 # is_valid_json_stdin <string> — true if the given string parses as JSON.
 is_valid_json() {
-  printf '%s' "$1" | node - <<'NODE'
-let raw = '';
-process.stdin.on('data', c => (raw += c));
-process.stdin.on('end', () => {
-  try {
-    JSON.parse(raw);
-    process.exit(0);
-  } catch {
-    process.exit(1);
-  }
-});
+  JSON_ARG="$1" node - <<'NODE'
+try {
+  JSON.parse(process.env.JSON_ARG);
+  process.exit(0);
+} catch {
+  process.exit(1);
+}
 NODE
 }
 
@@ -342,6 +338,8 @@ fi
 echo "--- D. End-to-end wrapper (claude-telemetry-hook.js) ---"
 
 POST_TOOL_USE_PAYLOAD='{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"echo hi"},"tool_response":{"stdout":"hi"}}'
+POST_TOOL_USE_PAYLOAD_FILE="$TMPDIR_EVAL/post-tool-use-payload.json"
+printf '%s' "$POST_TOOL_USE_PAYLOAD" >"$POST_TOOL_USE_PAYLOAD_FILE"
 
 # D1: a fresh (well past the 60s throttle, real clock) claim exists for the resolved
 # actor -> exactly one heartbeat event is appended by the wrapper's postToolUse path.
@@ -349,7 +347,7 @@ D1_ROOT="$(new_scratch)"
 D1_STALE_AT="$(iso_offset_ms -300000)"
 seed_claim "$D1_ROOT" "d1-subj" "agent-hb" "$D1_STALE_AT" 1800
 D1_OUT="$(cd "$D1_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb \
-  node "$CLAUDE_HOOK" PostToolUse dev <<<"$POST_TOOL_USE_PAYLOAD")"
+  node "$CLAUDE_HOOK" PostToolUse dev <"$POST_TOOL_USE_PAYLOAD_FILE")"
 D1_STATUS=$?
 if [[ "$D1_STATUS" -eq 0 ]] \
   && is_valid_json "$D1_OUT" \
@@ -366,7 +364,7 @@ D2_ROOT="$(new_scratch)"
 mkdir -p "$D2_ROOT/.kontourai/flow-agents/liveness"
 printf '{not valid json' >"$D2_ROOT/.kontourai/flow-agents/$SNAPSHOT_FILENAME"
 D2_OUT="$(cd "$D2_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb \
-  node "$CLAUDE_HOOK" PostToolUse dev <<<"$POST_TOOL_USE_PAYLOAD" 2>"$TMPDIR_EVAL/d2.err")"
+  node "$CLAUDE_HOOK" PostToolUse dev <"$POST_TOOL_USE_PAYLOAD_FILE" 2>"$TMPDIR_EVAL/d2.err")"
 D2_STATUS=$?
 if [[ "$D2_STATUS" -eq 0 ]] \
   && is_valid_json "$D2_OUT" \
@@ -383,7 +381,7 @@ E_ROOT="$(new_scratch)"
 E_STALE_AT="$(iso_offset_ms -300000)"
 seed_claim "$E_ROOT" "e-subj" "agent-hb" "$E_STALE_AT" 1800
 E_OUT="$(cd "$E_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb \
-  node "$CLAUDE_HOOK" PostToolUse dev <<<"$POST_TOOL_USE_PAYLOAD")"
+  node "$CLAUDE_HOOK" PostToolUse dev <"$POST_TOOL_USE_PAYLOAD_FILE")"
 E_STATUS=$?
 if [[ "$E_STATUS" -eq 0 ]] && [[ "$(stream_line_count "$E_ROOT")" -eq 2 ]] \
   && grep -q '"type":"heartbeat"' "$(stream_file "$E_ROOT")"; then
@@ -396,11 +394,13 @@ fi
 echo "--- F. Cross-runtime smoke (codex-telemetry-hook.js) ---"
 
 CODEX_PAYLOAD='{"hook_event_name":"PostToolUse","tool_name":"shell","tool_input":{"command":"echo hi"}}'
+CODEX_PAYLOAD_FILE="$TMPDIR_EVAL/codex-payload.json"
+printf '%s' "$CODEX_PAYLOAD" >"$CODEX_PAYLOAD_FILE"
 F_ROOT="$(new_scratch)"
 F_STALE_AT="$(iso_offset_ms -300000)"
 seed_claim "$F_ROOT" "f-subj" "agent-hb" "$F_STALE_AT" 1800
 F_OUT="$(cd "$F_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb \
-  node "$CODEX_HOOK" PostToolUse dev <<<"$CODEX_PAYLOAD")"
+  node "$CODEX_HOOK" PostToolUse dev <"$CODEX_PAYLOAD_FILE")"
 F_STATUS=$?
 if [[ "$F_STATUS" -eq 0 ]] && [[ "$(stream_line_count "$F_ROOT")" -eq 2 ]] \
   && grep -q '"type":"heartbeat"' "$(stream_file "$F_ROOT")"; then
@@ -415,8 +415,8 @@ echo "--- G. Wrapper-level throttle smoke ---"
 G_ROOT="$(new_scratch)"
 G_STALE_AT="$(iso_offset_ms -300000)"
 seed_claim "$G_ROOT" "g-subj" "agent-hb" "$G_STALE_AT" 1800
-(cd "$G_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb node "$CLAUDE_HOOK" PostToolUse dev <<<"$POST_TOOL_USE_PAYLOAD" >/dev/null)
-(cd "$G_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb node "$CLAUDE_HOOK" PostToolUse dev <<<"$POST_TOOL_USE_PAYLOAD" >/dev/null)
+(cd "$G_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb node "$CLAUDE_HOOK" PostToolUse dev <"$POST_TOOL_USE_PAYLOAD_FILE" >/dev/null)
+(cd "$G_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb node "$CLAUDE_HOOK" PostToolUse dev <"$POST_TOOL_USE_PAYLOAD_FILE" >/dev/null)
 if [[ "$(stream_line_count "$G_ROOT")" -eq 2 ]]; then
   _pass "two back-to-back wrapper invocations append exactly one heartbeat (real-clock throttle smoke, AC3)"
 else
