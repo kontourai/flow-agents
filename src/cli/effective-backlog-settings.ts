@@ -7,6 +7,7 @@ import { parseArgs, flagString, flagBool } from "../lib/args.js";
 import { readJson } from "../lib/fs.js";
 
 const PROJECT_SETTINGS_RELATIVE_PATH = path.join("context", "settings", "backlog-provider-settings.json");
+const WORKSPACE_SETTINGS_RELATIVE_PATH = path.join(".kontourai", "settings.json");
 
 function loadSettings(file: string): Record<string, unknown> | null {
   if (!fs.existsSync(file)) return null;
@@ -36,6 +37,14 @@ function currentRepo(repoPath: string): { owner: string; name: string } | null {
   return null;
 }
 
+function gitRoot(repoPath: string): string | null {
+  try {
+    return child_process.execFileSync("git", ["-C", repoPath, "rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {
+    return null;
+  }
+}
+
 function merge(base: unknown, override: unknown): Record<string, unknown> | null {
   if (!base && !override) return null;
   if (!base) return structuredClone(override) as Record<string, unknown>;
@@ -58,6 +67,43 @@ function findProject(settings: Record<string, unknown> | null, repo: { owner: st
   }) as Record<string, unknown> | undefined) ?? null;
 }
 
+function workspaceRepos(settings: Record<string, unknown> | null): string[] {
+  const workspace = settings?.workspace;
+  if (typeof workspace !== "object" || workspace === null || Array.isArray(workspace)) return [];
+  const repos = (workspace as Record<string, unknown>).repos;
+  return Array.isArray(repos) ? repos.flatMap((repo) => typeof repo === "string" && repo.trim() ? [repo.trim()] : []) : [];
+}
+
+function hasWorkspaceSettings(repoPath: string): boolean {
+  return fs.existsSync(path.join(repoPath, WORKSPACE_SETTINGS_RELATIVE_PATH));
+}
+
+function isGitRepoRoot(candidate: string): boolean {
+  if (fs.existsSync(path.join(candidate, ".git"))) return true;
+  try {
+    const root = child_process.execFileSync("git", ["-C", candidate, "rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return fs.realpathSync(root) === fs.realpathSync(candidate);
+  } catch {
+    return false;
+  }
+}
+
+function depthOneGitRepoCount(repoPath: string): number {
+  if (!fs.existsSync(repoPath)) return 0;
+  let count = 0;
+  for (const name of fs.readdirSync(repoPath)) {
+    const candidate = path.join(repoPath, name);
+    if (!fs.statSync(candidate).isDirectory()) continue;
+    if (isGitRepoRoot(candidate)) count += 1;
+    if (count >= 2) return count;
+  }
+  return count;
+}
+
+function isWorkspacePath(repoPath: string): boolean {
+  return hasWorkspaceSettings(repoPath) || depthOneGitRepoCount(repoPath) >= 2;
+}
+
 function defaultProjectSettingsPath(): string {
   let cursor = path.dirname(fileURLToPath(import.meta.url));
   while (true) {
@@ -70,13 +116,33 @@ function defaultProjectSettingsPath(): string {
 }
 
 function effective(repoPath: string, projectSettings: string, globalSettings: string): [Record<string, unknown>, number] {
+  const globalDoc = loadSettings(globalSettings);
+  const root = gitRoot(repoPath);
+  if (!root && isWorkspacePath(repoPath)) {
+    const workspaceSettings = path.join(repoPath, WORKSPACE_SETTINGS_RELATIVE_PATH);
+    const workspaceDoc = loadSettings(workspaceSettings);
+    const effectiveSettings = merge(globalDoc?.defaults, workspaceDoc?.defaults);
+    const repos = workspaceRepos(workspaceDoc);
+    if (effectiveSettings) {
+      if (repos.length) (effectiveSettings as Record<string, unknown>).workspace = { repos };
+      return [{
+        status: "configured",
+        scope: "workspace",
+        workspace: { root: repoPath, settings_path: workspaceSettings, repos },
+        source: workspaceDoc?.defaults ? "workspace" : "global",
+        precedence: ["workspace.defaults", "global.defaults"],
+        settings: effectiveSettings,
+      }, 0];
+    }
+    return [{ status: "ask_user", scope: "workspace", reason: "no_backlog_provider_settings", message: "Ask the user which backlog WorkItemProvider and BoardProvider to use for this workspace.", workspace: { root: repoPath, settings_path: workspaceSettings, repos }, resolution: { workspace_settings_path: workspaceSettings, global_settings_path: globalSettings, checked: ["workspace", "global"] } }, 2];
+  }
+
   const repo = currentRepo(repoPath);
   const projectDoc = loadSettings(projectSettings);
-  const globalDoc = loadSettings(globalSettings);
   if (!repo) return [{ status: "ask_user", reason: "could_not_identify_current_repo", message: "Ask the user which backlog WorkItemProvider and BoardProvider to use for this workspace.", resolution: { project_settings_path: projectSettings, global_settings_path: globalSettings } }, 2];
   const effectiveSettings = merge(merge(merge(globalDoc?.defaults, findProject(globalDoc, repo)), projectDoc?.defaults), findProject(projectDoc, repo));
   if (!effectiveSettings) return [{ status: "ask_user", reason: "no_backlog_provider_settings", message: "Ask the user which backlog WorkItemProvider and BoardProvider to use before selecting work.", current_repo: repo, resolution: { project_settings_path: projectSettings, global_settings_path: globalSettings, checked: ["project", "global"] } }, 2];
-  return [{ status: "configured", current_repo: repo, source: findProject(projectDoc, repo) || projectDoc?.defaults ? "project" : "global", precedence: ["project.projects match", "project.defaults", "global.projects match", "global.defaults"], settings: effectiveSettings }, 0];
+  return [{ status: "configured", scope: "repo", current_repo: repo, source: findProject(projectDoc, repo) || projectDoc?.defaults ? "project" : "global", precedence: ["project.projects match", "project.defaults", "global.projects match", "global.defaults"], settings: effectiveSettings }, 0];
 }
 
 export function main(argv = process.argv.slice(2)): number {
