@@ -2,7 +2,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -2849,6 +2849,7 @@ async function promote(p: ReturnType<typeof parseArgs>): Promise<number> {
     await publishDelivery(dir, publishRepoRoot).catch((err: unknown) => {
       if (err instanceof InvalidBundleShapeError) throw err;
       if (err instanceof NotFreshHolderError) throw err;
+      if (err instanceof RepoHeadMismatchError) throw err;
       process.stderr.write(`[promote] WARNING: publish-delivery failed: ${err instanceof Error ? err.message : String(err)}\n`);
     });
   }
@@ -2924,6 +2925,7 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
     await publishDelivery(dir, publishRepoRoot).catch((err: unknown) => {
       if (err instanceof InvalidBundleShapeError) throw err;
       if (err instanceof NotFreshHolderError) throw err;
+      if (err instanceof RepoHeadMismatchError) throw err;
       process.stderr.write(`[advance-state] WARNING: publish-delivery failed: ${err instanceof Error ? err.message : String(err)}\n`);
     });
   }
@@ -3023,6 +3025,7 @@ async function recordRelease(p: ReturnType<typeof parseArgs>): Promise<number> {
   await publishDelivery(dir, publishRepoRoot).catch((err: unknown) => {
     if (err instanceof InvalidBundleShapeError) throw err;
     if (err instanceof NotFreshHolderError) throw err;
+    if (err instanceof RepoHeadMismatchError) throw err;
     process.stderr.write(`[record-release] WARNING: publish-delivery failed: ${err instanceof Error ? err.message : String(err)}\n`);
   });
   return 0;
@@ -3376,6 +3379,41 @@ export class NotFreshHolderError extends Error {
 }
 
 /**
+ * Distinct, identifiable error for a publish attempt whose resolved `repoRoot` does not
+ * positively confirm the session's sealed `trust.checkpoint.json` `commit_sha` — a FOURTH,
+ * distinct fail-closed tier (#413 Facet A), never conflated with `InvalidBundleShapeError`
+ * (bundle shape) or `NotFreshHolderError` (actor hold). This is the "refuse loudly when the cwd
+ * repo does not match the sealed checkpoint commit_sha" fallback the issue itself proposed:
+ * `publishDelivery`'s `repoRoot` is resolved by walking up from the ARTIFACT directory
+ * (findRepoRootFromDirStrict), which always physically lives under the primary checkout even
+ * when invoked from an unrelated worktree/repo — so a positively-confirmed mismatch here is the
+ * signal that this resolved repoRoot is NOT the repo the sealed checkpoint was produced against,
+ * and publishing into it would silently write to the wrong tree.
+ *
+ * #413 iteration-2 Fix 4: thrown for the ONE positively-determinable `mismatchKind` (see
+ * checkpointHeadAncestry's doc comment) — `"positive"` (repoRoot's HEAD is confirmed NOT an
+ * ancestor-or-equal of commit_sha; `headSha` is a real sha). It is intentionally NEVER thrown for
+ * `"undeterminable-shallow"` (e.g. a shallow clone missing the commit object) — that case only
+ * warns and allows the publish (see publishDelivery's own gate). A non-git `repoRoot` classifies
+ * as `mismatchKind === "none"` (no opinion — allow; see checkpointHeadAncestry's doc comment for
+ * why the iteration-2 Fix 5 refusal here was reverted in iteration-3) and never throws this error
+ * either.
+ */
+export class RepoHeadMismatchError extends Error {
+  readonly code = "PUBLISH_DELIVERY_REPO_HEAD_MISMATCH" as const;
+  readonly repoRoot: string;
+  readonly commitSha: string;
+  readonly headSha: string;
+  constructor(repoRoot: string, commitSha: string, headSha: string) {
+    super(`publish-delivery refused — resolved repoRoot '${repoRoot}' HEAD '${headSha}' is not an ancestor-or-equal of the sealed trust.checkpoint.json commit_sha '${commitSha}'. This usually means repoRoot was resolved to the wrong checkout (e.g. invoked from a worktree whose artifact dir physically lives under a different primary checkout), or repoRoot is not a valid git working tree at all. Pass --repo-root explicitly naming the checkout whose HEAD matches '${commitSha}', or re-seal the checkpoint (seal-checkpoint) against this repoRoot's current HEAD if this really is the intended target.`);
+    this.name = "RepoHeadMismatchError";
+    this.repoRoot = repoRoot;
+    this.commitSha = commitSha;
+    this.headSha = headSha;
+  }
+}
+
+/**
  * Human-actionable fix text per divergence type (Q2: unwaived-assumed's message always
  * carries the "waiver voided by a mixed record-evidence call" root-cause hint — shape #5 is
  * NOT a distinct predicate, it is #2 enriched, per the plan's Q2 resolution).
@@ -3415,35 +3453,122 @@ function preflightFixHint(type: string): string {
  * @param repoRoot repo root used for manifest resolution + the optional ancestor warning
  * @param manifestOverride optional --manifest JSON string (CLI passthrough)
  */
-type TrustReconcileHelper = ReturnType<typeof loadTrustReconcileHelper>;
+
+/**
+ * #413 Facet A: best-effort single-direction ancestor check scoped to the specific needs of
+ * checkpointHeadAncestry's hard-refuse gate — is `ancestorSha` positively determinable as an
+ * ancestor of (or equal to) `descendantSha` in `repoRoot`, OR positively determinable as NOT an
+ * ancestor, OR is the question simply UNDETERMINABLE here (shallow clone missing the object,
+ * unknown/garbage sha, git itself unusable, etc.)? This is intentionally a SEPARATE, local
+ * classification from `trust-reconcile.js`'s shared `isAncestorCommit()` (which the rest of the
+ * repo, including checkpointStalenessWarning's own non-blocking warning below, correctly keeps
+ * as a simple best-effort boolean that "fails toward false/stale" for every non-CI caller) —
+ * that collapsed boolean is exactly right for a WARNING, but wrong for a HARD REFUSE gate: a
+ * shallow clone's git-object-missing failure and a genuine cross-repo mismatch both surface as
+ * `false` there, yet only the second is real harm (#413 iteration-2 Fix 4). `git merge-base
+ * --is-ancestor` itself already distinguishes these at the exit-code level (0 = ancestor, 1 =
+ * positively NOT an ancestor, anything else / a spawn failure = underivable), so this reuses
+ * that primitive directly rather than duplicating trust-reconcile.js's collapsed wrapper.
+ */
+function classifyAncestry(repoRoot: string, ancestorSha: string, descendantSha: string): "ancestor" | "not-ancestor" | "undeterminable" {
+  if (!ancestorSha || !descendantSha) return "undeterminable";
+  try {
+    const res = spawnSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], {
+      cwd: repoRoot,
+      stdio: "ignore",
+    });
+    if (!res || res.error) return "undeterminable";
+    if (res.status === 0) return "ancestor";
+    if (res.status === 1) return "not-ancestor";
+    return "undeterminable"; // e.g. 128 (unknown commit, shallow clone missing the object, etc.)
+  } catch {
+    return "undeterminable";
+  }
+}
+
+/**
+ * #413 Facet A: read `trust.checkpoint.json`'s `commit_sha` (if the checkpoint exists and
+ * carries one) and resolve `git rev-parse HEAD` with an EXPLICIT `{ cwd: repoRoot }` (never the
+ * bare no-cwd pattern `resolveCommitSha()` uses — see that function's own doc comment for why
+ * that variant is intentionally cwd-inheriting for the seal-checkpoint path, and must not be
+ * reused here). Returns `{ commitSha: null }` when there is no checkpoint or no commit_sha yet
+ * (a session with nothing sealed has nothing to compare against — callers must treat this as
+ * "no opinion", never as a mismatch). Returns `{ commitSha, headSha, isAncestor }` when both
+ * shas are resolvable. This is the ONE shared comparison both `checkpointStalenessWarning`
+ * (non-blocking) and `publishDelivery`'s hard refuse gate (fail-closed) call — never a second,
+ * independently-drifting git shell-out.
+ *
+ * #413 iteration-2 Fix 4 (scoped to the hard-refuse tier ONLY — checkpointStalenessWarning's
+ * non-blocking warning is intentionally unaffected, see its own doc comment): the returned
+ * `isAncestor` stays a simple boolean (`true` unless POSITIVELY determined false) for backward
+ * compatibility with that warning caller, but the `mismatchKind` field lets publishDelivery's
+ * hard gate distinguish these cases precisely:
+ *   - "none": no checkpoint, no commit_sha, `repoRoot` is not a git working tree at all (or is a
+ *     freshly-initialized repo with no resolvable HEAD), or the commit_sha IS an
+ *     ancestor-or-equal of HEAD — never refuse. A non-git `repoRoot` is a SUPPORTED flow (e.g.
+ *     checkpoint-signing against a bare scratch dir — see evals/integration/test_checkpoint_signing.sh
+ *     TEST 2), not a mismatch signal: there is no HEAD to compare against, so this is "no
+ *     opinion", exactly like the no-checkpoint case above.
+ *   - "positive": repoRoot is a real git working tree, HEAD resolves, AND commit_sha is
+ *     POSITIVELY determined to NOT be an ancestor of HEAD (`git merge-base --is-ancestor` exits
+ *     1, a real answer, not a failure) — the genuine wrong-tree harm case; hard refuse.
+ *   - "undeterminable-shallow": repoRoot is a real git working tree, HEAD resolves, but whether
+ *     commit_sha is an ancestor of HEAD could not be determined (e.g. a shallow clone missing
+ *     the commit_sha object) — must NOT hard-refuse a legitimate publish from a shallow clone;
+ *     warn loudly and allow (the shape + verify-hold gates still stand).
+ *
+ * #413 iteration-2 Fix 5 (reverted, iteration-3): a prior pass hard-refused here when `repoRoot`
+ * was not a git working tree at all but a sealed commit_sha existed ("a sealed delivery implies
+ * the target should be a real git repo"). That premise is false — publishing against a non-git
+ * `repoRoot` is a supported scratch/checkpoint-signing flow, and the refusal regressed
+ * `evals/integration/test_checkpoint_signing.sh` TEST 2. The accepted residual: a non-git
+ * `repoRoot` with a sealed checkpoint is ALLOWED here; wrong-tree protection for a REAL git
+ * repoRoot relies on this function's ancestry (HEAD-vs-commit_sha) check plus the shape-check and
+ * verify-hold gates in publishDelivery, all of which correctly no-op (allow) when there is no git
+ * HEAD to compare against.
+ */
+function checkpointHeadAncestry(dir: string, repoRoot: string): { commitSha: string | null; headSha: string | null; isAncestor: boolean; mismatchKind: "none" | "positive" | "undeterminable-shallow" } {
+  try {
+    const checkpointPath = path.join(dir, "trust.checkpoint.json");
+    if (!fs.existsSync(checkpointPath)) return { commitSha: null, headSha: null, isAncestor: true, mismatchKind: "none" };
+    const checkpoint = loadJson(checkpointPath);
+    const commitSha = checkpoint && typeof checkpoint === "object" ? (checkpoint as AnyObj).commit_sha : undefined;
+    if (typeof commitSha !== "string" || !commitSha) return { commitSha: null, headSha: null, isAncestor: true, mismatchKind: "none" };
+    let headSha = "";
+    try {
+      headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    } catch {
+      headSha = "";
+    }
+    // repoRoot is not a git working tree at all (non-git scratch dir) or is a freshly-initialized
+    // repo with no resolvable HEAD yet — "no opinion", never a mismatch (see doc comment above).
+    if (!headSha) return { commitSha, headSha: null, isAncestor: true, mismatchKind: "none" };
+    const classification = classifyAncestry(repoRoot, commitSha, headSha);
+    const isAncestor = classification !== "not-ancestor";
+    const mismatchKind: "none" | "positive" | "undeterminable-shallow" =
+      classification === "ancestor" ? "none" : classification === "not-ancestor" ? "positive" : "undeterminable-shallow";
+    return { commitSha, headSha, isAncestor, mismatchKind };
+  } catch {
+    // best-effort only — a resolution failure must never be misread as a mismatch.
+    return { commitSha: null, headSha: null, isAncestor: true, mismatchKind: "none" };
+  }
+}
 
 /**
  * F4 (iteration-1): extracted from runReconcilePreflight so the main function stays under
  * the 50-line guideline. Q3 (optional, non-blocking): warn if the checkpoint's commit_sha is
- * not yet an ancestor of local HEAD — never affects ok/exit code, best-effort only. Already a
- * self-contained try/catch with no effect on the caller's `ok`/`issues`.
+ * not yet an ancestor of local HEAD — never affects ok/exit code, best-effort only. Delegates
+ * to checkpointHeadAncestry (the shared comparison helper #413 Facet A's hard gate also uses)
+ * so the warning path and the hard-refuse path can never independently drift. #413 iteration-2:
+ * intentionally keeps using the plain `isAncestor` boolean (never `mismatchKind`) — a shallow
+ * clone's undeterminable case still deserves this SAME staleness-flavored warning text, it just
+ * must never become a hard refuse (see publishDelivery's own gate for that distinction).
  */
-function checkpointStalenessWarning(dir: string, repoRoot: string, tr: TrustReconcileHelper): string[] {
+function checkpointStalenessWarning(dir: string, repoRoot: string): string[] {
   const warnings: string[] = [];
-  try {
-    const checkpointPath = path.join(dir, "trust.checkpoint.json");
-    if (fs.existsSync(checkpointPath)) {
-      const checkpoint = loadJson(checkpointPath);
-      const commitSha = checkpoint && typeof checkpoint === "object" ? (checkpoint as AnyObj).commit_sha : undefined;
-      if (typeof commitSha === "string" && commitSha) {
-        let headSha = "";
-        try {
-          headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-        } catch {
-          headSha = "";
-        }
-        if (headSha && !tr.isAncestorCommit(repoRoot, commitSha, headSha)) {
-          warnings.push(`NON-BLOCKING: trust.checkpoint.json commit_sha '${commitSha}' is not an ancestor of local HEAD '${headSha}' — the checkpoint may be stale (e.g. after an amend/rebase). Consider re-sealing (seal-checkpoint) before publishing. This is a warning only — see #335 for the full checkpoint-staleness ownership check.`);
-        }
-      }
-    }
-  } catch {
-    // best-effort only — never affects ok/exit code.
+  const { commitSha, headSha, isAncestor } = checkpointHeadAncestry(dir, repoRoot);
+  if (commitSha && headSha && !isAncestor) {
+    warnings.push(`NON-BLOCKING: trust.checkpoint.json commit_sha '${commitSha}' is not an ancestor of local HEAD '${headSha}' — the checkpoint may be stale (e.g. after an amend/rebase). Consider re-sealing (seal-checkpoint) before publishing. This is a warning only — see #335 for the full checkpoint-staleness ownership check.`);
   }
   return warnings;
 }
@@ -3494,7 +3619,7 @@ export function runReconcilePreflight(
   issues.push(...sessionLocalIssues);
 
   const report = issues.map((i) => `${i.message} — ${preflightFixHint(i.type)}`);
-  const warnings = checkpointStalenessWarning(dir, repoRoot, tr);
+  const warnings = checkpointStalenessWarning(dir, repoRoot);
 
   return { ok: report.length === 0, issues: report, warnings };
 }
@@ -3996,49 +4121,45 @@ async function takeoverPreflightCmd(p: ReturnType<typeof parseArgs>): Promise<nu
 // Also exposed as the `publish-delivery <artifact-dir>` subcommand for explicit use.
 
 /**
- * #379 supersede-on-publish cleanup: keep delivery/ bounded by pruning inherited PER-SESSION
- * seal dirs (the growth vector), scoped to avoid any cross-PR conflict.
+ * #413 Facet B: prune ONLY keepSlug's OWN prior seal — NEVER another session's
+ * `delivery/<other-slug>/` directory.
  *
- * An inherited per-session seal dir (`delivery/<other-slug>/`) is UNIQUELY named, so pruning
- * it can never conflict with a concurrent PR: two branches deleting the same inherited dir is
- * a delete/delete (auto-merges), and each new delivery adds its OWN distinct
- * `delivery/<slug>/`. And it is HARMLESS to leave: trust-reconcile.js's prefer-newest
- * ownership selection always picks THIS session's fresher bundle over an older inherited one.
- * Pruning is therefore purely to stop unbounded accumulation of permanently-superseded dirs.
+ * This function previously (#379) deleted ANY non-keepSlug directory under delivery/ that
+ * "looked like a seal" (contained a trust.bundle or trust.checkpoint.json), on the theory that
+ * an inherited per-session seal dir is harmless to leave and therefore harmless to delete too.
+ * That theory was correct about harmlessness-if-left but did not follow that deletion was
+ * therefore SAFE: issue #413's own corrected evidence reports this exact cross-slug loop
+ * deleted a DIFFERENT, still-in-flight actor's active seal on a different branch
+ * (`delivery/kontourai-flow-agents-349/`) — a real, observed destructive side effect with no
+ * compensating correctness benefit. trust-reconcile.js's own PREFER-NEWEST doc comment
+ * (resolveDeliveryCandidates, ~line 480-491) already establishes that leaving an
+ * inherited/older seal in place is harmless — the reconciler always selects the newest owning
+ * bundle regardless of what else is present — so there is no correctness reason to prune
+ * ANOTHER session's seal at all, ever. The safest fix (and the one issue #413's own corrected
+ * comment endorses — "never prune another session's active seal", no same-branch carve-out) is
+ * to stop cross-slug pruning entirely, not merely narrow its blast radius.
  *
- * The SHARED FLAT path (`delivery/trust.bundle` + checkpoints) is deliberately NOT pruned
- * here. During the migration window other concurrent PRs may still seal to the flat path;
- * deleting it would produce a modify/delete conflict → a DIRTY PR → the no-CI failure this
- * whole change fixes. The flat path is a single fixed location (not a growth vector) and the
- * reconciler treats a stale flat bundle as non-owning / older-owning, so leaving it is safe.
- * Removing the flat legacy seals is a one-time cleanup for a dedicated PR once no open PR
- * still seals to it — intentionally NOT bundled into every delivery.
+ * The only pruning responsibility that legitimately remains here is keepSlug's OWN prior seal:
+ * publishDelivery() is about to freshly (re)write `delivery/<keepSlug>/trust.bundle` and its
+ * companions, but `fs.copyFileSync` only overwrites files that exist in the CURRENT session dir
+ * — a companion that existed in a PRIOR publish of this exact slug (e.g.
+ * trust.checkpoint.sig.json) but is absent from this publish would otherwise linger stale
+ * alongside the freshly-written files. Removing keepSlug's own existing directory before it is
+ * recreated (by the caller, immediately after this call) avoids that same-slug staleness
+ * without touching any OTHER slug's directory.
  *
  * Best-effort: a prune failure is logged, never fatal to the delivery. Never touches
- * README.md, DECLARED, the flat seal files, or any subdir that is not itself a seal dir.
+ * README.md, DECLARED, the flat seal files (delivery/trust.bundle at the shared flat path,
+ * deliberately untouched — see the historical #379 rationale on the flat-path migration
+ * window), or any directory other than keepSlug's own.
  */
 function pruneSupersededSeals(deliveryDir: string, keepSlug: string): void {
-  let entries: fs.Dirent[] = [];
+  const ownDir = path.join(deliveryDir, keepSlug);
+  if (!fs.existsSync(ownDir)) return; // nothing to prune yet — first publish for this slug.
   try {
-    entries = fs.readdirSync(deliveryDir, { withFileTypes: true });
-  } catch {
-    entries = [];
-  }
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name === keepSlug) continue;
-    const subdir = path.join(deliveryDir, entry.name);
-    // Only prune dirs that actually look like a seal dir (contain a trust.bundle or
-    // trust.checkpoint.json) — never an unrelated directory a human placed under delivery/.
-    const looksLikeSeal =
-      fs.existsSync(path.join(subdir, "trust.bundle")) ||
-      fs.existsSync(path.join(subdir, "trust.checkpoint.json"));
-    if (!looksLikeSeal) continue;
-    try {
-      fs.rmSync(subdir, { recursive: true, force: true });
-      process.stderr.write(`[publish-delivery] #379: pruned superseded per-session seal delivery/${entry.name}/ (older-owning/stale; the reconciler selects the newest bundle regardless)\n`);
-    } catch (err) {
-      process.stderr.write(`[publish-delivery] #379: could not prune per-session seal delivery/${entry.name}/ (non-fatal): ${err instanceof Error ? err.message : String(err)}\n`);
-    }
+    fs.rmSync(ownDir, { recursive: true, force: true });
+  } catch (err) {
+    process.stderr.write(`[publish-delivery] #413: could not prune this session's own prior seal delivery/${keepSlug}/ before rewriting it (non-fatal, publish continues): ${err instanceof Error ? err.message : String(err)}\n`);
   }
 }
 
@@ -4078,17 +4199,44 @@ function pruneSupersededSeals(deliveryDir: string, keepSlug: string): void {
  * which stay exactly as before (see each publishDelivery call site's catch handler for how
  * the distinction is preserved end-to-end).
  *
- * #293 (SECOND, DISTINCT fail-closed gate): immediately after the shape check above and BEFORE
+ * #293 (THIRD, DISTINCT fail-closed gate): immediately after the shape check above and BEFORE
  * writing anything into delivery/, runs `runVerifyHold()` — the assignment ⋈ liveness join
  * asking "is the calling actor the fresh, non-superseded holder of this subject (or is it
  * free/self-held)?" A not-fresh-holder result throws `NotFreshHolderError` (distinct from
  * `InvalidBundleShapeError` — a different `code`, a different failure mode: actor hold vs
- * bundle shape). There are now THREE tiers here, and they must never be conflated in prose or
- * in a call site's catch handler: (1) fail-SOFT bundle absence / repo-root resolution (silent
- * no-op / visible warning, unchanged from before #356), (2) fail-CLOSED bundle shape (#356,
- * `InvalidBundleShapeError`), (3) fail-CLOSED verify-hold (#293, `NotFreshHolderError`). The
- * shape check runs first (per the plan's ordering) — a bundle that is BOTH shape-invalid and
- * not-held throws `InvalidBundleShapeError` specifically, never `NotFreshHolderError`.
+ * bundle shape).
+ *
+ * #413 Facet A (FOURTH, DISTINCT fail-closed gate): immediately after the verify-hold gate and
+ * BEFORE writing anything into delivery/, compares the resolved `repoRoot`'s `git rev-parse
+ * HEAD` against the session's sealed `trust.checkpoint.json` `commit_sha` (via the shared
+ * checkpointHeadAncestry() helper — the SAME ancestor-check checkpointStalenessWarning already
+ * used as a non-blocking warning). Throws `RepoHeadMismatchError` (distinct from both other
+ * error tiers) instead of silently publishing into what is very likely the WRONG repo (e.g.
+ * `repoRoot` resolved to the primary checkout via findRepoRootFromDirStrict's artifact-dir
+ * walk, even though this session's checkpoint was sealed against a DIFFERENT worktree's HEAD).
+ * A session with no checkpoint yet, or a checkpoint with no commit_sha, has nothing to compare
+ * against and is unaffected (scoped strictly to the mismatch case, never a spurious refusal).
+ *
+ * #413 iteration-2 Fix 4 (see checkpointHeadAncestry's own doc comment for the full
+ * `mismatchKind` classification this gate reads): only `mismatchKind === "positive"` (a
+ * POSITIVELY-DETERMINABLE ancestry mismatch — the real wrong-tree harm case) hard refuses here.
+ * `"undeterminable-shallow"` (e.g. a local shallow clone missing the commit_sha object) must
+ * NEVER hard-refuse a legitimate publish — this branch only WARNS loudly and lets the shape +
+ * verify-hold gates above continue to stand guard. A non-git `repoRoot` classifies as
+ * `mismatchKind === "none"` (allow) — iteration-2's Fix 5 hard-refused this case too, but that
+ * regressed the SUPPORTED non-git-repoRoot scratch/checkpoint-signing flow (see
+ * evals/integration/test_checkpoint_signing.sh TEST 2) and was reverted in iteration-3. Wrong-tree
+ * protection for that case relies on the shape-check and verify-hold gates above, which correctly
+ * no-op (allow) when there is no git repo to inspect, same as this gate.
+ *
+ * There are now FOUR fail-closed/fail-soft TIERS in this function, and they must never be
+ * conflated in prose or in a call site's catch handler: (1) fail-SOFT bundle absence /
+ * repo-root resolution (silent no-op / visible warning, unchanged from before #356), (2)
+ * fail-CLOSED bundle shape (#356, `InvalidBundleShapeError`), (3) fail-CLOSED verify-hold (#293,
+ * `NotFreshHolderError`), (4) fail-CLOSED repo-HEAD-vs-checkpoint mismatch (#413 Facet A,
+ * `RepoHeadMismatchError`) — see this tier's own gate below for the undeterminable-shallow
+ * carve-out. Tiers run in this fixed order (shape, then verify-hold, then HEAD-mismatch); a
+ * bundle that fails an earlier tier throws that tier's error specifically, never a later one's.
  */
 export async function publishDelivery(dir: string, repoRoot: string | null): Promise<void> {
   const bundleSrc = path.join(dir, "trust.bundle");
@@ -4099,10 +4247,8 @@ export async function publishDelivery(dir: string, repoRoot: string | null): Pro
     return;
   }
 
-  // #356 AC6: fail-CLOSED on shape-invalidity — runs AFTER the fail-soft absence/repo-root
-  // guards above (both preserved unchanged) and BEFORE any copy into delivery/. Throws
-  // InvalidBundleShapeError (never a generic Error) so every call site can positively
-  // distinguish this from the failure modes they already tolerate as best-effort.
+  // #356 AC6: fail-CLOSED on shape-invalidity — TIER 2 (see this function's doc comment above
+  // for the full tier ordering). Throws InvalidBundleShapeError (never a generic Error).
   const preflight = runReconcilePreflight(dir, repoRoot);
   if (!preflight.ok) {
     process.stderr.write(`[publish-delivery] REFUSING to publish — trust.bundle failed the reconcile-preflight shape check (${preflight.issues.length} issue(s)):\n`);
@@ -4112,15 +4258,28 @@ export async function publishDelivery(dir: string, repoRoot: string | null): Pro
     throw new InvalidBundleShapeError(preflight.issues);
   }
 
-  // #293: SECOND, DISTINCT fail-closed gate — runs after the shape check above and before any
-  // copy into delivery/. Throws NotFreshHolderError (never conflated with InvalidBundleShapeError)
-  // so every call site can positively distinguish "not the fresh holder" from "bundle shape
-  // invalid".
+  // #293: fail-CLOSED verify-hold — TIER 3 (see this function's doc comment above). Throws
+  // NotFreshHolderError (never conflated with InvalidBundleShapeError).
   const holdCheck = runVerifyHold(dir, repoRoot);
   if (!holdCheck.ok) {
     process.stderr.write(`[publish-delivery] REFUSING to publish — verify-hold gate: ${holdCheck.reason}\n`);
     for (const line of holdCheck.guidance) process.stderr.write(`[publish-delivery]   - ${line}\n`);
     throw new NotFreshHolderError(holdCheck);
+  }
+
+  // #413 Facet A: FOURTH, DISTINCT fail-closed gate (see this function's doc comment above for
+  // the full four-tier ordering, and checkpointHeadAncestry's doc comment for the
+  // Fix 4 mismatchKind classification this reads).
+  const ancestry = checkpointHeadAncestry(dir, repoRoot);
+  if (ancestry.mismatchKind === "positive" && ancestry.commitSha && ancestry.headSha) {
+    process.stderr.write(`[publish-delivery] REFUSING to publish — resolved repoRoot '${repoRoot}' HEAD '${ancestry.headSha}' is not an ancestor-or-equal of the sealed trust.checkpoint.json commit_sha '${ancestry.commitSha}'. This resolved repoRoot is very likely the WRONG checkout for this session (e.g. invoked from a worktree whose artifact dir physically lives under a different primary checkout). Pass --repo-root explicitly, or re-seal the checkpoint against this repoRoot if it really is the intended target.\n`);
+    throw new RepoHeadMismatchError(repoRoot, ancestry.commitSha, ancestry.headSha);
+  }
+  if (ancestry.mismatchKind === "undeterminable-shallow" && ancestry.commitSha && ancestry.headSha) {
+    // #413 iteration-2 Fix 4: NEVER hard-refuse here — a shallow clone (or any other case where
+    // git cannot positively determine ancestry) must not spuriously block a legitimate publish.
+    // The shape + verify-hold gates above already ran and passed; this is warn-and-allow only.
+    process.stderr.write(`[publish-delivery] WARNING: could not determine whether trust.checkpoint.json commit_sha '${ancestry.commitSha}' is an ancestor of repoRoot '${repoRoot}' HEAD '${ancestry.headSha}' (e.g. a shallow clone missing the commit object) — allowing the publish since this is UNDETERMINABLE, not a positively-confirmed mismatch. The shape and verify-hold gates already passed.\n`);
   }
 
   const deliveryDir = path.join(repoRoot, "delivery");
@@ -4131,7 +4290,8 @@ export async function publishDelivery(dir: string, repoRoot: string | null): Pro
   const sessionDeliveryDir = path.join(deliveryDir, slug);
 
   fs.mkdirSync(deliveryDir, { recursive: true });
-  // Supersede inherited/flat seals BEFORE writing this session's dir (keepSlug = our own).
+  // #413 Facet B: prune only THIS session's own prior seal (never another slug's) before
+  // freshly rewriting delivery/<slug>/ below.
   pruneSupersededSeals(deliveryDir, slug);
   fs.mkdirSync(sessionDeliveryDir, { recursive: true });
 

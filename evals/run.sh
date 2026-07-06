@@ -227,6 +227,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_liveness_heartbeat.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_liveness_worktree_root.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_pull_work_liveness_preflight.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_liveness_verdict.sh" || result=1
