@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parseArgs, flagList, flagString } from "../lib/args.js";
 
@@ -27,8 +28,39 @@ type FreshnessContext = {
   scopeIntersections: string[];
 };
 
+type BoardIssue = {
+  id?: string;
+  node_id?: string;
+  owner?: string;
+  repo?: string;
+  number: number;
+  title: string;
+  body?: string;
+  state?: string;
+  labels: string[];
+  url?: string;
+  updatedAt?: string;
+  createdAt?: string;
+};
+
+type BoardItem = {
+  id?: string;
+  position: number;
+  status?: string;
+  priority?: string;
+  issue: BoardIssue | null;
+};
+
 function loadJson(file: string): unknown {
   return file === "-" ? JSON.parse(fs.readFileSync(0, "utf8")) : JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function arrayValue(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
 function names(values: unknown): string[] {
@@ -38,7 +70,18 @@ function names(values: unknown): string[] {
 function statusKey(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const key = value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
-  return ({ todo: "todo", to_do: "todo", ready: "ready", doing: "in_progress", in_progress: "in_progress", blocked: "blocked", review: "review", verification: "verification", done: "done", closed: "done" } as Record<string, string>)[key] ?? key;
+  return ({ open: "todo", todo: "todo", to_do: "todo", ready: "ready", doing: "in_progress", in_progress: "in_progress", blocked: "blocked", review: "review", verification: "verification", done: "done", closed: "done" } as Record<string, string>)[key] ?? key;
+}
+
+function normalizedText(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : null;
+}
+
+function repoKey(owner: unknown, repo: unknown, number: unknown): string | null {
+  const issueNumber = Number(number);
+  return typeof owner === "string" && typeof repo === "string" && Number.isFinite(issueNumber)
+    ? `${owner}/${repo}#${issueNumber}`
+    : null;
 }
 
 function projectStatus(issue: Record<string, unknown>): string | null {
@@ -412,6 +455,260 @@ function normalize(issue: Record<string, unknown>, settings: Record<string, unkn
   };
 }
 
+function fieldValueByName(item: Record<string, unknown>, fieldName: string): string | undefined {
+  const wanted = fieldName.toLowerCase();
+  const direct = item[fieldName] ?? item[fieldName.toLowerCase()];
+  if (typeof direct === "string") return direct;
+  const fieldValues = Array.isArray(item.fieldValues) ? item.fieldValues : arrayValue(asRecord(item.fieldValues)?.nodes);
+  for (const value of fieldValues) {
+    const record = asRecord(value);
+    if (!record) continue;
+    const field = asRecord(record.field);
+    const name = normalizedText(field?.name);
+    if (name !== wanted) continue;
+    return stringValue(record.name) ?? stringValue(record.text) ?? stringValue(record.value) ?? stringValue(record.optionName);
+  }
+  return undefined;
+}
+
+function normalizeBoardIssue(rawIssue: unknown, fallbackOwner?: string, fallbackRepo?: string): BoardIssue | null {
+  const issue = asRecord(rawIssue);
+  if (!issue) return null;
+  const number = Number(issue.number);
+  if (!Number.isFinite(number)) return null;
+  const repository = asRecord(issue.repository);
+  const owner = stringValue(issue.owner) ?? stringValue(asRecord(repository?.owner)?.login) ?? fallbackOwner;
+  const repo = stringValue(issue.repo) ?? stringValue(issue.repositoryName) ?? stringValue(repository?.name) ?? fallbackRepo;
+  return {
+    id: stringValue(issue.id),
+    node_id: stringValue(issue.node_id) ?? stringValue(issue.id),
+    owner,
+    repo,
+    number,
+    title: stringValue(issue.title) ?? `#${number}`,
+    body: stringValue(issue.body) ?? "",
+    state: stringValue(issue.state) ?? "OPEN",
+    labels: names(issue.labels).concat(arrayValue(asRecord(issue.labels)?.nodes).flatMap((label) => stringValue(asRecord(label)?.name) ?? [])),
+    url: stringValue(issue.url),
+    updatedAt: stringValue(issue.updatedAt),
+    createdAt: stringValue(issue.createdAt),
+  };
+}
+
+function normalizeBoardItem(rawItem: unknown, index: number, fallbackOwner?: string, fallbackRepo?: string): BoardItem | null {
+  const item = asRecord(rawItem);
+  if (!item) return null;
+  const content = item.content ?? item.issue;
+  const issue = normalizeBoardIssue(content, fallbackOwner, fallbackRepo);
+  if (!issue) return null;
+  const rawPosition = item.position ?? item.databaseId ?? item.index;
+  const position = Number.isFinite(Number(rawPosition)) ? Number(rawPosition) : index;
+  return {
+    id: stringValue(item.id),
+    position,
+    status: fieldValueByName(item, "Status") ?? stringValue(item.status),
+    priority: fieldValueByName(item, "Priority") ?? stringValue(item.priority),
+    issue,
+  };
+}
+
+function boardItemsFromDoc(doc: unknown, settings: Record<string, unknown>): BoardItem[] {
+  const workProvider = settings.work_item_provider as Record<string, unknown>;
+  const repo = workProvider.repo as Record<string, string>;
+  const record = asRecord(doc);
+  const rawItems = Array.isArray(doc)
+    ? doc
+    : arrayValue(record?.project_items).length ? arrayValue(record?.project_items)
+      : arrayValue(record?.projectItems).length ? arrayValue(record?.projectItems)
+        : arrayValue(record?.items).length ? arrayValue(record?.items)
+          : arrayValue(asRecord(asRecord(asRecord(record?.data)?.organization)?.projectV2)?.items).length
+            ? arrayValue(asRecord(asRecord(asRecord(record?.data)?.organization)?.projectV2)?.items)
+            : [];
+  const nodes = rawItems.flatMap((item) => asRecord(item)?.nodes && Array.isArray(asRecord(item)?.nodes) ? arrayValue(asRecord(item)?.nodes) : [item]);
+  return nodes.flatMap((item, index) => normalizeBoardItem(item, index, repo.owner, repo.name) ?? []);
+}
+
+function openIssuesFromDoc(doc: unknown, settings: Record<string, unknown>): BoardIssue[] {
+  const workProvider = settings.work_item_provider as Record<string, unknown>;
+  const repo = workProvider.repo as Record<string, string>;
+  const record = asRecord(doc);
+  const rawIssues = arrayValue(record?.open_issues).length ? arrayValue(record?.open_issues)
+    : arrayValue(record?.issues).length ? arrayValue(record?.issues)
+      : arrayValue(asRecord(asRecord(asRecord(record?.data)?.repository)?.issues)?.nodes);
+  return rawIssues.flatMap((issue) => {
+    const normalized = normalizeBoardIssue(issue, repo.owner, repo.name);
+    return normalized && (normalized.state ?? "OPEN").toUpperCase() === "OPEN" ? [normalized] : [];
+  });
+}
+
+function boardCandidate(item: BoardItem, settings: Record<string, unknown>): Record<string, unknown> {
+  const workProvider = settings.work_item_provider as Record<string, unknown>;
+  const boardProvider = (settings.board_provider ?? {}) as Record<string, unknown>;
+  const issue = item.issue as BoardIssue;
+  const owner = issue.owner ?? ((workProvider.repo as Record<string, string>).owner);
+  const repo = issue.repo ?? ((workProvider.repo as Record<string, string>).name);
+  const body = issue.body ?? "";
+  const metadata = parseWorkItemMetadata(body);
+  const rawStatus = item.status ?? "Todo";
+  return {
+    id: `github:${owner}/${repo}#${issue.number}`,
+    title: issue.title,
+    body,
+    status: statusKey(rawStatus) ?? rawStatus.toLowerCase(),
+    labels: issue.labels,
+    priority: item.priority,
+    ...sourceRevisionFields(metadata, owner, repo),
+    blockers: mergeBlockers(normalizeStructuredBlockers(metadata, owner, repo), blockers(body, owner, repo)),
+    related_links: extractRefs(body, owner, repo),
+    source_provider: { role: "WorkItemProvider", kind: workProvider.kind, owner, repo, number: issue.number, url: issue.url, state: issue.state, node_id: issue.node_id ?? issue.id, capabilities: workProvider.capabilities ?? [] },
+    board_membership: {
+      role: "BoardProvider",
+      kind: boardProvider.kind,
+      board: boardProvider.board,
+      project_item_id: item.id,
+      position: item.position,
+      status: rawStatus,
+      priority: item.priority,
+      capabilities: boardProvider.capabilities ?? [],
+    },
+    artifact_refs: Array.from(body.matchAll(FLOW_ARTIFACT_PATTERN), (m) => (m.groups?.path ?? "").replace(/[.,]+$/, "")),
+    updated_at: issue.updatedAt,
+    created_at: issue.createdAt,
+  };
+}
+
+function priorityRank(priority: unknown): number {
+  const key = String(priority ?? "").trim().toUpperCase();
+  return ({ P0: 0, P1: 1, P2: 2 } as Record<string, number>)[key] ?? 99;
+}
+
+function boardResult(settings: Record<string, unknown>, boardItems: BoardItem[], openIssues: BoardIssue[]): Record<string, unknown> {
+  const selection = (settings.selection ?? {}) as Record<string, unknown>;
+  const filters = (selection.filters ?? {}) as Record<string, unknown>;
+  const readyStatuses = new Set(((filters.ready_statuses as string[] | undefined) ?? ["ready"]).map((status) => status.toLowerCase()));
+  const workProvider = settings.work_item_provider as Record<string, unknown>;
+  const repo = workProvider.repo as Record<string, string>;
+  const candidates = boardItems.map((item) => ({ item, candidate: boardCandidate(item, settings) }));
+  const readyQueue = candidates
+    .filter(({ item }) => readyStatuses.has(String(statusKey(item.status) ?? item.status ?? "").toLowerCase()))
+    .sort((left, right) => priorityRank(left.item.priority) - priorityRank(right.item.priority) || left.item.position - right.item.position)
+    .map(({ candidate }) => candidate);
+  const boardIssueKeys = new Set(boardItems.flatMap((item) => {
+    const issue = item.issue;
+    const key = repoKey(issue?.owner ?? repo.owner, issue?.repo ?? repo.name, issue?.number);
+    return key ? [key] : [];
+  }));
+  const intakeGaps = openIssues
+    .filter((issue) => !boardIssueKeys.has(repoKey(issue.owner ?? repo.owner, issue.repo ?? repo.name, issue.number) ?? ""))
+    .map((issue) => ({
+      id: `github:${issue.owner ?? repo.owner}/${issue.repo ?? repo.name}#${issue.number}`,
+      title: issue.title,
+      status: statusKey(issue.state) ?? "todo",
+      labels: issue.labels,
+      source_provider: { role: "WorkItemProvider", kind: workProvider.kind, owner: issue.owner ?? repo.owner, repo: issue.repo ?? repo.name, number: issue.number, url: issue.url, state: issue.state, node_id: issue.node_id ?? issue.id, capabilities: workProvider.capabilities ?? [] },
+    }));
+  const warnings = readyQueue.length === 0
+    ? [{ code: "zero_ready_items", message: "Configured BoardProvider yielded zero ready items; treat this as a dead readiness source and do not silently fall back to WorkItemProvider issue listing." }]
+    : [];
+  return { ready_queue: readyQueue, intake_gaps: intakeGaps, warnings };
+}
+
+const PROJECT_BOARD_QUERY = `
+query($org: String!, $projectNumber: Int!, $repoOwner: String!, $repoName: String!, $itemCursor: String, $issueCursor: String) {
+  organization(login: $org) {
+    projectV2(number: $projectNumber) {
+      items(first: 100, after: $itemCursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          fieldValues(first: 30) {
+            nodes {
+              ... on ProjectV2ItemFieldSingleSelectValue { name field { ... on ProjectV2FieldCommon { name } } }
+              ... on ProjectV2ItemFieldTextValue { text field { ... on ProjectV2FieldCommon { name } } }
+            }
+          }
+          content {
+            ... on Issue {
+              id
+              number
+              title
+              body
+              state
+              url
+              updatedAt
+              createdAt
+              repository { name owner { login } }
+              labels(first: 50) { nodes { name } }
+            }
+          }
+        }
+      }
+    }
+  }
+  repository(owner: $repoOwner, name: $repoName) {
+    issues(first: 100, after: $issueCursor, states: OPEN) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        id
+        number
+        title
+        body
+        state
+        url
+        updatedAt
+        createdAt
+        repository { name owner { login } }
+        labels(first: 50) { nodes { name } }
+      }
+    }
+  }
+}`;
+
+function ghGraphql(query: string, variables: Record<string, string | number | undefined>): Record<string, unknown> {
+  const args = ["api", "graphql", "-f", `query=${query}`];
+  for (const [key, value] of Object.entries(variables)) {
+    if (value !== undefined && value !== "") args.push("-F", `${key}=${value}`);
+  }
+  return JSON.parse(execFileSync("gh", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })) as Record<string, unknown>;
+}
+
+function liveBoardDoc(settings: Record<string, unknown>): Record<string, unknown> {
+  const workProvider = settings.work_item_provider as Record<string, unknown>;
+  const boardProvider = settings.board_provider as Record<string, unknown>;
+  const workRepo = workProvider.repo as Record<string, string>;
+  const board = boardProvider.board as Record<string, unknown>;
+  const org = stringValue(board.owner) ?? stringValue((boardProvider.repo as Record<string, unknown> | undefined)?.owner) ?? workRepo.owner;
+  const projectNumber = Number(board.number);
+  if (!org || !Number.isFinite(projectNumber)) throw new Error("BoardProvider must configure board.owner or repo.owner and board.number for live reads");
+  const items: unknown[] = [];
+  const issues: unknown[] = [];
+  let itemCursor = "";
+  let issueCursor = "";
+  let fetchItems = true;
+  let fetchIssues = true;
+  while (fetchItems || fetchIssues) {
+    const page = ghGraphql(PROJECT_BOARD_QUERY, {
+      org,
+      projectNumber,
+      repoOwner: workRepo.owner,
+      repoName: workRepo.name,
+      itemCursor,
+      issueCursor,
+    });
+    const projectItems = asRecord(asRecord(asRecord(page.data)?.organization)?.projectV2)?.items as Record<string, unknown> | undefined;
+    const repoIssues = asRecord(asRecord(page.data)?.repository)?.issues as Record<string, unknown> | undefined;
+    if (fetchItems) items.push(...arrayValue(projectItems?.nodes));
+    if (fetchIssues) issues.push(...arrayValue(repoIssues?.nodes));
+    const itemPageInfo = asRecord(projectItems?.pageInfo);
+    const issuePageInfo = asRecord(repoIssues?.pageInfo);
+    fetchItems = Boolean(itemPageInfo?.hasNextPage);
+    fetchIssues = Boolean(issuePageInfo?.hasNextPage);
+    itemCursor = stringValue(itemPageInfo?.endCursor) ?? "";
+    issueCursor = stringValue(issuePageInfo?.endCursor) ?? "";
+  }
+  return { items, issues };
+}
+
 function classify(item: Record<string, unknown>, settings: Record<string, unknown>, resolved: Record<string, string>): Record<string, unknown> {
   const selection = (settings.selection ?? {}) as Record<string, unknown>;
   const filters = (selection.filters ?? {}) as Record<string, unknown>;
@@ -456,7 +753,8 @@ export function main(argv = process.argv.slice(2)): number {
   const args = parseArgs(argv);
   const settingsJson = flagString(args.flags, "settings-json");
   const issuesJson = flagString(args.flags, "issues-json");
-  if (!settingsJson || !issuesJson) throw new Error("--settings-json and --issues-json are required");
+  const itemsJson = flagString(args.flags, "items-json");
+  if (!settingsJson) throw new Error("--settings-json is required");
   const now = new Date(flagString(args.flags, "now") ?? Date.now());
   if (Number.isNaN(now.getTime())) throw new Error("--now must be a valid date/time when provided");
   const freshnessInputs: FreshnessInputs = {
@@ -467,6 +765,11 @@ export function main(argv = process.argv.slice(2)): number {
     now,
   };
   const settings = resolveSettings(loadJson(settingsJson) as Record<string, unknown>);
+  if (itemsJson || !issuesJson) {
+    const doc = itemsJson ? loadJson(itemsJson) : liveBoardDoc(settings);
+    console.log(JSON.stringify(boardResult(settings, boardItemsFromDoc(doc, settings), openIssuesFromDoc(doc, settings)), null, 2));
+    return 0;
+  }
   const issuesDoc = loadJson(issuesJson);
   const issues = Array.isArray(issuesDoc) ? issuesDoc : ((issuesDoc as Record<string, unknown>).items as unknown[] ?? [issuesDoc]);
   const resolved = Object.fromEntries(flagList(args.flags, "resolved-ref").map((item) => item.split("=", 2) as [string, string]));

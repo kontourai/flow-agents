@@ -13,7 +13,7 @@ pass() { echo "  ✓ $1"; }
 fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 
 json_query() {
-  node -e 'const fs=require("fs"); let cur=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); for (const part of process.argv[2].split(".")) cur=part==="length" ? cur.length : (Array.isArray(cur) ? cur[Number(part)] : cur[part]); console.log(cur);' "$1" "$2"
+  NO_COLOR=1 FORCE_COLOR=0 node -e 'const fs=require("fs"); let cur=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); for (const part of process.argv[2].split(".")) cur=part==="length" ? cur.length : (Array.isArray(cur) ? cur[Number(part)] : cur[part]); console.log(cur);' "$1" "$2"
 }
 
 echo "=== Pull Work Provider Normalization ==="

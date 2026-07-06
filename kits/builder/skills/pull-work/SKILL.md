@@ -96,6 +96,8 @@ Use `github-cli` / `gh` when available to inspect issues, labels, milestones, pr
 
 Treat GitHub Issues as a `WorkItemProvider` and GitHub Projects as a `BoardProvider`, mapped through `context/contracts/work-item-contract.md`. Preserve provider-specific values in the artifact when useful, but use the contract's neutral fields for selection, grouping, and handoff.
 
+When a `BoardProvider` is configured, read the board Ready queue as the primary cross-repo selection input, ordered by configured priority and board position. Per-repo `WorkItemProvider` issue listing is the intake-gap detector: use it to surface open issues missing from the board, not as a silent fallback when the board has no ready items. If the configured board returns zero ready items, record and surface that warning as a dead readiness source before selecting or asking for alignment.
+
 Classify issues:
 
 - ready
@@ -114,6 +116,15 @@ npm run pull-work-provider -- \
 ```
 
 The helper preserves provider refs, project fields, blockers, PR links, and source artifact refs, then emits the work item contract fields plus readiness evidence. Use live provider state for final decisions; fixture output is only test evidence.
+
+When board state is available, read the Ready queue and intake gaps through the same helper:
+
+```bash
+npm run pull-work-provider -- \
+  --settings-json context/settings/backlog-provider-settings.json
+```
+
+For fixture-backed evaluation or cached provider JSON, pass `--items-json /path/to/project-items-and-open-issues.json`. The board output includes `ready_queue`, `intake_gaps`, and `warnings`; select from `ready_queue` first when it is populated.
 
 Before classifying provider-backed work as ready for pickup, fetch the latest target ref when network access and provider credentials are available, then compare the current target SHA to the work item's `planned_base_sha`. Record the current target ref/SHA, planned base ref/SHA, `commits-since`, planned age, changed files since the planned base, and changed-file intersections with `planning_scope_refs` in the pull-work artifact or helper output.
 
