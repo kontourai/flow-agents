@@ -42,6 +42,8 @@ const {
 const {
   flowAgentsArtifactRoot,
   flowAgentsArtifactRootsForRead,
+  resolveSharedRepoRoot,
+  warnIfFailingOpenInsideGitTree,
 } = require('./lib/local-artifact-paths');
 const { resolveActor, isUnresolvedActor, detectRuntime } = require('./lib/actor-identity.js');
 const { readCurrentPointer } = require('./lib/current-pointer.js');
@@ -84,14 +86,36 @@ function parseJson(raw) {
 }
 
 function findRepoRoot(startDir) {
-  let dir = path.resolve(startDir || process.cwd());
+  const resolvedStartDir = path.resolve(startDir || process.cwd());
+  // #357: prefer git's SHARED common-dir root (the primary checkout's repo root, resolved
+  // identically from any linked worktree) before falling back to the plain `.git`/AGENTS.md
+  // ancestor walk below. Without this, a worktree's OWN `.git` FILE (not the shared `.git`
+  // DIRECTORY) satisfies `fs.existsSync(path.join(dir, '.git'))` at the very first directory
+  // checked, so the walk always stopped at the worktree root instead of resolving to the
+  // shared primary checkout — see src/lib/local-artifact-root.ts's resolveSharedRepoRoot doc
+  // comment for the full rationale. Fails open to the walk below (unchanged) when git is
+  // unavailable, `resolvedStartDir` is not inside a git working tree, or the command fails —
+  // this is also exactly today's behavior in the single-checkout case, where
+  // `--git-common-dir` resolves to `.git` under `resolvedStartDir` itself.
+  const sharedRoot = resolveSharedRepoRoot(resolvedStartDir);
+  if (sharedRoot) return sharedRoot;
+  let dir = resolvedStartDir;
   const root = path.parse(dir).root;
   for (let depth = 0; dir && depth < 40; depth++) {
-    if (fs.existsSync(path.join(dir, '.git')) || fs.existsSync(path.join(dir, 'AGENTS.md'))) return dir;
+    if (fs.existsSync(path.join(dir, '.git'))) {
+      // #413 iteration-2 Fix 1: resolveSharedRepoRoot failed above even though a `.git` entry
+      // exists right here — git resolution was ATTEMPTED and FAILED (corrupted gitlink, bad
+      // GIT_DIR, git unavailable, etc.), not merely "no git repo at all". Loud, not silent —
+      // see warnIfFailingOpenInsideGitTree's own doc comment for the full rationale. This walk
+      // still returns `dir` (the ancestor-walk fallback is preserved unchanged) after warning.
+      warnIfFailingOpenInsideGitTree(resolvedStartDir, dir);
+      return dir;
+    }
+    if (fs.existsSync(path.join(dir, 'AGENTS.md'))) return dir;
     if (dir === root) break;
     dir = path.dirname(dir);
   }
-  return path.resolve(startDir || process.cwd());
+  return resolvedStartDir;
 }
 
 function walkMarkdown(dir, out = []) {
