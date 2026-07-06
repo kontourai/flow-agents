@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "github-actions-intake-automation-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+      "subjectType": "workflow-check",
+      "subjectId": "github-actions-intake-automation/bash-evals-run.sh-static",
+      "facet": "flow-agents.workflow",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "record-check: bash evals/run.sh static (exit 0)",
+      "value": "pass",
+      "createdAt": "2026-07-06T17:32:46Z",
+      "updatedAt": "2026-07-06T17:32:46Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:workflow.check.command:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "command",
+        "output_digest": {
+          "algorithm": "sha256",
+          "hex": "e5ba4d74f893d07e17822161cc18b55af6a9c64eb9e06b655867525407bcad58"
+        }
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:github-actions-intake-automation-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+      "claimId": "github-actions-intake-automation-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "github-actions-intake-automation/evidence.json",
+      "excerptOrSummary": "record-check: bash evals/run.sh static (exit 0)",
+      "observedAt": "2026-07-06T17:32:46Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/run.sh static",
+        "isError": false
+      }
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.command:test_output",
+      "claimType": "workflow.check.command",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.command claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:github-actions-intake-automation-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+      "claimId": "github-actions-intake-automation-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:github-actions-intake-automation-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0"
+      ],
+      "createdAt": "2026-07-06T17:32:46Z",
+      "verifiedAt": "2026-07-06T17:32:46Z"
+    }
+  ]
+}
