@@ -3697,6 +3697,83 @@ else
   _fail "#270: --skip-evidence-ref-runnability-guard should have bypassed the lockout, but record-evidence still failed: $(cat "$TMPDIR_EVAL/ac8-bypass.out" "$TMPDIR_EVAL/ac8-bypass.err")"
 fi
 
+# ─── #362 AC7: validateAcceptanceEvidenceRefs' ADVISORY (non-fatal) ambiguous-absence-command ──
+# nudge — a kind:"command" evidence ref whose excerpt is a bare (non-negated, non-count-asserted)
+# grep/diff invocation gets a stderr advisory suggesting the self-asserting rewrite, but the
+# record-evidence call is NOT blocked (this is guidance, not enforcement — distinct from the
+# runnability guard immediately above, which stays fatal/unchanged).
+AC7_ADV_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/ac7-ambiguous-advisory"
+mkdir -p "$AC7_ADV_DIR"
+cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$AC7_ADV_DIR/ac7-ambiguous-advisory--deliver.md"
+flow_agents_node "$WRITER" init-plan "$AC7_ADV_DIR/ac7-ambiguous-advisory--deliver.md"   --source-request "AC7 ambiguous-absence-command advisory fixture."   --summary "AC7 ambiguous-absence-command advisory fixture."   --next-action "Seed a bare-grep kind:command evidence_ref."   --timestamp "2026-07-05T09:02:00Z" >"$TMPDIR_EVAL/ac7-init.out" 2>"$TMPDIR_EVAL/ac7-init.err"
+
+node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/ac7-mutate.err"
+import { readFileSync, writeFileSync } from 'node:fs';
+const file = '${AC7_ADV_DIR}/acceptance.json';
+const data = JSON.parse(readFileSync(file, 'utf8'));
+if (!Array.isArray(data.criteria) || data.criteria.length === 0) { process.stderr.write('no criteria to mutate\n'); process.exit(1); }
+data.criteria[0].evidence_refs = [{ kind: 'command', excerpt: "grep -E 'this-pattern-does-not-exist-anywhere' package.json" }];
+writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
+NODEOF
+
+if flow_agents_node "$WRITER" record-evidence "$AC7_ADV_DIR"   --verdict pass   --check-json '{"id":"ac7-adv-check","kind":"test","status":"pass","summary":"AC7 advisory fixture check passed."}'   --timestamp "2026-07-05T09:02:30Z" >"$TMPDIR_EVAL/ac7-adv.out" 2>"$TMPDIR_EVAL/ac7-adv.err"; then
+  _pass "AC7: record-evidence with a bare-grep-shaped kind:\"command\" evidence ref succeeds (advisory is non-fatal, does NOT block the write)"
+else
+  _fail "AC7 REGRESSION: record-evidence with a bare-grep-shaped evidence ref should succeed (advisory only), but it was rejected: $(cat "$TMPDIR_EVAL/ac7-adv.out" "$TMPDIR_EVAL/ac7-adv.err")"
+fi
+
+if grep -qi "advisory" "$TMPDIR_EVAL/ac7-adv.err" && grep -qi "self-asserting\|ambiguous" "$TMPDIR_EVAL/ac7-adv.err"; then
+  _pass "AC7: record-evidence emits an advisory stderr note recommending the self-asserting form for a bare-grep evidence ref"
+else
+  _fail "AC7: expected advisory stderr note (mentioning 'advisory' and 'self-asserting'/'ambiguous') was missing: $(cat "$TMPDIR_EVAL/ac7-adv.err")"
+fi
+
+if [[ -f "$AC7_ADV_DIR/acceptance.json" ]] && node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/ac7-adv-assert.err"
+import { readFileSync } from 'node:fs';
+const data = JSON.parse(readFileSync('${AC7_ADV_DIR}/acceptance.json', 'utf8'));
+const ref = data.criteria[0].evidence_refs[0];
+if (ref.kind !== 'command') { process.stderr.write('expected the ref to remain kind:"command", got: ' + ref.kind + '\n'); process.exit(1); }
+if (ref.excerpt !== "grep -E 'this-pattern-does-not-exist-anywhere' package.json") { process.stderr.write('the advisory must NOT alter the ref excerpt: got ' + JSON.stringify(ref.excerpt) + '\n'); process.exit(1); }
+NODEOF
+then
+  _pass "AC7: the advisory does not alter or reject the existing evidence ref (excerpt unchanged, still kind:\"command\")"
+else
+  _fail "AC7: evidence-ref-unchanged assertion failed: $(cat "$TMPDIR_EVAL/ac7-adv-assert.err")"
+fi
+
+# Regression guard: a self-asserting form (`! grep ...`, the NATURAL negated form -- not a
+# count-assertion workaround; isRunnableCommandText now strips a leading `!` before evaluating
+# runnability, per the coherence fix, so the runnability guard ACCEPTS this excerpt) never
+# triggers the advisory.
+AC7_NEG_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/ac7-self-asserting-no-advisory"
+mkdir -p "$AC7_NEG_DIR"
+cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$AC7_NEG_DIR/ac7-self-asserting-no-advisory--deliver.md"
+flow_agents_node "$WRITER" init-plan "$AC7_NEG_DIR/ac7-self-asserting-no-advisory--deliver.md" --source-request "AC7 self-asserting-form no-advisory regression fixture." --summary "AC7 self-asserting-form no-advisory regression fixture." --next-action "Seed a negated-grep kind:command evidence_ref." --timestamp "2026-07-05T09:03:00Z" >"$TMPDIR_EVAL/ac7-neg-init.out" 2>"$TMPDIR_EVAL/ac7-neg-init.err"
+
+node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/ac7-neg-mutate.err"
+import { readFileSync, writeFileSync } from 'node:fs';
+const file = '${AC7_NEG_DIR}/acceptance.json';
+const data = JSON.parse(readFileSync(file, 'utf8'));
+if (!Array.isArray(data.criteria) || data.criteria.length === 0) { process.stderr.write('no criteria to mutate\n'); process.exit(1); }
+data.criteria[0].evidence_refs = [{ kind: 'command', excerpt: "! grep -E 'this-pattern-does-not-exist-anywhere' package.json" }];
+writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
+NODEOF
+
+if flow_agents_node "$WRITER" record-evidence "$AC7_NEG_DIR" --verdict pass --check-json '{"id":"ac7-neg-check","kind":"test","status":"pass","summary":"AC7 negation regression fixture check passed."}' --timestamp "2026-07-05T09:03:30Z" >"$TMPDIR_EVAL/ac7-neg.out" 2>"$TMPDIR_EVAL/ac7-neg.err"; then
+  if grep -qi "not a runnable shell command" "$TMPDIR_EVAL/ac7-neg.out" "$TMPDIR_EVAL/ac7-neg.err"; then
+    _fail "REGRESSION: record-evidence rejected a '! grep ...' evidence ref as non-runnable — isRunnableCommandText's leading-'!' strip is not working"
+  else
+    _pass "record-evidence ACCEPTS a '! grep ...' evidence ref as runnable (leading '!' is stripped before evaluation)"
+  fi
+  if grep -qi "advisory" "$TMPDIR_EVAL/ac7-neg.err"; then
+    _fail "regression: a self-asserting '! grep ...' evidence ref should NOT trigger the ambiguous-absence advisory, but it did: $(cat "$TMPDIR_EVAL/ac7-neg.err")"
+  else
+    _pass "regression guard: a self-asserting '! grep ...' evidence ref does not trigger the ambiguous-absence advisory"
+  fi
+else
+  _fail "regression fixture: record-evidence with a self-asserting negated-grep evidence ref unexpectedly failed: $(cat "$TMPDIR_EVAL/ac7-neg.out" "$TMPDIR_EVAL/ac7-neg.err")"
+fi
+
 # ─── #270 MEDIUM fix eval: parseCriterion routes a PROSE "- Evidence:" line through the REAL ──
 # init-plan parse path (definitionAcceptanceLines -> parseCriterion), not a hand-mutated
 # acceptance.json — asserting the resulting acceptance.json ref carries the prose in `summary`
