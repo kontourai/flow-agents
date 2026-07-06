@@ -1,0 +1,141 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "trust.checkpoint.json",
+      "digest": {
+        "sha256": "2f6dfe093d9de4be87c08c65f8a9a2cb62dd4e747e7b9bf4aa4f5ca08032fa54"
+      }
+    }
+  ],
+  "predicateType": "https://hachure.org/v1/bundle",
+  "predicate": {
+    "schemaVersion": 5,
+    "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+    "claims": [
+      {
+        "id": "kontourai-flow-agents-447-bash-evals-integration-test-liveness-conflict-injection-sh.flow-agents-workflow.record-check-bash-evals-integration-test-liveness-conflict-injection-sh-exit-0",
+        "subjectType": "workflow-check",
+        "subjectId": "kontourai-flow-agents-447/bash-evals-integration-test_liveness_conflict_injection.sh",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.check.command",
+        "fieldOrBehavior": "record-check: bash evals/integration/test_liveness_conflict_injection.sh (exit 0)",
+        "value": "pass",
+        "createdAt": "2026-07-06T23:45:20Z",
+        "updatedAt": "2026-07-06T23:45:20Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.check.command:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "command",
+          "output_digest": {
+            "algorithm": "sha256",
+            "hex": "c5061d174e010fc5908bfaaef8af5f1fae0aef183540e7b2ba81d9b01b9cd553"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-447-bash-evals-integration-test-liveness-heartbeat-sh.flow-agents-workflow.record-check-bash-evals-integration-test-liveness-heartbeat-sh-exit-0",
+        "subjectType": "workflow-check",
+        "subjectId": "kontourai-flow-agents-447/bash-evals-integration-test_liveness_heartbeat.sh",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.check.command",
+        "fieldOrBehavior": "record-check: bash evals/integration/test_liveness_heartbeat.sh (exit 0)",
+        "value": "pass",
+        "createdAt": "2026-07-06T23:45:20Z",
+        "updatedAt": "2026-07-06T23:45:20Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.check.command:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "command",
+          "output_digest": {
+            "algorithm": "sha256",
+            "hex": "35671a38160df094cd2b294d6084b59f0f9cea1e3612f585477a83a08523888b"
+          }
+        },
+        "status": "verified"
+      }
+    ],
+    "evidence": [
+      {
+        "id": "ev:kontourai-flow-agents-447-bash-evals-integration-test-liveness-conflict-injection-sh.flow-agents-workflow.record-check-bash-evals-integration-test-liveness-conflict-injection-sh-exit-0",
+        "claimId": "kontourai-flow-agents-447-bash-evals-integration-test-liveness-conflict-injection-sh.flow-agents-workflow.record-check-bash-evals-integration-test-liveness-conflict-injection-sh-exit-0",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-447/evidence.json",
+        "excerptOrSummary": "record-check: bash evals/integration/test_liveness_conflict_injection.sh (exit 0)",
+        "observedAt": "2026-07-06T23:45:20Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_liveness_conflict_injection.sh",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-447-bash-evals-integration-test-liveness-heartbeat-sh.flow-agents-workflow.record-check-bash-evals-integration-test-liveness-heartbeat-sh-exit-0",
+        "claimId": "kontourai-flow-agents-447-bash-evals-integration-test-liveness-heartbeat-sh.flow-agents-workflow.record-check-bash-evals-integration-test-liveness-heartbeat-sh-exit-0",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-447/evidence.json",
+        "excerptOrSummary": "record-check: bash evals/integration/test_liveness_heartbeat.sh (exit 0)",
+        "observedAt": "2026-07-06T23:45:20Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_liveness_heartbeat.sh",
+          "isError": false
+        }
+      }
+    ],
+    "policies": [
+      {
+        "id": "policy:workflow.check.command:test_output",
+        "claimType": "workflow.check.command",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.command claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      }
+    ],
+    "events": [
+      {
+        "id": "evt:kontourai-flow-agents-447-bash-evals-integration-test-liveness-conflict-injection-sh.flow-agents-workflow.record-check-bash-evals-integration-test-liveness-conflict-injection-sh-exit-0",
+        "claimId": "kontourai-flow-agents-447-bash-evals-integration-test-liveness-conflict-injection-sh.flow-agents-workflow.record-check-bash-evals-integration-test-liveness-conflict-injection-sh-exit-0",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-447-bash-evals-integration-test-liveness-conflict-injection-sh.flow-agents-workflow.record-check-bash-evals-integration-test-liveness-conflict-injection-sh-exit-0"
+        ],
+        "createdAt": "2026-07-06T23:45:20Z",
+        "verifiedAt": "2026-07-06T23:45:20Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-447-bash-evals-integration-test-liveness-heartbeat-sh.flow-agents-workflow.record-check-bash-evals-integration-test-liveness-heartbeat-sh-exit-0",
+        "claimId": "kontourai-flow-agents-447-bash-evals-integration-test-liveness-heartbeat-sh.flow-agents-workflow.record-check-bash-evals-integration-test-liveness-heartbeat-sh-exit-0",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-447-bash-evals-integration-test-liveness-heartbeat-sh.flow-agents-workflow.record-check-bash-evals-integration-test-liveness-heartbeat-sh-exit-0"
+        ],
+        "createdAt": "2026-07-06T23:45:20Z",
+        "verifiedAt": "2026-07-06T23:45:20Z"
+      }
+    ]
+  }
+}
