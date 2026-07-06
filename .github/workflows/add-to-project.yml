@@ -2,7 +2,7 @@ name: Add issue to org project
 
 on:
   issues:
-    types: [opened, reopened]
+    types: [opened, reopened, closed]
 
 permissions:
   contents: read
