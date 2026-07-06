@@ -200,6 +200,175 @@ else
   _fail "record-check no-command error message was unexpected: $(cat "$TMPDIR_EVAL/rc-no-command.out" "$TMPDIR_EVAL/rc-no-command.err")"
 fi
 
+# ─── #362 AC6/AC7: record-check's ambiguous-absence-command classification ──────────────────
+# A bare (non-negated, non-count-asserted, non-chained) grep/diff invocation whose exit code is
+# exactly 1 is exit-code-ambiguous (zero matches could be the author's intended PASS for an
+# absence check, or an unintended miss for a presence check) — record-check stamps a distinct
+# "not_verified" status (never silently pass, never silently fail) and surfaces a loud, actionable
+# stderr note, but does NOT itself exit nonzero (the command DID run; this is not a tool error).
+FIXTURE_FILE="$TMPDIR_EVAL/repo/ac6-fixture.txt"
+echo "some content with no matching pattern here" >"$FIXTURE_FILE"
+
+# AC6: bare `grep` exit 1 (pattern genuinely absent) → recorded status not_verified + loud stderr
+# note, record-check itself exits 0 (never hard-fail on an ambiguous, not a tool-error, outcome).
+if flow_agents_node "$WRITER" record-check "$SESSION_DIR" --timestamp "2026-07-05T09:08:00Z" --id ac6-ambiguous-grep -- grep -E 'this-pattern-does-not-exist-anywhere' "$FIXTURE_FILE"   >"$TMPDIR_EVAL/rc-ambiguous.out" 2>"$TMPDIR_EVAL/rc-ambiguous.err"; then
+  _pass "AC6: record-check with a bare grep exit-1 (ambiguous absence) exits 0, never hard-fails"
+else
+  _fail "AC6 REGRESSION: record-check with a bare grep exit-1 (ambiguous absence) should exit 0 (never a tool error, never hard-fail), but exited nonzero: $(cat "$TMPDIR_EVAL/rc-ambiguous.out" "$TMPDIR_EVAL/rc-ambiguous.err")"
+fi
+
+if grep -qi "ambiguous" "$TMPDIR_EVAL/rc-ambiguous.err" && grep -qi "not_verified" "$TMPDIR_EVAL/rc-ambiguous.err"; then
+  _pass "AC6: record-check emits a loud stderr note naming both 'ambiguous' and the recorded 'not_verified' status for a bare grep exit-1"
+else
+  _fail "AC6: record-check's ambiguous stderr note was missing expected substrings ('ambiguous' and 'not_verified'): $(cat "$TMPDIR_EVAL/rc-ambiguous.err")"
+fi
+
+# AC7: the same stderr note nudges toward a self-asserting rewrite ('! grep ...' / 'grep -c ... | grep -qx 0').
+if grep -qi "self-asserting" "$TMPDIR_EVAL/rc-ambiguous.err"; then
+  _pass "AC7: record-check's ambiguous stderr note nudges toward a self-asserting recorded-command form"
+else
+  _fail "AC7: record-check's ambiguous stderr note did not mention 'self-asserting': $(cat "$TMPDIR_EVAL/rc-ambiguous.err")"
+fi
+
+if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/rc-ambiguous-assert.err"
+import { readFileSync } from 'node:fs';
+const bundle = JSON.parse(readFileSync('${SESSION_DIR}/trust.bundle', 'utf8'));
+const claim = bundle.claims.find((c) => c.subjectId && c.subjectId.endsWith('/ac6-ambiguous-grep'));
+if (!claim) { process.stderr.write('no claim found for the ac6-ambiguous-grep check\n'); process.exit(1); }
+if (claim.value !== 'not_verified') { process.stderr.write('expected claim value not_verified for an ambiguous bare-grep exit-1, got ' + claim.value + '\n'); process.exit(1); }
+NODEOF
+then
+  _pass "AC6: record-check stamps check status not_verified (not a new 'ambiguous' enum value — mapped onto the existing not_verified status per the plan/ADR 0008/0010) for a bare grep exit-1"
+else
+  _fail "AC6: record-check ambiguous-status bundle assertion failed: $(cat "$TMPDIR_EVAL/rc-ambiguous-assert.err")"
+fi
+
+# Regression guard: a SELF-ASSERTING form (`! grep ...`, negation flips intent into the command's
+# own exit code) exiting 0 records a clean pass — never misclassified ambiguous just because the
+# underlying binary is grep. Uses the NATURAL `--command '! grep ...'` form (not a `bash -lc`
+# workaround) — isRunnableCommandText now strips a leading `!` before evaluating runnability
+# (coherence fix: the ambiguous-absence advisory's own suggested remediation must not itself be
+# rejected by the #412 runnability guard), so `--command` accepts this literal negated form.
+if flow_agents_node "$WRITER" record-check "$SESSION_DIR" --timestamp "2026-07-05T09:08:30Z" --id ac6-self-asserting-negation --command "! grep -E 'this-pattern-does-not-exist-anywhere' $FIXTURE_FILE" \
+  >"$TMPDIR_EVAL/rc-negation.out" 2>"$TMPDIR_EVAL/rc-negation.err"; then
+  _pass "record-check --command '! grep ...' (natural self-asserting negated form) exits 0, as expected for a plain pass"
+else
+  _fail "record-check --command '! grep ...' unexpectedly failed: $(cat "$TMPDIR_EVAL/rc-negation.out" "$TMPDIR_EVAL/rc-negation.err")"
+fi
+
+if grep -qi "not a runnable shell command" "$TMPDIR_EVAL/rc-negation.out" "$TMPDIR_EVAL/rc-negation.err"; then
+  _fail "REGRESSION: record-check --command '! grep ...' was rejected as non-runnable — isRunnableCommandText's leading-'!' strip is not working"
+else
+  _pass "record-check --command '! grep ...' is ACCEPTED by the runnability guard (leading '!' is stripped before evaluation)"
+fi
+
+if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/rc-negation-assert.err"
+import { readFileSync } from 'node:fs';
+const bundle = JSON.parse(readFileSync('${SESSION_DIR}/trust.bundle', 'utf8'));
+const claim = bundle.claims.find((c) => c.subjectId && c.subjectId.endsWith('/ac6-self-asserting-negation'));
+if (!claim) { process.stderr.write('no claim found for the ac6-self-asserting-negation check\n'); process.exit(1); }
+if (claim.value !== 'pass') { process.stderr.write('expected claim value pass for a self-asserting negated grep, got ' + claim.value + '\n'); process.exit(1); }
+NODEOF
+then
+  _pass "regression guard: a self-asserting '! grep ...' form records a clean pass, never misclassified ambiguous"
+else
+  _fail "regression guard assertion failed: $(cat "$TMPDIR_EVAL/rc-negation-assert.err")"
+fi
+
+# AC5-parity regression guard: bare grep exit >= 2 (a real tool error — missing file) still hard
+# FAILs (nonzero record-check exit), proving the exit-1-only carve-out is narrowly scoped.
+if flow_agents_node "$WRITER" record-check "$SESSION_DIR" --timestamp "2026-07-05T09:09:00Z" --id ac6-exit2-hard-fail -- grep -E 'pattern' "$TMPDIR_EVAL/this-file-does-not-exist-ac6"   >"$TMPDIR_EVAL/rc-exit2.out" 2>"$TMPDIR_EVAL/rc-exit2.err"; then
+  _fail "REGRESSION: record-check with a bare grep exit >= 2 (missing file, a real tool error) should hard-fail (nonzero exit), but exited 0"
+else
+  _pass "record-check with a bare grep exit >= 2 (missing file) still hard-fails (nonzero exit) — the exit-1-only carve-out does not weaken real tool-error detection"
+fi
+
+if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/rc-exit2-assert.err"
+import { readFileSync } from 'node:fs';
+const bundle = JSON.parse(readFileSync('${SESSION_DIR}/trust.bundle', 'utf8'));
+const claim = bundle.claims.find((c) => c.subjectId && c.subjectId.endsWith('/ac6-exit2-hard-fail'));
+if (!claim) { process.stderr.write('no claim found for the ac6-exit2-hard-fail check\n'); process.exit(1); }
+if (claim.value !== 'fail') { process.stderr.write('expected claim value fail for a bare grep exit >= 2, got ' + claim.value + '\n'); process.exit(1); }
+NODEOF
+then
+  _pass "record-check with a bare grep exit >= 2 records a hard fail claim value (not ambiguous, not_verified)"
+else
+  _fail "exit>=2 hard-fail claim-value assertion failed: $(cat "$TMPDIR_EVAL/rc-exit2-assert.err")"
+fi
+
+# ─── Mutation test (#362 AC6 recordCheck ambiguity branch): temporarily disable recordCheck's ──
+# `ambiguous` computation in a SCRATCH COPY of the compiled build/ output, confirm the AC6 bare-
+# grep-exit-1 fixture above now records status "fail" (not "not_verified") against that mutated
+# binary (eval "goes red" without the branch), then restore the original compiled file
+# immediately. Proves the eval is actually exercising this specific classification branch, not
+# passing vacuously for an unrelated reason.
+DIST_SIDECAR="$ROOT/build/src/cli/workflow-sidecar.js"
+AMBIGUOUS_SCRATCH="$TMPDIR_EVAL/ambiguous-mutation-scratch"
+mkdir -p "$AMBIGUOUS_SCRATCH"
+
+if [[ -f "$DIST_SIDECAR" ]]; then
+  cp "$DIST_SIDECAR" "$AMBIGUOUS_SCRATCH/workflow-sidecar.orig.js"
+  node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/ambiguous-mutation-patch.err"
+import { readFileSync, writeFileSync } from 'node:fs';
+const file = '${AMBIGUOUS_SCRATCH}/workflow-sidecar.orig.js';
+let src = readFileSync(file, 'utf8');
+const needle = 'const ambiguous = exitCode === 1 && isAmbiguousAbsenceCommand(displayCommand ?? "");';
+if (!src.includes(needle)) { process.stderr.write('mutation: recordCheck ambiguous-branch text not found — source pattern drifted, cannot mutation-test\n'); process.exit(1); }
+src = src.split(needle).join('const ambiguous = false;');
+writeFileSync('${AMBIGUOUS_SCRATCH}/workflow-sidecar.mutated.js', src);
+NODEOF
+
+  if [[ -s "$TMPDIR_EVAL/ambiguous-mutation-patch.err" ]]; then
+    _fail "mutation-test setup failed (recordCheck ambiguous-branch source pattern did not match compiled output): $(cat "$TMPDIR_EVAL/ambiguous-mutation-patch.err")"
+  else
+    if node --check "$AMBIGUOUS_SCRATCH/workflow-sidecar.mutated.js" 2>"$TMPDIR_EVAL/ambiguous-mutation-syntax.err"; then
+      cp "$AMBIGUOUS_SCRATCH/workflow-sidecar.mutated.js" "$DIST_SIDECAR"
+
+      flow_agents_node "$WRITER" record-check "$SESSION_DIR" --timestamp "2026-07-05T09:10:00Z" --id ac6-mutation-check -- grep -E 'this-pattern-does-not-exist-anywhere' "$FIXTURE_FILE"         >"$TMPDIR_EVAL/rc-mutation.out" 2>"$TMPDIR_EVAL/rc-mutation.err"
+      MUTATION_EXIT=$?
+
+      if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/rc-mutation-assert.err"
+import { readFileSync } from 'node:fs';
+const bundle = JSON.parse(readFileSync('${SESSION_DIR}/trust.bundle', 'utf8'));
+const claim = bundle.claims.find((c) => c.subjectId && c.subjectId.endsWith('/ac6-mutation-check'));
+if (!claim) { process.stderr.write('no claim found for the ac6-mutation-check check\n'); process.exit(1); }
+if (claim.value !== 'fail') { process.stderr.write('expected the mutated (ambiguity-disabled) binary to record claim value fail (not not_verified), got ' + claim.value + '\n'); process.exit(1); }
+NODEOF
+      then
+        if [[ "$MUTATION_EXIT" -eq 0 ]]; then
+          _fail "mutation-test: with the ambiguous branch neutered, record-check should hard-fail (nonzero exit) on the same bare-grep exit-1 fixture, but it exited 0"
+        else
+          _pass "mutation-test: with the ambiguous branch neutered, the same bare-grep exit-1 fixture now records a hard FAIL and exits nonzero (eval correctly goes red without the branch, proving the eval exercises it)"
+        fi
+      else
+        _fail "mutation-test: bare-grep exit-1 fixture did not flip to a hard fail claim value even with the ambiguous branch neutered — the eval may not be exercising the intended branch: $(cat "$TMPDIR_EVAL/rc-mutation-assert.err")"
+      fi
+    else
+      _fail "mutation-test setup: mutated workflow-sidecar.js (recordCheck ambiguous branch) failed a syntax check, refusing to run it: $(cat "$TMPDIR_EVAL/ambiguous-mutation-syntax.err")"
+    fi
+
+    # Restore the real compiled branch immediately — never leave the mutated binary in place —
+    # and re-run the same fixture to confirm the restored binary classifies it ambiguous again.
+    cp "$AMBIGUOUS_SCRATCH/workflow-sidecar.orig.js" "$DIST_SIDECAR"
+    flow_agents_node "$WRITER" record-check "$SESSION_DIR" --timestamp "2026-07-05T09:10:30Z" --id ac6-restore-check -- grep -E 'this-pattern-does-not-exist-anywhere' "$FIXTURE_FILE"       >"$TMPDIR_EVAL/rc-restore.out" 2>"$TMPDIR_EVAL/rc-restore.err"
+    RESTORE_EXIT=$?
+    if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/rc-restore-assert.err"
+import { readFileSync } from 'node:fs';
+const bundle = JSON.parse(readFileSync('${SESSION_DIR}/trust.bundle', 'utf8'));
+const claim = bundle.claims.find((c) => c.subjectId && c.subjectId.endsWith('/ac6-restore-check'));
+if (!claim) { process.stderr.write('no claim found for the ac6-restore-check check\n'); process.exit(1); }
+if (claim.value !== 'not_verified' || "$RESTORE_EXIT" != "0") { process.stderr.write('expected the restored binary to record claim value not_verified and exit 0, got value=' + claim.value + ' exit=$RESTORE_EXIT\n'); process.exit(1); }
+NODEOF
+    then
+      _pass "mutation-test cleanup: the real compiled ambiguous branch is restored and classifies a bare-grep exit-1 as not_verified (exit 0) again"
+    else
+      _fail "mutation-test cleanup REGRESSION: the ambiguous branch did not come back correctly after restoring the original compiled file: $(cat "$TMPDIR_EVAL/rc-restore-assert.err")"
+    fi
+  fi
+else
+  _fail "mutation-test setup: could not locate the compiled build/src/cli/workflow-sidecar.js to mutate for the recordCheck ambiguous branch (ran 'npm run build' first?)"
+fi
+
 if [[ "$errors" -eq 0 ]]; then
   echo "record-check integration passed."
   exit 0

@@ -1415,12 +1415,31 @@ function loadCurrentPointerHelper(): {
  * between stop-goal-fit.js's Stop-time backstop and this file's record-time rejection
  * (validateAcceptanceEvidenceRefs, recordGateClaim --command, recordCheck --command) — see
  * AC9.
+ *
+ * #362 (Wave 3, AC6/AC7): extended (not a new sibling loader — same module, same
+ * createRequire call, single require() of runnable-command.js) to also return
+ * `isAmbiguousAbsenceCommand`, landed in that module by Wave 1's Task 1.2. This keeps
+ * `recordCheck`'s record-time ambiguous-status stamp and `validateAcceptanceEvidenceRefs`'s
+ * record-time advisory single-sourced against the SAME heuristic `runBackstop`/
+ * `readCommandLog`/`evidence-capture.js`'s `observeResult` already consume (Waves 1-2) —
+ * never a second, divergent implementation of "what counts as ambiguous."
  */
-function loadRunnableCommandHelper(): { isRunnableCommandText: (text: string) => boolean } {
+function loadRunnableCommandHelper(): { isRunnableCommandText: (text: string) => boolean; isAmbiguousAbsenceCommand: (text: string) => boolean } {
   const _req = createRequire(import.meta.url);
   const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/runnable-command.js");
-  return _req(helperPath) as { isRunnableCommandText: (text: string) => boolean };
+  return _req(helperPath) as { isRunnableCommandText: (text: string) => boolean; isAmbiguousAbsenceCommand: (text: string) => boolean };
 }
+
+/**
+ * #362 (iteration-2 fix item 4/LOW): single-sourced human-facing remediation fragment shared by
+ * this file's two ambiguous-absence-command emission sites (`validateAcceptanceEvidenceRefs`'s
+ * record-time advisory and `recordCheck`'s ambiguous-status stderr note) — mirrors how
+ * `isAmbiguousAbsenceCommand` itself is single-sourced above. Cross-ref: scripts/hooks/
+ * stop-goal-fit.js keeps its OWN copy of the equivalent shared string (`AMBIGUOUS_REMEDIATION`)
+ * for its three Stop-hook emission sites — the two files do not share a module for this string,
+ * so each file single-sources independently.
+ */
+const AMBIGUOUS_REMEDIATION_ADVICE = "self-asserting command ('! grep ...' or 'grep -c ... | grep -qx 0')";
 
 /**
  * #291 Wave 2 Task 2.1 (§5): writes the UNCHANGED legacy global `<root>/current.json` (the
@@ -2121,7 +2140,7 @@ function validateAcceptanceEvidenceRefs(dir: string, p?: ReturnType<typeof parse
   if (!fs.existsSync(file)) return;
   const data = loadJson(file);
   if (!Array.isArray(data.criteria)) return;
-  const { isRunnableCommandText } = loadRunnableCommandHelper();
+  const { isRunnableCommandText, isAmbiguousAbsenceCommand } = loadRunnableCommandHelper();
   data.criteria.forEach((criterion: AnyObj, index: number) => {
     if (criterion.evidence_refs === undefined) return;
     const refs = normalizeEvidenceRefs(criterion.evidence_refs, `acceptance.criteria[${index}].evidence_refs`);
@@ -2137,6 +2156,16 @@ function validateAcceptanceEvidenceRefs(dir: string, p?: ReturnType<typeof parse
       if (!commandSource) return; // command refs may carry only `summary` — nothing to validate
       if (!isRunnableCommandText(commandSource)) {
         die(`acceptance.criteria[${index}].evidence_refs[${refIndex}]: kind:"command" ref's command text is not a runnable shell command: "${commandSource}" — remediate by either (1) moving the prose to ref.summary (never executed) and dropping/emptying ref.excerpt/ref.url, or (2) reclassifying this ref as kind:"external" (session-local attestation) or kind:"artifact" (a file/screenshot/dashboard reference) instead of kind:"command". As a last resort, --skip-evidence-ref-runnability-guard bypasses this check (logged, not silent).`);
+      }
+      // #362 (Wave 3, AC7): ADVISORY ONLY — never die(), never rejects/alters the ref. This is
+      // deliberately the opposite posture from the runnability guard immediately above (which
+      // stays fatal, unchanged). Guidance, not enforcement, per the plan's item 2: nudge a
+      // newly-recorded bare (non-negated, non-count-asserted, non-chained) grep/diff evidence
+      // ref toward a self-asserting form, without breaking back-compat with any already-recorded
+      // evidence ref (#412) — an already-recorded ref reaching this validator on every subsequent
+      // record-evidence call must keep passing, just with a repeated nudge, never a new failure.
+      if (isAmbiguousAbsenceCommand(commandSource)) {
+        process.stderr.write(`[record-evidence] advisory: acceptance.criteria[${index}].evidence_refs[${refIndex}] kind:"command" ref "${commandSource}" is a bare grep/diff invocation — its exit code is AMBIGUOUS (zero matches/no diff could mean PASS for an absence check or FAIL for a presence check). Consider re-recording it as a ${AMBIGUOUS_REMEDIATION_ADVICE} to remove the ambiguity. This is advisory only; the ref is NOT rejected.\n`);
       }
     });
   });
@@ -2545,7 +2574,25 @@ async function recordCheck(p: ReturnType<typeof parseArgs>, commandArgv: string[
   // (0 => pass, nonzero => fail); this path always HAS a clean integer exit code because it ran
   // the command itself (unlike the host-observation path, which sometimes only has failure
   // indicators). See scripts/hooks/evidence-capture.js's observeResult()/cleanExitCode().
-  const status = exitCode === 0 ? "pass" : "fail";
+  //
+  // #362 (Wave 3, AC6): the SAME narrow, two-binary carve-out `runBackstop`/`readCommandLog`
+  // (stop-goal-fit.js) and `observeResult` (evidence-capture.js) already apply — a bare
+  // (non-negated, non-count-asserted, non-chained) `grep`/`diff` invocation that exits EXACTLY
+  // 1 is exit-code-ambiguous (zero matches/no diff could be the author's intended PASS for an
+  // absence check, or an unintended miss for a presence check) — is applied HERE at record time
+  // too, since record-check is the most direct match to the issue's own AC12 field evidence: it
+  // executes the command itself and stamps the resulting status. Exit codes >= 2 are untouched
+  // (still "fail", a real tool error) — the carve-out is exit-code-1-only, never widened.
+  //
+  // There is no "ambiguous" value in the check-status enum (`checkStatuses`,
+  // schemas/workflow-acceptance.schema.json's criteria[].status enum) and none is added here —
+  // per the plan (and ADR 0008/0010 consume-never-fork), the ambiguous case maps onto the
+  // EXISTING "not_verified" status rather than inventing a new enum value that every consumer of
+  // that enum would need auditing for. The distinction from a hard "fail" is carried in the
+  // stderr note and the check summary text, not a new status value.
+  const { isAmbiguousAbsenceCommand } = loadRunnableCommandHelper();
+  const ambiguous = exitCode === 1 && isAmbiguousAbsenceCommand(displayCommand ?? "");
+  const status = exitCode === 0 ? "pass" : (ambiguous ? "not_verified" : "fail");
   // #270 MEDIUM fix: hash the captured (clamped) output — the digest itself is what gets
   // persisted onto claim.metadata (below, via buildTrustBundle), NEVER the raw output. This is
   // secret-safe by construction: even if the executed command's stdout/stderr contained a
@@ -2558,7 +2605,7 @@ ${stderr}` : ""}`.trim());
   const outputSha256 = capturedOutput ? createHash("sha256").update(capturedOutput, "utf8").digest("hex") : null;
   const checkIdRaw = opt(p, "id") || displayCommand;
   const checkId = checkIdRaw.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "record-check";
-  const summary = opt(p, "summary", `record-check: ${displayCommand}${exitCode !== null ? ` (exit ${exitCode})` : ""}`);
+  const summary = opt(p, "summary", `record-check: ${displayCommand}${exitCode !== null ? ` (exit ${exitCode})` : ""}${ambiguous ? " — AMBIGUOUS (bare grep/diff exit 1): NOT_VERIFIED, not silently pass/fail" : ""}`);
   // #270 follow-up fix (iteration 5, narrowed iteration 6): read the bundle's CURRENT check ids
   // (and stamp status) BEFORE normalizeCheck runs so a correction of an UNSTAMPED wedged id is
   // exempted from the reserved gate-claim- prefix rejection, while a brand-new mint of that
@@ -2579,6 +2626,15 @@ ${stderr}` : ""}`.trim());
 
   const _mergedChecks = mergeChecksById(_existingState.checks, [check]);
   assertBundleWritten(await writeTrustBundle(dir, slug, ts, _mergedChecks, _existingState.criteria, _existingState.critiques));
+  if (ambiguous) {
+    // #362 (AC6): never silent-pass, never hard-fail — a bare grep/diff exit 1 is recorded
+    // "not_verified" (above) and this is surfaced loudly on stderr, but record-check itself
+    // still exits 0: the command DID run (this is not a tool/execution error), and the operator
+    // needs an actionable nudge, not a blocked pipeline. Exit codes >= 2 for grep/diff remain a
+    // hard "fail" via the branch below, unchanged.
+    process.stderr.write(`[record-check] command "${displayCommand}" exited 1 — for bare grep/diff this may mean zero matches/no differences (PASS for an absence check) or an unintended miss (FAIL for a presence check); recorded status: not_verified (ambiguous), not silently pass or fail. Re-record this check as a ${AMBIGUOUS_REMEDIATION_ADVICE} to remove the ambiguity.\n`);
+    return 0;
+  }
   if (status === "fail") {
     process.stderr.write(`[record-check] command failed (exit ${exitCode ?? "unknown"}): ${displayCommand}\n${stderr ? `${stderr}\n` : ""}`);
     return 1;

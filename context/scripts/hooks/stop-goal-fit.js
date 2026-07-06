@@ -45,7 +45,7 @@ const {
 } = require('./lib/local-artifact-paths');
 const { resolveActor, isUnresolvedActor, detectRuntime } = require('./lib/actor-identity.js');
 const { readCurrentPointer } = require('./lib/current-pointer.js');
-const { isRunnableCommandText } = require('./lib/runnable-command.js');
+const { isRunnableCommandText, isAmbiguousAbsenceCommand } = require('./lib/runnable-command.js');
 
 const MAX_STDIN = 1024 * 1024;
 const ACTIVE_STATUSES = new Set([
@@ -688,9 +688,47 @@ function normalizeCommand(value) {
 }
 
 /**
+ * #362 (iteration-2 fix item 4/LOW): single-sourced human-facing remediation phrase for an
+ * ambiguous bare grep/diff exit-1 command. Every emission site below (captureCrossReference's
+ * capture-log cross-reference branch, its live-backstop-re-run branch, and
+ * capturedFailReconciliation's ambiguous bucket) interpolates this constant rather than
+ * re-duplicating the literal string — mirrors how `isAmbiguousAbsenceCommand` itself is
+ * single-sourced (required once from ./lib/runnable-command.js, never reimplemented per call
+ * site). Cross-ref: src/cli/workflow-sidecar.ts keeps its OWN copy of the shared fragment
+ * (`AMBIGUOUS_REMEDIATION_ADVICE`) for its two record-time emission sites — the two files do not
+ * share a module for this string, so each file single-sources independently.
+ */
+const AMBIGUOUS_REMEDIATION = "re-record this check as a self-asserting command ('! grep ...' or 'grep -c ... | grep -qx 0')";
+
+/**
+ * #362: a bare (non-self-asserting) grep/diff exit 1 is exit-code-AMBIGUOUS (zero
+ * matches/no diff — could be the author's intended PASS for an absence check, or an
+ * unintended miss for a presence check), not a genuine FAIL. This is the SAME narrow,
+ * two-binary-only carve-out `isAmbiguousAbsenceCommand` already applies at capture time
+ * (`evidence-capture.js`'s `observeResult`) — reused here (not reimplemented) so a log
+ * entry's `observedResult` and this re-derivation from raw exitCode can never disagree.
+ * Exit codes >=2 for grep/diff remain hard FAILs (real tool errors) — this carve-out is
+ * exactly exitCode === 1, nothing wider.
+ *
+ * @param {{command?: string, observedResult?: string, exitCode?: number}} entry
+ * @returns {{failed: boolean, ambiguous: boolean}}
+ */
+function classifyLogEntry(entry) {
+  const exitCode = Number.isInteger(entry.exitCode) ? entry.exitCode : null;
+  const ambiguous = entry.observedResult === 'ambiguous'
+    || (exitCode === 1 && isAmbiguousAbsenceCommand(entry.command));
+  if (ambiguous) return { failed: false, ambiguous: true };
+  const failed = entry.observedResult === 'fail' || (exitCode !== null && exitCode !== 0);
+  return { failed, ambiguous: false };
+}
+
+/**
  * Read command-log.jsonl into a map of normalized-command -> aggregate outcome.
  * If the same command was run more than once, a single FAIL makes the aggregate
- * a fail (a caught false-completion must not be masked by a later pass-claim).
+ * a fail (a caught false-completion must not be masked by a later pass-claim). A
+ * bare grep/diff exit-1 (#362) is carved out as `ambiguous` rather than `failed` — it
+ * is surfaced as a distinct warning class by callers, never silently dropped, and
+ * never treated as a hard block.
  */
 function readCommandLog(artifactDir) {
   const file = path.join(artifactDir, 'command-log.jsonl');
@@ -705,11 +743,12 @@ function readCommandLog(artifactDir) {
     if (!entry || typeof entry.command !== 'string') continue;
     const key = normalizeCommand(entry.command);
     if (!key) continue;
-    const failed = entry.observedResult === 'fail' || (Number.isInteger(entry.exitCode) && entry.exitCode !== 0);
+    const { failed, ambiguous } = classifyLogEntry(entry);
     const prev = byCommand.get(key);
     byCommand.set(key, {
       ran: true,
       failed: failed || (prev ? prev.failed : false),
+      ambiguous: !failed && (ambiguous || (prev ? prev.ambiguous : false)),
       exitCode: Number.isInteger(entry.exitCode) ? entry.exitCode : (prev ? prev.exitCode : null),
     });
   }
@@ -721,7 +760,9 @@ function readCommandLog(artifactDir) {
  * The LAST entry for each command wins (unlike readCommandLog which makes FAIL sticky).
  * Used for both capturedFailReconciliation and captureCrossReference (Fix C): we want to
  * know the LAST result, so a genuine re-run-to-pass clears the earlier FAIL. Only an actual
- * re-run (new PASS entry in the log) clears it — a new claim cannot change the log.
+ * re-run (new PASS entry in the log) clears it — a new claim cannot change the log. #362: a
+ * bare grep/diff exit-1 is carved out as `ambiguous` (via the shared `classifyLogEntry`), not
+ * `failed` — same rationale as `readCommandLog` above.
  */
 function readLatestCommandLog(artifactDir) {
   const file = path.join(artifactDir, 'command-log.jsonl');
@@ -736,11 +777,12 @@ function readLatestCommandLog(artifactDir) {
     if (!entry || typeof entry.command !== 'string') continue;
     const key = normalizeCommand(entry.command);
     if (!key) continue;
-    const failed = entry.observedResult === 'fail' || (Number.isInteger(entry.exitCode) && entry.exitCode !== 0);
-    // LAST entry wins — genuine re-run-to-pass overwrites the earlier FAIL.
+    const { failed, ambiguous } = classifyLogEntry(entry);
+    // LAST entry wins — genuine re-run-to-pass overwrites the earlier FAIL/ambiguous.
     byCommand.set(key, {
       ran: true,
       failed,
+      ambiguous,
       exitCode: Number.isInteger(entry.exitCode) ? entry.exitCode : null,
     });
   }
@@ -927,6 +969,32 @@ function resolveTrustedCommand(root, artifactDir, check, acceptance) {
     // is not a runnable shell command is malformed-evidence — reported distinctly, not
     // executed, and not conflated with a caught false-completion.
     if (!isRunnableCommandText(fromAcceptance)) return { malformed: fromAcceptance };
+    // DIALECT-PRESERVATION INVARIANT (#362): from THIS POINT ONWARD, `fromAcceptance` MUST be
+    // passed through to argv[2] unmodified from `acceptanceCommandFor`'s return value — never
+    // re-trimmed, re-escaped, re-quoted, or reconstructed from a parsed/tokenized form. The
+    // recorded command's regex dialect and flags (e.g. `grep -E '(foo|bar)'`'s ERE alternation/
+    // grouping, or any other -E/-P/-G flag combination) are part of the evidence-ref text itself;
+    // re-deriving the command string from anything other than this exact `fromAcceptance` value
+    // would silently reinterpret an ERE-recorded pattern as BRE (or vice versa) on re-run,
+    // corrupting the very check this backstop exists to confirm.
+    //
+    // KNOWN ACCEPTED UPSTREAM BOUNDARY: this guarantee begins at `acceptanceCommandFor`'s return
+    // value, NOT at the raw evidence-ref text — it is NOT "byte-for-byte, exactly as recorded in
+    // the evidence ref" (a prior version of this comment overclaimed that). `acceptanceCommandFor`
+    // derives `fromAcceptance` via `normalizeCommand` (~line 686: `.replace(/\s+/g, ' ').trim()`),
+    // which collapses whitespace runs and trims BEFORE this invariant's scope begins. Regex
+    // dialect metacharacters (-E, |, +, (), etc.) are single characters/short tokens, not
+    // whitespace, so they are untouched by this collapse and survive intact — but a literal
+    // multi-space or tab run *inside* a recorded pattern (e.g. two spaces in `grep -E 'foo  bar'`)
+    // does NOT survive verbatim; it is already collapsed to one space by the time it reaches this
+    // function. That is a pre-existing, accepted normalization boundary (not introduced by this
+    // invariant, and not something this invariant claims to cover) — not a dialect-preservation
+    // gap.
+    // `runBackstop` (below) preserves this invariant on its side by reading `trusted.argv[2]`
+    // verbatim rather than re-joining `argv` with spaces — see runBackstop's own
+    // DIALECT-PRESERVATION INVARIANT comment for that half of the contract.
+    // A regression eval (evals/integration/test_goal_fit_hook.sh, "#362 dialect preservation")
+    // pins this end-to-end with a `grep -E` ERE-only alternation construct.
     return { argv: ['bash', '-lc', fromAcceptance], cwd: root, source: 'acceptance' };
   }
 
@@ -1026,6 +1094,33 @@ function resolveBackstopMode() {
   return 'block';
 }
 
+/**
+ * #362: `classification` is a three-state result (`'pass'`/`'fail'`/`'ambiguous'`) rather than
+ * the old boolean `passed` — `'ambiguous'` iff the re-run command text is a bare (non-negated,
+ * non-count-asserted, non-chained) `grep`/`diff` invocation (`isAmbiguousAbsenceCommand`) AND
+ * `exitCode === 1` (zero matches/no diff — could be the author's intended PASS for an absence
+ * check, never silently coerced to pass OR fail). `'fail'` iff `exitCode !== 0` and not the
+ * ambiguous case (this still includes exitCode >= 2 for grep/diff — a real tool error, e.g. a
+ * missing file — which stays a hard fail, proving the carve-out is narrowly scoped). `'pass'`
+ * iff `exitCode === 0`. `trusted.argv.join(' ')` is passed to `isAmbiguousAbsenceCommand` (it
+ * already unwraps a `bash -lc '<command>'` wrapper on its own, so the `['bash', '-lc', cmd]`
+ * shape `resolveTrustedCommand`'s acceptance/model-command sources produce is inspected
+ * correctly; a `declared`-manifest-target argv like `['npm', 'test']` simply never matches
+ * `grep`/`diff` as its first token, so it is never misclassified ambiguous).
+ *
+ * DIALECT-PRESERVATION INVARIANT (#362): `commandText` below MUST be `trusted.argv[2]`'s value,
+ * verbatim — never re-derived, re-joined, or re-quoted from `trusted.argv`. The recorded
+ * command's exact dialect/flags (e.g. `grep -E '(foo|bar)'`'s ERE alternation) are part of the
+ * evidence ref text; re-joining `argv` with spaces (or any other reconstruction) would silently
+ * reintroduce a BRE/ERE dialect mismatch — the exact bug this invariant exists to prevent. This
+ * mirrors the equivalent invariant on `resolveTrustedCommand`'s `acceptance` branch below (search
+ * DIALECT-PRESERVATION INVARIANT there, including its accepted whitespace-collapse boundary
+ * note) — the same recorded string must survive unmodified from `acceptanceCommandFor`'s return
+ * value through to this spawnSync call.
+ *
+ * @param {{argv: string[], cwd: string}} trusted
+ * @returns {{ran: boolean, exitCode?: number, classification?: 'pass'|'fail'|'ambiguous', error?: string, timedOut?: boolean}}
+ */
 function runBackstop(trusted) {
   const result = spawnSync(trusted.argv[0], trusted.argv.slice(1), {
     cwd: trusted.cwd,
@@ -1036,7 +1131,19 @@ function runBackstop(trusted) {
   });
   if (result.error) return { ran: false, error: result.error.code || result.error.message };
   if (result.signal) return { ran: false, error: `killed (${result.signal})`, timedOut: result.signal === 'SIGKILL' || result.signal === 'SIGTERM' };
-  return { ran: true, passed: result.status === 0, exitCode: result.status };
+  const exitCode = result.status;
+  // The `['bash', '-lc', <command-text>]` shape resolveTrustedCommand's acceptance/
+  // model-command sources produce carries the ORIGINAL recorded command text verbatim in
+  // argv[2] — pass THAT (not a re-joined/re-quoted `argv.join(' ')`, which would lose the
+  // shell-quoting isAmbiguousAbsenceCommand's `bash -lc '...'` unwrap regex requires) to the
+  // heuristic. A `declared`-manifest-target argv (e.g. `['npm', 'test']`) has no such wrapper;
+  // joining it is fine since its first token is never `grep`/`diff` anyway.
+  const commandText = (trusted.argv.length === 3 && trusted.argv[0] === 'bash' && trusted.argv[1] === '-lc')
+    ? trusted.argv[2]
+    : trusted.argv.join(' ');
+  const ambiguous = exitCode === 1 && isAmbiguousAbsenceCommand(commandText);
+  const classification = ambiguous ? 'ambiguous' : (exitCode === 0 ? 'pass' : 'fail');
+  return { ran: true, exitCode, classification };
 }
 
 /**
@@ -1175,6 +1282,12 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
       if (logged.failed) {
         const exit = Number.isInteger(logged.exitCode) ? ` (exitCode:${logged.exitCode})` : '';
         warnings.push(`${base} evidence check ${id}: capture log CONTRADICTS claimed pass — command "${safeOneLine(cmd, 120)}" was recorded as FAIL${exit}. This is a caught false-completion.`);
+      } else if (logged.ambiguous) {
+        // #362: a bare grep/diff logged exit 1 — ambiguous (zero matches/no diff), not a
+        // caught false-completion. Distinct warning class, never silently dropped, never a
+        // hard block.
+        const exit = Number.isInteger(logged.exitCode) ? ` (exitCode:${logged.exitCode})` : '';
+        warnings.push(`${base} evidence check ${id}: capture log shows command "${safeOneLine(cmd, 120)}" exited 1${exit} — for bare grep/diff this may mean zero matches/no differences (PASS for an absence check) or an unintended miss (FAIL for a presence check); NOT_VERIFIED (ambiguous): ${AMBIGUOUS_REMEDIATION} to remove the ambiguity.`);
       } else if (hasLaunderingOperator(cmd)) {
         // Fix D: exit-code laundering. The captured exit-0 is not trustworthy — the command
         // baked in '|| true' / '|| :' / '; true' / '; exit 0' / '| true' to mask the real result.
@@ -1205,12 +1318,18 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
       warnings.push(`${base} evidence check ${id}: claimed pass but NOT_VERIFIED — trusted backstop (${trusted.source}) could not run (${safeOneLine(outcome.error, 80)}).`);
       continue;
     }
-    if (!outcome.passed) {
+    if (outcome.classification === 'ambiguous') {
+      // #362: bare grep/diff backstop re-run exited 1 — ambiguous, not a caught
+      // false-completion. Never silently PASS (a presence check recorded without
+      // negation could genuinely be a miss) and never silently dropped.
+      const note = `${base} evidence check ${id}: trusted backstop (${trusted.source}) re-run of "${trusted.argv.join(' ')}" exited 1 — for grep/diff this may mean zero matches/no differences (PASS for an absence check) or an unintended miss (FAIL for a presence check); NOT_VERIFIED (ambiguous): ${AMBIGUOUS_REMEDIATION} to remove the ambiguity.`;
+      warnings.push(note);
+    } else if (outcome.classification === 'fail') {
       const note = `${base} evidence check ${id}: trusted backstop (${trusted.source}) re-run of "${trusted.argv.join(' ')}" FAILED with exit ${outcome.exitCode}, contradicting the claimed pass. This is a caught false-completion.`;
       if (backstopMode === 'off') warnings.push(`${note} [backstop in warn mode — not blocking]`);
       else warnings.push(note);
     }
-    // backstop passed → claim deterministically confirmed by re-run, no warning.
+    // backstop classification 'pass' → claim deterministically confirmed by re-run, no warning.
   }
 
   return warnings;
@@ -1270,7 +1389,18 @@ function capturedFailReconciliation(root, artifactDir, taskStatus) {
     if (!info.failed && hasLaunderingOperator(cmd)) launderedPass.set(cmd, info);
   }
 
-  if (latestFails.size === 0 && launderedPass.size === 0) return []; // Nothing to flag
+  // Iteration-2 fix item 4 (HIGH, ambiguity-must-not-slip-terminal-stops): a THIRD bucket —
+  // commands whose LATEST capture is `ambiguous` (a bare, non-self-asserting grep/diff exit 1;
+  // #362) — collected separately from `latestFails`, never merged into it. An ambiguous capture
+  // is NOT a caught false-completion (it may genuinely be the author's intended pass for an
+  // absence check) — it gets its own distinct re-record-self-asserting message below, never the
+  // "caught false-completion" accusation `latestFails`/`launderedPass` use.
+  const latestAmbiguous = new Map(); // cmd -> {failed:false, ambiguous:true, exitCode}
+  for (const [cmd, info] of latestLog) {
+    if (!info.failed && info.ambiguous) latestAmbiguous.set(cmd, info);
+  }
+
+  if (latestFails.size === 0 && launderedPass.size === 0 && latestAmbiguous.size === 0) return []; // Nothing to flag
 
   const base = relative(root, artifactDir);
   const warnings = [];
@@ -1286,8 +1416,8 @@ function capturedFailReconciliation(root, artifactDir, taskStatus) {
     if (c && c.id) claimById.set(c.id, c);
   }
 
-  // commandsToCheck: FAIL-latest commands + laundered-pass commands
-  const commandsToCheck = new Set([...latestFails.keys(), ...launderedPass.keys()]);
+  // commandsToCheck: FAIL-latest commands + laundered-pass commands + ambiguous-latest commands
+  const commandsToCheck = new Set([...latestFails.keys(), ...launderedPass.keys(), ...latestAmbiguous.keys()]);
 
   // For each relevant command, track what claims say about it.
   // cmdAcc: cmd → {passClaims: [...], ackClaims: []}
@@ -1354,6 +1484,31 @@ function capturedFailReconciliation(root, artifactDir, taskStatus) {
         `exit-code-laundered command — claim ${safeOneLine(claim.subjectId || claim.id, 80)} ` +
         `(${safeOneLine(claim.claimType, 48)}) asserts pass but the exit code is not a ` +
         `trustworthy signal (laundering operators mask the real exit code).`
+      );
+    }
+  }
+
+  // Iteration-2 fix item 4 (HIGH): THIRD bucket — commands whose latest capture is `ambiguous`
+  // AND some claim asserts pass for them. This is deliberately gated on `acc.passClaims.length >
+  // 0` (mirroring Case A / Fix D above) — an ambiguous capture with NO pass-claim at all is not
+  // reconciled here (nothing was asserted against it to reconcile), matching the existing
+  // no-over-block guarantee for incidental runs. When a claim DOES assert pass for an ambiguous
+  // command, this is a DISTINCT re-record-self-asserting message — NEVER the "caught
+  // false-completion" accusation Case A/Fix D use, since a bare grep/diff exit 1 may genuinely be
+  // the author's intended pass (zero matches/no differences for an absence check). This bucket
+  // still BLOCKS a terminal stop (via HARD_BLOCK's dedicated ambiguous pattern below) because the
+  // claim is asserting something the capture cannot actually confirm — recording is not the same
+  // as verified completion.
+  for (const [cmd, ambiguousInfo] of latestAmbiguous) {
+    const exit = Number.isInteger(ambiguousInfo.exitCode) ? ambiguousInfo.exitCode : null;
+    const exitStr = exit !== null ? ` (exit ${exit})` : '';
+    const acc = cmdAcc.get(cmd);
+    if (acc && acc.passClaims.length > 0) {
+      const claim = acc.passClaims[0];
+      warnings.push(
+        `${base} captured command '${safeOneLine(cmd, 120)}' last ran AMBIGUOUS${exitStr} ` +
+        `(bare grep/diff exit 1 — zero matches/no differences) and claim ${safeOneLine(claim.subjectId || claim.id, 80)} ` +
+        `(${safeOneLine(claim.claimType, 48)}) asserts pass — NOT_VERIFIED (ambiguous): ${AMBIGUOUS_REMEDIATION} and re-run it, then re-record the claim.`
       );
     }
   }
@@ -1620,16 +1775,30 @@ function missingBundleOrStateSignal(artifactDir, activeFlowStep) {
 //
 // HARD_BLOCK: always blocks, even for pre-execution and terminal tasks.
 //   Fires on genuine false-completion signals (a claimed pass the capture log or
-//   evidence.json contradicts), integrity failures, and gate misconfiguration.
+//   evidence.json contradicts), integrity failures, gate misconfiguration, and — iteration-2 fix
+//   item 4 (HIGH) — the unified ambiguous-with-a-pass-claim signal (`NOT_VERIFIED (ambiguous)`,
+//   built from the shared AMBIGUOUS_REMEDIATION const). ALL THREE emission sites — the capture-log
+//   shortcut in captureCrossReference, the live re-run in runBackstop, and the THIRD bucket in
+//   capturedFailReconciliation — emit this same marker, and it is DELIBERATELY distinct text from
+//   `caught false-completion` (never the false-completion accusation for a bare grep/diff exit 1,
+//   which may genuinely be the author's intended pass). All three DELIBERATELY match HARD_BLOCK,
+//   so an ambiguous claimed-pass BLOCKS a terminal/pre-execution stop in every config
+//   (evidence.json-only, never-captured, and captured+bundle) — a claim asserting pass for a
+//   command whose exit code cannot actually confirm that is not a verified completion either. Do
+//   NOT revert any of the three sites back to plain `NOT_VERIFIED —` text: that would desync them
+//   from HARD_BLOCK and reopen the terminal-stop ambiguous bypass. (The genuinely non-ambiguous
+//   `NOT_VERIFIED —` cases — never-captured, backstop-disabled, no-trust-bundle, etc. — are a
+//   separate, unrelated class: they stay warn-only for a terminal/pre-execution stop and only
+//   block a non-terminal stop via FULL_BLOCK's broader `NOT_VERIFIED —` pattern, unchanged.)
 //
 // FULL_BLOCK: fires for execution-onward tasks (post-planning, non-terminal).
 //   Includes all HARD_BLOCK patterns plus completeness/hygiene and not-done state.
 //
 // Both are used in analyze() for blocking decisions AND in run() for the AC2
 // MAX_BLOCKS hard-block guard (preventing auto-release of hard blocks).
-const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered/;
+const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered|NOT_VERIFIED \(ambiguous\)/;
 // FULL_BLOCK adds: workflow-state hygiene, surface-unavailable fail-closed, missing log.
-const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing|exit-code-laundered|malformed-evidence/;
+const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing|exit-code-laundered|malformed-evidence|NOT_VERIFIED \(ambiguous\)/;
 
 async function analyze(root, now = Date.now()) {
   const flowAgentsDirs = flowAgentsArtifactRootsForRead(root);

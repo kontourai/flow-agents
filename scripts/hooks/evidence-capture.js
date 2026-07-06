@@ -12,7 +12,12 @@
  * Records to `.kontourai/flow-agents/<slug>/command-log.jsonl`, one JSON object per line:
  *   {
  *     "command":        "<the command string the agent ran>",
- *     "observedResult": "pass" | "fail",   // deterministically inferred
+ *     "observedResult": "pass" | "fail" | "ambiguous", // deterministically inferred
+ *                                       // ("ambiguous": a bare, non-self-asserting
+ *                                       // grep/diff exited 1 — could mean zero
+ *                                       // matches/no differences (PASS for an
+ *                                       // absence check) or an unintended miss
+ *                                       // (FAIL for a presence check); #362)
  *     "exitCode":       <integer> | null,  // null when only pass/fail is inferable
  *     "capturedAt":     "<ISO-8601 timestamp>",
  *     "source":         "postToolUse-capture",
@@ -51,6 +56,7 @@ const path = require('path');
 const { flowAgentsArtifactRootsForRead } = require('./lib/local-artifact-paths');
 const { resolveActor } = require('./lib/actor-identity.js');
 const { readCurrentPointer } = require('./lib/current-pointer.js');
+const { isAmbiguousAbsenceCommand } = require('./lib/runnable-command.js');
 const crypto = require('crypto');
 
 const MAX_STDIN = 1024 * 1024;
@@ -248,15 +254,29 @@ function cleanExitCode(value) {
  *
  * Priority:
  *   1. A clean integer exit code anywhere the host surfaces it → exitCode set;
- *      observedResult = pass iff exitCode === 0.
+ *      observedResult = pass iff exitCode === 0, EXCEPT (#362) a bare,
+ *      non-self-asserting `grep`/`diff` invocation (per
+ *      `isAmbiguousAbsenceCommand`, ./lib/runnable-command.js) that exits
+ *      EXACTLY 1 → observedResult = 'ambiguous' instead of 'fail'. Exit 1 for
+ *      such a command could mean zero matches/no differences (PASS for an
+ *      absence check) or an unintended miss (FAIL for a presence check) —
+ *      this is never coerced to 'pass' (that would trade a false-block for a
+ *      false-pass) nor silently left as 'fail' (that is the exact false
+ *      caught-completion #362 reports). Exit codes >= 2 for these two
+ *      binaries are real tool errors and remain 'fail', unchanged.
  *   2. Else, a non-empty `error` field or stderr-style failure indication →
  *      observedResult = fail, exitCode = null.
  *   3. Else → observedResult = pass, exitCode = null.
+ *
+ * `input.command` (the raw command string, already in scope at the run()
+ * call site) is required to evaluate the #362 carve-out; when absent, the
+ * carve-out simply never fires and behavior is byte-identical to before #362.
  */
 function observeResult(input) {
   const response = input.tool_response;
   const output = input.tool_output;
   const error = input.error;
+  const command = typeof input.command === 'string' ? input.command : '';
 
   // Candidate locations for a host-provided exit code.
   const candidates = [];
@@ -274,6 +294,9 @@ function observeResult(input) {
   }
 
   if (exitCode !== null) {
+    if (exitCode === 1 && command && isAmbiguousAbsenceCommand(command)) {
+      return { exitCode, observedResult: 'ambiguous' };
+    }
     return { exitCode, observedResult: exitCode === 0 ? 'pass' : 'fail' };
   }
 
@@ -326,6 +349,10 @@ function run(rawInput) {
       exit_code: input.exit_code,
       status: input.status,
       code: input.code,
+      // #362: thread the raw command string through so observeResult can apply the
+      // bare-grep/diff-exit-1 ambiguous carve-out. `command` is already in scope here
+      // (extracted above from input.tool_input.command).
+      command,
     });
 
     const record = {
