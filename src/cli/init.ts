@@ -297,6 +297,35 @@ function ensureBundle(runtime: Runtime): string {
 const GLOBAL_INSTALL_PROJECT_DIR_PREFIX = /root="\$\{CLAUDE_PROJECT_DIR:-\$\(pwd\)\}";\s*/g;
 const GLOBAL_INSTALL_PROJECT_DIR_VAR = /"\$root\//g;
 
+type InstallMergeConflict = {
+  path: string;
+  existingValue: unknown;
+  managedValue: unknown;
+};
+
+type MergeSettingsFn = (
+  existing: Record<string, unknown>,
+  managed: Record<string, unknown>,
+  options?: { onConflict?: (conflict: InstallMergeConflict) => void },
+) => Record<string, unknown>;
+
+function warnInstallMergeConflicts(conflicts: InstallMergeConflict[]): void {
+  for (const conflict of conflicts) {
+    console.warn(`install-merge: conflict: preserving existing setting '${conflict.path}' and not applying Flow Agents managed value`);
+  }
+}
+
+function mergeInstallSettings(
+  mergeSettings: MergeSettingsFn,
+  existing: Record<string, unknown>,
+  managed: Record<string, unknown>,
+): Record<string, unknown> {
+  const conflicts: InstallMergeConflict[] = [];
+  const merged = mergeSettings(existing, managed, { onConflict: (conflict) => conflicts.push(conflict) });
+  warnInstallMergeConflicts(conflicts);
+  return merged;
+}
+
 function rewriteCommandForGlobalInstall(command: string, sourceRoot: string): string {
   return command
     .replace(GLOBAL_INSTALL_PROJECT_DIR_PREFIX, "")
@@ -442,12 +471,12 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       const destSettingsPath = path.join(options.dest, "settings.json");
       const installMergePath = path.join(root, "scripts", "install-merge.js");
       const _require = createRequire(import.meta.url);
-      const { mergeSettings } = _require(installMergePath) as { mergeSettings: (a: Record<string, unknown>, b: Record<string, unknown>) => Record<string, unknown> };
+      const { mergeSettings } = _require(installMergePath) as { mergeSettings: MergeSettingsFn };
       let existing: Record<string, unknown> = {};
       if (fs.existsSync(destSettingsPath)) {
         try { existing = JSON.parse(fs.readFileSync(destSettingsPath, "utf8")) as Record<string, unknown>; } catch { existing = {}; }
       }
-      const merged = mergeSettings(existing, managed);
+      const merged = mergeInstallSettings(mergeSettings, existing, managed);
       const tmp = `${destSettingsPath}.tmp.${process.pid}`;
       fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
       fs.renameSync(tmp, destSettingsPath);
@@ -484,12 +513,12 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       const destConfigPath = path.join(options.dest, "opencode.json");
       const installMergePath = path.join(root, "scripts", "install-merge.js");
       const _require = createRequire(import.meta.url);
-      const { mergeSettings } = _require(installMergePath) as { mergeSettings: (a: Record<string, unknown>, b: Record<string, unknown>) => Record<string, unknown> };
+      const { mergeSettings } = _require(installMergePath) as { mergeSettings: MergeSettingsFn };
       let existing: Record<string, unknown> = {};
       if (fs.existsSync(destConfigPath)) {
         try { existing = JSON.parse(fs.readFileSync(destConfigPath, "utf8")) as Record<string, unknown>; } catch { existing = {}; }
       }
-      const merged = mergeSettings(existing, managed);
+      const merged = mergeInstallSettings(mergeSettings, existing, managed);
       const tmp = `${destConfigPath}.tmp.${process.pid}`;
       fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}
 `, "utf8");
@@ -604,12 +633,12 @@ function dogfoodClaudeCode(bundleRoot: string, dest: string): void {
   // Merge: read existing, strip FA hooks, append new FA hooks, preserve all other keys.
   const installMergePath = path.join(root, "scripts", "install-merge.js");
   const _require = createRequire(import.meta.url);
-  const { mergeSettings } = _require(installMergePath) as { mergeSettings: (a: Record<string, unknown>, b: Record<string, unknown>) => Record<string, unknown> };
+  const { mergeSettings } = _require(installMergePath) as { mergeSettings: MergeSettingsFn };
   let existing: Record<string, unknown> = {};
   if (fs.existsSync(destSettingsPath)) {
     try { existing = JSON.parse(fs.readFileSync(destSettingsPath, "utf8")) as Record<string, unknown>; } catch { existing = {}; }
   }
-  const merged = mergeSettings(existing, managed);
+  const merged = mergeInstallSettings(mergeSettings, existing, managed);
   const tmp = `${destSettingsPath}.tmp.${process.pid}`;
   fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
   fs.renameSync(tmp, destSettingsPath);
@@ -642,12 +671,12 @@ function dogfoodCodex(bundleRoot: string, dest: string): void {
   // Merge: read existing, strip FA hook-groups, append new FA hook-groups, preserve user groups.
   const installMergePath = path.join(root, "scripts", "install-merge.js");
   const _require = createRequire(import.meta.url);
-  const { mergeSettings } = _require(installMergePath) as { mergeSettings: (a: Record<string, unknown>, b: Record<string, unknown>) => Record<string, unknown> };
+  const { mergeSettings } = _require(installMergePath) as { mergeSettings: MergeSettingsFn };
   let existing: Record<string, unknown> = {};
   if (fs.existsSync(destHooksPath)) {
     try { existing = JSON.parse(fs.readFileSync(destHooksPath, "utf8")) as Record<string, unknown>; } catch { existing = {}; }
   }
-  const merged = mergeSettings(existing, managed);
+  const merged = mergeInstallSettings(mergeSettings, existing, managed);
   const tmp = `${destHooksPath}.tmp.${process.pid}`;
   fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
   fs.renameSync(tmp, destHooksPath);

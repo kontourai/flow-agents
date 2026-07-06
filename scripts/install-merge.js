@@ -23,10 +23,13 @@
  *       flow-agents marker (the COLLISION_MARKER strings from init.ts).
  *   (c) APPEND the current managed hook groups from the bundle.
  *   (d) Preserve ALL other keys (permissions, statusLine, user hooks, auth).
+ *       Managed non-hook values are added only when absent or when replacing
+ *       an existing Flow Agents-owned value. Conflicting user-owned values win
+ *       and are reported to stderr.
  *   (e) Atomic write (write tmp + rename).
  *   (f) Write/update .flow-agents/install.json version stamp.
  *
- * Export: mergeSettings(existing, managed) — pure, testable.
+ * Export: mergeSettings(existing, managed, options) — pure, testable.
  * The managed ownership region is identified purely by statusMessage markers
  * (cross-runtime, no top-level key needed in settings.json).
  */
@@ -46,6 +49,33 @@ const FA_MARKERS = [
   "Running Flow Agents hook policy",
   "Capturing Flow Agents command evidence",
 ];
+
+const FA_OWNERSHIP_MARKERS = [
+  ...FA_MARKERS,
+  "flow-agents",
+  "Flow Agents",
+];
+
+function stableJson(value) {
+  if (value === undefined) return "undefined";
+  return JSON.stringify(value);
+}
+
+function valuesEqual(a, b) {
+  return stableJson(a) === stableJson(b);
+}
+
+function valueContainsManagedMarker(value) {
+  return FA_OWNERSHIP_MARKERS.some((marker) => stableJson(value).includes(marker));
+}
+
+function conflict(path, existingValue, managedValue) {
+  return { path, existingValue, managedValue };
+}
+
+function emitConflict(onConflict, item) {
+  if (typeof onConflict === "function") onConflict(item);
+}
 
 /**
  * Returns true if a hook-group entry is owned by flow-agents.
@@ -95,16 +125,28 @@ function mergeArrayUnion(a, b) {
  * @param {unknown} existingPerms @param {unknown} managedPerms
  * @returns {Record<string, unknown>}
  */
-function mergePermissions(existingPerms, managedPerms) {
+function mergePermissions(existingPerms, managedPerms, options = {}) {
   const e = existingPerms && typeof existingPerms === "object" ? existingPerms : {};
   const m = managedPerms && typeof managedPerms === "object" ? managedPerms : {};
-  const out = Object.assign({}, e, m);
+  const out = Object.assign({}, e);
   for (const listKey of ["allow", "deny", "ask"]) {
     if (Array.isArray(e[listKey]) || Array.isArray(m[listKey])) {
       out[listKey] = mergeArrayUnion(e[listKey], m[listKey]);
     }
   }
-  if (e.defaultMode !== undefined) out.defaultMode = e.defaultMode;
+  for (const [key, value] of Object.entries(m)) {
+    if (["allow", "deny", "ask"].includes(key)) continue;
+    if (!(key in e)) {
+      out[key] = value;
+      continue;
+    }
+    if (valuesEqual(e[key], value) || valueContainsManagedMarker(e[key])) {
+      out[key] = value;
+      continue;
+    }
+    out[key] = e[key];
+    emitConflict(options.onConflict, conflict(`permissions.${key}`, e[key], value));
+  }
   return out;
 }
 
@@ -117,14 +159,17 @@ function mergePermissions(existingPerms, managedPerms) {
  *
  * Returns a new object with:
  *   - All keys from `existing` preserved (permissions, statusLine, auth, etc.)
- *   - All keys from `managed` merged in (flow-agents owned keys like statusLine, hooks)
+ *   - Managed keys added when absent, or updated only when the existing value
+ *     is already Flow Agents-owned.
+ *   - User-owned managed-key conflicts preserved from `existing` and surfaced
+ *     through `options.onConflict`.
  *   - For the `hooks` key: user-owned hook groups (non-FA) survive; FA groups are
  *     replaced with the current managed set from `managed`.
  *
  * Strategy:
  *   1. Start with a shallow copy of `existing` (preserves all user keys).
- *   2. Overlay all scalar/non-hooks keys from `managed` (statusLine, permissions
- *      from the bundle, skipDangerousModePermissionPrompt, etc.).
+ *   2. Add or update Flow Agents-owned non-hooks keys from `managed`; preserve
+ *      user-owned conflicting values and report conflicts.
  *   3. For `hooks`: iterate each event key from both existing and managed;
  *      keep user (non-FA) groups from existing, append the current FA groups
  *      from managed.
@@ -133,19 +178,26 @@ function mergePermissions(existingPerms, managedPerms) {
  * @param {Record<string, unknown>} managed
  * @returns {Record<string, unknown>}
  */
-function mergeSettings(existing, managed) {
+function mergeSettings(existing, managed, options = {}) {
   // 1. Start with all existing keys (preserves user-owned data).
   const result = Object.assign({}, existing);
 
-  // 2. Overlay non-hooks keys from managed. `permissions` is DEEP-merged so the
-  //    user's allow/deny/ask lists + defaultMode survive — flow-agents only adds
-  //    its required entries (#117: never clobber user customizations).
+  // 2. Add non-hooks keys from managed without overwriting user-owned values.
+  //    If a key is absent, add the managed default. If the existing value is
+  //    already Flow Agents-owned (for example the generated statusLine command),
+  //    replace it with the current managed value. Otherwise preserve the user's
+  //    value and surface a conflict so the user can decide.
   for (const [key, value] of Object.entries(managed)) {
     if (key === "hooks") continue;
     if (key === "permissions") {
-      result.permissions = mergePermissions(existing.permissions, value);
-    } else {
+      result.permissions = mergePermissions(existing.permissions, value, options);
+    } else if (!(key in existing)) {
       result[key] = value;
+    } else if (valuesEqual(existing[key], value) || valueContainsManagedMarker(existing[key])) {
+      result[key] = value;
+    } else {
+      result[key] = existing[key];
+      emitConflict(options.onConflict, conflict(key, existing[key], value));
     }
   }
 
@@ -267,7 +319,13 @@ function runMerge({ configPath, managedHooksPath, version, installRecordPath, ru
   }
 
   // (b) + (c) + (d) Merge.
-  const merged = mergeSettings(existing, managed);
+  const conflicts = [];
+  const merged = mergeSettings(existing, managed, { onConflict: (item) => conflicts.push(item) });
+  for (const item of conflicts) {
+    process.stderr.write(
+      `install-merge: conflict: preserving existing setting '${item.path}' and not applying Flow Agents managed value\n`
+    );
+  }
 
   // (e) Atomic write.
   atomicWriteJson(configPath, merged);

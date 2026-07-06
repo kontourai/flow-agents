@@ -58,8 +58,14 @@ cat > "$SEEDED_DEST/.claude/settings.json" << 'JSON'
 {
   "permissions": {
     "allow": ["Bash(usertool:*)"],
+    "defaultMode": "ask",
     "customPermission": true
   },
+  "statusLine": {
+    "type": "command",
+    "command": "echo user-statusline"
+  },
+  "skipDangerousModePermissionPrompt": false,
   "myUserKey": "preserved-value",
   "hooks": {
     "Stop": [
@@ -78,7 +84,8 @@ cat > "$SEEDED_DEST/.claude/settings.json" << 'JSON'
 JSON
 
 # Run install
-(cd "$ROOT_DIR/dist/claude-code" && bash install.sh "$SEEDED_DEST" >/dev/null 2>&1)
+SEEDED_INSTALL_OUT="$TMPDIR_EVAL/seeded-claude-install.out"
+(cd "$ROOT_DIR/dist/claude-code" && bash install.sh "$SEEDED_DEST" >"$SEEDED_INSTALL_OUT" 2>&1)
 
 # Assert: FA hooks present
 if node - "$SEEDED_DEST/.claude/settings.json" << 'NODE'
@@ -135,13 +142,37 @@ const fs = require("node:fs");
 const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const p = s.permissions || {};
 if (p.customPermission !== true) throw new Error("user permissions.customPermission was clobbered: " + JSON.stringify(p));
+if (p.defaultMode !== "ask") throw new Error("user permissions.defaultMode conflict was not preserved: " + JSON.stringify(p));
 if (!JSON.stringify(p.allow || []).includes("usertool")) throw new Error("user permissions.allow entry not preserved by union: " + JSON.stringify(p.allow));
 console.log("ok");
 NODE
 then
-  _pass "seeded: user custom permissions preserved (deep-merge union, not clobbered)"
+  _pass "seeded: user custom permissions preserved (deep-merge union, scalar conflicts preserved)"
 else
   _fail "seeded: user custom permissions were clobbered"
+fi
+
+# Assert: user-owned scalar/object settings are preserved and surfaced as conflicts.
+if node - "$SEEDED_DEST/.claude/settings.json" << 'NODE'
+const fs = require("node:fs");
+const s = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (s.statusLine?.command !== "echo user-statusline") throw new Error("statusLine conflict was not preserved: " + JSON.stringify(s.statusLine));
+if (s.skipDangerousModePermissionPrompt !== false) throw new Error("skipDangerousModePermissionPrompt conflict was not preserved: " + JSON.stringify(s.skipDangerousModePermissionPrompt));
+console.log("ok");
+NODE
+then
+  _pass "seeded: user-owned statusLine and skipDangerousModePermissionPrompt preserved"
+else
+  _fail "seeded: user-owned scalar/object settings were clobbered"
+fi
+
+if rg -q "install-merge: conflict: preserving existing setting 'statusLine'" "$SEEDED_INSTALL_OUT" \
+  && rg -q "install-merge: conflict: preserving existing setting 'permissions.defaultMode'" "$SEEDED_INSTALL_OUT" \
+  && rg -q "install-merge: conflict: preserving existing setting 'skipDangerousModePermissionPrompt'" "$SEEDED_INSTALL_OUT"; then
+  _pass "seeded: install reports preserved setting conflicts to the user"
+else
+  _fail "seeded: install did not report expected setting conflicts"
+  sed -n '1,120p' "$SEEDED_INSTALL_OUT"
 fi
 
 echo ""
