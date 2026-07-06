@@ -22,8 +22,18 @@
  *     SAFE: the CLI writes state.json via writeState → writeJson → fs.writeFileSync.
  *   - .kontourai/flow-agents/<slug>/trust.bundle — where an agent could forge claims.
  *     SAFE: the CLI writes trust.bundle via writeTrustBundle → writeJson → fs.writeFileSync.
+ *   - .kontourai/flow-agents/assignment/<slug>.json (iteration-3 fix, Finding B) — the durable
+ *     assignment-provider claim record (#290/#291/#294) whose actor_key field
+ *     lib/current-pointer.js's ownedSessionArtifactDirs now keys the stop-goal-fit tier-2
+ *     ownership scan on (iteration-3 Finding A) independent of the record's claimed/released
+ *     status — an agent could otherwise rm/mv/Edit this file to hide or forge session ownership
+ *     from that scan the same way the current.json/state.json bypass class already worked.
+ *     SAFE: the CLI writes it via writeLocalRecord → writeJson → fs.writeFileSync.
+ *     HONEST (ADR 0018 frozen bar-raiser): this is defense-in-depth, matching its sibling
+ *     sidecars' coverage for consistency; the durable backstop is CI trust-reconcile on a fresh
+ *     server-side checkout, not this local string-matcher.
  *   (Verified: ensureSession / advanceState / writeCurrent / writeState /
- *    writeTrustBundle all use writeJson which calls fs.writeFileSync directly —
+ *    writeTrustBundle / writeLocalRecord all use writeJson which calls fs.writeFileSync directly —
  *    blocking the Write/Edit tool path does NOT break legit CLI sidecar writes.)
  *
  * Also detects (best-effort) Bash-command redirects that write to the same paths
@@ -39,6 +49,19 @@
  * '/.bashrc', homedir()+'/.bashrc'), base64-encoded paths, multi-step path assembly,
  * any interpreter not in the list (ruby, php, etc.), and multiline here-docs.
  * The real anchor remains external (clean CI env + human review).
+ *
+ * DELETE/RENAME-AWAY DETECTION — INCOMPLETE (iteration-2 CRITICAL-adjacent fix, security
+ * review: an actor could remove or rename away its OWN pointer sidecar to manipulate the
+ * stop-goal-fit ownership-scan tier — this is a suspenders fix alongside the primary fix in
+ * lib/current-pointer.js's ownedSessionArtifactDirs, which no longer relies on the pointer file
+ * surviving). Also checks Bash removal-family invocations targeting a protected path, rename
+ * commands whose SOURCE argument is a protected path (moving it away is equivalent to removing
+ * it), and interpreter-invoked removal calls referencing a protected-path token literal — the
+ * SAME literal-substring approach (and the SAME honest incomplete-coverage note) as the existing
+ * interpreter-write check above. KNOWN EVASIONS NOT CAUGHT: runtime-constructed paths,
+ * base64-encoded paths, a find-based bulk delete, a sync-then-delete-source tool, any
+ * interpreter/removal API not listed, and multiline here-docs. The real anchor remains external
+ * (clean CI env + human review).
  *
  * FROZEN bar-raiser (ADR 0018). The redirect / interpreter-write / cp-target detection
  * is intentionally non-exhaustive and is NOT to be grown with new evasion-pattern rules.
@@ -87,8 +110,8 @@ const PROTECTED_FILES = new Set([
  * Check whether a Write/Edit tool file path targets a gate kill-switch file
  * that requires path-level matching (.claude/settings.json,
  * .kontourai/flow-agents/current.json, .kontourai/flow-agents/<slug>/state.json,
- * .kontourai/flow-agents/<slug>/trust.bundle, and deprecated runtime-shaped
- * .flow-agents equivalents).
+ * .kontourai/flow-agents/<slug>/trust.bundle, .kontourai/flow-agents/assignment/<slug>.json
+ * (iteration-3 fix, Finding B), and deprecated runtime-shaped .flow-agents equivalents).
  *
  * Returns { name, reason } when blocked, null when allowed.
  *
@@ -172,6 +195,22 @@ function checkProtectedPathPattern(filePath) {
     return {
       name: '.kontourai/flow-agents/<slug>/trust.bundle',
       reason: 'an agent could forge trust claims (verified status, impact level) to bypass gate integrity checks',
+    };
+  }
+
+  // .kontourai/flow-agents/assignment/<slug>.json (iteration-3 fix, Finding B) — the durable
+  // assignment-provider claim record (#290/#291/#294) whose actor_key field
+  // lib/current-pointer.js's ownedSessionArtifactDirs keys the stop-goal-fit tier-2 ownership
+  // scan on (iteration-3 Finding A), independent of the record's claimed/released status. An
+  // agent could otherwise forge/delete this record to hide or fabricate session ownership from
+  // that scan. SAFE: the CLI writes it via writeLocalRecord → writeJson → fs.writeFileSync,
+  // NOT via the Write/Edit tool — blocking the tool path does not break legit sidecar writes.
+  // HONEST (ADR 0018 frozen bar-raiser): defense-in-depth alongside the primary fix, matching
+  // sibling sidecar coverage; the durable backstop is CI trust-reconcile, not this matcher.
+  if (/(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/assignment\/[^/]+\.json$/.test(norm)) {
+    return {
+      name: '.kontourai/flow-agents/assignment/<slug>.json',
+      reason: 'an agent could forge or delete the durable assignment-claim ownership record to hide an owned session from the stop-goal-fit gate',
     };
   }
 
@@ -421,12 +460,14 @@ function checkCommandForBypass(command) {
  * .kontourai/flow-agents/current/<actor>.json (#291 per-actor projection),
  * .kontourai/flow-agents/.goal-fit-block-streak.json,
  * .kontourai/flow-agents/<slug>/state.json,
- * .kontourai/flow-agents/<slug>/trust.bundle, and deprecated runtime-shaped
- * .flow-agents equivalents.
+ * .kontourai/flow-agents/<slug>/trust.bundle,
+ * .kontourai/flow-agents/assignment/<slug>.json (iteration-3 fix, Finding B — the durable
+ * assignment-claim ownership record; see checkProtectedPathPattern's arm above for rationale),
+ * and deprecated runtime-shaped .flow-agents equivalents.
  */
 // #379: the delivery/ arms carry an optional (?:[^/]+\/)? segment so redirects/tee to the
 // per-session path delivery/<slug>/trust.bundle (+ checkpoint) are caught, not just the flat path.
-const REDIRECT_PROTECTED_RE = /(?:^|\/|~\/)(\.bash_profile|\.bashrc|\.profile|\.zprofile|\.zshrc)$|(?:^|\/)\.claude\/settings(?:\.local)?\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\/[^/]+\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/\.goal-fit-block-streak\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/state\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.checkpoint\.json$/;
+const REDIRECT_PROTECTED_RE = /(?:^|\/|~\/)(\.bash_profile|\.bashrc|\.profile|\.zprofile|\.zshrc)$|(?:^|\/)\.claude\/settings(?:\.local)?\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\/[^/]+\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/\.goal-fit-block-streak\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/state\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/trust\.bundle$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/assignment\/[^/]+\.json$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.checkpoint\.json$/;
 
 /**
  * Return true when a token (an unquoted redirect target or tee argument) matches
@@ -534,6 +575,17 @@ const INTERPRETER_PROTECTED_TOKENS = [
   // Flow-agents session sidecars (basename match; false-positive risk is low
   // in the interpreter-write context and accepted per R5a honest framing)
   'current.json', 'state.json', 'trust.bundle',
+  // Iteration-2 CRITICAL-adjacent fix: the per-actor current/<actor>.json projection (#291) has
+  // no shared literal basename with the legacy current.json token above (a per-actor file is
+  // named after the actor, e.g. current/eval-actor-a.json) -- this directory-prefix token
+  // catches an interpreter-invoked removal referencing ANY per-actor pointer file.
+  'current/',
+  // Iteration-3 fix (Finding B): the durable assignment-claim ownership record (#290/#291/#294,
+  // .kontourai/flow-agents/assignment/<slug>.json) -- no shared literal basename with any token
+  // above (a record is named after the subject, e.g. assignment/kontourai-flow-agents-345.json),
+  // so this directory-prefix token catches an interpreter-invoked write/removal referencing ANY
+  // assignment record, mirroring the 'current/' token's approach exactly.
+  'assignment/',
   // Delivery CI anchor paths. The existing trust.bundle token catches delivery/trust.bundle
   // as a substring; explicit path added for clarity. trust.checkpoint.json is new.
   'delivery/trust.bundle', 'delivery/trust.checkpoint.json',
@@ -588,12 +640,36 @@ function matchesDeliveryProtected(token) {
 }
 
 /**
+ * Assignment-record-protected path regex (iteration-3 fix, Finding B):
+ * .kontourai/flow-agents/assignment/<slug>.json (and deprecated .flow-agents equivalent) -- the
+ * durable assignment-claim ownership record lib/current-pointer.js's ownedSessionArtifactDirs
+ * keys the stop-goal-fit tier-2 ownership scan on. Kept as its own dedicated regex/matcher
+ * (rather than folding into the broader REDIRECT_PROTECTED_RE reuse checkDeleteOrRenameAwayOfProtected
+ * already does) so checkCopyMoveToProtected's cp/mv/install coverage stays scoped to exactly the
+ * two path families it protects today (delivery/* and now assignment/*), not silently widened to
+ * every REDIRECT_PROTECTED_RE arm (current.json/state.json/trust.bundle already have no cp/mv
+ * coverage requirement in this iteration's fix-plan; adding it here would be scope creep beyond
+ * Finding B).
+ */
+const ASSIGNMENT_COPY_PROTECTED_RE = /(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/assignment\/[^/]+\.json$/;
+
+/**
+ * Return true when a normalized token matches the assignment-record-protected path.
+ */
+function matchesAssignmentProtected(token) {
+  if (!token || typeof token !== "string") return false;
+  return ASSIGNMENT_COPY_PROTECTED_RE.test(token.replace(/\\/g, "/"));
+}
+
+/**
  * checkCopyMoveToProtected(command): detect cp/mv/install commands whose
- * destination argument targets a delivery-protected path.
+ * destination argument targets a delivery-protected OR assignment-record-protected path.
  *
  * Catches the plain-cp attack vector: `cp forged.json delivery/trust.bundle`
- * is not a redirect and not an interpreter invocation, so those checks miss it.
- * The destination is the LAST positional (non-flag) argument.
+ * is not a redirect and not an interpreter invocation, so those checks miss it. Iteration-3 fix
+ * (Finding B) extends the SAME vector to `cp forged.json .kontourai/flow-agents/assignment/<slug>.json`
+ * -- overwriting the durable assignment-claim ownership record via cp/mv/install rather than a
+ * redirect or Write/Edit tool call. The destination is the LAST positional (non-flag) argument.
  *
  * INCOMPLETE COVERAGE: only cp, mv, install are checked. Other copy tools
  * (rsync, scp, dd, etc.) and runtime-constructed path arguments are NOT caught.
@@ -603,7 +679,7 @@ function matchesDeliveryProtected(token) {
 function checkCopyMoveToProtected(command) {
   if (typeof command !== "string" || !command) return null;
   if (!command.includes("cp") && !command.includes("mv") && !command.includes("install")) return null;
-  if (!command.includes("delivery/")) return null;
+  if (!command.includes("delivery/") && !command.includes("assignment/")) return null;
 
   const segments = splitSegments(command);
   for (const seg of segments) {
@@ -621,6 +697,98 @@ function checkCopyMoveToProtected(command) {
     const dest = positional[positional.length - 1];
     if (matchesDeliveryProtected(dest)) {
       return `${cmd} to ${dest} (delivery-protected path)`;
+    }
+    if (matchesAssignmentProtected(dest)) {
+      return `${cmd} to ${dest} (assignment-record-protected path)`;
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Gate lock-down: delete/rename-away detection for the per-actor / legacy current pointer
+// and the durable assignment-claim ownership record (iteration-2 CRITICAL-adjacent fix,
+// iteration-3 fix Finding B)
+//
+// Security review + verifier reproduced an end-to-end stop-goal-fit ownership-scan bypass: an
+// actor with an active gated session removes its OWN current.json / current/<actor>.json
+// pointer file with one un-guarded Bash removal command, so the next Stop hit the (pre-fix)
+// tier-2 "scope to nothing" branch. The primary fix is the ownership-scan redesign in
+// lib/current-pointer.js's ownedSessionArtifactDirs (the durable assignment-claim actor_key
+// stamp, not the pointer file, is now the ownership authority) -- this check is a suspenders
+// hardening alongside that fix, raising the cost of casually removing the pointer file itself.
+//
+// Iteration-3 fix (Finding B, relocated CRITICAL): moving the ownership authority to
+// assignment/<slug>.json without extending THIS SAME defensive perimeter to that file left the
+// identical bypass class reachable again -- `rm .kontourai/flow-agents/assignment/<slug>.json`
+// (or an Edit flipping its actor_key/status) went undetected by every check in this file.
+// REDIRECT_PROTECTED_RE (reused below) now covers that path too, so this check, the interpreter-
+// write check, and the redirect/tee check all gained the same coverage in one place.
+//
+// HONEST -- INCOMPLETE COVERAGE (same framing as every other check in this file):
+//   `rm .kontourai/flow-agents/current.json`                  caught (rm, protected FILE target)
+//   `rm -f .kontourai/flow-agents/current/eval-actor-a.json`  caught (rm, protected FILE target)
+//   `unlink .kontourai/flow-agents/current.json`              caught (unlink, protected FILE target)
+//   `mv .kontourai/flow-agents/current.json /tmp/gone.json`   caught (mv, protected SOURCE)
+//   `rm .kontourai/flow-agents/assignment/<slug>.json`        caught (rm, protected FILE target)
+//   `mv .kontourai/flow-agents/assignment/<slug>.json /tmp/x` caught (mv, protected SOURCE)
+//   `rmdir .kontourai/flow-agents/current` (the WHOLE per-actor directory, not one named
+//   pointer file) is NOT caught -- REDIRECT_PROTECTED_RE (reused here) matches specific FILE
+//   paths, not the bare containing directory; nor is a recursive `rm -rf
+//   .kontourai/flow-agents/current` or `.kontourai/flow-agents/assignment`. A runtime-constructed
+//   path, `find ... -delete`, or a removal tool/API not listed here also evades this check -- the
+//   real anchor remains external (clean CI env + human review; CI trust-reconcile does not trust
+//   agent-written files).
+// ---------------------------------------------------------------------------
+
+const REMOVAL_COMMANDS = new Set(['rm', 'rmdir', 'unlink']);
+
+/**
+ * checkDeleteOrRenameAwayOfProtected(command): detect rm/rmdir/unlink invocations whose
+ * (any) positional argument targets a protected kill-switch path, and mv/rename invocations
+ * whose SOURCE (first positional) argument targets one -- moving the file away is equivalent
+ * to deleting it from its protected location.
+ *
+ * Reuses matchesRedirectProtected/REDIRECT_PROTECTED_RE -- the SAME protected-path set the
+ * existing redirect/tee check already guards (current.json, current/<actor>.json, state.json,
+ * trust.bundle, assignment/<slug>.json (iteration-3 fix), shell profiles,
+ * .claude/settings*.json, etc.) -- so this check never drifts from that list.
+ *
+ * INCOMPLETE COVERAGE -- see the module header and section header above for the honest framing.
+ */
+function checkDeleteOrRenameAwayOfProtected(command) {
+  if (typeof command !== 'string' || !command) return null;
+  if (!command.includes('rm') && !command.includes('unlink') && !command.includes('mv') && !command.includes('rename')) return null;
+
+  const segments = splitSegments(command);
+  for (const seg of segments) {
+    const tokens = tokenize(seg);
+    if (tokens.length < 2) continue;
+    const cmd = tokens[0];
+
+    const positional = [];
+    for (let i = 1; i < tokens.length; i++) {
+      if (!tokens[i].startsWith('-')) positional.push(tokens[i]);
+    }
+    if (positional.length === 0) continue;
+
+    if (REMOVAL_COMMANDS.has(cmd)) {
+      // rm/rmdir/unlink: ANY positional argument targeting a protected path is a removal of it
+      // (rm accepts multiple targets: `rm a.txt .kontourai/flow-agents/current.json`).
+      for (const target of positional) {
+        if (matchesRedirectProtected(target)) {
+          return `${cmd} of ${target}`;
+        }
+      }
+    } else if (cmd === 'mv' || cmd === 'rename') {
+      // mv/rename: the SOURCE is every positional except the last (the destination) -- moving a
+      // protected path away from its required location is equivalent to deleting it there.
+      const sources = positional.slice(0, -1);
+      for (const source of sources) {
+        if (matchesRedirectProtected(source)) {
+          return `${cmd} of ${source} (renamed away from its protected location)`;
+        }
+      }
     }
   }
   return null;
@@ -739,8 +907,9 @@ function run(inputOrRaw, options = {}) {
       return {
         exitCode: 2,
         stderr: `BLOCKED: Detected ${redirect} targeting a protected gate kill-switch file. ` +
-          'Writing to shell profiles or Claude/flow-agents config files via shell redirect could ' +
-          'disable or tamper with the gate. Do not disable this hook. ' +
+          'Writing to shell profiles, Claude/flow-agents config files, or the durable ' +
+          'assignment-claim ownership record via shell redirect could disable or tamper with ' +
+          'the gate. Do not disable this hook. ' +
           remedyForCommand(command) + ' ' +
           'NOTE: This check has incomplete coverage (sed -i and similar forms are not caught).',
       };
@@ -760,25 +929,48 @@ function run(inputOrRaw, options = {}) {
           'NOTE: This check has INCOMPLETE COVERAGE — runtime path construction evades it.',
       };
     }
-    // Gate lock-down R6: detect cp/mv/install targeting delivery-protected paths.
-    // Catches the plain-cp attack: `cp forged.json delivery/trust.bundle`.
+    // Gate lock-down R6: detect cp/mv/install targeting delivery-protected paths. Iteration-3 fix
+    // (Finding B) extends the SAME check to the durable assignment-claim ownership record.
+    // Catches the plain-cp attack: cp forged.json delivery/trust.bundle, or a cp of a forged
+    // record onto the assignment ownership record path under .kontourai/flow-agents/assignment/.
     // INCOMPLETE: cp/mv/install only; rsync/scp/dd evade. Real anchor is external.
     const copyMove = checkCopyMoveToProtected(command);
     if (copyMove) {
       return {
         exitCode: 2,
         stderr: `BLOCKED: Detected ${copyMove} in a Bash command. ` +
-          'Writing to delivery/trust.bundle or delivery/trust.checkpoint.json via cp/mv/install ' +
-          'could forge the CI trust anchor. Do not disable this hook. ' +
+          'Writing to delivery/trust.bundle, delivery/trust.checkpoint.json, or the durable ' +
+          'assignment-claim ownership record under .kontourai/flow-agents/assignment/ ' +
+          'via cp/mv/install could forge the CI trust anchor or hide/fabricate session ' +
+          'ownership from the goal-fit gate. Do not disable this hook. ' +
           remedyForCommand(command) + ' ' +
           'NOTE: This check covers cp/mv/install only -- other copy tools may evade it.',
+      };
+    }
+    // Iteration-2 CRITICAL-adjacent fix, extended by iteration-3 fix (Finding B): detect
+    // rm/rmdir/unlink of, or mv/rename away from, the legacy current.json / per-actor
+    // current/<actor>.json pointer, the durable assignment-claim ownership record, or any
+    // other protected kill-switch path. A suspenders hardening alongside the primary
+    // ownedSessionArtifactDirs fix (lib/current-pointer.js) that no longer relies on either the
+    // pointer file OR the assignment record's status field surviving.
+    const deleteOrRenameAway = checkDeleteOrRenameAwayOfProtected(command);
+    if (deleteOrRenameAway) {
+      return {
+        exitCode: 2,
+        stderr: `BLOCKED: Detected ${deleteOrRenameAway} targeting a protected gate kill-switch file. ` +
+          'Removing or renaming away current.json/current/<actor>.json, the assignment ownership ' +
+          'record under .kontourai/flow-agents/assignment/, or any other protected ' +
+          'sidecar/gate file) could manipulate the goal-fit gate\'s session-ownership resolution. ' +
+          'Do not disable this hook. ' +
+          remedyForCommand(command) + ' ' +
+          'NOTE: This check has incomplete coverage (runtime-constructed paths, find -delete, and similar forms are not caught).',
       };
     }
   }
   return { exitCode: 0 };
 }
 
-module.exports = { run, tokenize, splitSegments, checkCommandForBypass, checkProtectedPathPattern, checkRedirectToProtected, checkInterpreterWriteToProtected, checkCopyMoveToProtected, matchesDeliveryProtected };
+module.exports = { run, tokenize, splitSegments, checkCommandForBypass, checkProtectedPathPattern, checkRedirectToProtected, checkInterpreterWriteToProtected, checkCopyMoveToProtected, checkDeleteOrRenameAwayOfProtected, matchesDeliveryProtected, matchesAssignmentProtected };
 
 // Stdin fallback for spawnSync execution
 if (require.main === module) {

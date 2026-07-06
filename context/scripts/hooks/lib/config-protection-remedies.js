@@ -34,6 +34,9 @@ const SANCTIONED_REMEDIES = {
     'This is written automatically by the delivery publish step (`npm run workflow:sidecar -- publish-delivery` / `advance-state --status delivered`). Never disable this hook to make the write.',
   'delivery/trust.checkpoint.json':
     'This is written automatically by the delivery publish step (`npm run workflow:sidecar -- publish-delivery` / `advance-state --status delivered`). Never disable this hook to make the write.',
+  // Iteration-3 fix (Finding B): the durable assignment-claim ownership record (#290/#291/#294).
+  '.kontourai/flow-agents/assignment/<slug>.json':
+    'Use `ensure-session` (which claims it for you) or the `assignment-provider claim`/`release`/`supersede` CLI directly, not a direct write. Never disable this hook to make the write.',
 };
 
 /** Sanctioned remedy for a protected path name (from checkProtectedPathPattern). */
@@ -71,6 +74,9 @@ const REMEDY_COMMAND_CANDIDATES = [
   // convention.
   { name: '.kontourai/flow-agents/current/<actor>.json', needles: ['flow-agents/current/', '.flow-agents/current/'] },
   { name: '.kontourai/flow-agents/current.json', needles: ['current.json'] },
+  // Iteration-3 fix (Finding B): directory-scoped substring, mirroring the current/<actor>.json
+  // entry above -- never overlaps with any other needle in this table.
+  { name: '.kontourai/flow-agents/assignment/<slug>.json', needles: ['flow-agents/assignment/', '.flow-agents/assignment/'] },
   { name: '.claude/settings.local.json', needles: ['settings.local.json'] },
   { name: '.claude/settings.json', needles: ['.claude/settings.json'] },
 ];

@@ -44,8 +44,8 @@ const {
   flowAgentsArtifactRootsForRead,
 } = require('./lib/local-artifact-paths');
 const { resolveActor, isUnresolvedActor, detectRuntime } = require('./lib/actor-identity.js');
-const { readCurrentPointer } = require('./lib/current-pointer.js');
-const { isRunnableCommandText } = require('./lib/runnable-command.js');
+const { readCurrentPointer, hasOtherActorPointer, ownedSessionArtifactDirs } = require('./lib/current-pointer.js');
+const { isRunnableCommandText, isAmbiguousAbsenceCommand } = require('./lib/runnable-command.js');
 
 const MAX_STDIN = 1024 * 1024;
 const ACTIVE_STATUSES = new Set([
@@ -688,9 +688,34 @@ function normalizeCommand(value) {
 }
 
 /**
+ * #362: a bare (non-self-asserting) grep/diff exit 1 is exit-code-AMBIGUOUS (zero
+ * matches/no diff — could be the author's intended PASS for an absence check, or an
+ * unintended miss for a presence check), not a genuine FAIL. This is the SAME narrow,
+ * two-binary-only carve-out `isAmbiguousAbsenceCommand` already applies at capture time
+ * (`evidence-capture.js`'s `observeResult`) — reused here (not reimplemented) so a log
+ * entry's `observedResult` and this re-derivation from raw exitCode can never disagree.
+ * Exit codes >=2 for grep/diff remain hard FAILs (real tool errors) — this carve-out is
+ * exactly exitCode === 1, nothing wider.
+ *
+ * @param {{command?: string, observedResult?: string, exitCode?: number}} entry
+ * @returns {{failed: boolean, ambiguous: boolean}}
+ */
+function classifyLogEntry(entry) {
+  const exitCode = Number.isInteger(entry.exitCode) ? entry.exitCode : null;
+  const ambiguous = entry.observedResult === 'ambiguous'
+    || (exitCode === 1 && isAmbiguousAbsenceCommand(entry.command));
+  if (ambiguous) return { failed: false, ambiguous: true };
+  const failed = entry.observedResult === 'fail' || (exitCode !== null && exitCode !== 0);
+  return { failed, ambiguous: false };
+}
+
+/**
  * Read command-log.jsonl into a map of normalized-command -> aggregate outcome.
  * If the same command was run more than once, a single FAIL makes the aggregate
- * a fail (a caught false-completion must not be masked by a later pass-claim).
+ * a fail (a caught false-completion must not be masked by a later pass-claim). A
+ * bare grep/diff exit-1 (#362) is carved out as `ambiguous` rather than `failed` — it
+ * is surfaced as a distinct warning class by callers, never silently dropped, and
+ * never treated as a hard block.
  */
 function readCommandLog(artifactDir) {
   const file = path.join(artifactDir, 'command-log.jsonl');
@@ -705,11 +730,12 @@ function readCommandLog(artifactDir) {
     if (!entry || typeof entry.command !== 'string') continue;
     const key = normalizeCommand(entry.command);
     if (!key) continue;
-    const failed = entry.observedResult === 'fail' || (Number.isInteger(entry.exitCode) && entry.exitCode !== 0);
+    const { failed, ambiguous } = classifyLogEntry(entry);
     const prev = byCommand.get(key);
     byCommand.set(key, {
       ran: true,
       failed: failed || (prev ? prev.failed : false),
+      ambiguous: !failed && (ambiguous || (prev ? prev.ambiguous : false)),
       exitCode: Number.isInteger(entry.exitCode) ? entry.exitCode : (prev ? prev.exitCode : null),
     });
   }
@@ -721,7 +747,9 @@ function readCommandLog(artifactDir) {
  * The LAST entry for each command wins (unlike readCommandLog which makes FAIL sticky).
  * Used for both capturedFailReconciliation and captureCrossReference (Fix C): we want to
  * know the LAST result, so a genuine re-run-to-pass clears the earlier FAIL. Only an actual
- * re-run (new PASS entry in the log) clears it — a new claim cannot change the log.
+ * re-run (new PASS entry in the log) clears it — a new claim cannot change the log. #362: a
+ * bare grep/diff exit-1 is carved out as `ambiguous` (via the shared `classifyLogEntry`), not
+ * `failed` — same rationale as `readCommandLog` above.
  */
 function readLatestCommandLog(artifactDir) {
   const file = path.join(artifactDir, 'command-log.jsonl');
@@ -736,11 +764,12 @@ function readLatestCommandLog(artifactDir) {
     if (!entry || typeof entry.command !== 'string') continue;
     const key = normalizeCommand(entry.command);
     if (!key) continue;
-    const failed = entry.observedResult === 'fail' || (Number.isInteger(entry.exitCode) && entry.exitCode !== 0);
-    // LAST entry wins — genuine re-run-to-pass overwrites the earlier FAIL.
+    const { failed, ambiguous } = classifyLogEntry(entry);
+    // LAST entry wins — genuine re-run-to-pass overwrites the earlier FAIL/ambiguous.
     byCommand.set(key, {
       ran: true,
       failed,
+      ambiguous,
       exitCode: Number.isInteger(entry.exitCode) ? entry.exitCode : null,
     });
   }
@@ -1026,6 +1055,23 @@ function resolveBackstopMode() {
   return 'block';
 }
 
+/**
+ * #362: `classification` is a three-state result (`'pass'`/`'fail'`/`'ambiguous'`) rather than
+ * the old boolean `passed` — `'ambiguous'` iff the re-run command text is a bare (non-negated,
+ * non-count-asserted, non-chained) `grep`/`diff` invocation (`isAmbiguousAbsenceCommand`) AND
+ * `exitCode === 1` (zero matches/no diff — could be the author's intended PASS for an absence
+ * check, never silently coerced to pass OR fail). `'fail'` iff `exitCode !== 0` and not the
+ * ambiguous case (this still includes exitCode >= 2 for grep/diff — a real tool error, e.g. a
+ * missing file — which stays a hard fail, proving the carve-out is narrowly scoped). `'pass'`
+ * iff `exitCode === 0`. `trusted.argv.join(' ')` is passed to `isAmbiguousAbsenceCommand` (it
+ * already unwraps a `bash -lc '<command>'` wrapper on its own, so the `['bash', '-lc', cmd]`
+ * shape `resolveTrustedCommand`'s acceptance/model-command sources produce is inspected
+ * correctly; a `declared`-manifest-target argv like `['npm', 'test']` simply never matches
+ * `grep`/`diff` as its first token, so it is never misclassified ambiguous).
+ *
+ * @param {{argv: string[], cwd: string}} trusted
+ * @returns {{ran: boolean, exitCode?: number, classification?: 'pass'|'fail'|'ambiguous', error?: string, timedOut?: boolean}}
+ */
 function runBackstop(trusted) {
   const result = spawnSync(trusted.argv[0], trusted.argv.slice(1), {
     cwd: trusted.cwd,
@@ -1036,7 +1082,19 @@ function runBackstop(trusted) {
   });
   if (result.error) return { ran: false, error: result.error.code || result.error.message };
   if (result.signal) return { ran: false, error: `killed (${result.signal})`, timedOut: result.signal === 'SIGKILL' || result.signal === 'SIGTERM' };
-  return { ran: true, passed: result.status === 0, exitCode: result.status };
+  const exitCode = result.status;
+  // The `['bash', '-lc', <command-text>]` shape resolveTrustedCommand's acceptance/
+  // model-command sources produce carries the ORIGINAL recorded command text verbatim in
+  // argv[2] — pass THAT (not a re-joined/re-quoted `argv.join(' ')`, which would lose the
+  // shell-quoting isAmbiguousAbsenceCommand's `bash -lc '...'` unwrap regex requires) to the
+  // heuristic. A `declared`-manifest-target argv (e.g. `['npm', 'test']`) has no such wrapper;
+  // joining it is fine since its first token is never `grep`/`diff` anyway.
+  const commandText = (trusted.argv.length === 3 && trusted.argv[0] === 'bash' && trusted.argv[1] === '-lc')
+    ? trusted.argv[2]
+    : trusted.argv.join(' ');
+  const ambiguous = exitCode === 1 && isAmbiguousAbsenceCommand(commandText);
+  const classification = ambiguous ? 'ambiguous' : (exitCode === 0 ? 'pass' : 'fail');
+  return { ran: true, exitCode, classification };
 }
 
 /**
@@ -1175,6 +1233,12 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
       if (logged.failed) {
         const exit = Number.isInteger(logged.exitCode) ? ` (exitCode:${logged.exitCode})` : '';
         warnings.push(`${base} evidence check ${id}: capture log CONTRADICTS claimed pass — command "${safeOneLine(cmd, 120)}" was recorded as FAIL${exit}. This is a caught false-completion.`);
+      } else if (logged.ambiguous) {
+        // #362: a bare grep/diff logged exit 1 — ambiguous (zero matches/no diff), not a
+        // caught false-completion. Distinct warning class, never silently dropped, never a
+        // hard block.
+        const exit = Number.isInteger(logged.exitCode) ? ` (exitCode:${logged.exitCode})` : '';
+        warnings.push(`${base} evidence check ${id}: capture log shows command "${safeOneLine(cmd, 120)}" exited 1${exit} — for bare grep/diff this may mean zero matches/no differences (PASS for an absence check) or an unintended miss (FAIL for a presence check); NOT_VERIFIED — re-record this check as a self-asserting command ('! grep ...' or 'grep -c ... | grep -qx 0') to remove the ambiguity.`);
       } else if (hasLaunderingOperator(cmd)) {
         // Fix D: exit-code laundering. The captured exit-0 is not trustworthy — the command
         // baked in '|| true' / '|| :' / '; true' / '; exit 0' / '| true' to mask the real result.
@@ -1205,12 +1269,18 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
       warnings.push(`${base} evidence check ${id}: claimed pass but NOT_VERIFIED — trusted backstop (${trusted.source}) could not run (${safeOneLine(outcome.error, 80)}).`);
       continue;
     }
-    if (!outcome.passed) {
+    if (outcome.classification === 'ambiguous') {
+      // #362: bare grep/diff backstop re-run exited 1 — ambiguous, not a caught
+      // false-completion. Never silently PASS (a presence check recorded without
+      // negation could genuinely be a miss) and never silently dropped.
+      const note = `${base} evidence check ${id}: trusted backstop (${trusted.source}) re-run of "${trusted.argv.join(' ')}" exited 1 — for grep/diff this may mean zero matches/no differences (PASS for an absence check) or an unintended miss (FAIL for a presence check); NOT_VERIFIED — re-record this check as a self-asserting command ('! grep ...' or 'grep -c ... | grep -qx 0') to remove the ambiguity.`;
+      warnings.push(note);
+    } else if (outcome.classification === 'fail') {
       const note = `${base} evidence check ${id}: trusted backstop (${trusted.source}) re-run of "${trusted.argv.join(' ')}" FAILED with exit ${outcome.exitCode}, contradicting the claimed pass. This is a caught false-completion.`;
       if (backstopMode === 'off') warnings.push(`${note} [backstop in warn mode — not blocking]`);
       else warnings.push(note);
     }
-    // backstop passed → claim deterministically confirmed by re-run, no warning.
+    // backstop classification 'pass' → claim deterministically confirmed by re-run, no warning.
   }
 
   return warnings;
@@ -1270,7 +1340,18 @@ function capturedFailReconciliation(root, artifactDir, taskStatus) {
     if (!info.failed && hasLaunderingOperator(cmd)) launderedPass.set(cmd, info);
   }
 
-  if (latestFails.size === 0 && launderedPass.size === 0) return []; // Nothing to flag
+  // Iteration-2 fix item 4 (HIGH, ambiguity-must-not-slip-terminal-stops): a THIRD bucket —
+  // commands whose LATEST capture is `ambiguous` (a bare, non-self-asserting grep/diff exit 1;
+  // #362) — collected separately from `latestFails`, never merged into it. An ambiguous capture
+  // is NOT a caught false-completion (it may genuinely be the author's intended pass for an
+  // absence check) — it gets its own distinct re-record-self-asserting message below, never the
+  // "caught false-completion" accusation `latestFails`/`launderedPass` use.
+  const latestAmbiguous = new Map(); // cmd -> {failed:false, ambiguous:true, exitCode}
+  for (const [cmd, info] of latestLog) {
+    if (!info.failed && info.ambiguous) latestAmbiguous.set(cmd, info);
+  }
+
+  if (latestFails.size === 0 && launderedPass.size === 0 && latestAmbiguous.size === 0) return []; // Nothing to flag
 
   const base = relative(root, artifactDir);
   const warnings = [];
@@ -1286,8 +1367,8 @@ function capturedFailReconciliation(root, artifactDir, taskStatus) {
     if (c && c.id) claimById.set(c.id, c);
   }
 
-  // commandsToCheck: FAIL-latest commands + laundered-pass commands
-  const commandsToCheck = new Set([...latestFails.keys(), ...launderedPass.keys()]);
+  // commandsToCheck: FAIL-latest commands + laundered-pass commands + ambiguous-latest commands
+  const commandsToCheck = new Set([...latestFails.keys(), ...launderedPass.keys(), ...latestAmbiguous.keys()]);
 
   // For each relevant command, track what claims say about it.
   // cmdAcc: cmd → {passClaims: [...], ackClaims: []}
@@ -1354,6 +1435,32 @@ function capturedFailReconciliation(root, artifactDir, taskStatus) {
         `exit-code-laundered command — claim ${safeOneLine(claim.subjectId || claim.id, 80)} ` +
         `(${safeOneLine(claim.claimType, 48)}) asserts pass but the exit code is not a ` +
         `trustworthy signal (laundering operators mask the real exit code).`
+      );
+    }
+  }
+
+  // Iteration-2 fix item 4 (HIGH): THIRD bucket — commands whose latest capture is `ambiguous`
+  // AND some claim asserts pass for them. This is deliberately gated on `acc.passClaims.length >
+  // 0` (mirroring Case A / Fix D above) — an ambiguous capture with NO pass-claim at all is not
+  // reconciled here (nothing was asserted against it to reconcile), matching the existing
+  // no-over-block guarantee for incidental runs. When a claim DOES assert pass for an ambiguous
+  // command, this is a DISTINCT re-record-self-asserting message — NEVER the "caught
+  // false-completion" accusation Case A/Fix D use, since a bare grep/diff exit 1 may genuinely be
+  // the author's intended pass (zero matches/no differences for an absence check). This bucket
+  // still BLOCKS a terminal stop (via HARD_BLOCK's dedicated ambiguous pattern below) because the
+  // claim is asserting something the capture cannot actually confirm — recording is not the same
+  // as verified completion.
+  for (const [cmd, ambiguousInfo] of latestAmbiguous) {
+    const exit = Number.isInteger(ambiguousInfo.exitCode) ? ambiguousInfo.exitCode : null;
+    const exitStr = exit !== null ? ` (exit ${exit})` : '';
+    const acc = cmdAcc.get(cmd);
+    if (acc && acc.passClaims.length > 0) {
+      const claim = acc.passClaims[0];
+      warnings.push(
+        `${base} captured command '${safeOneLine(cmd, 120)}' last ran AMBIGUOUS${exitStr} ` +
+        `(bare grep/diff exit 1 — zero matches/no differences) and claim ${safeOneLine(claim.subjectId || claim.id, 80)} ` +
+        `(${safeOneLine(claim.claimType, 48)}) asserts pass — NOT_VERIFIED (ambiguous): re-record this check as ` +
+        `a self-asserting command ('! grep ...' or 'grep -c ... | grep -qx 0') and re-run it, then re-record the claim.`
       );
     }
   }
@@ -1510,18 +1617,93 @@ async function bundleEnforcement(artifactDir, activeFlowStep) {
 }
 
 /**
- * Scope to the session's current task when .kontourai/flow-agents/current.json points at
- * one (mirroring evidence-capture.js). Returns the slug dir, or null to fall back
- * to scanning all of .kontourai/flow-agents (newest-mtime).
+ * #345 (field evidence read 2026-07-05) + iteration-2 CRITICAL fix (ownership-scan redesign):
+ * single choke point for the three-tier actor-scope resolution rule consumed by BOTH
+ * `preferredArtifactDir` and `staleCurrentSlug` below, so the two functions can never
+ * independently drift on what "this actor's scope" means.
+ *
+ * `readCurrentPointer`'s own compat-shim contract (`lib/current-pointer.js` doc comment) is
+ * deliberately "per-actor file first, else fall straight through to the legacy global
+ * `current.json`" — correct for a genuinely single-actor/legacy-only repo, but it cannot
+ * distinguish that case from "this actor never ran ensure-session/advance-state, but a DIFFERENT,
+ * concurrently-active actor already has its own per-actor pointer" — the exact #345 field
+ * evidence (a pull-work-only session's Stop hook getting gated on a concurrent delivery
+ * session's pending criteria). Resolution order:
+ *   1. This actor's own `current/<actor>.json` exists → use it (existing behavior, unchanged).
+ *   2. No own per-actor file, but `hasOtherActorPointer` is true (a DIFFERENT actor has already
+ *      graduated to per-actor projection under this artifact root) → the pointer is an INDEX,
+ *      not the AUTHORITY on what this actor owns. Iteration-2 CRITICAL fix (security review +
+ *      verifier reproduced an end-to-end gate bypass: an actor with an active gated session
+ *      deletes its OWN `current/<actor>.json` with one un-guarded `rm`, silencing the gate under
+ *      the pre-fix "scope to nothing" tier-2 behavior): before giving up, scan for session dirs
+ *      OWNED BY THE STOPPING ACTOR via `ownedSessionArtifactDirs` — the local-file
+ *      assignment-provider claim record's `actor_key` stamp (#291's ownership guard,
+ *      `enforceEnsureSessionOwnership` → `performLocalClaim`/`performLocalSupersede` in
+ *      `src/cli/workflow-sidecar.ts`), which is independent of (and never erased by) a deleted
+ *      pointer file. If that scan finds ANY owned dirs, use them (`ownedDirs`, non-empty) — the
+ *      exploiting session is still found and gated despite the deleted pointer. Only when the
+ *      scan ALSO finds nothing (a genuinely non-owning session, e.g. pull-work-only with no
+ *      `ensure-session` claim at all) does this actor resolve to scoped-to-nothing
+ *      (`scopedToNothing: true`, `ownedDirs: []`) — the #345 fix (no warnings for a non-owner) is
+ *      preserved exactly for that case.
+ *   3. No own per-actor file AND no other actor's per-actor file exists anywhere under
+ *      `current/` (including the directory being absent) → fall straight through to the legacy
+ *      `current.json`, BYTE-IDENTICAL to today — the single-actor/legacy-only back-compat path
+ *      `test_current_json_per_actor.sh` §3/F3 test-pins.
+ *
+ * Per iteration-2 fix item 3 (code review HIGH): `hasOtherActorPointer` (and the new ownership
+ * scan) are gated behind `isUnresolvedActor`, mirroring `readCurrentPointer`'s OWN gating
+ * (`lib/current-pointer.js`, `key && !isUnresolvedActor(key)`) exactly. Without this, an
+ * unresolved/empty actor sanitizes to the literal segment `"unknown"` (`sanitizeSegment('')` →
+ * `'unknown'`), which then looks "foreign" relative to every real per-actor pointer file on disk
+ * — mis-scoping every unresolved-actor stop into tier 2 instead of tier 3 (legacy fallback, the
+ * correct, single-actor-equivalent behavior for an actor that couldn't be identified at all).
+ *
+ * @param {string} flowAgentsDir
+ * @returns {{ dir: string|null, scopedToNothing: boolean, staleSlug: string|null, ownedDirs: string[] }}
  */
-function preferredArtifactDir(flowAgentsDir) {
-  const { payload: current } = readCurrentPointer(flowAgentsDir, resolveActor(process.env).actor);
-  if (!current) return null;
+function resolveActorScope(flowAgentsDir) {
+  const actorKey = resolveActor(process.env).actor;
+  const { payload: current, source } = readCurrentPointer(flowAgentsDir, actorKey);
+
+  // Fix item 3 (HIGH): an unresolved actor always takes tier 3 (legacy fallback) — never tier 2.
+  // `hasOtherActorPointer`/`ownedSessionArtifactDirs` are not even consulted for an unresolved
+  // actor, mirroring `readCurrentPointer`'s own `key && !isUnresolvedActor(key)` gate.
+  const actorResolved = !!actorKey && !isUnresolvedActor(actorKey);
+
+  // Step 2: no own per-actor pointer, but another actor already has one — this actor MAY still
+  // own session(s) of its own (iteration-2 ownership-scan redesign); only scope to nothing if the
+  // ownership scan also comes up empty.
+  if (actorResolved && source !== 'per-actor' && hasOtherActorPointer(flowAgentsDir, actorKey)) {
+    const ownedDirs = ownedSessionArtifactDirs(flowAgentsDir, actorKey);
+    if (ownedDirs.length > 0) {
+      return { dir: null, scopedToNothing: false, staleSlug: null, ownedDirs };
+    }
+    return { dir: null, scopedToNothing: true, staleSlug: null, ownedDirs: [] };
+  }
+
+  // Steps 1 and 3 both resolve through the SAME payload readCurrentPointer already returned
+  // (own per-actor file, or — only reachable here when no other actor pointer exists — the
+  // legacy fallback) — byte-identical to the pre-#345 preferredArtifactDir/staleCurrentSlug logic.
+  if (!current) return { dir: null, scopedToNothing: false, staleSlug: null, ownedDirs: [] };
   const slug = current.artifact_dir || current.active_slug;
-  if (typeof slug !== 'string' || !slug.trim()) return null;
+  if (typeof slug !== 'string' || !slug.trim()) return { dir: null, scopedToNothing: false, staleSlug: null, ownedDirs: [] };
   const safe = slug.replace(/\.\.+/g, '').replace(/^[/\\]+/, '');
   const dir = path.join(flowAgentsDir, safe);
-  return dir.startsWith(flowAgentsDir + path.sep) && fs.existsSync(dir) ? dir : null;
+  if (!dir.startsWith(flowAgentsDir + path.sep)) return { dir: null, scopedToNothing: false, staleSlug: null, ownedDirs: [] };
+  if (fs.existsSync(dir)) return { dir, scopedToNothing: false, staleSlug: null, ownedDirs: [] };
+  return { dir: null, scopedToNothing: false, staleSlug: slug, ownedDirs: [] };
+}
+
+/**
+ * Scope to the session's current task when .kontourai/flow-agents/current.json points at
+ * one (mirroring evidence-capture.js). Returns the slug dir, or null to fall back
+ * to scanning all of .kontourai/flow-agents (newest-mtime) — UNLESS this actor is scoped to
+ * nothing (#345 step 2), in which case analyze() must not fall back to the global scan either;
+ * see `resolveActorScope`'s `scopedToNothing` flag, read directly by analyze() below.
+ */
+function preferredArtifactDir(flowAgentsDir) {
+  return resolveActorScope(flowAgentsDir).dir;
 }
 
 /** WS8 (AC10a): a session dir is eligible as "active" only with real sidecar presence. */
@@ -1533,13 +1715,7 @@ function hasSidecarPresence(artifactDir) {
 // return that slug so analyze() can log the staleness rather than silently falling back to
 // a global mtime scan that could resurface an abandoned/never-real session as active.
 function staleCurrentSlug(flowAgentsDir) {
-  const { payload: current } = readCurrentPointer(flowAgentsDir, resolveActor(process.env).actor);
-  if (!current) return null;
-  const slug = current.artifact_dir || current.active_slug;
-  if (typeof slug !== 'string' || !slug.trim()) return null;
-  const safe = slug.replace(/\.\.+/g, '').replace(/^[/\\]+/, '');
-  const dir = path.join(flowAgentsDir, safe);
-  return (dir.startsWith(flowAgentsDir + path.sep) && !fs.existsSync(dir)) ? slug : null;
+  return resolveActorScope(flowAgentsDir).staleSlug;
 }
 
 /**
@@ -1620,30 +1796,71 @@ function missingBundleOrStateSignal(artifactDir, activeFlowStep) {
 //
 // HARD_BLOCK: always blocks, even for pre-execution and terminal tasks.
 //   Fires on genuine false-completion signals (a claimed pass the capture log or
-//   evidence.json contradicts), integrity failures, and gate misconfiguration.
+//   evidence.json contradicts), integrity failures, gate misconfiguration, and — iteration-2 fix
+//   item 4 (HIGH) — the THIRD-bucket ambiguous-with-a-pass-claim signal from
+//   capturedFailReconciliation (`NOT_VERIFIED (ambiguous)`). That message is DELIBERATELY
+//   distinct text from `caught false-completion` (never the false-completion accusation for a
+//   bare grep/diff exit 1, which may genuinely be the author's intended pass) — but it must still
+//   BLOCK a terminal/pre-execution stop, because a claim asserting pass for a command whose exit
+//   code cannot actually confirm that is not a verified completion either. The plain,
+//   non-terminal-only ambiguous warnings emitted by captureCrossReference/runBackstop (their text
+//   uses `NOT_VERIFIED —`, not `NOT_VERIFIED (ambiguous)`) intentionally do NOT match HARD_BLOCK —
+//   those stay warn-only for a terminal/pre-execution stop (they already block a non-terminal
+//   stop via FULL_BLOCK's broader `NOT_VERIFIED —` pattern, unchanged).
 //
 // FULL_BLOCK: fires for execution-onward tasks (post-planning, non-terminal).
 //   Includes all HARD_BLOCK patterns plus completeness/hygiene and not-done state.
 //
 // Both are used in analyze() for blocking decisions AND in run() for the AC2
 // MAX_BLOCKS hard-block guard (preventing auto-release of hard blocks).
-const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered/;
+const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered|NOT_VERIFIED \(ambiguous\)/;
 // FULL_BLOCK adds: workflow-state hygiene, surface-unavailable fail-closed, missing log.
-const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing|exit-code-laundered|malformed-evidence/;
+const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing|exit-code-laundered|malformed-evidence|NOT_VERIFIED \(ambiguous\)/;
 
 async function analyze(root, now = Date.now()) {
   const flowAgentsDirs = flowAgentsArtifactRootsForRead(root);
-  // Scope to the session's current task when current.json names one, so an
-  // unrelated active workflow elsewhere in the repo does not gate this stop.
-  const scoped = flowAgentsDirs.map(preferredArtifactDir).find(Boolean);
+  // #345: resolve each read-root's actor scope ONCE (not two separate mapped calls), so the
+  // scopedToNothing signal from any root can short-circuit both the legacy fallback AND the
+  // global newest-mtime scan for this actor — the concrete fix for the field evidence: a
+  // stopping actor with no owned per-actor pointer, where another actor's pointer already
+  // exists, must not be gated on that OTHER session's artifacts.
+  const scopes = flowAgentsDirs.map(resolveActorScope);
+  // Scope to the session's current task when current.json (or this actor's own per-actor
+  // pointer) names one, so an unrelated active workflow elsewhere in the repo does not gate
+  // this stop.
+  const scoped = scopes.map(s => s.dir).find(Boolean);
+  // Iteration-2 CRITICAL fix: the ownership-scan redesign. When this actor has no own per-actor
+  // pointer (`scoped` falsy) but the tier-2 ownership scan (`ownedSessionArtifactDirs`, run
+  // inside `resolveActorScope`) found session(s) actually owned by this actor via the durable
+  // assignment-provider claim-record stamp, those dirs are searched directly — this is what
+  // keeps the exploiting session gated even after it deletes its own `current/<actor>.json`
+  // pointer (the pointer is an index, not the ownership authority).
+  const ownedDirs = scoped ? [] : scopes.flatMap(s => s.ownedDirs || []);
+  // #345 step 2: if ANY read-root resolved this actor to "scoped to nothing" AND the ownership
+  // scan also found nothing owned anywhere, this actor has no owned session to evaluate — never
+  // fall back to the global flowAgentsDirs scan, which is exactly what let one session's Stop be
+  // gated on a DIFFERENT, concurrently-active session's pending criteria.
+  const scopedToNothing = !scoped && ownedDirs.length === 0 && scopes.some(s => s.scopedToNothing);
   // WS8 (AC10a): if current.json points at a nonexistent slug, LOG the staleness and, in
   // the global fallback, require sidecar presence so a stale pointer cannot resurface an
-  // abandoned/never-real markdown-only directory as "the active session".
-  const staleSlug = scoped ? null : flowAgentsDirs.map(staleCurrentSlug).find(Boolean);
+  // abandoned/never-real markdown-only directory as "the active session". Not reachable when
+  // scopedToNothing is true (that branch never falls through to the legacy pointer read).
+  const staleSlug = (scoped || scopedToNothing || ownedDirs.length > 0) ? null : scopes.map(s => s.staleSlug).find(Boolean);
   if (staleSlug) {
     process.stderr.write(`[Hook] Goal Fit: current.json names slug "${safeOneLine(staleSlug, 80)}" but no such session directory exists — ignoring the stale pointer instead of resurfacing an abandoned session via a global mtime scan.\n`);
   }
-  const searchDirs = scoped ? [scoped] : flowAgentsDirs;
+  if (scopedToNothing) {
+    // #345: this actor owns no per-actor pointer while another actor already does, AND the
+    // ownership scan found no owned sessions either — scoped to nothing rather than the whole
+    // artifact root; the existing staleness log line is preserved above for the legacy-fallback
+    // case, this is the distinct "owned session, but empty" branch.
+    process.stderr.write('[Hook] Goal Fit: this actor has no owned current/<actor>.json pointer, and another actor already has one under this artifact root — scoping to no session (not the global scan) rather than evaluating a different session\'s artifacts.\n');
+    return { warnings: [], blocking: false, latestArtifactDir: null };
+  }
+  if (ownedDirs.length > 0) {
+    process.stderr.write(`[Hook] Goal Fit: this actor has no own current/<actor>.json pointer, but ${ownedDirs.length} session(s) owned by this actor were found via the durable assignment-claim ownership stamp — evaluating those, not another actor's artifacts and not a global scan.\n`);
+  }
+  const searchDirs = scoped ? [scoped] : (ownedDirs.length > 0 ? ownedDirs : flowAgentsDirs);
   let artifacts = searchDirs
     .flatMap(dir => walkMarkdown(dir))
     .map(readArtifact)

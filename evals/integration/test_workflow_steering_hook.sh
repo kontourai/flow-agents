@@ -498,6 +498,58 @@ else
   _fail "workflow steering hook should not fail for done ambient state"
 fi
 
+
+# --- #345 multi-actor steering: non-owner actor's ambient steering hint is not steered by ---
+# another actor's active session (mirrors AC1 for workflow-steering.js's own
+# actorScopedWorkflowState/latestWorkflowState, dedicated fixture per the plan's Task 1.1 file
+# list). RED-UNTIL-WAVE-1-COMPLETE (by design): as of this authoring pass,
+# scripts/hooks/workflow-steering.js does not yet import `hasOtherActorPointer` from
+# scripts/hooks/lib/current-pointer.js (confirmed: `grep -c hasOtherActorPointer
+# scripts/hooks/workflow-steering.js` is 0), so `actorScopedWorkflowState` still falls straight
+# through to the legacy current.json for an actor with no own per-actor file, regardless of
+# whether another actor already has one — this assertion is EXPECTED TO FAIL until that Task
+# 1.1 piece lands in this file (current-pointer.js and stop-goal-fit.js already have it as of
+# this authoring pass; workflow-steering.js is the one file in Task 1.1's scope still pending).
+MULTI_ACTOR_STEERING_REPO="$TMPDIR_EVAL/multi-actor-steering-repo"
+mkdir -p "$MULTI_ACTOR_STEERING_REPO/.kontourai/flow-agents/current"
+mkdir -p "$MULTI_ACTOR_STEERING_REPO/.kontourai/flow-agents/owner-b-steering-task"
+mkdir -p "$MULTI_ACTOR_STEERING_REPO/docs"
+printf '# Test Repo\n' > "$MULTI_ACTOR_STEERING_REPO/AGENTS.md"
+printf '# Context Map\n' > "$MULTI_ACTOR_STEERING_REPO/docs/context-map.md"
+
+# Owner actor B has its own per-actor pointer AND an ACTIVE state.json under the same root.
+MULTI_ACTOR_B_POINTER='{"schema_version":"1.0","active_slug":"owner-b-steering-task","artifact_dir":"owner-b-steering-task"}'
+printf '%s' "$MULTI_ACTOR_B_POINTER" > "$MULTI_ACTOR_STEERING_REPO/.kontourai/flow-agents/current/eval-steering-actor-b-owner.json.write-tmp"
+mv "$MULTI_ACTOR_STEERING_REPO/.kontourai/flow-agents/current/eval-steering-actor-b-owner.json.write-tmp" "$MULTI_ACTOR_STEERING_REPO/.kontourai/flow-agents/current/eval-steering-actor-b-owner.json"
+
+cat > "$MULTI_ACTOR_STEERING_REPO/.kontourai/flow-agents/owner-b-steering-task/state.json.write-tmp" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "owner-b-steering-task",
+  "status": "in_progress",
+  "phase": "build",
+  "updated_at": "2026-06-30T00:00:00Z",
+  "next_action": {
+    "status": "in_progress",
+    "summary": "Owner B's own active steering-relevant session."
+  }
+}
+JSON
+mv "$MULTI_ACTOR_STEERING_REPO/.kontourai/flow-agents/owner-b-steering-task/state.json.write-tmp" "$MULTI_ACTOR_STEERING_REPO/.kontourai/flow-agents/owner-b-steering-task/state.json"
+
+# Actor A (the ambient session issuing this UserPromptSubmit) has NO current/<actor>.json of
+# its own -- only owner B's per-actor pointer exists under current/. No legacy global
+# current.json either (a genuinely multi-actor, per-actor-projecting repo where A owns
+# nothing of its own).
+MULTI_ACTOR_STEERING_OUT="$(FLOW_AGENTS_ACTOR=eval-steering-actor-a-nonowner node "$ROOT/scripts/hooks/workflow-steering.js" <<JSON
+{"hook_event_name":"UserPromptSubmit","cwd":"$MULTI_ACTOR_STEERING_REPO","prompt":"continue"}
+JSON
+)"
+if [[ "$MULTI_ACTOR_STEERING_OUT" != *"owner-b-steering-task"* ]]; then
+  _pass "#345: non-owner actor A's ambient steering hint does NOT surface owner B's owner-b-steering-task state (actorScopedWorkflowState scoped-to-nothing branch, mirrors AC1 for workflow-steering.js)"
+else
+  _fail "#345: non-owner actor A's ambient steering hint leaked owner B's active session state (RED-UNTIL-WAVE-1-COMPLETE for workflow-steering.js's hasOtherActorPointer wiring, expected until Task 1.1 finishes this file): $MULTI_ACTOR_STEERING_OUT"
+fi
 if [[ "$errors" -eq 0 ]]; then
   echo "Workflow steering hook integration passed."
   exit 0

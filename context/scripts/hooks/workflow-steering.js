@@ -17,9 +17,9 @@
 const fs = require('fs');
 const path = require('path');
 const { readLivenessEvents, freshHolders } = require('./lib/liveness-read');
-const { resolveActor } = require('./lib/actor-identity');
+const { resolveActor, isUnresolvedActor } = require('./lib/actor-identity');
 const { flowAgentsArtifactRootsForRead } = require('./lib/local-artifact-paths');
-const { readCurrentPointer } = require('./lib/current-pointer');
+const { readCurrentPointer, hasOtherActorPointer, ownedSessionArtifactDirs } = require('./lib/current-pointer');
 
 const STEERING = {
   'tool-planner': [
@@ -118,13 +118,57 @@ function readJson(file) {
  * for every other Wave 2 reader, so a single-session/CI/legacy-only fixture cannot fail to
  * resolve here in a way it wouldn't already have resolved via the global scan.
  *
+ * #345 (field evidence read 2026-07-05) + iteration-2 CRITICAL fix (ownership-scan redesign):
+ * applies the SAME three-tier resolution rule as `stop-goal-fit.js`'s `resolveActorScope` —
+ * (1) this actor's own per-actor pointer wins, unchanged; (2) no own per-actor pointer but
+ * `hasOtherActorPointer` is true (a DIFFERENT actor already has one under this read-root) → the
+ * pointer is an INDEX, not the ownership AUTHORITY, so before giving up this actor's OWN
+ * sessions are looked up via `ownedSessionArtifactDirs` (the durable local-file
+ * assignment-provider claim-record `actor_key` stamp — #291's ownership guard — which survives a
+ * deleted `current/<actor>.json` pointer). Any owned dirs found are returned via `ownedDirs`; only
+ * when the scan ALSO finds nothing does this actor have no owned steering state for THIS root
+ * AND must not fall through to that root's legacy global pointer (which is the OTHER actor's,
+ * not this one's) — recorded via the returned `scopedToNothing` flag rather than silently
+ * `continue`-ing into the next read-root's legacy pointer; (3) no own pointer AND no other
+ * actor's pointer anywhere under this root → fall through to the legacy `current.json`,
+ * byte-identical to before. `latestWorkflowState` (below) uses `scopedToNothing` to skip its
+ * global newest-mtime scan for an actor that owns no pointer anywhere but for whom at least one
+ * read-root already has a DIFFERENT actor's pointer — otherwise that other actor's steering hint
+ * would surface via the global scan as if it were this actor's own ambient state.
+ *
+ * Iteration-2 fix item 3 (code review HIGH): `hasOtherActorPointer`/`ownedSessionArtifactDirs`
+ * are gated behind `isUnresolvedActor`, mirroring `readCurrentPointer`'s own gating exactly — an
+ * unresolved/empty actor always takes tier 3 (legacy fallback), never tier 2, so
+ * `sanitizeSegment('')` → `'unknown'` never mis-scopes an unresolved actor against real pointer
+ * files that merely look "foreign" to the synthetic `'unknown'` segment.
+ *
  * @param {string} root
  * @param {string} actorKey
- * @returns {{file: string, payload: object, mtimeMs: number}|null}
+ * @returns {{state: {file: string, payload: object, mtimeMs: number}|null, scopedToNothing: boolean, ownedDirs: string[]}}
  */
 function actorScopedWorkflowState(root, actorKey) {
+  let scopedToNothing = false;
+  const ownedDirsAll = [];
+  const actorResolved = !!actorKey && !isUnresolvedActor(actorKey);
   for (const flowAgentsDir of flowAgentsArtifactRootsForRead(root)) {
-    const { payload: current } = readCurrentPointer(flowAgentsDir, actorKey);
+    const { payload: current, source } = readCurrentPointer(flowAgentsDir, actorKey);
+    // #345 step 2: no own per-actor pointer, but another actor already has one under THIS
+    // read-root — do not adopt its legacy global pointer. Iteration-2: first check whether this
+    // actor owns session(s) of its own via the durable assignment-claim stamp (survives a
+    // deleted pointer file); if so, record them and move on (a LATER root's own dirs are still
+    // gathered too). Only when the ownership scan also finds nothing does this read-root record
+    // scopedToNothing and move on to the next read-root (a LATER root could still resolve this
+    // actor's own pointer or owned dirs), rather than falling through to a pointer that is not
+    // reliably this actor's own.
+    if (actorResolved && source !== 'per-actor' && hasOtherActorPointer(flowAgentsDir, actorKey)) {
+      const owned = ownedSessionArtifactDirs(flowAgentsDir, actorKey);
+      if (owned.length > 0) {
+        ownedDirsAll.push(...owned);
+      } else {
+        scopedToNothing = true;
+      }
+      continue;
+    }
     if (!current) continue;
     const slug = current.artifact_dir || current.active_slug;
     if (typeof slug !== 'string' || !slug.trim()) continue;
@@ -136,14 +180,36 @@ function actorScopedWorkflowState(root, actorKey) {
     try { stat = fs.statSync(file); } catch { continue; }
     const payload = readJson(file);
     if (!payload || !ACTIVE_STATE_STATUSES.has(payload.status)) continue;
-    return { file, payload, mtimeMs: stat.mtimeMs };
+    return { state: { file, payload, mtimeMs: stat.mtimeMs }, scopedToNothing: false, ownedDirs: [] };
   }
-  return null;
+  // Iteration-2: if any read-root's ownership scan found owned session dir(s), surface the
+  // newest-mtime state.json among them (mirroring the same ACTIVE_STATE_STATUSES filter used
+  // above) rather than scoping to nothing or falling through to the global scan.
+  if (ownedDirsAll.length > 0) {
+    const ownedStates = ownedDirsAll
+      .map((dir) => {
+        const file = path.join(dir, 'state.json');
+        let stat;
+        try { stat = fs.statSync(file); } catch { return null; }
+        const payload = readJson(file);
+        if (!payload || !ACTIVE_STATE_STATUSES.has(payload.status)) return null;
+        return { file, payload, mtimeMs: stat.mtimeMs };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.mtimeMs - a.mtimeMs);
+    return { state: ownedStates[0] || null, scopedToNothing: false, ownedDirs: ownedDirsAll };
+  }
+  return { state: null, scopedToNothing, ownedDirs: [] };
 }
 
 function latestWorkflowState(root) {
-  const preferred = actorScopedWorkflowState(root, resolveActor(process.env).actor);
+  const { state: preferred, scopedToNothing, ownedDirs } = actorScopedWorkflowState(root, resolveActor(process.env).actor);
   if (preferred) return preferred;
+  // #345: this actor owns no per-actor pointer anywhere, while another actor already has one
+  // under at least one read-root, AND the ownership scan (iteration-2) also found no owned
+  // session dirs anywhere — no ambient steering hint for this actor, never the global
+  // newest-mtime scan (which would otherwise surface that other actor's session state).
+  if (scopedToNothing && ownedDirs.length === 0) return null;
 
   const states = flowAgentsArtifactRootsForRead(root)
     .flatMap(artifactRoot => walkStateFiles(artifactRoot))
