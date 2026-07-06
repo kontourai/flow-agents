@@ -51,6 +51,11 @@ type BoardItem = {
   issue: BoardIssue | null;
 };
 
+type RepoRef = {
+  owner: string;
+  name: string;
+};
+
 function loadJson(file: string): unknown {
   return file === "-" ? JSON.parse(fs.readFileSync(0, "utf8")) : JSON.parse(fs.readFileSync(file, "utf8"));
 }
@@ -82,6 +87,23 @@ function repoKey(owner: unknown, repo: unknown, number: unknown): string | null 
   return typeof owner === "string" && typeof repo === "string" && Number.isFinite(issueNumber)
     ? `${owner}/${repo}#${issueNumber}`
     : null;
+}
+
+function configuredRepos(settings: Record<string, unknown>): RepoRef[] {
+  const workProvider = settings.work_item_provider as Record<string, unknown>;
+  const boardProvider = (settings.board_provider ?? {}) as Record<string, unknown>;
+  const workRepo = workProvider.repo as Record<string, string>;
+  const board = (boardProvider.board ?? {}) as Record<string, unknown>;
+  const defaultOwner = stringValue(board.owner) ?? stringValue((boardProvider.repo as Record<string, unknown> | undefined)?.owner) ?? workRepo.owner;
+  const workspace = asRecord(settings.workspace);
+  const repos = arrayValue(workspace?.repos).flatMap((repo) => {
+    if (typeof repo === "string" && repo.trim()) return [{ owner: defaultOwner, name: repo.trim() }];
+    const record = asRecord(repo);
+    const owner = stringValue(record?.owner) ?? defaultOwner;
+    const name = stringValue(record?.name);
+    return owner && name ? [{ owner, name }] : [];
+  });
+  return repos.length ? repos : [{ owner: workRepo.owner, name: workRepo.name }];
 }
 
 function projectStatus(issue: Record<string, unknown>): string | null {
@@ -529,14 +551,21 @@ function boardItemsFromDoc(doc: unknown, settings: Record<string, unknown>): Boa
 }
 
 function openIssuesFromDoc(doc: unknown, settings: Record<string, unknown>): BoardIssue[] {
-  const workProvider = settings.work_item_provider as Record<string, unknown>;
-  const repo = workProvider.repo as Record<string, string>;
+  const repos = configuredRepos(settings);
+  const fallback = repos.length === 1 ? repos[0] : undefined;
   const record = asRecord(doc);
-  const rawIssues = arrayValue(record?.open_issues).length ? arrayValue(record?.open_issues)
-    : arrayValue(record?.issues).length ? arrayValue(record?.issues)
-      : arrayValue(asRecord(asRecord(asRecord(record?.data)?.repository)?.issues)?.nodes);
+  const rawOpenIssues = record?.open_issues;
+  const rawIssues = arrayValue(rawOpenIssues).length ? arrayValue(rawOpenIssues)
+    : rawOpenIssues && typeof rawOpenIssues === "object" && !Array.isArray(rawOpenIssues)
+      ? Object.entries(rawOpenIssues as Record<string, unknown>).flatMap(([repoName, issues]) => arrayValue(issues).map((issue) => ({ issue, repoName })))
+      : arrayValue(record?.issues).length ? arrayValue(record?.issues)
+        : arrayValue(asRecord(asRecord(asRecord(record?.data)?.repository)?.issues)?.nodes);
   return rawIssues.flatMap((issue) => {
-    const normalized = normalizeBoardIssue(issue, repo.owner, repo.name);
+    const wrapped = asRecord(issue);
+    const rawIssue = wrapped && "issue" in wrapped ? wrapped.issue : issue;
+    const repoName = wrapped && typeof wrapped.repoName === "string" ? wrapped.repoName : undefined;
+    const repoFallback = repoName ? repos.find((repo) => repo.name === repoName) : fallback;
+    const normalized = normalizeBoardIssue(rawIssue, repoFallback?.owner, repoName ?? repoFallback?.name);
     return normalized && (normalized.state ?? "OPEN").toUpperCase() === "OPEN" ? [normalized] : [];
   });
 }
@@ -664,6 +693,27 @@ query($org: String!, $projectNumber: Int!, $repoOwner: String!, $repoName: Strin
   }
 }`;
 
+const REPO_ISSUES_QUERY = `
+query($repoOwner: String!, $repoName: String!, $issueCursor: String) {
+  repository(owner: $repoOwner, name: $repoName) {
+    issues(first: 100, after: $issueCursor, states: OPEN) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        id
+        number
+        title
+        body
+        state
+        url
+        updatedAt
+        createdAt
+        repository { name owner { login } }
+        labels(first: 50) { nodes { name } }
+      }
+    }
+  }
+}`;
+
 function ghGraphql(query: string, variables: Record<string, string | number | undefined>): Record<string, unknown> {
   const args = ["api", "graphql", "-f", `query=${query}`];
   for (const [key, value] of Object.entries(variables)) {
@@ -676,6 +726,7 @@ function liveBoardDoc(settings: Record<string, unknown>): Record<string, unknown
   const workProvider = settings.work_item_provider as Record<string, unknown>;
   const boardProvider = settings.board_provider as Record<string, unknown>;
   const workRepo = workProvider.repo as Record<string, string>;
+  const repos = configuredRepos(settings);
   const board = boardProvider.board as Record<string, unknown>;
   const org = stringValue(board.owner) ?? stringValue((boardProvider.repo as Record<string, unknown> | undefined)?.owner) ?? workRepo.owner;
   const projectNumber = Number(board.number);
@@ -690,8 +741,8 @@ function liveBoardDoc(settings: Record<string, unknown>): Record<string, unknown
     const page = ghGraphql(PROJECT_BOARD_QUERY, {
       org,
       projectNumber,
-      repoOwner: workRepo.owner,
-      repoName: workRepo.name,
+      repoOwner: repos[0]?.owner ?? workRepo.owner,
+      repoName: repos[0]?.name ?? workRepo.name,
       itemCursor,
       issueCursor,
     });
@@ -705,6 +756,22 @@ function liveBoardDoc(settings: Record<string, unknown>): Record<string, unknown
     fetchIssues = Boolean(issuePageInfo?.hasNextPage);
     itemCursor = stringValue(itemPageInfo?.endCursor) ?? "";
     issueCursor = stringValue(issuePageInfo?.endCursor) ?? "";
+  }
+  for (const repo of repos.slice(1)) {
+    let repoIssueCursor = "";
+    let fetchRepoIssues = true;
+    while (fetchRepoIssues) {
+      const page = ghGraphql(REPO_ISSUES_QUERY, {
+        repoOwner: repo.owner,
+        repoName: repo.name,
+        issueCursor: repoIssueCursor,
+      });
+      const repoIssues = asRecord(asRecord(page.data)?.repository)?.issues as Record<string, unknown> | undefined;
+      issues.push(...arrayValue(repoIssues?.nodes));
+      const issuePageInfo = asRecord(repoIssues?.pageInfo);
+      fetchRepoIssues = Boolean(issuePageInfo?.hasNextPage);
+      repoIssueCursor = stringValue(issuePageInfo?.endCursor) ?? "";
+    }
   }
   return { items, issues };
 }
@@ -745,7 +812,11 @@ function resolveSettings(doc: Record<string, unknown>): Record<string, unknown> 
   if (typeof doc.settings === "object" && doc.settings !== null) return doc.settings as Record<string, unknown>;
   if (doc.work_item_provider) return doc;
   if (Array.isArray(doc.projects) && doc.projects.length) return doc.projects[0] as Record<string, unknown>;
-  if (typeof doc.defaults === "object" && doc.defaults !== null) return doc.defaults as Record<string, unknown>;
+  if (typeof doc.defaults === "object" && doc.defaults !== null) {
+    const settings = structuredClone(doc.defaults) as Record<string, unknown>;
+    if (typeof doc.workspace === "object" && doc.workspace !== null) settings.workspace = doc.workspace;
+    return settings;
+  }
   throw new Error("settings JSON must be an effective settings object or backlog-provider-settings document");
 }
 
