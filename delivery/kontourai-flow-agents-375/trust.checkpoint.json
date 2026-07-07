@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "slug": "kontourai-flow-agents-375",
+  "work_item": null,
+  "status": "delivered",
+  "phase": "release",
+  "sealed_at": "2026-07-07T04:36:03Z",
+  "commit_sha": "4622bfe29af47c5d8d891e2d25b47354ef3f97a3",
+  "checkpoint": {
+    "asOf": "2026-07-07T04:36:03.992Z",
+    "statusByClaimId": {
+      "kontourai-flow-agents-375-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0": "verified"
+    },
+    "throughEventCreatedAt": "2026-07-07T04:35:37Z",
+    "throughEventCreatedAtByClaimId": {
+      "kontourai-flow-agents-375-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0": "2026-07-07T04:35:37Z"
+    },
+    "statusFunctionVersion": "2"
+  }
+}

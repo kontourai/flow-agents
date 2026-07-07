@@ -17,6 +17,8 @@ set -uo pipefail
 
 EVAL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$EVAL_DIR/.." && pwd)"
+source "$EVAL_DIR/lib/env.sh"
+flow_agents_eval_bootstrap "$ROOT_DIR" || exit $?
 LAYER="${1:-all}"
 AGENT="${2:-}"
 RUNTIME="${FLOW_AGENTS_EVAL_RUNTIME:-${EVAL_RUNTIME:-kiro}}"
