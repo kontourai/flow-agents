@@ -201,6 +201,8 @@ Plans should preserve the work item's `R*` and `AC*` ids from `idea-to-backlog`.
 
 Keep an isolated worktree alive through review, verification, provider change creation, and provider checks so the branch remains inspectable and fixable without disturbing the main checkout. Remove the worktree only after the change is merged or accepted, the branch is abandoned, or the user explicitly asks to collapse the isolation. Do not copy files back into the original checkout by hand; Git is the merge surface.
 
+After creating or entering a fresh worktree, run `npm ci` there before pre-push checks or evals; each worktree needs its own `node_modules`.
+
 When `pull-work` chooses a worktree, record `worktree_lifecycle`: path, branch, retain-until condition, cleanup owner, cleanup command, and cleanup blockers. Publish-change retains the worktree for review/CI fixes; final acceptance or explicit abandonment owns cleanup.
 
 Example prompt:

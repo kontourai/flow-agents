@@ -56,6 +56,8 @@
 set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT_DIR/evals/lib/env.sh"
+flow_agents_eval_bootstrap "$ROOT_DIR" || exit $?
 CLI="$ROOT_DIR/build/src/cli.js"
 SKILL_DRIFT_LIB="$ROOT_DIR/scripts/hooks/lib/skill-drift.js"
 WORKFLOW_STEERING="$ROOT_DIR/scripts/hooks/workflow-steering.js"
@@ -295,7 +297,7 @@ echo ""
 echo "--- Scenario 4: User-modified (installed file edited locally) -> exit 1 ---"
 
 printf '# Skill Two\ncontent-two-USER-EDITED\n' > "$DEST/sk""ills/skill-two/SKILL.md"
-USER_FILE_MTIME_BEFORE=$(stat -f %m "$DEST/sk""ills/skill-two/SKILL.md" 2>/dev/null || stat -c %Y "$DEST/sk""ills/skill-two/SKILL.md")
+USER_FILE_MTIME_BEFORE=$(stat -c %Y "$DEST/sk""ills/skill-two/SKILL.md" 2>/dev/null || stat -f %m "$DEST/sk""ills/skill-two/SKILL.md")
 USER_FILE_SUM_BEFORE=$(cksum "$DEST/sk""ills/skill-two/SKILL.md")
 
 BEFORE_DEST=$(_dirsum "$DEST/skills")
@@ -316,7 +318,7 @@ else
 fi
 AFTER_DEST=$(_dirsum "$DEST/skills")
 AFTER_KIT_A=$(_dirsum "$KIT_A")
-USER_FILE_MTIME_AFTER=$(stat -f %m "$DEST/sk""ills/skill-two/SKILL.md" 2>/dev/null || stat -c %Y "$DEST/sk""ills/skill-two/SKILL.md")
+USER_FILE_MTIME_AFTER=$(stat -c %Y "$DEST/sk""ills/skill-two/SKILL.md" 2>/dev/null || stat -f %m "$DEST/sk""ills/skill-two/SKILL.md")
 USER_FILE_SUM_AFTER=$(cksum "$DEST/sk""ills/skill-two/SKILL.md")
 
 if [[ "$S4_RC" -eq 1 && "$S4_JSON_RC" -eq 1 ]]; then
