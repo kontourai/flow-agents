@@ -1,0 +1,305 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "kontourai-flow-agents-469-economics-record-integration.flow-agents-workflow.registered-ci-lane-covers-ac1-ac2-ac4",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-469/economics-record-integration",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "Registered CI lane covers AC1/AC2/AC4.",
+      "value": "pass",
+      "createdAt": "2026-07-07T06:16:20Z",
+      "updatedAt": "2026-07-07T06:16:20Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-469-ac3-live-economics-nonzero.flow-agents-workflow.ac3-live-after-relay-went-active-get-api-economics-for-tenant-kontour-returns-runcount-2-with-real-data-task-kontourai-flow-agents-349-0-31-6-defects-caught-1-crit-2-high-1-med-2-low-1-caught-false-completion-3-gate-fires-funnel-2-runs-3-iterations-1-route-back-0-5-first-pass-45s-human-wait-economics-tab-renders-this-instead-of-the-empty-state",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-469/ac3-live-economics-nonzero",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC3 LIVE: after relay went active, GET /api/economics for tenant kontour returns runCount=2 with real data — task kontourai-flow-agents-349 $0.31, 6 defects caught (1 crit/2 high/1 med/2 low), 1 caught-false-completion, 3 gate-fires; funnel 2 runs/3 iterations/1 route-back/0.5 first-pass/45s human-wait. Economics tab renders this instead of the empty state.",
+      "value": "pass",
+      "createdAt": "2026-07-07T06:16:20Z",
+      "updatedAt": "2026-07-07T06:16:20Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-469-ac1-econ-log-path-fixed-economics-record-sh-s-local-economics-log-lands-at.flow-agents-workflow.ac1-econ-log-path-fixed-economics-record-sh-s-local-economics-log-lands-at",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-469/ac1-econ-log-path-fixed-economics-record-sh-s-local-economics-log-lands-at",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC1 `econ-log-path-fixed`: `economics-record.sh`'s local economics log lands at",
+      "value": "pass",
+      "createdAt": "2026-07-07T06:16:20Z",
+      "updatedAt": "2026-07-07T06:16:20Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-469-ac2-relay-config-wired-setting-a-console-telemetry-sink-via.flow-agents-workflow.ac2-relay-config-wired-setting-a-console-telemetry-sink-via",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-469/ac2-relay-config-wired-setting-a-console-telemetry-sink-via",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC2 `relay-config-wired`: setting a console telemetry sink via",
+      "value": "pass",
+      "createdAt": "2026-07-07T06:16:20Z",
+      "updatedAt": "2026-07-07T06:16:20Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-469-ac3-live-economics-nonzero-after-a-builder-run-on-the-owner-machine-get.flow-agents-workflow.ac3-live-economics-nonzero-after-a-builder-run-on-the-owner-machine-get",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-469/ac3-live-economics-nonzero-after-a-builder-run-on-the-owner-machine-get",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC3 `live-economics-nonzero`: after a Builder run on the owner machine, `GET",
+      "value": "pass",
+      "createdAt": "2026-07-07T06:16:20Z",
+      "updatedAt": "2026-07-07T06:16:20Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "kontourai-flow-agents-469-ac4-tenant-scoped-fail-open-idempotent-no-secrets-the-relay-is-tenant-scoped-record.flow-agents-workflow.ac4-tenant-scoped-fail-open-idempotent-no-secrets-the-relay-is-tenant-scoped-record",
+      "subjectType": "flow-step",
+      "subjectId": "kontourai-flow-agents-469/ac4-tenant-scoped-fail-open-idempotent-no-secrets-the-relay-is-tenant-scoped-record",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC4 `tenant-scoped-fail-open-idempotent-no-secrets`: the relay is tenant-scoped (record",
+      "value": "pass",
+      "createdAt": "2026-07-07T06:16:20Z",
+      "updatedAt": "2026-07-07T06:16:20Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:kontourai-flow-agents-469-economics-record-integration.flow-agents-workflow.registered-ci-lane-covers-ac1-ac2-ac4",
+      "claimId": "kontourai-flow-agents-469-economics-record-integration.flow-agents-workflow.registered-ci-lane-covers-ac1-ac2-ac4",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "kontourai-flow-agents-469/evidence.json",
+      "excerptOrSummary": "Registered CI lane covers AC1/AC2/AC4.",
+      "observedAt": "2026-07-07T06:16:20Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_economics_record.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:kontourai-flow-agents-469-ac3-live-economics-nonzero.flow-agents-workflow.ac3-live-after-relay-went-active-get-api-economics-for-tenant-kontour-returns-runcount-2-with-real-data-task-kontourai-flow-agents-349-0-31-6-defects-caught-1-crit-2-high-1-med-2-low-1-caught-false-completion-3-gate-fires-funnel-2-runs-3-iterations-1-route-back-0-5-first-pass-45s-human-wait-economics-tab-renders-this-instead-of-the-empty-state",
+      "claimId": "kontourai-flow-agents-469-ac3-live-economics-nonzero.flow-agents-workflow.ac3-live-after-relay-went-active-get-api-economics-for-tenant-kontour-returns-runcount-2-with-real-data-task-kontourai-flow-agents-349-0-31-6-defects-caught-1-crit-2-high-1-med-2-low-1-caught-false-completion-3-gate-fires-funnel-2-runs-3-iterations-1-route-back-0-5-first-pass-45s-human-wait-economics-tab-renders-this-instead-of-the-empty-state",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-469/evidence.json",
+      "excerptOrSummary": "AC3 LIVE: after relay went active, GET /api/economics for tenant kontour returns runCount=2 with real data — task kontourai-flow-agents-349 $0.31, 6 defects caught (1 crit/2 high/1 med/2 low), 1 caught-false-completion, 3 gate-fires; funnel 2 runs/3 iterations/1 route-back/0.5 first-pass/45s human-wait. Economics tab renders this instead of the empty state.",
+      "observedAt": "2026-07-07T06:16:20Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.test:test_output",
+      "claimType": "workflow.check.test",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.test claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.verify.tests:test_output",
+      "claimType": "builder.verify.tests",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.tests claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.verify.tests:attestation",
+      "claimType": "builder.verify.tests",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.tests claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.verify.tests",
+      "claimType": "builder.verify.tests",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.tests claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:kontourai-flow-agents-469-economics-record-integration.flow-agents-workflow.registered-ci-lane-covers-ac1-ac2-ac4",
+      "claimId": "kontourai-flow-agents-469-economics-record-integration.flow-agents-workflow.registered-ci-lane-covers-ac1-ac2-ac4",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-469-economics-record-integration.flow-agents-workflow.registered-ci-lane-covers-ac1-ac2-ac4"
+      ],
+      "createdAt": "2026-07-07T06:16:20Z",
+      "verifiedAt": "2026-07-07T06:16:20Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-469-ac3-live-economics-nonzero.flow-agents-workflow.ac3-live-after-relay-went-active-get-api-economics-for-tenant-kontour-returns-runcount-2-with-real-data-task-kontourai-flow-agents-349-0-31-6-defects-caught-1-crit-2-high-1-med-2-low-1-caught-false-completion-3-gate-fires-funnel-2-runs-3-iterations-1-route-back-0-5-first-pass-45s-human-wait-economics-tab-renders-this-instead-of-the-empty-state",
+      "claimId": "kontourai-flow-agents-469-ac3-live-economics-nonzero.flow-agents-workflow.ac3-live-after-relay-went-active-get-api-economics-for-tenant-kontour-returns-runcount-2-with-real-data-task-kontourai-flow-agents-349-0-31-6-defects-caught-1-crit-2-high-1-med-2-low-1-caught-false-completion-3-gate-fires-funnel-2-runs-3-iterations-1-route-back-0-5-first-pass-45s-human-wait-economics-tab-renders-this-instead-of-the-empty-state",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-469-ac3-live-economics-nonzero.flow-agents-workflow.ac3-live-after-relay-went-active-get-api-economics-for-tenant-kontour-returns-runcount-2-with-real-data-task-kontourai-flow-agents-349-0-31-6-defects-caught-1-crit-2-high-1-med-2-low-1-caught-false-completion-3-gate-fires-funnel-2-runs-3-iterations-1-route-back-0-5-first-pass-45s-human-wait-economics-tab-renders-this-instead-of-the-empty-state"
+      ],
+      "createdAt": "2026-07-07T06:16:20Z",
+      "verifiedAt": "2026-07-07T06:16:20Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-469-ac1-econ-log-path-fixed-economics-record-sh-s-local-economics-log-lands-at.flow-agents-workflow.ac1-econ-log-path-fixed-economics-record-sh-s-local-economics-log-lands-at",
+      "claimId": "kontourai-flow-agents-469-ac1-econ-log-path-fixed-economics-record-sh-s-local-economics-log-lands-at.flow-agents-workflow.ac1-econ-log-path-fixed-economics-record-sh-s-local-economics-log-lands-at",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T06:16:20Z",
+      "verifiedAt": "2026-07-07T06:16:20Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-469-ac2-relay-config-wired-setting-a-console-telemetry-sink-via.flow-agents-workflow.ac2-relay-config-wired-setting-a-console-telemetry-sink-via",
+      "claimId": "kontourai-flow-agents-469-ac2-relay-config-wired-setting-a-console-telemetry-sink-via.flow-agents-workflow.ac2-relay-config-wired-setting-a-console-telemetry-sink-via",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T06:16:20Z",
+      "verifiedAt": "2026-07-07T06:16:20Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-469-ac3-live-economics-nonzero-after-a-builder-run-on-the-owner-machine-get.flow-agents-workflow.ac3-live-economics-nonzero-after-a-builder-run-on-the-owner-machine-get",
+      "claimId": "kontourai-flow-agents-469-ac3-live-economics-nonzero-after-a-builder-run-on-the-owner-machine-get.flow-agents-workflow.ac3-live-economics-nonzero-after-a-builder-run-on-the-owner-machine-get",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T06:16:20Z",
+      "verifiedAt": "2026-07-07T06:16:20Z"
+    },
+    {
+      "id": "evt:kontourai-flow-agents-469-ac4-tenant-scoped-fail-open-idempotent-no-secrets-the-relay-is-tenant-scoped-record.flow-agents-workflow.ac4-tenant-scoped-fail-open-idempotent-no-secrets-the-relay-is-tenant-scoped-record",
+      "claimId": "kontourai-flow-agents-469-ac4-tenant-scoped-fail-open-idempotent-no-secrets-the-relay-is-tenant-scoped-record.flow-agents-workflow.ac4-tenant-scoped-fail-open-idempotent-no-secrets-the-relay-is-tenant-scoped-record",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T06:16:20Z",
+      "verifiedAt": "2026-07-07T06:16:20Z"
+    }
+  ]
+}

@@ -190,9 +190,36 @@ Because the record stream is immutable and tenant-stamped, shape evolution is a
 1. The record is assembled with a **single `jq -c` filter** so every untrusted field
    (`task_slug`, model names, finding text) is `\u`-escaped — JSON is never string-built.
 2. The record is written to the local economics log
-   (`${TELEMETRY_ECONOMICS_LOG_FILE:-<TELEMETRY_DATA_DIR>/economics.jsonl}`) **first**.
+   (`${TELEMETRY_ECONOMICS_LOG_FILE:-${TELEMETRY_DATA_DIR}/economics.jsonl}`) **first** — the
+   fixed, non-doubled path (#469; `TELEMETRY_DATA_DIR` is already the fully-qualified
+   `.../.kontourai/telemetry` data dir, so only `economics.jsonl` is appended to it, never a
+   second `.kontourai/telemetry/...` suffix on top).
 3. Only then is the record best-effort POSTed to `<console>/records` via the shared
-   `console_post_json` transport core — detached, fail-open, opt-in
-   (`FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY`) and only when a console endpoint is configured.
+   `console_post_json` transport core — detached, fail-open, and gated on
+   `FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY` and only when a console endpoint is configured.
 4. Every failure path is `exit 0`. The emitter only writes/relays a fact — it never mutates
    a kit, gate, or claim (render-don't-execute).
+
+### Enabling the relay (config-driven, opt-out — #469)
+
+The console relay is **on by default once a Console telemetry sink is configured** — it is no
+longer env-var-only. `scripts/telemetry/lib/config.sh` resolves
+`FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY` as follows:
+
+- An explicit `console_economics_relay` key in a trusted conf (`.kontourai/telemetry-console.conf`
+  or `~/.flow-agents/telemetry-console.conf` — mode `600`, owned by the current user; see the
+  telemetry-mirror trust gate in `docs/agent-usage-feedback-loop.md`) always wins: truthy
+  (`1`/`true`/`yes`/`on`) forces the relay on, falsey (`0`/`false`/`no`/`off`) forces it off.
+- Otherwise, once `console_telemetry_url` / `console_telemetry_endpoint_url` resolves (from that
+  same trusted conf, or a directly-set env var), the relay **defaults on**.
+- A caller-pre-set `FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY` environment variable is left untouched
+  and takes priority over the default-on rule (but not over an explicit conf key).
+- The optional `console_economics_endpoint_url` conf key (or the
+  `FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL` env var) overrides the derived `<console>/records`
+  endpoint when it must differ from the telemetry sink's origin.
+- To opt out without hand-editing the conf, pass `--no-economics-relay` to
+  `install-console-config.sh`, which writes `console_economics_relay=0`.
+
+The raw `FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY` / `FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL` env
+vars are still honored directly, for one-off invocations or CI where writing a conf file isn't
+worth it — but the conf keys above are the normal path for an installed setup.

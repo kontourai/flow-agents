@@ -81,6 +81,14 @@ CONSOLE_TELEMETRY_URL="${CONSOLE_TELEMETRY_URL:-${CONSOLE_URL:-}}"
 CONSOLE_TELEMETRY_ENDPOINT_URL="${CONSOLE_TELEMETRY_ENDPOINT_URL:-}"
 CONSOLE_TELEMETRY_TOKEN="${CONSOLE_TELEMETRY_TOKEN:-${CONSOLE_AUTH_TOKEN:-}}"
 CONSOLE_TENANT_ID="${CONSOLE_TENANT_ID:-}"
+# Economics relay (#469): a caller-pre-set env var is preserved as the starting point; the
+# config-file key (parsed below) can override it, and if no key is present at all the
+# default-on rule below turns it on once a console telemetry sink resolves.
+FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY="${FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY:-}"
+FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL="${FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL:-}"
+# Set (non-empty) only when the config file carries an explicit console_economics_relay key —
+# distinguishes "operator said 0/1" from "key absent" for the default-on rule below.
+console_economics_relay_raw=""
 # Pricing registry source (consumed by lib/pricing.sh). Explicit file/URL win;
 # otherwise the URL is derived from the console below so all runtimes read one
 # live pricing source. Falls back to the bundled pricing.json offline.
@@ -126,6 +134,17 @@ if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
         console_telemetry_token) CONSOLE_TELEMETRY_TOKEN="$value" ;;
         console_tenant_id) CONSOLE_TENANT_ID="$value" ;;
         console_telemetry_redact) CONSOLE_TELEMETRY_REDACT="$value" ;;
+        console_economics_relay)
+          case "$(echo "$value" | tr '[:upper:]' '[:lower:]')" in
+            1|true|yes|on) console_economics_relay_raw="1" ;;
+            0|false|no|off) console_economics_relay_raw="0" ;;
+            *)
+              printf 'warning: config.sh: unrecognized console_economics_relay value %q; treating as off\n' "$value" >&2
+              console_economics_relay_raw="$value"
+              ;;
+          esac
+          ;;
+        console_economics_endpoint_url) FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL="$value" ;;
         console_pricing_url) TELEMETRY_PRICING_URL="$value" ;;
         pricing_url) TELEMETRY_PRICING_URL="$value" ;;
         pricing_file) TELEMETRY_PRICING_FILE="$value" ;;
@@ -135,6 +154,18 @@ if [[ -f "$TELEMETRY_CONFIG_FILE" ]]; then
 fi
 
 CONSOLE_TELEMETRY_REDACT="${CONSOLE_TELEMETRY_REDACT:-${TELEMETRY_CHANNEL_ANALYTICS_REDACT}}"
+
+# Economics relay default-on rule (#469, opt-out not silent-off): an explicit
+# console_economics_relay config key always wins. Otherwise, once a console telemetry sink is
+# resolved (console_telemetry_url/console_telemetry_endpoint_url non-empty) the relay defaults ON —
+# unless a caller already pre-set FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY in the environment, which is
+# left untouched. economics-record.sh's own opt-in gate (unchanged) reads this exact variable.
+if [[ -n "$console_economics_relay_raw" ]]; then
+  FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY="$console_economics_relay_raw"
+elif [[ -z "$FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY" \
+      && ( -n "${CONSOLE_TELEMETRY_URL:-}" || -n "${CONSOLE_TELEMETRY_ENDPOINT_URL:-}" ) ]]; then
+  FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY=1
+fi
 
 # Derive the live pricing source from the console when not set explicitly, the
 # same way the transport derives /api/telemetry/records. One live source for

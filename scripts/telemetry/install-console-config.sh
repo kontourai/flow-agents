@@ -15,6 +15,10 @@ Options:
   --console-token-file PATH
                           File containing the bearer token.
   --console-tenant ID     Tenant identifier for hosted Console routing.
+  --no-economics-relay    Write console_economics_relay=0 to opt out of the
+                          automatic kit-economics relay (default-on once a
+                          Console telemetry sink is configured; see
+                          lib/config.sh).
 EOF
 }
 
@@ -105,6 +109,7 @@ main() {
   local console_token=""
   local console_token_file="${FLOW_AGENTS_CONSOLE_TOKEN_FILE:-${CONSOLE_TELEMETRY_TOKEN_FILE:-}}"
   local console_tenant="${FLOW_AGENTS_CONSOLE_TENANT:-${CONSOLE_TENANT_ID:-}}"
+  local no_economics_relay=0
   telemetry_sinks=()
   if [[ -n "${FLOW_AGENTS_TELEMETRY_SINKS:-}" ]]; then
     append_sinks "$FLOW_AGENTS_TELEMETRY_SINKS"
@@ -138,6 +143,10 @@ main() {
         [[ $# -ge 2 ]] || die "$1 requires a value"
         console_tenant="$2"
         shift 2
+        ;;
+      --no-economics-relay)
+        no_economics_relay=1
+        shift
         ;;
       --help|-h)
         usage
@@ -181,7 +190,8 @@ main() {
   done
   [[ "$console_sink_count" -le 1 ]] || die "select at most one Console telemetry sink"
 
-  if [[ -z "$console_url" && -z "$console_endpoint" && -z "$console_token" && -z "$console_tenant" ]]; then
+  if [[ -z "$console_url" && -z "$console_endpoint" && -z "$console_token" && -z "$console_tenant" \
+        && "$no_economics_relay" -eq 0 ]]; then
     return 0
   fi
   if [[ -z "$console_url" && -z "$console_endpoint" && ( -n "$console_token" || -n "$console_tenant" ) ]]; then
@@ -199,15 +209,22 @@ main() {
   set_config_key "$conf" "console_telemetry_endpoint_url" "$console_endpoint"
   set_config_key "$conf" "console_telemetry_token" "$console_token"
   set_config_key "$conf" "console_tenant_id" "$console_tenant"
+  if [[ "$no_economics_relay" -eq 1 ]]; then
+    set_config_key "$conf" "console_economics_relay" "0"
+  fi
   if [[ -n "$console_token" ]]; then
     chmod 600 "$conf" 2>/dev/null || true
   fi
 
   local target="${console_endpoint:-$console_url}"
-  if [[ -n "$console_tenant" ]]; then
-    echo "Configured Console telemetry in $conf for $target (tenant: $console_tenant)"
+  if [[ -n "$target" ]]; then
+    if [[ -n "$console_tenant" ]]; then
+      echo "Configured Console telemetry in $conf for $target (tenant: $console_tenant)"
+    else
+      echo "Configured Console telemetry in $conf for $target"
+    fi
   else
-    echo "Configured Console telemetry in $conf for $target"
+    echo "Recorded economics-relay opt-out in $conf"
   fi
 }
 

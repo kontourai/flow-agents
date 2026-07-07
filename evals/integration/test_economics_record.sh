@@ -33,6 +33,16 @@ trap 'rm -rf "$TMP"; [[ -n "${STUB_PID:-}" ]] && kill "$STUB_PID" 2>/dev/null' E
 PORT=38812
 RECV="$TMP/recv.jsonl"
 
+# Hermetic isolation: this suite must be deterministic regardless of what the machine running it has
+# configured for real (e.g. an operator's trusted .kontourai/telemetry-console.conf / ~/.flow-agents
+# conf). Point every emitter invocation below at an empty scratch conf by default so config.sh's
+# key-parser never resolves real console_telemetry_token/console_tenant_id/console_telemetry_url
+# values into these assertions; explicit TELEMETRY_CONFIG_FILE exports in the config-driven (#469)
+# cases below intentionally override this default per-case.
+EMPTY_CONF="$TMP/empty-telemetry.conf"
+: > "$EMPTY_CONF"
+export TELEMETRY_CONFIG_FILE="$EMPTY_CONF"
+
 errors=0
 pass() { echo "  [PASS] $1"; }
 fail() { echo "  [FAIL] $1"; errors=$((errors + 1)); }
@@ -178,7 +188,7 @@ start_stub() {
 const http=require("http"),fs=require("fs");
 const out=process.argv[1], mode=process.env.STUB_MODE||"ok";
 const s=http.createServer((req,res)=>{let b="";req.on("data",d=>b+=d);req.on("end",()=>{
-  fs.appendFileSync(out, JSON.stringify({method:req.method,headers:req.headers,body:b})+"\n");
+  fs.appendFileSync(out, JSON.stringify({method:req.method,url:req.url,headers:req.headers,body:b})+"\n");
   res.writeHead(mode==="fail"?500:200); res.end(mode==="fail"?"err":"ok");
 });});
 s.listen(Number(process.argv[2]),"127.0.0.1");
@@ -266,6 +276,150 @@ if grep -q 'economics-record.sh' "$TELEMETRY/telemetry.sh" \
 else
   fail "economics emission is NOT guarded by TELEMETRY_USAGE_TRACKING in telemetry.sh"
 fi
+
+# ── config-driven activation (#469): install-console-config.sh sink → relay defaults ON ───────────
+# Mirrors the env-var-driven relay-on/off cases above, but drives FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY /
+# FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL through config.sh's key-parser + install-console-config.sh
+# instead of setting them directly, proving the "no raw env var needed" path (AC2/AC4).
+echo "--- config-driven (#469): install-console-config.sh (no economics flag) → relay defaults ON ---"
+CONF_ON="$TMP/telemetry-cfg-on.conf"
+(
+  unset FLOW_AGENTS_CONSOLE_URL CONSOLE_TELEMETRY_URL CONSOLE_URL \
+        FLOW_AGENTS_CONSOLE_ENDPOINT_URL CONSOLE_TELEMETRY_ENDPOINT_URL \
+        FLOW_AGENTS_CONSOLE_TOKEN_FILE CONSOLE_TELEMETRY_TOKEN_FILE \
+        FLOW_AGENTS_CONSOLE_TENANT CONSOLE_TENANT_ID
+  bash "$TELEMETRY/install-console-config.sh" "$CONF_ON" \
+    --console-url "http://127.0.0.1:${PORT}" --console-tenant "tenant-cfg-on" >/dev/null
+)
+RELAY_RESOLVED="$(env -i PATH="$PATH" HOME="$TMP/home-empty" \
+  TELEMETRY_CONFIG_FILE="$CONF_ON" TELEMETRY_DATA_DIR="$TMP/cfg-on-data" TELEMETRY_SESSION_DIR="$TMP/cfg-on-data/sessions" \
+  bash -c "source '$ROOT/scripts/telemetry/lib/config.sh'; printf '%s' \"\$FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY\"")"
+[[ "$RELAY_RESOLVED" == "1" ]] && pass "config.sh: FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY resolves truthy from a console-sink conf with no explicit key" \
+  || fail "config.sh: expected relay=1, got '$RELAY_RESOLVED'"
+
+: > "$RECV"; start_stub ok
+LOG8="$TMP/econ8.jsonl"; : > "$LOG8"
+(
+  unset FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL \
+        FLOW_AGENTS_CONSOLE_URL CONSOLE_TELEMETRY_URL CONSOLE_URL CONSOLE_TENANT_ID CONSOLE_TELEMETRY_TOKEN
+  export TELEMETRY_CONFIG_FILE="$CONF_ON"
+  export TELEMETRY_ECONOMICS_LOG_FILE="$LOG8"
+  bash "$EMITTER" "$USAGE_EVENT" --state "$FIX/state.json" --critique "$FIX/critique.json"
+)
+[[ -s "$LOG8" ]] && pass "config-driven activation: local record written (local-first)" || fail "config-driven activation: local record missing"
+if wait_for_post; then pass "config-driven activation: emitter POSTs to the derived endpoint with no raw env var set"; else fail "config-driven activation: no POST within timeout"; fi
+stop_stub
+
+# ── config-driven opt-out: --no-economics-relay suppresses the POST, local record still holds ─────
+echo "--- config-driven (#469): install-console-config.sh --no-economics-relay suppresses the POST ---"
+CONF_OFF="$TMP/telemetry-cfg-off.conf"
+(
+  unset FLOW_AGENTS_CONSOLE_URL CONSOLE_TELEMETRY_URL CONSOLE_URL \
+        FLOW_AGENTS_CONSOLE_ENDPOINT_URL CONSOLE_TELEMETRY_ENDPOINT_URL \
+        FLOW_AGENTS_CONSOLE_TOKEN_FILE CONSOLE_TELEMETRY_TOKEN_FILE \
+        FLOW_AGENTS_CONSOLE_TENANT CONSOLE_TENANT_ID
+  bash "$TELEMETRY/install-console-config.sh" "$CONF_OFF" \
+    --console-url "http://127.0.0.1:${PORT}" --console-tenant "tenant-cfg-off" --no-economics-relay >/dev/null
+)
+grep -q '^console_economics_relay=0$' "$CONF_OFF" && pass "--no-economics-relay writes console_economics_relay=0" || fail "--no-economics-relay did not write console_economics_relay=0"
+
+: > "$RECV"; start_stub ok
+LOG9="$TMP/econ9.jsonl"; : > "$LOG9"
+(
+  unset FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL \
+        FLOW_AGENTS_CONSOLE_URL CONSOLE_TELEMETRY_URL CONSOLE_URL CONSOLE_TENANT_ID CONSOLE_TELEMETRY_TOKEN
+  export TELEMETRY_CONFIG_FILE="$CONF_OFF"
+  export TELEMETRY_ECONOMICS_LOG_FILE="$LOG9"
+  bash "$EMITTER" "$USAGE_EVENT" --state "$FIX/state.json" --critique "$FIX/critique.json"
+)
+sleep 1
+[[ -s "$LOG9" ]] && pass "--no-economics-relay: local record still written (local-first holds)" || fail "--no-economics-relay: local record missing"
+[[ ! -s "$RECV" ]] && pass "--no-economics-relay: relay suppressed even though a console sink is configured" || fail "--no-economics-relay: a POST happened despite opt-out"
+stop_stub
+
+# ── explicit console_economics_relay=0 in a hand-written conf suppresses relay too ─────────────────
+echo "--- config-driven (#469): hand-written console_economics_relay=0 suppresses relay despite console URL ---"
+CONF_HAND="$TMP/telemetry-cfg-hand.conf"
+cat > "$CONF_HAND" <<CONF_HAND_EOF
+console_telemetry_url=http://127.0.0.1:${PORT}
+console_tenant_id=tenant-cfg-hand
+console_economics_relay=0
+CONF_HAND_EOF
+
+: > "$RECV"; start_stub ok
+LOG10="$TMP/econ10.jsonl"; : > "$LOG10"
+(
+  unset FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL \
+        FLOW_AGENTS_CONSOLE_URL CONSOLE_TELEMETRY_URL CONSOLE_URL CONSOLE_TENANT_ID CONSOLE_TELEMETRY_TOKEN
+  export TELEMETRY_CONFIG_FILE="$CONF_HAND"
+  export TELEMETRY_ECONOMICS_LOG_FILE="$LOG10"
+  bash "$EMITTER" "$USAGE_EVENT" --state "$FIX/state.json" --critique "$FIX/critique.json"
+)
+sleep 1
+[[ -s "$LOG10" ]] && pass "hand-written console_economics_relay=0: local record still written (local-first holds)" || fail "hand-written conf: local record missing"
+[[ ! -s "$RECV" ]] && pass "hand-written console_economics_relay=0 suppresses relay even with a console URL present" || fail "hand-written conf: a POST happened despite explicit opt-out"
+stop_stub
+
+# ── HIGH-finding regression (#469 review): endpoint-only sink (console_telemetry_endpoint_url set,
+# NO console_telemetry_url) must still resolve an economics endpoint — economics-record.sh derives
+# the origin from CONSOLE_TELEMETRY_ENDPOINT_URL (stripping its `/api/telemetry/records` path) and
+# posts to the shared `<origin>/records` ingress, NEVER the telemetry endpoint path verbatim ──────
+echo "--- HIGH regression (#469): endpoint-only sink (console_telemetry_endpoint_url, no console_telemetry_url) still relays economics to <origin>/records ---"
+CONF_ENDPOINT_ONLY="$TMP/telemetry-cfg-endpoint-only.conf"
+cat > "$CONF_ENDPOINT_ONLY" <<CONF_EP_EOF
+console_telemetry_endpoint_url=http://127.0.0.1:${PORT}/api/telemetry/records
+console_tenant_id=tenant-cfg-endpoint-only
+CONF_EP_EOF
+
+: > "$RECV"; start_stub ok
+LOG11="$TMP/econ11.jsonl"; : > "$LOG11"
+(
+  unset FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL \
+        FLOW_AGENTS_CONSOLE_URL CONSOLE_TELEMETRY_URL CONSOLE_URL CONSOLE_TENANT_ID CONSOLE_TELEMETRY_TOKEN
+  export TELEMETRY_CONFIG_FILE="$CONF_ENDPOINT_ONLY"
+  export TELEMETRY_ECONOMICS_LOG_FILE="$LOG11"
+  bash "$EMITTER" "$USAGE_EVENT" --state "$FIX/state.json" --critique "$FIX/critique.json"
+)
+[[ -s "$LOG11" ]] && pass "endpoint-only sink: local record still written (local-first)" || fail "endpoint-only sink: local record missing"
+if wait_for_post; then pass "endpoint-only sink: relay defaults ON (either console signal is truthful, #469 HIGH fix)"; else fail "endpoint-only sink: no POST within timeout (HIGH regression)"; fi
+POSTED_URL="$(node -e '
+const fs=require("fs"); const raw=fs.readFileSync(process.argv[1],"utf8").trim();
+if(!raw){console.log("NO_POST");process.exit(0)}
+const r=JSON.parse(raw.split("\n")[0]);
+console.log(r.url);
+' "$RECV" 2>&1)"
+[[ "$POSTED_URL" == "/records" ]] && pass "endpoint-only sink: POST landed on <origin>/records ($POSTED_URL), NOT the telemetry endpoint path verbatim" \
+  || fail "endpoint-only sink: expected POST to /records, got '$POSTED_URL'"
+stop_stub
+
+# ── explicit console_economics_endpoint_url conf key routes the POST to that exact URL ───────────
+echo "--- config-driven (#469): explicit console_economics_endpoint_url conf key wins verbatim ---"
+CONF_EXPLICIT_EP="$TMP/telemetry-cfg-explicit-economics-endpoint.conf"
+cat > "$CONF_EXPLICIT_EP" <<CONF_EXP_EOF
+console_economics_relay=1
+console_economics_endpoint_url=http://127.0.0.1:${PORT}/records
+CONF_EXP_EOF
+
+: > "$RECV"; start_stub ok
+LOG12="$TMP/econ12.jsonl"; : > "$LOG12"
+(
+  unset FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL \
+        FLOW_AGENTS_CONSOLE_URL CONSOLE_TELEMETRY_URL CONSOLE_URL CONSOLE_TENANT_ID CONSOLE_TELEMETRY_TOKEN
+  export TELEMETRY_CONFIG_FILE="$CONF_EXPLICIT_EP"
+  export TELEMETRY_ECONOMICS_LOG_FILE="$LOG12"
+  bash "$EMITTER" "$USAGE_EVENT" --state "$FIX/state.json" --critique "$FIX/critique.json"
+)
+[[ -s "$LOG12" ]] && pass "explicit console_economics_endpoint_url: local record still written (local-first)" || fail "explicit console_economics_endpoint_url: local record missing"
+if wait_for_post; then pass "explicit console_economics_endpoint_url: relay POSTs (explicit key + relay=1, no console_telemetry_url needed)"; else fail "explicit console_economics_endpoint_url: no POST within timeout"; fi
+POSTED_URL2="$(node -e '
+const fs=require("fs"); const raw=fs.readFileSync(process.argv[1],"utf8").trim();
+if(!raw){console.log("NO_POST");process.exit(0)}
+const r=JSON.parse(raw.split("\n")[0]);
+console.log(r.url);
+' "$RECV" 2>&1)"
+[[ "$POSTED_URL2" == "/records" ]] && pass "explicit console_economics_endpoint_url: POST landed on the exact configured URL ($POSTED_URL2)" \
+  || fail "explicit console_economics_endpoint_url: expected POST to /records, got '$POSTED_URL2'"
+stop_stub
 
 # ── AC8 (#415): delegations[] facts + orchestrator-observable outcome + signals capability block ──────
 echo "--- AC8: delegations[] — role/model join, escalation supersession, honest outcome, signals ---"
