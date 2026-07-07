@@ -28,6 +28,7 @@ type InitOptions = {
   consoleTenant?: string;
   telemetrySinks: TelemetrySink[];
   activateKits: boolean;
+  activeKitIds?: string[];
   // Informational only -- never read by installBundle()/install-console-config.sh
   // (not part of the install writer contract). Set when the runtime was not
   // given via an explicit --runtime flag/typed answer and the layered
@@ -121,8 +122,37 @@ Options:
   --console-token-file PATH
   --console-tenant ID
   --activate-kits
+  --activate-kit KIT_ID   Activate one catalog kit by id. Repeat for multiple kits.
   --yes, --headless
 `);
+}
+
+function catalogKitIds(): string[] {
+  const catalogPath = path.join(root, "kits", "catalog.json");
+  if (!fs.existsSync(catalogPath)) return [];
+  const catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8")) as { kits?: unknown[] };
+  if (!Array.isArray(catalog.kits)) return [];
+  return catalog.kits
+    .map((entry) => typeof entry === "object" && entry !== null ? String((entry as Record<string, unknown>).id ?? "") : "")
+    .filter(Boolean);
+}
+
+function selectedKitIdsFromFlags(flags: ReturnType<typeof parseArgs>["flags"]): string[] {
+  const explicit = flagList(flags, "activate-kit").map((id) => id.trim()).filter(Boolean);
+  if (explicit.length) return [...new Set(explicit)];
+  if (flagBool(flags, "activate-kits")) return catalogKitIds();
+  return [];
+}
+
+function writeInstallRecord(dest: string, runtime: Runtime, global: boolean | undefined, activeKitIds: string[] = []): void {
+  const recordPath = durableInstallRecordPath(dest);
+  const installRecordDir = path.dirname(recordPath);
+  fs.mkdirSync(installRecordDir, { recursive: true });
+  const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
+  const record = { version: pkgJson["version"] ?? "0.0.0", installedAt: new Date().toISOString(), runtime, ...(global ? { global: true } : {}), active_kit_ids: activeKitIds };
+  const recordTmp = `${recordPath}.tmp.${process.pid}`;
+  fs.writeFileSync(recordTmp, `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  fs.renameSync(recordTmp, recordPath);
 }
 
 function normalizeRuntime(value: string | undefined): Runtime | undefined {
@@ -341,14 +371,6 @@ export function globalDest(runtime: Runtime): string {
   return defaultDest(runtime);
 }
 
-function parseYesNo(value: string, fallback: boolean): boolean {
-  const normalized = value.trim().toLowerCase();
-  if (!normalized) return fallback;
-  if (["y", "yes", "true", "1"].includes(normalized)) return true;
-  if (["n", "no", "false", "0"].includes(normalized)) return false;
-  return fallback;
-}
-
 type ConsoleConnectGatherResult = {
   telemetrySinks: TelemetrySink[];
   consoleUrl: string | undefined;
@@ -441,12 +463,14 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
     const consoleTokenFile = flagString(args.flags, "console-token-file");
     const { telemetrySinks, consoleUrl, consoleTokenValue, consoleTenant } = await gatherConsoleConnectOptions(rl, args, consoleTokenFile);
 
-    const activateDefault = false;
-    const activateAnswer = flagBool(args.flags, "activate-kits")
-      ? "yes"
-      : runtime === "codex"
-        ? await rl.question(`Activate local Builder Kit runtime assets [${activateDefault ? "Y/n" : "y/N"}]: `)
-        : "no";
+    const activeKitIds = selectedKitIdsFromFlags(args.flags);
+    if (!activeKitIds.length && !flagBool(args.flags, "activate-kits") && !flagList(args.flags, "activate-kit").length) {
+      const available = catalogKitIds();
+      if (available.length) {
+        const answer = await rl.question(`Activate kits by id (comma-separated, default none) [none]: `);
+        activeKitIds.push(...answer.split(",").map((id) => id.trim()).filter((id) => available.includes(id)));
+      }
+    }
     return {
       runtime,
       runtimeAutoDetected,
@@ -458,7 +482,8 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
       consoleTokenValue: consoleTokenValue?.trim() || undefined,
       consoleTenant: consoleTenant?.trim() || undefined,
       telemetrySinks,
-      activateKits: runtime === "codex" && parseYesNo(activateAnswer, activateDefault),
+      activateKits: activeKitIds.length > 0,
+      activeKitIds,
     };
   } finally {
     rl.close();
@@ -479,7 +504,8 @@ function headlessOptions(argv: string[]): InitOptions {
     consoleTokenFile: flagString(args.flags, "console-token-file"),
     consoleTenant: flagString(args.flags, "console-tenant") ?? flagString(args.flags, "console-tenant-id"),
     telemetrySinks: telemetrySinksFromFlags(args.flags),
-    activateKits: runtime === "codex" && flagBool(args.flags, "activate-kits"),
+    activateKits: selectedKitIdsFromFlags(args.flags).length > 0,
+    activeKitIds: selectedKitIdsFromFlags(args.flags),
   };
 }
 
@@ -615,8 +641,9 @@ function installBundle(bundle: string, options: InitOptions): number {
 }
 
 function activateKits(options: InitOptions): number {
-  if (!options.activateKits) return 0;
-  const result = activateCodexLocal(options.dest, options.dest);
+  const activeKitIds = options.activeKitIds ?? [];
+  if (!options.activateKits || activeKitIds.length === 0 || options.runtime !== "codex") return 0;
+  const result = activateCodexLocal(options.dest, options.dest, { kitIdFilter: activeKitIds });
   if (Array.isArray(result.errors) && result.errors.length > 0) {
     console.error(JSON.stringify(result, null, 2));
     return 1;
@@ -760,14 +787,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       const skillsSync = copyDirMerge(path.join(bundle, ".claude", "skills"), path.join(options.dest, "skills"));
       const agentsSync = copyDirMerge(path.join(bundle, ".claude", "agents"), path.join(options.dest, "agents"));
       // Write version stamp.
-      const recordPath = durableInstallRecordPath(options.dest);
-      const installRecordDir = path.dirname(recordPath);
-      fs.mkdirSync(installRecordDir, { recursive: true });
-      const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
-      const record = { version: pkgJson["version"] ?? "0.0.0", installedAt: new Date().toISOString(), runtime: "claude-code", global: true };
-      const recordTmp = `${recordPath}.tmp.${process.pid}`;
-      fs.writeFileSync(recordTmp, `${JSON.stringify(record, null, 2)}\n`, "utf8");
-      fs.renameSync(recordTmp, recordPath);
+      writeInstallRecord(options.dest, "claude-code", true, options.activeKitIds ?? []);
       console.log(`Flow Agents global hooks merged for claude-code in ${options.dest}`);
       console.log(`Synced skills (+${skillsSync.added} new, ~${skillsSync.updated} updated) and agents (+${agentsSync.added} new, ~${agentsSync.updated} updated) in ${options.dest}`);
       // Write a per-skill-file sha256 content-hash manifest, sibling of install.json, so
@@ -821,15 +841,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 `, "utf8");
       fs.renameSync(tmp, destConfigPath);
       // Write version stamp.
-      const recordPath = durableInstallRecordPath(options.dest);
-      const installRecordDir = path.dirname(recordPath);
-      fs.mkdirSync(installRecordDir, { recursive: true });
-      const pkgJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8")) as Record<string, string>;
-      const record = { version: pkgJson["version"] ?? "0.0.0", installedAt: new Date().toISOString(), runtime: "opencode", global: true };
-      const recordTmp = `${recordPath}.tmp.${process.pid}`;
-      fs.writeFileSync(recordTmp, `${JSON.stringify(record, null, 2)}
-`, "utf8");
-      fs.renameSync(recordTmp, recordPath);
+      writeInstallRecord(options.dest, "opencode", true, options.activeKitIds ?? []);
       console.log(`Flow Agents global config merged for opencode in ${options.dest}`);
       return 0;
     }
@@ -854,6 +866,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       }
       const installed = result.status ?? 1;
       if (installed !== 0) return installed;
+      writeInstallRecord(options.dest, "codex", true, options.activeKitIds ?? []);
       return activateKits(options);
     }
     // --global for pi: NOT_VERIFIED (no documented global dir). Warn and fall through to workspace install.
@@ -867,6 +880,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const bundle = ensureBundle(options.runtime);
     const installed = installBundle(bundle, options);
     if (installed !== 0) return installed;
+    writeInstallRecord(options.dest, options.runtime, options.global, options.activeKitIds ?? []);
     const activated = activateKits(options);
     // G2/G3: shared post-install auto-verify + summary tail. Applies
     // identically whether main() reached here via headlessOptions() or

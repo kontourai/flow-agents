@@ -9,6 +9,7 @@ import { assertPathContained, copyDir, isoNow, readJson, walkFiles, writeJson } 
 import { assertKitRepository, deriveKitTargets, parseKitDependencies } from "../flow-kit/validate.js";
 import { activateCodexLocal, activateStrandsLocal } from "../runtime-adapters.js";
 import { defaultCodexHome } from "../lib/local-artifact-root.js";
+import { root } from "../tools/common.js";
 
 const REGISTRY_REL = path.join("kits", "local", "installed-kits.json");
 const REPOSITORIES_REL = path.join("kits", "local", "repositories");
@@ -18,6 +19,20 @@ function installedPath(dest: string, kitId: string): string { return path.join(d
 function resolveDest(flags: ReturnType<typeof parseArgs>["flags"]): string {
   const explicit = flagString(flags, "dest");
   return path.resolve(explicit ?? defaultCodexHome());
+}
+
+function resolveCatalogKitSource(source: string): string | null {
+  if (!/^[a-z][a-z0-9-]*$/.test(source)) return null;
+  const repoCatalogPath = path.join(root, "kits", "catalog.json");
+  if (!fs.existsSync(repoCatalogPath)) return null;
+  const catalog = readJson(repoCatalogPath) as { kits?: unknown[] };
+  const entry = Array.isArray(catalog.kits)
+    ? catalog.kits.find((item) => typeof item === "object" && item !== null && (item as Record<string, unknown>).id === source)
+    : undefined;
+  if (!entry || typeof entry !== "object") return null;
+  const rel = (entry as Record<string, unknown>).path;
+  if (typeof rel !== "string") return null;
+  return path.resolve(path.dirname(repoCatalogPath), "..", rel);
 }
 
 function loadRegistry(dest: string): { schema_version: string; kits: Record<string, unknown>[] } {
@@ -102,7 +117,7 @@ async function install(argv: string[]): Promise<number> {
   if (isGitUrl) {
     return await installGitSource(source, argv);
   }
-  return await installLocalSource(path.resolve(source), argv);
+  return await installLocalSource(resolveCatalogKitSource(source) ?? path.resolve(source), argv);
 }
 
 async function installLocalSource(source: string, argv: string[]): Promise<number> {
@@ -321,7 +336,7 @@ async function inspect(argv: string[]): Promise<number> {
     return 1;
   }
   // Pass the real kitDir so @kontourai/flow can validate flow file existence for K0.
-  const result = await deriveKitTargets(manifest, kitDir);
+  const result = await deriveKitTargets(manifest, kitDir, root);
   console.log(JSON.stringify(result, null, 2));
   return result.conformance.k0 ? 0 : 1;
 }

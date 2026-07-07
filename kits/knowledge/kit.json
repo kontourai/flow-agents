@@ -4,6 +4,7 @@
   "name": "Knowledge Kit",
   "product_name": "Knowledge Kit",
   "description": "A Flow Kit for durable, gated knowledge storage. Provides a store contract with defined record types, mutation operations, and provenance rules — plus a default adapter backed by markdown files, YAML frontmatter, wikilinks, and a graph index.",
+  "first_party": true,
   "flows": [
     {
       "id": "knowledge.store-contract",
@@ -64,6 +65,14 @@
       "id": "knowledge.promote",
       "path": "flows/promote.flow.json",
       "description": "Knowledge promote sub-flow (issue #313, the codebase-facing 'flow within a flow'): ingest a delivered session's artifacts -> distill schema-valid DRAFT decision/vocabulary/learning deltas per the decision-registry contract -> link provenance (PR, merge SHA, session archive, touched topics) -> health-check the registry for contradictions (overlapping subject nouns + divergent content) and propose merge-repair. Invokable standalone AND composable from the Builder promote step via uses_flow. PROPOSALS-ONLY: outputs land under <session>/proposals/ for the promote step to apply; the sub-flow never writes docs directly. Executable logic: promote/index.js."
+    }
+  ],
+  "workflow_triggers": [
+    {
+      "id": "knowledge-capture-work",
+      "when": "knowledge-capture-detected",
+      "target_flow_id": "knowledge.ingest",
+      "default_skill": "knowledge.knowledge-capture"
     }
   ],
   "docs": [

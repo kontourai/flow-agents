@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 import {
   detectRuntimeFromProcessEnv,
@@ -20,6 +21,10 @@ import {
 
 function fakeHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "init-detect-home-"));
+}
+
+function installRecord(dest) {
+  return JSON.parse(fs.readFileSync(path.join(dest, ".flow-agents", "install.json"), "utf8"));
 }
 
 // --- detectRuntimeFromProcessEnv ---
@@ -117,4 +122,40 @@ test("detectDefaultRuntime: ambiguous filesystem (2+ dirs) and no env signal fal
   fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
   fs.mkdirSync(path.join(home, ".config", "opencode"), { recursive: true });
   assert.equal(detectDefaultRuntime({}, home), "base");
+});
+
+test("init headless: no kit selection records zero active kits", () => {
+  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-init-no-kits-"));
+  const result = spawnSync(process.execPath, ["build/src/cli.js", "init", "--runtime", "base", "--dest", dest, "--telemetry-sink", "local-files", "--yes"], {
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(installRecord(dest).active_kit_ids, []);
+});
+
+test("init headless: --activate-kit selects a non-Builder catalog kit without activating Builder", () => {
+  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-init-one-kit-"));
+  const result = spawnSync(process.execPath, ["build/src/cli.js", "init", "--runtime", "codex", "--dest", dest, "--telemetry-sink", "local-files", "--activate-kit", "release-evidence", "--yes"], {
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(installRecord(dest).active_kit_ids, ["release-evidence"]);
+  const activation = JSON.parse(fs.readFileSync(path.join(dest, ".kontourai", "flow-agents", "projections", "codex", "activation.json"), "utf8"));
+  const activatedKitIds = new Set((activation.generated_runtime_files ?? []).map((entry) => entry.kit_id));
+  assert.equal(activatedKitIds.has("release-evidence"), true);
+  assert.equal(activatedKitIds.has("builder"), false);
+});
+
+test("init headless: --activate-kit auto-includes declared kit dependencies", () => {
+  const dest = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-init-kit-deps-"));
+  const result = spawnSync(process.execPath, ["build/src/cli.js", "init", "--runtime", "codex", "--dest", dest, "--telemetry-sink", "local-files", "--activate-kit", "builder", "--yes"], {
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.deepEqual(installRecord(dest).active_kit_ids, ["builder"]);
+  const activation = JSON.parse(fs.readFileSync(path.join(dest, ".kontourai", "flow-agents", "projections", "codex", "activation.json"), "utf8"));
+  const activatedKitIds = new Set((activation.generated_runtime_files ?? []).map((entry) => entry.kit_id));
+  assert.equal(activatedKitIds.has("builder"), true);
+  assert.equal(activatedKitIds.has("knowledge"), true);
+  assert.deepEqual(activation.errors ?? [], []);
 });

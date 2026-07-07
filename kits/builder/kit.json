@@ -27,6 +27,73 @@
       "reason": "learning-review invokes knowledge-capture (kits/knowledge/skills/knowledge-capture/SKILL.md) for durable knowledge storage"
     }
   ],
+  "first_party": true,
+  "workflow_triggers": [
+    {
+      "id": "builder-build-work",
+      "when": "implementation-work-detected",
+      "target_flow_id": "builder.build",
+      "default_skill": "deliver",
+      "conditional_skills": [
+        {
+          "when": "user-requested-tdd",
+          "skill": "tdd-workflow"
+        }
+      ],
+      "required_sequence": ["plan-work", "execute-plan", "review-work", "verify-work"],
+      "post_verify_targets": ["release-readiness", "learning-review"]
+    }
+  ],
+  "hook_influence_expectations": [
+    {
+      "id": "dev-builder-build-requires-pickup-probe-before-plan",
+      "description": "missing pickup Probe before plan",
+      "tier": "design-target",
+      "must_include_guidance": [
+        "design-probe",
+        "accepted gaps",
+        "provider_state",
+        "conflict_risks"
+      ],
+      "must_include_actions": [
+        "route decision_gap back to design-probe/pickup Probe"
+      ]
+    },
+    {
+      "id": "dev-builder-review-before-verify-after-execute",
+      "description": "review-before-verify after execute",
+      "tier": "adapter",
+      "event": "PostToolUse",
+      "must_include_guidance": [
+        "Next: review",
+        "then verify",
+        "report only"
+      ],
+      "must_include_actions": [
+        "review-work for report-only critique before verify-work",
+        "not count critique.json as verification evidence"
+      ]
+    },
+    {
+      "id": "dev-builder-route-fresh-coding-prompt",
+      "description": "fresh coding prompt routes into Builder workflow",
+      "tier": "adapter",
+      "event": "UserPromptSubmit",
+      "must_include_guidance": [
+        "KIT WORKFLOW ROUTE",
+        "activate `deliver`",
+        "--flow-id builder.build",
+        "plan-work -> execute-plan -> review-work -> verify-work",
+        "release-readiness and learning-review"
+      ],
+      "must_include_actions": [
+        "use the `builder` kit's `builder.build` workflow before source edits",
+        "use deliver by default for coding/build work",
+        "do not bypass plan-work -> execute-plan -> review-work -> verify-work",
+        "publish, release readiness, and learning feedback"
+      ]
+    }
+  ],
   "skills": [
     {
       "id": "builder.builder-shape",

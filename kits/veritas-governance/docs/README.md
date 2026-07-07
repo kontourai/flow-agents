@@ -166,9 +166,9 @@ derivation is correct today and will agree with Veritas's own exported functions
 
 ## Trust status
 
-Slice 1 ships **unverified** (like `kits/release-evidence`); it is not on the first-party
-allowlist (`src/flow-kit/validate.ts` `FIRST_PARTY_KIT_IDS`). First-party promotion is an owner
-decision deferred to a later slice (see the WS5 shaping's open decisions).
+Slice 1 ships **unverified** (like all current kits). Official catalog placement is marketplace
+metadata only and grants no runtime privilege. Verified promotion is an owner decision deferred
+to a later slice (see the WS5 shaping's open decisions).
 
 ## Not in slice 1
 

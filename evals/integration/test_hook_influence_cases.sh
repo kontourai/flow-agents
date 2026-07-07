@@ -31,6 +31,30 @@ else
   _fail "hook influence behavioral cases failed validation: $(cat /tmp/flow-agents-hook-influence.out /tmp/flow-agents-hook-influence.err)"
 fi
 
+TMP_HOOK_INFLUENCE="$(mktemp -d)"
+mkdir -p "$TMP_HOOK_INFLUENCE/source/kits/release-evidence" "$TMP_HOOK_INFLUENCE/dest"
+cat > "$TMP_HOOK_INFLUENCE/source/kits/catalog.json" <<'JSON'
+{"schema_version":"1.0","kits":[{"id":"release-evidence","name":"Release Evidence Kit","path":"kits/release-evidence","description":"Builder-less fixture"}]}
+JSON
+cat > "$TMP_HOOK_INFLUENCE/source/kits/release-evidence/kit.json" <<'JSON'
+{"schema_version":"1.0","id":"release-evidence","name":"Release Evidence Kit","flows":[{"id":"release-evidence.review","path":"flows/review.flow.json"}]}
+JSON
+node - "$CASES" "$TMP_HOOK_INFLUENCE/cases-without-builder.json" <<'NODE'
+const fs = require("node:fs");
+const input = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+input.cases = input.cases.filter((item) => !/^(kit:builder:)?dev-builder-/.test(String(item.id || "")));
+fs.writeFileSync(process.argv[3], JSON.stringify(input, null, 2) + "\n");
+NODE
+
+if FLOW_AGENTS_HOOK_INFLUENCE_SOURCE_ROOT="$TMP_HOOK_INFLUENCE/source" \
+  FLOW_AGENTS_HOOK_INFLUENCE_DEST="$TMP_HOOK_INFLUENCE/dest" \
+  flow_agents_node "$VALIDATOR" "$TMP_HOOK_INFLUENCE/cases-without-builder.json" > /tmp/flow-agents-hook-influence-builderless.out 2> /tmp/flow-agents-hook-influence-builderless.err; then
+  _pass "hook influence validator drops Builder-required cases when Builder is absent from catalog"
+else
+  _fail "hook influence validator still required Builder cases for a Builder-less catalog: $(cat /tmp/flow-agents-hook-influence-builderless.out /tmp/flow-agents-hook-influence-builderless.err)"
+fi
+rm -rf "$TMP_HOOK_INFLUENCE"
+
 if rg -q '"tier": "adapter"' "$CASES" \
   && rg -q '"tier": "live-acceptance"' "$CASES" \
   && rg -q '"tier": "installed-command"' "$CASES" \
@@ -59,7 +83,7 @@ else
   _fail "hook influence cases miss a required #62 Builder Kit loop category"
 fi
 
-rm -f /tmp/flow-agents-hook-influence.out /tmp/flow-agents-hook-influence.err
+rm -f /tmp/flow-agents-hook-influence.out /tmp/flow-agents-hook-influence.err /tmp/flow-agents-hook-influence-builderless.out /tmp/flow-agents-hook-influence-builderless.err
 
 if [[ "$errors" -eq 0 ]]; then
   echo "Hook influence case integration passed."

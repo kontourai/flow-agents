@@ -108,7 +108,7 @@
       }
     },
     {
-      "id": "dev-builder-review-before-verify-after-execute",
+      "id": "kit:builder:dev-builder-review-before-verify-after-execute",
       "description": "After execute-plan completes in the Builder Kit build flow, the next gate is review-work critique before verify-work evidence. Review is report-only and cannot be treated as verification evidence. Open critique findings route back through execution before re-review and re-verify.",
       "runtime_scope": ["claude-code", "codex", "kiro-cli"],
       "hook": "workflow-steering",
@@ -141,8 +141,8 @@
       }
     },
     {
-      "id": "dev-builder-route-fresh-coding-prompt",
-      "description": "A fresh coding/build prompt with no active sidecar should still steer into Builder Kit delivery workflow before source edits. Claude Code must receive this as prompt-submit additional context through the hook adapter.",
+      "id": "kit:builder:dev-builder-route-fresh-coding-prompt",
+      "description": "A fresh coding/build prompt with no active sidecar should still steer into the builder kit's builder.build workflow before source edits. Claude Code must receive this as prompt-submit additional context through the hook adapter.",
       "runtime_scope": ["claude-code", "codex", "kiro-cli"],
       "hook": "workflow-steering",
       "event": "UserPromptSubmit",
@@ -154,14 +154,14 @@
         "prompt": "Please implement the new settings API and update its tests."
       },
       "guidance_must_include": [
-        "BUILDER WORKFLOW ROUTE",
+        "KIT WORKFLOW ROUTE",
         "activate `deliver`",
         "--flow-id builder.build",
         "plan-work -> execute-plan -> review-work -> verify-work",
-        "publish/release-readiness and learning-review"
+        "release-readiness and learning-review"
       ],
       "agent_must_do": [
-        "activate Builder Kit delivery workflow before source edits or implementation commands",
+        "use the `builder` kit's `builder.build` workflow before source edits or implementation commands",
         "use deliver by default for coding/build work unless the user explicitly requested TDD",
         "keep the session on builder.build and do not bypass plan-work -> execute-plan -> review-work -> verify-work",
         "continue from local verification into publish, release readiness, and learning feedback"
@@ -261,7 +261,7 @@
       }
     },
     {
-      "id": "dev-builder-build-requires-pickup-probe-before-plan",
+      "id": "kit:builder:dev-builder-build-requires-pickup-probe-before-plan",
       "description": "When Builder Kit build flow reaches planning without recorded pickup Probe decisions or accepted gaps, the hook must steer back to design-probe instead of allowing plan-work to proceed. Direct pull-work and plan-work remain valid when the user invokes those primitives outside Builder Kit build flow.",
       "runtime_scope": ["claude-code", "codex", "kiro-cli"],
       "hook": "workflow-steering",
