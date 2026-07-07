@@ -86,6 +86,20 @@ else
   _fail "Codex install with Kontour hosted Console telemetry config failed"
 fi
 
+CODEX_HOSTED_CONSOLE_NO_TENANT_DEST="$TMPDIR_EVAL/codex-hosted-console-no-tenant-workspace"
+CODEX_HOSTED_CONSOLE_NO_TENANT_STDERR="$TMPDIR_EVAL/codex-hosted-console-no-tenant-stderr.txt"
+if (cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_HOSTED_CONSOLE_NO_TENANT_DEST" --telemetry-sink kontour-hosted-console --console-token-file "$CONSOLE_TOKEN_FILE" >/dev/null 2>"$CODEX_HOSTED_CONSOLE_NO_TENANT_STDERR"); then
+  _pass "Codex install with hosted Console sink and no --console-tenant still succeeds"
+else
+  _fail "Codex install with hosted Console sink and no --console-tenant unexpectedly failed"
+fi
+
+if rg -q 'warning: install-console-config.sh: a Console telemetry sink was selected with no --console-tenant' "$CODEX_HOSTED_CONSOLE_NO_TENANT_STDERR"; then
+  _pass "Untenanted hosted Console sink install prints DX warning to stderr"
+else
+  _fail "Untenanted hosted Console sink install did not print DX warning to stderr"
+fi
+
 if (cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_USER_HOSTED_CONSOLE_DEST" --telemetry-sink user-hosted-console --console-url https://console.example.test --console-token-file "$CONSOLE_TOKEN_FILE" >/dev/null); then
   _pass "Codex install with user-hosted Console telemetry config succeeded"
 else

@@ -190,6 +190,10 @@ main() {
   done
   [[ "$console_sink_count" -le 1 ]] || die "select at most one Console telemetry sink"
 
+  if [[ "$console_sink_count" -gt 0 && -z "$console_tenant" ]]; then
+    echo "warning: install-console-config.sh: a Console telemetry sink was selected with no --console-tenant; records will be untenanted" >&2
+  fi
+
   if [[ -z "$console_url" && -z "$console_endpoint" && -z "$console_token" && -z "$console_tenant" \
         && "$no_economics_relay" -eq 0 ]]; then
     return 0

@@ -148,6 +148,61 @@ janitor — is tracked in the console repo (**console #125**), and feeds the red
 **Fleet** panel (its per-actor `coordinationState` is already wired to render the pills). Two-machine
 visibility and the janitor sweep are console-side acceptance; this repo ships only the emit half.
 
+#### Multi-tenant install runbook (adding tenant #2 to an existing install)
+
+Installing a second tenant against the same Console instance is a **one-command** operation, with
+either installer entry point:
+
+```
+npx @kontourai/flow-agents init --telemetry-sink kontour-hosted-console --console-tenant <tenant-id> --console-token-file <path>
+```
+
+```
+bash install.sh <workspace> --telemetry-sink kontour-hosted-console --console-tenant <tenant-id> --console-token-file <path>
+```
+
+Both forms drive the same mechanism. `install.sh` collects the Console-related flags into
+`CONSOLE_CONFIG_ARGS` (`install.sh:21,24-27`) and passes them straight through to the installed
+`scripts/telemetry/install-console-config.sh` once the bundle is copied into place (`install.sh:54-55`).
+`flow-agents init`'s `installBundle()` shells out to that same freshly-installed `install.sh` with the
+equivalent flags (`src/cli/init.ts:385-408`); when a raw token value (rather than a file) is supplied,
+`installBundle()` first writes it to a private `mkdtemp` file with `mode: 0o600` before passing
+`--console-token-file` through (`src/cli/init.ts:390-398`), so a bearer token never sits in argv or an
+unprotected file even transiently.
+
+**Token provisioning** is console-side, not flow-agents-side: see the "Ingest" bullet above — tokens
+are configured through `CONSOLE_AUTH_TOKENS_JSON`. Issuing tenant #2 a token, or rotating an existing
+one, is entirely console-repo scope; this repo only ever consumes a token file/value handed to it by
+that process, it does not mint or manage tokens itself.
+
+**Idempotency:** re-running the installer (e.g. to update a tenant's token after rotation, or to add
+`--console-tenant` to an install that didn't originally have one) is safe to repeat. `set_config_key`
+in `install-console-config.sh` (lines 88-100) rewrites `telemetry.conf` by awk-filtering out any
+existing `key=` line for that key and appending the new value, so re-running with the same or updated
+flags updates the same conf keys in place rather than duplicating or appending stale entries.
+
+**Post-install verification:** run
+
+```bash
+flow-agents telemetry-doctor --dest <workspace> --json --headless
+```
+
+and check the `console` block of the report: `tokenConfigured` and `tenantConfigured`
+(`src/cli/telemetry-doctor.ts:208-209`) should both be `true`, and `reachability`
+(`src/cli/telemetry-doctor.ts:210`) should report `ok: true` for a healthy install. A misconfigured
+tenant install typically shows `tenantConfigured: false` (no `--console-tenant` at install time) or
+`reachability.ok: false` (endpoint unreachable, or the token was rejected).
+
+**Isolation proof:** `evals/integration/test_console_tenant_isolation.sh` installs two distinct
+tenants side by side through this exact `install-console-config.sh` → `config.sh` → `transport.sh`
+path against a local HTTP stub, and asserts each tenant's outbound POST carries only its own
+`x-console-tenant-id` and bearer token, never the other's. This proves the **client-side wire
+contract** — that a correctly configured install sends the right headers for the right tenant. It
+does **not** prove server-side tenant isolation or enforcement (that a token cannot be used to read
+another tenant's data); that remains Console-repo scope (console #98–#100 tenant hardening, see
+*Phase 2* below).
+
+
 ### Phase 2 — authoritative fleet coordination
 
 Opt-in, for teams that want cross-machine assignment arbitration:
