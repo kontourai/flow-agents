@@ -130,6 +130,137 @@ else
   _fail "flow-agents init headless Codex install failed"
 fi
 
+echo ""
+echo "--- Guided Console-Connect Wizard (G2/G3): headless regression + summary/verify ---"
+
+# New (G3): a plain local-files headless install still prints the structured
+# post-install summary block (regardless of the guided wizard, which only
+# fires for interactive installs) -- the summary/verify tail is shared by
+# both install paths.
+BASE_SUMMARY_LOCAL_DEST="$TMPDIR_EVAL/base-summary-local-workspace"
+BASE_SUMMARY_LOCAL_STDOUT="$TMPDIR_EVAL/base-summary-local-stdout.txt"
+if node "$ROOT_DIR/build/src/cli.js" init --dest "$BASE_SUMMARY_LOCAL_DEST" --telemetry-sink local-files --yes >"$BASE_SUMMARY_LOCAL_STDOUT" 2>&1; then
+  _pass "flow-agents init headless local-files install succeeded (G3 summary case)"
+else
+  _fail "flow-agents init headless local-files install failed (G3 summary case)"
+fi
+
+if rg -q 'Console:' "$BASE_SUMMARY_LOCAL_STDOUT"   && rg -q 'local-only' "$BASE_SUMMARY_LOCAL_STDOUT"   && rg -F -q "$BASE_SUMMARY_LOCAL_DEST" "$BASE_SUMMARY_LOCAL_STDOUT"; then
+  _pass "flow-agents init prints G3 post-install summary block for a local-files headless install"
+else
+  _fail "flow-agents init did not print G3 post-install summary block for a local-files headless install"
+fi
+
+# New (G2/G3): a kontour-hosted-console headless install auto-verifies via
+# telemetry-doctor's buildReport in-process, stays within a bounded wall-clock
+# time (never hangs), never prints the raw console token, and prints a
+# console status line -- verified or unverified is acceptable in a sandboxed
+# CI network, as long as the check happened honestly.
+BASE_SUMMARY_HOSTED_DEST="$TMPDIR_EVAL/base-summary-hosted-workspace"
+BASE_SUMMARY_HOSTED_STDOUT="$TMPDIR_EVAL/base-summary-hosted-stdout.txt"
+SECONDS=0
+if node "$ROOT_DIR/build/src/cli.js" init --dest "$BASE_SUMMARY_HOSTED_DEST" --telemetry-sink kontour-hosted-console --console-tenant tenant-x --console-token-file "$CONSOLE_TOKEN_FILE" --yes >"$BASE_SUMMARY_HOSTED_STDOUT" 2>&1; then
+  _pass "flow-agents init headless kontour-hosted-console install succeeded (G2/G3 case)"
+else
+  _fail "flow-agents init headless kontour-hosted-console install failed (G2/G3 case)"
+fi
+HOSTED_SUMMARY_ELAPSED_SECONDS=$SECONDS
+
+if [[ "$HOSTED_SUMMARY_ELAPSED_SECONDS" -le 20 ]]; then
+  _pass "flow-agents init auto-verify (G2) completed within a bounded wall-clock time (${HOSTED_SUMMARY_ELAPSED_SECONDS}s, never hangs)"
+else
+  _fail "flow-agents init auto-verify (G2) took too long (${HOSTED_SUMMARY_ELAPSED_SECONDS}s) -- may be hanging"
+fi
+
+if rg -q 'Console:' "$BASE_SUMMARY_HOSTED_STDOUT" && ! rg -F -q 'test-token' "$BASE_SUMMARY_HOSTED_STDOUT"; then
+  _pass "flow-agents init prints a G2/G3 console status line and never prints the raw console token"
+else
+  _fail "flow-agents init did not print a console status line, or leaked the raw console token"
+fi
+
+# New (regression, RESOLVED OWNER DECISION): the self-hosted blank-URL guard
+# (fallback to local-files with a warning) applies to the INTERACTIVE wizard
+# ONLY. The headless (--yes/--headless) path keeps today's unchanged
+# behavior -- install-console-config.sh's existing die-on-blank for
+# user-hosted-console with no --console-url/--console-endpoint. This asserts
+# the exact same non-zero exit + die message current main() (pre-PR2)
+# already produces, proving headless is byte-for-byte untouched. (The
+# interactive fallback itself is proven by the console-connect-options.test.mjs
+# unit tests on resolveSelfHostedUrlOrFallback + runConsoleConnectWizard.)
+BASE_SELF_HOSTED_NO_URL_DEST="$TMPDIR_EVAL/base-self-hosted-no-url-workspace"
+BASE_SELF_HOSTED_NO_URL_STDERR="$TMPDIR_EVAL/base-self-hosted-no-url-stderr.txt"
+set +e
+node "$ROOT_DIR/build/src/cli.js" init --dest "$BASE_SELF_HOSTED_NO_URL_DEST" --telemetry-sink user-hosted-console --yes >/dev/null 2>"$BASE_SELF_HOSTED_NO_URL_STDERR"
+BASE_SELF_HOSTED_NO_URL_EXIT=$?
+set -e
+
+if [[ "$BASE_SELF_HOSTED_NO_URL_EXIT" -ne 0 ]]   && rg -q 'install-console-config.sh: user-hosted-console requires --console-url or --console-endpoint' "$BASE_SELF_HOSTED_NO_URL_STDERR"; then
+  _pass "flow-agents init headless user-hosted-console with no --console-url still dies exactly as before (self-hosted guard is interactive-only)"
+else
+  _fail "flow-agents init headless user-hosted-console with no --console-url behavior changed (expected unchanged die-on-blank)"
+fi
+
+# New (review fix FIX 1): a self-hosted/BYO Console (non-local https, not the
+# known hosted host) headless install stays honest -- connected-unverified,
+# exit 0, reachability.checked stays false because --allow-network was not
+# passed -- but the summary now includes an actionable next-step hint instead
+# of leaving the operator with a bare "not checked". Never for local-only.
+BASE_SUMMARY_SELFHOSTED_DEST="$TMPDIR_EVAL/base-summary-selfhosted-workspace"
+BASE_SUMMARY_SELFHOSTED_STDOUT="$TMPDIR_EVAL/base-summary-selfhosted-stdout.txt"
+if node "$ROOT_DIR/build/src/cli.js" init --dest "$BASE_SUMMARY_SELFHOSTED_DEST" --telemetry-sink user-hosted-console --console-url https://console.example.test --console-tenant tenant-selfhosted --console-token-file "$CONSOLE_TOKEN_FILE" --yes >"$BASE_SUMMARY_SELFHOSTED_STDOUT" 2>&1; then
+  _pass "flow-agents init headless self-hosted/BYO Console install succeeds (unverified is honest, not a failure)"
+else
+  _fail "flow-agents init headless self-hosted/BYO Console install unexpectedly failed"
+fi
+
+if rg -q 'connected, unverified' "$BASE_SUMMARY_SELFHOSTED_STDOUT" \
+  && rg -F -q 'flow-agents telemetry-doctor --allow-network' "$BASE_SUMMARY_SELFHOSTED_STDOUT" \
+  && ! rg -F -q 'test-token' "$BASE_SUMMARY_SELFHOSTED_STDOUT"; then
+  _pass "flow-agents init summary discloses WHY self-hosted reachability is unverified with an actionable --allow-network hint, and never prints the raw token"
+else
+  _fail "flow-agents init summary did not disclose the self-hosted not-checked reason with the --allow-network hint"
+fi
+
+if rg -F -q 'flow-agents telemetry-doctor --allow-network' "$BASE_SUMMARY_LOCAL_STDOUT"; then
+  _fail "flow-agents init printed the self-hosted --allow-network hint for a local-files-only install (should never appear there)"
+else
+  _pass "flow-agents init does not print the self-hosted --allow-network hint for a local-files-only install"
+fi
+
+# New (review fix FIX 4, security): pin the validate-before-persist ordering
+# invariant. The TS-side wizard validators (console-telemetry-validate.ts) are
+# soft (validate-and-warn, never block); the ONLY reason a malformed value can
+# never land in a persisted telemetry.conf is that install-console-config.sh's
+# bash validators (validate_tenant et al.) run BEFORE any config key is
+# written and `die` (non-zero exit) on failure. A tenant value containing a
+# semicolon fails validate_tenant's charset (^[A-Za-z0-9._:-]+$ --
+# scripts/telemetry/install-console-config.sh); assert the headless install
+# dies non-zero via that exact bash validator, and that the hostile value
+# never appears in the persisted telemetry.conf (which already exists at this
+# point from the rsync'd template, since install-console-config.sh only
+# validates -- and writes nothing -- before dying).
+BASE_HOSTILE_TENANT_DEST="$TMPDIR_EVAL/base-hostile-tenant-workspace"
+BASE_HOSTILE_TENANT_STDERR="$TMPDIR_EVAL/base-hostile-tenant-stderr.txt"
+HOSTILE_TENANT='tenant;rm-rf-evidence'
+set +e
+node "$ROOT_DIR/build/src/cli.js" init --dest "$BASE_HOSTILE_TENANT_DEST" --telemetry-sink user-hosted-console --console-url https://console.example.test --console-tenant "$HOSTILE_TENANT" --yes >/dev/null 2>"$BASE_HOSTILE_TENANT_STDERR"
+BASE_HOSTILE_TENANT_EXIT=$?
+set -e
+
+if [[ "$BASE_HOSTILE_TENANT_EXIT" -ne 0 ]] \
+  && rg -q 'install-console-config.sh: --console-tenant contains unsupported characters' "$BASE_HOSTILE_TENANT_STDERR"; then
+  _pass "flow-agents init headless install with an illegal-character Console tenant dies via the bash validate_tenant gate (non-zero exit)"
+else
+  _fail "flow-agents init headless install with an illegal-character Console tenant did not die via bash validate_tenant as expected"
+fi
+
+if [[ ! -f "$BASE_HOSTILE_TENANT_DEST/scripts/telemetry/telemetry.conf" ]] \
+  || ! rg -F -q "$HOSTILE_TENANT" "$BASE_HOSTILE_TENANT_DEST/scripts/telemetry/telemetry.conf"; then
+  _pass "hostile Console tenant value never lands in telemetry.conf (validate-before-persist ordering invariant holds)"
+else
+  _fail "hostile Console tenant value was persisted into telemetry.conf despite failing bash validate_tenant"
+fi
+
 if (cd "$ROOT_DIR/dist/opencode" && bash install.sh "$OPENCODE_DEST" >/dev/null); then
   _pass "opencode install succeeded"
 else
