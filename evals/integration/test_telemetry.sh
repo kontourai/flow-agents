@@ -83,6 +83,110 @@ for lib in config.sh session.sh enrich.sh transport.sh redact.sh; do
   fi
 done
 
+# --- 1b. Config file resolution precedence ---
+# scripts/telemetry/lib/config.sh must resolve TELEMETRY_CONFIG_FILE in this
+# order: (1) explicit env always wins; (2) a gitignored per-workspace conf at
+# .kontourai/telemetry-console.conf if present AND operator-trusted
+# (project-specific override); (3) a gitignored user-global conf at
+# ~/.flow-agents/telemetry-console.conf if present AND operator-trusted
+# (one machine-wide install, matching the existing ~/.flow-agents
+# install-home convention); (4) the shipped telemetry.conf default. The
+# shipped conf is tracked and ships into dist bundles, so owner credentials
+# must never land there — hence the per-workspace/per-machine fallbacks.
+# "Operator-trusted" means mode 600 and owned by the current user, since
+# install-console-config.sh always chmod 600s the conf it writes while git
+# can only store 644/755 — never 600 — so a conf smuggled in via
+# clone/tarball/PR/supply-chain cannot pass the gate even at the expected
+# path. Symlinks are rejected outright regardless of the link's own mode,
+# since the trust check uses lstat semantics but the later conf read follows
+# the link — a mismatched check/read object. A fake HOME isolates these
+# checks from any real ~/.flow-agents on the machine running the suite.
+echo ""
+echo "--- Config File Resolution ---"
+CONFIG_SH="$ROOT_DIR/scripts/telemetry/lib/config.sh"
+CONFIG_TEST_ROOT=$(mktemp -d /tmp/eval-telemetry-config-test.XXXXXX)
+mkdir -p "$CONFIG_TEST_ROOT/scripts/telemetry/lib"
+cp "$CONFIG_SH" "$CONFIG_TEST_ROOT/scripts/telemetry/lib/config.sh"
+: > "$CONFIG_TEST_ROOT/scripts/telemetry/telemetry.conf"
+FAKE_HOME="$CONFIG_TEST_ROOT/home"
+mkdir -p "$FAKE_HOME"
+
+_resolve_config_file() {
+  env -i PATH="$PATH" HOME="$FAKE_HOME" "$@" \
+    bash -c "source '$CONFIG_TEST_ROOT/scripts/telemetry/lib/config.sh' 2>/dev/null; echo \"\$TELEMETRY_CONFIG_FILE\""
+}
+
+default_resolved=$(_resolve_config_file)
+if [[ "$default_resolved" == "$CONFIG_TEST_ROOT/scripts/telemetry/telemetry.conf" ]]; then
+  _pass "config.sh: falls back to shipped telemetry.conf default"
+else
+  _fail "config.sh: default expected '$CONFIG_TEST_ROOT/scripts/telemetry/telemetry.conf', got '$default_resolved'"
+fi
+
+mkdir -p "$FAKE_HOME/.flow-agents"
+GLOBAL_CONF="$FAKE_HOME/.flow-agents/telemetry-console.conf"
+: > "$GLOBAL_CONF"
+chmod 644 "$GLOBAL_CONF"
+untrusted_global_resolved=$(_resolve_config_file)
+if [[ "$untrusted_global_resolved" == "$CONFIG_TEST_ROOT/scripts/telemetry/telemetry.conf" ]]; then
+  _pass "config.sh: untrusted (644) user-global conf falls through to shipped default"
+else
+  _fail "config.sh: untrusted global conf should fall through, got '$untrusted_global_resolved'"
+fi
+
+chmod 600 "$GLOBAL_CONF"
+global_resolved=$(_resolve_config_file)
+if [[ "$global_resolved" == "$GLOBAL_CONF" ]]; then
+  _pass "config.sh: trusted (600) user-global telemetry-console.conf wins over shipped default"
+else
+  _fail "config.sh: global conf expected '$GLOBAL_CONF', got '$global_resolved'"
+fi
+
+mkdir -p "$CONFIG_TEST_ROOT/.kontourai"
+LOCAL_CONF="$CONFIG_TEST_ROOT/.kontourai/telemetry-console.conf"
+: > "$LOCAL_CONF"
+chmod 644 "$LOCAL_CONF"
+untrusted_local_resolved=$(_resolve_config_file)
+if [[ "$untrusted_local_resolved" == "$GLOBAL_CONF" ]]; then
+  _pass "config.sh: untrusted (644) workspace-local conf falls through to trusted global conf"
+else
+  _fail "config.sh: untrusted local conf should fall through to global, got '$untrusted_local_resolved'"
+fi
+
+chmod 600 "$LOCAL_CONF"
+local_resolved=$(_resolve_config_file)
+if [[ "$local_resolved" == "$LOCAL_CONF" ]]; then
+  _pass "config.sh: trusted (600) workspace-local telemetry-console.conf wins over user-global conf"
+else
+  _fail "config.sh: local conf expected '$LOCAL_CONF', got '$local_resolved'"
+fi
+
+# A symlink at the workspace conf path must be ignored outright, even if the
+# link's own mode is 600 (macOS `chmod -h` sets the link's own bits without
+# following it) and it points at a genuinely trusted 600 regular file, since
+# the later conf read follows the link to a possibly different target.
+TARGET_CONF="$CONFIG_TEST_ROOT/.kontourai/telemetry-console-target.conf"
+: > "$TARGET_CONF"
+chmod 600 "$TARGET_CONF"
+rm -f "$LOCAL_CONF"
+ln -s "$TARGET_CONF" "$LOCAL_CONF"
+chmod -h 600 "$LOCAL_CONF" 2>/dev/null || true
+symlink_resolved=$(_resolve_config_file)
+if [[ "$symlink_resolved" == "$GLOBAL_CONF" ]]; then
+  _pass "config.sh: symlinked workspace-local conf is ignored, falls through to trusted global conf"
+else
+  _fail "config.sh: symlinked local conf should fall through to global, got '$symlink_resolved'"
+fi
+
+explicit_resolved=$(_resolve_config_file TELEMETRY_CONFIG_FILE="/tmp/explicit-telemetry.conf")
+if [[ "$explicit_resolved" == "/tmp/explicit-telemetry.conf" ]]; then
+  _pass "config.sh: explicit TELEMETRY_CONFIG_FILE env wins over workspace-local conf"
+else
+  _fail "config.sh: explicit env expected '/tmp/explicit-telemetry.conf', got '$explicit_resolved'"
+fi
+
+rm -rf "$CONFIG_TEST_ROOT"
+
 # --- 2. Event type mapping ---
 echo ""
 echo "--- Event Type Mapping ---"

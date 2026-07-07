@@ -62,6 +62,41 @@ Use `flow-agents init --yes` or `--headless` with the same flags in CI. The
 legacy sink names `kontour-cloud` and `hosted-kontour-console` are still
 accepted for existing scripts.
 
+### Owner machine mirror
+
+For a personal machine or repo where an owner wants Claude Code (or other
+runtime) hook sessions mirrored to a hosted Console, without editing the
+tracked `scripts/telemetry/telemetry.conf` default template (that file ships
+verbatim into every packaged bundle, so writing a personal token/tenant into
+it would leak to downstream consumers) and without exporting env vars per
+session, `scripts/telemetry/lib/config.sh` auto-discovers a gitignored,
+operator-created conf at either of two conventional paths, no extra wiring
+required:
+
+1. `<workspace>/.kontourai/telemetry-console.conf` — repo-scoped, checked
+   first.
+2. `~/.flow-agents/telemetry-console.conf` — machine-scoped, used when no
+   workspace-scoped conf is present.
+
+Populate either path with the existing preset installer:
+`scripts/telemetry/install-console-config.sh <conf-path> --telemetry-sink
+kontour-hosted-console --console-token-file <token-file> --console-tenant
+<tenant>`. The installer `chmod 600`s the file, sets it to be owned by the
+current user, and never echoes the token. Both conditions matter: config.sh
+only honors a discovered conf if it is mode 600 and owned by the current
+user, since that combination can only come from an operator running the
+installer (or an equivalent manual `chmod 600`) — it distinguishes an
+operator-created conf from one that arrived via `git clone`, a tarball, a
+PR, or any other supply-chain path, none of which can produce a 600-mode
+file. A conf that fails that check is treated as if it were absent (fail
+open) and resolution falls through to the next tier.
+
+The explicit `TELEMETRY_CONFIG_FILE` env var still overrides both
+auto-discovered paths and always wins. Wiring it from a login-shell profile
+(for example `~/.profile` on `bash -l` setups) remains available for exotic
+setups that need a config path outside both conventional locations, but is
+no longer required for the common case.
+
 Check an installed telemetry setup without opening an interactive prompt:
 
 ```bash
