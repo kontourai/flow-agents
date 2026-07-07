@@ -373,6 +373,30 @@ fi
 
 rm -rf "$TRANSPORT_TEST_ROOT"
 
+# --- Console relay project attribution (path-free project label) ---
+echo ""
+echo "--- Console Relay Project Attribution ---"
+PROJ_TEST_ROOT=$(mktemp -d /tmp/eval-telemetry-project.XXXXXX)
+mkdir -p "$PROJ_TEST_ROOT/scripts/telemetry/lib"
+cp "$ROOT_DIR/scripts/telemetry/lib/transport.sh" "$PROJ_TEST_ROOT/scripts/telemetry/lib/transport.sh"
+cp "$ROOT_DIR/scripts/telemetry/lib/redact.sh" "$PROJ_TEST_ROOT/scripts/telemetry/lib/redact.sh"
+proj_captured=$(bash -c "
+  source '$PROJ_TEST_ROOT/scripts/telemetry/lib/redact.sh'
+  source '$PROJ_TEST_ROOT/scripts/telemetry/lib/transport.sh'
+  console_telemetry_endpoint_url() { echo 'https://console.example.test/records'; }
+  console_post_json() { printf '%s' \"\$2\"; }
+  CONSOLE_TELEMETRY_REDACT='context.cwd' \
+    console_telemetry_emit '{\"type\":\"tool\",\"context\":{\"cwd\":\"/home/u/dev/kontourai/station\"}}'
+")
+proj_val=$(printf '%s' "$proj_captured" | jq -r '.context.project // "MISSING"' 2>/dev/null)
+cwd_val=$(printf '%s' "$proj_captured" | jq -r '.context.cwd // "null"' 2>/dev/null)
+if [[ "$proj_val" == "station" && "$cwd_val" == "null" ]]; then
+  _pass "transport.sh: console relay derives context.project=basename(cwd), full cwd stays redacted"
+else
+  _fail "transport.sh: expected project=station cwd=null, got project='$proj_val' cwd='$cwd_val'"
+fi
+rm -rf "$PROJ_TEST_ROOT"
+
 # --- 2. Event type mapping ---
 echo ""
 echo "--- Event Type Mapping ---"

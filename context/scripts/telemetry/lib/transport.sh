@@ -53,6 +53,18 @@ console_telemetry_emit() {
   [[ -z "$endpoint_url" ]] && return
   console_telemetry_endpoint_allowed "$endpoint_url" || return
 
+  # Attribution: derive a coarse, path-free project label (basename of the working dir) so the
+  # hosted console can bucket events by project. The full context.cwd is still redacted below —
+  # only this basename-level label leaves the machine, never the full local path. jq-guarded: on
+  # any failure the event is relayed unchanged (never blocks or drops telemetry).
+  local labeled_event
+  labeled_event=$(printf '%s' "$event" | jq -c '
+    (.context.cwd // "") as $cwd
+    | if ($cwd | length) > 0 and ((.context.project // "") | length) == 0
+      then .context.project = ($cwd | rtrimstr("/") | split("/") | last)
+      else . end' 2>/dev/null)
+  [[ -n "$labeled_event" ]] && event="$labeled_event"
+
   local processed_event
   processed_event=$(redact_event "$event" "${CONSOLE_TELEMETRY_REDACT:-${TELEMETRY_CHANNEL_ANALYTICS_REDACT:-}}")
 

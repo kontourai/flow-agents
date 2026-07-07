@@ -45,6 +45,23 @@ Telemetry channels redact sensitive payload fields before emission. Adapters mus
 
 These defaults are configurable via `TELEMETRY_CHANNEL_FULL_REDACT` and `TELEMETRY_CHANNEL_ANALYTICS_REDACT` environment variables.
 
+### Attribution Fields (canonical, all adapters)
+
+Because `context.cwd` is redacted on the analytics/console relay (the full local path must never
+leave the machine), adapters cannot rely on the consumer deriving a project name from it. So the
+attribution label is itself canonical and every adapter — harness **and** framework — must produce it:
+
+| Field | Semantics | Redacted? | Producer requirement |
+| --- | --- | --- | --- |
+| `context.project` | Coarse, path-free project label — the basename of the agent's working directory (e.g. `station` from `/Users/x/dev/station`). | **No** (path-free by construction; safe to relay) | Adapters SHOULD populate `context.project` before emission when a working directory is known and `context.project` is not already set. Compute it as `basename(cwd)`; never send the full path. |
+
+Consumers (the console projection) prefer `context.project` and fall back to `basename(context.cwd)`
+only when a non-redacted cwd is present. This keeps project attribution consistent across every
+runtime — a Claude Code shell hook and an in-process Strands adapter derive the same label the same
+way — while the full path stays local. **Consistency callout:** a runtime that exposes no working
+directory cannot populate `context.project`; such events attribute to "unknown" by design, and that
+gap must be surfaced (not silently bucketed) per §"Degradation when host lacks trigger".
+
 ### Exit Code Protocol (Canonical Hook Scripts)
 
 Canonical hook scripts in `scripts/hooks/` use the following exit code contract — originally derived from Kiro conventions and shared across all harness adapters via the adapter translation layer:
