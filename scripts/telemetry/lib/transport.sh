@@ -114,11 +114,14 @@ console_post_json() {
 #   3. git remote origin org/repo — repo-level identity, stable across clones
 #   4. git toplevel dir basename  — repo dir even from a worktree/subdir
 #   5. cwd basename               — last resort
-# Path-free by construction (never the full local path). Cached per-cwd in the session dir so the
-# git/manifest reads run once per project per session, not per event.
+# Path-free by construction (never the full local path). Cached per cwd under the telemetry data
+# dir so the git/manifest reads run once per project, not per event; session_cleanup bounds the
+# cache lifetime so a project rename (package.json name / git remote) self-heals within a day.
+# Failure signals via empty output and a 0 exit — NEVER a non-zero return — so a caller running
+# under `set -e` can never have telemetry aborted by this helper (see console_telemetry_emit).
 console_project_label() {
   local cwd="$1"
-  [[ -z "$cwd" || ! -d "$cwd" ]] && return 1
+  [[ -z "$cwd" || ! -d "$cwd" ]] && return 0
   [[ -n "${FLOW_AGENTS_PROJECT:-}" ]] && { printf '%s' "$FLOW_AGENTS_PROJECT"; return 0; }
 
   local cache="" key
@@ -128,26 +131,35 @@ console_project_label() {
     [[ -s "$cache" ]] && { cat "$cache"; return 0; }
   fi
 
-  local label="" dir name url top
+  local label="" dir name url cand top
   dir="$cwd"
   while [[ -n "$dir" && "$dir" != "/" ]]; do
     if [[ -f "$dir/package.json" ]]; then
-      name=$(jq -r '.name // empty' "$dir/package.json" 2>/dev/null)
+      name=$(jq -r '.name // empty' "$dir/package.json" 2>/dev/null) || name=""
       [[ -n "$name" ]] && { label="$name"; break; }
     fi
     dir=$(dirname "$dir")
   done
   if [[ -z "$label" ]]; then
-    url=$(git -C "$cwd" config --get remote.origin.url 2>/dev/null)
-    [[ -n "$url" ]] && label=$(printf '%s' "$url" | sed -E 's#\.git$##; s#^.*[/:]([^/:]+/[^/]+)$#\1#')
+    url=$(git -C "$cwd" config --get remote.origin.url 2>/dev/null) || url=""
+    if [[ -n "$url" ]]; then
+      url="${url%/}"; url="${url%.git}"
+      cand=$(printf '%s' "$url" | sed -E 's#^.*[/:]([^/:]+/[^/:]+)$#\1#')
+      # Accept only a clean two-segment org/repo — no scheme/host leak: exactly one slash,
+      # no colon, and the org segment is not a hostname (contains no dot). Anything else
+      # (single-segment remote, trailing-slash passthrough) falls through to the next tier.
+      if [[ "$cand" =~ ^[^/:]+/[^/:]+$ && "${cand%%/*}" != *.* ]]; then label="$cand"; fi
+    fi
   fi
   if [[ -z "$label" ]]; then
-    top=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
+    top=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) || top=""
     [[ -n "$top" ]] && label=$(basename "$top")
   fi
   [[ -z "$label" ]] && label=$(basename "$cwd")
 
-  [[ -n "$cache" ]] && printf '%s' "$label" > "$cache" 2>/dev/null
+  if [[ -n "$cache" ]]; then
+    printf '%s' "$label" > "${cache}.tmp.$$" 2>/dev/null && mv "${cache}.tmp.$$" "$cache" 2>/dev/null
+  fi
   printf '%s' "$label"
 }
 
@@ -159,14 +171,15 @@ console_telemetry_emit() {
 
   # Attribution: stamp a coarse, path-free project label (see console_project_label) before redaction
   # so the console buckets by project consistently across developers. The full context.cwd is still
-  # redacted below — only the label leaves the machine. Guarded: any failure relays the event as-is.
+  # redacted below — only the label leaves the machine. Every substitution is `|| var=""`-guarded so
+  # that even under `set -e` any failure (bad JSON, missing cwd, no git) relays the event unchanged.
   local ev_cwd proj labeled_event
-  ev_cwd=$(printf '%s' "$event" | jq -r '.context.cwd // empty' 2>/dev/null)
+  ev_cwd=$(printf '%s' "$event" | jq -r '.context.cwd // empty' 2>/dev/null) || ev_cwd=""
   if [[ -n "$ev_cwd" ]]; then
-    proj=$(console_project_label "$ev_cwd" 2>/dev/null)
+    proj=$(console_project_label "$ev_cwd" 2>/dev/null) || proj=""
     if [[ -n "$proj" ]]; then
       labeled_event=$(printf '%s' "$event" | jq -c --arg p "$proj" '
-        if ((.context.project // "") | length) == 0 then .context.project = $p else . end' 2>/dev/null)
+        if ((.context.project // "") | length) == 0 then .context.project = $p else . end' 2>/dev/null) || labeled_event=""
       [[ -n "$labeled_event" ]] && event="$labeled_event"
     fi
   fi
