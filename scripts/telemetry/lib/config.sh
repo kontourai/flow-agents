@@ -2,14 +2,58 @@
 # config.sh — Load telemetry configuration with defaults
 
 TELEMETRY_DIR="${TELEMETRY_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-TELEMETRY_CONFIG_FILE="${TELEMETRY_CONFIG_FILE:-${TELEMETRY_DIR}/telemetry.conf}"
+# TELEMETRY_DIR is <workspace>/scripts/telemetry, so the workspace root is
+# two levels up.
+TELEMETRY_WORKSPACE_ROOT="${TELEMETRY_WORKSPACE_ROOT:-$(cd "${TELEMETRY_DIR}/../.." && pwd)}"
+
+# A workspace/global conf only counts as operator-created (and thus trusted
+# with credentials) if it is mode 600 and owned by the current user.
+# install-console-config.sh always chmod 600s the conf it writes; git can
+# only store 644/755 (never 600), so this gate rejects a conf smuggled in via
+# clone/tarball/PR/supply-chain even if it happens to land at the expected
+# path. Portable across macOS/BSD stat (-f) and GNU/Linux stat (-c).
+telemetry_conf_trusted() {
+  local file="$1" mode owner
+  # Reject symlinks outright: stat below reports the link's own mode/owner
+  # (lstat semantics, no -L), but the config file is later read by following
+  # the link, so a symlink lets `chmod -h 600 <link>` pass this gate while
+  # the read lands on a different, untrusted target. Never trust a link.
+  [[ -L "$file" ]] && return 1
+  [[ -f "$file" ]] || return 1
+  mode=$(stat -f '%Lp' "$file" 2>/dev/null) || mode=$(stat -c '%a' "$file" 2>/dev/null)
+  owner=$(stat -f '%u' "$file" 2>/dev/null) || owner=$(stat -c '%u' "$file" 2>/dev/null)
+  [[ "$mode" == "600" && -n "$owner" && "$owner" == "$(id -u)" ]]
+}
+
+# Config file resolution order: (1) explicit TELEMETRY_CONFIG_FILE env always
+# wins; (2) a gitignored per-workspace conf at .kontourai/telemetry-console.conf
+# if present and operator-trusted (project-specific override); (3) a
+# gitignored user-global conf at ~/.flow-agents/telemetry-console.conf if
+# present and operator-trusted, matching the existing ~/.flow-agents
+# install-home convention (see scripts/discover-agents.sh,
+# scripts/context-budget/budget-scan.sh) so one machine-wide install can carry owner
+# credentials without per-workspace wiring; (4) the shipped telemetry.conf
+# default. The shipped scripts/telemetry/telemetry.conf is tracked and ships
+# into every packaged dist bundle, so it must never carry owner credentials.
+# A candidate that exists but fails the trust gate falls through silently
+# (telemetry stays fail-open).
+TELEMETRY_LOCAL_CONFIG_FILE="${TELEMETRY_WORKSPACE_ROOT}/.kontourai/telemetry-console.conf"
+TELEMETRY_GLOBAL_CONFIG_FILE="${HOME:-}/.flow-agents/telemetry-console.conf"
+if [[ -n "${TELEMETRY_CONFIG_FILE:-}" ]]; then
+  :
+elif telemetry_conf_trusted "$TELEMETRY_LOCAL_CONFIG_FILE"; then
+  TELEMETRY_CONFIG_FILE="$TELEMETRY_LOCAL_CONFIG_FILE"
+elif [[ -n "${HOME:-}" ]] && telemetry_conf_trusted "$TELEMETRY_GLOBAL_CONFIG_FILE"; then
+  TELEMETRY_CONFIG_FILE="$TELEMETRY_GLOBAL_CONFIG_FILE"
+else
+  TELEMETRY_CONFIG_FILE="${TELEMETRY_DIR}/telemetry.conf"
+fi
 
 # Defaults
 TELEMETRY_ENABLED="${TELEMETRY_ENABLED:-true}"
-# TELEMETRY_DIR is <workspace>/scripts/telemetry, so the workspace root is
-# two levels up. Local runtime telemetry defaults under .kontourai/telemetry;
-# explicit TELEMETRY_DATA_DIR still wins.
-TELEMETRY_DATA_DIR="${TELEMETRY_DATA_DIR:-$(cd "${TELEMETRY_DIR}/../.." && pwd)/.kontourai/telemetry}"
+# Local runtime telemetry defaults under .kontourai/telemetry; explicit
+# TELEMETRY_DATA_DIR still wins.
+TELEMETRY_DATA_DIR="${TELEMETRY_DATA_DIR:-${TELEMETRY_WORKSPACE_ROOT}/.kontourai/telemetry}"
 TELEMETRY_SESSION_DIR="${TELEMETRY_SESSION_DIR:-${TELEMETRY_DATA_DIR}/sessions}"
 TELEMETRY_ENRICH_SYSTEM="${TELEMETRY_ENRICH_SYSTEM:-true}"
 TELEMETRY_ENRICH_WORKSPACE="${TELEMETRY_ENRICH_WORKSPACE:-true}"
