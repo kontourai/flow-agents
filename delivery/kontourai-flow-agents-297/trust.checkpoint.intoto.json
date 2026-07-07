@@ -1,0 +1,191 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "trust.checkpoint.json",
+      "digest": {
+        "sha256": "ea65448bbfd7f781de7796416c98f79e47ef02c0b55b766f76a9ef05eca56d5a"
+      }
+    }
+  ],
+  "predicateType": "https://hachure.org/v1/bundle",
+  "predicate": {
+    "schemaVersion": 5,
+    "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+    "claims": [
+      {
+        "id": "kontourai-flow-agents-297-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+        "subjectType": "workflow-check",
+        "subjectId": "kontourai-flow-agents-297/bash-evals-run.sh-static",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.check.command",
+        "fieldOrBehavior": "record-check: bash evals/run.sh static (exit 0)",
+        "value": "pass",
+        "createdAt": "2026-07-07T04:20:35Z",
+        "updatedAt": "2026-07-07T04:20:35Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.check.command:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "command",
+          "output_digest": {
+            "algorithm": "sha256",
+            "hex": "c1de6d8f6df1c947f3f4ca36428b0e0f221b28d50f397b2822a05abb0931ead6"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-297-bash-evals-integration-test-session-resume-roundtrip-sh.flow-agents-workflow.record-check-bash-evals-integration-test-session-resume-roundtrip-sh-exit-0",
+        "subjectType": "workflow-check",
+        "subjectId": "kontourai-flow-agents-297/bash-evals-integration-test_session_resume_roundtrip.sh",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.check.command",
+        "fieldOrBehavior": "record-check: bash evals/integration/test_session_resume_roundtrip.sh (exit 0)",
+        "value": "pass",
+        "createdAt": "2026-07-07T04:20:35Z",
+        "updatedAt": "2026-07-07T04:20:35Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.check.command:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "command",
+          "output_digest": {
+            "algorithm": "sha256",
+            "hex": "11c2cbe3d92d7eb3ddd94be6cf8231d30bf4249f736f0e0479ebd98be3cf5bcb"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-297-bash-evals-integration-test-skill-drift-check-sh.flow-agents-workflow.record-check-bash-evals-integration-test-skill-drift-check-sh-exit-0",
+        "subjectType": "workflow-check",
+        "subjectId": "kontourai-flow-agents-297/bash-evals-integration-test_skill_drift_check.sh",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.check.command",
+        "fieldOrBehavior": "record-check: bash evals/integration/test_skill_drift_check.sh (exit 0)",
+        "value": "pass",
+        "createdAt": "2026-07-07T04:20:35Z",
+        "updatedAt": "2026-07-07T04:20:35Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.check.command:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "command",
+          "output_digest": {
+            "algorithm": "sha256",
+            "hex": "d661cafb8af9a175123305ae2e4f455e5aaa2981eba17cf17bdb1412cc016921"
+          }
+        },
+        "status": "verified"
+      }
+    ],
+    "evidence": [
+      {
+        "id": "ev:kontourai-flow-agents-297-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+        "claimId": "kontourai-flow-agents-297-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-297/evidence.json",
+        "excerptOrSummary": "record-check: bash evals/run.sh static (exit 0)",
+        "observedAt": "2026-07-07T04:20:35Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/run.sh static",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-297-bash-evals-integration-test-session-resume-roundtrip-sh.flow-agents-workflow.record-check-bash-evals-integration-test-session-resume-roundtrip-sh-exit-0",
+        "claimId": "kontourai-flow-agents-297-bash-evals-integration-test-session-resume-roundtrip-sh.flow-agents-workflow.record-check-bash-evals-integration-test-session-resume-roundtrip-sh-exit-0",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-297/evidence.json",
+        "excerptOrSummary": "record-check: bash evals/integration/test_session_resume_roundtrip.sh (exit 0)",
+        "observedAt": "2026-07-07T04:20:35Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_session_resume_roundtrip.sh",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-297-bash-evals-integration-test-skill-drift-check-sh.flow-agents-workflow.record-check-bash-evals-integration-test-skill-drift-check-sh-exit-0",
+        "claimId": "kontourai-flow-agents-297-bash-evals-integration-test-skill-drift-check-sh.flow-agents-workflow.record-check-bash-evals-integration-test-skill-drift-check-sh-exit-0",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-297/evidence.json",
+        "excerptOrSummary": "record-check: bash evals/integration/test_skill_drift_check.sh (exit 0)",
+        "observedAt": "2026-07-07T04:20:35Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_skill_drift_check.sh",
+          "isError": false
+        }
+      }
+    ],
+    "policies": [
+      {
+        "id": "policy:workflow.check.command:test_output",
+        "claimType": "workflow.check.command",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.command claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      }
+    ],
+    "events": [
+      {
+        "id": "evt:kontourai-flow-agents-297-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+        "claimId": "kontourai-flow-agents-297-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-297-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0"
+        ],
+        "createdAt": "2026-07-07T04:20:35Z",
+        "verifiedAt": "2026-07-07T04:20:35Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-297-bash-evals-integration-test-session-resume-roundtrip-sh.flow-agents-workflow.record-check-bash-evals-integration-test-session-resume-roundtrip-sh-exit-0",
+        "claimId": "kontourai-flow-agents-297-bash-evals-integration-test-session-resume-roundtrip-sh.flow-agents-workflow.record-check-bash-evals-integration-test-session-resume-roundtrip-sh-exit-0",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-297-bash-evals-integration-test-session-resume-roundtrip-sh.flow-agents-workflow.record-check-bash-evals-integration-test-session-resume-roundtrip-sh-exit-0"
+        ],
+        "createdAt": "2026-07-07T04:20:35Z",
+        "verifiedAt": "2026-07-07T04:20:35Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-297-bash-evals-integration-test-skill-drift-check-sh.flow-agents-workflow.record-check-bash-evals-integration-test-skill-drift-check-sh-exit-0",
+        "claimId": "kontourai-flow-agents-297-bash-evals-integration-test-skill-drift-check-sh.flow-agents-workflow.record-check-bash-evals-integration-test-skill-drift-check-sh-exit-0",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-297-bash-evals-integration-test-skill-drift-check-sh.flow-agents-workflow.record-check-bash-evals-integration-test-skill-drift-check-sh-exit-0"
+        ],
+        "createdAt": "2026-07-07T04:20:35Z",
+        "verifiedAt": "2026-07-07T04:20:35Z"
+      }
+    ]
+  }
+}
