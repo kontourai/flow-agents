@@ -30,6 +30,7 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [promotion-gate](./promotion-gate.md) | current | Promotion gate |
 | [standing-directives](./standing-directives.md) | current | Standing directives |
 | [three-hard-boundary-model](./three-hard-boundary-model.md) | needs-decision | Three-hard-boundary model |
+| [trust-ledger-retention](./trust-ledger-retention.md) | needs-decision | Trust-ledger retention and console-as-projection |
 | [trust-reconcile](./trust-reconcile.md) | current | Trust-reconcile and delivery reconciliation |
 | [typescript-source-policy](./typescript-source-policy.md) | current | TypeScript-first source policy |
 | [workflow-enforcement](./workflow-enforcement.md) | needs-decision | Workflow Enforcement |

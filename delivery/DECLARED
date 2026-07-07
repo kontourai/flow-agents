@@ -16,5 +16,11 @@
     "reason": "Issue #367 code fix to content-boundary check script; no agent delivery changes",
     "approved_by": "issue-367-pre-approval (scans untracked files for banned terms)",
     "declared_at": "2026-07-04T05:06:20Z"
+  },
+  {
+    "scope": "branch-prefix:agent/claude-code-3c7d5297-89ec-4893-81a6-8aae94890c95-Kontour/docs-trust-reconciliation",
+    "reason": "Docs-only PR: trust-reconciliation implementation guide + trust-ledger-retention decision record + regenerated decisions index. No source/behavior changes and no command-backed (agent-delivery) claims to reconcile.",
+    "approved_by": "brian.anderson1222 (delegated approval, 2026-07-07 session: take-my-recommendations-on-all-of-it)",
+    "declared_at": "2026-07-07T21:48:14Z"
   }
 ]
