@@ -56,6 +56,8 @@ echo "Part A: deterministic capture"
 printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","cwd":"%s","tool_input":{"command":"npm test"},"tool_response":{"exitCode":0,"stdout":"ok"}}' "$A" | capture
 printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","cwd":"%s","tool_input":{"command":"npm run lint"},"error":"command failed"}' "$A" | capture
 printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","cwd":"%s","tool_input":{"command":"make build"},"tool_response":{"exit_code":2}}' "$A" | capture
+# #470 rule-3 default: no exit code, no error, no stderr → ambiguous (never pass).
+printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","cwd":"%s","tool_input":{"command":"echo status-check"}}' "$A" | capture
 # A non-command tool (Write) must NOT be captured.
 printf '{"hook_event_name":"PostToolUse","tool_name":"Write","cwd":"%s","tool_input":{"file_path":"/tmp/x"}}' "$A" | capture
 
@@ -63,7 +65,7 @@ LOG="$A/.kontourai/flow-agents/t1/command-log.jsonl"
 if [[ -f "$LOG" ]]; then _pass "capture writes command-log.jsonl"; else _fail "capture did not write command-log.jsonl"; fi
 
 lines=$(wc -l < "$LOG" | tr -d ' ')
-if [[ "$lines" == "3" ]]; then _pass "capture records 3 command executions (Write tool excluded)"; else _fail "expected 3 log lines, got $lines"; fi
+if [[ "$lines" == "4" ]]; then _pass "capture records 4 command executions (Write tool excluded)"; else _fail "expected 4 log lines, got $lines"; fi
 
 if rg -q '"command":"npm test","observedResult":"pass","exitCode":0' "$LOG"; then
   _pass "clean exit 0 recorded as observedResult:pass exitCode:0"
@@ -76,6 +78,14 @@ else _fail "errored command not recorded correctly"; fi
 if rg -q '"command":"make build","observedResult":"fail","exitCode":2' "$LOG"; then
   _pass "non-zero exit recorded as fail with exitCode"
 else _fail "non-zero-exit command not recorded correctly"; fi
+
+# #470 rule-3 default: absent any positive success evidence, observedResult is
+# "ambiguous" (never "pass"). The error-bearing case above ("npm run lint" →
+# fail, exitCode:null) already proves rule 2 (isFailureIndicated) is unchanged
+# by the rule-3 flip.
+if rg -q '"command":"echo status-check","observedResult":"ambiguous","exitCode":null' "$LOG"; then
+  _pass "no-signal command (no exit code, no error, no stderr) recorded as ambiguous, never pass"
+else _fail "no-signal command not recorded as ambiguous: $(cat "$LOG")"; fi
 
 if rg -q '"source":"postToolUse-capture"' "$LOG"; then _pass "records source:postToolUse-capture"; else _fail "missing source field"; fi
 

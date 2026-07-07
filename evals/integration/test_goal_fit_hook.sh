@@ -1449,6 +1449,185 @@ else
   _fail "iteration-2 item 1 (capture-log shortcut site): the distinct ambiguous message was not found: $(cat "$TMPDIR_EVAL/crit1-captured.out" "$TMPDIR_EVAL/crit1-captured.err")"
 fi
 
+# ─── Iteration-2 (re-plan) finding #3 (HIGH), Decision A: no-signal-ambiguous split ───────────
+# Site-1 coverage (captureCrossReference's own capture-log branch, same site as crit1-captured
+# above): a GENERIC command ("npm test") whose LATEST capture is `ambiguous` with NO exit code
+# recoverable at all (`exitCode:null` — e.g. an unreadable/missing codex host banner) is a
+# DIFFERENT origin from the #362 absence-ambiguous carve-out (bare grep/diff exit EXACTLY 1)
+# exercised by crit1-captured-task directly above. Decision A: this no-signal case gets
+# grep/diff-FREE, accurate wording and is warn-only at a TERMINAL stop (never HARD_BLOCKs),
+# while still blocking a NON-terminal stop via FULL_BLOCK's existing `NOT_VERIFIED —` pattern.
+# The crit1-captured-task assertions directly above are the regression guard proving the #362
+# absence-ambiguous case still HARD_BLOCKs a terminal stop, unchanged.
+echo ""
+echo "--- iteration-2 (re-plan) finding #3 Decision A: no-signal-ambiguous is warn-only at a terminal stop (site 1) ---"
+
+NOSIGNAL_TERMINAL_REPO="$TMPDIR_EVAL/nosignal-terminal/repo"
+mkdir -p "$NOSIGNAL_TERMINAL_REPO/.kontourai/flow-agents/nosignal-terminal-task"
+printf '# Test Repo\n' > "$NOSIGNAL_TERMINAL_REPO/AGENTS.md"
+
+cat > "$NOSIGNAL_TERMINAL_REPO/.kontourai/flow-agents/nosignal-terminal-task/nosignal-terminal-task--deliver.md" <<'MARKDOWN'
+# No-signal ambiguous terminal task (finding #3, generic command, no exit code)
+
+branch: main
+worktree: main
+created: 2026-07-06
+status: delivered
+type: deliver
+
+## Definition Of Done
+- [x] tests pass
+
+## Goal Fit Gate
+- [x] acceptance verified
+
+## Verification Report
+
+Build: PASS
+
+### Verdict: PASS
+MARKDOWN
+
+write_json_file "$NOSIGNAL_TERMINAL_REPO/.kontourai/flow-agents/nosignal-terminal-task/state.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "nosignal-terminal-task",
+  "status": "delivered",
+  "phase": "done",
+  "updated_at": "2026-07-06T00:00:00Z",
+  "next_action": {
+    "status": "done",
+    "summary": "Delivered."
+  }
+}
+JSON
+
+write_json_file "$NOSIGNAL_TERMINAL_REPO/.kontourai/flow-agents/nosignal-terminal-task/evidence.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "nosignal-terminal-task",
+  "verdict": "pass",
+  "checks": [
+    {
+      "id": "tests-pass",
+      "kind": "command",
+      "status": "pass",
+      "command": "npm test",
+      "summary": "Claimed tests pass."
+    }
+  ],
+  "not_verified_gaps": []
+}
+JSON
+
+# command-log.jsonl HAS an entry for this EXACT command -- its LATEST (only) capture is a
+# no-signal ambiguous (observedResult:"ambiguous", exitCode:null), NOT the #362
+# absence-ambiguous carve-out (which requires exitCode===1 on a bare grep/diff). No trust.bundle
+# in this artifact dir at all.
+printf '%s\n' '{"command":"npm test","observedResult":"ambiguous","exitCode":null,"capturedAt":"2026-07-06T00:00:00Z","source":"postToolUse-capture"}' \
+  > "$NOSIGNAL_TERMINAL_REPO/.kontourai/flow-agents/nosignal-terminal-task/command-log.jsonl"
+
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=100000 \
+  node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/nosignal-terminal.out" 2>"$TMPDIR_EVAL/nosignal-terminal.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$NOSIGNAL_TERMINAL_REPO"}
+JSON
+then
+  nosignal_terminal_status=0
+else
+  nosignal_terminal_status=$?
+fi
+
+if [[ "$nosignal_terminal_status" -eq 0 ]]; then
+  _pass "finding #3 Decision A: a terminal (delivered) stop with a no-signal-ambiguous claimed-pass command ('npm test', exitCode:null) does NOT hard-block (exit 0) -- warn-only, no exit code was ever observed on this host"
+else
+  _fail "finding #3 Decision A REGRESSION: a terminal stop with a no-signal-ambiguous claimed-pass command WRONGLY blocked (exit=$nosignal_terminal_status): $(cat "$TMPDIR_EVAL/nosignal-terminal.out" "$TMPDIR_EVAL/nosignal-terminal.err")"
+fi
+
+if ! grep -qi 'grep/diff\|NOT_VERIFIED (ambiguous)' "$TMPDIR_EVAL/nosignal-terminal.err"; then
+  _pass "finding #3 Decision A: the no-signal-ambiguous message contains NO grep/diff wording and NOT the absence-ambiguous 'NOT_VERIFIED (ambiguous)' marker -- accurate wording for a generic command"
+else
+  _fail "finding #3 Decision A REGRESSION: the no-signal-ambiguous message wrongly carries grep/diff wording or the absence-ambiguous marker: $(cat "$TMPDIR_EVAL/nosignal-terminal.out" "$TMPDIR_EVAL/nosignal-terminal.err")"
+fi
+
+if grep -q 'NOT_VERIFIED —' "$TMPDIR_EVAL/nosignal-terminal.err"; then
+  _pass "finding #3 Decision A: the no-signal-ambiguous message still surfaces via the generic 'NOT_VERIFIED —' pattern (warn, not silently dropped)"
+else
+  _fail "finding #3 Decision A REGRESSION: the no-signal-ambiguous message was dropped entirely: $(cat "$TMPDIR_EVAL/nosignal-terminal.out" "$TMPDIR_EVAL/nosignal-terminal.err")"
+fi
+
+# Non-terminal variant: SAME fixture, but status:in_progress/phase:build (not terminal, not
+# pre-execution) -- FULL_BLOCK's broader `evidence check` / `NOT_VERIFIED —` patterns still
+# BLOCK a non-terminal stop, proving the split is warn-terminal / block-non-terminal, not a
+# blanket downgrade to non-blocking.
+NOSIGNAL_NONTERMINAL_REPO="$TMPDIR_EVAL/nosignal-nonterminal/repo"
+mkdir -p "$NOSIGNAL_NONTERMINAL_REPO/.kontourai/flow-agents/nosignal-nonterminal-task"
+printf '# Test Repo\n' > "$NOSIGNAL_NONTERMINAL_REPO/AGENTS.md"
+
+cat > "$NOSIGNAL_NONTERMINAL_REPO/.kontourai/flow-agents/nosignal-nonterminal-task/nosignal-nonterminal-task--deliver.md" <<'MARKDOWN'
+# No-signal ambiguous non-terminal task (finding #3)
+
+branch: main
+worktree: main
+created: 2026-07-06
+status: executing
+type: deliver
+
+## Plan
+
+Same no-signal-ambiguous shape, but NON-terminal (status:in_progress) -- must still BLOCK.
+MARKDOWN
+
+write_json_file "$NOSIGNAL_NONTERMINAL_REPO/.kontourai/flow-agents/nosignal-nonterminal-task/state.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "nosignal-nonterminal-task",
+  "status": "in_progress",
+  "phase": "build",
+  "updated_at": "2026-07-06T00:00:00Z",
+  "next_action": {
+    "status": "in_progress",
+    "summary": "Mid-build."
+  }
+}
+JSON
+
+write_json_file "$NOSIGNAL_NONTERMINAL_REPO/.kontourai/flow-agents/nosignal-nonterminal-task/evidence.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "nosignal-nonterminal-task",
+  "verdict": "pass",
+  "checks": [
+    {
+      "id": "tests-pass",
+      "kind": "command",
+      "status": "pass",
+      "command": "npm test",
+      "summary": "Claimed tests pass."
+    }
+  ],
+  "not_verified_gaps": []
+}
+JSON
+
+printf '%s\n' '{"command":"npm test","observedResult":"ambiguous","exitCode":null,"capturedAt":"2026-07-06T00:00:00Z","source":"postToolUse-capture"}' \
+  > "$NOSIGNAL_NONTERMINAL_REPO/.kontourai/flow-agents/nosignal-nonterminal-task/command-log.jsonl"
+
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=100000 \
+  node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/nosignal-nonterminal.out" 2>"$TMPDIR_EVAL/nosignal-nonterminal.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$NOSIGNAL_NONTERMINAL_REPO"}
+JSON
+then
+  nosignal_nonterminal_status=0
+else
+  nosignal_nonterminal_status=$?
+fi
+
+if [[ "$nosignal_nonterminal_status" -eq 2 ]]; then
+  _pass "finding #3 Decision A: the SAME no-signal-ambiguous fixture BLOCKS (exit 2) at a non-terminal (executing) stop via FULL_BLOCK -- terminal-warn/non-terminal-block split confirmed"
+else
+  _fail "finding #3 Decision A REGRESSION: a non-terminal stop with a no-signal-ambiguous claimed-pass command did NOT block: exit=$nosignal_nonterminal_status $(cat "$TMPDIR_EVAL/nosignal-nonterminal.out" "$TMPDIR_EVAL/nosignal-nonterminal.err")"
+fi
+
 # Negative control: a LEGITIMATE self-asserting absence check ('! grep -q ...', which exits 0
 # when the pattern is genuinely absent) claimed pass at a TERMINAL stop must still PASS -- no
 # new over-block introduced by this fix. Same never-captured/no-bundle shape as case (i), but

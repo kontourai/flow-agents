@@ -517,6 +517,62 @@ function critiqueToEventStatus(verdict: string, findings: AnyObj[]): string | nu
 }
 
 /**
+ * Fold a raw command-log (command-log.jsonl entries) into a per-command classification,
+ * keyed by normalized command text (whitespace-collapsed, trimmed). Pure and side-effect-free
+ * so it is directly unit-testable (#470 iteration 2, finding #2 — HIGH: the prior inline reducer
+ * collapsed every non-"fail" `observedResult` — including "ambiguous" — to "pass", feeding a
+ * verified event + `passing:true` and reintroducing the #470 false-pass through the trust-bundle
+ * reconciliation path).
+ *
+ * Three-way classification, keyed on `observedResult` (never re-derived from `exitCode` alone,
+ * which would miscoerce the #362 grep/diff absence carve-out `ambiguous,exitCode:1` entry to
+ * `fail`):
+ *   - "fail"      when `observedResult==="fail"`, or (legacy, no observedResult) a nonzero
+ *                 integer `exitCode`.
+ *   - "ambiguous" when `observedResult==="ambiguous"`, or (legacy) `exitCode` is `null` with no
+ *                 fail signal.
+ *   - "pass"      when `observedResult==="pass"`, or (legacy) `exitCode===0`.
+ *
+ * Precedence across repeated entries for the same command: fail > pass > ambiguous. A genuine
+ * exit-0 pass is positive evidence and confirms; ambiguous holds only when there is neither a
+ * fail nor a positive pass, since a "pass" always requires positive evidence.
+ *
+ * The caller (buildTrustBundle) maps "ambiguous" onto the existing canonical non-confirming
+ * status `not_verified` — consume-never-fork, mirroring record-check's identical mapping — so
+ * `checkStatusToEventStatus("not_verified")` returns null (no verification event emitted) and the
+ * evidence item is stamped `passing:false`. See Decision/finding #2 in the iteration-2 plan.
+ */
+export function reduceCaptureLogByCommand(commandLog: AnyObj[] | undefined): Map<string, { observedResult: "pass" | "fail" | "ambiguous"; exitCode: number | null }> {
+  const captureByCommand = new Map<string, { observedResult: "pass" | "fail" | "ambiguous"; exitCode: number | null }>();
+  for (const entry of Array.isArray(commandLog) ? commandLog : []) {
+    if (!entry || typeof entry.command !== "string") continue;
+    const key = entry.command.replace(/\s+/g, " ").trim();
+    if (!key) continue;
+    const exitCode = Number.isInteger(entry.exitCode) ? (entry.exitCode as number) : null;
+    let result: "pass" | "fail" | "ambiguous";
+    if (entry.observedResult === "fail" || (entry.observedResult === undefined && exitCode !== null && exitCode !== 0)) {
+      result = "fail";
+    } else if (entry.observedResult === "pass" || (entry.observedResult === undefined && exitCode === 0)) {
+      result = "pass";
+    } else {
+      // Covers observedResult==="ambiguous" AND the legacy no-observedResult, exitCode:null case.
+      result = "ambiguous";
+    }
+    const prev = captureByCommand.get(key);
+    let merged: "pass" | "fail" | "ambiguous" = result;
+    if (prev) {
+      // fail > pass > ambiguous precedence.
+      if (prev.observedResult === "fail" || result === "fail") merged = "fail";
+      else if (prev.observedResult === "pass" || result === "pass") merged = "pass";
+      else merged = "ambiguous";
+    }
+    const mergedExitCode = exitCode !== null ? exitCode : (prev ? prev.exitCode : null);
+    captureByCommand.set(key, { observedResult: merged, exitCode: mergedExitCode });
+  }
+  return captureByCommand;
+}
+
+/**
  * Build a Hachure trust.bundle from raw check/criterion/critique inputs.
  * trust.bundle is the PRIMARY artifact (ADR 0010 Phase 4a producer inversion).
  * Callers pass raw inputs directly — not bespoke-sidecar-shaped objects.
@@ -674,17 +730,15 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     return p;
   };
 
-  // Index the deterministic capture log by normalized command (a single FAIL wins),
-  // so a claimed-pass check whose command actually FAILED becomes authoritative here.
-  const captureByCommand = new Map<string, { observedResult: string; exitCode: number | null }>();
-  for (const entry of Array.isArray(commandLog) ? commandLog : []) {
-    if (!entry || typeof entry.command !== "string") continue;
-    const key = entry.command.replace(/\s+/g, " ").trim();
-    if (!key) continue;
-    const failed = entry.observedResult === "fail" || (Number.isInteger(entry.exitCode) && entry.exitCode !== 0);
-    const prev = captureByCommand.get(key);
-    captureByCommand.set(key, { observedResult: failed || (prev && prev.observedResult === "fail") ? "fail" : "pass", exitCode: Number.isInteger(entry.exitCode) ? entry.exitCode : (prev ? prev.exitCode : null) });
-  }
+  // Index the deterministic capture log by normalized command (fail > pass > ambiguous
+  // precedence wins across repeated entries for the same command), so a claimed-pass check
+  // whose command actually FAILED (or never produced usable signal) becomes authoritative here.
+  // Extracted to reduceCaptureLogByCommand (below) for direct unit testing (#470 iteration 2,
+  // finding #2): the three-way classification is keyed on `observedResult`, NEVER re-derived
+  // from `exitCode` alone, so an `ambiguous,exitCode:1` entry (the #362 grep/diff absence
+  // carve-out) is never miscoerced to `fail` here, and a no-signal `ambiguous` (exitCode:null)
+  // is never coerced to `pass`.
+  const captureByCommand = reduceCaptureLogByCommand(commandLog);
 
   // ─── P-b dual-emit helper ──────────────────────────────────────────────────
   // Semantic matching table (ADR 0016 Abstraction A P-b):
@@ -797,7 +851,15 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       ? { evidenceType: "attestation", method: "attestation", reconcilable: false }
       : classifyEvidence(check.kind, cmd.length > 0);
     const policy = ensurePolicy(legacyClaimType, "high", [evClass.evidenceType]);
-    const effectiveStatus = captured ? captured.observedResult : String(check.status ?? "");
+    // #470 iteration 2, finding #2: an "ambiguous" capture (no positive pass/fail signal —
+    // e.g. the codex no-signal default, or the #362 grep/diff absence carve-out) is
+    // non-confirming and must never be surfaced as a claim value of "pass". Map it onto the
+    // EXISTING canonical non-confirming status "not_verified" (consume-never-fork; the same
+    // mapping record-check already applies at its `ambiguous` branch above) so
+    // checkStatusToEventStatus("not_verified") returns null — no verification event, and the
+    // evidence item below is stamped passing:false. `isError` stays fail-only (ambiguous is
+    // not an error).
+    const effectiveStatus = captured ? (captured.observedResult === "ambiguous" ? "not_verified" : captured.observedResult) : String(check.status ?? "");
     const evStatus = waiver ? "assumed" : checkStatusToEventStatus(effectiveStatus);
     // Promotion claim marker (issue #312): a `promote` check carries a session-local
     // _promotion object that must survive onto claim.metadata.promotion so the archive gate
