@@ -230,6 +230,112 @@ function runCommand(cmd, repoRoot) {
   };
 }
 
+function gitOutput(args, repoRoot) {
+  const res = spawnSync('git', args, {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (res.error || res.status !== 0) return null;
+  return String(res.stdout || '').trim();
+}
+
+function gitOutputRaw(args, repoRoot) {
+  const res = spawnSync('git', args, {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (res.error || res.status !== 0) return null;
+  return String(res.stdout || '');
+}
+
+function normalizeRepoPath(value) {
+  return String(value || '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+/g, '/');
+}
+
+function splitGitPathList(value) {
+  if (value === null) return [];
+  return value.split('\0').filter((entry) => entry.length > 0).map(normalizeRepoPath);
+}
+
+function resolveDiffBase(repoRoot) {
+  const candidates = [
+    process.env.TRUST_RECONCILE_BASE_REF || '',
+    process.env.GITHUB_BASE_REF || '',
+    'origin/main',
+    'main',
+  ].map((v) => v.trim()).filter(Boolean);
+  const head = (process.env.TRUST_RECONCILE_SHA || process.env.GITHUB_SHA || 'HEAD').trim();
+  for (const candidate of candidates) {
+    const mergeBase = gitOutput(['merge-base', candidate, head], repoRoot);
+    if (mergeBase) return { base: mergeBase, head };
+    const rev = gitOutput(['rev-parse', '--verify', candidate], repoRoot);
+    if (rev) return { base: rev, head };
+  }
+  return { base: null, head };
+}
+
+function actualChangedFiles(repoRoot) {
+  const { base, head } = resolveDiffBase(repoRoot);
+  if (!base) return { files: null, base, head };
+  const out = gitOutputRaw(['diff', '-z', '--name-only', `${base}...${head}`], repoRoot);
+  if (out === null) return { files: null, base, head };
+  const files = splitGitPathList(out).sort();
+  return { files, base, head };
+}
+
+function declaredScopePaths(bundle) {
+  const declared = new Set();
+  let foundScopeClaim = false;
+  const claims = Array.isArray(bundle && bundle.claims) ? bundle.claims : [];
+  for (const claim of claims) {
+    const md = claim && typeof claim.metadata === 'object' ? claim.metadata : null;
+    const kind = md && typeof md.check_kind === 'string' ? md.check_kind : '';
+    const scope = md && md.scope && typeof md.scope === 'object' ? md.scope : null;
+    if (kind !== 'scope' || !scope || !Array.isArray(scope.entries)) continue;
+    foundScopeClaim = true;
+    for (const entry of scope.entries) {
+      if (entry && typeof entry.path === 'string' && entry.path.length > 0) declared.add(normalizeRepoPath(entry.path));
+    }
+  }
+  return foundScopeClaim ? declared : null;
+}
+
+function scopeReconcileIssues(bundle, repoRoot) {
+  const declared = declaredScopePaths(bundle);
+  if (declared === null) return [];
+  const actual = actualChangedFiles(repoRoot);
+  if (!actual.files) {
+    return [{
+      type: 'scope-divergence',
+      message: 'trust divergence: scope claim present but CI could not compute actual changed files from git diff',
+    }];
+  }
+  const issues = [];
+  for (const filePath of actual.files) {
+    if (!declared.has(filePath)) {
+      issues.push({
+        type: 'scope-divergence',
+        message: `trust divergence: actual changed file '${filePath}' was not declared by scope attestation`,
+      });
+    }
+  }
+  const actualSet = new Set(actual.files);
+  for (const filePath of declared) {
+    if (!actualSet.has(filePath)) {
+      issues.push({
+        type: 'scope-divergence',
+        message: `trust divergence: declared scope file '${filePath}' is not present in the actual git diff`,
+      });
+    }
+  }
+  if (issues.length === 0) {
+    process.stdout.write(`[trust-reconcile]   RECONCILED scope: ${actual.files.length} actual changed file${actual.files.length === 1 ? '' : 's'} declared\n`);
+  }
+  return issues;
+}
+
 /**
  * WS8 (finding 3): re-derive every claim's status CI-side from the bundle's OWN
  * evidence/events/policies, using @kontourai/surface's canonical deriveClaimStatus (the same
@@ -1224,6 +1330,7 @@ function runTrustReconcile({ bundle = null, commands = [], repoRoot = null, mani
       // command claims — instead of forcing every claim to match one composite command.
       const { reconcilable, sessionLocal, noEvidenceCommand, waiverOnCommand } = classifyBundleClaims(bundle);
       process.stdout.write(`[trust-reconcile] classified bundle: ${reconcilable.length} reconcilable command claim(s), ${sessionLocal.length} session-local claim(s), ${noEvidenceCommand.length} unbacked/unreconciled command claim(s), ${waiverOnCommand.length} waiver-on-command claim(s)\n`);
+      issues.push(...scopeReconcileIssues(bundle, resolvedRepoRoot));
 
       // finding 3: re-derive every claim's status CI-side (never trust self-reported
       // claim.status). Consumed by the session-local loop below to catch status-misassertion.
@@ -1440,6 +1547,8 @@ module.exports.isAncestorCommit = isAncestorCommit;
 // threads its own resolved canonicalCommands into this same fallback) resolves a non-empty
 // one, a real parity gap, not merely a fixture quirk.
 module.exports.resolveCanonicalCommands = resolveCanonicalCommands;
+module.exports.declaredScopePaths = declaredScopePaths;
+module.exports.scopeReconcileIssues = scopeReconcileIssues;
 
 // #356: re-export the shared bundle-shape classification/issue-construction functions
 // (primary home: scripts/lib/reconcile-shape.js) so a caller that already requires

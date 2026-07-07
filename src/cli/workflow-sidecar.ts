@@ -19,7 +19,7 @@ type AnyObj = Record<string, any>;
 
 export const statuses = new Set(["new", "planning", "planned", "in_progress", "blocked", "verifying", "verified", "needs_decision", "not_verified", "failed", "delivered", "accepted", "archived"]);
 export const phases = ["idea", "backlog", "pickup", "planning", "execution", "verification", "goal_fit", "evidence", "release", "learning", "done"];
-export const checkKinds = new Set(["build", "types", "lint", "test", "command", "security", "diff", "browser", "runtime", "policy", "external"]);
+export const checkKinds = new Set(["build", "types", "lint", "test", "command", "security", "diff", "browser", "runtime", "policy", "scope", "external"]);
 export const checkStatuses = new Set(["pass", "fail", "not_verified", "skip"]);
 export const verdicts = new Set(["pass", "partial", "fail", "not_verified"]);
 
@@ -499,6 +499,8 @@ function classifyEvidence(kind: string | undefined, hasCommand: boolean): { evid
         : { evidenceType: "attestation", method: "attestation", reconcilable: false };
     case "policy":
       return { evidenceType: "policy_rule", method: "auditability", reconcilable: false };
+    case "scope":
+      return { evidenceType: "attestation", method: "attestation", reconcilable: false };
     case "external":
       return { evidenceType: "attestation", method: "corroboration", reconcilable: false };
     default:
@@ -885,6 +887,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const outputDigestMeta = typeof check._output_sha256 === "string" && check._output_sha256.length > 0
       ? { algorithm: "sha256", hex: check._output_sha256 }
       : null;
+    const scopeMeta = check._scope && typeof check._scope === "object" ? check._scope as AnyObj : null;
     // #270(a)/(c): a gate claim's declared claimType/subjectType, once resolved (either freshly
     // via matchExpectsEntry below, or restored from a prior write's metadata.gate_claim stamp by
     // checksFromBundle), is stamped here so it is frozen at record time — a later bundle rebuild
@@ -917,6 +920,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       ...(artifactRefsMeta ? { artifact_refs: artifactRefsMeta } : {}),
       ...(standardRefsMeta ? { standard_refs: standardRefsMeta } : {}),
       ...(outputDigestMeta ? { output_digest: outputDigestMeta } : {}),
+      ...(scopeMeta ? { scope: scopeMeta } : {}),
     };
 
     const claimEvents: AnyObj[] = [];
@@ -2064,7 +2068,7 @@ export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false, existi
     if (existingHasStamp === true) die(`check id "${check.id}" belongs to a live, properly-stamped gate claim — only record-gate-claim may supersede it. Superseding a stamped gate claim via record-evidence/record-check/dogfood-pass would silently destroy its metadata.gate_claim stamp. Re-record via record-gate-claim, or choose a different --id.`);
     if (existingHasStamp === undefined) die(`check id "${check.id}" starts with the reserved "gate-claim-" prefix — that namespace is reserved for record-gate-claim's own generated ids. Choose a different --id (or omit --id to let the check derive one from its command/summary). Supersession of an EXISTING, UNSTAMPED check claim with this same id (a correction) is permitted — this rejection applies to newly-minted ids not already present in the session's trust.bundle, and to ids that already belong to a stamped (live) gate claim.`);
   }
-    if (!checkKinds.has(check.kind)) die("kind must be one of: build, types, lint, test, command, security, diff, browser, runtime, policy, external");
+    if (!checkKinds.has(check.kind)) die("kind must be one of: build, types, lint, test, command, security, diff, browser, runtime, policy, scope, external");
   if (!checkStatuses.has(check.status)) die("status must be one of: pass, fail, not_verified, skip");
   if (Array.isArray(check.standard_refs)) for (const ref of check.standard_refs) if (!["junit", "sarif", "coverage", "veritas"].includes(ref.standard)) die("standard must be one of");
   if (check.artifact_refs) check.artifact_refs = normalizeEvidenceRefs(check.artifact_refs, "artifact_refs");
@@ -2316,6 +2320,10 @@ function checksFromBundle(dir: string): AnyObj[] {
     const od = md && typeof md === "object" ? md.output_digest as AnyObj : undefined;
     return od && typeof od === "object" && od.algorithm === "sha256" && typeof od.hex === "string" && od.hex.length > 0 ? od.hex : undefined;
   };
+  const scopeOf = (claim: AnyObj): AnyObj | undefined => {
+    const md = claim.metadata as AnyObj;
+    return md && typeof md === "object" && md.scope && typeof md.scope === "object" ? md.scope as AnyObj : undefined;
+  };
   // #270(a)/(c): read side of the gate_claim stamp (write side: buildTrustBundle's
   // claimMetadata.gate_claim, above). Restoring expectation_id/claim_type/subject_type/step_id
   // is what lets a REBUILD (record-evidence/record-critique/record-learning, after the recorded
@@ -2388,6 +2396,8 @@ function checksFromBundle(dir: string): AnyObj[] {
     Object.assign(check, refsOf(claim));
     const outputSha256 = outputSha256Of(claim);
     if (outputSha256) check._output_sha256 = outputSha256;
+    const scope = scopeOf(claim);
+    if (scope) check._scope = scope;
     applyGateClaimStamp(check, claim);
     applyGateClaimShapeUnstamped(check, claim);
     checks.push(check);
@@ -2405,6 +2415,8 @@ function checksFromBundle(dir: string): AnyObj[] {
     Object.assign(check, refsOf(claim));
     const outputSha256 = outputSha256Of(claim);
     if (outputSha256) check._output_sha256 = outputSha256;
+    const scope = scopeOf(claim);
+    if (scope) check._scope = scope;
     applyGateClaimStamp(check, claim);
     applyGateClaimShapeUnstamped(check, claim);
     checks.push(check);
@@ -2495,6 +2507,146 @@ function parseWaiver(p: ReturnType<typeof parseArgs>, ts: string): AnyObj | null
   if (!reason) die("--accepted-gap-reason is required when --waived-by is set (an accepted gap must carry its justification)");
   if (!waivedBy) die("--waived-by is required when --accepted-gap-reason is set (an accepted gap must name its approver)");
   return { reason, approved_by: waivedBy, approved_at: ts };
+}
+
+function gitOutput(args: string[], cwd = process.cwd()): string | null {
+  const res = spawnSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  if (res.error || res.status !== 0) return null;
+  return String(res.stdout ?? "").trim();
+}
+
+function gitOutputRaw(args: string[], cwd = process.cwd()): string | null {
+  const res = spawnSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  if (res.error || res.status !== 0) return null;
+  return String(res.stdout ?? "");
+}
+
+function normalizeGitPath(value: string): string {
+  return value.replace(/\\/g, "/").replace(/^\.\/+/, "").replace(/\/+/g, "/");
+}
+
+function splitGitPathList(value: string | null): string[] {
+  if (value === null) return [];
+  return value.split("\0").filter((entry) => entry.length > 0).map(normalizeGitPath);
+}
+
+function repoRootForScope(): string | null {
+  const root = gitOutput(["rev-parse", "--show-toplevel"]);
+  return root ? path.resolve(root) : null;
+}
+
+function resolveScopeBase(repoRoot: string, explicitBase: string): string | null {
+  const candidates = [
+    explicitBase,
+    process.env.TRUST_RECONCILE_BASE_REF ?? "",
+    process.env.GITHUB_BASE_REF ?? "",
+    "origin/main",
+    "main",
+  ].map((v) => v.trim()).filter(Boolean);
+  for (const candidate of candidates) {
+    const mergeBase = gitOutput(["merge-base", candidate, "HEAD"], repoRoot);
+    if (mergeBase) return mergeBase;
+    const rev = gitOutput(["rev-parse", "--verify", candidate], repoRoot);
+    if (rev) return rev;
+  }
+  return null;
+}
+
+function changedFilesFromGit(repoRoot: string, base: string | null): string[] | null {
+  const committed = base ? gitOutputRaw(["diff", "-z", "--name-only", `${base}...HEAD`], repoRoot) : null;
+  const staged = gitOutputRaw(["diff", "-z", "--name-only", "--cached"], repoRoot);
+  const unstaged = gitOutputRaw(["diff", "-z", "--name-only"], repoRoot);
+  const untracked = gitOutputRaw(["ls-files", "-z", "--others", "--exclude-standard"], repoRoot);
+  if (committed === null || staged === null || unstaged === null || untracked === null) return null;
+  const names = new Set<string>();
+  for (const part of [committed, staged, unstaged, untracked]) {
+    for (const filePath of splitGitPathList(part)) names.add(filePath);
+  }
+  return [...names].sort();
+}
+
+function dirtyFilesFromGit(repoRoot: string): Set<string> {
+  const dirty = new Set<string>();
+  for (const part of [
+    gitOutputRaw(["diff", "-z", "--name-only", "--cached"], repoRoot),
+    gitOutputRaw(["diff", "-z", "--name-only"], repoRoot),
+    gitOutputRaw(["ls-files", "-z", "--others", "--exclude-standard"], repoRoot),
+  ]) {
+    for (const filePath of splitGitPathList(part)) dirty.add(filePath);
+  }
+  return dirty;
+}
+
+function blobHashForPath(repoRoot: string, relPath: string, preferWorktree = false): string {
+  if (!preferWorktree) {
+    const headBlob = gitOutput(["rev-parse", `HEAD:${relPath}`], repoRoot);
+    if (headBlob) return headBlob;
+  }
+  const abs = path.join(repoRoot, relPath);
+  try {
+    const stat = fs.lstatSync(abs);
+    if (stat.isSymbolicLink()) {
+      return `symlink:${createHash("sha256").update(fs.readlinkSync(abs)).digest("hex")}`;
+    }
+    if (!stat.isFile()) return "non-file";
+    const realRoot = fs.realpathSync(repoRoot);
+    const realPath = fs.realpathSync(abs);
+    const relative = path.relative(realRoot, realPath);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) return "outside-repo";
+    return createHash("sha256").update(fs.readFileSync(abs)).digest("hex");
+  } catch {
+    // Fall through to HEAD/deleted handling below.
+  }
+  const headBlob = gitOutput(["rev-parse", `HEAD:${relPath}`], repoRoot);
+  if (headBlob) return headBlob;
+  return "deleted";
+}
+
+function computeScopeEntries(baseRef: string): { entries: AnyObj[]; base: string | null; head: string | null; source: string } {
+  const repoRoot = repoRootForScope();
+  if (!repoRoot) {
+    die("record-scope: cannot attest scope — git ground truth unavailable (not a git repo)");
+  }
+  const base = resolveScopeBase(repoRoot, baseRef);
+  if (!base) {
+    die("record-scope: cannot attest scope — git ground truth unavailable (no resolvable base ref)");
+  }
+  const files = changedFilesFromGit(repoRoot, base);
+  if (!files) {
+    die("record-scope: cannot attest scope — git ground truth unavailable (git diff failed)");
+  }
+  const dirty = dirtyFilesFromGit(repoRoot);
+  return {
+    entries: files.map((filePath) => ({ path: filePath, blobHash: blobHashForPath(repoRoot, filePath, dirty.has(filePath)) })),
+    base,
+    head: gitOutput(["rev-parse", "HEAD"], repoRoot),
+    source: "git",
+  };
+}
+
+async function recordScope(p: ReturnType<typeof parseArgs>): Promise<number> {
+  const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
+  const slug = taskSlugFor(dir, opt(p, "task-slug"));
+  const ts = opt(p, "timestamp", now());
+  const scope = computeScopeEntries(opt(p, "base-ref"));
+  const id = opt(p, "id", "scope");
+  const summary = opt(p, "summary", `scope attestation: ${scope.entries.length} changed file${scope.entries.length === 1 ? "" : "s"}`);
+  const check = normalizeCheck({
+    id,
+    kind: "scope",
+    status: "pass",
+    summary,
+    _scope: scope,
+  });
+  const existingState = readBundleState(dir);
+  const mergedChecks = mergeChecksById(existingState.checks, [check]);
+  assertBundleWritten(await writeTrustBundle(dir, slug, ts, mergedChecks, existingState.criteria, existingState.critiques));
+  const currentState = loadJson(path.join(dir, "state.json"));
+  const status = typeof currentState.status === "string" && statuses.has(currentState.status) ? currentState.status : "in_progress";
+  const phase = typeof currentState.phase === "string" && phases.includes(currentState.phase) ? currentState.phase : "execution";
+  writeState(dir, slug, status, phase, ts, "Scope attestation recorded.");
+  printJson({ artifact_dir: dir, claim_kind: "scope", changed_files: scope.entries.length, source: scope.source });
+  return 0;
 }
 
 async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> {
@@ -5654,6 +5806,7 @@ async function main(): Promise<number> {
       case "current": return current(p);
       case "record-agent-event": return recordAgentEvent(p);
       case "init-plan": return initPlan(p);
+      case "record-scope": return recordScope(p);
       case "record-evidence": return recordEvidence(p);
       case "record-gate-claim": return recordGateClaim(p);
       case "record-check": return recordCheck(p, _commandArgv);

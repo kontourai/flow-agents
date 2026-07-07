@@ -951,6 +951,92 @@ else
   _fail "sidecar writer evidence failed: $(cat "$TMPDIR_EVAL/evidence.out" "$TMPDIR_EVAL/evidence.err")"
 fi
 
+SCOPE_REPO="$TMPDIR_EVAL/scope-repo"
+SCOPE_ROOT="$SCOPE_REPO/.kontourai/flow-agents"
+SCOPE_DIR="$SCOPE_ROOT/scope-session"
+mkdir -p "$SCOPE_REPO"
+if (
+  cd "$SCOPE_REPO" \
+    && git init -q \
+    && git config user.email "flow-agents@example.test" \
+    && git config user.name "Flow Agents Test" \
+    && printf 'base\n' > scoped.txt \
+    && git add scoped.txt \
+    && git commit -q -m "base" \
+    && git branch base \
+    && printf 'changed\n' > scoped.txt \
+    && ln -s outside-target linked.txt
+) \
+  && (cd "$SCOPE_REPO" && flow_agents_node "$WRITER" ensure-session \
+    --artifact-root "$SCOPE_ROOT" \
+    --task-slug scope-session \
+    --summary "Scope session." \
+    --criterion "Scope recorded." \
+    --timestamp "2026-05-09T00:01:30Z" >/dev/null 2>"$TMPDIR_EVAL/scope-ensure.err") \
+  && (cd "$SCOPE_REPO" && flow_agents_node "$WRITER" record-scope "$SCOPE_DIR" \
+    --base-ref base \
+    --timestamp "2026-05-09T00:02:00Z" >"$TMPDIR_EVAL/scope-record.out" 2>"$TMPDIR_EVAL/scope-record.err") \
+  && node - "$SCOPE_DIR/trust.bundle" <<'NODE'
+const fs = require("fs");
+const crypto = require("crypto");
+const bundle = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const state = JSON.parse(fs.readFileSync(process.argv[2].replace(/trust\.bundle$/, "state.json"), "utf8"));
+if (state.status === "verified") throw new Error("record-scope must not mark the workflow verified");
+const claim = bundle.claims.find((c) => c.metadata && c.metadata.check_kind === "scope");
+if (!claim) throw new Error("no scope claim");
+if (claim.claimType !== "workflow.check.scope") throw new Error(`unexpected claimType ${claim.claimType}`);
+const entries = claim.metadata.scope && claim.metadata.scope.entries;
+if (!Array.isArray(entries)) throw new Error("missing scope entries");
+const entry = entries.find((e) => e.path === "scoped.txt");
+if (!entry) throw new Error(`missing scoped.txt entry: ${JSON.stringify(entries)}`);
+const expectedHash = crypto.createHash("sha256").update("changed\n").digest("hex");
+if (entry.blobHash !== expectedHash) throw new Error(`expected dirty worktree hash ${expectedHash}, got ${entry.blobHash}`);
+const symlinkEntry = entries.find((e) => e.path === "linked.txt");
+if (!symlinkEntry) throw new Error(`missing linked.txt symlink entry: ${JSON.stringify(entries)}`);
+const expectedSymlinkHash = `symlink:${crypto.createHash("sha256").update("outside-target").digest("hex")}`;
+if (symlinkEntry.blobHash !== expectedSymlinkHash) throw new Error(`expected symlink hash ${expectedSymlinkHash}, got ${symlinkEntry.blobHash}`);
+const ev = bundle.evidence.find((e) => e.claimId === claim.id);
+if (!ev) throw new Error("missing evidence");
+if (ev.execution && ev.execution.label) throw new Error("scope evidence must not carry execution.label");
+NODE
+then
+  _pass "sidecar writer record-scope records a non-command scope claim from git ground truth"
+else
+  _fail "sidecar writer record-scope did not produce expected scope claim: $(cat "$TMPDIR_EVAL/scope-ensure.err" "$TMPDIR_EVAL/scope-record.out" "$TMPDIR_EVAL/scope-record.err" 2>/dev/null)"
+fi
+
+SCOPE_NO_BASE_REPO="$TMPDIR_EVAL/scope-no-base-repo"
+SCOPE_NO_BASE_ROOT="$SCOPE_NO_BASE_REPO/.kontourai/flow-agents"
+SCOPE_NO_BASE_DIR="$SCOPE_NO_BASE_ROOT/scope-no-base-session"
+mkdir -p "$SCOPE_NO_BASE_REPO"
+if (
+  cd "$SCOPE_NO_BASE_REPO" \
+    && git init -q \
+    && git config user.email "flow-agents@example.test" \
+    && git config user.name "Flow Agents Test" \
+    && printf 'only\n' > only.txt \
+    && git add only.txt \
+    && git commit -q -m "only commit" \
+    && git branch -M topic \
+    && printf 'changed\n' > only.txt
+) \
+  && (cd "$SCOPE_NO_BASE_REPO" && flow_agents_node "$WRITER" ensure-session \
+    --artifact-root "$SCOPE_NO_BASE_ROOT" \
+    --task-slug scope-no-base-session \
+    --summary "Scope no-base session." \
+    --criterion "Scope must fail closed without git base." \
+    --timestamp "2026-05-09T00:02:30Z" >/dev/null 2>"$TMPDIR_EVAL/scope-no-base-ensure.err") \
+  && ! (cd "$SCOPE_NO_BASE_REPO" && TRUST_RECONCILE_BASE_REF= GITHUB_BASE_REF= flow_agents_node "$WRITER" record-scope "$SCOPE_NO_BASE_DIR" \
+    --base-ref missing-base-ref \
+    --timestamp "2026-05-09T00:03:00Z" >"$TMPDIR_EVAL/scope-no-base-record.out" 2>"$TMPDIR_EVAL/scope-no-base-record.err") \
+  && rg -q "record-scope: cannot attest scope .*no resolvable base ref" "$TMPDIR_EVAL/scope-no-base-record.err" \
+  && [[ ! -f "$SCOPE_NO_BASE_DIR/trust.bundle" ]]
+then
+  _pass "sidecar writer record-scope fails closed without a resolvable git base and writes no passing scope claim"
+else
+  _fail "sidecar writer record-scope did not fail closed without git ground truth: $(cat "$TMPDIR_EVAL/scope-no-base-ensure.err" "$TMPDIR_EVAL/scope-no-base-record.out" "$TMPDIR_EVAL/scope-no-base-record.err" 2>/dev/null)"
+fi
+
 # Phase 4c: acceptance.json criteria status no longer updated at verification time (bundle-only).
 # State is verified; bundle claims carry the criteria status.
 if rg -q '"status": "verified"' "$ARTIFACT_DIR/state.json"   && [[ -f "$ARTIFACT_DIR/trust.bundle" ]]   && node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const ac=b.claims.filter(c=>c.claimType==="workflow.acceptance.criterion"); if(ac.length===0) throw new Error("no acceptance criterion claims in bundle"); if(ac.some(c=>c.value!=="pass")) throw new Error("some acceptance criterion not pass in bundle: "+JSON.stringify(ac.map(c=>c.value)));' "$ARTIFACT_DIR/trust.bundle" 2>/dev/null; then

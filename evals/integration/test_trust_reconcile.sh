@@ -91,6 +91,81 @@ fs.writeFileSync(bundlePath, JSON.stringify(bundle, null, 2));
 NODE
 }
 
+write_scope_bundle() {
+  local bundle_path="$1"
+  shift
+
+  node - "$bundle_path" "$@" << 'NODE'
+const fs = require('fs');
+const [,, bundlePath, ...paths] = process.argv;
+const entries = paths.map((p) => ({ path: p, blobHash: `sha:${p}` }));
+const bundle = {
+  schemaVersion: 5,
+  source: "test-fixture",
+  claims: [
+    {
+      id: "scope-claim",
+      claimType: "workflow.check.scope",
+      value: "pass",
+      status: "verified",
+      subjectId: "test-slug/scope",
+      facet: "flow-agents.workflow",
+      subjectType: "workflow-check",
+      fieldOrBehavior: "scope attestation",
+      createdAt: "2026-06-27T00:00:00Z",
+      updatedAt: "2026-06-27T00:00:00Z",
+      impactLevel: "high",
+      verificationPolicyId: "policy:workflow.check.scope:attestation",
+      metadata: {
+        origin: "check",
+        check_kind: "scope",
+        scope: { source: "git", base: "fixture-base", head: "fixture-head", entries }
+      }
+    }
+  ],
+  evidence: [
+    {
+      id: "ev-scope",
+      claimId: "scope-claim",
+      evidenceType: "attestation",
+      method: "attestation",
+      sourceRef: "test-slug/scope",
+      excerptOrSummary: "scope attestation",
+      observedAt: "2026-06-27T00:00:00Z",
+      collectedBy: "flow-agents/workflow-sidecar",
+      passing: true
+    }
+  ],
+  policies: [
+    {
+      id: "policy:workflow.check.scope:attestation",
+      claimType: "workflow.check.scope",
+      requiredEvidence: ["attestation"],
+      acceptanceCriteria: ["A verified verification event must support a workflow.check.scope claim."],
+      reviewAuthority: "system",
+      validityRule: { kind: "manual" },
+      stalenessTriggers: [],
+      conflictRules: [],
+      impactLevel: "high"
+    }
+  ],
+  events: [
+    {
+      id: "evt-scope",
+      claimId: "scope-claim",
+      status: "verified",
+      actor: "flow-agents/workflow-sidecar",
+      method: "validation",
+      evidenceIds: ["ev-scope"],
+      createdAt: "2026-06-27T00:00:00Z",
+      verifiedAt: "2026-06-27T00:00:00Z"
+    }
+  ]
+};
+fs.writeFileSync(bundlePath, JSON.stringify(bundle, null, 2));
+NODE
+}
+
 # ─── TEST 1: DIVERGENCE-CAUGHT ────────────────────────────────────────────────
 echo ""
 echo "=== TEST 1: DIVERGENCE-CAUGHT — claimed pass, CI re-run FAILS ==="
@@ -148,6 +223,118 @@ if echo "$out2" | grep -q "RECONCILED"; then
   _pass "MATCHING-PASSES: output shows RECONCILED"
 else
   _fail "MATCHING-PASSES: expected 'RECONCILED' in output, got: $out2"
+fi
+
+# ─── TEST 2b: SCOPE-MATCHING-PASSES ──────────────────────────────────────────
+echo ""
+echo "=== TEST 2b: SCOPE-MATCHING-PASSES — actual changed files are declared ==="
+
+SCOPE_REPO="$TMP/scope-repo"
+mkdir -p "$SCOPE_REPO"
+(
+  cd "$SCOPE_REPO" \
+    && git init -q \
+    && git config user.email "flow-agents@example.test" \
+    && git config user.name "Flow Agents Test" \
+    && printf 'base\n' > declared.txt \
+    && git add declared.txt \
+    && git commit -q -m "base" \
+    && git branch base \
+    && printf 'changed\n' > declared.txt \
+    && git add declared.txt \
+    && git commit -q -m "change declared"
+)
+
+BUNDLE2B="$TMP/bundle-scope-match.json"
+write_scope_bundle "$BUNDLE2B" "declared.txt"
+out2b=$(TRUST_RECONCILE_COMMANDS="node -e 'process.exit(0)'" TRUST_RECONCILE_BASE_REF="base" \
+  node "$RECONCILE" \
+    --bundle "$BUNDLE2B" \
+    --repo-root "$SCOPE_REPO" 2>&1)
+exit2b=$?
+
+if [[ $exit2b -eq 0 ]]; then
+  _pass "SCOPE-MATCHING-PASSES: exits 0"
+else
+  _fail "SCOPE-MATCHING-PASSES: expected exit 0, got $exit2b — output: $out2b"
+fi
+
+if echo "$out2b" | grep -q "RECONCILED scope"; then
+  _pass "SCOPE-MATCHING-PASSES: output shows scope reconciliation"
+else
+  _fail "SCOPE-MATCHING-PASSES: expected scope reconciliation output, got: $out2b"
+fi
+
+# ─── TEST 2c: SCOPE-DIVERGENCE-CAUGHT ────────────────────────────────────────
+echo ""
+echo "=== TEST 2c: SCOPE-DIVERGENCE-CAUGHT — actual changed file is undeclared ==="
+
+BUNDLE2C="$TMP/bundle-scope-diverge.json"
+write_scope_bundle "$BUNDLE2C" "other.txt"
+out2c=$(TRUST_RECONCILE_COMMANDS="node -e 'process.exit(0)'" TRUST_RECONCILE_BASE_REF="base" \
+  node "$RECONCILE" \
+    --bundle "$BUNDLE2C" \
+    --repo-root "$SCOPE_REPO" 2>&1)
+exit2c=$?
+
+if [[ $exit2c -ne 0 ]]; then
+  _pass "SCOPE-DIVERGENCE-CAUGHT: exits 1 (got $exit2c)"
+else
+  _fail "SCOPE-DIVERGENCE-CAUGHT: expected exit 1, got 0"
+fi
+
+if echo "$out2c" | grep -q "actual changed file 'declared.txt' was not declared"; then
+  _pass "SCOPE-DIVERGENCE-CAUGHT: output names the undeclared actual file"
+else
+  _fail "SCOPE-DIVERGENCE-CAUGHT: expected undeclared file diagnostic, got: $out2c"
+fi
+
+# ─── TEST 2d: SCOPE-OVERDECLARED-CAUGHT ──────────────────────────────────────
+echo ""
+echo "=== TEST 2d: SCOPE-OVERDECLARED-CAUGHT — declared file is not actually changed ==="
+
+BUNDLE2D="$TMP/bundle-scope-overdeclared.json"
+write_scope_bundle "$BUNDLE2D" "declared.txt" "extra.txt"
+out2d=$(TRUST_RECONCILE_COMMANDS="node -e 'process.exit(0)'" TRUST_RECONCILE_BASE_REF="base" \
+  node "$RECONCILE" \
+    --bundle "$BUNDLE2D" \
+    --repo-root "$SCOPE_REPO" 2>&1)
+exit2d=$?
+
+if [[ $exit2d -ne 0 ]]; then
+  _pass "SCOPE-OVERDECLARED-CAUGHT: exits 1 (got $exit2d)"
+else
+  _fail "SCOPE-OVERDECLARED-CAUGHT: expected exit 1, got 0"
+fi
+
+if echo "$out2d" | grep -q "declared scope file 'extra.txt' is not present"; then
+  _pass "SCOPE-OVERDECLARED-CAUGHT: output names the over-declared file"
+else
+  _fail "SCOPE-OVERDECLARED-CAUGHT: expected over-declared file diagnostic, got: $out2d"
+fi
+
+# ─── TEST 2e: SCOPE-EMPTY-CAUGHT ──────────────────────────────────────────────
+echo ""
+echo "=== TEST 2e: SCOPE-EMPTY-CAUGHT — empty declared scope does not bypass actual diff ==="
+
+BUNDLE2E="$TMP/bundle-scope-empty.json"
+write_scope_bundle "$BUNDLE2E"
+out2e=$(TRUST_RECONCILE_COMMANDS="node -e 'process.exit(0)'" TRUST_RECONCILE_BASE_REF="base" \
+  node "$RECONCILE" \
+    --bundle "$BUNDLE2E" \
+    --repo-root "$SCOPE_REPO" 2>&1)
+exit2e=$?
+
+if [[ $exit2e -ne 0 ]]; then
+  _pass "SCOPE-EMPTY-CAUGHT: exits 1 (got $exit2e)"
+else
+  _fail "SCOPE-EMPTY-CAUGHT: expected exit 1, got 0"
+fi
+
+if echo "$out2e" | grep -q "actual changed file 'declared.txt' was not declared"; then
+  _pass "SCOPE-EMPTY-CAUGHT: output names actual file omitted by empty scope"
+else
+  _fail "SCOPE-EMPTY-CAUGHT: expected omitted actual file diagnostic, got: $out2e"
 fi
 
 # ─── TEST 3: NO-CHECKPOINT ────────────────────────────────────────────────────
