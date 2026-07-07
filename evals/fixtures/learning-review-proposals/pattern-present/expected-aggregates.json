@@ -1,0 +1,30 @@
+{
+  "by_kit": [
+    {
+      "kit_id": "builder",
+      "runs": 6,
+      "first_half_avg_cost_usd": 0.1,
+      "second_half_avg_cost_usd": 0.2,
+      "cost_trend_pct": 100,
+      "first_half_findings_total": 6,
+      "second_half_findings_total": 6,
+      "findings_delta_pct": 0,
+      "avg_wall_clock_s": 100,
+      "avg_human_wait_s": 10,
+      "route_back_rate": 0.5,
+      "caught_false_completions_total": 6
+    }
+  ],
+  "by_gate": [
+    {
+      "gate_id": "unit tests pass",
+      "fire_count": 4,
+      "correct_count": 1,
+      "false_block_count": 3,
+      "missed_block_count": 0,
+      "false_block_rate": 0.75,
+      "avg_wall_clock_s_when_fired": 100,
+      "avg_human_wait_s_when_fired": 10
+    }
+  ]
+}

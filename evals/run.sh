@@ -225,6 +225,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_economics_record.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_learning_review_proposals.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_liveness_heartbeat.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_liveness_worktree_root.sh" || result=1

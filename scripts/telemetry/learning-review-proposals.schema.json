@@ -1,0 +1,161 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kontourai.dev/schemas/kontour.learning-review-proposals/0.1.json",
+  "title": "kontour.learning-review-proposals",
+  "description": "Per-run kit/gate tuning proposal document + ledger-line shape (flow-agents #352). Advisory only, never auto-applied. evidence.cost and evidence.defect are co-required on every proposal (R7-style Goodhart guard, mirrors kontour.console.economics's cost+defects co-requirement).",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema", "version", "window", "outcome", "aggregates", "proposals"],
+  "properties": {
+    "schema": { "const": "kontour.learning-review-proposals" },
+    "version": { "const": "0.1" },
+    "window": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["since", "until"],
+      "properties": {
+        "since": { "type": ["number", "string", "null"] },
+        "until": { "type": ["number", "string", "null"] }
+      }
+    },
+    "records_considered": { "type": "number" },
+    "outcome": {
+      "type": "string",
+      "enum": ["ok", "insufficient-data"]
+    },
+    "aggregates": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["by_kit", "by_gate", "partial"],
+      "properties": {
+        "by_kit": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["kit_id", "runs"],
+            "properties": {
+              "kit_id": { "type": "string" },
+              "runs": { "type": "number" },
+              "first_half_avg_cost_usd": { "type": ["number", "null"] },
+              "second_half_avg_cost_usd": { "type": ["number", "null"] },
+              "cost_trend_pct": { "type": ["number", "null"] },
+              "first_half_findings_total": { "type": ["number", "null"] },
+              "second_half_findings_total": { "type": ["number", "null"] },
+              "findings_delta_pct": { "type": ["number", "null"] },
+              "avg_wall_clock_s": { "type": ["number", "null"] },
+              "avg_human_wait_s": { "type": ["number", "null"] },
+              "route_back_rate": { "type": ["number", "null"] },
+              "caught_false_completions_total": { "type": ["number", "null"] }
+            }
+          }
+        },
+        "by_gate": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["gate_id", "fire_count"],
+            "properties": {
+              "gate_id": { "type": "string" },
+              "fire_count": { "type": "number" },
+              "correct_count": { "type": "number" },
+              "false_block_count": { "type": "number" },
+              "missed_block_count": { "type": "number" },
+              "false_block_rate": { "type": ["number", "null"] },
+              "avg_wall_clock_s_when_fired": { "type": ["number", "null"] },
+              "avg_human_wait_s_when_fired": { "type": ["number", "null"] }
+            }
+          }
+        },
+        "partial": { "type": "boolean" }
+      }
+    },
+    "proposals": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/proposal" }
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "$defs": {
+    "proposal": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "proposal_id",
+        "target",
+        "pattern",
+        "proposed_change",
+        "evidence",
+        "expected_effect",
+        "decision"
+      ],
+      "properties": {
+        "proposal_id": { "type": "string", "minLength": 1 },
+        "target": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["kind", "id"],
+          "properties": {
+            "kind": { "type": "string", "enum": ["kit", "gate"] },
+            "id": { "type": "string" }
+          }
+        },
+        "pattern": {
+          "type": "string",
+          "enum": ["kit-review-cost-inflation", "gate-false-block-review", "gate-well-calibrated"]
+        },
+        "proposed_change": { "type": "string", "minLength": 1 },
+        "severity": { "const": "advisory" },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["cost", "defect"],
+          "description": "Goodhart guard (structural): cost and defect are co-required — no proposal may cite a cost/time signal without also pairing a defect signal, mirroring kontour.console.economics's own cost+defects co-requirement (R7).",
+          "properties": {
+            "cost": { "type": "object", "additionalProperties": true },
+            "defect": { "type": "object", "additionalProperties": true }
+          }
+        },
+        "expected_effect": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["metric", "direction", "description"],
+          "properties": {
+            "metric": { "type": "string", "minLength": 1 },
+            "direction": { "type": "string", "enum": ["decrease", "increase", "maintain"] },
+            "description": { "type": "string", "minLength": 1 }
+          }
+        },
+        "decision": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["status", "decided_by", "decided_at", "rationale"],
+          "properties": {
+            "status": { "type": "string", "enum": ["proposed", "ratified", "rejected", "deferred"] },
+            "decided_by": { "type": ["string", "null"] },
+            "decided_at": { "type": ["string", "null"] },
+            "rationale": { "type": ["string", "null"] }
+          }
+        },
+        "follow_on_ref": { "type": ["string", "null"] },
+        "effect_observed": {
+          "type": ["object", "null"],
+          "additionalProperties": true,
+          "required": ["measured_at", "metric", "before", "after", "moved"],
+          "properties": {
+            "measured_at": { "type": "string" },
+            "metric": { "type": "string" },
+            "before": { "type": ["number", "null"] },
+            "after": { "type": ["number", "null"] },
+            "moved": { "type": "string", "enum": ["improved", "worsened", "unchanged"] }
+          }
+        },
+        "already_proposed": { "type": "boolean" }
+      }
+    }
+  }
+}
