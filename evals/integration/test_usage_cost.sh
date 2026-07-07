@@ -94,6 +94,24 @@ old_cost=$(TELEMETRY_PRICING_FILE="$v2" usage_parse_transcript "$tp2" "old" | jq
 { [ "$(approx_eq "$new_cost" 25)" = "true" ] && [ "$(approx_eq "$old_cost" 1)" = "true" ]; } \
   && _pass "version selection (default=25 @new, override=1 @old)" || _fail "version selection (new=$new_cost old=$old_cost)"
 
+# --- 5b. corrupt registry (present but unparseable) degrades to tokens-only -
+# Regression for: a non-empty-but-malformed registry (truncated pricing.json,
+# bad remote 200) must NOT crash the jq -n --argjson parse and discard tokens
+# — it should degrade exactly like a missing registry (cost/version -> null).
+corrupt="$(mktemp)"; printf '%s' '{not valid json' > "$corrupt"
+corrupt_res="$(TELEMETRY_PRICING_FILE="$corrupt" usage_parse_transcript "$tp")"
+if [ -n "$corrupt_res" ]; then
+  cit=$(echo "$corrupt_res" | jq '.input_tokens'); cot=$(echo "$corrupt_res" | jq '.output_tokens')
+  ccost=$(echo "$corrupt_res" | jq -r '.estimated_cost_usd'); cver=$(echo "$corrupt_res" | jq -r '.pricing_version')
+  cby=$(echo "$corrupt_res" | jq '.by_model|length')
+  { [ "$cit" = "1000" ] && [ "$cot" = "2100" ] && [ "$ccost" = "null" ] && [ "$cver" = "null" ] && [ "$cby" -gt 0 ]; } \
+    && _pass "corrupt registry: tokens/by_model survive, cost+version degrade to null" \
+    || _fail "corrupt registry (in=$cit out=$cot cost=$ccost ver=$cver by_model_len=$cby)"
+else
+  _fail "corrupt registry: usage_parse_transcript returned empty (tokens were discarded)"
+fi
+rm -f "$corrupt" 2>/dev/null
+
 # --- 6. cross-runtime golden vectors ---------------------------------------
 n=$(jq '.cases|length' "$GOLDEN")
 for i in $(seq 0 $((n - 1))); do
@@ -111,6 +129,29 @@ for i in $(seq 0 $((n - 1))); do
   fi
   rm -f "$gtp"
 done
+
+# --- 7. usage_model_from_transcript_usage() — runtime-agnostic model derivation
+echo ""
+echo "Model derivation tests"
+
+single="$(mktemp)"; mk_line "claude-opus-4-8" 100 200 0 0 > "$single"
+single_res="$(usage_parse_transcript "$single")"
+single_model="$(usage_model_from_transcript_usage "$single_res")"
+[ "$single_model" = "claude-opus-4-8" ] && _pass "single-model transcript resolves that model" || _fail "single-model transcript (got $single_model)"
+
+multi="$(mktemp)"
+{ mk_line "claude-opus-4-8" 1000 2000 0 500000; mk_line "claude-fable-5" 0 100 0 0; } > "$multi"
+multi_res="$(usage_parse_transcript "$multi")"
+multi_model="$(usage_model_from_transcript_usage "$multi_res")"
+[ "$multi_model" = "claude-opus-4-8" ] && _pass "multi-model transcript resolves dominant-by-tokens model (opus over fable)" || _fail "multi-model dominant resolution (got $multi_model)"
+
+empty_model="$(usage_model_from_transcript_usage "null")"
+[ -z "$empty_model" ] && _pass "null transcript_usage resolves empty (falls through to usage_get_model)" || _fail "expected empty for null transcript_usage (got $empty_model)"
+
+blank_model="$(usage_model_from_transcript_usage "")"
+[ -z "$blank_model" ] && _pass "empty-string transcript_usage resolves empty (falls through to usage_get_model)" || _fail "expected empty for blank transcript_usage (got $blank_model)"
+
+rm -f "$single" "$multi" 2>/dev/null
 
 rm -f "$ov" "$bad" "$tp" "$empty" "$drift" "$dlog" "$tp2" "$v2" 2>/dev/null
 
