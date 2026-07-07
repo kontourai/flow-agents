@@ -122,6 +122,26 @@ FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL=<console>/records   # or FLOW_AGENTS_
 CONSOLE_TELEMETRY_TOKEN=<bearer>   (or FLOW_AGENTS_CONSOLE_TOKEN_FILE)   ·   CONSOLE_TENANT_ID / FLOW_AGENTS_CONSOLE_TENANT
 ```
 
+#### Economics relay config (default-on, opt-out — #469)
+
+Like the telemetry mirror (see the "Owner machine mirror" section of
+[`docs/agent-usage-feedback-loop.md`](../agent-usage-feedback-loop.md)), the economics relay is
+now **config-driven** rather than requiring the env vars above to be exported by hand: once a
+Console telemetry sink is configured (`console_telemetry_url` / `console_telemetry_endpoint_url`
+in a trusted conf), the relay turns on **automatically**. It rides the exact same trusted-conf
+gate as the telemetry mirror — `.kontourai/telemetry-console.conf` or
+`~/.flow-agents/telemetry-console.conf`, mode `600` and owned by the current user — and the same
+`https://`/`localhost` transport allowlist (`console_telemetry_endpoint_allowed` in
+`scripts/telemetry/lib/transport.sh`). The derived endpoint is `<console-origin>/records` — the
+same shared kind-routed ingress the liveness relay uses, and **distinct** from the telemetry
+mirror's `/api/telemetry/records` path. An explicit `console_economics_relay=0` conf key, or
+`install-console-config.sh --no-economics-relay`, opts back out; `console_economics_endpoint_url`
+overrides the derived endpoint when needed. Full resolution order is documented in
+[`docs/specs/economics-record-contract.md`](../specs/economics-record-contract.md#enabling-the-relay-config-driven-opt-out--469).
+
+On the console side, `POST /records` already accepts the `kontour.console.economics` kind into a
+per-tenant `EconomicsStore`, read back via `GET /api/economics` (console #117) — deployed.
+
 The paired **console side** — ingesting `kontour.console.liveness`, the fleet OperatingState
 projection (actors + held/reclaimable subjects + last-seen + per-session cost), and the ADR 0021 §4
 janitor — is tracked in the console repo (**console #125**), and feeds the redesigned console
