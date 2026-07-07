@@ -46,6 +46,51 @@ console_telemetry_timeout_seconds() {
   fi
 }
 
+# Derive a coarse, path-free project label for console attribution, most-stable-first so the SAME
+# project resolves to the SAME label across developers and machines (folder names differ between
+# clones and worktrees; the project manifest and git remote do not). Precedence:
+#   1. FLOW_AGENTS_PROJECT       — explicit operator override, always wins
+#   2. nearest package.json name — walking up from cwd (monorepo-granular, committed => consistent)
+#   3. git remote origin org/repo — repo-level identity, stable across clones
+#   4. git toplevel dir basename  — repo dir even from a worktree/subdir
+#   5. cwd basename               — last resort
+# Path-free by construction (never the full local path). Cached per-cwd in the session dir so the
+# git/manifest reads run once per project per session, not per event.
+console_project_label() {
+  local cwd="$1"
+  [[ -z "$cwd" || ! -d "$cwd" ]] && return 1
+  [[ -n "${FLOW_AGENTS_PROJECT:-}" ]] && { printf '%s' "$FLOW_AGENTS_PROJECT"; return 0; }
+
+  local cache="" key
+  if [[ -n "${TELEMETRY_SESSION_DIR:-}" && -d "${TELEMETRY_SESSION_DIR:-}" ]]; then
+    key=$(printf '%s' "$cwd" | cksum | cut -d' ' -f1)
+    cache="${TELEMETRY_SESSION_DIR%/}/project-label.${key}"
+    [[ -s "$cache" ]] && { cat "$cache"; return 0; }
+  fi
+
+  local label="" dir name url top
+  dir="$cwd"
+  while [[ -n "$dir" && "$dir" != "/" ]]; do
+    if [[ -f "$dir/package.json" ]]; then
+      name=$(jq -r '.name // empty' "$dir/package.json" 2>/dev/null)
+      [[ -n "$name" ]] && { label="$name"; break; }
+    fi
+    dir=$(dirname "$dir")
+  done
+  if [[ -z "$label" ]]; then
+    url=$(git -C "$cwd" config --get remote.origin.url 2>/dev/null)
+    [[ -n "$url" ]] && label=$(printf '%s' "$url" | sed -E 's#\.git$##; s#^.*[/:]([^/:]+/[^/]+)$#\1#')
+  fi
+  if [[ -z "$label" ]]; then
+    top=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
+    [[ -n "$top" ]] && label=$(basename "$top")
+  fi
+  [[ -z "$label" ]] && label=$(basename "$cwd")
+
+  [[ -n "$cache" ]] && printf '%s' "$label" > "$cache" 2>/dev/null
+  printf '%s' "$label"
+}
+
 console_telemetry_emit() {
   local event="$1"
   local endpoint_url
@@ -53,17 +98,19 @@ console_telemetry_emit() {
   [[ -z "$endpoint_url" ]] && return
   console_telemetry_endpoint_allowed "$endpoint_url" || return
 
-  # Attribution: derive a coarse, path-free project label (basename of the working dir) so the
-  # hosted console can bucket events by project. The full context.cwd is still redacted below —
-  # only this basename-level label leaves the machine, never the full local path. jq-guarded: on
-  # any failure the event is relayed unchanged (never blocks or drops telemetry).
-  local labeled_event
-  labeled_event=$(printf '%s' "$event" | jq -c '
-    (.context.cwd // "") as $cwd
-    | if ($cwd | length) > 0 and ((.context.project // "") | length) == 0
-      then .context.project = ($cwd | rtrimstr("/") | split("/") | last)
-      else . end' 2>/dev/null)
-  [[ -n "$labeled_event" ]] && event="$labeled_event"
+  # Attribution: stamp a coarse, path-free project label (see console_project_label) before redaction
+  # so the console buckets by project consistently across developers. The full context.cwd is still
+  # redacted below — only the label leaves the machine. Guarded: any failure relays the event as-is.
+  local ev_cwd proj labeled_event
+  ev_cwd=$(printf '%s' "$event" | jq -r '.context.cwd // empty' 2>/dev/null)
+  if [[ -n "$ev_cwd" ]]; then
+    proj=$(console_project_label "$ev_cwd" 2>/dev/null)
+    if [[ -n "$proj" ]]; then
+      labeled_event=$(printf '%s' "$event" | jq -c --arg p "$proj" '
+        if ((.context.project // "") | length) == 0 then .context.project = $p else . end' 2>/dev/null)
+      [[ -n "$labeled_event" ]] && event="$labeled_event"
+    fi
+  fi
 
   local processed_event
   processed_event=$(redact_event "$event" "${CONSOLE_TELEMETRY_REDACT:-${TELEMETRY_CHANNEL_ANALYTICS_REDACT:-}}")

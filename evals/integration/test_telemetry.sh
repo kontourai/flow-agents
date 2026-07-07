@@ -373,27 +373,40 @@ fi
 
 rm -rf "$TRANSPORT_TEST_ROOT"
 
-# --- Console relay project attribution (path-free project label) ---
+# --- Console relay project attribution (canonical precedence, path-free) ---
 echo ""
 echo "--- Console Relay Project Attribution ---"
 PROJ_TEST_ROOT=$(mktemp -d /tmp/eval-telemetry-project.XXXXXX)
-mkdir -p "$PROJ_TEST_ROOT/scripts/telemetry/lib"
+mkdir -p "$PROJ_TEST_ROOT/scripts/telemetry/lib" "$PROJ_TEST_ROOT/work/pkg" "$PROJ_TEST_ROOT/plain-dir-name"
 cp "$ROOT_DIR/scripts/telemetry/lib/transport.sh" "$PROJ_TEST_ROOT/scripts/telemetry/lib/transport.sh"
 cp "$ROOT_DIR/scripts/telemetry/lib/redact.sh" "$PROJ_TEST_ROOT/scripts/telemetry/lib/redact.sh"
-proj_captured=$(bash -c "
-  source '$PROJ_TEST_ROOT/scripts/telemetry/lib/redact.sh'
-  source '$PROJ_TEST_ROOT/scripts/telemetry/lib/transport.sh'
-  console_telemetry_endpoint_url() { echo 'https://console.example.test/records'; }
-  console_post_json() { printf '%s' \"\$2\"; }
-  CONSOLE_TELEMETRY_REDACT='context.cwd' \
-    console_telemetry_emit '{\"type\":\"tool\",\"context\":{\"cwd\":\"/home/u/dev/kontourai/station\"}}'
-")
-proj_val=$(printf '%s' "$proj_captured" | jq -r '.context.project // "MISSING"' 2>/dev/null)
-cwd_val=$(printf '%s' "$proj_captured" | jq -r '.context.cwd // "null"' 2>/dev/null)
-if [[ "$proj_val" == "station" && "$cwd_val" == "null" ]]; then
-  _pass "transport.sh: console relay derives context.project=basename(cwd), full cwd stays redacted"
+printf '{"name":"@kontourai/inner-pkg"}\n' > "$PROJ_TEST_ROOT/work/pkg/package.json"
+_relay_project() {
+  bash -c "
+    source '$PROJ_TEST_ROOT/scripts/telemetry/lib/redact.sh'
+    source '$PROJ_TEST_ROOT/scripts/telemetry/lib/transport.sh'
+    console_telemetry_endpoint_url() { echo 'https://console.example.test/records'; }
+    console_post_json() { printf '%s' \"\$2\"; }
+    CONSOLE_TELEMETRY_REDACT='context.cwd' TELEMETRY_SESSION_DIR='' \
+      console_telemetry_emit '{\"type\":\"tool\",\"context\":{\"cwd\":\"$1\"}}'
+  "
+}
+# case 1: nearest package.json name wins (step 2), and the full cwd is still redacted
+cap=$(_relay_project "$PROJ_TEST_ROOT/work/pkg")
+proj_val=$(printf '%s' "$cap" | jq -r '.context.project // "MISSING"' 2>/dev/null)
+cwd_val=$(printf '%s' "$cap" | jq -r '.context.cwd // "null"' 2>/dev/null)
+if [[ "$proj_val" == "@kontourai/inner-pkg" && "$cwd_val" == "null" ]]; then
+  _pass "transport.sh: console relay resolves context.project from nearest package.json name; full cwd stays redacted"
 else
-  _fail "transport.sh: expected project=station cwd=null, got project='$proj_val' cwd='$cwd_val'"
+  _fail "transport.sh: expected project=@kontourai/inner-pkg cwd=null, got project='$proj_val' cwd='$cwd_val'"
+fi
+# case 2: no manifest/git remote -> cwd basename fallback (step 5)
+cap2=$(_relay_project "$PROJ_TEST_ROOT/plain-dir-name")
+proj2=$(printf '%s' "$cap2" | jq -r '.context.project // "MISSING"' 2>/dev/null)
+if [[ "$proj2" == "plain-dir-name" ]]; then
+  _pass "transport.sh: console relay falls back to cwd basename when no manifest/git remote is present"
+else
+  _fail "transport.sh: expected project=plain-dir-name, got '$proj2'"
 fi
 rm -rf "$PROJ_TEST_ROOT"
 

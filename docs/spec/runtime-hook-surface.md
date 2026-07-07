@@ -53,14 +53,37 @@ attribution label is itself canonical and every adapter — harness **and** fram
 
 | Field | Semantics | Redacted? | Producer requirement |
 | --- | --- | --- | --- |
-| `context.project` | Coarse, path-free project label — the basename of the agent's working directory (e.g. `station` from `/Users/x/dev/station`). | **No** (path-free by construction; safe to relay) | Adapters SHOULD populate `context.project` before emission when a working directory is known and `context.project` is not already set. Compute it as `basename(cwd)`; never send the full path. |
+| `context.project` | Coarse, path-free project label identifying the project a session is working in. | **No** (path-free by construction; safe to relay) | Adapters SHOULD populate `context.project` before emission when `context.project` is not already set, using the **canonical derivation precedence** below. Never send the full path. |
+
+**Canonical derivation precedence (all adapters MUST resolve in this order, first match wins).** A
+bare `basename(cwd)` is *not* sufficient — folder names differ between developers, clones, and
+worktrees, so the same project would report inconsistent labels. Resolve most-stable-first:
+
+1. `FLOW_AGENTS_PROJECT` — explicit operator override; always wins.
+2. **Nearest project manifest name** walking up from the working dir — `package.json` `name` today
+   (monorepo-granular *and* committed, so every developer of the same package resolves the same
+   label). Other ecosystems (`pyproject.toml`, `Cargo.toml`, `go.mod`, …) extend this step — see
+   the consistency callout.
+3. **Git remote `org/repo`** (from `remote.origin.url`, `.git` stripped, path-free) — repo-level
+   identity that is stable across clones and worktrees.
+4. **Git toplevel directory basename** — the repo dir even when invoked from a worktree or subdir.
+5. **`basename(cwd)`** — last resort.
+
+Derivation is deterministic for a given working tree, so adapters SHOULD compute it once per
+project per session and cache it rather than re-resolving per event.
 
 Consumers (the console projection) prefer `context.project` and fall back to `basename(context.cwd)`
 only when a non-redacted cwd is present. This keeps project attribution consistent across every
 runtime — a Claude Code shell hook and an in-process Strands adapter derive the same label the same
-way — while the full path stays local. **Consistency callout:** a runtime that exposes no working
-directory cannot populate `context.project`; such events attribute to "unknown" by design, and that
-gap must be surfaced (not silently bucketed) per §"Degradation when host lacks trigger".
+way.
+
+**Consistency callouts (features that cannot be identical across runtimes — surface, don't hide):**
+- A runtime that exposes no working directory cannot resolve steps 2–5 and attributes to "unknown"
+  by design; that gap must be surfaced, not silently bucketed (§"Degradation when host lacks
+  trigger").
+- Step 2's manifest matrix is inherently language-specific. Until an adapter's ecosystem manifest is
+  supported, it resolves from step 3 onward. Adapters MUST document which manifests they honor so the
+  attribution granularity difference is explicit, not surprising.
 
 ### Exit Code Protocol (Canonical Hook Scripts)
 
