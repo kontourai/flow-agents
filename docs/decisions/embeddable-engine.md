@@ -90,23 +90,27 @@ Five rules follow.
 
 ## Consequences / required refactors
 
-- **Extract a runtime-agnostic core.** The engine logic currently expressed in
-  shell (`scripts/telemetry/lib/*`) must be factored so its policy — event
+The backlog issues that carry this direction:
+
+- **Extract a runtime-agnostic core** (#500). The engine logic currently expressed
+  in shell (`scripts/telemetry/lib/*`) must be factored so its policy — event
   canonicalization, redaction, attribution precedence, transport routing — is a
   reusable port with at least a shell binding (today) and a language binding
   (first framework adapter). No new policy may be added to an adapter that isn't
   in the core.
-- **The artifact/state store becomes a pluggable port.** Trust bundles, delivery
-  records, and state projection are written today against a filesystem + git +
-  Console assumption. For embedded agents that seam must be an interface
+- **The artifact/state store becomes a pluggable port** (#501). Trust bundles,
+  delivery records, and state projection are written today against a filesystem +
+  git + Console assumption. For embedded agents that seam must be an interface
   (local-fs, git, Console-remote, customer-supplied) so the engine backend is
   swappable without touching adapters. This is the storage-port dependency of the
   Console-as-backend rule (3).
-- **A first framework adapter proves the model.** AWS Strands (the non-terminal
-  runtime that motivated this) is the reference in-process adapter: it must emit
-  canonical events in-process, honor redaction without a shell, and pass the
-  conformance suite. Its explicit callouts define the template for "what a
-  framework cannot do that a harness can."
+- **An adapter conformance suite** (#502) makes rule 5 checkable — one shared spec
+  every adapter (harness or framework) must pass, with explicit gap declarations.
+- **A first framework adapter proves the model** (#503). AWS Strands (the
+  non-terminal runtime that motivated this) is the reference in-process adapter:
+  it must emit canonical events in-process, honor redaction without a shell, and
+  pass the conformance suite. Its explicit callouts define the template for "what
+  a framework cannot do that a harness can."
 - **`runtime-hook-surface.md` is promoted from a harness spec to the adapter
   contract** every adapter category conforms to.
 
