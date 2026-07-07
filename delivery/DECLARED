@@ -28,5 +28,11 @@
     "reason": "Docs-only PR: adds an 'Attribution & pricing correctness (#487)' subsection to docs/integrations/flow-agents-console.md documenting the merged #487 behavior (canonical active-session attribution; bundled-registry pricing floor). No source/behavior changes and no command-backed (agent-delivery) claims to reconcile.",
     "approved_by": "brian.anderson1222 (delegated approval, 2026-07-07 session: clean-after-merge-and-continue)",
     "declared_at": "2026-07-07T22:02:46Z"
+  },
+  {
+    "scope": "branch-prefix:agent/claude-code-3c7d5297-89ec-4893-81a6-8aae94890c95-Kontour/embeddable-engine-decision",
+    "reason": "Docs-only PR: adds docs/decisions/embeddable-engine.md (owner-shaped 'Embeddable engine and adapter model' decision record: harness+framework adapters as thin adapters over one runtime-agnostic core; Console as remote backend; cooperative-vs-authoritative enforcement; conformance suite; storage port) plus regenerated docs/decisions/index.md. No source/behavior changes and no command-backed (agent-delivery) claims to reconcile.",
+    "approved_by": "brian.anderson1222 (delegated approval, 2026-07-07 session: solidify-embeddable-engine-DRY)",
+    "declared_at": "2026-07-07T23:40:00Z"
   }
 ]
