@@ -169,6 +169,10 @@ run_integration() {
   local result=0
   bash "$EVAL_DIR/integration/test_telemetry.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_usage_cost.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_telemetry_usage_pipeline.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_telemetry_doctor.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_usage_feedback_outcomes.sh" || result=1

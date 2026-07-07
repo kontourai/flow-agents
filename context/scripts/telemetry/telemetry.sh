@@ -318,6 +318,18 @@ add_stop_data_and_emit_usage() {
     transcript_usage=$(usage_parse_transcript "$transcript_path")
     [[ -z "$transcript_usage" ]] && transcript_usage='null'
 
+    # Prefer the transcript-derived model (runtime-agnostic — works for any
+    # runtime that exposes a transcript) over the kiro-only ~/.kiro/agents
+    # lookup above, which never resolves for non-kiro agent names (e.g.
+    # Claude Code's fixed "dev" hook arg) and falls through to "unknown".
+    # Falls back to usage_get_model's kiro result when no transcript usage
+    # is available (kiro-cli path is unchanged: transcript_usage stays null).
+    if [[ "$transcript_usage" != "null" ]]; then
+      local transcript_model
+      transcript_model=$(usage_model_from_transcript_usage "$transcript_usage")
+      [[ -n "$transcript_model" ]] && model="$transcript_model"
+    fi
+
     local usage_event
     usage_event=$(echo "$event" | jq -c \
       --arg m "$model" \
