@@ -264,6 +264,40 @@ case "${FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY:-}" in
   *) exit 0 ;;
 esac
 
+# --- suppression guard: never relay a record with neither attribution nor cost/token/defect signal
+# An "unattributed" $0/no-token/no-defect record carries no signal for the console ROI view and
+# only dilutes cross-run aggregates (firstPassRate, totalCostUsd, defectsCaught). Suppress the
+# POST — NOT the local write above, which stays an unconditional immutable per-run fact — only
+# when task_slug is empty/"unattributed" AND cost is zero AND there is NO token volume (input +
+# output + cache all zero — cost legitimately degrades to null/0 on an unpriced/new model while
+# TOKENS remain source-of-truth, so a token-volume leg is required or real usage on unpriced
+# models is wrongly suppressed) AND there is no defect/gate signal. ANY of real attribution, real
+# cost, real token volume, or a real defect signal is enough to still relay unchanged. This guard
+# is itself best-effort and fails OPEN toward RELAYING: dropping a real record is worse than an
+# extra empty one reaching the console, so we suppress ONLY when jq successfully computed an
+# explicit `false` (a genuinely-empty record); a jq/read failure (non-zero exit, or any output
+# other than the literal "false") falls through and RELAYS unchanged — never toward silently
+# swallowing real data (see docs/specs/economics-record-contract.md).
+has_signal="$(printf '%s' "$record" | jq -r '
+  ((.task_slug // "") | ascii_downcase) as $slug
+  | ($slug != "" and $slug != "unattributed") as $attributed
+  | ((.cost.estimated_cost_usd // 0) > 0) as $has_cost
+  | ((((.cost.input_tokens // 0) + (.cost.output_tokens // 0)
+       + (.cost.cache_creation_input_tokens // 0)
+       + (.cost.cache_read_input_tokens // 0)) > 0)) as $has_tokens
+  | ((.defects.gate_fires // 0) > 0) as $has_gate_fires
+  | ((.defects.caught_false_completions // 0) > 0) as $has_cfc
+  | (([.defects.findings_by_severity[]?] | add // 0) > 0) as $has_findings
+  | ($attributed or $has_cost or $has_tokens or $has_gate_fires or $has_cfc or $has_findings)
+' 2>/dev/null)"
+jq_rc=$?
+if [[ $jq_rc -eq 0 && "$has_signal" == "false" ]]; then
+  [[ "${TELEMETRY_ECONOMICS_DEBUG:-}" == "1" ]] && echo "economics-record: suppressing console relay (genuinely-empty record: no attribution/cost/tokens/defects)" >&2
+  exit 0
+fi
+# jq error (non-zero rc), or any signal present ($has_signal == "true") -> fall through and RELAY
+# (fail-open toward relaying real data, never toward silently dropping a record on guard failure).
+
 # The economics ingress is the shared kind-routed `<origin>/records` endpoint — NOT the same path as
 # the telemetry endpoint (`.../api/telemetry/records`) — so CONSOLE_TELEMETRY_ENDPOINT_URL can only
 # contribute an origin here (its path is stripped), never be reused verbatim (#469 review).
