@@ -9,21 +9,23 @@
 #
 #   1. no-label-bypass       (finding 1) → not-run: a test_output claim with no
 #      manifest-matched execution.label is a divergence, never session-local.
-#   2. skip-assumed-bypass   (finding 2) → unwaived-assumed: 'assumed' alone is not a pass.
-#   3. status-misassertion   (finding 3) → status-misassertion: CI re-derives status; a
+#   2. mcp-degrade           (issue 492) → not-run: an MCP-shaped execution.label is not a
+#      manifest command and can never be RECONCILED as a CI-verified command check.
+#   3. skip-assumed-bypass   (finding 2) → unwaived-assumed: 'assumed' alone is not a pass.
+#   4. status-misassertion   (finding 3) → status-misassertion: CI re-derives status; a
 #      self-reported status that does not match the bundle's own evidence is rejected.
-#   4. waived-command-check  (finding 4) → waiver-on-command-check: a command-backed
+#   5. waived-command-check  (finding 4) → waiver-on-command-check: a command-backed
 #      (test_output) check cannot be waived.
-#   5. ws3-old-style-bundle  (AC6) → old all-test_output bundle FAILS the same way (exit 1,
+#   6. ws3-old-style-bundle  (AC6) → old all-test_output bundle FAILS the same way (exit 1,
 #      divergences) under the new reconciler as under the old one — no soundness regression.
-#   6. fabricated-attestation (iteration-4, converged iteration-3 finding, both gates) → a
+#   7. fabricated-attestation (iteration-4, converged iteration-3 finding, both gates) → a
 #      fully self-consistent, hand-fabricated no-command 'security' claim+evidence+event
 #      triple (indistinguishable from a genuine attestation at the reconciler's own
 #      re-derivation layer) MUST still pass (exit 0 — blocking attestations at L0 would break
 #      every honest human-attestation use) BUT MUST be loudly, distinctly marked
 #      'ATTESTED (not independently verifiable at L0)' plus the summary count line — never a
 #      quiet SESSION-LOCAL OK indistinguishable from a reconciled check. See ADR 0020 Residuals.
-#   7. delivery/DECLARED marker regressions (ADR 0022 §1/§2, section 7 below) — bundle-absent
+#   8. delivery/DECLARED marker regressions (ADR 0022 §1/§2, section 7 below) — bundle-absent
 #      fail-closed default, malformed/empty-array/missing-field diagnostics, and all four
 #      matchesScope() forms (ref:, commit: single + range, author:, branch-prefix:) including
 #      positive AND near-miss coverage, plus the compound (space-separated AND) scope form a
@@ -49,10 +51,12 @@ errors=0
 _pass() { echo "  PASS: $1"; }
 _fail() { echo "  FAIL: $1"; errors=$((errors + 1)); }
 
-# run_case <label> <bundle> <needle>
-# Asserts: reconciler exits non-zero AND stdout/stderr contains <needle>.
+# run_case <label> <bundle> <needle> [forbidden]
+# Asserts: reconciler exits non-zero, stdout/stderr contains <needle>, and optionally does
+# NOT contain <forbidden>.
 run_case() {
   local label="$1" bundle="$2" needle="$3"
+  local forbidden="${4:-}"
   echo "=== $label ==="
   if [[ ! -f "$bundle" ]]; then _fail "$label: fixture not found at $bundle"; return; fi
   local out code
@@ -69,25 +73,38 @@ run_case() {
   else
     _fail "$label: expected divergence \"$needle\" not found — output: $out"
   fi
+  if [[ -n "$forbidden" ]]; then
+    if echo "$out" | grep -qF "$forbidden"; then
+      _fail "$label: must NOT emit \"$forbidden\" — output: $out"
+    else
+      _pass "$label: does not emit \"$forbidden\""
+    fi
+  fi
 }
 
 # 1. Reviewer's no-label exploit → not-run (test_output must reconcile against the manifest).
 run_case "no-label-bypass (finding 1)" "$FX/no-label-bypass.json" \
   "no manifest-matched execution.label"
 
-# 2. Verifier's skip->assumed exploit → unwaived-assumed.
+# 2. Issue #492: MCP-shaped self-reported pass → not-run (not manifest-matched), never
+#    RECONCILED as a CI-verified command check.
+run_case "mcp-degrade (issue 492)" "$FX/mcp-degrade.json" \
+  "command is not in the reconcile manifest" \
+  "RECONCILED"
+
+# 3. Verifier's skip->assumed exploit → unwaived-assumed.
 run_case "skip-assumed-bypass (finding 2)" "$FX/skip-assumed-bypass.json" \
   "[unwaived-assumed]"
 
-# 3. Status-misassertion exploit → status re-derived CI-side; asserted != derived.
+# 4. Status-misassertion exploit → status re-derived CI-side; asserted != derived.
 run_case "status-misassertion (finding 3)" "$FX/status-misassertion.json" \
   "[status-misassertion]"
 
-# 4. Waived command-backed check → waiver-on-command-check.
+# 5. Waived command-backed check → waiver-on-command-check.
 run_case "waived-command-check (finding 4)" "$FX/waived-command-check.json" \
   "[waiver-on-command-check]"
 
-# 5. AC6 backward-compat regression: the real ws3-kit-dependencies-namespacing/trust.bundle
+# 6. AC6 backward-compat regression: the real ws3-kit-dependencies-namespacing/trust.bundle
 #    (an old-style all-test_output bundle whose commands are not manifest-matched) FAILS the
 #    same way under the new reconciler as under the old one — same FAIL verdict, divergences
 #    present, no silent pass introduced.
@@ -115,7 +132,7 @@ else
   fi
 fi
 
-# 6. Fabricated-attestation (iteration-4): passes (exit 0) but MUST carry the loud ATTESTED
+# 7. Fabricated-attestation (iteration-4): passes (exit 0) but MUST carry the loud ATTESTED
 #    marker and the summary count line — NOT the old quiet SESSION-LOCAL OK. This is a
 #    visibility assertion, not a divergence assertion (unlike run_case above): a fabricated
 #    self-consistent attestation bundle is, by construction, indistinguishable from a genuine
