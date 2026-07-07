@@ -421,6 +421,163 @@ console.log(r.url);
   || fail "explicit console_economics_endpoint_url: expected POST to /records, got '$POSTED_URL2'"
 stop_stub
 
+# ── suppression guard: unattributed+$0+no-defect/gate signal never relays (economics-relay- ───────
+# unattributed-suppression) — local write still happens; only the console POST is suppressed. Full
+# signal matrix so a shortcut implementation (task_slug-only) cannot pass: (1) suppressed case, then
+# each signal category alone (attribution / cost / defect-gate) proven to still relay unchanged.
+echo "--- suppression guard: unattributed+\$0+no-defect record is NOT relayed (local write unaffected) ---"
+ZERO_USAGE_EVENT="$(jq -cn '{
+  schema_version:"0.3.0", timestamp:"1751731200000",
+  session_id:"unattributed-run-01", event_id:"evt-02-usage",
+  event_type:"session.usage", agent:{name:"dev",runtime:"claude-code",version:"1"},
+  context:{cwd:"/workspace/flow-agents"},
+  usage:{ model:"claude-opus-4-8", duration_s:5, tool_invocations:0, delegations:0,
+    input_tokens:0, output_tokens:0, cache_creation_input_tokens:0, cache_read_input_tokens:0,
+    estimated_cost_usd:0, pricing_version:"2026-06-28", by_model:[] }
+}')"
+
+# Case 1: no --state/--acceptance/--critique at all (mirrors telemetry.sh's real invocation when
+# econ_slug is empty) + zero-cost usage → local write happens, NO POST.
+: > "$RECV"; start_stub ok || fail "stub server did not start (suppression case 1)"
+LOG13="$TMP/econ13.jsonl"; : > "$LOG13"
+(
+  export FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY=1
+  export FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL="$ENDPOINT"
+  export TELEMETRY_ECONOMICS_LOG_FILE="$LOG13"
+  bash "$EMITTER" "$ZERO_USAGE_EVENT"
+)
+sleep 1
+[[ -s "$LOG13" ]] && pass "suppression case 1: local record still written (local-first unaffected)" || fail "suppression case 1: local record missing"
+[[ ! -s "$RECV" ]] && pass "suppression case 1: unattributed+\$0+no-defect record is NOT POSTed (relay suppressed)" || fail "suppression case 1: a POST happened for an unattributed/\$0/no-defect record"
+stop_stub
+
+# Case 1b (HIGH review fix): unattributed + estimated_cost_usd null (unpriced/new model — cost
+# legitimately degrades to null while TOKENS remain source-of-truth, per usage.sh's contract and
+# the #477 fix) + real input/output token volume + no defects → still relays. Without a
+# token-volume leg in has_signal, this record is wrongly suppressed — dropping real ROI data,
+# the opposite of the suppression guard's intent.
+echo "--- suppression guard (HIGH fix): unattributed + null cost + real tokens still relays (no false suppression on unpriced models) ---"
+TOKENS_NULL_COST_USAGE_EVENT="$(jq -cn '{
+  schema_version:"0.3.0", timestamp:"1751731200000",
+  session_id:"unattributed-unpriced-run-01", event_id:"evt-03-usage",
+  event_type:"session.usage", agent:{name:"dev",runtime:"claude-code",version:"1"},
+  context:{cwd:"/workspace/flow-agents"},
+  usage:{ model:"claude-new-unpriced-model", duration_s:120, tool_invocations:4, delegations:0,
+    input_tokens:50000, output_tokens:20000, cache_creation_input_tokens:0, cache_read_input_tokens:0,
+    estimated_cost_usd:null, pricing_version:null, by_model:[] }
+}')"
+: > "$RECV"; start_stub ok
+LOG13B="$TMP/econ13b.jsonl"; : > "$LOG13B"
+(
+  export FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY=1
+  export FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL="$ENDPOINT"
+  export TELEMETRY_ECONOMICS_LOG_FILE="$LOG13B"
+  bash "$EMITTER" "$TOKENS_NULL_COST_USAGE_EVENT"
+)
+[[ -s "$LOG13B" ]] && pass "suppression case 1b: local record written" || fail "suppression case 1b: local record missing"
+REC13B="$(cat "$LOG13B")"
+COST13B="$(printf '%s' "$REC13B" | jq -c '.cost.estimated_cost_usd')"
+[[ "$COST13B" == "0" ]] && pass "suppression case 1b: null cost coerces to 0 on the assembled record (estimated_cost_usd==$COST13B)" || fail "suppression case 1b: expected estimated_cost_usd 0, got $COST13B"
+IT13B="$(printf '%s' "$REC13B" | jq -c '.cost.input_tokens')"
+OT13B="$(printf '%s' "$REC13B" | jq -c '.cost.output_tokens')"
+[[ "$IT13B" == "50000" && "$OT13B" == "20000" ]] && pass "suppression case 1b: real token volume carried (input=$IT13B, output=$OT13B)" || fail "suppression case 1b: expected input=50000/output=20000, got input=$IT13B/output=$OT13B"
+if wait_for_post; then pass "suppression case 1b: unattributed + null/\$0 cost + real token volume STILL relays (token-volume leg, no false suppression)"; else fail "suppression case 1b: real-token record was WRONGLY suppressed (token-volume leg missing/broken)"; fi
+stop_stub
+
+# Case 2: same zero-cost usage event, but with real task attribution via --state → still relays.
+echo "--- suppression guard: real task-slug attribution alone still relays (zero cost, no defects) ---"
+: > "$RECV"; start_stub ok
+LOG14="$TMP/econ14.jsonl"; : > "$LOG14"
+(
+  export FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY=1
+  export FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL="$ENDPOINT"
+  export TELEMETRY_ECONOMICS_LOG_FILE="$LOG14"
+  bash "$EMITTER" "$ZERO_USAGE_EVENT" --state "$FIX/state.json"
+)
+[[ -s "$LOG14" ]] && pass "suppression case 2: local record written" || fail "suppression case 2: local record missing"
+if wait_for_post; then pass "suppression case 2: real task-slug attribution alone still relays"; else fail "suppression case 2: attributed record was wrongly suppressed"; fi
+stop_stub
+
+# Case 3: real-transcript (non-zero cost) usage event, with NO --state/--acceptance/--critique at
+# all (unattributed) → cost signal alone still relays.
+echo "--- suppression guard: real cost alone still relays (unattributed, no defects) ---"
+: > "$RECV"; start_stub ok
+LOG15="$TMP/econ15.jsonl"; : > "$LOG15"
+(
+  export FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY=1
+  export FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL="$ENDPOINT"
+  export TELEMETRY_ECONOMICS_LOG_FILE="$LOG15"
+  bash "$EMITTER" "$USAGE_EVENT"
+)
+[[ -s "$LOG15" ]] && pass "suppression case 3: local record written" || fail "suppression case 3: local record missing"
+if wait_for_post; then pass "suppression case 3: real cost (unattributed) alone still relays"; else fail "suppression case 3: cost-bearing record was wrongly suppressed"; fi
+stop_stub
+
+# Case 4: zero-cost usage event, unattributed (task_slug deleted) but a real gate-fire/defect signal
+# via a derived state.json → defect/gate signal alone still relays.
+echo "--- suppression guard: real gate/defect signal alone still relays (unattributed, zero cost) ---"
+STATE_NOSLUG_GATE="$TMP/state-noslug-gate.json"
+jq 'del(.task_slug) | .gate_fires = 2' "$FIX/state.json" > "$STATE_NOSLUG_GATE"
+: > "$RECV"; start_stub ok
+LOG16="$TMP/econ16.jsonl"; : > "$LOG16"
+(
+  export FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY=1
+  export FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL="$ENDPOINT"
+  export TELEMETRY_ECONOMICS_LOG_FILE="$LOG16"
+  bash "$EMITTER" "$ZERO_USAGE_EVENT" --state "$STATE_NOSLUG_GATE"
+)
+[[ -s "$LOG16" ]] && pass "suppression case 4: local record written" || fail "suppression case 4: local record missing"
+if wait_for_post; then pass "suppression case 4: gate/defect signal alone (unattributed, \$0) still relays"; else fail "suppression case 4: gate-signal record was wrongly suppressed"; fi
+stop_stub
+
+# Case 5: zero-cost usage event, unattributed (no --state at all), gate_fires=0, findings all 0 —
+# the ONLY signal present is a real caught_false_completions count (set directly on critique.json,
+# not derived from a findings[] entry, so findings_by_severity stays all-zero) → defect sub-leg
+# (caught_false_completions) alone still relays.
+echo "--- suppression guard: caught_false_completions alone still relays (unattributed, \$0, gate_fires=0, findings=0) ---"
+CRITIQUE_CFC_ONLY="$TMP/critique-cfc-only.json"
+printf '%s' '{"gate_fires":0,"caught_false_completions":1}' > "$CRITIQUE_CFC_ONLY"
+: > "$RECV"; start_stub ok
+LOG17="$TMP/econ17.jsonl"; : > "$LOG17"
+(
+  export FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY=1
+  export FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL="$ENDPOINT"
+  export TELEMETRY_ECONOMICS_LOG_FILE="$LOG17"
+  bash "$EMITTER" "$ZERO_USAGE_EVENT" --critique "$CRITIQUE_CFC_ONLY"
+)
+[[ -s "$LOG17" ]] && pass "suppression case 5: local record written" || fail "suppression case 5: local record missing"
+REC17="$(cat "$LOG17")"
+assert_case5() { local got; got="$(printf '%s' "$REC17" | jq -c "$1")"; [[ "$got" == "$2" ]] && pass "suppression case 5: $3 ($got)" || fail "suppression case 5: $3 expected $2 got $got"; }
+assert_case5 '.defects.gate_fires' '0' "gate_fires stays 0 (isolating the cfc sub-leg)"
+assert_case5 '.defects.caught_false_completions' '1' "caught_false_completions carried through"
+assert_case5 '([.defects.findings_by_severity[]] | add)' '0' "findings_by_severity all-zero (isolating the cfc sub-leg)"
+if wait_for_post; then pass "suppression case 5: caught_false_completions signal alone (unattributed, \$0, gate_fires=0) still relays"; else fail "suppression case 5: caught_false_completions-only record was wrongly suppressed"; fi
+stop_stub
+
+# Case 6: zero-cost usage event, unattributed (no --state at all), gate_fires=0,
+# caught_false_completions=0 — the ONLY signal present is a nonzero findings_by_severity bucket
+# (one real "high" finding) → defect sub-leg (findings_by_severity) alone still relays.
+echo "--- suppression guard: a nonzero findings_by_severity bucket alone still relays (unattributed, \$0, gate_fires=0, cfc=0) ---"
+CRITIQUE_FINDING_ONLY="$TMP/critique-finding-only.json"
+printf '%s' '{"gate_fires":0,"caught_false_completions":0,"critiques":[{"findings":[{"severity":"high","description":"real finding, not a false-completion"}]}]}' > "$CRITIQUE_FINDING_ONLY"
+: > "$RECV"; start_stub ok
+LOG18="$TMP/econ18.jsonl"; : > "$LOG18"
+(
+  export FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY=1
+  export FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL="$ENDPOINT"
+  export TELEMETRY_ECONOMICS_LOG_FILE="$LOG18"
+  bash "$EMITTER" "$ZERO_USAGE_EVENT" --critique "$CRITIQUE_FINDING_ONLY"
+)
+[[ -s "$LOG18" ]] && pass "suppression case 6: local record written" || fail "suppression case 6: local record missing"
+REC18="$(cat "$LOG18")"
+assert_case6() { local got; got="$(printf '%s' "$REC18" | jq -c "$1")"; [[ "$got" == "$2" ]] && pass "suppression case 6: $3 ($got)" || fail "suppression case 6: $3 expected $2 got $got"; }
+assert_case6 '.defects.gate_fires' '0' "gate_fires stays 0 (isolating the findings sub-leg)"
+assert_case6 '.defects.caught_false_completions' '0' "caught_false_completions stays 0 (isolating the findings sub-leg)"
+assert_case6 '.defects.findings_by_severity.high' '1' "findings_by_severity.high carried through"
+if wait_for_post; then pass "suppression case 6: findings_by_severity signal alone (unattributed, \$0, gate_fires=0, cfc=0) still relays"; else fail "suppression case 6: findings-only record was wrongly suppressed"; fi
+stop_stub
+
+
 # ── AC8 (#415): delegations[] facts + orchestrator-observable outcome + signals capability block ──────
 echo "--- AC8: delegations[] — role/model join, escalation supersession, honest outcome, signals ---"
 LOG7="$TMP/econ7.jsonl"; : > "$LOG7"

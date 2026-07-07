@@ -1,0 +1,431 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "economics-relay-unattributed-suppression-ac1-suppression-genuinely-empty-record.flow-agents-workflow.ac1-genuinely-empty-record-unattributed-0-no-tokens-no-defects-gate-local-write-happens-console-post-suppressed-verified-via-evals-integration-test-economics-record-sh-suppression-case-1-pass-and-fault-injection-flipping-guard-to-suppress-on-real-signal-correctly-made-case-1-continue-to-pass-while-cases-1b-2-4-5-6-failed-proving-the-guard-genuinely-discriminates",
+      "subjectType": "flow-step",
+      "subjectId": "economics-relay-unattributed-suppression/ac1-suppression-genuinely-empty-record",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC1: genuinely-empty record (unattributed, $0, no tokens, no defects/gate) -> local write happens, console POST suppressed. Verified via evals/integration/test_economics_record.sh suppression case 1 (PASS) and fault-injection (flipping guard to suppress-on-real-signal correctly made case 1 continue to pass while cases 1b/2/4/5/6 failed, proving the guard genuinely discriminates).",
+      "value": "pass",
+      "createdAt": "2026-07-07T14:41:51Z",
+      "updatedAt": "2026-07-07T14:41:51Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "economics-relay-unattributed-suppression-ac2-real-signal-still-relays.flow-agents-workflow.ac2-real-attribution-case-2-real-cost-case-3-real-tokens-with-null-0-cost-on-unpriced-model-case-1b-and-each-defect-gate-signal-leg-alone-cases-4-gate-fires-5-caught-false-completions-6-findings-by-severity-all-still-relay-unchanged-verified-via-evals-integration-test-economics-record-sh-all-6-cases-pass-plus-4-mandatory-fault-injections-that-each-broke-a-specific-leg-and-were-caught-by-the-suite-1-wrong-field-token-leg-case-1b-failed-as-expected-3-dropped-caught-false-completions-leg-case-5-failed-as-expected-4-flipped-guard-to-suppress-whenever-cost-0-cases-1b-2-4-5-6-all-failed-as-expected-all-injections-reverted-file-hash-confirmed-identical-to-original-20ea58da2e63af636f20c44a6e0319b0-after-each-revert",
+      "subjectType": "flow-step",
+      "subjectId": "economics-relay-unattributed-suppression/ac2-real-signal-still-relays",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC2: real attribution (case 2), real cost (case 3), real tokens with null/0 cost on unpriced model (case 1b), and each defect/gate signal leg alone (cases 4 gate_fires, 5 caught_false_completions, 6 findings_by_severity) all still relay unchanged. Verified via evals/integration/test_economics_record.sh (all 6 cases PASS) plus 4 mandatory fault injections that each broke a specific leg and were CAUGHT by the suite: (1) wrong-field token leg -> case 1b FAILED as expected; (3) dropped caught_false_completions leg -> case 5 FAILED as expected; (4) flipped guard to suppress whenever cost==0 -> cases 1b/2/4/5/6 all FAILED as expected. All injections reverted; file hash confirmed identical to original (20ea58da2e63af636f20c44a6e0319b0) after each revert.",
+      "value": "pass",
+      "createdAt": "2026-07-07T14:41:51Z",
+      "updatedAt": "2026-07-07T14:41:51Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "economics-relay-unattributed-suppression-ac3-integration-eval-passes-end-to-end.flow-agents-workflow.ac3-evals-integration-test-economics-record-sh-passes-end-to-end-98-pass-0-fail-exit-0-includes-golden-parity-phase-sum-invariant-injection-escaping-ac7-fail-open-disabled-telemetry-config-driven-activation-opt-out-469-and-all-7-new-suppression-guard-cases-1-1b-2-3-4-5-6",
+      "subjectType": "flow-step",
+      "subjectId": "economics-relay-unattributed-suppression/ac3-integration-eval-passes-end-to-end",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC3: evals/integration/test_economics_record.sh passes end-to-end: 98 [PASS], 0 [FAIL], exit 0. Includes golden-parity, phase-sum invariant, injection-escaping, AC7 fail-open/disabled-telemetry, config-driven activation/opt-out (#469), AND all 7 new suppression-guard cases (1, 1b, 2, 3, 4, 5, 6).",
+      "value": "pass",
+      "createdAt": "2026-07-07T14:41:51Z",
+      "updatedAt": "2026-07-07T14:41:51Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "economics-relay-unattributed-suppression-ac4-mirror-invariant-and-source-tree-contract.flow-agents-workflow.ac4-npm-run-validate-source-passes-source-tree-validation-passed-src-tools-validate-source-tree-ts-mirroredfiles-map-confirms-economics-record-sh-is-not-a-mirrored-entry-no-context-copy-exists-find-returned-nothing-the-two-mirrored-files-this-change-is-adjacent-to-scripts-telemetry-telemetry-sh-and-scripts-telemetry-lib-config-sh-are-untouched-by-this-diff-git-diff-stat-shows-0-changes-to-either-and-remain-byte-identical-to-their-context-mirrors",
+      "subjectType": "flow-step",
+      "subjectId": "economics-relay-unattributed-suppression/ac4-mirror-invariant-and-source-tree-contract",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC4: npm run validate:source passes (Source tree validation passed). src/tools/validate-source-tree.ts mirroredFiles map confirms economics-record.sh is NOT a mirrored entry (no context/ copy exists — find returned nothing). The two mirrored files this change is adjacent to, scripts/telemetry/telemetry.sh and scripts/telemetry/lib/config.sh, are untouched by this diff (git diff --stat shows 0 changes to either) and remain byte-identical to their context/ mirrors.",
+      "value": "pass",
+      "createdAt": "2026-07-07T14:41:51Z",
+      "updatedAt": "2026-07-07T14:41:51Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "economics-relay-unattributed-suppression-coverage-gap-fail-open-direction-untested.flow-agents-workflow.coverage-gap-not-an-ac-failure-fault-injecting-the-fail-open-guard-itself-reverting-if-jq-rc-eq-0-has-signal-false-to-if-has-signal-true-which-changes-behavior-only-when-the-internal-jq-call-fails-returns-non-true-false-was-not-caught-by-evals-integration-test-economics-record-sh-the-suite-still-reported-all-checks-passed-after-this-mutation-root-cause-the-suite-has-no-black-box-way-to-force-the-guard-s-internal-jq-call-to-fail-because-record-is-always-well-formed-json-assembled-by-the-emitter-s-own-earlier-jq-filter-there-is-no-injectable-malformed-record-path-through-the-emitter-s-public-cli-interface-usage-event-state-critique-args-manually-reproduced-the-semantic-difference-directly-against-jq-jq-rc-5-has-signal-empty-on-a-simulated-jq-failure-original-guard-logic-relay-correct-fail-open-mutated-guard-logic-suppress-silently-drops-a-real-record-on-internal-guard-failure-this-is-a-real-disclosed-test-coverage-gap-on-the-fail-open-direction-specifically-not-a-defect-in-the-shipped-guard-manual-repro-confirms-the-shipped-code-is-fail-open-as-designed-and-not-a-failure-of-ac1-ac4-as-written",
+      "subjectType": "flow-step",
+      "subjectId": "economics-relay-unattributed-suppression/coverage-gap-fail-open-direction-untested",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "COVERAGE GAP (not an AC failure): fault-injecting the fail-open guard itself (reverting `if [[ $jq_rc -eq 0 && \"$has_signal\" == \"false\" ]]` to `if [[ \"$has_signal\" != \"true\" ]]`, which changes behavior only when the internal jq call fails/returns non-\"true\"/\"false\") was NOT caught by evals/integration/test_economics_record.sh -- the suite still reported all checks passed after this mutation. Root cause: the suite has no black-box way to force the guard's internal jq call to fail, because `$record` is always well-formed JSON assembled by the emitter's own earlier jq filter -- there is no injectable malformed-record path through the emitter's public CLI interface (usage_event/--state/--critique args). Manually reproduced the semantic difference directly against jq (jq_rc=5, has_signal=empty on a simulated jq failure): original guard logic -> RELAY (correct fail-open); mutated guard logic -> SUPPRESS (silently drops a real record on internal guard failure). This is a real, disclosed test-coverage gap on the fail-open direction specifically, not a defect in the shipped guard (manual repro confirms the shipped code is fail-open as designed) and not a failure of AC1-AC4 as written.",
+      "value": "not_verified",
+      "createdAt": "2026-07-07T14:41:51Z",
+      "updatedAt": "2026-07-07T14:41:51Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "proposed"
+    },
+    {
+      "id": "economics-relay-unattributed-suppression-ac1-an-economics-record-with-no-real-task-slug-attribution-task-slug-null-empty-unattributed-and-zero-cost-and-zero-defect-gate-signal-gate-fires-caught-false-completions-every-findings-by-severity-bucket-all-0-is-written-to-the-local-economics-log-but-is-not-posted-to-the-console-even-when-the-console-relay-is-enabled-and-an-endpoint-is-configured.flow-agents-workflow.ac1-an-economics-record-with-no-real-task-slug-attribution-task-slug-null-empty-unattributed-and-zero-cost-and-zero-defect-gate-signal-gate-fires-caught-false-completions-every-findings-by-severity-bucket-all-0-is-written-to-the-local-economics-log-but-is-not-posted-to-the-console-even-when-the-console-relay-is-enabled-and-an-endpoint-is-configured",
+      "subjectType": "flow-step",
+      "subjectId": "economics-relay-unattributed-suppression/ac1-an-economics-record-with-no-real-task-slug-attribution-task-slug-null-empty-unattributed-and-zero-cost-and-zero-defect-gate-signal-gate-fires-caught-false-completions-every-findings-by-severity-bucket-all-0-is-written-to-the-local-economics-log-but-is-not-posted-to-the-console-even-when-the-console-relay-is-enabled-and-an-endpoint-is-configured",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC1: an economics record with no real task-slug attribution (task_slug null/empty/\"unattributed\") AND zero cost AND zero defect/gate signal (gate_fires, caught_false_completions, every findings_by_severity bucket all 0) is written to the local economics log but is NOT POSTed to the console, even when the console relay is enabled and an endpoint is configured",
+      "value": "pass",
+      "createdAt": "2026-07-07T14:41:51Z",
+      "updatedAt": "2026-07-07T14:41:51Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "economics-relay-unattributed-suppression-ac2-a-record-with-real-task-slug-attribution-or-real-cost-cost-estimated-cost-usd-0-or-any-real-defect-gate-signal-gate-fires-0-caught-false-completions-0-or-any-findings-by-severity-bucket-0-even-with-the-other-two-signal-categories-absent-still-relays-to-the-console-unchanged-byte-identical-to-current-behavior.flow-agents-workflow.ac2-a-record-with-real-task-slug-attribution-or-real-cost-cost-estimated-cost-usd-0-or-any-real-defect-gate-signal-gate-fires-0-caught-false-completions-0-or-any-findings-by-severity-bucket-0-even-with-the-other-two-signal-categories-absent-still-relays-to-the-console-unchanged-byte-identical-to-current-behavior",
+      "subjectType": "flow-step",
+      "subjectId": "economics-relay-unattributed-suppression/ac2-a-record-with-real-task-slug-attribution-or-real-cost-cost-estimated-cost-usd-0-or-any-real-defect-gate-signal-gate-fires-0-caught-false-completions-0-or-any-findings-by-severity-bucket-0-even-with-the-other-two-signal-categories-absent-still-relays-to-the-console-unchanged-byte-identical-to-current-behavior",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC2: a record with real task-slug attribution, OR real cost (cost.estimated_cost_usd > 0), OR any real defect/gate signal (gate_fires>0, caught_false_completions>0, or any findings_by_severity bucket >0) - even with the other two signal categories absent - still relays to the console unchanged, byte-identical to current behavior",
+      "value": "pass",
+      "createdAt": "2026-07-07T14:41:51Z",
+      "updatedAt": "2026-07-07T14:41:51Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "economics-relay-unattributed-suppression-ac3-the-economics-record-integration-eval-lane-passes-end-to-end-including-all-pre-existing-cases-golden-parity-phase-sum-invariant-injection-escaping-fail-open-config-driven-activation-opt-out-plus-the-new-suppression-non-suppression-cases.flow-agents-workflow.ac3-the-economics-record-integration-eval-lane-passes-end-to-end-including-all-pre-existing-cases-golden-parity-phase-sum-invariant-injection-escaping-fail-open-config-driven-activation-opt-out-plus-the-new-suppression-non-suppression-cases",
+      "subjectType": "flow-step",
+      "subjectId": "economics-relay-unattributed-suppression/ac3-the-economics-record-integration-eval-lane-passes-end-to-end-including-all-pre-existing-cases-golden-parity-phase-sum-invariant-injection-escaping-fail-open-config-driven-activation-opt-out-plus-the-new-suppression-non-suppression-cases",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC3: the economics-record integration eval lane passes end-to-end, including all pre-existing cases (golden parity, phase-sum invariant, injection escaping, fail-open, config-driven activation/opt-out) plus the new suppression/non-suppression cases",
+      "value": "pass",
+      "createdAt": "2026-07-07T14:41:51Z",
+      "updatedAt": "2026-07-07T14:41:51Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "economics-relay-unattributed-suppression-ac4-the-config-sh-mirror-invariant-and-the-rest-of-the-source-tree-contract-stay-green-economics-record-sh-is-confirmed-not-a-mirrored-file-so-no-context-copy-needs-updating-and-telemetry-sh-lib-config-sh-which-are-mirrored-are-left-untouched-by-this-change.flow-agents-workflow.ac4-the-config-sh-mirror-invariant-and-the-rest-of-the-source-tree-contract-stay-green-economics-record-sh-is-confirmed-not-a-mirrored-file-so-no-context-copy-needs-updating-and-telemetry-sh-lib-config-sh-which-are-mirrored-are-left-untouched-by-this-change",
+      "subjectType": "flow-step",
+      "subjectId": "economics-relay-unattributed-suppression/ac4-the-config-sh-mirror-invariant-and-the-rest-of-the-source-tree-contract-stay-green-economics-record-sh-is-confirmed-not-a-mirrored-file-so-no-context-copy-needs-updating-and-telemetry-sh-lib-config-sh-which-are-mirrored-are-left-untouched-by-this-change",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "AC4: the config.sh mirror invariant and the rest of the source-tree contract stay green - economics-record.sh is confirmed NOT a mirrored file so no context/ copy needs updating, and telemetry.sh/lib/config.sh which ARE mirrored are left untouched by this change",
+      "value": "pass",
+      "createdAt": "2026-07-07T14:41:51Z",
+      "updatedAt": "2026-07-07T14:41:51Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.verify.tests",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:economics-relay-unattributed-suppression-ac1-suppression-genuinely-empty-record.flow-agents-workflow.ac1-genuinely-empty-record-unattributed-0-no-tokens-no-defects-gate-local-write-happens-console-post-suppressed-verified-via-evals-integration-test-economics-record-sh-suppression-case-1-pass-and-fault-injection-flipping-guard-to-suppress-on-real-signal-correctly-made-case-1-continue-to-pass-while-cases-1b-2-4-5-6-failed-proving-the-guard-genuinely-discriminates",
+      "claimId": "economics-relay-unattributed-suppression-ac1-suppression-genuinely-empty-record.flow-agents-workflow.ac1-genuinely-empty-record-unattributed-0-no-tokens-no-defects-gate-local-write-happens-console-post-suppressed-verified-via-evals-integration-test-economics-record-sh-suppression-case-1-pass-and-fault-injection-flipping-guard-to-suppress-on-real-signal-correctly-made-case-1-continue-to-pass-while-cases-1b-2-4-5-6-failed-proving-the-guard-genuinely-discriminates",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "economics-relay-unattributed-suppression/evidence.json",
+      "excerptOrSummary": "AC1: genuinely-empty record (unattributed, $0, no tokens, no defects/gate) -> local write happens, console POST suppressed. Verified via evals/integration/test_economics_record.sh suppression case 1 (PASS) and fault-injection (flipping guard to suppress-on-real-signal correctly made case 1 continue to pass while cases 1b/2/4/5/6 failed, proving the guard genuinely discriminates).",
+      "observedAt": "2026-07-07T14:41:51Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_economics_record.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:economics-relay-unattributed-suppression-ac2-real-signal-still-relays.flow-agents-workflow.ac2-real-attribution-case-2-real-cost-case-3-real-tokens-with-null-0-cost-on-unpriced-model-case-1b-and-each-defect-gate-signal-leg-alone-cases-4-gate-fires-5-caught-false-completions-6-findings-by-severity-all-still-relay-unchanged-verified-via-evals-integration-test-economics-record-sh-all-6-cases-pass-plus-4-mandatory-fault-injections-that-each-broke-a-specific-leg-and-were-caught-by-the-suite-1-wrong-field-token-leg-case-1b-failed-as-expected-3-dropped-caught-false-completions-leg-case-5-failed-as-expected-4-flipped-guard-to-suppress-whenever-cost-0-cases-1b-2-4-5-6-all-failed-as-expected-all-injections-reverted-file-hash-confirmed-identical-to-original-20ea58da2e63af636f20c44a6e0319b0-after-each-revert",
+      "claimId": "economics-relay-unattributed-suppression-ac2-real-signal-still-relays.flow-agents-workflow.ac2-real-attribution-case-2-real-cost-case-3-real-tokens-with-null-0-cost-on-unpriced-model-case-1b-and-each-defect-gate-signal-leg-alone-cases-4-gate-fires-5-caught-false-completions-6-findings-by-severity-all-still-relay-unchanged-verified-via-evals-integration-test-economics-record-sh-all-6-cases-pass-plus-4-mandatory-fault-injections-that-each-broke-a-specific-leg-and-were-caught-by-the-suite-1-wrong-field-token-leg-case-1b-failed-as-expected-3-dropped-caught-false-completions-leg-case-5-failed-as-expected-4-flipped-guard-to-suppress-whenever-cost-0-cases-1b-2-4-5-6-all-failed-as-expected-all-injections-reverted-file-hash-confirmed-identical-to-original-20ea58da2e63af636f20c44a6e0319b0-after-each-revert",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "economics-relay-unattributed-suppression/evidence.json",
+      "excerptOrSummary": "AC2: real attribution (case 2), real cost (case 3), real tokens with null/0 cost on unpriced model (case 1b), and each defect/gate signal leg alone (cases 4 gate_fires, 5 caught_false_completions, 6 findings_by_severity) all still relay unchanged. Verified via evals/integration/test_economics_record.sh (all 6 cases PASS) plus 4 mandatory fault injections that each broke a specific leg and were CAUGHT by the suite: (1) wrong-field token leg -> case 1b FAILED as expected; (3) dropped caught_false_completions leg -> case 5 FAILED as expected; (4) flipped guard to suppress whenever cost==0 -> cases 1b/2/4/5/6 all FAILED as expected. All injections reverted; file hash confirmed identical to original (20ea58da2e63af636f20c44a6e0319b0) after each revert.",
+      "observedAt": "2026-07-07T14:41:51Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_economics_record.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:economics-relay-unattributed-suppression-ac3-integration-eval-passes-end-to-end.flow-agents-workflow.ac3-evals-integration-test-economics-record-sh-passes-end-to-end-98-pass-0-fail-exit-0-includes-golden-parity-phase-sum-invariant-injection-escaping-ac7-fail-open-disabled-telemetry-config-driven-activation-opt-out-469-and-all-7-new-suppression-guard-cases-1-1b-2-3-4-5-6",
+      "claimId": "economics-relay-unattributed-suppression-ac3-integration-eval-passes-end-to-end.flow-agents-workflow.ac3-evals-integration-test-economics-record-sh-passes-end-to-end-98-pass-0-fail-exit-0-includes-golden-parity-phase-sum-invariant-injection-escaping-ac7-fail-open-disabled-telemetry-config-driven-activation-opt-out-469-and-all-7-new-suppression-guard-cases-1-1b-2-3-4-5-6",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "economics-relay-unattributed-suppression/evidence.json",
+      "excerptOrSummary": "AC3: evals/integration/test_economics_record.sh passes end-to-end: 98 [PASS], 0 [FAIL], exit 0. Includes golden-parity, phase-sum invariant, injection-escaping, AC7 fail-open/disabled-telemetry, config-driven activation/opt-out (#469), AND all 7 new suppression-guard cases (1, 1b, 2, 3, 4, 5, 6).",
+      "observedAt": "2026-07-07T14:41:51Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_economics_record.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:economics-relay-unattributed-suppression-ac4-mirror-invariant-and-source-tree-contract.flow-agents-workflow.ac4-npm-run-validate-source-passes-source-tree-validation-passed-src-tools-validate-source-tree-ts-mirroredfiles-map-confirms-economics-record-sh-is-not-a-mirrored-entry-no-context-copy-exists-find-returned-nothing-the-two-mirrored-files-this-change-is-adjacent-to-scripts-telemetry-telemetry-sh-and-scripts-telemetry-lib-config-sh-are-untouched-by-this-diff-git-diff-stat-shows-0-changes-to-either-and-remain-byte-identical-to-their-context-mirrors",
+      "claimId": "economics-relay-unattributed-suppression-ac4-mirror-invariant-and-source-tree-contract.flow-agents-workflow.ac4-npm-run-validate-source-passes-source-tree-validation-passed-src-tools-validate-source-tree-ts-mirroredfiles-map-confirms-economics-record-sh-is-not-a-mirrored-entry-no-context-copy-exists-find-returned-nothing-the-two-mirrored-files-this-change-is-adjacent-to-scripts-telemetry-telemetry-sh-and-scripts-telemetry-lib-config-sh-are-untouched-by-this-diff-git-diff-stat-shows-0-changes-to-either-and-remain-byte-identical-to-their-context-mirrors",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "economics-relay-unattributed-suppression/evidence.json",
+      "excerptOrSummary": "AC4: npm run validate:source passes (Source tree validation passed). src/tools/validate-source-tree.ts mirroredFiles map confirms economics-record.sh is NOT a mirrored entry (no context/ copy exists — find returned nothing). The two mirrored files this change is adjacent to, scripts/telemetry/telemetry.sh and scripts/telemetry/lib/config.sh, are untouched by this diff (git diff --stat shows 0 changes to either) and remain byte-identical to their context/ mirrors.",
+      "observedAt": "2026-07-07T14:41:51Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:economics-relay-unattributed-suppression-coverage-gap-fail-open-direction-untested.flow-agents-workflow.coverage-gap-not-an-ac-failure-fault-injecting-the-fail-open-guard-itself-reverting-if-jq-rc-eq-0-has-signal-false-to-if-has-signal-true-which-changes-behavior-only-when-the-internal-jq-call-fails-returns-non-true-false-was-not-caught-by-evals-integration-test-economics-record-sh-the-suite-still-reported-all-checks-passed-after-this-mutation-root-cause-the-suite-has-no-black-box-way-to-force-the-guard-s-internal-jq-call-to-fail-because-record-is-always-well-formed-json-assembled-by-the-emitter-s-own-earlier-jq-filter-there-is-no-injectable-malformed-record-path-through-the-emitter-s-public-cli-interface-usage-event-state-critique-args-manually-reproduced-the-semantic-difference-directly-against-jq-jq-rc-5-has-signal-empty-on-a-simulated-jq-failure-original-guard-logic-relay-correct-fail-open-mutated-guard-logic-suppress-silently-drops-a-real-record-on-internal-guard-failure-this-is-a-real-disclosed-test-coverage-gap-on-the-fail-open-direction-specifically-not-a-defect-in-the-shipped-guard-manual-repro-confirms-the-shipped-code-is-fail-open-as-designed-and-not-a-failure-of-ac1-ac4-as-written",
+      "claimId": "economics-relay-unattributed-suppression-coverage-gap-fail-open-direction-untested.flow-agents-workflow.coverage-gap-not-an-ac-failure-fault-injecting-the-fail-open-guard-itself-reverting-if-jq-rc-eq-0-has-signal-false-to-if-has-signal-true-which-changes-behavior-only-when-the-internal-jq-call-fails-returns-non-true-false-was-not-caught-by-evals-integration-test-economics-record-sh-the-suite-still-reported-all-checks-passed-after-this-mutation-root-cause-the-suite-has-no-black-box-way-to-force-the-guard-s-internal-jq-call-to-fail-because-record-is-always-well-formed-json-assembled-by-the-emitter-s-own-earlier-jq-filter-there-is-no-injectable-malformed-record-path-through-the-emitter-s-public-cli-interface-usage-event-state-critique-args-manually-reproduced-the-semantic-difference-directly-against-jq-jq-rc-5-has-signal-empty-on-a-simulated-jq-failure-original-guard-logic-relay-correct-fail-open-mutated-guard-logic-suppress-silently-drops-a-real-record-on-internal-guard-failure-this-is-a-real-disclosed-test-coverage-gap-on-the-fail-open-direction-specifically-not-a-defect-in-the-shipped-guard-manual-repro-confirms-the-shipped-code-is-fail-open-as-designed-and-not-a-failure-of-ac1-ac4-as-written",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "economics-relay-unattributed-suppression/evidence.json",
+      "excerptOrSummary": "COVERAGE GAP (not an AC failure): fault-injecting the fail-open guard itself (reverting `if [[ $jq_rc -eq 0 && \"$has_signal\" == \"false\" ]]` to `if [[ \"$has_signal\" != \"true\" ]]`, which changes behavior only when the internal jq call fails/returns non-\"true\"/\"false\") was NOT caught by evals/integration/test_economics_record.sh -- the suite still reported all checks passed after this mutation. Root cause: the suite has no black-box way to force the guard's internal jq call to fail, because `$record` is always well-formed JSON assembled by the emitter's own earlier jq filter -- there is no injectable malformed-record path through the emitter's public CLI interface (usage_event/--state/--critique args). Manually reproduced the semantic difference directly against jq (jq_rc=5, has_signal=empty on a simulated jq failure): original guard logic -> RELAY (correct fail-open); mutated guard logic -> SUPPRESS (silently drops a real record on internal guard failure). This is a real, disclosed test-coverage gap on the fail-open direction specifically, not a defect in the shipped guard (manual repro confirms the shipped code is fail-open as designed) and not a failure of AC1-AC4 as written.",
+      "observedAt": "2026-07-07T14:41:51Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": false,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_economics_record.sh (mutation not caught; manual jq repro confirms semantic difference)",
+        "isError": true
+      }
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.test:test_output",
+      "claimType": "workflow.check.test",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.test claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.verify.tests:test_output",
+      "claimType": "builder.verify.tests",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.tests claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.verify.tests:attestation",
+      "claimType": "builder.verify.tests",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.tests claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.verify.tests",
+      "claimType": "builder.verify.tests",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.verify.tests claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:economics-relay-unattributed-suppression-ac1-suppression-genuinely-empty-record.flow-agents-workflow.ac1-genuinely-empty-record-unattributed-0-no-tokens-no-defects-gate-local-write-happens-console-post-suppressed-verified-via-evals-integration-test-economics-record-sh-suppression-case-1-pass-and-fault-injection-flipping-guard-to-suppress-on-real-signal-correctly-made-case-1-continue-to-pass-while-cases-1b-2-4-5-6-failed-proving-the-guard-genuinely-discriminates",
+      "claimId": "economics-relay-unattributed-suppression-ac1-suppression-genuinely-empty-record.flow-agents-workflow.ac1-genuinely-empty-record-unattributed-0-no-tokens-no-defects-gate-local-write-happens-console-post-suppressed-verified-via-evals-integration-test-economics-record-sh-suppression-case-1-pass-and-fault-injection-flipping-guard-to-suppress-on-real-signal-correctly-made-case-1-continue-to-pass-while-cases-1b-2-4-5-6-failed-proving-the-guard-genuinely-discriminates",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:economics-relay-unattributed-suppression-ac1-suppression-genuinely-empty-record.flow-agents-workflow.ac1-genuinely-empty-record-unattributed-0-no-tokens-no-defects-gate-local-write-happens-console-post-suppressed-verified-via-evals-integration-test-economics-record-sh-suppression-case-1-pass-and-fault-injection-flipping-guard-to-suppress-on-real-signal-correctly-made-case-1-continue-to-pass-while-cases-1b-2-4-5-6-failed-proving-the-guard-genuinely-discriminates"
+      ],
+      "createdAt": "2026-07-07T14:41:51Z",
+      "verifiedAt": "2026-07-07T14:41:51Z"
+    },
+    {
+      "id": "evt:economics-relay-unattributed-suppression-ac2-real-signal-still-relays.flow-agents-workflow.ac2-real-attribution-case-2-real-cost-case-3-real-tokens-with-null-0-cost-on-unpriced-model-case-1b-and-each-defect-gate-signal-leg-alone-cases-4-gate-fires-5-caught-false-completions-6-findings-by-severity-all-still-relay-unchanged-verified-via-evals-integration-test-economics-record-sh-all-6-cases-pass-plus-4-mandatory-fault-injections-that-each-broke-a-specific-leg-and-were-caught-by-the-suite-1-wrong-field-token-leg-case-1b-failed-as-expected-3-dropped-caught-false-completions-leg-case-5-failed-as-expected-4-flipped-guard-to-suppress-whenever-cost-0-cases-1b-2-4-5-6-all-failed-as-expected-all-injections-reverted-file-hash-confirmed-identical-to-original-20ea58da2e63af636f20c44a6e0319b0-after-each-revert",
+      "claimId": "economics-relay-unattributed-suppression-ac2-real-signal-still-relays.flow-agents-workflow.ac2-real-attribution-case-2-real-cost-case-3-real-tokens-with-null-0-cost-on-unpriced-model-case-1b-and-each-defect-gate-signal-leg-alone-cases-4-gate-fires-5-caught-false-completions-6-findings-by-severity-all-still-relay-unchanged-verified-via-evals-integration-test-economics-record-sh-all-6-cases-pass-plus-4-mandatory-fault-injections-that-each-broke-a-specific-leg-and-were-caught-by-the-suite-1-wrong-field-token-leg-case-1b-failed-as-expected-3-dropped-caught-false-completions-leg-case-5-failed-as-expected-4-flipped-guard-to-suppress-whenever-cost-0-cases-1b-2-4-5-6-all-failed-as-expected-all-injections-reverted-file-hash-confirmed-identical-to-original-20ea58da2e63af636f20c44a6e0319b0-after-each-revert",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:economics-relay-unattributed-suppression-ac2-real-signal-still-relays.flow-agents-workflow.ac2-real-attribution-case-2-real-cost-case-3-real-tokens-with-null-0-cost-on-unpriced-model-case-1b-and-each-defect-gate-signal-leg-alone-cases-4-gate-fires-5-caught-false-completions-6-findings-by-severity-all-still-relay-unchanged-verified-via-evals-integration-test-economics-record-sh-all-6-cases-pass-plus-4-mandatory-fault-injections-that-each-broke-a-specific-leg-and-were-caught-by-the-suite-1-wrong-field-token-leg-case-1b-failed-as-expected-3-dropped-caught-false-completions-leg-case-5-failed-as-expected-4-flipped-guard-to-suppress-whenever-cost-0-cases-1b-2-4-5-6-all-failed-as-expected-all-injections-reverted-file-hash-confirmed-identical-to-original-20ea58da2e63af636f20c44a6e0319b0-after-each-revert"
+      ],
+      "createdAt": "2026-07-07T14:41:51Z",
+      "verifiedAt": "2026-07-07T14:41:51Z"
+    },
+    {
+      "id": "evt:economics-relay-unattributed-suppression-ac3-integration-eval-passes-end-to-end.flow-agents-workflow.ac3-evals-integration-test-economics-record-sh-passes-end-to-end-98-pass-0-fail-exit-0-includes-golden-parity-phase-sum-invariant-injection-escaping-ac7-fail-open-disabled-telemetry-config-driven-activation-opt-out-469-and-all-7-new-suppression-guard-cases-1-1b-2-3-4-5-6",
+      "claimId": "economics-relay-unattributed-suppression-ac3-integration-eval-passes-end-to-end.flow-agents-workflow.ac3-evals-integration-test-economics-record-sh-passes-end-to-end-98-pass-0-fail-exit-0-includes-golden-parity-phase-sum-invariant-injection-escaping-ac7-fail-open-disabled-telemetry-config-driven-activation-opt-out-469-and-all-7-new-suppression-guard-cases-1-1b-2-3-4-5-6",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:economics-relay-unattributed-suppression-ac3-integration-eval-passes-end-to-end.flow-agents-workflow.ac3-evals-integration-test-economics-record-sh-passes-end-to-end-98-pass-0-fail-exit-0-includes-golden-parity-phase-sum-invariant-injection-escaping-ac7-fail-open-disabled-telemetry-config-driven-activation-opt-out-469-and-all-7-new-suppression-guard-cases-1-1b-2-3-4-5-6"
+      ],
+      "createdAt": "2026-07-07T14:41:51Z",
+      "verifiedAt": "2026-07-07T14:41:51Z"
+    },
+    {
+      "id": "evt:economics-relay-unattributed-suppression-ac4-mirror-invariant-and-source-tree-contract.flow-agents-workflow.ac4-npm-run-validate-source-passes-source-tree-validation-passed-src-tools-validate-source-tree-ts-mirroredfiles-map-confirms-economics-record-sh-is-not-a-mirrored-entry-no-context-copy-exists-find-returned-nothing-the-two-mirrored-files-this-change-is-adjacent-to-scripts-telemetry-telemetry-sh-and-scripts-telemetry-lib-config-sh-are-untouched-by-this-diff-git-diff-stat-shows-0-changes-to-either-and-remain-byte-identical-to-their-context-mirrors",
+      "claimId": "economics-relay-unattributed-suppression-ac4-mirror-invariant-and-source-tree-contract.flow-agents-workflow.ac4-npm-run-validate-source-passes-source-tree-validation-passed-src-tools-validate-source-tree-ts-mirroredfiles-map-confirms-economics-record-sh-is-not-a-mirrored-entry-no-context-copy-exists-find-returned-nothing-the-two-mirrored-files-this-change-is-adjacent-to-scripts-telemetry-telemetry-sh-and-scripts-telemetry-lib-config-sh-are-untouched-by-this-diff-git-diff-stat-shows-0-changes-to-either-and-remain-byte-identical-to-their-context-mirrors",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:economics-relay-unattributed-suppression-ac4-mirror-invariant-and-source-tree-contract.flow-agents-workflow.ac4-npm-run-validate-source-passes-source-tree-validation-passed-src-tools-validate-source-tree-ts-mirroredfiles-map-confirms-economics-record-sh-is-not-a-mirrored-entry-no-context-copy-exists-find-returned-nothing-the-two-mirrored-files-this-change-is-adjacent-to-scripts-telemetry-telemetry-sh-and-scripts-telemetry-lib-config-sh-are-untouched-by-this-diff-git-diff-stat-shows-0-changes-to-either-and-remain-byte-identical-to-their-context-mirrors"
+      ],
+      "createdAt": "2026-07-07T14:41:51Z",
+      "verifiedAt": "2026-07-07T14:41:51Z"
+    },
+    {
+      "id": "evt:economics-relay-unattributed-suppression-ac1-an-economics-record-with-no-real-task-slug-attribution-task-slug-null-empty-unattributed-and-zero-cost-and-zero-defect-gate-signal-gate-fires-caught-false-completions-every-findings-by-severity-bucket-all-0-is-written-to-the-local-economics-log-but-is-not-posted-to-the-console-even-when-the-console-relay-is-enabled-and-an-endpoint-is-configured.flow-agents-workflow.ac1-an-economics-record-with-no-real-task-slug-attribution-task-slug-null-empty-unattributed-and-zero-cost-and-zero-defect-gate-signal-gate-fires-caught-false-completions-every-findings-by-severity-bucket-all-0-is-written-to-the-local-economics-log-but-is-not-posted-to-the-console-even-when-the-console-relay-is-enabled-and-an-endpoint-is-configured",
+      "claimId": "economics-relay-unattributed-suppression-ac1-an-economics-record-with-no-real-task-slug-attribution-task-slug-null-empty-unattributed-and-zero-cost-and-zero-defect-gate-signal-gate-fires-caught-false-completions-every-findings-by-severity-bucket-all-0-is-written-to-the-local-economics-log-but-is-not-posted-to-the-console-even-when-the-console-relay-is-enabled-and-an-endpoint-is-configured.flow-agents-workflow.ac1-an-economics-record-with-no-real-task-slug-attribution-task-slug-null-empty-unattributed-and-zero-cost-and-zero-defect-gate-signal-gate-fires-caught-false-completions-every-findings-by-severity-bucket-all-0-is-written-to-the-local-economics-log-but-is-not-posted-to-the-console-even-when-the-console-relay-is-enabled-and-an-endpoint-is-configured",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T14:41:51Z",
+      "verifiedAt": "2026-07-07T14:41:51Z"
+    },
+    {
+      "id": "evt:economics-relay-unattributed-suppression-ac2-a-record-with-real-task-slug-attribution-or-real-cost-cost-estimated-cost-usd-0-or-any-real-defect-gate-signal-gate-fires-0-caught-false-completions-0-or-any-findings-by-severity-bucket-0-even-with-the-other-two-signal-categories-absent-still-relays-to-the-console-unchanged-byte-identical-to-current-behavior.flow-agents-workflow.ac2-a-record-with-real-task-slug-attribution-or-real-cost-cost-estimated-cost-usd-0-or-any-real-defect-gate-signal-gate-fires-0-caught-false-completions-0-or-any-findings-by-severity-bucket-0-even-with-the-other-two-signal-categories-absent-still-relays-to-the-console-unchanged-byte-identical-to-current-behavior",
+      "claimId": "economics-relay-unattributed-suppression-ac2-a-record-with-real-task-slug-attribution-or-real-cost-cost-estimated-cost-usd-0-or-any-real-defect-gate-signal-gate-fires-0-caught-false-completions-0-or-any-findings-by-severity-bucket-0-even-with-the-other-two-signal-categories-absent-still-relays-to-the-console-unchanged-byte-identical-to-current-behavior.flow-agents-workflow.ac2-a-record-with-real-task-slug-attribution-or-real-cost-cost-estimated-cost-usd-0-or-any-real-defect-gate-signal-gate-fires-0-caught-false-completions-0-or-any-findings-by-severity-bucket-0-even-with-the-other-two-signal-categories-absent-still-relays-to-the-console-unchanged-byte-identical-to-current-behavior",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T14:41:51Z",
+      "verifiedAt": "2026-07-07T14:41:51Z"
+    },
+    {
+      "id": "evt:economics-relay-unattributed-suppression-ac3-the-economics-record-integration-eval-lane-passes-end-to-end-including-all-pre-existing-cases-golden-parity-phase-sum-invariant-injection-escaping-fail-open-config-driven-activation-opt-out-plus-the-new-suppression-non-suppression-cases.flow-agents-workflow.ac3-the-economics-record-integration-eval-lane-passes-end-to-end-including-all-pre-existing-cases-golden-parity-phase-sum-invariant-injection-escaping-fail-open-config-driven-activation-opt-out-plus-the-new-suppression-non-suppression-cases",
+      "claimId": "economics-relay-unattributed-suppression-ac3-the-economics-record-integration-eval-lane-passes-end-to-end-including-all-pre-existing-cases-golden-parity-phase-sum-invariant-injection-escaping-fail-open-config-driven-activation-opt-out-plus-the-new-suppression-non-suppression-cases.flow-agents-workflow.ac3-the-economics-record-integration-eval-lane-passes-end-to-end-including-all-pre-existing-cases-golden-parity-phase-sum-invariant-injection-escaping-fail-open-config-driven-activation-opt-out-plus-the-new-suppression-non-suppression-cases",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T14:41:51Z",
+      "verifiedAt": "2026-07-07T14:41:51Z"
+    },
+    {
+      "id": "evt:economics-relay-unattributed-suppression-ac4-the-config-sh-mirror-invariant-and-the-rest-of-the-source-tree-contract-stay-green-economics-record-sh-is-confirmed-not-a-mirrored-file-so-no-context-copy-needs-updating-and-telemetry-sh-lib-config-sh-which-are-mirrored-are-left-untouched-by-this-change.flow-agents-workflow.ac4-the-config-sh-mirror-invariant-and-the-rest-of-the-source-tree-contract-stay-green-economics-record-sh-is-confirmed-not-a-mirrored-file-so-no-context-copy-needs-updating-and-telemetry-sh-lib-config-sh-which-are-mirrored-are-left-untouched-by-this-change",
+      "claimId": "economics-relay-unattributed-suppression-ac4-the-config-sh-mirror-invariant-and-the-rest-of-the-source-tree-contract-stay-green-economics-record-sh-is-confirmed-not-a-mirrored-file-so-no-context-copy-needs-updating-and-telemetry-sh-lib-config-sh-which-are-mirrored-are-left-untouched-by-this-change.flow-agents-workflow.ac4-the-config-sh-mirror-invariant-and-the-rest-of-the-source-tree-contract-stay-green-economics-record-sh-is-confirmed-not-a-mirrored-file-so-no-context-copy-needs-updating-and-telemetry-sh-lib-config-sh-which-are-mirrored-are-left-untouched-by-this-change",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T14:41:51Z",
+      "verifiedAt": "2026-07-07T14:41:51Z"
+    }
+  ]
+}

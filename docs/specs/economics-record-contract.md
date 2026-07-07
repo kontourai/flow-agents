@@ -199,6 +199,51 @@ Because the record stream is immutable and tenant-stamped, shape evolution is a
    `FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY` and only when a console endpoint is configured.
 4. Every failure path is `exit 0`. The emitter only writes/relays a fact — it never mutates
    a kit, gate, or claim (render-don't-execute).
+5. **Unattributed/no-signal suppression** (economics-relay-unattributed-suppression): the local
+   write in step 2 is unconditional, but the console POST in step 3 is additionally suppressed —
+   the run's fact still lands in the local `economics.jsonl`, it just never reaches the console —
+   when the assembled record carries **none** of the following:
+
+   ```
+   suppress_relay =
+         (task_slug is null/empty/"unattributed")
+     AND (cost.estimated_cost_usd == 0)
+     AND (no token volume — cost.input_tokens + cost.output_tokens
+          + cost.cache_creation_input_tokens + cost.cache_read_input_tokens == 0)
+     AND (defects.gate_fires == 0)
+     AND (defects.caught_false_completions == 0)
+     AND (sum of defects.findings_by_severity.* == 0)
+   ```
+
+   Any one of real task attribution, real cost, real token volume, or a real defect/gate signal
+   is enough to still relay the record unchanged. The token-volume leg exists because cost
+   legitimately degrades to `0` on an unpriced/new model (see `scripts/telemetry/lib/usage.sh`'s
+   contract) while the transcript-ground-truth token counts remain a real signal — without this
+   leg, a real, unattributed, unpriced-model run with genuine token volume would be
+   indistinguishable from a truly-empty run and would be wrongly suppressed, dropping real ROI
+   data.
+
+   This guard exists because `telemetry.sh` invokes the emitter on every `session.usage` Stop
+   event once usage tracking is on, regardless of whether the run had an active Builder task —
+   with no `active_slug`, `task_slug` resolves to `null` (assembled as `state.task_slug // null`;
+   it is never the literal string `"unattributed"` as *data* — that literal is only how the
+   console *renders* a `null`/empty `task_slug` in its ROI view) and every `defects.*` field sits
+   at its zero default, so without this guard every no-task, no-signal run relayed a `null`
+   task_slug, `$0`-cost, zero-token, zero-defect record that diluted the console
+   `/api/economics` ROI view's `firstPassRate` and cost aggregates. The `!= "unattributed"` leg
+   in the predicate is harmless defense-in-depth (in case an upstream caller ever passes that
+   literal string), not a claim that the emitter itself produces it. `delegations[]`/`signals.*`
+   are deliberately excluded from the predicate — `--agents-dir` is only ever passed alongside
+   `--state`, so `delegations` is already `[]` whenever the other terms are at their zero
+   defaults.
+
+   **The guard itself fails OPEN toward relaying.** The suppress path only fires when jq
+   successfully evaluates the predicate above to an explicit `false` (a genuinely-empty record);
+   a jq/read failure (non-zero exit, or any output other than the literal `false`) falls through
+   and the record RELAYS unchanged — dropping a real record is worse than an extra empty one
+   reaching the console, so a guard failure never silently swallows real data. Set
+   `TELEMETRY_ECONOMICS_DEBUG=1` to log a one-line `economics-record: suppressing console relay
+   (...)` diagnostic to stderr whenever the guard actually suppresses a POST.
 
 ### Enabling the relay (config-driven, opt-out — #469)
 
