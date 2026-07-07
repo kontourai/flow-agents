@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0",
+  "slug": "kontourai-flow-agents-469",
+  "work_item": null,
+  "status": "verified",
+  "phase": "verification",
+  "sealed_at": "2026-07-07T06:17:16Z",
+  "commit_sha": "9945dfdf604cd9eaac637a28db49fb4e617a8de8",
+  "checkpoint": {
+    "asOf": "2026-07-07T06:17:16.494Z",
+    "statusByClaimId": {
+      "kontourai-flow-agents-469-economics-record-integration.flow-agents-workflow.registered-ci-lane-covers-ac1-ac2-ac4": "verified",
+      "kontourai-flow-agents-469-ac3-live-economics-nonzero.flow-agents-workflow.ac3-live-after-relay-went-active-get-api-economics-for-tenant-kontour-returns-runcount-2-with-real-data-task-kontourai-flow-agents-349-0-31-6-defects-caught-1-crit-2-high-1-med-2-low-1-caught-false-completion-3-gate-fires-funnel-2-runs-3-iterations-1-route-back-0-5-first-pass-45s-human-wait-economics-tab-renders-this-instead-of-the-empty-state": "verified",
+      "kontourai-flow-agents-469-ac1-econ-log-path-fixed-economics-record-sh-s-local-economics-log-lands-at.flow-agents-workflow.ac1-econ-log-path-fixed-economics-record-sh-s-local-economics-log-lands-at": "verified",
+      "kontourai-flow-agents-469-ac2-relay-config-wired-setting-a-console-telemetry-sink-via.flow-agents-workflow.ac2-relay-config-wired-setting-a-console-telemetry-sink-via": "verified",
+      "kontourai-flow-agents-469-ac3-live-economics-nonzero-after-a-builder-run-on-the-owner-machine-get.flow-agents-workflow.ac3-live-economics-nonzero-after-a-builder-run-on-the-owner-machine-get": "verified",
+      "kontourai-flow-agents-469-ac4-tenant-scoped-fail-open-idempotent-no-secrets-the-relay-is-tenant-scoped-record.flow-agents-workflow.ac4-tenant-scoped-fail-open-idempotent-no-secrets-the-relay-is-tenant-scoped-record": "verified"
+    },
+    "throughEventCreatedAt": "2026-07-07T06:16:20Z",
+    "throughEventCreatedAtByClaimId": {
+      "kontourai-flow-agents-469-economics-record-integration.flow-agents-workflow.registered-ci-lane-covers-ac1-ac2-ac4": "2026-07-07T06:16:20Z",
+      "kontourai-flow-agents-469-ac3-live-economics-nonzero.flow-agents-workflow.ac3-live-after-relay-went-active-get-api-economics-for-tenant-kontour-returns-runcount-2-with-real-data-task-kontourai-flow-agents-349-0-31-6-defects-caught-1-crit-2-high-1-med-2-low-1-caught-false-completion-3-gate-fires-funnel-2-runs-3-iterations-1-route-back-0-5-first-pass-45s-human-wait-economics-tab-renders-this-instead-of-the-empty-state": "2026-07-07T06:16:20Z",
+      "kontourai-flow-agents-469-ac1-econ-log-path-fixed-economics-record-sh-s-local-economics-log-lands-at.flow-agents-workflow.ac1-econ-log-path-fixed-economics-record-sh-s-local-economics-log-lands-at": "2026-07-07T06:16:20Z",
+      "kontourai-flow-agents-469-ac2-relay-config-wired-setting-a-console-telemetry-sink-via.flow-agents-workflow.ac2-relay-config-wired-setting-a-console-telemetry-sink-via": "2026-07-07T06:16:20Z",
+      "kontourai-flow-agents-469-ac3-live-economics-nonzero-after-a-builder-run-on-the-owner-machine-get.flow-agents-workflow.ac3-live-economics-nonzero-after-a-builder-run-on-the-owner-machine-get": "2026-07-07T06:16:20Z",
+      "kontourai-flow-agents-469-ac4-tenant-scoped-fail-open-idempotent-no-secrets-the-relay-is-tenant-scoped-record.flow-agents-workflow.ac4-tenant-scoped-fail-open-idempotent-no-secrets-the-relay-is-tenant-scoped-record": "2026-07-07T06:16:20Z"
+    },
+    "statusFunctionVersion": "2"
+  }
+}
