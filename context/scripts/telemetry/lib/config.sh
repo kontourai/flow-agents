@@ -110,8 +110,7 @@ FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL="${FLOW_AGENTS_CONSOLE_ECONOMICS_ENDP
 # distinguishes "operator said 0/1" from "key absent" for the default-on rule below.
 console_economics_relay_raw=""
 # Pricing registry source (consumed by lib/pricing.sh). Explicit file/URL win;
-# otherwise the URL is derived from the console below so all runtimes read one
-# live pricing source. Falls back to the bundled pricing.json offline.
+# otherwise lib/pricing.sh uses the bundled pricing.json offline.
 TELEMETRY_PRICING_FILE="${TELEMETRY_PRICING_FILE:-${FLOW_AGENTS_PRICING_FILE:-}}"
 TELEMETRY_PRICING_URL="${TELEMETRY_PRICING_URL:-${FLOW_AGENTS_PRICING_URL:-}}"
 
@@ -187,12 +186,8 @@ elif [[ -z "$FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY" \
   FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY=1
 fi
 
-# Derive the live pricing source from the console when not set explicitly, the
-# same way the transport derives /api/telemetry/records. One live source for
-# bash/Python/TS runtimes; lib/pricing.sh caches it and falls back to bundled.
-if [[ -z "${TELEMETRY_PRICING_URL:-}" && -n "${CONSOLE_TELEMETRY_URL:-}" ]]; then
-  TELEMETRY_PRICING_URL="${CONSOLE_TELEMETRY_URL%/}/api/telemetry/pricing"
-fi
+# Pricing URL is explicit-only (env or config). Do not derive the console
+# pricing endpoint by default; the bundled registry is the reliable offline floor.
 
 # Ensure directories exist
 mkdir -p "$TELEMETRY_DATA_DIR" "$TELEMETRY_SESSION_DIR" 2>/dev/null

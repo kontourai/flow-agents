@@ -296,6 +296,36 @@ else
   _fail "config.sh: explicit env expected '/tmp/explicit-telemetry.conf', got '$explicit_resolved'"
 fi
 
+_resolve_pricing_url() {
+  env -i PATH="$PATH" HOME="$FAKE_HOME" "$@" \
+    bash -c "source '$CONFIG_TEST_ROOT/scripts/telemetry/lib/config.sh' 2>/dev/null; printf '%s\n' \"\${TELEMETRY_PRICING_URL:-}\""
+}
+
+PRICING_EMPTY_CONF="$CONFIG_TEST_ROOT/pricing-empty.conf"
+: > "$PRICING_EMPTY_CONF"
+pricing_from_console=$(_resolve_pricing_url TELEMETRY_CONFIG_FILE="$PRICING_EMPTY_CONF" CONSOLE_TELEMETRY_URL="https://console.example.test")
+if [[ -z "$pricing_from_console" ]]; then
+  _pass "config.sh: console telemetry URL alone does not derive TELEMETRY_PRICING_URL (bundled default)"
+else
+  _fail "config.sh: expected no derived pricing URL from console URL alone, got '$pricing_from_console'"
+fi
+
+pricing_from_env=$(_resolve_pricing_url TELEMETRY_CONFIG_FILE="$PRICING_EMPTY_CONF" CONSOLE_TELEMETRY_URL="https://console.example.test" FLOW_AGENTS_PRICING_URL="https://pricing.example.test/registry.json")
+if [[ "$pricing_from_env" == "https://pricing.example.test/registry.json" ]]; then
+  _pass "config.sh: explicit FLOW_AGENTS_PRICING_URL remains honored"
+else
+  _fail "config.sh: expected explicit FLOW_AGENTS_PRICING_URL to win, got '$pricing_from_env'"
+fi
+
+PRICING_CONF="$CONFIG_TEST_ROOT/pricing-explicit.conf"
+printf '%s\n' 'console_pricing_url=https://pricing.example.test/from-config.json' > "$PRICING_CONF"
+pricing_from_config=$(_resolve_pricing_url TELEMETRY_CONFIG_FILE="$PRICING_CONF" CONSOLE_TELEMETRY_URL="https://console.example.test")
+if [[ "$pricing_from_config" == "https://pricing.example.test/from-config.json" ]]; then
+  _pass "config.sh: explicit console_pricing_url config remains honored"
+else
+  _fail "config.sh: expected console_pricing_url config to win, got '$pricing_from_config'"
+fi
+
 rm -rf "$CONFIG_TEST_ROOT"
 
 # --- 1c. Endpoint allowlist drop warning ---

@@ -73,6 +73,26 @@ else
   _fail "multi-model parse returned empty"
 fi
 
+# --- 2b. remote/cache fallback: invalid cache or failed remote uses bundled -
+price_cache_dir="$(mktemp -d)"
+printf '%s' '<html>console auth gate</html>' > "$price_cache_dir/flow-agents-pricing-cache.json"
+poisoned_cost=$(TMPDIR="$price_cache_dir" TELEMETRY_PRICING_FILE="" FLOW_AGENTS_PRICING_FILE="" TELEMETRY_PRICING_URL="http://127.0.0.1:1/api/telemetry/pricing" FLOW_AGENTS_PRICING_URL="" usage_parse_transcript "$tp" | jq '.estimated_cost_usd')
+poisoned_ver=$(TMPDIR="$price_cache_dir" TELEMETRY_PRICING_FILE="" FLOW_AGENTS_PRICING_FILE="" TELEMETRY_PRICING_URL="http://127.0.0.1:1/api/telemetry/pricing" FLOW_AGENTS_PRICING_URL="" pricing_registry | jq -r '.current_version')
+if [ "$poisoned_ver" = "2026-06-28" ] && [ "$(approx_eq "$poisoned_cost" 0.31)" = "true" ]; then
+  _pass "poisoned HTML pricing cache is ignored; bundled registry prices known models (cost=$poisoned_cost)"
+else
+  _fail "poisoned cache fallback expected bundled version/cost 0.31 (version=$poisoned_ver cost=$poisoned_cost)"
+fi
+rm -f "$price_cache_dir/flow-agents-pricing-cache.json" 2>/dev/null
+failed_remote_cost=$(TMPDIR="$price_cache_dir" TELEMETRY_PRICING_FILE="" FLOW_AGENTS_PRICING_FILE="" TELEMETRY_PRICING_URL="http://127.0.0.1:1/api/telemetry/pricing" FLOW_AGENTS_PRICING_URL="" usage_parse_transcript "$tp" | jq '.estimated_cost_usd')
+failed_remote_ver=$(TMPDIR="$price_cache_dir" TELEMETRY_PRICING_FILE="" FLOW_AGENTS_PRICING_FILE="" TELEMETRY_PRICING_URL="http://127.0.0.1:1/api/telemetry/pricing" FLOW_AGENTS_PRICING_URL="" pricing_registry | jq -r '.current_version')
+if [ "$failed_remote_ver" = "2026-06-28" ] && [ "$(approx_eq "$failed_remote_cost" 0.31)" = "true" ]; then
+  _pass "failed/401-style remote falls through to bundled registry with non-zero cost (cost=$failed_remote_cost)"
+else
+  _fail "failed remote fallback expected bundled version/cost 0.31 (version=$failed_remote_ver cost=$failed_remote_cost)"
+fi
+rm -rf "$price_cache_dir" 2>/dev/null
+
 # --- 3. empty / no-usage transcript ----------------------------------------
 empty="$(mktemp)"; echo '{"type":"user","message":{"content":"hi"}}' > "$empty"
 if usage_parse_transcript "$empty" >/dev/null 2>&1; then _fail "empty transcript should return non-zero"; else _pass "empty transcript → non-zero (null fallback)"; fi
