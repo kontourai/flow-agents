@@ -60,6 +60,29 @@ CHECKS=(
   "Utterance check integration|bash evals/integration/test_utterance_check.sh"
   "Pull work provider integration|bash evals/integration/test_pull_work_provider.sh"
   "Veritas governance kit integration|bash evals/integration/test_veritas_governance_kit.sh"
+  "Builder step producers integration|bash evals/integration/test_builder_step_producers.sh"
+  "Codex hook resolution integration|bash evals/integration/test_codex_hook_resolution.sh"
+  "Critique supersession roundtrip integration|bash evals/integration/test_critique_supersession_roundtrip.sh"
+  "Dual emit flow step integration|bash evals/integration/test_dual_emit_flow_step.sh"
+  "Evidence capture hook integration|bash evals/integration/test_evidence_capture_hook.sh"
+  "Exemption usage review integration|bash evals/integration/test_exemption_usage_review.sh"
+  "FlowDefinition session history preservation integration|bash evals/integration/test_flowdef_session_history_preservation.sh"
+  "Gate review inquiry records integration|bash evals/integration/test_gate_review_inquiry_records.sh"
+  "Install merge integration|bash evals/integration/test_install_merge.sh"
+  "Kit identity trust integration|bash evals/integration/test_kit_identity_trust.sh"
+  "Liveness worktree root integration|bash evals/integration/test_liveness_worktree_root.sh"
+  "Migrate local artifacts integration|bash evals/integration/test_migrate_local_artifacts.sh"
+  "Model routing escalation integration|bash evals/integration/test_model_routing_escalation.sh"
+  "Promote gate integration|bash evals/integration/test_promote_gate.sh"
+  "Pull work board integration|bash evals/integration/test_pull_work_board.sh"
+  "Routing efficiency integration|bash evals/integration/test_routing_efficiency.sh"
+  "Session resume roundtrip integration|bash evals/integration/test_session_resume_roundtrip.sh"
+  "Skill drift check integration|bash evals/integration/test_skill_drift_check.sh"
+  "Trust reconcile trailer diagnostic integration|bash evals/integration/test_trust_reconcile_trailer_diagnostic.sh"
+  "Validate artifacts portability integration|bash evals/integration/test_validate_artifacts_portability.sh"
+  "Verify CLI integration|bash evals/integration/test_verify_cli.sh"
+  "Veritas governance adapter integration|bash evals/integration/test_veritas_governance_adapter.sh"
+  "Workspace settings integration|bash evals/integration/test_workspace_settings.sh"
   "Anti-gaming and trust suite|bash evals/ci/antigaming-suite.sh"
   "Usage feedback import integration|bash evals/integration/test_usage_feedback_import.sh"
   "Usage feedback outcomes integration|bash evals/integration/test_usage_feedback_outcomes.sh"
@@ -128,6 +151,32 @@ LANE_RUNTIME_AND_KIT=(
   "Anti-gaming and trust suite"
 )
 
+LANE_INTEGRATION_COVERAGE=(
+  "Builder step producers integration"
+  "Codex hook resolution integration"
+  "Critique supersession roundtrip integration"
+  "Dual emit flow step integration"
+  "Evidence capture hook integration"
+  "Exemption usage review integration"
+  "FlowDefinition session history preservation integration"
+  "Gate review inquiry records integration"
+  "Install merge integration"
+  "Kit identity trust integration"
+  "Liveness worktree root integration"
+  "Migrate local artifacts integration"
+  "Model routing escalation integration"
+  "Promote gate integration"
+  "Pull work board integration"
+  "Routing efficiency integration"
+  "Session resume roundtrip integration"
+  "Skill drift check integration"
+  "Trust reconcile trailer diagnostic integration"
+  "Validate artifacts portability integration"
+  "Verify CLI integration"
+  "Veritas governance adapter integration"
+  "Workspace settings integration"
+)
+
 LANE_USAGE_FEEDBACK=(
   "Usage feedback import integration"
   "Usage feedback outcomes integration"
@@ -142,10 +191,11 @@ slugify() {
 
 # WS8 (ADR 0020): the reconcile manifest is THIS registry, not a new file. Every entry
 # EMITTED below is a member of a REQUIRED LANE_* array (source-and-static, workflow-contracts,
-# runtime-and-kit), each of which gates a merge — so a manifest command is, by construction, a
-# required-lane command. The advisory LANE_USAGE_FEEDBACK lane (continue-on-error, non-blocking)
-# is EXCLUDED from the emit so a test_output claim can never reconcile against a non-gating
-# command. scripts/ci/trust-reconcile.js consumes this emit to resolve the manifest.
+# runtime-and-kit, integration-coverage), each of which gates a merge — so a manifest command
+# is, by construction, a required-lane command. The advisory LANE_USAGE_FEEDBACK lane
+# (continue-on-error, non-blocking) is EXCLUDED from the emit so a test_output claim can
+# never reconcile against a non-gating command. scripts/ci/trust-reconcile.js consumes this
+# emit to resolve the manifest.
 _json_str() {
   local s="$1"
   s="${s//\\/\\\\}"
@@ -164,6 +214,7 @@ _lanes_for_label() {
   for x in "${LANE_SOURCE_AND_STATIC[@]}"; do [[ "$x" == "$label" ]] && { out="${out}\"source-and-static\","; break; }; done
   for x in "${LANE_WORKFLOW_CONTRACTS[@]}"; do [[ "$x" == "$label" ]] && { out="${out}\"workflow-contracts\","; break; }; done
   for x in "${LANE_RUNTIME_AND_KIT[@]}"; do [[ "$x" == "$label" ]] && { out="${out}\"runtime-and-kit\","; break; }; done
+  for x in "${LANE_INTEGRATION_COVERAGE[@]}"; do [[ "$x" == "$label" ]] && { out="${out}\"integration-coverage\","; break; }; done
   printf '%s' "${out%,}"
 }
 
@@ -205,6 +256,9 @@ lane_labels() {
       ;;
     runtime-and-kit)
       printf '%s\n' "${LANE_RUNTIME_AND_KIT[@]}"
+      ;;
+    integration-coverage)
+      printf '%s\n' "${LANE_INTEGRATION_COVERAGE[@]}"
       ;;
     usage-feedback)
       printf '%s\n' "${LANE_USAGE_FEEDBACK[@]}"

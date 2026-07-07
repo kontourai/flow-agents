@@ -37,9 +37,9 @@ sha256_file() {
 # ─── Seed fixture ─────────────────────────────────────────────────────────────
 REPO="$TMPDIR_EVAL/repo"
 SLUG="test-slug-153"
-TASK_DIR="$REPO/.flow-agents/$SLUG"
+TASK_DIR="$REPO/.kontourai/flow-agents/$SLUG"
 mkdir -p "$TASK_DIR"
-mkdir -p "$REPO/.flow-agents/liveness"
+mkdir -p "$REPO/.kontourai/flow-agents/liveness"
 mkdir -p "$REPO/docs"
 
 printf '# Test Repo\n' > "$REPO/AGENTS.md"
@@ -98,7 +98,7 @@ cat > "$TASK_DIR/trust.bundle" << 'JSON'
 JSON
 
 # install.json — initial version
-cat > "$REPO/.flow-agents/install.json" << 'JSON'
+cat > "$REPO/.kontourai/flow-agents/install.json" << 'JSON'
 {
   "version": "v0.0.1",
   "installedAt": "2026-06-25T00:00:00Z",
@@ -107,10 +107,10 @@ cat > "$REPO/.flow-agents/install.json" << 'JSON'
 JSON
 
 # Liveness stream: fresh other-agent event (5 min ago, within 1800 s TTL)
-# and a self (local) event — self should NOT trigger a warning
+# and a self event — self should NOT trigger a warning
 FIVE_MIN_AGO="$(node -e "process.stdout.write(new Date(Date.now()-300000).toISOString().replace(/\\.\\d{3}Z$/,'Z'))")"
-printf '{"type":"claim","subjectId":"test-slug-153","actor":"other-agent","at":"%s","ttlSeconds":1800}\n' "$FIVE_MIN_AGO" > "$REPO/.flow-agents/liveness/events.jsonl"
-printf '{"type":"heartbeat","subjectId":"test-slug-153","actor":"local","at":"%s"}\n' "$FIVE_MIN_AGO" >> "$REPO/.flow-agents/liveness/events.jsonl"
+printf '{"type":"claim","subjectId":"test-slug-153","actor":"other-agent","at":"%s","ttlSeconds":1800}\n' "$FIVE_MIN_AGO" > "$REPO/.kontourai/flow-agents/liveness/events.jsonl"
+printf '{"type":"heartbeat","subjectId":"test-slug-153","actor":"self-actor","at":"%s"}\n' "$FIVE_MIN_AGO" >> "$REPO/.kontourai/flow-agents/liveness/events.jsonl"
 
 # ─── Snapshot checksums before hook run ───────────────────────────────────────
 CKSUM_STATE_BEFORE="$(sha256_file "$TASK_DIR/state.json")"
@@ -120,7 +120,7 @@ CKSUM_TRUST_BEFORE="$(sha256_file "$TASK_DIR/trust.bundle")"
 # ─── Hot-upgrade simulation: bump install.json version ───────────────────────
 node -e "
 const fs = require('fs');
-const f = '$REPO/.flow-agents/install.json';
+const f = '$REPO/.kontourai/flow-agents/install.json';
 const obj = JSON.parse(fs.readFileSync(f,'utf8'));
 obj.version = 'v0.0.2';
 fs.writeFileSync(f, JSON.stringify(obj, null, 2) + '\n');
@@ -128,7 +128,7 @@ fs.writeFileSync(f, JSON.stringify(obj, null, 2) + '\n');
 
 # ─── Run hook with SessionStart ───────────────────────────────────────────────
 if echo "{\"hook_event_name\":\"SessionStart\",\"cwd\":\"$REPO\"}" | \
-  FLOW_AGENTS_ACTOR="local" node "$ROOT/scripts/hooks/workflow-steering.js" > "$TMPDIR_EVAL/resume.out" 2>&1; then
+  FLOW_AGENTS_ACTOR="self-actor" node "$ROOT/scripts/hooks/workflow-steering.js" > "$TMPDIR_EVAL/resume.out" 2>&1; then
   _pass "hook exits 0 for SessionStart"
 else
   _fail "hook should exit 0 for SessionStart (exit $?)"
@@ -208,9 +208,9 @@ else
   _fail "other-agent actor missing from liveness warning"
 fi
 
-# Self-actor (local) should NOT appear as a liveness warning
-if ! grep -q "LIVENESS WARNING.*local\|local.*LIVENESS WARNING" "$TMPDIR_EVAL/resume.out"; then
-  _pass "self-actor (local) correctly excluded from liveness warning"
+# Self actor should NOT appear as a liveness warning
+if ! grep -q "LIVENESS WARNING.*self-actor\|self-actor.*LIVENESS WARNING" "$TMPDIR_EVAL/resume.out"; then
+  _pass "self-actor correctly excluded from liveness warning"
 else
   _fail "self-actor should not be warned in liveness advisory"
 fi
@@ -240,7 +240,7 @@ fi
 
 # ─── Negative: UserPromptSubmit should produce NO RESUME block ────────────────
 echo "{\"hook_event_name\":\"UserPromptSubmit\",\"cwd\":\"$REPO\",\"prompt\":\"continue\"}" | \
-  FLOW_AGENTS_ACTOR="local" node "$ROOT/scripts/hooks/workflow-steering.js" > "$TMPDIR_EVAL/prompt.out" 2>&1
+  FLOW_AGENTS_ACTOR="self-actor" node "$ROOT/scripts/hooks/workflow-steering.js" > "$TMPDIR_EVAL/prompt.out" 2>&1
 
 if ! grep -q "RESUME:" "$TMPDIR_EVAL/prompt.out"; then
   _pass "RESUME block absent for UserPromptSubmit (negative case)"
@@ -250,7 +250,7 @@ fi
 
 # ─── Negative: Empty liveness stream → no LIVENESS WARNING ───────────────────
 REPO2="$TMPDIR_EVAL/repo2"
-TASK_DIR2="$REPO2/.flow-agents/$SLUG"
+TASK_DIR2="$REPO2/.kontourai/flow-agents/$SLUG"
 mkdir -p "$TASK_DIR2"
 mkdir -p "$REPO2/docs"
 printf '# Test Repo 2\n' > "$REPO2/AGENTS.md"
@@ -262,7 +262,7 @@ printf 'test-slug-153--plan-work.md stub\n' > "$TASK_DIR2/test-slug-153--plan-wo
 # No liveness directory → empty stream
 
 echo "{\"hook_event_name\":\"SessionStart\",\"cwd\":\"$REPO2\"}" | \
-  FLOW_AGENTS_ACTOR="local" node "$ROOT/scripts/hooks/workflow-steering.js" > "$TMPDIR_EVAL/nolive.out" 2>&1
+  FLOW_AGENTS_ACTOR="self-actor" node "$ROOT/scripts/hooks/workflow-steering.js" > "$TMPDIR_EVAL/nolive.out" 2>&1
 
 if grep -q "RESUME:" "$TMPDIR_EVAL/nolive.out"; then
   _pass "RESUME block present when no liveness stream (absence case)"
@@ -284,12 +284,9 @@ fi
 # env, and assert that derived actor is excluded from LIVENESS WARNING while a
 # genuinely different actor is still reported.
 #
-# NOTE: this fixture seeds under ".kontourai/flow-agents/<slug>" (not
-# ".flow-agents/<slug>" as the REPO/REPO2 fixtures above do), because
+# This and the fixtures above seed under ".kontourai/flow-agents/<slug>", because
 # scripts/hooks/lib/local-artifact-paths.js's flowAgentsArtifactRootsForRead()
-# only reads ".kontourai/flow-agents" — pre-existing drift from the REPO/REPO2
-# fixtures above, unrelated to #287, out of scope for this task (see plan
-# artifact task 3.2 investigation notes).
+# reads the runtime artifact root, not durable ".flow-agents" config.
 REPO3="$TMPDIR_EVAL/repo3"
 SLUG3="test-slug-153-derived"
 TASK_DIR3="$REPO3/.kontourai/flow-agents/$SLUG3"

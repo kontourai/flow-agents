@@ -145,6 +145,8 @@ run_static() {
   echo ""
   bash "$EVAL_DIR/static/test_flowdef_codeowners_coverage.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/static/test_ci_integration_coverage.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/static/test_validate_source_kit_asset_scope.sh" || result=1
   echo ""
   bash "$EVAL_DIR/static/test_declared_scope_forms_documented.sh" || result=1
