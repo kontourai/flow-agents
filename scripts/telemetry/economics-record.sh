@@ -240,8 +240,20 @@ record="$(printf '%s' "$usage_event" | jq -c \
 [[ -z "$record" || "$record" == "null" ]] && exit 0
 
 # --- LOCAL-FIRST: append the record to the local economics log BEFORE any network attempt -----------
-# This write must happen and must NOT depend on the POST. TELEMETRY_DATA_DIR comes from config.sh.
-economics_log="${TELEMETRY_ECONOMICS_LOG_FILE:-${TELEMETRY_DATA_DIR:-${TELEMETRY_DIR}/../..}/.kontourai/telemetry/economics.jsonl}"
+# This write must happen and must NOT depend on the POST. TELEMETRY_DATA_DIR comes from config.sh
+# and is ALREADY the fully-qualified `.../.kontourai/telemetry` data dir (lib/config.sh:47), so only
+# `economics.jsonl` is appended to it here — do NOT re-append `.kontourai/telemetry/...` on top of an
+# already-fully-qualified TELEMETRY_DATA_DIR (that doubled the suffix, #469). The TELEMETRY_DIR-
+# relative last resort below only applies when TELEMETRY_DATA_DIR truly isn't set (config.sh failed
+# to source), in which case it legitimately needs the full `.kontourai/telemetry/economics.jsonl`
+# suffix since it resolves from the workspace root, not a data dir.
+if [[ -n "${TELEMETRY_ECONOMICS_LOG_FILE:-}" ]]; then
+  economics_log="$TELEMETRY_ECONOMICS_LOG_FILE"
+elif [[ -n "${TELEMETRY_DATA_DIR:-}" ]]; then
+  economics_log="${TELEMETRY_DATA_DIR}/economics.jsonl"
+else
+  economics_log="${TELEMETRY_DIR}/../../.kontourai/telemetry/economics.jsonl"
+fi
 mkdir -p "$(dirname "$economics_log")" 2>/dev/null || true
 printf '%s\n' "$record" >> "$economics_log" 2>/dev/null || true
 
@@ -252,9 +264,15 @@ case "${FLOW_AGENTS_CONSOLE_ECONOMICS_RELAY:-}" in
   *) exit 0 ;;
 esac
 
+# The economics ingress is the shared kind-routed `<origin>/records` endpoint — NOT the same path as
+# the telemetry endpoint (`.../api/telemetry/records`) — so CONSOLE_TELEMETRY_ENDPOINT_URL can only
+# contribute an origin here (its path is stripped), never be reused verbatim (#469 review).
 endpoint="${FLOW_AGENTS_CONSOLE_ECONOMICS_ENDPOINT_URL:-}"
 if [[ -z "$endpoint" ]]; then
   base="${FLOW_AGENTS_CONSOLE_URL:-${CONSOLE_TELEMETRY_URL:-${CONSOLE_URL:-}}}"
+  if [[ -z "$base" && -n "${CONSOLE_TELEMETRY_ENDPOINT_URL:-}" ]]; then
+    base="$(printf '%s' "$CONSOLE_TELEMETRY_ENDPOINT_URL" | sed -E 's#^(https?://[^/]+).*#\1#')"
+  fi
   [[ -z "$base" ]] && exit 0
   endpoint="${base%/}/records"
 fi
