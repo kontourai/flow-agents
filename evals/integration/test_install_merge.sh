@@ -434,6 +434,36 @@ else
   _fail "--global: agents were not synced into global destination"
 fi
 
+# Regression guard (#439): --global must also write a per-skill-file sha256 content-hash
+# manifest, a sibling of install.json, so `flow-agents skill-drift-check` and the SessionStart
+# advisory have a baseline to classify installed skill files against.
+if node - "$GLOBAL_SETTINGS_DIR/.flow-agents/skills-manifest.json" << 'NODE'
+const fs = require("node:fs");
+const manifest = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!manifest.files || typeof manifest.files !== "object" || Object.keys(manifest.files).length === 0) throw new Error("skills-manifest.json files is empty: " + JSON.stringify(manifest.files));
+if (!manifest.generatedAt) throw new Error("skills-manifest.json missing generatedAt");
+if (manifest.runtime !== "claude-code") throw new Error("skills-manifest.json wrong runtime: " + manifest.runtime);
+console.log("ok: " + Object.keys(manifest.files).length + " files");
+NODE
+then
+  _pass "--global: skills-manifest.json written with non-empty files after install"
+else
+  _fail "--global: skills-manifest.json missing, empty, or invalid after install"
+fi
+
+# Re-run init --global: the manifest must regenerate (fresh generatedAt) without disturbing any
+# of the settings-merge, skill-sync, and agent-sync assertions already proven above in this scenario.
+FIRST_MANIFEST_GENERATED_AT=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$GLOBAL_SETTINGS_DIR/.flow-agents/skills-manifest.json','utf8')).generatedAt)" 2>/dev/null || echo "")
+FLOW_AGENTS_USER_CLAUDE_SETTINGS="$GLOBAL_SETTINGS_DIR/settings.json" \
+  node "$ROOT_DIR/build/src/cli.js" init --runtime claude-code --global --yes >/dev/null 2>&1 || true
+SECOND_MANIFEST_GENERATED_AT=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$GLOBAL_SETTINGS_DIR/.flow-agents/skills-manifest.json','utf8')).generatedAt)" 2>/dev/null || echo "")
+
+if [[ -n "$FIRST_MANIFEST_GENERATED_AT" && -n "$SECOND_MANIFEST_GENERATED_AT" && "$FIRST_MANIFEST_GENERATED_AT" != "$SECOND_MANIFEST_GENERATED_AT" ]]; then
+  _pass "--global: re-running init regenerates skills-manifest.json (generatedAt changed)"
+else
+  _fail "--global: skills-manifest.json generatedAt did not change on re-run (first=$FIRST_MANIFEST_GENERATED_AT second=$SECOND_MANIFEST_GENERATED_AT)"
+fi
+
 echo ""
 
 # ─── Scenario 6: Manual proof (user-visible) ─────────────────────────────────

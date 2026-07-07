@@ -28,6 +28,7 @@ const commands = [
   ["Claim lookup", "npm run workflow:sidecar -- claim <id> <dir>"],
   ["Context map drift", "npm run context-map:check"],
   ["Bundle build", "npm run build:bundles"],
+  ["Skill drift check", "flow-agents skill-drift-check"],
 ];
 
 function frontmatter(text: string): Record<string, string> {

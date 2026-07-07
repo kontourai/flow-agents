@@ -10,7 +10,7 @@ import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { activateCodexLocal } from "../runtime-adapters.js";
 import { main as buildBundles } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
-import { defaultCodexHome, durableInstallRecordPath } from "../lib/local-artifact-root.js";
+import { defaultCodexHome, durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
 
 type Runtime = "base" | "codex" | "claude-code" | "kiro" | "opencode" | "pi";
 type TelemetrySink = "local-files" | "local-kontour-console" | "kontour-hosted-console" | "user-hosted-console" | "kontour-cloud" | "hosted-kontour-console";
@@ -178,7 +178,7 @@ function defaultDest(runtime: Runtime): string {
   return process.cwd();
 }
 
-function globalDest(runtime: Runtime): string {
+export function globalDest(runtime: Runtime): string {
   if (runtime === "claude-code") {
     // Honor FLOW_AGENTS_USER_CLAUDE_SETTINGS for test isolation (same as checkScopeCollision).
     const override = process.env["FLOW_AGENTS_USER_CLAUDE_SETTINGS"];
@@ -276,7 +276,7 @@ function headlessOptions(argv: string[]): InitOptions {
   };
 }
 
-function ensureBundle(runtime: Runtime): string {
+export function ensureBundle(runtime: Runtime): string {
   const bundle = path.join(root, "dist", runtimeBundles[runtime]);
   if (!fs.existsSync(path.join(bundle, "install.sh"))) {
     const rc = buildBundles();
@@ -495,6 +495,28 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       fs.renameSync(recordTmp, recordPath);
       console.log(`Flow Agents global hooks merged for claude-code in ${options.dest}`);
       console.log(`Synced skills (+${skillsSync.added} new, ~${skillsSync.updated} updated) and agents (+${agentsSync.added} new, ~${agentsSync.updated} updated) in ${options.dest}`);
+      // Write a per-skill-file sha256 content-hash manifest, sibling of install.json, so
+      // `flow-agents skill-drift-check` and the SessionStart advisory can classify installed
+      // skill files as in_sync/kit_updated/user_modified/unbaselined/missing_install/kit_removed
+      // without re-deriving a second hashing convention (kontourai/flow-agents#439). This is an
+      // additive convenience feature layered on top of the install that already succeeded above
+      // (settings merge + skills/agents sync) — a failure writing this manifest must never fail
+      // the whole `init --global` run, so it is contained here: warn and continue.
+      try {
+        const skillDriftLibPath = path.join(root, "scripts", "hooks", "lib", "skill-drift.js");
+        const _requireSkillDrift = createRequire(import.meta.url);
+        const { buildManifest, writeManifestAtomic } = _requireSkillDrift(skillDriftLibPath) as {
+          buildManifest: (params: { skillsSourceDir: string; runtime: string }) => unknown;
+          writeManifestAtomic: (manifestPath: string, manifest: unknown) => void;
+        };
+        const skillsManifest = buildManifest({ skillsSourceDir: path.join(bundle, ".claude", "skills"), runtime: "claude-code" });
+        writeManifestAtomic(skillsManifestPath(options.dest), skillsManifest);
+      } catch (error) {
+        console.error(
+          `flow-agents init: WARNING: could not write skills drift-detection manifest: ${(error as Error).message} ` +
+            "(drift detection will report unbaselined until the next successful --global sync)."
+        );
+      }
       return 0;
     }
     // --global for opencode: merge FA opencode.json into the global opencode config dir.
