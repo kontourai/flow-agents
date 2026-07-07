@@ -1,0 +1,572 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "trust.checkpoint.json",
+      "digest": {
+        "sha256": "b228b6ab9329c25c8bb903c5ab907548240d55485f51ec520c117abaf2bdf15b"
+      }
+    }
+  ],
+  "predicateType": "https://hachure.org/v1/bundle",
+  "predicate": {
+    "schemaVersion": 5,
+    "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+    "claims": [
+      {
+        "id": "kontourai-flow-agents-352-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-352-scope-clear-issue-r1-r5-five-fixture-verifiable-acs-prereq-fa-349-delivered-worktree-isolation-recorded-for-concurrent-in-repo-session",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-352/gate-claim-selected-work",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "Selected kontourai/flow-agents#352: scope clear (issue R1-R5), five fixture-verifiable ACs, prereq fa#349 delivered, worktree isolation recorded for concurrent in-repo session.",
+        "value": "pass",
+        "createdAt": "2026-07-07T03:16:31Z",
+        "updatedAt": "2026-07-07T03:16:31Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-352/kontourai-flow-agents-352--pull-work.md",
+              "summary": "Pull-work artifact with selection, pickup probe, and worktree decision."
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "selected-work",
+            "claim_type": "builder.pull-work.selected",
+            "subject_type": "work-item",
+            "step_id": "pull-work"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-352-learning-review-proposals-integration.flow-agents-workflow.learning-review-proposals-integration-covers-ac1-ac5-plus-ledger-corruption-and-iso-8601-regressions-all-checks-passed",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-352/learning-review-proposals-integration",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Learning review proposals integration covers AC1-AC5 plus ledger corruption and ISO-8601 regressions; all checks passed.",
+        "value": "pass",
+        "createdAt": "2026-07-07T03:16:31Z",
+        "updatedAt": "2026-07-07T03:16:31Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "test"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-352-learning-review-proposals-shellcheck.flow-agents-workflow.shellcheck-passed-for-analyzer-decider-and-integration-test",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-352/learning-review-proposals-shellcheck",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Shellcheck passed for analyzer, decider, and integration test.",
+        "value": "pass",
+        "createdAt": "2026-07-07T03:16:31Z",
+        "updatedAt": "2026-07-07T03:16:31Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "lint"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-352-source-validation-context-map-and-ci-lane.flow-agents-workflow.repo-source-validation-context-map-drift-check-and-registered-ci-lane-check-passed-locally",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-352/source-validation-context-map-and-ci-lane",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Repo source validation, context-map drift check, and registered CI lane check passed locally.",
+        "value": "pass",
+        "createdAt": "2026-07-07T03:16:31Z",
+        "updatedAt": "2026-07-07T03:16:31Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "command"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-352-ac1-fixture-aggregates-match-hand-computed-per-kit-per-gate-values.flow-agents-workflow.ac1-r1-fixture-aggregates-match-hand-computed-per-kit-per-gate-values",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-352/ac1-fixture-aggregates-match-hand-computed-per-kit-per-gate-values",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "AC1 (R1): fixture aggregates match hand-computed per-kit/per-gate values",
+        "value": "pass",
+        "createdAt": "2026-07-07T03:16:31Z",
+        "updatedAt": "2026-07-07T03:16:31Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-352-ac2-engineered-pattern-fixture-yields-1-evidence-cited-proposal-balanced-fixture-yields-none.flow-agents-workflow.ac2-r2-engineered-pattern-fixture-yields-1-evidence-cited-proposal-paired-cost-defect-balanced-fixture-yields-none",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-352/ac2-engineered-pattern-fixture-yields-1-evidence-cited-proposal-balanced-fixture-yields-none",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "AC2 (R2): engineered pattern fixture yields >=1 evidence-cited proposal (paired cost+defect); balanced fixture yields none",
+        "value": "pass",
+        "createdAt": "2026-07-07T03:16:31Z",
+        "updatedAt": "2026-07-07T03:16:31Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-352-ac3-zero-mutation-to-kit-gate-flow-config-human-decision-recorded-before-follow-on-work-item.flow-agents-workflow.ac3-r3-zero-mutation-to-kit-gate-flow-config-human-decision-recorded-before-follow-on-work-item",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-352/ac3-zero-mutation-to-kit-gate-flow-config-human-decision-recorded-before-follow-on-work-item",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "AC3 (R3): zero mutation to kit/gate/flow config; human decision recorded before follow-on work item",
+        "value": "pass",
+        "createdAt": "2026-07-07T03:16:31Z",
+        "updatedAt": "2026-07-07T03:16:31Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-352-ac4-idempotent-over-same-window-explicit-insufficient-data-outcome-under-threshold.flow-agents-workflow.ac4-r4-idempotent-over-same-window-no-duplicate-proposals-explicit-insufficient-data-outcome-under-threshold",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-352/ac4-idempotent-over-same-window-explicit-insufficient-data-outcome-under-threshold",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "AC4 (R4): idempotent over same window (no duplicate proposals); explicit insufficient-data outcome under threshold",
+        "value": "pass",
+        "createdAt": "2026-07-07T03:16:31Z",
+        "updatedAt": "2026-07-07T03:16:31Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-352-ac5-proposal-trail-links-ratified-proposal-to-follow-on-item-and-later-observed-effect.flow-agents-workflow.ac5-r5-proposal-trail-links-ratified-proposal-to-follow-on-item-and-later-observed-effect",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-352/ac5-proposal-trail-links-ratified-proposal-to-follow-on-item-and-later-observed-effect",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "AC5 (R5): proposal trail links ratified proposal to follow-on item and later observed effect",
+        "value": "pass",
+        "createdAt": "2026-07-07T03:16:31Z",
+        "updatedAt": "2026-07-07T03:16:31Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-352-review.flow-agents-workflow.changes-requested-critical-learning-review-proposals-sh-silently-wipes-entire-ledger-incl-human-decisions-when-any-ledger-line-is-malformed-jq-s-failure-swallowed-substituted-mv-overwrites-high-to-epoch-ms-breaks-every-iso-8601-since-until-at-sub-z-00-00-makes-fromdateiso8601-fail-degrading-to-false-insufficient-data-contradicts-the-contract-s-own-honesty-guarantee-2-low-gate-dedup-by-value-tuple-negative-cost-trust-unnoted-clean-elsewhere-acs-pass-decide-sh-injection-safe-atomic-consume-never-fork-ci-triple-fixture-count-bump-verified-superseded-review-2026-07-07t03-14-22z-2026-07-07t02-54-15z",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-352/review",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "CHANGES_REQUESTED: CRITICAL learning-review-proposals.sh silently wipes entire ledger (incl. human decisions) when any ledger line is malformed (jq -s failure swallowed, [] substituted, mv overwrites); HIGH to_epoch_ms breaks every ISO-8601 --since/--until/.at (sub Z->+00:00 makes fromdateiso8601 fail) degrading to false insufficient-data — contradicts the contract's own honesty guarantee; 2 LOW (gate dedup by value tuple; negative-cost trust unnoted). Clean elsewhere: ACs pass, decide.sh injection-safe+atomic, consume-never-fork, CI triple, fixture-count bump verified.",
+        "value": "fail",
+        "createdAt": "2026-07-07T03:16:31Z",
+        "updatedAt": "2026-07-07T03:16:31Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:builder.execute.scope",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "tool-code-reviewer",
+          "reviewed_at": "2026-07-07T02:54:15Z",
+          "superseded_by": "review@2026-07-07T03:14:22Z"
+        },
+        "status": "superseded"
+      },
+      {
+        "id": "kontourai-flow-agents-352-review.flow-agents-workflow.pass-targeted-re-review-after-fixes-the-prior-critical-ledger-silent-wipe-is-covered-by-fail-loud-corrupted-ledger-regression-exit-nonzero-no-stdout-byte-identical-ledger-valid-ratified-entry-survives-the-prior-high-iso-8601-parsing-bug-is-covered-by-date-only-z-00-00-fractional-second-and-record-at-regressions-low-gate-dedup-now-uses-record-index-trust-docs-note-present-no-open-findings-superseded-review-2026-07-07t03-16-31z-2026-07-07t03-14-22z",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-352/review",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "PASS: targeted re-review after fixes. The prior CRITICAL ledger silent-wipe is covered by fail-loud corrupted-ledger regression (exit nonzero, no stdout, byte-identical ledger, valid ratified entry survives). The prior HIGH ISO-8601 parsing bug is covered by date-only, Z, +00:00, fractional-second, and record .at regressions. LOW gate dedup now uses record index; trust/docs note present. No open findings.",
+        "value": "pass",
+        "createdAt": "2026-07-07T03:16:31Z",
+        "updatedAt": "2026-07-07T03:16:31Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:builder.execute.scope",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "tool-code-reviewer",
+          "reviewed_at": "2026-07-07T03:14:22Z",
+          "superseded_by": "review@2026-07-07T03:16:31Z"
+        },
+        "status": "superseded"
+      },
+      {
+        "id": "kontourai-flow-agents-352-review.flow-agents-workflow.review-clean-after-3-iterations-critical-ledger-silent-wipe-fixed-fail-loud-zero-write-regression-pinned-high-medium-timestamp-parsing-fixed-date-only-z-00-00-fractional-all-parse-garbage-cli-args-fail-loud-pre-i-o-record-at-degrades-tolerantly-per-documented-contract-lows-fixed-index-keyed-dedup-trusted-inputs-note-injection-probes-against-cli-args-and-jq-program-assembly-defeated-static-program-text-arg-only-data-flow-86-86-eval-assertions-shellcheck-validate-source-clean",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-352/review",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Review CLEAN after 3 iterations: CRITICAL ledger silent-wipe fixed (fail-loud, zero-write, regression-pinned); HIGH+MEDIUM timestamp parsing fixed (date-only/Z/+00:00/fractional all parse; garbage CLI args fail loud pre-I/O; record .at degrades tolerantly per documented contract); LOWs fixed (index-keyed dedup, trusted-inputs note); injection probes against CLI args and jq program assembly defeated (static program text, --arg-only data flow); 86/86 eval assertions; shellcheck + validate:source clean.",
+        "value": "pass",
+        "createdAt": "2026-07-07T03:16:31Z",
+        "updatedAt": "2026-07-07T03:16:31Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:builder.execute.scope",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "tool-code-reviewer",
+          "reviewed_at": "2026-07-07T03:16:31Z"
+        },
+        "status": "verified"
+      }
+    ],
+    "evidence": [
+      {
+        "id": "ev:kontourai-flow-agents-352-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-352-scope-clear-issue-r1-r5-five-fixture-verifiable-acs-prereq-fa-349-delivered-worktree-isolation-recorded-for-concurrent-in-repo-session",
+        "claimId": "kontourai-flow-agents-352-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-352-scope-clear-issue-r1-r5-five-fixture-verifiable-acs-prereq-fa-349-delivered-worktree-isolation-recorded-for-concurrent-in-repo-session",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-352/evidence.json",
+        "excerptOrSummary": "Selected kontourai/flow-agents#352: scope clear (issue R1-R5), five fixture-verifiable ACs, prereq fa#349 delivered, worktree isolation recorded for concurrent in-repo session.",
+        "observedAt": "2026-07-07T03:16:31Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "grep -q 'kontourai/flow-agents#352' .kontourai/flow-agents/kontourai-flow-agents-352/kontourai-flow-agents-352--pull-work.md && grep -q 'selected_item_ids' .kontourai/flow-agents/kontourai-flow-agents-352/kontourai-flow-agents-352--pull-work.md",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-352-learning-review-proposals-integration.flow-agents-workflow.learning-review-proposals-integration-covers-ac1-ac5-plus-ledger-corruption-and-iso-8601-regressions-all-checks-passed",
+        "claimId": "kontourai-flow-agents-352-learning-review-proposals-integration.flow-agents-workflow.learning-review-proposals-integration-covers-ac1-ac5-plus-ledger-corruption-and-iso-8601-regressions-all-checks-passed",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-352/command-log.jsonl",
+        "excerptOrSummary": "Learning review proposals integration covers AC1-AC5 plus ledger corruption and ISO-8601 regressions; all checks passed.",
+        "observedAt": "2026-07-07T03:16:31Z",
+        "collectedBy": "flow-agents/evidence-capture",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_learning_review_proposals.sh",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-352-learning-review-proposals-shellcheck.flow-agents-workflow.shellcheck-passed-for-analyzer-decider-and-integration-test",
+        "claimId": "kontourai-flow-agents-352-learning-review-proposals-shellcheck.flow-agents-workflow.shellcheck-passed-for-analyzer-decider-and-integration-test",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-352/command-log.jsonl",
+        "excerptOrSummary": "Shellcheck passed for analyzer, decider, and integration test.",
+        "observedAt": "2026-07-07T03:16:31Z",
+        "collectedBy": "flow-agents/evidence-capture",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "shellcheck scripts/telemetry/learning-review-proposals.sh scripts/telemetry/learning-review-decide.sh evals/integration/test_learning_review_proposals.sh",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-352-source-validation-context-map-and-ci-lane.flow-agents-workflow.repo-source-validation-context-map-drift-check-and-registered-ci-lane-check-passed-locally",
+        "claimId": "kontourai-flow-agents-352-source-validation-context-map-and-ci-lane.flow-agents-workflow.repo-source-validation-context-map-drift-check-and-registered-ci-lane-check-passed-locally",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-352/evidence.json",
+        "excerptOrSummary": "Repo source validation, context-map drift check, and registered CI lane check passed locally.",
+        "observedAt": "2026-07-07T03:16:31Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "npm run validate:source -- && npm run context-map -- --check && bash evals/ci/run-baseline.sh --check learning-review-proposals-integration",
+          "isError": false
+        }
+      }
+    ],
+    "policies": [
+      {
+        "id": "policy:workflow.check.external:attestation",
+        "claimType": "workflow.check.external",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.external claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.pull-work.selected:attestation",
+        "claimType": "builder.pull-work.selected",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.pull-work.selected claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.check.test:test_output",
+        "claimType": "workflow.check.test",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.test claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.execute.scope:test_output",
+        "claimType": "builder.execute.scope",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.execute.scope claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.check.lint:test_output",
+        "claimType": "workflow.check.lint",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.lint claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.check.command:test_output",
+        "claimType": "workflow.check.command",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.command claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.acceptance.criterion",
+        "claimType": "workflow.acceptance.criterion",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.acceptance.criterion claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.execute.scope",
+        "claimType": "builder.execute.scope",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.execute.scope claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.critique.review",
+        "claimType": "workflow.critique.review",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.critique.review claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "medium"
+      }
+    ],
+    "events": [
+      {
+        "id": "evt:kontourai-flow-agents-352-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-352-scope-clear-issue-r1-r5-five-fixture-verifiable-acs-prereq-fa-349-delivered-worktree-isolation-recorded-for-concurrent-in-repo-session",
+        "claimId": "kontourai-flow-agents-352-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-352-scope-clear-issue-r1-r5-five-fixture-verifiable-acs-prereq-fa-349-delivered-worktree-isolation-recorded-for-concurrent-in-repo-session",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-352-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-352-scope-clear-issue-r1-r5-five-fixture-verifiable-acs-prereq-fa-349-delivered-worktree-isolation-recorded-for-concurrent-in-repo-session"
+        ],
+        "createdAt": "2026-07-07T03:16:31Z",
+        "verifiedAt": "2026-07-07T03:16:31Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-352-learning-review-proposals-integration.flow-agents-workflow.learning-review-proposals-integration-covers-ac1-ac5-plus-ledger-corruption-and-iso-8601-regressions-all-checks-passed",
+        "claimId": "kontourai-flow-agents-352-learning-review-proposals-integration.flow-agents-workflow.learning-review-proposals-integration-covers-ac1-ac5-plus-ledger-corruption-and-iso-8601-regressions-all-checks-passed",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-352-learning-review-proposals-integration.flow-agents-workflow.learning-review-proposals-integration-covers-ac1-ac5-plus-ledger-corruption-and-iso-8601-regressions-all-checks-passed"
+        ],
+        "createdAt": "2026-07-07T03:16:31Z",
+        "verifiedAt": "2026-07-07T03:16:31Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-352-learning-review-proposals-shellcheck.flow-agents-workflow.shellcheck-passed-for-analyzer-decider-and-integration-test",
+        "claimId": "kontourai-flow-agents-352-learning-review-proposals-shellcheck.flow-agents-workflow.shellcheck-passed-for-analyzer-decider-and-integration-test",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-352-learning-review-proposals-shellcheck.flow-agents-workflow.shellcheck-passed-for-analyzer-decider-and-integration-test"
+        ],
+        "createdAt": "2026-07-07T03:16:31Z",
+        "verifiedAt": "2026-07-07T03:16:31Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-352-source-validation-context-map-and-ci-lane.flow-agents-workflow.repo-source-validation-context-map-drift-check-and-registered-ci-lane-check-passed-locally",
+        "claimId": "kontourai-flow-agents-352-source-validation-context-map-and-ci-lane.flow-agents-workflow.repo-source-validation-context-map-drift-check-and-registered-ci-lane-check-passed-locally",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-352-source-validation-context-map-and-ci-lane.flow-agents-workflow.repo-source-validation-context-map-drift-check-and-registered-ci-lane-check-passed-locally"
+        ],
+        "createdAt": "2026-07-07T03:16:31Z",
+        "verifiedAt": "2026-07-07T03:16:31Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-352-ac1-fixture-aggregates-match-hand-computed-per-kit-per-gate-values.flow-agents-workflow.ac1-r1-fixture-aggregates-match-hand-computed-per-kit-per-gate-values",
+        "claimId": "kontourai-flow-agents-352-ac1-fixture-aggregates-match-hand-computed-per-kit-per-gate-values.flow-agents-workflow.ac1-r1-fixture-aggregates-match-hand-computed-per-kit-per-gate-values",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-07T03:16:31Z",
+        "verifiedAt": "2026-07-07T03:16:31Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-352-ac2-engineered-pattern-fixture-yields-1-evidence-cited-proposal-balanced-fixture-yields-none.flow-agents-workflow.ac2-r2-engineered-pattern-fixture-yields-1-evidence-cited-proposal-paired-cost-defect-balanced-fixture-yields-none",
+        "claimId": "kontourai-flow-agents-352-ac2-engineered-pattern-fixture-yields-1-evidence-cited-proposal-balanced-fixture-yields-none.flow-agents-workflow.ac2-r2-engineered-pattern-fixture-yields-1-evidence-cited-proposal-paired-cost-defect-balanced-fixture-yields-none",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-07T03:16:31Z",
+        "verifiedAt": "2026-07-07T03:16:31Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-352-ac3-zero-mutation-to-kit-gate-flow-config-human-decision-recorded-before-follow-on-work-item.flow-agents-workflow.ac3-r3-zero-mutation-to-kit-gate-flow-config-human-decision-recorded-before-follow-on-work-item",
+        "claimId": "kontourai-flow-agents-352-ac3-zero-mutation-to-kit-gate-flow-config-human-decision-recorded-before-follow-on-work-item.flow-agents-workflow.ac3-r3-zero-mutation-to-kit-gate-flow-config-human-decision-recorded-before-follow-on-work-item",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-07T03:16:31Z",
+        "verifiedAt": "2026-07-07T03:16:31Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-352-ac4-idempotent-over-same-window-explicit-insufficient-data-outcome-under-threshold.flow-agents-workflow.ac4-r4-idempotent-over-same-window-no-duplicate-proposals-explicit-insufficient-data-outcome-under-threshold",
+        "claimId": "kontourai-flow-agents-352-ac4-idempotent-over-same-window-explicit-insufficient-data-outcome-under-threshold.flow-agents-workflow.ac4-r4-idempotent-over-same-window-no-duplicate-proposals-explicit-insufficient-data-outcome-under-threshold",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-07T03:16:31Z",
+        "verifiedAt": "2026-07-07T03:16:31Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-352-ac5-proposal-trail-links-ratified-proposal-to-follow-on-item-and-later-observed-effect.flow-agents-workflow.ac5-r5-proposal-trail-links-ratified-proposal-to-follow-on-item-and-later-observed-effect",
+        "claimId": "kontourai-flow-agents-352-ac5-proposal-trail-links-ratified-proposal-to-follow-on-item-and-later-observed-effect.flow-agents-workflow.ac5-r5-proposal-trail-links-ratified-proposal-to-follow-on-item-and-later-observed-effect",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-07T03:16:31Z",
+        "verifiedAt": "2026-07-07T03:16:31Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-352-review.flow-agents-workflow.review-clean-after-3-iterations-critical-ledger-silent-wipe-fixed-fail-loud-zero-write-regression-pinned-high-medium-timestamp-parsing-fixed-date-only-z-00-00-fractional-all-parse-garbage-cli-args-fail-loud-pre-i-o-record-at-degrades-tolerantly-per-documented-contract-lows-fixed-index-keyed-dedup-trusted-inputs-note-injection-probes-against-cli-args-and-jq-program-assembly-defeated-static-program-text-arg-only-data-flow-86-86-eval-assertions-shellcheck-validate-source-clean",
+        "claimId": "kontourai-flow-agents-352-review.flow-agents-workflow.review-clean-after-3-iterations-critical-ledger-silent-wipe-fixed-fail-loud-zero-write-regression-pinned-high-medium-timestamp-parsing-fixed-date-only-z-00-00-fractional-all-parse-garbage-cli-args-fail-loud-pre-i-o-record-at-degrades-tolerantly-per-documented-contract-lows-fixed-index-keyed-dedup-trusted-inputs-note-injection-probes-against-cli-args-and-jq-program-assembly-defeated-static-program-text-arg-only-data-flow-86-86-eval-assertions-shellcheck-validate-source-clean",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-07T03:16:31Z",
+        "verifiedAt": "2026-07-07T03:16:31Z"
+      }
+    ]
+  }
+}
