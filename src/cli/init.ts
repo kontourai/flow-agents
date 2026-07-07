@@ -11,6 +11,8 @@ import { activateCodexLocal } from "../runtime-adapters.js";
 import { main as buildBundles } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
 import { durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
+import { runConsoleConnectWizard, describeConsoleStatus, buildPostInstallSummaryLines } from "../lib/console-connect-options.js";
+import { buildReport } from "./telemetry-doctor.js";
 
 type Runtime = "base" | "codex" | "claude-code" | "kiro" | "opencode" | "pi";
 type TelemetrySink = "local-files" | "local-kontour-console" | "kontour-hosted-console" | "user-hosted-console" | "kontour-cloud" | "hosted-kontour-console";
@@ -26,6 +28,14 @@ type InitOptions = {
   consoleTenant?: string;
   telemetrySinks: TelemetrySink[];
   activateKits: boolean;
+  // Informational only -- never read by installBundle()/install-console-config.sh
+  // (not part of the install writer contract). Set when the runtime was not
+  // given via an explicit --runtime flag/typed answer and the layered
+  // detector (detectRuntimeFromProcessEnv/detectRuntimeFromFilesystem)
+  // actually matched a signal, for the post-install summary's
+  // "(auto-detected)" annotation. headlessOptions() itself never sets this
+  // (untouched) -- main() merges it onto the headless result separately.
+  runtimeAutoDetected?: boolean;
 };
 
 const runtimeBundles: Record<Runtime, string> = {
@@ -203,6 +213,24 @@ export function detectDefaultRuntime(
   return "base";
 }
 
+/**
+ * Returns the runtime the layered detector actually matched (env signal
+ * first, then an unambiguous filesystem probe), or "unknown" if neither
+ * fired. Distinct from `detectDefaultRuntime()`, which additionally falls
+ * back to `"base"` when detection is unknown -- the post-install summary's
+ * "(auto-detected)" annotation needs to distinguish "detection fired" from
+ * "detection defaulted to base," which `detectDefaultRuntime()`'s return
+ * value alone cannot express.
+ */
+function detectedRuntimeSignal(
+  env: NodeJS.ProcessEnv = process.env,
+  homedir: string = os.homedir(),
+): Runtime | "unknown" {
+  const fromEnv = detectRuntimeFromProcessEnv(env);
+  if (fromEnv !== "unknown") return fromEnv;
+  return detectRuntimeFromFilesystem(homedir, env);
+}
+
 function normalizeTelemetrySink(value: string): TelemetrySink {
   if (value === "local-files" || value === "local-kontour-console" || value === "kontour-hosted-console" || value === "user-hosted-console" || value === "kontour-cloud" || value === "hosted-kontour-console") return value;
   throw new Error(`unknown telemetry sink '${value}'`);
@@ -219,6 +247,26 @@ function telemetrySinksFromFlags(flags: ReturnType<typeof parseArgs>["flags"]): 
 
 function needsConsoleCredentials(sinks: TelemetrySink[]): boolean {
   return sinks.some((sink) => sink !== "local-files");
+}
+
+const DEFAULT_HOSTED_CONSOLE_URL = "https://console.kontourai.io";
+const DEFAULT_LOCAL_CONSOLE_URL = "http://127.0.0.1:3737";
+
+/**
+ * Resolve one of `console-presets.sh`'s bash functions (by name) against the
+ * source root, so the interactive wizard's printed defaults are never a
+ * second hardcoded literal competing with the one bash source of truth
+ * (itself overridable via FLOW_AGENTS_KONTOUR_CLOUD_CONSOLE_URL /
+ * FLOW_AGENTS_LOCAL_KONTOUR_CONSOLE_URL, depending on which function is
+ * named). `fallback` is only a defensive floor for the rare case the
+ * subprocess produces no output (e.g. an unreadable source tree) -- it is not
+ * a second default.
+ */
+function presetConsoleUrl(bashFnName: string, fallback: string): string {
+  const scriptPath = path.join(root, "scripts", "telemetry", "console-presets.sh");
+  const result = spawnSync("bash", ["-c", `source "${scriptPath}" && ${bashFnName}`], { encoding: "utf8" });
+  const stdout = (result.stdout ?? "").trim();
+  return stdout || fallback;
 }
 
 async function questionHidden(prompt: string): Promise<string> {
@@ -301,28 +349,98 @@ function parseYesNo(value: string, fallback: boolean): boolean {
   return fallback;
 }
 
+type ConsoleConnectGatherResult = {
+  telemetrySinks: TelemetrySink[];
+  consoleUrl: string | undefined;
+  consoleTokenValue: string | undefined;
+  consoleTenant: string | undefined;
+};
+
+/**
+ * Console-connect sink/credential gathering for interactiveOptions(),
+ * extracted as a pure refactor (identical behavior, identical returned
+ * shape) so interactiveOptions() itself stays a thin top-level orchestration.
+ * Covers both branches of "did the caller already give --telemetry-sink(s)
+ * on argv":
+ *  - sinkFlagsGiven: the guided wizard is bypassed entirely (same as the old
+ *    hidden sinkAnswer skip); only whichever of URL/token/tenant was not
+ *    already supplied via flag gets its own prompt.
+ *  - not given: the full guided wizard runs, with askWithFlagOverrides /
+ *    askHiddenWithFlagOverrides short-circuiting any individual sub-prompt
+ *    whose answer was already supplied via flag -- same flag-wins precedence
+ *    as the sinkFlagsGiven branch, just applied per-sub-prompt instead of
+ *    skipping the whole wizard.
+ * Flag-wins-over-prompt precedence is unchanged from before this wizard
+ * existed.
+ */
+async function gatherConsoleConnectOptions(
+  rl: ReturnType<typeof createInterface>,
+  args: ReturnType<typeof parseArgs>,
+  consoleTokenFile: string | undefined,
+): Promise<ConsoleConnectGatherResult> {
+  const sinkFlagsGiven = flagList(args.flags, "telemetry-sink").length > 0 || flagList(args.flags, "telemetry-sinks").length > 0;
+  const consoleUrlFlag = flagString(args.flags, "console-url");
+  const consoleTenantFlag = flagString(args.flags, "console-tenant") ?? flagString(args.flags, "console-tenant-id");
+
+  if (sinkFlagsGiven) {
+    const telemetrySinks = telemetrySinksFromFlags(args.flags);
+    const needsUserHostedUrl = telemetrySinks.includes("user-hosted-console") || telemetrySinks.includes("hosted-kontour-console");
+    const consoleUrl = consoleUrlFlag ?? (needsUserHostedUrl ? await rl.question("User-hosted Console URL: ") : undefined);
+    const consoleTokenValue = consoleTokenFile ? undefined : (needsConsoleCredentials(telemetrySinks) ? await questionHidden("Console telemetry token (blank to skip): ") : undefined);
+    const consoleTenant = consoleTenantFlag ?? (needsConsoleCredentials(telemetrySinks) ? await rl.question("Console tenant ID (blank to skip): ") : undefined);
+    return { telemetrySinks, consoleUrl, consoleTokenValue, consoleTenant };
+  }
+
+  const askWithFlagOverrides = async (prompt: string): Promise<string> => {
+    if (prompt.includes("Self-hosted Console URL") && consoleUrlFlag !== undefined) return consoleUrlFlag;
+    if (prompt.includes("Console tenant ID") && consoleTenantFlag !== undefined) return consoleTenantFlag;
+    return rl.question(prompt);
+  };
+  const askHiddenWithFlagOverrides = async (prompt: string): Promise<string> => {
+    if (consoleTokenFile) return "";
+    return questionHidden(prompt);
+  };
+  const wizardResult = await runConsoleConnectWizard(
+    { ask: askWithFlagOverrides, askHidden: askHiddenWithFlagOverrides },
+    {
+      hostedUrl: presetConsoleUrl("flow_agents_kontour_hosted_console_url", DEFAULT_HOSTED_CONSOLE_URL),
+      localUrl: presetConsoleUrl("flow_agents_local_kontour_console_url", DEFAULT_LOCAL_CONSOLE_URL),
+    },
+  );
+  for (const warning of wizardResult.warnings) console.warn(`flow-agents init: ${warning}`);
+  return {
+    telemetrySinks: wizardResult.telemetrySinks,
+    consoleUrl: consoleUrlFlag ?? wizardResult.consoleUrl,
+    consoleTokenValue: consoleTokenFile ? undefined : wizardResult.consoleTokenValue,
+    consoleTenant: consoleTenantFlag ?? wizardResult.consoleTenant,
+  };
+}
+
 async function interactiveOptions(argv: string[]): Promise<InitOptions> {
   const args = parseArgs(argv);
   const rl = createInterface({ input, output });
   try {
-    const runtimeDefault = normalizeRuntime(flagString(args.flags, "runtime")) ?? detectDefaultRuntime();
-    const runtimeAnswer = flagString(args.flags, "runtime") ?? await rl.question(`Runtime [${runtimeDefault}]: `);
-    const runtime = normalizeRuntime(runtimeAnswer.trim() || runtimeDefault) ?? runtimeDefault;
+    const explicitRuntimeFlag = flagString(args.flags, "runtime");
+    const runtimeDefault = normalizeRuntime(explicitRuntimeFlag) ?? detectDefaultRuntime();
+    const runtimeAnswer = explicitRuntimeFlag ?? await rl.question(`Runtime [${runtimeDefault}]: `);
+    const runtimeAnswerTrimmed = runtimeAnswer.trim();
+    const runtime = normalizeRuntime(runtimeAnswerTrimmed || runtimeDefault) ?? runtimeDefault;
+    // "(auto-detected)" is only accurate when the runtime was neither an
+    // explicit --runtime flag nor a typed interactive answer AND the layered
+    // detector actually matched a signal (not merely defaulted to "base").
+    const runtimeAutoDetected = !explicitRuntimeFlag && !runtimeAnswerTrimmed && detectedRuntimeSignal() === runtime;
     const isGlobal = flagBool(args.flags, "global");
     const destBase = isGlobal ? globalDest(runtime) : defaultDest(runtime);
     const destDefault = flagString(args.flags, "dest", destBase) ?? destBase;
     const destAnswer = flagString(args.flags, "dest") ?? await rl.question(`Install destination [${destDefault}]: `);
-    const sinkDefault = telemetrySinksFromFlags(args.flags);
-    const sinkAnswer = flagList(args.flags, "telemetry-sink").length || flagList(args.flags, "telemetry-sinks").length
-      ? sinkDefault.join(",")
-      : await rl.question(`Telemetry sinks [${sinkDefault.join(",")}]: `);
-    const telemetrySinks = telemetrySinksFromValues([sinkAnswer || sinkDefault.join(",")]);
-    const needsUserHostedUrl = telemetrySinks.includes("user-hosted-console") || telemetrySinks.includes("hosted-kontour-console");
-    const consoleUrl = flagString(args.flags, "console-url") ?? (needsUserHostedUrl ? await rl.question("User-hosted Console URL: ") : undefined);
+
+    // Guided "Connect to Kontour Console?" wizard (Hosted/Local/Self-hosted/Skip)
+    // replaces the old hidden sink-keyword prompt -- see gatherConsoleConnectOptions
+    // for the flag-override / sink-flags-given branching.
     const consoleEndpoint = flagString(args.flags, "console-endpoint") ?? flagString(args.flags, "console-endpoint-url");
     const consoleTokenFile = flagString(args.flags, "console-token-file");
-    const consoleTokenValue = consoleTokenFile ? undefined : (needsConsoleCredentials(telemetrySinks) ? await questionHidden("Console telemetry token (blank to skip): ") : undefined);
-    const consoleTenant = flagString(args.flags, "console-tenant") ?? flagString(args.flags, "console-tenant-id") ?? (needsConsoleCredentials(telemetrySinks) ? await rl.question("Console tenant ID (blank to skip): ") : undefined);
+    const { telemetrySinks, consoleUrl, consoleTokenValue, consoleTenant } = await gatherConsoleConnectOptions(rl, args, consoleTokenFile);
+
     const activateDefault = false;
     const activateAnswer = flagBool(args.flags, "activate-kits")
       ? "yes"
@@ -331,6 +449,7 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
         : "no";
     return {
       runtime,
+      runtimeAutoDetected,
       global: isGlobal,
       dest: path.resolve(destAnswer.trim() || destDefault),
       consoleUrl: consoleUrl?.trim() || undefined,
@@ -507,6 +626,72 @@ function activateKits(options: InitOptions): number {
   return 0;
 }
 
+/**
+ * Headless counterpart of interactiveOptions()'s inline `runtimeAutoDetected`
+ * computation. headlessOptions() itself is untouched (see its doc note) --
+ * this is computed separately in main() and merged onto its result, so the
+ * "(auto-detected)" annotation applies to both install paths without adding
+ * a new required prompt or changing headlessOptions()'s own behavior.
+ */
+function headlessRuntimeAutoDetected(argv: string[]): boolean {
+  const args = parseArgs(argv);
+  if (flagString(args.flags, "runtime")) return false;
+  return detectedRuntimeSignal() !== "unknown";
+}
+
+/**
+ * G2 auto-verify + G3 post-install summary, shared by both the headless and
+ * interactive install paths (applies identically regardless of which one
+ * reached main()'s successful non-global install tail). Calls
+ * telemetry-doctor.ts's buildReport() in-process against the endpoint
+ * install-console-config.sh just wrote. Never allowed to change the exit
+ * code or hang the install: buildReport already has its own bounded default
+ * reachability timeout (2000ms unless overridden), and any thrown/rejected
+ * error here is caught and downgraded to a warning line only.
+ */
+async function printPostInstallSummary(options: InitOptions): Promise<void> {
+  let doctorConsole: {
+    sink: "local-only" | "console";
+    reachability: { checked: boolean; ok: boolean | null; error?: string; statusCode?: number };
+  } = { sink: "local-only", reachability: { checked: false, ok: null } };
+  let tokenConfigured = false;
+  let tenantConfigured = false;
+  try {
+    const report = await buildReport(["--dest", options.dest]);
+    doctorConsole = report.console;
+    tokenConfigured = report.console.tokenConfigured;
+    tenantConfigured = report.console.tenantConfigured;
+  } catch (error) {
+    console.warn(`flow-agents init: WARNING: could not verify the Console connection: ${(error as Error).message} (telemetry still installed; run 'flow-agents telemetry-doctor' to re-check).`);
+  }
+  const consoleStatus = describeConsoleStatus({ console: doctorConsole });
+  const nextSteps = [`Run your agent inside ${options.dest} -- Flow Agents hooks are already wired.`];
+  if (consoleStatus.status !== "local-only") {
+    nextSteps.push("Telemetry now flows to Kontour Console; visit the Console for ROI/economics views.");
+  }
+  // Only for the "reachability was never attempted" case (self-hosted/BYO
+  // HTTPS hosts default to not-allowed without --allow-network) -- never for
+  // local-only (nothing to verify) or the already-verified case (nothing left
+  // to do). doctorConsole.reachability.checked is the same raw signal
+  // describeConsoleStatus used to pick its NOT_CHECKED_DETAIL branch, so this
+  // stays in sync with that classifier without re-parsing its detail string.
+  if (consoleStatus.status === "connected-unverified" && doctorConsole.reachability.checked === false) {
+    nextSteps.push("Self-hosted/BYO Console reachability was not checked; run `flow-agents telemetry-doctor --allow-network` to verify it.");
+  }
+  nextSteps.push("Re-run `flow-agents init` anytime to reconfigure runtime, destination, or Console connection.");
+  const summaryLines = buildPostInstallSummaryLines({
+    runtime: options.runtime,
+    runtimeAutoDetected: Boolean(options.runtimeAutoDetected),
+    dest: options.dest,
+    telemetrySinks: options.telemetrySinks,
+    consoleStatus,
+    tokenConfigured,
+    tenantConfigured,
+    nextSteps,
+  });
+  for (const line of summaryLines) console.log(line);
+}
+
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (argv.includes("--help") || argv.includes("-h")) {
     usage();
@@ -514,7 +699,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   }
   const headless = argv.includes("--yes") || argv.includes("--headless") || !process.stdin.isTTY;
   try {
-    const options = headless ? headlessOptions(argv) : await interactiveOptions(argv);
+    const options = headless
+      ? { ...headlessOptions(argv), runtimeAutoDetected: headlessRuntimeAutoDetected(argv) }
+      : await interactiveOptions(argv);
     // Scope-collision check for claude-code: Claude Code merges user-level
     // (~/.claude/settings.json) and project-level (.claude/settings.json) settings
     // and runs ALL matching hooks from both files. If a user-level settings file
@@ -680,7 +867,12 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const bundle = ensureBundle(options.runtime);
     const installed = installBundle(bundle, options);
     if (installed !== 0) return installed;
-    return activateKits(options);
+    const activated = activateKits(options);
+    // G2/G3: shared post-install auto-verify + summary tail. Applies
+    // identically whether main() reached here via headlessOptions() or
+    // interactiveOptions() -- never changes `activated`'s exit code.
+    await printPostInstallSummary(options);
+    return activated;
   } catch (error) {
     console.error(`flow-agents init: ${(error as Error).message}`);
     return 2;

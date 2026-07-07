@@ -15,7 +15,7 @@ type Reachability = {
   error?: string;
 };
 
-type DoctorReport = {
+export type DoctorReport = {
   ok: boolean;
   destination: string;
   telemetry: {
@@ -198,7 +198,7 @@ function safeReportUrl(value: string): string | undefined {
   return parsed.toString();
 }
 
-async function buildReport(argv: string[]): Promise<DoctorReport> {
+export async function buildReport(argv: string[]): Promise<DoctorReport> {
   const args = parseArgs(argv);
   const allowNetwork = flagBool(args.flags, "allow-network");
   const dest = path.resolve(flagString(args.flags, "dest", process.cwd()) ?? process.cwd());
