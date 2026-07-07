@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "slug": "kontourai-flow-agents-352",
+  "work_item": null,
+  "status": "verified",
+  "phase": "verification",
+  "sealed_at": "2026-07-07T03:20:36Z",
+  "commit_sha": "4f828589dc70d6a25bfa609961968833106d58e4",
+  "checkpoint": {
+    "asOf": "2026-07-07T03:20:36.113Z",
+    "statusByClaimId": {
+      "kontourai-flow-agents-352-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-352-scope-clear-issue-r1-r5-five-fixture-verifiable-acs-prereq-fa-349-delivered-worktree-isolation-recorded-for-concurrent-in-repo-session": "verified",
+      "kontourai-flow-agents-352-learning-review-proposals-integration.flow-agents-workflow.learning-review-proposals-integration-covers-ac1-ac5-plus-ledger-corruption-and-iso-8601-regressions-all-checks-passed": "verified",
+      "kontourai-flow-agents-352-learning-review-proposals-shellcheck.flow-agents-workflow.shellcheck-passed-for-analyzer-decider-and-integration-test": "verified",
+      "kontourai-flow-agents-352-source-validation-context-map-and-ci-lane.flow-agents-workflow.repo-source-validation-context-map-drift-check-and-registered-ci-lane-check-passed-locally": "verified",
+      "kontourai-flow-agents-352-ac1-fixture-aggregates-match-hand-computed-per-kit-per-gate-values.flow-agents-workflow.ac1-r1-fixture-aggregates-match-hand-computed-per-kit-per-gate-values": "verified",
+      "kontourai-flow-agents-352-ac2-engineered-pattern-fixture-yields-1-evidence-cited-proposal-balanced-fixture-yields-none.flow-agents-workflow.ac2-r2-engineered-pattern-fixture-yields-1-evidence-cited-proposal-paired-cost-defect-balanced-fixture-yields-none": "verified",
+      "kontourai-flow-agents-352-ac3-zero-mutation-to-kit-gate-flow-config-human-decision-recorded-before-follow-on-work-item.flow-agents-workflow.ac3-r3-zero-mutation-to-kit-gate-flow-config-human-decision-recorded-before-follow-on-work-item": "verified",
+      "kontourai-flow-agents-352-ac4-idempotent-over-same-window-explicit-insufficient-data-outcome-under-threshold.flow-agents-workflow.ac4-r4-idempotent-over-same-window-no-duplicate-proposals-explicit-insufficient-data-outcome-under-threshold": "verified",
+      "kontourai-flow-agents-352-ac5-proposal-trail-links-ratified-proposal-to-follow-on-item-and-later-observed-effect.flow-agents-workflow.ac5-r5-proposal-trail-links-ratified-proposal-to-follow-on-item-and-later-observed-effect": "verified",
+      "kontourai-flow-agents-352-review.flow-agents-workflow.changes-requested-critical-learning-review-proposals-sh-silently-wipes-entire-ledger-incl-human-decisions-when-any-ledger-line-is-malformed-jq-s-failure-swallowed-substituted-mv-overwrites-high-to-epoch-ms-breaks-every-iso-8601-since-until-at-sub-z-00-00-makes-fromdateiso8601-fail-degrading-to-false-insufficient-data-contradicts-the-contract-s-own-honesty-guarantee-2-low-gate-dedup-by-value-tuple-negative-cost-trust-unnoted-clean-elsewhere-acs-pass-decide-sh-injection-safe-atomic-consume-never-fork-ci-triple-fixture-count-bump-verified-superseded-review-2026-07-07t03-14-22z-2026-07-07t02-54-15z": "proposed",
+      "kontourai-flow-agents-352-review.flow-agents-workflow.pass-targeted-re-review-after-fixes-the-prior-critical-ledger-silent-wipe-is-covered-by-fail-loud-corrupted-ledger-regression-exit-nonzero-no-stdout-byte-identical-ledger-valid-ratified-entry-survives-the-prior-high-iso-8601-parsing-bug-is-covered-by-date-only-z-00-00-fractional-second-and-record-at-regressions-low-gate-dedup-now-uses-record-index-trust-docs-note-present-no-open-findings-superseded-review-2026-07-07t03-16-31z-2026-07-07t03-14-22z": "proposed",
+      "kontourai-flow-agents-352-review.flow-agents-workflow.review-clean-after-3-iterations-critical-ledger-silent-wipe-fixed-fail-loud-zero-write-regression-pinned-high-medium-timestamp-parsing-fixed-date-only-z-00-00-fractional-all-parse-garbage-cli-args-fail-loud-pre-i-o-record-at-degrades-tolerantly-per-documented-contract-lows-fixed-index-keyed-dedup-trusted-inputs-note-injection-probes-against-cli-args-and-jq-program-assembly-defeated-static-program-text-arg-only-data-flow-86-86-eval-assertions-shellcheck-validate-source-clean": "verified"
+    },
+    "throughEventCreatedAt": "2026-07-07T03:16:31Z",
+    "throughEventCreatedAtByClaimId": {
+      "kontourai-flow-agents-352-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-352-scope-clear-issue-r1-r5-five-fixture-verifiable-acs-prereq-fa-349-delivered-worktree-isolation-recorded-for-concurrent-in-repo-session": "2026-07-07T03:16:31Z",
+      "kontourai-flow-agents-352-learning-review-proposals-integration.flow-agents-workflow.learning-review-proposals-integration-covers-ac1-ac5-plus-ledger-corruption-and-iso-8601-regressions-all-checks-passed": "2026-07-07T03:16:31Z",
+      "kontourai-flow-agents-352-learning-review-proposals-shellcheck.flow-agents-workflow.shellcheck-passed-for-analyzer-decider-and-integration-test": "2026-07-07T03:16:31Z",
+      "kontourai-flow-agents-352-source-validation-context-map-and-ci-lane.flow-agents-workflow.repo-source-validation-context-map-drift-check-and-registered-ci-lane-check-passed-locally": "2026-07-07T03:16:31Z",
+      "kontourai-flow-agents-352-ac1-fixture-aggregates-match-hand-computed-per-kit-per-gate-values.flow-agents-workflow.ac1-r1-fixture-aggregates-match-hand-computed-per-kit-per-gate-values": "2026-07-07T03:16:31Z",
+      "kontourai-flow-agents-352-ac2-engineered-pattern-fixture-yields-1-evidence-cited-proposal-balanced-fixture-yields-none.flow-agents-workflow.ac2-r2-engineered-pattern-fixture-yields-1-evidence-cited-proposal-paired-cost-defect-balanced-fixture-yields-none": "2026-07-07T03:16:31Z",
+      "kontourai-flow-agents-352-ac3-zero-mutation-to-kit-gate-flow-config-human-decision-recorded-before-follow-on-work-item.flow-agents-workflow.ac3-r3-zero-mutation-to-kit-gate-flow-config-human-decision-recorded-before-follow-on-work-item": "2026-07-07T03:16:31Z",
+      "kontourai-flow-agents-352-ac4-idempotent-over-same-window-explicit-insufficient-data-outcome-under-threshold.flow-agents-workflow.ac4-r4-idempotent-over-same-window-no-duplicate-proposals-explicit-insufficient-data-outcome-under-threshold": "2026-07-07T03:16:31Z",
+      "kontourai-flow-agents-352-ac5-proposal-trail-links-ratified-proposal-to-follow-on-item-and-later-observed-effect.flow-agents-workflow.ac5-r5-proposal-trail-links-ratified-proposal-to-follow-on-item-and-later-observed-effect": "2026-07-07T03:16:31Z",
+      "kontourai-flow-agents-352-review.flow-agents-workflow.changes-requested-critical-learning-review-proposals-sh-silently-wipes-entire-ledger-incl-human-decisions-when-any-ledger-line-is-malformed-jq-s-failure-swallowed-substituted-mv-overwrites-high-to-epoch-ms-breaks-every-iso-8601-since-until-at-sub-z-00-00-makes-fromdateiso8601-fail-degrading-to-false-insufficient-data-contradicts-the-contract-s-own-honesty-guarantee-2-low-gate-dedup-by-value-tuple-negative-cost-trust-unnoted-clean-elsewhere-acs-pass-decide-sh-injection-safe-atomic-consume-never-fork-ci-triple-fixture-count-bump-verified-superseded-review-2026-07-07t03-14-22z-2026-07-07t02-54-15z": null,
+      "kontourai-flow-agents-352-review.flow-agents-workflow.pass-targeted-re-review-after-fixes-the-prior-critical-ledger-silent-wipe-is-covered-by-fail-loud-corrupted-ledger-regression-exit-nonzero-no-stdout-byte-identical-ledger-valid-ratified-entry-survives-the-prior-high-iso-8601-parsing-bug-is-covered-by-date-only-z-00-00-fractional-second-and-record-at-regressions-low-gate-dedup-now-uses-record-index-trust-docs-note-present-no-open-findings-superseded-review-2026-07-07t03-16-31z-2026-07-07t03-14-22z": null,
+      "kontourai-flow-agents-352-review.flow-agents-workflow.review-clean-after-3-iterations-critical-ledger-silent-wipe-fixed-fail-loud-zero-write-regression-pinned-high-medium-timestamp-parsing-fixed-date-only-z-00-00-fractional-all-parse-garbage-cli-args-fail-loud-pre-i-o-record-at-degrades-tolerantly-per-documented-contract-lows-fixed-index-keyed-dedup-trusted-inputs-note-injection-probes-against-cli-args-and-jq-program-assembly-defeated-static-program-text-arg-only-data-flow-86-86-eval-assertions-shellcheck-validate-source-clean": "2026-07-07T03:16:31Z"
+    },
+    "statusFunctionVersion": "2"
+  }
+}

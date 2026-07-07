@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 3,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=1",
+  "claims": [
+    {
+      "id": "task-lr-pp-6-gate-claim-unit-tests.flow-agents-workflow.unit-tests-pass",
+      "subjectType": "workflow-check",
+      "subjectId": "task-lr-pp-6/unit-tests",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.verify.tests",
+      "fieldOrBehavior": "unit tests pass",
+      "value": "pass",
+      "createdAt": "2026-07-03T00:00:00Z",
+      "updatedAt": "2026-07-03T00:00:00Z",
+      "status": "verified"
+    }
+  ],
+  "evidence": [],
+  "events": [],
+  "policies": []
+}

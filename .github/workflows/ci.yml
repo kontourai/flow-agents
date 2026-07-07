@@ -318,6 +318,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check economics-record-integration
 
+      - name: Learning review proposals integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check learning-review-proposals-integration
+
       - name: Utterance check integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check utterance-check-integration

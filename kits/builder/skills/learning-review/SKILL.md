@@ -21,6 +21,7 @@ Turn delivery outcomes into durable learning and follow-up work.
 
 - Release-readiness artifact, evidence-gate artifact, PR/issue links, deploy notes, incidents, telemetry, user feedback, and reviewer/verifier notes.
 - **Delegation routing telemetry** — the per-run economics records (`.kontourai/telemetry/economics.jsonl`) carry `delegations[]` with each sub-agent's `(role, resolved_model, outcome)`. Feed them to the routing-efficiency review (step 2a) to judge whether the model each role routes to is actually efficient.
+- **Kit/gate economics proposal ledger** — the same economics records, turned into a durable, idempotent per-kit/per-gate proposal ledger (`.kontourai/telemetry/learning-review-proposals.jsonl`) by `scripts/telemetry/learning-review-proposals.sh`. Feed it to the kit/gate economics review (step 2b).
 
 ## Artifact Contract
 
@@ -109,6 +110,35 @@ outcomes are excluded (a missing verdict is neither success nor failure; see
 - **These are proposals, never auto-applied.** A human ratifies the `.datum/config.json` change, which
   then travels the normal deliver loop (ADR 0003 call 5). `insufficient-signal` proposals are recorded
   as coverage notes, not routing changes.
+
+### 2b. Review Kit/Gate Economics Proposals
+
+Run the kit/gate economics analyzer over a window of economics records whenever enough new
+records have piled up since the last ledger entry — cadenced during a learning-review pass, not
+on a scheduler (see `--help` for the full flag set):
+
+```bash
+bash scripts/telemetry/learning-review-proposals.sh --since <last-run-until> --until <now>
+```
+
+It emits ADVISORY per-kit (`kit-review-cost-inflation`) and per-gate (`gate-false-block-review`,
+`gate-well-calibrated`) proposals, each citing paired `evidence.cost` + `evidence.defect` — never
+cost alone. `insufficient-data` is a valid, reportable outcome, not a bar to lower; never propose
+from noise. Surface every new (non-`already_proposed`) proposal to the human with its evidence,
+then record the ratify/reject/defer decision BEFORE any follow-on work exists:
+
+```bash
+bash scripts/telemetry/learning-review-decide.sh <ledger> <proposal-id> \
+  --ratify|--reject|--defer --decided-by <name> --rationale "<why>"
+```
+
+- **These are proposals, never auto-applied.** Nothing here writes to `kits/**`,
+  `.datum/config.json`, or any gate/flow config file.
+- Only on `--ratify`, create the ordinary follow-on backlog item and record it back onto the
+  proposal with `--follow-on-ref <ref>` — a follow-on may never cite an unratified proposal. A
+  later pass's effect-fill shows whether the ratified change actually moved the numbers.
+
+See `docs/specs/learning-review-proposals-contract.md` for the full contract.
 
 ### 3. Route Follow-Up
 

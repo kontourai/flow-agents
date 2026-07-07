@@ -1,0 +1,26 @@
+[
+  {
+    "id": "task-lr-pp-3-gr-1",
+    "inquiry": {
+      "id": "task-lr-pp-3-gr-1",
+      "question": "Was gate action on claim task-lr-pp-3/unit-tests justified?",
+      "askedBy": "gate-review",
+      "askedAt": "2026-07-03T00:05:00Z",
+      "target": { "subjectType": "workflow-check", "subjectId": "task-lr-pp-3/unit-tests", "fieldOrBehavior": "unit tests pass" }
+    },
+    "outcome": "matched",
+    "resolutionPath": { "claimIds": ["task-lr-pp-3-gate-claim-unit-tests.flow-agents-workflow.unit-tests-pass"] },
+    "answer": {
+      "status": "verified",
+      "value": {
+        "calibration": "false_block",
+        "advisoryFix": "Investigate why the gate blocked when the claim was already verified passing.",
+        "gateFired": true,
+        "sessionSlug": "task-lr-pp-3"
+      }
+    },
+    "inputSnapshot": [{ "claimId": "task-lr-pp-3-gate-claim-unit-tests.flow-agents-workflow.unit-tests-pass", "status": "verified" }],
+    "statusFunctionVersion": "1",
+    "resolvedAt": "2026-07-03T00:05:00Z"
+  }
+]
