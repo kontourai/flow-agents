@@ -82,6 +82,7 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/desktop-notify.sh", { category: "local notification helper", requiredNeedles: ["desktop-notify.sh", "osascript"] }],
   ["scripts/hooks/lib/actor-identity.js", { category: "shared hook library", requiredNeedles: ["resolveActor", "FLOW_AGENTS_ACTOR"] }],
   ["scripts/hooks/lib/audit-transport.sh", { category: "shared hook library", requiredNeedles: ["audit_emit"] }],
+  ["scripts/hooks/lib/codex-exit-code.js", { category: "shared hook library", requiredNeedles: ["extractExitCodeFromBanner", "readExitCodeFromRollout"] }],
   ["scripts/hooks/lib/config-protection-remedies.js", { category: "shared hook library", requiredNeedles: ["SANCTIONED_REMEDIES", "REMEDY_COMMAND_CANDIDATES"] }],
   ["scripts/hooks/lib/current-pointer.js", { category: "shared hook library", requiredNeedles: ["readCurrentPointer", "perActorCurrentFile"] }],
   ["scripts/hooks/lib/hook-flags.js", { category: "shared hook library", requiredNeedles: ["isHookEnabled"] }],

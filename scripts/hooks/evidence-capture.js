@@ -43,7 +43,10 @@
  * (per docs/spec/runtime-hook-surface.md §1, postToolUse). A clean integer exit
  * code is host-dependent. We extract the real exit code where present; otherwise
  * we derive `observedResult` from `error`/stderr-style failure indication and
- * record `exitCode: null`. We never record the model's words about the outcome.
+ * record `exitCode: null`. Absent positive success evidence (a clean integer
+ * exit code of 0; no host currently surfaces a positive success flag), the
+ * result is 'ambiguous', never 'pass'. We never record the model's words about
+ * the outcome.
  *
  * Non-blocking — always exits 0. Idempotent/append-only. Fail-open on any error:
  * a capture failure must never block the agent or corrupt the log.
@@ -266,7 +269,10 @@ function cleanExitCode(value) {
  *      binaries are real tool errors and remain 'fail', unchanged.
  *   2. Else, a non-empty `error` field or stderr-style failure indication →
  *      observedResult = fail, exitCode = null.
- *   3. Else → observedResult = pass, exitCode = null.
+ *   3. Else → observedResult = ambiguous, exitCode = null. Absent positive
+ *      success evidence (a clean integer exit code of 0; no host currently
+ *      surfaces a positive success flag), the result is 'ambiguous', never
+ *      'pass'.
  *
  * `input.command` (the raw command string, already in scope at the run()
  * call site) is required to evaluate the #362 carve-out; when absent, the
@@ -304,7 +310,7 @@ function observeResult(input) {
   if (isFailureIndicated(error, response, output)) {
     return { exitCode: null, observedResult: 'fail' };
   }
-  return { exitCode: null, observedResult: 'pass' };
+  return { exitCode: null, observedResult: 'ambiguous' };
 }
 
 // True when the host surfaces a deterministic failure signal: a non-empty

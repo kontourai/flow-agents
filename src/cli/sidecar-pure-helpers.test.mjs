@@ -17,6 +17,7 @@ import {
   validateEvidenceRef,
   normalizeEvidenceRefs,
   normalizeCheck,
+  reduceCaptureLogByCommand,
 } from "../../build/src/cli/workflow-sidecar.js";
 import { buildClaimExplanation } from "../../build/src/cli/sidecar-claim-explain.js";
 
@@ -109,6 +110,69 @@ test("normalizeCheck: validates required fields, kind, and status", () => {
   const ok = normalizeCheck({ id: "x", kind: "test", status: "pass", summary: "ran" });
   assert.equal(ok.kind, "test");
   assert.equal(ok.status, "pass");
+});
+
+// ── reduceCaptureLogByCommand (#470 iteration 2, finding #2 — three-way capture fold) ────
+
+test("reduceCaptureLogByCommand: a single ambiguous entry classifies as ambiguous (non-confirming), not pass", () => {
+  const out = reduceCaptureLogByCommand([{ command: "npm test", observedResult: "ambiguous", exitCode: null }]);
+  const entry = out.get("npm test");
+  assert.equal(entry.observedResult, "ambiguous");
+  assert.equal(entry.exitCode, null);
+});
+
+test("reduceCaptureLogByCommand: fail beats pass and ambiguous for the same command", () => {
+  const out = reduceCaptureLogByCommand([
+    { command: "npm test", observedResult: "pass", exitCode: 0 },
+    { command: "npm test", observedResult: "ambiguous", exitCode: null },
+    { command: "npm test", observedResult: "fail", exitCode: 1 },
+  ]);
+  const entry = out.get("npm test");
+  assert.equal(entry.observedResult, "fail");
+  assert.equal(entry.exitCode, 1);
+});
+
+test("reduceCaptureLogByCommand: fail beats pass and ambiguous regardless of entry order", () => {
+  const out = reduceCaptureLogByCommand([
+    { command: "npm test", observedResult: "fail", exitCode: 1 },
+    { command: "npm test", observedResult: "pass", exitCode: 0 },
+  ]);
+  assert.equal(out.get("npm test").observedResult, "fail");
+});
+
+test("reduceCaptureLogByCommand: pass beats ambiguous when there is no fail", () => {
+  const out = reduceCaptureLogByCommand([
+    { command: "npm test", observedResult: "ambiguous", exitCode: null },
+    { command: "npm test", observedResult: "pass", exitCode: 0 },
+  ]);
+  const entry = out.get("npm test");
+  assert.equal(entry.observedResult, "pass");
+  assert.equal(entry.exitCode, 0);
+});
+
+test("reduceCaptureLogByCommand: legacy entries (no observedResult) classify from exitCode alone", () => {
+  const out = reduceCaptureLogByCommand([
+    { command: "legacy-pass", exitCode: 0 },
+    { command: "legacy-fail", exitCode: 1 },
+    { command: "legacy-ambiguous", exitCode: null },
+  ]);
+  assert.equal(out.get("legacy-pass").observedResult, "pass");
+  assert.equal(out.get("legacy-fail").observedResult, "fail");
+  assert.equal(out.get("legacy-ambiguous").observedResult, "ambiguous");
+});
+
+test("reduceCaptureLogByCommand: legacy nonzero exit code classifies as fail (never coerced to pass)", () => {
+  const out = reduceCaptureLogByCommand([{ command: "some cmd", exitCode: 2 }]);
+  const entry = out.get("some cmd");
+  assert.equal(entry.observedResult, "fail");
+  assert.equal(entry.exitCode, 2);
+});
+
+test("reduceCaptureLogByCommand: grep/diff absence-ambiguous entry (observedResult:'ambiguous', exitCode:1) stays ambiguous, not fail", () => {
+  const out = reduceCaptureLogByCommand([{ command: "grep -q needle file", observedResult: "ambiguous", exitCode: 1 }]);
+  const entry = out.get("grep -q needle file");
+  assert.equal(entry.observedResult, "ambiguous");
+  assert.equal(entry.exitCode, 1);
 });
 
 // ── buildGateInquiryRecords (pure orchestration, fake Surface injected) ───────

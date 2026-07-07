@@ -734,16 +734,26 @@ const AMBIGUOUS_REMEDIATION = "re-record this check as a self-asserting command 
  * Exit codes >=2 for grep/diff remain hard FAILs (real tool errors) — this carve-out is
  * exactly exitCode === 1, nothing wider.
  *
+ * Iteration-2 (re-plan) finding #3 (HIGH): `ambiguous` now has TWO distinct origins, threaded
+ * via the additive `absenceAmbiguous` discriminator so existing #362 callers are unaffected:
+ *   - absence-ambiguous (#362 carve-out): `exitCode===1` on a bare grep/diff — the command
+ *     genuinely RAN and produced exit 1. `absenceAmbiguous:true`.
+ *   - no-signal-ambiguous (rule-3 default): `observedResult==='ambiguous'` with no exit code
+ *     recoverable (e.g. an unreadable codex host banner) — capture saw the command run but got
+ *     NO usable pass/fail signal. `absenceAmbiguous:false`.
+ * Callers that need the #362-specific grep/diff wording/HARD_BLOCK branch on `absenceAmbiguous`;
+ * callers that just need "was this ambiguous at all" keep using `ambiguous`.
+ *
  * @param {{command?: string, observedResult?: string, exitCode?: number}} entry
- * @returns {{failed: boolean, ambiguous: boolean}}
+ * @returns {{failed: boolean, ambiguous: boolean, absenceAmbiguous: boolean}}
  */
 function classifyLogEntry(entry) {
   const exitCode = Number.isInteger(entry.exitCode) ? entry.exitCode : null;
-  const ambiguous = entry.observedResult === 'ambiguous'
-    || (exitCode === 1 && isAmbiguousAbsenceCommand(entry.command));
-  if (ambiguous) return { failed: false, ambiguous: true };
+  const absenceAmbiguous = exitCode === 1 && isAmbiguousAbsenceCommand(entry.command);
+  const ambiguous = entry.observedResult === 'ambiguous' || absenceAmbiguous;
+  if (ambiguous) return { failed: false, ambiguous: true, absenceAmbiguous };
   const failed = entry.observedResult === 'fail' || (exitCode !== null && exitCode !== 0);
-  return { failed, ambiguous: false };
+  return { failed, ambiguous: false, absenceAmbiguous: false };
 }
 
 /**
@@ -767,12 +777,13 @@ function readCommandLog(artifactDir) {
     if (!entry || typeof entry.command !== 'string') continue;
     const key = normalizeCommand(entry.command);
     if (!key) continue;
-    const { failed, ambiguous } = classifyLogEntry(entry);
+    const { failed, ambiguous, absenceAmbiguous } = classifyLogEntry(entry);
     const prev = byCommand.get(key);
     byCommand.set(key, {
       ran: true,
       failed: failed || (prev ? prev.failed : false),
       ambiguous: !failed && (ambiguous || (prev ? prev.ambiguous : false)),
+      absenceAmbiguous: !failed && (absenceAmbiguous || (prev ? prev.absenceAmbiguous : false)),
       exitCode: Number.isInteger(entry.exitCode) ? entry.exitCode : (prev ? prev.exitCode : null),
     });
   }
@@ -801,12 +812,13 @@ function readLatestCommandLog(artifactDir) {
     if (!entry || typeof entry.command !== 'string') continue;
     const key = normalizeCommand(entry.command);
     if (!key) continue;
-    const { failed, ambiguous } = classifyLogEntry(entry);
+    const { failed, ambiguous, absenceAmbiguous } = classifyLogEntry(entry);
     // LAST entry wins — genuine re-run-to-pass overwrites the earlier FAIL/ambiguous.
     byCommand.set(key, {
       ran: true,
       failed,
       ambiguous,
+      absenceAmbiguous,
       exitCode: Number.isInteger(entry.exitCode) ? entry.exitCode : null,
     });
   }
@@ -1306,12 +1318,23 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
       if (logged.failed) {
         const exit = Number.isInteger(logged.exitCode) ? ` (exitCode:${logged.exitCode})` : '';
         warnings.push(`${base} evidence check ${id}: capture log CONTRADICTS claimed pass — command "${safeOneLine(cmd, 120)}" was recorded as FAIL${exit}. This is a caught false-completion.`);
-      } else if (logged.ambiguous) {
+      } else if (logged.ambiguous && logged.absenceAmbiguous) {
         // #362: a bare grep/diff logged exit 1 — ambiguous (zero matches/no diff), not a
         // caught false-completion. Distinct warning class, never silently dropped, never a
-        // hard block.
+        // hard block. UNCHANGED (byte-identical) — iteration-2 (re-plan) finding #3 Decision A
+        // keeps this absence-ambiguous branch verbatim; only the sibling no-signal branch below
+        // is new.
         const exit = Number.isInteger(logged.exitCode) ? ` (exitCode:${logged.exitCode})` : '';
         warnings.push(`${base} evidence check ${id}: capture log shows command "${safeOneLine(cmd, 120)}" exited 1${exit} — for bare grep/diff this may mean zero matches/no differences (PASS for an absence check) or an unintended miss (FAIL for a presence check); NOT_VERIFIED (ambiguous): ${AMBIGUOUS_REMEDIATION} to remove the ambiguity.`);
+      } else if (logged.ambiguous) {
+        // Iteration-2 (re-plan) finding #3 (HIGH), Decision A: generic no-signal-ambiguous — the
+        // rule-3 default (`observedResult:'ambiguous'`, no exit code recoverable, e.g. an
+        // unreadable/missing codex host banner). This is NOT the #362 grep/diff carve-out (no
+        // `absenceAmbiguous`), so the message is grep/diff-FREE and accurate for any command.
+        // Deliberately does NOT contain `NOT_VERIFIED (ambiguous)`, `caught false-completion`, or
+        // `status:` so it MISSES HARD_BLOCK (warn-only on a terminal/pre-execution stop) while
+        // `evidence check` / `NOT_VERIFIED —` still match FULL_BLOCK (blocks a non-terminal stop).
+        warnings.push(`${base} evidence check ${id}: claimed pass but NOT_VERIFIED — command "${safeOneLine(cmd, 120)}" was captured with no deterministic pass/fail signal (no exit code observed on this host); a pass requires positive evidence. Re-run it to produce a definitive exit code, or record it as not_verified/accepted_gap.`);
       } else if (hasLaunderingOperator(cmd)) {
         // Fix D: exit-code laundering. The captured exit-0 is not trustworthy — the command
         // baked in '|| true' / '|| :' / '; true' / '; exit 0' / '| true' to mask the real result.
@@ -1529,11 +1552,23 @@ function capturedFailReconciliation(root, artifactDir, taskStatus) {
     const acc = cmdAcc.get(cmd);
     if (acc && acc.passClaims.length > 0) {
       const claim = acc.passClaims[0];
-      warnings.push(
-        `${base} captured command '${safeOneLine(cmd, 120)}' last ran AMBIGUOUS${exitStr} ` +
-        `(bare grep/diff exit 1 — zero matches/no differences) and claim ${safeOneLine(claim.subjectId || claim.id, 80)} ` +
-        `(${safeOneLine(claim.claimType, 48)}) asserts pass — NOT_VERIFIED (ambiguous): ${AMBIGUOUS_REMEDIATION} and re-run it, then re-record the claim.`
-      );
+      if (ambiguousInfo.absenceAmbiguous) {
+        // #362 absence-ambiguous — UNCHANGED (byte-identical) message + HARD_BLOCK marker.
+        warnings.push(
+          `${base} captured command '${safeOneLine(cmd, 120)}' last ran AMBIGUOUS${exitStr} ` +
+          `(bare grep/diff exit 1 — zero matches/no differences) and claim ${safeOneLine(claim.subjectId || claim.id, 80)} ` +
+          `(${safeOneLine(claim.claimType, 48)}) asserts pass — NOT_VERIFIED (ambiguous): ${AMBIGUOUS_REMEDIATION} and re-run it, then re-record the claim.`
+        );
+      } else {
+        // Iteration-2 (re-plan) finding #3 Decision A: generic no-signal-ambiguous (no exit code
+        // ever recoverable) — grep/diff-FREE wording, misses HARD_BLOCK, still matches FULL_BLOCK
+        // via `NOT_VERIFIED —` so a non-terminal stop still blocks.
+        warnings.push(
+          `${base} captured command '${safeOneLine(cmd, 120)}' last ran with no deterministic pass/fail signal${exitStr} ` +
+          `(no exit code observed on this host) and claim ${safeOneLine(claim.subjectId || claim.id, 80)} ` +
+          `(${safeOneLine(claim.claimType, 48)}) asserts pass — NOT_VERIFIED — re-run it to produce a definitive exit code, then re-record the claim.`
+        );
+      }
     }
   }
 

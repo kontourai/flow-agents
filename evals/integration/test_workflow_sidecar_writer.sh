@@ -2800,6 +2800,52 @@ else
   _fail "trust.bundle capture-authoritative setup failed: $(cat "$TMPDIR_EVAL/tb-capture-evidence.out" "$TMPDIR_EVAL/tb-capture-evidence.err")"
 fi
 
+# ─── #470 iteration 2 (finding #2, HIGH): captureByCommand treats ambiguous as
+# non-confirming, never coerced to "pass" (would reconcile as a verified event + passing:true,
+# reintroducing the #470 false-pass). A command-log entry whose only capture is
+# observedResult:"ambiguous" (e.g. a codex no-signal capture, or the #362 grep/diff absence
+# carve-out) paired with a claimed-pass check must build a bundle claim whose value is the
+# EXISTING canonical non-confirming status "not_verified", an evidence item stamped
+# passing:false, and NO verification event for that claim. ------------------------------------
+TB_AMBIGUOUS_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/trust-bundle-ambiguous"
+mkdir -p "$TB_AMBIGUOUS_DIR"
+cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_AMBIGUOUS_DIR/trust-bundle-ambiguous--deliver.md"
+flow_agents_node "$WRITER" init-plan "$TB_AMBIGUOUS_DIR/trust-bundle-ambiguous--deliver.md" \
+  --source-request "Ambiguous-capture non-confirming trust bundle fixture (#470 iteration 2)." \
+  --summary "Ambiguous-capture non-confirming trust bundle fixture." \
+  --next-action "Seed a claimed-pass check whose only capture is observedResult:ambiguous." \
+  --timestamp "2026-05-09T00:00:00Z" >"$TMPDIR_EVAL/tb-ambiguous-init.out" 2>"$TMPDIR_EVAL/tb-ambiguous-init.err"
+# Deterministic capture log: the command produced NO usable pass/fail signal (codex no-signal
+# default / #362 absence carve-out), recorded before record-evidence.
+printf '%s\n' '{"command":"npm test","observedResult":"ambiguous","exitCode":null}' > "$TB_AMBIGUOUS_DIR/command-log.jsonl"
+if flow_agents_node "$WRITER" record-evidence "$TB_AMBIGUOUS_DIR" \
+  --verdict pass \
+  --check-json '{"id":"tb-ambiguous-check","kind":"test","status":"pass","summary":"Claimed pass.","command":"npm test"}' \
+  --timestamp "2026-05-09T00:01:00Z" >"$TMPDIR_EVAL/tb-ambiguous-evidence.out" 2>"$TMPDIR_EVAL/tb-ambiguous-evidence.err" \
+  && [[ -f "$TB_AMBIGUOUS_DIR/trust.bundle" ]]; then
+  if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/tb-ambiguous-assert.err"
+import { readFileSync } from 'node:fs';
+const bundle = JSON.parse(readFileSync('${TB_AMBIGUOUS_DIR}/trust.bundle', 'utf8'));
+const claim = bundle.claims.find((c) => c.subjectId && c.subjectId.endsWith('/tb-ambiguous-check'));
+if (!claim) { process.stderr.write('missing claim for /tb-ambiguous-check\n'); process.exit(1); }
+if (claim.value !== 'not_verified') { process.stderr.write('claimed-pass check with captured ambiguous had claim.value ' + claim.value + ', expected not_verified\n'); process.exit(1); }
+if (claim.status === 'verified') { process.stderr.write('claimed-pass check with captured ambiguous derived claim.status verified -- ambiguous must never confirm\n'); process.exit(1); }
+const ev = bundle.evidence.find((e) => e.claimId === claim.id);
+if (!ev) { process.stderr.write('missing evidence item for ambiguous-captured claim\n'); process.exit(1); }
+if (ev.passing !== false) { process.stderr.write('ambiguous-captured evidence item had passing=' + ev.passing + ', expected false\n'); process.exit(1); }
+if (ev.execution && ev.execution.isError !== false) { process.stderr.write('ambiguous-captured evidence item had execution.isError=' + (ev.execution && ev.execution.isError) + ', expected false (ambiguous is not an error)\n'); process.exit(1); }
+const verifiedEvent = bundle.events.find((e) => e.claimId === claim.id && e.status === 'verified');
+if (verifiedEvent) { process.stderr.write('a verified event was emitted for an ambiguous-captured claim -- #470 false-pass reintroduced\n'); process.exit(1); }
+NODEOF
+  then
+    _pass "trust.bundle ambiguous non-confirming (#470 iter2): claimed-pass + captured-ambiguous -> claim.value=not_verified, passing:false, no verified event"
+  else
+    _fail "trust.bundle ambiguous non-confirming assertion failed: $(cat "$TMPDIR_EVAL/tb-ambiguous-assert.err")"
+  fi
+else
+  _fail "trust.bundle ambiguous non-confirming setup failed: $(cat "$TMPDIR_EVAL/tb-ambiguous-evidence.out" "$TMPDIR_EVAL/tb-ambiguous-evidence.err")"
+fi
+
 # ---- #347: hard cutover -- an unstamped (pre-#344) claim in a session trust bundle is a loud,
 # typed error; checksFromBundle/critiquesFromBundle carry NO claimType-derivation fallback (that
 # fallback WAS the #268 defect kept reachable). ----------------------------------------------
