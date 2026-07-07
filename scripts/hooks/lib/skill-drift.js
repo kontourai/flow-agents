@@ -268,6 +268,17 @@ function compareSkillDrift({ installedDir, kitSourceDir, manifest }) {
     // than inventing a seventh state for it.
     if (installedHash === null && kitHash === null) continue;
 
+    // An installed-only path with no kit-source counterpart AND no manifest entry is outside the
+    // kit's jurisdiction entirely — e.g. another tool's skill directory living alongside
+    // kit-installed skills under the same shared `~/.claude/skills` dest. `copyDirMerge`'s doc
+    // contract (`src/cli/init.ts`) is explicit that the dest may hold unrelated content it must
+    // never touch; the drift classifier honors the same boundary by staying silent about paths it
+    // never owned, rather than reporting them "unbaselined". `unbaselined` stays reserved for
+    // kit-owned paths (kitHash !== null) that simply predate the manifest baseline; `kit_removed`
+    // is unaffected — a manifest entry there proves prior kit ownership, so it never reaches this
+    // skip (manifestHash === null is required here).
+    if (kitHash === null && manifestHash === null) continue;
+
     let state;
     if (kitHash !== null && installedHash === null) {
       state = 'missing_install';

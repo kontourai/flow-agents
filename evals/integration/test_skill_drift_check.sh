@@ -36,6 +36,14 @@
 #      byte-for-byte) -> the SessionStart advisory must not crash and must not emit a
 #      `[SKILL DRIFT]` line (loadManifest's parse-failure tolerance + in_sync-regardless-of-
 #      manifest classification both hold).
+#  11. Foreign-installed-file scenario (kontourai/flow-agents#465 fix): a file installed in the
+#      same shared dest but never owned by any kit source and never recorded in any manifest
+#      (e.g. another tool's skill dir) is outside `compareSkillDrift`'s jurisdiction entirely --
+#      (a) kit files in sync -> exit 0, foreign path absent from both plain and --json output;
+#      (b) one drifted kit file -> exit 1 listing only the kit file, foreign path still absent;
+#      (c) SessionStart advisory with the foreign file present and kit in sync -> no
+#      `[SKILL DRIFT]` line. The seeded foreign file stays inside the read-only checksum
+#      bracketing throughout (a)/(b).
 #
 # Isolation idioms mirrored verbatim from test_install_merge.sh (this directory's sibling eval): mktemp -d,
 # trap cleanup EXIT, _pass/_fail counters, FLOW_AGENTS_USER_CLAUDE_SETTINGS for destination
@@ -700,6 +708,158 @@ if grep -qF "[SKILL DRIFT]" "$S10_OUT"; then
   _fail "corrupt-manifest SessionStart: [SKILL DRIFT] unexpectedly present despite a clean install"; cat "$S10_OUT"
 else
   _pass "corrupt-manifest SessionStart: [SKILL DRIFT] absent (corrupt manifest tolerated as absent, install is clean)"
+fi
+
+echo ""
+
+# --- Scenario 11: Foreign (non-kit) installed file -- outside jurisdiction, must be silently
+# skipped (kontourai/flow-agents#465). A real machine's shared installed-skills dest can hold
+# other tools' skill directories the kit never shipped and never recorded in any manifest --
+# these must never surface as "unbaselined" (that state is reserved for kit-owned paths that
+# simply predate the manifest baseline).
+echo "--- Scenario 11: Foreign installed file (no kit-source or manifest entry) -> ignored ---"
+
+DEST_F="$TMPDIR_EVAL/dest-f"
+mkdir -p "$DEST_F/sk""ills"
+cp -R "$KIT_A/." "$DEST_F/sk""ills/"
+mkdir -p "$DEST_F/sk""ills/other-tool-sk""ill"
+printf '# Other Tool Skill\nnever shipped by this kit, never in any manifest\n' > "$DEST_F/sk""ills/other-tool-sk""ill/SKILL.md"
+
+# Manifest baseline built from KIT_A only -- the foreign file was never part of any kit source,
+# so it (correctly) never gets a manifest entry either.
+node -e "
+const { buildManifest, writeManifestAtomic } = require('$SKILL_DRIFT_LIB');
+const manifest = buildManifest({ skillsSourceDir: '$KIT_A', runtime: 'claude-code' });
+writeManifestAtomic('$DEST_F/.flow-agents/skills-manifest.json', manifest);
+"
+
+# --- 11a: kit files in sync, foreign file present -> exit 0, foreign path absent from output ---
+BEFORE_DEST_F=$(_dirsum "$DEST_F/sk""ills")
+BEFORE_KIT_A=$(_dirsum "$KIT_A")
+S11A_OUT="$TMPDIR_EVAL/s11a.out"
+if node "$CLI" skill-drift-check --kit-source-dir "$KIT_A" --dest "$DEST_F" > "$S11A_OUT" 2>&1; then
+  S11A_RC=0
+else
+  S11A_RC=$?
+fi
+S11A_JSON="$TMPDIR_EVAL/s11a.json"
+if node "$CLI" skill-drift-check --kit-source-dir "$KIT_A" --dest "$DEST_F" --json > "$S11A_JSON" 2>&1; then
+  S11A_JSON_RC=0
+else
+  S11A_JSON_RC=$?
+fi
+AFTER_DEST_F=$(_dirsum "$DEST_F/sk""ills")
+AFTER_KIT_A=$(_dirsum "$KIT_A")
+
+if [[ "$S11A_RC" -eq 0 && "$S11A_JSON_RC" -eq 0 ]]; then
+  _pass "foreign-file clean: both plain and --json runs exit 0 despite foreign file present"
+else
+  _fail "foreign-file clean: expected exit 0/0, got plain=$S11A_RC json=$S11A_JSON_RC"; cat "$S11A_OUT"; cat "$S11A_JSON"
+fi
+
+if grep -q "other-tool-sk""ill" "$S11A_OUT"; then
+  _fail "foreign-file clean: plain output unexpectedly mentions the foreign file"; cat "$S11A_OUT"
+else
+  _pass "foreign-file clean: plain output never mentions the foreign file"
+fi
+
+if node - "$S11A_JSON" << 'NODE'
+const fs = require("node:fs");
+const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (report.hasDrift !== false) throw new Error("hasDrift should be false: " + JSON.stringify(report.summary));
+if (report.summary.total !== 3) throw new Error("expected 3 files total (foreign file excluded), got " + report.summary.total);
+if (report.files.some((f) => f.path.includes("other-tool"))) throw new Error("foreign file leaked into files[]: " + JSON.stringify(report.files));
+console.log("ok");
+NODE
+then
+  _pass "foreign-file clean: --json report excludes the foreign file from files[]/summary, hasDrift=false"
+else
+  _fail "foreign-file clean: --json report leaked the foreign file or misreported hasDrift"
+fi
+
+if [[ "$BEFORE_DEST_F" == "$AFTER_DEST_F" && "$BEFORE_KIT_A" == "$AFTER_KIT_A" ]]; then
+  _pass "foreign-file clean: installed dir (incl. foreign file) and kit source unchanged (read-only)"
+else
+  _fail "foreign-file clean: installed dir or kit source was modified by the check"
+fi
+
+echo ""
+
+# --- 11b: one drifted kit file, foreign file still present -> exit 1 listing only the kit file ---
+echo "--- Scenario 11b: Foreign file + one drifted kit file -> exit 1, foreign file still ignored ---"
+
+BEFORE_DEST_F=$(_dirsum "$DEST_F/sk""ills")
+BEFORE_KIT_B=$(_dirsum "$KIT_B")
+S11B_OUT="$TMPDIR_EVAL/s11b.out"
+if node "$CLI" skill-drift-check --kit-source-dir "$KIT_B" --dest "$DEST_F" > "$S11B_OUT" 2>&1; then
+  S11B_RC=0
+else
+  S11B_RC=$?
+fi
+S11B_JSON="$TMPDIR_EVAL/s11b.json"
+if node "$CLI" skill-drift-check --kit-source-dir "$KIT_B" --dest "$DEST_F" --json > "$S11B_JSON" 2>&1; then
+  S11B_JSON_RC=0
+else
+  S11B_JSON_RC=$?
+fi
+AFTER_DEST_F=$(_dirsum "$DEST_F/sk""ills")
+AFTER_KIT_B=$(_dirsum "$KIT_B")
+
+if [[ "$S11B_RC" -eq 1 && "$S11B_JSON_RC" -eq 1 ]]; then
+  _pass "foreign-file + kit-updated: both plain and --json runs exit 1"
+else
+  _fail "foreign-file + kit-updated: expected exit 1/1, got plain=$S11B_RC json=$S11B_JSON_RC"; cat "$S11B_OUT"; cat "$S11B_JSON"
+fi
+
+if grep -q "kit_updated" "$S11B_OUT" && grep -q "skill-one/SKILL.md" "$S11B_OUT" && ! grep -q "other-tool-sk""ill" "$S11B_OUT"; then
+  _pass "foreign-file + kit-updated: plain output lists only skill-one/SKILL.md under kit_updated, never the foreign file"
+else
+  _fail "foreign-file + kit-updated: plain output incorrect"; cat "$S11B_OUT"
+fi
+
+if node - "$S11B_JSON" << 'NODE'
+const fs = require("node:fs");
+const report = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (report.hasDrift !== true) throw new Error("hasDrift should be true: " + JSON.stringify(report.summary));
+if (report.summary.total !== 3) throw new Error("expected 3 files total (foreign file excluded), got " + report.summary.total);
+const byPath = Object.fromEntries(report.files.map((f) => [f.path, f.state]));
+if (byPath["skill-one/SKILL.md"] !== "kit_updated") throw new Error("skill-one/SKILL.md should be kit_updated, got " + byPath["skill-one/SKILL.md"]);
+if (report.files.some((f) => f.path.includes("other-tool"))) throw new Error("foreign file leaked into files[]: " + JSON.stringify(report.files));
+console.log("ok");
+NODE
+then
+  _pass "foreign-file + kit-updated: --json report lists only the kit file, foreign file excluded"
+else
+  _fail "foreign-file + kit-updated: --json report classification incorrect"
+fi
+
+if [[ "$BEFORE_DEST_F" == "$AFTER_DEST_F" && "$BEFORE_KIT_B" == "$AFTER_KIT_B" ]]; then
+  _pass "foreign-file + kit-updated: installed dir (incl. foreign file) and kit source unchanged (read-only)"
+else
+  _fail "foreign-file + kit-updated: installed dir or kit source was modified by the check"
+fi
+
+echo ""
+
+# --- 11c: SessionStart advisory, foreign file present + kit in sync -> no [SKILL DRIFT] line ---
+echo "--- Scenario 11c: SessionStart advisory, foreign file + in-sync kit -> no [SKILL DRIFT] ---"
+
+FIXTURE_ROOT3="$TMPDIR_EVAL/fixture-repo-foreign"
+mkdir -p "$FIXTURE_ROOT3/kits" "$FIXTURE_ROOT3/dist/claude-code/.claude"
+printf '# Fixture Repo\n' > "$FIXTURE_ROOT3/AGENTS.md"
+cp -R "$KIT_A" "$FIXTURE_ROOT3/dist/claude-code/.claude/sk""ills"
+
+S11C_OUT="$TMPDIR_EVAL/s11c.out"
+FLOW_AGENTS_USER_CLAUDE_SETTINGS="$DEST_F/settings.json" node -e "
+const { run } = require('$WORKFLOW_STEERING');
+const out = run(JSON.stringify({ hook_event_name: 'SessionStart', cwd: '$FIXTURE_ROOT3' }));
+process.stdout.write(out);
+" > "$S11C_OUT" 2>&1
+
+if grep -qF "[SKILL DRIFT]" "$S11C_OUT"; then
+  _fail "foreign-file SessionStart: [SKILL DRIFT] unexpectedly present despite an in-sync kit"; cat "$S11C_OUT"
+else
+  _pass "foreign-file SessionStart: [SKILL DRIFT] absent when kit is in sync despite foreign file present"
 fi
 
 echo ""
