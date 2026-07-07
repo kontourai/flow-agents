@@ -26,7 +26,8 @@ pricing_registry() {
     local ttl="${TELEMETRY_PRICING_TTL_SEC:-3600}"
     if [[ -f "$cache" ]]; then
       local mtime now age
-      mtime=$(stat -f %m "$cache" 2>/dev/null || stat -c %Y "$cache" 2>/dev/null || echo 0)
+      mtime=$(stat -c %Y "$cache" 2>/dev/null || stat -f %m "$cache" 2>/dev/null || echo 0)
+      [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
       now=$(date +%s)
       age=$(( now - mtime ))
       if [[ "$age" -lt "$ttl" ]] && pricing_registry_valid_json < "$cache"; then cat "$cache"; return 0; fi
