@@ -90,6 +90,8 @@ npx @kontourai/flow-agents init --runtime pi --dest /path/to/workspace --yes
 
 For Codex global installs, omit `--dest` and use `--global`: Flow Agents installs into `CODEX_HOME` when it is set, otherwise `~/.codex`. Pass `--dest` only when you intentionally want an isolated or test-specific Codex home.
 
+Runtime auto-detection is best-effort: it first checks environment markers set by the invoking coding agent (e.g. `CLAUDECODE`, `CODEX_SESSION_ID`, `OPENCODE_SESSION_ID`), then falls back to checking whether exactly one of `~/.claude`, `~/.codex` (or `$CODEX_HOME`), or opencode's global config dir already exists. If neither signal is unambiguous, it defaults to `base`. Pass `--runtime` explicitly to override the detected default at any time.
+
 Working from a checkout (for contributors): `npm install && npm run build`, then `node build/src/cli.js init --dest /path/to/workspace`.
 
 The installer copies the bundled agents, skills, context, scripts, evals, Flow Kit assets, and the Flow Agents-owned `console.telemetry.json` descriptor into the target workspace. Telemetry writes to local files by default; optional sinks mirror it to a local, hosted, or self-hosted Kontour Console (`--telemetry-sink local-kontour-console | kontour-hosted-console | user-hosted-console --console-url …`).

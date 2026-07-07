@@ -25,6 +25,22 @@ telemetry_conf_trusted() {
   [[ "$mode" == "600" && -n "$owner" && "$owner" == "$(id -u)" ]]
 }
 
+# A candidate that exists on disk but fails telemetry_conf_trusted would
+# otherwise be silently ignored (telemetry stays fail-open with no signal to
+# the operator). Print a one-time, visible warning naming the path and the
+# fix whenever this happens. Never warn when the file is simply absent, and
+# never change which file TELEMETRY_CONFIG_FILE resolves to below -- this is
+# purely additive/observational.
+telemetry_conf_warn_untrusted() {
+  local file="$1"
+  # `-e` catches a regular file; `-L` additionally catches a symlink that
+  # `-e` would miss (a symlink to a directory, or a dangling symlink) --
+  # both of those are rejected by telemetry_conf_trusted's `-L` check above
+  # but must still surface this warning, not silently emit none.
+  [[ -e "$file" || -L "$file" ]] || return 0
+  printf 'warning: config.sh: %s exists but is not trusted (must be mode 600, owned by the current user, and not a symlink); telemetry will ignore it and stay fail-open. Fix with: chmod 600 "%s"\n' "$file" "$file" >&2
+}
+
 # Config file resolution order: (1) explicit TELEMETRY_CONFIG_FILE env always
 # wins; (2) a gitignored per-workspace conf at .kontourai/telemetry-console.conf
 # if present and operator-trusted (project-specific override); (3) a
@@ -43,10 +59,14 @@ if [[ -n "${TELEMETRY_CONFIG_FILE:-}" ]]; then
   :
 elif telemetry_conf_trusted "$TELEMETRY_LOCAL_CONFIG_FILE"; then
   TELEMETRY_CONFIG_FILE="$TELEMETRY_LOCAL_CONFIG_FILE"
-elif [[ -n "${HOME:-}" ]] && telemetry_conf_trusted "$TELEMETRY_GLOBAL_CONFIG_FILE"; then
-  TELEMETRY_CONFIG_FILE="$TELEMETRY_GLOBAL_CONFIG_FILE"
 else
-  TELEMETRY_CONFIG_FILE="${TELEMETRY_DIR}/telemetry.conf"
+  telemetry_conf_warn_untrusted "$TELEMETRY_LOCAL_CONFIG_FILE"
+  if [[ -n "${HOME:-}" ]] && telemetry_conf_trusted "$TELEMETRY_GLOBAL_CONFIG_FILE"; then
+    TELEMETRY_CONFIG_FILE="$TELEMETRY_GLOBAL_CONFIG_FILE"
+  else
+    [[ -n "${HOME:-}" ]] && telemetry_conf_warn_untrusted "$TELEMETRY_GLOBAL_CONFIG_FILE"
+    TELEMETRY_CONFIG_FILE="${TELEMETRY_DIR}/telemetry.conf"
+  fi
 fi
 
 # Defaults
