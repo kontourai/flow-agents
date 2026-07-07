@@ -193,6 +193,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check liveness-console-relay-integration
 
+      - name: Console tenant isolation integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check console-tenant-isolation-integration
+
       - name: Finalize CI evidence
         if: always()
         run: bash evals/ci/run-baseline.sh --finalize

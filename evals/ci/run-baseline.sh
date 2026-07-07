@@ -33,6 +33,7 @@ CHECKS=(
   "Takeover protocol integration|bash evals/integration/test_takeover_protocol.sh"
   "Current.json per-actor integration|bash evals/integration/test_current_json_per_actor.sh"
   "Liveness console relay integration|bash evals/integration/test_liveness_console_relay.sh"
+  "Console tenant isolation integration|bash evals/integration/test_console_tenant_isolation.sh"
   "Goal Fit hook integration|bash evals/integration/test_goal_fit_hook.sh"
   "Hook category behavior integration|bash evals/integration/test_hook_category_behaviors.sh"
   "Workflow steering hook integration|bash evals/integration/test_workflow_steering_hook.sh"
@@ -120,6 +121,7 @@ LANE_WORKFLOW_CONTRACTS=(
   "Takeover protocol integration"
   "Current.json per-actor integration"
   "Liveness console relay integration"
+  "Console tenant isolation integration"
 )
 
 LANE_RUNTIME_AND_KIT=(
