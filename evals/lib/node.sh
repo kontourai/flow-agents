@@ -2,6 +2,8 @@
 # Shared command adapter for evals. Historical script entry paths are routed to TypeScript tools.
 
 FLOW_AGENTS_EVAL_ROOT="${ROOT:-${ROOT_DIR:-}}"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/env.sh"
+flow_agents_eval_bootstrap "$FLOW_AGENTS_EVAL_ROOT" || return $?
 
 # Memoized per-process: flow_agents_node is called dozens of times per eval script
 # (often inside a `run_bounded N ...` hang-guard around a single fail-fast assertion).

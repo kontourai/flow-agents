@@ -2,6 +2,8 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT/evals/lib/env.sh"
+flow_agents_eval_bootstrap "$ROOT" || exit $?
 SCRIPT="$ROOT/scripts/pull-work-provider.js"
 TMPDIR_EVAL="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_EVAL"' EXIT

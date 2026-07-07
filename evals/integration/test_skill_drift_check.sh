@@ -47,11 +47,9 @@
 # reads or writes this repo's own `kits/` or `dist/` trees.
 set -uo pipefail
 
-# Node emits version-dependent (node:PID) warnings on stderr/stdout that corrupt
-# captured --json output (JSON.parse fails on node 24.x locally). Silence them.
-export NODE_NO_WARNINGS=1
-
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT_DIR/evals/lib/env.sh"
+flow_agents_eval_bootstrap "$ROOT_DIR" || exit $?
 CLI="$ROOT_DIR/build/src/cli.js"
 SKILL_DRIFT_LIB="$ROOT_DIR/scripts/hooks/lib/skill-drift.js"
 WORKFLOW_STEERING="$ROOT_DIR/scripts/hooks/workflow-steering.js"
