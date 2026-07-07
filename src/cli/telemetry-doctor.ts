@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as http from "node:http";
 import * as https from "node:https";
+import * as os from "node:os";
 import * as path from "node:path";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
 import { telemetryDataDir as defaultTelemetryDataDir } from "../lib/local-artifact-root.js";
@@ -95,12 +96,24 @@ function deriveConsoleEndpoint(consoleUrl: string, explicitEndpoint: string): st
   return `${base}/api/telemetry/records`;
 }
 
-function endpointAllowed(endpointUrl: string, allowNetwork = false): boolean {
+// The one known hosted Kontour Console host is reachability-checkable by
+// default (no --allow-network): reuses the exact override knob
+// scripts/telemetry/console-presets.sh already defines
+// (FLOW_AGENTS_KONTOUR_CLOUD_CONSOLE_URL / https://console.kontourai.io), so
+// it self-corrects if that default ever changes rather than drifting via a
+// second hardcoded literal. Scoped to this one hostname only -- a generic
+// non-local HTTPS endpoint still requires --allow-network exactly as today.
+function isKnownHostedConsoleHostname(hostname: string): boolean {
+  const hostedUrl = parseUrl(process.env["FLOW_AGENTS_KONTOUR_CLOUD_CONSOLE_URL"] ?? "https://console.kontourai.io");
+  return hostedUrl !== null && hostname === hostedUrl.hostname;
+}
+
+export function endpointAllowed(endpointUrl: string, allowNetwork = false): boolean {
   if (!endpointUrl || endpointUrl.includes("\n") || endpointUrl.includes("\r") || endpointUrl.includes('"')) return false;
   const url = parseUrl(endpointUrl);
   if (!url) return false;
   if (url.username || url.password) return false;
-  if (url.protocol === "https:") return allowNetwork || isLocalHostname(url.hostname);
+  if (url.protocol === "https:") return allowNetwork || isLocalHostname(url.hostname) || isKnownHostedConsoleHostname(url.hostname);
   return url.protocol === "http:" && isLocalHostname(url.hostname);
 }
 
@@ -152,6 +165,27 @@ function isLocalHostname(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname.endsWith(".localhost");
 }
 
+// TS mirror of scripts/telemetry/lib/config.sh's telemetry_conf_trusted
+// (mode-600 + owner-uid + no-symlink gate). Used only to WARN that a
+// candidate telemetry-console.conf exists but would be silently ignored by
+// the real bash runtime pipeline -- this doctor still reads the shipped
+// scripts/telemetry/telemetry.conf default for its own report (accepted,
+// explicitly out-of-scope gap; see install-flow-foundations plan Thread C).
+// Symlink-then-existence guard order mirrors console-learning-projection.ts
+// and workflow-sidecar.ts's existing lstatSync-before-statSync precedent.
+function isConfTrusted(file: string): boolean {
+  try {
+    if (fs.lstatSync(file).isSymbolicLink()) return false;
+    const stat = fs.statSync(file);
+    if (!stat.isFile()) return false;
+    if ((stat.mode & 0o777) !== 0o600) return false;
+    if (typeof process.getuid === "function" && stat.uid !== process.getuid()) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function safeReportUrl(value: string): string | undefined {
   if (!value) return undefined;
   const parsed = parseUrl(value);
@@ -187,7 +221,7 @@ async function buildReport(argv: string[]): Promise<DoctorReport> {
   const allowed = endpointAllowed(endpointUrl, allowNetwork);
   const timeoutMs = Number.parseInt(flagString(args.flags, "timeout-ms", "2000") ?? "2000", 10);
   const reachability = await checkConsoleReachability(endpointUrl, Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 2000, allowNetwork);
-  const warnings = reportWarnings(configFile, endpointUrl, allowed, allowNetwork);
+  const warnings = reportWarnings(configFile, endpointUrl, allowed, allowNetwork, dest);
   return {
     ok: enabled && (!endpointUrl || (allowed && reachability.ok !== false)),
     destination: dest,
@@ -213,10 +247,19 @@ async function buildReport(argv: string[]): Promise<DoctorReport> {
   };
 }
 
-function reportWarnings(configFile: string, endpointUrl: string, allowed: boolean, allowNetwork: boolean): string[] {
+function reportWarnings(configFile: string, endpointUrl: string, allowed: boolean, allowNetwork: boolean, dest: string): string[] {
   const warnings: string[] = [];
   if (!fs.existsSync(configFile)) warnings.push("telemetry.conf was not found under destination scripts/telemetry");
-  if (endpointUrl && !allowed) warnings.push(allowNetwork ? "Console endpoint is malformed or contains credentials" : "Console endpoint is not allowed without --allow-network; local http(s) endpoints are allowed by default");
+  if (endpointUrl && !allowed) warnings.push(allowNetwork ? "Console endpoint is malformed or contains credentials" : "Console endpoint is not allowed without --allow-network; local http(s) endpoints and the known hosted Console host are allowed by default");
+  // Mirrors config.sh's local-before-global precedence for the warning only
+  // (see isConfTrusted's doc comment for the accepted config-resolution-parity gap).
+  const localConf = path.join(dest, ".kontourai", "telemetry-console.conf");
+  const globalConf = path.join(os.homedir(), ".flow-agents", "telemetry-console.conf");
+  if (fs.existsSync(localConf) && !isConfTrusted(localConf)) {
+    warnings.push(`Untrusted telemetry console conf at ${localConf} (must be mode 600, owned by the current user, and not a symlink); it is being ignored and telemetry stays fail-open`);
+  } else if (fs.existsSync(globalConf) && !isConfTrusted(globalConf)) {
+    warnings.push(`Untrusted telemetry console conf at ${globalConf} (must be mode 600, owned by the current user, and not a symlink); it is being ignored and telemetry stays fail-open`);
+  }
   return warnings;
 }
 

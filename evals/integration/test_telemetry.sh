@@ -116,11 +116,32 @@ _resolve_config_file() {
     bash -c "source '$CONFIG_TEST_ROOT/scripts/telemetry/lib/config.sh' 2>/dev/null; echo \"\$TELEMETRY_CONFIG_FILE\""
 }
 
+# Same as _resolve_config_file but captures config.sh's stderr into
+# $1 instead of discarding it, so the new "conf exists but is not trusted"
+# warning (AC2, install-flow-foundations Thread B) can be asserted on
+# directly. Call as: _resolve_config_file_with_stderr <stderr-file> [env=val ...]
+_resolve_config_file_with_stderr() {
+  local stderr_file="$1"
+  shift
+  env -i PATH="$PATH" HOME="$FAKE_HOME" "$@" \
+    bash -c "source '$CONFIG_TEST_ROOT/scripts/telemetry/lib/config.sh' 2>'$stderr_file'; echo \"\$TELEMETRY_CONFIG_FILE\""
+}
+
+STDERR_CAPTURE="$CONFIG_TEST_ROOT/config-stderr.txt"
+
 default_resolved=$(_resolve_config_file)
 if [[ "$default_resolved" == "$CONFIG_TEST_ROOT/scripts/telemetry/telemetry.conf" ]]; then
   _pass "config.sh: falls back to shipped telemetry.conf default"
 else
   _fail "config.sh: default expected '$CONFIG_TEST_ROOT/scripts/telemetry/telemetry.conf', got '$default_resolved'"
+fi
+
+: > "$STDERR_CAPTURE"
+_resolve_config_file_with_stderr "$STDERR_CAPTURE" >/dev/null
+if [[ ! -s "$STDERR_CAPTURE" ]]; then
+  _pass "config.sh: no conf on disk at all produces no untrusted-conf warning"
+else
+  _fail "config.sh: baseline (no conf) should produce no warning, got: $(cat "$STDERR_CAPTURE")"
 fi
 
 mkdir -p "$FAKE_HOME/.flow-agents"
@@ -134,12 +155,28 @@ else
   _fail "config.sh: untrusted global conf should fall through, got '$untrusted_global_resolved'"
 fi
 
+: > "$STDERR_CAPTURE"
+_resolve_config_file_with_stderr "$STDERR_CAPTURE" >/dev/null
+if grep -qF "$GLOBAL_CONF" "$STDERR_CAPTURE" 2>/dev/null; then
+  _pass "config.sh: untrusted (644) user-global conf prints a visible warning naming its path"
+else
+  _fail "config.sh: expected a warning naming '$GLOBAL_CONF', got: $(cat "$STDERR_CAPTURE" 2>/dev/null)"
+fi
+
 chmod 600 "$GLOBAL_CONF"
 global_resolved=$(_resolve_config_file)
 if [[ "$global_resolved" == "$GLOBAL_CONF" ]]; then
   _pass "config.sh: trusted (600) user-global telemetry-console.conf wins over shipped default"
 else
   _fail "config.sh: global conf expected '$GLOBAL_CONF', got '$global_resolved'"
+fi
+
+: > "$STDERR_CAPTURE"
+_resolve_config_file_with_stderr "$STDERR_CAPTURE" >/dev/null
+if [[ ! -s "$STDERR_CAPTURE" ]]; then
+  _pass "config.sh: trusted (600) user-global conf produces no warning"
+else
+  _fail "config.sh: trusted global conf should produce no warning, got: $(cat "$STDERR_CAPTURE")"
 fi
 
 mkdir -p "$CONFIG_TEST_ROOT/.kontourai"
@@ -153,12 +190,32 @@ else
   _fail "config.sh: untrusted local conf should fall through to global, got '$untrusted_local_resolved'"
 fi
 
+# Local is untrusted here while global is trusted (600) and wins the
+# resolution -- the local warning must still fire even though local isn't
+# the file config.sh ultimately picks, since the local conf is still being
+# silently ignored on its own terms.
+: > "$STDERR_CAPTURE"
+_resolve_config_file_with_stderr "$STDERR_CAPTURE" >/dev/null
+if grep -qF "$LOCAL_CONF" "$STDERR_CAPTURE" 2>/dev/null; then
+  _pass "config.sh: untrusted (644) workspace-local conf prints a visible warning naming its path even though global wins"
+else
+  _fail "config.sh: expected a warning naming '$LOCAL_CONF', got: $(cat "$STDERR_CAPTURE" 2>/dev/null)"
+fi
+
 chmod 600 "$LOCAL_CONF"
 local_resolved=$(_resolve_config_file)
 if [[ "$local_resolved" == "$LOCAL_CONF" ]]; then
   _pass "config.sh: trusted (600) workspace-local telemetry-console.conf wins over user-global conf"
 else
   _fail "config.sh: local conf expected '$LOCAL_CONF', got '$local_resolved'"
+fi
+
+: > "$STDERR_CAPTURE"
+_resolve_config_file_with_stderr "$STDERR_CAPTURE" >/dev/null
+if [[ ! -s "$STDERR_CAPTURE" ]]; then
+  _pass "config.sh: trusted (600) workspace-local conf produces no warning"
+else
+  _fail "config.sh: trusted local conf should produce no warning, got: $(cat "$STDERR_CAPTURE")"
 fi
 
 # A symlink at the workspace conf path must be ignored outright, even if the
@@ -178,6 +235,60 @@ else
   _fail "config.sh: symlinked local conf should fall through to global, got '$symlink_resolved'"
 fi
 
+: > "$STDERR_CAPTURE"
+_resolve_config_file_with_stderr "$STDERR_CAPTURE" >/dev/null
+if grep -qF "$LOCAL_CONF" "$STDERR_CAPTURE" 2>/dev/null; then
+  _pass "config.sh: symlinked workspace-local conf also prints a visible untrusted-conf warning ('-f' follows the link to a real file)"
+else
+  _fail "config.sh: expected a warning naming '$LOCAL_CONF' for the symlink case, got: $(cat "$STDERR_CAPTURE" 2>/dev/null)"
+fi
+
+# A DANGLING symlink (target does not exist) at the workspace conf path is
+# rejected by the trust gate just like the symlink-to-a-real-file case above,
+# but `-f` (which follows the link) returns false for a dangling target --
+# so the warning gate must additionally check `-L` to still fire here
+# (LOW fix: telemetry_conf_warn_untrusted broadened from `-f` alone to
+# `-e || -L`).
+rm -f "$LOCAL_CONF"
+ln -s "$CONFIG_TEST_ROOT/.kontourai/telemetry-console-target-missing.conf" "$LOCAL_CONF"
+dangling_symlink_resolved=$(_resolve_config_file)
+if [[ "$dangling_symlink_resolved" == "$GLOBAL_CONF" ]]; then
+  _pass "config.sh: dangling-symlink workspace-local conf is ignored, falls through to trusted global conf"
+else
+  _fail "config.sh: dangling-symlink local conf should fall through to global, got '$dangling_symlink_resolved'"
+fi
+
+: > "$STDERR_CAPTURE"
+_resolve_config_file_with_stderr "$STDERR_CAPTURE" >/dev/null
+if grep -qF "$LOCAL_CONF" "$STDERR_CAPTURE" 2>/dev/null; then
+  _pass "config.sh: dangling-symlink workspace-local conf prints a visible untrusted-conf warning ('-f' alone would miss this; '-L' catches it)"
+else
+  _fail "config.sh: expected a warning naming '$LOCAL_CONF' for the dangling-symlink case, got: $(cat "$STDERR_CAPTURE" 2>/dev/null)"
+fi
+
+# A symlink pointing at a DIRECTORY (not a regular file) hits the same `-f`
+# gap: `-f` is false for a directory target, so the pre-fix warning gate
+# silently skipped it too.
+rm -f "$LOCAL_CONF"
+mkdir -p "$CONFIG_TEST_ROOT/.kontourai/telemetry-console-target-dir"
+ln -s "$CONFIG_TEST_ROOT/.kontourai/telemetry-console-target-dir" "$LOCAL_CONF"
+symlink_to_dir_resolved=$(_resolve_config_file)
+if [[ "$symlink_to_dir_resolved" == "$GLOBAL_CONF" ]]; then
+  _pass "config.sh: symlink-to-directory workspace-local conf is ignored, falls through to trusted global conf"
+else
+  _fail "config.sh: symlink-to-directory local conf should fall through to global, got '$symlink_to_dir_resolved'"
+fi
+
+: > "$STDERR_CAPTURE"
+_resolve_config_file_with_stderr "$STDERR_CAPTURE" >/dev/null
+if grep -qF "$LOCAL_CONF" "$STDERR_CAPTURE" 2>/dev/null; then
+  _pass "config.sh: symlink-to-directory workspace-local conf prints a visible untrusted-conf warning ('-f' alone would miss this; '-L' catches it)"
+else
+  _fail "config.sh: expected a warning naming '$LOCAL_CONF' for the symlink-to-directory case, got: $(cat "$STDERR_CAPTURE" 2>/dev/null)"
+fi
+
+rm -f "$LOCAL_CONF"
+
 explicit_resolved=$(_resolve_config_file TELEMETRY_CONFIG_FILE="/tmp/explicit-telemetry.conf")
 if [[ "$explicit_resolved" == "/tmp/explicit-telemetry.conf" ]]; then
   _pass "config.sh: explicit TELEMETRY_CONFIG_FILE env wins over workspace-local conf"
@@ -186,6 +297,51 @@ else
 fi
 
 rm -rf "$CONFIG_TEST_ROOT"
+
+# --- 1c. Endpoint allowlist drop warning ---
+# transport.sh's console_post_json silently dropped an endpoint rejected by
+# console_telemetry_endpoint_allowed before this change (AC2, Thread B). It
+# now prints a one-time (per shell process) "warning: transport.sh: ..." line
+# to stderr instead, guarded by a plain global var so a second call in the
+# same sourced shell does not repeat it. Sourcing transport.sh directly
+# (mirroring the Config File Resolution block's own cp-then-source pattern)
+# with a disallowed http (non-local) endpoint means console_post_json must
+# return before ever invoking curl, so PATH is left untouched deliberately.
+echo ""
+echo "--- Endpoint Allowlist Drop Warning ---"
+TRANSPORT_TEST_ROOT=$(mktemp -d /tmp/eval-telemetry-transport-test.XXXXXX)
+mkdir -p "$TRANSPORT_TEST_ROOT/scripts/telemetry/lib"
+cp "$ROOT_DIR/scripts/telemetry/lib/transport.sh" "$TRANSPORT_TEST_ROOT/scripts/telemetry/lib/transport.sh"
+cp "$ROOT_DIR/scripts/telemetry/lib/redact.sh" "$TRANSPORT_TEST_ROOT/scripts/telemetry/lib/redact.sh"
+TRANSPORT_STDERR="$TRANSPORT_TEST_ROOT/transport-stderr.txt"
+TRANSPORT_CURL_MARKER="$TRANSPORT_TEST_ROOT/curl-invoked"
+NO_CURL_BIN="$TRANSPORT_TEST_ROOT/no-curl-bin"
+mkdir -p "$NO_CURL_BIN"
+cat > "$NO_CURL_BIN/curl" <<SH
+#!/usr/bin/env bash
+touch "$TRANSPORT_CURL_MARKER"
+SH
+chmod +x "$NO_CURL_BIN/curl"
+TELEMETRY_DIR="$TRANSPORT_TEST_ROOT/scripts/telemetry" PATH="$NO_CURL_BIN:$PATH" bash -c "
+  source '$TRANSPORT_TEST_ROOT/scripts/telemetry/lib/transport.sh'
+  console_post_json 'http://example.test' '{}'
+  console_post_json 'http://example.test' '{}'
+" 2>"$TRANSPORT_STDERR"
+
+warning_count=$(grep -c "warning: transport.sh:" "$TRANSPORT_STDERR" 2>/dev/null || echo 0)
+if [[ "$warning_count" -eq 1 ]] && grep -qF "http://example.test" "$TRANSPORT_STDERR" 2>/dev/null; then
+  _pass "transport.sh: disallowed endpoint prints exactly one drop warning across two calls in the same shell"
+else
+  _fail "transport.sh: expected exactly 1 warning naming the endpoint, got $warning_count: $(cat "$TRANSPORT_STDERR" 2>/dev/null)"
+fi
+
+if [[ ! -f "$TRANSPORT_CURL_MARKER" ]]; then
+  _pass "transport.sh: disallowed endpoint never invokes curl"
+else
+  _fail "transport.sh: disallowed endpoint should never invoke curl, but it did"
+fi
+
+rm -rf "$TRANSPORT_TEST_ROOT"
 
 # --- 2. Event type mapping ---
 echo ""

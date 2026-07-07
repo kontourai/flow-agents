@@ -1,0 +1,777 @@
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+  "claims": [
+    {
+      "id": "install-flow-foundations-build.flow-agents-workflow.npm-run-build-tsc-p-tsconfig-json-compiles-cleanly-zero-errors",
+      "subjectType": "change",
+      "subjectId": "install-flow-foundations/build",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "npm run build (tsc -p tsconfig.json) compiles cleanly, zero errors.",
+      "value": "pass",
+      "createdAt": "2026-07-07T16:53:29Z",
+      "updatedAt": "2026-07-07T16:53:29Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-foundations-config-sh-resolution-unchanged.flow-agents-workflow.traced-config-sh-s-nested-if-else-telemetry-config-file-resolution-order-explicit-env-trusted-local-trusted-global-shipped-default-is-unchanged-for-every-local-global-x-trusted-untrusted-combination-only-the-new-telemetry-conf-warn-untrusted-calls-were-added-in-the-else-branches-no-assignment-side-effects-warning-gate-uses-e-l-so-it-fires-for-present-but-untrusted-including-symlink-to-dir-and-dangling-symlink-and-never-for-a-genuinely-absent-conf-ac2",
+      "subjectType": "change",
+      "subjectId": "install-flow-foundations/config-sh-resolution-unchanged",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "Traced config.sh's nested if/else: TELEMETRY_CONFIG_FILE resolution order (explicit env > trusted local > trusted global > shipped default) is unchanged for every local/global x trusted/untrusted combination; only the new telemetry_conf_warn_untrusted calls were added in the else branches (no assignment side effects). Warning gate uses -e||-L so it fires for present-but-untrusted (including symlink-to-dir and dangling symlink) and never for a genuinely absent conf (AC2).",
+      "value": "pass",
+      "createdAt": "2026-07-07T16:53:29Z",
+      "updatedAt": "2026-07-07T16:53:29Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-foundations-codex-dedupe-behavior-identical.flow-agents-workflow.globaldest-codex-now-returns-runtimeglobalconfigcandidates-codex-defined-as-env-codex-home-path-join-homedir-codex-byte-identical-to-the-prior-defaultcodexhome-implementation-in-src-lib-local-artifact-root-ts-20-22-codex-home-codex-same-precedence-no-behavior-change",
+      "subjectType": "change",
+      "subjectId": "install-flow-foundations/codex-dedupe-behavior-identical",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "globalDest(\"codex\") now returns runtimeGlobalConfigCandidates(...).codex, defined as env[\"CODEX_HOME\"] || path.join(homedir, \".codex\") — byte-identical to the prior defaultCodexHome() implementation in src/lib/local-artifact-root.ts:20-22 (CODEX_HOME||~/.codex, same precedence). No behavior change.",
+      "value": "pass",
+      "createdAt": "2026-07-07T16:53:29Z",
+      "updatedAt": "2026-07-07T16:53:29Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-foundations-fault-injection-suite.flow-agents-workflow.5-mandated-fault-injections-each-independently-caught-by-the-suite-then-reverted-1-re-added-tab-rejection-to-isvalidconsoleendpointstrict-console-telemetry-validate-test-mjs-failed-as-expected-2-filesystem-probe-changed-to-return-on-2-matches-init-test-mjs-ambiguity-test-detectdefaultruntime-cascade-test-failed-as-expected-3-doctor-hostname-carve-out-widened-to-all-https-telemetry-doctor-test-mjs-unit-test-and-test-telemetry-doctor-sh-s-2-regression-guard-assertions-failed-as-expected-4-stray-comment-added-to-only-the-context-mirror-copy-of-config-sh-npm-run-validate-source-failed-with-the-mirror-diff-error-as-expected-5-config-sh-warn-gate-inverted-to-fire-on-absent-conf-test-telemetry-sh-s-2-no-warning-on-baseline-assertions-failed-as-expected-all-5-reverted-final-git-status-porcelain-and-mirror-diff-both-confirmed-clean-empty-after-each-and-at-the-end",
+      "subjectType": "change",
+      "subjectId": "install-flow-foundations/fault-injection-suite",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "5 mandated fault injections each independently caught by the suite, then reverted: (1) re-added tab-rejection to isValidConsoleEndpointStrict -> console-telemetry-validate.test.mjs failed as expected; (2) filesystem-probe changed to return on 2+ matches -> init.test.mjs ambiguity test + detectDefaultRuntime cascade test failed as expected; (3) doctor hostname carve-out widened to all https -> telemetry-doctor.test.mjs unit test AND test_telemetry_doctor.sh's 2 regression-guard assertions failed as expected; (4) stray comment added to only the context/ mirror copy of config.sh -> npm run validate:source failed with the mirror-diff error as expected; (5) config.sh warn-gate inverted to fire on absent conf -> test_telemetry.sh's 2 no-warning-on-baseline assertions failed as expected. All 5 reverted; final git status --porcelain and mirror diff both confirmed clean/empty after each and at the end.",
+      "value": "pass",
+      "createdAt": "2026-07-07T16:53:29Z",
+      "updatedAt": "2026-07-07T16:53:29Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-foundations-unit-tests.flow-agents-workflow.node-test-src-cli-test-mjs-108-108-pass-including-new-init-test-mjs-runtime-auto-detection-ac1-console-telemetry-validate-test-mjs-validator-predicates-ac4-telemetry-doctor-test-mjs-hosted-reachability-carve-out-ac3",
+      "subjectType": "change",
+      "subjectId": "install-flow-foundations/unit-tests",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "node --test src/cli/*.test.mjs: 108/108 pass, including new init.test.mjs (runtime auto-detection, AC1), console-telemetry-validate.test.mjs (validator predicates, AC4), telemetry-doctor.test.mjs (hosted reachability carve-out, AC3).",
+      "value": "pass",
+      "createdAt": "2026-07-07T16:53:29Z",
+      "updatedAt": "2026-07-07T16:53:29Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-foundations-validate-source.flow-agents-workflow.npm-run-validate-source-passes-config-sh-root-context-mirror-confirmed-byte-identical-by-the-tool-s-own-mirroredfiles-check-ac5",
+      "subjectType": "change",
+      "subjectId": "install-flow-foundations/validate-source",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "npm run validate:source -- passes; config.sh root/context mirror confirmed byte-identical by the tool's own mirroredFiles check (AC5).",
+      "value": "pass",
+      "createdAt": "2026-07-07T16:53:29Z",
+      "updatedAt": "2026-07-07T16:53:29Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-foundations-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-81-81-passed-1-pre-existing-unrelated-skip-repo-mode-agent-card-matching-not-touched-by-this-diff-ac5",
+      "subjectType": "change",
+      "subjectId": "install-flow-foundations/static-eval-suite",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "bash evals/run.sh static: 81/81 passed, 1 pre-existing unrelated skip (repo-mode agent-card matching, not touched by this diff) (AC5).",
+      "value": "pass",
+      "createdAt": "2026-07-07T16:53:29Z",
+      "updatedAt": "2026-07-07T16:53:29Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-foundations-telemetry-contract-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-sh-68-68-passed-including-new-stderr-warning-assertions-for-untrusted-local-untrusted-global-symlink-dangling-symlink-symlink-to-directory-conf-cases-and-the-transport-sh-one-time-endpoint-drop-warning-ac2",
+      "subjectType": "change",
+      "subjectId": "install-flow-foundations/telemetry-contract-integration",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "bash evals/integration/test_telemetry.sh: 68/68 passed, including new stderr-warning assertions for untrusted-local/untrusted-global/symlink/dangling-symlink/symlink-to-directory conf cases and the transport.sh one-time endpoint-drop warning (AC2).",
+      "value": "pass",
+      "createdAt": "2026-07-07T16:53:29Z",
+      "updatedAt": "2026-07-07T16:53:29Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-foundations-telemetry-doctor-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-doctor-sh-11-11-passed-on-two-consecutive-runs-no-flake-hosted-console-by-default-reachability-generic-non-local-still-requires-allow-network-regression-guard-and-untrusted-conf-doctor-warning-all-pass-ac2-ac3",
+      "subjectType": "change",
+      "subjectId": "install-flow-foundations/telemetry-doctor-integration",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "bash evals/integration/test_telemetry_doctor.sh: 11/11 passed on two consecutive runs (no flake) — hosted-console-by-default reachability, generic-non-local-still-requires-allow-network regression guard, and untrusted-conf doctor warning all pass (AC2, AC3).",
+      "value": "pass",
+      "createdAt": "2026-07-07T16:53:29Z",
+      "updatedAt": "2026-07-07T16:53:29Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-foundations-bundle-install-integration.flow-agents-workflow.bash-evals-integration-test-bundle-install-sh-79-79-passed-no-regression-from-init-ts-runtime-detection-changes",
+      "subjectType": "change",
+      "subjectId": "install-flow-foundations/bundle-install-integration",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "bash evals/integration/test_bundle_install.sh: 79/79 passed; no regression from init.ts runtime-detection changes.",
+      "value": "pass",
+      "createdAt": "2026-07-07T16:53:29Z",
+      "updatedAt": "2026-07-07T16:53:29Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:test_output",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "test"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-foundations-mirror-diff-check.flow-agents-workflow.diff-scripts-telemetry-lib-config-sh-context-scripts-telemetry-lib-config-sh-is-empty-byte-identical-mirror-invariant-preserved-ac5",
+      "subjectType": "change",
+      "subjectId": "install-flow-foundations/mirror-diff-check",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "diff scripts/telemetry/lib/config.sh context/scripts/telemetry/lib/config.sh is empty; byte-identical mirror invariant preserved (AC5).",
+      "value": "pass",
+      "createdAt": "2026-07-07T16:53:29Z",
+      "updatedAt": "2026-07-07T16:53:29Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-foundations-ts-bash-validator-agreement.flow-agents-workflow.independently-sourced-the-real-bash-console-telemetry-endpoint-allowed-scripts-telemetry-lib-transport-sh-and-compared-against-ts-isvalidconsoleendpointstrict-for-tab-newline-cr-quote-empty-valid-https-valid-http-localhost-non-local-http-outputs-identical-in-all-8-cases-fixed-high-confirmed-resolved-also-cross-checked-isvalidconsoleurl-isvalidconsoletoken-isvalidconsoletenant-issafeconsoletenantforruntime-against-install-console-config-sh-and-transport-sh-sources-line-by-line-no-residual-drift-found",
+      "subjectType": "change",
+      "subjectId": "install-flow-foundations/ts-bash-validator-agreement",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "Independently sourced the real bash console_telemetry_endpoint_allowed (scripts/telemetry/lib/transport.sh) and compared against TS isValidConsoleEndpointStrict for tab/newline/CR/quote/empty/valid-https/valid-http-localhost/non-local-http: outputs identical in all 8 cases (fixed HIGH confirmed resolved). Also cross-checked isValidConsoleUrl/isValidConsoleToken/isValidConsoleTenant/isSafeConsoleTenantForRuntime against install-console-config.sh and transport.sh sources line-by-line: no residual drift found.",
+      "value": "pass",
+      "createdAt": "2026-07-07T16:53:29Z",
+      "updatedAt": "2026-07-07T16:53:29Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-foundations-ac1-runtime-is-auto-detected-claude-code-codex-opencode-and-pre-fills-the-init-default-readme-no-longer-overclaims-explicit-flag-prompt-still-overrides-flow-agents-init-both-interactive-and-headless-defaults-the-runtime-prompt-flag-fallback-to-the-environment-detected-runtime-via-detectruntime-from-actor-identity-js-or-failing-that-the-single-unambiguous-filesystem-detected-runtime-claude-codex-codex-home-or-opencode-s-global-config-dir-falling-back-to-base-only-when-detection-is-ambiguous-or-absent-an-explicit-runtime-flag-or-interactive-answer-still-wins.flow-agents-workflow.ac1-runtime-is-auto-detected-claude-code-codex-opencode-and-pre-fills-the-init-default-readme-no-longer-overclaims-explicit-flag-prompt-still-overrides-flow-agents-init-both-interactive-and-headless-defaults-the-runtime-prompt-flag-fallback-to-the-environment-detected-runtime-via-detectruntime-from-actor-identity-js-or-failing-that-the-single-unambiguous-filesystem-detected-runtime-claude-codex-codex-home-or-opencode-s-global-config-dir-falling-back-to-base-only-when-detection-is-ambiguous-or-absent-an-explicit-runtime-flag-or-interactive-answer-still-wins",
+      "subjectType": "change",
+      "subjectId": "install-flow-foundations/ac1-runtime-is-auto-detected-claude-code-codex-opencode-and-pre-fills-the-init-default-readme-no-longer-overclaims-explicit-flag-prompt-still-overrides-flow-agents-init-both-interactive-and-headless-defaults-the-runtime-prompt-flag-fallback-to-the-environment-detected-runtime-via-detectruntime-from-actor-identity-js-or-failing-that-the-single-unambiguous-filesystem-detected-runtime-claude-codex-codex-home-or-opencode-s-global-config-dir-falling-back-to-base-only-when-detection-is-ambiguous-or-absent-an-explicit-runtime-flag-or-interactive-answer-still-wins",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "AC1 `runtime-is-auto-detected-claude-code-codex-opencode-and-pre-fills-the-init-default-readme-no-longer-overclaims-explicit-flag-prompt-still-overrides`: `flow-agents init` (both interactive and headless) defaults the runtime prompt/flag fallback to the environment-detected runtime (via `detectRuntime` from `actor-identity.js`) or, failing that, the single unambiguous filesystem-detected runtime (`~/.claude`, `~/.codex`/`$CODEX_HOME`, or opencode's global config dir), falling back to `base` only when detection is ambiguous or absent; an explicit `--runtime` flag or interactive answer still wins",
+      "value": "pass",
+      "createdAt": "2026-07-07T16:53:29Z",
+      "updatedAt": "2026-07-07T16:53:29Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-foundations-ac2-silent-fail-open-paths-surface-a-visible-warning-conf-failing-the-mode-600-owner-trust-gate-and-an-endpoint-dropped-by-the-transport-allowlist-wired-into-telemetry-doctor-warnings-too-an-existing-but-untrusted-telemetry-console-conf-wrong-mode-owner-or-a-symlink-prints-a-visible-warning-config-sh-to-stderr-while-still-falling-through-to-the-shipped-default-fail-open-behavior-unchanged-a-console-endpoint-dropped-by-console-telemetry-endpoint-allowed-prints-a-one-time-warning-transport-sh-to-stderr-instead-of-silently-returning-flow-agents-telemetry-doctor-s-warnings-reports-an-untrusted-but-present-local-global-conf-candidate.flow-agents-workflow.ac2-silent-fail-open-paths-surface-a-visible-warning-conf-failing-the-mode-600-owner-trust-gate-and-an-endpoint-dropped-by-the-transport-allowlist-wired-into-telemetry-doctor-warnings-too-an-existing-but-untrusted-telemetry-console-conf-wrong-mode-owner-or-a-symlink-prints-a-visible-warning-config-sh-to-stderr-while-still-falling-through-to-the-shipped-default-fail-open-behavior-unchanged-a-console-endpoint-dropped-by-console-telemetry-endpoint-allowed-prints-a-one-time-warning-transport-sh-to-stderr-instead-of-silently-returning-flow-agents-telemetry-doctor-s-warnings-reports-an-untrusted-but-present-local-global-conf-candidate",
+      "subjectType": "change",
+      "subjectId": "install-flow-foundations/ac2-silent-fail-open-paths-surface-a-visible-warning-conf-failing-the-mode-600-owner-trust-gate-and-an-endpoint-dropped-by-the-transport-allowlist-wired-into-telemetry-doctor-warnings-too-an-existing-but-untrusted-telemetry-console-conf-wrong-mode-owner-or-a-symlink-prints-a-visible-warning-config-sh-to-stderr-while-still-falling-through-to-the-shipped-default-fail-open-behavior-unchanged-a-console-endpoint-dropped-by-console-telemetry-endpoint-allowed-prints-a-one-time-warning-transport-sh-to-stderr-instead-of-silently-returning-flow-agents-telemetry-doctor-s-warnings-reports-an-untrusted-but-present-local-global-conf-candidate",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "AC2 `silent-fail-open-paths-surface-a-visible-warning-conf-failing-the-mode-600-owner-trust-gate-and-an-endpoint-dropped-by-the-transport-allowlist-wired-into-telemetry-doctor-warnings-too`: an existing-but-untrusted `telemetry-console.conf` (wrong mode/owner, or a symlink) prints a visible `warning: config.sh: ...` to stderr while still falling through to the shipped default (fail-open behavior unchanged); a console endpoint dropped by `console_telemetry_endpoint_allowed` prints a one-time `warning: transport.sh: ...` to stderr instead of silently returning; `flow-agents telemetry-doctor`'s `warnings[]` reports an untrusted-but-present local/global conf candidate",
+      "value": "pass",
+      "createdAt": "2026-07-07T16:53:29Z",
+      "updatedAt": "2026-07-07T16:53:29Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-foundations-ac3-telemetry-doctor-checks-hosted-console-reachability-by-default-or-init-passes-allow-network-for-the-endpoint-it-just-wrote-so-a-hosted-setup-can-be-verified-flow-agents-telemetry-doctor-no-allow-network-attempts-reachability-for-a-configured-endpoint-whose-hostname-matches-the-known-hosted-console-console-kontourai-io-or-flow-agents-kontour-cloud-console-url-when-overridden-while-a-generic-non-local-https-endpoint-still-requires-allow-network-exactly-as-before-no-regression-to-the-existing-opt-in-required-test-case.flow-agents-workflow.ac3-telemetry-doctor-checks-hosted-console-reachability-by-default-or-init-passes-allow-network-for-the-endpoint-it-just-wrote-so-a-hosted-setup-can-be-verified-flow-agents-telemetry-doctor-no-allow-network-attempts-reachability-for-a-configured-endpoint-whose-hostname-matches-the-known-hosted-console-console-kontourai-io-or-flow-agents-kontour-cloud-console-url-when-overridden-while-a-generic-non-local-https-endpoint-still-requires-allow-network-exactly-as-before-no-regression-to-the-existing-opt-in-required-test-case",
+      "subjectType": "change",
+      "subjectId": "install-flow-foundations/ac3-telemetry-doctor-checks-hosted-console-reachability-by-default-or-init-passes-allow-network-for-the-endpoint-it-just-wrote-so-a-hosted-setup-can-be-verified-flow-agents-telemetry-doctor-no-allow-network-attempts-reachability-for-a-configured-endpoint-whose-hostname-matches-the-known-hosted-console-console-kontourai-io-or-flow-agents-kontour-cloud-console-url-when-overridden-while-a-generic-non-local-https-endpoint-still-requires-allow-network-exactly-as-before-no-regression-to-the-existing-opt-in-required-test-case",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "AC3 `telemetry-doctor-checks-hosted-console-reachability-by-default-or-init-passes-allow-network-for-the-endpoint-it-just-wrote-so-a-hosted-setup-can-be-verified`: `flow-agents telemetry-doctor` (no `--allow-network`) attempts reachability for a configured endpoint whose hostname matches the known hosted Console (`console.kontourai.io`, or `FLOW_AGENTS_KONTOUR_CLOUD_CONSOLE_URL` when overridden), while a generic non-local HTTPS endpoint still requires `--allow-network` exactly as before (no regression to the existing opt-in-required test case)",
+      "value": "pass",
+      "createdAt": "2026-07-07T16:53:29Z",
+      "updatedAt": "2026-07-07T16:53:29Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-foundations-ac4-shared-inline-validation-helpers-groundwork-src-lib-console-telemetry-validate-ts-exports-pure-predicates-isvalidconsoleurl-isvalidconsoleendpointstrict-isvalidconsoletoken-isvalidconsoletenant-issafeconsoletenantforruntime-that-agree-with-the-bash-die-based-validators-on-every-boundary-case-empty-blank-handling-https-localhost-http-allowance-control-character-and-quote-rejection-length-limits-tenant-charset-with-no-bash-behavior-change-and-no-wiring-into-init-ts-s-interactive-flow-in-this-pr.flow-agents-workflow.ac4-shared-inline-validation-helpers-groundwork-src-lib-console-telemetry-validate-ts-exports-pure-predicates-isvalidconsoleurl-isvalidconsoleendpointstrict-isvalidconsoletoken-isvalidconsoletenant-issafeconsoletenantforruntime-that-agree-with-the-bash-die-based-validators-on-every-boundary-case-empty-blank-handling-https-localhost-http-allowance-control-character-and-quote-rejection-length-limits-tenant-charset-with-no-bash-behavior-change-and-no-wiring-into-init-ts-s-interactive-flow-in-this-pr",
+      "subjectType": "change",
+      "subjectId": "install-flow-foundations/ac4-shared-inline-validation-helpers-groundwork-src-lib-console-telemetry-validate-ts-exports-pure-predicates-isvalidconsoleurl-isvalidconsoleendpointstrict-isvalidconsoletoken-isvalidconsoletenant-issafeconsoletenantforruntime-that-agree-with-the-bash-die-based-validators-on-every-boundary-case-empty-blank-handling-https-localhost-http-allowance-control-character-and-quote-rejection-length-limits-tenant-charset-with-no-bash-behavior-change-and-no-wiring-into-init-ts-s-interactive-flow-in-this-pr",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "AC4 `shared-inline-validation-helpers-groundwork`: `src/lib/console-telemetry-validate.ts` exports pure predicates (`isValidConsoleUrl`, `isValidConsoleEndpointStrict`, `isValidConsoleToken`, `isValidConsoleTenant`, `isSafeConsoleTenantForRuntime`) that agree with the bash `die`-based validators on every boundary case (empty/blank handling, https/localhost-http allowance, control-character and quote rejection, length limits, tenant charset), with no bash behavior change and no wiring into `init.ts`'s interactive flow in this PR",
+      "value": "pass",
+      "createdAt": "2026-07-07T16:53:29Z",
+      "updatedAt": "2026-07-07T16:53:29Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    },
+    {
+      "id": "install-flow-foundations-ac5-no-regression-validate-source-telemetry-bundle-install-telemetry-doctor-evals-green-mirror-invariant-preserved-new-changed-behavior-covered-by-evals-npm-run-validate-source-bash-evals-run-sh-static-bash-evals-integration-test-telemetry-sh-bash-evals-integration-test-telemetry-doctor-sh-bash-evals-integration-test-bundle-install-sh-and-node-test-src-cli-test-mjs-all-pass-config-sh-s-root-context-mirror-stays-byte-identical-per-validate-source-tree-ts-s-mirroredfiles-check.flow-agents-workflow.ac5-no-regression-validate-source-telemetry-bundle-install-telemetry-doctor-evals-green-mirror-invariant-preserved-new-changed-behavior-covered-by-evals-npm-run-validate-source-bash-evals-run-sh-static-bash-evals-integration-test-telemetry-sh-bash-evals-integration-test-telemetry-doctor-sh-bash-evals-integration-test-bundle-install-sh-and-node-test-src-cli-test-mjs-all-pass-config-sh-s-root-context-mirror-stays-byte-identical-per-validate-source-tree-ts-s-mirroredfiles-check",
+      "subjectType": "change",
+      "subjectId": "install-flow-foundations/ac5-no-regression-validate-source-telemetry-bundle-install-telemetry-doctor-evals-green-mirror-invariant-preserved-new-changed-behavior-covered-by-evals-npm-run-validate-source-bash-evals-run-sh-static-bash-evals-integration-test-telemetry-sh-bash-evals-integration-test-telemetry-doctor-sh-bash-evals-integration-test-bundle-install-sh-and-node-test-src-cli-test-mjs-all-pass-config-sh-s-root-context-mirror-stays-byte-identical-per-validate-source-tree-ts-s-mirroredfiles-check",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.execute.scope",
+      "fieldOrBehavior": "AC5 `no-regression-validate-source-telemetry-bundle-install-telemetry-doctor-evals-green-mirror-invariant-preserved-new-changed-behavior-covered-by-evals`: `npm run validate:source`, `bash evals/run.sh static`, `bash evals/integration/test_telemetry.sh`, `bash evals/integration/test_telemetry_doctor.sh`, `bash evals/integration/test_bundle_install.sh`, and `node --test src/cli/*.test.mjs` all pass; `config.sh`'s root/context mirror stays byte-identical per `validate-source-tree.ts`'s `mirroredFiles` check",
+      "value": "pass",
+      "createdAt": "2026-07-07T16:53:29Z",
+      "updatedAt": "2026-07-07T16:53:29Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.execute.scope",
+      "metadata": {
+        "origin": "acceptance"
+      },
+      "status": "verified"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:install-flow-foundations-build.flow-agents-workflow.npm-run-build-tsc-p-tsconfig-json-compiles-cleanly-zero-errors",
+      "claimId": "install-flow-foundations-build.flow-agents-workflow.npm-run-build-tsc-p-tsconfig-json-compiles-cleanly-zero-errors",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "install-flow-foundations/evidence.json",
+      "excerptOrSummary": "npm run build (tsc -p tsconfig.json) compiles cleanly, zero errors.",
+      "observedAt": "2026-07-07T16:53:29Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "npm run build",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:install-flow-foundations-config-sh-resolution-unchanged.flow-agents-workflow.traced-config-sh-s-nested-if-else-telemetry-config-file-resolution-order-explicit-env-trusted-local-trusted-global-shipped-default-is-unchanged-for-every-local-global-x-trusted-untrusted-combination-only-the-new-telemetry-conf-warn-untrusted-calls-were-added-in-the-else-branches-no-assignment-side-effects-warning-gate-uses-e-l-so-it-fires-for-present-but-untrusted-including-symlink-to-dir-and-dangling-symlink-and-never-for-a-genuinely-absent-conf-ac2",
+      "claimId": "install-flow-foundations-config-sh-resolution-unchanged.flow-agents-workflow.traced-config-sh-s-nested-if-else-telemetry-config-file-resolution-order-explicit-env-trusted-local-trusted-global-shipped-default-is-unchanged-for-every-local-global-x-trusted-untrusted-combination-only-the-new-telemetry-conf-warn-untrusted-calls-were-added-in-the-else-branches-no-assignment-side-effects-warning-gate-uses-e-l-so-it-fires-for-present-but-untrusted-including-symlink-to-dir-and-dangling-symlink-and-never-for-a-genuinely-absent-conf-ac2",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "install-flow-foundations/evidence.json",
+      "excerptOrSummary": "Traced config.sh's nested if/else: TELEMETRY_CONFIG_FILE resolution order (explicit env > trusted local > trusted global > shipped default) is unchanged for every local/global x trusted/untrusted combination; only the new telemetry_conf_warn_untrusted calls were added in the else branches (no assignment side effects). Warning gate uses -e||-L so it fires for present-but-untrusted (including symlink-to-dir and dangling symlink) and never for a genuinely absent conf (AC2).",
+      "observedAt": "2026-07-07T16:53:29Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:install-flow-foundations-codex-dedupe-behavior-identical.flow-agents-workflow.globaldest-codex-now-returns-runtimeglobalconfigcandidates-codex-defined-as-env-codex-home-path-join-homedir-codex-byte-identical-to-the-prior-defaultcodexhome-implementation-in-src-lib-local-artifact-root-ts-20-22-codex-home-codex-same-precedence-no-behavior-change",
+      "claimId": "install-flow-foundations-codex-dedupe-behavior-identical.flow-agents-workflow.globaldest-codex-now-returns-runtimeglobalconfigcandidates-codex-defined-as-env-codex-home-path-join-homedir-codex-byte-identical-to-the-prior-defaultcodexhome-implementation-in-src-lib-local-artifact-root-ts-20-22-codex-home-codex-same-precedence-no-behavior-change",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "install-flow-foundations/evidence.json",
+      "excerptOrSummary": "globalDest(\"codex\") now returns runtimeGlobalConfigCandidates(...).codex, defined as env[\"CODEX_HOME\"] || path.join(homedir, \".codex\") — byte-identical to the prior defaultCodexHome() implementation in src/lib/local-artifact-root.ts:20-22 (CODEX_HOME||~/.codex, same precedence). No behavior change.",
+      "observedAt": "2026-07-07T16:53:29Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:install-flow-foundations-fault-injection-suite.flow-agents-workflow.5-mandated-fault-injections-each-independently-caught-by-the-suite-then-reverted-1-re-added-tab-rejection-to-isvalidconsoleendpointstrict-console-telemetry-validate-test-mjs-failed-as-expected-2-filesystem-probe-changed-to-return-on-2-matches-init-test-mjs-ambiguity-test-detectdefaultruntime-cascade-test-failed-as-expected-3-doctor-hostname-carve-out-widened-to-all-https-telemetry-doctor-test-mjs-unit-test-and-test-telemetry-doctor-sh-s-2-regression-guard-assertions-failed-as-expected-4-stray-comment-added-to-only-the-context-mirror-copy-of-config-sh-npm-run-validate-source-failed-with-the-mirror-diff-error-as-expected-5-config-sh-warn-gate-inverted-to-fire-on-absent-conf-test-telemetry-sh-s-2-no-warning-on-baseline-assertions-failed-as-expected-all-5-reverted-final-git-status-porcelain-and-mirror-diff-both-confirmed-clean-empty-after-each-and-at-the-end",
+      "claimId": "install-flow-foundations-fault-injection-suite.flow-agents-workflow.5-mandated-fault-injections-each-independently-caught-by-the-suite-then-reverted-1-re-added-tab-rejection-to-isvalidconsoleendpointstrict-console-telemetry-validate-test-mjs-failed-as-expected-2-filesystem-probe-changed-to-return-on-2-matches-init-test-mjs-ambiguity-test-detectdefaultruntime-cascade-test-failed-as-expected-3-doctor-hostname-carve-out-widened-to-all-https-telemetry-doctor-test-mjs-unit-test-and-test-telemetry-doctor-sh-s-2-regression-guard-assertions-failed-as-expected-4-stray-comment-added-to-only-the-context-mirror-copy-of-config-sh-npm-run-validate-source-failed-with-the-mirror-diff-error-as-expected-5-config-sh-warn-gate-inverted-to-fire-on-absent-conf-test-telemetry-sh-s-2-no-warning-on-baseline-assertions-failed-as-expected-all-5-reverted-final-git-status-porcelain-and-mirror-diff-both-confirmed-clean-empty-after-each-and-at-the-end",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "install-flow-foundations/evidence.json",
+      "excerptOrSummary": "5 mandated fault injections each independently caught by the suite, then reverted: (1) re-added tab-rejection to isValidConsoleEndpointStrict -> console-telemetry-validate.test.mjs failed as expected; (2) filesystem-probe changed to return on 2+ matches -> init.test.mjs ambiguity test + detectDefaultRuntime cascade test failed as expected; (3) doctor hostname carve-out widened to all https -> telemetry-doctor.test.mjs unit test AND test_telemetry_doctor.sh's 2 regression-guard assertions failed as expected; (4) stray comment added to only the context/ mirror copy of config.sh -> npm run validate:source failed with the mirror-diff error as expected; (5) config.sh warn-gate inverted to fire on absent conf -> test_telemetry.sh's 2 no-warning-on-baseline assertions failed as expected. All 5 reverted; final git status --porcelain and mirror diff both confirmed clean/empty after each and at the end.",
+      "observedAt": "2026-07-07T16:53:29Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    },
+    {
+      "id": "ev:install-flow-foundations-unit-tests.flow-agents-workflow.node-test-src-cli-test-mjs-108-108-pass-including-new-init-test-mjs-runtime-auto-detection-ac1-console-telemetry-validate-test-mjs-validator-predicates-ac4-telemetry-doctor-test-mjs-hosted-reachability-carve-out-ac3",
+      "claimId": "install-flow-foundations-unit-tests.flow-agents-workflow.node-test-src-cli-test-mjs-108-108-pass-including-new-init-test-mjs-runtime-auto-detection-ac1-console-telemetry-validate-test-mjs-validator-predicates-ac4-telemetry-doctor-test-mjs-hosted-reachability-carve-out-ac3",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "install-flow-foundations/evidence.json",
+      "excerptOrSummary": "node --test src/cli/*.test.mjs: 108/108 pass, including new init.test.mjs (runtime auto-detection, AC1), console-telemetry-validate.test.mjs (validator predicates, AC4), telemetry-doctor.test.mjs (hosted reachability carve-out, AC3).",
+      "observedAt": "2026-07-07T16:53:29Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "node --test src/cli/*.test.mjs",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:install-flow-foundations-validate-source.flow-agents-workflow.npm-run-validate-source-passes-config-sh-root-context-mirror-confirmed-byte-identical-by-the-tool-s-own-mirroredfiles-check-ac5",
+      "claimId": "install-flow-foundations-validate-source.flow-agents-workflow.npm-run-validate-source-passes-config-sh-root-context-mirror-confirmed-byte-identical-by-the-tool-s-own-mirroredfiles-check-ac5",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "install-flow-foundations/evidence.json",
+      "excerptOrSummary": "npm run validate:source -- passes; config.sh root/context mirror confirmed byte-identical by the tool's own mirroredFiles check (AC5).",
+      "observedAt": "2026-07-07T16:53:29Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "npm run validate:source --",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:install-flow-foundations-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-81-81-passed-1-pre-existing-unrelated-skip-repo-mode-agent-card-matching-not-touched-by-this-diff-ac5",
+      "claimId": "install-flow-foundations-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-81-81-passed-1-pre-existing-unrelated-skip-repo-mode-agent-card-matching-not-touched-by-this-diff-ac5",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "install-flow-foundations/evidence.json",
+      "excerptOrSummary": "bash evals/run.sh static: 81/81 passed, 1 pre-existing unrelated skip (repo-mode agent-card matching, not touched by this diff) (AC5).",
+      "observedAt": "2026-07-07T16:53:29Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/run.sh static",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:install-flow-foundations-telemetry-contract-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-sh-68-68-passed-including-new-stderr-warning-assertions-for-untrusted-local-untrusted-global-symlink-dangling-symlink-symlink-to-directory-conf-cases-and-the-transport-sh-one-time-endpoint-drop-warning-ac2",
+      "claimId": "install-flow-foundations-telemetry-contract-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-sh-68-68-passed-including-new-stderr-warning-assertions-for-untrusted-local-untrusted-global-symlink-dangling-symlink-symlink-to-directory-conf-cases-and-the-transport-sh-one-time-endpoint-drop-warning-ac2",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "install-flow-foundations/evidence.json",
+      "excerptOrSummary": "bash evals/integration/test_telemetry.sh: 68/68 passed, including new stderr-warning assertions for untrusted-local/untrusted-global/symlink/dangling-symlink/symlink-to-directory conf cases and the transport.sh one-time endpoint-drop warning (AC2).",
+      "observedAt": "2026-07-07T16:53:29Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_telemetry.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:install-flow-foundations-telemetry-doctor-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-doctor-sh-11-11-passed-on-two-consecutive-runs-no-flake-hosted-console-by-default-reachability-generic-non-local-still-requires-allow-network-regression-guard-and-untrusted-conf-doctor-warning-all-pass-ac2-ac3",
+      "claimId": "install-flow-foundations-telemetry-doctor-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-doctor-sh-11-11-passed-on-two-consecutive-runs-no-flake-hosted-console-by-default-reachability-generic-non-local-still-requires-allow-network-regression-guard-and-untrusted-conf-doctor-warning-all-pass-ac2-ac3",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "install-flow-foundations/evidence.json",
+      "excerptOrSummary": "bash evals/integration/test_telemetry_doctor.sh: 11/11 passed on two consecutive runs (no flake) — hosted-console-by-default reachability, generic-non-local-still-requires-allow-network regression guard, and untrusted-conf doctor warning all pass (AC2, AC3).",
+      "observedAt": "2026-07-07T16:53:29Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_telemetry_doctor.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:install-flow-foundations-bundle-install-integration.flow-agents-workflow.bash-evals-integration-test-bundle-install-sh-79-79-passed-no-regression-from-init-ts-runtime-detection-changes",
+      "claimId": "install-flow-foundations-bundle-install-integration.flow-agents-workflow.bash-evals-integration-test-bundle-install-sh-79-79-passed-no-regression-from-init-ts-runtime-detection-changes",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "install-flow-foundations/evidence.json",
+      "excerptOrSummary": "bash evals/integration/test_bundle_install.sh: 79/79 passed; no regression from init.ts runtime-detection changes.",
+      "observedAt": "2026-07-07T16:53:29Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "bash evals/integration/test_bundle_install.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:install-flow-foundations-mirror-diff-check.flow-agents-workflow.diff-scripts-telemetry-lib-config-sh-context-scripts-telemetry-lib-config-sh-is-empty-byte-identical-mirror-invariant-preserved-ac5",
+      "claimId": "install-flow-foundations-mirror-diff-check.flow-agents-workflow.diff-scripts-telemetry-lib-config-sh-context-scripts-telemetry-lib-config-sh-is-empty-byte-identical-mirror-invariant-preserved-ac5",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "install-flow-foundations/evidence.json",
+      "excerptOrSummary": "diff scripts/telemetry/lib/config.sh context/scripts/telemetry/lib/config.sh is empty; byte-identical mirror invariant preserved (AC5).",
+      "observedAt": "2026-07-07T16:53:29Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "diff scripts/telemetry/lib/config.sh context/scripts/telemetry/lib/config.sh",
+        "isError": false
+      }
+    },
+    {
+      "id": "ev:install-flow-foundations-ts-bash-validator-agreement.flow-agents-workflow.independently-sourced-the-real-bash-console-telemetry-endpoint-allowed-scripts-telemetry-lib-transport-sh-and-compared-against-ts-isvalidconsoleendpointstrict-for-tab-newline-cr-quote-empty-valid-https-valid-http-localhost-non-local-http-outputs-identical-in-all-8-cases-fixed-high-confirmed-resolved-also-cross-checked-isvalidconsoleurl-isvalidconsoletoken-isvalidconsoletenant-issafeconsoletenantforruntime-against-install-console-config-sh-and-transport-sh-sources-line-by-line-no-residual-drift-found",
+      "claimId": "install-flow-foundations-ts-bash-validator-agreement.flow-agents-workflow.independently-sourced-the-real-bash-console-telemetry-endpoint-allowed-scripts-telemetry-lib-transport-sh-and-compared-against-ts-isvalidconsoleendpointstrict-for-tab-newline-cr-quote-empty-valid-https-valid-http-localhost-non-local-http-outputs-identical-in-all-8-cases-fixed-high-confirmed-resolved-also-cross-checked-isvalidconsoleurl-isvalidconsoletoken-isvalidconsoletenant-issafeconsoletenantforruntime-against-install-console-config-sh-and-transport-sh-sources-line-by-line-no-residual-drift-found",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "install-flow-foundations/evidence.json",
+      "excerptOrSummary": "Independently sourced the real bash console_telemetry_endpoint_allowed (scripts/telemetry/lib/transport.sh) and compared against TS isValidConsoleEndpointStrict for tab/newline/CR/quote/empty/valid-https/valid-http-localhost/non-local-http: outputs identical in all 8 cases (fixed HIGH confirmed resolved). Also cross-checked isValidConsoleUrl/isValidConsoleToken/isValidConsoleTenant/isSafeConsoleTenantForRuntime against install-console-config.sh and transport.sh sources line-by-line: no residual drift found.",
+      "observedAt": "2026-07-07T16:53:29Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy:workflow.check.external:attestation",
+      "claimType": "workflow.check.external",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.external claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.execute.scope:attestation",
+      "claimType": "builder.execute.scope",
+      "requiredEvidence": [
+        "attestation"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.execute.scope claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.check.test:test_output",
+      "claimType": "workflow.check.test",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.check.test claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.execute.scope:test_output",
+      "claimType": "builder.execute.scope",
+      "requiredEvidence": [
+        "test_output"
+      ],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.execute.scope claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:workflow.acceptance.criterion",
+      "claimType": "workflow.acceptance.criterion",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a workflow.acceptance.criterion claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    },
+    {
+      "id": "policy:builder.execute.scope",
+      "claimType": "builder.execute.scope",
+      "requiredEvidence": [],
+      "acceptanceCriteria": [
+        "A verified verification event must support a builder.execute.scope claim."
+      ],
+      "reviewAuthority": "system",
+      "validityRule": {
+        "kind": "manual"
+      },
+      "stalenessTriggers": [],
+      "conflictRules": [],
+      "impactLevel": "high"
+    }
+  ],
+  "events": [
+    {
+      "id": "evt:install-flow-foundations-build.flow-agents-workflow.npm-run-build-tsc-p-tsconfig-json-compiles-cleanly-zero-errors",
+      "claimId": "install-flow-foundations-build.flow-agents-workflow.npm-run-build-tsc-p-tsconfig-json-compiles-cleanly-zero-errors",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:install-flow-foundations-build.flow-agents-workflow.npm-run-build-tsc-p-tsconfig-json-compiles-cleanly-zero-errors"
+      ],
+      "createdAt": "2026-07-07T16:53:29Z",
+      "verifiedAt": "2026-07-07T16:53:29Z"
+    },
+    {
+      "id": "evt:install-flow-foundations-config-sh-resolution-unchanged.flow-agents-workflow.traced-config-sh-s-nested-if-else-telemetry-config-file-resolution-order-explicit-env-trusted-local-trusted-global-shipped-default-is-unchanged-for-every-local-global-x-trusted-untrusted-combination-only-the-new-telemetry-conf-warn-untrusted-calls-were-added-in-the-else-branches-no-assignment-side-effects-warning-gate-uses-e-l-so-it-fires-for-present-but-untrusted-including-symlink-to-dir-and-dangling-symlink-and-never-for-a-genuinely-absent-conf-ac2",
+      "claimId": "install-flow-foundations-config-sh-resolution-unchanged.flow-agents-workflow.traced-config-sh-s-nested-if-else-telemetry-config-file-resolution-order-explicit-env-trusted-local-trusted-global-shipped-default-is-unchanged-for-every-local-global-x-trusted-untrusted-combination-only-the-new-telemetry-conf-warn-untrusted-calls-were-added-in-the-else-branches-no-assignment-side-effects-warning-gate-uses-e-l-so-it-fires-for-present-but-untrusted-including-symlink-to-dir-and-dangling-symlink-and-never-for-a-genuinely-absent-conf-ac2",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:install-flow-foundations-config-sh-resolution-unchanged.flow-agents-workflow.traced-config-sh-s-nested-if-else-telemetry-config-file-resolution-order-explicit-env-trusted-local-trusted-global-shipped-default-is-unchanged-for-every-local-global-x-trusted-untrusted-combination-only-the-new-telemetry-conf-warn-untrusted-calls-were-added-in-the-else-branches-no-assignment-side-effects-warning-gate-uses-e-l-so-it-fires-for-present-but-untrusted-including-symlink-to-dir-and-dangling-symlink-and-never-for-a-genuinely-absent-conf-ac2"
+      ],
+      "createdAt": "2026-07-07T16:53:29Z",
+      "verifiedAt": "2026-07-07T16:53:29Z"
+    },
+    {
+      "id": "evt:install-flow-foundations-codex-dedupe-behavior-identical.flow-agents-workflow.globaldest-codex-now-returns-runtimeglobalconfigcandidates-codex-defined-as-env-codex-home-path-join-homedir-codex-byte-identical-to-the-prior-defaultcodexhome-implementation-in-src-lib-local-artifact-root-ts-20-22-codex-home-codex-same-precedence-no-behavior-change",
+      "claimId": "install-flow-foundations-codex-dedupe-behavior-identical.flow-agents-workflow.globaldest-codex-now-returns-runtimeglobalconfigcandidates-codex-defined-as-env-codex-home-path-join-homedir-codex-byte-identical-to-the-prior-defaultcodexhome-implementation-in-src-lib-local-artifact-root-ts-20-22-codex-home-codex-same-precedence-no-behavior-change",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:install-flow-foundations-codex-dedupe-behavior-identical.flow-agents-workflow.globaldest-codex-now-returns-runtimeglobalconfigcandidates-codex-defined-as-env-codex-home-path-join-homedir-codex-byte-identical-to-the-prior-defaultcodexhome-implementation-in-src-lib-local-artifact-root-ts-20-22-codex-home-codex-same-precedence-no-behavior-change"
+      ],
+      "createdAt": "2026-07-07T16:53:29Z",
+      "verifiedAt": "2026-07-07T16:53:29Z"
+    },
+    {
+      "id": "evt:install-flow-foundations-fault-injection-suite.flow-agents-workflow.5-mandated-fault-injections-each-independently-caught-by-the-suite-then-reverted-1-re-added-tab-rejection-to-isvalidconsoleendpointstrict-console-telemetry-validate-test-mjs-failed-as-expected-2-filesystem-probe-changed-to-return-on-2-matches-init-test-mjs-ambiguity-test-detectdefaultruntime-cascade-test-failed-as-expected-3-doctor-hostname-carve-out-widened-to-all-https-telemetry-doctor-test-mjs-unit-test-and-test-telemetry-doctor-sh-s-2-regression-guard-assertions-failed-as-expected-4-stray-comment-added-to-only-the-context-mirror-copy-of-config-sh-npm-run-validate-source-failed-with-the-mirror-diff-error-as-expected-5-config-sh-warn-gate-inverted-to-fire-on-absent-conf-test-telemetry-sh-s-2-no-warning-on-baseline-assertions-failed-as-expected-all-5-reverted-final-git-status-porcelain-and-mirror-diff-both-confirmed-clean-empty-after-each-and-at-the-end",
+      "claimId": "install-flow-foundations-fault-injection-suite.flow-agents-workflow.5-mandated-fault-injections-each-independently-caught-by-the-suite-then-reverted-1-re-added-tab-rejection-to-isvalidconsoleendpointstrict-console-telemetry-validate-test-mjs-failed-as-expected-2-filesystem-probe-changed-to-return-on-2-matches-init-test-mjs-ambiguity-test-detectdefaultruntime-cascade-test-failed-as-expected-3-doctor-hostname-carve-out-widened-to-all-https-telemetry-doctor-test-mjs-unit-test-and-test-telemetry-doctor-sh-s-2-regression-guard-assertions-failed-as-expected-4-stray-comment-added-to-only-the-context-mirror-copy-of-config-sh-npm-run-validate-source-failed-with-the-mirror-diff-error-as-expected-5-config-sh-warn-gate-inverted-to-fire-on-absent-conf-test-telemetry-sh-s-2-no-warning-on-baseline-assertions-failed-as-expected-all-5-reverted-final-git-status-porcelain-and-mirror-diff-both-confirmed-clean-empty-after-each-and-at-the-end",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:install-flow-foundations-fault-injection-suite.flow-agents-workflow.5-mandated-fault-injections-each-independently-caught-by-the-suite-then-reverted-1-re-added-tab-rejection-to-isvalidconsoleendpointstrict-console-telemetry-validate-test-mjs-failed-as-expected-2-filesystem-probe-changed-to-return-on-2-matches-init-test-mjs-ambiguity-test-detectdefaultruntime-cascade-test-failed-as-expected-3-doctor-hostname-carve-out-widened-to-all-https-telemetry-doctor-test-mjs-unit-test-and-test-telemetry-doctor-sh-s-2-regression-guard-assertions-failed-as-expected-4-stray-comment-added-to-only-the-context-mirror-copy-of-config-sh-npm-run-validate-source-failed-with-the-mirror-diff-error-as-expected-5-config-sh-warn-gate-inverted-to-fire-on-absent-conf-test-telemetry-sh-s-2-no-warning-on-baseline-assertions-failed-as-expected-all-5-reverted-final-git-status-porcelain-and-mirror-diff-both-confirmed-clean-empty-after-each-and-at-the-end"
+      ],
+      "createdAt": "2026-07-07T16:53:29Z",
+      "verifiedAt": "2026-07-07T16:53:29Z"
+    },
+    {
+      "id": "evt:install-flow-foundations-unit-tests.flow-agents-workflow.node-test-src-cli-test-mjs-108-108-pass-including-new-init-test-mjs-runtime-auto-detection-ac1-console-telemetry-validate-test-mjs-validator-predicates-ac4-telemetry-doctor-test-mjs-hosted-reachability-carve-out-ac3",
+      "claimId": "install-flow-foundations-unit-tests.flow-agents-workflow.node-test-src-cli-test-mjs-108-108-pass-including-new-init-test-mjs-runtime-auto-detection-ac1-console-telemetry-validate-test-mjs-validator-predicates-ac4-telemetry-doctor-test-mjs-hosted-reachability-carve-out-ac3",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:install-flow-foundations-unit-tests.flow-agents-workflow.node-test-src-cli-test-mjs-108-108-pass-including-new-init-test-mjs-runtime-auto-detection-ac1-console-telemetry-validate-test-mjs-validator-predicates-ac4-telemetry-doctor-test-mjs-hosted-reachability-carve-out-ac3"
+      ],
+      "createdAt": "2026-07-07T16:53:29Z",
+      "verifiedAt": "2026-07-07T16:53:29Z"
+    },
+    {
+      "id": "evt:install-flow-foundations-validate-source.flow-agents-workflow.npm-run-validate-source-passes-config-sh-root-context-mirror-confirmed-byte-identical-by-the-tool-s-own-mirroredfiles-check-ac5",
+      "claimId": "install-flow-foundations-validate-source.flow-agents-workflow.npm-run-validate-source-passes-config-sh-root-context-mirror-confirmed-byte-identical-by-the-tool-s-own-mirroredfiles-check-ac5",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:install-flow-foundations-validate-source.flow-agents-workflow.npm-run-validate-source-passes-config-sh-root-context-mirror-confirmed-byte-identical-by-the-tool-s-own-mirroredfiles-check-ac5"
+      ],
+      "createdAt": "2026-07-07T16:53:29Z",
+      "verifiedAt": "2026-07-07T16:53:29Z"
+    },
+    {
+      "id": "evt:install-flow-foundations-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-81-81-passed-1-pre-existing-unrelated-skip-repo-mode-agent-card-matching-not-touched-by-this-diff-ac5",
+      "claimId": "install-flow-foundations-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-81-81-passed-1-pre-existing-unrelated-skip-repo-mode-agent-card-matching-not-touched-by-this-diff-ac5",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:install-flow-foundations-static-eval-suite.flow-agents-workflow.bash-evals-run-sh-static-81-81-passed-1-pre-existing-unrelated-skip-repo-mode-agent-card-matching-not-touched-by-this-diff-ac5"
+      ],
+      "createdAt": "2026-07-07T16:53:29Z",
+      "verifiedAt": "2026-07-07T16:53:29Z"
+    },
+    {
+      "id": "evt:install-flow-foundations-telemetry-contract-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-sh-68-68-passed-including-new-stderr-warning-assertions-for-untrusted-local-untrusted-global-symlink-dangling-symlink-symlink-to-directory-conf-cases-and-the-transport-sh-one-time-endpoint-drop-warning-ac2",
+      "claimId": "install-flow-foundations-telemetry-contract-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-sh-68-68-passed-including-new-stderr-warning-assertions-for-untrusted-local-untrusted-global-symlink-dangling-symlink-symlink-to-directory-conf-cases-and-the-transport-sh-one-time-endpoint-drop-warning-ac2",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:install-flow-foundations-telemetry-contract-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-sh-68-68-passed-including-new-stderr-warning-assertions-for-untrusted-local-untrusted-global-symlink-dangling-symlink-symlink-to-directory-conf-cases-and-the-transport-sh-one-time-endpoint-drop-warning-ac2"
+      ],
+      "createdAt": "2026-07-07T16:53:29Z",
+      "verifiedAt": "2026-07-07T16:53:29Z"
+    },
+    {
+      "id": "evt:install-flow-foundations-telemetry-doctor-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-doctor-sh-11-11-passed-on-two-consecutive-runs-no-flake-hosted-console-by-default-reachability-generic-non-local-still-requires-allow-network-regression-guard-and-untrusted-conf-doctor-warning-all-pass-ac2-ac3",
+      "claimId": "install-flow-foundations-telemetry-doctor-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-doctor-sh-11-11-passed-on-two-consecutive-runs-no-flake-hosted-console-by-default-reachability-generic-non-local-still-requires-allow-network-regression-guard-and-untrusted-conf-doctor-warning-all-pass-ac2-ac3",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:install-flow-foundations-telemetry-doctor-integration.flow-agents-workflow.bash-evals-integration-test-telemetry-doctor-sh-11-11-passed-on-two-consecutive-runs-no-flake-hosted-console-by-default-reachability-generic-non-local-still-requires-allow-network-regression-guard-and-untrusted-conf-doctor-warning-all-pass-ac2-ac3"
+      ],
+      "createdAt": "2026-07-07T16:53:29Z",
+      "verifiedAt": "2026-07-07T16:53:29Z"
+    },
+    {
+      "id": "evt:install-flow-foundations-bundle-install-integration.flow-agents-workflow.bash-evals-integration-test-bundle-install-sh-79-79-passed-no-regression-from-init-ts-runtime-detection-changes",
+      "claimId": "install-flow-foundations-bundle-install-integration.flow-agents-workflow.bash-evals-integration-test-bundle-install-sh-79-79-passed-no-regression-from-init-ts-runtime-detection-changes",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:install-flow-foundations-bundle-install-integration.flow-agents-workflow.bash-evals-integration-test-bundle-install-sh-79-79-passed-no-regression-from-init-ts-runtime-detection-changes"
+      ],
+      "createdAt": "2026-07-07T16:53:29Z",
+      "verifiedAt": "2026-07-07T16:53:29Z"
+    },
+    {
+      "id": "evt:install-flow-foundations-mirror-diff-check.flow-agents-workflow.diff-scripts-telemetry-lib-config-sh-context-scripts-telemetry-lib-config-sh-is-empty-byte-identical-mirror-invariant-preserved-ac5",
+      "claimId": "install-flow-foundations-mirror-diff-check.flow-agents-workflow.diff-scripts-telemetry-lib-config-sh-context-scripts-telemetry-lib-config-sh-is-empty-byte-identical-mirror-invariant-preserved-ac5",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:install-flow-foundations-mirror-diff-check.flow-agents-workflow.diff-scripts-telemetry-lib-config-sh-context-scripts-telemetry-lib-config-sh-is-empty-byte-identical-mirror-invariant-preserved-ac5"
+      ],
+      "createdAt": "2026-07-07T16:53:29Z",
+      "verifiedAt": "2026-07-07T16:53:29Z"
+    },
+    {
+      "id": "evt:install-flow-foundations-ts-bash-validator-agreement.flow-agents-workflow.independently-sourced-the-real-bash-console-telemetry-endpoint-allowed-scripts-telemetry-lib-transport-sh-and-compared-against-ts-isvalidconsoleendpointstrict-for-tab-newline-cr-quote-empty-valid-https-valid-http-localhost-non-local-http-outputs-identical-in-all-8-cases-fixed-high-confirmed-resolved-also-cross-checked-isvalidconsoleurl-isvalidconsoletoken-isvalidconsoletenant-issafeconsoletenantforruntime-against-install-console-config-sh-and-transport-sh-sources-line-by-line-no-residual-drift-found",
+      "claimId": "install-flow-foundations-ts-bash-validator-agreement.flow-agents-workflow.independently-sourced-the-real-bash-console-telemetry-endpoint-allowed-scripts-telemetry-lib-transport-sh-and-compared-against-ts-isvalidconsoleendpointstrict-for-tab-newline-cr-quote-empty-valid-https-valid-http-localhost-non-local-http-outputs-identical-in-all-8-cases-fixed-high-confirmed-resolved-also-cross-checked-isvalidconsoleurl-isvalidconsoletoken-isvalidconsoletenant-issafeconsoletenantforruntime-against-install-console-config-sh-and-transport-sh-sources-line-by-line-no-residual-drift-found",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [
+        "ev:install-flow-foundations-ts-bash-validator-agreement.flow-agents-workflow.independently-sourced-the-real-bash-console-telemetry-endpoint-allowed-scripts-telemetry-lib-transport-sh-and-compared-against-ts-isvalidconsoleendpointstrict-for-tab-newline-cr-quote-empty-valid-https-valid-http-localhost-non-local-http-outputs-identical-in-all-8-cases-fixed-high-confirmed-resolved-also-cross-checked-isvalidconsoleurl-isvalidconsoletoken-isvalidconsoletenant-issafeconsoletenantforruntime-against-install-console-config-sh-and-transport-sh-sources-line-by-line-no-residual-drift-found"
+      ],
+      "createdAt": "2026-07-07T16:53:29Z",
+      "verifiedAt": "2026-07-07T16:53:29Z"
+    },
+    {
+      "id": "evt:install-flow-foundations-ac1-runtime-is-auto-detected-claude-code-codex-opencode-and-pre-fills-the-init-default-readme-no-longer-overclaims-explicit-flag-prompt-still-overrides-flow-agents-init-both-interactive-and-headless-defaults-the-runtime-prompt-flag-fallback-to-the-environment-detected-runtime-via-detectruntime-from-actor-identity-js-or-failing-that-the-single-unambiguous-filesystem-detected-runtime-claude-codex-codex-home-or-opencode-s-global-config-dir-falling-back-to-base-only-when-detection-is-ambiguous-or-absent-an-explicit-runtime-flag-or-interactive-answer-still-wins.flow-agents-workflow.ac1-runtime-is-auto-detected-claude-code-codex-opencode-and-pre-fills-the-init-default-readme-no-longer-overclaims-explicit-flag-prompt-still-overrides-flow-agents-init-both-interactive-and-headless-defaults-the-runtime-prompt-flag-fallback-to-the-environment-detected-runtime-via-detectruntime-from-actor-identity-js-or-failing-that-the-single-unambiguous-filesystem-detected-runtime-claude-codex-codex-home-or-opencode-s-global-config-dir-falling-back-to-base-only-when-detection-is-ambiguous-or-absent-an-explicit-runtime-flag-or-interactive-answer-still-wins",
+      "claimId": "install-flow-foundations-ac1-runtime-is-auto-detected-claude-code-codex-opencode-and-pre-fills-the-init-default-readme-no-longer-overclaims-explicit-flag-prompt-still-overrides-flow-agents-init-both-interactive-and-headless-defaults-the-runtime-prompt-flag-fallback-to-the-environment-detected-runtime-via-detectruntime-from-actor-identity-js-or-failing-that-the-single-unambiguous-filesystem-detected-runtime-claude-codex-codex-home-or-opencode-s-global-config-dir-falling-back-to-base-only-when-detection-is-ambiguous-or-absent-an-explicit-runtime-flag-or-interactive-answer-still-wins.flow-agents-workflow.ac1-runtime-is-auto-detected-claude-code-codex-opencode-and-pre-fills-the-init-default-readme-no-longer-overclaims-explicit-flag-prompt-still-overrides-flow-agents-init-both-interactive-and-headless-defaults-the-runtime-prompt-flag-fallback-to-the-environment-detected-runtime-via-detectruntime-from-actor-identity-js-or-failing-that-the-single-unambiguous-filesystem-detected-runtime-claude-codex-codex-home-or-opencode-s-global-config-dir-falling-back-to-base-only-when-detection-is-ambiguous-or-absent-an-explicit-runtime-flag-or-interactive-answer-still-wins",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T16:53:29Z",
+      "verifiedAt": "2026-07-07T16:53:29Z"
+    },
+    {
+      "id": "evt:install-flow-foundations-ac2-silent-fail-open-paths-surface-a-visible-warning-conf-failing-the-mode-600-owner-trust-gate-and-an-endpoint-dropped-by-the-transport-allowlist-wired-into-telemetry-doctor-warnings-too-an-existing-but-untrusted-telemetry-console-conf-wrong-mode-owner-or-a-symlink-prints-a-visible-warning-config-sh-to-stderr-while-still-falling-through-to-the-shipped-default-fail-open-behavior-unchanged-a-console-endpoint-dropped-by-console-telemetry-endpoint-allowed-prints-a-one-time-warning-transport-sh-to-stderr-instead-of-silently-returning-flow-agents-telemetry-doctor-s-warnings-reports-an-untrusted-but-present-local-global-conf-candidate.flow-agents-workflow.ac2-silent-fail-open-paths-surface-a-visible-warning-conf-failing-the-mode-600-owner-trust-gate-and-an-endpoint-dropped-by-the-transport-allowlist-wired-into-telemetry-doctor-warnings-too-an-existing-but-untrusted-telemetry-console-conf-wrong-mode-owner-or-a-symlink-prints-a-visible-warning-config-sh-to-stderr-while-still-falling-through-to-the-shipped-default-fail-open-behavior-unchanged-a-console-endpoint-dropped-by-console-telemetry-endpoint-allowed-prints-a-one-time-warning-transport-sh-to-stderr-instead-of-silently-returning-flow-agents-telemetry-doctor-s-warnings-reports-an-untrusted-but-present-local-global-conf-candidate",
+      "claimId": "install-flow-foundations-ac2-silent-fail-open-paths-surface-a-visible-warning-conf-failing-the-mode-600-owner-trust-gate-and-an-endpoint-dropped-by-the-transport-allowlist-wired-into-telemetry-doctor-warnings-too-an-existing-but-untrusted-telemetry-console-conf-wrong-mode-owner-or-a-symlink-prints-a-visible-warning-config-sh-to-stderr-while-still-falling-through-to-the-shipped-default-fail-open-behavior-unchanged-a-console-endpoint-dropped-by-console-telemetry-endpoint-allowed-prints-a-one-time-warning-transport-sh-to-stderr-instead-of-silently-returning-flow-agents-telemetry-doctor-s-warnings-reports-an-untrusted-but-present-local-global-conf-candidate.flow-agents-workflow.ac2-silent-fail-open-paths-surface-a-visible-warning-conf-failing-the-mode-600-owner-trust-gate-and-an-endpoint-dropped-by-the-transport-allowlist-wired-into-telemetry-doctor-warnings-too-an-existing-but-untrusted-telemetry-console-conf-wrong-mode-owner-or-a-symlink-prints-a-visible-warning-config-sh-to-stderr-while-still-falling-through-to-the-shipped-default-fail-open-behavior-unchanged-a-console-endpoint-dropped-by-console-telemetry-endpoint-allowed-prints-a-one-time-warning-transport-sh-to-stderr-instead-of-silently-returning-flow-agents-telemetry-doctor-s-warnings-reports-an-untrusted-but-present-local-global-conf-candidate",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T16:53:29Z",
+      "verifiedAt": "2026-07-07T16:53:29Z"
+    },
+    {
+      "id": "evt:install-flow-foundations-ac3-telemetry-doctor-checks-hosted-console-reachability-by-default-or-init-passes-allow-network-for-the-endpoint-it-just-wrote-so-a-hosted-setup-can-be-verified-flow-agents-telemetry-doctor-no-allow-network-attempts-reachability-for-a-configured-endpoint-whose-hostname-matches-the-known-hosted-console-console-kontourai-io-or-flow-agents-kontour-cloud-console-url-when-overridden-while-a-generic-non-local-https-endpoint-still-requires-allow-network-exactly-as-before-no-regression-to-the-existing-opt-in-required-test-case.flow-agents-workflow.ac3-telemetry-doctor-checks-hosted-console-reachability-by-default-or-init-passes-allow-network-for-the-endpoint-it-just-wrote-so-a-hosted-setup-can-be-verified-flow-agents-telemetry-doctor-no-allow-network-attempts-reachability-for-a-configured-endpoint-whose-hostname-matches-the-known-hosted-console-console-kontourai-io-or-flow-agents-kontour-cloud-console-url-when-overridden-while-a-generic-non-local-https-endpoint-still-requires-allow-network-exactly-as-before-no-regression-to-the-existing-opt-in-required-test-case",
+      "claimId": "install-flow-foundations-ac3-telemetry-doctor-checks-hosted-console-reachability-by-default-or-init-passes-allow-network-for-the-endpoint-it-just-wrote-so-a-hosted-setup-can-be-verified-flow-agents-telemetry-doctor-no-allow-network-attempts-reachability-for-a-configured-endpoint-whose-hostname-matches-the-known-hosted-console-console-kontourai-io-or-flow-agents-kontour-cloud-console-url-when-overridden-while-a-generic-non-local-https-endpoint-still-requires-allow-network-exactly-as-before-no-regression-to-the-existing-opt-in-required-test-case.flow-agents-workflow.ac3-telemetry-doctor-checks-hosted-console-reachability-by-default-or-init-passes-allow-network-for-the-endpoint-it-just-wrote-so-a-hosted-setup-can-be-verified-flow-agents-telemetry-doctor-no-allow-network-attempts-reachability-for-a-configured-endpoint-whose-hostname-matches-the-known-hosted-console-console-kontourai-io-or-flow-agents-kontour-cloud-console-url-when-overridden-while-a-generic-non-local-https-endpoint-still-requires-allow-network-exactly-as-before-no-regression-to-the-existing-opt-in-required-test-case",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T16:53:29Z",
+      "verifiedAt": "2026-07-07T16:53:29Z"
+    },
+    {
+      "id": "evt:install-flow-foundations-ac4-shared-inline-validation-helpers-groundwork-src-lib-console-telemetry-validate-ts-exports-pure-predicates-isvalidconsoleurl-isvalidconsoleendpointstrict-isvalidconsoletoken-isvalidconsoletenant-issafeconsoletenantforruntime-that-agree-with-the-bash-die-based-validators-on-every-boundary-case-empty-blank-handling-https-localhost-http-allowance-control-character-and-quote-rejection-length-limits-tenant-charset-with-no-bash-behavior-change-and-no-wiring-into-init-ts-s-interactive-flow-in-this-pr.flow-agents-workflow.ac4-shared-inline-validation-helpers-groundwork-src-lib-console-telemetry-validate-ts-exports-pure-predicates-isvalidconsoleurl-isvalidconsoleendpointstrict-isvalidconsoletoken-isvalidconsoletenant-issafeconsoletenantforruntime-that-agree-with-the-bash-die-based-validators-on-every-boundary-case-empty-blank-handling-https-localhost-http-allowance-control-character-and-quote-rejection-length-limits-tenant-charset-with-no-bash-behavior-change-and-no-wiring-into-init-ts-s-interactive-flow-in-this-pr",
+      "claimId": "install-flow-foundations-ac4-shared-inline-validation-helpers-groundwork-src-lib-console-telemetry-validate-ts-exports-pure-predicates-isvalidconsoleurl-isvalidconsoleendpointstrict-isvalidconsoletoken-isvalidconsoletenant-issafeconsoletenantforruntime-that-agree-with-the-bash-die-based-validators-on-every-boundary-case-empty-blank-handling-https-localhost-http-allowance-control-character-and-quote-rejection-length-limits-tenant-charset-with-no-bash-behavior-change-and-no-wiring-into-init-ts-s-interactive-flow-in-this-pr.flow-agents-workflow.ac4-shared-inline-validation-helpers-groundwork-src-lib-console-telemetry-validate-ts-exports-pure-predicates-isvalidconsoleurl-isvalidconsoleendpointstrict-isvalidconsoletoken-isvalidconsoletenant-issafeconsoletenantforruntime-that-agree-with-the-bash-die-based-validators-on-every-boundary-case-empty-blank-handling-https-localhost-http-allowance-control-character-and-quote-rejection-length-limits-tenant-charset-with-no-bash-behavior-change-and-no-wiring-into-init-ts-s-interactive-flow-in-this-pr",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T16:53:29Z",
+      "verifiedAt": "2026-07-07T16:53:29Z"
+    },
+    {
+      "id": "evt:install-flow-foundations-ac5-no-regression-validate-source-telemetry-bundle-install-telemetry-doctor-evals-green-mirror-invariant-preserved-new-changed-behavior-covered-by-evals-npm-run-validate-source-bash-evals-run-sh-static-bash-evals-integration-test-telemetry-sh-bash-evals-integration-test-telemetry-doctor-sh-bash-evals-integration-test-bundle-install-sh-and-node-test-src-cli-test-mjs-all-pass-config-sh-s-root-context-mirror-stays-byte-identical-per-validate-source-tree-ts-s-mirroredfiles-check.flow-agents-workflow.ac5-no-regression-validate-source-telemetry-bundle-install-telemetry-doctor-evals-green-mirror-invariant-preserved-new-changed-behavior-covered-by-evals-npm-run-validate-source-bash-evals-run-sh-static-bash-evals-integration-test-telemetry-sh-bash-evals-integration-test-telemetry-doctor-sh-bash-evals-integration-test-bundle-install-sh-and-node-test-src-cli-test-mjs-all-pass-config-sh-s-root-context-mirror-stays-byte-identical-per-validate-source-tree-ts-s-mirroredfiles-check",
+      "claimId": "install-flow-foundations-ac5-no-regression-validate-source-telemetry-bundle-install-telemetry-doctor-evals-green-mirror-invariant-preserved-new-changed-behavior-covered-by-evals-npm-run-validate-source-bash-evals-run-sh-static-bash-evals-integration-test-telemetry-sh-bash-evals-integration-test-telemetry-doctor-sh-bash-evals-integration-test-bundle-install-sh-and-node-test-src-cli-test-mjs-all-pass-config-sh-s-root-context-mirror-stays-byte-identical-per-validate-source-tree-ts-s-mirroredfiles-check.flow-agents-workflow.ac5-no-regression-validate-source-telemetry-bundle-install-telemetry-doctor-evals-green-mirror-invariant-preserved-new-changed-behavior-covered-by-evals-npm-run-validate-source-bash-evals-run-sh-static-bash-evals-integration-test-telemetry-sh-bash-evals-integration-test-telemetry-doctor-sh-bash-evals-integration-test-bundle-install-sh-and-node-test-src-cli-test-mjs-all-pass-config-sh-s-root-context-mirror-stays-byte-identical-per-validate-source-tree-ts-s-mirroredfiles-check",
+      "status": "verified",
+      "actor": "flow-agents/workflow-sidecar",
+      "method": "validation",
+      "evidenceIds": [],
+      "createdAt": "2026-07-07T16:53:29Z",
+      "verifiedAt": "2026-07-07T16:53:29Z"
+    }
+  ]
+}

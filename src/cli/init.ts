@@ -10,7 +10,7 @@ import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { activateCodexLocal } from "../runtime-adapters.js";
 import { main as buildBundles } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
-import { defaultCodexHome, durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
+import { durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
 
 type Runtime = "base" | "codex" | "claude-code" | "kiro" | "opencode" | "pi";
 type TelemetrySink = "local-files" | "local-kontour-console" | "kontour-hosted-console" | "user-hosted-console" | "kontour-cloud" | "hosted-kontour-console";
@@ -122,6 +122,87 @@ function normalizeRuntime(value: string | undefined): Runtime | undefined {
   throw new Error(`unknown runtime '${value}'; expected base, codex, claude-code, kiro, opencode, or pi`);
 }
 
+type ActorIdentityModule = { detectRuntime: (env: NodeJS.ProcessEnv) => string };
+
+/**
+ * The three candidate global config directories a runtime's own tooling uses,
+ * shared between `globalDest` (the `--global` install target) and
+ * `detectRuntimeFromFilesystem` (auto-detection fallback) so "where does
+ * runtime X's global config live" is defined in exactly one place.
+ */
+function runtimeGlobalConfigCandidates(
+  homedir: string,
+  env: NodeJS.ProcessEnv,
+): { "claude-code": string; codex: string; opencode: string } {
+  return {
+    "claude-code": path.join(homedir, ".claude"),
+    codex: env["CODEX_HOME"] || path.join(homedir, ".codex"),
+    opencode: path.join(env["XDG_CONFIG_HOME"] ?? path.join(homedir, ".config"), "opencode"),
+  };
+}
+
+/**
+ * Detect the current runtime from environment-variable signals already
+ * ambient in the invoking process (Claude Code / Codex / opencode session
+ * markers). Reuses the single existing `detectRuntime` implementation from
+ * `scripts/hooks/lib/actor-identity.js` (via the same `createRequire` pattern
+ * used elsewhere in this file for `install-merge.js`/`skill-drift.js`)
+ * instead of forking a second copy of the env-var contract. `pi`'s env-var
+ * contract is unverified there (see actor-identity.js's own docstring) and is
+ * intentionally out of scope for auto-detection, so it maps down to
+ * `"unknown"` here (pi still falls back to `"base"` like today).
+ */
+export function detectRuntimeFromProcessEnv(env: NodeJS.ProcessEnv = process.env): Runtime | "unknown" {
+  const actorIdentityPath = path.join(root, "scripts", "hooks", "lib", "actor-identity.js");
+  const _require = createRequire(import.meta.url);
+  const { detectRuntime } = _require(actorIdentityPath) as ActorIdentityModule;
+  const detected = detectRuntime(env);
+  if (detected === "claude-code" || detected === "codex" || detected === "opencode") return detected;
+  return "unknown";
+}
+
+/**
+ * Detect the current runtime by probing for exactly one runtime's own global
+ * config directory on disk (the same paths `globalDest` computes for
+ * `--global` installs — see `runtimeGlobalConfigCandidates`). Zero matches or
+ * 2+ matches are both ambiguous and must never guess: only a single
+ * unambiguous hit returns a runtime; everything else is `"unknown"`.
+ */
+export function detectRuntimeFromFilesystem(
+  homedir: string = os.homedir(),
+  env: NodeJS.ProcessEnv = process.env,
+): Runtime | "unknown" {
+  const candidates = runtimeGlobalConfigCandidates(homedir, env);
+  const matches = (Object.keys(candidates) as Array<keyof typeof candidates>).filter((runtime) => {
+    try {
+      return fs.existsSync(candidates[runtime]);
+    } catch {
+      return false;
+    }
+  });
+  return matches.length === 1 ? matches[0] : "unknown";
+}
+
+/**
+ * Layered runtime auto-detection default used to pre-fill both the
+ * interactive prompt and the headless `--runtime` fallback: (1) env-var
+ * signals from the invoking process, (2) failing that, an unambiguous
+ * filesystem probe, (3) failing that, today's `"base"` default. An explicit
+ * `--runtime` flag or interactive answer always overrides this — this
+ * function only supplies the fallback default (see `interactiveOptions` /
+ * `headlessOptions`).
+ */
+export function detectDefaultRuntime(
+  env: NodeJS.ProcessEnv = process.env,
+  homedir: string = os.homedir(),
+): Runtime {
+  const fromEnv = detectRuntimeFromProcessEnv(env);
+  if (fromEnv !== "unknown") return fromEnv;
+  const fromFilesystem = detectRuntimeFromFilesystem(homedir, env);
+  if (fromFilesystem !== "unknown") return fromFilesystem;
+  return "base";
+}
+
 function normalizeTelemetrySink(value: string): TelemetrySink {
   if (value === "local-files" || value === "local-kontour-console" || value === "kontour-hosted-console" || value === "user-hosted-console" || value === "kontour-cloud" || value === "hosted-kontour-console") return value;
   throw new Error(`unknown telemetry sink '${value}'`);
@@ -179,11 +260,14 @@ function defaultDest(runtime: Runtime): string {
 }
 
 export function globalDest(runtime: Runtime): string {
+  // Shared with detectRuntimeFromFilesystem so the "where is runtime X's global
+  // config" path logic is defined exactly once.
+  const candidates = runtimeGlobalConfigCandidates(os.homedir(), process.env);
   if (runtime === "claude-code") {
     // Honor FLOW_AGENTS_USER_CLAUDE_SETTINGS for test isolation (same as checkScopeCollision).
     const override = process.env["FLOW_AGENTS_USER_CLAUDE_SETTINGS"];
     if (override) return path.dirname(override);
-    return path.join(os.homedir(), ".claude");
+    return candidates["claude-code"];
   }
   if (runtime === "opencode") {
     // Honor FLOW_AGENTS_USER_OPENCODE_CONFIG (points to the opencode.json FILE) for test isolation,
@@ -191,11 +275,15 @@ export function globalDest(runtime: Runtime): string {
     const override = process.env["FLOW_AGENTS_USER_OPENCODE_CONFIG"];
     if (override) return path.dirname(override);
     // Global opencode config: ~/.config/opencode/ (honor XDG_CONFIG_HOME when set, else ~/.config).
-    return path.join(process.env["XDG_CONFIG_HOME"] ?? path.join(os.homedir(), ".config"), "opencode");
+    return candidates.opencode;
   }
   if (runtime === "codex") {
     // codex --global routes to the standard Codex home. --dest remains an explicit override.
-    return defaultCodexHome();
+    // `candidates.codex` is built from the same `CODEX_HOME || ~/.codex` resolution as
+    // `defaultCodexHome()` (see runtimeGlobalConfigCandidates above), so this is byte-identical
+    // to calling `defaultCodexHome()` directly while keeping the candidate map the single
+    // source of truth for "where does runtime X's global config live".
+    return candidates.codex;
   }
   if (runtime === "pi") {
     // pi has no documented global config dir.
@@ -217,7 +305,7 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
   const args = parseArgs(argv);
   const rl = createInterface({ input, output });
   try {
-    const runtimeDefault = normalizeRuntime(flagString(args.flags, "runtime")) ?? "base";
+    const runtimeDefault = normalizeRuntime(flagString(args.flags, "runtime")) ?? detectDefaultRuntime();
     const runtimeAnswer = flagString(args.flags, "runtime") ?? await rl.question(`Runtime [${runtimeDefault}]: `);
     const runtime = normalizeRuntime(runtimeAnswer.trim() || runtimeDefault) ?? runtimeDefault;
     const isGlobal = flagBool(args.flags, "global");
@@ -260,7 +348,7 @@ async function interactiveOptions(argv: string[]): Promise<InitOptions> {
 
 function headlessOptions(argv: string[]): InitOptions {
   const args = parseArgs(argv);
-  const runtime = normalizeRuntime(flagString(args.flags, "runtime")) ?? "base";
+  const runtime = normalizeRuntime(flagString(args.flags, "runtime")) ?? detectDefaultRuntime();
   const isGlobal = flagBool(args.flags, "global");
   const destBase = isGlobal ? globalDest(runtime) : defaultDest(runtime);
   return {

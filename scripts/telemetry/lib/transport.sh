@@ -57,7 +57,17 @@ console_post_json() {
   local body="$2"
   local connect_timeout max_time tmp_dir curl_config curl_body
   [[ -z "$endpoint_url" ]] && return
-  console_telemetry_endpoint_allowed "$endpoint_url" || return
+  if ! console_telemetry_endpoint_allowed "$endpoint_url"; then
+    # Dropped silently before today's change (no signal that the event never
+    # left the machine). Warn once per shell process (guarded by a plain,
+    # non-local var so it survives across repeated console_post_json calls
+    # within the same sourced shell) without changing the drop itself.
+    if [[ -z "${_CONSOLE_TELEMETRY_ENDPOINT_WARNED:-}" ]]; then
+      printf 'warning: transport.sh: console endpoint dropped by the allowlist (must be https://, or http://localhost|127.0.0.1): %s\n' "$endpoint_url" >&2
+      _CONSOLE_TELEMETRY_ENDPOINT_WARNED=1
+    fi
+    return
+  fi
   connect_timeout=$(console_telemetry_timeout_seconds "${3:-2}" 2 30)
   max_time=$(console_telemetry_timeout_seconds "${4:-5}" 5 60)
   tmp_dir="${5:-${TELEMETRY_SESSION_DIR:-${TMPDIR:-/tmp}}}"
