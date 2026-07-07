@@ -15,7 +15,7 @@ pass() { echo "  ✓ $1"; }
 fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 
 json_value() {
-  node -e 'const fs=require("fs"); let cur=JSON.parse(fs.readFileSync(0,"utf8")); for (const part of process.argv[1].split(".")) cur=Array.isArray(cur) ? cur[Number(part)] : cur[part]; console.log(cur);' "$1"
+  NO_COLOR=1 FORCE_COLOR=0 node -e 'const fs=require("fs"); let cur=JSON.parse(fs.readFileSync(0,"utf8")); for (const part of process.argv[1].split(".")) cur=Array.isArray(cur) ? cur[Number(part)] : cur[part]; console.log(cur);' "$1"
 }
 
 echo "=== Effective Backlog Settings ==="

@@ -1,0 +1,141 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "trust.checkpoint.json",
+      "digest": {
+        "sha256": "3284c92ac46017596eeff3827f8d81879845d5cb122ecec4f06c8f3f388cdd50"
+      }
+    }
+  ],
+  "predicateType": "https://hachure.org/v1/bundle",
+  "predicate": {
+    "schemaVersion": 5,
+    "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+    "claims": [
+      {
+        "id": "kontourai-flow-agents-444-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+        "subjectType": "workflow-check",
+        "subjectId": "kontourai-flow-agents-444/bash-evals-run.sh-static",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.check.command",
+        "fieldOrBehavior": "record-check: bash evals/run.sh static (exit 0)",
+        "value": "pass",
+        "createdAt": "2026-07-06T23:26:57Z",
+        "updatedAt": "2026-07-06T23:26:57Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.check.command:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "command",
+          "output_digest": {
+            "algorithm": "sha256",
+            "hex": "b133fbfc765cc1f8547e433846e944cb26ef7ea26c4097a856407c8a5aac5693"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-444-bash-evals-integration-test-effective-backlog-settings-sh.flow-agents-workflow.record-check-bash-evals-integration-test-effective-backlog-settings-sh-exit-0",
+        "subjectType": "workflow-check",
+        "subjectId": "kontourai-flow-agents-444/bash-evals-integration-test_effective_backlog_settings.sh",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.check.command",
+        "fieldOrBehavior": "record-check: bash evals/integration/test_effective_backlog_settings.sh (exit 0)",
+        "value": "pass",
+        "createdAt": "2026-07-06T23:26:57Z",
+        "updatedAt": "2026-07-06T23:26:57Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.check.command:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "command",
+          "output_digest": {
+            "algorithm": "sha256",
+            "hex": "df68a6285f6ee45c3da127e28dd8a230c679e2aa088473ad8b8bbeb11ad7bbb0"
+          }
+        },
+        "status": "verified"
+      }
+    ],
+    "evidence": [
+      {
+        "id": "ev:kontourai-flow-agents-444-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+        "claimId": "kontourai-flow-agents-444-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-444/evidence.json",
+        "excerptOrSummary": "record-check: bash evals/run.sh static (exit 0)",
+        "observedAt": "2026-07-06T23:26:57Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/run.sh static",
+          "isError": false
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-444-bash-evals-integration-test-effective-backlog-settings-sh.flow-agents-workflow.record-check-bash-evals-integration-test-effective-backlog-settings-sh-exit-0",
+        "claimId": "kontourai-flow-agents-444-bash-evals-integration-test-effective-backlog-settings-sh.flow-agents-workflow.record-check-bash-evals-integration-test-effective-backlog-settings-sh-exit-0",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-444/evidence.json",
+        "excerptOrSummary": "record-check: bash evals/integration/test_effective_backlog_settings.sh (exit 0)",
+        "observedAt": "2026-07-06T23:26:57Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_effective_backlog_settings.sh",
+          "isError": false
+        }
+      }
+    ],
+    "policies": [
+      {
+        "id": "policy:workflow.check.command:test_output",
+        "claimType": "workflow.check.command",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.command claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      }
+    ],
+    "events": [
+      {
+        "id": "evt:kontourai-flow-agents-444-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+        "claimId": "kontourai-flow-agents-444-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-444-bash-evals-run-sh-static.flow-agents-workflow.record-check-bash-evals-run-sh-static-exit-0"
+        ],
+        "createdAt": "2026-07-06T23:26:57Z",
+        "verifiedAt": "2026-07-06T23:26:57Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-444-bash-evals-integration-test-effective-backlog-settings-sh.flow-agents-workflow.record-check-bash-evals-integration-test-effective-backlog-settings-sh-exit-0",
+        "claimId": "kontourai-flow-agents-444-bash-evals-integration-test-effective-backlog-settings-sh.flow-agents-workflow.record-check-bash-evals-integration-test-effective-backlog-settings-sh-exit-0",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-444-bash-evals-integration-test-effective-backlog-settings-sh.flow-agents-workflow.record-check-bash-evals-integration-test-effective-backlog-settings-sh-exit-0"
+        ],
+        "createdAt": "2026-07-06T23:26:57Z",
+        "verifiedAt": "2026-07-06T23:26:57Z"
+      }
+    ]
+  }
+}
