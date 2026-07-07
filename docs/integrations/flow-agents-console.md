@@ -142,6 +142,29 @@ overrides the derived endpoint when needed. Full resolution order is documented 
 On the console side, `POST /records` already accepts the `kontour.console.economics` kind into a
 per-tenant `EconomicsStore`, read back via `GET /api/economics` (console #117) — deployed.
 
+#### Attribution & pricing correctness (#487)
+
+Two robustness fixes close the "why is my usage landing `unattributed` at `$0`?" gap that made the
+first hosted-console economics rows misleading:
+
+- **Attribution source.** The stop path stamps the record's `task_slug` and `phase` from the
+  **canonical** active-session file (`.kontourai/flow-agents/current.json`), falling back to the
+  legacy `.flow-agents/` path only when the canonical one is absent — so a run inside a live Builder
+  session lands attributed to the *real* slug/phase, not a stale placeholder. A run with **no** active
+  session is still recorded, but as `unattributed` by design: there is no session to attribute it to,
+  so that is a correct null, not a bug.
+- **Pricing floor.** Cost is resolved from the **bundled** pricing registry
+  (`scripts/telemetry/pricing.json`) as the default source. `pricing.sh` validates that any fetched or
+  cached body is JSON carrying `current_version` + `versions` before trusting it, and never caches a
+  non-JSON body — so a poisoned cache (e.g. a console gate's HTML) or a `401` from an authed pricing
+  endpoint **falls through to the bundled registry** instead of degrading cost to `$0`. `config.sh` no
+  longer silently derives an authed console pricing URL that 401s unauthenticated; the default path
+  uses the valid bundled registry. Net effect: a model the bundled registry can price is **never**
+  recorded at `$0` because of a stale/hostile cache or an unreachable remote.
+
+Both fixes are forward-looking — they correct what future runs emit. Historical `unattributed`/`$0`
+rows already ingested are not retroactively rewritten; that is a console-side data operation.
+
 The paired **console side** — ingesting `kontour.console.liveness`, the fleet OperatingState
 projection (actors + held/reclaimable subjects + last-seen + per-session cost), and the ADR 0021 §4
 janitor — is tracked in the console repo (**console #125**), and feeds the redesigned console
