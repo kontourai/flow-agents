@@ -10,8 +10,8 @@
       "claimType": "builder.pull-work.selected",
       "fieldOrBehavior": "Selected kontourai/flow-agents#410 slice 1 (owner usage flowing to hosted console): scope clear, acceptance criteria present, prereqs verified delivered.",
       "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
       "metadata": {
@@ -41,8 +41,8 @@
       "claimType": "builder.execute.scope",
       "fieldOrBehavior": "Execution complete for slice 1 code scope: Wave 1 conf+docs landed (no tracked secrets), Wave 2 keep-warm merged to console-deploy main (PR #5 squash cca8be76) with clean code+security re-review; manual dispatch run succeeded.",
       "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "high",
       "verificationPolicyId": "policy:builder.execute.scope:attestation",
       "metadata": {
@@ -66,16 +66,16 @@
     },
     {
       "id": "kontourai-flow-agents-410-review.flow-agents-workflow.review-verdicts-final-code-clean-docs-accurate-mirrors-identical-style-consistent-security-resolved-600-euid-non-symlink-gate-closes-smuggle-macos-chmod-h-symlink-vectors-independently-reproduced-permissions-on-keep-warm-yml-verified-on-console-deploy-main",
-      "subjectType": "flow-step",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-410/review",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "Review verdicts final: code CLEAN (docs accurate, mirrors identical, style consistent); security RESOLVED (600+euid+non-symlink gate closes smuggle + macOS chmod -h symlink vectors, independently reproduced). permissions:{} on keep-warm.yml verified on console-deploy main.",
       "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
       "metadata": {
         "origin": "check",
         "check_kind": "external"
@@ -84,16 +84,16 @@
     },
     {
       "id": "kontourai-flow-agents-410-review-prose-backstop-gap.flow-agents-workflow.accepted-gap-four-review-critique-prose-claims-re-run-as-bash-by-the-stop-gate-backstop-exit-2-are-malformed-evidence-noise-not-real-failures-see-kontourai-flow-agents-453-the-substantive-review-verdicts-pass-via-the-command-backed-check-id-review",
-      "subjectType": "flow-step",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-410/review-prose-backstop-gap",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "Accepted gap: four review-critique prose claims re-run as bash by the Stop-gate backstop (exit 2) are malformed-evidence noise, not real failures — see kontourai/flow-agents#453; the substantive review verdicts pass via the command-backed check id=review.",
       "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
       "metadata": {
         "origin": "check",
         "check_kind": "external",
@@ -107,16 +107,16 @@
     },
     {
       "id": "kontourai-flow-agents-410-ac3-durable-for-future-sessions-a-brand-new-terminal-session-on-this-machine-wit.flow-agents-workflow.ac3-durable-auto-discovery-telemetry-precedence-suite-passes-env-workspace-conf-global-conf-default-600-euid-non-symlink-gate-end-to-end-proof-is-ac1-s-live-headless-session-mirroring-with-zero-env-profile-wiring-quote-free-re-record-after-gate-re-run-mangled-the-prior-nested-quote-command",
-      "subjectType": "flow-step",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-410/ac3-durable-for-future-sessions-a-brand-new-terminal-session-on-this-machine-wit",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC3 durable auto-discovery: telemetry precedence suite passes (env > workspace conf > global conf > default, 600+euid+non-symlink gate); end-to-end proof is AC1's live headless session mirroring with zero env/profile wiring. Quote-free re-record after gate re-run mangled the prior nested-quote command.",
       "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests:test_output",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:test_output",
       "metadata": {
         "origin": "check",
         "check_kind": "command",
@@ -129,16 +129,16 @@
     },
     {
       "id": "kontourai-flow-agents-410-ac1-usage-visible-in-console-a-real-claude-code-session-run-after-this-change-pr.flow-agents-workflow.observed-headless-session-953fd913-a640-4142-ae79-5a5dbfa24fdb-produced-records-authenticated-get-https-console-kontourai-io-api-telemetry-preset-15m-returned-http-200-with-102-matches-of-that-session-id-tenant-scoped-via-bearer-to-tenant-mapping-token-read-at-run-time-from-console-deploy-env-never-persisted",
-      "subjectType": "flow-step",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-410/ac1-usage-visible-in-console-a-real-claude-code-session-run-after-this-change-pr",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "OBSERVED: headless session 953FD913-A640-4142-AE79-5A5DBFA24FDB produced records; authenticated GET https://console.kontourai.io/api/telemetry?preset=15m returned HTTP 200 with 102 matches of that session id, tenant-scoped via bearer-to-tenant mapping. Token read at run time from console-deploy/.env, never persisted.",
       "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
       "metadata": {
         "origin": "check",
         "check_kind": "external"
@@ -147,16 +147,16 @@
     },
     {
       "id": "kontourai-flow-agents-410-ac2-keep-warm-live-github-workflows-keep-warm-yml-exists-on-console-deploy-s-mai.flow-agents-workflow.observed-keep-warm-yml-on-console-deploy-main-pr-5-cca8be76-schedule-event-run-conclusion-success-createdat-2026-07-07t01-21-03z-and-workflow-dispatch-success-2026-07-06t23-30-11z-per-gh-run-list",
-      "subjectType": "flow-step",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-410/ac2-keep-warm-live-github-workflows-keep-warm-yml-exists-on-console-deploy-s-mai",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "OBSERVED: keep-warm.yml on console-deploy main (PR #5, cca8be76); schedule-event run conclusion=success createdAt=2026-07-07T01:21:03Z and workflow_dispatch success 2026-07-06T23:30:11Z per gh run list.",
       "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
       "metadata": {
         "origin": "check",
         "check_kind": "external"
@@ -165,16 +165,16 @@
     },
     {
       "id": "kontourai-flow-agents-410-ac4-no-secret-leakage-fail-open-the-token-value-never-appears-in-any-tracked-flo.flow-agents-workflow.observed-conf-gitignored-check-ignore-exit-0-mode-600-diff-limited-to-config-sh-mirrors-test-docs-zero-32-char-token-shaped-strings-in-diff-fail-open-transport-unchanged",
-      "subjectType": "flow-step",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-410/ac4-no-secret-leakage-fail-open-the-token-value-never-appears-in-any-tracked-flo",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "OBSERVED: conf gitignored (check-ignore exit 0), mode 600; diff limited to config.sh mirrors + test + docs; zero 32+char token-shaped strings in diff; fail-open transport unchanged.",
       "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
       "metadata": {
         "origin": "check",
         "check_kind": "external"
@@ -183,16 +183,16 @@
     },
     {
       "id": "kontourai-flow-agents-410-wave3-live-verification.flow-agents-workflow.wave-3-complete-ac1-live-records-observed-in-hosted-console-ac2-scheduled-cron-success-observed-ac3-proven-by-manifest-lane-eval-suite-56-56-ac1-end-to-end-ac4-secret-containment-observed-reviews-code-clean-security-resolved-via-independent-exploit-reproduction",
-      "subjectType": "flow-step",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-410/wave3-live-verification",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "Wave 3 complete: AC1 live records observed in hosted console; AC2 scheduled cron success observed; AC3 proven by manifest-lane eval suite (56/56) + AC1 end-to-end; AC4 secret containment observed. Reviews: code CLEAN, security RESOLVED via independent exploit reproduction.",
       "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
       "metadata": {
         "origin": "check",
         "check_kind": "external"
@@ -201,16 +201,16 @@
     },
     {
       "id": "kontourai-flow-agents-410-final-verification.flow-agents-workflow.wave-3-verification-complete-all-acs-evidence-backed-by-command-checked-records-in-this-bundle",
-      "subjectType": "flow-step",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-410/final-verification",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "Wave 3 verification complete; all ACs evidence-backed by command-checked records in this bundle.",
       "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
       "metadata": {
         "origin": "check",
         "check_kind": "external"
@@ -219,16 +219,16 @@
     },
     {
       "id": "kontourai-flow-agents-410-ac1-usage-visible-in-console-a-real-claude-code-session-run-after-this-change-produces.flow-agents-workflow.observed-headless-session-953fd913-a640-4142-ae79-5a5dbfa24fdb-fired-on-this-machine-authenticated-get-https-console-kontourai-io-api-telemetry-preset-15m-returned-http-200-with-102-records-matching-that-session-id-tenant-scoped-via-bearer-to-tenant-mapping-token-read-from-console-deploy-env-at-run-time-never-persisted",
-      "subjectType": "flow-step",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-410/ac1-usage-visible-in-console-a-real-claude-code-session-run-after-this-change-produces",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "OBSERVED: headless session 953FD913-A640-4142-AE79-5A5DBFA24FDB fired on this machine; authenticated GET https://console.kontourai.io/api/telemetry?preset=15m returned HTTP 200 with 102 records matching that session id (tenant-scoped via bearer-to-tenant mapping). Token read from console-deploy/.env at run time, never persisted.",
       "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
       "metadata": {
         "origin": "check",
         "check_kind": "external"
@@ -237,16 +237,16 @@
     },
     {
       "id": "kontourai-flow-agents-410-ac2-keep-warm-live-github-workflows-keep-warm-yml-exists-on-console-deploy-s-main.flow-agents-workflow.observed-keep-warm-yml-present-on-console-deploy-main-pr-5-merged-cca8be76-gh-run-list-shows-schedule-event-run-conclusion-success-createdat-2026-07-07t01-21-03z-plus-workflow-dispatch-success-2026-07-06t23-30-11z-cron-firing-on-its-own-schedule",
-      "subjectType": "flow-step",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-410/ac2-keep-warm-live-github-workflows-keep-warm-yml-exists-on-console-deploy-s-main",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "OBSERVED: keep-warm.yml present on console-deploy main (PR #5 merged cca8be76); gh run list shows schedule-event run conclusion=success createdAt=2026-07-07T01:21:03Z plus workflow_dispatch success 2026-07-06T23:30:11Z — cron firing on its own schedule.",
       "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
       "metadata": {
         "origin": "check",
         "check_kind": "external"
@@ -255,16 +255,16 @@
     },
     {
       "id": "kontourai-flow-agents-410-ac4-no-secret-leakage-fail-open-the-token-value-never-appears-in-any-tracked-flow-agents.flow-agents-workflow.observed-kontourai-telemetry-console-conf-gitignored-check-ignore-exit-0-and-mode-600-committed-diff-touches-exactly-config-sh-both-mirrors-test-telemetry-sh-agent-usage-feedback-loop-md-zero-32-char-token-shaped-strings-in-diff-transport-fail-open-unchanged-zero-transport-sh-diff",
-      "subjectType": "flow-step",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-410/ac4-no-secret-leakage-fail-open-the-token-value-never-appears-in-any-tracked-flow-agents",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "OBSERVED: .kontourai/telemetry-console.conf gitignored (check-ignore exit 0) and mode 600; committed diff touches exactly config.sh (both mirrors), test_telemetry.sh, agent-usage-feedback-loop.md; zero 32+char token-shaped strings in diff; transport fail-open unchanged (zero transport.sh diff).",
       "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests:attestation",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
       "metadata": {
         "origin": "check",
         "check_kind": "external"
@@ -272,85 +272,116 @@
       "status": "verified"
     },
     {
+      "id": "kontourai-flow-agents-410-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-460-linked-to-kontourai-flow-agents-410-slice-1-review-verdicts-live-verification-evidence-and-trust-bundle-attached-ci-running",
+      "subjectType": "pull-request",
+      "subjectId": "kontourai-flow-agents-410/gate-claim-pull-request-opened",
+      "facet": "flow-agents.workflow",
+      "claimType": "builder.pr-open.pull-request",
+      "fieldOrBehavior": "PR opened: https://github.com/kontourai/flow-agents/pull/460. Linked to kontourai/flow-agents#410 slice 1; review verdicts, live verification evidence, and trust bundle attached; CI running.",
+      "value": "pass",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
+      "impactLevel": "high",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
+      "metadata": {
+        "origin": "check",
+        "check_kind": "external",
+        "artifact_refs": [
+          {
+            "kind": "provider",
+            "url": "https://github.com/kontourai/flow-agents/pull/460",
+            "summary": "Slice-1 PR with trust bundle and verification evidence."
+          }
+        ],
+        "gate_claim": {
+          "expectation_id": "pull-request-opened",
+          "claim_type": "builder.pr-open.pull-request",
+          "subject_type": "pull-request",
+          "step_id": "pr-open"
+        }
+      },
+      "status": "verified"
+    },
+    {
       "id": "kontourai-flow-agents-410-ac1-usage-visible-in-console-a-real-claude-code-session-run-after-this-change-produces.flow-agents-workflow.ac1-usage-visible-in-console-a-real-claude-code-session-run-after-this-change-produces",
-      "subjectType": "flow-step",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-410/ac1-usage-visible-in-console-a-real-claude-code-session-run-after-this-change-produces",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC1 `usage-visible-in-console`: a real Claude Code session run after this change produces",
-      "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "value": "pending",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "metadata": {
         "origin": "acceptance"
       },
-      "status": "verified"
+      "status": "proposed"
     },
     {
       "id": "kontourai-flow-agents-410-ac2-keep-warm-live-github-workflows-keep-warm-yml-exists-on-console-deploy-s-main.flow-agents-workflow.ac2-keep-warm-live-github-workflows-keep-warm-yml-exists-on-console-deploy-s-main",
-      "subjectType": "flow-step",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-410/ac2-keep-warm-live-github-workflows-keep-warm-yml-exists-on-console-deploy-s-main",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC2 `keep-warm-live`: `.github/workflows/keep-warm.yml` exists on `console-deploy`'s `main`",
-      "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "value": "pending",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "metadata": {
         "origin": "acceptance"
       },
-      "status": "verified"
+      "status": "proposed"
     },
     {
       "id": "kontourai-flow-agents-410-ac3-durable-for-future-sessions-a-brand-new-terminal-session-on-this-machine-with-no.flow-agents-workflow.ac3-durable-for-future-sessions-a-brand-new-terminal-session-on-this-machine-with-no",
-      "subjectType": "flow-step",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-410/ac3-durable-for-future-sessions-a-brand-new-terminal-session-on-this-machine-with-no",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC3 `durable-for-future-sessions`: a brand-new terminal/session on this machine, with no",
-      "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "value": "pending",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "metadata": {
         "origin": "acceptance"
       },
-      "status": "verified"
+      "status": "proposed"
     },
     {
       "id": "kontourai-flow-agents-410-ac4-no-secret-leakage-fail-open-the-token-value-never-appears-in-any-tracked-flow-agents.flow-agents-workflow.ac4-no-secret-leakage-fail-open-the-token-value-never-appears-in-any-tracked-flow-agents",
-      "subjectType": "flow-step",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-410/ac4-no-secret-leakage-fail-open-the-token-value-never-appears-in-any-tracked-flow-agents",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.tests",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "AC4 `no-secret-leakage-fail-open`: the token value never appears in any tracked flow-agents",
-      "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "value": "pending",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "high",
-      "verificationPolicyId": "policy:builder.verify.tests",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "metadata": {
         "origin": "acceptance"
       },
-      "status": "verified"
+      "status": "proposed"
     },
     {
       "id": "kontourai-flow-agents-410-review.flow-agents-workflow.keep-warm-yml-lacks-explicit-permissions-block-repo-convention-add-to-project-yml-declares-explicit-permissions-and-job-needs-zero-github-token-scope-fix-add-permissions-at-workflow-root-also-high-process-note-pr-5-must-merge-to-main-for-ac2-schedule-only-fires-from-default-branch-expected-merge-pending-review-completion-all-else-clean-docs-accurate-conf-posture-correct-ignored-600-keys-only-yaml-cron-curl-sane-no-secrets-superseded-review-2026-07-06t23-58-48z-2026-07-06t23-28-06z",
-      "subjectType": "artifact",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-410/review",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.policy-compliance",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "keep-warm.yml lacks explicit permissions block; repo convention (add-to-project.yml) declares explicit permissions and job needs zero GITHUB_TOKEN scope. Fix: add permissions:{} at workflow root. Also HIGH process note: PR #5 must merge to main for AC2 (schedule only fires from default branch) — expected, merge pending review completion. All else clean: docs accurate, conf posture correct (ignored, 600, keys-only), YAML/cron/curl sane, no secrets.",
       "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "medium",
-      "verificationPolicyId": "policy:builder.verify.policy-compliance",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "metadata": {
         "origin": "critique",
         "reviewer": "tool-code-reviewer",
@@ -361,16 +392,16 @@
     },
     {
       "id": "kontourai-flow-agents-410-review.flow-agents-workflow.single-low-keep-warm-yml-missing-explicit-permissions-job-needs-zero-github-token-scope-same-as-code-review-medium-fix-dispatched-clean-otherwise-secret-containment-intact-conf-ignored-600-token-in-no-tracked-file-keys-only-inspection-transport-endpoint-allow-redaction-fail-open-unchanged-zero-script-diffs-workflow-has-no-injection-surface-secrets-informational-pre-existing-single-token-read-write-api-telemetry-model-unchanged-already-tracked-as-console-130-104-superseded-review-2026-07-06t23-58-49z-2026-07-06t23-28-38z",
-      "subjectType": "artifact",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-410/review",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.policy-compliance",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "Single LOW: keep-warm.yml missing explicit permissions:{} (job needs zero GITHUB_TOKEN scope) — same as code-review MEDIUM, fix dispatched. Clean otherwise: secret containment intact (conf ignored+600, token in no tracked file, keys-only inspection), transport endpoint-allow/redaction/fail-open unchanged (zero script diffs), workflow has no injection surface/secrets. Informational: pre-existing single-token read+write /api/telemetry model unchanged, already tracked as console#130/#104.",
       "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "medium",
-      "verificationPolicyId": "policy:builder.verify.policy-compliance",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "metadata": {
         "origin": "critique",
         "reviewer": "tool-security-reviewer",
@@ -381,16 +412,16 @@
     },
     {
       "id": "kontourai-flow-agents-410-review.flow-agents-workflow.final-code-review-clean-permissions-fix-f7a3cdf4-verified-merged-to-console-deploy-main-pr-5-cca8be76-docs-subsection-accurate-conf-posture-correct-no-secrets-in-tracked-files",
-      "subjectType": "artifact",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-410/review",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.policy-compliance",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "Final code review CLEAN: permissions:{} fix f7a3cdf4 verified merged to console-deploy main (PR #5, cca8be76); docs subsection accurate; conf posture correct; no secrets in tracked files.",
       "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "medium",
-      "verificationPolicyId": "policy:builder.verify.policy-compliance",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "metadata": {
         "origin": "critique",
         "reviewer": "tool-code-reviewer",
@@ -400,16 +431,16 @@
     },
     {
       "id": "kontourai-flow-agents-410-review.flow-agents-workflow.final-security-review-clean-secret-containment-intact-conf-gitignored-600-token-in-no-tracked-file-transport-endpoint-allow-redaction-fail-open-unchanged-keep-warm-workflow-hardened-with-empty-permissions-and-no-injection-surface-superseded-review-2026-07-07t00-26-53z-2026-07-06t23-58-49z",
-      "subjectType": "artifact",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-410/review",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.policy-compliance",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "Final security review CLEAN: secret containment intact (conf gitignored+600, token in no tracked file), transport endpoint-allow/redaction/fail-open unchanged, keep-warm workflow hardened with empty permissions and no injection surface.",
       "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "medium",
-      "verificationPolicyId": "policy:builder.verify.policy-compliance",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "metadata": {
         "origin": "critique",
         "reviewer": "tool-security-reviewer",
@@ -420,16 +451,16 @@
     },
     {
       "id": "kontourai-flow-agents-410-review.flow-agents-workflow.security-resolved-symlink-rejection-verified-by-independent-exploit-reproduction-chmod-h-600-link-correctly-ignored-falls-through-to-shipped-default-600-euid-gate-closes-clone-tarball-smuggle-vector-on-macos-linux-fail-open-preserved-56-56-tests",
-      "subjectType": "artifact",
+      "subjectType": "pull-request",
       "subjectId": "kontourai-flow-agents-410/review",
       "facet": "flow-agents.workflow",
-      "claimType": "builder.verify.policy-compliance",
+      "claimType": "builder.pr-open.pull-request",
       "fieldOrBehavior": "Security RESOLVED: symlink rejection verified by independent exploit reproduction (chmod -h 600 link correctly ignored, falls through to shipped default); 600+euid gate closes clone/tarball smuggle vector on macOS+Linux; fail-open preserved; 56/56 tests.",
       "value": "pass",
-      "createdAt": "2026-07-07T01:26:07Z",
-      "updatedAt": "2026-07-07T01:26:07Z",
+      "createdAt": "2026-07-07T01:27:26Z",
+      "updatedAt": "2026-07-07T01:27:26Z",
       "impactLevel": "medium",
-      "verificationPolicyId": "policy:builder.verify.policy-compliance",
+      "verificationPolicyId": "policy:builder.pr-open.pull-request",
       "metadata": {
         "origin": "critique",
         "reviewer": "tool-security-reviewer",
@@ -446,7 +477,7 @@
       "method": "corroboration",
       "sourceRef": "kontourai-flow-agents-410/evidence.json",
       "excerptOrSummary": "Selected kontourai/flow-agents#410 slice 1 (owner usage flowing to hosted console): scope clear, acceptance criteria present, prereqs verified delivered.",
-      "observedAt": "2026-07-07T01:26:07Z",
+      "observedAt": "2026-07-07T01:27:26Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
       "execution": {
@@ -462,7 +493,7 @@
       "method": "corroboration",
       "sourceRef": "kontourai-flow-agents-410/evidence.json",
       "excerptOrSummary": "Execution complete for slice 1 code scope: Wave 1 conf+docs landed (no tracked secrets), Wave 2 keep-warm merged to console-deploy main (PR #5 squash cca8be76) with clean code+security re-review; manual dispatch run succeeded.",
-      "observedAt": "2026-07-07T01:26:07Z",
+      "observedAt": "2026-07-07T01:27:26Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
       "execution": {
@@ -478,7 +509,7 @@
       "method": "corroboration",
       "sourceRef": "kontourai-flow-agents-410/evidence.json",
       "excerptOrSummary": "Review verdicts final: code CLEAN (docs accurate, mirrors identical, style consistent); security RESOLVED (600+euid+non-symlink gate closes smuggle + macOS chmod -h symlink vectors, independently reproduced). permissions:{} on keep-warm.yml verified on console-deploy main.",
-      "observedAt": "2026-07-07T01:26:07Z",
+      "observedAt": "2026-07-07T01:27:26Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     },
@@ -489,7 +520,7 @@
       "method": "attestation",
       "sourceRef": "kontourai-flow-agents-410/evidence.json",
       "excerptOrSummary": "Accepted gap: four review-critique prose claims re-run as bash by the Stop-gate backstop (exit 2) are malformed-evidence noise, not real failures — see kontourai/flow-agents#453; the substantive review verdicts pass via the command-backed check id=review.",
-      "observedAt": "2026-07-07T01:26:07Z",
+      "observedAt": "2026-07-07T01:27:26Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     },
@@ -500,7 +531,7 @@
       "method": "validation",
       "sourceRef": "kontourai-flow-agents-410/evidence.json",
       "excerptOrSummary": "AC3 durable auto-discovery: telemetry precedence suite passes (env > workspace conf > global conf > default, 600+euid+non-symlink gate); end-to-end proof is AC1's live headless session mirroring with zero env/profile wiring. Quote-free re-record after gate re-run mangled the prior nested-quote command.",
-      "observedAt": "2026-07-07T01:26:07Z",
+      "observedAt": "2026-07-07T01:27:26Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true,
       "execution": {
@@ -516,7 +547,7 @@
       "method": "corroboration",
       "sourceRef": "kontourai-flow-agents-410/evidence.json",
       "excerptOrSummary": "OBSERVED: headless session 953FD913-A640-4142-AE79-5A5DBFA24FDB produced records; authenticated GET https://console.kontourai.io/api/telemetry?preset=15m returned HTTP 200 with 102 matches of that session id, tenant-scoped via bearer-to-tenant mapping. Token read at run time from console-deploy/.env, never persisted.",
-      "observedAt": "2026-07-07T01:26:07Z",
+      "observedAt": "2026-07-07T01:27:26Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     },
@@ -527,7 +558,7 @@
       "method": "corroboration",
       "sourceRef": "kontourai-flow-agents-410/evidence.json",
       "excerptOrSummary": "OBSERVED: keep-warm.yml on console-deploy main (PR #5, cca8be76); schedule-event run conclusion=success createdAt=2026-07-07T01:21:03Z and workflow_dispatch success 2026-07-06T23:30:11Z per gh run list.",
-      "observedAt": "2026-07-07T01:26:07Z",
+      "observedAt": "2026-07-07T01:27:26Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     },
@@ -538,7 +569,7 @@
       "method": "corroboration",
       "sourceRef": "kontourai-flow-agents-410/evidence.json",
       "excerptOrSummary": "OBSERVED: conf gitignored (check-ignore exit 0), mode 600; diff limited to config.sh mirrors + test + docs; zero 32+char token-shaped strings in diff; fail-open transport unchanged.",
-      "observedAt": "2026-07-07T01:26:07Z",
+      "observedAt": "2026-07-07T01:27:26Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     },
@@ -549,7 +580,7 @@
       "method": "corroboration",
       "sourceRef": "kontourai-flow-agents-410/evidence.json",
       "excerptOrSummary": "Wave 3 complete: AC1 live records observed in hosted console; AC2 scheduled cron success observed; AC3 proven by manifest-lane eval suite (56/56) + AC1 end-to-end; AC4 secret containment observed. Reviews: code CLEAN, security RESOLVED via independent exploit reproduction.",
-      "observedAt": "2026-07-07T01:26:07Z",
+      "observedAt": "2026-07-07T01:27:26Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     },
@@ -560,7 +591,7 @@
       "method": "corroboration",
       "sourceRef": "kontourai-flow-agents-410/evidence.json",
       "excerptOrSummary": "Wave 3 verification complete; all ACs evidence-backed by command-checked records in this bundle.",
-      "observedAt": "2026-07-07T01:26:07Z",
+      "observedAt": "2026-07-07T01:27:26Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     },
@@ -571,7 +602,7 @@
       "method": "corroboration",
       "sourceRef": "kontourai-flow-agents-410/evidence.json",
       "excerptOrSummary": "OBSERVED: headless session 953FD913-A640-4142-AE79-5A5DBFA24FDB fired on this machine; authenticated GET https://console.kontourai.io/api/telemetry?preset=15m returned HTTP 200 with 102 records matching that session id (tenant-scoped via bearer-to-tenant mapping). Token read from console-deploy/.env at run time, never persisted.",
-      "observedAt": "2026-07-07T01:26:07Z",
+      "observedAt": "2026-07-07T01:27:26Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     },
@@ -582,7 +613,7 @@
       "method": "corroboration",
       "sourceRef": "kontourai-flow-agents-410/evidence.json",
       "excerptOrSummary": "OBSERVED: keep-warm.yml present on console-deploy main (PR #5 merged cca8be76); gh run list shows schedule-event run conclusion=success createdAt=2026-07-07T01:21:03Z plus workflow_dispatch success 2026-07-06T23:30:11Z — cron firing on its own schedule.",
-      "observedAt": "2026-07-07T01:26:07Z",
+      "observedAt": "2026-07-07T01:27:26Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
     },
@@ -593,9 +624,25 @@
       "method": "corroboration",
       "sourceRef": "kontourai-flow-agents-410/evidence.json",
       "excerptOrSummary": "OBSERVED: .kontourai/telemetry-console.conf gitignored (check-ignore exit 0) and mode 600; committed diff touches exactly config.sh (both mirrors), test_telemetry.sh, agent-usage-feedback-loop.md; zero 32+char token-shaped strings in diff; transport fail-open unchanged (zero transport.sh diff).",
-      "observedAt": "2026-07-07T01:26:07Z",
+      "observedAt": "2026-07-07T01:27:26Z",
       "collectedBy": "flow-agents/workflow-sidecar",
       "passing": true
+    },
+    {
+      "id": "ev:kontourai-flow-agents-410-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-460-linked-to-kontourai-flow-agents-410-slice-1-review-verdicts-live-verification-evidence-and-trust-bundle-attached-ci-running",
+      "claimId": "kontourai-flow-agents-410-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-460-linked-to-kontourai-flow-agents-410-slice-1-review-verdicts-live-verification-evidence-and-trust-bundle-attached-ci-running",
+      "evidenceType": "attestation",
+      "method": "corroboration",
+      "sourceRef": "kontourai-flow-agents-410/evidence.json",
+      "excerptOrSummary": "PR opened: https://github.com/kontourai/flow-agents/pull/460. Linked to kontourai/flow-agents#410 slice 1; review verdicts, live verification evidence, and trust bundle attached; CI running.",
+      "observedAt": "2026-07-07T01:27:26Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "runner": "bash",
+        "label": "gh pr view 460 --repo kontourai/flow-agents --json state -q .state | grep -qx OPEN",
+        "isError": false
+      }
     }
   ],
   "policies": [
@@ -651,13 +698,13 @@
       "impactLevel": "high"
     },
     {
-      "id": "policy:builder.verify.tests:attestation",
-      "claimType": "builder.verify.tests",
+      "id": "policy:builder.pr-open.pull-request:attestation",
+      "claimType": "builder.pr-open.pull-request",
       "requiredEvidence": [
         "attestation"
       ],
       "acceptanceCriteria": [
-        "A verified verification event must support a builder.verify.tests claim."
+        "A verified verification event must support a builder.pr-open.pull-request claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -685,13 +732,13 @@
       "impactLevel": "high"
     },
     {
-      "id": "policy:builder.verify.tests:test_output",
-      "claimType": "builder.verify.tests",
+      "id": "policy:builder.pr-open.pull-request:test_output",
+      "claimType": "builder.pr-open.pull-request",
       "requiredEvidence": [
         "test_output"
       ],
       "acceptanceCriteria": [
-        "A verified verification event must support a builder.verify.tests claim."
+        "A verified verification event must support a builder.pr-open.pull-request claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -717,11 +764,11 @@
       "impactLevel": "high"
     },
     {
-      "id": "policy:builder.verify.tests",
-      "claimType": "builder.verify.tests",
+      "id": "policy:builder.pr-open.pull-request",
+      "claimType": "builder.pr-open.pull-request",
       "requiredEvidence": [],
       "acceptanceCriteria": [
-        "A verified verification event must support a builder.verify.tests claim."
+        "A verified verification event must support a builder.pr-open.pull-request claim."
       ],
       "reviewAuthority": "system",
       "validityRule": {
@@ -745,21 +792,6 @@
       "stalenessTriggers": [],
       "conflictRules": [],
       "impactLevel": "medium"
-    },
-    {
-      "id": "policy:builder.verify.policy-compliance",
-      "claimType": "builder.verify.policy-compliance",
-      "requiredEvidence": [],
-      "acceptanceCriteria": [
-        "A verified verification event must support a builder.verify.policy-compliance claim."
-      ],
-      "reviewAuthority": "system",
-      "validityRule": {
-        "kind": "manual"
-      },
-      "stalenessTriggers": [],
-      "conflictRules": [],
-      "impactLevel": "medium"
     }
   ],
   "events": [
@@ -772,8 +804,8 @@
       "evidenceIds": [
         "ev:kontourai-flow-agents-410-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-410-slice-1-owner-usage-flowing-to-hosted-console-scope-clear-acceptance-criteria-present-prereqs-verified-delivered"
       ],
-      "createdAt": "2026-07-07T01:26:07Z",
-      "verifiedAt": "2026-07-07T01:26:07Z"
+      "createdAt": "2026-07-07T01:27:26Z",
+      "verifiedAt": "2026-07-07T01:27:26Z"
     },
     {
       "id": "evt:kontourai-flow-agents-410-gate-claim-implementation-scope.flow-agents-workflow.execution-complete-for-slice-1-code-scope-wave-1-conf-docs-landed-no-tracked-secrets-wave-2-keep-warm-merged-to-console-deploy-main-pr-5-squash-cca8be76-with-clean-code-security-re-review-manual-dispatch-run-succeeded",
@@ -784,8 +816,8 @@
       "evidenceIds": [
         "ev:kontourai-flow-agents-410-gate-claim-implementation-scope.flow-agents-workflow.execution-complete-for-slice-1-code-scope-wave-1-conf-docs-landed-no-tracked-secrets-wave-2-keep-warm-merged-to-console-deploy-main-pr-5-squash-cca8be76-with-clean-code-security-re-review-manual-dispatch-run-succeeded"
       ],
-      "createdAt": "2026-07-07T01:26:07Z",
-      "verifiedAt": "2026-07-07T01:26:07Z"
+      "createdAt": "2026-07-07T01:27:26Z",
+      "verifiedAt": "2026-07-07T01:27:26Z"
     },
     {
       "id": "evt:kontourai-flow-agents-410-review.flow-agents-workflow.review-verdicts-final-code-clean-docs-accurate-mirrors-identical-style-consistent-security-resolved-600-euid-non-symlink-gate-closes-smuggle-macos-chmod-h-symlink-vectors-independently-reproduced-permissions-on-keep-warm-yml-verified-on-console-deploy-main",
@@ -796,8 +828,8 @@
       "evidenceIds": [
         "ev:kontourai-flow-agents-410-review.flow-agents-workflow.review-verdicts-final-code-clean-docs-accurate-mirrors-identical-style-consistent-security-resolved-600-euid-non-symlink-gate-closes-smuggle-macos-chmod-h-symlink-vectors-independently-reproduced-permissions-on-keep-warm-yml-verified-on-console-deploy-main"
       ],
-      "createdAt": "2026-07-07T01:26:07Z",
-      "verifiedAt": "2026-07-07T01:26:07Z"
+      "createdAt": "2026-07-07T01:27:26Z",
+      "verifiedAt": "2026-07-07T01:27:26Z"
     },
     {
       "id": "evt:kontourai-flow-agents-410-review-prose-backstop-gap.flow-agents-workflow.accepted-gap-four-review-critique-prose-claims-re-run-as-bash-by-the-stop-gate-backstop-exit-2-are-malformed-evidence-noise-not-real-failures-see-kontourai-flow-agents-453-the-substantive-review-verdicts-pass-via-the-command-backed-check-id-review",
@@ -808,8 +840,8 @@
       "evidenceIds": [
         "ev:kontourai-flow-agents-410-review-prose-backstop-gap.flow-agents-workflow.accepted-gap-four-review-critique-prose-claims-re-run-as-bash-by-the-stop-gate-backstop-exit-2-are-malformed-evidence-noise-not-real-failures-see-kontourai-flow-agents-453-the-substantive-review-verdicts-pass-via-the-command-backed-check-id-review"
       ],
-      "createdAt": "2026-07-07T01:26:07Z",
-      "verifiedAt": "2026-07-07T01:26:07Z"
+      "createdAt": "2026-07-07T01:27:26Z",
+      "verifiedAt": "2026-07-07T01:27:26Z"
     },
     {
       "id": "evt:kontourai-flow-agents-410-ac3-durable-for-future-sessions-a-brand-new-terminal-session-on-this-machine-wit.flow-agents-workflow.ac3-durable-auto-discovery-telemetry-precedence-suite-passes-env-workspace-conf-global-conf-default-600-euid-non-symlink-gate-end-to-end-proof-is-ac1-s-live-headless-session-mirroring-with-zero-env-profile-wiring-quote-free-re-record-after-gate-re-run-mangled-the-prior-nested-quote-command",
@@ -820,8 +852,8 @@
       "evidenceIds": [
         "ev:kontourai-flow-agents-410-ac3-durable-for-future-sessions-a-brand-new-terminal-session-on-this-machine-wit.flow-agents-workflow.ac3-durable-auto-discovery-telemetry-precedence-suite-passes-env-workspace-conf-global-conf-default-600-euid-non-symlink-gate-end-to-end-proof-is-ac1-s-live-headless-session-mirroring-with-zero-env-profile-wiring-quote-free-re-record-after-gate-re-run-mangled-the-prior-nested-quote-command"
       ],
-      "createdAt": "2026-07-07T01:26:07Z",
-      "verifiedAt": "2026-07-07T01:26:07Z"
+      "createdAt": "2026-07-07T01:27:26Z",
+      "verifiedAt": "2026-07-07T01:27:26Z"
     },
     {
       "id": "evt:kontourai-flow-agents-410-ac1-usage-visible-in-console-a-real-claude-code-session-run-after-this-change-pr.flow-agents-workflow.observed-headless-session-953fd913-a640-4142-ae79-5a5dbfa24fdb-produced-records-authenticated-get-https-console-kontourai-io-api-telemetry-preset-15m-returned-http-200-with-102-matches-of-that-session-id-tenant-scoped-via-bearer-to-tenant-mapping-token-read-at-run-time-from-console-deploy-env-never-persisted",
@@ -832,8 +864,8 @@
       "evidenceIds": [
         "ev:kontourai-flow-agents-410-ac1-usage-visible-in-console-a-real-claude-code-session-run-after-this-change-pr.flow-agents-workflow.observed-headless-session-953fd913-a640-4142-ae79-5a5dbfa24fdb-produced-records-authenticated-get-https-console-kontourai-io-api-telemetry-preset-15m-returned-http-200-with-102-matches-of-that-session-id-tenant-scoped-via-bearer-to-tenant-mapping-token-read-at-run-time-from-console-deploy-env-never-persisted"
       ],
-      "createdAt": "2026-07-07T01:26:07Z",
-      "verifiedAt": "2026-07-07T01:26:07Z"
+      "createdAt": "2026-07-07T01:27:26Z",
+      "verifiedAt": "2026-07-07T01:27:26Z"
     },
     {
       "id": "evt:kontourai-flow-agents-410-ac2-keep-warm-live-github-workflows-keep-warm-yml-exists-on-console-deploy-s-mai.flow-agents-workflow.observed-keep-warm-yml-on-console-deploy-main-pr-5-cca8be76-schedule-event-run-conclusion-success-createdat-2026-07-07t01-21-03z-and-workflow-dispatch-success-2026-07-06t23-30-11z-per-gh-run-list",
@@ -844,8 +876,8 @@
       "evidenceIds": [
         "ev:kontourai-flow-agents-410-ac2-keep-warm-live-github-workflows-keep-warm-yml-exists-on-console-deploy-s-mai.flow-agents-workflow.observed-keep-warm-yml-on-console-deploy-main-pr-5-cca8be76-schedule-event-run-conclusion-success-createdat-2026-07-07t01-21-03z-and-workflow-dispatch-success-2026-07-06t23-30-11z-per-gh-run-list"
       ],
-      "createdAt": "2026-07-07T01:26:07Z",
-      "verifiedAt": "2026-07-07T01:26:07Z"
+      "createdAt": "2026-07-07T01:27:26Z",
+      "verifiedAt": "2026-07-07T01:27:26Z"
     },
     {
       "id": "evt:kontourai-flow-agents-410-ac4-no-secret-leakage-fail-open-the-token-value-never-appears-in-any-tracked-flo.flow-agents-workflow.observed-conf-gitignored-check-ignore-exit-0-mode-600-diff-limited-to-config-sh-mirrors-test-docs-zero-32-char-token-shaped-strings-in-diff-fail-open-transport-unchanged",
@@ -856,8 +888,8 @@
       "evidenceIds": [
         "ev:kontourai-flow-agents-410-ac4-no-secret-leakage-fail-open-the-token-value-never-appears-in-any-tracked-flo.flow-agents-workflow.observed-conf-gitignored-check-ignore-exit-0-mode-600-diff-limited-to-config-sh-mirrors-test-docs-zero-32-char-token-shaped-strings-in-diff-fail-open-transport-unchanged"
       ],
-      "createdAt": "2026-07-07T01:26:07Z",
-      "verifiedAt": "2026-07-07T01:26:07Z"
+      "createdAt": "2026-07-07T01:27:26Z",
+      "verifiedAt": "2026-07-07T01:27:26Z"
     },
     {
       "id": "evt:kontourai-flow-agents-410-wave3-live-verification.flow-agents-workflow.wave-3-complete-ac1-live-records-observed-in-hosted-console-ac2-scheduled-cron-success-observed-ac3-proven-by-manifest-lane-eval-suite-56-56-ac1-end-to-end-ac4-secret-containment-observed-reviews-code-clean-security-resolved-via-independent-exploit-reproduction",
@@ -868,8 +900,8 @@
       "evidenceIds": [
         "ev:kontourai-flow-agents-410-wave3-live-verification.flow-agents-workflow.wave-3-complete-ac1-live-records-observed-in-hosted-console-ac2-scheduled-cron-success-observed-ac3-proven-by-manifest-lane-eval-suite-56-56-ac1-end-to-end-ac4-secret-containment-observed-reviews-code-clean-security-resolved-via-independent-exploit-reproduction"
       ],
-      "createdAt": "2026-07-07T01:26:07Z",
-      "verifiedAt": "2026-07-07T01:26:07Z"
+      "createdAt": "2026-07-07T01:27:26Z",
+      "verifiedAt": "2026-07-07T01:27:26Z"
     },
     {
       "id": "evt:kontourai-flow-agents-410-final-verification.flow-agents-workflow.wave-3-verification-complete-all-acs-evidence-backed-by-command-checked-records-in-this-bundle",
@@ -880,8 +912,8 @@
       "evidenceIds": [
         "ev:kontourai-flow-agents-410-final-verification.flow-agents-workflow.wave-3-verification-complete-all-acs-evidence-backed-by-command-checked-records-in-this-bundle"
       ],
-      "createdAt": "2026-07-07T01:26:07Z",
-      "verifiedAt": "2026-07-07T01:26:07Z"
+      "createdAt": "2026-07-07T01:27:26Z",
+      "verifiedAt": "2026-07-07T01:27:26Z"
     },
     {
       "id": "evt:kontourai-flow-agents-410-ac1-usage-visible-in-console-a-real-claude-code-session-run-after-this-change-produces.flow-agents-workflow.observed-headless-session-953fd913-a640-4142-ae79-5a5dbfa24fdb-fired-on-this-machine-authenticated-get-https-console-kontourai-io-api-telemetry-preset-15m-returned-http-200-with-102-records-matching-that-session-id-tenant-scoped-via-bearer-to-tenant-mapping-token-read-from-console-deploy-env-at-run-time-never-persisted",
@@ -892,8 +924,8 @@
       "evidenceIds": [
         "ev:kontourai-flow-agents-410-ac1-usage-visible-in-console-a-real-claude-code-session-run-after-this-change-produces.flow-agents-workflow.observed-headless-session-953fd913-a640-4142-ae79-5a5dbfa24fdb-fired-on-this-machine-authenticated-get-https-console-kontourai-io-api-telemetry-preset-15m-returned-http-200-with-102-records-matching-that-session-id-tenant-scoped-via-bearer-to-tenant-mapping-token-read-from-console-deploy-env-at-run-time-never-persisted"
       ],
-      "createdAt": "2026-07-07T01:26:07Z",
-      "verifiedAt": "2026-07-07T01:26:07Z"
+      "createdAt": "2026-07-07T01:27:26Z",
+      "verifiedAt": "2026-07-07T01:27:26Z"
     },
     {
       "id": "evt:kontourai-flow-agents-410-ac2-keep-warm-live-github-workflows-keep-warm-yml-exists-on-console-deploy-s-main.flow-agents-workflow.observed-keep-warm-yml-present-on-console-deploy-main-pr-5-merged-cca8be76-gh-run-list-shows-schedule-event-run-conclusion-success-createdat-2026-07-07t01-21-03z-plus-workflow-dispatch-success-2026-07-06t23-30-11z-cron-firing-on-its-own-schedule",
@@ -904,8 +936,8 @@
       "evidenceIds": [
         "ev:kontourai-flow-agents-410-ac2-keep-warm-live-github-workflows-keep-warm-yml-exists-on-console-deploy-s-main.flow-agents-workflow.observed-keep-warm-yml-present-on-console-deploy-main-pr-5-merged-cca8be76-gh-run-list-shows-schedule-event-run-conclusion-success-createdat-2026-07-07t01-21-03z-plus-workflow-dispatch-success-2026-07-06t23-30-11z-cron-firing-on-its-own-schedule"
       ],
-      "createdAt": "2026-07-07T01:26:07Z",
-      "verifiedAt": "2026-07-07T01:26:07Z"
+      "createdAt": "2026-07-07T01:27:26Z",
+      "verifiedAt": "2026-07-07T01:27:26Z"
     },
     {
       "id": "evt:kontourai-flow-agents-410-ac4-no-secret-leakage-fail-open-the-token-value-never-appears-in-any-tracked-flow-agents.flow-agents-workflow.observed-kontourai-telemetry-console-conf-gitignored-check-ignore-exit-0-and-mode-600-committed-diff-touches-exactly-config-sh-both-mirrors-test-telemetry-sh-agent-usage-feedback-loop-md-zero-32-char-token-shaped-strings-in-diff-transport-fail-open-unchanged-zero-transport-sh-diff",
@@ -916,48 +948,20 @@
       "evidenceIds": [
         "ev:kontourai-flow-agents-410-ac4-no-secret-leakage-fail-open-the-token-value-never-appears-in-any-tracked-flow-agents.flow-agents-workflow.observed-kontourai-telemetry-console-conf-gitignored-check-ignore-exit-0-and-mode-600-committed-diff-touches-exactly-config-sh-both-mirrors-test-telemetry-sh-agent-usage-feedback-loop-md-zero-32-char-token-shaped-strings-in-diff-transport-fail-open-unchanged-zero-transport-sh-diff"
       ],
-      "createdAt": "2026-07-07T01:26:07Z",
-      "verifiedAt": "2026-07-07T01:26:07Z"
+      "createdAt": "2026-07-07T01:27:26Z",
+      "verifiedAt": "2026-07-07T01:27:26Z"
     },
     {
-      "id": "evt:kontourai-flow-agents-410-ac1-usage-visible-in-console-a-real-claude-code-session-run-after-this-change-produces.flow-agents-workflow.ac1-usage-visible-in-console-a-real-claude-code-session-run-after-this-change-produces",
-      "claimId": "kontourai-flow-agents-410-ac1-usage-visible-in-console-a-real-claude-code-session-run-after-this-change-produces.flow-agents-workflow.ac1-usage-visible-in-console-a-real-claude-code-session-run-after-this-change-produces",
+      "id": "evt:kontourai-flow-agents-410-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-460-linked-to-kontourai-flow-agents-410-slice-1-review-verdicts-live-verification-evidence-and-trust-bundle-attached-ci-running",
+      "claimId": "kontourai-flow-agents-410-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-460-linked-to-kontourai-flow-agents-410-slice-1-review-verdicts-live-verification-evidence-and-trust-bundle-attached-ci-running",
       "status": "verified",
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-07T01:26:07Z",
-      "verifiedAt": "2026-07-07T01:26:07Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-410-ac2-keep-warm-live-github-workflows-keep-warm-yml-exists-on-console-deploy-s-main.flow-agents-workflow.ac2-keep-warm-live-github-workflows-keep-warm-yml-exists-on-console-deploy-s-main",
-      "claimId": "kontourai-flow-agents-410-ac2-keep-warm-live-github-workflows-keep-warm-yml-exists-on-console-deploy-s-main.flow-agents-workflow.ac2-keep-warm-live-github-workflows-keep-warm-yml-exists-on-console-deploy-s-main",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-07T01:26:07Z",
-      "verifiedAt": "2026-07-07T01:26:07Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-410-ac3-durable-for-future-sessions-a-brand-new-terminal-session-on-this-machine-with-no.flow-agents-workflow.ac3-durable-for-future-sessions-a-brand-new-terminal-session-on-this-machine-with-no",
-      "claimId": "kontourai-flow-agents-410-ac3-durable-for-future-sessions-a-brand-new-terminal-session-on-this-machine-with-no.flow-agents-workflow.ac3-durable-for-future-sessions-a-brand-new-terminal-session-on-this-machine-with-no",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-07T01:26:07Z",
-      "verifiedAt": "2026-07-07T01:26:07Z"
-    },
-    {
-      "id": "evt:kontourai-flow-agents-410-ac4-no-secret-leakage-fail-open-the-token-value-never-appears-in-any-tracked-flow-agents.flow-agents-workflow.ac4-no-secret-leakage-fail-open-the-token-value-never-appears-in-any-tracked-flow-agents",
-      "claimId": "kontourai-flow-agents-410-ac4-no-secret-leakage-fail-open-the-token-value-never-appears-in-any-tracked-flow-agents.flow-agents-workflow.ac4-no-secret-leakage-fail-open-the-token-value-never-appears-in-any-tracked-flow-agents",
-      "status": "verified",
-      "actor": "flow-agents/workflow-sidecar",
-      "method": "validation",
-      "evidenceIds": [],
-      "createdAt": "2026-07-07T01:26:07Z",
-      "verifiedAt": "2026-07-07T01:26:07Z"
+      "evidenceIds": [
+        "ev:kontourai-flow-agents-410-gate-claim-pull-request-opened.flow-agents-workflow.pr-opened-https-github-com-kontourai-flow-agents-pull-460-linked-to-kontourai-flow-agents-410-slice-1-review-verdicts-live-verification-evidence-and-trust-bundle-attached-ci-running"
+      ],
+      "createdAt": "2026-07-07T01:27:26Z",
+      "verifiedAt": "2026-07-07T01:27:26Z"
     },
     {
       "id": "evt:kontourai-flow-agents-410-review.flow-agents-workflow.final-code-review-clean-permissions-fix-f7a3cdf4-verified-merged-to-console-deploy-main-pr-5-cca8be76-docs-subsection-accurate-conf-posture-correct-no-secrets-in-tracked-files",
@@ -966,8 +970,8 @@
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-07T01:26:07Z",
-      "verifiedAt": "2026-07-07T01:26:07Z"
+      "createdAt": "2026-07-07T01:27:26Z",
+      "verifiedAt": "2026-07-07T01:27:26Z"
     },
     {
       "id": "evt:kontourai-flow-agents-410-review.flow-agents-workflow.security-resolved-symlink-rejection-verified-by-independent-exploit-reproduction-chmod-h-600-link-correctly-ignored-falls-through-to-shipped-default-600-euid-gate-closes-clone-tarball-smuggle-vector-on-macos-linux-fail-open-preserved-56-56-tests",
@@ -976,8 +980,8 @@
       "actor": "flow-agents/workflow-sidecar",
       "method": "validation",
       "evidenceIds": [],
-      "createdAt": "2026-07-07T01:26:07Z",
-      "verifiedAt": "2026-07-07T01:26:07Z"
+      "createdAt": "2026-07-07T01:27:26Z",
+      "verifiedAt": "2026-07-07T01:27:26Z"
     }
   ]
 }
