@@ -80,6 +80,7 @@ renamed, or changes category, update the table and the validator together.
 | `lib/patterns.sh` | shared hook library | `evals/integration/test_hook_category_behaviors.sh`, `evals/integration/test_telemetry.sh` | Shared shell pattern constants. |
 | `lib/resolve-formatter.js` | shared hook library | `evals/integration/test_hook_category_behaviors.sh` | Shared formatter resolution helper. |
 | `lib/runnable-command.js` | shared hook library | `evals/integration/test_goal_fit_hook.sh` | Shared runnable-command-text heuristic (`isRunnableCommandText`) consumed by `stop-goal-fit.js` and `workflow-sidecar.js` so record-time and Stop-time checks never drift (issue #412). |
+| `lib/skill-drift.js` | shared hook library | `evals/integration/test_skill_drift_check.sh` | Shared installed-Claude-Code-skill manifest builder and drift classifier (`buildManifest`, `compareSkillDrift`) — the single choke point the `init --global` manifest writer, the `flow-agents skill-drift-check` CLI, and the SessionStart advisory all route through so they never disagree on drift classification (issue #439). |
 
 ## Telemetry
 

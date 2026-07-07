@@ -153,6 +153,11 @@ export function durableInstallRecordPath(cwd = process.cwd()): string {
   return path.join(durableFlowAgentsRoot(cwd), "install.json");
 }
 
+/** Path to the per-skill-file content-hash drift manifest, a sibling of `install.json` under the same durable root. */
+export function skillsManifestPath(cwd = process.cwd()): string {
+  return path.join(durableFlowAgentsRoot(cwd), "skills-manifest.json");
+}
+
 export function telemetryDataDir(cwd = process.cwd()): string {
   return path.resolve(cwd, KONTOURAI_DIR, "telemetry");
 }

@@ -287,6 +287,52 @@ function contextMapSteering(root) {
   ].join(' ');
 }
 
+/**
+ * Compose the SessionStart advisory line for installed-skill drift (#439). Fires only inside a
+ * kit-bearing checkout (repo has `kits/` AND a built `dist/claude-code/.claude/skills` bundle) —
+ * never triggers a build itself, staying read-only and cheap on every SessionStart. Returns ''
+ * (never throws past this function) in every other case: not kit-bearing, no manifest yet, no
+ * drift found, or any internal error.
+ *
+ * Reuses the SINGLE shared classification choke point, `scripts/hooks/lib/skill-drift.js`'s
+ * `compareSkillDrift()` — this function must never hand-roll its own drift comparison (same
+ * convention the CLI check and the manifest writer follow, see #439 plan).
+ *
+ * @param {string} root  Repository root
+ * @returns {string}
+ */
+function skillDriftSteering(root) {
+  try {
+    if (!fs.existsSync(path.join(root, 'kits'))) return '';
+    if (!fs.existsSync(path.join(root, 'dist', 'claude-code', '.claude', 'skills'))) return '';
+
+    const { loadManifest, compareSkillDrift, resolveClaudeGlobalSkillsDir } = require('./lib/skill-drift');
+
+    const destDir = resolveClaudeGlobalSkillsDir(process.env);
+    // Sibling layout: <destDir>/.flow-agents/skills-manifest.json — mirrors
+    // src/lib/local-artifact-root.ts's durableFlowAgentsRoot(destDir)/skillsManifestPath exactly
+    // (durableFlowAgentsRoot(cwd) resolves to `${cwd}/.flow-agents`, no parent traversal).
+    const manifestPath = path.join(destDir, '.flow-agents', 'skills-manifest.json');
+    const manifest = loadManifest(manifestPath);
+
+    const installedDir = path.join(destDir, 'skills');
+    const kitSourceDir = path.join(root, 'dist', 'claude-code', '.claude', 'skills');
+    const report = compareSkillDrift({ installedDir, kitSourceDir, manifest });
+    if (!report.hasDrift) return '';
+
+    const { kitUpdated, userModified, unbaselined, missingInstall, kitRemoved } = report.summary;
+    // kit_removed (#439 review fix) folds into staleCount alongside the other non-in_sync
+    // states — this advisory line only ever surfaces kit-updated/user-modified counts by name
+    // (see the template string below), so kit_removed does not get its own named count here; it
+    // is still reflected in the total. Full per-state detail is always available via
+    // `flow-agents skill-drift-check`.
+    const staleCount = kitUpdated + userModified + unbaselined + missingInstall + kitRemoved;
+    return `[SKILL DRIFT] ${staleCount} installed Claude Code skill file(s) are stale vs this kit (${kitUpdated} kit-updated, ${userModified} user-modified). Run \`flow-agents init --runtime claude-code --global\` to refresh (user-modified files are reported, not overwritten). See \`flow-agents skill-drift-check\` for details.`;
+  } catch {
+    return '';
+  }
+}
+
 function promptText(input) {
   const candidates = [
     input && input.prompt,
@@ -550,6 +596,14 @@ function run(rawInput) {
       if (supersessionHint) hints.push(supersessionHint);
     }
 
+    // SessionStart only, unconditional of `current` (#439): the installed-skill drift advisory
+    // fires on every SessionStart inside a kit-bearing checkout, independent of whether an active
+    // workflow session exists — do NOT fold this into the `current`-gated block above.
+    if (event === 'SessionStart') {
+      const driftHint = skillDriftSteering(root);
+      if (driftHint) hints.push(driftHint);
+    }
+
     if (shouldAppendWorkflowContext) {
       const stateHint = stateSteering(root);
       if (stateHint) hints.push(stateHint);
@@ -580,6 +634,7 @@ module.exports = {
   stateSteering,
   critiqueSteering,
   contextMapSteering,
+  skillDriftSteering,
   latestWorkflowState,
   findRepoRoot,
   safeStateText,
