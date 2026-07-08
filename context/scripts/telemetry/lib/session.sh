@@ -60,4 +60,7 @@ session_end() {
 
 session_cleanup() {
   find "${TELEMETRY_SESSION_DIR}" -name "*.session" -mtime +1 -delete 2>/dev/null || true
+  # Bound the per-cwd project-label cache (see console_project_label) so a project rename
+  # (package.json name / git remote) self-heals within the same window instead of caching forever.
+  find "${TELEMETRY_SESSION_DIR}" -name "project-label.*" -mtime +1 -delete 2>/dev/null || true
 }
