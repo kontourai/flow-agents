@@ -13,12 +13,35 @@ const AGENT_EXTENSION_CLASSES = new Set(["skills", "docs", "adapters", "evals", 
 // Flow Agents-recognized metadata fields that are neither core container fields nor
 // agent-extension asset classes. Recognized here so they are never misreported as
 // unknown third-party extension namespaces. `dependencies` declares cross-kit skill
-// dependencies (extension-layer ownership; see docs/adr/0019-kit-dependency-ownership.md).
-const KNOWN_METADATA_FIELDS = new Set(["dependencies"]);
+// dependencies (extension-layer ownership; see docs/adr/0019-kit-dependency-ownership.md),
+// workflow_triggers / hook_influence_expectations declare kit-owned runtime influence,
+// and first_party is legacy catalog/marketplace metadata. It does not grant runtime
+// capability or steering privilege.
+const KNOWN_METADATA_FIELDS = new Set(["dependencies", "workflow_triggers", "hook_influence_expectations", "first_party"]);
 
 export interface KitDependencyEntry {
   kit_id: string;
   reason?: string;
+}
+
+export interface KitWorkflowTriggerEntry {
+  id: string;
+  when: string;
+  target_flow_id?: string;
+  default_skill?: string;
+  conditional_skills?: { when: string; skill: string }[];
+  required_sequence?: string[];
+  post_verify_targets?: string[];
+}
+
+export interface KitHookInfluenceExpectationEntry {
+  id: string;
+  description: string;
+  tier: string;
+  hook?: string;
+  event?: string;
+  must_include_guidance: string[];
+  must_include_actions: string[];
 }
 
 /**
@@ -76,6 +99,164 @@ export function parseKitDependencies(manifest: Record<string, unknown>, manifest
   return { entries, errors };
 }
 
+function nonEmptyStringList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "string" && item.trim().length > 0);
+}
+
+const WORKFLOW_TRIGGER_IDENTIFIER_RE = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
+
+function workflowTriggerIdentifier(value: unknown): value is string {
+  return typeof value === "string" && WORKFLOW_TRIGGER_IDENTIFIER_RE.test(value);
+}
+
+function optionalWorkflowTriggerIdentifier(value: unknown): value is string | undefined {
+  return value === undefined || workflowTriggerIdentifier(value);
+}
+
+function optionalWorkflowTriggerIdentifierList(value: unknown): value is string[] | undefined {
+  return value === undefined || (Array.isArray(value) && value.length > 0 && value.every(workflowTriggerIdentifier));
+}
+
+function optionalConditionalSkills(value: unknown): value is { when: string; skill: string }[] | undefined {
+  return value === undefined ||
+    (Array.isArray(value) && value.every((item) =>
+      typeof item === "object" && item !== null &&
+      workflowTriggerIdentifier((item as Record<string, unknown>).when) &&
+      workflowTriggerIdentifier((item as Record<string, unknown>).skill)
+    ));
+}
+
+export function parseKitWorkflowTriggers(manifest: Record<string, unknown>, manifestPath: string): { entries: KitWorkflowTriggerEntry[]; errors: string[] } {
+  const entries: KitWorkflowTriggerEntry[] = [];
+  const errors: string[] = [];
+  const raw = manifest.workflow_triggers;
+  if (raw === undefined) return { entries, errors };
+  if (!Array.isArray(raw)) {
+    errors.push(`${manifestPath}: .workflow_triggers must be a list`);
+    return { entries, errors };
+  }
+  const seen = new Set<string>();
+  raw.forEach((entry, index) => {
+    if (typeof entry !== "object" || entry === null) {
+      errors.push(`${manifestPath}: workflow_triggers[${index}] must be an object`);
+      return;
+    }
+    const record = entry as Record<string, unknown>;
+    const id = record.id;
+    const when = record.when;
+    if (!workflowTriggerIdentifier(id)) {
+      errors.push(`${manifestPath}: workflow_triggers[${index}].id must match ^[a-z0-9]+(?:[.-][a-z0-9]+)*$`);
+      return;
+    }
+    if (seen.has(id)) errors.push(`${manifestPath}: workflow_triggers[${index}].id duplicates '${id}'`);
+    seen.add(id);
+    if (!workflowTriggerIdentifier(when)) {
+      errors.push(`${manifestPath}: workflow_triggers[${index}].when must match ^[a-z0-9]+(?:[.-][a-z0-9]+)*$`);
+      return;
+    }
+    if (record.hint !== undefined) {
+      errors.push(`${manifestPath}: workflow_triggers[${index}].hint is retired; use structured steering fields`);
+      return;
+    }
+    if (record.display_name !== undefined) {
+      errors.push(`${manifestPath}: workflow_triggers[${index}].display_name is not supported in workflow_triggers; use catalog/listing metadata for human-readable names`);
+      return;
+    }
+    if (!optionalWorkflowTriggerIdentifier(record.target_flow_id)) {
+      errors.push(`${manifestPath}: workflow_triggers[${index}].target_flow_id must match ^[a-z0-9]+(?:[.-][a-z0-9]+)*$ when present`);
+      return;
+    }
+    if (!optionalWorkflowTriggerIdentifier(record.default_skill)) {
+      errors.push(`${manifestPath}: workflow_triggers[${index}].default_skill must match ^[a-z0-9]+(?:[.-][a-z0-9]+)*$ when present`);
+      return;
+    }
+    if (!optionalConditionalSkills(record.conditional_skills)) {
+      errors.push(`${manifestPath}: workflow_triggers[${index}].conditional_skills must be a list of { when, skill } identifiers matching ^[a-z0-9]+(?:[.-][a-z0-9]+)*$ when present`);
+      return;
+    }
+    if (!optionalWorkflowTriggerIdentifierList(record.required_sequence)) {
+      errors.push(`${manifestPath}: workflow_triggers[${index}].required_sequence must be a non-empty identifier list matching ^[a-z0-9]+(?:[.-][a-z0-9]+)*$ when present`);
+      return;
+    }
+    if (!optionalWorkflowTriggerIdentifierList(record.post_verify_targets)) {
+      errors.push(`${manifestPath}: workflow_triggers[${index}].post_verify_targets must be a non-empty identifier list matching ^[a-z0-9]+(?:[.-][a-z0-9]+)*$ when present`);
+      return;
+    }
+    entries.push({
+      id,
+      when,
+      ...(typeof record.target_flow_id === "string" ? { target_flow_id: record.target_flow_id } : {}),
+      ...(typeof record.default_skill === "string" ? { default_skill: record.default_skill } : {}),
+      ...(Array.isArray(record.conditional_skills) ? { conditional_skills: record.conditional_skills as { when: string; skill: string }[] } : {}),
+      ...(Array.isArray(record.required_sequence) ? { required_sequence: record.required_sequence as string[] } : {}),
+      ...(Array.isArray(record.post_verify_targets) ? { post_verify_targets: record.post_verify_targets as string[] } : {}),
+    });
+  });
+  return { entries, errors };
+}
+
+export function parseKitHookInfluenceExpectations(manifest: Record<string, unknown>, manifestPath: string): { entries: KitHookInfluenceExpectationEntry[]; errors: string[] } {
+  const entries: KitHookInfluenceExpectationEntry[] = [];
+  const errors: string[] = [];
+  const raw = manifest.hook_influence_expectations;
+  if (raw === undefined) return { entries, errors };
+  if (!Array.isArray(raw)) {
+    errors.push(`${manifestPath}: .hook_influence_expectations must be a list`);
+    return { entries, errors };
+  }
+  const seen = new Set<string>();
+  raw.forEach((entry, index) => {
+    if (typeof entry !== "object" || entry === null) {
+      errors.push(`${manifestPath}: hook_influence_expectations[${index}] must be an object`);
+      return;
+    }
+    const record = entry as Record<string, unknown>;
+    const id = record.id;
+    const description = record.description;
+    const tier = record.tier;
+    if (typeof id !== "string" || !id.trim()) {
+      errors.push(`${manifestPath}: hook_influence_expectations[${index}].id must be a non-empty string`);
+      return;
+    }
+    if (seen.has(id)) errors.push(`${manifestPath}: hook_influence_expectations[${index}].id duplicates '${id}'`);
+    seen.add(id);
+    if (typeof description !== "string" || !description.trim()) {
+      errors.push(`${manifestPath}: hook_influence_expectations[${index}].description must be a non-empty string`);
+      return;
+    }
+    if (typeof tier !== "string" || !tier.trim()) {
+      errors.push(`${manifestPath}: hook_influence_expectations[${index}].tier must be a non-empty string`);
+      return;
+    }
+    if (record.hook !== undefined && (typeof record.hook !== "string" || !record.hook.trim())) {
+      errors.push(`${manifestPath}: hook_influence_expectations[${index}].hook must be a non-empty string when present`);
+      return;
+    }
+    if (record.event !== undefined && (typeof record.event !== "string" || !record.event.trim())) {
+      errors.push(`${manifestPath}: hook_influence_expectations[${index}].event must be a non-empty string when present`);
+      return;
+    }
+    if (!nonEmptyStringList(record.must_include_guidance)) {
+      errors.push(`${manifestPath}: hook_influence_expectations[${index}].must_include_guidance must be a non-empty string list`);
+      return;
+    }
+    if (!nonEmptyStringList(record.must_include_actions)) {
+      errors.push(`${manifestPath}: hook_influence_expectations[${index}].must_include_actions must be a non-empty string list`);
+      return;
+    }
+    entries.push({
+      id,
+      description,
+      tier,
+      ...(typeof record.hook === "string" ? { hook: record.hook } : {}),
+      ...(typeof record.event === "string" ? { event: record.event } : {}),
+      must_include_guidance: record.must_include_guidance,
+      must_include_actions: record.must_include_actions,
+    });
+  });
+  return { entries, errors };
+}
+
 export type KitTargetConsumer =
   | "flow"
   | "flow-agents"
@@ -92,42 +273,26 @@ export interface KitConformanceLevel {
 
 /**
  * Kit trust level — WHO vouches for a kit, orthogonal to the K-level capability axis.
- *
- * - "first-party": the kit is authored and published by Kontour (kontourai); its id is in the
- *   FIRST_PARTY_KIT_IDS allowlist maintained in this repository. These kits are built, tested,
- *   and distributed with the flow-agents package.
- * - "verified": reserved for a future third-party verification process (e.g. self-certification
- *   via the conformance kit + cryptographic attestation / Veritas claims). Not yet implemented.
- * - "unverified": default for all kits not in the first-party allowlist. This says nothing about
- *   the kit's quality — it only means Kontour has not vouched for it.
- *
- * The v2 path for "verified": cryptographic signing / attestation against the conformance kit
- * and Veritas claims substrate is the natural next step and is intentionally deferred.
+ * Runtime steering and capability decisions do not branch on official/built-in provenance.
  */
-export type KitTrustLevel = "first-party" | "verified" | "unverified";
+export type KitTrustLevel = "verified" | "unverified";
 
-/**
- * Allowlist of kit IDs that Kontour authors, tests, and ships with the flow-agents package.
- *
- * Criteria for inclusion:
- *   1. The kit directory lives under kits/ in the kontourai/flow-agents repository.
- *   2. The kit is published by @kontourai (npm package @kontourai/flow-agents).
- *   3. Kontour owns and maintains the kit's content and release lifecycle.
- *
- * To add a new first-party kit: add its id here AND ensure it lives under kits/ in this repo.
- * Third-party forks or community kits published elsewhere are NOT first-party, even if they
- * share a similar id — first-party is tied to provenance in this specific repository.
- */
-export const FIRST_PARTY_KIT_IDS: ReadonlySet<string> = new Set(["builder", "knowledge"]);
+export type KitSourceKind = "builtin" | "local" | "unknown";
+
+export interface KitTrustOptions {
+  source_kind?: KitSourceKind;
+  kitDir?: string;
+  sourceRoot?: string;
+}
 
 /**
  * Derive the trust level for a kit id.
- *
- * v1 determination: allowlist check against FIRST_PARTY_KIT_IDS.
- * "verified" is reserved for future third-party verification (not yet granted to any kit).
+ * "verified" is reserved for future third-party verification.
  */
-export function deriveKitTrust(kitId: string): KitTrustLevel {
-  if (FIRST_PARTY_KIT_IDS.has(kitId)) return "first-party";
+export function deriveKitTrust(kitId: string, manifest?: Record<string, unknown>, options: KitTrustOptions = {}): KitTrustLevel {
+  void kitId;
+  void manifest;
+  void options;
   return "unverified";
 }
 
@@ -141,7 +306,7 @@ export interface KitTargetsResult {
   third_party_extensions: string[];
   /**
    * Trust level: who vouches for this kit. Orthogonal to the K-level capability axis.
-   * "first-party" = Kontour-published; "verified" = reserved (future); "unverified" = default.
+   * "verified" = reserved (future); "unverified" = default.
    */
   trust: KitTrustLevel;
 }
@@ -206,15 +371,15 @@ async function delegateCoreContainerValidation(kitDir: string, manifest: Record<
  *  - targets.flow-agents: present when K1 (agent extension assets activate in >=1 harness).
  *  - third-party: any top-level keys that are not core fields and not Flow Agents extension classes.
  *
- * Trust derivation (from kontourai/flow-agents#79):
- *  - "first-party": kit id is in FIRST_PARTY_KIT_IDS (Kontour-authored kits in this repo).
- *  - "unverified": all other kits (default; "verified" is reserved for a future process).
+ * Trust derivation:
+ *  - "unverified": all current kits (default; "verified" is reserved for a future process).
+ *    kit.json `first_party` is catalog metadata and is not trusted for runtime privilege.
  *
  * @param manifest  The kit.json manifest object.
  * @param kitDir    Kit directory for flow file-existence checks. Defaults to "" (structural-only).
  *                  Pass the real kit directory from `inspect` to get authoritative K0 validation.
  */
-export async function deriveKitTargets(manifest: Record<string, unknown>, kitDir = ""): Promise<KitTargetsResult> {
+export async function deriveKitTargets(manifest: Record<string, unknown>, kitDir = "", sourceRoot = process.cwd()): Promise<KitTargetsResult> {
   const kitId = typeof manifest.id === "string" ? manifest.id : "<unknown>";
   const kitName = typeof manifest.name === "string" ? manifest.name : "<unknown>";
 
@@ -242,7 +407,7 @@ export async function deriveKitTargets(manifest: Record<string, unknown>, kitDir
   for (const ns of thirdPartyExtensions) targets.push(ns);
 
   // Derive trust level orthogonally to the K-level capability axis.
-  const trust = deriveKitTrust(kitId);
+  const trust = deriveKitTrust(kitId, manifest, { kitDir, sourceRoot });
 
   return {
     kit_id: kitId,
@@ -319,6 +484,13 @@ export async function validateKitRepository(kitDir: string): Promise<string[]> {
   // checked separately (non-blocking at install, hard error at activation).
   const depResult = parseKitDependencies(manifest, manifestPath);
   for (const err of depResult.errors) errors.push(err);
+  const workflowTriggerResult = parseKitWorkflowTriggers(manifest, manifestPath);
+  for (const err of workflowTriggerResult.errors) errors.push(err);
+  const hookExpectationResult = parseKitHookInfluenceExpectations(manifest, manifestPath);
+  for (const err of hookExpectationResult.errors) errors.push(err);
+  if (manifest.first_party !== undefined && typeof manifest.first_party !== "boolean") {
+    errors.push(`${manifestPath}: .first_party must be a boolean when present`);
+  }
 
   return errors;
 }

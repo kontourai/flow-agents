@@ -552,7 +552,7 @@ require_text "$WORKFLOW_STEERING_INTEGRATION" 'workflow steering hook neutralize
 require_text "$WORKFLOW_STEERING_INTEGRATION" 'workflow steering hook appends context-map recovery guidance' "workflow steering integration covers context-map guidance"
 require_text "$WORKFLOW_STEERING_INTEGRATION" 'workflow steering hook emits ambient state guidance at user prompt submit' "workflow steering integration covers ambient state guidance"
 require_text "$WORKFLOW_STEERING_INTEGRATION" 'Claude hook adapter surfaces Builder workflow route for coding prompts' "workflow steering integration covers Claude Builder-route prompt guidance"
-require_text "$WORKFLOW_STEERING_INTEGRATION" 'publish/release-readiness and learning-review' "workflow steering integration covers full Builder lifecycle guidance"
+require_text "$WORKFLOW_STEERING_INTEGRATION" 'release-readiness and learning-review' "workflow steering integration covers full Builder lifecycle guidance"
 require_text "$WORKFLOW_STEERING_INTEGRATION" 'does not route explicit review-only prompts into Builder workflow' "workflow steering integration covers review-only prompt suppression"
 require_text "$WORKFLOW_STEERING_INTEGRATION" 'does not route explicit validation-only prompts into Builder workflow' "workflow steering integration covers validation-only prompt suppression"
 require_text "$WORKFLOW_STEERING_INTEGRATION" 'does not route question-only test prompts into Builder workflow' "workflow steering integration covers question-only test prompt suppression"

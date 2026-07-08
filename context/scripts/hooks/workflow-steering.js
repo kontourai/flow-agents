@@ -20,6 +20,7 @@ const { readLivenessEvents, freshHolders } = require('./lib/liveness-read');
 const { resolveActor } = require('./lib/actor-identity');
 const { flowAgentsArtifactRootsForRead, resolveSharedRepoRoot, warnIfFailingOpenInsideGitTree } = require('./lib/local-artifact-paths');
 const { readCurrentPointer } = require('./lib/current-pointer');
+const { workflowTriggersFor } = require('./lib/kit-catalog');
 
 const STEERING = {
   'tool-planner': [
@@ -347,7 +348,7 @@ function promptText(input) {
   return '';
 }
 
-function looksLikeBuilderWork(text) {
+function looksLikeImplementationWork(text) {
   const normalized = safeStateText(text, 2000).toLowerCase();
   if (!normalized) return false;
   const readOnlyIntent = /\b(read[- ]only|review[- ]only|no (source |code |file )?(changes?|edits?|modifications?)|do not (modify|edit|change|write|fix|implement|touch)|don't (modify|edit|change|write|fix|implement|touch)|dont (modify|edit|change|write|fix|implement|touch))\b/.test(normalized);
@@ -366,17 +367,29 @@ function looksLikeBuilderWork(text) {
   return hasWorkVerb || (hasWorkObject && hasRequestLanguage);
 }
 
-function builderWorkflowSteering(input) {
-  if (!looksLikeBuilderWork(promptText(input))) return '';
-  return [
-    'BUILDER WORKFLOW ROUTE: this user prompt looks like coding/build work.',
-    'Builder lifecycle: shape raw ideas -> build selected work -> publish verified branch/PR -> learn correction feedback.',
-    'Before source edits or implementation commands, activate Builder Kit delivery workflow.',
-    'If the user explicitly requested TDD, activate `tdd-workflow`; otherwise activate `deliver` and keep the session on `builder.build`.',
-    'Use `npm run workflow:sidecar -- ensure-session --flow-id builder.build ...` when the repo provides the sidecar writer.',
-    'After local verification, continue to publish/release-readiness and learning-review; do not treat local verification as terminal delivery.',
-    'Do not bypass plan-work -> execute-plan -> review-work -> verify-work for coding tasks; direct implementation is only acceptable when the user explicitly asks for no workflow or explanation-only help.',
-  ].join(' ');
+function looksLikeKnowledgeWork(text) {
+  const normalized = safeStateText(text, 2000).toLowerCase();
+  if (!normalized) return false;
+  return /\b(remember|capture|save|file|bookmark)\s+(this|that|the|my|our)\b/.test(normalized) ||
+    /\bcapture\s+(this\s+)?(decision|learning|lesson|note|context)\b/.test(normalized) ||
+    /\bwhat did we learn about\b/.test(normalized);
+}
+
+function kitWorkflowSteering(input, root) {
+  const prompt = promptText(input);
+  const categories = [];
+  if (looksLikeImplementationWork(prompt)) categories.push('implementation-work-detected');
+  if (looksLikeKnowledgeWork(prompt)) categories.push('knowledge-capture-detected');
+  if (!categories.length) return '';
+  try {
+    return categories
+      .flatMap(category => workflowTriggersFor(root, category))
+      .map(trigger => trigger.steering)
+      .filter(Boolean)
+      .join('\n');
+  } catch {
+    return '';
+  }
 }
 
 /**
@@ -573,9 +586,9 @@ function run(rawInput) {
     }
 
     if (event === 'UserPromptSubmit') {
-      const builderHint = builderWorkflowSteering(input);
-      if (builderHint) {
-        hints.push(builderHint);
+      const kitHint = kitWorkflowSteering(input, root);
+      if (kitHint) {
+        hints.push(kitHint);
         const contextHint = contextMapSteering(root);
         if (contextHint) hints.push(contextHint);
       }
@@ -642,6 +655,6 @@ module.exports = {
   resumeSteering,
   supersessionSteering,
   promptText,
-  looksLikeBuilderWork,
-  builderWorkflowSteering,
+  looksLikeImplementationWork,
+  kitWorkflowSteering,
 };

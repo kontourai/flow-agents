@@ -201,17 +201,17 @@ fi
 
 # ===================================================================
 echo ""
-echo "=== 8. Trust axis: first-party allowlist (builder and knowledge) ==="
+echo "=== 8. Trust axis: built-in kits are unverified without runtime privilege ==="
 # ===================================================================
 
 for kit_name in builder knowledge; do
   out="$TMP_DIR/trust-${kit_name}.out"
   run_inspect "$ROOT/kits/$kit_name" "$out" || true
   trust=$(node -e "const d=require('fs').readFileSync('$out','utf8'); console.log(JSON.parse(d).trust)" 2>/dev/null)
-  if [[ "$trust" == "first-party" ]]; then
-    pass "$kit_name kit trust: first-party (in Kontour allowlist)"
+  if [[ "$trust" == "unverified" ]]; then
+    pass "$kit_name kit trust: unverified (official catalog metadata grants no runtime privilege)"
   else
-    fail "$kit_name kit trust: expected first-party, got '$trust'"
+    fail "$kit_name kit trust: expected unverified, got '$trust'"
     cat "$out"
   fi
 done
@@ -226,7 +226,7 @@ for fixture in k0-flows-only k1-agent-extension k2-with-evals third-party-extens
   run_inspect "$ROOT/evals/fixtures/kit-conformance-levels/$fixture" "$out" || true
   trust=$(node -e "const d=require('fs').readFileSync('$out','utf8'); console.log(JSON.parse(d).trust)" 2>/dev/null)
   if [[ "$trust" == "unverified" ]]; then
-    pass "$fixture fixture trust: unverified (not in first-party allowlist)"
+    pass "$fixture fixture trust: unverified"
   else
     fail "$fixture fixture trust: expected unverified, got '$trust'"
     cat "$out"
@@ -244,7 +244,7 @@ if node -e "
 const d = require('fs').readFileSync('$out', 'utf8');
 const r = JSON.parse(d);
 if (!('trust' in r)) throw new Error('missing key: trust');
-const valid = ['first-party', 'verified', 'unverified'];
+const valid = ['verified', 'unverified'];
 if (!valid.includes(r.trust)) throw new Error('trust must be one of: ' + valid.join(', ') + '; got: ' + r.trust);
 " 2>/dev/null; then
   pass "inspect JSON output includes trust field with valid value"

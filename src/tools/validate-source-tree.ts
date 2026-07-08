@@ -31,6 +31,7 @@ const mirroredFiles = new Map<string, { mirror: string; allowedDifferences: Arra
   // fails `npm run validate:source` instead of silently accumulating.
   ["scripts/hooks/config-protection.js", { mirror: "context/scripts/hooks/config-protection.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/config-protection-remedies.js", { mirror: "context/scripts/hooks/lib/config-protection-remedies.js", allowedDifferences: [] }],
+  ["scripts/hooks/lib/kit-catalog.js", { mirror: "context/scripts/hooks/lib/kit-catalog.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/runnable-command.js", { mirror: "context/scripts/hooks/lib/runnable-command.js", allowedDifferences: [] }],
   ["scripts/hooks/stop-goal-fit.js", { mirror: "context/scripts/hooks/stop-goal-fit.js", allowedDifferences: [] }],
   ["scripts/hooks/run-hook.js", { mirror: "context/scripts/hooks/run-hook.js", allowedDifferences: [] }],
@@ -87,6 +88,7 @@ const hookFilePolicies = new Map<string, { category: string; requiredNeedles: st
   ["scripts/hooks/lib/config-protection-remedies.js", { category: "shared hook library", requiredNeedles: ["SANCTIONED_REMEDIES", "REMEDY_COMMAND_CANDIDATES"] }],
   ["scripts/hooks/lib/current-pointer.js", { category: "shared hook library", requiredNeedles: ["readCurrentPointer", "perActorCurrentFile"] }],
   ["scripts/hooks/lib/hook-flags.js", { category: "shared hook library", requiredNeedles: ["isHookEnabled"] }],
+  ["scripts/hooks/lib/kit-catalog.js", { category: "shared hook library", requiredNeedles: ["readKitManifests", "workflowTriggersFor"] }],
   ["scripts/hooks/lib/liveness-heartbeat.js", { category: "shared hook library", requiredNeedles: ["maybeEmitHeartbeat", "resolveHeartbeatThrottleSeconds"] }],
   ["scripts/hooks/lib/liveness-policy.js", { category: "shared hook library", requiredNeedles: ["isLivenessEnabled", "resolveTtlSeconds"] }],
   ["scripts/hooks/lib/liveness-read.js", { category: "shared hook library", requiredNeedles: ["freshHolders", "readLivenessEvents"] }],

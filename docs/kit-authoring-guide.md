@@ -54,7 +54,7 @@ Required fields:
 | `name` | Non-empty display name |
 | `flows` | Non-empty list; each entry must have `id` and `path` |
 
-Optional fields: `product_name`, `description`, `skills`, `docs`, `adapters`, `evals`, `assets`, `dependencies` (cross-kit dependency declarations; see [Cross-kit dependencies](#cross-kit-dependencies)). Optional fields list relative asset paths or objects with `id`, `path`, and optional `description`. `skills` and `docs` assets are activated by both adapters alongside flows. `adapters`, `evals`, and `assets` appear in diagnostics as `skipped_assets` (see the Activate section for the full per-adapter table).
+Optional fields: `product_name`, `description`, `skills`, `docs`, `adapters`, `evals`, `assets`, `dependencies` (cross-kit dependency declarations; see [Cross-kit dependencies](#cross-kit-dependencies)), `workflow_triggers` (structured workflow steering keyed by engine trigger names such as `implementation-work-detected`), `hook_influence_expectations` (kit-owned required hook-influence fixture expectations), and `first_party` (legacy catalog/marketplace metadata; no runtime privilege). Optional asset fields list relative asset paths or objects with `id`, `path`, and optional `description`. `skills` and `docs` assets are activated by both adapters alongside flows. `adapters`, `evals`, and `assets` appear in diagnostics as `skipped_assets` (see the Activate section for the full per-adapter table).
 
 ## Minimal flow file
 
@@ -181,6 +181,14 @@ When installing through `npx @kontourai/flow-agents init` with the Codex runtime
 npx @kontourai/flow-agents init --runtime codex --dest /path/to/workspace --activate-kits --yes
 ```
 
+`init` activates no kits by default. To activate one or more catalog kits explicitly, pass `--activate-kit <kit-id>` once per selected kit. Declared kit dependencies are auto-included transitively during activation; for example, activating Builder also activates its Knowledge dependency:
+
+```bash
+npx @kontourai/flow-agents init --runtime codex --dest /path/to/workspace --activate-kit builder --yes
+```
+
+`--activate-kits` remains a backwards-compatible alias for selecting every catalog kit.
+
 ## Troubleshooting
 
 Common validation errors and fixes are documented in the [Flow Kit Repository Contract](flow-kit-repository-contract.md#common-failures). The most frequent:
@@ -270,6 +278,42 @@ Where it is checked:
 - **Presence at activation** — `flow-agents kit activate` is a **hard error** (non-zero exit) when a declared `kit_id` is not present among the union of built-in catalog kits and locally-installed kits.
 
 `dependencies` is metadata, not evaluable-gate content, so it does **not** affect K0/K1/K2 conformance scoring (see the K-levels section below).
+
+### Structured workflow triggers
+
+A kit may declare `workflow_triggers` to let the engine route matching prompts into a kit workflow. Triggers do not contain freeform prose. The engine owns the rendered wording and applies the same template to every kit. Every trigger steering field is an identifier and must match `^[a-z0-9]+(?:[.-][a-z0-9]+)*$`; malformed values fail closed and the trigger is skipped.
+
+Shape:
+
+```json
+{
+  "workflow_triggers": [
+    {
+      "id": "builder-build-work",
+      "when": "implementation-work-detected",
+      "target_flow_id": "builder.build",
+      "default_skill": "deliver",
+      "conditional_skills": [
+        { "when": "user-requested-tdd", "skill": "tdd-workflow" }
+      ],
+      "required_sequence": ["plan-work", "execute-plan", "review-work", "verify-work"],
+      "post_verify_targets": ["release-readiness", "learning-review"]
+    }
+  ]
+}
+```
+
+| Field | Rule |
+|---|---|
+| `id` | Required trigger id unique within the kit. |
+| `when` | Required engine trigger category such as `implementation-work-detected` or `knowledge-capture-detected`. |
+| `target_flow_id` | Optional flow id the session should stay on. |
+| `default_skill` | Optional skill id to activate when no conditional skill applies. |
+| `conditional_skills` | Optional list of `{ "when": "...", "skill": "..." }` identifier entries. |
+| `required_sequence` | Optional ordered list of workflow skills or steps the engine should name as the required sequence. |
+| `post_verify_targets` | Optional list of post-verification targets such as release readiness or learning capture. |
+
+The retired `hint` field is invalid. `display_name` is not a workflow trigger field; keep human-readable names in catalog/listing metadata such as top-level `name` or `product_name`. Do not put natural-language steering instructions in kit metadata; express routing needs through the structured identifier fields above.
 
 ### When a kit "is" a Flow Agents Kit
 
@@ -378,35 +422,22 @@ Every kit carries two independent badges:
 | Axis | Values | Question answered |
 |---|---|---|
 | **Capability** (K-level) | K0 / K1 / K2 | What does the kit CONTAIN? (derived from assets) |
-| **Trust** | first-party / verified / unverified | WHO vouches for it? (derived from provenance) |
+| **Trust** | verified / unverified | WHO vouches for it? |
 
-A K2 kit can be `unverified`. A K0 kit can be `first-party`. The levels are independent.
+A K2 kit can be `unverified`. The levels are independent.
 
-**Marketplace listing format**: `Works with: Flow (gates-only) | K1 | ✓ First-party`
+**Marketplace listing format**: `Works with: Flow (gates-only) | K1 | Official`
+
+`official` / `first_party` is catalog and marketplace metadata only. It grants no runtime privilege: every kit uses the same structured steering mechanism, and no capability decision keys off kit id or load provenance.
 
 ### Trust levels
 
 | Level | Meaning | How it is assigned (v1) |
 |---|---|---|
-| `first-party` | Kontour authored, tested, and ships this kit in the `@kontourai/flow-agents` package. | Kit id is in the internal FIRST_PARTY_KIT_IDS allowlist in `src/flow-kit/validate.ts`. |
 | `verified` | Reserved for a future third-party verification process. | Not yet implemented; the value is reserved but not granted to any kit today. |
-| `unverified` | Default for all kits not explicitly vouched for. | All other kits, including third-party community kits. |
+| `unverified` | Default for all kits. | All current kits, including built-ins and third-party community kits. |
 
 `unverified` says nothing about the quality of a kit — it only means Kontour has not vouched for it through one of the above channels.
-
-### First-party kits (v1)
-
-The first-party allowlist in v1 contains the kits authored by Kontour and distributed with the flow-agents package:
-
-- `builder` — Builder Kit (shape, build, and deliver work)
-- `knowledge` — Knowledge Kit (durable gated knowledge store)
-
-Criteria for a kit to be first-party:
-1. Its directory lives under `kits/` in the `kontourai/flow-agents` repository.
-2. It is published as part of the `@kontourai/flow-agents` npm package.
-3. Kontour owns and maintains the kit's content and release lifecycle.
-
-Third-party forks, community kits, or kits published under a different npm package are NOT first-party even if they share a similar id. First-party is tied to provenance in this specific repository and package.
 
 ### Deferred: verified trust and cryptographic attestation (v2)
 
@@ -438,7 +469,7 @@ npm run kit -- inspect kits/builder
   },
   "targets": ["flow", "flow-agents"],
   "third_party_extensions": [],
-  "trust": "first-party"
+  "trust": "unverified"
 }
 ```
 
