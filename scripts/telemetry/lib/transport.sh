@@ -106,11 +106,98 @@ console_post_json() {
   ) &
 }
 
+# Derive a coarse, path-free project label for console attribution, most-stable-first so the SAME
+# project resolves to the SAME label across developers and machines (folder names differ between
+# clones and worktrees; the project manifest and git remote do not). Precedence:
+#   1. FLOW_AGENTS_PROJECT       — explicit operator override, always wins
+#   2. nearest package.json name — walking up from cwd (monorepo-granular, committed => consistent)
+#   3. git remote origin org/repo — repo-level identity, stable across clones
+#   4. git toplevel dir basename  — repo dir even from a worktree/subdir
+#   5. cwd basename               — last resort
+# Path-free by construction (never the full local path). Cached per cwd under the telemetry data
+# dir so the git/manifest reads run once per project, not per event; session_cleanup bounds the
+# cache lifetime so a project rename (package.json name / git remote) self-heals within a day.
+# Failure signals via empty output; the sole caller wraps the call as `$(...) || proj=""` so even if
+# an internal command fails under `set -e`, telemetry is relayed unchanged (see
+# console_telemetry_emit). Do not call this unwrapped from a `set -e` context.
+console_project_label() {
+  local cwd="$1"
+  [[ -z "$cwd" || ! -d "$cwd" ]] && return 0
+  [[ -n "${FLOW_AGENTS_PROJECT:-}" ]] && { printf '%s' "$FLOW_AGENTS_PROJECT"; return 0; }
+
+  local cache="" key
+  if [[ -n "${TELEMETRY_SESSION_DIR:-}" && -d "${TELEMETRY_SESSION_DIR:-}" ]]; then
+    key=$(printf '%s' "$cwd" | cksum | cut -d' ' -f1)
+    cache="${TELEMETRY_SESSION_DIR%/}/project-label.${key}"
+    [[ -s "$cache" ]] && { cat "$cache"; return 0; }
+  fi
+
+  local label="" dir name url top after path repo rest org
+  dir="$cwd"
+  while [[ -n "$dir" && "$dir" != "/" ]]; do
+    if [[ -f "$dir/package.json" ]]; then
+      name=$(jq -r '.name // empty' "$dir/package.json" 2>/dev/null) || name=""
+      [[ -n "$name" ]] && { label="$name"; break; }
+    fi
+    dir=$(dirname "$dir")
+  done
+  if [[ -z "$label" ]]; then
+    url=$(git -C "$cwd" config --get remote.origin.url 2>/dev/null) || url=""
+    if [[ -n "$url" ]]; then
+      # Reduce a git remote to a coarse, host-free org/repo. Strip scheme+host STRUCTURALLY (not by
+      # a dot-in-host heuristic) so a self-hosted or dot-less host, a port, or a user@ prefix can
+      # never leak into the label; a remote with no org tier (single path segment) falls through.
+      url="${url%/}"; url="${url%.git}"
+      path=""
+      if [[ "$url" == *"://"* ]]; then
+        # Only network VCS schemes carry an org/repo path; file:// and other local schemes fall through.
+        if [[ "$url" =~ ^(https?|ssh|git|ftps?):// ]]; then
+          after="${url#*://}"                       # [user@]host[:port]/org/repo
+          [[ "$after" == */* ]] && path="${after#*/}" # drop host[:port] (and any user@), keep path
+        fi
+      elif [[ "$url" == *:* && "${url%%:*}" != */* ]]; then
+        path="${url#*:}"                            # scp form [user@]host:org/repo
+      elif [[ "$url" != /* ]]; then
+        path="$url"                                 # bare relative org/repo shorthand (not a local abs path)
+      fi
+      if [[ "$path" == */* ]]; then
+        repo="${path##*/}"; rest="${path%/*}"; org="${rest##*/}"  # last two path segments
+        [[ -n "$org" && -n "$repo" ]] && label="$org/$repo"
+      fi
+    fi
+  fi
+  if [[ -z "$label" ]]; then
+    top=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) || top=""
+    [[ -n "$top" ]] && label=$(basename "$top")
+  fi
+  [[ -z "$label" ]] && label=$(basename "$cwd")
+
+  if [[ -n "$cache" ]]; then
+    printf '%s' "$label" > "${cache}.tmp.$$" 2>/dev/null && mv "${cache}.tmp.$$" "$cache" 2>/dev/null
+  fi
+  printf '%s' "$label"
+}
+
 console_telemetry_emit() {
   local event="$1"
   local endpoint_url
   endpoint_url=$(console_telemetry_endpoint_url)
   [[ -z "$endpoint_url" ]] && return
+
+  # Attribution: stamp a coarse, path-free project label (see console_project_label) before redaction
+  # so the console buckets by project consistently across developers. The full context.cwd is still
+  # redacted below — only the label leaves the machine. Every substitution is `|| var=""`-guarded so
+  # that even under `set -e` any failure (bad JSON, missing cwd, no git) relays the event unchanged.
+  local ev_cwd proj labeled_event
+  ev_cwd=$(printf '%s' "$event" | jq -r '.context.cwd // empty' 2>/dev/null) || ev_cwd=""
+  if [[ -n "$ev_cwd" ]]; then
+    proj=$(console_project_label "$ev_cwd" 2>/dev/null) || proj=""
+    if [[ -n "$proj" ]]; then
+      labeled_event=$(printf '%s' "$event" | jq -c --arg p "$proj" '
+        if ((.context.project // "") | length) == 0 then .context.project = $p else . end' 2>/dev/null) || labeled_event=""
+      [[ -n "$labeled_event" ]] && event="$labeled_event"
+    fi
+  fi
 
   local processed_event
   processed_event=$(redact_event "$event" "${CONSOLE_TELEMETRY_REDACT:-${TELEMETRY_CHANNEL_ANALYTICS_REDACT:-}}")
