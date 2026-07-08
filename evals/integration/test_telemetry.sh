@@ -379,10 +379,13 @@ echo "--- Console Relay Project Attribution ---"
 PROJ_TEST_ROOT=$(mktemp -d /tmp/eval-telemetry-project.XXXXXX)
 mkdir -p "$PROJ_TEST_ROOT/work/pkg" "$PROJ_TEST_ROOT/plain-dir-name"
 printf '{"name":"@kontourai/inner-pkg"}\n' > "$PROJ_TEST_ROOT/work/pkg/package.json"
-# git fixtures (no package.json ancestor) for the git-remote precedence tier and sed hardening
-git init -q "$PROJ_TEST_ROOT/gitrepo"   && git -C "$PROJ_TEST_ROOT/gitrepo"   remote add origin 'https://github.com/test-org/test-repo.git'
-git init -q "$PROJ_TEST_ROOT/gitslash"  && git -C "$PROJ_TEST_ROOT/gitslash"  remote add origin 'https://github.com/test-org/test-repo/'
-git init -q "$PROJ_TEST_ROOT/gitsingle" && git -C "$PROJ_TEST_ROOT/gitsingle" remote add origin 'https://github.com/loneseg.git'
+# git fixtures (no package.json ancestor) for the git-remote precedence tier and host-strip hardening
+git init -q "$PROJ_TEST_ROOT/gitrepo"     && git -C "$PROJ_TEST_ROOT/gitrepo"     remote add origin 'https://github.com/test-org/test-repo.git'
+git init -q "$PROJ_TEST_ROOT/gitslash"    && git -C "$PROJ_TEST_ROOT/gitslash"    remote add origin 'https://github.com/test-org/test-repo/'
+git init -q "$PROJ_TEST_ROOT/gitsingle"   && git -C "$PROJ_TEST_ROOT/gitsingle"   remote add origin 'https://github.com/loneseg.git'
+git init -q "$PROJ_TEST_ROOT/githostless" && git -C "$PROJ_TEST_ROOT/githostless" remote add origin 'https://gitserver/reponame.git'
+git init -q "$PROJ_TEST_ROOT/gitselfhost" && git -C "$PROJ_TEST_ROOT/gitselfhost" remote add origin 'https://gitea.example.com/team/proj.git'
+git init -q "$PROJ_TEST_ROOT/gitscphost"  && git -C "$PROJ_TEST_ROOT/gitscphost"  remote add origin 'git@gitserver:reponame.git'
 
 # Unit-test the precedence engine console_project_label directly. It is byte-identical between the
 # source copy and the context/ mirror (their emit wrappers differ: source delegates to
@@ -440,11 +443,29 @@ for transport in \
     && _pass "console_project_label ($tag): trailing-slash git remote reduces to org/repo" \
     || _fail "console_project_label ($tag): expected test-org/test-repo (trailing slash), got '$lbl'"
 
-  # sed hardening: single-segment remote must NOT leak the host; falls through to basename
+  # host-strip: single-segment remote (dotted host, no org tier) must NOT leak host; falls through
   lbl=$(_label_of "$transport" "$PROJ_TEST_ROOT/gitsingle")
   [[ "$lbl" == "gitsingle" ]] \
     && _pass "console_project_label ($tag): single-segment git remote does not leak host" \
     || _fail "console_project_label ($tag): expected gitsingle fallthrough, got '$lbl'"
+
+  # host-strip: DOT-LESS self-hosted host (URL), single path segment -> no host leak, falls through
+  lbl=$(_label_of "$transport" "$PROJ_TEST_ROOT/githostless")
+  [[ "$lbl" == "githostless" ]] \
+    && _pass "console_project_label ($tag): dot-less self-hosted host does not leak; falls through" \
+    || _fail "console_project_label ($tag): expected githostless fallthrough, got '$lbl'"
+
+  # host-strip: dotted self-hosted FQDN WITH an org tier reduces to org/repo (host stripped)
+  lbl=$(_label_of "$transport" "$PROJ_TEST_ROOT/gitselfhost")
+  [[ "$lbl" == "team/proj" ]] \
+    && _pass "console_project_label ($tag): self-hosted FQDN with org tier reduces to org/repo" \
+    || _fail "console_project_label ($tag): expected team/proj, got '$lbl'"
+
+  # host-strip: scp-form dot-less host, single path segment -> no user@host leak, falls through
+  lbl=$(_label_of "$transport" "$PROJ_TEST_ROOT/gitscphost")
+  [[ "$lbl" == "gitscphost" ]] \
+    && _pass "console_project_label ($tag): scp-form dot-less host does not leak; falls through" \
+    || _fail "console_project_label ($tag): expected gitscphost fallthrough, got '$lbl'"
 done
 
 # Integration: exercise the real shipping emit wrapper (source copy) end-to-end — proves the label

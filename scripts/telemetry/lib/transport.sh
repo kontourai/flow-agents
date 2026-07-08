@@ -117,8 +117,9 @@ console_post_json() {
 # Path-free by construction (never the full local path). Cached per cwd under the telemetry data
 # dir so the git/manifest reads run once per project, not per event; session_cleanup bounds the
 # cache lifetime so a project rename (package.json name / git remote) self-heals within a day.
-# Failure signals via empty output and a 0 exit — NEVER a non-zero return — so a caller running
-# under `set -e` can never have telemetry aborted by this helper (see console_telemetry_emit).
+# Failure signals via empty output; the sole caller wraps the call as `$(...) || proj=""` so even if
+# an internal command fails under `set -e`, telemetry is relayed unchanged (see
+# console_telemetry_emit). Do not call this unwrapped from a `set -e` context.
 console_project_label() {
   local cwd="$1"
   [[ -z "$cwd" || ! -d "$cwd" ]] && return 0
@@ -131,7 +132,7 @@ console_project_label() {
     [[ -s "$cache" ]] && { cat "$cache"; return 0; }
   fi
 
-  local label="" dir name url cand top
+  local label="" dir name url top after path repo rest org
   dir="$cwd"
   while [[ -n "$dir" && "$dir" != "/" ]]; do
     if [[ -f "$dir/package.json" ]]; then
@@ -143,12 +144,23 @@ console_project_label() {
   if [[ -z "$label" ]]; then
     url=$(git -C "$cwd" config --get remote.origin.url 2>/dev/null) || url=""
     if [[ -n "$url" ]]; then
+      # Reduce a git remote to a coarse, host-free org/repo. Strip scheme+host STRUCTURALLY (not by
+      # a dot-in-host heuristic) so a self-hosted or dot-less host, a port, or a user@ prefix can
+      # never leak into the label; a remote with no org tier (single path segment) falls through.
       url="${url%/}"; url="${url%.git}"
-      cand=$(printf '%s' "$url" | sed -E 's#^.*[/:]([^/:]+/[^/:]+)$#\1#')
-      # Accept only a clean two-segment org/repo — no scheme/host leak: exactly one slash,
-      # no colon, and the org segment is not a hostname (contains no dot). Anything else
-      # (single-segment remote, trailing-slash passthrough) falls through to the next tier.
-      if [[ "$cand" =~ ^[^/:]+/[^/:]+$ && "${cand%%/*}" != *.* ]]; then label="$cand"; fi
+      path=""
+      if [[ "$url" == *"://"* ]]; then
+        after="${url#*://}"                         # [user@]host[:port]/org/repo
+        [[ "$after" == */* ]] && path="${after#*/}" # drop host[:port] (and any user@), keep path
+      elif [[ "$url" == *:* && "${url%%:*}" != */* ]]; then
+        path="${url#*:}"                            # scp form [user@]host:org/repo
+      else
+        path="$url"                                 # bare org/repo shorthand
+      fi
+      if [[ "$path" == */* ]]; then
+        repo="${path##*/}"; rest="${path%/*}"; org="${rest##*/}"  # last two path segments
+        [[ -n "$org" && -n "$repo" ]] && label="$org/$repo"
+      fi
     fi
   fi
   if [[ -z "$label" ]]; then
