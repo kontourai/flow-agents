@@ -81,6 +81,13 @@ const PRE_EXECUTION_PHASES = new Set(['idea', 'backlog', 'pickup', 'planning']);
 // not block an unrelated session.
 const TERMINAL_STATUSES = new Set(['done', 'delivered', 'accepted', 'archived', 'complete', 'completed']);
 
+function isTerminalDeliveredState(state) {
+  if (!state || typeof state !== 'object') return false;
+  const status = normalizedStatus(state.status || '');
+  const phase = normalizedStatus(state.phase || '');
+  return TERMINAL_STATUSES.has(status) || phase === 'done';
+}
+
 function parseJson(raw) {
   try { return JSON.parse(raw || '{}'); } catch { return {}; }
 }
@@ -1205,6 +1212,8 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
   const base = relative(root, artifactDir);
   const backstopMode = resolveBackstopMode();
   const warnings = [];
+  const captureState = readJsonFile(path.join(artifactDir, 'state.json'));
+  const terminalDelivered = isTerminalDeliveredState(captureState);
 
   // AC3 fail-closed: detect a missing command log in a post-execution session.
   // When state.json confirms the session is past the planning phase (commands should
@@ -1218,7 +1227,6 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
   {
     const logFileMissing = !fs.existsSync(path.join(artifactDir, 'command-log.jsonl'));
     if (logFileMissing) {
-      const captureState = readJsonFile(path.join(artifactDir, 'state.json'));
       if (captureState) {
         const capturePhase = normalizedStatus(captureState.phase || '');
         const captureStatus = normalizedStatus(captureState.status || '');
@@ -1358,6 +1366,13 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
     }
     if (!trusted) {
       warnings.push(`${base} evidence check ${id}: claimed pass but NOT_VERIFIED — command "${safeOneLine(cmd, 120)}" was never captured and no trusted command (acceptance criterion / declared manifest target) resolves to re-run it. Set FLOW_AGENTS_GOAL_FIT_RECHECK=true to opt into re-running the model's free-form command.`);
+      continue;
+    }
+    if (terminalDelivered && trusted.source === 'model-command (FLOW_AGENTS_GOAL_FIT_RECHECK)') {
+      // Terminal delivered/done sessions have finalized evidence. Do not turn
+      // model-asserted command text into a new RECHECK false-completion. Captured
+      // execution evidence and CI/L2 checks remain the anchors for terminal tasks.
+      warnings.push(`${base} evidence check ${id}: malformed-evidence — terminal delivered/done session recorded model-command text asserted by FLOW_AGENTS_GOAL_FIT_RECHECK ("${safeOneLine(cmd, 120)}"); it was NOT re-run on a terminal session. Captured-execution evidence and CI/L2 checks remain the anchors.`);
       continue;
     }
     const outcome = runBackstop(trusted);

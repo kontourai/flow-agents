@@ -1503,6 +1503,14 @@ function loadRunnableCommandHelper(): { isRunnableCommandText: (text: string) =>
  */
 const AMBIGUOUS_REMEDIATION_ADVICE = "self-asserting command ('! grep ...' or 'grep -c ... | grep -qx 0')";
 
+function validateRunnableCheckCommand(check: AnyObj, context: string): void {
+  if (check.kind !== "command" || !hasNonEmptyString(check.command)) return;
+  const { isRunnableCommandText } = loadRunnableCommandHelper();
+  if (!isRunnableCommandText(check.command)) {
+    die(`${context}: kind:"command" check command is not a runnable shell command: "${check.command}" — remediate by either (1) moving the prose to summary and omitting command/execution.label, or (2) reclassifying this check as kind:"external" (session-local attestation) instead of kind:"command".`);
+  }
+}
+
 /**
  * #291 Wave 2 Task 2.1 (§5): writes the UNCHANGED legacy global `<root>/current.json` (the
  * compat-shim's write-side half — every existing consumer without an actorKey keeps reading
@@ -2064,8 +2072,9 @@ export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false, existi
     if (existingHasStamp === true) die(`check id "${check.id}" belongs to a live, properly-stamped gate claim — only record-gate-claim may supersede it. Superseding a stamped gate claim via record-evidence/record-check/dogfood-pass would silently destroy its metadata.gate_claim stamp. Re-record via record-gate-claim, or choose a different --id.`);
     if (existingHasStamp === undefined) die(`check id "${check.id}" starts with the reserved "gate-claim-" prefix — that namespace is reserved for record-gate-claim's own generated ids. Choose a different --id (or omit --id to let the check derive one from its command/summary). Supersession of an EXISTING, UNSTAMPED check claim with this same id (a correction) is permitted — this rejection applies to newly-minted ids not already present in the session's trust.bundle, and to ids that already belong to a stamped (live) gate claim.`);
   }
-    if (!checkKinds.has(check.kind)) die("kind must be one of: build, types, lint, test, command, security, diff, browser, runtime, policy, external");
+  if (!checkKinds.has(check.kind)) die("kind must be one of: build, types, lint, test, command, security, diff, browser, runtime, policy, external");
   if (!checkStatuses.has(check.status)) die("status must be one of: pass, fail, not_verified, skip");
+  validateRunnableCheckCommand(check, `check ${String(check.id)}`);
   if (Array.isArray(check.standard_refs)) for (const ref of check.standard_refs) if (!["junit", "sarif", "coverage", "veritas"].includes(ref.standard)) die("standard must be one of");
   if (check.artifact_refs) check.artifact_refs = normalizeEvidenceRefs(check.artifact_refs, "artifact_refs");
   if (check.surface_trust_refs) check.surface_trust_refs = normalizeSurfaceRefs(check.surface_trust_refs);

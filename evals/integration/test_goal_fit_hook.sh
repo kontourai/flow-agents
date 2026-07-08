@@ -10,6 +10,10 @@ source "$ROOT/evals/lib/node.sh"
 # escape hatch here so the streak counter never trips; test_goal_fit_escape_hatch.sh
 # covers the release-after-N behavior on its own.
 export FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=100000
+# The developer shell may disable Stop hooks for interactive work. This eval must exercise the
+# hook itself, so keep it hermetic from those inherited session-level controls.
+unset SA_DISABLED_HOOKS
+unset FLOW_AGENTS_GOAL_FIT_MODE
 
 TMPDIR_EVAL="$(mktemp -d)"
 errors=0
@@ -327,6 +331,316 @@ then
   _pass "strict goal-fit hook allows valid required critique"
 else
   _fail "strict critique hook should allow valid critique: $(cat "$TMPDIR_EVAL/critique-valid.err")"
+fi
+
+TERMINAL_RECHECK_REPO="$TMPDIR_EVAL/terminal-recheck-repo"
+TERMINAL_RECHECK_DIR="$TERMINAL_RECHECK_REPO/.kontourai/flow-agents/terminal-recheck"
+mkdir -p "$TERMINAL_RECHECK_DIR"
+printf '# Test Repo\n' > "$TERMINAL_RECHECK_REPO/AGENTS.md"
+cat > "$TERMINAL_RECHECK_DIR/terminal-recheck--deliver.md" <<'MARKDOWN'
+# Terminal RECHECK fixture
+
+branch: main
+worktree: main
+created: 2026-07-07
+status: delivered
+type: deliver
+MARKDOWN
+cat > "$TERMINAL_RECHECK_DIR/state.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "terminal-recheck",
+  "status": "delivered",
+  "phase": "done",
+  "updated_at": "2026-07-07T00:00:00Z",
+  "next_action": { "status": "done", "summary": "Delivered and reconciled." }
+}
+JSON
+cat > "$TERMINAL_RECHECK_DIR/trust.bundle" <<'JSON'
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar",
+  "claims": [
+    {
+      "id": "terminal-recheck.prose-ci",
+      "subjectId": "terminal-recheck/prose-ci",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "External CI ground truth: PR #475 is merged and all checks are green.",
+      "value": "pass",
+      "impactLevel": "high",
+      "status": "verified",
+      "createdAt": "2026-07-07T00:00:00Z",
+      "updatedAt": "2026-07-07T00:00:00Z",
+      "metadata": { "origin": "check", "check_kind": "command" }
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:terminal-recheck.prose-ci",
+      "claimId": "terminal-recheck.prose-ci",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "terminal-recheck/evidence.json",
+      "excerptOrSummary": "External CI ground truth: PR #475 is merged and all checks are green.",
+      "observedAt": "2026-07-07T00:00:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": {
+        "label": "External CI ground truth: PR #475 is merged and all checks are green."
+      }
+    }
+  ],
+  "policies": [],
+  "events": []
+}
+JSON
+
+if FLOW_AGENTS_GOAL_FIT_STRICT=true FLOW_AGENTS_GOAL_FIT_RECHECK=true node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/terminal-recheck.out" 2>"$TMPDIR_EVAL/terminal-recheck.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$TERMINAL_RECHECK_REPO"}
+JSON
+then
+  if rg -q 'caught false-completion|trusted backstop' "$TMPDIR_EVAL/terminal-recheck.err"; then
+    _fail "terminal delivered/done session emitted a RECHECK false-completion phantom gap: $(cat "$TMPDIR_EVAL/terminal-recheck.err")"
+  elif rg -q 'malformed-evidence.*terminal delivered/done session recorded model-command text asserted by FLOW_AGENTS_GOAL_FIT_RECHECK.*NOT re-run on a terminal session.*Captured-execution evidence and CI/L2 checks remain the anchors' "$TMPDIR_EVAL/terminal-recheck.err"; then
+    _pass "terminal delivered/done session surfaces model-asserted command evidence without RECHECK execution"
+  else
+    _fail "terminal delivered/done session skipped RECHECK but did not surface model-asserted command evidence: $(cat "$TMPDIR_EVAL/terminal-recheck.err")"
+  fi
+else
+  _fail "terminal delivered/done session should not be blocked by RECHECK prose-command phantom gaps: $(cat "$TMPDIR_EVAL/terminal-recheck.err")"
+fi
+
+# #494 third pass: this deliberately reverses the earlier terminal-session AC.
+# Runnable-looking model-asserted RECHECK text (`exit 42`, `false`) is still not
+# captured execution, so a terminal delivered/done session skips it just like prose.
+for AC494_CMD in "exit 42" "false"; do
+  AC494_SAFE="$(printf '%s' "$AC494_CMD" | tr ' /' '--')"
+  AC494_REPO="$TMPDIR_EVAL/ac494-terminal-${AC494_SAFE}/repo"
+  AC494_DIR="$AC494_REPO/.kontourai/flow-agents/ac494-terminal-${AC494_SAFE}"
+  mkdir -p "$AC494_DIR"
+  printf '# Test Repo\n' > "$AC494_REPO/AGENTS.md"
+  cat > "$AC494_DIR/ac494-terminal-${AC494_SAFE}--deliver.md" <<'MARKDOWN'
+# AC494 Terminal RECHECK failing command fixture
+
+branch: main
+worktree: main
+created: 2026-07-07
+status: delivered
+type: deliver
+MARKDOWN
+  write_json_file "$AC494_DIR/state.json" <<JSON
+{
+  "schema_version": "1.0",
+  "task_slug": "ac494-terminal-${AC494_SAFE}",
+  "status": "delivered",
+  "phase": "done",
+  "updated_at": "2026-07-07T00:00:00Z",
+  "next_action": { "status": "done", "summary": "Delivered." }
+}
+JSON
+  write_json_file "$AC494_DIR/trust.bundle" <<JSON
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar",
+  "claims": [
+    {
+      "id": "ac494-terminal-${AC494_SAFE}.failing-command",
+      "subjectId": "ac494-terminal-${AC494_SAFE}/failing-command",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "$AC494_CMD",
+      "value": "pass",
+      "impactLevel": "high",
+      "status": "verified",
+      "createdAt": "2026-07-07T00:00:00Z",
+      "updatedAt": "2026-07-07T00:00:00Z",
+      "metadata": { "origin": "check", "check_kind": "command" }
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:ac494-terminal-${AC494_SAFE}.failing-command",
+      "claimId": "ac494-terminal-${AC494_SAFE}.failing-command",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "ac494-terminal-${AC494_SAFE}/evidence.json",
+      "excerptOrSummary": "$AC494_CMD",
+      "observedAt": "2026-07-07T00:00:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": { "label": "$AC494_CMD" }
+    }
+  ],
+  "policies": [],
+  "events": []
+}
+JSON
+
+  if FLOW_AGENTS_GOAL_FIT_STRICT=true FLOW_AGENTS_GOAL_FIT_RECHECK=true \
+    node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/ac494-terminal-${AC494_SAFE}.out" 2>"$TMPDIR_EVAL/ac494-terminal-${AC494_SAFE}.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$AC494_REPO"}
+JSON
+  then
+    if rg -q 'caught false-completion|trusted backstop' "$TMPDIR_EVAL/ac494-terminal-${AC494_SAFE}.err"; then
+      _fail "AC-FIX-1: terminal delivered/done RECHECK for '$AC494_CMD' emitted a false-completion despite terminal model-command skip: $(cat "$TMPDIR_EVAL/ac494-terminal-${AC494_SAFE}.err")"
+    elif rg -q 'malformed-evidence.*terminal delivered/done session recorded model-command text asserted by FLOW_AGENTS_GOAL_FIT_RECHECK.*NOT re-run on a terminal session.*Captured-execution evidence and CI/L2 checks remain the anchors' "$TMPDIR_EVAL/ac494-terminal-${AC494_SAFE}.err"; then
+      _pass "AC-FIX-1: terminal delivered/done RECHECK skips model-asserted '$AC494_CMD' with non-blocking note"
+    else
+      _fail "AC-FIX-1: terminal delivered/done RECHECK for '$AC494_CMD' skipped but did not emit the expected non-blocking note: $(cat "$TMPDIR_EVAL/ac494-terminal-${AC494_SAFE}.err")"
+    fi
+  else
+    status=$?
+    _fail "AC-FIX-1: terminal delivered/done RECHECK for '$AC494_CMD' should skip, not block: status=$status output=$(cat "$TMPDIR_EVAL/ac494-terminal-${AC494_SAFE}.out" "$TMPDIR_EVAL/ac494-terminal-${AC494_SAFE}.err")"
+  fi
+done
+
+INFLIGHT_RECHECK_REPO="$TMPDIR_EVAL/inflight-recheck-repo"
+INFLIGHT_RECHECK_DIR="$INFLIGHT_RECHECK_REPO/.kontourai/flow-agents/inflight-recheck"
+mkdir -p "$INFLIGHT_RECHECK_DIR"
+printf '# Test Repo\n' > "$INFLIGHT_RECHECK_REPO/AGENTS.md"
+cat > "$INFLIGHT_RECHECK_DIR/inflight-recheck--deliver.md" <<'MARKDOWN'
+# In-flight RECHECK fixture
+
+branch: main
+worktree: main
+created: 2026-07-07
+status: executing
+type: deliver
+MARKDOWN
+cat > "$INFLIGHT_RECHECK_DIR/state.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "inflight-recheck",
+  "status": "in_progress",
+  "phase": "execution",
+  "updated_at": "2026-07-07T00:00:00Z",
+  "next_action": { "status": "continue", "summary": "Still executing." }
+}
+JSON
+cat > "$INFLIGHT_RECHECK_DIR/trust.bundle" <<'JSON'
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar",
+  "claims": [
+    {
+      "id": "inflight-recheck.real-fail",
+      "subjectId": "inflight-recheck/real-fail",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "bash -lc \"exit 42\"",
+      "value": "pass",
+      "impactLevel": "high",
+      "status": "verified",
+      "createdAt": "2026-07-07T00:00:00Z",
+      "updatedAt": "2026-07-07T00:00:00Z",
+      "metadata": { "origin": "check", "check_kind": "command" }
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:inflight-recheck.real-fail",
+      "claimId": "inflight-recheck.real-fail",
+      "evidenceType": "test_output",
+      "method": "validation",
+      "sourceRef": "inflight-recheck/evidence.json",
+      "excerptOrSummary": "bash -lc \"exit 42\"",
+      "observedAt": "2026-07-07T00:00:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": { "label": "bash -lc \"exit 42\"" }
+    }
+  ],
+  "policies": [],
+  "events": []
+}
+JSON
+
+if FLOW_AGENTS_GOAL_FIT_STRICT=true FLOW_AGENTS_GOAL_FIT_RECHECK=true node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/inflight-recheck.out" 2>"$TMPDIR_EVAL/inflight-recheck.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$INFLIGHT_RECHECK_REPO"}
+JSON
+then
+  _fail "in-flight session with a genuinely failing real RECHECK command should block"
+else
+  status=$?
+  if [[ "$status" -eq 2 ]] && rg -q 'trusted backstop .*FAILED with exit 42.*caught false-completion' "$TMPDIR_EVAL/inflight-recheck.err"; then
+    _pass "in-flight session still blocks on a genuinely failing real RECHECK command"
+  else
+    _fail "in-flight RECHECK failure did not produce the expected false-completion block: status=$status output=$(cat "$TMPDIR_EVAL/inflight-recheck.err")"
+  fi
+fi
+
+CAPTURED_FAIL_TERMINAL_REPO="$TMPDIR_EVAL/captured-fail-terminal/repo"
+CAPTURED_FAIL_TERMINAL_DIR="$CAPTURED_FAIL_TERMINAL_REPO/.kontourai/flow-agents/captured-fail-terminal"
+mkdir -p "$CAPTURED_FAIL_TERMINAL_DIR"
+printf '# Test Repo\n' > "$CAPTURED_FAIL_TERMINAL_REPO/AGENTS.md"
+cat > "$CAPTURED_FAIL_TERMINAL_DIR/captured-fail-terminal--deliver.md" <<'MARKDOWN'
+# Terminal captured-fail fixture
+
+branch: main
+worktree: main
+created: 2026-07-07
+status: delivered
+type: deliver
+MARKDOWN
+cat > "$CAPTURED_FAIL_TERMINAL_DIR/state.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "captured-fail-terminal",
+  "status": "delivered",
+  "phase": "done",
+  "updated_at": "2026-07-07T00:00:00Z",
+  "next_action": { "status": "done", "summary": "Delivered." }
+}
+JSON
+cat > "$CAPTURED_FAIL_TERMINAL_DIR/trust.bundle" <<'JSON'
+{
+  "schemaVersion": 5,
+  "source": "flow-agents/workflow-sidecar",
+  "claims": [
+    {
+      "id": "captured-fail-terminal.real-fail",
+      "subjectId": "captured-fail-terminal/real-fail",
+      "claimType": "workflow.check.command",
+      "fieldOrBehavior": "bash -lc \"exit 42\"",
+      "value": "pass",
+      "impactLevel": "high",
+      "status": "verified",
+      "createdAt": "2026-07-07T00:00:00Z",
+      "updatedAt": "2026-07-07T00:00:00Z",
+      "metadata": { "origin": "check", "check_kind": "command" }
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev:captured-fail-terminal.real-fail",
+      "claimId": "captured-fail-terminal.real-fail",
+      "evidenceType": "command_output",
+      "method": "capture",
+      "sourceRef": "command-log.jsonl",
+      "excerptOrSummary": "bash -lc \"exit 42\"",
+      "observedAt": "2026-07-07T00:00:00Z",
+      "collectedBy": "flow-agents/workflow-sidecar",
+      "passing": true,
+      "execution": { "label": "bash -lc \"exit 42\"", "exitCode": 42 }
+    }
+  ],
+  "policies": [],
+  "events": []
+}
+JSON
+printf '%s\n' '{"command":"bash -lc \"exit 42\"","observedResult":"fail","exitCode":42,"capturedAt":"2026-07-07T00:00:00Z","source":"postToolUse-capture"}' \
+  > "$CAPTURED_FAIL_TERMINAL_DIR/command-log.jsonl"
+
+if FLOW_AGENTS_GOAL_FIT_STRICT=true FLOW_AGENTS_GOAL_FIT_RECHECK=true node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/captured-fail-terminal.out" 2>"$TMPDIR_EVAL/captured-fail-terminal.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$CAPTURED_FAIL_TERMINAL_REPO"}
+JSON
+then
+  _fail "terminal session with a captured failing execution should block despite delivered/done status"
+else
+  status=$?
+  if [[ "$status" -eq 2 ]] && rg -q 'capture log CONTRADICTS claimed pass.*recorded as FAIL.*caught false-completion|captured command .* last ran FAIL.*namespace-agnostic caught false-completion' "$TMPDIR_EVAL/captured-fail-terminal.err"; then
+    _pass "terminal session still blocks on CAPTURED failing execution despite model-command RECHECK skip"
+  else
+    _fail "terminal captured failing execution did not produce the expected false-completion block: status=$status output=$(cat "$TMPDIR_EVAL/captured-fail-terminal.out" "$TMPDIR_EVAL/captured-fail-terminal.err")"
+  fi
 fi
 
 cat > "$REPO/.kontourai/flow-agents/feedback-loop/state.json" <<'JSON'
