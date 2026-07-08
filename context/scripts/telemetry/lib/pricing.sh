@@ -10,6 +10,11 @@
 
 PRICING_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+pricing_registry_valid_json() {
+  command -v jq >/dev/null 2>&1 || return 1
+  jq -e '.current_version and .versions' >/dev/null 2>&1
+}
+
 # Echo the raw registry JSON. Returns non-zero if nothing resolvable.
 pricing_registry() {
   local f="${TELEMETRY_PRICING_FILE:-${FLOW_AGENTS_PRICING_FILE:-}}"
@@ -21,18 +26,21 @@ pricing_registry() {
     local ttl="${TELEMETRY_PRICING_TTL_SEC:-3600}"
     if [[ -f "$cache" ]]; then
       local mtime now age
-      mtime=$(stat -f %m "$cache" 2>/dev/null || stat -c %Y "$cache" 2>/dev/null || echo 0)
+      mtime=$(stat -c %Y "$cache" 2>/dev/null || stat -f %m "$cache" 2>/dev/null || echo 0)
+      [[ "$mtime" =~ ^[0-9]+$ ]] || mtime=0
       now=$(date +%s)
       age=$(( now - mtime ))
-      if [[ "$age" -lt "$ttl" ]]; then cat "$cache"; return 0; fi
+      if [[ "$age" -lt "$ttl" ]] && pricing_registry_valid_json < "$cache"; then cat "$cache"; return 0; fi
     fi
     if curl -fsS --max-time 5 "$url" -o "${cache}.tmp" 2>/dev/null && [[ -s "${cache}.tmp" ]]; then
-      mv "${cache}.tmp" "$cache"
-      cat "$cache"
-      return 0
+      if pricing_registry_valid_json < "${cache}.tmp"; then
+        mv "${cache}.tmp" "$cache"
+        cat "$cache"
+        return 0
+      fi
     fi
     rm -f "${cache}.tmp" 2>/dev/null
-    [[ -f "$cache" ]] && { cat "$cache"; return 0; }  # stale cache beats nothing
+    [[ -f "$cache" ]] && pricing_registry_valid_json < "$cache" && { cat "$cache"; return 0; }
   fi
 
   local bundled
