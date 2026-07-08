@@ -386,6 +386,8 @@ git init -q "$PROJ_TEST_ROOT/gitsingle"   && git -C "$PROJ_TEST_ROOT/gitsingle" 
 git init -q "$PROJ_TEST_ROOT/githostless" && git -C "$PROJ_TEST_ROOT/githostless" remote add origin 'https://gitserver/reponame.git'
 git init -q "$PROJ_TEST_ROOT/gitselfhost" && git -C "$PROJ_TEST_ROOT/gitselfhost" remote add origin 'https://gitea.example.com/team/proj.git'
 git init -q "$PROJ_TEST_ROOT/gitscphost"  && git -C "$PROJ_TEST_ROOT/gitscphost"  remote add origin 'git@gitserver:reponame.git'
+git init -q "$PROJ_TEST_ROOT/gitfile"     && git -C "$PROJ_TEST_ROOT/gitfile"     remote add origin 'file:///srv/git/secretuser/reponame.git'
+git init -q "$PROJ_TEST_ROOT/gitlocal"    && git -C "$PROJ_TEST_ROOT/gitlocal"    remote add origin '/srv/git/secretuser/reponame'
 
 # Unit-test the precedence engine console_project_label directly. It is byte-identical between the
 # source copy and the context/ mirror (their emit wrappers differ: source delegates to
@@ -466,6 +468,18 @@ for transport in \
   [[ "$lbl" == "gitscphost" ]] \
     && _pass "console_project_label ($tag): scp-form dot-less host does not leak; falls through" \
     || _fail "console_project_label ($tag): expected gitscphost fallthrough, got '$lbl'"
+
+  # path-free: a file:// remote must not leak local path components; falls through to basename
+  lbl=$(_label_of "$transport" "$PROJ_TEST_ROOT/gitfile")
+  [[ "$lbl" == "gitfile" ]] \
+    && _pass "console_project_label ($tag): file:// remote does not leak local path; falls through" \
+    || _fail "console_project_label ($tag): expected gitfile fallthrough, got '$lbl'"
+
+  # path-free: a bare absolute-local-path remote must not leak path components; falls through
+  lbl=$(_label_of "$transport" "$PROJ_TEST_ROOT/gitlocal")
+  [[ "$lbl" == "gitlocal" ]] \
+    && _pass "console_project_label ($tag): absolute-local-path remote does not leak; falls through" \
+    || _fail "console_project_label ($tag): expected gitlocal fallthrough, got '$lbl'"
 done
 
 # Integration: exercise the real shipping emit wrapper (source copy) end-to-end — proves the label

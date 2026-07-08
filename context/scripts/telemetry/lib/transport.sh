@@ -90,12 +90,15 @@ console_project_label() {
       url="${url%/}"; url="${url%.git}"
       path=""
       if [[ "$url" == *"://"* ]]; then
-        after="${url#*://}"                         # [user@]host[:port]/org/repo
-        [[ "$after" == */* ]] && path="${after#*/}" # drop host[:port] (and any user@), keep path
+        # Only network VCS schemes carry an org/repo path; file:// and other local schemes fall through.
+        if [[ "$url" =~ ^(https?|ssh|git|ftps?):// ]]; then
+          after="${url#*://}"                       # [user@]host[:port]/org/repo
+          [[ "$after" == */* ]] && path="${after#*/}" # drop host[:port] (and any user@), keep path
+        fi
       elif [[ "$url" == *:* && "${url%%:*}" != */* ]]; then
         path="${url#*:}"                            # scp form [user@]host:org/repo
-      else
-        path="$url"                                 # bare org/repo shorthand
+      elif [[ "$url" != /* ]]; then
+        path="$url"                                 # bare relative org/repo shorthand (not a local abs path)
       fi
       if [[ "$path" == */* ]]; then
         repo="${path##*/}"; rest="${path%/*}"; org="${rest##*/}"  # last two path segments
