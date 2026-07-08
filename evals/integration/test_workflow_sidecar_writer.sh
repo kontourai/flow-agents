@@ -3904,6 +3904,132 @@ else
   _fail "AC10: record-gate-claim --command prose rejection message was unexpected: $(cat "$TMPDIR_EVAL/compose-gate-prose.out" "$TMPDIR_EVAL/compose-gate-prose.err")"
 fi
 
+# ─── AC11: command-backed check claims reject prose; external prose remains valid ─────────────
+CHECK_PROSE_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/check-prose-guard"
+mkdir -p "$CHECK_PROSE_DIR"
+cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$CHECK_PROSE_DIR/check-prose-guard--deliver.md"
+flow_agents_node "$WRITER" init-plan "$CHECK_PROSE_DIR/check-prose-guard--deliver.md" \
+  --source-request "Check command prose guard fixture." \
+  --summary "Check command prose guard fixture." \
+  --next-action "Exercise command check runnability validation." \
+  --timestamp "2026-07-05T09:11:10Z" >"$TMPDIR_EVAL/check-prose-init.out" 2>"$TMPDIR_EVAL/check-prose-init.err"
+
+if flow_agents_node "$WRITER" record-evidence "$CHECK_PROSE_DIR" \
+  --verdict pass \
+  --check-json '{"id":"prose-command-check","kind":"command","status":"pass","summary":"External CI is green.","command":"External CI ground truth: PR #475 is merged and all checks are green."}' \
+  --timestamp "2026-07-05T09:11:20Z" >"$TMPDIR_EVAL/check-prose-command.out" 2>"$TMPDIR_EVAL/check-prose-command.err"; then
+  _fail "AC11 REGRESSION: record-evidence accepted a kind:\"command\" check whose command text is prose"
+elif grep -qi "not a runnable shell command" "$TMPDIR_EVAL/check-prose-command.out" "$TMPDIR_EVAL/check-prose-command.err" \
+  && grep -qi "kind:\"external\"" "$TMPDIR_EVAL/check-prose-command.out" "$TMPDIR_EVAL/check-prose-command.err"; then
+  _pass "AC11: record-evidence rejects prose command-backed check claims with external-attestation remediation"
+else
+  _fail "AC11: record-evidence prose command rejection message was unexpected: $(cat "$TMPDIR_EVAL/check-prose-command.out" "$TMPDIR_EVAL/check-prose-command.err")"
+fi
+
+if flow_agents_node "$WRITER" record-check "$CHECK_PROSE_DIR" \
+  --command "External CI ground truth: PR #475 is merged and all checks are green." \
+  >"$TMPDIR_EVAL/record-check-prose.out" 2>"$TMPDIR_EVAL/record-check-prose.err"; then
+  _fail "AC11 REGRESSION: record-check --command accepted prose instead of rejecting it"
+elif grep -qi "not a runnable shell command" "$TMPDIR_EVAL/record-check-prose.out" "$TMPDIR_EVAL/record-check-prose.err"; then
+  _pass "AC11: record-check --command rejects prose before it can become execution.label"
+else
+  _fail "AC11: record-check prose rejection message was unexpected: $(cat "$TMPDIR_EVAL/record-check-prose.out" "$TMPDIR_EVAL/record-check-prose.err")"
+fi
+
+for AC494_PROSE in "External CI (green)" "Reconciled after merge; all green"; do
+  AC494_ID="$(printf '%s' "$AC494_PROSE" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g; s/--*/-/g; s/^-//; s/-$//')"
+  if flow_agents_node "$WRITER" record-evidence "$CHECK_PROSE_DIR" \
+    --verdict pass \
+    --check-json "{\"id\":\"ac494-${AC494_ID}\",\"kind\":\"command\",\"status\":\"pass\",\"summary\":\"AC494 prose punctuation fixture.\",\"command\":\"${AC494_PROSE}\"}" \
+    --timestamp "2026-07-05T09:11:24Z" >"$TMPDIR_EVAL/ac494-${AC494_ID}-evidence.out" 2>"$TMPDIR_EVAL/ac494-${AC494_ID}-evidence.err"; then
+    _fail "AC-FIX-2 REGRESSION: record-evidence accepted incidental-punctuation prose as kind:\"command\": ${AC494_PROSE}"
+  elif grep -qi "not a runnable shell command" "$TMPDIR_EVAL/ac494-${AC494_ID}-evidence.out" "$TMPDIR_EVAL/ac494-${AC494_ID}-evidence.err"; then
+    _pass "AC-FIX-2: record-evidence rejects incidental-punctuation prose as kind:\"command\": ${AC494_PROSE}"
+  else
+    _fail "AC-FIX-2: record-evidence rejection for '${AC494_PROSE}' had unexpected output: $(cat "$TMPDIR_EVAL/ac494-${AC494_ID}-evidence.out" "$TMPDIR_EVAL/ac494-${AC494_ID}-evidence.err")"
+  fi
+
+  if flow_agents_node "$WRITER" record-check "$CHECK_PROSE_DIR" \
+    --command "$AC494_PROSE" \
+    >"$TMPDIR_EVAL/ac494-${AC494_ID}-record-check.out" 2>"$TMPDIR_EVAL/ac494-${AC494_ID}-record-check.err"; then
+    _fail "AC-FIX-2 REGRESSION: record-check --command accepted incidental-punctuation prose: ${AC494_PROSE}"
+  elif grep -qi "not a runnable shell command" "$TMPDIR_EVAL/ac494-${AC494_ID}-record-check.out" "$TMPDIR_EVAL/ac494-${AC494_ID}-record-check.err"; then
+    _pass "AC-FIX-2: record-check --command rejects incidental-punctuation prose: ${AC494_PROSE}"
+  else
+    _fail "AC-FIX-2: record-check rejection for '${AC494_PROSE}' had unexpected output: $(cat "$TMPDIR_EVAL/ac494-${AC494_ID}-record-check.out" "$TMPDIR_EVAL/ac494-${AC494_ID}-record-check.err")"
+  fi
+done
+
+if node - "$ROOT/scripts/hooks/lib/runnable-command.js" <<'NODEEOF' >"$TMPDIR_EVAL/ac494-runnable-contract.out" 2>"$TMPDIR_EVAL/ac494-runnable-contract.err"
+const { isRunnableCommandText } = require(process.argv[2]);
+const cases = [
+  ['exit 42', true],
+  ['false', true],
+  ['true', true],
+  ['cd nonexistent', true],
+  ['FOO=bar npm test', true],
+  ['npm test', true],
+  ['./script.sh', true],
+  ['test -f somefile', true],
+  ['set -e', true],
+  ['export FOO=bar', true],
+  ['echo hi > out.txt', true],
+  ['source ./env.sh', true],
+  [': noop', true],
+  ['test coverage improved across the suite', false],
+  ['set the stage for the next release', false],
+  ['export controls apply to this build', false],
+  ['source of truth confirmed by CI', false],
+  ['echo of the original design', false],
+  ['return on investment was high', false],
+  ['true to the original plan', false],
+  ['false alarm, everything passed', false],
+  ['cd into the details later', false],
+  ['Test coverage improved', false],
+  ['Set up the environment first', false],
+  ['External CI (green)', false],
+  ['Reconciled after merge; all green', false],
+  ['Reconciled after merge: PR #475 is orchestrator-confirmed MERGED with Trust Reconcile, Source and Static, Runtime and Kit, Integration Coverage, Workflow Contracts, Usage Feedback, and Secret Scan all SUCCESS.', false],
+  ['A codex-shaped PostToolUse payload whose only failure signal is the host prose banner is never captured as observedResult:pass', false],
+];
+let ok = true;
+for (const [text, expected] of cases) {
+  const actual = isRunnableCommandText(text);
+  if (actual !== expected) {
+    ok = false;
+    console.error(`${actual ? 'RUNNABLE' : 'PROSE'} != ${expected ? 'RUNNABLE' : 'PROSE'} :: ${text}`);
+  }
+}
+process.exit(ok ? 0 : 1);
+NODEEOF
+then
+  _pass "AC-FIX-3: shared runnable-command detector classifies shell keyword commands and plain-English prose per contract"
+else
+  _fail "AC-FIX-3: shared runnable-command detector contract failed: $(cat "$TMPDIR_EVAL/ac494-runnable-contract.err")"
+fi
+
+if flow_agents_node "$WRITER" record-evidence "$CHECK_PROSE_DIR" \
+  --verdict pass \
+  --check-json '{"id":"external-ci-attestation","kind":"external","status":"pass","summary":"External CI ground truth: PR #475 is merged and all checks are green."}' \
+  --timestamp "2026-07-05T09:11:30Z" >"$TMPDIR_EVAL/check-prose-external.out" 2>"$TMPDIR_EVAL/check-prose-external.err"; then
+  if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/check-prose-external-assert.err"
+import { readFileSync } from 'node:fs';
+const bundle = JSON.parse(readFileSync('${CHECK_PROSE_DIR}/trust.bundle', 'utf8'));
+const claim = bundle.claims.find((c) => c.subjectId && c.subjectId.endsWith('/external-ci-attestation'));
+const evidence = bundle.evidence.find((e) => e.claimId === (claim && claim.id));
+if (!claim) { process.stderr.write('external attestation claim missing\n'); process.exit(1); }
+if (claim.claimType !== 'workflow.check.external') { process.stderr.write('expected external claim type, got ' + claim.claimType + '\n'); process.exit(1); }
+if (evidence && evidence.execution && evidence.execution.label) { process.stderr.write('external attestation must not carry execution.label: ' + JSON.stringify(evidence.execution) + '\n'); process.exit(1); }
+NODEOF
+  then
+    _pass "AC11: kind:\"external\" prose attestation is accepted and carries no execution.label"
+  else
+    _fail "AC11: external prose attestation bundle shape was wrong: $(cat "$TMPDIR_EVAL/check-prose-external-assert.err")"
+  fi
+else
+  _fail "AC11: kind:\"external\" prose attestation should be accepted: $(cat "$TMPDIR_EVAL/check-prose-external.out" "$TMPDIR_EVAL/check-prose-external.err")"
+fi
+
 # ─── #270 CRITICAL/HIGH fix evals: forged-stamp negative + pre-cluster missing-stamp negative ──
 # Both mutate a FRESH COPY of the compose session's trust.bundle (never COMPOSE_DIR itself) so
 # these negative fixtures stay isolated from the compose-layer assertions above.

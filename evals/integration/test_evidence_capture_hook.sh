@@ -175,8 +175,13 @@ fi
 # ============================================================================
 echo "Part B5: free-form model command re-run is opt-in only"
 F="$TMP/recheck"; seed_repo "$F" t1
+# #494: the opt-in RECHECK re-run of model-recorded free-form commands applies to IN-FLIGHT
+# sessions. On terminal delivered/done sessions the model-asserted RECHECK is skipped (captured
+# execution evidence + L2 CI remain the anchors) — terminal-skip is covered in test_goal_fit_hook.sh.
+# seed_repo defaults to delivered/done, so make this session in-flight to exercise the opt-in re-run.
+printf '%s' '{"schema_version":"1.0","task_slug":"t1","status":"in_progress","phase":"verification","updated_at":"2026-06-23T00:00:00Z","next_action":{"status":"continue","summary":"verify command evidence"}}' > "$F/.kontourai/flow-agents/t1/state.json"
 printf '%s' '{"schema_version":"1.0","task_slug":"t1","verdict":"pass","checks":[{"id":"custom","kind":"command","status":"pass","command":"exit 5","summary":"ran custom"}]}' > "$F/.kontourai/flow-agents/t1/evidence.json"
-# Opt-in ON: the model's free-form "exit 5" is re-run and fails → block.
+# Opt-in ON (in-flight): the model's free-form "exit 5" is re-run and fails → block.
 if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_RECHECK=true node "$GATE" >/dev/null 2>"$TMP/b5.err" <<JSON
 {"hook_event_name":"Stop","cwd":"$F"}
 JSON
