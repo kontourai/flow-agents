@@ -32,6 +32,7 @@ const mirroredFiles = new Map<string, { mirror: string; allowedDifferences: Arra
   ["scripts/hooks/config-protection.js", { mirror: "context/scripts/hooks/config-protection.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/config-protection-remedies.js", { mirror: "context/scripts/hooks/lib/config-protection-remedies.js", allowedDifferences: [] }],
   ["scripts/hooks/lib/kit-catalog.js", { mirror: "context/scripts/hooks/lib/kit-catalog.js", allowedDifferences: [] }],
+  ["scripts/hooks/lib/runnable-command.js", { mirror: "context/scripts/hooks/lib/runnable-command.js", allowedDifferences: [] }],
   ["scripts/hooks/stop-goal-fit.js", { mirror: "context/scripts/hooks/stop-goal-fit.js", allowedDifferences: [] }],
   ["scripts/hooks/run-hook.js", { mirror: "context/scripts/hooks/run-hook.js", allowedDifferences: [] }],
   ["scripts/hooks/workflow-steering.js", { mirror: "context/scripts/hooks/workflow-steering.js", allowedDifferences: [] }],
@@ -140,7 +141,7 @@ const allowedPythonCommandFiles = [
   /^(context\/)?scripts\/hooks\/stop-goal-fit\.js$/,
   // #412: the recognizer allowlist itself now lives in scripts/hooks/lib/runnable-command.js
   // (single source of truth), so the same literal-token exemption applies there too.
-  /^scripts\/hooks\/lib\/runnable-command\.js$/,
+  /^(context\/)?scripts\/hooks\/lib\/runnable-command\.js$/,
 ];
 
 function tryLoadJson(file: string, reporter: Reporter): any {

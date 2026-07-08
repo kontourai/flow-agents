@@ -296,6 +296,36 @@ else
   _fail "config.sh: explicit env expected '/tmp/explicit-telemetry.conf', got '$explicit_resolved'"
 fi
 
+_resolve_pricing_url() {
+  env -i PATH="$PATH" HOME="$FAKE_HOME" "$@" \
+    bash -c "source '$CONFIG_TEST_ROOT/scripts/telemetry/lib/config.sh' 2>/dev/null; printf '%s\n' \"\${TELEMETRY_PRICING_URL:-}\""
+}
+
+PRICING_EMPTY_CONF="$CONFIG_TEST_ROOT/pricing-empty.conf"
+: > "$PRICING_EMPTY_CONF"
+pricing_from_console=$(_resolve_pricing_url TELEMETRY_CONFIG_FILE="$PRICING_EMPTY_CONF" CONSOLE_TELEMETRY_URL="https://console.example.test")
+if [[ -z "$pricing_from_console" ]]; then
+  _pass "config.sh: console telemetry URL alone does not derive TELEMETRY_PRICING_URL (bundled default)"
+else
+  _fail "config.sh: expected no derived pricing URL from console URL alone, got '$pricing_from_console'"
+fi
+
+pricing_from_env=$(_resolve_pricing_url TELEMETRY_CONFIG_FILE="$PRICING_EMPTY_CONF" CONSOLE_TELEMETRY_URL="https://console.example.test" FLOW_AGENTS_PRICING_URL="https://pricing.example.test/registry.json")
+if [[ "$pricing_from_env" == "https://pricing.example.test/registry.json" ]]; then
+  _pass "config.sh: explicit FLOW_AGENTS_PRICING_URL remains honored"
+else
+  _fail "config.sh: expected explicit FLOW_AGENTS_PRICING_URL to win, got '$pricing_from_env'"
+fi
+
+PRICING_CONF="$CONFIG_TEST_ROOT/pricing-explicit.conf"
+printf '%s\n' 'console_pricing_url=https://pricing.example.test/from-config.json' > "$PRICING_CONF"
+pricing_from_config=$(_resolve_pricing_url TELEMETRY_CONFIG_FILE="$PRICING_CONF" CONSOLE_TELEMETRY_URL="https://console.example.test")
+if [[ "$pricing_from_config" == "https://pricing.example.test/from-config.json" ]]; then
+  _pass "config.sh: explicit console_pricing_url config remains honored"
+else
+  _fail "config.sh: expected console_pricing_url config to win, got '$pricing_from_config'"
+fi
+
 rm -rf "$CONFIG_TEST_ROOT"
 
 # --- 1c. Endpoint allowlist drop warning ---
@@ -342,6 +372,161 @@ else
 fi
 
 rm -rf "$TRANSPORT_TEST_ROOT"
+
+# --- Console relay project attribution (canonical precedence, path-free) ---
+echo ""
+echo "--- Console Relay Project Attribution ---"
+PROJ_TEST_ROOT=$(mktemp -d /tmp/eval-telemetry-project.XXXXXX)
+mkdir -p "$PROJ_TEST_ROOT/work/pkg" "$PROJ_TEST_ROOT/plain-dir-name"
+printf '{"name":"@kontourai/inner-pkg"}\n' > "$PROJ_TEST_ROOT/work/pkg/package.json"
+# git fixtures (no package.json ancestor) for the git-remote precedence tier and host-strip hardening
+git init -q "$PROJ_TEST_ROOT/gitrepo"     && git -C "$PROJ_TEST_ROOT/gitrepo"     remote add origin 'https://github.com/test-org/test-repo.git'
+git init -q "$PROJ_TEST_ROOT/gitslash"    && git -C "$PROJ_TEST_ROOT/gitslash"    remote add origin 'https://github.com/test-org/test-repo/'
+git init -q "$PROJ_TEST_ROOT/gitsingle"   && git -C "$PROJ_TEST_ROOT/gitsingle"   remote add origin 'https://github.com/loneseg.git'
+git init -q "$PROJ_TEST_ROOT/githostless" && git -C "$PROJ_TEST_ROOT/githostless" remote add origin 'https://gitserver/reponame.git'
+git init -q "$PROJ_TEST_ROOT/gitselfhost" && git -C "$PROJ_TEST_ROOT/gitselfhost" remote add origin 'https://gitea.example.com/team/proj.git'
+git init -q "$PROJ_TEST_ROOT/gitscphost"  && git -C "$PROJ_TEST_ROOT/gitscphost"  remote add origin 'git@gitserver:reponame.git'
+git init -q "$PROJ_TEST_ROOT/gitfile"     && git -C "$PROJ_TEST_ROOT/gitfile"     remote add origin 'file:///srv/git/secretuser/reponame.git'
+git init -q "$PROJ_TEST_ROOT/gitlocal"    && git -C "$PROJ_TEST_ROOT/gitlocal"    remote add origin '/srv/git/secretuser/reponame'
+
+# Unit-test the precedence engine console_project_label directly. It is byte-identical between the
+# source copy and the context/ mirror (their emit wrappers differ: source delegates to
+# console_post_json, the mirror inlines curl), so calling the function directly is the way to catch
+# a future edit landing in one copy but not the other. Echoes the derived label.
+# args: <full path to a transport.sh> <cwd> [bash prefix run before the call]. TELEMETRY_DIR is
+# derived from the transport path, and only the two full copy paths below are written as literals
+# (both resolve), so the source-tree path validator has nothing unresolvable to flag.
+_label_of() {
+  local transport="$1" cwd="$2" pre="${3:-}"
+  local teldir; teldir=$(dirname "$(dirname "$transport")")
+  bash -c "
+    $pre
+    export TELEMETRY_DIR='$teldir'
+    source \"$transport\"
+    console_project_label '$cwd'
+  "
+}
+_proj_of() { printf '%s' "$1" | jq -r '.context.project // "MISSING"' 2>/dev/null; }
+
+# Precedence matrix against BOTH the source copy and the context/ mirror.
+for transport in \
+  "$ROOT_DIR/scripts/telemetry/lib/transport.sh" \
+  "$ROOT_DIR/context/scripts/telemetry/lib/transport.sh"; do
+  [[ -f "$transport" ]] || continue
+  case "$transport" in *"/context/"*) tag="context-mirror" ;; *) tag="source" ;; esac
+
+  # step 2: nearest package.json name wins
+  lbl=$(_label_of "$transport" "$PROJ_TEST_ROOT/work/pkg")
+  [[ "$lbl" == "@kontourai/inner-pkg" ]] \
+    && _pass "console_project_label ($tag): nearest package.json name wins" \
+    || _fail "console_project_label ($tag): expected @kontourai/inner-pkg, got '$lbl'"
+
+  # step 1: FLOW_AGENTS_PROJECT override beats a present package.json
+  lbl=$(_label_of "$transport" "$PROJ_TEST_ROOT/work/pkg" "export FLOW_AGENTS_PROJECT=my-explicit-proj")
+  [[ "$lbl" == "my-explicit-proj" ]] \
+    && _pass "console_project_label ($tag): FLOW_AGENTS_PROJECT overrides all other tiers" \
+    || _fail "console_project_label ($tag): expected my-explicit-proj, got '$lbl'"
+
+  # step 3: git remote org/repo when no manifest is found on the walk-up
+  lbl=$(_label_of "$transport" "$PROJ_TEST_ROOT/gitrepo")
+  [[ "$lbl" == "test-org/test-repo" ]] \
+    && _pass "console_project_label ($tag): git remote resolves to org/repo" \
+    || _fail "console_project_label ($tag): expected test-org/test-repo, got '$lbl'"
+
+  # step 5: no manifest/git remote -> cwd basename fallback
+  lbl=$(_label_of "$transport" "$PROJ_TEST_ROOT/plain-dir-name")
+  [[ "$lbl" == "plain-dir-name" ]] \
+    && _pass "console_project_label ($tag): falls back to cwd basename when no manifest/git remote" \
+    || _fail "console_project_label ($tag): expected plain-dir-name, got '$lbl'"
+
+  # sed hardening: trailing-slash remote still reduces to a clean org/repo (not the raw URL)
+  lbl=$(_label_of "$transport" "$PROJ_TEST_ROOT/gitslash")
+  [[ "$lbl" == "test-org/test-repo" ]] \
+    && _pass "console_project_label ($tag): trailing-slash git remote reduces to org/repo" \
+    || _fail "console_project_label ($tag): expected test-org/test-repo (trailing slash), got '$lbl'"
+
+  # host-strip: single-segment remote (dotted host, no org tier) must NOT leak host; falls through
+  lbl=$(_label_of "$transport" "$PROJ_TEST_ROOT/gitsingle")
+  [[ "$lbl" == "gitsingle" ]] \
+    && _pass "console_project_label ($tag): single-segment git remote does not leak host" \
+    || _fail "console_project_label ($tag): expected gitsingle fallthrough, got '$lbl'"
+
+  # host-strip: DOT-LESS self-hosted host (URL), single path segment -> no host leak, falls through
+  lbl=$(_label_of "$transport" "$PROJ_TEST_ROOT/githostless")
+  [[ "$lbl" == "githostless" ]] \
+    && _pass "console_project_label ($tag): dot-less self-hosted host does not leak; falls through" \
+    || _fail "console_project_label ($tag): expected githostless fallthrough, got '$lbl'"
+
+  # host-strip: dotted self-hosted FQDN WITH an org tier reduces to org/repo (host stripped)
+  lbl=$(_label_of "$transport" "$PROJ_TEST_ROOT/gitselfhost")
+  [[ "$lbl" == "team/proj" ]] \
+    && _pass "console_project_label ($tag): self-hosted FQDN with org tier reduces to org/repo" \
+    || _fail "console_project_label ($tag): expected team/proj, got '$lbl'"
+
+  # host-strip: scp-form dot-less host, single path segment -> no user@host leak, falls through
+  lbl=$(_label_of "$transport" "$PROJ_TEST_ROOT/gitscphost")
+  [[ "$lbl" == "gitscphost" ]] \
+    && _pass "console_project_label ($tag): scp-form dot-less host does not leak; falls through" \
+    || _fail "console_project_label ($tag): expected gitscphost fallthrough, got '$lbl'"
+
+  # path-free: a file:// remote must not leak local path components; falls through to basename
+  lbl=$(_label_of "$transport" "$PROJ_TEST_ROOT/gitfile")
+  [[ "$lbl" == "gitfile" ]] \
+    && _pass "console_project_label ($tag): file:// remote does not leak local path; falls through" \
+    || _fail "console_project_label ($tag): expected gitfile fallthrough, got '$lbl'"
+
+  # path-free: a bare absolute-local-path remote must not leak path components; falls through
+  lbl=$(_label_of "$transport" "$PROJ_TEST_ROOT/gitlocal")
+  [[ "$lbl" == "gitlocal" ]] \
+    && _pass "console_project_label ($tag): absolute-local-path remote does not leak; falls through" \
+    || _fail "console_project_label ($tag): expected gitlocal fallthrough, got '$lbl'"
+done
+
+# Integration: exercise the real shipping emit wrapper (source copy) end-to-end — proves the label
+# is stamped AND the full cwd is still redacted to null in the same relayed event.
+_relay_source() {
+  local cwd="$1" preset="${2:-}"
+  local ev="{\"type\":\"tool\",\"context\":{\"cwd\":\"$cwd\"}}"
+  [[ -n "$preset" ]] && ev="{\"type\":\"tool\",\"context\":{\"cwd\":\"$cwd\",\"project\":\"$preset\"}}"
+  bash -c "
+    export TELEMETRY_DIR='$ROOT_DIR/scripts/telemetry'
+    source '$ROOT_DIR/scripts/telemetry/lib/transport.sh'
+    console_telemetry_endpoint_url() { echo 'https://console.example.test/records'; }
+    console_post_json() { printf '%s' \"\$2\"; }
+    CONSOLE_TELEMETRY_REDACT='context.cwd' TELEMETRY_SESSION_DIR='' \
+      console_telemetry_emit '$ev'
+  "
+}
+cap=$(_relay_source "$PROJ_TEST_ROOT/work/pkg")
+if [[ "$(_proj_of "$cap")" == "@kontourai/inner-pkg" && "$(printf '%s' "$cap" | jq -r '.context.cwd // "null"')" == "null" ]]; then
+  _pass "console_telemetry_emit: stamps context.project while the full cwd stays redacted to null"
+else
+  _fail "console_telemetry_emit: expected project=@kontourai/inner-pkg cwd=null, got '$cap'"
+fi
+# no-clobber: an adapter-supplied context.project is never overwritten
+cap=$(_relay_source "$PROJ_TEST_ROOT/work/pkg" "adapter-supplied")
+[[ "$(_proj_of "$cap")" == "adapter-supplied" ]] \
+  && _pass "console_telemetry_emit: pre-set context.project is left untouched" \
+  || _fail "console_telemetry_emit: expected project=adapter-supplied, got '$(_proj_of "$cap")'"
+
+# set -e safety: a missing/stale cwd must relay the event unchanged, never abort the caller
+sete_out=$(bash -c "
+  set -euo pipefail
+  export TELEMETRY_DIR='$ROOT_DIR/scripts/telemetry'
+  source '$ROOT_DIR/scripts/telemetry/lib/transport.sh'
+  console_telemetry_endpoint_url() { echo 'https://console.example.test/records'; }
+  console_post_json() { printf '%s' \"\$2\"; }
+  CONSOLE_TELEMETRY_REDACT='context.cwd' TELEMETRY_SESSION_DIR='' \
+    console_telemetry_emit '{\"type\":\"tool\",\"context\":{\"cwd\":\"/no/such/dir/xyz\"}}'
+  echo REACHED_END
+")
+sete_rc=$?
+if [[ $sete_rc -eq 0 && "$sete_out" == *REACHED_END* ]]; then
+  _pass "console_telemetry_emit: under set -e survives a missing cwd (relays, no abort)"
+else
+  _fail "console_telemetry_emit: set -e aborted on missing cwd (rc=$sete_rc, out='$sete_out')"
+fi
+rm -rf "$PROJ_TEST_ROOT"
 
 # --- 2. Event type mapping ---
 echo ""

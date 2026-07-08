@@ -184,22 +184,55 @@ printf '%s' "$(cat "$LOG3")" | jq -e . >/dev/null 2>&1 && pass "record with host
 # ── Stub Console endpoint (200 / 500) for the relay + fail-open cases ──────────────────────────────
 start_stub() {
   local mode="$1"
-  STUB_MODE="$mode" node -e '
-const http=require("http"),fs=require("fs");
-const out=process.argv[1], mode=process.env.STUB_MODE||"ok";
-const s=http.createServer((req,res)=>{let b="";req.on("data",d=>b+=d);req.on("end",()=>{
-  fs.appendFileSync(out, JSON.stringify({method:req.method,url:req.url,headers:req.headers,body:b})+"\n");
-  res.writeHead(mode==="fail"?500:200); res.end(mode==="fail"?"err":"ok");
-});});
-s.listen(Number(process.argv[2]),"127.0.0.1");
-setTimeout(()=>process.exit(0),30000);
-' "$RECV" "$PORT" >/dev/null 2>&1 &
-  STUB_PID=$!
-  for _ in $(seq 1 20); do
-    if node -e 'const n=require("net");const s=n.connect(Number(process.argv[1]),"127.0.0.1");s.on("connect",()=>{s.end();process.exit(0)});s.on("error",()=>process.exit(1))' "$PORT" 2>/dev/null; then return 0; fi
-    sleep 0.2
-  done
-  return 1
+  local fake_bin="$TMP/fake-curl-bin"
+  mkdir -p "$fake_bin"
+  cat > "$fake_bin/curl" <<'SH'
+#!/usr/bin/env bash
+config=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --config) config="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+[[ -n "$config" && -f "$config" ]] || exit 2
+node - "$config" "$ECON_STUB_RECV" <<'NODE'
+const fs = require("fs");
+const config = fs.readFileSync(process.argv[2], "utf8").split(/\n/);
+const out = process.argv[3];
+const headers = {};
+let url = "";
+let method = "GET";
+let body = "";
+for (const line of config) {
+  const m = line.match(/^([a-z-]+) = "(.*)"$/);
+  if (!m) continue;
+  const [, key, value] = m;
+  if (key === "url") url = value;
+  if (key === "request") method = value;
+  if (key === "header") {
+    const i = value.indexOf(":");
+    if (i > 0) headers[value.slice(0, i).toLowerCase()] = value.slice(i + 1).trim();
+  }
+  if (key === "data-binary" && value.startsWith("@")) body = fs.readFileSync(value.slice(1), "utf8");
+}
+let path = url;
+try {
+  path = new URL(url).pathname;
+} catch {}
+fs.appendFileSync(out, JSON.stringify({ method, url: path, headers, body }) + "\n");
+NODE
+[[ "${ECON_STUB_MODE:-ok}" == "fail" ]] && exit 22
+exit 0
+SH
+  chmod +x "$fake_bin/curl"
+  export ECON_STUB_RECV="$RECV" ECON_STUB_MODE="$mode"
+  case ":$PATH:" in
+    *":$fake_bin:"*) ;;
+    *) export PATH="$fake_bin:$PATH" ;;
+  esac
+  STUB_PID=""
+  return 0
 }
 stop_stub() { [[ -n "${STUB_PID:-}" ]] && kill "$STUB_PID" 2>/dev/null; STUB_PID=""; }
 wait_for_post() { for _ in $(seq 1 25); do [[ -s "$RECV" ]] && return 0; sleep 0.2; done; return 1; }

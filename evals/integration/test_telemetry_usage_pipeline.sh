@@ -61,6 +61,15 @@ _wait_for_line() {
   done
 }
 
+_wait_for_file_line() {
+  local file="$1" i=0 current_lines
+  while [[ $i -lt 50 ]]; do
+    current_lines=$(wc -l < "$file" 2>/dev/null | tr -d ' ')
+    [[ "${current_lines:-0}" -gt 0 ]] && break
+    sleep 0.1; i=$((i + 1))
+  done
+}
+
 # Run a real Stop event against a freshly-established session (agentSpawn
 # first, matching real usage — Claude Code always sends SessionStart before
 # Stop). Returns the emitted session.usage event (jq-compact, one line).
@@ -113,6 +122,35 @@ if [[ -n "$out1" ]]; then
   [[ "$by_model_len" == "2" ]] && _pass "by_model has 2 entries" || _fail "expected 2 by_model entries, got $by_model_len"
 else
   _fail "no session.usage event emitted for fixture transcript"
+fi
+
+# --- 1b. Economics attribution: canonical current pointer beats stale legacy
+echo ""
+echo "--- Economics attribution uses canonical current pointer ---"
+ATTR_CWD="${TMPDIR_EVAL}/workspace"
+CANON_SLUG="canonical-task"
+LEGACY_SLUG="legacy-task"
+ECON_LOG="${TMPDIR_EVAL}/economics.jsonl"
+mkdir -p "$ATTR_CWD/.kontourai/flow-agents/$CANON_SLUG" "$ATTR_CWD/.flow-agents/$LEGACY_SLUG"
+: > "$ECON_LOG"
+printf '%s\n' "{\"active_slug\":\"$CANON_SLUG\"}" > "$ATTR_CWD/.kontourai/flow-agents/current.json"
+printf '%s\n' "{\"active_slug\":\"$LEGACY_SLUG\"}" > "$ATTR_CWD/.flow-agents/current.json"
+printf '%s\n' '{"schema_version":"1.0","task_slug":"canonical-task","phase":"execution","verification_verdict":"PASS"}' > "$ATTR_CWD/.kontourai/flow-agents/$CANON_SLUG/state.json"
+printf '%s\n' '{"schema_version":"1.0","task_slug":"legacy-task","phase":"execution","verification_verdict":"PASS"}' > "$ATTR_CWD/.flow-agents/$LEGACY_SLUG/state.json"
+input_attr=$(jq -nc --arg tp "$FIXTURE_TRANSCRIPT" --arg cwd "$ATTR_CWD" '{session_id:"pipeline-attribution",transcript_path:$tp,hook_event_name:"Stop",cwd:$cwd}')
+TELEMETRY_SH_SAVED="$TELEMETRY_SH"
+TELEMETRY_SH="$ROOT_DIR/scripts/telemetry/telemetry.sh"
+out_attr=$(_run_stop "$input_attr" TELEMETRY_PRICING_FILE="$PRICING_FILE" TELEMETRY_ECONOMICS_LOG_FILE="$ECON_LOG")
+TELEMETRY_SH="$TELEMETRY_SH_SAVED"
+_wait_for_file_line "$ECON_LOG"
+
+if [[ -n "$out_attr" && -s "$ECON_LOG" ]]; then
+  attr_task=$(tail -1 "$ECON_LOG" | jq -r '.task_slug')
+  attr_phase=$(tail -1 "$ECON_LOG" | jq -r '.phases[0].phase')
+  [[ "$attr_task" == "$CANON_SLUG" ]] && _pass "economics record task_slug comes from canonical .kontourai current pointer" || _fail "expected canonical task_slug '$CANON_SLUG', got '$attr_task'"
+  [[ "$attr_phase" == "execution" ]] && _pass "economics record phase comes from canonical state.json" || _fail "expected canonical phase execution, got '$attr_phase'"
+else
+  _fail "economics attribution record was not emitted for canonical-current test"
 fi
 
 # --- 2. Pricing forced unavailable: tokens survive, cost is null ------------

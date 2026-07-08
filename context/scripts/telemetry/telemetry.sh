@@ -363,9 +363,11 @@ add_stop_data_and_emit_usage() {
       local econ_cwd econ_slug econ_state econ_acceptance econ_critique
       econ_cwd=$(echo "$usage_event" | jq -r '.context.cwd // ""' 2>/dev/null)
       [[ -z "$econ_cwd" || ! -d "$econ_cwd" ]] && econ_cwd="$PWD"
-      # Active slug from the per-run current pointer (active_slug), tolerant of a missing/corrupt file.
+      # Active slug from the canonical current pointer first, falling back to the legacy pointer.
       econ_slug=""
-      if [[ -f "$econ_cwd/.flow-agents/current.json" ]]; then
+      if [[ -f "$econ_cwd/.kontourai/flow-agents/current.json" ]]; then
+        econ_slug=$(jq -r '.active_slug // .artifact_dir // empty' "$econ_cwd/.kontourai/flow-agents/current.json" 2>/dev/null)
+      elif [[ -f "$econ_cwd/.flow-agents/current.json" ]]; then
         econ_slug=$(jq -r '.active_slug // .artifact_dir // empty' "$econ_cwd/.flow-agents/current.json" 2>/dev/null)
       fi
       econ_state="" econ_acceptance="" econ_critique="" econ_agents_dir=""
