@@ -17,7 +17,7 @@
 
 Agents are powerful and forgetful. They plan well, then drift. They skip verification when context gets crowded. They call partial work done, and after a compaction nobody — including the agent — can say where the work actually stands.
 
-Flow Agents addresses this with a process-discipline layer that sits between the user and the agent: four canonical policy classes (workflow steering, quality gate, stop-goal-fit, config protection), durable sidecar state that survives compaction and handoff, evidence gates before release decisions, and telemetry that feeds corrections back into the system. [Kontour Flow](https://kontourai.github.io/flow/) owns the gate semantics underneath; Flow Agents compiles those policies to whatever hook surface a host exposes — coding-agent harnesses today, agent frameworks next.
+Flow Agents has two layers. The **engine** is product-neutral: FlowDefinition interpretation, gates, runtime and harness adapters, SDK/evidence/trust primitives, and kit validation. **Kits** are the swappable solutions on top: Builder, Knowledge, Release Evidence, Veritas Governance, and any third-party kit declared with `kit.json` and registered through a catalog. [Kontour Flow](https://kontourai.github.io/flow/) owns the gate semantics underneath; Flow Agents compiles those policies to whatever hook surface a host exposes — coding-agent harnesses today, agent frameworks next.
 
 **You ask for outcomes. The system supplies the path, the state, the checks, and the proof.**
 
@@ -28,7 +28,8 @@ Flow Agents addresses this with a process-discipline layer that sits between the
 - **Resumable workflow state** — schema-validated sidecars under `.kontourai/flow-agents/` record acceptance criteria, evidence, critique, handoff, and learning, so any session can resume from recorded state instead of chat memory.
 - **Four canonical policies** — workflow steering (phase reminders at each turn), quality gate (per-file checks after edits), stop-goal-fit (evidence check before the agent stops), and config protection (veto writes to linter/formatter configs). Each policy class has a canonical script under `scripts/hooks/` and compiles to the host's native hook format.
 - **Evidence over confidence** — important work ends with tests, browser checks, CI results, review findings, governance reports, or an explicit `NOT_VERIFIED` gap. Optional [Veritas](docs/veritas-integration.md) integration attaches repo-governance evidence without making it mandatory.
-- **Verifiable, un-gameable "done"** — the agent can't mark work complete that isn't: the gate re-derives the verdict from independent evidence, an external CI anchor re-runs the verification fresh and fails the merge on any divergence, and CI mints a Sigstore-signed record of what shipped. See [Verifiable Trust — why "done" actually means done](docs/verifiable-trust.md).
+- **Tamper-evident "done"** — the local runtime gate is advisory and best-effort; the controlled CI re-run is the authoritative anchor that reconciles manifest commands and git diff against fresh results before evidence is treated as CI-verified. See [Verifiable Trust — why "done" actually means done](docs/verifiable-trust.md).
+- **Engine plus opt-in kits** — `kits/catalog.json` lists discoverable kits, each `kit.json` declares its flows and assets, and bring-your-own-kit follows the same validation and activation path. See [Engine and Kits](docs/architecture-engine-and-kits.md).
 - **Evals that keep the bundle honest** — 60 integration scenarios (1,829 assertions) and 7 static suites (110 assertions) validate the skills, contracts, fixtures, and hook influence as the bundle evolves.
 
 ## Flow Agents as a process-discipline layer
@@ -83,7 +84,7 @@ npx @kontourai/flow-agents init --dest /path/to/workspace --telemetry-sink local
 
 # runtime-specific wiring
 npx @kontourai/flow-agents init --runtime claude-code --dest /path/to/workspace --yes
-npx @kontourai/flow-agents init --runtime codex --dest /path/to/workspace --activate-kits --yes
+npx @kontourai/flow-agents init --runtime codex --dest /path/to/workspace --activate-kit builder --yes
 npx @kontourai/flow-agents init --runtime opencode --dest /path/to/workspace --yes
 npx @kontourai/flow-agents init --runtime pi --dest /path/to/workspace --yes
 ```
@@ -94,7 +95,7 @@ Runtime auto-detection is best-effort: it first checks environment markers set b
 
 Working from a checkout (for contributors): `npm install && npm run build`, then `node build/src/cli.js init --dest /path/to/workspace`.
 
-The installer copies the bundled agents, skills, context, scripts, evals, Flow Kit assets, and the Flow Agents-owned `console.telemetry.json` descriptor into the target workspace. Telemetry writes to local files by default; optional sinks mirror it to a local, hosted, or self-hosted Kontour Console (`--telemetry-sink local-kontour-console | kontour-hosted-console | user-hosted-console --console-url …`).
+The installer copies the bundled agents, skills, context, scripts, evals, the kit catalog, and the Flow Agents-owned `console.telemetry.json` descriptor into the target workspace. Kits are opt-in at activation time: pass `--activate-kit <kit-id>` for a specific kit, or `--activate-kits` when you intentionally want every catalog kit. Telemetry writes to local files by default; optional sinks mirror it to a local, hosted, or self-hosted Kontour Console (`--telemetry-sink local-kontour-console | kontour-hosted-console | user-hosted-console --console-url …`).
 
 `bash install.sh` is the low-level option for CI pipelines or scripts that already have a generated bundle checkout (e.g. from a pinned `git clone` of this repo). Prefer `npx @kontourai/flow-agents init` for normal workspace setup — it fetches the latest published bundle and auto-detects the runtime:
 
@@ -108,7 +109,7 @@ After installing, ask the agent for the workflow you want — in plain language.
 
 ### Builder Kit quick start
 
-The Builder Kit installs automatically and gives your agent two gated flows: `builder.shape` turns a raw idea into slices and executable work items; `builder.build` takes a selected work item through design probe, planning, execution, verification, PR readiness, merge readiness, and learning.
+After activating the Builder Kit, your agent gets two gated flows: `builder.shape` turns a raw idea into slices and executable work items; `builder.build` takes a selected work item through design probe, planning, execution, verification, PR readiness, merge readiness, and learning.
 
 Shape an idea:
 
@@ -137,11 +138,15 @@ Use fix-bug. Reproduce the problem, diagnose root cause, implement the fix, and 
 
 The [Workflow Usage Guide](docs/workflow-usage-guide.md) has example prompts and expected behavior for every stage — `pull-work`, `plan-work`, `execute-plan`, `review-work`, `verify-work`, `fix-bug`, `release-readiness`, and more. The [Agent System Guidebook](docs/agent-system-guidebook.md) is the plain-language map of how the pieces fit.
 
-## Flow Kits
+## Engine and Flow Kits
+
+Flow Agents is not the Builder Kit. The engine is kit-neutral: every kit, built-in or third-party, declares its flows and assets in `kit.json` and is discovered through a catalog. Runtime steering comes from structured `workflow_triggers` rendered through the same engine path; `first_party` or "official" status is marketplace/catalog metadata only and grants no runtime privilege.
+
+Read [Engine and Kits](docs/architecture-engine-and-kits.md) for the canonical split, including the built-in catalog, the manifest model, and the bring-your-own-kit extension point.
 
 A Flow Kit bundles a workflow AND its opinionated output shape into a single validated unit: a `kit.json` manifest (schema version 1.0), one or more Flow Definitions, and optional skills, docs, adapters, evals, and assets. Authoring a kit means deciding not just _what_ an agent does but _how the result is rendered_ — the same pipeline produces different representations depending on which store adapter is active. Kits are the extension model for Flow Agents: validated and installed through the `flow-agents kit` CLI, and activatable into any workspace that runs Flow Agents.
 
-**Builder Kit** — ships with `builder.shape` (shape a problem into slices and fileable work items) and `builder.build` (pull ready work through design probing, planning, execution, verification, PR readiness, merge readiness, and learning). Installed automatically by `npx @kontourai/flow-agents init`.
+**Builder Kit** — ships with `builder.shape` (shape a problem into slices and fileable work items), `builder.build` (pull ready work through design probing, planning, execution, verification, PR readiness, merge readiness, and learning), and `builder.publish-learn` (publish, provider/CI merge readiness, and learning feedback gates).
 
 **Knowledge Kit** — a Flow Kit for durable, gated knowledge storage. It ships a store contract with four record types (`raw`, `compiled`, `concept`, `snapshot`), five pipeline flows (`ingest`, `compile`, `synthesize`, `consolidate`, `retire`), and a mutation policy of propose→evidence-gate→apply/reject with supersede-not-delete. All mutations require provenance; nothing is silently overwritten or deleted. Ships with 198 tests.
 
@@ -163,7 +168,11 @@ npx @kontourai/flow-agents kit install path/to/my-kit --dest /path/to/workspace
 - [Flow Kit Repository Contract](docs/flow-kit-repository-contract.md) — the full validation rules, registry schema, and activation diagnostics.
 - [Knowledge Kit docs](kits/knowledge/docs/README.md) — store contract, record types, mutation ops, similarity detectors, and the Obsidian adapter.
 
-**Direction** (not shipped): domain kits that compose this substrate — a Sales Kit (territory/customer/initiative schema with side-effect adapters for CRM logging), a Research Kit (transcript capture→compile→recall). Distribution follows sequencing: authoring tooling and covetable reference kits first, then a registry, then a marketplace. No marketplace claims are shipped.
+**Release Evidence Kit** — a minimal flows-only kit that proves agentless gate evaluation over trusted `release.evidence` claims in CI.
+
+**Veritas Governance Kit** — an agentless kit that gates a real `veritas readiness` verdict as a trust.bundle software-readiness-verdict claim. It wraps @kontourai/veritas through CLI + a kit-local adapter and does not reimplement standards evaluation.
+
+**Direction**: domain kits that compose this substrate — a Sales Kit (territory/customer/initiative schema with side-effect adapters for CRM logging), a Research Kit (transcript capture→compile→recall), and community-contributed kits discovered through a marketplace. Marketplace labels such as official or first-party describe provenance; they do not grant runtime privilege.
 
 ## Framework adapters
 

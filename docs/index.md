@@ -4,24 +4,24 @@ title: Kontour Flow Agents
 
 # Flow Agents
 
-<p class="home-lede">A portable process-discipline layer for agentic work: canonical policies, evidence, and telemetry that compile to whatever hook surface a host exposes — coding-agent harnesses today, agent frameworks next. Flow Agents keeps work inspectable from idea to release readiness so you ask for outcomes and the system supplies the path, the state, the checks, and the proof.</p>
+<p class="home-lede">A portable process-discipline layer for agentic work: a kit-neutral engine for FlowDefinition interpretation, gates, runtime adapters, evidence, trust, and kit validation — plus opt-in kits such as Builder, Knowledge, Release Evidence, and Veritas Governance. Flow Agents keeps work inspectable so you ask for outcomes and the selected kit supplies the path, the state, the checks, and the proof.</p>
 
 <div class="value-grid">
   <section>
-    <strong>Four canonical policies</strong>
-    <span>Workflow steering, quality gate, stop-goal-fit, and config protection — each a canonical script under <code>scripts/hooks/</code> that compiles to the host's native hook format. Claude Code and Codex are the L2 reference implementations.</span>
+    <strong>Kit-neutral engine</strong>
+    <span>FlowDefinition interpretation, gates, runtime and harness adapters, SDK/evidence/trust primitives, and kit validation. The engine is not Builder Kit; Builder is one kit on top.</span>
   </section>
   <section>
     <strong>Survive context loss</strong>
-    <span>Durable sidecar state under <code>.flow-agents/</code> records acceptance criteria, evidence, critique, and handoff, so any session resumes from recorded state instead of chat memory.</span>
+    <span>Durable sidecar state under <code>.kontourai/flow-agents/</code> records acceptance criteria, evidence, critique, and handoff, so any session resumes from recorded state instead of chat memory.</span>
   </section>
   <section>
-    <strong>Evidence over confidence</strong>
-    <span>Hooks catch stop-short behavior, and important work ends with tests, browser checks, CI results, review findings, or an explicit <code>NOT_VERIFIED</code> gap — never just a confident summary.</span>
+    <strong>Tamper-evident trust</strong>
+    <span>Local capture is advisory and best-effort; the controlled CI re-run reconciles manifest commands and git diff as the authoritative anchor before evidence is treated as CI-verified.</span>
   </section>
   <section>
     <strong>Flow Kits — workflow + output shape</strong>
-    <span>A kit bundles a workflow and its opinionated output shape as a validated, installable unit. Two reference kits ship today: Builder Kit (shaping → delivery pipeline) and Knowledge Kit (gated store with five pipeline flows, pluggable adapters, and an Obsidian rendering layer). <a href="kit-authoring-guide.html">Author your own</a> using the same path.</span>
+    <span>A kit bundles flows and optional skills, docs, adapters, evals, and assets as a validated, installable unit. The catalog lists Builder, Knowledge, Release Evidence, and Veritas Governance; <a href="kit-authoring-guide.html">bring your own kit</a> through the same manifest path.</span>
   </section>
 </div>
 
@@ -45,7 +45,9 @@ flowchart LR
   Evidence -->|not verified| Plan
 ```
 
-Flow Agents adds the operating layer around the model: skills choose the right workflow, sidecars preserve state, hooks enforce the four canonical policies, and evals keep the bundle honest as it changes. The gate semantics underneath — definitions, runs, evidence, route-back — belong to <a href="https://kontourai.github.io/flow/">Kontour Flow</a>; Flow Agents compiles those policies to whatever hook surface a host exposes.
+Flow Agents adds the operating layer around the model: the engine preserves state, evaluates evidence, activates selected kits, renders structured kit triggers, and compiles canonical policies to host hooks. The gate semantics underneath — definitions, runs, evidence, route-back — belong to <a href="https://kontourai.github.io/flow/">Kontour Flow</a>.
+
+Kits supply the workflow. Builder and Knowledge are examples on the engine, not the engine itself. The built-in catalog also includes Release Evidence and Veritas Governance, both useful proof points that a kit can be agentless and still run through the same manifest and gate model.
 
 ## Process-discipline layer
 
@@ -78,7 +80,11 @@ Install into your workspace in one command:
 npx @kontourai/flow-agents init --runtime <your-agent> --dest .
 ```
 
-Where `--runtime` is `claude-code`, `codex`, `kiro`, `opencode`, or `pi`. The Builder Kit installs automatically and gives your agent two gated flows: `builder.shape` (idea → slices → filed work items) and `builder.build` (selected work item → design probe → plan → execute → verify → PR → learn).
+Where `--runtime` is `claude-code`, `codex`, `kiro`, `opencode`, or `pi`. Kits are opt-in. Activate Builder when you want its two gated flows: `builder.shape` (idea → slices → filed work items) and `builder.build` (selected work item → design probe → plan → execute → verify → PR → learn).
+
+```bash
+npx @kontourai/flow-agents init --runtime <your-agent> --dest . --activate-kit builder
+```
 
 Ask your agent to shape an idea:
 
@@ -109,6 +115,10 @@ Use fix-bug. Reproduce the problem, diagnose root cause, implement the fix, and 
   <a class="doc-card" href="getting-started.html">
     <strong>Builder Kit Quick Start</strong>
     <span>Zero to a running, gated build flow in two minutes: install, shape an idea into a work item, build it through the builder.shape and builder.build flows, and see what the evidence gates do.</span>
+  </a>
+  <a class="doc-card" href="architecture-engine-and-kits.html">
+    <strong>Engine and Kits</strong>
+    <span>The canonical split: product-neutral engine, opt-in kits, catalog + kit.json plugin model, structured workflow triggers, and marketplace metadata with no runtime privilege.</span>
   </a>
   <a class="doc-card" href="workflow-usage-guide.html">
     <strong>Workflow Usage Guide</strong>
