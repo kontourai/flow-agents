@@ -28,5 +28,11 @@
     "reason": "Docs-only PR: adds an 'Attribution & pricing correctness (#487)' subsection to docs/integrations/flow-agents-console.md documenting the merged #487 behavior (canonical active-session attribution; bundled-registry pricing floor). No source/behavior changes and no command-backed (agent-delivery) claims to reconcile.",
     "approved_by": "brian.anderson1222 (delegated approval, 2026-07-07 session: clean-after-merge-and-continue)",
     "declared_at": "2026-07-07T22:02:46Z"
+  },
+  {
+    "scope": "branch-prefix:agent/claude-code-3c7d5297-89ec-4893-81a6-8aae94890c95-Kontour/telemetry-project-attribution",
+    "reason": "Scoped telemetry-attribution change: console relay derives a path-free context.project via a stable precedence hierarchy (FLOW_AGENTS_PROJECT > nearest package.json name > git remote org/repo > git toplevel basename > cwd basename), cached per cwd under the telemetry data dir and bounded by session_cleanup so a project rename self-heals, so the SAME project resolves to the SAME label across developers/clones/worktrees while the full cwd stays redacted; documents context.project as a canonical attribution field with that precedence in runtime-hook-surface.md so all adapters honor it. Hardened after independent report-only review: the helper never returns non-zero and every caller substitution is `|| var=''`-guarded so telemetry can never be aborted under `set -e`; the git-remote sed rejects host/raw-URL leaks (single-segment or trailing-slash remotes fall through) so only a clean coarse org/repo is emitted. Owner-governed exemption (no formal agent-delivery bundle recorded). Verified locally: build + validate:source + test_telemetry (15 project-attribution assertions covering both the source and context/ mirror copies of console_project_label across all precedence tiers, plus set-e-survival and sed-hardening regressions) + test_usage_cost + test_liveness_console_relay all green; CI Runtime-and-Kit re-runs these evals as the authoritative check.",
+    "approved_by": "brian.anderson1222 (delegated approval, 2026-07-07 session: solidify-embeddable-engine-DRY)",
+    "declared_at": "2026-07-07T23:14:12Z"
   }
 ]
