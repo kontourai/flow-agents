@@ -1,0 +1,796 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "trust.checkpoint.json",
+      "digest": {
+        "sha256": "a1e2b1fa63fcc8382863367c23525f95296c331993c84d1e4f901ea70e52c89d"
+      }
+    }
+  ],
+  "predicateType": "https://hachure.org/v1/bundle",
+  "predicate": {
+    "schemaVersion": 5,
+    "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+    "claims": [
+      {
+        "id": "kontourai-flow-agents-177-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-177-with-explicit-owner-override-isolated-worktree-and-disjoint-scope-from-pr-498",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-177/gate-claim-selected-work",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "Selected kontourai/flow-agents#177 with explicit owner override, isolated worktree, and disjoint scope from PR #498.",
+        "value": "pass",
+        "createdAt": "2026-07-09T22:02:40Z",
+        "updatedAt": "2026-07-09T22:02:40Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "artifact_refs": [
+            {
+              "kind": "provider",
+              "url": "https://github.com/kontourai/flow-agents/issues/177"
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "selected-work",
+            "claim_type": "builder.pull-work.selected",
+            "subject_type": "work-item",
+            "step_id": "pull-work"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-177-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-at-kontourai-flow-agents-kontourai-flow-agents-177-kontourai-flow-agents-177-pickup-probe-md-records-goal-fit-provider-state-wip-override-dependency-freshness-acceptance-quality-expected-files-risks-and-worktree-isolation",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-177/gate-claim-pickup-probe-readiness",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.design-probe.pickup-readiness",
+        "fieldOrBehavior": "Pickup Probe at .kontourai/flow-agents/kontourai-flow-agents-177/kontourai-flow-agents-177--pickup-probe.md records goal fit, provider state, WIP override, dependency freshness, acceptance quality, expected files, risks, and worktree isolation.",
+        "value": "pass",
+        "createdAt": "2026-07-09T22:02:40Z",
+        "updatedAt": "2026-07-09T22:02:40Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.design-probe.pickup-readiness:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "gate_claim": {
+            "expectation_id": "pickup-probe-readiness",
+            "claim_type": "builder.design-probe.pickup-readiness",
+            "subject_type": "work-item",
+            "step_id": "design-probe"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-177-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.boundary-decisions-are-explicit-in-the-pickup-probe-the-only-accepted-gap-is-the-legacy-issue-missing-planned-base-sha",
+        "subjectType": "decision",
+        "subjectId": "kontourai-flow-agents-177/gate-claim-probe-decisions-or-accepted-gaps",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.design-probe.decisions",
+        "fieldOrBehavior": "Boundary decisions are explicit in the Pickup Probe; the only accepted gap is the legacy issue missing planned_base_sha.",
+        "value": "pass",
+        "createdAt": "2026-07-09T22:02:40Z",
+        "updatedAt": "2026-07-09T22:02:40Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.design-probe.decisions:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "gate_claim": {
+            "expectation_id": "probe-decisions-or-accepted-gaps",
+            "claim_type": "builder.design-probe.decisions",
+            "subject_type": "decision",
+            "step_id": "design-probe"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-177-ac1-ac7-local-verification.flow-agents-workflow.ac1-ac7-local-verification-attestation-verifier-report-records-14-14-focused-tests-typecheck-167-167-unit-tests-diff-and-forbidden-scope-checks-pr-511-records-all-seven-passing-provider-checks-and-accepted-residuals",
+        "subjectType": "pull-request",
+        "subjectId": "kontourai-flow-agents-177/ac1-ac7-local-verification",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pr-open.pull-request",
+        "fieldOrBehavior": "AC1-AC7 local verification attestation: verifier report records 14/14 focused tests, typecheck, 167/167 unit tests, diff and forbidden-scope checks; PR #511 records all seven passing provider checks and accepted residuals.",
+        "value": "pass",
+        "createdAt": "2026-07-09T22:02:40Z",
+        "updatedAt": "2026-07-09T22:02:40Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-177/kontourai-flow-agents-177--verification-review.md",
+              "summary": "Structured verifier report with command and source evidence."
+            },
+            {
+              "kind": "provider",
+              "url": "https://github.com/kontourai/flow-agents/pull/511",
+              "summary": "Provider change with acceptance evidence and passing checks."
+            }
+          ]
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-177-gate-claim-pull-request-opened.flow-agents-workflow.draft-pr-511-opened-for-issue-177-ac1-ac7-evidence-attached-and-all-seven-provider-checks-pass",
+        "subjectType": "pull-request",
+        "subjectId": "kontourai-flow-agents-177/gate-claim-pull-request-opened",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pr-open.pull-request",
+        "fieldOrBehavior": "Draft PR #511 opened for issue #177; AC1-AC7 evidence attached and all seven provider checks pass.",
+        "value": "pass",
+        "createdAt": "2026-07-09T22:02:40Z",
+        "updatedAt": "2026-07-09T22:02:40Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pr-open.pull-request:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "artifact_refs": [
+            {
+              "kind": "provider",
+              "url": "https://github.com/kontourai/flow-agents/pull/511"
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "pull-request-opened",
+            "claim_type": "builder.pr-open.pull-request",
+            "subject_type": "pull-request",
+            "step_id": "pr-open"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-177-flowrun-builder-adapter-importable.flow-agents-workflow.flowrun-builder-adapter-importable",
+        "subjectType": "pull-request",
+        "subjectId": "kontourai-flow-agents-177/flowrun-builder-adapter-importable",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pr-open.pull-request",
+        "fieldOrBehavior": "`flowrun-builder-adapter-importable`",
+        "value": "pass",
+        "createdAt": "2026-07-09T22:02:40Z",
+        "updatedAt": "2026-07-09T22:02:40Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pr-open.pull-request",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-177-flowrun-evidence-evaluate-through-flow.flow-agents-workflow.flowrun-evidence-evaluate-through-flow",
+        "subjectType": "pull-request",
+        "subjectId": "kontourai-flow-agents-177/flowrun-evidence-evaluate-through-flow",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pr-open.pull-request",
+        "fieldOrBehavior": "`flowrun-evidence-evaluate-through-flow`",
+        "value": "pass",
+        "createdAt": "2026-07-09T22:02:40Z",
+        "updatedAt": "2026-07-09T22:02:40Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pr-open.pull-request",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-177-flowrun-builder-contract-tests.flow-agents-workflow.flowrun-builder-contract-tests",
+        "subjectType": "pull-request",
+        "subjectId": "kontourai-flow-agents-177/flowrun-builder-contract-tests",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pr-open.pull-request",
+        "fieldOrBehavior": "`flowrun-builder-contract-tests`",
+        "value": "pass",
+        "createdAt": "2026-07-09T22:02:40Z",
+        "updatedAt": "2026-07-09T22:02:40Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pr-open.pull-request",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-177-flowrun-boundary-preserved.flow-agents-workflow.flowrun-boundary-preserved",
+        "subjectType": "pull-request",
+        "subjectId": "kontourai-flow-agents-177/flowrun-boundary-preserved",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pr-open.pull-request",
+        "fieldOrBehavior": "`flowrun-boundary-preserved`",
+        "value": "pass",
+        "createdAt": "2026-07-09T22:02:40Z",
+        "updatedAt": "2026-07-09T22:02:40Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pr-open.pull-request",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-177-flowrun-flow-contract-consumed.flow-agents-workflow.flowrun-flow-contract-consumed",
+        "subjectType": "pull-request",
+        "subjectId": "kontourai-flow-agents-177/flowrun-flow-contract-consumed",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pr-open.pull-request",
+        "fieldOrBehavior": "`flowrun-flow-contract-consumed`",
+        "value": "pass",
+        "createdAt": "2026-07-09T22:02:40Z",
+        "updatedAt": "2026-07-09T22:02:40Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pr-open.pull-request",
+        "metadata": {
+          "origin": "acceptance"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-177-kontourai-flow-agents-177-deliver-code-review.flow-agents-workflow.imported-critique-from-kontourai-flow-agents-177-deliver-code-review-md-superseded-kontourai-flow-agents-177-deliver-code-review-2026-07-09t22-02-38z-2026-07-09t20-20-40z",
+        "subjectType": "pull-request",
+        "subjectId": "kontourai-flow-agents-177/kontourai-flow-agents-177-deliver-code-review",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pr-open.pull-request",
+        "fieldOrBehavior": "Imported critique from kontourai-flow-agents-177--deliver-code-review.md",
+        "value": "fail",
+        "createdAt": "2026-07-09T22:02:40Z",
+        "updatedAt": "2026-07-09T22:02:40Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:builder.pr-open.pull-request",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "tool-code-reviewer",
+          "reviewed_at": "2026-07-09T20:20:40Z",
+          "superseded_by": "kontourai-flow-agents-177-deliver-code-review@2026-07-09T22:02:38Z"
+        },
+        "status": "superseded"
+      },
+      {
+        "id": "kontourai-flow-agents-177-code-review-1.flow-agents-workflow.route-back-test-bypasses-the-adapter-add-evaluate-existing-run-api-and-prove-typed-route-back-through-the-adapter-superseded-code-review-1-2026-07-09t22-02-39z-2026-07-09t20-20-49z",
+        "subjectType": "pull-request",
+        "subjectId": "kontourai-flow-agents-177/code-review-1",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pr-open.pull-request",
+        "fieldOrBehavior": "Route-back test bypasses the adapter; add evaluate-existing-run API and prove typed route-back through the adapter.",
+        "value": "fail",
+        "createdAt": "2026-07-09T22:02:40Z",
+        "updatedAt": "2026-07-09T22:02:40Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:builder.pr-open.pull-request",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "tool-code-reviewer",
+          "reviewed_at": "2026-07-09T20:20:49Z",
+          "superseded_by": "code-review-1@2026-07-09T22:02:39Z"
+        },
+        "status": "superseded"
+      },
+      {
+        "id": "kontourai-flow-agents-177-security-review-1.flow-agents-workflow.document-trusted-local-cwd-evidence-boundary-dependency-audit-debt-is-pre-existing-and-outside-this-diff-superseded-security-review-1-2026-07-09t22-02-39z-2026-07-09t20-20-49z",
+        "subjectType": "pull-request",
+        "subjectId": "kontourai-flow-agents-177/security-review-1",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pr-open.pull-request",
+        "fieldOrBehavior": "Document trusted-local cwd/evidence boundary. Dependency audit debt is pre-existing and outside this diff.",
+        "value": "comment",
+        "createdAt": "2026-07-09T22:02:40Z",
+        "updatedAt": "2026-07-09T22:02:40Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:builder.pr-open.pull-request",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "tool-security-reviewer",
+          "reviewed_at": "2026-07-09T20:20:49Z",
+          "superseded_by": "security-review-1@2026-07-09T22:02:39Z"
+        },
+        "status": "superseded"
+      },
+      {
+        "id": "kontourai-flow-agents-177-architecture-review-5-6-sol.flow-agents-workflow.shipped-trust-statuses-are-overridden-in-tests-public-gate-override-can-bypass-persisted-run-authority-flow-2-0-lacks-builder-uses-flow-composition-existing-run-identity-is-not-validated-superseded-architecture-review-5-6-sol-2026-07-09t22-02-40z-2026-07-09t20-30-19z",
+        "subjectType": "pull-request",
+        "subjectId": "kontourai-flow-agents-177/architecture-review-5-6-sol",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pr-open.pull-request",
+        "fieldOrBehavior": "Shipped trust statuses are overridden in tests; public gate override can bypass persisted run authority; Flow 2.0 lacks Builder uses_flow composition; existing-run identity is not validated.",
+        "value": "fail",
+        "createdAt": "2026-07-09T22:02:40Z",
+        "updatedAt": "2026-07-09T22:02:40Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:builder.pr-open.pull-request",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "supplemental-gpt-5.6-sol",
+          "reviewed_at": "2026-07-09T20:30:19Z",
+          "superseded_by": "architecture-review-5-6-sol@2026-07-09T22:02:40Z"
+        },
+        "status": "superseded"
+      },
+      {
+        "id": "kontourai-flow-agents-177-sol-code-review-final.flow-agents-workflow.ac1-ac7-code-and-architecture-review-pass-no-findings-14-focused-and-167-unit-tests-confirmed",
+        "subjectType": "pull-request",
+        "subjectId": "kontourai-flow-agents-177/sol-code-review-final",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pr-open.pull-request",
+        "fieldOrBehavior": "AC1-AC7 code and architecture review PASS; no findings; 14 focused and 167 unit tests confirmed.",
+        "value": "pass",
+        "createdAt": "2026-07-09T22:02:40Z",
+        "updatedAt": "2026-07-09T22:02:40Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:builder.pr-open.pull-request",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "gpt-5.6-sol-code-reviewer",
+          "reviewed_at": "2026-07-09T21:44:08Z"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-177-sol-security-review-final.flow-agents-workflow.ac1-ac7-security-and-trust-boundary-review-pass-no-findings-trusted-local-and-flow-transaction-residuals-explicitly-bounded",
+        "subjectType": "pull-request",
+        "subjectId": "kontourai-flow-agents-177/sol-security-review-final",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pr-open.pull-request",
+        "fieldOrBehavior": "AC1-AC7 security and trust-boundary review PASS; no findings; trusted-local and Flow transaction residuals explicitly bounded.",
+        "value": "pass",
+        "createdAt": "2026-07-09T22:02:40Z",
+        "updatedAt": "2026-07-09T22:02:40Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:builder.pr-open.pull-request",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "gpt-5.6-sol-security-reviewer",
+          "reviewed_at": "2026-07-09T21:44:09Z"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-177-kontourai-flow-agents-177-deliver-code-review.flow-agents-workflow.resolved-final-adapter-implementation-and-ac1-ac7-review-passed-prior-imported-findings-are-superseded",
+        "subjectType": "pull-request",
+        "subjectId": "kontourai-flow-agents-177/kontourai-flow-agents-177-deliver-code-review",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pr-open.pull-request",
+        "fieldOrBehavior": "Resolved: final adapter implementation and AC1-AC7 review passed; prior imported findings are superseded.",
+        "value": "pass",
+        "createdAt": "2026-07-09T22:02:40Z",
+        "updatedAt": "2026-07-09T22:02:40Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:builder.pr-open.pull-request",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "tool-code-reviewer",
+          "reviewed_at": "2026-07-09T22:02:38Z"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-177-code-review-1.flow-agents-workflow.resolved-evaluate-existing-run-api-and-adapter-level-route-back-proof-are-implemented-and-passing",
+        "subjectType": "pull-request",
+        "subjectId": "kontourai-flow-agents-177/code-review-1",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pr-open.pull-request",
+        "fieldOrBehavior": "Resolved: evaluate-existing-run API and adapter-level route-back proof are implemented and passing.",
+        "value": "pass",
+        "createdAt": "2026-07-09T22:02:40Z",
+        "updatedAt": "2026-07-09T22:02:40Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:builder.pr-open.pull-request",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "tool-code-reviewer",
+          "reviewed_at": "2026-07-09T22:02:39Z"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-177-security-review-1.flow-agents-workflow.resolved-trusted-local-boundary-is-documented-and-final-security-review-found-no-diff-introduced-blocker-dependency-debt-remains-explicitly-outside-scope",
+        "subjectType": "pull-request",
+        "subjectId": "kontourai-flow-agents-177/security-review-1",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pr-open.pull-request",
+        "fieldOrBehavior": "Resolved: trusted-local boundary is documented and final security review found no diff-introduced blocker; dependency debt remains explicitly outside scope.",
+        "value": "pass",
+        "createdAt": "2026-07-09T22:02:40Z",
+        "updatedAt": "2026-07-09T22:02:40Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:builder.pr-open.pull-request",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "tool-security-reviewer",
+          "reviewed_at": "2026-07-09T22:02:39Z"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-177-architecture-review-5-6-sol.flow-agents-workflow.resolved-shipped-policy-is-verified-only-gate-override-and-foreign-identity-are-closed-and-missing-uses-flow-composition-is-explicitly-bounded-upstream-work",
+        "subjectType": "pull-request",
+        "subjectId": "kontourai-flow-agents-177/architecture-review-5-6-sol",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pr-open.pull-request",
+        "fieldOrBehavior": "Resolved: shipped policy is verified-only, gate override and foreign identity are closed, and missing uses_flow composition is explicitly bounded upstream work.",
+        "value": "pass",
+        "createdAt": "2026-07-09T22:02:40Z",
+        "updatedAt": "2026-07-09T22:02:40Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:builder.pr-open.pull-request",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "supplemental-gpt-5.6-sol",
+          "reviewed_at": "2026-07-09T22:02:40Z"
+        },
+        "status": "verified"
+      }
+    ],
+    "evidence": [
+      {
+        "id": "ev:kontourai-flow-agents-177-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-177-with-explicit-owner-override-isolated-worktree-and-disjoint-scope-from-pr-498",
+        "claimId": "kontourai-flow-agents-177-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-177-with-explicit-owner-override-isolated-worktree-and-disjoint-scope-from-pr-498",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-177/evidence.json",
+        "excerptOrSummary": "Selected kontourai/flow-agents#177 with explicit owner override, isolated worktree, and disjoint scope from PR #498.",
+        "observedAt": "2026-07-09T22:02:40Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-177-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-at-kontourai-flow-agents-kontourai-flow-agents-177-kontourai-flow-agents-177-pickup-probe-md-records-goal-fit-provider-state-wip-override-dependency-freshness-acceptance-quality-expected-files-risks-and-worktree-isolation",
+        "claimId": "kontourai-flow-agents-177-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-at-kontourai-flow-agents-kontourai-flow-agents-177-kontourai-flow-agents-177-pickup-probe-md-records-goal-fit-provider-state-wip-override-dependency-freshness-acceptance-quality-expected-files-risks-and-worktree-isolation",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-177/evidence.json",
+        "excerptOrSummary": "Pickup Probe at .kontourai/flow-agents/kontourai-flow-agents-177/kontourai-flow-agents-177--pickup-probe.md records goal fit, provider state, WIP override, dependency freshness, acceptance quality, expected files, risks, and worktree isolation.",
+        "observedAt": "2026-07-09T22:02:40Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-177-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.boundary-decisions-are-explicit-in-the-pickup-probe-the-only-accepted-gap-is-the-legacy-issue-missing-planned-base-sha",
+        "claimId": "kontourai-flow-agents-177-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.boundary-decisions-are-explicit-in-the-pickup-probe-the-only-accepted-gap-is-the-legacy-issue-missing-planned-base-sha",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-177/evidence.json",
+        "excerptOrSummary": "Boundary decisions are explicit in the Pickup Probe; the only accepted gap is the legacy issue missing planned_base_sha.",
+        "observedAt": "2026-07-09T22:02:40Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-177-ac1-ac7-local-verification.flow-agents-workflow.ac1-ac7-local-verification-attestation-verifier-report-records-14-14-focused-tests-typecheck-167-167-unit-tests-diff-and-forbidden-scope-checks-pr-511-records-all-seven-passing-provider-checks-and-accepted-residuals",
+        "claimId": "kontourai-flow-agents-177-ac1-ac7-local-verification.flow-agents-workflow.ac1-ac7-local-verification-attestation-verifier-report-records-14-14-focused-tests-typecheck-167-167-unit-tests-diff-and-forbidden-scope-checks-pr-511-records-all-seven-passing-provider-checks-and-accepted-residuals",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-177/evidence.json",
+        "excerptOrSummary": "AC1-AC7 local verification attestation: verifier report records 14/14 focused tests, typecheck, 167/167 unit tests, diff and forbidden-scope checks; PR #511 records all seven passing provider checks and accepted residuals.",
+        "observedAt": "2026-07-09T22:02:40Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-177-gate-claim-pull-request-opened.flow-agents-workflow.draft-pr-511-opened-for-issue-177-ac1-ac7-evidence-attached-and-all-seven-provider-checks-pass",
+        "claimId": "kontourai-flow-agents-177-gate-claim-pull-request-opened.flow-agents-workflow.draft-pr-511-opened-for-issue-177-ac1-ac7-evidence-attached-and-all-seven-provider-checks-pass",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-177/evidence.json",
+        "excerptOrSummary": "Draft PR #511 opened for issue #177; AC1-AC7 evidence attached and all seven provider checks pass.",
+        "observedAt": "2026-07-09T22:02:40Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      }
+    ],
+    "policies": [
+      {
+        "id": "policy:workflow.check.external:attestation",
+        "claimType": "workflow.check.external",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.external claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.pull-work.selected:attestation",
+        "claimType": "builder.pull-work.selected",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.pull-work.selected claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.design-probe.pickup-readiness:attestation",
+        "claimType": "builder.design-probe.pickup-readiness",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.design-probe.pickup-readiness claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.design-probe.decisions:attestation",
+        "claimType": "builder.design-probe.decisions",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.design-probe.decisions claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.pr-open.pull-request:attestation",
+        "claimType": "builder.pr-open.pull-request",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.pr-open.pull-request claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.acceptance.criterion",
+        "claimType": "workflow.acceptance.criterion",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.acceptance.criterion claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.pr-open.pull-request",
+        "claimType": "builder.pr-open.pull-request",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.pr-open.pull-request claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.critique.review",
+        "claimType": "workflow.critique.review",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.critique.review claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "medium"
+      }
+    ],
+    "events": [
+      {
+        "id": "evt:kontourai-flow-agents-177-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-177-with-explicit-owner-override-isolated-worktree-and-disjoint-scope-from-pr-498",
+        "claimId": "kontourai-flow-agents-177-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-177-with-explicit-owner-override-isolated-worktree-and-disjoint-scope-from-pr-498",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-177-gate-claim-selected-work.flow-agents-workflow.selected-kontourai-flow-agents-177-with-explicit-owner-override-isolated-worktree-and-disjoint-scope-from-pr-498"
+        ],
+        "createdAt": "2026-07-09T22:02:40Z",
+        "verifiedAt": "2026-07-09T22:02:40Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-177-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-at-kontourai-flow-agents-kontourai-flow-agents-177-kontourai-flow-agents-177-pickup-probe-md-records-goal-fit-provider-state-wip-override-dependency-freshness-acceptance-quality-expected-files-risks-and-worktree-isolation",
+        "claimId": "kontourai-flow-agents-177-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-at-kontourai-flow-agents-kontourai-flow-agents-177-kontourai-flow-agents-177-pickup-probe-md-records-goal-fit-provider-state-wip-override-dependency-freshness-acceptance-quality-expected-files-risks-and-worktree-isolation",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-177-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-at-kontourai-flow-agents-kontourai-flow-agents-177-kontourai-flow-agents-177-pickup-probe-md-records-goal-fit-provider-state-wip-override-dependency-freshness-acceptance-quality-expected-files-risks-and-worktree-isolation"
+        ],
+        "createdAt": "2026-07-09T22:02:40Z",
+        "verifiedAt": "2026-07-09T22:02:40Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-177-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.boundary-decisions-are-explicit-in-the-pickup-probe-the-only-accepted-gap-is-the-legacy-issue-missing-planned-base-sha",
+        "claimId": "kontourai-flow-agents-177-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.boundary-decisions-are-explicit-in-the-pickup-probe-the-only-accepted-gap-is-the-legacy-issue-missing-planned-base-sha",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-177-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.boundary-decisions-are-explicit-in-the-pickup-probe-the-only-accepted-gap-is-the-legacy-issue-missing-planned-base-sha"
+        ],
+        "createdAt": "2026-07-09T22:02:40Z",
+        "verifiedAt": "2026-07-09T22:02:40Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-177-ac1-ac7-local-verification.flow-agents-workflow.ac1-ac7-local-verification-attestation-verifier-report-records-14-14-focused-tests-typecheck-167-167-unit-tests-diff-and-forbidden-scope-checks-pr-511-records-all-seven-passing-provider-checks-and-accepted-residuals",
+        "claimId": "kontourai-flow-agents-177-ac1-ac7-local-verification.flow-agents-workflow.ac1-ac7-local-verification-attestation-verifier-report-records-14-14-focused-tests-typecheck-167-167-unit-tests-diff-and-forbidden-scope-checks-pr-511-records-all-seven-passing-provider-checks-and-accepted-residuals",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-177-ac1-ac7-local-verification.flow-agents-workflow.ac1-ac7-local-verification-attestation-verifier-report-records-14-14-focused-tests-typecheck-167-167-unit-tests-diff-and-forbidden-scope-checks-pr-511-records-all-seven-passing-provider-checks-and-accepted-residuals"
+        ],
+        "createdAt": "2026-07-09T22:02:40Z",
+        "verifiedAt": "2026-07-09T22:02:40Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-177-gate-claim-pull-request-opened.flow-agents-workflow.draft-pr-511-opened-for-issue-177-ac1-ac7-evidence-attached-and-all-seven-provider-checks-pass",
+        "claimId": "kontourai-flow-agents-177-gate-claim-pull-request-opened.flow-agents-workflow.draft-pr-511-opened-for-issue-177-ac1-ac7-evidence-attached-and-all-seven-provider-checks-pass",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-177-gate-claim-pull-request-opened.flow-agents-workflow.draft-pr-511-opened-for-issue-177-ac1-ac7-evidence-attached-and-all-seven-provider-checks-pass"
+        ],
+        "createdAt": "2026-07-09T22:02:40Z",
+        "verifiedAt": "2026-07-09T22:02:40Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-177-flowrun-builder-adapter-importable.flow-agents-workflow.flowrun-builder-adapter-importable",
+        "claimId": "kontourai-flow-agents-177-flowrun-builder-adapter-importable.flow-agents-workflow.flowrun-builder-adapter-importable",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-09T22:02:40Z",
+        "verifiedAt": "2026-07-09T22:02:40Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-177-flowrun-evidence-evaluate-through-flow.flow-agents-workflow.flowrun-evidence-evaluate-through-flow",
+        "claimId": "kontourai-flow-agents-177-flowrun-evidence-evaluate-through-flow.flow-agents-workflow.flowrun-evidence-evaluate-through-flow",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-09T22:02:40Z",
+        "verifiedAt": "2026-07-09T22:02:40Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-177-flowrun-builder-contract-tests.flow-agents-workflow.flowrun-builder-contract-tests",
+        "claimId": "kontourai-flow-agents-177-flowrun-builder-contract-tests.flow-agents-workflow.flowrun-builder-contract-tests",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-09T22:02:40Z",
+        "verifiedAt": "2026-07-09T22:02:40Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-177-flowrun-boundary-preserved.flow-agents-workflow.flowrun-boundary-preserved",
+        "claimId": "kontourai-flow-agents-177-flowrun-boundary-preserved.flow-agents-workflow.flowrun-boundary-preserved",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-09T22:02:40Z",
+        "verifiedAt": "2026-07-09T22:02:40Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-177-flowrun-flow-contract-consumed.flow-agents-workflow.flowrun-flow-contract-consumed",
+        "claimId": "kontourai-flow-agents-177-flowrun-flow-contract-consumed.flow-agents-workflow.flowrun-flow-contract-consumed",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-09T22:02:40Z",
+        "verifiedAt": "2026-07-09T22:02:40Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-177-sol-code-review-final.flow-agents-workflow.ac1-ac7-code-and-architecture-review-pass-no-findings-14-focused-and-167-unit-tests-confirmed",
+        "claimId": "kontourai-flow-agents-177-sol-code-review-final.flow-agents-workflow.ac1-ac7-code-and-architecture-review-pass-no-findings-14-focused-and-167-unit-tests-confirmed",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-09T22:02:40Z",
+        "verifiedAt": "2026-07-09T22:02:40Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-177-sol-security-review-final.flow-agents-workflow.ac1-ac7-security-and-trust-boundary-review-pass-no-findings-trusted-local-and-flow-transaction-residuals-explicitly-bounded",
+        "claimId": "kontourai-flow-agents-177-sol-security-review-final.flow-agents-workflow.ac1-ac7-security-and-trust-boundary-review-pass-no-findings-trusted-local-and-flow-transaction-residuals-explicitly-bounded",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-09T22:02:40Z",
+        "verifiedAt": "2026-07-09T22:02:40Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-177-kontourai-flow-agents-177-deliver-code-review.flow-agents-workflow.resolved-final-adapter-implementation-and-ac1-ac7-review-passed-prior-imported-findings-are-superseded",
+        "claimId": "kontourai-flow-agents-177-kontourai-flow-agents-177-deliver-code-review.flow-agents-workflow.resolved-final-adapter-implementation-and-ac1-ac7-review-passed-prior-imported-findings-are-superseded",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-09T22:02:40Z",
+        "verifiedAt": "2026-07-09T22:02:40Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-177-code-review-1.flow-agents-workflow.resolved-evaluate-existing-run-api-and-adapter-level-route-back-proof-are-implemented-and-passing",
+        "claimId": "kontourai-flow-agents-177-code-review-1.flow-agents-workflow.resolved-evaluate-existing-run-api-and-adapter-level-route-back-proof-are-implemented-and-passing",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-09T22:02:40Z",
+        "verifiedAt": "2026-07-09T22:02:40Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-177-security-review-1.flow-agents-workflow.resolved-trusted-local-boundary-is-documented-and-final-security-review-found-no-diff-introduced-blocker-dependency-debt-remains-explicitly-outside-scope",
+        "claimId": "kontourai-flow-agents-177-security-review-1.flow-agents-workflow.resolved-trusted-local-boundary-is-documented-and-final-security-review-found-no-diff-introduced-blocker-dependency-debt-remains-explicitly-outside-scope",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-09T22:02:40Z",
+        "verifiedAt": "2026-07-09T22:02:40Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-177-architecture-review-5-6-sol.flow-agents-workflow.resolved-shipped-policy-is-verified-only-gate-override-and-foreign-identity-are-closed-and-missing-uses-flow-composition-is-explicitly-bounded-upstream-work",
+        "claimId": "kontourai-flow-agents-177-architecture-review-5-6-sol.flow-agents-workflow.resolved-shipped-policy-is-verified-only-gate-override-and-foreign-identity-are-closed-and-missing-uses-flow-composition-is-explicitly-bounded-upstream-work",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-09T22:02:40Z",
+        "verifiedAt": "2026-07-09T22:02:40Z"
+      }
+    ]
+  }
+}

@@ -17,6 +17,23 @@ import * as path from "node:path";
 import { loadJson as _loadJson, writeJson as _writeJson } from "./cli/workflow-sidecar.js";
 
 export {
+  BUILDER_BUILD_FLOW_ID,
+  BUILDER_BUILD_FLOW_RELATIVE_PATH,
+  BuilderBuildRunInputError,
+  BuilderBuildRunIdentityError,
+  evaluateBuilderBuildRun,
+  resolveBuilderBuildFlowDefinitionPath,
+  startBuilderBuildRun,
+} from "./builder-flow-run-adapter.js";
+export type {
+  BuilderBuildRunResult,
+  BuilderBuildRunIdentityMismatch,
+  BuilderBuildTrustBundleEvidenceInput,
+  EvaluateBuilderBuildRunInput,
+  StartBuilderBuildRunInput,
+} from "./builder-flow-run-adapter.js";
+
+export {
   defaultArtifactRootForRead,
   defaultCodexHome,
   defaultTelemetryDirForRead,
