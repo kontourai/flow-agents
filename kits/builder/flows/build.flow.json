@@ -36,8 +36,7 @@
             "claimType": "builder.pull-work.selected",
             "subjectType": "work-item",
             "accepted_statuses": [
-              "trusted",
-              "accepted"
+              "verified"
             ]
           }
         }
@@ -55,8 +54,7 @@
             "claimType": "builder.design-probe.pickup-readiness",
             "subjectType": "work-item",
             "accepted_statuses": [
-              "trusted",
-              "accepted"
+              "verified"
             ]
           }
         },
@@ -69,8 +67,7 @@
             "claimType": "builder.design-probe.decisions",
             "subjectType": "decision",
             "accepted_statuses": [
-              "trusted",
-              "accepted"
+              "verified"
             ]
           }
         }
@@ -88,8 +85,7 @@
             "claimType": "builder.plan.implementation",
             "subjectType": "artifact",
             "accepted_statuses": [
-              "trusted",
-              "accepted"
+              "verified"
             ]
           }
         }
@@ -107,8 +103,7 @@
             "claimType": "builder.execute.scope",
             "subjectType": "change",
             "accepted_statuses": [
-              "trusted",
-              "accepted"
+              "verified"
             ]
           }
         }
@@ -137,8 +132,7 @@
             "claimType": "builder.verify.tests",
             "subjectType": "flow-step",
             "accepted_statuses": [
-              "trusted",
-              "accepted"
+              "verified"
             ]
           }
         },
@@ -152,9 +146,7 @@
             "claimType": "builder.verify.policy-compliance",
             "subjectType": "artifact",
             "accepted_statuses": [
-              "trusted",
-              "accepted",
-              "advisory"
+              "verified"
             ]
           }
         }
@@ -183,8 +175,7 @@
             "claimType": "builder.merge-ready.readiness",
             "subjectType": "change",
             "accepted_statuses": [
-              "trusted",
-              "accepted"
+              "verified"
             ]
           }
         }
