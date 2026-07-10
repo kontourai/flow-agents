@@ -43,29 +43,35 @@ WRITER="workflow-sidecar"
 echo ""
 echo "=== 1. ensure-session --flow-id builder.build activates FlowDefinition-driven path ==="
 
-MAIN_AROOT="$TMP/main-aroot"
+MAIN_AROOT="$TMP/main-project/.kontourai/flow-agents"
 SLUG="activation-test"
 SESSION_DIR="$MAIN_AROOT/$SLUG"
 mkdir -p "$MAIN_AROOT"
 
-flow_agents_node "$WRITER" ensure-session \
+if flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$MAIN_AROOT" \
   --task-slug "$SLUG" \
   --title "Step 1 activation test" \
   --summary "Test that --flow-id builder.build activates the FlowDefinition-driven path." \
   --criterion "All gates produce declared claims" \
   --flow-id builder.build \
-  --timestamp "2026-06-01T00:00:00Z" >/dev/null 2>&1
+  --timestamp "2026-06-01T00:00:00Z" >/dev/null 2>&1; then
+  _pass "ensure-session starts the canonical Builder Flow from a canonical artifact root"
+else
+  _fail "ensure-session failed to start the canonical Builder Flow"
+fi
 
 node -e "
 const fs = require('fs');
 const c = JSON.parse(fs.readFileSync('$MAIN_AROOT/current.json', 'utf8'));
+const flow = JSON.parse(fs.readFileSync('$TMP/main-project/.kontourai/flow/runs/$SLUG/state.json', 'utf8'));
 if (c.active_flow_id !== 'builder.build') throw new Error('expected active_flow_id=builder.build, got ' + c.active_flow_id);
 if (!c.active_step_id) throw new Error('expected active_step_id to be set (first step default), got ' + c.active_step_id);
+if (flow.status !== 'active' || flow.current_step !== 'pull-work') throw new Error('canonical Flow did not start at pull-work: ' + JSON.stringify(flow));
 console.log('current.json: active_flow_id=' + c.active_flow_id + ' active_step_id=' + c.active_step_id);
 " 2>&1 \
-  && _pass "ensure-session --flow-id builder.build writes active_flow_id + default active_step_id to current.json" \
-  || _fail "ensure-session --flow-id builder.build did NOT write active_flow_id to current.json"
+  && _pass "ensure-session writes current projection and a canonical Flow run at pull-work" \
+  || _fail "ensure-session did not create and project the canonical Flow run"
 
 # ─── TEST 2: advance-state sets active_step_id via phase_map ─────────────────
 echo ""

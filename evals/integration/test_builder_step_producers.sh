@@ -139,7 +139,7 @@ test_produce_claim() {
 
   local slug
   slug="$(echo "prod-$step-$expectation" | tr '/' '-' | tr '.' '-')"
-  local aroot="$TMP/$slug"
+  local aroot="$TMP/$slug/.kontourai/flow-agents"
   setup_session_for_produce "$aroot" "$slug" "$step"
 
   if flow_agents_node "workflow-sidecar" record-gate-claim "$aroot/$slug" \

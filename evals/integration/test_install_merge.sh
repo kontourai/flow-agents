@@ -47,6 +47,30 @@ else
 fi
 echo ""
 
+# The 3.4.2 bootstrap hook is intentionally absent from new bundles, but its
+# marker remains an ownership tombstone so upgrades remove the retired denial.
+if node - "$ROOT_DIR/scripts/install-merge.js" <<'NODE'
+const { mergeSettings, isManagedHookGroup } = require(process.argv[2]);
+const retired = { hooks: [{ type: "command", command: "old-flow-agents-entry", statusMessage: "Enforcing Flow Agents projected action" }] };
+const user = { hooks: [{ type: "command", command: "user-pretool" }] };
+const current = { hooks: [{ type: "command", command: "new-flow-agents", statusMessage: "Running Flow Agents hook policy" }] };
+if (!isManagedHookGroup(retired)) throw new Error("retired hook marker is no longer recognized as managed");
+const merged = mergeSettings(
+  { hooks: { PreToolUse: [retired, user] } },
+  { hooks: { UserPromptSubmit: [current] } },
+);
+const text = JSON.stringify(merged);
+if (text.includes("old-flow-agents-entry")) throw new Error("retired bootstrap hook survived upgrade");
+if (!text.includes("user-pretool")) throw new Error("user-owned PreToolUse hook was removed");
+if (!text.includes("new-flow-agents")) throw new Error("current managed hook was not installed");
+NODE
+then
+  _pass "upgrade removes the retired 3.4.2 bootstrap hook while preserving user hooks"
+else
+  _fail "upgrade did not cleanly replace the retired 3.4.2 bootstrap hook"
+fi
+echo ""
+
 # ─── Scenario 1: Seeded user config ──────────────────────────────────────────
 echo "--- Scenario 1: Seeded user config (user keys + non-FA hook survive) ---"
 

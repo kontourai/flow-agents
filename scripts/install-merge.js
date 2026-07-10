@@ -48,6 +48,8 @@ const FA_MARKERS = [
   "Recording Flow Agents telemetry",
   "Running Flow Agents hook policy",
   "Capturing Flow Agents command evidence",
+  // Cleanup tombstone: 3.4.2 installed this retired PreToolUse hook. Keep the
+  // marker recognizable so upgrades remove it even though new bundles do not.
   "Enforcing Flow Agents projected action",
 ];
 

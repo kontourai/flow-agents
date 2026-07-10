@@ -117,7 +117,7 @@ fi
 # --- 2. actor A's own current resolution is unaffected by actor B's later call (AC7) ----------
 echo "--- 2. actor A's current resolution survives actor B's later, unrelated ensure-session (AC7) ---"
 
-AC7_ROOT="$TMPDIR_EVAL/ac7-artifact-root"
+AC7_ROOT="$TMPDIR_EVAL/ac7-project/.kontourai/flow-agents"
 
 flow_agents_node "workflow-sidecar" ensure-session \
   --artifact-root "$AC7_ROOT" \
@@ -370,7 +370,7 @@ set -e
 # --- 5. record-gate-claim resolves A's own per-actor flow/step, not B's legacy pointer (AC11) --
 echo "--- 5. record-gate-claim resolves A's own per-actor flow/step, not B's legacy pointer (AC11) ---"
 
-AC11_ROOT="$TMPDIR_EVAL/ac11-artifact-root"
+AC11_ROOT="$TMPDIR_EVAL/ac11-project/.kontourai/flow-agents"
 
 flow_agents_node "workflow-sidecar" ensure-session \
   --artifact-root "$AC11_ROOT" \

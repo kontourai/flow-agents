@@ -123,16 +123,16 @@ Flow Agents currently ships five canonical policy classes. Each policy class has
 
 **Canonical script**: `scripts/hooks/workflow-steering.js`
 
-**Canonical trigger event**: `userPromptSubmit` and `agentSpawn`/`SessionStart` (active-goal re-grounding), `postToolUse` (after `InvokeSubagents` tool calls), and `preToolUse` when the projected `next_action` explicitly declares `enforcement: "before_tool_use"`
+**Canonical trigger event**: `userPromptSubmit` and `agentSpawn`/`SessionStart` (active-goal re-grounding), `postToolUse` (after `InvokeSubagents` tool calls)
 
 **Inputs consumed**:
 - `.kontourai/flow-agents/<slug>/state.json` — current workflow phase and status
 - `.kontourai/flow-agents/<slug>/critique.json` — open critique findings
 - `docs/context-map.md` — structure hint for repo navigation
 
-**Decision contract**: Advisory by default. It appends steering text to the agent's context via `additionalContext` and re-grounds the active workflow goal (status, phase, recorded next step) at the start of every user turn — not only for flagged/blocked states — and on `SessionStart`, which fires after context compaction and on resume. A structured `next_action` may explicitly declare a non-empty `command` with `enforcement: "before_tool_use"`; at `PreToolUse`, the canonical script then exits 2 for every unrelated call and includes the exact projected command in the denial reason. The exact projected command is allowed. This narrow bootstrap policy keeps workflow authority in the projected state instead of relying on the model voluntarily following prompt text; ordinary Flow-step projections remain advisory.
+**Decision contract**: Non-blocking. Always exits 0. Appends steering text to the agent's context via `additionalContext`. It re-grounds the active workflow goal (status, phase, recorded next step) at the start of every user turn — not only for flagged/blocked states — and on `SessionStart`, which fires after context compaction and on resume. Canonical Builder run creation is part of session orchestration rather than a model-mediated hook action.
 
-**Degradation when host lacks trigger**: If the host has no `userPromptSubmit`-equivalent hook, workflow steering is silent and the agent receives no ambient phase reminders at turn start. If the host has no block-capable `preToolUse` equivalent, explicit projected-action enforcement degrades to the same advisory command guidance. These are capability losses, not reasons to invent a second lifecycle authority. Record each missing capability in the adapter's conformance declaration.
+**Degradation when host lacks trigger**: If the host has no `userPromptSubmit`-equivalent hook, workflow steering is silent. The agent receives no ambient phase reminders at turn start. This is a capability loss, not a blocking failure. Log the gap in the adapter's conformance declaration.
 
 **Codex live hook influence caveat**: Codex hook influence on live sessions is limited — the agent may not honor all injected context. The hook influence behavioral cases in `evals/fixtures/hook-influence/cases.json` document which behaviors are expected (`agent_must_do`) versus which may only be soft guidance. Adapters on similar runtimes should apply the same classification.
 
@@ -550,7 +550,7 @@ For structured `run()` responses (native import form), the return value is:
 | config-protection | Fail-closed (exit 2 on protected file) | Yes — hook runtime errors exit 0 | Yes (preToolUse) |
 | quality-gate | Fail-open (exit 0 always) | Yes | No |
 | stop-goal-fit | Engine default warn (fail-open); blocks in `FLOW_AGENTS_GOAL_FIT_MODE=block` (shipped L2 default) | Yes — hook runtime errors exit 0 | Yes (stop, block mode) |
-| workflow-steering | Advisory; exit 2 only for an explicit `before_tool_use` projected command | Yes — hook runtime and malformed-state errors exit 0 | Yes (preToolUse, explicit projection only) |
+| workflow-steering | Fail-open (exit 0 always) | Yes | No |
 | evidence-capture | Fail-open (exit 0 always) | Yes — capture errors never block or corrupt the log | No |
 
 **Telemetry**: Always fail-open. Hook runtime errors in telemetry scripts must never block agent work.

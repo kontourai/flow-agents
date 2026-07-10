@@ -172,6 +172,38 @@ test("small-model client can start and advance from projected actions without ch
   assert.equal(duplicate.run.manifest.evidence.length, advanced.run.manifest.evidence.length);
 });
 
+test("automatic start refuses a slug-bound run for another Work Item without mutation", async () => {
+  const session = makeSession("start-subject-mismatch");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const sidecar = readJson(path.join(session.sessionDir, "state.json"));
+  sidecar.work_item_refs = ["local:work-item/other"];
+  writeJson(path.join(session.sessionDir, "state.json"), sidecar);
+  const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
+  const beforeProjection = snapshotProjectionTargets(session);
+
+  await assert.rejects(
+    () => startBuilderFlowSession({ sessionDir: session.sessionDir }),
+    /flow_run\.state\.subject.*selected Work Item/,
+  );
+  assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
+  assert.deepEqual(snapshotProjectionTargets(session), beforeProjection);
+});
+
+test("automatic start refuses a sidecar changed after its immutable subject snapshot", async () => {
+  const session = makeSession("start-sidecar-race");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
+  const startup = startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const changed = readJson(path.join(session.sessionDir, "state.json"));
+  changed.next_action = { status: "continue", summary: "concurrent change" };
+  writeJson(path.join(session.sessionDir, "state.json"), changed);
+  const beforeProjection = snapshotProjectionTargets(session);
+
+  await assert.rejects(() => startup, /state\.json.*changed during projection/);
+  assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
+  assert.deepEqual(snapshotProjectionTargets(session), beforeProjection);
+});
+
 test("wrong workflow subject is rejected before canonical Flow mutation", async () => {
   const session = makeSession("wrong-subject");
   await startBuilderFlowSession({ sessionDir: session.sessionDir });

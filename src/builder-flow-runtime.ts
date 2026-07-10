@@ -83,16 +83,20 @@ export async function startBuilderFlowSession(input: BuilderFlowSessionInput): P
       },
     });
   }
-  return syncAndProject(context, run);
+  assertRunSubjectBinding(run, subject);
+  return syncAndProject(context, run, sidecarSnapshot);
 }
 
 export async function syncBuilderFlowSession(input: BuilderFlowSessionInput): Promise<BuilderFlowSessionResult> {
   const context = resolveSessionContext(input.sessionDir);
+  const sidecarSnapshot = readSidecarSnapshot(context);
+  const subject = workflowSubject(sidecarSnapshot.state);
   const run = await loadBuilderBuildRun({
     cwd: context.projectRoot,
     runId: context.slug,
   });
-  return syncAndProject(context, run);
+  assertRunSubjectBinding(run, subject);
+  return syncAndProject(context, run, sidecarSnapshot);
 }
 
 export async function recoverBuilderFlowSession(input: BuilderFlowSessionInput): Promise<BuilderFlowSessionResult> {
@@ -103,14 +107,7 @@ export async function recoverBuilderFlowSession(input: BuilderFlowSessionInput):
     cwd: context.projectRoot,
     runId: context.slug,
   });
-  if (run.state.subject !== subject) {
-    throw new BuilderBuildRunInputError("flow_run.state.subject", "must match the selected Work Item");
-  }
-  if (isRecord(run.state.params)
-    && Object.prototype.hasOwnProperty.call(run.state.params, "subject")
-    && run.state.params.subject !== subject) {
-    throw new BuilderBuildRunInputError("flow_run.state.params.subject", "must match the selected Work Item");
-  }
+  assertRunSubjectBinding(run, subject);
   const projection = projectFlowRun(context, run, sidecarSnapshot.state);
   writeProjection(context, projection, sidecarSnapshot.raw, "recovery");
   return {
@@ -134,7 +131,11 @@ export async function syncBuilderFlowSessionIfPresent(sessionDir: string): Promi
   return syncBuilderFlowSession({ sessionDir });
 }
 
-async function syncAndProject(context: SessionContext, initial: BuilderBuildRunResult): Promise<BuilderFlowSessionResult> {
+async function syncAndProject(
+  context: SessionContext,
+  initial: BuilderBuildRunResult,
+  sidecarSnapshot: SidecarSnapshot,
+): Promise<BuilderFlowSessionResult> {
   let run = initial;
   let attached = false;
   const gates = openGatesForResult(run);
@@ -164,7 +165,6 @@ async function syncAndProject(context: SessionContext, initial: BuilderBuildRunR
       }
     }
   }
-  const sidecarSnapshot = readSidecarSnapshot(context);
   const projection = projectFlowRun(context, run, sidecarSnapshot.state);
   writeProjection(context, projection, sidecarSnapshot.raw, "projection");
   return {
@@ -174,6 +174,17 @@ async function syncAndProject(context: SessionContext, initial: BuilderBuildRunR
     projection,
     attached,
   };
+}
+
+function assertRunSubjectBinding(run: BuilderBuildRunResult, subject: string): void {
+  if (run.state.subject !== subject) {
+    throw new BuilderBuildRunInputError("flow_run.state.subject", "must match the selected Work Item");
+  }
+  if (isRecord(run.state.params)
+    && Object.prototype.hasOwnProperty.call(run.state.params, "subject")
+    && run.state.params.subject !== subject) {
+    throw new BuilderBuildRunInputError("flow_run.state.params.subject", "must match the selected Work Item");
+  }
 }
 
 function resolveSessionContext(sessionDirInput: string): SessionContext {
