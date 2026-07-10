@@ -46,6 +46,27 @@ else
   sed -n '1,80p' "$default_out"
 fi
 
+# Named acceptance outcomes must exercise the real catalog manifests, not only
+# the generic resolver fixture.
+for named_kit in builder knowledge; do
+  NAMED_HOME="$TMP_DIR/named-$named_kit-codex-home"
+  mkdir -p "$NAMED_HOME"
+  named_out="$TMP_DIR/named-$named_kit.out"
+  if CODEX_HOME="$NAMED_HOME" flow_agents_node "$CLI" install "$named_kit" >"$named_out" 2>&1 \
+    && [[ -f "$NAMED_HOME/kits/local/repositories/$named_kit/kit.json" ]] \
+    && node - "$NAMED_HOME/kits/local/installed-kits.json" "$named_kit" <<'NODE'
+const fs = require("node:fs");
+const registry = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+if (!registry.kits.some((kit) => kit.id === process.argv[3])) process.exit(1);
+NODE
+  then
+    pass "$named_kit kit install without --dest uses isolated CODEX_HOME"
+  else
+    fail "$named_kit kit install without --dest did not use isolated CODEX_HOME"
+    sed -n '1,100p' "$named_out"
+  fi
+done
+
 list_out="$TMP_DIR/default-list.out"
 if CODEX_HOME="$DEFAULT_CODEX_HOME" flow_agents_node "$CLI" list >"$list_out" 2>&1 \
   && grep -q "example-kit" "$list_out"; then
@@ -203,6 +224,68 @@ if [[ "$CATALOG_HASH_BEFORE" == "$(shasum -a 256 "$ROOT/kits/catalog.json" | awk
   pass "install-git does not mutate source kits/catalog.json"
 else
   fail "source kits/catalog.json changed during install-git test"
+fi
+
+# --- Security regressions: symlink escapes and local-source overlap ---
+REGISTRY_ESCAPE_DEST="$TMP_DIR/registry-escape-dest"
+REGISTRY_ESCAPE_OUTSIDE="$TMP_DIR/registry-escape-outside.json"
+mkdir -p "$REGISTRY_ESCAPE_DEST/kits/local"
+printf '{"outside":"unchanged"}\n' > "$REGISTRY_ESCAPE_OUTSIDE"
+ln -s "$REGISTRY_ESCAPE_OUTSIDE" "$REGISTRY_ESCAPE_DEST/kits/local/installed-kits.json"
+if flow_agents_node "$CLI" install "$VALID_SRC" --dest "$REGISTRY_ESCAPE_DEST" >"$TMP_DIR/registry-escape.out" 2>&1; then
+  fail "symlinked kit registry should fail closed"
+elif grep -q '"outside":"unchanged"' "$REGISTRY_ESCAPE_OUTSIDE"; then
+  pass "symlinked kit registry fails closed without outside write"
+else
+  fail "symlinked kit registry modified outside file"
+fi
+
+REPOSITORY_ESCAPE_DEST="$TMP_DIR/repository-escape-dest"
+REPOSITORY_ESCAPE_OUTSIDE="$TMP_DIR/repository-escape-outside"
+mkdir -p "$REPOSITORY_ESCAPE_DEST/kits/local/repositories" "$REPOSITORY_ESCAPE_OUTSIDE"
+printf 'unchanged\n' > "$REPOSITORY_ESCAPE_OUTSIDE/sentinel"
+ln -s "$REPOSITORY_ESCAPE_OUTSIDE" "$REPOSITORY_ESCAPE_DEST/kits/local/repositories/example-kit"
+if flow_agents_node "$CLI" install "$VALID_SRC" --dest "$REPOSITORY_ESCAPE_DEST" >"$TMP_DIR/repository-escape.out" 2>&1; then
+  fail "symlinked kit repository should fail closed"
+elif [[ "$(cat "$REPOSITORY_ESCAPE_OUTSIDE/sentinel")" == "unchanged" && ! -e "$REPOSITORY_ESCAPE_OUTSIDE/kit.json" ]]; then
+  pass "symlinked kit repository fails closed without outside write"
+else
+  fail "symlinked kit repository modified outside directory"
+fi
+
+SELF_DEST="$TMP_DIR/self-overlap-dest"
+SELF_SOURCE="$SELF_DEST/kits/local/repositories/example-kit"
+mkdir -p "$(dirname "$SELF_SOURCE")"
+cp -R "$VALID_SRC" "$SELF_SOURCE"
+if flow_agents_node "$CLI" install "$SELF_SOURCE" --dest "$SELF_DEST" >"$TMP_DIR/self-overlap.out" 2>&1; then
+  fail "exact local-kit self-install should be rejected"
+elif [[ -f "$SELF_SOURCE/kit.json" ]] && grep -q "refusing overlapping paths" "$TMP_DIR/self-overlap.out"; then
+  pass "exact local-kit self-install is rejected before source mutation"
+else
+  fail "exact local-kit self-install did not preserve its source"
+fi
+
+DESCENDANT_DEST="$TMP_DIR/descendant-overlap-dest"
+cp -R "$VALID_SRC" "$DESCENDANT_DEST"
+if flow_agents_node "$CLI" install "$DESCENDANT_DEST" --dest "$DESCENDANT_DEST" >"$TMP_DIR/descendant-overlap.out" 2>&1; then
+  fail "kit target nested beneath source should be rejected"
+elif [[ -f "$DESCENDANT_DEST/kit.json" ]] && grep -q "refusing overlapping paths" "$TMP_DIR/descendant-overlap.out"; then
+  pass "kit target nested beneath source is rejected before mutation"
+else
+  fail "source-ancestor overlap did not preserve source"
+fi
+
+ANCESTOR_DEST="$TMP_DIR/ancestor-overlap-dest"
+ANCESTOR_TARGET="$ANCESTOR_DEST/kits/local/repositories/example-kit"
+ANCESTOR_SOURCE="$ANCESTOR_TARGET/nested-source"
+mkdir -p "$ANCESTOR_TARGET"
+cp -R "$VALID_SRC" "$ANCESTOR_SOURCE"
+if flow_agents_node "$CLI" install "$ANCESTOR_SOURCE" --dest "$ANCESTOR_DEST" >"$TMP_DIR/ancestor-overlap.out" 2>&1; then
+  fail "kit source nested beneath target should be rejected"
+elif [[ -f "$ANCESTOR_SOURCE/kit.json" ]] && grep -q "refusing overlapping paths" "$TMP_DIR/ancestor-overlap.out"; then
+  pass "kit source nested beneath target is rejected before mutation"
+else
+  fail "target-ancestor overlap did not preserve source"
 fi
 
 echo ""

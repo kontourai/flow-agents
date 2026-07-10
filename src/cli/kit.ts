@@ -5,7 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
-import { assertPathContained, copyDir, isoNow, readJson, walkFiles, writeJson } from "../lib/fs.js";
+import { assertPathContained, assertPathsDisjoint, atomicWriteJson, copyDirAtomic, ensureSafeDirectory, isoNow, readJson, walkFiles } from "../lib/fs.js";
 import { assertKitRepository, deriveKitTargets, parseKitDependencies } from "../flow-kit/validate.js";
 import { activateCodexLocal, activateStrandsLocal } from "../runtime-adapters.js";
 import { defaultCodexHome } from "../lib/local-artifact-root.js";
@@ -132,13 +132,25 @@ async function installLocalSource(source: string, argv: string[]): Promise<numbe
     return 1;
   }
   const kitId = String(manifest.id);
+  const target = installedPath(dest, kitId);
+  try {
+    assertPathsDisjoint(source, target);
+    ensureSafeDirectory(dest, dest);
+    assertPathContained(dest, target);
+    ensureSafeDirectory(dest, path.dirname(target));
+    const registryFile = registryPath(dest);
+    ensureSafeDirectory(dest, path.dirname(registryFile));
+    if (fs.existsSync(registryFile) && fs.lstatSync(registryFile).isSymbolicLink()) {
+      throw new Error(`refusing to read or replace symlink: ${registryFile}`);
+    }
+  } catch (error) {
+    console.error(`install: unsafe source or destination: ${(error as Error).message}`);
+    return 1;
+  }
   warnUninstalledDependencies(manifest, path.join(source, "kit.json"), dest);
   const hash = contentHash(source);
   const registry = loadRegistry(dest);
   const existing = registry.kits.find((entry) => entry.id === kitId);
-  const target = installedPath(dest, kitId);
-  fs.mkdirSync(dest, { recursive: true });
-  assertPathContained(dest, target);
   const sourceText = source;
   if (existing && existing.source !== sourceText && !flagBool(args.flags, "update")) {
     console.log(`conflict: kit '${kitId}' is already installed from ${existing.source}; rerun with --update to replace it`);
@@ -148,7 +160,7 @@ async function installLocalSource(source: string, argv: string[]): Promise<numbe
     console.log(`kit '${kitId}' is already installed from ${sourceText}`);
     return 0;
   }
-  copyDir(source, target);
+  copyDirAtomic(dest, source, target);
   const entry: Record<string, unknown> = {
     id: kitId,
     source: sourceText,
@@ -159,7 +171,7 @@ async function installLocalSource(source: string, argv: string[]): Promise<numbe
   };
   if (typeof manifest.version === "string" && manifest.version) entry.version = manifest.version;
   registry.kits = existing ? registry.kits.map((item) => item.id === kitId ? entry : item) : [...registry.kits, entry];
-  writeJson(registryPath(dest), registry);
+  atomicWriteJson(dest, registryPath(dest), registry);
   console.log(`${existing ? "updated" : "installed"} local kit '${kitId}' at ${target}`);
   return 0;
 }
@@ -216,8 +228,19 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
     const registry = loadRegistry(dest);
     const existing = registry.kits.find((entry) => entry.id === kitId);
     const target = installedPath(dest, kitId);
-    fs.mkdirSync(dest, { recursive: true });
-    assertPathContained(dest, target);
+    try {
+      ensureSafeDirectory(dest, dest);
+      assertPathContained(dest, target);
+      ensureSafeDirectory(dest, path.dirname(target));
+      const registryFile = registryPath(dest);
+      ensureSafeDirectory(dest, path.dirname(registryFile));
+      if (fs.existsSync(registryFile) && fs.lstatSync(registryFile).isSymbolicLink()) {
+        throw new Error(`refusing to read or replace symlink: ${registryFile}`);
+      }
+    } catch (error) {
+      console.error(`install: unsafe destination: ${(error as Error).message}`);
+      return 1;
+    }
     const sourceText = repoUrl + (ref ? `#${ref}` : "");
     if (existing && existing.source !== sourceText && !update) {
       console.log(`conflict: kit '${kitId}' is already installed from ${existing.source}; rerun with --update to replace it`);
@@ -227,7 +250,7 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
       console.log(`kit '${kitId}' is already installed from ${sourceText}`);
       return 0;
     }
-    copyDir(tmpBase, target);
+    copyDirAtomic(dest, tmpBase, target);
     const entry: Record<string, unknown> = {
       id: kitId,
       source: sourceText,
@@ -238,7 +261,7 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
     };
     if (typeof manifest.version === "string" && manifest.version) entry.version = manifest.version;
     registry.kits = existing ? registry.kits.map((item) => item.id === kitId ? entry : item) : [...registry.kits, entry];
-    writeJson(registryPath(dest), registry);
+    atomicWriteJson(dest, registryPath(dest), registry);
     console.log(`${existing ? "updated" : "installed"} git kit '${kitId}' from ${sourceText} at ${target}`);
     return 0;
   } finally {
