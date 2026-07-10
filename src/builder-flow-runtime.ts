@@ -44,10 +44,28 @@ type SessionContext = {
   bundleFile: string;
 };
 
+type SidecarSnapshot = {
+  state: AnyRecord;
+  raw: string;
+};
+
+type ProjectionTargetSnapshot = {
+  file: string;
+  raw: string | null;
+  root: string;
+  field: string;
+};
+
+type PreparedProjectionWrites = {
+  targets: ProjectionTargetSnapshot[];
+  actorEntries: string[] | null;
+  writes: Array<{ file: string; content: string }>;
+};
+
 export async function startBuilderFlowSession(input: BuilderFlowSessionInput): Promise<BuilderFlowSessionResult> {
   const context = resolveSessionContext(input.sessionDir);
-  const sidecarState = readSidecarState(context);
-  const subject = workflowSubject(sidecarState);
+  const sidecarSnapshot = readSidecarSnapshot(context);
+  const subject = workflowSubject(sidecarSnapshot.state);
   let run: BuilderBuildRunResult;
   try {
     run = await loadBuilderBuildRun({
@@ -75,6 +93,33 @@ export async function syncBuilderFlowSession(input: BuilderFlowSessionInput): Pr
     runId: context.slug,
   });
   return syncAndProject(context, run);
+}
+
+export async function recoverBuilderFlowSession(input: BuilderFlowSessionInput): Promise<BuilderFlowSessionResult> {
+  const context = resolveSessionContext(input.sessionDir);
+  const sidecarSnapshot = readSidecarSnapshot(context);
+  const subject = workflowSubject(sidecarSnapshot.state);
+  const run = await loadBuilderBuildRun({
+    cwd: context.projectRoot,
+    runId: context.slug,
+  });
+  if (run.state.subject !== subject) {
+    throw new BuilderBuildRunInputError("flow_run.state.subject", "must match the selected Work Item");
+  }
+  if (isRecord(run.state.params)
+    && Object.prototype.hasOwnProperty.call(run.state.params, "subject")
+    && run.state.params.subject !== subject) {
+    throw new BuilderBuildRunInputError("flow_run.state.params.subject", "must match the selected Work Item");
+  }
+  const projection = projectFlowRun(context, run, sidecarSnapshot.state);
+  writeProjection(context, projection, sidecarSnapshot.raw, "recovery");
+  return {
+    sessionDir: context.sessionDir,
+    projectRoot: context.projectRoot,
+    run,
+    projection,
+    attached: false,
+  };
 }
 
 export async function syncBuilderFlowSessionIfPresent(sessionDir: string): Promise<BuilderFlowSessionResult | null> {
@@ -119,8 +164,9 @@ async function syncAndProject(context: SessionContext, initial: BuilderBuildRunR
       }
     }
   }
-  const projection = projectFlowRun(context, run);
-  writeProjection(context, projection);
+  const sidecarSnapshot = readSidecarSnapshot(context);
+  const projection = projectFlowRun(context, run, sidecarSnapshot.state);
+  writeProjection(context, projection, sidecarSnapshot.raw, "projection");
   return {
     sessionDir: context.sessionDir,
     projectRoot: context.projectRoot,
@@ -137,6 +183,7 @@ function resolveSessionContext(sessionDirInput: string): SessionContext {
   if (path.basename(artifactRoot) !== "flow-agents" || path.basename(kontouraiRoot) !== ".kontourai") {
     throw new BuilderBuildRunInputError("sessionDir", "must be .kontourai/flow-agents/<slug>");
   }
+  assertSafeDirectory(sessionDir, artifactRoot, "sessionDir");
   const slug = path.basename(sessionDir);
   if (!slug || slug === "." || slug === "..") {
     throw new BuilderBuildRunInputError("sessionDir", "must name a session");
@@ -145,6 +192,7 @@ function resolveSessionContext(sessionDirInput: string): SessionContext {
   if (!fs.existsSync(stateFile)) {
     throw new BuilderBuildRunInputError("sessionDir", "must contain state.json");
   }
+  assertSafeFile(stateFile, sessionDir, "state.json");
   return {
     sessionDir,
     artifactRoot,
@@ -155,19 +203,22 @@ function resolveSessionContext(sessionDirInput: string): SessionContext {
   };
 }
 
-function readSidecarState(context: SessionContext): AnyRecord {
-  const value = JSON.parse(fs.readFileSync(context.stateFile, "utf8"));
+function readSidecarSnapshot(context: SessionContext): SidecarSnapshot {
+  assertSafeFile(context.stateFile, context.sessionDir, "state.json");
+  const raw = fs.readFileSync(context.stateFile, "utf8");
+  const value = JSON.parse(raw);
   if (!isRecord(value) || value.task_slug !== context.slug) {
     throw new BuilderBuildRunInputError("sessionDir", "state.json task_slug must match the session directory");
   }
-  return value;
+  return { state: value, raw };
 }
 
 function workflowSubject(state: AnyRecord): string {
-  const refs = Array.isArray(state.work_item_refs)
-    ? state.work_item_refs.filter((value: unknown): value is string => typeof value === "string" && value.length > 0)
-    : [];
-  if (refs.length !== 1) {
+  const refs = state.work_item_refs;
+  if (!Array.isArray(refs)
+    || refs.length !== 1
+    || typeof refs[0] !== "string"
+    || refs[0].trim().length === 0) {
     throw new BuilderBuildRunInputError("state.work_item_refs", "must contain exactly one selected Work Item for builder.build");
   }
   return refs[0]!;
@@ -225,8 +276,7 @@ function manifestEvidence(manifest: JsonObject): AnyRecord[] {
   return Array.isArray(manifest.evidence) ? manifest.evidence.filter(isRecord) : [];
 }
 
-function projectFlowRun(context: SessionContext, run: BuilderBuildRunResult): AnyRecord {
-  const sidecar = readSidecarState(context);
+function projectFlowRun(context: SessionContext, run: BuilderBuildRunResult, sidecar: AnyRecord): AnyRecord {
   const definition = JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8"));
   const gates = openGates(definition, run.state) as Array<FlowGate & { id: string }>;
   const complete = run.state.status === "completed";
@@ -279,23 +329,164 @@ function projectFlowRun(context: SessionContext, run: BuilderBuildRunResult): An
   };
 }
 
-function writeProjection(context: SessionContext, projection: AnyRecord): void {
-  fs.writeFileSync(context.stateFile, `${JSON.stringify(projection, null, 2)}\n`);
-  const pointerFiles = [path.join(context.artifactRoot, "current.json")];
-  const actorRoot = path.join(context.artifactRoot, "current");
-  if (fs.existsSync(actorRoot)) {
-    pointerFiles.push(...fs.readdirSync(actorRoot)
-      .filter((name) => name.endsWith(".json"))
-      .map((name) => path.join(actorRoot, name)));
+function writeProjection(context: SessionContext, projection: AnyRecord, expectedStateRaw: string, operation: string): void {
+  const prepared = prepareProjectionWrites(context, projection, expectedStateRaw, operation);
+  assertProjectionTargetsUnchanged(context, prepared, operation);
+  for (const write of prepared.writes) writeExistingFileNoFollow(write.file, write.content);
+}
+
+function prepareProjectionWrites(
+  context: SessionContext,
+  projection: AnyRecord,
+  expectedStateRaw: string,
+  operation: string,
+): PreparedProjectionWrites {
+  const targets: ProjectionTargetSnapshot[] = [];
+  const writes: Array<{ file: string; content: string }> = [];
+  const stateTarget = readProjectionTarget(context.stateFile, context.sessionDir, "state.json");
+  targets.push(stateTarget);
+  if (stateTarget.raw !== expectedStateRaw) {
+    throw new BuilderBuildRunInputError("state.json", `changed during ${operation}`);
   }
+  writes.push({ file: context.stateFile, content: `${JSON.stringify(projection, null, 2)}\n` });
+
+  const pointerFiles: string[] = [];
+  const globalPointer = path.join(context.artifactRoot, "current.json");
+  const globalTarget = readOptionalProjectionTarget(globalPointer, context.artifactRoot, "current.json");
+  targets.push(globalTarget);
+  if (globalTarget.raw !== null) pointerFiles.push(globalPointer);
+
+  const actorRoot = path.join(context.artifactRoot, "current");
+  let actorEntries: string[] | null = null;
+  if (pathExistsNoFollow(actorRoot)) {
+    assertSafeDirectory(actorRoot, context.artifactRoot, "current directory");
+    actorEntries = fs.readdirSync(actorRoot).sort();
+    for (const name of actorEntries) {
+      const file = path.join(actorRoot, name);
+      const stat = fs.lstatSync(file);
+      if (stat.isSymbolicLink()) {
+        throw new BuilderBuildRunInputError("projection target", `current/${name} must not be a symbolic link`);
+      }
+      if (!name.endsWith(".json")) continue;
+      if (!stat.isFile()) {
+        throw new BuilderBuildRunInputError("projection target", `current/${name} must be a regular file`);
+      }
+      const target = readProjectionTarget(file, actorRoot, `current/${name}`);
+      targets.push(target);
+      pointerFiles.push(file);
+    }
+  }
+
   for (const file of pointerFiles) {
-    if (!fs.existsSync(file)) continue;
-    const pointer = JSON.parse(fs.readFileSync(file, "utf8"));
+    const target = targets.find((candidate) => candidate.file === file)!;
+    const pointer = parseProjectionTarget(target);
     if (!isRecord(pointer) || pointer.active_slug !== context.slug) continue;
-    pointer.active_flow_id = BUILDER_BUILD_FLOW_ID;
-    pointer.active_step_id = projection.flow_run.current_step;
-    pointer.updated_at = projection.updated_at;
-    fs.writeFileSync(file, `${JSON.stringify(pointer, null, 2)}\n`);
+    const output = {
+      ...pointer,
+      active_flow_id: BUILDER_BUILD_FLOW_ID,
+      active_step_id: projection.flow_run.current_step,
+      updated_at: projection.updated_at,
+    };
+    writes.push({ file, content: `${JSON.stringify(output, null, 2)}\n` });
+  }
+  return { targets, actorEntries, writes };
+}
+
+function assertProjectionTargetsUnchanged(
+  context: SessionContext,
+  prepared: PreparedProjectionWrites,
+  operation: string,
+): void {
+  const actorRoot = path.join(context.artifactRoot, "current");
+  const currentActorEntries = pathExistsNoFollow(actorRoot)
+    ? (assertSafeDirectory(actorRoot, context.artifactRoot, "current directory"), fs.readdirSync(actorRoot).sort())
+    : null;
+  if (JSON.stringify(currentActorEntries) !== JSON.stringify(prepared.actorEntries)) {
+    throw new BuilderBuildRunInputError("current", `directory changed during ${operation}`);
+  }
+  for (const target of prepared.targets) {
+    const current = readOptionalProjectionTarget(target.file, target.root, target.field);
+    if (current.raw !== target.raw) {
+      throw new BuilderBuildRunInputError(target.field, `changed during ${operation}`);
+    }
+  }
+}
+
+function readOptionalProjectionTarget(file: string, root: string, field: string): ProjectionTargetSnapshot {
+  if (!pathExistsNoFollow(file)) return { file, raw: null, root, field };
+  return readProjectionTarget(file, root, field);
+}
+
+function readProjectionTarget(file: string, root: string, field: string): ProjectionTargetSnapshot {
+  assertSafeFile(file, root, field);
+  return { file, raw: fs.readFileSync(file, "utf8"), root, field };
+}
+
+function parseProjectionTarget(target: ProjectionTargetSnapshot): unknown {
+  try {
+    return JSON.parse(target.raw!);
+  } catch (error) {
+    throw new BuilderBuildRunInputError("projection target", `${target.field} must contain valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function assertSafeDirectory(directory: string, root: string, field: string): void {
+  if (!pathExistsNoFollow(directory)) {
+    throw new BuilderBuildRunInputError(field, "must exist");
+  }
+  const stat = fs.lstatSync(directory);
+  if (stat.isSymbolicLink()) {
+    throw new BuilderBuildRunInputError(field, "must not be a symbolic link");
+  }
+  if (!stat.isDirectory()) {
+    throw new BuilderBuildRunInputError(field, "must be a directory");
+  }
+  assertContainedPath(directory, root, field);
+}
+
+function pathExistsNoFollow(candidate: string): boolean {
+  try {
+    fs.lstatSync(candidate);
+    return true;
+  } catch (error) {
+    if (isRecord(error) && error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function assertSafeFile(file: string, root: string, field: string): void {
+  const stat = fs.lstatSync(file);
+  if (stat.isSymbolicLink()) {
+    throw new BuilderBuildRunInputError(field, "must not be a symbolic link");
+  }
+  if (!stat.isFile()) {
+    throw new BuilderBuildRunInputError(field, "must be a regular file");
+  }
+  assertContainedPath(file, root, field);
+}
+
+function assertContainedPath(candidate: string, root: string, field: string): void {
+  if (!pathIsWithin(candidate, root)) {
+    throw new BuilderBuildRunInputError(field, "must remain within its expected artifact root");
+  }
+  const realCandidate = fs.realpathSync(candidate);
+  const realRoot = fs.realpathSync(root);
+  if (!pathIsWithin(realCandidate, realRoot)) {
+    throw new BuilderBuildRunInputError(field, "must not escape its expected artifact root");
+  }
+}
+
+function pathIsWithin(candidate: string, root: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+}
+
+function writeExistingFileNoFollow(file: string, content: string): void {
+  const descriptor = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW);
+  try {
+    fs.writeFileSync(descriptor, content);
+  } finally {
+    fs.closeSync(descriptor);
   }
 }
 
