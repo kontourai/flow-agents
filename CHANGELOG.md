@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.4.2](https://github.com/kontourai/flow-agents/compare/v3.4.1...v3.4.2) (2026-07-10)
+
+
+### Fixes
+
+* enforce canonical Builder entry action ([#536](https://github.com/kontourai/flow-agents/issues/536)) ([bab5dfe](https://github.com/kontourai/flow-agents/commit/bab5dfe419a42b137dcb79bd276edf3268c5fb23))
+
 ## [3.4.1](https://github.com/kontourai/flow-agents/compare/v3.4.0...v3.4.1) (2026-07-10)
 
 
