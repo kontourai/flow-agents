@@ -79,6 +79,15 @@ This skill owns orchestration between waves. The contracts own artifact continui
    - **Checkpoint**: update session file with completed tasks and next wave
    - Record worker progress with `npm run workflow:sidecar -- record-agent-event --artifact-dir <artifact-dir> --agent-id <worker-id> --kind evidence --status active|done --summary ...`
 9. After all waves: set session file `status: executed` and update `state.json` / `handoff.json` with `advance-state`
+10. For an active Builder Flow run, record the `implementation-scope` gate claim only after the changed-file scope and acceptance mapping are complete:
+    ```bash
+    npm run workflow:sidecar -- record-gate-claim .kontourai/flow-agents/<slug> \
+      --expectation implementation-scope \
+      --status pass \
+      --summary "Implementation completed within the planned scope; changed files and supported acceptance criteria are recorded." \
+      --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/<slug>/<slug>--execute-plan.md","summary":"Execution record with changed files, acceptance mapping, and worker evidence."}'
+    ```
+    Use `fail` or `not_verified` when scope integrity is unresolved. The sidecar writer synchronizes Flow; it does not declare the execute gate passed itself.
 
 The orchestrator is responsible for keeping root `state.json` current, and performs that update **exclusively** through `npm run workflow:sidecar -- advance-state` — never through a direct Write/Edit tool call against the sidecar path. `config-protection.js` blocks direct tool-mediated writes to `state.json` by design; that block is expected and correct, not a bug to route around. Workers should receive the workflow artifact root explicitly and append agent events under that root instead of inferring the slug or rewriting shared sidecars.
 

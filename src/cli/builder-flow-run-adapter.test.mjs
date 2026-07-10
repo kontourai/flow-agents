@@ -9,6 +9,7 @@ import {
   FLOW_RUN_EVIDENCE_MANIFEST_PATH,
   FLOW_RUN_REPORT_JSON_FILE,
   FLOW_RUN_STATE_FILE,
+  runDir,
   startRun,
 } from "@kontourai/flow";
 
@@ -39,7 +40,7 @@ function writeJson(file, value) {
 }
 
 function runFile(cwd, runId, file) {
-  return path.join(cwd, ".flow", "runs", runId, file);
+  return path.join(runDir(runId, cwd), file);
 }
 
 function evidenceDirectory(cwd, runId) {
@@ -110,10 +111,13 @@ function trustBundle({ claims, status = "verified", waiver = false, stale = fals
       claimType: claim.claimType,
       fieldOrBehavior: "parent gated prefix contract",
       value: `${claim.claimType} for ${claim.subjectId}`,
+      metadata: {
+        workflow_subject_ref: claim.workflowSubjectRef ?? claim.subjectId,
+        ...(waiver ? { waiver: { reason: "plausible fixture waiver", approved_by: "flow-agents-test", approved_at: FIXTURE_NOW } } : {}),
+      },
       createdAt: stale ? "2026-01-01T00:00:00.000Z" : FIXTURE_NOW,
       updatedAt: stale ? "2026-01-01T00:00:00.000Z" : FIXTURE_NOW,
       ...(stale ? { impactLevel: "high", verificationPolicyId: policyId } : {}),
-      ...(waiver ? { metadata: { waiver: { reason: "plausible fixture waiver", approved_by: "flow-agents-test", approved_at: FIXTURE_NOW } } } : {}),
     })),
     evidence,
     policies: stale
@@ -191,9 +195,9 @@ test("start is creation-only and persists canonical id/version", async () => {
   const persisted = snapshotRun(cwd, runId);
 
   assert.equal(result.definitionId, BUILDER_BUILD_FLOW_ID);
-  assert.equal(result.definitionVersion, "1.0");
+  assert.equal(result.definitionVersion, "1.1");
   assert.equal(persisted.state.definition_id, BUILDER_BUILD_FLOW_ID);
-  assert.equal(persisted.state.definition_version, "1.0");
+  assert.equal(persisted.state.definition_version, "1.1");
   assert.equal(persisted.state.subject, SUBJECT);
   assert.equal(persisted.state.status, "active");
   assert.equal(persisted.state.current_step, "pull-work");
@@ -454,7 +458,7 @@ test("result identity comes from the persisted canonical run", async () => {
     assert.equal(result.definitionVersion, persisted.state.definition_version);
   }
   assert.equal(persisted.state.definition_id, BUILDER_BUILD_FLOW_ID);
-  assert.equal(persisted.state.definition_version, "1.0");
+  assert.equal(persisted.state.definition_version, "1.1");
 });
 
 test("failed verify evidence routes back only after sequential prefix advancement", async () => {

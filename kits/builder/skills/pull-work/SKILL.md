@@ -469,6 +469,14 @@ After a merge, automatic continuation may inspect the queue and write a new pull
 
 When the Pickup Gate passes and work is selected (not just a shepherding scan or WIP-only audit), record the gate claim for the Builder Kit `pull-work` step before handing off to `design-probe` or `plan-work`. This satisfies the `builder.pull-work.selected` gate expectation.
 
+Start the canonical Flow run before recording the first gate claim. This is idempotent for an existing run and projects Flow's current step and gate requirements into the sidecar:
+
+```bash
+flow-agents builder-run start --session-dir .kontourai/flow-agents/<slug>
+```
+
+Do not start at a later step. Flow owns advancement from `pull-work` after it evaluates the recorded evidence.
+
 Use the `selected_item_ids` as the evidence artifact ref and confirm that scope and acceptance criteria are present in the pull-work artifact:
 
 ```bash
@@ -478,6 +486,8 @@ npm run workflow:sidecar -- record-gate-claim .kontourai/flow-agents/<slug> \
   --summary "Selected <work-item-ref>: scope clear, acceptance criteria present." \
   --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/<slug>/<slug>--pull-work.md","summary":"Pull-work artifact with selected_item_ids, scope, and acceptance criteria."}'
 ```
+
+The sidecar writer synchronizes an existing canonical Flow run after writing the trust bundle. If synchronization was interrupted, recover with the exact `next_action.command` from `state.json`; do not edit Flow state or restamp the active step.
 
 Use `--status fail` when the gate fails (blocker recorded but no selection made). Use `--status not_verified` only when the session has no active flow step (non-Builder-Kit usage).
 

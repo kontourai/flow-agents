@@ -3,6 +3,7 @@ import { basename } from "node:path";
 import { main as effectiveBacklogSettings } from "./cli/effective-backlog-settings.js";
 import { main as effectiveAssignmentProviderSettings } from "./cli/effective-assignment-provider-settings.js";
 import { main as assignmentProvider } from "./cli/assignment-provider.js";
+import { main as builderRun } from "./cli/builder-run.js";
 import { main as consoleLearningProjection } from "./cli/console-learning-projection.js";
 import { main as kit } from "./cli/kit.js";
 import { main as fixtureRetirementAudit } from "./cli/fixture-retirement-audit.js";
@@ -26,6 +27,7 @@ import { main as verify } from "./cli/verify.js";
 
 const availableCommands = new Map<string, (argv: string[]) => number | Promise<number>>([
   ["build-bundles", () => buildBundles()],
+  ["builder-run", builderRun],
   ["console-learning-projection", consoleLearningProjection],
   ["context-map", contextMap],
   ["assignment-provider", assignmentProvider],

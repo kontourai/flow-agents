@@ -208,4 +208,16 @@ explicitly accepts them as unrelated residual risk.
 
 Evidence passes only when acceptance criteria, scope integrity, CI/runtime evidence, and residual risk are sufficient for the risk class.
 
+For an active Builder Flow run, record merge readiness only after this skill reaches `PASS`:
+
+```bash
+npm run workflow:sidecar -- record-gate-claim .kontourai/flow-agents/<slug> \
+  --expectation merge-readiness \
+  --status pass \
+  --summary "Evidence gate passed: verified scope, acceptance evidence, review findings, and unresolved risks support provider review." \
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/<slug>/evidence.json","summary":"Structured evidence verdict and acceptance coverage."}'
+```
+
+Record `fail` or `not_verified` when the verdict is not `PASS`. The resulting trust bundle is evaluated by Flow and may route back to verification, execution, planning, or Probe according to the canonical definition.
+
 After `PASS`, hand off to `publish-change` when the work is still local, or to `release-readiness` when the verified commit, pushed branch, provider change record or no-provider-change reason, provider checks, closing refs, structured evidence refs, and `Acceptance Evidence` table are available. After `FAIL` or `NOT_VERIFIED`, stop and name the missing work or evidence.

@@ -64,6 +64,7 @@ CHECKS=(
   "Pull work provider integration|bash evals/integration/test_pull_work_provider.sh"
   "Veritas governance kit integration|bash evals/integration/test_veritas_governance_kit.sh"
   "Builder step producers integration|bash evals/integration/test_builder_step_producers.sh"
+  "Builder canonical Flow run integration|bash evals/integration/test_builder_entry_enforcement.sh"
   "Codex hook resolution integration|bash evals/integration/test_codex_hook_resolution.sh"
   "Critique supersession roundtrip integration|bash evals/integration/test_critique_supersession_roundtrip.sh"
   "Dual emit flow step integration|bash evals/integration/test_dual_emit_flow_step.sh"
@@ -159,6 +160,7 @@ LANE_RUNTIME_AND_KIT=(
 
 LANE_INTEGRATION_COVERAGE=(
   "Builder step producers integration"
+  "Builder canonical Flow run integration"
   "Codex hook resolution integration"
   "Critique supersession roundtrip integration"
   "Dual emit flow step integration"

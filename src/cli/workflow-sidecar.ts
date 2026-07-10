@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
 import { resolveActiveFlowStep, resolveAllFlowGateExpects, resolveFlowFilePath, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
+import { syncBuilderFlowSessionIfPresent } from "../builder-flow-runtime.js";
 // #291 Wave 1 Task 1.1 exports: ensure-session's ownership guard reuses the EXACT same
 // assignment ⋈ liveness join / claim / supersede logic #290 already ships for the
 // `assignment-provider` CLI, rather than reimplementing a second, parallel join (static ESM
@@ -652,6 +653,16 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       return null;
     }
   })();
+  const workflowSubjectRef: string | null = (() => {
+    if (!flowAgentsDir) return null;
+    try {
+      const state = loadJson(path.join(flowAgentsDir, slug, "state.json"));
+      const refs = Array.isArray(state.work_item_refs) ? state.work_item_refs : [];
+      return refs.length === 1 && typeof refs[0] === "string" && refs[0].length > 0 ? refs[0] : null;
+    } catch {
+      return null;
+    }
+  })();
   // repoRoot resolution mirrors resolveActiveFlowStep's own internal findRepoRoot(path.dirname(
   // flowAgentsDir)) call exactly (flow-resolver.ts) — findRepoRootFromDir is this file's
   // fallback-to-cwd equivalent of that unexported helper. NOTE (#270 MEDIUM fix, iteration 3):
@@ -928,6 +939,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const gateClaimDeclaredType = typeof check._gate_claim_declared_type === "string" ? check._gate_claim_declared_type : null;
     const gateClaimDeclaredSubject = typeof check._gate_claim_declared_subject === "string" ? check._gate_claim_declared_subject : null;
     const gateClaimDeclaredStepId = typeof check._gate_claim_declared_step_id === "string" ? check._gate_claim_declared_step_id : null;
+    const gateClaimRouteReason = typeof check._gate_claim_route_reason === "string" ? check._gate_claim_route_reason : null;
     // #270 CRITICAL/HIGH fix: checksFromBundle stamps this when it read a claim that is
     // gate-claim-SHAPED (origin:"check", check_kind:"external", kit-typed claimType) but carries
     // NO metadata.gate_claim stamp — a claim this code could not have produced without also
@@ -946,6 +958,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const claimMetadata: AnyObj = {
       origin: "check",
       check_kind: String(check.kind ?? "external"),
+      ...(activeStep && workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}),
       ...(waiver ? { waiver } : {}),
       ...(promotionMeta ? { promotion: promotionMeta } : {}),
       ...(artifactRefsMeta ? { artifact_refs: artifactRefsMeta } : {}),
@@ -1013,7 +1026,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       // restored stamp) takes the currently-active step's id.
       const declaredStepId = gateClaimDeclaredStepId ?? (activeStep ? activeStep.stepId : null);
       const declaredMetadata: AnyObj = gateClaimExpectationId
-        ? { ...claimMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId } }
+        ? { ...claimMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}) } }
         : claimMetadata;
       const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, ...(declaredMetadata ? { metadata: declaredMetadata } : {}) };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
@@ -1047,7 +1060,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     if (declared) {
       // Declared kit-typed claim only — no legacy shadow (ADR 0016 P-d).
       const declaredPolicy = ensurePolicy(declared.claimType, "high", []);
-      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, metadata: { origin: "acceptance" } };
+      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, metadata: { origin: "acceptance", ...(workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}) } };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
       claims.push({ ...declaredClaimObj, status: declaredStatus });
     } else {
@@ -1070,7 +1083,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const supersededBy = typeof c.superseded_by === "string" && c.superseded_by.length > 0 ? c.superseded_by : null;
     const critiqueReviewer = String(c.reviewer ?? "tool-code-reviewer");
     const critiqueReviewedAt = String(c.reviewed_at ?? ts);
-    const critMeta: AnyObj = { origin: "critique", reviewer: critiqueReviewer, reviewed_at: critiqueReviewedAt, ...(supersededBy ? { superseded_by: supersededBy } : {}) };
+    const critMeta: AnyObj = { origin: "critique", reviewer: critiqueReviewer, reviewed_at: critiqueReviewedAt, ...(activeStep && workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}), ...(supersededBy ? { superseded_by: supersededBy } : {}) };
     // A superseded historical write gets a distinct, stable claimId so it co-exists with the live
     // claim of the same critique id (never overwrites or duplicates it). The salt is reproducible
     // across rebuilds because superseded_by + reviewed_at are preserved in metadata.
@@ -1160,6 +1173,7 @@ export async function writeTrustBundle(dir: string, slug: string, timestamp: str
       return { written: false, errors: result.errors };
     }
     writeJson(path.join(dir, "trust.bundle"), bundle);
+    await syncBuilderFlowSessionIfPresent(dir);
     return { written: true, errors: [] };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -1969,7 +1983,9 @@ function ensureSession(p: ReturnType<typeof parseArgs>): number {
     const phaseMap = entry.flowId ? resolvePhaseMap(entry.flowId, findRepoRootFromDir(dir)) : null;
     const initialPhase = Object.entries(phaseMap ?? {}).find(([, step]) => step === entry.firstStep)?.[0];
     const nextAction = entry.flowId
-      ? `Continue at Flow step ${JSON.stringify(entry.stepId)} for work item ${JSON.stringify(workItem.ref)}; satisfy its declared gate before advancing.`
+      ? entry.flowId === "builder.build"
+        ? `Start the canonical Flow run with \`flow-agents builder-run start --session-dir .kontourai/flow-agents/${slug}\`; activate \`pull-work\` for work item ${JSON.stringify(workItem.ref)}, and satisfy the declared gate before advancing.`
+        : `Continue at Flow step ${JSON.stringify(entry.stepId)} for work item ${JSON.stringify(workItem.ref)}; satisfy its declared gate before advancing.`
       : opt(p, "next-action", "Continue.");
     initSidecars(
       dir,
@@ -2419,6 +2435,7 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (typeof gc.claim_type === "string") check._gate_claim_declared_type = gc.claim_type;
     if (typeof gc.subject_type === "string") check._gate_claim_declared_subject = gc.subject_type;
     if (typeof gc.step_id === "string") check._gate_claim_declared_step_id = gc.step_id;
+    if (typeof gc.route_reason === "string") check._gate_claim_route_reason = gc.route_reason;
   };
   // #270 CRITICAL/HIGH fix: a claim that is gate-claim-SHAPED but carries NO metadata.gate_claim
   // stamp predates this cluster (#270/#344): buildTrustBundle could not have produced this shape
@@ -2805,6 +2822,7 @@ function diagnostic(dir: string, code: string, summary: string): never {
  *   --status <pass|fail|not_verified>  (required)
  *   --summary <text>                   (required)
  *   --expectation <id>                 (optional; auto-resolved when the gate has one entry)
+ *   --route-reason <classifier>        (optional; fail only, interpreted by Flow)
  *   --evidence-json <json>             (optional; structured evidence refs)
  *
  * The producer emits a check of kind="external" targeting the gate expectation's declared
@@ -2831,6 +2849,9 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   if (!["pass", "fail", "not_verified"].includes(statusVal)) die("--status must be one of: pass, fail, not_verified");
   const summary = opt(p, "summary") || die("--summary is required");
   const expectationId = opt(p, "expectation");
+  const routeReason = opt(p, "route-reason");
+  if (routeReason && statusVal !== "fail") die("--route-reason is only valid with --status fail");
+  if (routeReason && !/^[a-z][a-z0-9_-]*$/.test(routeReason)) die("--route-reason must be a lowercase classifier identifier");
 
   // Resolve the active flow step from current.json. #291 Wave 2 Task 2.1 (§7)/Task 2.2: resolve
   // the CALLING actor's own current-pointer (per-actor-first, legacy-fallback) rather than an
@@ -2841,6 +2862,9 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   const gateClaimActorKey = resolveReadActorKey(p);
   const activeStep = resolveActiveFlowStep(flowAgentsDir, gateClaimActorKey);
   if (!activeStep) die("record-gate-claim requires an active flow step in current.json (set via ensure-session --flow-id or advance-state --flow-definition)");
+  if (routeReason && !activeStep.routeBackReasons.includes(routeReason)) {
+    die(`--route-reason "${routeReason}" is not declared by gate "${activeStep.gateId}". Available: ${activeStep.routeBackReasons.join(", ") || "none"}`);
+  }
 
   const expects = activeStep.gateExpects;
   if (expects.length === 0) die(`record-gate-claim: active step "${activeStep.stepId}" gate "${activeStep.gateId}" has no expects[] entries`);
@@ -2872,6 +2896,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
     status: statusVal,
     summary,
     _gate_claim_expectation_id: targetExpectation.id,
+    ...(routeReason ? { _gate_claim_route_reason: routeReason } : {}),
   };
 
   // Include structured evidence refs if provided

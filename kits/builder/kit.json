@@ -44,6 +44,59 @@
       "post_verify_targets": ["release-readiness", "learning-review"]
     }
   ],
+  "flow_step_actions": [
+    {
+      "flow_id": "builder.build",
+      "step_id": "pull-work",
+      "skills": ["pull-work"]
+    },
+    {
+      "flow_id": "builder.build",
+      "step_id": "design-probe",
+      "skills": ["pickup-probe"]
+    },
+    {
+      "flow_id": "builder.build",
+      "step_id": "plan",
+      "skills": ["plan-work"]
+    },
+    {
+      "flow_id": "builder.build",
+      "step_id": "execute",
+      "skills": ["execute-plan"]
+    },
+    {
+      "flow_id": "builder.build",
+      "step_id": "verify",
+      "skills": ["review-work", "verify-work"]
+    },
+    {
+      "flow_id": "builder.build",
+      "step_id": "merge-ready",
+      "skills": ["evidence-gate"]
+    },
+    {
+      "flow_id": "builder.build",
+      "step_id": "pr-open",
+      "skills": [],
+      "operations": ["publish-change"]
+    },
+    {
+      "flow_id": "builder.build",
+      "step_id": "merge-ready-ci",
+      "skills": ["release-readiness"]
+    },
+    {
+      "flow_id": "builder.build",
+      "step_id": "learn",
+      "skills": ["learning-review"]
+    },
+    {
+      "flow_id": "builder.build",
+      "step_id": "done",
+      "skills": []
+    }
+  ],
   "hook_influence_expectations": [
     {
       "id": "dev-builder-build-requires-pickup-probe-before-plan",

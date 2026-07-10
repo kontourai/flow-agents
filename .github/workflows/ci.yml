@@ -406,6 +406,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check builder-step-producers-integration
 
+      - name: Builder canonical Flow run integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check builder-canonical-flow-run-integration
+
       - name: Codex hook resolution integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check codex-hook-resolution-integration

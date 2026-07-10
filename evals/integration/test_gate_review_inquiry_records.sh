@@ -25,6 +25,14 @@ trap cleanup EXIT
 _pass() { echo "  ✓ $1"; }
 _fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 
+hook_tree_digest() {
+  find "$ROOT/scripts/hooks" -type f -print | LC_ALL=C sort | while IFS= read -r file; do
+    shasum -a 256 "$file"
+  done | shasum -a 256 | awk '{print $1}'
+}
+
+HOOKS_BEFORE="$(hook_tree_digest)"
+
 echo "=== Gate Review InquiryRecord Tests (AC1 + AC2) ==="
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -385,7 +393,7 @@ fi
 # ── AC3: no hooks changed ─────────────────────────────────────────────────────
 echo ""
 echo "--- AC3: hooks unchanged ---"
-if git -C "$ROOT" diff origin/main -- scripts/hooks/ 2>/dev/null | grep -q '^[+-]'; then
+if [[ "$(hook_tree_digest)" != "$HOOKS_BEFORE" ]]; then
   _fail "AC3: scripts/hooks/ was modified (gate-review must not touch hooks)"
 else
   _pass "AC3: scripts/hooks/ unchanged"
