@@ -28,18 +28,23 @@ expectations, and Builder Kit's structured action map.
 
 ## Entry And Synchronization
 
-A Builder session must first be created at the Flow Definition's entry step by the
-workflow sidecar. Start the canonical run with:
+A Builder session is created at the Flow Definition's entry step by the workflow
+sidecar. If automatic startup reports a failure, retry the canonical operation with:
 
 ```bash
 flow-agents builder-run start --session-dir .kontourai/flow-agents/<slug>
 ```
 
-The initial sidecar projects this as `next_action.command` with
-`enforcement: "before_tool_use"`. Runtime adapters deny unrelated tool calls until
-the projected command runs. Starting the canonical run replaces that bootstrap
-action with the ordinary Flow-step projection; later actions remain advisory while
-the agent performs their declared skills and operations.
+`ensure-session --flow-id builder.build` starts or loads this canonical run before
+returning, then projects the first Flow step into the sidecar. The command remains
+the explicit recovery path if Flow startup fails after sidecar creation; the
+failure is returned to the caller and no substitute run state is invented. Runtime
+hooks keep projected actions advisory while the agent performs their declared
+skills and operations.
+
+Sidecars written by 3.4.2 may still contain `next_action.enforcement`. The 1.0
+schema accepts that deprecated field for artifact compatibility, but current
+runtime steering ignores it and does not install a PreToolUse bootstrap hook.
 
 `start` requires exactly one `state.work_item_refs` entry and uses that stable Work
 Item reference as the Flow run subject. It is idempotent for an existing canonical

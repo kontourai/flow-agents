@@ -3437,7 +3437,7 @@ fi
 # ─── #270/#298 compose layer: gate-claim accumulation, gate-claim typing survives rebuild, ──
 # compose-two/three/four-writer round-trip, waiver + artifact_refs/standard_refs round-trip,
 # runnability rejection at record time (AC1-AC6, AC8, AC10) ──────────────────────────────────
-COMPOSE_ROOT="$TMPDIR_EVAL/compose-root"
+COMPOSE_ROOT="$TMPDIR_EVAL/compose-project/.kontourai/flow-agents"
 COMPOSE_SLUG="compose-270"
 COMPOSE_DIR="$COMPOSE_ROOT/$COMPOSE_SLUG"
 mkdir -p "$COMPOSE_ROOT"
@@ -3446,12 +3446,23 @@ flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$COMPOSE_ROOT" \
   --task-slug "$COMPOSE_SLUG" \
   --actor compose-actor \
-  --flow-id builder.build \
   --title "Compose layer session" \
   --source-request "Compose-safe writer layer smoke session." \
   --summary "Seed session for compose-layer round-trip assertions." \
   --criterion "Compose layer round-trips losslessly" \
   --timestamp "2026-07-05T09:00:00Z" >"$TMPDIR_EVAL/compose-seed.out" 2>"$TMPDIR_EVAL/compose-seed.err"
+
+# This fixture exercises sidecar writer composition, not canonical run
+# transitions. Activate FlowDefinition claim typing through the standalone
+# transition primitive so preliminary generic evidence cannot advance Flow.
+flow_agents_node "$WRITER" advance-state "$COMPOSE_DIR" \
+  --actor compose-actor \
+  --status in_progress \
+  --phase pickup \
+  --summary "Compose writer fixture at pull-work." \
+  --next-action "Record composed claims." \
+  --flow-definition builder.build \
+  --timestamp "2026-07-05T09:00:30Z" >"$TMPDIR_EVAL/compose-activate.out" 2>"$TMPDIR_EVAL/compose-activate.err"
 
 _compose_claims_json() {
   cat "$COMPOSE_DIR/trust.bundle"
@@ -4157,7 +4168,7 @@ fi
 # misclassified as an unstamped pre-cluster-270 gate claim on the NEXT rebuild — is now rejected
 # AT RECORD TIME instead, in a FRESH session (isolated from COMPOSE_DIR) so no rebuild landmine
 # is ever created.
-COLLISION_ROOT="$TMPDIR_EVAL/collision-root"
+COLLISION_ROOT="$TMPDIR_EVAL/collision-project/.kontourai/flow-agents"
 COLLISION_SLUG="collision-270"
 COLLISION_DIR="$COLLISION_ROOT/$COLLISION_SLUG"
 mkdir -p "$COLLISION_ROOT"
@@ -4207,7 +4218,7 @@ fi
 # (real flow, real record-gate-claim), then break resolution by pointing active_flow_id at a
 # bogus flow id that cannot resolve under kits/ (mirrors the re-reviewer's approach of pointing
 # at an unresolvable kits/ path), in an ISOLATED fixture copied from a fresh session.
-UNRESOLVABLE_ROOT="$TMPDIR_EVAL/unresolvable-root"
+UNRESOLVABLE_ROOT="$TMPDIR_EVAL/unresolvable-project/.kontourai/flow-agents"
 UNRESOLVABLE_SLUG="unresolvable-270"
 UNRESOLVABLE_DIR="$UNRESOLVABLE_ROOT/$UNRESOLVABLE_SLUG"
 mkdir -p "$UNRESOLVABLE_ROOT"
@@ -4327,7 +4338,7 @@ fi
 # label, exactly the real kontourai-flow-agents-270 wedge this closes) can NEVER be corrected:
 # every attempt to re-record that exact id — the only way to supersede/fix it — is itself
 # rejected by the guard, permanently wedging that id and blocking publish-preflight forever.
-CORRECTION_ROOT="$TMPDIR_EVAL/correction-root"
+CORRECTION_ROOT="$TMPDIR_EVAL/correction-project/.kontourai/flow-agents"
 CORRECTION_SLUG="correction-270"
 CORRECTION_DIR="$CORRECTION_ROOT/$CORRECTION_SLUG"
 mkdir -p "$CORRECTION_ROOT"
@@ -4479,7 +4490,7 @@ fi
 # check_kind so the replacement claim can be shaped to evade gateClaimShapeUnstampedId's detector
 # (which requires check_kind==="external"). This eval reproduces that exact attack end-to-end
 # against the CURRENT (narrowed) binary and asserts it now dies, with the stamp intact afterward.
-STAMPED_ROOT="$TMPDIR_EVAL/stamped-claim-root"
+STAMPED_ROOT="$TMPDIR_EVAL/stamped-claim-project/.kontourai/flow-agents"
 STAMPED_SLUG="stamped-claim-270"
 STAMPED_DIR="$STAMPED_ROOT/$STAMPED_SLUG"
 mkdir -p "$STAMPED_ROOT"

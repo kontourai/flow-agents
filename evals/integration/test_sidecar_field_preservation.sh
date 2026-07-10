@@ -85,13 +85,15 @@ _assert_preserved() {
   [[ "$ok" -eq 1 ]] && _pass "persistent identity fields (${FIELDS[*]}) survive $label"
 }
 
-# ─── Seed: ensure-session with an injected actor (derived branch) and a KNOWN timestamp ──────
+# ─── Seed: standalone sidecar session with an injected actor and a KNOWN timestamp ──────────
+# This sweep tests sidecar writer preservation. Canonical Flow startup and transitions are
+# covered separately; advance-state below activates Builder FlowDefinition claim typing without
+# creating a run that would legitimately project over this fixture's synthetic phase sequence.
 SEED_TS="2026-06-20T08:00:00Z"
 if ! flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$SESSION_ROOT" \
   --task-slug "$SLUG" \
   --actor sweep-actor \
-  --flow-id builder.build \
   --title "Sidecar Field Preservation Sweep" \
   --source-request "Seed a fully-populated session for the field-preservation invariant sweep." \
   --summary "Seed session for the class-level field-preservation sweep." \

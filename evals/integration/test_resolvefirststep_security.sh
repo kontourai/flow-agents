@@ -185,7 +185,7 @@ fi
 echo ""
 echo "=== 4. Legit --flow-id builder.build → active_step_id set (first step resolved) ==="
 
-LEGIT_AROOT="$TMP/legit-aroot"
+LEGIT_AROOT="$TMP/legit-project/.kontourai/flow-agents"
 mkdir -p "$LEGIT_AROOT"
 
 set +e

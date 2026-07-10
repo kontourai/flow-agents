@@ -8,7 +8,8 @@
 #   4. record-gate-claim at pull-work step produces builder.pull-work.selected claim (status=verified).
 #   5. A TAMPERED bundle (stored verified, evidence fail) at pull-work step BLOCKS (exit 2)
 #      with the tamper warning naming the declared claimType.
-#   6. A CLEAN record-gate-claim bundle (passing evidence → verified) is NOT blocked.
+#   6. A CLEAN record-gate-claim bundle is not reported as false completion;
+#      its still-active canonical Flow run remains blocked from stopping.
 #
 # Deterministic, no model spend, self-cleaning.
 # Usage: bash evals/integration/test_phase_map_and_gate_claim.sh
@@ -119,7 +120,7 @@ test_advance_state "learning"     "learn"
 echo ""
 echo "=== 3. ensure-session --flow-id builder.build defaults to pull-work ==="
 
-ENSURE_ROOT="$TMP/ensure-test"
+ENSURE_ROOT="$TMP/ensure-project/.kontourai/flow-agents"
 mkdir -p "$ENSURE_ROOT"
 
 flow_agents_node "workflow-sidecar" ensure-session \
@@ -144,7 +145,7 @@ node -e "
 echo ""
 echo "=== 4. record-gate-claim produces builder.pull-work.selected claim ==="
 
-CLAIM_ROOT="$TMP/gate-claim-test"
+CLAIM_ROOT="$TMP/gate-claim-project/.kontourai/flow-agents"
 mkdir -p "$CLAIM_ROOT"
 
 flow_agents_node "workflow-sidecar" ensure-session \
@@ -192,7 +193,7 @@ node -e "
 echo ""
 echo "=== 4b. composed publish-learn gate claim emits builder.pr-open.pull-request ==="
 
-COMPOSED_ROOT="$TMP/composed-gate-claim-test"
+COMPOSED_ROOT="$TMP/composed-gate-claim-project/.kontourai/flow-agents"
 mkdir -p "$COMPOSED_ROOT"
 
 flow_agents_node "workflow-sidecar" ensure-session \
@@ -200,7 +201,6 @@ flow_agents_node "workflow-sidecar" ensure-session \
   --task-slug composed-gate-claim \
   --title "Composed Gate Claim Test" \
   --summary "Test composed Builder publish/learn flow producer." \
-  --flow-id builder.build \
   --timestamp "2026-06-26T00:00:00Z" >/dev/null 2>&1
 
 flow_agents_node "workflow-sidecar" init-plan "$COMPOSED_ROOT/composed-gate-claim/composed-gate-claim--deliver.md" \
@@ -350,9 +350,9 @@ else
   _fail "tamper warning does not name claimType: $tamper_out"
 fi
 
-# ─── Clean gate-claim: passing evidence → NOT blocked ────────────────────────
+# ─── Clean gate-claim: no false completion, active Flow still blocks ─────────
 echo ""
-echo "=== 6. CLEAN record-gate-claim (passing evidence → verified) → NOT BLOCKED ==="
+echo "=== 6. CLEAN record-gate-claim remains governed by active canonical Flow ==="
 
 C_DIR="$TMP/clean-test"
 mkdir -p "$C_DIR"
@@ -400,10 +400,10 @@ clean_out="$(FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip 
 clean_exit="$?"
 set -e
 
-if [ "$clean_exit" -ne 2 ]; then
-  _pass "clean builder.pull-work.selected bundle not blocked (exit $clean_exit)"
+if [ "$clean_exit" -eq 2 ] && echo "$clean_out" | grep -q 'release skipped for active Flow run "clean"'; then
+  _pass "clean claim advances to the next Flow step and active run blocks premature Stop"
 else
-  _fail "clean builder.pull-work.selected bundle false-blocked (exit 2): $clean_out"
+  _fail "clean active Flow run returned the wrong Stop decision (exit $clean_exit): $clean_out"
 fi
 
 if echo "$clean_out" | grep -q "caught false-completion"; then

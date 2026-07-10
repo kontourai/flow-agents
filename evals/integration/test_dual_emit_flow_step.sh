@@ -34,7 +34,7 @@ cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
 
 WRITER="workflow-sidecar"
-SESSION_ROOT="$TMP/.flow-agents"
+SESSION_ROOT="$TMP/.kontourai/flow-agents"
 
 echo "── P-a resolver unit checks ──"
 
@@ -269,11 +269,25 @@ fi
 
 DUAL_DIR="$SESSION_ROOT/dual-emit-test"
 
-flow_agents_node "$WRITER" advance-state "$DUAL_DIR" \
-  --status in_progress --phase verification \
-  --summary "Testing declared-only verify claims." --next-action "Record evidence." \
-  --flow-definition builder.build \
-  --timestamp "2026-06-26T00:00:30Z" >/dev/null 2>&1
+advance_builder_to_verify() {
+  local session_dir="$1"
+  flow_agents_node "$WRITER" record-gate-claim "$session_dir" --status pass --expectation selected-work \
+    --summary "Selected the fixture Work Item." --timestamp "2026-06-26T00:00:10Z" >/dev/null 2>&1 \
+    && flow_agents_node "$WRITER" record-gate-claim "$session_dir" --status pass --expectation pickup-probe-readiness \
+      --summary "Pickup readiness is established." --timestamp "2026-06-26T00:00:20Z" >/dev/null 2>&1 \
+    && flow_agents_node "$WRITER" record-gate-claim "$session_dir" --status pass --expectation probe-decisions-or-accepted-gaps \
+      --summary "Probe decisions are recorded." --timestamp "2026-06-26T00:00:30Z" >/dev/null 2>&1 \
+    && flow_agents_node "$WRITER" record-gate-claim "$session_dir" --status pass --expectation implementation-plan \
+      --summary "Implementation plan is recorded." --timestamp "2026-06-26T00:00:40Z" >/dev/null 2>&1 \
+    && flow_agents_node "$WRITER" record-gate-claim "$session_dir" --status pass --expectation implementation-scope \
+      --summary "Implementation scope is recorded." --timestamp "2026-06-26T00:00:50Z" >/dev/null 2>&1
+}
+
+if advance_builder_to_verify "$DUAL_DIR"; then
+  _pass "canonical Builder Flow advances through required gates to verify"
+else
+  _fail "canonical Builder Flow did not reach verify"
+fi
 
 # Verify current.json carries the flow keys
 if node -e "
@@ -328,8 +342,26 @@ fi
 echo ""
 echo "── P-d declared-only: policy-kind check maps to builder.verify.policy-compliance ──"
 
-# Record a policy check with the same flow context
-if flow_agents_node "$WRITER" record-evidence "$DUAL_DIR" \
+# Use a separate canonical run because the failing tests evidence above legitimately
+# routes its run back to execute before this independent producer assertion.
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$SESSION_ROOT" \
+  --task-slug dual-emit-policy \
+  --flow-id builder.build \
+  --title "Declared Policy Test" \
+  --summary "Test declared-only policy emit for ADR 0016 P-d." \
+  --criterion "Policy passes" \
+  --timestamp "2026-06-26T00:01:30Z" >/dev/null 2>&1 \
+  && advance_builder_to_verify "$SESSION_ROOT/dual-emit-policy"; then
+  _pass "policy fixture canonical Builder Flow reaches verify"
+else
+  _fail "policy fixture canonical Builder Flow did not reach verify"
+fi
+
+POLICY_DIR="$SESSION_ROOT/dual-emit-policy"
+POLICY_BUNDLE="$POLICY_DIR/trust.bundle"
+
+if flow_agents_node "$WRITER" record-evidence "$POLICY_DIR" \
   --verdict pass \
   --check-json '{"id":"policy-check","kind":"policy","status":"pass","summary":"Policy compliance passed"}' \
   --timestamp "2026-06-26T00:02:00Z" >"$TMP/policy-evidence.out" 2>"$TMP/policy-evidence.err"; then
@@ -340,7 +372,7 @@ fi
 
 if node -e "
 const fs = require('fs');
-const bundle = JSON.parse(fs.readFileSync('${BUNDLE}', 'utf8'));
+const bundle = JSON.parse(fs.readFileSync('${POLICY_BUNDLE}', 'utf8'));
 const claims = bundle.claims;
 // Declared claim for policy kind should be builder.verify.policy-compliance
 const policyDeclared = claims.find(c => c.claimType === 'builder.verify.policy-compliance');

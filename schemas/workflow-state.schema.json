@@ -124,6 +124,7 @@
           "minLength": 1
         },
         "enforcement": {
+          "description": "Deprecated compatibility field. Runtime steering ignores this value; session orchestration owns Builder Flow startup.",
           "type": "string",
           "enum": [
             "advisory",

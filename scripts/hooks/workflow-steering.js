@@ -9,8 +9,7 @@
  * survive context loss instead of relying on the model voluntarily re-reading
  * the sidecar.
  *
- * Advisory by default. A structured next action may explicitly require its
- * projected command before unrelated tool use; only that PreToolUse case blocks.
+ * Non-blocking — always exits 0.
  */
 
 'use strict';
@@ -281,32 +280,6 @@ function stateSteering(root) {
   const critiqueHint = critiqueSteering(path.dirname(current.file));
   if (critiqueHint) parts.push(critiqueHint);
   return parts.join(' ');
-}
-
-function normalizedCommand(value) {
-  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
-}
-
-function toolCommands(input) {
-  const toolInput = input && input.tool_input && typeof input.tool_input === 'object' ? input.tool_input : {};
-  return [
-    toolInput.command,
-    toolInput.content && toolInput.content.command,
-    toolInput.args && toolInput.args.command,
-  ].map(normalizedCommand).filter(Boolean);
-}
-
-function beforeToolUseEnforcement(input, current) {
-  if (!input || input.hook_event_name !== 'PreToolUse' || !current) return null;
-  const next = current.payload && current.payload.next_action;
-  if (!next || next.status !== 'continue' || next.enforcement !== 'before_tool_use') return null;
-  const expected = normalizedCommand(next.command);
-  if (!expected) return null;
-  if (toolCommands(input).some(command => command === expected)) return null;
-  return {
-    exitCode: 2,
-    stderr: `[workflow-entry] Run the required projected action before using other tools. Run exactly: ${safeStateText(expected, 500)}`,
-  };
 }
 
 function contextMapSteering(root) {
@@ -599,8 +572,6 @@ function run(rawInput) {
     const toolInput = input.tool_input || {};
     const root = findRepoRoot(input.cwd || process.cwd());
     const current = latestWorkflowState(root);
-    const enforcement = beforeToolUseEnforcement(input, current);
-    if (enforcement) return enforcement;
     const hints = [];
     let shouldAppendWorkflowContext = false;
 
@@ -677,14 +648,7 @@ if (require.main === module) {
     data += chunk;
   });
   process.stdin.on('end', () => {
-    const result = run(data);
-    if (result && typeof result === 'object') {
-      if (result.stderr) process.stderr.write(String(result.stderr) + (String(result.stderr).endsWith('\n') ? '' : '\n'));
-      if (Object.prototype.hasOwnProperty.call(result, 'stdout')) process.stdout.write(String(result.stdout || ''));
-      process.exitCode = Number.isInteger(result.exitCode) ? result.exitCode : 0;
-    } else {
-      process.stdout.write(String(result));
-    }
+    process.stdout.write(String(run(data)));
   });
 }
 
@@ -703,6 +667,4 @@ module.exports = {
   promptText,
   looksLikeImplementationWork,
   kitWorkflowSteering,
-  beforeToolUseEnforcement,
-  toolCommands,
 };

@@ -40,7 +40,7 @@ WRITER="workflow-sidecar"
 
 TMPDIR_EVAL="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_EVAL"' EXIT
-ARTIFACT_ROOT="$TMPDIR_EVAL/artifact-root"
+ARTIFACT_ROOT="$TMPDIR_EVAL/project/.kontourai/flow-agents"
 
 errors=0
 pass() { echo "  [PASS] $1"; }

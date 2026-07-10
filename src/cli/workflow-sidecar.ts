@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
 import { resolveActiveFlowStep, resolveAllFlowGateExpects, resolveFlowFilePath, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
-import { syncBuilderFlowSessionIfPresent } from "../builder-flow-runtime.js";
+import { startBuilderFlowSession, syncBuilderFlowSessionIfPresent } from "../builder-flow-runtime.js";
 // #291 Wave 1 Task 1.1 exports: ensure-session's ownership guard reuses the EXACT same
 // assignment ⋈ liveness join / claim / supersede logic #290 already ships for the
 // `assignment-provider` CLI, rather than reimplementing a second, parallel join (static ESM
@@ -1312,8 +1312,15 @@ async function withLock<T>(dir: string, create: boolean, command: string, body: 
   const lockDir = path.join(dir, ".workflow-sidecar.lockdir");
   const staleMs = Number(process.env.FLOW_AGENTS_WORKFLOW_SIDECAR_STALE_LOCK_MS ?? 5 * 60 * 1000);
   const deadline = Date.now() + 30000;
+  let acquiredRoot: fs.Stats | null = null;
+  let acquiredLock: fs.Stats | null = null;
   while (true) {
-    try { fs.mkdirSync(lockDir); break; }
+    try {
+      fs.mkdirSync(lockDir);
+      acquiredRoot = fs.lstatSync(dir);
+      acquiredLock = fs.lstatSync(lockDir);
+      break;
+    }
     catch (error) {
       const lockError = error as NodeJS.ErrnoException;
       if (lockError.code !== "EEXIST") {
@@ -1338,7 +1345,28 @@ async function withLock<T>(dir: string, create: boolean, command: string, body: 
     if (delay) await new Promise((resolve) => setTimeout(resolve, Number(delay) * 1000));
     return await body();
   } finally {
-    fs.rmSync(lockDir, { recursive: true, force: true });
+    try {
+      const currentRoot = fs.lstatSync(dir);
+      const currentLock = fs.lstatSync(lockDir);
+      const sameIdentity = (left: fs.Stats, right: fs.Stats): boolean =>
+        left.dev === right.dev && left.ino === right.ino;
+      if (acquiredRoot
+        && acquiredLock
+        && !currentRoot.isSymbolicLink()
+        && currentRoot.isDirectory()
+        && !currentLock.isSymbolicLink()
+        && currentLock.isDirectory()
+        && sameIdentity(currentRoot, acquiredRoot)
+        && sameIdentity(currentLock, acquiredLock)) {
+        fs.rmdirSync(lockDir);
+      } else {
+        process.stderr.write(`[workflow-sidecar] lock cleanup skipped because root or lock identity changed: ${lockDir}\n`);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        process.stderr.write(`[workflow-sidecar] lock cleanup skipped: ${error instanceof Error ? error.message : String(error)}\n`);
+      }
+    }
   }
 }
 
@@ -1947,19 +1975,53 @@ function resolveEnsureSessionEntry(p: ReturnType<typeof parseArgs>, dir: string)
   return { flowId, stepId: explicitStep || firstStep, firstStep };
 }
 
+function assertCanonicalBuilderArtifactRoot(root: string): void {
+  const kontouraiRoot = path.dirname(root);
+  const projectRoot = path.dirname(kontouraiRoot);
+  if (path.basename(root) !== "flow-agents" || path.basename(kontouraiRoot) !== ".kontourai") {
+    die("ensure-session --flow-id builder.build requires --artifact-root <project>/.kontourai/flow-agents");
+  }
+
+  const statIfPresent = (candidate: string): fs.Stats | null => {
+    try {
+      return fs.lstatSync(candidate);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  };
+  const projectStat = statIfPresent(projectRoot);
+  if (projectStat && (projectStat.isSymbolicLink() || !projectStat.isDirectory())) {
+    die(`ensure-session --flow-id builder.build requires a non-symlink project root: ${projectRoot}`);
+  }
+  const realProjectRoot = projectStat ? fs.realpathSync(projectRoot) : projectRoot;
+  for (const [candidate, expected, label] of [
+    [kontouraiRoot, path.join(realProjectRoot, ".kontourai"), ".kontourai root"],
+    [root, path.join(realProjectRoot, ".kontourai", "flow-agents"), "Flow Agents artifact root"],
+  ] as const) {
+    const stat = statIfPresent(candidate);
+    if (!stat) continue;
+    if (stat.isSymbolicLink() || !stat.isDirectory() || fs.realpathSync(candidate) !== expected) {
+      die(`ensure-session --flow-id builder.build requires a non-symlink ${label}: ${candidate}`);
+    }
+  }
+}
+
 function preflightEnsureSession(p: ReturnType<typeof parseArgs>): void {
   const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : flowAgentsArtifactRoot();
   const slug = opt(p, "task-slug") || (opt(p, "work-item") ? workItemSlug(opt(p, "work-item")) : die("--task-slug is required (or pass --work-item to derive it)"));
   const dir = sessionDirFor(root, slug);
-  resolveEnsureSessionEntry(p, dir);
+  const entry = resolveEnsureSessionEntry(p, dir);
+  if (entry.flowId === "builder.build") assertCanonicalBuilderArtifactRoot(root);
   sessionWorkItem(p, slug, dir);
 }
 
-function ensureSession(p: ReturnType<typeof parseArgs>): number {
+async function ensureSession(p: ReturnType<typeof parseArgs>): Promise<number> {
   const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : flowAgentsArtifactRoot();
   const slug = opt(p, "task-slug") || (opt(p, "work-item") ? workItemSlug(opt(p, "work-item")) : die("--task-slug is required (or pass --work-item to derive it)"));
   const dir = sessionDirFor(root, slug);
   const entry = resolveEnsureSessionEntry(p, dir);
+  if (entry.flowId === "builder.build") assertCanonicalBuilderArtifactRoot(root);
   const workItem = sessionWorkItem(p, slug, dir);
   // #291 Wave 2 Task 2.1 (§3, §4): resolve the actor ONCE, then run the ownership guard BEFORE
   // any directory/file is created — a refusal must never leave a stray empty session dir. Reused
@@ -1994,7 +2056,6 @@ function ensureSession(p: ReturnType<typeof parseArgs>): number {
             summary: `Start the canonical Flow run; activate \`pull-work\` for work item ${JSON.stringify(workItem.ref)}, and satisfy the declared gate before advancing.`,
             skills: ["pull-work"],
             command: startCommand,
-            enforcement: "before_tool_use",
           }
         : `Continue at Flow step ${JSON.stringify(entry.stepId)} for work item ${JSON.stringify(workItem.ref)}; satisfy its declared gate before advancing.`
       : opt(p, "next-action", "Continue.");
@@ -2025,6 +2086,15 @@ function ensureSession(p: ReturnType<typeof parseArgs>): number {
     ? persistedCurrent.active_step_id
     : entry.stepId;
   writeCurrent(root, dir, timestamp, "workflow-sidecar", "ensure-session", entry.flowId || undefined, resumedStep || undefined, actorResolution.unresolved ? undefined : actorResolution.branchActorKey);
+  if (entry.flowId === "builder.build") {
+    try {
+      await startBuilderFlowSession({ sessionDir: dir });
+    } catch (error) {
+      const retry = `flow-agents builder-run start --session-dir .kontourai/flow-agents/${slug}`;
+      process.stderr.write(`[ensure-session] canonical Builder Flow run did not start; the sidecar remains retryable. Run: ${retry}\n`);
+      throw error;
+    }
+  }
   console.log(dir);
   return 0;
 }
