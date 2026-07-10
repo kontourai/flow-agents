@@ -41,21 +41,29 @@ trap cleanup EXIT
 
 # ─── Helper: set active_step_id for a step.
 # For steps in the phase_map, use advance-state.
-# For design-probe (no phase mapping), use ensure-session --step-id.
+# For design-probe (no phase mapping), mutate only the test fixture's current pointer.
 # ──────────────────────────────────────────────────────────────────
 set_active_step() {
   local aroot="$1" slug="$2" step="$3"
   case "$step" in
     design-probe)
-      # design-probe has no lifecycle phase in the phase_map — set via ensure-session --step-id
-      flow_agents_node "workflow-sidecar" ensure-session \
-        --artifact-root "$aroot" \
-        --task-slug "$slug" \
-        --title "Producer test: $step" \
-        --summary "Test gate-claim producer at $step." \
-        --flow-id builder.build \
-        --step-id design-probe \
-        --timestamp "2026-06-26T00:00:30Z" >/dev/null 2>&1
+      # The production entry surface cannot select a later step. This producer-focused
+      # fixture sets the pointer directly because design-probe has no legacy phase_map key.
+      node - "$aroot" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const root = process.argv[2];
+const files = [path.join(root, 'current.json')];
+const actorRoot = path.join(root, 'current');
+if (fs.existsSync(actorRoot)) {
+  files.push(...fs.readdirSync(actorRoot).filter((name) => name.endsWith('.json')).map((name) => path.join(actorRoot, name)));
+}
+for (const file of files) {
+  const current = JSON.parse(fs.readFileSync(file, 'utf8'));
+  current.active_step_id = 'design-probe';
+  fs.writeFileSync(file, `${JSON.stringify(current, null, 2)}\n`);
+}
+NODE
       ;;
     pull-work)
       flow_agents_node "workflow-sidecar" advance-state "$aroot/$slug" \

@@ -143,7 +143,6 @@ flow_agents_node "$WRITER" ensure-session \
   --title "Tamper verify test" \
   --summary "Testing tamper detection at verify step." \
   --flow-id builder.build \
-  --step-id verify \
   --timestamp "2026-06-01T02:00:00Z" >/dev/null 2>&1
 
 flow_agents_node "$WRITER" init-plan "$TAMPER_DIR/.kontourai/flow-agents/$TAMPER_SLUG/$TAMPER_SLUG--deliver.md" \

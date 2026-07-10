@@ -292,6 +292,7 @@ run_integration() {
   bash "$EVAL_DIR/integration/test_critique_supersession_roundtrip.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_flowdef_session_activation.sh" || result=1
+  bash "$EVAL_DIR/integration/test_builder_entry_enforcement.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_trust_checkpoint.sh" || result=1
   echo ""

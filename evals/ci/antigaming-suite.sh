@@ -25,6 +25,7 @@ TESTS=(
   "evals/integration/test_enforcer_expects_driven.sh"
   "evals/integration/test_goal_fit_rederive.sh"
   "evals/integration/test_flowdef_session_activation.sh"
+  "evals/integration/test_builder_entry_enforcement.sh"
   "evals/integration/test_flowdef_union_floor_regression.sh"
   "evals/integration/test_trust_reconcile.sh"
   "evals/integration/test_trust_checkpoint.sh"

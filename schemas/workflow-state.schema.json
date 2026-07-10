@@ -59,6 +59,16 @@
       },
       "uniqueItems": true
     },
+    "work_item_refs": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Provider-neutral work item references anchoring this workflow session."
+    },
     "next_action": {
       "type": "object",
       "additionalProperties": false,

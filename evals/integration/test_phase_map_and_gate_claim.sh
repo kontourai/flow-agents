@@ -201,12 +201,17 @@ flow_agents_node "workflow-sidecar" ensure-session \
   --title "Composed Gate Claim Test" \
   --summary "Test composed Builder publish/learn flow producer." \
   --flow-id builder.build \
-  --step-id pr-open \
   --timestamp "2026-06-26T00:00:00Z" >/dev/null 2>&1
 
 flow_agents_node "workflow-sidecar" init-plan "$COMPOSED_ROOT/composed-gate-claim/composed-gate-claim--deliver.md" \
   --source-request "Test" --summary "Testing" \
   --timestamp "2026-06-26T00:00:00Z" >/dev/null 2>&1
+
+flow_agents_node "workflow-sidecar" advance-state "$COMPOSED_ROOT/composed-gate-claim" \
+  --status in_progress --phase release \
+  --summary "Testing composed pr-open producer." --next-action "Record claim." \
+  --flow-definition builder.build \
+  --timestamp "2026-06-26T00:00:30Z" >/dev/null 2>&1
 
 if flow_agents_node "workflow-sidecar" record-gate-claim "$COMPOSED_ROOT/composed-gate-claim" \
   --status pass \
