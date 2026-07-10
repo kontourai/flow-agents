@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { resolveEffectiveFlowDefinition } from "../../build/src/lib/flow-resolver.js";
+import { resolveEffectiveFlowDefinition, resolveFlowFilePath } from "../../build/src/lib/flow-resolver.js";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../..");
 
@@ -24,6 +24,35 @@ test("effective Builder definition materializes uses_flow and Flow-native comple
     definition.gates["builder.publish-learn:pr-open-gate"].expects[0].bundle_claim.accepted_statuses,
     ["verified", "trusted", "accepted"],
   );
+});
+
+test("installed package definitions resolve when a consumer repo has no kits directory", () => {
+  const consumer = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-consumer-"));
+  const resolved = resolveFlowFilePath("builder", "build", "builder.build", consumer, false);
+  assert.ok(resolved);
+  assert.equal(fs.realpathSync(resolved), fs.realpathSync(path.join(REPO_ROOT, "kits", "builder", "flows", "build.flow.json")));
+  assert.equal(resolveEffectiveFlowDefinition("builder.build", consumer, { allowOverride: false })?.version, "1.1");
+});
+
+test("consumer-vendored definitions remain authoritative over package fallback", () => {
+  const consumer = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-consumer-vendored-"));
+  const vendored = path.join(consumer, "kits", "builder", "flows", "build.flow.json");
+  writeJson(vendored, { id: "builder.build", version: "consumer", steps: [{ id: "local", next: null }], gates: {} });
+  assert.equal(resolveFlowFilePath("builder", "build", "builder.build", consumer, false), fs.realpathSync(vendored));
+});
+
+test("unsafe explicit overrides fail closed instead of using package fallback", () => {
+  const consumer = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-consumer-unsafe-"));
+  const unsafeDefinitions = path.join(consumer, ".kontourai", "flow-agents", "definitions");
+  fs.mkdirSync(unsafeDefinitions, { recursive: true });
+  const prior = process.env.FLOW_AGENTS_FLOW_DEFS_DIR;
+  process.env.FLOW_AGENTS_FLOW_DEFS_DIR = unsafeDefinitions;
+  try {
+    assert.equal(resolveFlowFilePath("builder", "build", "builder.build", consumer), null);
+  } finally {
+    if (prior === undefined) delete process.env.FLOW_AGENTS_FLOW_DEFS_DIR;
+    else process.env.FLOW_AGENTS_FLOW_DEFS_DIR = prior;
+  }
 });
 
 test("effective definition compilation rejects uses_flow cycles", () => {
