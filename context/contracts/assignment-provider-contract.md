@@ -138,8 +138,10 @@ detect an incompatible future shape before parsing fields it does not understand
 {
   "schema_version": "1.0",
   "role": "AssignmentClaimRecord",
-  "subject_id": "kontourai/flow-agents#290",
+  "subject_id": "kontourai-flow-agents-290",
   "actor": { "runtime": "claude-code", "session_id": "...", "host": "...", "human": null },
+  "actor_key": "claude-code:...:host",
+  "work_item_ref": "kontourai/flow-agents#290",
   "claimed_at": "2026-07-02T00:00:00Z",
   "ttl_seconds": 1800,
   "branch": "agent/<actor>/<slug>",
@@ -152,9 +154,10 @@ detect an incompatible future shape before parsing fields it does not understand
 | --- | --- | --- |
 | `schema_version` | yes | Version of this record shape, `"1.0"`. |
 | `role` | yes | Constant `"AssignmentClaimRecord"`, for readers scanning mixed content (e.g. a GitHub comment thread) for this record type. |
-| `subject_id` | yes | The claimed work item, in `owner/repo#id` form — the same string `workItemSlug` derives the deterministic session slug from. |
+| `subject_id` | yes | The provider subject key. The local-file provider uses the deterministic session slug; provider-backed records may use their native subject identifier. |
 | `actor` | yes | `{ runtime, session_id, host, human? }` — the exact struct `actor-identity.js` defines. `human` is set (non-null) only for a human assignee; its presence, not a username heuristic, gates the human-held join state. |
 | `actor_key` | no (additive, #291) | The canonical `resolveActor(env).actor` string for the claiming actor — the same flat/bare token `liveness whoami`, `liveness claim --actor`, per-actor `current.json`, and pull-work's `--self-actor` all use. When present, `computeEffectiveState` compares against THIS (not a re-serialization of `actor`) for both self-recognition and the liveness join, because `serializeActor(actor)` and `resolveActor(env).actor` diverge for an explicit-override actor (a bare token vs. a `explicit-override:<value>:<host>` triple) while agreeing for a derived actor. Absent on any pre-#291 record or fixture — `computeEffectiveState` falls back to `serializeActor(actor)` in that case, reproducing pre-#291 behavior exactly. |
+| `work_item_ref` | no (additive, #541) | Exact Work Item reference acquired by Builder `ensure-session`. This preserves identity beyond the local provider's lossy filesystem slug and allows an interrupted acquisition to retry safely. Older records and ordinary assignment-provider claims omit it and cannot automatically satisfy `builder.pull-work.selected`. |
 | `claimed_at` | yes | ISO-8601 timestamp the claim was recorded. Mirrors the liveness stream's own claim-event field so a reader compares freshness with one mental model across both layers, even though the two are stored in different media. |
 | `ttl_seconds` | yes | Same field name/semantics as the liveness stream's `ttlSeconds` (default `1800`). |
 | `branch` | yes | The branch this actor is working on, per the `agent/<actor>/<slug>` convention. |

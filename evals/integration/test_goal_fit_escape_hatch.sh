@@ -15,10 +15,10 @@ _pass() { echo "  ✓ $1"; }
 _fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 
 REPO="$TMPDIR_EVAL/repo"
-mkdir -p "$REPO/.flow-agents/stuck"
+mkdir -p "$REPO/.kontourai/flow-agents/stuck"
 printf '# Test Repo\n' > "$REPO/AGENTS.md"
 printf '# Stuck\n\nbranch: main\nstatus: executing\ntype: deliver\n\n## Plan\n\nTBD.\n' \
-  > "$REPO/.flow-agents/stuck/stuck--deliver.md"
+  > "$REPO/.kontourai/flow-agents/stuck/stuck--deliver.md"
 
 PAYLOAD="{\"hook_event_name\":\"Stop\",\"cwd\":\"$REPO\"}"
 
@@ -54,7 +54,7 @@ c4=$(run_block "$TMPDIR_EVAL/b4.err")
 printf '%s' "$PAYLOAD" | FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=3 node "$ROOT/scripts/hooks/stop-goal-fit.js" >/dev/null 2>/dev/null
 # mutate the artifact so the warning set differs
 printf '# Stuck\n\nbranch: main\nstatus: verifying\ntype: deliver\n\n## Plan\n\nDifferent.\n' \
-  > "$REPO/.flow-agents/stuck/stuck--deliver.md"
+  > "$REPO/.kontourai/flow-agents/stuck/stuck--deliver.md"
 cd=$(run_block "$TMPDIR_EVAL/bd.err")
 [[ "$cd" -eq 2 ]] && rg -q 'Stop blocked .* \(block 1; after 3 identical blocks' "$TMPDIR_EVAL/bd.err" \
   && _pass "changed goal-fit gap resets the streak to 1/3" \

@@ -69,6 +69,60 @@ node "$CLI" assignment-provider status \
 [[ "$(json_query "$TMPDIR_EVAL/status-a.json" "assignment.assignee")" == "claude-code:eval-actor-a-session:eval-host" ]] && pass "status reports actor A as assignee" || fail "status reports actor A as assignee"
 [[ "$(json_query "$TMPDIR_EVAL/status-a.json" "assignment.record.claimed_at")" == "$CLAIMED_AT" ]] && pass "status claimed_at matches claim's claimed_at" || fail "status claimed_at matches claim's claimed_at"
 
+# A generic same-actor refresh must preserve exact Builder provenance that an interrupted
+# ensure-session recorded, even though the assignment-provider CLI does not accept that field.
+PROVENANCE_SUBJECT="builder-provenance"
+node "$CLI" assignment-provider claim \
+  --provider local-file --artifact-root "$ARTIFACT_ROOT" \
+  --subject-id "$PROVENANCE_SUBJECT" \
+  --actor-json "$ACTOR_A" \
+  --branch "$BRANCH_A" \
+  --artifact-dir "$ARTIFACT_DIR_A" \
+  --ttl-seconds 1800 \
+  > "$TMPDIR_EVAL/provenance-claim.json"
+PROVENANCE_FILE="$(node - "$ARTIFACT_ROOT/assignment" "$PROVENANCE_SUBJECT" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const [dir, subject] = process.argv.slice(2);
+for (const name of fs.readdirSync(dir)) {
+  if (!name.endsWith('.json')) continue;
+  const file = path.join(dir, name);
+  if (JSON.parse(fs.readFileSync(file, 'utf8')).subject_id === subject) {
+    process.stdout.write(file);
+    process.exit(0);
+  }
+}
+process.exit(1);
+NODE
+)"
+node - "$PROVENANCE_FILE" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const record = JSON.parse(fs.readFileSync(file, 'utf8'));
+record.work_item_ref = 'kontourai/flow-agents#9001';
+fs.writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
+NODE
+node "$CLI" assignment-provider claim \
+  --provider local-file --artifact-root "$ARTIFACT_ROOT" \
+  --subject-id "$PROVENANCE_SUBJECT" \
+  --actor-json "$ACTOR_A" \
+  --branch "$BRANCH_A" \
+  --artifact-dir "$ARTIFACT_DIR_A" \
+  --ttl-seconds 1800 \
+  > "$TMPDIR_EVAL/provenance-refresh.json"
+[[ "$(json_query "$TMPDIR_EVAL/provenance-refresh.json" "record.work_item_ref")" == "$SUBJECT_ID" ]] && pass "same-actor refresh preserves exact Work Item provenance" || fail "same-actor refresh preserves exact Work Item provenance"
+node "$CLI" assignment-provider supersede \
+  --provider local-file --artifact-root "$ARTIFACT_ROOT" \
+  --subject-id "$PROVENANCE_SUBJECT" \
+  --from-actor-json "$ACTOR_A" --to-actor-json "$ACTOR_B" \
+  --reason "provenance handoff" >"$TMPDIR_EVAL/provenance-supersede.json"
+[[ "$(json_query "$TMPDIR_EVAL/provenance-supersede.json" "record.work_item_ref")" == "$SUBJECT_ID" ]] && pass "generic supersede preserves exact Work Item provenance" || fail "generic supersede preserves exact Work Item provenance"
+node "$CLI" assignment-provider release \
+  --provider local-file --artifact-root "$ARTIFACT_ROOT" \
+  --subject-id "$PROVENANCE_SUBJECT" \
+  --actor-json "$ACTOR_B" \
+  --reason "provenance fixture cleanup" >/dev/null
+
 # 3. supersede A -> B updates the actor and records an audit trail entry.
 node "$CLI" assignment-provider supersede \
   --provider local-file --artifact-root "$ARTIFACT_ROOT" --subject-id "$SUBJECT_ID" \

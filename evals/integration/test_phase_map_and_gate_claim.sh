@@ -129,6 +129,7 @@ flow_agents_node "workflow-sidecar" ensure-session \
   --title "Ensure Default Step" \
   --summary "Test ensure-session default step." \
   --flow-id builder.build \
+  --skip-ownership-guard \
   --timestamp "2026-06-26T00:00:00Z" >/dev/null 2>&1
 
 node -e "
@@ -154,6 +155,7 @@ flow_agents_node "workflow-sidecar" ensure-session \
   --title "Gate Claim Test" \
   --summary "Test gate claim producer." \
   --flow-id builder.build \
+  --skip-ownership-guard \
   --timestamp "2026-06-26T00:00:00Z" >/dev/null 2>&1
 
 flow_agents_node "workflow-sidecar" init-plan "$CLAIM_ROOT/gate-claim/gate-claim--deliver.md" \
@@ -261,6 +263,7 @@ flow_agents_node "workflow-sidecar" ensure-session \
   --title "Tamper Test" \
   --summary "Testing tamper detection." \
   --flow-id builder.build \
+  --skip-ownership-guard \
   --timestamp "2026-06-26T00:00:00Z" >/dev/null 2>&1
 
 flow_agents_node "workflow-sidecar" init-plan "$T_DIR/.kontourai/flow-agents/tamper/tamper--deliver.md" \
@@ -364,6 +367,7 @@ flow_agents_node "workflow-sidecar" ensure-session \
   --title "Clean Test" \
   --summary "Testing clean gate claim." \
   --flow-id builder.build \
+  --skip-ownership-guard \
   --timestamp "2026-06-26T00:00:00Z" >/dev/null 2>&1
 
 flow_agents_node "workflow-sidecar" init-plan "$C_DIR/.kontourai/flow-agents/clean/clean--deliver.md" \

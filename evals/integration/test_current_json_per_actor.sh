@@ -377,6 +377,7 @@ flow_agents_node "workflow-sidecar" ensure-session \
   --task-slug gate-actor-a \
   --actor eval-actor-a-session \
   --flow-id builder.build \
+  --skip-ownership-guard \
   --source-request "Actor A is active on a FlowDefinition-driven session." \
   --summary "Actor A, builder.build, pull-work step." \
   --timestamp "2026-07-01T00:00:00Z" \

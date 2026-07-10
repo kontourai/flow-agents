@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { parseArgs, flagString, type ParsedArgs } from "../lib/args.js";
-import { readJson, writeJson, isoNow } from "../lib/fs.js";
+import { atomicWriteJson, readJson, isoNow } from "../lib/fs.js";
 
 // ─── AssignmentProvider CLI (#290) ──────────────────────────────────────────
 // context/contracts/assignment-provider-contract.md is the governing vocabulary doc for this
@@ -60,6 +60,7 @@ export type AssignmentClaimRecord = {
   subject_id: string;
   actor: ActorStruct;
   actor_key?: string;
+  work_item_ref?: string;
   claimed_at: string;
   ttl_seconds: number;
   branch: string;
@@ -218,16 +219,50 @@ export function assignmentFilePath(artifactRoot: string, subjectId: string): str
   return path.join(artifactRoot, "assignment", `${sanitized}.json`);
 }
 
-export function readLocalRecord(artifactRoot: string, subjectId: string): AssignmentClaimRecord | null {
-  const file = assignmentFilePath(artifactRoot, subjectId);
-  if (!fs.existsSync(file)) return null;
-  let data: unknown;
+function localAssignmentDir(artifactRoot: string, create: boolean): string | null {
+  const dir = path.join(artifactRoot, "assignment");
+  if (create) fs.mkdirSync(dir, { recursive: true });
+  let stat: fs.Stats;
   try {
-    data = readJson(file);
+    stat = fs.lstatSync(dir);
+  } catch (error) {
+    if (!create && (error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    throw new Error(`assignment directory must be a real directory, not a symlink: ${dir}`);
+  }
+  const realRoot = fs.realpathSync(artifactRoot);
+  if (fs.realpathSync(dir) !== path.join(realRoot, "assignment")) {
+    throw new Error(`assignment directory escapes the artifact root: ${dir}`);
+  }
+  return dir;
+}
+
+export function readLocalRecord(artifactRoot: string, subjectId: string): AssignmentClaimRecord | null {
+  if (!localAssignmentDir(artifactRoot, false)) return null;
+  const file = assignmentFilePath(artifactRoot, subjectId);
+  let stat: fs.Stats;
+  try {
+    stat = fs.lstatSync(file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    throw new Error(`assignment record must be a regular file, not a symlink: ${file}`);
+  }
+  let data: unknown;
+  let descriptor: number | null = null;
+  try {
+    descriptor = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    data = JSON.parse(fs.readFileSync(descriptor, "utf8"));
   } catch (error) {
     // Fail loud: a corrupt claim record must never be silently treated as "no claim" — that
     // would be a fail-open path that could let a second claim silently overwrite a real one.
     throw new Error(`assignment record is corrupt, refusing to proceed: ${file}: ${(error as Error).message}`);
+  } finally {
+    if (descriptor !== null) fs.closeSync(descriptor);
   }
   if (typeof data !== "object" || data === null) throw new Error(`assignment record is not an object: ${file}`);
   const record = data as AssignmentClaimRecord;
@@ -239,7 +274,7 @@ export function writeLocalRecord(artifactRoot: string, subjectId: string, record
   // writeJson throws on any mkdir/writeFileSync failure; that error is intentionally allowed to
   // propagate to main()'s top-level try/catch and exit non-zero. Durable writes must fail loud,
   // never fail open (artifact-contract.md).
-  writeJson(assignmentFilePath(artifactRoot, subjectId), record);
+  atomicWriteJson(artifactRoot, assignmentFilePath(artifactRoot, subjectId), record);
 }
 
 /**
@@ -255,8 +290,7 @@ function sleepSync(ms: number): void {
 }
 
 function subjectLockDir(artifactRoot: string, subjectId: string): string {
-  const assignmentDir = path.join(artifactRoot, "assignment");
-  fs.mkdirSync(assignmentDir, { recursive: true });
+  const assignmentDir = localAssignmentDir(artifactRoot, true)!;
   const sanitized = loadActorIdentityHelper().sanitizeSegment(subjectId);
   return path.join(assignmentDir, `.${sanitized}.lockdir`);
 }
@@ -310,11 +344,19 @@ export function withSubjectLock<T>(artifactRoot: string, subjectId: string, body
       sleepSync(20);
     }
   }
+  const release = (): void => fs.rmSync(lockDir, { recursive: true, force: true });
+  let result: T;
   try {
-    return body();
-  } finally {
-    fs.rmSync(lockDir, { recursive: true, force: true });
+    result = body();
+  } catch (error) {
+    release();
+    throw error;
   }
+  if (result && typeof (result as { then?: unknown }).then === "function") {
+    return Promise.resolve(result).finally(release) as T;
+  }
+  release();
+  return result;
 }
 
 /**
@@ -512,7 +554,7 @@ export function performLocalClaim(
   artifactRoot: string,
   subjectId: string,
   actor: ActorStruct,
-  opts: { ttlSeconds: number; branch: string; artifactDir: string; reason?: string; actorKey?: string },
+  opts: { ttlSeconds: number; branch: string; artifactDir: string; reason?: string; actorKey?: string; workItemRef?: string },
 ): AssignmentClaimRecord {
   const helper = loadActorIdentityHelper();
   const reason = opts.reason ?? "claim";
@@ -538,6 +580,7 @@ export function performLocalClaim(
       subject_id: subjectId,
       actor,
       ...(opts.actorKey ? { actor_key: opts.actorKey } : {}),
+      ...((opts.workItemRef ?? existing?.work_item_ref) ? { work_item_ref: opts.workItemRef ?? existing?.work_item_ref } : {}),
       claimed_at: isoNow(),
       ttl_seconds: opts.ttlSeconds,
       branch: opts.branch,
@@ -707,7 +750,7 @@ export function performLocalSupersede(
   subjectId: string,
   fromActor: ActorStruct,
   toActor: ActorStruct,
-  opts: { ttlSeconds?: number; branch?: string; artifactDir?: string; reason?: string; actorKey?: string } = {},
+  opts: { ttlSeconds?: number; branch?: string; artifactDir?: string; reason?: string; actorKey?: string; workItemRef?: string } = {},
 ): AssignmentClaimRecord {
   const helper = loadActorIdentityHelper();
   const reason = opts.reason ?? "supersede";
@@ -732,6 +775,7 @@ export function performLocalSupersede(
       subject_id: subjectId,
       actor: toActor,
       ...(opts.actorKey ? { actor_key: opts.actorKey } : {}),
+      ...((opts.workItemRef ?? existing.work_item_ref) ? { work_item_ref: opts.workItemRef ?? existing.work_item_ref } : {}),
       claimed_at: isoNow(),
       ttl_seconds: ttlSeconds,
       branch: opts.branch ?? existing.branch,
