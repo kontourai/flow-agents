@@ -57,6 +57,33 @@ function isAgentWritableDir(resolvedDir: string): boolean {
   }
 }
 
+function installedPackageRoot(): string | null {
+  let directory = path.dirname(fileURLToPath(import.meta.url));
+  while (true) {
+    if (fs.existsSync(path.join(directory, "package.json")) && fs.existsSync(path.join(directory, "kits"))) {
+      return directory;
+    }
+    const parent = path.dirname(directory);
+    if (parent === directory) return null;
+    directory = parent;
+  }
+}
+
+function packagedFlowFile(kitId: string, flowName: string, consumerRoot: string): string | null {
+  const packageRoot = installedPackageRoot();
+  if (!packageRoot || path.resolve(packageRoot) === path.resolve(consumerRoot)) return null;
+  const kitsRoot = path.resolve(packageRoot, "kits");
+  const candidate = path.resolve(kitsRoot, kitId, "flows", `${flowName}.flow.json`);
+  if (!candidate.startsWith(kitsRoot + path.sep)) return null;
+  try {
+    const realKitsRoot = fs.realpathSync.native(kitsRoot);
+    const realCandidate = fs.realpathSync.native(candidate);
+    return realCandidate.startsWith(realKitsRoot + path.sep) ? realCandidate : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Build and validate the FlowDefinition file path.
  *
@@ -65,8 +92,8 @@ function isAgentWritableDir(resolvedDir: string): boolean {
  *  - FLOW_AGENTS_FLOW_DEFS_DIR resolves into a runtime artifact directory
  *  - The resolved path escapes the expected root (belt-and-suspenders)
  *
- * When the override is unsafe, it is ignored and the resolver uses the
- * canonical repoRoot/kits/ source for legitimate flows.
+ * An unsafe explicit override fails closed. Package fallback applies only to
+ * canonical lookup when no override was supplied.
  */
 export function resolveFlowFilePath(
   kitId: string,
@@ -82,14 +109,12 @@ export function resolveFlowFilePath(
 
   let expectedRoot: string;
   let flowFilePath: string;
+  let canonicalLookup = false;
 
   if (override) {
     const resolvedOverride = path.resolve(override);
     if (isAgentWritableDir(resolvedOverride)) {
-      // Override targets an agent-writable runtime path; ignore it and use
-      // the canonical kit root. The session will resolve the real kit flow.
-      expectedRoot = path.resolve(repoRoot, "kits");
-      flowFilePath = path.join(repoRoot, "kits", kitId, "flows", `${flowName}.flow.json`);
+      return null;
     } else {
       expectedRoot = resolvedOverride;
       // flowId = kitId + "." + flowName; after slug validation this contains only
@@ -99,6 +124,7 @@ export function resolveFlowFilePath(
   } else {
     expectedRoot = path.resolve(repoRoot, "kits");
     flowFilePath = path.join(repoRoot, "kits", kitId, "flows", `${flowName}.flow.json`);
+    canonicalLookup = true;
   }
 
   // Belt-and-suspenders: confirm the resolved path stays within the expected root.
@@ -120,6 +146,10 @@ export function resolveFlowFilePath(
     }
     return realPath;
   } catch {
+    if (canonicalLookup) {
+      const packaged = packagedFlowFile(kitId, flowName, repoRoot);
+      if (packaged) return packaged;
+    }
     return resolvedPath;
   }
 }
