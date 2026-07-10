@@ -50,6 +50,48 @@ else
   fail "symlinked Builder root wrote externally or returned the wrong diagnostic: $(cat "$TMP/symlink-root.out")"
 fi
 
+SESSION_SYMLINK_PROJECT="$TMP/session-symlink-project"
+SESSION_SYMLINK_ROOT="$SESSION_SYMLINK_PROJECT/.kontourai/flow-agents"
+SESSION_SYMLINK_EXTERNAL="$TMP/session-symlink-external"
+mkdir -p "$SESSION_SYMLINK_ROOT" "$SESSION_SYMLINK_EXTERNAL"
+ln -s "$SESSION_SYMLINK_EXTERNAL" "$SESSION_SYMLINK_ROOT/session-symlink"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$SESSION_SYMLINK_ROOT" \
+  --task-slug session-symlink \
+  --actor builder-entry-session-symlink \
+  --title "Session symlink" \
+  --summary "Session state must not escape the artifact root." \
+  --flow-id builder.build >"$TMP/session-symlink.out" 2>&1; then
+  fail "symlinked session directory should be rejected"
+elif [[ -z "$(find "$SESSION_SYMLINK_EXTERNAL" -mindepth 1 -print -quit)" ]] \
+  && grep -q 'session directory must be a real directory under the artifact root' "$TMP/session-symlink.out"; then
+  pass "symlinked session directory is rejected before external reads or writes"
+else
+  fail "symlinked session directory escaped or returned the wrong diagnostic: $(cat "$TMP/session-symlink.out")"
+fi
+
+NESTED_PROJECT="$TMP/nested-symlink-project"
+NESTED_ROOT="$NESTED_PROJECT/.kontourai/flow-agents"
+NESTED_EXTERNAL="$TMP/nested-symlink-external.json"
+mkdir -p "$NESTED_ROOT/assignment"
+printf 'external must survive\n' >"$NESTED_EXTERNAL"
+ln -s "$NESTED_EXTERNAL" "$NESTED_ROOT/assignment/nested-symlink.json"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$NESTED_ROOT" \
+  --task-slug nested-symlink \
+  --actor builder-entry-nested-symlink \
+  --title "Nested assignment symlink" \
+  --summary "Assignment evidence must stay inside the product root." \
+  --flow-id builder.build >"$TMP/nested-symlink.out" 2>&1; then
+  fail "symlinked assignment record should be rejected"
+elif [[ "$(cat "$NESTED_EXTERNAL")" == "external must survive" ]] \
+  && [[ ! -e "$NESTED_ROOT/nested-symlink" ]] \
+  && grep -q 'assignment record must be a regular file, not a symlink' "$TMP/nested-symlink.out"; then
+  pass "nested assignment symlink is rejected before external write or trust evidence"
+else
+  fail "nested assignment symlink escaped or returned the wrong diagnostic: $(cat "$TMP/nested-symlink.out")"
+fi
+
 RACE_PROJECT="$TMP/race-project"
 RACE_ROOT="$RACE_PROJECT/.kontourai/flow-agents"
 RACE_MOVED="$RACE_PROJECT/.kontourai/flow-agents-acquired"
@@ -146,6 +188,7 @@ LOCAL_ROOT="$TMP/local/.kontourai/flow-agents"
 if flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$LOCAL_ROOT" \
   --task-slug local-request \
+  --actor builder-entry-local \
   --title "Local request" \
   --summary "Providerless work still needs an anchor." \
   --flow-id builder.build \
@@ -158,19 +201,24 @@ const current = JSON.parse(fs.readFileSync(path.join(root, 'current.json'), 'utf
 const state = JSON.parse(fs.readFileSync(path.join(root, 'local-request', 'state.json'), 'utf8'));
 const workItem = JSON.parse(fs.readFileSync(path.join(root, 'local-request', 'work-item.json'), 'utf8'));
 const flowState = JSON.parse(fs.readFileSync(path.join(path.dirname(root), 'flow', 'runs', 'local-request', 'state.json'), 'utf8'));
-if (current.active_flow_id !== 'builder.build' || current.active_step_id !== 'pull-work') process.exit(1);
-if (state.status !== 'new' || state.phase !== 'pickup') process.exit(1);
+if (current.active_flow_id !== 'builder.build' || current.active_step_id !== 'design-probe') process.exit(1);
+if (state.status !== 'in_progress' || state.phase !== 'pickup') process.exit(1);
 if (JSON.stringify(state.work_item_refs) !== JSON.stringify(['local:local-request'])) process.exit(1);
 if (workItem.id !== 'local-request' || workItem.title !== 'Local request') process.exit(1);
 if (workItem.source_provider?.kind !== 'local' || workItem.source_provider?.path !== 'work-item.json') process.exit(1);
-if (flowState.current_step !== 'pull-work' || flowState.subject !== 'local:local-request') process.exit(1);
-if (state.flow_run?.current_step !== 'pull-work') process.exit(1);
-if (JSON.stringify(state.next_action?.skills) !== JSON.stringify(['pull-work'])) process.exit(1);
+if (flowState.current_step !== 'design-probe' || flowState.subject !== 'local:local-request') process.exit(1);
+if (state.flow_run?.current_step !== 'design-probe') process.exit(1);
+if (JSON.stringify(state.next_action?.skills) !== JSON.stringify(['pickup-probe'])) process.exit(1);
 if (!state.next_action?.command?.includes('builder-run sync')) process.exit(1);
 if ('enforcement' in state.next_action) process.exit(1);
+const bundle = JSON.parse(fs.readFileSync(path.join(root, 'local-request', 'trust.bundle'), 'utf8'));
+const selected = (bundle.claims || []).find((claim) => claim.claimType === 'builder.pull-work.selected');
+if (selected?.status !== 'verified') process.exit(1);
+if (selected?.metadata?.workflow_subject_ref !== 'local:local-request') process.exit(1);
+if (!(selected?.metadata?.artifact_refs || []).some((ref) => ref.file === '.kontourai/flow-agents/assignment/local-request.json')) process.exit(1);
 NODE
   then
-    pass "providerless request creates a local Work Item and canonical Flow run at pull-work"
+    pass "durably acquired local Work Item satisfies pull-work through the trust bundle and Flow advances"
   else
     fail "local Work Item or first-step state is invalid"
   fi
@@ -183,6 +231,7 @@ FLOW_DIGEST_BEFORE="$(find "$TMP/local/.kontourai/flow/runs/local-request" -type
 if flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$LOCAL_ROOT" \
   --task-slug local-request \
+  --actor builder-entry-local \
   --title "Local request" \
   --summary "Providerless work still needs an anchor." \
   --flow-id builder.build \
@@ -195,9 +244,9 @@ const project = process.argv[2];
 const session = process.argv[3];
 const flowState = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', 'local-request', 'state.json'), 'utf8'));
 const sidecar = JSON.parse(fs.readFileSync(path.join(session, 'state.json'), 'utf8'));
-if (flowState.current_step !== 'pull-work' || flowState.subject !== 'local:local-request') process.exit(1);
-if (sidecar.flow_run?.current_step !== 'pull-work') process.exit(1);
-if (JSON.stringify(sidecar.next_action?.skills) !== JSON.stringify(['pull-work'])) process.exit(1);
+if (flowState.current_step !== 'design-probe' || flowState.subject !== 'local:local-request') process.exit(1);
+if (sidecar.flow_run?.current_step !== 'design-probe') process.exit(1);
+if (JSON.stringify(sidecar.next_action?.skills) !== JSON.stringify(['pickup-probe'])) process.exit(1);
 if (!sidecar.next_action?.command?.includes('builder-run sync')) process.exit(1);
 NODE
 then
@@ -213,14 +262,15 @@ printf 'not a run-store directory\n' > "$BROKEN_PROJECT/.kontourai/flow"
 if flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$BROKEN_ROOT" \
   --task-slug broken-start \
+  --actor builder-entry-broken \
   --title "Broken start" \
   --summary "Flow startup must fail visibly." \
   --flow-id builder.build >"$TMP/broken-start.out" 2>&1; then
   fail "invalid canonical Flow startup should fail ensure-session"
 elif [[ -f "$BROKEN_ROOT/broken-start/state.json" ]] \
   && [[ ! -e "$BROKEN_PROJECT/.kontourai/flow/runs/broken-start" ]] \
-  && grep -q 'canonical Builder Flow run did not start' "$TMP/broken-start.out" \
-  && grep -q 'flow-agents builder-run start --session-dir .kontourai/flow-agents/broken-start' "$TMP/broken-start.out" \
+  && grep -q 'canonical Builder Flow entry failed' "$TMP/broken-start.out" \
+  && grep -q 'Re-run the same ensure-session command' "$TMP/broken-start.out" \
   && node - "$BROKEN_ROOT/broken-start/state.json" <<'NODE'
 const fs = require('node:fs');
 const state = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
@@ -233,13 +283,30 @@ else
   fail "failed canonical startup forged state or lost recovery guidance: $(cat "$TMP/broken-start.out")"
 fi
 
-if flow_agents_node "$WRITER" record-gate-claim "$LOCAL_SESSION" \
-  --expectation selected-work \
-  --status pass \
-  --summary "Selected local:local-request with scope and acceptance context." \
-  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/local-request/work-item.json","summary":"Provider-neutral local Work Item."}' \
-  >"$TMP/selected-work.out" 2>&1 \
-  && node - "$TMP/local" "$LOCAL_SESSION" <<'NODE'
+rm -f "$BROKEN_PROJECT/.kontourai/flow"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$BROKEN_ROOT" \
+  --task-slug broken-start \
+  --actor builder-entry-broken \
+  --title "Broken start" \
+  --summary "Flow startup must recover from persisted acquisition provenance." \
+  --flow-id builder.build >"$TMP/broken-start-retry.out" 2>&1 \
+  && node - "$BROKEN_PROJECT" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const project = process.argv[2];
+const flowState = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', 'broken-start', 'state.json'), 'utf8'));
+const bundle = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'broken-start', 'trust.bundle'), 'utf8'));
+if (flowState.current_step !== 'design-probe') process.exit(1);
+if (!(bundle.claims || []).some((claim) => claim.claimType === 'builder.pull-work.selected' && claim.status === 'verified')) process.exit(1);
+NODE
+then
+  pass "interrupted Flow startup retries from exact persisted acquisition provenance"
+else
+  fail "interrupted acquisition could not recover: $(cat "$TMP/broken-start-retry.out")"
+fi
+
+if node - "$TMP/local" "$LOCAL_SESSION" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
 const project = process.argv[2];
@@ -251,9 +318,158 @@ if (sidecar.flow_run?.current_step !== 'design-probe') process.exit(1);
 if (JSON.stringify(sidecar.next_action?.skills) !== JSON.stringify(['pickup-probe'])) process.exit(1);
 NODE
 then
-  pass "gate-claim write synchronizes Flow and projects the next skill"
+  pass "automatic selected-work claim synchronizes Flow and projects the next skill"
 else
-  fail "selected-work claim did not advance the canonical run: $(cat "$TMP/selected-work.out")"
+  fail "automatic selected-work claim did not advance the canonical run"
+fi
+
+SKIPPED_ROOT="$TMP/skipped/.kontourai/flow-agents"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$SKIPPED_ROOT" \
+  --task-slug skipped-ownership \
+  --actor builder-entry-skipped \
+  --skip-ownership-guard \
+  --title "Skipped ownership" \
+  --summary "Unproven ownership must remain at pull-work." \
+  --flow-id builder.build >"$TMP/skipped.out" 2>&1 \
+  && node - "$TMP/skipped" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const project = process.argv[2];
+const session = path.join(project, '.kontourai', 'flow-agents', 'skipped-ownership');
+const flowState = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', 'skipped-ownership', 'state.json'), 'utf8'));
+const sidecar = JSON.parse(fs.readFileSync(path.join(session, 'state.json'), 'utf8'));
+if (flowState.current_step !== 'pull-work' || sidecar.flow_run?.current_step !== 'pull-work') process.exit(1);
+if (JSON.stringify(sidecar.next_action?.skills) !== JSON.stringify(['pull-work'])) process.exit(1);
+if (fs.existsSync(path.join(session, 'trust.bundle'))) process.exit(1);
+if (fs.existsSync(path.join(project, '.kontourai', 'flow-agents', 'assignment', 'skipped-ownership.json'))) process.exit(1);
+NODE
+then
+  pass "skipped ownership remains at pull-work without selected-work evidence"
+else
+  fail "unproven ownership advanced the canonical run: $(cat "$TMP/skipped.out")"
+fi
+
+MISMATCH_ROOT="$TMP/mismatched-subject/.kontourai/flow-agents"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$MISMATCH_ROOT" \
+  --task-slug arbitrary-session-name \
+  --work-item "kontourai/flow-agents#541" \
+  --actor builder-entry-mismatch \
+  --title "Mismatched assignment subject" \
+  --summary "An arbitrary slug is not exact Work Item evidence." \
+  --flow-id builder.build >"$TMP/mismatched-subject.out" 2>&1 \
+  && node - "$TMP/mismatched-subject" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const project = process.argv[2];
+const session = path.join(project, '.kontourai', 'flow-agents', 'arbitrary-session-name');
+const flowState = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', 'arbitrary-session-name', 'state.json'), 'utf8'));
+const sidecar = JSON.parse(fs.readFileSync(path.join(session, 'state.json'), 'utf8'));
+if (flowState.subject !== 'kontourai/flow-agents#541' || flowState.current_step !== 'pull-work') process.exit(1);
+if (sidecar.flow_run?.current_step !== 'pull-work') process.exit(1);
+if (fs.existsSync(path.join(session, 'trust.bundle'))) process.exit(1);
+if (!fs.existsSync(path.join(project, '.kontourai', 'flow-agents', 'assignment', 'arbitrary-session-name.json'))) process.exit(1);
+NODE
+then
+  pass "assignment subject must canonically match the exact Work Item before pull-work can pass"
+else
+  fail "mismatched assignment subject was treated as exact Work Item evidence: $(cat "$TMP/mismatched-subject.out")"
+fi
+
+COLLISION_ROOT="$TMP/collision/.kontourai/flow-agents"
+if ! flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$COLLISION_ROOT" \
+  --work-item "owner/a.b#541" \
+  --actor builder-entry-collision \
+  --title "Collision seed" \
+  --summary "Bind the first exact Work Item." >/dev/null 2>&1; then
+  fail "collision fixture could not seed the first exact Work Item"
+else
+  COLLISION_ASSIGNMENT="$COLLISION_ROOT/assignment/owner-a-b-541.json"
+  COLLISION_DIGEST="$(shasum -a 256 "$COLLISION_ASSIGNMENT")"
+  if flow_agents_node "$WRITER" ensure-session \
+    --artifact-root "$COLLISION_ROOT" \
+    --work-item "owner/a-b#541" \
+    --actor builder-entry-collision \
+    --title "Collision attempt" \
+    --summary "A colliding slug must not change the exact Work Item." \
+    --flow-id builder.build >"$TMP/collision.out" 2>&1; then
+    fail "colliding exact Work Item refs should be rejected"
+  elif grep -q 'already bound to Work Item "owner/a.b#541", not "owner/a-b#541"' "$TMP/collision.out" \
+    && [[ "$COLLISION_DIGEST" == "$(shasum -a 256 "$COLLISION_ASSIGNMENT")" ]] \
+    && [[ ! -e "$TMP/collision/.kontourai/flow/runs/owner-a-b-541" ]]; then
+    pass "colliding slugs cannot change an existing session's exact Work Item binding"
+  else
+    fail "slug collision mutated ownership or returned the wrong diagnostic: $(cat "$TMP/collision.out")"
+  fi
+fi
+
+ASSIGNMENT_ONLY_ROOT="$TMP/assignment-only-collision/.kontourai/flow-agents"
+mkdir -p "$ASSIGNMENT_ONLY_ROOT/assignment"
+cat >"$ASSIGNMENT_ONLY_ROOT/assignment/owner-a-b-542.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "role": "AssignmentClaimRecord",
+  "subject_id": "owner-a-b-542",
+  "actor": { "runtime": "codex", "session_id": "interrupted", "host": "eval-host", "human": null },
+  "actor_key": "interrupted",
+  "work_item_ref": "owner/a.b#542",
+  "claimed_at": "2020-01-01T00:00:00Z",
+  "ttl_seconds": 1,
+  "branch": "agent/interrupted/owner-a-b-542",
+  "artifact_dir": "owner-a-b-542",
+  "status": "claimed",
+  "audit_trail": []
+}
+JSON
+ASSIGNMENT_ONLY_FILE="$ASSIGNMENT_ONLY_ROOT/assignment/owner-a-b-542.json"
+ASSIGNMENT_ONLY_DIGEST="$(shasum -a 256 "$ASSIGNMENT_ONLY_FILE")"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$ASSIGNMENT_ONLY_ROOT" \
+  --work-item "owner/a-b#542" \
+  --actor builder-entry-assignment-only-collision \
+  --supersede-stale \
+  --now "2026-07-10T00:00:00Z" \
+  --title "Assignment-only collision" \
+  --summary "A crash before state creation must preserve exact assignment identity." \
+  --flow-id builder.build >"$TMP/assignment-only-collision.out" 2>&1; then
+  fail "assignment-only colliding Work Item should be rejected"
+elif grep -q 'already bound to Work Item "owner/a.b#542", not "owner/a-b#542"' "$TMP/assignment-only-collision.out" \
+  && [[ "$ASSIGNMENT_ONLY_DIGEST" == "$(shasum -a 256 "$ASSIGNMENT_ONLY_FILE")" ]] \
+  && [[ ! -e "$ASSIGNMENT_ONLY_ROOT/owner-a-b-542" ]]; then
+  pass "assignment provenance blocks slug collisions before session state exists"
+else
+  fail "assignment-only collision mutated provenance or returned the wrong diagnostic: $(cat "$TMP/assignment-only-collision.out")"
+fi
+
+PREEXISTING_ROOT="$TMP/preexisting/.kontourai/flow-agents"
+if flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$PREEXISTING_ROOT" \
+  --task-slug preexisting-selection \
+  --actor builder-entry-preexisting \
+  --title "Preexisting selection" \
+  --summary "Seed an assignment before the canonical Builder run." >/dev/null 2>&1 \
+  && flow_agents_node "$WRITER" ensure-session \
+    --artifact-root "$PREEXISTING_ROOT" \
+    --task-slug preexisting-selection \
+    --actor builder-entry-preexisting \
+    --title "Preexisting selection" \
+    --summary "An older self-held assignment is not new selection evidence." \
+    --flow-id builder.build >"$TMP/preexisting.out" 2>&1 \
+  && node - "$TMP/preexisting" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const project = process.argv[2];
+const session = path.join(project, '.kontourai', 'flow-agents', 'preexisting-selection');
+const flowState = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', 'preexisting-selection', 'state.json'), 'utf8'));
+if (flowState.current_step !== 'pull-work') process.exit(1);
+if (fs.existsSync(path.join(session, 'trust.bundle'))) process.exit(1);
+NODE
+then
+  pass "preexisting self-held assignments do not retroactively satisfy pull-work"
+else
+  fail "preexisting assignment was treated as current selection evidence: $(cat "$TMP/preexisting.out")"
 fi
 
 if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=100000 \

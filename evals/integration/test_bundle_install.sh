@@ -881,6 +881,49 @@ else
   _fail "Codex full install lost Builder specialist role routing"
 fi
 
+echo ""
+echo "--- Packed Package Builder Entry ---"
+PACKAGE_CONSUMER="$TMPDIR_EVAL/package-consumer"
+PACKAGE_PROJECT="$TMPDIR_EVAL/package-project"
+PACKAGE_AMBIENT="$TMPDIR_EVAL/package-ambient"
+mkdir -p "$PACKAGE_CONSUMER" "$PACKAGE_PROJECT/.kontourai/flow-agents" "$PACKAGE_AMBIENT/kits/builder/flows"
+cat >"$PACKAGE_AMBIENT/kits/builder/flows/build.flow.json" <<'JSON'
+{
+  "id": "builder.build",
+  "version": "poison-ambient-cwd",
+  "steps": [{ "id": "ambient-poison", "next": null }],
+  "gates": {}
+}
+JSON
+PACKAGE_PACK_LOG="$TMPDIR_EVAL/package-pack.log"
+if (cd "$ROOT_DIR" && npm pack --silent --pack-destination "$TMPDIR_EVAL" >"$PACKAGE_PACK_LOG") \
+  && PACKAGE_TARBALL="$(find "$TMPDIR_EVAL" -maxdepth 1 -type f -name 'kontourai-flow-agents-*.tgz' -print -quit)" \
+  && [[ -n "$PACKAGE_TARBALL" ]] \
+  && npm install --silent --no-audit --no-fund --ignore-scripts --prefix "$PACKAGE_CONSUMER" "$PACKAGE_TARBALL" \
+  && (cd "$PACKAGE_AMBIENT" && node "$PACKAGE_CONSUMER/node_modules/@kontourai/flow-agents/build/src/cli/workflow-sidecar.js" ensure-session \
+    --artifact-root "$PACKAGE_PROJECT/.kontourai/flow-agents" \
+    --task-slug packed-builder-entry \
+    --actor packed-package-consumer \
+    --title "Packed Builder entry" \
+    --summary "Installed package should project pickup-probe." \
+    --flow-id builder.build >/dev/null 2>&1) \
+  && node - "$PACKAGE_PROJECT" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const project = process.argv[2];
+const state = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'packed-builder-entry', 'state.json'), 'utf8'));
+const flow = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', 'packed-builder-entry', 'state.json'), 'utf8'));
+const bundle = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'packed-builder-entry', 'trust.bundle'), 'utf8'));
+if (flow.current_step !== 'design-probe' || state.flow_run?.current_step !== 'design-probe') process.exit(1);
+if (JSON.stringify(state.next_action?.skills) !== JSON.stringify(['pickup-probe'])) process.exit(1);
+if (!(bundle.claims || []).some((claim) => claim.claimType === 'builder.pull-work.selected' && claim.status === 'verified')) process.exit(1);
+NODE
+then
+  _pass "packed npm consumer ignores unrelated ambient Flow definitions and projects pickup-probe"
+else
+  _fail "packed npm consumer did not execute canonical Builder entry"
+fi
+
 if [[ -d "$CODEX_FULL_DEST/.codex/skills/plan-work" && -d "$CODEX_FULL_DEST/.codex/skills/deliver" && -d "$CODEX_FULL_DEST/.codex/skills/agentic-engineering" ]]; then
   _pass "Codex full install ships kit-skills and standalone skills together"
 else

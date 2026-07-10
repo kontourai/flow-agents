@@ -4228,6 +4228,7 @@ flow_agents_node "$WRITER" ensure-session \
   --task-slug "$UNRESOLVABLE_SLUG" \
   --actor unresolvable-actor \
   --flow-id builder.build \
+  --skip-ownership-guard \
   --title "Unresolvable FlowDefinition regression" \
   --source-request "Regression: an unresolvable FlowDefinition must die with the dedicated cannot-be-loaded message." \
   --summary "Seed session with a REAL flow so a real stamped gate claim can be recorded." \

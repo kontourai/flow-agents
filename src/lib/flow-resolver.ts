@@ -449,8 +449,8 @@ export function resolvePhaseMap(flowId: string, repoRoot: string): Record<string
 
 /**
  * Find the repository root from a starting directory by walking upward to locate
- * the nearest ancestor that contains a `kits/` subdirectory. If none is found,
- * falls back to `process.cwd()` so the default "run from repo root" case still works.
+ * the nearest ancestor that contains a `kits/` subdirectory. A canonical `.kontourai`
+ * artifact path falls back to its owning project; other layouts fall back to cwd.
  *
  * This is required because the runtime artifact directory can live anywhere (temp dirs,
  * subprojects, CI workspaces) while the kits/ directory is always at the repo root.
@@ -464,6 +464,10 @@ function findRepoRoot(startDir: string): string {
     if (parent === dir) break; // reached filesystem root
     dir = parent;
   }
+  // A canonical product artifact root identifies its owning project even when that
+  // consumer has no source-tree kits/. resolveFlowFilePath can then use the installed
+  // package fallback without consulting an unrelated ambient cwd.
+  if (path.basename(startDir) === ".kontourai") return path.dirname(startDir);
   // Fallback: process.cwd() covers the common "run from repo root" case
   return process.cwd();
 }

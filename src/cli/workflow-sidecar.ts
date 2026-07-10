@@ -9,12 +9,13 @@ import { fileURLToPath } from "node:url";
 // ADR 0016 Abstraction A: shared FlowDefinition resolver (P-a)
 import { resolveActiveFlowStep, resolveAllFlowGateExpects, resolveFlowFilePath, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
+import { ensureSafeDirectory } from "../lib/fs.js";
 import { startBuilderFlowSession, syncBuilderFlowSessionIfPresent } from "../builder-flow-runtime.js";
 // #291 Wave 1 Task 1.1 exports: ensure-session's ownership guard reuses the EXACT same
 // assignment ⋈ liveness join / claim / supersede logic #290 already ships for the
 // `assignment-provider` CLI, rather than reimplementing a second, parallel join (static ESM
 // import — same idiom already used above for ../lib/flow-resolver.js).
-import { computeEffectiveState, performLocalClaim, performLocalSupersede, readLocalAssignmentStatus, type ActorStruct, type EffectiveState, type FreshHolder } from "./assignment-provider.js";
+import { assignmentFilePath, computeEffectiveState, performLocalClaim, performLocalSupersede, readLocalAssignmentStatus, withSubjectLock, type ActorStruct, type EffectiveState, type FreshHolder } from "./assignment-provider.js";
 
 type AnyObj = Record<string, any>;
 
@@ -57,6 +58,12 @@ function workItemSlug(ref: string): string {
   return slugify(`${owner}-${repo}-${id}`, "work-item");
 }
 
+function assignmentSubjectMatchesWorkItem(slug: string, ref: string): boolean {
+  if (ref === `local:${slug}`) return true;
+  if (!/^[^/#]+\/[^/#]+#\d+$/.test(ref)) return false;
+  return workItemSlug(ref) === slug;
+}
+
 type SessionWorkItem = {
   ref: string;
   localRecord?: AnyObj;
@@ -64,13 +71,18 @@ type SessionWorkItem = {
 
 function sessionWorkItem(p: ReturnType<typeof parseArgs>, slug: string, dir: string): SessionWorkItem {
   const providerRef = opt(p, "work-item");
+  const existingState = loadJson(path.join(dir, "state.json"));
+  const existingRef = Array.isArray(existingState.work_item_refs) && typeof existingState.work_item_refs[0] === "string"
+    ? existingState.work_item_refs[0]
+    : "";
   if (providerRef) {
+    if (existingRef && existingRef !== providerRef) {
+      die(`ensure-session refused: session ${JSON.stringify(slug)} is already bound to Work Item ${JSON.stringify(existingRef)}, not ${JSON.stringify(providerRef)}`);
+    }
     return { ref: providerRef };
   }
-
-  const existingState = loadJson(path.join(dir, "state.json"));
-  if (Array.isArray(existingState.work_item_refs) && typeof existingState.work_item_refs[0] === "string") {
-    return { ref: existingState.work_item_refs[0] };
+  if (existingRef) {
+    return { ref: existingRef };
   }
 
   const title = opt(p, "title", slug).trim() || slug;
@@ -1442,6 +1454,15 @@ function sessionDirFor(root: string, slug: string): string {
   return dir;
 }
 
+function assertSafeSessionDirectory(root: string, dir: string): void {
+  if (!fs.existsSync(dir)) return;
+  const stat = fs.lstatSync(dir);
+  const expected = path.join(fs.realpathSync(root), path.basename(dir));
+  if (stat.isSymbolicLink() || !stat.isDirectory() || fs.realpathSync(dir) !== expected) {
+    die(`session directory must be a real directory under the artifact root: ${dir}`);
+  }
+}
+
 function validateAgentId(agent: string): string {
   if (!agent) die("--agent-id is required");
   if (path.isAbsolute(agent)) die("--agent-id must be a relative slug");
@@ -1481,17 +1502,20 @@ function findRepoRootFromDirStrict(startDir: string): string | null {
  * Find the repository root by walking upward from a starting directory to locate
  * the nearest ancestor containing a kits/ subdirectory. Mirrors flow-resolver.ts
  * findRepoRoot, but callable from workflow-sidecar.ts without re-importing the
- * internal helper. Falls back to process.cwd() when no kits/ ancestor is found —
- * appropriate for phase-map/first-step resolution (ADR 0016 Abstraction A, P-d),
- * where the caller is always invoked from within a real repo checkout.
+ * internal helper. A canonical `.kontourai` path falls back to its owning project,
+ * allowing installed package assets to resolve independently of ambient cwd. Other
+ * layouts retain the cwd fallback used by standalone primitive sessions.
  *
- * Do NOT use this cwd-falling-back variant for publishDelivery's repo-root
- * resolution — use findRepoRootFromDirStrict there instead, so a scratch/test
+ * Do NOT use this permissive variant for publishDelivery's repo-root resolution —
+ * use findRepoRootFromDirStrict there instead, so a scratch/test
  * session dir with no repo ancestor fails closed (skips publish) rather than
  * silently trusting process.cwd(), which could be an unrelated real repo.
  */
 function findRepoRootFromDir(startDir: string): string {
-  return findRepoRootFromDirStrict(startDir) ?? process.cwd();
+  const discovered = findRepoRootFromDirStrict(startDir);
+  if (discovered) return discovered;
+  if (path.basename(startDir) === ".kontourai") return path.dirname(startDir);
+  return process.cwd();
 }
 
 /**
@@ -1786,10 +1810,11 @@ function enforceEnsureSessionOwnership(
   slug: string,
   dir: string,
   resolution: { actorStruct: ActorStruct; actorKey: string; branchActorKey: string; unresolved: boolean },
-): void {
+  workItemRef?: string,
+): { assignmentFile: string; actorKey: string } | null {
   if (p.flags.has("skip-ownership-guard")) {
     process.stderr.write("[ensure-session] ownership guard skipped via --skip-ownership-guard\n");
-    return;
+    return null;
   }
   // Design Decision 4 (unchanged from resolveSessionBranch): actor-resolution ambiguity never
   // hard-fails session creation. Without a resolvable actor there is no safe identity to claim
@@ -1797,7 +1822,7 @@ function enforceEnsureSessionOwnership(
   // than claiming under a synthetic/unstable identity.
   if (resolution.unresolved) {
     process.stderr.write("[ensure-session] ownership guard not evaluated: actor is unresolved (set --actor or FLOW_AGENTS_ACTOR, or run inside a supported runtime) — proceeding without a durable claim, exactly as ensure-session behaved before #291\n");
-    return;
+    return null;
   }
 
   // F5 fix (fix-plan iteration 1, LOW): match assignment-provider.ts's sanitizeDisplayField
@@ -1849,6 +1874,9 @@ function enforceEnsureSessionOwnership(
     // `assignment-provider status --self-actor <branchActorKey>` run by a DIFFERENT tool
     // afterward would never recognize this guard's own claim as self.
     const assignment = readLocalAssignmentStatus(root, slug);
+    if (workItemRef && assignment.record?.work_item_ref && assignment.record.work_item_ref !== workItemRef) {
+      die(`ensure-session refused: assignment ${JSON.stringify(slug)} is already bound to Work Item ${JSON.stringify(assignment.record.work_item_ref)}, not ${JSON.stringify(workItemRef)}`);
+    }
     const events = readLivenessEvents(root);
     const freshList = loadLivenessReadHelper().freshHolders(events, slug, resolution.branchActorKey, nowMs);
     effective = computeEffectiveState(assignment, freshList, resolution.branchActorKey, nowMs);
@@ -1859,8 +1887,27 @@ function enforceEnsureSessionOwnership(
     // neither applies, this is a documented scope boundary (today's pre-#291 baseline behavior),
     // never a silent hole.
     process.stderr.write(`[ensure-session] ownership guard not evaluated: provider "${sanitize(assignmentProviderKind)}" requires --effective-state-json\n`);
-    return;
+    return null;
   }
+
+  const selectedWorkEvidence = (): { assignmentFile: string; actorKey: string } | null => {
+    // Only a claim read from the local provider is durable evidence. Precomputed provider state
+    // can authorize entry, but it cannot prove that this process acquired the Work Item.
+    if (!workItemRef || effectiveStateJsonFlag || assignmentProviderKind !== "local-file") return null;
+    const assignment = readLocalAssignmentStatus(root, slug);
+    const record = assignment.record;
+    if (!record
+      || record.status !== "claimed"
+      || record.subject_id !== slug
+      || record.actor_key !== resolution.branchActorKey
+      || record.work_item_ref !== workItemRef) {
+      return null;
+    }
+    return {
+      assignmentFile: assignmentFilePath(root, slug),
+      actorKey: resolution.branchActorKey,
+    };
+  };
 
   const resolveBranchForClaim = (): string => {
     const existingBranch = fs.existsSync(path.join(dir, "state.json")) ? (loadJson(path.join(dir, "state.json")).branch as string | undefined) : undefined;
@@ -1874,17 +1921,17 @@ function enforceEnsureSessionOwnership(
       // ActorStruct triple), so this redundant belt-and-suspenders check agrees with the
       // effective_state computation instead of silently using a different identity.
       const isSelf = effective.reason === "self_is_holder" || (!!effective.holder?.actor && effective.holder.actor === resolution.branchActorKey);
-      if (isSelf) return; // resume own session — no refusal
+      if (isSelf) return selectedWorkEvidence();
       const holderActor = sanitize(effective.holder?.actor ?? "unknown");
       const lastAtSuffix = effective.holder?.last_at ? ` (last_at ${sanitize(effective.holder.last_at)})` : "";
       die(`ensure-session refused: subject ${sanitize(slug)} is currently held by a different, still-live actor (${holderActor}${lastAtSuffix}). Pick a different work item, or confirm the holder session is truly gone before considering a takeover.`);
-      return;
+      return null;
     }
     case "human-held": {
       const assignee = effective.holder?.assignee ? sanitize(effective.holder.assignee) : "an assigned human";
       const idleSuffix = effective.holder?.idle_days != null ? ` (idle ${Number(effective.holder.idle_days)} day(s))` : "";
       die(`ensure-session refused: subject ${sanitize(slug)} is assigned to ${assignee}${idleSuffix}. This guard never auto-reclaims a human assignment — confirm with the user before proceeding.`);
-      return;
+      return null;
     }
     case "reclaimable": {
       const holderActor = sanitize(effective.holder?.actor ?? "unknown");
@@ -1917,11 +1964,12 @@ function enforceEnsureSessionOwnership(
         // computeEffectiveState's holderActorKey (assignment-provider.ts) matches this same
         // branchActorKey string on the next status/guard check, cross-tool.
         actorKey: resolution.branchActorKey,
+        ...(workItemRef ? { workItemRef } : {}),
       });
       // Render-don't-execute: emit the incumbent's branch so the skill continues it (never a new
       // branch). The successor re-enters the SAME artifact dir (deterministic slug) by construction.
       printJson({ role: "SupersedeTakeover", subject: sanitize(slug), superseded_actor: holderActor, ...(incumbentBranch ? { resumed_branch: sanitizeWide(incumbentBranch) } : {}), reason: sanitizeWide(takeoverReason) });
-      return;
+      return selectedWorkEvidence();
     }
     case "free": {
       performLocalClaim(root, slug, resolution.actorStruct, {
@@ -1931,8 +1979,9 @@ function enforceEnsureSessionOwnership(
         reason: opt(p, "reason", "ensure-session entry"),
         // F1 fix (fix-plan iteration 1, HIGH): see the performLocalSupersede call above.
         actorKey: resolution.branchActorKey,
+        ...(workItemRef ? { workItemRef } : {}),
       });
-      return;
+      return selectedWorkEvidence();
     }
     default:
       die(`ensure-session ownership guard: unrecognized effective_state ${JSON.stringify(effective.effective_state)}`);
@@ -2011,6 +2060,7 @@ function preflightEnsureSession(p: ReturnType<typeof parseArgs>): void {
   const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : flowAgentsArtifactRoot();
   const slug = opt(p, "task-slug") || (opt(p, "work-item") ? workItemSlug(opt(p, "work-item")) : die("--task-slug is required (or pass --work-item to derive it)"));
   const dir = sessionDirFor(root, slug);
+  assertSafeSessionDirectory(root, dir);
   const entry = resolveEnsureSessionEntry(p, dir);
   if (entry.flowId === "builder.build") assertCanonicalBuilderArtifactRoot(root);
   sessionWorkItem(p, slug, dir);
@@ -2020,6 +2070,7 @@ async function ensureSession(p: ReturnType<typeof parseArgs>): Promise<number> {
   const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : flowAgentsArtifactRoot();
   const slug = opt(p, "task-slug") || (opt(p, "work-item") ? workItemSlug(opt(p, "work-item")) : die("--task-slug is required (or pass --work-item to derive it)"));
   const dir = sessionDirFor(root, slug);
+  assertSafeSessionDirectory(root, dir);
   const entry = resolveEnsureSessionEntry(p, dir);
   if (entry.flowId === "builder.build") assertCanonicalBuilderArtifactRoot(root);
   const workItem = sessionWorkItem(p, slug, dir);
@@ -2028,8 +2079,11 @@ async function ensureSession(p: ReturnType<typeof parseArgs>): Promise<number> {
   // below (writeCurrent's per-actor dual-write) so the branch-naming actor and the
   // assignment-claim actor are always the same identity.
   const actorResolution = resolveEnsureSessionActor(p);
-  enforceEnsureSessionOwnership(p, root, slug, dir, actorResolution);
-  fs.mkdirSync(dir, { recursive: true });
+  const selectionWorkItemRef = entry.flowId === "builder.build" && assignmentSubjectMatchesWorkItem(slug, workItem.ref)
+    ? workItem.ref
+    : undefined;
+  const selectedWorkEvidence = enforceEnsureSessionOwnership(p, root, slug, dir, actorResolution, selectionWorkItemRef);
+  ensureSafeDirectory(root, dir);
   const timestamp = opt(p, "timestamp", now());
   if (workItem.localRecord && !fs.existsSync(path.join(dir, "work-item.json"))) {
     writeJson(path.join(dir, "work-item.json"), workItem.localRecord);
@@ -2088,10 +2142,41 @@ async function ensureSession(p: ReturnType<typeof parseArgs>): Promise<number> {
   writeCurrent(root, dir, timestamp, "workflow-sidecar", "ensure-session", entry.flowId || undefined, resumedStep || undefined, actorResolution.unresolved ? undefined : actorResolution.branchActorKey);
   if (entry.flowId === "builder.build") {
     try {
-      await startBuilderFlowSession({ sessionDir: dir });
+      const started = await startBuilderFlowSession({ sessionDir: dir });
+      if (started.run.state.current_step === "pull-work"
+        && selectedWorkEvidence
+        && assignmentSubjectMatchesWorkItem(slug, workItem.ref)) {
+        await withSubjectLock(root, slug, async () => {
+          const assignment = readLocalAssignmentStatus(root, slug).record;
+          if (!assignment
+            || assignment.status !== "claimed"
+            || assignment.subject_id !== slug
+            || assignment.actor_key !== selectedWorkEvidence.actorKey
+            || assignment.work_item_ref !== workItem.ref) {
+            die(`ensure-session refused to emit selected-work evidence: assignment provenance changed before gate evaluation for ${JSON.stringify(workItem.ref)}`);
+          }
+          const assignmentContent = fs.readFileSync(selectedWorkEvidence.assignmentFile);
+          const assignmentDigest = createHash("sha256").update(assignmentContent).digest("hex");
+          const projectRoot = path.dirname(path.dirname(root));
+          const evidenceFile = path.relative(projectRoot, selectedWorkEvidence.assignmentFile);
+          await recordGateClaim(parseArgs([
+            "record-gate-claim",
+            dir,
+            "--actor", selectedWorkEvidence.actorKey,
+            "--expectation", "selected-work",
+            "--status", "pass",
+            "--summary", `Work Item ${workItem.ref} is durably assigned to the active workflow actor (assignment sha256:${assignmentDigest}).`,
+            "--evidence-ref-json", JSON.stringify({
+              kind: "artifact",
+              file: evidenceFile,
+              summary: `Durable local assignment record for the selected Work Item and active actor; sha256:${assignmentDigest}.`,
+            }),
+            "--timestamp", timestamp,
+          ]));
+        });
+      }
     } catch (error) {
-      const retry = `flow-agents builder-run start --session-dir .kontourai/flow-agents/${slug}`;
-      process.stderr.write(`[ensure-session] canonical Builder Flow run did not start; the sidecar remains retryable. Run: ${retry}\n`);
+      process.stderr.write("[ensure-session] canonical Builder Flow entry failed; the acquired Work Item provenance remains retryable. Re-run the same ensure-session command.\n");
       throw error;
     }
   }

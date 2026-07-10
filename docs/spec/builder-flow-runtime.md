@@ -36,11 +36,18 @@ flow-agents builder-run start --session-dir .kontourai/flow-agents/<slug>
 ```
 
 `ensure-session --flow-id builder.build` starts or loads this canonical run before
-returning, then projects the first Flow step into the sidecar. The command remains
-the explicit recovery path if Flow startup fails after sidecar creation; the
-failure is returned to the caller and no substitute run state is invented. Runtime
-hooks keep projected actions advisory while the agent performs their declared
-skills and operations.
+returning. When the local assignment provider durably assigns the exact Work Item
+to the resolved workflow actor, `ensure-session` rereads that record and produces
+the declared `builder.pull-work.selected` claim through the normal Surface trust
+bundle path. Flow evaluates that subject-bound evidence and advances to
+`design-probe`; Flow Agents does not write a transition or gate outcome directly.
+Skipped ownership, unresolved actors, precomputed state, and non-local providers do
+not produce selection evidence and remain at `pull-work`.
+
+The command remains the explicit recovery path if Flow startup fails after sidecar
+creation; the failure is returned to the caller and no substitute run state is
+invented. Runtime hooks keep projected actions advisory while the agent performs
+their declared skills and operations.
 
 Sidecars written by 3.4.2 may still contain `next_action.enforcement`. The 1.0
 schema accepts that deprecated field for artifact compatibility, but current

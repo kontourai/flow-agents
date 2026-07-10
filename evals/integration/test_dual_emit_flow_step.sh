@@ -258,6 +258,7 @@ if flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$SESSION_ROOT" \
   --task-slug dual-emit-test \
   --flow-id builder.build \
+  --skip-ownership-guard \
   --title "Declared-Only Test" \
   --summary "Test declared-only emit for ADR 0016 P-d." \
   --criterion "Tests pass" \
@@ -348,6 +349,7 @@ if flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$SESSION_ROOT" \
   --task-slug dual-emit-policy \
   --flow-id builder.build \
+  --skip-ownership-guard \
   --title "Declared Policy Test" \
   --summary "Test declared-only policy emit for ADR 0016 P-d." \
   --criterion "Policy passes" \
