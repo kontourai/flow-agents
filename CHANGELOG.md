@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.4.3](https://github.com/kontourai/flow-agents/compare/v3.4.2...v3.4.3) (2026-07-10)
+
+
+### Fixes
+
+* start Builder Flow during session creation ([#539](https://github.com/kontourai/flow-agents/issues/539)) ([10214b4](https://github.com/kontourai/flow-agents/commit/10214b478530e522f0dc50c24175d1516c113431))
+
 ## [3.4.2](https://github.com/kontourai/flow-agents/compare/v3.4.1...v3.4.2) (2026-07-10)
 
 
