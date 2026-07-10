@@ -27,6 +27,13 @@ continue-work ties these together for **one job**: take a multi-slice work item 
 - The request is **brand-new work** with nothing landed yet — that is selection from the backlog. Route to `pull-work`.
 - The request is to **resume the *same* interrupted slice** after a restart (same in-flight slice, mid-execution, picking up new hooks/logic) — that is the resume surface (#153), which reconstructs `state.json` + `handoff.json` + plan + `trust.bundle` for the *same* increment. continue-work advances to the *next* increment; it does not re-enter an unfinished one.
 
+For that same-slice case, when a canonical Builder Flow run already exists, restore
+its sidecar/current projection with `flow-agents builder-run recover --session-dir
+.kontourai/flow-agents/<slug>` before following the resume surface. The command
+derives run identity from the session slug and only loads, validates, and projects;
+never invent or supply a run id or step, and use `builder-run sync` separately only
+when recorded evidence should be attached and evaluated.
+
 If the boundary is ambiguous (is this the next slice or the same one?), stop and ask one question before routing. Do not silently assume.
 
 ## Boundary (ADR 0014)

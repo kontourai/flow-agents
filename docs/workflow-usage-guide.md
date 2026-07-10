@@ -591,6 +591,18 @@ Start a newly selected session with `flow-agents builder-run start --session-dir
 [`docs/spec/builder-flow-runtime.md`](spec/builder-flow-runtime.md) for the ownership,
 trust-binding, route-back, and artifact-root contract.
 
+If the same Builder slice is interrupted and its sidecar/current pointers may be
+stale, restore the projection from the existing canonical Flow run with:
+
+```bash
+flow-agents builder-run recover --session-dir .kontourai/flow-agents/<slug>
+```
+
+The session slug is the run identity; recovery accepts no caller-selected run or
+step. It validates the sole Work Item binding and updates only the sidecar/current
+projection, leaving the entire Flow run byte-identical. Recovery never attaches or
+evaluates `trust.bundle`; use `builder-run sync` for that separate operation.
+
 When a session resumes (after context compaction, an agent restart, or a cross-session
 handoff), the workflow-steering hook emits a `RESUME:` block on `SessionStart` that
 gives the resuming agent immediate situational awareness without blocking or auto-deciding.

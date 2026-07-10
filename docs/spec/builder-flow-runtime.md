@@ -51,6 +51,28 @@ Synchronization is digest-idempotent. The same trust bundle is not attached twic
 Inspection loads the run without evaluating it, so invalid evidence is rejected
 before Flow mutation.
 
+## Recovery
+
+Recover an interrupted canonical Builder session with:
+
+```bash
+flow-agents builder-run recover --session-dir .kontourai/flow-agents/<slug>
+```
+
+`recover` derives the Flow run id from the session directory slug; callers cannot
+select a run id or step. It requires exactly one non-empty
+`state.work_item_refs` entry, loads the existing run through Flow's canonical load
+API, and verifies that the ref matches persisted `state.subject` and, when present,
+`state.params.subject`. A missing, foreign, or corrupt run fails closed and is not
+created or repaired.
+
+Recovery is load/validate/project only. It computes the complete projection before
+updating `state.json`, the matching global `current.json`, and matching per-actor
+current pointers. It does not inspect or attach `trust.bundle`, evaluate gates, or
+write any file in `.kontourai/flow/runs/<slug>/`; the complete Flow run tree remains
+byte-identical. Use `sync`, not `recover`, to attach recorded evidence and evaluate
+the current gate.
+
 ## Trust Binding
 
 Claims relevant to the current gate must carry
