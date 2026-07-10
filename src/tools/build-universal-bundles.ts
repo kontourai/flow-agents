@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { loadJson, readText, root, walkFiles, writeText } from "./common.js";
+import { CODEX_REASONING_EFFORTS, codexAgentRoutingErrors } from "./codex-agent-routing.js";
 import { DURABLE_FLOW_AGENTS_DIR, FLOW_AGENTS_RUNTIME_DIR } from "../lib/local-artifact-root.js";
 
 type Agent = Record<string, unknown> & { name: string; prompt: string };
@@ -188,8 +189,36 @@ function mapped(mapName: string, value: unknown): string {
   const map = manifest[mapName];
   return map[modelPrefix(String(value ?? ""))] ?? map.default;
 }
+function codexAgentOverride(spec: Agent): Record<string, unknown> | undefined {
+  const override = manifest.codex_agent_map?.[spec.name];
+  if (override === undefined) return undefined;
+  if (!override || typeof override !== "object" || Array.isArray(override)) {
+    throw new Error(`packaging/manifest.json: codex_agent_map.${spec.name} must be an object`);
+  }
+  const keys = Object.keys(override).sort();
+  if (keys.join(",") !== "model,reasoning_effort") {
+    throw new Error(`packaging/manifest.json: codex_agent_map.${spec.name} must contain exactly model and reasoning_effort`);
+  }
+  return override;
+}
+function validateCodexModel(model: string, context: string): string {
+  const allowed = new Set(manifest.codex?.allowed_agent_models ?? []);
+  if (!allowed.has(model)) throw new Error(`packaging/manifest.json: ${context} uses unsupported Codex agent model '${model}'`);
+  return model;
+}
 function resolveCodexModel(spec: Agent): string {
-  return ["tool-agent-delegate", "tool-agent-handoff"].includes(spec.name) ? "gpt-5.4-mini" : mapped("codex_model_map", spec.model);
+  const override = codexAgentOverride(spec)?.model;
+  if (typeof override === "string" && override) return validateCodexModel(override, `codex_agent_map.${spec.name}.model`);
+  const fallback = ["tool-agent-delegate", "tool-agent-handoff"].includes(spec.name) ? "gpt-5.4-mini" : mapped("codex_model_map", spec.model);
+  return validateCodexModel(fallback, `resolved model for ${spec.name}`);
+}
+function resolveCodexReasoningEffort(spec: Agent): string {
+  const override = codexAgentOverride(spec)?.reasoning_effort;
+  const effort = typeof override === "string" && override ? override : mapped("codex_reasoning_map", spec.model);
+  if (!CODEX_REASONING_EFFORTS.has(effort)) {
+    throw new Error(`packaging/manifest.json: resolved reasoning effort for ${spec.name} is invalid: '${effort}'`);
+  }
+  return effort;
 }
 function normalizeCodexText(text: string): string {
   const replacements: Record<string, string> = { "—": "-", "–": "-", "→": "->", "←": "<-", "’": "'", "“": '"', "”": '"', "⚡": "[quick]", "🖥️": "[interactive]" };
@@ -230,7 +259,7 @@ function codexNicknames(agentName: string): string[] {
 function exportCodexAgent(spec: Agent): string {
   const prompt = appendExportNote(normalizeCodexText(sanitizeText(spec.prompt, "codex", "<bundle-root>")), "Exported from a Kiro agent spec. Hooks, resource auto-loading, and tool allowlists were converted into prompt guidance only. Any explicit Kiro scheduler commands are preserved as optional shell workflows.");
   const description = normalizeCodexText(String(spec.description ?? "")).replace(/"/g, "'");
-  return `# exported from agents/${spec.name}.json\nname = "${spec.name}"\nnickname_candidates = ${JSON.stringify(codexNicknames(spec.name))}\ndescription = "${description}"\nmodel = "${resolveCodexModel(spec)}"\nmodel_reasoning_effort = "${mapped("codex_reasoning_map", spec.model)}"\ndeveloper_instructions = ${JSON.stringify(prompt)}\n`;
+  return `# exported from agents/${spec.name}.json\nname = "${spec.name}"\nnickname_candidates = ${JSON.stringify(codexNicknames(spec.name))}\ndescription = "${description}"\nmodel = "${resolveCodexModel(spec)}"\nmodel_reasoning_effort = "${resolveCodexReasoningEffort(spec)}"\ndeveloper_instructions = ${JSON.stringify(prompt)}\n`;
 }
 function tomlValue(value: unknown): string {
   if (typeof value === "boolean") return value ? "true" : "false";
@@ -733,6 +762,11 @@ export function main(): number {
     return 1;
   }
   const agents = fs.readdirSync(path.join(root, "agents")).filter((name) => name.endsWith(".json")).sort().map((name) => loadJson<Agent>(path.join(root, "agents", name)));
+  const routingErrors = codexAgentRoutingErrors(manifest, agents.map((agent) => agent.name));
+  if (routingErrors.length) {
+    for (const error of routingErrors) console.error(`flow-agents: packaging/manifest.json: ${error}`);
+    return 1;
+  }
   buildBase(agents);
   buildKiro(agents);
   buildClaudeCode(agents);

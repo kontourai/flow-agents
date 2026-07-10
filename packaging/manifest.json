@@ -56,6 +56,13 @@
     "excluded_agents": [
       "dev"
     ],
+    "allowed_agent_models": [
+      "gpt-5.3-codex-spark",
+      "gpt-5.4-mini",
+      "gpt-5.5",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra"
+    ],
     "profiles": {
       "builder": {
         "model": "gpt-5.5",
@@ -113,6 +120,28 @@
     "kimi-k2.5": "low",
     "agi-nova-beta-1m": "medium",
     "default": "medium"
+  },
+  "codex_agent_map": {
+    "tool-planner": {
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high"
+    },
+    "tool-worker": {
+      "model": "gpt-5.6-terra",
+      "reasoning_effort": "high"
+    },
+    "tool-code-reviewer": {
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high"
+    },
+    "tool-security-reviewer": {
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high"
+    },
+    "tool-verifier": {
+      "model": "gpt-5.6-sol",
+      "reasoning_effort": "high"
+    }
   },
   "target_substitutions": {
     "common": [],

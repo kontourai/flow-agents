@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { validateKitRepository as validateFlowKitRepository } from "../flow-kit/validate.js";
+import { codexAgentRoutingErrors } from "./codex-agent-routing.js";
 import { loadJson, readText, rel, root, walkFiles } from "./common.js";
 
 class Reporter {
@@ -209,6 +210,7 @@ function validateManifest(reporter: Reporter, manifest: any, agentNames: Set<str
   }
   for (const dir of manifest.optional_copy_dirs ?? []) if (!fs.existsSync(path.join(root, dir))) console.log(`warning: ${rel(manifestPath)} optional_copy_dirs entry absent: ${dir}`);
   for (const agent of manifest.codex?.excluded_agents ?? []) reporter.check(agentNames.has(agent), `${rel(manifestPath)}: codex excluded agent '${agent}' does not exist`);
+  for (const error of codexAgentRoutingErrors(manifest, agentNames)) reporter.fail(`${rel(manifestPath)}: ${error}`);
 }
 async function validateKitRepository(kitDir: string, reporter: Reporter): Promise<void> {
   if (!fs.existsSync(kitDir) || !fs.statSync(kitDir).isDirectory()) { reporter.fail(`${rel(kitDir)}: kit directory does not exist`); return; }

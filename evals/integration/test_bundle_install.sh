@@ -853,6 +853,33 @@ else
   _fail "Codex full install is missing base agents"
 fi
 
+if node - "$CODEX_AGENTS_DIR" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+function stringAssignment(text, key, name) {
+  const matches = [...text.matchAll(new RegExp(`^${key}\\s*=\\s*"([^"]*)"\\s*$`, "gm"))];
+  if (matches.length !== 1) throw new Error(`${name}: expected exactly one ${key} assignment, found ${matches.length}`);
+  return matches[0][1];
+}
+const expected = {
+  "tool-planner.toml": ["gpt-5.6-sol", "high"],
+  "tool-worker.toml": ["gpt-5.6-terra", "high"],
+  "tool-code-reviewer.toml": ["gpt-5.6-sol", "high"],
+  "tool-security-reviewer.toml": ["gpt-5.6-sol", "high"],
+  "tool-verifier.toml": ["gpt-5.6-sol", "high"],
+};
+for (const [name, [model, effort]] of Object.entries(expected)) {
+  const text = fs.readFileSync(path.join(process.argv[2], name), "utf8");
+  if (stringAssignment(text, "model", name) !== model) throw new Error(`${name}: expected model ${model}`);
+  if (stringAssignment(text, "model_reasoning_effort", name) !== effort) throw new Error(`${name}: expected reasoning ${effort}`);
+}
+NODE
+then
+  _pass "Codex full install preserves Builder specialist 5.6 role routing"
+else
+  _fail "Codex full install lost Builder specialist role routing"
+fi
+
 if [[ -d "$CODEX_FULL_DEST/.codex/skills/plan-work" && -d "$CODEX_FULL_DEST/.codex/skills/deliver" && -d "$CODEX_FULL_DEST/.codex/skills/agentic-engineering" ]]; then
   _pass "Codex full install ships kit-skills and standalone skills together"
 else
