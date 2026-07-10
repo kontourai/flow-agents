@@ -17,8 +17,8 @@ export const LEGACY_TELEMETRY_DIR = ".telemetry";
  * and the durable per-destination install record root
  * (`DURABLE_FLOW_AGENTS_DIR`, i.e. `.flow-agents`).
  */
-export function defaultCodexHome(): string {
-  return process.env["CODEX_HOME"] || path.join(os.homedir(), ".codex");
+export function defaultCodexHome(env: NodeJS.ProcessEnv = process.env, homedir: string = os.homedir()): string {
+  return env["CODEX_HOME"] || path.join(homedir, ".codex");
 }
 
 /**

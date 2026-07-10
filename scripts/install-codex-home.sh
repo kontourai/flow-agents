@@ -51,6 +51,41 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 REAL_CODEX_HOME="${CODEX_REAL_HOME:-$HOME/.codex}"
+
+canonicalize_path() {
+  node - "$1" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+let current = path.resolve(process.argv[2]);
+const missing = [];
+while (!fs.existsSync(current)) {
+  missing.unshift(path.basename(current));
+  const parent = path.dirname(current);
+  if (parent === current) break;
+  current = parent;
+}
+process.stdout.write(path.resolve(fs.realpathSync(current), ...missing));
+NODE
+}
+
+[[ ! -L "$DEST" ]] || { echo "install-codex-home.sh: refusing symlink destination root: $DEST" >&2; exit 1; }
+ROOT_REAL="$(canonicalize_path "$ROOT_DIR")"
+BUNDLE_SOURCE_REAL="$(canonicalize_path "$ROOT_DIR/dist/codex")"
+DEST_REAL="$(canonicalize_path "$DEST")"
+REAL_CODEX_HOME_REAL="$(canonicalize_path "$REAL_CODEX_HOME")"
+case "$DEST_REAL/" in
+  "$ROOT_REAL/"*|"$BUNDLE_SOURCE_REAL/"*)
+    echo "install-codex-home.sh: destination overlaps Flow Agents source: $DEST_REAL" >&2
+    exit 1
+    ;;
+esac
+case "$ROOT_REAL/" in
+  "$DEST_REAL/"*)
+    echo "install-codex-home.sh: Flow Agents source overlaps destination: $DEST_REAL" >&2
+    exit 1
+    ;;
+esac
+
 if command -v npm >/dev/null 2>&1; then
   (cd "$ROOT_DIR" && FLOW_AGENTS_EXPORT_DIAGNOSTICS=0 npm run build:bundles --silent >/dev/null)
 else
@@ -59,7 +94,8 @@ else
 fi
 
 mkdir -p "$DEST"
-DEST_REAL="$(cd "$DEST" && pwd -P)"
+DEST="$(cd "$DEST" && pwd -P)"
+DEST_REAL="$DEST"
 
 assert_safe_dest_path() {
   local rel="$1"
@@ -95,10 +131,17 @@ if [[ -f "$DEST/hooks.json" ]]; then
   cp "$DEST/hooks.json" "$FA_USER_HOOKS_STASH"
 fi
 
-# A real Codex home can contain user-owned config, profiles, auth, hooks, and
-# locally installed kits. Update Flow Agents-owned bundle trees in place without
-# deleting that state. `kits/local` is user/runtime state; everything else under
-# the generated bundle paths is managed by this installer.
+# A real Codex home can contain user-owned files in every shared directory.
+# Prepare an exact Flow Agents overlay, then synchronize only files recorded in
+# the ownership manifest. The synchronizer never uses directory-wide --delete:
+# it removes only unchanged files from its prior manifest and refuses collisions.
+FA_OWNED_OVERLAY="$(mktemp -d /tmp/fa-codex-overlay.XXXXXX)"
+cleanup_install_temps() {
+  rm -rf "$FA_OWNED_OVERLAY"
+  [[ -z "${FA_USER_HOOKS_STASH:-}" ]] || rm -f "$FA_USER_HOOKS_STASH"
+}
+trap cleanup_install_temps EXIT
+
 for managed_dir in \
   .flow-agents \
   agent-cards \
@@ -115,52 +158,65 @@ for managed_dir in \
 do
   if [[ -d "$ROOT_DIR/dist/codex/$managed_dir" ]]; then
     assert_safe_dest_path "$managed_dir"
-    mkdir -p "$DEST/$managed_dir"
-    rsync -a --delete "$ROOT_DIR/dist/codex/$managed_dir/" "$DEST/$managed_dir/"
+    mkdir -p "$FA_OWNED_OVERLAY/$managed_dir"
+    rsync -a "$ROOT_DIR/dist/codex/$managed_dir/" "$FA_OWNED_OVERLAY/$managed_dir/"
   fi
 done
 
 # Skills are user-extensible in a real Codex home. Merge both bundle skill
 # layers into the flattened destination without deleting user-owned skills.
 if [[ -d "$ROOT_DIR/dist/codex/skills" ]]; then
-  assert_safe_dest_path "skills"
-  mkdir -p "$DEST/skills"
-  rsync -a "$ROOT_DIR/dist/codex/skills/" "$DEST/skills/"
+  mkdir -p "$FA_OWNED_OVERLAY/skills"
+  rsync -a "$ROOT_DIR/dist/codex/skills/" "$FA_OWNED_OVERLAY/skills/"
 fi
 
 if [[ -d "$ROOT_DIR/dist/codex/.codex/skills" ]]; then
-  assert_safe_dest_path "skills"
-  mkdir -p "$DEST/skills"
-  rsync -a "$ROOT_DIR/dist/codex/.codex/skills/" "$DEST/skills/"
+  mkdir -p "$FA_OWNED_OVERLAY/skills"
+  rsync -a "$ROOT_DIR/dist/codex/.codex/skills/" "$FA_OWNED_OVERLAY/skills/"
 fi
 
 if [[ -d "$ROOT_DIR/dist/codex/kits" ]]; then
-  assert_safe_dest_path "kits"
-  mkdir -p "$DEST/kits"
-  rsync -a --delete --exclude 'local/' "$ROOT_DIR/dist/codex/kits/" "$DEST/kits/"
+  mkdir -p "$FA_OWNED_OVERLAY/kits"
+  rsync -a --exclude 'local/' "$ROOT_DIR/dist/codex/kits/" "$FA_OWNED_OVERLAY/kits/"
 fi
 
 # Agents are user-extensible in a real Codex home. Merge generated agents
 # without deleting user-owned agents.
 if [[ -d "$ROOT_DIR/dist/codex/.codex/agents" ]]; then
-  assert_safe_dest_path "agents"
-  mkdir -p "$DEST/agents"
-  rsync -a "$ROOT_DIR/dist/codex/.codex/agents/" "$DEST/agents/"
+  mkdir -p "$FA_OWNED_OVERLAY/agents"
+  rsync -a "$ROOT_DIR/dist/codex/.codex/agents/" "$FA_OWNED_OVERLAY/agents/"
 fi
 
 for bundle_file in README.md console.telemetry.json install.sh; do
   if [[ -f "$ROOT_DIR/dist/codex/$bundle_file" ]]; then
-    assert_safe_dest_path "$bundle_file"
-    cp "$ROOT_DIR/dist/codex/$bundle_file" "$DEST/$bundle_file"
+    cp "$ROOT_DIR/dist/codex/$bundle_file" "$FA_OWNED_OVERLAY/$bundle_file"
   fi
 done
+
+assert_safe_dest_path ".flow-agents/codex-install-manifest.json"
+node "$ROOT_DIR/scripts/install-owned-files.js" \
+  "$FA_OWNED_OVERLAY" "$DEST" ".flow-agents/codex-install-manifest.json"
+
+atomic_copy() {
+  local source="$1"
+  local rel="$2"
+  assert_safe_dest_path "$rel"
+  local target="$DEST/$rel"
+  if [[ -e "$target" && ! -f "$target" ]]; then
+    echo "install-codex-home.sh: refusing to replace non-file: $target" >&2
+    exit 1
+  fi
+  local temp
+  temp="$(mktemp "$(dirname "$target")/.flow-agents-install.XXXXXX")"
+  cp "$source" "$temp"
+  mv -f "$temp" "$target"
+}
 
 # Root Codex config/profiles and AGENTS.md may be user-owned in ~/.codex.
 # Seed Flow Agents defaults only when absent.
 for seed_file in AGENTS.md; do
   if [[ -f "$ROOT_DIR/dist/codex/$seed_file" && ! -e "$DEST/$seed_file" ]]; then
-    assert_safe_dest_path "$seed_file"
-    cp "$ROOT_DIR/dist/codex/$seed_file" "$DEST/$seed_file"
+    atomic_copy "$ROOT_DIR/dist/codex/$seed_file" "$seed_file"
   fi
 done
 generated_profile_files=()
@@ -173,8 +229,7 @@ for seed_source in "$ROOT_DIR/dist/codex/.codex/config.toml" "$ROOT_DIR"/dist/co
     profile_names+=("${seed_file%.config.toml}")
   fi
   if [[ ! -e "$DEST/$seed_file" ]] || grep -q 'Generated from packaging/manifest.json' "$DEST/$seed_file"; then
-    assert_safe_dest_path "$seed_file"
-    cp "$seed_source" "$DEST/$seed_file"
+    atomic_copy "$seed_source" "$seed_file"
   fi
 done
 for profile_path in "$DEST"/*.config.toml; do
@@ -195,9 +250,8 @@ done
 rmdir "$DEST/.codex" 2>/dev/null || true
 
 for auth_file in auth.json version.json installation_id models_cache.json; do
-  if [[ "$REAL_CODEX_HOME" != "$DEST" && -f "$REAL_CODEX_HOME/$auth_file" ]]; then
-    assert_safe_dest_path "$auth_file"
-    cp "$REAL_CODEX_HOME/$auth_file" "$DEST/$auth_file"
+  if [[ "$REAL_CODEX_HOME_REAL" != "$DEST_REAL" && -f "$REAL_CODEX_HOME_REAL/$auth_file" ]]; then
+    atomic_copy "$REAL_CODEX_HOME_REAL/$auth_file" "$auth_file"
   fi
 done
 
@@ -212,26 +266,22 @@ chmod 700 "$DEST" 2>/dev/null || true
 FA_VERSION="$(node -p "require('$ROOT_DIR/package.json').version" 2>/dev/null || echo unknown)"
 FA_MANAGED_HOOKS="$ROOT_DIR/dist/codex/.codex/hooks.json"
 if command -v node >/dev/null 2>&1 && [[ -f "$FA_MANAGED_HOOKS" ]]; then
-  if [[ -n "$FA_USER_HOOKS_STASH" && -f "$FA_USER_HOOKS_STASH" ]]; then
-    # Merge user's prior hooks (stash) with the current FA managed hooks.
-    node "$ROOT_DIR/scripts/install-merge.js" \
-      --config "$FA_USER_HOOKS_STASH" \
-      --managed-hooks "$FA_MANAGED_HOOKS" \
-      --version "$FA_VERSION" \
-      --install-record "$DEST/.flow-agents/install.json" \
-      --runtime "codex"
-    # Move the merged result into the destination.
-    cp "$FA_USER_HOOKS_STASH" "$DEST/hooks.json"
-    rm -f "$FA_USER_HOOKS_STASH"
-  else
-    # No prior user hooks: just write the version stamp (FA hooks are already correct from rsync).
-    node "$ROOT_DIR/scripts/install-merge.js" \
-      --config "$DEST/hooks.json" \
-      --managed-hooks "$FA_MANAGED_HOOKS" \
-      --version "$FA_VERSION" \
-      --install-record "$DEST/.flow-agents/install.json" \
-      --runtime "codex"
+  FA_HOOKS_WORK="${FA_USER_HOOKS_STASH:-}"
+  if [[ -z "$FA_HOOKS_WORK" ]]; then
+    FA_HOOKS_WORK="$(mktemp /tmp/fa-hooks-work.XXXXXX.json)"
+    printf '{"hooks":{}}\n' > "$FA_HOOKS_WORK"
   fi
+  FA_INSTALL_RECORD_WORK="$(mktemp /tmp/fa-install-record.XXXXXX.json)"
+  node "$ROOT_DIR/scripts/install-merge.js" \
+    --config "$FA_HOOKS_WORK" \
+    --managed-hooks "$FA_MANAGED_HOOKS" \
+    --version "$FA_VERSION" \
+    --install-record "$FA_INSTALL_RECORD_WORK" \
+    --runtime "codex"
+  atomic_copy "$FA_HOOKS_WORK" "hooks.json"
+  atomic_copy "$FA_INSTALL_RECORD_WORK" ".flow-agents/install.json"
+  rm -f "$FA_HOOKS_WORK" "$FA_INSTALL_RECORD_WORK"
+  FA_USER_HOOKS_STASH=""
 fi
 
 if [[ ${#CONSOLE_CONFIG_ARGS[@]} -gt 0 || -n "${FLOW_AGENTS_TELEMETRY_SINK:-}" || -n "${FLOW_AGENTS_TELEMETRY_SINKS:-}" || -n "${FLOW_AGENTS_CONSOLE_URL:-}" || -n "${CONSOLE_TELEMETRY_URL:-}" || -n "${CONSOLE_URL:-}" || -n "${FLOW_AGENTS_CONSOLE_TOKEN_FILE:-}" || -n "${CONSOLE_TELEMETRY_TOKEN_FILE:-}" ]]; then

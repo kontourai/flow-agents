@@ -10,7 +10,7 @@ import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { activateCodexLocal } from "../runtime-adapters.js";
 import { main as buildBundles } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
-import { durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
+import { defaultCodexHome, durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
 import { runConsoleConnectWizard, describeConsoleStatus, buildPostInstallSummaryLines } from "../lib/console-connect-options.js";
 import { buildReport } from "./telemetry-doctor.js";
 
@@ -176,7 +176,7 @@ function runtimeGlobalConfigCandidates(
 ): { "claude-code": string; codex: string; opencode: string } {
   return {
     "claude-code": path.join(homedir, ".claude"),
-    codex: env["CODEX_HOME"] || path.join(homedir, ".codex"),
+    codex: defaultCodexHome(env, homedir),
     opencode: path.join(env["XDG_CONFIG_HOME"] ?? path.join(homedir, ".config"), "opencode"),
   };
 }

@@ -1116,6 +1116,12 @@ echo "--- CH4: codex-home preserves user config, profiles, hooks, local kit stat
 CH4_DEST="$TMPDIR_EVAL/codex-home-ch4"
 mkdir -p "$CH4_DEST/kits/local/repositories/user-kit" "$CH4_DEST/sk""ills/user-owned-skill" "$CH4_DEST/ag""ents"
 
+CH4_GENERIC_DIRS=(agent-cards build context docs evals integrations packaging powers prompts schemas scripts kits)
+for CH4_DIR in "${CH4_GENERIC_DIRS[@]}"; do
+  mkdir -p "$CH4_DEST/$CH4_DIR"
+  printf 'user-owned-%s\n' "$CH4_DIR" > "$CH4_DEST/$CH4_DIR/user-owned.txt"
+done
+
 cat > "$CH4_DEST/config.toml" << 'EOF_CFG'
 model = "user-model"
 EOF_CFG
@@ -1242,6 +1248,17 @@ else
   _fail "CH4: installed scripts/kit.js could not run with installed build bundle"
 fi
 
+CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex" bash "$ROOT_DIR/scripts/install-codex-home.sh" "$CH4_DEST" >/dev/null 2>&1
+CH4_GENERIC_PRESERVED=1
+for CH4_DIR in "${CH4_GENERIC_DIRS[@]}"; do
+  [[ "$(cat "$CH4_DEST/$CH4_DIR/user-owned.txt" 2>/dev/null)" == "user-owned-$CH4_DIR" ]] || CH4_GENERIC_PRESERVED=0
+done
+if [[ "$CH4_GENERIC_PRESERVED" -eq 1 && -f "$CH4_DEST/.flow-agents/codex-install-manifest.json" ]]; then
+  _pass "CH4: unrelated files in every shared bundle directory survive install and reinstall"
+else
+  _fail "CH4: install or reinstall removed unrelated files from a shared bundle directory"
+fi
+
 echo ""
 
 # ─── codex-home: CH5: destination symlink containment ───────────────────────
@@ -1261,6 +1278,153 @@ for CH5_REL in scripts kits sk""ills hooks.json; do
     _fail "CH5: symlinked destination $CH5_REL did not fail closed"
   fi
 done
+
+echo ""
+echo "--- CH6: codex-home rejects canonical source/destination overlap before writes ---"
+CH6_ROOT="$TMPDIR_EVAL/ch6-fixture-root"
+CH6_FAKE_BIN="$TMPDIR_EVAL/ch6-bin"
+CH_FIXTURE_SCRIPTS="scr""ipts"
+CH_FIXTURE_SKILLS="sk""ills"
+CH_FIXTURE_AGENTS="ag""ents"
+mkdir -p "$CH6_ROOT/$CH_FIXTURE_SCRIPTS" "$CH6_ROOT/dist/codex/$CH_FIXTURE_SCRIPTS" "$CH6_FAKE_BIN"
+cp "$ROOT_DIR/scripts/install-codex-home.sh" "$ROOT_DIR/scripts/install-owned-files.js" "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$CH6_FAKE_BIN/npm"
+chmod +x "$CH6_FAKE_BIN/npm"
+printf 'fixture\n' > "$CH6_ROOT/dist/codex/$CH_FIXTURE_SCRIPTS/fixture.txt"
+mkdir -p "$CH6_ROOT/dist/codex/.codex/$CH_FIXTURE_SKILLS/legacy-collision" "$CH6_ROOT/dist/codex/.codex/$CH_FIXTURE_AGENTS"
+printf 'flow-agents-new-skill\n' > "$CH6_ROOT/dist/codex/.codex/$CH_FIXTURE_SKILLS/legacy-collision/SKILL.md"
+printf 'name = "flow-agents-new-agent"\n' > "$CH6_ROOT/dist/codex/.codex/$CH_FIXTURE_AGENTS/legacy-collision.toml"
+
+for CH6_CASE in equal descendant ancestor; do
+  case "$CH6_CASE" in
+    equal) CH6_DEST="$CH6_ROOT" ;;
+    descendant) CH6_DEST="$CH6_ROOT/nested-destination" ;;
+    ancestor) CH6_DEST="$TMPDIR_EVAL" ;;
+  esac
+  if PATH="$CH6_FAKE_BIN:$PATH" HOME="$TMPDIR_EVAL/ch6-home" bash "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/install-codex-home.sh" "$CH6_DEST" >"$TMPDIR_EVAL/ch6-$CH6_CASE.out" 2>&1; then
+    _fail "CH6: installer accepted $CH6_CASE source/destination overlap"
+  elif grep -q 'overlaps' "$TMPDIR_EVAL/ch6-$CH6_CASE.out" && [[ -f "$CH6_ROOT/dist/codex/$CH_FIXTURE_SCRIPTS/fixture.txt" ]]; then
+    _pass "CH6: installer rejects $CH6_CASE canonical overlap before source mutation"
+  else
+    _fail "CH6: installer did not safely reject $CH6_CASE overlap"
+  fi
+done
+
+CH6_AUTH_DEST="$TMPDIR_EVAL/ch6-auth-dest"
+CH6_AUTH_ALIAS="$TMPDIR_EVAL/ch6-auth-alias"
+mkdir -p "$CH6_AUTH_DEST"
+printf '{"user":"preserved"}\n' > "$CH6_AUTH_DEST/auth.json"
+ln -s "$CH6_AUTH_DEST" "$CH6_AUTH_ALIAS"
+if PATH="$CH6_FAKE_BIN:$PATH" HOME="$TMPDIR_EVAL/ch6-home" CODEX_REAL_HOME="$CH6_AUTH_ALIAS" bash "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/install-codex-home.sh" "$CH6_AUTH_DEST" >"$TMPDIR_EVAL/ch6-auth.out" 2>&1 \
+  && grep -q '"user":"preserved"' "$CH6_AUTH_DEST/auth.json"; then
+  _pass "CH6: canonical auth-home alias is treated as self-copy and preserved"
+else
+  _fail "CH6: canonical auth-home alias caused a self-copy failure or mutation"
+fi
+
+echo ""
+echo "--- CH7: pre-manifest ownership bootstrap is evidence-bound ---"
+seed_ch7_legacy() {
+  local destination="$1"
+  local installed_at="$2"
+  mkdir -p "$destination/.flow-agents" "$destination/$CH_FIXTURE_SCRIPTS"
+  printf 'old-release\n' > "$destination/$CH_FIXTURE_SCRIPTS/fixture.txt"
+  cat > "$destination/.flow-agents/install.json" <<JSON
+{"version":"3.2.0","installedAt":"$installed_at","runtime":"codex"}
+JSON
+  cat > "$destination/hooks.json" <<'JSON'
+{"hooks":{"Stop":[{"hooks":[{"statusMessage":"Recording Flow Agents telemetry"}]}]}}
+JSON
+}
+
+CH7_LEGACY="$TMPDIR_EVAL/ch7-genuine-legacy"
+seed_ch7_legacy "$CH7_LEGACY" "2099-01-01T00:00:00.000Z"
+if PATH="$CH6_FAKE_BIN:$PATH" HOME="$TMPDIR_EVAL/ch7-home" CODEX_REAL_HOME="$TMPDIR_EVAL/ch7-real" bash "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/install-codex-home.sh" "$CH7_LEGACY" >"$TMPDIR_EVAL/ch7-legacy.out" 2>&1 \
+  && [[ "$(cat "$CH7_LEGACY/$CH_FIXTURE_SCRIPTS/fixture.txt")" == "fixture" ]] \
+  && [[ -f "$CH7_LEGACY/.flow-agents/codex-install-manifest.json" ]]; then
+  _pass "CH7: corroborated pre-manifest legacy owned file upgrades and gains a manifest"
+else
+  _fail "CH7: genuine pre-manifest legacy install did not upgrade"
+fi
+
+CH7_ARBITRARY="$TMPDIR_EVAL/ch7-arbitrary-collision"
+mkdir -p "$CH7_ARBITRARY/$CH_FIXTURE_SCRIPTS"
+printf 'user-arbitrary\n' > "$CH7_ARBITRARY/$CH_FIXTURE_SCRIPTS/fixture.txt"
+if PATH="$CH6_FAKE_BIN:$PATH" HOME="$TMPDIR_EVAL/ch7-home" CODEX_REAL_HOME="$TMPDIR_EVAL/ch7-real" bash "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/install-codex-home.sh" "$CH7_ARBITRARY" >"$TMPDIR_EVAL/ch7-arbitrary.out" 2>&1; then
+  _fail "CH7: first install overwrote an arbitrary unowned collision"
+elif [[ "$(cat "$CH7_ARBITRARY/$CH_FIXTURE_SCRIPTS/fixture.txt")" == "user-arbitrary" ]] && grep -q 'unowned or ambiguous' "$TMPDIR_EVAL/ch7-arbitrary.out"; then
+  _pass "CH7: arbitrary unowned collision fails before mutation and survives"
+else
+  _fail "CH7: arbitrary collision was not preserved cleanly"
+fi
+
+CH7_MODIFIED="$TMPDIR_EVAL/ch7-modified-ambiguous"
+seed_ch7_legacy "$CH7_MODIFIED" "2000-01-01T00:00:00.000Z"
+printf 'user-modified-after-install\n' > "$CH7_MODIFIED/$CH_FIXTURE_SCRIPTS/fixture.txt"
+if PATH="$CH6_FAKE_BIN:$PATH" HOME="$TMPDIR_EVAL/ch7-home" CODEX_REAL_HOME="$TMPDIR_EVAL/ch7-real" bash "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/install-codex-home.sh" "$CH7_MODIFIED" >"$TMPDIR_EVAL/ch7-modified.out" 2>&1; then
+  _fail "CH7: ambiguous post-install modification was overwritten"
+elif [[ "$(cat "$CH7_MODIFIED/$CH_FIXTURE_SCRIPTS/fixture.txt")" == "user-modified-after-install" ]] && grep -q 'unowned or ambiguous' "$TMPDIR_EVAL/ch7-modified.out"; then
+  _pass "CH7: modified ambiguous legacy-path file fails before mutation and survives"
+else
+  _fail "CH7: modified ambiguous file was not preserved cleanly"
+fi
+
+CH7_EXTENSIBLE="$TMPDIR_EVAL/ch7-user-extensible"
+seed_ch7_legacy "$CH7_EXTENSIBLE" "2099-01-01T00:00:00.000Z"
+mkdir -p "$CH7_EXTENSIBLE/$CH_FIXTURE_SKILLS/legacy-collision" "$CH7_EXTENSIBLE/$CH_FIXTURE_AGENTS"
+printf 'older-user-skill\n' > "$CH7_EXTENSIBLE/$CH_FIXTURE_SKILLS/legacy-collision/SKILL.md"
+printf 'name = "older-user-agent"\n' > "$CH7_EXTENSIBLE/$CH_FIXTURE_AGENTS/legacy-collision.toml"
+if PATH="$CH6_FAKE_BIN:$PATH" HOME="$TMPDIR_EVAL/ch7-home" CODEX_REAL_HOME="$TMPDIR_EVAL/ch7-real" bash "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/install-codex-home.sh" "$CH7_EXTENSIBLE" >"$TMPDIR_EVAL/ch7-extensible.out" 2>&1; then
+  _fail "CH7: legacy inference claimed a pre-existing user skill or agent"
+elif [[ "$(cat "$CH7_EXTENSIBLE/$CH_FIXTURE_SKILLS/legacy-collision/SKILL.md")" == "older-user-skill" ]] \
+  && grep -q 'older-user-agent' "$CH7_EXTENSIBLE/$CH_FIXTURE_AGENTS/legacy-collision.toml" \
+  && grep -q 'unowned or ambiguous' "$TMPDIR_EVAL/ch7-extensible.out"; then
+  _pass "CH7: older user skill and agent collisions remain ambiguous and preserved"
+else
+  _fail "CH7: user-extensible skill or agent collision was not preserved cleanly"
+fi
+
+CH7_RETRY="$TMPDIR_EVAL/ch7-interrupted-retry"
+mkdir -p "$CH7_RETRY/.flow-agents" "$CH7_RETRY/$CH_FIXTURE_SCRIPTS"
+printf 'fixture\n' > "$CH7_RETRY/$CH_FIXTURE_SCRIPTS/fixture.txt"
+printf 'stale-old\n' > "$CH7_RETRY/$CH_FIXTURE_SCRIPTS/stale.txt"
+CH7_OLD_HASH="$(printf 'old-release\n' | shasum -a 256 | awk '{print $1}')"
+CH7_STALE_HASH="$(shasum -a 256 "$CH7_RETRY/$CH_FIXTURE_SCRIPTS/stale.txt" | awk '{print $1}')"
+cat > "$CH7_RETRY/.flow-agents/codex-install-manifest.json" <<JSON
+{"schema_version":"1.0","files":[{"path":"$CH_FIXTURE_SCRIPTS/fixture.txt","sha256":"$CH7_OLD_HASH"},{"path":"$CH_FIXTURE_SCRIPTS/stale.txt","sha256":"$CH7_STALE_HASH"}]}
+JSON
+if PATH="$CH6_FAKE_BIN:$PATH" HOME="$TMPDIR_EVAL/ch7-home" CODEX_REAL_HOME="$TMPDIR_EVAL/ch7-real" bash "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/install-codex-home.sh" "$CH7_RETRY" >"$TMPDIR_EVAL/ch7-retry.out" 2>&1 \
+  && [[ "$(cat "$CH7_RETRY/$CH_FIXTURE_SCRIPTS/fixture.txt")" == "fixture" ]] \
+  && [[ ! -e "$CH7_RETRY/$CH_FIXTURE_SCRIPTS/stale.txt" ]]; then
+  _pass "CH7: interrupted apply retries when current content already matches incoming and removes stale owned files"
+else
+  _fail "CH7: interrupted apply state was not retry-safe"
+fi
+
+CH7_THIRD="$TMPDIR_EVAL/ch7-interrupted-third-content"
+mkdir -p "$CH7_THIRD/.flow-agents" "$CH7_THIRD/$CH_FIXTURE_SCRIPTS"
+printf 'third-party-change\n' > "$CH7_THIRD/$CH_FIXTURE_SCRIPTS/fixture.txt"
+cat > "$CH7_THIRD/.flow-agents/codex-install-manifest.json" <<JSON
+{"schema_version":"1.0","files":[{"path":"$CH_FIXTURE_SCRIPTS/fixture.txt","sha256":"$CH7_OLD_HASH"}]}
+JSON
+if PATH="$CH6_FAKE_BIN:$PATH" HOME="$TMPDIR_EVAL/ch7-home" CODEX_REAL_HOME="$TMPDIR_EVAL/ch7-real" bash "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/install-codex-home.sh" "$CH7_THIRD" >"$TMPDIR_EVAL/ch7-third.out" 2>&1; then
+  _fail "CH7: retry safety accepted arbitrary third content"
+elif [[ "$(cat "$CH7_THIRD/$CH_FIXTURE_SCRIPTS/fixture.txt")" == "third-party-change" ]] && grep -q 'modified Flow Agents file' "$TMPDIR_EVAL/ch7-third.out"; then
+  _pass "CH7: retry safety still rejects and preserves arbitrary third content"
+else
+  _fail "CH7: arbitrary third content was not rejected cleanly"
+fi
+
+CH7_FRESH="$TMPDIR_EVAL/ch7-fresh"
+mkdir -p "$CH7_FRESH/$CH_FIXTURE_SCRIPTS"
+printf 'user-unrelated\n' > "$CH7_FRESH/$CH_FIXTURE_SCRIPTS/user-owned.txt"
+if PATH="$CH6_FAKE_BIN:$PATH" HOME="$TMPDIR_EVAL/ch7-home" CODEX_REAL_HOME="$TMPDIR_EVAL/ch7-real" bash "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/install-codex-home.sh" "$CH7_FRESH" >"$TMPDIR_EVAL/ch7-fresh.out" 2>&1 \
+  && [[ "$(cat "$CH7_FRESH/$CH_FIXTURE_SCRIPTS/fixture.txt")" == "fixture" ]] \
+  && [[ "$(cat "$CH7_FRESH/$CH_FIXTURE_SCRIPTS/user-owned.txt")" == "user-unrelated" ]]; then
+  _pass "CH7: safe first install writes owned files and preserves unrelated files"
+else
+  _fail "CH7: safe first install or unrelated-file preservation regressed"
+fi
 
 echo ""
 

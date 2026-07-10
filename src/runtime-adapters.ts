@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { readJson, relPath, writeJson } from "./lib/fs.js";
+import { atomicCopyFile, atomicWriteJson, ensureSafeDirectory, readJson, relPath } from "./lib/fs.js";
 import { flowAgentsArtifactRoot } from "./lib/local-artifact-root.js";
 import { parseKitDependencies, parseKitHookInfluenceExpectations, parseKitWorkflowTriggers } from "./flow-kit/validate.js";
 
@@ -251,6 +251,8 @@ const ACTIVATED_ASSET_CLASSES = new Set(["flows", "skills", "docs"]);
 export function activateCodexLocal(sourceRoot: string, dest: string, options: { kitIdFilter?: string[] } = {}): Record<string, unknown> {
   const inventory = readKitInventory(sourceRoot, dest, options);
   const runtimeDir = path.join(flowAgentsArtifactRoot(dest), "projections", "codex");
+  const writeRoot = path.resolve(runtimeDir, "../../..");
+  ensureSafeDirectory(writeRoot, runtimeDir);
   const generated: Record<string, string>[] = [];
   const skipped: Record<string, string | null>[] = [];
   for (const asset of inventory.assets) {
@@ -260,8 +262,7 @@ export function activateCodexLocal(sourceRoot: string, dest: string, options: { 
         continue;
       }
       const output = path.join(runtimeDir, "flows", safeSegment(asset.kit_id), `${safeSegment(asset.asset_id)}.flow.json`);
-      fs.mkdirSync(path.dirname(output), { recursive: true });
-      fs.copyFileSync(asset.source_path, output);
+      atomicCopyFile(writeRoot, asset.source_path, output);
       generated.push({ asset_class: asset.asset_class, path: relPath(dest, output), kit_id: asset.kit_id, asset_id: asset.asset_id, source_path: asset.source_path.split(path.sep).join("/") });
     } else if (asset.asset_class === "skills" || asset.asset_class === "docs") {
       // Copy skills and docs to runtime/<adapter>/<class>/<kit-id>/<filename> so the
@@ -275,18 +276,16 @@ export function activateCodexLocal(sourceRoot: string, dest: string, options: { 
       const output = asset.asset_class === "skills"
         ? path.join(runtimeDir, asset.asset_class, safeSegment(asset.kit_id), safeSegment(path.basename(path.dirname(asset.source_path))), filename)
         : path.join(runtimeDir, asset.asset_class, safeSegment(asset.kit_id), filename);
-      fs.mkdirSync(path.dirname(output), { recursive: true });
-      fs.copyFileSync(asset.source_path, output);
+      atomicCopyFile(writeRoot, asset.source_path, output);
       generated.push({ asset_class: asset.asset_class, path: relPath(dest, output), kit_id: asset.kit_id, asset_id: asset.asset_id ?? "", source_path: asset.source_path.split(path.sep).join("/") });
     } else {
       skipped.push({ asset_class: asset.asset_class, path: asset.relative_path, kit_id: asset.kit_id, asset_id: asset.asset_id, reason: "asset class is not activated by codex-local" });
     }
   }
-  fs.mkdirSync(runtimeDir, { recursive: true });
   const supportedClasses = Array.from(ACTIVATED_ASSET_CLASSES);
   const manifest = { schema_version: "1.0", adapter: "codex-local", supported_asset_classes: supportedClasses, generated_runtime_files: generated, skipped_assets: skipped, warnings: inventory.warnings, errors: inventory.errors };
   const manifestPath = path.join(runtimeDir, "activation.json");
-  writeJson(manifestPath, manifest);
+  atomicWriteJson(writeRoot, manifestPath, manifest);
   generated.push({ asset_class: "activation-manifest", path: relPath(dest, manifestPath), kit_id: "runtime", asset_id: "codex-local.activation", source_path: manifestPath.split(path.sep).join("/") });
   return { selected_adapter: "codex-local", supported_asset_classes: supportedClasses, generated_runtime_files: generated, skipped_assets: skipped, warnings: inventory.warnings, errors: inventory.errors };
 }
@@ -304,6 +303,8 @@ export function activateStrandsLocal(sourceRoot: string, dest: string, options: 
   // Runtime skills land at .kontourai/flow-agents/projections/strands/skills/<kit-id>/<filename> and
   // docs at .kontourai/flow-agents/projections/strands/docs/<kit-id>/<filename> for system-prompt injection.
   const runtimeDir = path.join(flowAgentsArtifactRoot(dest), "projections", "strands");
+  const writeRoot = path.resolve(runtimeDir, "../../..");
+  ensureSafeDirectory(writeRoot, runtimeDir);
   const generated: Record<string, string>[] = [];
   const skipped: Record<string, string | null>[] = [];
   for (const asset of inventory.assets) {
@@ -313,8 +314,7 @@ export function activateStrandsLocal(sourceRoot: string, dest: string, options: 
         continue;
       }
       const output = path.join(runtimeDir, "flows", safeSegment(asset.kit_id), `${safeSegment(asset.asset_id)}.flow.json`);
-      fs.mkdirSync(path.dirname(output), { recursive: true });
-      fs.copyFileSync(asset.source_path, output);
+      atomicCopyFile(writeRoot, asset.source_path, output);
       generated.push({ asset_class: asset.asset_class, path: relPath(dest, output), kit_id: asset.kit_id, asset_id: asset.asset_id, source_path: asset.source_path.split(path.sep).join("/") });
     } else if (asset.asset_class === "skills" || asset.asset_class === "docs") {
       // Mirror the codex-local layout: strands/<class>/<kit-id>/<filename>.
@@ -328,18 +328,16 @@ export function activateStrandsLocal(sourceRoot: string, dest: string, options: 
       const output = asset.asset_class === "skills"
         ? path.join(runtimeDir, asset.asset_class, safeSegment(asset.kit_id), safeSegment(path.basename(path.dirname(asset.source_path))), filename)
         : path.join(runtimeDir, asset.asset_class, safeSegment(asset.kit_id), filename);
-      fs.mkdirSync(path.dirname(output), { recursive: true });
-      fs.copyFileSync(asset.source_path, output);
+      atomicCopyFile(writeRoot, asset.source_path, output);
       generated.push({ asset_class: asset.asset_class, path: relPath(dest, output), kit_id: asset.kit_id, asset_id: asset.asset_id ?? "", source_path: asset.source_path.split(path.sep).join("/") });
     } else {
       skipped.push({ asset_class: asset.asset_class, path: asset.relative_path, kit_id: asset.kit_id, asset_id: asset.asset_id, reason: "asset class is not activated by strands-local" });
     }
   }
-  fs.mkdirSync(runtimeDir, { recursive: true });
   const supportedClasses = Array.from(ACTIVATED_ASSET_CLASSES);
   const manifest = { schema_version: "1.0", adapter: "strands-local", supported_asset_classes: supportedClasses, generated_runtime_files: generated, skipped_assets: skipped, warnings: inventory.warnings, errors: inventory.errors };
   const manifestPath = path.join(runtimeDir, "activation.json");
-  writeJson(manifestPath, manifest);
+  atomicWriteJson(writeRoot, manifestPath, manifest);
   generated.push({ asset_class: "activation-manifest", path: relPath(dest, manifestPath), kit_id: "runtime", asset_id: "strands-local.activation", source_path: manifestPath.split(path.sep).join("/") });
   return { selected_adapter: "strands-local", supported_asset_classes: supportedClasses, generated_runtime_files: generated, skipped_assets: skipped, warnings: inventory.warnings, errors: inventory.errors };
 }

@@ -116,6 +116,34 @@ else
   fail "source kits/catalog.json changed during activation"
 fi
 
+SYMLINK_DEST="$TMP_DIR/symlink-activation-dest"
+SYMLINK_OUTSIDE="$TMP_DIR/symlink-activation-outside"
+mkdir -p "$SYMLINK_DEST" "$SYMLINK_OUTSIDE"
+flow_agents_node "$CLI" install "$MIXED_SRC" --dest "$SYMLINK_DEST" >/dev/null 2>&1
+SYMLINK_OUTPUT="$SYMLINK_DEST/.kontourai/flow-agents/projections/codex/flows/mixed-runtime-kit/mixed.runtime.flow.json"
+mkdir -p "$(dirname "$SYMLINK_OUTPUT")"
+printf 'unchanged\n' > "$SYMLINK_OUTSIDE/output"
+ln -s "$SYMLINK_OUTSIDE/output" "$SYMLINK_OUTPUT"
+if flow_agents_node "$CLI" activate --dest "$SYMLINK_DEST" --source-root "$ROOT" >"$TMP_DIR/symlink-output.out" 2>&1; then
+  fail "activation output symlink should fail closed"
+elif [[ "$(cat "$SYMLINK_OUTSIDE/output")" == "unchanged" ]]; then
+  pass "activation output symlink fails closed without outside write"
+else
+  fail "activation output symlink modified outside file"
+fi
+
+rm -rf "$SYMLINK_DEST/.kontourai"
+mkdir -p "$SYMLINK_DEST/.kontourai/flow-agents/projections/codex"
+printf 'unchanged\n' > "$SYMLINK_OUTSIDE/manifest"
+ln -s "$SYMLINK_OUTSIDE/manifest" "$SYMLINK_DEST/.kontourai/flow-agents/projections/codex/activation.json"
+if flow_agents_node "$CLI" activate --dest "$SYMLINK_DEST" --source-root "$ROOT" >"$TMP_DIR/symlink-manifest.out" 2>&1; then
+  fail "activation manifest symlink should fail closed"
+elif [[ "$(cat "$SYMLINK_OUTSIDE/manifest")" == "unchanged" ]]; then
+  pass "activation manifest symlink fails closed without outside write"
+else
+  fail "activation manifest symlink modified outside file"
+fi
+
 if flow_agents_node "$CLI" activate --dest "$DEST" --source-root "$ROOT" --adapter unknown --format json >"$UNKNOWN_OUT" 2>&1; then
   fail "unknown adapter should fail"
   sed -n '1,120p' "$UNKNOWN_OUT"
