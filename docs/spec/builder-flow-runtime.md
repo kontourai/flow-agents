@@ -35,6 +35,12 @@ workflow sidecar. Start the canonical run with:
 flow-agents builder-run start --session-dir .kontourai/flow-agents/<slug>
 ```
 
+The initial sidecar projects this as `next_action.command` with
+`enforcement: "before_tool_use"`. Runtime adapters deny unrelated tool calls until
+the projected command runs. Starting the canonical run replaces that bootstrap
+action with the ordinary Flow-step projection; later actions remain advisory while
+the agent performs their declared skills and operations.
+
 `start` requires exactly one `state.work_item_refs` entry and uses that stable Work
 Item reference as the Flow run subject. It is idempotent for an existing canonical
 run. A direct primitive session without a Builder Flow stamp remains independent and

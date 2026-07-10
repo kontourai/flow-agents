@@ -68,7 +68,10 @@ if (state.status !== 'new' || state.phase !== 'pickup') process.exit(1);
 if (JSON.stringify(state.work_item_refs) !== JSON.stringify(['local:local-request'])) process.exit(1);
 if (workItem.id !== 'local-request' || workItem.title !== 'Local request') process.exit(1);
 if (workItem.source_provider?.kind !== 'local' || workItem.source_provider?.path !== 'work-item.json') process.exit(1);
-if (!state.next_action?.summary?.includes('builder-run start') || !state.next_action?.summary?.includes('`pull-work`')) process.exit(1);
+if (state.next_action?.command !== 'flow-agents builder-run start --session-dir .kontourai/flow-agents/local-request') process.exit(1);
+if (state.next_action?.enforcement !== 'before_tool_use') process.exit(1);
+if (JSON.stringify(state.next_action?.skills) !== JSON.stringify(['pull-work'])) process.exit(1);
+if (!state.next_action?.summary?.includes('`pull-work`')) process.exit(1);
 NODE
   then
     pass "providerless request creates a local Work Item and starts at pull-work"

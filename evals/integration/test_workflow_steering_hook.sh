@@ -21,6 +21,78 @@ mkdir -p "$REPO/docs"
 printf '# Test Repo\n' > "$REPO/AGENTS.md"
 printf '# Context Map\n' > "$REPO/docs/context-map.md"
 
+ENTRY_REPO="$TMPDIR_EVAL/entry-repo"
+ENTRY_COMMAND='flow-agents builder-run start --session-dir .kontourai/flow-agents/entry-demo'
+mkdir -p "$ENTRY_REPO/.kontourai/flow-agents/entry-demo"
+printf '# Entry Repo\n' > "$ENTRY_REPO/AGENTS.md"
+cat > "$ENTRY_REPO/.kontourai/flow-agents/entry-demo/state.json" <<JSON
+{
+  "schema_version": "1.0",
+  "task_slug": "entry-demo",
+  "status": "new",
+  "phase": "pickup",
+  "updated_at": "2026-07-10T00:00:00Z",
+  "next_action": {
+    "status": "continue",
+    "summary": "Start the canonical Flow run.",
+    "skills": ["pull-work"],
+    "command": "$ENTRY_COMMAND",
+    "enforcement": "before_tool_use"
+  }
+}
+JSON
+
+if node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/entry-direct.out" 2>"$TMPDIR_EVAL/entry-direct.err" <<JSON
+{"hook_event_name":"PreToolUse","cwd":"$ENTRY_REPO","tool_name":"Bash","tool_input":{"command":"git status --short"}}
+JSON
+then
+  _fail "workflow entry enforcement should block unrelated tools"
+else
+  status=$?
+  if [[ "$status" -eq 2 ]] && rg -F -q "Run exactly: $ENTRY_COMMAND" "$TMPDIR_EVAL/entry-direct.err"; then
+    _pass "workflow entry enforcement blocks unrelated tools with the projected action"
+  else
+    _fail "workflow entry enforcement returned the wrong direct-hook decision: rc=$status $(cat "$TMPDIR_EVAL/entry-direct.err")"
+  fi
+fi
+
+if node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/entry-allow.out" 2>"$TMPDIR_EVAL/entry-allow.err" <<JSON
+{"hook_event_name":"PreToolUse","cwd":"$ENTRY_REPO","tool_name":"Bash","tool_input":{"command":"$ENTRY_COMMAND"}}
+JSON
+then
+  _pass "workflow entry enforcement allows the exact projected action"
+else
+  _fail "workflow entry enforcement blocked the projected action: $(cat "$TMPDIR_EVAL/entry-allow.err")"
+fi
+
+for adapter in codex claude; do
+  if [[ "$adapter" == "codex" ]]; then
+    adapter_command=(node "$ROOT/scripts/hooks/codex-hook-adapter.js" pre:workflow-entry workflow-steering.js standard,strict)
+  else
+    adapter_command=(node "$ROOT/scripts/hooks/claude-hook-adapter.js" PreToolUse pre:workflow-entry workflow-steering.js standard,strict)
+  fi
+  if "${adapter_command[@]}" >"$TMPDIR_EVAL/entry-$adapter.out" 2>"$TMPDIR_EVAL/entry-$adapter.err" <<JSON
+{"hook_event_name":"PreToolUse","cwd":"$ENTRY_REPO","tool_name":"Bash","tool_input":{"command":"git status --short"}}
+JSON
+  then
+    if node - "$TMPDIR_EVAL/entry-$adapter.out" "$ENTRY_COMMAND" <<'NODE'
+const fs = require('node:fs');
+const payload = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const expected = process.argv[3];
+if (payload.hookSpecificOutput?.hookEventName !== 'PreToolUse') process.exit(1);
+if (payload.hookSpecificOutput?.permissionDecision !== 'deny') process.exit(1);
+if (!String(payload.hookSpecificOutput?.permissionDecisionReason || '').includes(expected)) process.exit(1);
+NODE
+    then
+      _pass "$adapter adapter translates projected-action enforcement into a PreToolUse denial"
+    else
+      _fail "$adapter adapter returned the wrong projected-action denial: $(cat "$TMPDIR_EVAL/entry-$adapter.out")"
+    fi
+  else
+    _fail "$adapter adapter should translate a policy block without failing: $(cat "$TMPDIR_EVAL/entry-$adapter.err")"
+  fi
+done
+
 cat > "$REPO/.kontourai/flow-agents/steering-demo/state.json" <<'JSON'
 {
   "schema_version": "1.0",

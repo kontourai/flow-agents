@@ -1661,7 +1661,7 @@ function initSidecars(
   slug: string,
   sourceRequest: string,
   summary: string,
-  nextAction: string,
+  nextAction: string | AnyObj,
   timestamp: string,
   markdown?: string,
   workItemRefs: string[] = [],
@@ -1698,12 +1698,16 @@ function initSidecars(
   // existing state.json's created_at when present; stamp only on true first-creation.
   // updated_at still reflects "now" on every call — that field is intentionally mutable.
   const retainedWorkItemRefs = workItemRefs.length > 0 ? workItemRefs : (Array.isArray(existingState.work_item_refs) ? existingState.work_item_refs : []);
+  const nextActionSummary = typeof nextAction === "string" ? nextAction : String(nextAction.summary ?? summary);
+  const nextActionPayload = typeof nextAction === "string"
+    ? { status: "continue", summary: nextAction || summary }
+    : { status: "continue", ...nextAction, summary: nextActionSummary };
   writeJson(path.join(dir, "state.json"), {
     ...sidecarBase(slug), status: initialLifecycle?.status ?? "planned", phase: initialLifecycle?.phase ?? "planning", created_at: existingState.created_at || timestamp, updated_at: timestamp,
     ...(branch ? { branch } : {}),
     ...(retainedWorkItemRefs.length > 0 ? { work_item_refs: retainedWorkItemRefs } : {}),
     artifact_paths: relArtifacts(dir),
-    next_action: { status: "continue", summary: nextAction || summary },
+    next_action: nextActionPayload,
   });
   writeJson(path.join(dir, "acceptance.json"), {
     ...sidecarBase(slug), source_request: sourceRequest,
@@ -1711,7 +1715,7 @@ function initSidecars(
     goal_fit: { status: "pending", summary: "Goal fit has not been verified yet." },
   });
   writeJson(path.join(dir, "handoff.json"), {
-    ...sidecarBase(slug), summary, current_state_ref: "state.json", next_steps: nextAction ? [nextAction] : [], blockers: [], warnings: [],
+    ...sidecarBase(slug), summary, current_state_ref: "state.json", next_steps: nextActionSummary ? [nextActionSummary] : [], blockers: [], warnings: [],
   });
 }
 
@@ -1982,9 +1986,16 @@ function ensureSession(p: ReturnType<typeof parseArgs>): number {
   if (!fs.existsSync(path.join(dir, "state.json")) || !fs.existsSync(path.join(dir, "acceptance.json")) || !fs.existsSync(path.join(dir, "handoff.json"))) {
     const phaseMap = entry.flowId ? resolvePhaseMap(entry.flowId, findRepoRootFromDir(dir)) : null;
     const initialPhase = Object.entries(phaseMap ?? {}).find(([, step]) => step === entry.firstStep)?.[0];
-    const nextAction = entry.flowId
+    const startCommand = `flow-agents builder-run start --session-dir .kontourai/flow-agents/${slug}`;
+    const nextAction: string | AnyObj = entry.flowId
       ? entry.flowId === "builder.build"
-        ? `Start the canonical Flow run with \`flow-agents builder-run start --session-dir .kontourai/flow-agents/${slug}\`; activate \`pull-work\` for work item ${JSON.stringify(workItem.ref)}, and satisfy the declared gate before advancing.`
+        ? {
+            status: "continue",
+            summary: `Start the canonical Flow run; activate \`pull-work\` for work item ${JSON.stringify(workItem.ref)}, and satisfy the declared gate before advancing.`,
+            skills: ["pull-work"],
+            command: startCommand,
+            enforcement: "before_tool_use",
+          }
         : `Continue at Flow step ${JSON.stringify(entry.stepId)} for work item ${JSON.stringify(workItem.ref)}; satisfy its declared gate before advancing.`
       : opt(p, "next-action", "Continue.");
     initSidecars(

@@ -41,13 +41,14 @@ const path = require("node:path");
 const os = require("node:os");
 
 // ─── Marker strings ───────────────────────────────────────────────────────────
-// These three statusMessage strings identify every flow-agents managed hook.
+// These statusMessage strings identify every flow-agents managed hook.
 // They are the same strings used by COLLISION_MARKER in src/cli/init.ts and
 // by exportClaudeSettings() / exportCodexHooks() in build-universal-bundles.ts.
 const FA_MARKERS = [
   "Recording Flow Agents telemetry",
   "Running Flow Agents hook policy",
   "Capturing Flow Agents command evidence",
+  "Enforcing Flow Agents projected action",
 ];
 
 const FA_OWNERSHIP_MARKERS = [

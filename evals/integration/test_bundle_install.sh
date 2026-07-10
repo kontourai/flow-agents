@@ -592,13 +592,14 @@ function hasWorkflowSteering(file, ...eventNames) {
 }
 for (const file of process.argv.slice(2)) {
   if (!hasWorkflowSteering(file, "UserPromptSubmit", "userPromptSubmit")) throw new Error(`missing prompt-submit workflow steering: ${file}`);
+  if (!hasWorkflowSteering(file, "PreToolUse", "preToolUse")) throw new Error(`missing pre-tool workflow entry enforcement: ${file}`);
 }
 console.log("ok");
 NODE
 then
-  _pass "installed bundles wire prompt-submit workflow steering across Claude Code, Codex, and Kiro"
+  _pass "installed bundles wire prompt-submit steering and pre-tool entry enforcement across Claude Code, Codex, and Kiro"
 else
-  _fail "installed bundles do not wire prompt-submit workflow steering consistently"
+  _fail "installed bundles do not wire workflow steering consistently"
 fi
 
 if [[ -f "$OPENCODE_DEST/.opencode/plugins/flow-agents.js" ]]   && node - "$OPENCODE_DEST/.opencode/plugins/flow-agents.js" <<'NODE'
