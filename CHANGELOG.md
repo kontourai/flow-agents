@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.4.1](https://github.com/kontourai/flow-agents/compare/v3.4.0...v3.4.1) (2026-07-10)
+
+
+### Fixes
+
+* resolve packaged Flow definitions in consumer repos ([#532](https://github.com/kontourai/flow-agents/issues/532)) ([3eb4a2e](https://github.com/kontourai/flow-agents/commit/3eb4a2e42d49a9c31b16ef62484cf5b0a001c7a1))
+
 ## [3.4.0](https://github.com/kontourai/flow-agents/compare/v3.3.0...v3.4.0) (2026-07-10)
 
 
