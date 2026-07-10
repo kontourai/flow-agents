@@ -39,19 +39,24 @@ SLUG="history-flow-test"
 SESSION_DIR="$FLOW_AROOT/$SLUG"
 mkdir -p "$FLOW_AROOT"
 
-# Create a FlowDefinition-driven session at the verify step (builder.verify.tests is declared)
+# Start at the declared first step, then establish the verify-state fixture.
 flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$FLOW_AROOT" \
   --task-slug "$SLUG" \
   --title "History preservation test" \
   --summary "Test that declared builder.* claims survive round-trips." \
   --flow-id builder.build \
-  --step-id verify \
   --timestamp "2026-06-01T00:00:00Z" >/dev/null 2>&1
 
 flow_agents_node "$WRITER" init-plan "$SESSION_DIR/$SLUG--deliver.md" \
   --source-request "Test" --summary "Testing" \
   --timestamp "2026-06-01T00:00:00Z" >/dev/null 2>&1
+
+flow_agents_node "$WRITER" advance-state "$SESSION_DIR" \
+  --status in_progress --phase verification \
+  --summary "Testing at verify." --next-action "Record evidence." \
+  --flow-definition builder.build \
+  --timestamp "2026-06-01T00:00:30Z" >/dev/null 2>&1
 
 # Record a passing check (produces ONLY builder.verify.tests declared claim — no legacy shadow, P-d)
 flow_agents_node "$WRITER" record-evidence "$SESSION_DIR" \
@@ -196,12 +201,17 @@ flow_agents_node "$WRITER" ensure-session \
   --title "Dogfood clean test" \
   --summary "Test evidenceClean/critiqueClean on builder.build session." \
   --flow-id builder.build \
-  --step-id verify \
   --timestamp "2026-06-01T20:00:00Z" >/dev/null 2>&1
 
 flow_agents_node "$WRITER" init-plan "$DOGFOOD_DIR/$DOGFOOD_SLUG--deliver.md" \
   --source-request "Test" --summary "Testing" \
   --timestamp "2026-06-01T20:00:00Z" >/dev/null 2>&1
+
+flow_agents_node "$WRITER" advance-state "$DOGFOOD_DIR" \
+  --status in_progress --phase verification \
+  --summary "Testing at verify." --next-action "Record evidence." \
+  --flow-definition builder.build \
+  --timestamp "2026-06-01T20:00:30Z" >/dev/null 2>&1
 
 # Record pass evidence (produces builder.verify.tests declared claim, status=verified)
 flow_agents_node "$WRITER" record-evidence "$DOGFOOD_DIR" \

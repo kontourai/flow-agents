@@ -34,5 +34,5 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [trust-ledger-retention](./trust-ledger-retention.md) | needs-decision | Trust-ledger retention and console-as-projection |
 | [trust-reconcile](./trust-reconcile.md) | current | Trust-reconcile and delivery reconciliation |
 | [typescript-source-policy](./typescript-source-policy.md) | current | TypeScript-first source policy |
-| [workflow-enforcement](./workflow-enforcement.md) | needs-decision | Workflow Enforcement |
+| [workflow-enforcement](./workflow-enforcement.md) | current | Workflow Enforcement |
 | [workflow-trust-state](./workflow-trust-state.md) | needs-decision | Workflow trust state |

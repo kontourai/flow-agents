@@ -171,6 +171,11 @@ A stable explanation for why a Gate passed, failed, could not be verified, or ro
 One execution of a Workflow from selected scope through its gates, evidence, route-backs, and terminal outcome. A Workflow Run references its canonical Selected Scope and snapshots the selected subject identifiers for audit history. Builder Kit Delivery Runs are a build-specific kind of Workflow Run.
 _Avoid_: Delivery Run as the generic term
 
+### Workflow Entry Authority
+
+The authority to create a new Workflow Run or resume an existing one. A new run always starts at the Workflow's first step; a later current step is valid only when recovered from persisted run state whose transitions, gate outcomes, evidence, and accepted exceptions validate against the canonical Workflow definition. Gate exceptions may authorize a gate outcome inside an existing run, but never authorize selecting a later starting step.
+_Avoid_: Ad-hoc entry, skip-step override
+
 ### Run Plan
 
 The core workflow-level plan for a Workflow Run. Run Plans describe intended gate order, selected scope, required capabilities, required evidence, route-back policy, and learning points without assuming the work is software delivery.
@@ -398,4 +403,3 @@ The CI-anchored reconciliation of a session's trust claims against a manifest โ€
 
 The policy that maps a delegate role name (such as `delegate-mechanical`, `delegate-implementation`, `delegate-design`, `orchestrator`, `extraction-default`) to a specific `model@provider` ref. Model Routing is data, not code: it lives in `.datum/config.json` (read by the `@kontourai/datum` registry, schema `datum.schema.json`) and never in generated files or per-agent frontmatter. The orchestrator resolves the role at delegation time (`datum resolve <role> --json`) and passes the resolved model explicitly when spawning each delegate. See [context/contracts/execution-contract.md](context/contracts/execution-contract.md) ยง Delegation: Model Routing and [docs/decisions/model-routing.md](docs/decisions/model-routing.md).
 _Avoid_: Generated per-agent model frontmatter, environment-variable-only model selection
-

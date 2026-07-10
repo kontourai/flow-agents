@@ -56,6 +56,40 @@ function workItemSlug(ref: string): string {
   return slugify(`${owner}-${repo}-${id}`, "work-item");
 }
 
+type SessionWorkItem = {
+  ref: string;
+  localRecord?: AnyObj;
+};
+
+function sessionWorkItem(p: ReturnType<typeof parseArgs>, slug: string, dir: string): SessionWorkItem {
+  const providerRef = opt(p, "work-item");
+  if (providerRef) {
+    return { ref: providerRef };
+  }
+
+  const existingState = loadJson(path.join(dir, "state.json"));
+  if (Array.isArray(existingState.work_item_refs) && typeof existingState.work_item_refs[0] === "string") {
+    return { ref: existingState.work_item_refs[0] };
+  }
+
+  const title = opt(p, "title", slug).trim() || slug;
+  const body = opt(p, "summary").trim();
+  return {
+    ref: `local:${slug}`,
+    localRecord: {
+      id: slug,
+      title,
+      ...(body ? { body } : {}),
+      status: "ready",
+      source_provider: {
+        kind: "local",
+        path: "work-item.json",
+      },
+      artifact_refs: ["state.json", "handoff.json"],
+    },
+  };
+}
+
 /** Pure, lock-free, side-effect-free CLI wrapper around workItemSlug() — the single source of
  * truth for the deterministic subjectId/session-directory-name slug. Named resolveSlugCmd (not
  * resolveSlug) to avoid colliding with any future export named resolveSlug. */
@@ -1520,7 +1554,7 @@ function validateRunnableCheckCommand(check: AnyObj, context: string): void {
  * byte-identical to this function's pre-#291 behavior — with a stderr note mirroring the existing
  * unresolved-actor branch-naming diagnostic.
  */
-function writeCurrent(root: string, dir: string, timestamp: string, owner: string, source: string, flowId?: string, stepId?: string, adHocReason?: string, actorKey?: string): void {
+function writeCurrent(root: string, dir: string, timestamp: string, owner: string, source: string, flowId?: string, stepId?: string, actorKey?: string): void {
   // #289: mirror the active session's already-recorded branch (state.json.branch) into
   // current.json so consumers of current.json (which has no schema of its own — not one of the
   // 9 schemas under schemas/) see the routing branch without re-reading state.json separately.
@@ -1539,11 +1573,6 @@ function writeCurrent(root: string, dir: string, timestamp: string, owner: strin
     // FlowDefinition omit them and fall through to the workflow.* claim type path.
     ...(flowId ? { active_flow_id: flowId } : {}),
     ...(stepId ? { active_step_id: stepId } : {}),
-    // WS8 (AC12): sanctioned ad-hoc direct entry marker. Set when --step-id explicitly
-    // targets a step other than the flow's resolved first step, so stop-goal-fit /
-    // gate-review can distinguish an intentional direct entry (e.g. a planning-only
-    // session that skips pull-work) from a stale/mis-stamped active_step_id.
-    ...(adHocReason ? { ad_hoc_entry: true, ad_hoc_reason: adHocReason } : {}),
   };
   writeJson(path.join(root, "current.json"), payload);
   if (actorKey && !loadActorIdentityHelper().isUnresolvedActor(actorKey)) {
@@ -1613,7 +1642,17 @@ function updateCurrentAgent(root: string, dir: string, agentId: string, status: 
   }
 }
 
-function initSidecars(dir: string, slug: string, sourceRequest: string, summary: string, nextAction: string, timestamp: string, markdown?: string): void {
+function initSidecars(
+  dir: string,
+  slug: string,
+  sourceRequest: string,
+  summary: string,
+  nextAction: string,
+  timestamp: string,
+  markdown?: string,
+  workItemRefs: string[] = [],
+  initialLifecycle?: { status: string; phase: string },
+): void {
   const criteria = markdown ? definitionAcceptanceLines(markdown).map(parseCriterion) : [];
   // #289/#309: `markdown` here is NOT always the session `<slug>--deliver.md` that
   // ensureSession seeds the `branch:` line into — initPlan is called against the tool-planner's
@@ -1644,9 +1683,11 @@ function initSidecars(dir: string, slug: string, sourceRequest: string, summary:
   // current call's timestamp silently rewrites a session's original creation time. Preserve the
   // existing state.json's created_at when present; stamp only on true first-creation.
   // updated_at still reflects "now" on every call — that field is intentionally mutable.
+  const retainedWorkItemRefs = workItemRefs.length > 0 ? workItemRefs : (Array.isArray(existingState.work_item_refs) ? existingState.work_item_refs : []);
   writeJson(path.join(dir, "state.json"), {
-    ...sidecarBase(slug), status: "planned", phase: "planning", created_at: existingState.created_at || timestamp, updated_at: timestamp,
+    ...sidecarBase(slug), status: initialLifecycle?.status ?? "planned", phase: initialLifecycle?.phase ?? "planning", created_at: existingState.created_at || timestamp, updated_at: timestamp,
     ...(branch ? { branch } : {}),
+    ...(retainedWorkItemRefs.length > 0 ? { work_item_refs: retainedWorkItemRefs } : {}),
     artifact_paths: relArtifacts(dir),
     next_action: { status: "continue", summary: nextAction || summary },
   });
@@ -1867,10 +1908,41 @@ function enforceEnsureSessionOwnership(
  *   --claim-ttl-seconds <n>        Overrides the liveness-policy TTL default for a new claim.
  *   --reason <text>                Audit-trail reason recorded on the claim/supersede record.
  */
+function resolveEnsureSessionEntry(p: ReturnType<typeof parseArgs>, dir: string): { flowId: string; stepId: string; firstStep: string } {
+  const flowId = opt(p, "flow-id");
+  const explicitStep = opt(p, "step-id");
+  if (!flowId) {
+    if (explicitStep) die("ensure-session --step-id requires --flow-id");
+    if (opt(p, "ad-hoc-reason")) die("ensure-session --ad-hoc-reason is no longer supported");
+    return { flowId: "", stepId: "", firstStep: "" };
+  }
+
+  const firstStep = resolveFirstStep(flowId, findRepoRootFromDir(dir));
+  if (!firstStep) die(`ensure-session could not resolve the first step for Flow Definition ${JSON.stringify(flowId)}`);
+  if (opt(p, "ad-hoc-reason")) {
+    die("ensure-session --ad-hoc-reason cannot authorize workflow entry; start at the Flow Definition's first step or resume persisted run state");
+  }
+  if (explicitStep && explicitStep !== firstStep) {
+    die(`ensure-session refused workflow entry at ${JSON.stringify(explicitStep)}: new runs must start at first step ${JSON.stringify(firstStep)}; resume an existing run without --step-id`);
+  }
+
+  return { flowId, stepId: explicitStep || firstStep, firstStep };
+}
+
+function preflightEnsureSession(p: ReturnType<typeof parseArgs>): void {
+  const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : flowAgentsArtifactRoot();
+  const slug = opt(p, "task-slug") || (opt(p, "work-item") ? workItemSlug(opt(p, "work-item")) : die("--task-slug is required (or pass --work-item to derive it)"));
+  const dir = sessionDirFor(root, slug);
+  resolveEnsureSessionEntry(p, dir);
+  sessionWorkItem(p, slug, dir);
+}
+
 function ensureSession(p: ReturnType<typeof parseArgs>): number {
   const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : flowAgentsArtifactRoot();
   const slug = opt(p, "task-slug") || (opt(p, "work-item") ? workItemSlug(opt(p, "work-item")) : die("--task-slug is required (or pass --work-item to derive it)"));
   const dir = sessionDirFor(root, slug);
+  const entry = resolveEnsureSessionEntry(p, dir);
+  const workItem = sessionWorkItem(p, slug, dir);
   // #291 Wave 2 Task 2.1 (§3, §4): resolve the actor ONCE, then run the ownership guard BEFORE
   // any directory/file is created — a refusal must never leave a stray empty session dir. Reused
   // below (writeCurrent's per-actor dual-write) so the branch-naming actor and the
@@ -1879,6 +1951,9 @@ function ensureSession(p: ReturnType<typeof parseArgs>): number {
   enforceEnsureSessionOwnership(p, root, slug, dir, actorResolution);
   fs.mkdirSync(dir, { recursive: true });
   const timestamp = opt(p, "timestamp", now());
+  if (workItem.localRecord && !fs.existsSync(path.join(dir, "work-item.json"))) {
+    writeJson(path.join(dir, "work-item.json"), workItem.localRecord);
+  }
   let md = fs.existsSync(path.join(dir, `${slug}--deliver.md`)) ? read(path.join(dir, `${slug}--deliver.md`)) : "";
   if (!md) {
     // #289: derive the routing branch ONLY on fresh session creation (this `if (!md)` guard).
@@ -1886,11 +1961,27 @@ function ensureSession(p: ReturnType<typeof parseArgs>): number {
     // of code is skipped on a resumed/taken-over session, which is what makes ADR 0021 §5
     // takeover continuity true by construction (see Design Decision 3 in the plan).
     const branch = resolveSessionBranch(p, slug);
-    md = `# ${opt(p, "title", slug)}\n\nbranch: ${branch}\nworktree: main\ncreated: ${timestamp}\nstatus: planning\ntype: deliver\niteration: 1\n\n## Plan\n\n${opt(p, "summary", "")}\n\n## Definition Of Done\n\n- **User outcome:** ${opt(p, "summary", "Workflow session is durable.")}\n- **Scope:** Workflow session artifacts and sidecars.\n- **Acceptance criteria:**\n${opts(p, "criterion").map((c) => `  - [ ] ${c} - Evidence: pending.`).join("\n")}\n- **Usefulness checks:**\n  - [ ] User-facing workflow is documented or discoverable\n- **Stop-short risks:** Workflow artifacts could drift.\n- **Durable docs target:** not needed\n- **Sandbox mode:** local-edit\n\n## Execution Progress\n\n- [ ] Session initialized.\n\n## Verification Report\n\nBuild: [NOT_VERIFIED] Verification has not run yet.\n\n### Acceptance Criteria\n- [NOT_VERIFIED] Verification has not run yet - Evidence: pending workflow execution and checks.\n\n### Verdict: NOT_VERIFIED\n\n## Goal Fit Gate\n\n- [ ] Original user goal restated\n\n## Final Acceptance\n\n- [ ] CI/relevant checks passed or local equivalent recorded\n`;
+    const initialMarkdownStatus = entry.flowId ? "new" : "planning";
+    md = `# ${opt(p, "title", slug)}\n\nbranch: ${branch}\nworktree: main\ncreated: ${timestamp}\nstatus: ${initialMarkdownStatus}\ntype: deliver\niteration: 1\n\n## Plan\n\n${opt(p, "summary", "")}\n\n## Definition Of Done\n\n- **User outcome:** ${opt(p, "summary", "Workflow session is durable.")}\n- **Scope:** Workflow session artifacts and sidecars.\n- **Acceptance criteria:**\n${opts(p, "criterion").map((c) => `  - [ ] ${c} - Evidence: pending.`).join("\n")}\n- **Usefulness checks:**\n  - [ ] User-facing workflow is documented or discoverable\n- **Stop-short risks:** Workflow artifacts could drift.\n- **Durable docs target:** not needed\n- **Sandbox mode:** local-edit\n\n## Execution Progress\n\n- [ ] Session initialized.\n\n## Verification Report\n\nBuild: [NOT_VERIFIED] Verification has not run yet.\n\n### Acceptance Criteria\n- [NOT_VERIFIED] Verification has not run yet - Evidence: pending workflow execution and checks.\n\n### Verdict: NOT_VERIFIED\n\n## Goal Fit Gate\n\n- [ ] Original user goal restated\n\n## Final Acceptance\n\n- [ ] CI/relevant checks passed or local equivalent recorded\n`;
     fs.writeFileSync(path.join(dir, `${slug}--deliver.md`), md);
   }
   if (!fs.existsSync(path.join(dir, "state.json")) || !fs.existsSync(path.join(dir, "acceptance.json")) || !fs.existsSync(path.join(dir, "handoff.json"))) {
-    initSidecars(dir, slug, opt(p, "source-request"), opt(p, "summary"), opt(p, "next-action", "Continue."), timestamp, md);
+    const phaseMap = entry.flowId ? resolvePhaseMap(entry.flowId, findRepoRootFromDir(dir)) : null;
+    const initialPhase = Object.entries(phaseMap ?? {}).find(([, step]) => step === entry.firstStep)?.[0];
+    const nextAction = entry.flowId
+      ? `Continue at Flow step ${JSON.stringify(entry.stepId)} for work item ${JSON.stringify(workItem.ref)}; satisfy its declared gate before advancing.`
+      : opt(p, "next-action", "Continue.");
+    initSidecars(
+      dir,
+      slug,
+      opt(p, "source-request"),
+      opt(p, "summary"),
+      nextAction,
+      timestamp,
+      md,
+      [workItem.ref],
+      initialPhase ? { status: "new", phase: initialPhase } : undefined,
+    );
   }
   // ADR 0016 Abstraction A (P-a): optional --flow-id / --step-id flags persist FlowDefinition
   // routing keys into current.json for the producer (P-b) and enforcer (P-c) to consume.
@@ -1899,27 +1990,14 @@ function ensureSession(p: ReturnType<typeof parseArgs>): number {
   // active_step_id to the FIRST step in the FlowDefinition's steps[] list. This ensures
   // ensure-session --flow-id builder.build produces a FlowDefinition-driven session even
   // before the first advance-state call.
-  const flowId = opt(p, "flow-id");
-  const explicitStep = opt(p, "step-id");
-  let stepId = explicitStep;
-  let adHocReason: string | undefined;
-  if (flowId && !stepId) {
-    const repoRoot = findRepoRootFromDir(dir);
-    const firstStep = resolveFirstStep(flowId, repoRoot);
-    if (firstStep) stepId = firstStep;
-  } else if (flowId && explicitStep) {
-    // WS8 (AC12): --step-id is the sanctioned ad-hoc direct-entry mechanism. When it names
-    // a step other than the flow's resolved first step, record an explicit ad_hoc_entry
-    // marker (with a reason) instead of silently letting the mis-stamp look like the
-    // flow's normal first step. This is the root-cause fix for a planning-only session
-    // whose active_step_id would otherwise default to builder.build's first step.
-    const repoRoot = findRepoRootFromDir(dir);
-    const firstStep = resolveFirstStep(flowId, repoRoot);
-    if (firstStep && firstStep !== explicitStep) {
-      adHocReason = opt(p, "ad-hoc-reason") || `direct entry at step "${explicitStep}" via --step-id (flow first step is "${firstStep}")`;
-    }
-  }
-  writeCurrent(root, dir, timestamp, "workflow-sidecar", "ensure-session", flowId || undefined, stepId || undefined, adHocReason, actorResolution.unresolved ? undefined : actorResolution.branchActorKey);
+  const persistedCurrent = loadCurrent(root);
+  const resumedStep = !opt(p, "step-id")
+    && persistedCurrent?.active_slug === slug
+    && persistedCurrent?.active_flow_id === entry.flowId
+    && typeof persistedCurrent?.active_step_id === "string"
+    ? persistedCurrent.active_step_id
+    : entry.stepId;
+  writeCurrent(root, dir, timestamp, "workflow-sidecar", "ensure-session", entry.flowId || undefined, resumedStep || undefined, actorResolution.unresolved ? undefined : actorResolution.branchActorKey);
   console.log(dir);
   return 0;
 }
@@ -2976,7 +3054,7 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
       // call site ALSO dual-writes the per-actor projection, not only ensure-session's call site —
       // otherwise a session that only ever calls advance-state (never re-running ensure-session)
       // would never get a per-actor current.json mirror for its own FlowDefinition routing keys.
-      writeCurrent(root, dir, timestamp, "workflow-sidecar", "advance-state", flow, stepId, undefined, resolveReadActorKey(p));
+      writeCurrent(root, dir, timestamp, "workflow-sidecar", "advance-state", flow, stepId, resolveReadActorKey(p));
     }
   }
   livenessLifecycle(dir, slug, LIVENESS_TERMINAL.has(status) ? "release" : "heartbeat", timestamp);
@@ -5639,6 +5717,7 @@ async function main(): Promise<number> {
   }
   const p = parseArgs(_argvForParse);
   if (!p.command) die("workflow-sidecar command is required");
+  if (p.command === "ensure-session") preflightEnsureSession(p);
   // F1 (#166 fix iteration 1): `liveness whoami` is a read-only, lock-free, write-free advisory
   // surface (see the `action === "whoami"` branch inside `liveness()` above) — it must never
   // acquire the workflow-sidecar lock, regardless of whether the artifact root already exists on

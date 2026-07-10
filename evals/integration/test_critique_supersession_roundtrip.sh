@@ -81,7 +81,10 @@ if [[ $? -eq 0 ]]; then _pass "(a) trust-reconcile exits 0 (resolved session con
 echo ""
 echo "=== (b) HEADLINE --flow-id builder.build/verify: mixed evidence + critique → reconcile 0 ==="
 B_AROOT="$TMP/b/aroot"; B_SLUG="flowid-converge"; B_DIR="$B_AROOT/$B_SLUG"
-seed "$B_AROOT" "$B_SLUG" --flow-id builder.build --step-id verify
+seed "$B_AROOT" "$B_SLUG" --flow-id builder.build
+flow_agents_node "$WRITER" advance-state "$B_DIR" --status in_progress --phase verification \
+  --summary "Testing at verify." --next-action "Record evidence." \
+  --flow-definition builder.build --timestamp "2026-07-01T00:00:30Z" >/dev/null 2>&1
 flow_agents_node "$WRITER" record-evidence "$B_DIR" --verdict pass \
   --check-json '{"id":"k-diff","kind":"diff","status":"pass","summary":"diff excerpt"}' \
   --check-json '{"id":"k-policy","kind":"policy","status":"pass","summary":"policy rule"}' \

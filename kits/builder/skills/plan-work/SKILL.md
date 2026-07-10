@@ -198,22 +198,10 @@ Copied from the plan artifact. This is the stop condition for delivery.
 
 {context?}
 
-## Ad-hoc Direct Entry (Planning-Only or Non-`pull-work` Sessions)
+## Workflow Entry
 
-`ensure-session --flow-id <id>` without `--step-id` defaults `active_step_id` to the
-flow's FIRST step (`pull-work` for `builder.build`). For a session that legitimately
-enters mid-flow — e.g. planning directly from a portfolio work item without a
-`pull-work`/pickup artifact — pass the sanctioned override:
-
-```
-npm run workflow:sidecar -- ensure-session \
-  --flow-id builder.build --task-slug <slug> --step-id plan \
-  [--ad-hoc-reason "planning a directly-issued work item; no pull-work artifact"]
-```
-
-When `--step-id` names a step other than the flow's first step, `ensure-session` records
-`ad_hoc_entry: true` + `ad_hoc_reason` in `current.json`. This is the sanctioned way to
-enter a flow mid-stream: the explicit marker lets `stop-goal-fit` / `gate-review`
-distinguish an intentional direct entry from a stale or mis-stamped `active_step_id`,
-instead of silently defaulting to the first step and looking like a normal `pull-work`
-start.
+Do not create or restamp a `builder.build` run from this planning primitive. A Builder
+run enters through `pull-work`, then `design-probe`; Flow advances it to `plan` only after
+the declared upstream gates pass. When `plan-work` is invoked directly outside that
+product workflow, run it as a standalone primitive without `--flow-id builder.build` and
+do not report the omitted Builder prefix as complete.

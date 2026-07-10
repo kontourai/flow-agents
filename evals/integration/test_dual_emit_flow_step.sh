@@ -251,23 +251,29 @@ fi
 echo ""
 echo "── P-d declared-only: session WITH active_flow_id=builder.build / active_step_id=verify ──"
 
-# Create a session with flow-id and step-id
+# Create a session at the declared first step, then use the transition surface to
+# establish the verify-state fixture exercised by this producer test.
 mkdir -p "$SESSION_ROOT"
 if flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$SESSION_ROOT" \
   --task-slug dual-emit-test \
   --flow-id builder.build \
-  --step-id verify \
   --title "Declared-Only Test" \
   --summary "Test declared-only emit for ADR 0016 P-d." \
   --criterion "Tests pass" \
   --timestamp "2026-06-26T00:00:00Z" >"$TMP/ensure.out" 2>"$TMP/ensure.err"; then
-  _pass "ensure-session with --flow-id/--step-id succeeds"
+  _pass "ensure-session with --flow-id succeeds at the declared first step"
 else
-  _fail "ensure-session with --flow-id/--step-id failed: $(cat "$TMP/ensure.out" "$TMP/ensure.err")"
+  _fail "ensure-session with --flow-id failed: $(cat "$TMP/ensure.out" "$TMP/ensure.err")"
 fi
 
 DUAL_DIR="$SESSION_ROOT/dual-emit-test"
+
+flow_agents_node "$WRITER" advance-state "$DUAL_DIR" \
+  --status in_progress --phase verification \
+  --summary "Testing declared-only verify claims." --next-action "Record evidence." \
+  --flow-definition builder.build \
+  --timestamp "2026-06-26T00:00:30Z" >/dev/null 2>&1
 
 # Verify current.json carries the flow keys
 if node -e "
