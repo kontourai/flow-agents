@@ -206,6 +206,40 @@ else
   _fail "Codex agent TOML required-field check failed"
 fi
 
+if node - "$DIST_DIR/codex/.codex/agents" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const root = process.argv[2];
+function stringAssignment(text, key, name) {
+  const matches = [...text.matchAll(new RegExp(`^${key}\\s*=\\s*"([^"]*)"\\s*$`, "gm"))];
+  if (matches.length !== 1) throw new Error(`${name}: expected exactly one ${key} assignment, found ${matches.length}`);
+  return matches[0][1];
+}
+const expected = {
+  "tool-planner.toml": ["gpt-5.6-sol", "high"],
+  "tool-worker.toml": ["gpt-5.6-terra", "high"],
+  "tool-code-reviewer.toml": ["gpt-5.6-sol", "high"],
+  "tool-security-reviewer.toml": ["gpt-5.6-sol", "high"],
+  "tool-verifier.toml": ["gpt-5.6-sol", "high"],
+};
+for (const [name, [model, effort]] of Object.entries(expected)) {
+  const text = fs.readFileSync(path.join(root, name), "utf8");
+  if (stringAssignment(text, "model", name) !== model) throw new Error(`${name}: expected model ${model}`);
+  if (stringAssignment(text, "model_reasoning_effort", name) !== effort) throw new Error(`${name}: expected reasoning ${effort}`);
+}
+const fallback = fs.readFileSync(path.join(root, "tool-playwright.toml"), "utf8");
+if (stringAssignment(fallback, "model", "tool-playwright.toml") !== "gpt-5.5" ||
+    stringAssignment(fallback, "model_reasoning_effort", "tool-playwright.toml") !== "low") {
+  throw new Error("unmapped Codex agent no longer uses family fallback");
+}
+console.log("ok");
+NODE
+then
+  _pass "Codex Builder specialist roles use deterministic 5.6 models and unmapped agents retain family fallback"
+else
+  _fail "Codex Builder specialist role routing is missing, stale, or bypasses family fallback"
+fi
+
 if node - "$DIST_DIR/codex/.codex/hooks.json" <<'NODE'
 const fs = require("node:fs");
 const hooks = JSON.parse(fs.readFileSync(process.argv[2], "utf8")).hooks || {};
