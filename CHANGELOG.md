@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.5.0](https://github.com/kontourai/flow-agents/compare/v3.4.3...v3.5.0) (2026-07-10)
+
+
+### Features
+
+* **builder:** derive selected-work evidence from acquisition ([#543](https://github.com/kontourai/flow-agents/issues/543)) ([bfe1681](https://github.com/kontourai/flow-agents/commit/bfe1681211174cb6219b0dd94d765aa9c99734bd))
+
 ## [3.4.3](https://github.com/kontourai/flow-agents/compare/v3.4.2...v3.4.3) (2026-07-10)
 
 
