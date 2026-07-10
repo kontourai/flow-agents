@@ -337,6 +337,7 @@ function exportClaudeSettings(): string {
   hooks.UserPromptSubmit.push({ hooks: [shellHook(claudePolicy("UserPromptSubmit", "workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
   hooks.PostToolUse.push({ hooks: [shellHook(claudePolicy("PostToolUse", "quality-gate.js"), 30, "Running Flow Agents hook policy")] });
   hooks.PostToolUse.push({ hooks: [shellHook(claudePolicy("PostToolUse", "evidence-capture.js"), 30, "Capturing Flow Agents command evidence")] });
+  hooks.PreToolUse.push({ hooks: [shellHook(claudePolicy("PreToolUse", "workflow-steering.js"), 30, "Enforcing Flow Agents projected action")] });
   hooks.PreToolUse.push({ hooks: [shellHook(claudePolicy("PreToolUse", "config-protection.js"), 30, "Running Flow Agents hook policy")] });
   return `${JSON.stringify({
     statusLine: { type: "command", command: 'bash -lc \'root="${CLAUDE_PROJECT_DIR:-$(pwd)}"; node "$root/scripts/statusline/flow-agents-statusline.js"\'' },
@@ -354,6 +355,7 @@ function exportCodexHooks(): string {
   hooks.SessionStart.push({ hooks: [shellHook(codexPolicy("workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
   hooks.UserPromptSubmit.push({ hooks: [shellHook(codexPolicy("workflow-steering.js"), 30, "Running Flow Agents hook policy")] });
   hooks.PostToolUse.push({ hooks: [shellHook(codexPolicy("evidence-capture.js"), 30, "Capturing Flow Agents command evidence")] });
+  hooks.PreToolUse.push({ hooks: [shellHook(codexPolicy("workflow-steering.js"), 30, "Enforcing Flow Agents projected action")] });
   return `${JSON.stringify({ hooks }, null, 2)}\n`;
 }
 

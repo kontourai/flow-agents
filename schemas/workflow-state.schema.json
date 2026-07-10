@@ -122,6 +122,13 @@
         "command": {
           "type": "string",
           "minLength": 1
+        },
+        "enforcement": {
+          "type": "string",
+          "enum": [
+            "advisory",
+            "before_tool_use"
+          ]
         }
       }
     }

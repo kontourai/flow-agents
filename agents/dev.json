@@ -54,6 +54,11 @@
         "timeout_ms": 3000
       },
       {
+        "command": "node ~/.flow-agents/scripts/hooks/run-hook.js pre:workflow-entry workflow-steering.js standard,strict",
+        "matcher": "*",
+        "timeout_ms": 5000
+      },
+      {
         "command": "node ~/.flow-agents/scripts/hooks/run-hook.js pre:config-protection config-protection.js standard,strict",
         "matcher": "fs_write",
         "timeout_ms": 5000
