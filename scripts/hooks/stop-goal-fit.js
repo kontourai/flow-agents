@@ -17,9 +17,8 @@
  *
  * Scope: the gate evaluates the session's current task (.kontourai/flow-agents/current.json)
  * when set, so an unrelated active workflow elsewhere in the repo does not gate
- * this stop. It also never hard-blocks a pre-execution (not-yet-started) task on
- * mere incompleteness — only genuine false-completion signals (a claimed pass the
- * capture log or evidence.json contradicts) block before execution begins.
+ * this stop. A pre-execution sidecar remains warning-only unless it has an active
+ * canonical Flow run; once Flow is active, its unfinished gate remains blocking.
  */
 
 'use strict';
@@ -69,10 +68,9 @@ const WORKFLOW_SESSION_TYPES = new Set(['deliver', 'delivery', 'fix-bug', 'execu
 const SIDECAR_NAMES = new Set(['state.json', 'handoff.json', 'trust.bundle']);
 const OPTIONAL_SIDECAR_NAMES = new Set();
 
-// A workflow that has not started execution is EXPECTED to be incomplete, so the
-// Stop gate must not hard-block on its missing DOD / Goal Fit / not-done state.
-// Only genuine false-completion signals block a pre-execution task; execution
-// onward gates fully.
+// A sidecar that has not started execution is normally expected to be incomplete.
+// An active canonical Flow run is the exception: its current gate remains live and
+// blocks Stop even while the projected sidecar is in pickup or planning.
 const PRE_EXECUTION_STATUSES = new Set(['new', 'planning', 'planned', 'backlog']);
 const PRE_EXECUTION_PHASES = new Set(['idea', 'backlog', 'pickup', 'planning']);
 
@@ -609,6 +607,9 @@ function sidecarGuidance(root, artifactDir, activeFlowStep) {
   if (state && state.next_action && normalizedStatus(state.next_action.status) !== 'done') {
     const next = state.next_action;
     warnings.push(`${base} next action: ${safeOneLine(next.summary)}${next.target_phase ? ` (target phase: ${safeOneLine(next.target_phase, 80)})` : ''}`);
+    if (Array.isArray(next.skills) && next.skills.length) warnings.push(`${base} required skills: ${next.skills.map(skill => safeOneLine(skill, 80)).join(' -> ')}`);
+    if (Array.isArray(next.operations) && next.operations.length) warnings.push(`${base} required operations: ${next.operations.map(operation => safeOneLine(operation, 80)).join(' -> ')}`);
+    if (next.command) warnings.push(`${base} next command: ${safeOneLine(next.command, 240)}`);
   }
 
   // ── Evidence verdict + checks: bundle-first, fallback to evidence.json ────
@@ -1964,7 +1965,8 @@ async function analyze(root, now = Date.now()) {
   // Use module-scope HARD_BLOCK / FULL_BLOCK (defined above analyze()).
   // pre-execution/terminal tasks: only HARD_BLOCK signals cause a block.
   // execution-onward tasks: FULL_BLOCK signals cause a block.
-  const blockRe = (preExecution || terminal) ? HARD_BLOCK : FULL_BLOCK;
+  const activeFlowRun = gateState && gateState.flow_run && normalizedStatus(gateState.flow_run.status) === 'active';
+  const blockRe = ((preExecution && !activeFlowRun) || terminal) ? HARD_BLOCK : FULL_BLOCK;
   const blocking = warnings.some(w => {
     // Capture cross-reference warn-mode notes never block (operator opted out).
     if (/\[backstop in warn mode — not blocking\]/.test(w)) return false;
@@ -2218,6 +2220,10 @@ function releaseOnNonTerminalStop(root, artifactDir) {
 
     const state = readJsonFile(path.join(artifactDir, 'state.json'));
     if (!state) return; // AC5: no state.json — nothing to gate a release decision on.
+    if (state.flow_run && normalizedStatus(state.flow_run.status) === 'active') {
+      process.stderr.write(`[Hook] Goal Fit: stop-hook release skipped for active Flow run "${safeOneLine(state.flow_run.run_id || state.task_slug || 'unknown', 80)}"; continuation remains governed by Flow state.\n`);
+      return;
+    }
 
     const sidecar = loadWorkflowSidecarBuilt();
     if (!sidecar) {

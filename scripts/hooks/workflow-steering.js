@@ -267,6 +267,9 @@ function stateSteering(root) {
     `STATE: ${state.task_slug || path.basename(path.dirname(current.file))} is status:${state.status} phase:${state.phase}.`,
   ];
   if (next.summary) parts.push(`Recorded next_action.summary: "${safeStateText(next.summary)}"`);
+  if (Array.isArray(next.skills) && next.skills.length) parts.push(`Required skills: ${next.skills.map(skill => safeStateText(skill, 80)).join(' -> ')}.`);
+  if (Array.isArray(next.operations) && next.operations.length) parts.push(`Required operations: ${next.operations.map(operation => safeStateText(operation, 80)).join(' -> ')}.`);
+  if (next.command) parts.push(`Run: ${safeStateText(next.command, 240)}`);
   if (next.target_phase) parts.push(`Target phase: ${safeStateText(next.target_phase, 80)}.`);
   if (next.status === 'needs_user' || state.status === 'needs_decision' || state.status === 'not_verified') {
     parts.push('Do not deliver as complete until the user decision or accepted gap is recorded.');
@@ -422,6 +425,13 @@ function resumeSteering(root, current) {
     // Full next action (240-char display path, not the 80-char normalization)
     const nextSummary = next.summary ? safeStateText(next.summary, 240) : 'none';
     lines.push(`Next action: ${nextSummary}`);
+    if (Array.isArray(next.skills) && next.skills.length) {
+      lines.push(`Required skills: ${next.skills.map(skill => safeStateText(skill, 80)).join(' -> ')}`);
+    }
+    if (Array.isArray(next.operations) && next.operations.length) {
+      lines.push(`Required operations: ${next.operations.map(operation => safeStateText(operation, 80)).join(' -> ')}`);
+    }
+    if (next.command) lines.push(`Run: ${safeStateText(next.command, 240)}`);
 
     // Plan artifact path
     let planPath = 'not found';

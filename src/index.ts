@@ -22,6 +22,7 @@ export {
   BuilderBuildRunInputError,
   BuilderBuildRunIdentityError,
   evaluateBuilderBuildRun,
+  loadBuilderBuildRun,
   resolveBuilderBuildFlowDefinitionPath,
   startBuilderBuildRun,
 } from "./builder-flow-run-adapter.js";
@@ -30,6 +31,7 @@ export type {
   BuilderBuildRunIdentityMismatch,
   BuilderBuildTrustBundleEvidenceInput,
   EvaluateBuilderBuildRunInput,
+  LoadBuilderBuildRunInput,
   StartBuilderBuildRunInput,
 } from "./builder-flow-run-adapter.js";
 

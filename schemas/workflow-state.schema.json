@@ -69,6 +69,26 @@
       "uniqueItems": true,
       "description": "Provider-neutral work item references anchoring this workflow session."
     },
+    "flow_run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "definition_id", "definition_version", "status", "current_step", "run_ref", "open_gate_ids"],
+      "properties": {
+        "run_id": { "type": "string", "minLength": 1 },
+        "definition_id": { "type": "string", "minLength": 1 },
+        "definition_version": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "minLength": 1 },
+        "current_step": { "type": "string", "minLength": 1 },
+        "run_ref": { "type": "string", "minLength": 1 },
+        "open_gate_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "route_back_attempt": { "type": "integer", "minimum": 1 },
+        "route_back_max_attempts": { "type": "integer", "minimum": 1 }
+      }
+    },
     "next_action": {
       "type": "object",
       "additionalProperties": false,
@@ -88,6 +108,20 @@
         },
         "target_artifact": {
           "type": "string"
+        },
+        "skills": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "operations": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1
         }
       }
     }

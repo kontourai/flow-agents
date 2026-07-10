@@ -154,7 +154,14 @@ mkdir -p "$audit_dir/sessions"
 printf '{"session_id":"session-1"}\n' > "$audit_dir/sessions/one.session"
 if printf '%s\n' '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"echo AKIA1234567890ABCDEF && rm -rf /tmp/example"}}' \
   | TELEMETRY_GOVERNANCE=true TELEMETRY_DATA_DIR="$audit_dir" TELEMETRY_SESSION_DIR="$audit_dir/sessions" bash "$ROOT/scripts/hooks/governance-audit.sh" preToolUse dev >"$TMPDIR_EVAL/governance.out" 2>"$TMPDIR_EVAL/governance.err"; then
-  sleep 0.2
+  for _audit_wait in $(seq 1 50); do
+    if [[ -s "$audit_dir/audit.jsonl" ]] \
+      && grep -q '"event_type":"governance.secret_detected"' "$audit_dir/audit.jsonl" \
+      && grep -q '"event_type":"governance.destructive_operation"' "$audit_dir/audit.jsonl"; then
+      break
+    fi
+    sleep 0.1
+  done
   if [[ -s "$audit_dir/audit.jsonl" ]] \
     && grep -q '"event_type":"governance.secret_detected"' "$audit_dir/audit.jsonl" \
     && grep -q '"event_type":"governance.destructive_operation"' "$audit_dir/audit.jsonl"; then

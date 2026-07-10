@@ -1,10 +1,12 @@
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import {
   attachEvidence,
   evaluateRun,
+  expectationsForGate,
   loadRun,
   normalizeTrustBundle,
   openGates,
@@ -16,6 +18,7 @@ import {
   type GateOutcome,
   type JsonObject,
 } from "@kontourai/flow";
+import { resolveEffectiveFlowDefinition } from "./lib/flow-resolver.js";
 
 export const BUILDER_BUILD_FLOW_ID = "builder.build";
 export const BUILDER_BUILD_FLOW_RELATIVE_PATH = "kits/builder/flows/build.flow.json";
@@ -57,6 +60,11 @@ export interface EvaluateBuilderBuildRunInput {
    */
   cwd?: string;
   evidence?: BuilderBuildTrustBundleEvidenceInput;
+}
+
+export interface LoadBuilderBuildRunInput {
+  runId: string;
+  cwd?: string;
 }
 
 export interface BuilderBuildRunResult {
@@ -124,7 +132,8 @@ export async function startBuilderBuildRun(input: StartBuilderBuildRunInput): Pr
   const cwd = input.cwd ?? process.cwd();
   const definitionPath = resolveBuilderBuildFlowDefinitionPath();
   const definition = await loadShippedBuilderBuildDefinition(definitionPath);
-  const started = await startRun(definitionPath, {
+  const runtimeDefinitionPath = materializeRuntimeDefinition(cwd, definition);
+  const started = await startRun(runtimeDefinitionPath, {
     cwd,
     runId: input.runId,
     params: {
@@ -153,7 +162,7 @@ export async function evaluateBuilderBuildRun(input: EvaluateBuilderBuildRunInpu
     const evidence = validateEvidenceInput(input.evidence);
     assertCurrentOpenGate(run.definition, run.state, evidence.gate);
     const normalized = normalizeTrustBundle(await readJson(path.resolve(cwd, evidence.file)));
-    assertBundleSubjects(normalized.bundle, run.state.subject);
+    assertBundleSubjects(normalized.bundle, run.state.subject, openGates(run.definition, run.state)[0]);
     attachedEvidence = [await attachEvidence(input.runId, trustBundleAttachOptions(cwd, evidence))];
   }
 
@@ -169,6 +178,15 @@ export async function evaluateBuilderBuildRun(input: EvaluateBuilderBuildRunInpu
     manifest: evaluated.manifest,
     freshnessTransitions: evaluated.freshness_transitions,
   };
+}
+
+export async function loadBuilderBuildRun(input: LoadBuilderBuildRunInput): Promise<BuilderBuildRunResult> {
+  assertRuntimeInput(input, ["evidence", "now", "gate"]);
+  const cwd = input.cwd ?? process.cwd();
+  const run = await loadRun(input.runId, cwd);
+  const definition = await loadShippedBuilderBuildDefinition(resolveBuilderBuildFlowDefinitionPath());
+  assertCanonicalDefinition(input.runId, definition, run.definition);
+  return resultFromRun(run, input.runId);
 }
 
 function resultFromRun(run: Awaited<ReturnType<typeof loadRun>>, runId: string): BuilderBuildRunResult {
@@ -196,11 +214,26 @@ async function loadCanonicalBuilderBuildRun(
 }
 
 async function loadShippedBuilderBuildDefinition(definitionPath: string): Promise<{ id: string; version: string }> {
-  const definition = validateDefinition(await readJson(definitionPath));
+  const packageRoot = findPackageRoot(path.dirname(definitionPath));
+  const effective = resolveEffectiveFlowDefinition(BUILDER_BUILD_FLOW_ID, packageRoot, { allowOverride: false });
+  if (!effective) {
+    throw new BuilderBuildRunInputError("definition", "could not compile the shipped uses_flow composition");
+  }
+  const definition = validateDefinition(effective);
   if (definition.id !== BUILDER_BUILD_FLOW_ID) {
     throw new BuilderBuildRunInputError("definition", `expected shipped definition id ${BUILDER_BUILD_FLOW_ID}`);
   }
   return definition;
+}
+
+function materializeRuntimeDefinition(cwd: string, definition: unknown): string {
+  const content = `${JSON.stringify(definition, null, 2)}\n`;
+  const digest = createHash("sha256").update(content).digest("hex").slice(0, 16);
+  const directory = path.join(cwd, ".kontourai", "flow-agents", "runtime-definitions");
+  mkdirSync(directory, { recursive: true });
+  const file = path.join(directory, `builder-build-${digest}.flow.json`);
+  if (!existsSync(file)) writeFileSync(file, content);
+  return file;
 }
 
 function assertCanonicalDefinition(
@@ -255,13 +288,25 @@ function assertCurrentOpenGate(definition: unknown, state: FlowRunState, evidenc
   }
 }
 
-function assertBundleSubjects(bundle: unknown, subject: string): void {
+function assertBundleSubjects(bundle: unknown, subject: string, gate: unknown): void {
   if (!isRecord(bundle) || !Array.isArray(bundle.claims)) {
     throw new BuilderBuildRunInputError("evidence", "contains no normalized claims");
   }
-  for (const claim of bundle.claims) {
-    if (!isRecord(claim) || !isNonEmptyString(claim.subjectId) || claim.subjectId !== subject) {
-      throw new BuilderBuildRunInputError("evidence.claims.subjectId", "must match the persisted run subject");
+  const selectors = expectationsForGate(gate).map((expectation: any) => expectation.bundle_claim);
+  const relevant = bundle.claims.filter((claim) =>
+    isRecord(claim)
+    && selectors.some((selector: any) =>
+      selector.claimType === claim.claimType
+      && (!selector.subjectType || selector.subjectType === claim.subjectType)
+    )
+  );
+  if (relevant.length === 0) {
+    throw new BuilderBuildRunInputError("evidence.claims", "contains no claim matching the persisted current open gate");
+  }
+  for (const claim of relevant) {
+    const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+    if (!metadata || metadata.workflow_subject_ref !== subject) {
+      throw new BuilderBuildRunInputError("evidence.claims.metadata.workflow_subject_ref", "must match the persisted run subject");
     }
   }
 }

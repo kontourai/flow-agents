@@ -58,6 +58,18 @@ Use additional `--gate-json` and `--post-deploy-json` values for release, deploy
 
 After writing `release.json`, run artifact validation when available. If `record-release` is unavailable or blocked, keep the release decision as `HOLD` in the Markdown artifact and record the sidecar-write or validation blocker as a `NOT_VERIFIED` evidence gap until the structured release record can be written or the gap is explicitly accepted.
 
+For an active Builder Flow run, record the CI merge-readiness claim only for a `MERGE`, `RELEASE`, or `DEPLOY` decision backed by current provider checks:
+
+```bash
+npm run workflow:sidecar -- record-gate-claim .kontourai/flow-agents/<slug> \
+  --expectation ci-merge-readiness \
+  --status pass \
+  --summary "Provider checks are current and passing; release-readiness decision and residual risks are recorded." \
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/<slug>/release.json","summary":"Release-readiness decision with provider checks, rollback, and observability evidence."}'
+```
+
+Use `fail` or `not_verified` for `HOLD` and unresolved provider evidence. Flow owns the transition to learning after it verifies this claim.
+
 ## Workflow
 
 ### 1. Confirm Evidence

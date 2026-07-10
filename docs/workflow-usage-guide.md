@@ -583,6 +583,14 @@ Use learning-review. Capture facts, decisions, gaps, follow-ups, and durable kno
 
 ## Resumable sessions
 
+Builder build sessions also project their canonical Flow run into the resume block.
+Start a newly selected session with `flow-agents builder-run start --session-dir
+.kontourai/flow-agents/<slug>`. Thereafter, follow `next_action.skills` or
+`next_action.operations`, record the current gate evidence, and use the exact
+`next_action.command` if automatic synchronization was interrupted. See
+[`docs/spec/builder-flow-runtime.md`](spec/builder-flow-runtime.md) for the ownership,
+trust-binding, route-back, and artifact-root contract.
+
 When a session resumes (after context compaction, an agent restart, or a cross-session
 handoff), the workflow-steering hook emits a `RESUME:` block on `SessionStart` that
 gives the resuming agent immediate situational awareness without blocking or auto-deciding.

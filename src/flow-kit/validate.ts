@@ -17,7 +17,7 @@ const AGENT_EXTENSION_CLASSES = new Set(["skills", "docs", "adapters", "evals", 
 // workflow_triggers / hook_influence_expectations declare kit-owned runtime influence,
 // and first_party is legacy catalog/marketplace metadata. It does not grant runtime
 // capability or steering privilege.
-const KNOWN_METADATA_FIELDS = new Set(["dependencies", "workflow_triggers", "hook_influence_expectations", "first_party"]);
+const KNOWN_METADATA_FIELDS = new Set(["dependencies", "workflow_triggers", "hook_influence_expectations", "flow_step_actions", "first_party"]);
 
 export interface KitDependencyEntry {
   kit_id: string;
@@ -42,6 +42,13 @@ export interface KitHookInfluenceExpectationEntry {
   event?: string;
   must_include_guidance: string[];
   must_include_actions: string[];
+}
+
+export interface KitFlowStepActionEntry {
+  flow_id: string;
+  step_id: string;
+  skills: string[];
+  operations: string[];
 }
 
 /**
@@ -252,6 +259,64 @@ export function parseKitHookInfluenceExpectations(manifest: Record<string, unkno
       ...(typeof record.event === "string" ? { event: record.event } : {}),
       must_include_guidance: record.must_include_guidance,
       must_include_actions: record.must_include_actions,
+    });
+  });
+  return { entries, errors };
+}
+
+export function parseKitFlowStepActions(manifest: Record<string, unknown>, manifestPath: string): { entries: KitFlowStepActionEntry[]; errors: string[] } {
+  const entries: KitFlowStepActionEntry[] = [];
+  const errors: string[] = [];
+  const raw = manifest.flow_step_actions;
+  if (raw === undefined) return { entries, errors };
+  if (!Array.isArray(raw)) {
+    errors.push(`${manifestPath}: .flow_step_actions must be a list`);
+    return { entries, errors };
+  }
+  const seen = new Set<string>();
+  raw.forEach((entry, index) => {
+    if (typeof entry !== "object" || entry === null) {
+      errors.push(`${manifestPath}: flow_step_actions[${index}] must be an object`);
+      return;
+    }
+    const record = entry as Record<string, unknown>;
+    if (!workflowTriggerIdentifier(record.flow_id)) {
+      errors.push(`${manifestPath}: flow_step_actions[${index}].flow_id must be a Flow identifier`);
+      return;
+    }
+    if (!workflowTriggerIdentifier(record.step_id)) {
+      errors.push(`${manifestPath}: flow_step_actions[${index}].step_id must be a step identifier`);
+      return;
+    }
+    const skills = record.skills;
+    const operations = record.operations ?? [];
+    if (!Array.isArray(skills) || !skills.every(workflowTriggerIdentifier)) {
+      errors.push(`${manifestPath}: flow_step_actions[${index}].skills must be an identifier list`);
+      return;
+    }
+    if (new Set(skills).size !== skills.length) {
+      errors.push(`${manifestPath}: flow_step_actions[${index}].skills must not contain duplicates`);
+      return;
+    }
+    if (!Array.isArray(operations) || !operations.every(workflowTriggerIdentifier)) {
+      errors.push(`${manifestPath}: flow_step_actions[${index}].operations must be an identifier list when present`);
+      return;
+    }
+    if (new Set(operations).size !== operations.length) {
+      errors.push(`${manifestPath}: flow_step_actions[${index}].operations must not contain duplicates`);
+      return;
+    }
+    const key = `${record.flow_id}/${record.step_id}`;
+    if (seen.has(key)) {
+      errors.push(`${manifestPath}: flow_step_actions[${index}] duplicates '${key}'`);
+      return;
+    }
+    seen.add(key);
+    entries.push({
+      flow_id: record.flow_id,
+      step_id: record.step_id,
+      skills: skills as string[],
+      operations: operations as string[],
     });
   });
   return { entries, errors };
@@ -488,6 +553,8 @@ export async function validateKitRepository(kitDir: string): Promise<string[]> {
   for (const err of workflowTriggerResult.errors) errors.push(err);
   const hookExpectationResult = parseKitHookInfluenceExpectations(manifest, manifestPath);
   for (const err of hookExpectationResult.errors) errors.push(err);
+  const flowStepActionResult = parseKitFlowStepActions(manifest, manifestPath);
+  for (const err of flowStepActionResult.errors) errors.push(err);
   if (manifest.first_party !== undefined && typeof manifest.first_party !== "boolean") {
     errors.push(`${manifestPath}: .first_party must be a boolean when present`);
   }

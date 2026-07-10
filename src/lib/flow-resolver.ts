@@ -73,11 +73,12 @@ export function resolveFlowFilePath(
   flowName: string,
   flowId: string,
   repoRoot: string,
+  allowOverride = true,
 ): string | null {
   // Primary defense: reject any slug containing traversal chars or non-identifier chars.
   if (!SLUG_RE.test(kitId) || !SLUG_RE.test(flowName)) return null;
 
-  const override = process.env["FLOW_AGENTS_FLOW_DEFS_DIR"];
+  const override = allowOverride ? process.env["FLOW_AGENTS_FLOW_DEFS_DIR"] : undefined;
 
   let expectedRoot: string;
   let flowFilePath: string;
@@ -143,6 +144,7 @@ export type ActiveFlowStep = {
   stepId: string;
   gateId: string;
   gateExpects: GateExpectation[];
+  routeBackReasons: string[];
   /** When resolved through a parent step's uses_flow edge, names the child FlowDefinition that owns the gate. */
   sourceFlowId?: string;
 };
@@ -183,10 +185,10 @@ function flowIdParts(flowId: string): { kitId: string; flowName: string } | null
   return { kitId, flowName };
 }
 
-function readFlowDefinition(flowId: string, repoRoot: string): FlowDefinition | null {
+function readFlowDefinition(flowId: string, repoRoot: string, allowOverride = true): FlowDefinition | null {
   const parts = flowIdParts(flowId);
   if (!parts) return null;
-  const flowFilePath = resolveFlowFilePath(parts.kitId, parts.flowName, flowId, repoRoot);
+  const flowFilePath = resolveFlowFilePath(parts.kitId, parts.flowName, flowId, repoRoot, allowOverride);
   if (!flowFilePath) return null;
 
   try {
@@ -211,6 +213,52 @@ export function resolveFlowStep(flowId: string, stepId: string, repoRoot: string
   if (!resolved) return null;
   const { flowExports: _flowExports, ...publicStep } = resolved;
   return publicStep;
+}
+
+/**
+ * Compile Flow Agents' `uses_flow` kit extension into one effective definition
+ * that the Flow runtime can evaluate without understanding agent-layer composition.
+ */
+export function resolveEffectiveFlowDefinition(flowId: string, repoRoot: string, options: { allowOverride?: boolean } = {}): Record<string, unknown> | null {
+  return resolveEffectiveFlowDefinitionInternal(flowId, repoRoot, new Set<string>(), options.allowOverride !== false);
+}
+
+function resolveEffectiveFlowDefinitionInternal(flowId: string, repoRoot: string, seen: Set<string>, allowOverride: boolean): Record<string, unknown> | null {
+  if (seen.has(flowId)) return null;
+  const nextSeen = new Set(seen);
+  nextSeen.add(flowId);
+  const source = readFlowDefinition(flowId, repoRoot, allowOverride);
+  if (!source || !Array.isArray(source.steps)) return null;
+  const effective = JSON.parse(JSON.stringify(source)) as FlowDefinition;
+  effective.gates = { ...(effective.gates ?? {}) };
+
+  for (let index = 0; index < source.steps.length; index += 1) {
+    const sourceStep = source.steps[index]!;
+    if (typeof sourceStep.uses_flow !== "string" || !sourceStep.uses_flow.trim()) continue;
+    const child = resolveEffectiveFlowDefinitionInternal(sourceStep.uses_flow, repoRoot, nextSeen, allowOverride) as FlowDefinition | null;
+    if (!child || !child.gates) return null;
+    const childGateEntry = Object.entries(child.gates).find(([, gate]) => gate?.step === sourceStep.id);
+    if (!childGateEntry) return null;
+    if (Object.values(effective.gates).some((gate) => gate?.step === sourceStep.id)) return null;
+    const [childGateId, childGate] = childGateEntry;
+    const childExpects = Array.isArray(childGate.expects) ? childGate.expects : [];
+    const exported = exportedExpectations(childExpects, child.exports);
+    if (!exported) return null;
+    effective.gates[`${sourceStep.uses_flow}:${childGateId}`] = {
+      ...childGate,
+      expects: exported,
+    };
+    const { uses_flow: _usesFlow, ...compiledStep } = effective.steps![index]!;
+    effective.steps![index] = compiledStep;
+  }
+  const effectiveSteps = effective.steps!;
+  const done = effectiveSteps.find((step) => step.id === "done" && step.next === null);
+  if (done && !Object.values(effective.gates).some((gate) => gate?.step === "done")) {
+    effective.steps = effectiveSteps
+      .filter((step) => step.id !== "done")
+      .map((step) => step.next === "done" ? { ...step, next: null } : step);
+  }
+  return effective as unknown as Record<string, unknown>;
 }
 
 /**
@@ -313,7 +361,7 @@ function resolveFlowStepInternal(flowId: string, stepId: string, repoRoot: strin
     for (const [gateId, gate] of Object.entries(flowDef.gates)) {
       if (!gate || gate.step !== stepId) continue;
       const expects = Array.isArray(gate.expects) ? gate.expects : [];
-      return { flowId, stepId, gateId, gateExpects: expects, flowExports: flowDef.exports };
+      return { flowId, stepId, gateId, gateExpects: expects, routeBackReasons: Object.keys(gate.on_route_back ?? {}), flowExports: flowDef.exports };
     }
   }
 
@@ -330,6 +378,7 @@ function resolveFlowStepInternal(flowId: string, stepId: string, repoRoot: strin
         stepId,
         gateId: `${child.flowId}:${child.gateId}`,
         gateExpects: childGateExpects,
+        routeBackReasons: child.routeBackReasons,
         sourceFlowId: child.flowId,
         flowExports: flowDef.exports,
       };

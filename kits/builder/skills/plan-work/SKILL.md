@@ -137,8 +137,17 @@ The `tool-planner` prompt context must include the latest-base confirmation and 
 4. Read the plan artifact
 5. Update session file: paste plan summary into `## Plan`, set `status: planned`
 6. Update `state.json` (`status: planned`, phase `planning`, next action) via `npm run workflow:sidecar -- advance-state` — never through a direct Write/Edit tool call (`config-protection.js` blocks that by design)
-7. Present the plan to the user
-8. If the user wants changes, re-delegate to tool-planner with feedback
+7. For an active Builder Flow run, record the `implementation-plan` gate claim after the plan and structured sidecars are complete:
+   ```bash
+   npm run workflow:sidecar -- record-gate-claim .kontourai/flow-agents/<slug> \
+     --expectation implementation-plan \
+     --status pass \
+     --summary "Implementation plan records files, sequencing, acceptance criteria, and required evidence." \
+     --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/<slug>/<session-basename>-plan.md","summary":"Structured implementation plan with acceptance and evidence traceability."}'
+   ```
+   Use `fail` or `not_verified` instead of `pass` when the plan contract is not satisfied. The sidecar writer synchronizes Flow; Flow, not this skill, decides whether execution is now active.
+8. Present the plan to the user
+9. If the user wants changes, re-delegate to tool-planner with feedback
 
 Never rely on conversational memory for the slug. Resolve the active artifact with `npm run workflow:sidecar -- current --format path` and pass that path to delegated agents.
 

@@ -1,6 +1,6 @@
 {
   "id": "builder.publish-learn",
-  "version": "1.0",
+  "version": "1.1",
   "description": "Reusable delivery closeout extension: publish the verified change, confirm merge readiness from provider/CI evidence, and record learning feedback.",
   "steps": [
     { "id": "pr-open", "next": "merge-ready-ci" },
@@ -27,6 +27,7 @@
             "claimType": "builder.pr-open.pull-request",
             "subjectType": "pull-request",
             "accepted_statuses": [
+              "verified",
               "trusted",
               "accepted"
             ]
@@ -46,6 +47,7 @@
             "claimType": "builder.merge-ready-ci.readiness",
             "subjectType": "pull-request",
             "accepted_statuses": [
+              "verified",
               "trusted",
               "accepted"
             ]
@@ -65,6 +67,7 @@
             "claimType": "builder.learn.decisions",
             "subjectType": "decision",
             "accepted_statuses": [
+              "verified",
               "trusted",
               "accepted"
             ]
@@ -79,6 +82,7 @@
             "claimType": "builder.learn.evidence",
             "subjectType": "release",
             "accepted_statuses": [
+              "verified",
               "trusted",
               "accepted"
             ]

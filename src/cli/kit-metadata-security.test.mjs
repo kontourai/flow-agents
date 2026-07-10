@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 
 import { readKitInventory } from "../../build/src/runtime-adapters.js";
 import { main as validateHookInfluence } from "../../build/src/cli/validate-hook-influence.js";
+import { parseKitFlowStepActions } from "../../build/src/flow-kit/validate.js";
 
 const require = createRequire(import.meta.url);
 const { workflowTriggersFor } = require("../../scripts/hooks/lib/kit-catalog.js");
@@ -61,6 +62,34 @@ function writeHookKit(root, kitId, expectationId) {
 function baseCases() {
   return JSON.parse(fs.readFileSync("evals/fixtures/hook-influence/cases.json", "utf8"));
 }
+
+test("Builder flow step actions are structured, complete, and operation-aware", () => {
+  const manifest = JSON.parse(fs.readFileSync("kits/builder/kit.json", "utf8"));
+  const result = parseKitFlowStepActions(manifest, "kits/builder/kit.json");
+
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.entries.length, 10);
+  assert.deepEqual(result.entries.find((entry) => entry.step_id === "plan")?.skills, ["plan-work"]);
+  assert.deepEqual(result.entries.find((entry) => entry.step_id === "pr-open"), {
+    flow_id: "builder.build",
+    step_id: "pr-open",
+    skills: [],
+    operations: ["publish-change"],
+  });
+});
+
+test("flow step action metadata rejects malformed and duplicate entries", () => {
+  const result = parseKitFlowStepActions({
+    flow_step_actions: [
+      { flow_id: "builder.build", step_id: "plan", skills: ["plan-work"] },
+      { flow_id: "builder.build", step_id: "plan", skills: [] },
+      { flow_id: "builder.build", step_id: "verify", skills: "verify-work" },
+    ],
+  }, "fixture/kit.json");
+
+  assert.match(result.errors.join("\n"), /duplicates 'builder\.build\/plan'/);
+  assert.match(result.errors.join("\n"), /skills must be an identifier list/);
+});
 
 test("hook influence: kit expectation cannot override engine-required case id", () => {
   const sourceRoot = tempRoot("flow-agents-hook-collision-source-");

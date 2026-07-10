@@ -75,6 +75,7 @@ _wait_for_file_line() {
 # Stop). Returns the emitted session.usage event (jq-compact, one line).
 _run_stop() {
   local input="$1"; shift
+  local extra_env_count="$#"
   local extra_env=("$@")
   local common_env=(
     HOME="$FAKE_HOME"
@@ -94,8 +95,13 @@ _run_stop() {
   _wait_for_line "$before_lines"
 
   before_lines=$(wc -l < "$TMPLOG" | tr -d ' ')
-  echo "$input" | env "${common_env[@]}" TELEMETRY_USAGE_TRACKING=true "${extra_env[@]}" \
-    bash "$TELEMETRY_SH" Stop dev 2>/dev/null
+  if [[ "$extra_env_count" -gt 0 ]]; then
+    echo "$input" | env "${common_env[@]}" TELEMETRY_USAGE_TRACKING=true "${extra_env[@]}" \
+      bash "$TELEMETRY_SH" Stop dev 2>/dev/null
+  else
+    echo "$input" | env "${common_env[@]}" TELEMETRY_USAGE_TRACKING=true \
+      bash "$TELEMETRY_SH" Stop dev 2>/dev/null
+  fi
   _wait_for_line "$before_lines"
 
   tail -n +"$((before_lines + 1))" "$TMPLOG" 2>/dev/null | jq -c 'select(.event_type=="session.usage")' | tail -1

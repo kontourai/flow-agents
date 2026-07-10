@@ -47,6 +47,12 @@ flow_agents_node() {
       node "$FLOW_AGENTS_EVAL_ROOT/build/src/cli/workflow-sidecar.js" "$@"
       return
       ;;
+    builder-run)
+      shift
+      flow_agents_build_ts || return
+      node "$FLOW_AGENTS_EVAL_ROOT/build/src/cli.js" builder-run "$@"
+      return
+      ;;
     validate-workflow-artifacts)
       shift
       flow_agents_build_ts || return
