@@ -1,5 +1,46 @@
 # Changelog
 
+## [3.4.0](https://github.com/kontourai/flow-agents/compare/v3.3.0...v3.4.0) (2026-07-10)
+
+
+### Features
+
+* **builder:** add fail-closed FlowRun adapter prefix ([#511](https://github.com/kontourai/flow-agents/issues/511)) ([1f2a1bd](https://github.com/kontourai/flow-agents/commit/1f2a1bd0a6a6f1b5610848b417ed8c9561b85131))
+* **builder:** route Codex specialists by role ([5a53e9b](https://github.com/kontourai/flow-agents/commit/5a53e9bb79afbba6823c7c1de77125030d87dc41))
+* drive Builder sessions with canonical Flow runs ([#531](https://github.com/kontourai/flow-agents/issues/531)) ([72301c7](https://github.com/kontourai/flow-agents/commit/72301c735d3788283ffe40963ee7fc622f69e822))
+* **engine:** collapse kit trust model to structured steering (kit-neutral) ([#491](https://github.com/kontourai/flow-agents/issues/491)) ([615dc44](https://github.com/kontourai/flow-agents/commit/615dc4477f884e8ad61f37ea67fc250a3a3030ec))
+* installed-skill drift detection — per-skill manifest, skill-drift-check CLI, SessionStart advisory ([#439](https://github.com/kontourai/flow-agents/issues/439)) ([#455](https://github.com/kontourai/flow-agents/issues/455)) ([a23c346](https://github.com/kontourai/flow-agents/commit/a23c34673e41bc8dcb8fd0c72425ac5ae83f4247))
+* **install:** guided console-connect wizard + auto-verify + post-install summary (easy-install-flow PR2/3) ([#483](https://github.com/kontourai/flow-agents/issues/483)) ([573fd81](https://github.com/kontourai/flow-agents/commit/573fd81860de9731ebe76f352da8502137159bb7))
+* **install:** runtime auto-detection + surface silent fail-open paths (easy-install-flow PR1/3) ([#482](https://github.com/kontourai/flow-agents/issues/482)) ([a9d249e](https://github.com/kontourai/flow-agents/commit/a9d249ee1b5104488ead521dbd012e5cc8240b6c))
+* **learning-review:** economics-driven advisory proposals + human-ratified decision ledger ([#352](https://github.com/kontourai/flow-agents/issues/352)) ([#464](https://github.com/kontourai/flow-agents/issues/464)) ([1f8e56b](https://github.com/kontourai/flow-agents/commit/1f8e56bba2a71e77e43e42dc2574101e40399adc))
+* **telemetry:** auto-discover owner console conf via trusted workspace/global tiers (fa[#410](https://github.com/kontourai/flow-agents/issues/410) slice 1) ([#460](https://github.com/kontourai/flow-agents/issues/460)) ([4f82858](https://github.com/kontourai/flow-agents/commit/4f828589dc70d6a25bfa609961968833106d58e4))
+* **telemetry:** config-driven kit-economics console relay so ROI views populate ([#469](https://github.com/kontourai/flow-agents/issues/469)) ([#471](https://github.com/kontourai/flow-agents/issues/471)) ([f604f60](https://github.com/kontourai/flow-agents/commit/f604f609924635ea53ac051b822ee068504f59fb))
+* **veritas-governance:** exemption-usage-review skill, trailer diagnostic, DECLARED scope-forms docs ([#408](https://github.com/kontourai/flow-agents/issues/408)) ([d304621](https://github.com/kontourai/flow-agents/commit/d304621d744f84cd422ca069183f41826c2c1b20))
+
+
+### Fixes
+
+* **checks:** content-boundary scans untracked files — local matches CI (closes [#367](https://github.com/kontourai/flow-agents/issues/367)) ([#374](https://github.com/kontourai/flow-agents/issues/374)) ([a4e7a0e](https://github.com/kontourai/flow-agents/commit/a4e7a0ef8341ab951597ef6255e4b66f315f8f2c))
+* codex capture false-pass — deterministic exit codes, ambiguous default, anti-forgery extraction ([2806c5b](https://github.com/kontourai/flow-agents/commit/2806c5bb7c39e376937162ab0680c01f4fc80666))
+* codex capture false-pass — deterministic exit codes, ambiguous default, anti-forgery extraction ([#470](https://github.com/kontourai/flow-agents/issues/470)) ([06c292a](https://github.com/kontourai/flow-agents/commit/06c292a6ccfface4d778f78ec2e04ba2dd801daa))
+* enforce first-step workflow entry ([17b3a12](https://github.com/kontourai/flow-agents/commit/17b3a1282f491cd2c655b0da9847c00925f18ef8))
+* **goal-fit:** stop re-running model-asserted RECHECK text on terminal sessions ([#494](https://github.com/kontourai/flow-agents/issues/494)) ([#504](https://github.com/kontourai/flow-agents/issues/504)) ([9546252](https://github.com/kontourai/flow-agents/commit/954625233dddd14772b57ecba98016a911443f4d))
+* harden global Codex home installs ([1bfaba6](https://github.com/kontourai/flow-agents/commit/1bfaba65a3b490d0b031401268c55b8d74f930b7))
+* preserve user installer settings conflicts ([#430](https://github.com/kontourai/flow-agents/issues/430)) ([ac2d356](https://github.com/kontourai/flow-agents/commit/ac2d3567f47a744c7c5466d60aec26577f846a31))
+* **sidecar:** trust-bundle writers compose losslessly; record-check; record-time evidence-ref validation ([#418](https://github.com/kontourai/flow-agents/issues/418)) ([800675f](https://github.com/kontourai/flow-agents/commit/800675f75033a164c24e2be379dc2b41c76d2237))
+* skill-drift-check ignores foreign (non-kit) installed files ([#465](https://github.com/kontourai/flow-agents/issues/465)) ([#468](https://github.com/kontourai/flow-agents/issues/468)) ([71985c9](https://github.com/kontourai/flow-agents/commit/71985c9c8f860a50b25f1bec3818af9807832cae))
+* **telemetry:** land owner usage attributed + priced in the hosted console ([#487](https://github.com/kontourai/flow-agents/issues/487)) ([ace8faf](https://github.com/kontourai/flow-agents/commit/ace8fafc2af274302397c1e12bb09388db5fe0e9))
+* **telemetry:** real per-session token/cost + model so console ROI stops showing $0 ([#477](https://github.com/kontourai/flow-agents/issues/477)) ([2a6fcfc](https://github.com/kontourai/flow-agents/commit/2a6fcfc5d18acaddcb64eabc4341e10d2c9d7184))
+* **telemetry:** suppress console relay of genuinely-empty economics records ([#478](https://github.com/kontourai/flow-agents/issues/478)) ([b09b6de](https://github.com/kontourai/flow-agents/commit/b09b6de189f6bef051c25fbb6c52dd61919d9c62))
+
+
+### Documentation
+
+* **console:** document attribution & pricing correctness ([#487](https://github.com/kontourai/flow-agents/issues/487)) ([#490](https://github.com/kontourai/flow-agents/issues/490)) ([36b0ec2](https://github.com/kontourai/flow-agents/commit/36b0ec288b3aea6ca49efaaa2373ea9b60a55197))
+* **decisions:** embeddable engine and adapter model direction ([#499](https://github.com/kontourai/flow-agents/issues/499)) ([89aec1d](https://github.com/kontourai/flow-agents/commit/89aec1df53df27cfa85685bc24612edf0882cb5c))
+* **engine:** reframe around engine↔kit split + honest trust tiers ([#495](https://github.com/kontourai/flow-agents/issues/495)) ([b5b5ae3](https://github.com/kontourai/flow-agents/commit/b5b5ae392cd43ee2e0374b5b08da40add5c06c3a))
+* trust-reconciliation guide + trust-ledger-retention decision ([#488](https://github.com/kontourai/flow-agents/issues/488)) ([9d5feba](https://github.com/kontourai/flow-agents/commit/9d5febae318e62bb59189279321d92f4ede3afa2))
+
 ## [3.3.0](https://github.com/kontourai/flow-agents/compare/v3.2.0...v3.3.0) (2026-07-05)
 
 
