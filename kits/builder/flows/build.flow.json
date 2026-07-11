@@ -124,6 +124,28 @@
       },
       "expects": [
         {
+          "id": "clean-critique",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "A distinct reviewer recorded a current clean critique of the delivered change.",
+          "bundle_claim": {
+            "claimType": "workflow.critique.review",
+            "subjectType": "workflow-critique",
+            "accepted_statuses": ["verified"]
+          }
+        },
+        {
+          "id": "acceptance-criteria",
+          "kind": "trust.bundle",
+          "required": true,
+          "description": "The selected Work Item acceptance criteria have verified evidence.",
+          "bundle_claim": {
+            "claimType": "workflow.acceptance.criterion",
+            "subjectType": "flow-step",
+            "accepted_statuses": ["verified"]
+          }
+        },
+        {
           "id": "tests-evidence",
           "kind": "trust.bundle",
           "required": true,

@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { parseArgs, flagString, type ParsedArgs } from "../lib/args.js";
@@ -309,18 +310,28 @@ function subjectLockDir(artifactRoot: string, subjectId: string): string {
   return path.join(assignmentDir, `.${sanitized}.lockdir`);
 }
 
+// Lock age is adjudicated by the current contender, never by metadata written
+// by the lock owner. The environment is only an operator tuning input; clamp it
+// so a caller cannot turn a transient owner-file write into immediate takeover.
+const SUBJECT_LOCK_STALE_MIN_MS = 1_000;
+const SUBJECT_LOCK_STALE_MAX_MS = 30 * 60 * 1_000;
+const SUBJECT_LOCK_STALE_DEFAULT_MS = 5 * 60 * 1_000;
+
+function trustedSubjectLockStaleMs(): number {
+  const configured = Number(process.env.FLOW_AGENTS_ASSIGNMENT_STALE_LOCK_MS);
+  if (!Number.isFinite(configured)) return SUBJECT_LOCK_STALE_DEFAULT_MS;
+  return Math.min(SUBJECT_LOCK_STALE_MAX_MS, Math.max(SUBJECT_LOCK_STALE_MIN_MS, Math.floor(configured)));
+}
+
 /**
  * F1 fix (fix-plan iteration 1, CRITICAL): claimLocalFile/releaseLocalFile/supersedeLocalFile were
  * a plain read -> compare-actor -> write with no lock, so two concurrently-launched OS processes
  * could both read "no conflicting claim" before either wrote, and the second write would silently
  * clobber the first with zero error and zero audit-trail entry for the loser (reproduced 29/40
- * races against the built CLI). This mirrors the EXACT mechanism `withLock` already uses in
- * workflow-sidecar.ts:908 for the same class of shared-state mutation — atomic `fs.mkdirSync`
- * lockdir create as the mutual-exclusion primitive, EEXIST-spin with a staleness-reclaim check
- * (a lock directory older than the stale threshold is presumed abandoned by a crashed process and
- * is reclaimed rather than waited on forever) and a bounded deadline, `finally` rmSync release —
- * as a small LOCAL helper (not a cross-import of that private function, which would pull the
- * entire workflow-sidecar module in for one primitive). Deliberately synchronous (sleepSync's
+ * races against the built CLI). Atomic directory creation establishes ownership before metadata
+ * is written; contenders treat even an ownerless directory as held. Live contention waits with a
+ * bounded deadline; stale or malformed residue fails closed for explicit operator cleanup because portable Node
+ * filesystem APIs cannot compare-and-swap a directory identity safely. Deliberately synchronous (sleepSync's
  * Atomics.wait spin, not setTimeout/await) so claim/release/supersede can stay sync `number`
  * -returning functions and the CLI dispatcher (src/cli.ts, `number | Promise<number>`) does not
  * need any ripple to async. On lock-acquire failure (any error other than a live contested lock,
@@ -331,22 +342,31 @@ function subjectLockDir(artifactRoot: string, subjectId: string): string {
  */
 export function withSubjectLock<T>(artifactRoot: string, subjectId: string, body: () => T): T {
   const lockDir = subjectLockDir(artifactRoot, subjectId);
-  const staleMs = Number(process.env.FLOW_AGENTS_ASSIGNMENT_STALE_LOCK_MS ?? 5 * 60 * 1000);
+  const staleMs = trustedSubjectLockStaleMs();
+  const token = randomBytes(16).toString("hex");
+  const ownerFile = path.join(lockDir, "owner.json");
   const deadline = Date.now() + 30000;
   while (true) {
+    let createdLockDir = false;
     try {
       fs.mkdirSync(lockDir);
+      createdLockDir = true;
+      fs.writeFileSync(ownerFile, `${JSON.stringify({ token, pid: process.pid, acquired_at: isoNow() })}\n`, { flag: "wx", mode: 0o600 });
       break;
     } catch (error) {
       const lockError = error as NodeJS.ErrnoException;
+      if (createdLockDir) fs.rmSync(lockDir, { recursive: true, force: true });
       if (lockError.code !== "EEXIST") {
         throw new Error(`failed to acquire assignment lock for subject ${subjectId}: ${lockDir}: ${lockError.message || lockError.code || String(lockError)}`);
       }
       try {
-        const stat = fs.statSync(lockDir);
-        if (staleMs > 0 && Date.now() - stat.mtimeMs > staleMs) {
-          fs.rmSync(lockDir, { recursive: true, force: true });
-          continue;
+        const owner = readSubjectLockOwner(ownerFile);
+        const stat = fs.lstatSync(owner?.token ? ownerFile : lockDir);
+        if (stat.isSymbolicLink() || !(owner?.token ? stat.isFile() : stat.isDirectory())) {
+          throw new Error(`assignment lock has an unsafe ${owner?.token ? "owner file" : "directory"}: ${lockDir}`);
+        }
+        if (Date.now() - stat.mtimeMs > staleMs) {
+          throw new Error(`assignment lock is stale or malformed and requires explicit operator cleanup after confirming no owner is active: ${lockDir}`);
         }
       } catch (statError) {
         if ((statError as NodeJS.ErrnoException).code === "ENOENT") continue; // lock released between mkdir/EEXIST and stat; retry immediately
@@ -358,7 +378,12 @@ export function withSubjectLock<T>(artifactRoot: string, subjectId: string, body
       sleepSync(20);
     }
   }
-  const release = (): void => fs.rmSync(lockDir, { recursive: true, force: true });
+  let heartbeat: NodeJS.Timeout | undefined;
+  const ownsLock = (): boolean => readSubjectLockOwner(ownerFile)?.token === token;
+  const release = (): void => {
+    if (heartbeat) clearInterval(heartbeat);
+    if (ownsLock()) fs.rmSync(lockDir, { recursive: true, force: true });
+  };
   let result: T;
   try {
     result = body();
@@ -367,10 +392,34 @@ export function withSubjectLock<T>(artifactRoot: string, subjectId: string, body
     throw error;
   }
   if (result && typeof (result as { then?: unknown }).then === "function") {
+    // An async owner can legitimately hold the lock longer than the stale-lock
+    // threshold while an authority-bound command is running. Keep its mtime fresh
+    // so lifecycle operations and takeovers continue to observe the live lock.
+    const heartbeatMs = Math.max(10, Math.min(1_000, Math.floor(staleMs > 0 ? staleMs / 3 : 1_000)));
+    heartbeat = setInterval(() => {
+      try {
+        if (!ownsLock()) return;
+        const timestamp = new Date();
+        fs.utimesSync(ownerFile, timestamp, timestamp);
+        fs.utimesSync(lockDir, timestamp, timestamp);
+      } catch { /* release, reclamation, or process teardown owns cleanup */ }
+    }, heartbeatMs);
     return Promise.resolve(result).finally(release) as T;
   }
   release();
   return result;
+}
+
+function readSubjectLockOwner(file: string): { token?: string } | null {
+  try {
+    const value = JSON.parse(fs.readFileSync(file, "utf8")) as unknown;
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value as { token?: string }
+      : null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT" || error instanceof SyntaxError) return null;
+    throw error;
+  }
 }
 
 /**

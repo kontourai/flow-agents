@@ -13,6 +13,12 @@ trap 'rm -rf "$TMP"' EXIT
 pass() { printf '  PASS %s\n' "$1"; }
 fail() { printf '  FAIL %s\n' "$1"; errors=$((errors + 1)); }
 
+seed_pull_work_report() {
+  local artifact_root="$1" slug="$2" work_item_ref="$3"
+  mkdir -p "$artifact_root/$slug"
+  printf '# Pull Work\n\nSelected Work Item: %s\n' "$work_item_ref" > "$artifact_root/$slug/$slug--pull-work.md"
+}
+
 WRITER="workflow-sidecar"
 
 echo "=== Builder workflow entry enforcement ==="
@@ -185,14 +191,20 @@ else
 fi
 
 LOCAL_ROOT="$TMP/local/.kontourai/flow-agents"
-if flow_agents_node "$WRITER" ensure-session \
+seed_pull_work_report "$LOCAL_ROOT" "local-request" "local:local-request"
+cat >"$LOCAL_ROOT/local-request/work-item.json" <<'JSON'
+{"id":"local-request","title":"Local request","source_provider":{"kind":"local","path":"work-item.json"}}
+JSON
+cat >"$LOCAL_ROOT/local-request/state.json" <<'JSON'
+{"schema_version":"1.0","task_slug":"local-request","status":"planned","phase":"pickup","work_item_refs":["local:local-request"],"next_action":{"status":"continue","summary":"Start Builder."}}
+JSON
+if FLOW_AGENTS_ACTOR=builder-entry-local node "$ROOT/build/src/cli.js" workflow start \
   --artifact-root "$LOCAL_ROOT" \
+  --flow builder.build \
+  --work-item local:local-request \
   --task-slug local-request \
-  --actor builder-entry-local \
   --title "Local request" \
-  --summary "Providerless work still needs an anchor." \
-  --flow-id builder.build \
-  --timestamp "2026-07-10T00:00:00Z" >"$TMP/local.out" 2>&1; then
+  --summary "Providerless work still needs an anchor." >"$TMP/local.out" 2>&1; then
   if node - "$LOCAL_ROOT" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
@@ -228,14 +240,13 @@ fi
 
 LOCAL_SESSION="$LOCAL_ROOT/local-request"
 FLOW_DIGEST_BEFORE="$(find "$TMP/local/.kontourai/flow/runs/local-request" -type f -print0 | sort -z | xargs -0 shasum -a 256)"
-if flow_agents_node "$WRITER" ensure-session \
+if FLOW_AGENTS_ACTOR=builder-entry-local node "$ROOT/build/src/cli.js" workflow start \
   --artifact-root "$LOCAL_ROOT" \
+  --flow builder.build \
+  --work-item local:local-request \
   --task-slug local-request \
-  --actor builder-entry-local \
   --title "Local request" \
-  --summary "Providerless work still needs an anchor." \
-  --flow-id builder.build \
-  --timestamp "2026-07-10T00:00:00Z" >"$TMP/builder-ensure-again.out" 2>&1 \
+  --summary "Providerless work still needs an anchor." >"$TMP/builder-ensure-again.out" 2>&1 \
   && [[ "$FLOW_DIGEST_BEFORE" == "$(find "$TMP/local/.kontourai/flow/runs/local-request" -type f -print0 | sort -z | xargs -0 shasum -a 256)" ]] \
   && node - "$TMP/local" "$LOCAL_SESSION" <<'NODE'
 const fs = require('node:fs');
@@ -258,6 +269,7 @@ fi
 BROKEN_PROJECT="$TMP/broken-start"
 BROKEN_ROOT="$BROKEN_PROJECT/.kontourai/flow-agents"
 mkdir -p "$BROKEN_PROJECT/.kontourai"
+seed_pull_work_report "$BROKEN_ROOT" "broken-start" "local:broken-start"
 printf 'not a run-store directory\n' > "$BROKEN_PROJECT/.kontourai/flow"
 if flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$BROKEN_ROOT" \
@@ -265,12 +277,9 @@ if flow_agents_node "$WRITER" ensure-session \
   --actor builder-entry-broken \
   --title "Broken start" \
   --summary "Flow startup must fail visibly." \
-  --flow-id builder.build >"$TMP/broken-start.out" 2>&1; then
-  fail "invalid canonical Flow startup should fail ensure-session"
-elif [[ -f "$BROKEN_ROOT/broken-start/state.json" ]] \
+  --flow-id builder.build >"$TMP/broken-start.out" 2>&1 \
+  && [[ -f "$BROKEN_ROOT/broken-start/state.json" ]] \
   && [[ ! -e "$BROKEN_PROJECT/.kontourai/flow/runs/broken-start" ]] \
-  && grep -q 'canonical Builder Flow entry failed' "$TMP/broken-start.out" \
-  && grep -q 'Re-run the same ensure-session command' "$TMP/broken-start.out" \
   && node - "$BROKEN_ROOT/broken-start/state.json" <<'NODE'
 const fs = require('node:fs');
 const state = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
@@ -278,19 +287,19 @@ if (state.flow_run) process.exit(1);
 if (!state.next_action?.command?.includes("'workflow' 'start'")) process.exit(1);
 NODE
 then
-  pass "failed canonical startup is visible and leaves only retryable sidecar guidance"
+  pass "private writer leaves public retry guidance without touching an invalid Flow store"
 else
-  fail "failed canonical startup forged state or lost recovery guidance: $(cat "$TMP/broken-start.out")"
+  fail "private writer touched canonical Flow or lost public retry guidance: $(cat "$TMP/broken-start.out")"
 fi
 
 rm -f "$BROKEN_PROJECT/.kontourai/flow"
-if flow_agents_node "$WRITER" ensure-session \
+if FLOW_AGENTS_ACTOR=builder-entry-broken node "$ROOT/build/src/cli.js" workflow start \
   --artifact-root "$BROKEN_ROOT" \
+  --flow builder.build \
+  --work-item local:broken-start \
   --task-slug broken-start \
-  --actor builder-entry-broken \
   --title "Broken start" \
-  --summary "Flow startup must recover from persisted acquisition provenance." \
-  --flow-id builder.build >"$TMP/broken-start-retry.out" 2>&1 \
+  --summary "Flow startup must recover from persisted acquisition provenance." >"$TMP/broken-start-retry.out" 2>&1 \
   && node - "$BROKEN_PROJECT" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
@@ -301,7 +310,7 @@ if (flowState.current_step !== 'design-probe') process.exit(1);
 if (!(bundle.claims || []).some((claim) => claim.claimType === 'builder.pull-work.selected' && claim.status === 'verified')) process.exit(1);
 NODE
 then
-  pass "interrupted Flow startup retries from exact persisted acquisition provenance"
+  pass "public startup consumes exact persisted acquisition provenance and advances canonical Flow"
 else
   fail "interrupted acquisition could not recover: $(cat "$TMP/broken-start-retry.out")"
 fi
@@ -337,15 +346,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const project = process.argv[2];
 const session = path.join(project, '.kontourai', 'flow-agents', 'skipped-ownership');
-const flowState = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', 'skipped-ownership', 'state.json'), 'utf8'));
 const sidecar = JSON.parse(fs.readFileSync(path.join(session, 'state.json'), 'utf8'));
-if (flowState.current_step !== 'pull-work' || sidecar.flow_run?.current_step !== 'pull-work') process.exit(1);
-if (JSON.stringify(sidecar.next_action?.skills) !== JSON.stringify(['pull-work'])) process.exit(1);
+if (sidecar.flow_run) process.exit(1);
+if (fs.existsSync(path.join(project, '.kontourai', 'flow', 'runs', 'skipped-ownership'))) process.exit(1);
 if (fs.existsSync(path.join(session, 'trust.bundle'))) process.exit(1);
 if (fs.existsSync(path.join(project, '.kontourai', 'flow-agents', 'assignment', 'skipped-ownership.json'))) process.exit(1);
 NODE
 then
-  pass "skipped ownership remains at pull-work without selected-work evidence"
+  pass "private skipped-ownership seed creates no assignment, evidence, or canonical Flow"
 else
   fail "unproven ownership advanced the canonical run: $(cat "$TMP/skipped.out")"
 fi
@@ -364,15 +372,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const project = process.argv[2];
 const session = path.join(project, '.kontourai', 'flow-agents', 'arbitrary-session-name');
-const flowState = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', 'arbitrary-session-name', 'state.json'), 'utf8'));
 const sidecar = JSON.parse(fs.readFileSync(path.join(session, 'state.json'), 'utf8'));
-if (flowState.subject !== 'kontourai/flow-agents#541' || flowState.current_step !== 'pull-work') process.exit(1);
-if (sidecar.flow_run?.current_step !== 'pull-work') process.exit(1);
+if (JSON.stringify(sidecar.work_item_refs) !== JSON.stringify(['kontourai/flow-agents#541'])) process.exit(1);
+if (sidecar.flow_run || fs.existsSync(path.join(project, '.kontourai', 'flow', 'runs', 'arbitrary-session-name'))) process.exit(1);
 if (fs.existsSync(path.join(session, 'trust.bundle'))) process.exit(1);
 if (!fs.existsSync(path.join(project, '.kontourai', 'flow-agents', 'assignment', 'arbitrary-session-name.json'))) process.exit(1);
 NODE
 then
-  pass "assignment subject must canonically match the exact Work Item before pull-work can pass"
+  pass "private mismatched-subject seed records scope but cannot create or advance canonical Flow"
 else
   fail "mismatched assignment subject was treated as exact Work Item evidence: $(cat "$TMP/mismatched-subject.out")"
 fi
@@ -462,8 +469,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const project = process.argv[2];
 const session = path.join(project, '.kontourai', 'flow-agents', 'preexisting-selection');
-const flowState = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', 'preexisting-selection', 'state.json'), 'utf8'));
-if (flowState.current_step !== 'pull-work') process.exit(1);
+if (fs.existsSync(path.join(project, '.kontourai', 'flow', 'runs', 'preexisting-selection'))) process.exit(1);
 if (fs.existsSync(path.join(session, 'trust.bundle'))) process.exit(1);
 NODE
 then
@@ -497,31 +503,35 @@ NODE
   fi
 fi
 
-if flow_agents_node "$WRITER" record-gate-claim "$LOCAL_SESSION" \
+printf '# Plan Work\n\nRoute-back fixture plan evidence.\n' > "$LOCAL_SESSION/local-request--plan-work.md"
+printf '# Delivery\n\nRoute-back fixture execution evidence.\n' > "$LOCAL_SESSION/local-request--deliver.md"
+
+if FLOW_AGENTS_ACTOR=builder-entry-local node "$ROOT/build/src/cli.js" workflow evidence --session-dir "$LOCAL_SESSION" \
   --expectation pickup-probe-readiness \
   --status pass \
   --summary "Pickup Probe confirmed scope and planning readiness." \
-  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/local-request/work-item.json","summary":"Probe fixture evidence."}' >/dev/null 2>&1 \
-  && flow_agents_node "$WRITER" record-gate-claim "$LOCAL_SESSION" \
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/local-request/local-request--pull-work.md","summary":"Declared pull-work fixture evidence."}' >/dev/null 2>&1 \
+  && FLOW_AGENTS_ACTOR=builder-entry-local node "$ROOT/build/src/cli.js" workflow evidence --session-dir "$LOCAL_SESSION" \
   --expectation probe-decisions-or-accepted-gaps \
   --status pass \
   --summary "Probe decisions and accepted gaps are recorded." \
-  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/local-request/work-item.json","summary":"Probe decision fixture evidence."}' >/dev/null 2>&1 \
-  && flow_agents_node "$WRITER" record-gate-claim "$LOCAL_SESSION" \
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/local-request/local-request--pull-work.md","summary":"Declared pull-work decision fixture evidence."}' >/dev/null 2>&1 \
+  && FLOW_AGENTS_ACTOR=builder-entry-local node "$ROOT/build/src/cli.js" workflow evidence --session-dir "$LOCAL_SESSION" \
   --expectation implementation-plan \
   --status pass \
   --summary "Implementation plan records files, sequence, and evidence." \
-  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/local-request/work-item.json","summary":"Plan fixture evidence."}' >/dev/null 2>&1 \
-  && flow_agents_node "$WRITER" record-gate-claim "$LOCAL_SESSION" \
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/local-request/local-request--plan-work.md","summary":"Declared plan fixture evidence."}' >/dev/null 2>&1 \
+  && FLOW_AGENTS_ACTOR=builder-entry-local node "$ROOT/build/src/cli.js" workflow evidence --session-dir "$LOCAL_SESSION" \
   --expectation implementation-scope \
   --status pass \
   --summary "Implementation scope and changed files are recorded." \
-  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/local-request/work-item.json","summary":"Execution fixture evidence."}' >/dev/null 2>&1 \
-  && flow_agents_node "$WRITER" record-gate-claim "$LOCAL_SESSION" \
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/local-request/local-request--deliver.md","summary":"Declared execution fixture evidence."}' >/dev/null 2>&1 \
+  && FLOW_AGENTS_ACTOR=builder-entry-local node "$ROOT/build/src/cli.js" workflow evidence --session-dir "$LOCAL_SESSION" \
   --expectation tests-evidence \
   --status fail \
   --route-reason implementation_defect \
   --summary "Verification found an implementation defect." \
+  --command false \
   --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/local-request/work-item.json","summary":"Failed verification fixture evidence."}' >"$TMP/route-back.out" 2>&1 \
   && node - "$TMP/local" "$LOCAL_SESSION" <<'NODE'
 const fs = require('node:fs');
@@ -542,6 +552,7 @@ else
 fi
 
 PROVIDER_ROOT="$TMP/provider/.kontourai/flow-agents"
+seed_pull_work_report "$PROVIDER_ROOT" "kontourai-flow-agents-438" "kontourai/flow-agents#438"
 if flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$PROVIDER_ROOT" \
   --work-item "kontourai/flow-agents#438" \

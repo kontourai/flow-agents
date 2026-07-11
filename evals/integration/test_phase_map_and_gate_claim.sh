@@ -8,7 +8,7 @@
 #   4. record-gate-claim at pull-work step produces builder.pull-work.selected claim (status=verified).
 #   5. A TAMPERED bundle (stored verified, evidence fail) at pull-work step BLOCKS (exit 2)
 #      with the tamper warning naming the declared claimType.
-#   6. A CLEAN record-gate-claim bundle is not reported as false completion;
+#   6. A CLEAN public Builder bundle is not reported as false completion;
 #      its still-active canonical Flow run remains blocked from stopping.
 #
 # Deterministic, no model spend, self-cleaning.
@@ -162,10 +162,14 @@ flow_agents_node "workflow-sidecar" init-plan "$CLAIM_ROOT/gate-claim/gate-claim
   --source-request "Test" --summary "Testing" \
   --timestamp "2026-06-26T00:00:00Z" >/dev/null 2>&1
 
+CLAIM_ARTIFACT="$CLAIM_ROOT/gate-claim/gate-claim--pull-work.md"
+printf '# Pull Work\n\nSelected issue #177 for implementation.\n' > "$CLAIM_ARTIFACT"
+
 if flow_agents_node "workflow-sidecar" record-gate-claim "$CLAIM_ROOT/gate-claim" \
   --status pass \
   --summary "Selected issue #177 for implementation." \
   --expectation selected-work \
+  --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$CLAIM_ARTIFACT\",\"summary\":\"Declared durable pull-work artifact for selected-work.\"}" \
   --timestamp "2026-06-26T00:01:00Z" >/dev/null 2>&1; then
   _pass "record-gate-claim exits 0 at pull-work step"
 else
@@ -188,9 +192,18 @@ node -e "
     console.error('expected status=verified, got', target.status);
     process.exit(1);
   }
+  const expectedArtifact = '.kontourai/flow-agents/gate-claim/gate-claim--pull-work.md';
+  if (!fs.existsSync('$CLAIM_ARTIFACT')) {
+    console.error('missing declared durable selected-work artifact:', '$CLAIM_ARTIFACT');
+    process.exit(1);
+  }
+  if (!target.metadata?.artifact_refs?.some(ref => ref.kind === 'artifact' && ref.file === expectedArtifact)) {
+    console.error('selected-work claim does not cite declared artifact:', JSON.stringify(target.metadata?.artifact_refs));
+    process.exit(1);
+  }
 " 2>/dev/null \
-  && _pass "bundle contains builder.pull-work.selected with subjectType=work-item, status=verified" \
-  || _fail "bundle missing or incorrect builder.pull-work.selected claim"
+  && _pass "bundle contains builder.pull-work.selected with declared durable artifact evidence" \
+  || _fail "bundle missing selected-work claim or declared durable artifact evidence"
 
 echo ""
 echo "=== 4b. composed publish-learn gate claim emits builder.pr-open.pull-request ==="
@@ -215,10 +228,14 @@ flow_agents_node "workflow-sidecar" advance-state "$COMPOSED_ROOT/composed-gate-
   --flow-definition builder.build \
   --timestamp "2026-06-26T00:00:30Z" >/dev/null 2>&1
 
+COMPOSED_ARTIFACT="$COMPOSED_ROOT/composed-gate-claim/release.json"
+printf '{"schema_version":"1.0","task_slug":"composed-gate-claim","status":"pr_open"}\n' > "$COMPOSED_ARTIFACT"
+
 if flow_agents_node "workflow-sidecar" record-gate-claim "$COMPOSED_ROOT/composed-gate-claim" \
   --status pass \
   --summary "PR opened with verification evidence." \
   --expectation pull-request-opened \
+  --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$COMPOSED_ARTIFACT\",\"summary\":\"Declared durable release artifact for pull-request-opened.\"}" \
   --timestamp "2026-06-26T00:01:00Z" >/dev/null 2>&1; then
   _pass "record-gate-claim exits 0 at composed pr-open step"
 else
@@ -244,9 +261,18 @@ node -e "
     console.error('expected status=verified, got', target.status);
     process.exit(1);
   }
+  const expectedArtifact = '.kontourai/flow-agents/composed-gate-claim/release.json';
+  if (!fs.existsSync('$COMPOSED_ARTIFACT')) {
+    console.error('missing declared durable pr-open artifact:', '$COMPOSED_ARTIFACT');
+    process.exit(1);
+  }
+  if (!target.metadata?.artifact_refs?.some(ref => ref.kind === 'artifact' && ref.file === expectedArtifact)) {
+    console.error('pr-open claim does not cite declared artifact:', JSON.stringify(target.metadata?.artifact_refs));
+    process.exit(1);
+  }
 " 2>/dev/null \
-  && _pass "composed bundle contains builder.pr-open.pull-request with active parent flow" \
-  || _fail "composed bundle missing or incorrect builder.pr-open.pull-request claim"
+  && _pass "composed bundle contains builder.pr-open.pull-request with declared durable artifact evidence" \
+  || _fail "composed bundle missing pr-open claim or declared durable artifact evidence"
 
 # ─── Tamper-blocks: stored verified + evidence fail → BLOCK (exit 2) ─────────
 echo ""
@@ -355,59 +381,58 @@ fi
 
 # ─── Clean gate-claim: no false completion, active Flow still blocks ─────────
 echo ""
-echo "=== 6. CLEAN record-gate-claim remains governed by active canonical Flow ==="
+echo "=== 6. CLEAN public Builder evidence remains governed by active canonical Flow ==="
 
 C_DIR="$TMP/clean-test"
+CLEAN_SLUG="provider-clean"
 mkdir -p "$C_DIR"
 printf '# Repo\n' > "$C_DIR/AGENTS.md"
+mkdir -p "$C_DIR/.kontourai/flow-agents/$CLEAN_SLUG"
+CLEAN_ARTIFACT="$C_DIR/.kontourai/flow-agents/$CLEAN_SLUG/$CLEAN_SLUG--pull-work.md"
+printf 'Selected Work Item: provider:clean\n' > "$CLEAN_ARTIFACT"
 
-flow_agents_node "workflow-sidecar" ensure-session \
+if ! FLOW_AGENTS_ACTOR=clean-fixture-actor node "$ROOT/build/src/cli.js" workflow start \
   --artifact-root "$C_DIR/.kontourai/flow-agents" \
-  --task-slug clean \
+  --flow builder.build \
+  --work-item provider:clean \
+  --assignment-provider local-file \
   --title "Clean Test" \
-  --summary "Testing clean gate claim." \
-  --flow-id builder.build \
-  --skip-ownership-guard \
-  --timestamp "2026-06-26T00:00:00Z" >/dev/null 2>&1
+  --summary "Testing clean gate claim." >"$TMP/clean-start.out" 2>&1; then
+  _fail "public clean fixture failed to start: $(cat "$TMP/clean-start.out")"
+fi
 
-flow_agents_node "workflow-sidecar" init-plan "$C_DIR/.kontourai/flow-agents/clean/clean--deliver.md" \
+flow_agents_node "workflow-sidecar" init-plan "$C_DIR/.kontourai/flow-agents/$CLEAN_SLUG/$CLEAN_SLUG--deliver.md" \
   --source-request "Test" --summary "Testing" \
   --timestamp "2026-06-26T00:00:00Z" >/dev/null 2>&1
-
-flow_agents_node "workflow-sidecar" advance-state "$C_DIR/.kontourai/flow-agents/clean" \
-  --status in_progress \
-  --phase pickup \
-  --summary "In progress." \
-  --next-action "done" \
-  --flow-definition builder.build \
-  --timestamp "2026-06-26T00:00:30Z" >/dev/null 2>&1
 
 # Fix next_action so it reads as "done" for the gate
 node -e "
   const fs = require('fs');
-  const f = '$C_DIR/.kontourai/flow-agents/clean/state.json';
+  const f = '$C_DIR/.kontourai/flow-agents/$CLEAN_SLUG/state.json';
   const s = JSON.parse(fs.readFileSync(f, 'utf8'));
   s.next_action = { status: 'done', summary: 'Work complete.' };
   s.status = 'verified';
+  delete s.flow_run;
   fs.writeFileSync(f, JSON.stringify(s, null, 2) + '\n');
 " 2>/dev/null
+rm -f "$C_DIR/.kontourai/flow-agents/$CLEAN_SLUG/$CLEAN_SLUG--deliver.md"
 
-flow_agents_node "workflow-sidecar" record-gate-claim "$C_DIR/.kontourai/flow-agents/clean" \
-  --status pass \
-  --summary "Selected issue #177 for implementation." \
-  --expectation selected-work \
-  --timestamp "2026-06-26T00:01:00Z" >/dev/null 2>&1
+clean_out=""
+clean_exit=0
+for attempt in 1 2; do
+  set +e
+  attempt_out="$(FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=2 FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip \
+      node "$GATE" 2>&1 <<< "{\"hook_event_name\":\"Stop\",\"cwd\":\"$C_DIR\"}")"
+  attempt_exit="$?"
+  set -e
+  clean_out="$clean_out$attempt_out"
+  if [ "$attempt_exit" -ne 2 ]; then clean_exit="$attempt_exit"; fi
+done
 
-set +e
-clean_out="$(FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip \
-    node "$GATE" 2>&1 <<< "{\"hook_event_name\":\"Stop\",\"cwd\":\"$C_DIR\"}")"
-clean_exit="$?"
-set -e
-
-if [ "$clean_exit" -eq 2 ] && echo "$clean_out" | grep -q 'release skipped for active Flow run "clean"'; then
-  _pass "clean claim advances to the next Flow step and active run blocks premature Stop"
+if [ "$clean_exit" -eq 0 ] && echo "$clean_out" | grep -q 'canonical Flow run remains active at step design-probe'; then
+  _pass "canonical Flow blocks repeated Stop after the sidecar projection and Markdown are removed"
 else
-  _fail "clean active Flow run returned the wrong Stop decision (exit $clean_exit): $clean_out"
+  _fail "canonical Flow could be hidden or auto-released after sidecar rewrite (exit $clean_exit): $clean_out"
 fi
 
 if echo "$clean_out" | grep -q "caught false-completion"; then

@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createRequire } from "node:module";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 
 import { readKitInventory } from "../../build/src/runtime-adapters.js";
 import { main as validateHookInfluence } from "../../build/src/cli/validate-hook-influence.js";
-import { parseKitFlowStepActions } from "../../build/src/flow-kit/validate.js";
+import { parseKitFlowStepActions, parseKitSkillRoles, validateKitRepository } from "../../build/src/flow-kit/validate.js";
 
 const require = createRequire(import.meta.url);
 const { workflowTriggersFor } = require("../../scripts/hooks/lib/kit-catalog.js");
@@ -68,13 +68,15 @@ test("Builder flow step actions are structured, complete, and operation-aware", 
   const result = parseKitFlowStepActions(manifest, "kits/builder/kit.json");
 
   assert.deepEqual(result.errors, []);
-  assert.equal(result.entries.length, 10);
+  assert.equal(result.entries.length, 14);
   assert.deepEqual(result.entries.find((entry) => entry.step_id === "plan")?.skills, ["plan-work"]);
   assert.deepEqual(result.entries.find((entry) => entry.step_id === "pr-open"), {
     flow_id: "builder.build",
     step_id: "pr-open",
     skills: [],
     operations: ["publish-change"],
+    artifacts: ["release.json"],
+    expectation_ids: ["pull-request-opened"],
   });
 });
 
@@ -84,11 +86,231 @@ test("flow step action metadata rejects malformed and duplicate entries", () => 
       { flow_id: "builder.build", step_id: "plan", skills: ["plan-work"] },
       { flow_id: "builder.build", step_id: "plan", skills: [] },
       { flow_id: "builder.build", step_id: "verify", skills: "verify-work" },
+      { flow_id: "builder.build", step_id: "publish", skills: [], operations: ["publish-change"], expectation_ids: ["pull-request-opened", "pull-request-opened"] },
     ],
   }, "fixture/kit.json");
 
   assert.match(result.errors.join("\n"), /duplicates 'builder\.build\/plan'/);
   assert.match(result.errors.join("\n"), /skills must be an identifier list/);
+  assert.match(result.errors.join("\n"), /expectation_ids must be a unique identifier list when present/);
+});
+
+test("flow step action metadata preserves explicit operation expectation ownership", () => {
+  const result = parseKitFlowStepActions({
+    flow_step_actions: [
+      { flow_id: "builder.build", step_id: "pr-open", skills: [], operations: ["publish-change"], expectation_ids: ["pull-request-opened"] },
+    ],
+  }, "fixture/kit.json");
+
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.entries[0]?.expectation_ids, ["pull-request-opened"]);
+  assert.deepEqual(result.entries[0]?.artifacts, []);
+});
+
+test("Builder skill roles form one complete role and producer matrix", async () => {
+  const manifest = JSON.parse(fs.readFileSync("kits/builder/kit.json", "utf8"));
+  const result = parseKitSkillRoles(manifest, "kits/builder/kit.json");
+
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.entries.length, 17);
+  assert.deepEqual(Object.fromEntries([...new Set(result.entries.map((entry) => entry.role))].map((role) => [role, result.entries.filter((entry) => entry.role === role).length])), {
+    entrypoint: 2,
+    profile: 2,
+    step: 10,
+    "shared-primitive": 1,
+    extension: 2,
+  });
+  assert.deepEqual(result.entries.find((entry) => entry.skill_id === "builder.review-work")?.expectation_ids, ["clean-critique"]);
+  assert.deepEqual(result.entries.find((entry) => entry.skill_id === "builder.verify-work")?.expectation_ids, ["acceptance-criteria", "tests-evidence", "policy-compliance"]);
+  assert.deepEqual(await validateKitRepository("kits/builder"), []);
+});
+
+test("skill role metadata rejects hidden semantics and role boundary violations", () => {
+  const result = parseKitSkillRoles({
+    skill_roles: [
+      { skill_id: "builder.deliver", role: "entrypoint", flow_id: "builder.build", step_ids: [], artifacts: [], expectation_ids: [], command: "private-bypass" },
+      { skill_id: "builder.deliver", role: "step", flow_id: "builder.build", step_ids: ["execute"], artifacts: ["state.json"], expectation_ids: [] },
+      { skill_id: "builder.profile", role: "profile", flow_id: "builder.build", step_ids: [], artifacts: [], expectation_ids: ["tests-evidence"] },
+      { skill_id: "builder.extension", role: "extension", flow_id: "builder.build", step_ids: [], artifacts: ["report.json"], expectation_ids: [] },
+      { skill_id: "builder.empty-step", role: "step", flow_id: "builder.build", step_ids: ["execute"], artifacts: [], expectation_ids: [] },
+      { skill_id: "builder.unknown", role: "orchestrator", step_ids: [], artifacts: [], expectation_ids: [] },
+    ],
+  }, "fixture/kit.json");
+
+  const errors = result.errors.join("\n");
+  assert.match(errors, /unsupported field\(s\): command/);
+  assert.match(errors, /duplicates 'builder\.deliver'/);
+  assert.match(errors, /profile must select one flow and own no steps, artifacts, or expectations/);
+  assert.match(errors, /extension must own no Builder flow, steps, or expectations/);
+  assert.match(errors, /step must bind one flow, at least one step, and at least one artifact/);
+  assert.match(errors, /role must be entrypoint, profile, step, shared-primitive, or extension/);
+});
+
+test("skill role repository validation rejects unknown steps and misplaced expectations", async () => {
+  const root = tempRoot("flow-agents-skill-role-cross-reference-");
+  const kit = path.join(root, "builder");
+  fs.cpSync("kits/builder", kit, { recursive: true });
+  const manifestFile = path.join(kit, "kit.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+  const execute = manifest.skill_roles.find((entry) => entry.skill_id === "builder.execute-plan");
+  execute.step_ids = ["missing-step"];
+  execute.expectation_ids = ["tests-evidence"];
+  writeJson(manifestFile, manifest);
+
+  const errors = (await validateKitRepository(kit)).join("\n");
+  assert.match(errors, /references unknown step 'builder\.build\/missing-step'/);
+  assert.match(errors, /expectation 'tests-evidence' is not owned by its bound step/);
+  assert.match(errors, /flow_step_actions 'builder\.build\/execute' skill 'execute-plan' must match one step-role binding/);
+});
+
+test("skill role repository validation requires exactly one producer per skill-owned expectation", async () => {
+  const root = tempRoot("flow-agents-skill-role-producer-completeness-");
+  const kit = path.join(root, "builder");
+  fs.cpSync("kits/builder", kit, { recursive: true });
+  const manifestFile = path.join(kit, "kit.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+  const verify = manifest.skill_roles.find((entry) => entry.skill_id === "builder.verify-work");
+  const review = manifest.skill_roles.find((entry) => entry.skill_id === "builder.review-work");
+  const shape = manifest.skill_roles.find((entry) => entry.skill_id === "builder.idea-to-backlog");
+
+  verify.expectation_ids = ["policy-compliance"];
+  review.expectation_ids = ["policy-compliance"];
+  shape.expectation_ids = shape.expectation_ids.filter((id) => id !== "shaped-problem");
+  manifest.flow_step_actions.find((entry) => entry.flow_id === "builder.build" && entry.step_id === "verify").skills = ["verify-work"];
+  writeJson(manifestFile, manifest);
+
+  const errors = (await validateKitRepository(kit)).join("\n");
+  assert.match(errors, /flow expectation 'builder\.build\/verify\/tests-evidence' must have exactly one producer owner; found 0/);
+  assert.match(errors, /flow expectation 'builder\.build\/verify\/policy-compliance' must have exactly one producer owner; found 2/);
+  assert.match(errors, /flow expectation 'builder\.shape\/shape\/shaped-problem' must have exactly one producer owner; found 0/);
+});
+
+test("flow expectation ownership cannot be bypassed by reclassifying a producer and emptying its action", async () => {
+  const root = tempRoot("flow-agents-reclassified-producer-");
+  const kit = path.join(root, "builder");
+  fs.cpSync("kits/builder", kit, { recursive: true });
+  const manifestFile = path.join(kit, "kit.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+  const producer = manifest.skill_roles.find((entry) => entry.skill_id === "builder.evidence-gate");
+  producer.role = "extension";
+  delete producer.flow_id;
+  producer.step_ids = [];
+  producer.expectation_ids = [];
+  producer.artifacts = [];
+  const action = manifest.flow_step_actions.find((entry) => entry.flow_id === "builder.build" && entry.step_id === "merge-ready");
+  action.skills = [];
+  delete action.operations;
+  writeJson(manifestFile, manifest);
+
+  const errors = (await validateKitRepository(kit)).join("\n");
+  assert.doesNotMatch(errors, /extension must own artifacts/);
+  assert.match(errors, /flow expectation 'builder\.build\/merge-ready\/merge-readiness' must have exactly one producer owner; found 0/);
+});
+
+test("operation-only composed actions must explicitly and exclusively own expectations", async () => {
+  async function errorsFor(name, mutate) {
+    const root = tempRoot(`flow-agents-operation-owner-${name}-`);
+    const kit = path.join(root, "builder");
+    fs.cpSync("kits/builder", kit, { recursive: true });
+    const manifestFile = path.join(kit, "kit.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+    mutate(manifest);
+    writeJson(manifestFile, manifest);
+    return (await validateKitRepository(kit)).join("\n");
+  }
+
+  const missing = await errorsFor("missing", (manifest) => {
+    const action = manifest.flow_step_actions.find((entry) => entry.flow_id === "builder.build" && entry.step_id === "pr-open");
+    action.skills = [];
+    action.operations = ["publish-change"];
+    delete action.expectation_ids;
+  });
+  assert.match(missing, /operation-only action must explicitly declare expectation_ids/);
+  assert.match(missing, /flow expectation 'builder\.publish-learn\/pr-open\/pull-request-opened' must have exactly one producer owner; found 0/);
+
+  const duplicate = await errorsFor("duplicate", (manifest) => {
+    const action = manifest.flow_step_actions.find((entry) => entry.flow_id === "builder.build" && entry.step_id === "pr-open");
+    action.skills = ["release-readiness"];
+    action.operations = ["publish-change"];
+    action.expectation_ids = ["pull-request-opened"];
+    const role = manifest.skill_roles.find((entry) => entry.skill_id === "builder.release-readiness");
+    role.step_ids = ["pr-open", "merge-ready-ci"];
+    role.expectation_ids = ["pull-request-opened", "ci-merge-readiness"];
+  });
+  assert.match(duplicate, /flow expectation 'builder\.publish-learn\/pr-open\/pull-request-opened' must have exactly one producer owner; found 2/);
+});
+
+test("skill role cross-reference never reads Flow definitions through traversal, symlinks, or oversized files", async () => {
+  async function errorsFor(name, mutate) {
+    const root = tempRoot(`flow-agents-skill-role-safe-flow-${name}-`);
+    const kit = path.join(root, "builder");
+    fs.cpSync("kits/builder", kit, { recursive: true });
+    const manifestFile = path.join(kit, "kit.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+    mutate({ root, kit, manifest });
+    writeJson(manifestFile, manifest);
+    return (await validateKitRepository(kit)).join("\n");
+  }
+
+  const traversal = await errorsFor("traversal", ({ root, manifest }) => {
+    writeJson(path.join(root, "outside.flow.json"), { id: "outside", steps: [], gates: {} });
+    manifest.flows[0].path = "../outside.flow.json";
+  });
+  assert.match(traversal, /path must stay inside the kit directory/);
+
+  const symlink = await errorsFor("symlink", ({ kit, manifest }) => {
+    const link = path.join(kit, "flows", "linked.flow.json");
+    fs.symlinkSync(path.join(kit, "flows", "build.flow.json"), link);
+    manifest.flows[0].path = "flows/linked.flow.json";
+  });
+  assert.match(symlink, /path must not traverse a symbolic link/);
+
+  const intermediateSymlink = await errorsFor("intermediate-symlink", ({ kit, manifest }) => {
+    const link = path.join(kit, "linked-flows");
+    fs.symlinkSync(path.join(kit, "flows"), link);
+    manifest.flows[0].path = "linked-flows/build.flow.json";
+  });
+  assert.match(intermediateSymlink, /path must not traverse a symbolic link/);
+
+  const oversized = await errorsFor("oversized", ({ kit, manifest }) => {
+    fs.writeFileSync(path.join(kit, "flows", "oversized.flow.json"), " ".repeat(1024 * 1024 + 1));
+    manifest.flows[0].path = "flows/oversized.flow.json";
+  });
+  assert.match(oversized, /file exceeds 1048576 bytes/);
+});
+
+test("flow definition descriptor identity changes fail closed", async () => {
+  const root = tempRoot("flow-agents-flow-identity-race-");
+  const kit = path.join(root, "builder");
+  fs.cpSync("kits/builder", kit, { recursive: true });
+  const manifestFile = path.join(kit, "kit.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+  const target = path.join(kit, "flows", "raced.flow.json");
+  const replacement = path.join(kit, "flows", "replacement.flow.json");
+  fs.copyFileSync(path.join(kit, "flows", "build.flow.json"), target);
+  fs.copyFileSync(path.join(kit, "flows", "shape.flow.json"), replacement);
+  manifest.flows[0].path = "flows/raced.flow.json";
+  writeJson(manifestFile, manifest);
+  const realTarget = path.join(fs.realpathSync(path.dirname(target)), path.basename(target));
+
+  const originalOpen = fs.openSync;
+  let swapped = false;
+  fs.openSync = (file, flags, mode) => {
+    if (!swapped && file === realTarget) {
+      fs.renameSync(replacement, target);
+      swapped = true;
+    }
+    return originalOpen(file, flags, mode);
+  };
+  syncBuiltinESMExports();
+  try {
+    const errors = (await validateKitRepository(kit)).join("\n");
+    assert.equal(swapped, true);
+    assert.match(errors, /flow definition identity changed while opening/);
+  } finally {
+    fs.openSync = originalOpen;
+    syncBuiltinESMExports();
+  }
 });
 
 test("hook influence: kit expectation cannot override engine-required case id", () => {
@@ -267,7 +489,9 @@ test("workflowTriggersFor uses one structured renderer for any id and provenance
   assert.match(trigger.steering, /^KIT WORKFLOW ROUTE:/);
   assert.match(trigger.steering, /use the `hostile-kit` kit's `hostile\.build` workflow/);
   assert.match(trigger.steering, /If user-requested-tdd, activate `hostile\.tdd`; otherwise activate `hostile\.run`/);
-  assert.match(trigger.steering, /--flow-id hostile\.build/);
+  assert.match(trigger.steering, /Keep the session on `hostile\.build`/);
+  assert.match(trigger.steering, /public `flow-agents workflow` interface/);
+  assert.doesNotMatch(trigger.steering, /workflow:sidecar|ensure-session/);
   assert.match(trigger.steering, /hostile\.plan -> hostile\.verify/);
   assert.match(trigger.steering, /hostile\.release/);
 });
@@ -299,7 +523,8 @@ test("workflowTriggersFor ignores invalid workflow_triggers and still returns Bu
   assert.deepEqual(triggers.map((trigger) => trigger.kit_id), ["builder"]);
   assert.match(triggers[0].steering, /^KIT WORKFLOW ROUTE:/);
   assert.match(triggers[0].steering, /use the `builder` kit's `builder\.build` workflow/);
-  assert.match(triggers[0].steering, /--flow-id builder\.build/);
+  assert.match(triggers[0].steering, /Keep the session on `builder\.build`/);
+  assert.match(triggers[0].steering, /public `flow-agents workflow` interface/);
 });
 
 test("workflowTriggersFor rejects duplicate trigger ids for a kit", () => {
@@ -439,5 +664,6 @@ test("workflowTriggersFor returns Knowledge's structured capture trigger", () =>
   assert.equal(trigger.kit_id, "knowledge");
   assert.match(trigger.steering, /use the `knowledge` kit's `knowledge\.ingest` workflow/);
   assert.match(trigger.steering, /`knowledge\.knowledge-capture`/);
-  assert.match(trigger.steering, /--flow-id knowledge\.ingest/);
+  assert.match(trigger.steering, /Keep the session on `knowledge\.ingest`/);
+  assert.match(trigger.steering, /unsupported-runtime blocker/);
 });

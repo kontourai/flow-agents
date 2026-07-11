@@ -17,7 +17,7 @@ import {
   BUILDER_BUILD_FLOW_ID,
   evaluateBuilderBuildRun,
   startBuilderBuildRun,
-} from "../../build/src/index.js";
+} from "../../build/src/builder-flow-run-adapter.js";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../..");
 const BUILDER_BUILD_DEFINITION = path.join(REPO_ROOT, "kits/builder/flows/build.flow.json");
@@ -245,6 +245,8 @@ test("all verified parent selectors advance only their persisted gates through p
       subjectType: "flow-step",
       name: "verify-all-selectors",
       bundle: trustBundle({ claims: [
+        claim("workflow.critique.review", "workflow-critique"),
+        claim("workflow.acceptance.criterion", "flow-step"),
         claim("builder.verify.tests", "flow-step"),
         claim("builder.verify.policy-compliance", "artifact"),
       ] }),
@@ -271,7 +273,7 @@ test("all verified parent selectors advance only their persisted gates through p
     { gate_id: "design-probe-gate", status: "pass", matched_expectations: ["pickup-probe-readiness", "probe-decisions-or-accepted-gaps"] },
     { gate_id: "plan-gate", status: "pass", matched_expectations: ["implementation-plan"] },
     { gate_id: "execute-gate", status: "pass", matched_expectations: ["implementation-scope"] },
-    { gate_id: "verify-gate", status: "pass", matched_expectations: ["tests-evidence", "policy-compliance"] },
+    { gate_id: "verify-gate", status: "pass", matched_expectations: ["clean-critique", "acceptance-criteria", "tests-evidence", "policy-compliance"] },
     { gate_id: "merge-ready-gate", status: "pass", matched_expectations: ["merge-readiness"] },
   ]);
 });

@@ -3,13 +3,17 @@ import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { isDeepStrictEqual } from "node:util";
-import { loadBuilderBuildRun } from "../builder-flow-run-adapter.js";
+import { fileURLToPath } from "node:url";
+import { validateDefinition } from "@kontourai/flow";
+import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
+import { inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
-import { flagBool, flagString, parseArgs } from "../lib/args.js";
+import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { main as builderRun } from "./builder-run.js";
-import { currentWorkflowSessionDir, main as workflowWriter, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
+import { currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
+import { resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -18,7 +22,7 @@ const PACKAGE_ROOT = flowAgentsPackageRoot();
 const REQUIRE = createRequire(import.meta.url);
 const PACKAGE_METADATA = readJsonFile(path.join(PACKAGE_ROOT, "package.json"), "Flow Agents package metadata");
 const CLI_VERSION = flowAgentsPackageVersion();
-const PUBLIC_VERBS = ["start", "status", "evidence", "pause", "resume", "release", "cancel", "archive", "doctor"] as const;
+const PUBLIC_VERBS = ["start", "status", "evidence", "critique", "pause", "resume", "release", "cancel", "archive", "doctor"] as const;
 
 function usage(): void {
   console.log(`Usage: flow-agents workflow <verb> [options]
@@ -27,6 +31,7 @@ Public workflow verbs:
   start               Start or resume a workflow for a Work Item.
   status              Show the current canonical run and projected next action.
   evidence            Record evidence for the current Flow gate and synchronize it.
+  critique            Record review critique directly into the current trust bundle.
   pause               Pause the current run as its assignment actor.
   resume              Resume the current paused run as its assignment actor.
   release             Release the current assignment without canceling the run.
@@ -55,6 +60,7 @@ export async function main(argv: string[]): Promise<number> {
   const sessionDir = resolveSessionDir(parsed.flags);
   if (verb === "status") return status(sessionDir, flagBool(parsed.flags, "json"));
   if (verb === "evidence") return evidence(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
+  if (verb === "critique") return critique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
 
   const forwarded = stripPublicFlags(argv.slice(1), new Set(["artifact-root", "session-dir", "json"]));
   if (verb === "release" && !flagString(parsed.flags, "reason")) throw new Error("workflow release requires --reason <text>");
@@ -63,14 +69,30 @@ export async function main(argv: string[]): Promise<number> {
 
 async function start(argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
-  assertOnlyFlags(parsed.flags, new Set(["flow", "work-item", "task-slug", "artifact-root", "source-request", "summary", "title", "criterion"]), "workflow start");
+  assertOnlyFlags(parsed.flags, new Set(["flow", "work-item", "task-slug", "artifact-root", "source-request", "summary", "title", "criterion", "assignment-provider", "effective-state-json"]), "workflow start");
   const flow = flagString(parsed.flags, "flow", "builder.build")!;
-  if (flow !== "builder.build") throw new Error("workflow start currently supports only --flow builder.build");
+  if (flow !== "builder.build" && flow !== "builder.shape") throw new Error("workflow start supports only --flow builder.build or builder.shape");
   const workItem = flagString(parsed.flags, "work-item");
-  if (!workItem) throw new Error("workflow start requires --work-item <owner/repo#id>");
   const artifactRoot = path.resolve(flagString(parsed.flags, "artifact-root", flowAgentsArtifactRoot())!);
   const taskSlug = flagString(parsed.flags, "task-slug");
-  if (workItem.startsWith("local:")) {
+  if (flow === "builder.shape") {
+    if (!taskSlug || !isSafeSlug(taskSlug)) throw new Error("workflow start --flow builder.shape requires an explicit safe --task-slug");
+    if (workItem) throw new Error("workflow start --flow builder.shape creates a local Work Item; omit --work-item");
+  } else if (!workItem) {
+    throw new Error("workflow start requires --work-item <provider-ref>");
+  }
+  const assignmentProvider = flagString(parsed.flags, "assignment-provider", flow === "builder.shape" || workItem?.startsWith("local:") ? "local-file" : undefined);
+  const effectiveStateJson = flagString(parsed.flags, "effective-state-json");
+  if (flow === "builder.build" && workItem && !workItem.startsWith("local:") && !assignmentProvider) {
+    throw new Error("workflow start requires --assignment-provider <kind> for a provider-backed Work Item; provider identity is never inferred from its reference");
+  }
+  if (assignmentProvider !== "local-file" && !effectiveStateJson) {
+    throw new Error(`workflow start requires --effective-state-json <path> for assignment provider ${assignmentProvider}`);
+  }
+  if (assignmentProvider === "local-file" && effectiveStateJson) {
+    throw new Error("workflow start --effective-state-json is only valid for a non-local assignment provider");
+  }
+  if (workItem?.startsWith("local:")) {
     const localSlug = workItem.slice("local:".length);
     if (!taskSlug || taskSlug !== localSlug || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(localSlug)) {
       throw new Error("local Work Item retries require the exact existing --task-slug binding");
@@ -80,29 +102,56 @@ async function start(argv: string[]): Promise<number> {
     if (localRecord.id !== taskSlug || (localRecord.source_provider as JsonRecord | undefined)?.kind !== "local") {
       throw new Error("local Work Item retry does not match the existing session binding");
     }
-  } else if (taskSlug) {
+  } else if (taskSlug && flow !== "builder.shape") {
     throw new Error("--task-slug is reserved for an existing local Work Item retry");
   }
-  const sourceRequest = flagString(parsed.flags, "source-request", `Start ${flow} for ${workItem}`)!;
-  const summary = flagString(parsed.flags, "summary", `Deliver ${workItem} through ${flow}.`)!;
+  const existingSlug = taskSlug ?? (workItem ? workItemSlug(workItem) : null);
+  if (existingSlug && fs.existsSync(path.join(artifactRoot, existingSlug, "state.json"))) {
+    try {
+      const existing = await loadBuilderFlowRun({ cwd: path.dirname(path.dirname(artifactRoot)), runId: existingSlug });
+      if (existing.definitionId !== flow) {
+        throw new Error(`workflow start cannot resume ${existing.definitionId} as ${flow}; local shape sessions are not build retries. Create or claim a provider Work Item for the builder.build handoff.`);
+      }
+    } catch (error) {
+      if ((error as { code?: string }).code !== "flow.run_location.not_found") throw error;
+    }
+  }
+  if (flow === "builder.build" && workItem && !workItem.startsWith("local:")) {
+    const slug = workItemSlug(workItem);
+    const report = path.join(artifactRoot, slug, `${slug}--pull-work.md`);
+    try {
+      const stat = fs.lstatSync(report);
+      if (stat.isSymbolicLink() || !stat.isFile() || !fs.readFileSync(report, "utf8").includes(workItem)) {
+        throw new Error("invalid");
+      }
+    } catch {
+      throw new Error(`workflow start requires concrete pull-work selection evidence at ${report} naming ${workItem} before it can produce selected-work`);
+    }
+  }
+  const sourceRequest = flagString(parsed.flags, "source-request", `Start ${flow} for ${workItem ?? `local:${taskSlug}`}`)!;
+  const summary = flagString(parsed.flags, "summary", `Deliver ${workItem ?? `local:${taskSlug}`} through ${flow}.`)!;
   const forwarded = keepFlags(argv, new Set(["title", "criterion"]));
-  return workflowWriter([
+  return mainFromPublicWorkflow([
     "ensure-session",
     "--artifact-root", artifactRoot,
     "--flow-id", flow,
-    "--work-item", workItem,
+    ...(workItem ? ["--work-item", workItem] : []),
     ...(taskSlug ? ["--task-slug", taskSlug] : []),
+    ...(assignmentProvider ? ["--assignment-provider", assignmentProvider] : []),
+    ...(effectiveStateJson ? ["--effective-state-json", path.resolve(effectiveStateJson)] : []),
     "--source-request", sourceRequest,
     "--summary", summary,
     ...forwarded,
   ]);
 }
 
+function workItemSlug(workItem: string): string {
+  return workItem.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
 async function status(sessionDir: string, json: boolean): Promise<number> {
-  const sidecar = readJsonFile(path.join(sessionDir, "state.json"), "workflow state");
-  const slug = String(sidecar.task_slug ?? path.basename(sessionDir));
-  const projectRoot = path.dirname(path.dirname(path.dirname(sessionDir)));
-  const result = await loadBuilderBuildRun({ cwd: projectRoot, runId: slug });
+  const inspected = await inspectBuilderFlowSession({ sessionDir });
+  const result = inspected.run;
   const report = {
     run_id: result.runId,
     definition_id: result.definitionId,
@@ -110,7 +159,7 @@ async function status(sessionDir: string, json: boolean): Promise<number> {
     status: result.state.status,
     current_step: result.state.current_step,
     session_dir: sessionDir,
-    next_action: sidecar.next_action ?? null,
+    next_action: inspected.projection.next_action ?? null,
   };
   if (json) console.log(JSON.stringify(report));
   else {
@@ -124,25 +173,105 @@ async function status(sessionDir: string, json: boolean): Promise<number> {
 
 async function evidence(sessionDir: string, argv: string[], json: boolean): Promise<number> {
   const parsed = parseArgs(argv);
-  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "expectation", "status", "summary", "evidence-ref-json", "accepted-gap-reason", "waived-by"]), "workflow evidence");
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "expectation", "status", "summary", "route-reason", "evidence-ref-json", "criterion-json", "accepted-gap-reason", "waived-by", "command"]), "workflow evidence");
   if (!flagString(parsed.flags, "expectation")) throw new Error("workflow evidence requires --expectation <gate-expectation-id>");
   if (!flagString(parsed.flags, "status")) throw new Error("workflow evidence requires --status <pass|fail|not_verified>");
   if (!flagString(parsed.flags, "summary")) throw new Error("workflow evidence requires --summary <text>");
   const forwarded = stripPublicFlags(argv, new Set(["artifact-root", "session-dir", "json"]));
-  await workflowWriter(["record-gate-claim", sessionDir, ...forwarded]);
-  const sidecar = readJsonFile(path.join(sessionDir, "state.json"), "workflow state");
-  const projectRoot = path.dirname(path.dirname(path.dirname(sessionDir)));
-  const result = await loadBuilderBuildRun({ cwd: projectRoot, runId: String(sidecar.task_slug ?? path.basename(sessionDir)) });
-  const report = {
-    run_id: result.runId,
-    status: result.state.status,
-    current_step: result.state.current_step,
-    attached: result.attachedEvidence.length > 0,
-    next_action: sidecar.next_action ?? null,
-  };
+  const { slug, projectRoot } = readBoundSession(sessionDir);
+  const commands = flagList(parsed.flags, "command");
+  if (Object.hasOwn(parsed.flags, "command") && commands.length === 0) {
+    throw new Error("workflow evidence --command requires a shell command value");
+  }
+  const requiresTestEvidence = flagString(parsed.flags, "expectation") === "tests-evidence" && flagString(parsed.flags, "status") === "pass";
+  // Argument and command-shape rejection must be read-only. Recovery below may
+  // repair stale projections, so it runs only after every command is accepted.
+  assertRunnableEvidenceCommands(commands, projectRoot, requiresTestEvidence);
+  const report = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
+    // Validate the owner after the lock is held, then keep the lock through command
+    // execution, evidence recording, and postcondition capture so assignment and
+    // session state cannot change mid-invocation.
+    const caller = assertMatchingAssignmentActor(sessionDir, slug);
+    const repaired = await recoverBuilderFlowSession({ sessionDir });
+    const beforeEvidence = manifestEvidenceDigests(repaired.run.manifest);
+    await mainFromPublicWorkflow([
+      "record-gate-claim",
+      sessionDir,
+      ...forwarded,
+      "--actor",
+      caller.actorKey,
+    ]);
+
+    await syncBuilderFlowSession({ sessionDir });
+
+    const digest = fileSha256(path.join(sessionDir, "trust.bundle"));
+    const run = await loadBuilderFlowRun({ cwd: repaired.projectRoot, runId: slug });
+    const afterEvidence = manifestEvidenceDigests(run.manifest);
+    const newEvidence = afterEvidence.filter((value) => !beforeEvidence.includes(value));
+    if (newEvidence.length !== 1 || newEvidence[0] !== digest) {
+      throw new Error("workflow evidence did not attach exactly this invocation's resulting trust.bundle digest");
+    }
+    const updatedSidecar = readBoundSession(sessionDir).sidecar;
+    return immutableReport({
+      run_id: run.runId,
+      status: run.state.status,
+      current_step: run.state.current_step,
+      attached: true,
+      next_action: updatedSidecar.next_action ?? null,
+    });
+  });
   if (json) console.log(JSON.stringify(report));
   else console.log(`Recorded evidence; canonical run is ${report.status} at ${report.current_step}.`);
   return 0;
+}
+
+async function critique(sessionDir: string, argv: string[], json: boolean): Promise<number> {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "id", "verdict", "summary", "artifact-ref", "finding-json", "lane-json", "timestamp"]), "workflow critique");
+  if (!flagString(parsed.flags, "summary")) throw new Error("workflow critique requires --summary <text>");
+  if (Object.hasOwn(parsed.flags, "reviewer")) throw new Error("workflow critique derives reviewer identity from the authenticated assignment actor; --reviewer is not accepted");
+  const { slug, projectRoot } = readBoundSession(sessionDir);
+  const forwarded = stripPublicFlags(argv, new Set(["artifact-root", "session-dir", "json"]));
+  const report = await withSubjectLock(path.dirname(sessionDir), slug, async () => {
+    const caller = assertDistinctReviewActor(sessionDir, slug);
+    const current = await loadBuilderFlowRun({ cwd: projectRoot, runId: slug });
+    if (current.definitionId !== "builder.build" || current.state.current_step !== "verify") throw new Error("workflow critique is allowed only for the canonical builder.build verify step");
+    const beforeManifest = JSON.parse(JSON.stringify(current.manifest)) as JsonRecord;
+    const beforeTrustBundle = optionalFileDigest(path.join(sessionDir, "trust.bundle"));
+    const legacySidecars = ["critique.json", "evidence.json"].map((name) => ({ name, digest: optionalFileDigest(path.join(sessionDir, name)) }));
+    await mainFromPublicWorkflow(["record-critique", sessionDir, ...forwarded, "--reviewer", caller.actorKey]);
+    const result = await recoverBuilderFlowSession({ sessionDir });
+    const digest = fileSha256(path.join(sessionDir, "trust.bundle"));
+    if (!isDeepStrictEqual(result.run.manifest, beforeManifest)) {
+      throw new Error("workflow critique must not attach or otherwise mutate the Flow manifest");
+    }
+    if (beforeTrustBundle === digest) {
+      throw new Error("workflow critique did not change trust.bundle");
+    }
+    if (legacySidecars.some(({ name, digest: legacyDigest }) => optionalFileDigest(path.join(sessionDir, name)) !== legacyDigest)) {
+      throw new Error("workflow critique must persist only through trust.bundle");
+    }
+    return immutableReport({ run_id: slug, recorded: true });
+  });
+  if (json) console.log(JSON.stringify(report));
+  else console.log("Recorded critique in the trust bundle.");
+  return 0;
+}
+
+function assertRunnableEvidenceCommands(commands: string[], projectRoot: string, requiresTestEvidence: boolean): void {
+  const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/runnable-command.js");
+  const { isRunnableCommandText } = REQUIRE(helperPath) as { isRunnableCommandText: (text: string) => boolean };
+  if (commands.length > 1 && new Set(commands).size !== commands.length) {
+    throw new Error("workflow evidence --command values must be unique because observations are matched by exact command text");
+  }
+  for (const command of commands) {
+    if (!isRunnableCommandText(command)) {
+      throw new Error(`workflow evidence --command ${JSON.stringify(command)} is not a runnable shell command — prose belongs in --summary, which is never executed.`);
+    }
+    if (requiresTestEvidence && !isMeaningfulTestCommand(command, projectRoot)) {
+      throw new Error("workflow evidence tests-evidence command must resolve through a non-vacuous package script or a known test/check/verify/eval runner or project-local test path; shell wrappers, no-ops, version/help commands, and arbitrary node -e commands are not evidence");
+    }
+  }
 }
 
 function resolveSessionDir(flags: ReturnType<typeof parseArgs>["flags"]): string {
@@ -167,11 +296,16 @@ function doctor(argv: string[]): number {
   const install = readOptionalJson(installFile);
   const state = readCurrentState(artifactRoot);
   const packageKit = readOptionalJson(path.join(packageRoot, "kits", "builder", "kit.json"));
-  const packageFlow = readOptionalJson(path.join(packageRoot, "kits", "builder", "flows", "build.flow.json"));
   const installedKitFile = path.join(projectRoot, "kits", "builder", "kit.json");
-  const installedFlowFile = path.join(projectRoot, "kits", "builder", "flows", "build.flow.json");
   const installedKit = readOptionalJson(installedKitFile);
-  const installedFlow = readOptionalJson(installedFlowFile);
+  const definitions = [
+    { id: "builder.build", file: "build.flow.json" },
+    { id: "builder.shape", file: "shape.flow.json" },
+  ].map(({ id, file }) => {
+    const packageFile = path.join(packageRoot, "kits", "builder", "flows", file);
+    const installedFile = path.join(projectRoot, "kits", "builder", "flows", file);
+    return { id, packageFile, installedFile, packageDefinition: readOptionalJson(packageFile), installedDefinition: readOptionalJson(installedFile) };
+  });
   const resolvedFlowPackage = readOptionalJson(resolveDependencyPackageJson("@kontourai/flow"));
   const installedVersion = typeof install?.version === "string" ? install.version : null;
   const staleInstall = installedVersion !== null && installedVersion !== cliVersion;
@@ -187,18 +321,35 @@ function doctor(argv: string[]): number {
   if (!installIntegrity.ok) warnings.push(`Installed hook/writer assets failed integrity verification: ${installIntegrity.problems.join("; ")}. Run: ${remediation}`);
   if (localDependency?.version && localDependency.version !== cliVersion) warnings.push(`Repository-local Flow Agents ${String(localDependency.version)} differs from executing CLI ${cliVersion}; keep automation explicitly versioned.`);
   if (activeKitIds.includes("builder") && !installedKit) warnings.push(`Activated Builder Kit is missing at ${installedKitFile}. Run: ${remediation}`);
-  if (activeKitIds.includes("builder") && !installedFlow) warnings.push(`Activated builder.build definition is missing at ${installedFlowFile}. Run: ${remediation}`);
+  for (const definition of definitions) {
+    if (activeKitIds.includes("builder") && !definition.installedDefinition) {
+      warnings.push(`Activated ${definition.id} definition is missing at ${definition.installedFile}. Run: ${remediation}`);
+      continue;
+    }
+    if (!definition.installedDefinition) continue;
+    const validationError = validateFlowDefinition(definition.id, definition.installedDefinition);
+    if (validationError) warnings.push(`Installed ${definition.id} definition is invalid: ${validationError}. Run: ${remediation}`);
+    if (definition.installedDefinition.id !== definition.packageDefinition?.id) {
+      warnings.push(`Installed ${definition.id} definition id ${String(definition.installedDefinition.id)} differs from CLI definition ${String(definition.packageDefinition?.id)}. Run: ${remediation}`);
+    }
+    if (definition.installedDefinition.version !== definition.packageDefinition?.version) {
+      warnings.push(`Installed ${definition.id} version ${String(definition.installedDefinition.version)} differs from CLI version ${String(definition.packageDefinition?.version)}. Run: ${remediation}`);
+    } else if (fileSha256(definition.installedFile) !== fileSha256(definition.packageFile)) {
+      warnings.push(`Installed ${definition.id} content differs from Flow Agents ${cliVersion}. Run: ${remediation}`);
+    }
+  }
   if (installedKit && installedKit.schema_version !== packageKit?.schema_version) {
     warnings.push(`Installed Builder Kit schema ${String(installedKit.schema_version)} differs from CLI schema ${String(packageKit?.schema_version)}. Run: ${remediation}`);
   }
   if (installedKit && fileSha256(installedKitFile) !== fileSha256(path.join(packageRoot, "kits", "builder", "kit.json"))) {
     warnings.push(`Installed Builder Kit content differs from Flow Agents ${cliVersion}. Run: ${remediation}`);
   }
-  if (installedFlow && installedFlow.version !== packageFlow?.version) {
-    warnings.push(`Installed builder.build version ${String(installedFlow.version)} differs from CLI version ${String(packageFlow?.version)}. Run: ${remediation}`);
-  }
-  if (state?.flow_run && (state.flow_run as JsonRecord).definition_version !== packageFlow?.version) {
-    warnings.push(`Current run uses builder.build@${String((state.flow_run as JsonRecord).definition_version)} while CLI resolves ${String(packageFlow?.version)}; recover or migrate before mutation.`);
+  const currentRun = state?.flow_run && typeof state.flow_run === "object" ? state.flow_run as JsonRecord : null;
+  const currentDefinition = definitions.find((definition) => definition.id === currentRun?.definition_id);
+  if (currentRun?.definition_id && !currentDefinition) {
+    warnings.push(`Current run uses unsupported Flow definition ${String(currentRun.definition_id)}; recover or migrate before mutation.`);
+  } else if (currentRun && currentDefinition && currentRun.definition_version !== currentDefinition.packageDefinition?.version) {
+    warnings.push(`Current run uses ${currentDefinition.id}@${String(currentRun.definition_version)} while CLI resolves ${currentDefinition.id}@${String(currentDefinition.packageDefinition?.version)}; recover or migrate before mutation.`);
   }
   if (state && state.schema_version !== "1.0") warnings.push(`Artifact schema ${String(state.schema_version)} is unsupported; recreate or migrate the session with CLI ${cliVersion}.`);
   const trustBundleSchema = readCurrentTrustBundleSchema(artifactRoot);
@@ -234,7 +385,13 @@ function doctor(argv: string[]): number {
       source: installedKit ? installedKitFile : path.join(packageRoot, "kits", "builder", "kit.json"),
     },
     flow_runtime: { package_version: resolvedFlowVersion, expected_range: expectedFlowRange, compatible: resolvedFlowVersion ? flowVersionCompatible(resolvedFlowVersion, expectedFlowRange) : false },
-    definition: { id: (state?.flow_run as JsonRecord | undefined)?.definition_id ?? packageFlow?.id ?? null, version: (state?.flow_run as JsonRecord | undefined)?.definition_version ?? packageFlow?.version ?? null },
+    definition: { id: currentRun?.definition_id ?? definitions[0]!.packageDefinition?.id ?? null, version: currentRun?.definition_version ?? definitions[0]!.packageDefinition?.version ?? null },
+    definitions: definitions.map((definition) => ({
+      id: definition.id,
+      resolved_version: definition.packageDefinition?.version ?? null,
+      installed_version: definition.installedDefinition?.version ?? null,
+      installed_valid: definition.installedDefinition ? validateFlowDefinition(definition.id, definition.installedDefinition) === null : false,
+    })),
     artifact: {
       state_schema_version: state?.schema_version ?? null,
       trust_bundle_schema_version: trustBundleSchema,
@@ -283,6 +440,86 @@ function readJsonFile(file: string, label: string): JsonRecord {
 
 function readOptionalJson(file: string): JsonRecord | null {
   try { return readJsonFile(file, file); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function validateFlowDefinition(expectedId: string, definition: JsonRecord): string | null {
+  if (definition.id !== expectedId) return `expected id ${expectedId}, received ${String(definition.id)}`;
+  try {
+    validateDefinition(definition as never);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+function isSafeSlug(value: string): boolean {
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value);
+}
+
+function readBoundSession(sessionDir: string): { sidecar: JsonRecord; slug: string; projectRoot: string } {
+  const slug = path.basename(sessionDir);
+  if (!isSafeSlug(slug)) throw new Error("workflow session basename must be a safe task slug");
+  const sidecar = readJsonFile(path.join(sessionDir, "state.json"), "workflow state");
+  if (sidecar.task_slug !== slug) throw new Error("workflow state task_slug must exactly match the safe session basename");
+  return { sidecar, slug, projectRoot: path.dirname(path.dirname(path.dirname(sessionDir))) };
+}
+
+function readAssignment(sessionDir: string, slug: string): JsonRecord {
+  const artifactRoot = path.dirname(sessionDir);
+  const assignmentRoot = path.join(artifactRoot, "assignment");
+  const stat = fs.lstatSync(assignmentRoot);
+  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error("workflow assignment directory must be a non-symlink directory");
+  const file = path.join(assignmentRoot, `${slug}.json`);
+  const fileStat = fs.lstatSync(file);
+  if (fileStat.isSymbolicLink() || !fileStat.isFile()) throw new Error("workflow assignment must be a non-symlink regular file");
+  return readJsonFile(file, "workflow assignment");
+}
+
+function assertMatchingAssignmentActor(sessionDir: string, slug: string): ReturnType<typeof resolveCurrentAssignmentActor> {
+  const assignment = readActiveAssignment(sessionDir, slug);
+  const caller = resolveCurrentAssignmentActor();
+  const normalizeActor = (value: unknown): JsonRecord | null => value && typeof value === "object" ? { ...(value as JsonRecord), human: (value as JsonRecord).human ?? null } : null;
+  if (assignment.actor_key !== caller.actorKey || !isDeepStrictEqual(normalizeActor(assignment.actor), normalizeActor(caller.actor))) {
+    throw new Error("workflow mutation requires the session's active, matching assignment actor");
+  }
+  return caller;
+}
+
+function readActiveAssignment(sessionDir: string, slug: string): JsonRecord {
+  const assignment = readAssignment(sessionDir, slug);
+  if (assignment.status !== "claimed" || assignment.artifact_dir !== slug || typeof assignment.actor_key !== "string" || !assignment.actor_key || !assignment.actor || typeof assignment.actor !== "object" || Array.isArray(assignment.actor)) {
+    throw new Error("workflow mutation requires the session's active implementation assignment");
+  }
+  return assignment;
+}
+
+function assertDistinctReviewActor(sessionDir: string, slug: string): ReturnType<typeof resolveCurrentAssignmentActor> {
+  const assignment = readActiveAssignment(sessionDir, slug);
+  const caller = resolveCurrentAssignmentActor();
+  if (assignment.actor_key === caller.actorKey) {
+    throw new Error("workflow critique requires a reviewer identity distinct from the active implementation assignment actor");
+  }
+  return caller;
+}
+
+function immutableReport<T>(value: T): T {
+  if (!value || typeof value !== "object") return value;
+  for (const nested of Object.values(value as Record<string, unknown>)) immutableReport(nested);
+  return Object.freeze(value);
+}
+
+function manifestEvidenceDigests(manifest: JsonRecord): string[] {
+  const evidence = Array.isArray(manifest.evidence) ? manifest.evidence : [];
+  return evidence
+    .map((entry) => entry && typeof entry === "object" ? (entry as JsonRecord).sha256 : null)
+    .filter((digest): digest is string => typeof digest === "string");
+}
+
+function optionalFileDigest(file: string): string | null {
+  try { return fileSha256(file); } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }

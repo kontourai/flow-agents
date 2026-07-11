@@ -1759,6 +1759,37 @@ function hasSidecarPresence(artifactDir) {
   return fs.existsSync(path.join(artifactDir, 'state.json')) || fs.existsSync(path.join(artifactDir, 'trust.bundle'));
 }
 
+function canonicalFlowState(root, artifactDir) {
+  if (!artifactDir) return { state: null, error: null };
+  const slug = path.basename(artifactDir);
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) return { state: null, error: 'canonical Flow run slug is malformed' };
+  const runDir = path.join(root, '.kontourai', 'flow', 'runs', slug);
+  const components = [
+    path.join(root, '.kontourai'),
+    path.join(root, '.kontourai', 'flow'),
+    path.join(root, '.kontourai', 'flow', 'runs'),
+    runDir,
+  ];
+  try {
+    for (const component of components) {
+      const stat = fs.lstatSync(component);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) return { state: null, error: `canonical Flow run has an unsafe parent component: ${component}` };
+    }
+    const file = path.join(runDir, 'state.json');
+    const stat = fs.lstatSync(file);
+    if (stat.isSymbolicLink() || !stat.isFile()) return { state: null, error: 'canonical Flow state must be a non-symlink regular file' };
+    const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!state || typeof state !== 'object' || Array.isArray(state)
+      || typeof state.status !== 'string' || !state.status.trim()
+      || typeof state.current_step !== 'string' || !state.current_step.trim()) {
+      return { state: null, error: 'canonical Flow state is malformed' };
+    }
+    return { state, error: null };
+  } catch (error) {
+    return { state: null, error: `canonical Flow state is unavailable or malformed: ${safeOneLine(error && error.message || error, 120)}` };
+  }
+}
+
 // WS8 (AC10a): when current.json names a slug whose session directory does NOT exist,
 // return that slug so analyze() can log the staleness rather than silently falling back to
 // a global mtime scan that could resurface an abandoned/never-real session as active.
@@ -1871,7 +1902,7 @@ function missingBundleOrStateSignal(artifactDir, activeFlowStep) {
 //
 // Both are used in analyze() for blocking decisions AND in run() for the AC2
 // MAX_BLOCKS hard-block guard (preventing auto-release of hard blocks).
-const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered|NOT_VERIFIED \(ambiguous\)/;
+const HARD_BLOCK = /contradicts evidence\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered|NOT_VERIFIED \(ambiguous\)|canonical Flow (?:run remains active|state is unsafe or malformed)/;
 // FULL_BLOCK adds: workflow-state hygiene, surface-unavailable fail-closed, missing log.
 const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|contradicts evidence\.json|workflow state|evidence verdict|evidence check|NOT_VERIFIED gap|critique status|critique open|next action|caught false-completion|NOT_VERIFIED —|command-log integrity check FAILED|gate misconfiguration:|surface unavailable —|expected capture log is missing|exit-code-laundered|malformed-evidence|NOT_VERIFIED \(ambiguous\)/;
 
@@ -1897,7 +1928,31 @@ async function analyze(root, now = Date.now()) {
     artifacts = artifacts.filter(a => a && hasSidecarPresence(path.dirname(a.file)));
   }
 
-  if (artifacts.length === 0) return { warnings: [], blocking: false, latestArtifactDir: null };
+  const scopedCanonicalFlow = canonicalFlowState(root, scoped);
+  const scopedState = scoped ? readJsonFile(path.join(scoped, 'state.json')) : null;
+  const scopedProjectedActive = Boolean(scopedState && scopedState.flow_run && normalizedStatus(scopedState.flow_run.status) === 'active');
+  if (scopedProjectedActive && scopedCanonicalFlow.error) {
+    return {
+      warnings: [`workflow state: canonical Flow state is unsafe or malformed for the active scoped session: ${scopedCanonicalFlow.error}. Resolve the canonical run before stopping.`],
+      blocking: true,
+      activeFlowRun: true,
+      latestArtifactDir: scoped,
+      gatePrefix: '[stop-gate]',
+    };
+  }
+  if (artifacts.length === 0) {
+    if (normalizedStatus(scopedCanonicalFlow.state?.status) === 'active') {
+      const activeStep = safeOneLine(scopedCanonicalFlow.state.current_step || 'unknown', 80);
+      return {
+        warnings: [`workflow state: canonical Flow run remains active at step ${activeStep}; complete or explicitly cancel the run before stopping.`],
+        blocking: true,
+        activeFlowRun: true,
+        latestArtifactDir: scoped,
+        gatePrefix: '[stop-gate]',
+      };
+    }
+    return { warnings: [], blocking: false, activeFlowRun: false, latestArtifactDir: null };
+  }
 
   const latest = artifacts[0];
   const latestArtifactDir = path.dirname(latest.file);
@@ -1965,14 +2020,25 @@ async function analyze(root, now = Date.now()) {
   // Use module-scope HARD_BLOCK / FULL_BLOCK (defined above analyze()).
   // pre-execution/terminal tasks: only HARD_BLOCK signals cause a block.
   // execution-onward tasks: FULL_BLOCK signals cause a block.
-  const activeFlowRun = gateState && gateState.flow_run && normalizedStatus(gateState.flow_run.status) === 'active';
+  const canonicalFlow = canonicalFlowState(root, latestArtifactDir);
+  const activeProjectedFlow = gateState && gateState.flow_run && normalizedStatus(gateState.flow_run.status) === 'active';
+  const unsafeActiveCanonical = Boolean(activeProjectedFlow && canonicalFlow.error);
+  if (unsafeActiveCanonical) {
+    warnings.push(`workflow state: canonical Flow state is unsafe or malformed for the active scoped session: ${canonicalFlow.error}. Resolve the canonical run before stopping.`);
+  }
+  const activeFlowRun = normalizedStatus(canonicalFlow.state?.status) === 'active'
+    || (gateState && gateState.flow_run && normalizedStatus(gateState.flow_run.status) === 'active');
+  if (activeFlowRun && !warnings.some(w => /canonical Flow run remains active/.test(w))) {
+    const activeStep = safeOneLine(canonicalFlow.state?.current_step || gateState?.flow_run?.current_step || 'unknown', 80);
+    warnings.push(`workflow state: canonical Flow run remains active at step ${activeStep}; complete or explicitly cancel the run before stopping.`);
+  }
   const blockRe = ((preExecution && !activeFlowRun) || terminal) ? HARD_BLOCK : FULL_BLOCK;
-  const blocking = warnings.some(w => {
+  const blocking = activeFlowRun || warnings.some(w => {
     // Capture cross-reference warn-mode notes never block (operator opted out).
     if (/\[backstop in warn mode — not blocking\]/.test(w)) return false;
     return blockRe.test(w);
   });
-  return { warnings, blocking, preExecution, gatePrefix: gateLabel(activeFlowStep), latestArtifactDir };
+  return { warnings, blocking, activeFlowRun, preExecution, gatePrefix: gateLabel(activeFlowStep), latestArtifactDir };
 }
 
 /**
@@ -2220,8 +2286,9 @@ function releaseOnNonTerminalStop(root, artifactDir) {
 
     const state = readJsonFile(path.join(artifactDir, 'state.json'));
     if (!state) return; // AC5: no state.json — nothing to gate a release decision on.
-    if (state.flow_run && normalizedStatus(state.flow_run.status) === 'active') {
-      process.stderr.write(`[Hook] Goal Fit: stop-hook release skipped for active Flow run "${safeOneLine(state.flow_run.run_id || state.task_slug || 'unknown', 80)}"; continuation remains governed by Flow state.\n`);
+    const canonicalFlow = canonicalFlowState(root, artifactDir);
+    if (normalizedStatus(canonicalFlow.state?.status) === 'active' || (state.flow_run && normalizedStatus(state.flow_run.status) === 'active')) {
+      process.stderr.write(`[Hook] Goal Fit: stop-hook release skipped for active Flow run "${safeOneLine(state.flow_run?.run_id || state.task_slug || path.basename(artifactDir), 80)}"; continuation remains governed by Flow state.\n`);
       return;
     }
 
@@ -2367,7 +2434,7 @@ async function run(rawInput) {
     // with runtime-constructed paths or by modifying the warning
     // text so the hash changes. The real anchor is external (signed checkpoints + human
     // review). This raises the cost of the burn-through-the-counter escape vector.
-    const isHardBlock = result.warnings.some(w => {
+    const isHardBlock = result.activeFlowRun || result.warnings.some(w => {
       if (/\[backstop in warn mode — not blocking\]/.test(w)) return false;
       return HARD_BLOCK.test(w);
     });
@@ -2375,7 +2442,9 @@ async function run(rawInput) {
       // Do NOT clear the streak — keep accumulating so the same hard block stays visible.
       return {
         stdout: rawInput,
-        stderr: `${message}\n${gatePrefix} max-blocks reached but the block is a caught false-completion / integrity failure — not auto-releasing; requires a real fix or operator override.`,
+        stderr: result.activeFlowRun
+          ? `${message}\n${gatePrefix} max-blocks reached but canonical Flow remains active — not auto-releasing; complete or explicitly cancel the run.`
+          : `${message}\n${gatePrefix} max-blocks reached but the block is a caught false-completion / integrity failure — not auto-releasing; requires a real fix or operator override.`,
         exitCode: 2,
       };
     }

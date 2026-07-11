@@ -1,127 +1,115 @@
 ---
 name: "verify-work"
-description: "Verification primitive — session file path to structured evidence verdict via tool-verifier + tool-playwright. Reads acceptance criteria from plan artifact."
+description: "Report-only acceptance verification. Records command-backed Builder verification evidence in trust.bundle when bound to an active run."
 ---
 
-# Verify
+# Verify Work
 
-Session file in, structured evidence verdict out. Delegates to tool-verifier and tool-playwright.
+## Role
 
-Verification is not critique. Run `review-work` first when the task needs maintainability, security, architecture, or standards review. Verification should start only after the required critique gate has been recorded or explicitly marked `not_verified`. `verify-work` records proof in `evidence.json`; `review-work` records critique through the critique artifact/sink, currently `critique.json` locally.
+This is a Builder step skill.
 
-## Agents
+Verify Work proves acceptance criteria with reproducible evidence. It is
+report-only: verifiers may inspect, test, and write evidence artifacts, but do
+not patch source files or apply autofixes.
 
-| Agent | Role |
-|---|---|
-| tool-verifier | Code verification, acceptance criteria checking, structured verdicts |
-| tool-playwright | Visual verification, screenshots, accessibility checks |
+Critique belongs to `review-work`; behavior proof belongs here.
+
+## Binding
+
+| Context | Binding | Flow expectations |
+| --- | --- | --- |
+| Active Builder run | `builder.build` at `verify` | `acceptance-criteria` and `tests-evidence`; `policy-compliance` only when applicable. `review-work` separately produces `clean-critique`. |
+| Standalone invocation | No Flow binding | No workflow mutation. |
+
+For an active run, verify the binding first:
+
+```bash
+flow-agents workflow status --session-dir <session-dir> --json
+```
+
+Only a matching active `builder.build` run at `verify` may receive workflow
+evidence. Otherwise, return the verification report and unresolved gaps without
+calling `workflow evidence`.
 
 ## Model Routing
 
-Verify roles never resolve **below** the tier of the work they check (Goodhart
-guard): default `delegate-implementation`, raised to match or exceed the tier
-that produced the work under verification — a verifier of `delegate-design` work
-resolves `delegate-design` or `orchestrator`, never a cheaper tier. Resolve the
-role from `.datum/config.json` (`npx @kontourai/datum resolve <role> --json`) and
-pass the model explicitly. See `context/contracts/execution-contract.md`
-§ Delegation: Model Routing and § Goodhart guard. Fallback: inherit the session
-model when datum/config is absent, noted in the artifact.
+Resolve `delegate-implementation` from `.datum/config.json` and follow
+`context/contracts/execution-contract.md`. The Goodhart guard applies:
+verification must never resolve below the reasoning tier of the checked work.
+Record any fallback or escalation in the verification report.
 
-## Orchestrator Rule
+## Inputs
 
-You do not review source files. You delegate to tool-verifier and tool-playwright, then read the verdict artifact.
+- Acceptance criteria, Definition Of Done, and stop-short risks.
+- Changed-file scope from the session, plan, or `RepositoryAdapter`.
+- Local checks and runtime evidence selected for the change.
+- Relevant `CheckProvider` and `ChangeProvider` evidence when it exists.
+- The `trust.bundle` critique slice when review is required; critique findings
+  remain separate from verification evidence.
 
-## Shared Contracts
+## Verification Work
 
-Follow:
-- `context/contracts/artifact-contract.md`
-- `context/contracts/verification-contract.md`
-- `context/contracts/planning-contract.md` for acceptance criteria and Definition Of Done
+1. Re-check Goal Fit before testing: compare the delivered artifacts and actual
+   changed scope with the selected Work Item, Definition Of Done, acceptance
+   criteria, and stop-short risks. Missing requested behavior or unexplained
+   scope routes back even when the implementation plan was completed.
+2. Map each acceptance criterion to an observable check, source inspection, or
+   runtime observation. Delegate to `tool-verifier`; include `tool-playwright`
+   for browser-facing behavior.
+3. Run relevant build, type, lint, test, security, diff, browser, runtime, and
+   provider checks. `CheckProvider` evidence is provider-neutral; a provider
+   check is not assumed to exist for every repository.
+4. Record every criterion as `PASS`, `FAIL`, `NOT_VERIFIED`, or an explicitly
+   accepted gap. Missing, inaccessible, or inconclusive evidence is
+   `NOT_VERIFIED`, never `PASS`.
+   Reject prose-only claims and non-resolving references. Evidence references
+   must identify a command result, source location, provider record, runtime
+   observation, or artifact that a reviewer can inspect. A passing
+   `tests-evidence` claim needs every declared criterion exactly once, and every
+   passing criterion needs a `kind:"command"` reference whose command text
+   exactly matches one of the substantive `--command` values that ran
+   successfully. External-only attestations cannot satisfy it.
+5. Publish the relevant active-run expectation through the public CLI with one
+   or more exact commands that produced the test results. Repeat `--command`
+   when criteria require different checks, and include a matching top-level
+   `--evidence-ref-json` for every recorded command. A prose summary or an
+   artifact reference alone cannot satisfy `tests-evidence`:
 
-This skill owns orchestration and routing. The verification contract owns phases, report-only behavior, verdict rules, report shape, Goal Fit checks, and `NOT_VERIFIED` handling.
+```bash
+flow-agents workflow evidence --session-dir <session-dir> \
+  --expectation tests-evidence \
+  --status <pass|fail|not_verified> \
+  --command "npm test" \
+  --summary "The recorded test command supports the accepted behavior." \
+  --evidence-ref-json '{"kind":"command","excerpt":"npm test","summary":"Exact substantive project test command recorded for this verification result."}' \
+  --criterion-json '{"id":"<criterion-id>","status":"pass","evidence_refs":[{"kind":"command","excerpt":"npm test","summary":"Exact substantive project test command run for this criterion."}]}' \
+  --evidence-ref-json '{"kind":"artifact","file":"<session-dir>/<slug>--plan-work.md","summary":"Accepted criterion and planned verification mapping."}'
+```
 
-## Read-Only Rule (STRICT)
-
-**Verifiers NEVER modify source code.** tool-verifier and tool-playwright are read-only reporters:
-- They may run commands (build, test, lint) but NEVER apply fixes
-- No format fixes, no lint auto-fixes, no "1 format fix applied"
-- No code patches, no "found and fixed" — report findings only
-- If a fix is needed, report it as a finding. The orchestrator routes it back to execute-plan.
-
-## Input
-
-- **Session file path**: the session file in `.kontourai/flow-agents/<slug>/` (preferred)
-- The session file references the plan artifact (which has acceptance criteria) and execution progress (which has modified files)
-- If NO session file exists, delegate to tool-verifier directly (see Standalone Verification below)
-
-## Standalone Verification (no session file)
-
-When invoked without a session file (e.g., user says "verify this project" or "run verification"):
-
-1. Delegate to tool-verifier with:
-   - The user's verification request
-   - The current working directory
-   - Modified files from `git diff --name-only` (if available)
-2. Delegate to tool-playwright in parallel if UI changes are mentioned
-3. Read the verdict and report to the user
-
-Skip session file lookup — go straight to delegation.
-
-## Workflow (with session file)
-
-1. Read the session file to find the plan artifact path and modified files
-2. Confirm the review-before-verify gate: the critique artifact/sink should show the required review pass, blocking findings, or an explicit `not_verified` gap. If the critique gate is missing for work that requires review, stop and route to `review-work` instead of treating verification as a substitute critique.
-3. Set session file `status: verifying` and update `state.json` phase/status. Use `npm run workflow:sidecar -- advance-state <artifact-dir> --status verifying --phase verification --summary ... --next-action ...` when the repository provides it.
-4. Delegate in parallel:
-   ```
-   tool-verifier:
-   - Acceptance criteria from plan artifact
-   - Acceptance criteria from acceptance.json when present
-   - Definition Of Done and stop-short risks from plan artifact
-   - Modified files from execution progress
-   - Requirement to preserve each AC id and map it to command/test evidence plus structured source evidence refs when implementation behavior is claimed
-   - Evidence ref schema: objects with `kind`, `url`, `file`, `line_start`, `line_end`, and `excerpt` where applicable; source refs require local file/line/excerpt and should use immutable GitHub blob permalinks pinned to a commit SHA when provider URLs are available
-   - Build/test commands from AGENTS.md or plan
-   - todo_file path for writing verdict artifact
-   - Workflow artifact root path; append verifier progress with record-agent-event
-
-   tool-playwright (if UI changes exist):
-   - Pages/components to check
-   - Expected visual state
-   - Workflow artifact root path; append browser evidence or blockers with record-agent-event
-   ```
-5. Read the verdict artifact: `<session-basename>-review.md`
-6. Update session file: paste verdict summary into `## Verification Report`
-7. Write or update `evidence.json` with verification checks, top-level verdict, and `not_verified_gaps`
-   - use `npm run workflow:sidecar -- record-evidence <artifact-dir> --verdict ... --check-json ...` when the repository provides it
-   - `checks[].artifact_refs` must use structured evidence ref objects, not legacy strings
-   - for multi-repo or cross-product work, preserve a coverage matrix in the
-     evidence report or check summaries that lists each affected root and its
-     build/test, dependency/security, provider/CI, and accepted-gap status
-   - if external dependency audit or provider checks are blocked by approval,
-     privacy, credentials, network, or missing change-provider state, record the
-     affected roots as `not_verified` instead of collapsing the lane into a
-     generic pass/fail
-8. Update `acceptance.json` with criterion statuses and structured evidence refs
-   - `criteria[].evidence_refs` must use structured evidence refs and map each AC id to command/test proof plus source refs for behavior claims
-   - when source refs are missing for a behavior claim, mark the criterion `not_verified` or record an accepted gap instead of using broad prose-only evidence
-9. Route on verdicts:
-   - **All PASS** → set `status: verified`
-   - **Any FAIL** → set `status: failed`, list failures
-   - **Any NOT_VERIFIED** → set Markdown status `needs-decision`, set `state.json` status `needs_decision`, and surface to user
-
-## Verification Contract
-
-tool-verifier writes the verdict artifact using `context/contracts/verification-contract.md`.
-
-You do not override verdicts. FAIL is FAIL until re-verified. `NOT_VERIFIED` items are surfaced to the user so they can decide whether to accept, fix, or skip. A technically green build is not enough for PASS when the `Definition Of Done` says the user still cannot run, understand, inspect, or act on the result.
+When a policy check applies, publish `policy-compliance` in the same way. Do
+not publish that optional expectation when no policy check applies.
 
 ## Output
 
-- Verdict artifact: `<session-basename>-review.md`
-- Session file updated with verification report and status
-- Structured sidecars updated: `state.json`, `acceptance.json`, and `evidence.json`
-- Acceptance evidence preserves AC ids and uses structured evidence refs; prose-only behavior claims are not clean verification evidence
-- Verdict follows `context/contracts/verification-contract.md`
+Record completed criteria as the required `acceptance-criteria` slice and the
+verification result as the `tests-evidence` slice in `trust.bundle`.
+It must preserve criterion identifiers and include a readable `Acceptance
+Evidence` table in its summary or linked reviewable report:
 
-If `record-evidence` or artifact validation is unavailable or blocked, keep the verdict explicit and record the sidecar-write gap as `NOT_VERIFIED`. Do not convert verifier output into `PASS` without structured evidence when sidecars are required.
+| AC id | Status | Command/Test Evidence | Source Evidence | Gaps |
+| --- | --- | --- | --- | --- |
+| `<id>` | `PASS`, `FAIL`, or `NOT_VERIFIED` | Command, result, or observation | File, test, provider, or runtime reference | Missing or accepted evidence |
+
+The result states the overall verification verdict and every unresolved gap.
+For an active matching run, publish one `--criterion-json` object for every
+accepted criterion, each with its own status and reviewable evidence refs, plus
+a substantive literal `--command` for every distinct check that was run. Every
+top-level and criterion command reference must exactly match one of those
+commands. The public evidence calls
+publish `acceptance-criteria`, `tests-evidence`, and applicable
+`policy-compliance`; no retired
+verification sidecar is a store. Never publish a placeholder, `true`,
+`bash -c true`, or `node --version` as behavior evidence. In a packed or
+temporary consumer repository, use a real project-local test/check/verify
+script rather than a command that exists only in the Flow Agents source repo.

@@ -6,11 +6,9 @@ import {
   recoverBuilderFlowSession,
   releaseBuilderFlowAssignment,
   resumeBuilderFlowSession,
-  startBuilderFlowSession,
-  syncBuilderFlowSession,
 } from "../builder-flow-runtime.js";
 
-const USAGE = "Usage: flow-agents builder-run <start|sync|recover|pause|resume|cancel|release-assignment|archive> --session-dir <path> [--reason <text> | --authorization-file <path>]";
+const USAGE = "Usage: flow-agents builder-run <recover|pause|resume|cancel|release-assignment|archive> --session-dir <path> [--reason <text> | --authorization-file <path>]";
 
 export async function main(argv: string[]): Promise<number> {
   const parsed = parseArgs(argv);
@@ -29,7 +27,7 @@ export async function main(argv: string[]): Promise<number> {
     console.error("builder-run requires --session-dir .kontourai/flow-agents/<slug>");
     return 64;
   }
-  if (!action || !["start", "sync", "recover", "pause", "resume", "cancel", "release-assignment", "archive"].includes(action)) {
+  if (!action || !["recover", "pause", "resume", "cancel", "release-assignment", "archive"].includes(action)) {
     console.error(USAGE);
     return 64;
   }
@@ -53,11 +51,7 @@ export async function main(argv: string[]): Promise<number> {
     console.error(USAGE);
     return 64;
   }
-  const result = action === "start"
-    ? await startBuilderFlowSession({ sessionDir })
-    : action === "sync"
-      ? await syncBuilderFlowSession({ sessionDir })
-      : action === "recover"
+  const result = action === "recover"
         ? await recoverBuilderFlowSession({ sessionDir })
         : action === "pause"
           ? await pauseBuilderFlowSession({ sessionDir, reason: reason! })

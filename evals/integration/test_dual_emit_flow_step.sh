@@ -251,43 +251,71 @@ fi
 echo ""
 echo "── P-d declared-only: session WITH active_flow_id=builder.build / active_step_id=verify ──"
 
-# Create a session at the declared first step, then use the transition surface to
-# establish the verify-state fixture exercised by this producer test.
+# Each fixture starts at the declared first step with selected-work evidence,
+# then advances by recording the durable artifacts that the declared producers
+# require. current.json is only projected by the writer during those transitions.
 mkdir -p "$SESSION_ROOT"
-if flow_agents_node "$WRITER" ensure-session \
-  --artifact-root "$SESSION_ROOT" \
-  --task-slug dual-emit-test \
-  --flow-id builder.build \
-  --skip-ownership-guard \
-  --title "Declared-Only Test" \
-  --summary "Test declared-only emit for ADR 0016 P-d." \
-  --criterion "Tests pass" \
-  --timestamp "2026-06-26T00:00:00Z" >"$TMP/ensure.out" 2>"$TMP/ensure.err"; then
-  _pass "ensure-session with --flow-id succeeds at the declared first step"
-else
-  _fail "ensure-session with --flow-id failed: $(cat "$TMP/ensure.out" "$TMP/ensure.err")"
-fi
-
-DUAL_DIR="$SESSION_ROOT/dual-emit-test"
 
 advance_builder_to_verify() {
-  local session_dir="$1"
-  flow_agents_node "$WRITER" record-gate-claim "$session_dir" --status pass --expectation selected-work \
-    --summary "Selected the fixture Work Item." --timestamp "2026-06-26T00:00:10Z" >/dev/null 2>&1 \
-    && flow_agents_node "$WRITER" record-gate-claim "$session_dir" --status pass --expectation pickup-probe-readiness \
-      --summary "Pickup readiness is established." --timestamp "2026-06-26T00:00:20Z" >/dev/null 2>&1 \
-    && flow_agents_node "$WRITER" record-gate-claim "$session_dir" --status pass --expectation probe-decisions-or-accepted-gaps \
-      --summary "Probe decisions are recorded." --timestamp "2026-06-26T00:00:30Z" >/dev/null 2>&1 \
-    && flow_agents_node "$WRITER" record-gate-claim "$session_dir" --status pass --expectation implementation-plan \
-      --summary "Implementation plan is recorded." --timestamp "2026-06-26T00:00:40Z" >/dev/null 2>&1 \
-    && flow_agents_node "$WRITER" record-gate-claim "$session_dir" --status pass --expectation implementation-scope \
-      --summary "Implementation scope is recorded." --timestamp "2026-06-26T00:00:50Z" >/dev/null 2>&1
+  local slug="$1"
+  local title="$2"
+  local summary="$3"
+  local session_dir="$SESSION_ROOT/$slug"
+  local pull_work="$session_dir/$slug--pull-work.md"
+  local plan="$session_dir/$slug--plan-work.md"
+  local deliver="$session_dir/$slug--deliver.md"
+  local work_item="${slug/-/:}"
+
+  mkdir -p "$session_dir"
+  printf 'Selected Work Item: %s\n' "$work_item" > "$pull_work"
+  FLOW_AGENTS_ACTOR="$slug-fixture-actor" node "$ROOT/build/src/cli.js" workflow start \
+    --artifact-root "$SESSION_ROOT" \
+    --flow builder.build \
+    --work-item "$work_item" \
+    --assignment-provider local-file \
+    --title "$title" \
+    --summary "$summary" \
+    --criterion "Fixture producer artifacts reach verify." >/dev/null 2>&1 || return 1
+  flow_agents_node "$WRITER" init-plan "$deliver" \
+    --source-request "Test declared-only producer artifacts." \
+    --summary "Fixture plan for declared-only producer artifacts." \
+    --timestamp "2026-06-26T00:00:05Z" >/dev/null 2>&1 || return 1
+  node - "$session_dir" "$slug" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const [dir, slug] = process.argv.slice(2);
+fs.writeFileSync(path.join(dir, `${slug}--plan-work.md`), '# Plan\n\n- AC-1: Reach verify through declared producer artifacts.\n', 'utf8');
+fs.writeFileSync(path.join(dir, 'acceptance.json'), JSON.stringify({
+  schema_version: '1.0',
+  task_slug: slug,
+  criteria: [{
+    id: 'AC-1',
+    description: 'Reach verify through declared producer artifacts.',
+    status: 'pending',
+    evidence_refs: [],
+  }],
+  goal_fit: { status: 'pending', summary: 'Fixture has not completed Goal Fit review.' },
+}, null, 2), 'utf8');
+NODE
+  FLOW_AGENTS_ACTOR="$slug-fixture-actor" node "$ROOT/build/src/cli.js" workflow evidence --session-dir "$session_dir" --status pass --expectation pickup-probe-readiness \
+    --summary "Pickup readiness is recorded in the selected-work artifact." \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$pull_work\",\"summary\":\"Declared durable producer artifact for pickup-probe-readiness.\"}" >/dev/null 2>&1 || return 1
+  FLOW_AGENTS_ACTOR="$slug-fixture-actor" node "$ROOT/build/src/cli.js" workflow evidence --session-dir "$session_dir" --status pass --expectation probe-decisions-or-accepted-gaps \
+    --summary "Probe decisions are recorded in the selected-work artifact." \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$pull_work\",\"summary\":\"Declared durable producer artifact for probe decisions.\"}" >/dev/null 2>&1 || return 1
+  FLOW_AGENTS_ACTOR="$slug-fixture-actor" node "$ROOT/build/src/cli.js" workflow evidence --session-dir "$session_dir" --status pass --expectation implementation-plan \
+    --summary "Implementation plan is recorded in the plan artifact." \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$plan\",\"summary\":\"Declared durable producer artifact for implementation-plan.\"}" >/dev/null 2>&1 || return 1
+  FLOW_AGENTS_ACTOR="$slug-fixture-actor" node "$ROOT/build/src/cli.js" workflow evidence --session-dir "$session_dir" --status pass --expectation implementation-scope \
+    --summary "Implementation scope is recorded in the delivery artifact." \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$deliver\",\"summary\":\"Declared durable producer artifact for implementation-scope.\"}" >/dev/null 2>&1 || return 1
 }
 
-if advance_builder_to_verify "$DUAL_DIR"; then
-  _pass "canonical Builder Flow advances through required gates to verify"
+DUAL_DIR="$SESSION_ROOT/dual-emit-test"
+if advance_builder_to_verify "dual-emit-test" "Declared-Only Test" "Test declared-only emit for ADR 0016 P-d."; then
+  _pass "canonical Builder Flow advances through declared producer artifacts to verify"
 else
-  _fail "canonical Builder Flow did not reach verify"
+  _fail "canonical Builder Flow did not reach verify through declared producer artifacts"
 fi
 
 # Verify current.json carries the flow keys
@@ -345,19 +373,10 @@ echo "── P-d declared-only: policy-kind check maps to builder.verify.policy-
 
 # Use a separate canonical run because the failing tests evidence above legitimately
 # routes its run back to execute before this independent producer assertion.
-if flow_agents_node "$WRITER" ensure-session \
-  --artifact-root "$SESSION_ROOT" \
-  --task-slug dual-emit-policy \
-  --flow-id builder.build \
-  --skip-ownership-guard \
-  --title "Declared Policy Test" \
-  --summary "Test declared-only policy emit for ADR 0016 P-d." \
-  --criterion "Policy passes" \
-  --timestamp "2026-06-26T00:01:30Z" >/dev/null 2>&1 \
-  && advance_builder_to_verify "$SESSION_ROOT/dual-emit-policy"; then
-  _pass "policy fixture canonical Builder Flow reaches verify"
+if advance_builder_to_verify "dual-emit-policy" "Declared Policy Test" "Test declared-only policy emit for ADR 0016 P-d."; then
+  _pass "policy fixture canonical Builder Flow reaches verify through declared producer artifacts"
 else
-  _fail "policy fixture canonical Builder Flow did not reach verify"
+  _fail "policy fixture canonical Builder Flow did not reach verify through declared producer artifacts"
 fi
 
 POLICY_DIR="$SESSION_ROOT/dual-emit-policy"

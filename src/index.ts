@@ -1,11 +1,9 @@
 /**
  * Public library surface for `@kontourai/flow-agents`.
  *
- * Native orchestration hosts can import the canonical workflow-sidecar
- * writer/validator here instead of shelling out to the
- * `flow-agents-workflow-sidecar` CLI or reimplementing validated
- * read / merge / write of workflow evidence. This is the same code the CLI
- * runs — importing it does not execute the CLI.
+ * Native orchestration hosts can import the canonical workflow runtime and
+ * sidecar writer/validator instead of reimplementing validated state changes.
+ * Agent-facing Kit guidance uses the public `flow-agents workflow` CLI.
  *
  * The sidecar JSON Schemas ship under `schemas/` and can be validated against
  * directly; the helpers below are the canonical writer/validator that produce
@@ -46,6 +44,9 @@ export {
   syncBuilderFlowSession,
 } from "./builder-flow-runtime.js";
 export type { BuilderFlowAgentLifecycleInput, BuilderFlowAuthorizedLifecycleInput, BuilderFlowSessionInput, BuilderFlowSessionResult } from "./builder-flow-runtime.js";
+
+// Pure serialization contract used by external lifecycle authorities when
+// signing requests. This does not load, create, or mutate a Flow run.
 export { builderLifecycleAuthorizationPayload, loadBuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
 export type { BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
 

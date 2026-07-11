@@ -19,7 +19,7 @@
           "bundle_claim": {
             "claimType": "builder.shape.problem",
             "subjectType": "decision",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": ["verified", "trusted", "accepted"]
           }
         },
         {
@@ -30,7 +30,7 @@
           "bundle_claim": {
             "claimType": "builder.shape.outcome",
             "subjectType": "flow-run",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": ["verified", "trusted", "accepted"]
           }
         },
         {
@@ -41,7 +41,7 @@
           "bundle_claim": {
             "claimType": "builder.shape.constraints",
             "subjectType": "decision",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": ["verified", "trusted", "accepted"]
           }
         },
         {
@@ -52,7 +52,7 @@
           "bundle_claim": {
             "claimType": "builder.shape.non-goals",
             "subjectType": "decision",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": ["verified", "trusted", "accepted"]
           }
         },
         {
@@ -63,7 +63,7 @@
           "bundle_claim": {
             "claimType": "builder.shape.success",
             "subjectType": "artifact",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": ["verified", "trusted", "accepted"]
           }
         },
         {
@@ -74,7 +74,7 @@
           "bundle_claim": {
             "claimType": "builder.shape.risk",
             "subjectType": "decision",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": ["verified", "trusted", "accepted"]
           }
         },
         {
@@ -86,7 +86,7 @@
           "bundle_claim": {
             "claimType": "builder.shape.open-decisions",
             "subjectType": "decision",
-            "accepted_statuses": ["trusted", "accepted", "advisory"]
+            "accepted_statuses": ["verified", "trusted", "accepted", "advisory"]
           }
         }
       ]
@@ -102,7 +102,7 @@
           "bundle_claim": {
             "claimType": "builder.breakdown.slices",
             "subjectType": "work-item",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": ["verified", "trusted", "accepted"]
           }
         }
       ]
@@ -118,7 +118,7 @@
           "bundle_claim": {
             "claimType": "builder.file-issues.work-items",
             "subjectType": "work-item",
-            "accepted_statuses": ["trusted", "accepted"]
+            "accepted_statuses": ["verified", "trusted", "accepted"]
           }
         }
       ]
