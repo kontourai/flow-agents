@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.6.0](https://github.com/kontourai/flow-agents/compare/v3.5.0...v3.6.0) (2026-07-11)
+
+
+### Features
+
+* **builder:** add authority-aware lifecycle controls ([#546](https://github.com/kontourai/flow-agents/issues/546)) ([5164902](https://github.com/kontourai/flow-agents/commit/51649020bc9a90dd77907f2aabdd9fb593f43504))
+* **cli:** add public workflow command ([#548](https://github.com/kontourai/flow-agents/issues/548)) ([2dad479](https://github.com/kontourai/flow-agents/commit/2dad47974819100ecb850fa0bec645e911d168f8))
+
 ## [3.5.0](https://github.com/kontourai/flow-agents/compare/v3.4.3...v3.5.0) (2026-07-10)
 
 
