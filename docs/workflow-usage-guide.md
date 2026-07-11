@@ -4,6 +4,11 @@ title: Workflow Usage Guide
 
 # Workflow Usage Guide
 
+> Consumer repositories should use the supported public workflow surface and isolated exact-package
+> launcher documented in [Public Workflow CLI](public-workflow-cli.md). The lower-level writer
+> commands retained later in this guide describe internal/package migration mechanics and are not a
+> consumer prerequisite.
+
 This guide shows how to use the Builder Kit workflow skills in normal chats.
 
 > **Which doc do I want?** This page is the *driver's manual* — what to say at each stage and what should happen. If you want the conceptual map first — layers, sidecars, hooks, evidence, and why the system is shaped this way — read the [Agent System Guidebook](agent-system-guidebook.md). For a one-line summary of every skill and gate, use the [Skills Map](skills-map.md). Flow Agents coordinates the local runtime, installs Flow Kits, and records artifacts; Flow owns gate semantics, including typed `expects` entries with `kind: "trust.bundle"`, trusted producer config, and gate overrides.

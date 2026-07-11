@@ -267,7 +267,10 @@ test("small-model client can start and advance from projected actions without ch
   assert.equal(started.run.state.current_step, "pull-work");
   assert.deepEqual(started.projection.next_action.skills, ["pull-work"]);
   assert.deepEqual(started.projection.next_action.operations, []);
-  assert.equal(started.projection.next_action.command, `flow-agents builder-run sync --session-dir .kontourai/flow-agents/${session.slug}`);
+  assert.match(started.projection.next_action.command, /^sh -c /);
+  assert.match(started.projection.next_action.command, /--prefix "\$root"/);
+  assert.ok(started.projection.next_action.command.includes("'@kontourai/flow-agents@3.5.0'"));
+  assert.ok(started.projection.next_action.command.includes(`'workflow' 'status' '--session-dir' '.kontourai/flow-agents/${session.slug}' '--json'`));
   assert.ok(fs.existsSync(runDir(session.slug, session.projectRoot)));
   assert.ok(!fs.existsSync(path.join(session.projectRoot, ".flow", "runs")), "retired runtime path must not be created");
 
