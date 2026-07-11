@@ -209,7 +209,7 @@ if (workItem.source_provider?.kind !== 'local' || workItem.source_provider?.path
 if (flowState.current_step !== 'design-probe' || flowState.subject !== 'local:local-request') process.exit(1);
 if (state.flow_run?.current_step !== 'design-probe') process.exit(1);
 if (JSON.stringify(state.next_action?.skills) !== JSON.stringify(['pickup-probe'])) process.exit(1);
-if (!state.next_action?.command?.includes('builder-run sync')) process.exit(1);
+if (!state.next_action?.command?.includes("'workflow' 'status'")) process.exit(1);
 if ('enforcement' in state.next_action) process.exit(1);
 const bundle = JSON.parse(fs.readFileSync(path.join(root, 'local-request', 'trust.bundle'), 'utf8'));
 const selected = (bundle.claims || []).find((claim) => claim.claimType === 'builder.pull-work.selected');
@@ -247,7 +247,7 @@ const sidecar = JSON.parse(fs.readFileSync(path.join(session, 'state.json'), 'ut
 if (flowState.current_step !== 'design-probe' || flowState.subject !== 'local:local-request') process.exit(1);
 if (sidecar.flow_run?.current_step !== 'design-probe') process.exit(1);
 if (JSON.stringify(sidecar.next_action?.skills) !== JSON.stringify(['pickup-probe'])) process.exit(1);
-if (!sidecar.next_action?.command?.includes('builder-run sync')) process.exit(1);
+if (!sidecar.next_action?.command?.includes("'workflow' 'status'")) process.exit(1);
 NODE
 then
   pass "repeated ensure-session loads the canonical Flow run without resetting its history"
@@ -275,7 +275,7 @@ elif [[ -f "$BROKEN_ROOT/broken-start/state.json" ]] \
 const fs = require('node:fs');
 const state = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 if (state.flow_run) process.exit(1);
-if (!state.next_action?.command?.includes('builder-run start')) process.exit(1);
+if (!state.next_action?.command?.includes("'workflow' 'start'")) process.exit(1);
 NODE
 then
   pass "failed canonical startup is visible and leaves only retryable sidecar guidance"
@@ -482,12 +482,13 @@ else
   stop_status=$?
   if [[ "$stop_status" -eq 2 ]] \
     && grep -q 'required skills: pickup-probe' "$TMP/stop.err" \
-    && grep -q 'builder-run sync' "$TMP/stop.err" \
+    && grep -q 'next command: sh -c' "$TMP/stop.err" \
     && grep -q 'release skipped for active Flow run' "$TMP/stop.err" \
     && node - "$LOCAL_SESSION/state.json" <<'NODE'
 const fs = require('node:fs');
 const state = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 if (state.flow_run?.status !== 'active' || state.flow_run?.current_step !== 'design-probe') process.exit(1);
+if (!state.next_action?.command?.includes("'workflow' 'status'")) process.exit(1);
 NODE
   then
     pass "active Flow run blocks Stop, preserves liveness, and exposes executable guidance"

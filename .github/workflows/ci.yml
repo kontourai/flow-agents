@@ -266,6 +266,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check bundle-install-integration
 
+      - name: Public workflow CLI integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check public-workflow-cli-integration
+
       - name: Bundle lifecycle integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check bundle-lifecycle-integration

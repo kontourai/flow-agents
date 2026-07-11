@@ -15,6 +15,7 @@ import { main as telemetryDoctor } from "./cli/telemetry-doctor.js";
 import { main as usageFeedback } from "./cli/usage-feedback.js";
 import { main as veritasGovernance } from "./cli/veritas-governance.js";
 import { main as workflowArtifactCleanupAudit } from "./cli/workflow-artifact-cleanup-audit.js";
+import { main as workflow } from "./cli/workflow.js";
 import { main as buildBundles } from "./tools/build-universal-bundles.js";
 import { main as contextMap } from "./tools/generate-context-map.js";
 import { main as validateSource } from "./tools/validate-source-tree.js";
@@ -48,6 +49,7 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["validate-package", validatePackage],
   ["validate-hook-influence", validateHookInfluence],
   ["verify", verify],
+  ["workflow", workflow],
   ["validate-source", validateSource],
   ["workflow-artifact-cleanup-audit", workflowArtifactCleanupAudit],
 ]);

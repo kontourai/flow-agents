@@ -2,6 +2,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import { flowAgentsPackageVersion } from "./lib/package-version.js";
+import { pinnedFlowAgentsCommand } from "./lib/pinned-cli-command.js";
 import {
   expectationsForGate,
   lifecycleRequestMatches,
@@ -506,7 +508,7 @@ function projectFlowRun(context: SessionContext, run: BuilderBuildRunResult, sid
     .map((expectation: FlowExpectation) => `${expectation.id} (${expectation.bundle_claim.claimType}/${expectation.bundle_claim.subjectType ?? "any"})`));
   const skills = action?.skills ?? [];
   const operations = action?.operations ?? [];
-  const syncCommand = `flow-agents builder-run sync --session-dir .kontourai/flow-agents/${context.slug}`;
+  const syncCommand = pinnedFlowAgentsCommand(flowAgentsPackageVersion(), ["workflow", "status", "--session-dir", `.kontourai/flow-agents/${context.slug}`, "--json"]);
   const routeBack = latestRouteBack(run.state);
   const skillText = skills.length ? `Activate ${skills.map((skill) => `\`${skill}\``).join(" then ")}.` : "No Builder skill is required.";
   const operationText = operations.length ? ` Perform ${operations.map((operation) => `\`${operation}\``).join(" then ")}.` : "";

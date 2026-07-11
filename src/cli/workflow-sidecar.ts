@@ -10,6 +10,8 @@ import { fileURLToPath } from "node:url";
 import { resolveActiveFlowStep, resolveAllFlowGateExpects, resolveFlowFilePath, resolvePhaseMap, resolveRouteBackPolicy, type ActiveFlowStep } from "../lib/flow-resolver.js";
 import { defaultArtifactRootForRead, flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import { ensureSafeDirectory } from "../lib/fs.js";
+import { flowAgentsPackageVersion } from "../lib/package-version.js";
+import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { startBuilderFlowSession, syncBuilderFlowSessionIfPresent } from "../builder-flow-runtime.js";
 // #291 Wave 1 Task 1.1 exports: ensure-session's ownership guard reuses the EXACT same
 // assignment ⋈ liveness join / claim / supersede logic #290 already ships for the
@@ -24,6 +26,7 @@ export const phases = ["idea", "backlog", "pickup", "planning", "execution", "ve
 export const checkKinds = new Set(["build", "types", "lint", "test", "command", "security", "diff", "browser", "runtime", "policy", "external"]);
 export const checkStatuses = new Set(["pass", "fail", "not_verified", "skip"]);
 export const verdicts = new Set(["pass", "partial", "fail", "not_verified"]);
+export const WORKFLOW_WRITER_CONTRACT_VERSION = "1.0";
 
 function now(): string { return new Date().toISOString().replace(/\.\d{3}Z$/, "Z"); }
 function read(file: string): string { return fs.readFileSync(file, "utf8"); }
@@ -1678,6 +1681,11 @@ function currentDir(root: string, actorKey?: string): string | null {
   }
   return dir;
 }
+
+export function currentWorkflowSessionDir(root: string): string | null {
+  const resolved = loadActorIdentityHelper().resolveActor(process.env);
+  return currentDir(path.resolve(root), loadActorIdentityHelper().isUnresolvedActor(resolved.actor) ? undefined : resolved.actor);
+}
 /**
  * #291 Wave 2 Task 2.1 (§6): updates BOTH the legacy current.json (when IT points at `dir` — the
  * exact, unchanged existing check/write) AND the resolved actor's own per-actor current.json
@@ -2096,13 +2104,24 @@ async function ensureSession(p: ReturnType<typeof parseArgs>): Promise<number> {
     // takeover continuity true by construction (see Design Decision 3 in the plan).
     const branch = resolveSessionBranch(p, slug);
     const initialMarkdownStatus = entry.flowId ? "new" : "planning";
-    md = `# ${opt(p, "title", slug)}\n\nbranch: ${branch}\nworktree: main\ncreated: ${timestamp}\nstatus: ${initialMarkdownStatus}\ntype: deliver\niteration: 1\n\n## Plan\n\n${opt(p, "summary", "")}\n\n## Definition Of Done\n\n- **User outcome:** ${opt(p, "summary", "Workflow session is durable.")}\n- **Scope:** Workflow session artifacts and sidecars.\n- **Acceptance criteria:**\n${opts(p, "criterion").map((c) => `  - [ ] ${c} - Evidence: pending.`).join("\n")}\n- **Usefulness checks:**\n  - [ ] User-facing workflow is documented or discoverable\n- **Stop-short risks:** Workflow artifacts could drift.\n- **Durable docs target:** not needed\n- **Sandbox mode:** local-edit\n\n## Execution Progress\n\n- [ ] Session initialized.\n\n## Verification Report\n\nBuild: [NOT_VERIFIED] Verification has not run yet.\n\n### Acceptance Criteria\n- [NOT_VERIFIED] Verification has not run yet - Evidence: pending workflow execution and checks.\n\n### Verdict: NOT_VERIFIED\n\n## Goal Fit Gate\n\n- [ ] Original user goal restated\n\n## Final Acceptance\n\n- [ ] CI/relevant checks passed or local equivalent recorded\n`;
+    const acceptanceCriteria = opts(p, "criterion");
+    if (acceptanceCriteria.length === 0) acceptanceCriteria.push(`Complete the requested outcome: ${opt(p, "summary", "Workflow session is durable.")}`);
+    md = `# ${opt(p, "title", slug)}\n\nbranch: ${branch}\nworktree: main\ncreated: ${timestamp}\nstatus: ${initialMarkdownStatus}\ntype: deliver\niteration: 1\n\n## Plan\n\n${opt(p, "summary", "")}\n\n## Definition Of Done\n\n- **User outcome:** ${opt(p, "summary", "Workflow session is durable.")}\n- **Scope:** Workflow session artifacts and sidecars.\n- **Acceptance criteria:**\n${acceptanceCriteria.map((c) => `  - [ ] ${c} - Evidence: pending.`).join("\n")}\n- **Usefulness checks:**\n  - [ ] User-facing workflow is documented or discoverable\n- **Stop-short risks:** Workflow artifacts could drift.\n- **Durable docs target:** not needed\n- **Sandbox mode:** local-edit\n\n## Execution Progress\n\n- [ ] Session initialized.\n\n## Verification Report\n\nBuild: [NOT_VERIFIED] Verification has not run yet.\n\n### Acceptance Criteria\n- [NOT_VERIFIED] Verification has not run yet - Evidence: pending workflow execution and checks.\n\n### Verdict: NOT_VERIFIED\n\n## Goal Fit Gate\n\n- [ ] Original user goal restated\n\n## Final Acceptance\n\n- [ ] CI/relevant checks passed or local equivalent recorded\n`;
     fs.writeFileSync(path.join(dir, `${slug}--deliver.md`), md);
   }
   if (!fs.existsSync(path.join(dir, "state.json")) || !fs.existsSync(path.join(dir, "acceptance.json")) || !fs.existsSync(path.join(dir, "handoff.json"))) {
     const phaseMap = entry.flowId ? resolvePhaseMap(entry.flowId, findRepoRootFromDir(dir)) : null;
     const initialPhase = Object.entries(phaseMap ?? {}).find(([, step]) => step === entry.firstStep)?.[0];
-    const startCommand = `flow-agents builder-run start --session-dir .kontourai/flow-agents/${slug}`;
+    const startCommand = pinnedFlowAgentsCommand(flowAgentsPackageVersion(), [
+      "workflow", "start",
+      "--flow", "builder.build",
+      "--work-item", workItem.ref,
+      ...(workItem.ref === `local:${slug}` ? ["--task-slug", slug] : []),
+      "--artifact-root", root,
+      "--title", opt(p, "title", slug),
+      "--summary", opt(p, "summary", "Workflow session is durable."),
+      ...opts(p, "criterion").flatMap((criterion) => ["--criterion", criterion]),
+    ]);
     const nextAction: string | AnyObj = entry.flowId
       ? entry.flowId === "builder.build"
         ? {
@@ -5889,8 +5908,8 @@ Available claim ids:
 // ─────────────────────────────────────────────────────────────────────────────
 
 
-async function main(): Promise<number> {
-  const _rawArgv = process.argv.slice(2);
+export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
+  const _rawArgv = argv;
   // #380: `record-check <dir> -- <command...>` — argv after the FIRST literal `--` token is the
   // command to execute verbatim (never option-parsed: a command like `npm test -- --watch`
   // legitimately contains its OWN `--`, so only the record-check dispatcher's own separator, the
@@ -5965,5 +5984,8 @@ async function main(): Promise<number> {
 const _selfRealPath = (() => { try { return fs.realpathSync(fileURLToPath(import.meta.url)); } catch { return fileURLToPath(import.meta.url); } })();
 const _argv1RealPath = (() => { try { return fs.realpathSync(process.argv[1]); } catch { return process.argv[1]; } })();
 if (_selfRealPath === _argv1RealPath) {
+  if (path.basename(process.argv[1] ?? "") === "flow-agents-workflow-sidecar") {
+    process.stderr.write("flow-agents-workflow-sidecar is deprecated; use `flow-agents workflow` or an explicitly pinned `npx @kontourai/flow-agents@<version> workflow` command.\n");
+  }
   main().then((code) => process.exit(code)).catch((error) => { console.error(error instanceof Error ? error.message : String(error)); process.exit(1); });
 }
