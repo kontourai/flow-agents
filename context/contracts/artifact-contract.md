@@ -137,7 +137,7 @@ Canonical vocabulary:
 
 | Field | Values |
 | --- | --- |
-| `state.status` | `new`, `planning`, `planned`, `in_progress`, `blocked`, `verifying`, `verified`, `needs_decision`, `not_verified`, `failed`, `delivered`, `accepted`, `archived` |
+| `state.status` | `new`, `planning`, `planned`, `in_progress`, `blocked`, `verifying`, `verified`, `needs_decision`, `not_verified`, `failed`, `delivered`, `canceled`, `accepted`, `archived` |
 | `state.phase` | `idea`, `backlog`, `pickup`, `planning`, `execution`, `verification`, `goal_fit`, `evidence`, `release`, `learning`, `done` |
 | `next_action.status` | `continue`, `needs_user`, `blocked`, `done` |
 | `acceptance.criteria[].status` | `pending`, `pass`, `fail`, `not_verified`, `accepted_gap` |

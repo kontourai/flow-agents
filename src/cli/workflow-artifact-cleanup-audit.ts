@@ -264,6 +264,9 @@ function classifyWorkflow(slug: string, workflowPath: string): AuditItem {
   if (status === "verified" && nextStatus === "done") {
     return { ...base, classification: "cleanup_candidate", reasons: ["verified workflow has next_action.status done"] };
   }
+  if (status === "canceled" && phase === "done") {
+    return { ...base, classification: "terminal_done", reasons: ["canceled workflow retains its artifacts without requiring delivery promotion"] };
+  }
   if (["delivered", "accepted", "archived"].includes(status) && phase === "done") {
     if (status !== "archived" && !hasPromotionClaim(workflowPath)) {
       return { ...base, classification: "cleanup_candidate", reasons: [`${status} workflow reached phase done without a promotion claim; ${PROMOTE_REMEDY}`] };

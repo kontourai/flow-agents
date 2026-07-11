@@ -121,6 +121,8 @@ function loadActorIdentityHelper(): {
   isUnresolvedActor: (actor: string) => boolean;
   sanitizeSegment: (value: unknown) => string;
   detectRuntime: (env: NodeJS.ProcessEnv) => string;
+  runtimeSessionId: (env: NodeJS.ProcessEnv) => string;
+  ancestorActorSeed: () => string;
   detectCiActor: (env: NodeJS.ProcessEnv) => { runtime: string; session_id: string } | null;
 } {
   const _req = createRequire(import.meta.url);
@@ -131,6 +133,8 @@ function loadActorIdentityHelper(): {
     isUnresolvedActor: (actor: string) => boolean;
     sanitizeSegment: (value: unknown) => string;
     detectRuntime: (env: NodeJS.ProcessEnv) => string;
+    runtimeSessionId: (env: NodeJS.ProcessEnv) => string;
+    ancestorActorSeed: () => string;
     detectCiActor: (env: NodeJS.ProcessEnv) => { runtime: string; session_id: string } | null;
   };
 }
@@ -199,6 +203,10 @@ function loadActorStructFromFile(file: string): ActorStruct {
 function loadActorStruct(args: ParsedArgs): { actor: ActorStruct; actorKey?: string } {
   const actorJsonPath = flagString(args.flags, "actor-json");
   if (actorJsonPath) return { actor: loadActorStructFromFile(actorJsonPath) };
+  return resolveCurrentAssignmentActor();
+}
+
+export function resolveCurrentAssignmentActor(): { actor: ActorStruct; actorKey: string } {
   const helper = loadActorIdentityHelper();
   const resolved = helper.resolveActor(process.env);
   if (helper.isUnresolvedActor(resolved.actor)) throw new Error("could not resolve an actor identity (no --actor-json and no resolvable environment actor); pass --actor-json explicitly");
@@ -208,9 +216,15 @@ function loadActorStruct(args: ParsedArgs): { actor: ActorStruct; actorKey?: str
   // CI session — actor_key stays correct (so no false-block), but record.actor is malformed and the
   // audit-trail / `assignment-provider status` output for CI sessions would be corrupt.
   const ci = resolved.source.startsWith("ci-runtime") ? helper.detectCiActor(process.env) : null;
-  const actor: ActorStruct = ci && ci.session_id
-    ? { runtime: ci.runtime, session_id: ci.session_id, host: os.hostname(), human: null }
-    : { runtime: helper.detectRuntime(process.env), session_id: resolved.actor, host: os.hostname(), human: null };
+  const runtimeSessionId = resolved.source.startsWith("runtime-session-id") ? helper.runtimeSessionId(process.env) : "";
+  const ancestrySeed = resolved.source === "process-ancestry" ? helper.ancestorActorSeed() : "";
+  const actor: ActorStruct = resolved.source === "explicit-override"
+    ? { runtime: "explicit-override", session_id: resolved.actor, host: os.hostname(), human: null }
+    : ci && ci.session_id
+      ? { runtime: ci.runtime, session_id: ci.session_id, host: os.hostname(), human: null }
+      : runtimeSessionId
+        ? { runtime: helper.detectRuntime(process.env), session_id: runtimeSessionId, host: os.hostname(), human: null }
+        : { runtime: helper.detectRuntime(process.env), session_id: ancestrySeed ? `anc-${ancestrySeed}` : resolved.actor, host: os.hostname(), human: null };
   return { actor, actorKey: resolved.actor };
 }
 
@@ -659,14 +673,21 @@ export function performLocalRelease(
   releasedBy: ActorStruct | null,
   opts: { reason?: string; actorKey?: string; tolerateNoActiveClaim?: boolean } = {},
 ): AssignmentClaimRecord | null {
+  return withSubjectLock(artifactRoot, subjectId, () => performLocalReleaseUnderLock(artifactRoot, subjectId, releasedBy, opts));
+}
+
+/** Caller must already hold this subject's assignment lock through withSubjectLock(). */
+export function performLocalReleaseUnderLock(
+  artifactRoot: string,
+  subjectId: string,
+  releasedBy: ActorStruct | null,
+  opts: { reason?: string; actorKey?: string; tolerateNoActiveClaim?: boolean } = {},
+): AssignmentClaimRecord | null {
   const helper = loadActorIdentityHelper();
   const reason = opts.reason ?? "released";
   const tolerateNoActiveClaim = opts.tolerateNoActiveClaim ?? false;
 
-  // F1 fix (fix-plan iteration 1, CRITICAL): release mutates the same record file claim/supersede
-  // do, under the same per-subject lock (see withSubjectLock()'s doc comment).
-  return withSubjectLock(artifactRoot, subjectId, (): AssignmentClaimRecord | null => {
-    const existing = readLocalRecord(artifactRoot, subjectId);
+  const existing = readLocalRecord(artifactRoot, subjectId);
     if (!existing || existing.status !== "claimed") {
       if (tolerateNoActiveClaim) return null;
       throw new Error(`no active claim to release for subject: ${subjectId}`);
@@ -718,8 +739,7 @@ export function performLocalRelease(
       audit_trail: [...(existing.audit_trail ?? []), { at: isoNow(), transition: "release", from_actor: existing.actor, to_actor: releasedBy, reason }],
     };
     writeLocalRecord(artifactRoot, subjectId, record);
-    return record;
-  });
+  return record;
 }
 
 function releaseLocalFile(argv: string[]): number {

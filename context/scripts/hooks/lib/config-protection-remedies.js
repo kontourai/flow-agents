@@ -20,6 +20,8 @@ const SANCTIONED_REMEDIES = {
     'There is no sanctioned automated writer for this file. Ask a human maintainer to edit it directly. Never disable this hook to make the write.',
   '.claude/settings.local.json':
     'There is no sanctioned automated writer for this file. Ask a human maintainer to edit it directly. Never disable this hook to make the write.',
+  '.flow-agents/lifecycle-authority-keys.json':
+    'Only the trusted harness installer or a human maintainer may rotate lifecycle authority keys. Never let an agent replace this trust root.',
   '.kontourai/flow-agents/current.json':
     'Use `npm run workflow:sidecar -- ensure-session` (or `advance-state`), which writes this file for you. Never disable this hook to make the write.',
   '.kontourai/flow-agents/current/<actor>.json':
@@ -58,6 +60,7 @@ function remedyFor(name) {
  * basename 'trust.bundle') -- first match wins, deterministically.
  */
 const REMEDY_COMMAND_CANDIDATES = [
+  { name: '.flow-agents/lifecycle-authority-keys.json', needles: ['lifecycle-authority-keys.json'] },
   { name: 'delivery/trust.checkpoint.json', needles: ['delivery/trust.checkpoint.json', 'trust.checkpoint.json'] },
   { name: 'delivery/trust.bundle', needles: ['delivery/trust.bundle'] },
   { name: '.kontourai/flow-agents/<slug>/trust.bundle', needles: ['trust.bundle'] },

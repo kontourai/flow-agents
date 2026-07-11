@@ -120,6 +120,13 @@ function checkProtectedPathPattern(filePath) {
     };
   }
 
+  if (/(?:^|\/)\.flow-agents\/lifecycle-authority-keys\.json$/.test(norm)) {
+    return {
+      name: '.flow-agents/lifecycle-authority-keys.json',
+      reason: 'an agent could replace the pinned lifecycle authority key and forge cancellation authority',
+    };
+  }
+
   // .kontourai/flow-agents/current.json — an agent could forge active_flow_id / active_step_id
   // to route the gate to a permissive or empty-expects FlowDefinition.
   // SAFE: the workflow CLI writes current.json via fs (writeJson → fs.writeFileSync),
@@ -426,7 +433,7 @@ function checkCommandForBypass(command) {
  */
 // #379: the delivery/ arms carry an optional (?:[^/]+\/)? segment so redirects/tee to the
 // per-session path delivery/<slug>/trust.bundle (+ checkpoint) are caught, not just the flat path.
-const REDIRECT_PROTECTED_RE = /(?:^|\/|~\/)(\.bash_profile|\.bashrc|\.profile|\.zprofile|\.zshrc)$|(?:^|\/)\.claude\/settings(?:\.local)?\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\/[^/]+\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/\.goal-fit-block-streak\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/state\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.checkpoint\.json$/;
+const REDIRECT_PROTECTED_RE = /(?:^|\/|~\/)(\.bash_profile|\.bashrc|\.profile|\.zprofile|\.zshrc)$|(?:^|\/)\.claude\/settings(?:\.local)?\.json$|(?:^|\/)\.flow-agents\/lifecycle-authority-keys\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/current\/[^/]+\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/\.goal-fit-block-streak\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/state\.json$|(?:^|\/)(?:\.kontourai\/flow-agents|\.flow-agents)\/[^/]+\/trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.bundle$|(?:^|\/)delivery\/(?:[^/]+\/)?trust\.checkpoint\.json$/;
 
 /**
  * Return true when a token (an unquoted redirect target or tee argument) matches

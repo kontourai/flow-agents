@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kontourai.dev/schemas/lifecycle-authority-keys.schema.json",
+  "title": "Lifecycle Authority Key Registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "keys"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "keys": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "algorithm", "public_key_pem"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "algorithm": { "const": "ed25519" },
+          "public_key_pem": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

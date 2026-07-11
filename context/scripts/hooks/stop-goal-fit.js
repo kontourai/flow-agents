@@ -77,7 +77,7 @@ const PRE_EXECUTION_PHASES = new Set(['idea', 'backlog', 'pickup', 'planning']);
 // Terminal tasks are complete — they must never gate a stop or count as "active".
 // A stale current.json pointing at one, or a graveyard of finished states, must
 // not block an unrelated session.
-const TERMINAL_STATUSES = new Set(['done', 'delivered', 'accepted', 'archived', 'complete', 'completed']);
+const TERMINAL_STATUSES = new Set(['done', 'delivered', 'canceled', 'accepted', 'archived', 'complete', 'completed']);
 
 function isTerminalDeliveredState(state) {
   if (!state || typeof state !== 'object') return false;

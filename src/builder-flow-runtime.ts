@@ -1,8 +1,10 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import {
   expectationsForGate,
+  lifecycleRequestMatches,
   openGates,
   readJson,
   runDir,
@@ -12,11 +14,16 @@ import {
   type FlowRunState,
   type JsonObject,
 } from "@kontourai/flow";
+import { assertAuthorizationUnused, loadBuilderLifecycleAuthorization, readAuthorizationConsumption, recordAuthorizationConsumed } from "./builder-lifecycle-authority.js";
+import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock, type ActorStruct } from "./cli/assignment-provider.js";
 import {
   BUILDER_BUILD_FLOW_ID,
   BuilderBuildRunInputError,
+  cancelBuilderBuildRun,
   evaluateBuilderBuildRun,
   loadBuilderBuildRun,
+  pauseBuilderBuildRun,
+  resumeBuilderBuildRun,
   startBuilderBuildRun,
   type BuilderBuildRunResult,
 } from "./builder-flow-run-adapter.js";
@@ -25,6 +32,14 @@ type AnyRecord = Record<string, any>;
 
 export interface BuilderFlowSessionInput {
   sessionDir: string;
+}
+
+export interface BuilderFlowAuthorizedLifecycleInput extends BuilderFlowSessionInput {
+  authorizationFile: string;
+}
+
+export interface BuilderFlowAgentLifecycleInput extends BuilderFlowSessionInput {
+  reason: string;
 }
 
 export interface BuilderFlowSessionResult {
@@ -117,6 +132,195 @@ export async function recoverBuilderFlowSession(input: BuilderFlowSessionInput):
     projection,
     attached: false,
   };
+}
+
+export async function pauseBuilderFlowSession(input: BuilderFlowAgentLifecycleInput): Promise<BuilderFlowSessionResult> {
+  return changeBuilderFlowSessionLifecycle(input, "pause");
+}
+
+export async function resumeBuilderFlowSession(input: BuilderFlowAgentLifecycleInput): Promise<BuilderFlowSessionResult> {
+  return changeBuilderFlowSessionLifecycle(input, "resume");
+}
+
+export async function cancelBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<BuilderFlowSessionResult & { assignmentReleased: boolean; idempotent: boolean }> {
+  const context = resolveSessionContext(input.sessionDir);
+  return await withSubjectLock(context.artifactRoot, context.slug, async () => {
+    const prepared = await prepareAuthorizedLifecycleChange(input, "cancel", context);
+    assertAuthorizationUnused(prepared.context.artifactRoot, prepared.authorization);
+    const changed = await cancelBuilderBuildRun({ cwd: prepared.context.projectRoot, runId: prepared.context.slug, request: prepared.authorization.request });
+    const released = performLocalReleaseUnderLock(prepared.context.artifactRoot, prepared.context.slug, prepared.authorization.assignment_actor, {
+      actorKey: prepared.authorization.assignment_actor_key,
+      reason: `canonical Flow run canceled by ${prepared.authorization.request.authority.request_ref}`,
+      tolerateNoActiveClaim: true,
+    });
+    const projection = projectFlowRun(prepared.context, changed, prepared.sidecarSnapshot.state);
+    writeProjection(prepared.context, projection, prepared.sidecarSnapshot.raw, "cancellation projection");
+    recordAuthorizationConsumed(prepared.context.artifactRoot, prepared.authorization);
+    return { sessionDir: prepared.context.sessionDir, projectRoot: prepared.context.projectRoot, run: changed, projection, attached: false, assignmentReleased: released !== null, idempotent: changed.idempotent };
+  });
+}
+
+export async function releaseBuilderFlowAssignment(input: BuilderFlowAgentLifecycleInput): Promise<BuilderFlowSessionResult & { assignmentReleased: boolean }> {
+  const context = resolveSessionContext(input.sessionDir);
+  return await withSubjectLock(context.artifactRoot, context.slug, async () => {
+    const prepared = prepareAgentLifecycleChange(input, context);
+    const run = await loadBuilderBuildRun({ cwd: context.projectRoot, runId: context.slug });
+    const released = performLocalReleaseUnderLock(context.artifactRoot, context.slug, prepared.actor, { actorKey: prepared.actorKey, reason: input.reason });
+    return { sessionDir: context.sessionDir, projectRoot: context.projectRoot, run, projection: prepared.sidecarSnapshot.state, attached: false, assignmentReleased: released !== null };
+  });
+}
+
+export async function archiveBuilderFlowSession(input: BuilderFlowAuthorizedLifecycleInput): Promise<BuilderFlowSessionResult & { archiveDir: string }> {
+  const context = resolveSessionContext(input.sessionDir);
+  return await withSubjectLock(context.artifactRoot, context.slug, async () => {
+  const prepared = await prepareAuthorizedLifecycleChange(input, "archive", context);
+  const priorConsumption = readAuthorizationConsumption(prepared.context.artifactRoot, prepared.authorization);
+  const recoveringPreparedArchive = priorConsumption !== null && prepared.sidecarSnapshot.state.status === "archived";
+  if (priorConsumption && !recoveringPreparedArchive) throw new Error("lifecycle authorization nonce has already been consumed");
+  const run = await loadBuilderBuildRun({ cwd: prepared.context.projectRoot, runId: prepared.context.slug });
+  if (run.state.status !== "completed" && run.state.status !== "canceled") {
+    throw new BuilderBuildRunInputError("flow_run.status", "must be completed or canceled before archival");
+  }
+  const archiveRoot = path.join(prepared.context.artifactRoot, "archive");
+  const archiveDir = path.join(archiveRoot, prepared.context.slug);
+  if (pathExistsNoFollow(archiveDir)) throw new BuilderBuildRunInputError("archive", "destination already exists");
+  fs.mkdirSync(archiveRoot, { recursive: true });
+  assertSafeDirectory(archiveRoot, prepared.context.artifactRoot, "archive root");
+  assertSafeDirectory(prepared.context.sessionDir, prepared.context.artifactRoot, "sessionDir");
+  if (!recoveringPreparedArchive && fs.readFileSync(prepared.context.stateFile, "utf8") !== prepared.sidecarSnapshot.raw) {
+    throw new BuilderBuildRunInputError("state.json", "changed during archive preparation");
+  }
+  const archivedState = recoveringPreparedArchive ? prepared.sidecarSnapshot.state : {
+    ...prepared.sidecarSnapshot.state,
+    status: "archived",
+    phase: "done",
+    updated_at: new Date().toISOString(),
+    next_action: { status: "done", summary: "Builder session archived; canonical Flow artifacts remain retained." },
+  };
+  if (!recoveringPreparedArchive) {
+    writeExistingFileNoFollow(prepared.context.stateFile, `${JSON.stringify(archivedState, null, 2)}\n`);
+    clearCurrentPointers(prepared.context.artifactRoot, prepared.context.slug);
+    recordAuthorizationConsumed(prepared.context.artifactRoot, prepared.authorization);
+  }
+  fs.renameSync(prepared.context.sessionDir, archiveDir);
+  return {
+    sessionDir: archiveDir,
+    projectRoot: prepared.context.projectRoot,
+    run,
+    projection: archivedState,
+    attached: false,
+    archiveDir,
+  };
+  });
+}
+
+async function changeBuilderFlowSessionLifecycle(
+  input: BuilderFlowAgentLifecycleInput,
+  operation: "pause" | "resume",
+): Promise<BuilderFlowSessionResult> {
+  const context = resolveSessionContext(input.sessionDir);
+  return await withSubjectLock(context.artifactRoot, context.slug, async () => {
+  const prepared = prepareAgentLifecycleChange(input, context);
+  const change = operation === "pause" ? pauseBuilderBuildRun : resumeBuilderBuildRun;
+  const at = new Date().toISOString();
+  const run = await change({
+    cwd: context.projectRoot,
+    runId: context.slug,
+    request: { reason: input.reason, authority: { kind: "operator_request", actor: prepared.actorKey, request_ref: `flow-agents://assignment/${context.slug}/${operation}/${at}`, requested_at: at } },
+  });
+  const projection = projectFlowRun(context, run, prepared.sidecarSnapshot.state);
+  writeProjection(context, projection, prepared.sidecarSnapshot.raw, `${operation} projection`);
+  return {
+    sessionDir: context.sessionDir,
+    projectRoot: context.projectRoot,
+    run,
+    projection,
+    attached: false,
+  };
+  });
+}
+
+async function prepareAuthorizedLifecycleChange(input: BuilderFlowAuthorizedLifecycleInput, operation: "cancel" | "archive", context: SessionContext): Promise<{
+  context: SessionContext;
+  sidecarSnapshot: SidecarSnapshot;
+  authorization: ReturnType<typeof loadBuilderLifecycleAuthorization>;
+}> {
+  const sidecarSnapshot = readSidecarSnapshot(context);
+  const subject = workflowSubject(sidecarSnapshot.state);
+  const activeAssignment = readLocalAssignmentStatus(context.artifactRoot, context.slug).record;
+  const assignmentFile = assignmentFilePath(context.artifactRoot, context.slug);
+  const persistedAssignment = pathExistsNoFollow(assignmentFile)
+    ? (assertSafeFile(assignmentFile, context.artifactRoot, "assignment record"), JSON.parse(fs.readFileSync(assignmentFile, "utf8")) as AnyRecord)
+    : null;
+  const canonicalRun = await loadBuilderBuildRun({ cwd: context.projectRoot, runId: context.slug });
+  const acceptsReleasedAssignment = (operation === "cancel" && canonicalRun.state.status === "canceled") || operation === "archive";
+  const assignment = activeAssignment ?? (acceptsReleasedAssignment && persistedAssignment?.status === "released" ? persistedAssignment : null);
+  if (!assignment || (assignment.status !== "claimed" && !acceptsReleasedAssignment) || !assignment.actor_key) {
+    throw new BuilderBuildRunInputError("assignment", "must be actively held by a canonical actor before a lifecycle change");
+  }
+  if (assignment.work_item_ref && assignment.work_item_ref !== subject) {
+    throw new BuilderBuildRunInputError("assignment.work_item_ref", "must match the selected Work Item");
+  }
+  const authorization = loadBuilderLifecycleAuthorization(input.authorizationFile, {
+    projectRoot: context.projectRoot,
+    operation,
+    runId: context.slug,
+    subject,
+    actorKey: assignment.actor_key,
+    ...(operation === "cancel" && canonicalRun.state.status === "canceled" ? { allowExpired: true } : {}),
+    ...(operation === "archive" && sidecarSnapshot.state.status === "archived" ? { allowExpired: true } : {}),
+  });
+  if (operation === "cancel" && canonicalRun.state.status === "canceled") {
+    const terminalEvent = canonicalRun.state.lifecycle?.at(-1);
+    if (!terminalEvent || terminalEvent.action !== "cancel" || !lifecycleRequestMatches(terminalEvent, authorization.request)) {
+      throw new BuilderBuildRunInputError("authorization.request", "does not match the canonical cancellation being recovered");
+    }
+  }
+  if (!sameActor(authorization.assignment_actor, assignment.actor)) {
+    throw new BuilderBuildRunInputError("authorization.assignment_actor", "must match the active assignment holder");
+  }
+  return { context, sidecarSnapshot, authorization };
+}
+
+function prepareAgentLifecycleChange(input: BuilderFlowAgentLifecycleInput, context: SessionContext): { sidecarSnapshot: SidecarSnapshot; actor: ActorStruct; actorKey: string } {
+  if (!input.reason.trim()) throw new BuilderBuildRunInputError("reason", "must be non-empty");
+  const resolved = resolveCurrentAssignmentActor();
+  const sidecarSnapshot = readSidecarSnapshot(context);
+  const subject = workflowSubject(sidecarSnapshot.state);
+  const assignment = readLocalAssignmentStatus(context.artifactRoot, context.slug).record;
+  if (!assignment || assignment.status !== "claimed" || assignment.actor_key !== resolved.actorKey || !sameActor(assignment.actor, resolved.actor)) {
+    throw new BuilderBuildRunInputError("assignment", "must be actively held by the current workflow actor");
+  }
+  if (assignment.work_item_ref && assignment.work_item_ref !== subject) throw new BuilderBuildRunInputError("assignment.work_item_ref", "must match the selected Work Item");
+  return { sidecarSnapshot, actor: resolved.actor, actorKey: resolved.actorKey };
+}
+
+function sameActor(left: ActorStruct, right: ActorStruct): boolean {
+  return isDeepStrictEqual({ ...left, human: left.human ?? null }, { ...right, human: right.human ?? null });
+}
+
+function clearCurrentPointers(artifactRoot: string, slug: string): void {
+  const candidates = [path.join(artifactRoot, "current.json")];
+  const actorRoot = path.join(artifactRoot, "current");
+  if (pathExistsNoFollow(actorRoot)) {
+    assertSafeDirectory(actorRoot, artifactRoot, "current directory");
+    candidates.push(...fs.readdirSync(actorRoot).filter((name) => name.endsWith(".json")).map((name) => path.join(actorRoot, name)));
+  }
+  for (const file of candidates) {
+    if (!pathExistsNoFollow(file) || !fs.lstatSync(file).isFile()) continue;
+    const root = file === candidates[0] ? artifactRoot : actorRoot;
+    if (root === actorRoot) assertSafeDirectory(actorRoot, artifactRoot, "current directory");
+    assertSafeFile(file, root, "current pointer");
+    let pointer: AnyRecord;
+    try {
+      pointer = JSON.parse(fs.readFileSync(file, "utf8")) as AnyRecord;
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      // Archival retains malformed unrelated pointers for explicit repair.
+      continue;
+    }
+    if (pointer.active_slug === slug) fs.unlinkSync(file);
+  }
 }
 
 export async function syncBuilderFlowSessionIfPresent(sessionDir: string): Promise<BuilderFlowSessionResult | null> {
@@ -291,7 +495,9 @@ function projectFlowRun(context: SessionContext, run: BuilderBuildRunResult, sid
   const definition = JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8"));
   const gates = openGates(definition, run.state) as Array<FlowGate & { id: string }>;
   const complete = run.state.status === "completed";
-  const action = complete ? { skills: [], operations: [] } : stepAction(run.state.current_step);
+  const paused = run.state.status === "paused";
+  const canceled = run.state.status === "canceled";
+  const action = complete || paused || canceled ? { skills: [], operations: [] } : stepAction(run.state.current_step);
   if (!action) {
     throw new BuilderBuildRunInputError("kit.flow_step_actions", `does not declare Builder step ${run.state.current_step}`);
   }
@@ -312,6 +518,10 @@ function projectFlowRun(context: SessionContext, run: BuilderBuildRunResult, sid
     : "";
   const nextAction = complete
     ? { status: "done", summary: "Canonical Flow run is complete." }
+    : canceled
+      ? { status: "done", summary: "Canonical Flow run was canceled by an authorized external request. Artifacts are retained until separately archived." }
+      : paused
+        ? { status: "blocked", summary: "Canonical Flow run is paused. The current assignment actor may resume it with a reason." }
     : {
         status: "continue",
         summary: `Flow step \`${run.state.current_step}\`: ${skillText}${operationText} ${gateText}${routeText} Then synchronize the recorded evidence.`,
@@ -322,8 +532,8 @@ function projectFlowRun(context: SessionContext, run: BuilderBuildRunResult, sid
   const phase = phaseForStep(definition.phase_map, run.state.current_step) ?? sidecar.phase;
   return {
     ...sidecar,
-    status: complete ? "delivered" : (run.state.transitions.length > 0 ? "in_progress" : sidecar.status),
-    phase: complete ? "done" : phase,
+    status: complete ? "delivered" : canceled ? "canceled" : paused ? "blocked" : (run.state.transitions.length > 0 ? "in_progress" : sidecar.status),
+    phase: complete || canceled ? "done" : phase,
     updated_at: run.state.updated_at,
     flow_run: {
       run_id: run.runId,
