@@ -118,3 +118,40 @@ Workflow steering surfaces these fields on session start and prompt submission. 
 Stop hook treats an unfinished canonical Flow run as active even during pickup or
 planning, blocks a premature stop in block mode, and does not release its liveness
 claim. A run is complete only when Flow reaches its terminal step.
+# Builder Lifecycle Authority
+
+The canonical Flow run owns pause, resume, and cancellation. The current assignment actor may
+pause, resume, or release its own assignment with a reason. Cancellation and archival require
+an Ed25519-signed authorization record conforming to
+`schemas/builder-lifecycle-authorization.schema.json`. The record is operation-bound and binds
+the request to the run id, selected Work Item, current assignment actor, immutable external
+request reference, nonce, and expiry. Its signing key must be pinned in the durable
+`.flow-agents/lifecycle-authority-keys.json` registry. Runtime or harness adapters hold the
+private key and capture the signed record from a user/operator channel they trust; agent-authored
+prose or an unsigned model-written file is not cancellation authority.
+
+This is an audit and policy boundary, not authentication against a process with unrestricted
+access as the same operating-system user. The harness must keep its signing key outside the
+agent process and enforce its own filesystem or process isolation when the agent is adversarial.
+The repository hooks protect the pinned public-key registry from ordinary agent writes, but are
+explicitly not an operating-system security boundary.
+Adversarial-runtime authentication is tracked separately in Flow Agents issue #545. Flow's
+current lifecycle authority vocabulary also requires agent-owned pause/resume events to use the
+closest available `operator_request` shape; a distinct canonical runtime authority is tracked in
+Flow issue #118.
+
+```text
+flow-agents builder-run pause --session-dir <dir> --reason <text>
+flow-agents builder-run resume --session-dir <dir> --reason <text>
+flow-agents builder-run cancel --session-dir <dir> --authorization-file <record.json>
+flow-agents builder-run release-assignment --session-dir <dir> --reason <text>
+flow-agents builder-run archive --session-dir <dir> --authorization-file <record.json>
+```
+
+Pause and resume verify the live assignment actor under the assignment lock, and preserve the
+current Flow step and assignment. Assignment release does not
+change the Flow run. Cancellation changes Flow first and then idempotently releases the owning
+assignment while holding the same lock; a successfully consumed cancellation nonce cannot be
+replayed. Archive accepts only completed or canceled runs, moves the session under
+`.kontourai/flow-agents/archive/<slug>/`, and retains the canonical Flow run. None of these
+operations deletes a branch or worktree; cleanup requires a separate provider-aware action.

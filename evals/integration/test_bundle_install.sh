@@ -896,18 +896,19 @@ cat >"$PACKAGE_AMBIENT/kits/builder/flows/build.flow.json" <<'JSON'
 }
 JSON
 PACKAGE_PACK_LOG="$TMPDIR_EVAL/package-pack.log"
+PACKAGE_CLI="$PACKAGE_CONSUMER/node_modules/@kontourai/flow-agents/build/src/cli.js"
+PACKAGE_SESSION="$PACKAGE_PROJECT/.kontourai/flow-agents/packed-builder-entry"
 if (cd "$ROOT_DIR" && npm pack --silent --pack-destination "$TMPDIR_EVAL" >"$PACKAGE_PACK_LOG") \
   && PACKAGE_TARBALL="$(find "$TMPDIR_EVAL" -maxdepth 1 -type f -name 'kontourai-flow-agents-*.tgz' -print -quit)" \
   && [[ -n "$PACKAGE_TARBALL" ]] \
   && npm install --silent --no-audit --no-fund --ignore-scripts --prefix "$PACKAGE_CONSUMER" "$PACKAGE_TARBALL" \
-  && (cd "$PACKAGE_AMBIENT" && node "$PACKAGE_CONSUMER/node_modules/@kontourai/flow-agents/build/src/cli/workflow-sidecar.js" ensure-session \
+  && (cd "$PACKAGE_AMBIENT" && CODEX_SESSION_ID=packed-package-consumer node "$PACKAGE_CONSUMER/node_modules/@kontourai/flow-agents/build/src/cli/workflow-sidecar.js" ensure-session \
     --artifact-root "$PACKAGE_PROJECT/.kontourai/flow-agents" \
     --task-slug packed-builder-entry \
-    --actor packed-package-consumer \
     --title "Packed Builder entry" \
     --summary "Installed package should project pickup-probe." \
     --flow-id builder.build >/dev/null 2>&1) \
-  && node - "$PACKAGE_PROJECT" <<'NODE'
+  && node - "$PACKAGE_PROJECT" <<'NODE' &&
 const fs = require('node:fs');
 const path = require('node:path');
 const project = process.argv[2];
@@ -918,10 +919,63 @@ if (flow.current_step !== 'design-probe' || state.flow_run?.current_step !== 'de
 if (JSON.stringify(state.next_action?.skills) !== JSON.stringify(['pickup-probe'])) process.exit(1);
 if (!(bundle.claims || []).some((claim) => claim.claimType === 'builder.pull-work.selected' && claim.status === 'verified')) process.exit(1);
 NODE
+  node --input-type=module - "$PACKAGE_PROJECT" "$PACKAGE_CONSUMER" <<'NODE' &&
+import fs from 'node:fs';
+import path from 'node:path';
+import { generateKeyPairSync, sign } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
+const [project, consumer] = process.argv.slice(2);
+const slug = 'packed-builder-entry';
+const assignment = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'assignment', `${slug}.json`), 'utf8'));
+const state = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', slug, 'state.json'), 'utf8'));
+const packageEntry = path.join(consumer, 'node_modules', '@kontourai', 'flow-agents', 'build', 'src', 'index.js');
+const { builderLifecycleAuthorizationPayload } = await import(pathToFileURL(packageEntry).href);
+const keys = generateKeyPairSync('ed25519');
+const keyId = 'packed-consumer';
+fs.mkdirSync(path.join(project, '.flow-agents'), { recursive: true });
+fs.writeFileSync(path.join(project, '.flow-agents', 'lifecycle-authority-keys.json'), JSON.stringify({
+  schema_version: '1.0',
+  keys: [{ id: keyId, algorithm: 'ed25519', public_key_pem: keys.publicKey.export({ type: 'spki', format: 'pem' }) }],
+}, null, 2));
+for (const operation of ['cancel', 'archive']) {
+  const requestedAt = new Date();
+  const unsigned = {
+    schema_version: '1.0',
+    operation,
+    run_id: slug,
+    subject: state.work_item_refs[0],
+    assignment_actor_key: assignment.actor_key,
+    assignment_actor: { ...assignment.actor, human: assignment.actor.human ?? null },
+    nonce: `packed-${operation}`,
+    expires_at: new Date(requestedAt.getTime() + 60 * 60_000).toISOString(),
+    request: {
+      reason: `packed consumer ${operation}`,
+      authority: { kind: 'user_request', actor: 'packed-fixture', request_ref: `fixture://packed/${operation}`, requested_at: requestedAt.toISOString() },
+    },
+  };
+  const authorization = { ...unsigned, signature: { algorithm: 'ed25519', key_id: keyId, value: sign(null, Buffer.from(builderLifecycleAuthorizationPayload(unsigned)), keys.privateKey).toString('base64') } };
+  fs.writeFileSync(path.join(project, `${operation}.authorization.json`), JSON.stringify(authorization, null, 2));
+}
+NODE
+  (cd "$PACKAGE_PROJECT" && CODEX_SESSION_ID=packed-package-consumer node "$PACKAGE_CLI" builder-run pause --session-dir "$PACKAGE_SESSION" --reason "packed pause" >/dev/null) \
+  && (cd "$PACKAGE_PROJECT" && CODEX_SESSION_ID=packed-package-consumer node "$PACKAGE_CLI" builder-run resume --session-dir "$PACKAGE_SESSION" --reason "packed resume" >/dev/null) \
+  && (cd "$PACKAGE_PROJECT" && node "$PACKAGE_CLI" builder-run cancel --session-dir "$PACKAGE_SESSION" --authorization-file "$PACKAGE_PROJECT/cancel.authorization.json" >/dev/null) \
+  && (cd "$PACKAGE_PROJECT" && node "$PACKAGE_CLI" builder-run archive --session-dir "$PACKAGE_SESSION" --authorization-file "$PACKAGE_PROJECT/archive.authorization.json" >/dev/null) \
+  && node - "$PACKAGE_PROJECT" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const project = process.argv[2];
+const slug = 'packed-builder-entry';
+const archived = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'archive', slug, 'state.json'), 'utf8'));
+const flow = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', slug, 'state.json'), 'utf8'));
+const consumed = fs.readdirSync(path.join(project, '.kontourai', 'flow-agents', 'lifecycle-authority', 'consumed'));
+if (archived.status !== 'archived' || flow.status !== 'canceled' || consumed.length !== 2) process.exit(1);
+if (fs.existsSync(path.join(project, '.kontourai', 'flow-agents', slug))) process.exit(1);
+NODE
 then
-  _pass "packed npm consumer ignores unrelated ambient Flow definitions and projects pickup-probe"
+  _pass "packed npm consumer projects Builder entry and executes lifecycle commands"
 else
-  _fail "packed npm consumer did not execute canonical Builder entry"
+  _fail "packed npm consumer did not execute canonical Builder entry and lifecycle commands"
 fi
 
 if [[ -d "$CODEX_FULL_DEST/.codex/skills/plan-work" && -d "$CODEX_FULL_DEST/.codex/skills/deliver" && -d "$CODEX_FULL_DEST/.codex/skills/agentic-engineering" ]]; then

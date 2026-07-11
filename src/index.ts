@@ -36,6 +36,20 @@ export type {
 } from "./builder-flow-run-adapter.js";
 
 export {
+  archiveBuilderFlowSession,
+  cancelBuilderFlowSession,
+  pauseBuilderFlowSession,
+  recoverBuilderFlowSession,
+  releaseBuilderFlowAssignment,
+  resumeBuilderFlowSession,
+  startBuilderFlowSession,
+  syncBuilderFlowSession,
+} from "./builder-flow-runtime.js";
+export type { BuilderFlowAgentLifecycleInput, BuilderFlowAuthorizedLifecycleInput, BuilderFlowSessionInput, BuilderFlowSessionResult } from "./builder-flow-runtime.js";
+export { builderLifecycleAuthorizationPayload, loadBuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
+export type { BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
+
+export {
   defaultArtifactRootForRead,
   defaultCodexHome,
   defaultTelemetryDirForRead,

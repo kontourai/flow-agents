@@ -3,17 +3,30 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { generateKeyPairSync, sign } from "node:crypto";
 
 import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, runDir } from "@kontourai/flow";
 import {
+  archiveBuilderFlowSession,
+  cancelBuilderFlowSession,
+  pauseBuilderFlowSession,
   recoverBuilderFlowSession,
+  releaseBuilderFlowAssignment,
+  resumeBuilderFlowSession,
   startBuilderFlowSession,
   syncBuilderFlowSession,
 } from "../../build/src/builder-flow-runtime.js";
+import { builderLifecycleAuthorizationPayload, loadBuilderLifecycleAuthorization, recordAuthorizationConsumed } from "../../build/src/builder-lifecycle-authority.js";
+import { cancelBuilderBuildRun } from "../../build/src/builder-flow-run-adapter.js";
+import { performLocalClaim, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
 
 const SUBJECT = "local:work-item/runtime-projection";
 const NOW = "2026-07-09T20:00:00.000Z";
+const ACTOR = { runtime: "codex", session_id: "runtime-projection", host: "test-host", human: null };
+const ACTOR_KEY = "codex:runtime-projection:test-host";
+const AUTHORITY_KEY_ID = "runtime-test";
+const AUTHORITY_KEYS = generateKeyPairSync("ed25519");
 
 function makeSession(slug = "runtime-projection") {
   const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-builder-runtime-"));
@@ -33,6 +46,10 @@ function makeSession(slug = "runtime-projection") {
     artifact_dir: `.kontourai/flow-agents/${slug}`,
     updated_at: NOW,
   });
+  writeJson(path.join(projectRoot, ".flow-agents", "lifecycle-authority-keys.json"), {
+    schema_version: "1.0",
+    keys: [{ id: AUTHORITY_KEY_ID, algorithm: "ed25519", public_key_pem: AUTHORITY_KEYS.publicKey.export({ type: "spki", format: "pem" }) }],
+  });
   return { projectRoot, artifactRoot, sessionDir, slug };
 }
 
@@ -43,6 +60,104 @@ function writeJson(file, value) {
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function consumedAuthorizationRecords(session) {
+  const directory = path.join(session.artifactRoot, "lifecycle-authority", "consumed");
+  if (!fs.existsSync(directory)) return [];
+  return fs.readdirSync(directory).sort().map((name) => readJson(path.join(directory, name)));
+}
+
+function claimSessionAssignment(session) {
+  performLocalClaim(session.artifactRoot, session.slug, ACTOR, {
+    ttlSeconds: 1800,
+    actorKey: ACTOR_KEY,
+    branch: `agent/${session.slug}`,
+    artifactDir: session.sessionDir,
+    workItemRef: SUBJECT,
+    reason: "test",
+  });
+}
+
+function claimAmbientSessionAssignment(session) {
+  const ambient = resolveCurrentAssignmentActor();
+  performLocalClaim(session.artifactRoot, session.slug, ambient.actor, {
+    ttlSeconds: 1800,
+    actorKey: ambient.actorKey,
+    branch: `agent/${session.slug}`,
+    artifactDir: session.sessionDir,
+    workItemRef: SUBJECT,
+    reason: "test",
+  });
+  return ambient;
+}
+
+function lifecycleAuthorization(session, operation, name, overrides = {}) {
+  const file = path.join(session.projectRoot, `${name}.authorization.json`);
+  const unsigned = {
+    schema_version: "1.0",
+    operation,
+    run_id: session.slug,
+    subject: SUBJECT,
+    assignment_actor_key: ACTOR_KEY,
+    assignment_actor: ACTOR,
+    nonce: `${session.slug}:${name}`,
+    expires_at: "2026-07-09T21:00:00.000Z",
+    request: {
+      reason: `${name} requested by fixture`,
+      authority: {
+        kind: "user_request",
+        actor: "fixture-user",
+        request_ref: `fixture://request/${name}`,
+        requested_at: NOW,
+      },
+    },
+    ...overrides,
+  };
+  const value = {
+    ...unsigned,
+    signature: {
+      algorithm: "ed25519",
+      key_id: AUTHORITY_KEY_ID,
+      value: sign(null, Buffer.from(builderLifecycleAuthorizationPayload(unsigned)), AUTHORITY_KEYS.privateKey).toString("base64"),
+    },
+  };
+  writeJson(file, value);
+  return file;
+}
+
+function liveLifecycleAuthorization(session, operation, name, overrides = {}) {
+  const requestedAt = new Date();
+  return lifecycleAuthorization(session, operation, name, {
+    expires_at: new Date(requestedAt.getTime() + 60 * 60_000).toISOString(),
+    request: {
+      reason: `${name} requested by fixture`,
+      authority: {
+        kind: "user_request",
+        actor: "fixture-user",
+        request_ref: `fixture://request/${name}`,
+        requested_at: requestedAt.toISOString(),
+      },
+    },
+    ...overrides,
+  });
+}
+
+function expiredLifecycleAuthorization(session, operation, name, overrides = {}) {
+  const requestedAt = new Date(Date.now() - 120_000);
+  return lifecycleAuthorization(session, operation, name, {
+    expires_at: new Date(Date.now() - 60_000).toISOString(),
+    request: {
+      reason: `${name} requested by fixture`,
+      authority: {
+        kind: "user_request",
+        actor: "fixture-user",
+        request_ref: `fixture://request/${name}`,
+        requested_at: requestedAt.toISOString(),
+      },
+    },
+    ...overrides,
+  });
 }
 
 function snapshotFile(file) {
@@ -172,6 +287,282 @@ test("small-model client can start and advance from projected actions without ch
   assert.equal(duplicate.run.manifest.evidence.length, advanced.run.manifest.evidence.length);
 });
 
+test("pause and resume preserve the current Flow step and active assignment", async () => {
+  const session = makeSession("lifecycle-pause-resume");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const before = readJson(path.join(runDir(session.slug, session.projectRoot), "state.json"));
+
+  const paused = await pauseBuilderFlowSession({
+    sessionDir: session.sessionDir,
+    reason: "fixture pause",
+  });
+  assert.equal(paused.run.state.status, "paused");
+  assert.equal(paused.run.state.current_step, before.current_step);
+  assert.deepEqual(paused.run.state.transitions, before.transitions);
+  assert.equal(paused.projection.status, "blocked");
+  assert.equal(readLocalAssignmentStatus(session.artifactRoot, session.slug).record.status, "claimed");
+
+  const resumed = await resumeBuilderFlowSession({
+    sessionDir: session.sessionDir,
+    reason: "fixture resume",
+  });
+  assert.equal(resumed.run.state.status, "active");
+  assert.equal(resumed.run.state.current_step, before.current_step);
+  assert.deepEqual(resumed.run.state.transitions, before.transitions);
+  assert.equal(readLocalAssignmentStatus(session.artifactRoot, session.slug).record.status, "claimed");
+});
+
+test("authorized cancellation is canonical, terminal, and releases the assignment exactly once", async () => {
+  const session = makeSession("lifecycle-cancel");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const authorizationFile = liveLifecycleAuthorization(session, "cancel", "cancel");
+
+  const canceled = await cancelBuilderFlowSession({
+    sessionDir: session.sessionDir,
+    authorizationFile,
+  });
+  assert.equal(canceled.run.state.status, "canceled");
+  assert.equal(canceled.projection.status, "canceled");
+  assert.equal(canceled.assignmentReleased, true);
+  assert.equal(canceled.idempotent, false);
+  const assignmentFile = path.join(session.artifactRoot, "assignment", `${session.slug}.json`);
+  assert.equal(readJson(assignmentFile).status, "released");
+  const firstAudit = readJson(assignmentFile).audit_trail;
+
+  await assert.rejects(() => cancelBuilderFlowSession({
+    sessionDir: session.sessionDir,
+    authorizationFile,
+  }), /nonce has already been consumed/);
+  assert.deepEqual(readJson(assignmentFile).audit_trail, firstAudit);
+});
+
+test("assignment release is independent of Flow lifecycle", async () => {
+  const session = makeSession("lifecycle-release-assignment");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
+
+  const released = await releaseBuilderFlowAssignment({
+    sessionDir: session.sessionDir,
+    reason: "fixture assignment release",
+  });
+
+  assert.equal(released.assignmentReleased, true);
+  assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
+  assert.equal(readJson(path.join(session.artifactRoot, "assignment", `${session.slug}.json`)).status, "released");
+});
+
+test("archive rejects active runs and retains canceled Flow and session artifacts", async () => {
+  const session = makeSession("lifecycle-archive");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const cancelAuthorization = liveLifecycleAuthorization(session, "cancel", "archive-cancel");
+  const authorizationFile = liveLifecycleAuthorization(session, "archive", "archive");
+  const beforeReject = snapshotTree(session.sessionDir);
+  await assert.rejects(() => archiveBuilderFlowSession({
+    sessionDir: session.sessionDir,
+    authorizationFile,
+  }), /must be completed or canceled/);
+  assert.deepEqual(snapshotTree(session.sessionDir), beforeReject);
+
+  await cancelBuilderFlowSession({
+    sessionDir: session.sessionDir,
+    authorizationFile: cancelAuthorization,
+  });
+  const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
+  const beforeSession = snapshotTree(session.sessionDir);
+  const archived = await archiveBuilderFlowSession({
+    sessionDir: session.sessionDir,
+    authorizationFile,
+  });
+
+  assert.equal(archived.archiveDir, path.join(session.artifactRoot, "archive", session.slug));
+  assert.equal(fs.existsSync(session.sessionDir), false);
+  assert.equal(readJson(path.join(archived.archiveDir, "state.json")).status, "archived");
+  assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
+  const archivedFiles = snapshotTree(archived.archiveDir).map(([name]) => name);
+  for (const [name] of beforeSession) assert.ok(archivedFiles.includes(name), `archive retained ${name}`);
+  assert.deepEqual(consumedAuthorizationRecords(session).map((record) => record.operation).sort(), ["archive", "cancel"]);
+});
+
+test("archive rejects a symlinked archive root without moving the session", async () => {
+  const session = makeSession("lifecycle-archive-symlink");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const cancelAuthorization = liveLifecycleAuthorization(session, "cancel", "archive-symlink-cancel");
+  const authorizationFile = liveLifecycleAuthorization(session, "archive", "archive-symlink");
+  await cancelBuilderFlowSession({
+    sessionDir: session.sessionDir,
+    authorizationFile: cancelAuthorization,
+  });
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-archive-outside-"));
+  fs.symlinkSync(outside, path.join(session.artifactRoot, "archive"), "dir");
+  const beforeSession = snapshotTree(session.sessionDir);
+
+  await assert.rejects(() => archiveBuilderFlowSession({
+    sessionDir: session.sessionDir,
+    authorizationFile,
+  }), /archive root.*symbolic link/);
+
+  assert.deepEqual(snapshotTree(session.sessionDir), beforeSession);
+  assert.deepEqual(fs.readdirSync(outside), []);
+});
+
+test("archive retries the exact consumed authorization after an interrupted prepared move", async () => {
+  const session = makeSession("lifecycle-archive-recovery");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await cancelBuilderFlowSession({
+    sessionDir: session.sessionDir,
+    authorizationFile: liveLifecycleAuthorization(session, "cancel", "archive-recovery-cancel"),
+  });
+  const authorizationFile = expiredLifecycleAuthorization(session, "archive", "archive-recovery");
+  const rawAuthorization = readJson(authorizationFile);
+  const authorization = loadBuilderLifecycleAuthorization(authorizationFile, {
+    projectRoot: session.projectRoot,
+    operation: "archive",
+    runId: session.slug,
+    subject: SUBJECT,
+    actorKey: ACTOR_KEY,
+    now: new Date(Date.parse(rawAuthorization.request.authority.requested_at) + 30_000).toISOString(),
+  });
+  const preparedState = readJson(path.join(session.sessionDir, "state.json"));
+  preparedState.status = "archived";
+  preparedState.phase = "done";
+  preparedState.next_action = { status: "done", summary: "Builder session archived; canonical Flow artifacts remain retained." };
+  writeJson(path.join(session.sessionDir, "state.json"), preparedState);
+  recordAuthorizationConsumed(session.artifactRoot, authorization);
+
+  const conflictingAuthorization = liveLifecycleAuthorization(session, "archive", "archive-recovery-conflict", {
+    nonce: authorization.nonce,
+  });
+  await assert.rejects(
+    () => archiveBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: conflictingAuthorization }),
+    /does not match its integrity key/,
+  );
+  assert.equal(fs.existsSync(session.sessionDir), true);
+
+  const recovered = await archiveBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile });
+  assert.equal(fs.existsSync(session.sessionDir), false);
+  assert.equal(readJson(path.join(recovered.archiveDir, "state.json")).status, "archived");
+  assert.equal(consumedAuthorizationRecords(session).length, 2);
+});
+
+test("mismatched and expired cancellation authority fail before Flow or sidecar mutation", async (t) => {
+  for (const [name, overrides, pattern] of [
+    ["wrong-run", { run_id: "another-run" }, /run_id does not match/],
+    ["wrong-subject", { subject: "local:other" }, /subject does not match/],
+    ["wrong-actor", { assignment_actor_key: "another-actor" }, /assignment_actor_key does not match/],
+    ["wrong-actor-struct", { assignment_actor: { ...ACTOR, session_id: "another-session" } }, /assignment_actor.*active assignment holder/],
+    ["wrong-operation", { operation: "archive" }, /operation does not match/],
+    ["expired", {}, /expired/],
+  ]) {
+    await t.test(name, async () => {
+      const session = makeSession(`lifecycle-reject-${name}`);
+      claimSessionAssignment(session);
+      await startBuilderFlowSession({ sessionDir: session.sessionDir });
+      const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
+      const beforeProjection = snapshotProjectionTargets(session);
+      const beforeAssignment = snapshotFile(path.join(session.artifactRoot, "assignment", `${session.slug}.json`));
+      await assert.rejects(() => cancelBuilderFlowSession({
+        sessionDir: session.sessionDir,
+        authorizationFile: name === "expired"
+          ? expiredLifecycleAuthorization(session, "cancel", name, overrides)
+          : liveLifecycleAuthorization(session, "cancel", name, overrides),
+      }), pattern);
+      assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
+      assert.deepEqual(snapshotProjectionTargets(session), beforeProjection);
+      assert.equal(snapshotFile(path.join(session.artifactRoot, "assignment", `${session.slug}.json`)), beforeAssignment);
+    });
+  }
+});
+
+test("conflicting cancellation request replay is rejected without a second transition or release", async () => {
+  const session = makeSession("lifecycle-conflicting-replay");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await cancelBuilderFlowSession({
+    sessionDir: session.sessionDir,
+    authorizationFile: liveLifecycleAuthorization(session, "cancel", "cancel-original"),
+  });
+  const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
+  const assignmentFile = path.join(session.artifactRoot, "assignment", `${session.slug}.json`);
+  const beforeAssignment = snapshotFile(assignmentFile);
+  await assert.rejects(() => cancelBuilderFlowSession({
+    sessionDir: session.sessionDir,
+    authorizationFile: liveLifecycleAuthorization(session, "cancel", "cancel-conflict"),
+  }), /does not match the canonical cancellation/);
+  assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
+  assert.equal(snapshotFile(assignmentFile), beforeAssignment);
+});
+
+test("tampered or unsigned cancellation authority fails before mutation", async () => {
+  const session = makeSession("lifecycle-signature-reject");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const authorizationFile = liveLifecycleAuthorization(session, "cancel", "signature-reject");
+  const tampered = readJson(authorizationFile);
+  tampered.request.reason = "agent-authored replacement";
+  writeJson(authorizationFile, tampered);
+  const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
+  const beforeAssignment = snapshotFile(path.join(session.artifactRoot, "assignment", `${session.slug}.json`));
+
+  await assert.rejects(() => cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile }), /signature is invalid/);
+  assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
+  assert.equal(snapshotFile(path.join(session.artifactRoot, "assignment", `${session.slug}.json`)), beforeAssignment);
+});
+
+test("expired authority can finish side effects for its matching canonical cancellation", async () => {
+  const session = makeSession("lifecycle-cancel-recovery");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const authorizationFile = expiredLifecycleAuthorization(session, "cancel", "cancel-recovery");
+  const authorization = readJson(authorizationFile);
+  await cancelBuilderBuildRun({
+    cwd: session.projectRoot,
+    runId: session.slug,
+    request: authorization.request,
+    at: new Date(Date.parse(authorization.expires_at) - 1_000).toISOString(),
+  });
+  assert.equal(readJson(path.join(runDir(session.slug, session.projectRoot), "state.json")).status, "canceled");
+  assert.equal(readJson(path.join(session.artifactRoot, "assignment", `${session.slug}.json`)).status, "claimed");
+  assert.deepEqual(consumedAuthorizationRecords(session), []);
+
+  const recovered = await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile });
+  assert.equal(recovered.idempotent, true);
+  assert.equal(recovered.assignmentReleased, true);
+  assert.equal(recovered.projection.status, "canceled");
+  assert.equal(consumedAuthorizationRecords(session).length, 1);
+});
+
+test("builder-run exposes lifecycle actions without caller-selected Flow identity", async () => {
+  const session = makeSession("lifecycle-cli");
+  const ambient = resolveCurrentAssignmentActor();
+  performLocalClaim(session.artifactRoot, session.slug, ambient.actor, { actorKey: ambient.actorKey, ttlSeconds: 1800, branch: `agent/${session.slug}`, artifactDir: session.sessionDir, workItemRef: SUBJECT, reason: "test" });
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(await builderRunMain([
+    "pause", "--session-dir", session.sessionDir,
+    "--reason", "cli pause",
+  ]), 0);
+  assert.equal(await builderRunMain([
+    "resume", "--session-dir", session.sessionDir,
+    "--reason", "cli resume",
+  ]), 0);
+  const cliCancel = liveLifecycleAuthorization(session, "cancel", "cli-cancel", { assignment_actor_key: ambient.actorKey, assignment_actor: ambient.actor });
+  assert.equal(await builderRunMain([
+    "cancel", "--session-dir", session.sessionDir,
+    "--authorization-file", cliCancel,
+  ]), 0);
+  assert.equal(readJson(path.join(runDir(session.slug, session.projectRoot), "state.json")).status, "canceled");
+  assert.equal(await builderRunMain([
+    "cancel", "--session-dir", session.sessionDir,
+    "--authorization-file", liveLifecycleAuthorization(session, "cancel", "cli-clock-override", { assignment_actor_key: ambient.actorKey, assignment_actor: ambient.actor }),
+    "--now", "2020-01-01T00:00:00.000Z",
+  ]), 64);
+});
+
 test("automatic start refuses a slug-bound run for another Work Item without mutation", async () => {
   const session = makeSession("start-subject-mismatch");
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -253,6 +644,7 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
 
 test("verified sidecar claims drive the composed publish and learning prefix to completion", async () => {
   const session = makeSession("composed-completion");
+  claimSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
   const steps = [
     [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })],
@@ -296,6 +688,13 @@ test("verified sidecar claims drive the composed publish and learning prefix to 
   assert.equal(recovered.projection.status, "delivered");
   assert.equal(recovered.projection.phase, "done");
   assert.deepEqual(recovered.projection.next_action, { status: "done", summary: "Canonical Flow run is complete." });
+  assert.deepEqual(snapshotTree(flowDirectory), beforeFlow);
+
+  const archived = await archiveBuilderFlowSession({
+    sessionDir: session.sessionDir,
+    authorizationFile: liveLifecycleAuthorization(session, "archive", "completed-archive"),
+  });
+  assert.equal(readJson(path.join(archived.archiveDir, "state.json")).status, "archived");
   assert.deepEqual(snapshotTree(flowDirectory), beforeFlow);
 });
 

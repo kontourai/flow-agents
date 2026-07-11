@@ -5,15 +5,19 @@ import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import {
   attachEvidence,
+  cancelRun,
   evaluateRun,
   expectationsForGate,
   loadRun,
   normalizeTrustBundle,
   openGates,
+  pauseRun,
   readJson,
+  resumeRun,
   startRun,
   validateDefinition,
   type FlowEvidenceEntry,
+  type FlowLifecycleRequest,
   type FlowRunState,
   type GateOutcome,
   type JsonObject,
@@ -65,6 +69,11 @@ export interface EvaluateBuilderBuildRunInput {
 export interface LoadBuilderBuildRunInput {
   runId: string;
   cwd?: string;
+}
+
+export interface ChangeBuilderBuildRunLifecycleInput extends LoadBuilderBuildRunInput {
+  request: FlowLifecycleRequest;
+  at?: string;
 }
 
 export interface BuilderBuildRunResult {
@@ -187,6 +196,44 @@ export async function loadBuilderBuildRun(input: LoadBuilderBuildRunInput): Prom
   const definition = await loadShippedBuilderBuildDefinition(resolveBuilderBuildFlowDefinitionPath());
   assertCanonicalDefinition(input.runId, definition, run.definition);
   return resultFromRun(run, input.runId);
+}
+
+export async function pauseBuilderBuildRun(input: ChangeBuilderBuildRunLifecycleInput): Promise<BuilderBuildRunResult> {
+  return changeBuilderBuildRunLifecycle(input, pauseRun);
+}
+
+export async function resumeBuilderBuildRun(input: ChangeBuilderBuildRunLifecycleInput): Promise<BuilderBuildRunResult> {
+  return changeBuilderBuildRunLifecycle(input, resumeRun);
+}
+
+export async function cancelBuilderBuildRun(input: ChangeBuilderBuildRunLifecycleInput): Promise<BuilderBuildRunResult & { idempotent: boolean }> {
+  const changed = await changeBuilderBuildRunLifecycleResult(input, cancelRun);
+  return { ...resultFromRun(changed, input.runId), idempotent: changed.idempotent };
+}
+
+async function changeBuilderBuildRunLifecycle(
+  input: ChangeBuilderBuildRunLifecycleInput,
+  operation: typeof pauseRun | typeof resumeRun,
+): Promise<BuilderBuildRunResult> {
+  const changed = await changeBuilderBuildRunLifecycleResult(input, operation);
+  return resultFromRun(changed, input.runId);
+}
+
+async function changeBuilderBuildRunLifecycleResult(
+  input: ChangeBuilderBuildRunLifecycleInput,
+  operation: typeof pauseRun | typeof resumeRun | typeof cancelRun,
+) {
+  assertRuntimeInput(input, []);
+  if (!isRecord(input.request)) throw new BuilderBuildRunInputError("request", "must be a lifecycle request object");
+  const cwd = input.cwd ?? process.cwd();
+  const before = await loadBuilderBuildRun({ runId: input.runId, cwd });
+  const changed = await operation(input.runId, { cwd, ...input.request, ...(input.at ? { at: input.at } : {}) });
+  const definition = await loadShippedBuilderBuildDefinition(resolveBuilderBuildFlowDefinitionPath());
+  assertCanonicalDefinition(input.runId, definition, changed.definition);
+  if (changed.state.subject !== before.state.subject) {
+    throw new BuilderBuildRunInputError("flow_run.state.subject", "changed during lifecycle transition");
+  }
+  return changed;
 }
 
 function resultFromRun(run: Awaited<ReturnType<typeof loadRun>>, runId: string): BuilderBuildRunResult {

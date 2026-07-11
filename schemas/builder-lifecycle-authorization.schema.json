@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kontourai.dev/schemas/builder-lifecycle-authorization.schema.json",
+  "title": "Builder Lifecycle Authorization",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "operation", "run_id", "subject", "assignment_actor_key", "assignment_actor", "nonce", "expires_at", "request", "signature"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "operation": { "enum": ["cancel", "archive"] },
+    "run_id": { "type": "string", "minLength": 1 },
+    "subject": { "type": "string", "minLength": 1 },
+    "assignment_actor_key": { "type": "string", "minLength": 1 },
+    "assignment_actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtime", "session_id", "host", "human"],
+      "properties": {
+        "runtime": { "type": "string", "minLength": 1 },
+        "session_id": { "type": "string", "minLength": 1 },
+        "host": { "type": "string", "minLength": 1 },
+        "human": { "type": ["string", "null"] }
+      }
+    },
+    "nonce": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "authority"],
+      "properties": {
+        "reason": { "type": "string", "minLength": 1 },
+        "authority": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "actor", "request_ref", "requested_at"],
+          "properties": {
+            "kind": { "enum": ["user_request", "operator_request"] },
+            "actor": { "type": "string", "minLength": 1 },
+            "request_ref": { "type": "string", "minLength": 1 },
+            "requested_at": { "type": "string", "format": "date-time" }
+          }
+        }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "key_id", "value"],
+      "properties": {
+        "algorithm": { "const": "ed25519" },
+        "key_id": { "type": "string", "minLength": 1 },
+        "value": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

@@ -27,7 +27,7 @@
     },
     "status": {
       "type": "string",
-      "enum": ["new", "planning", "planned", "in_progress", "blocked", "verifying", "verified", "needs_decision", "not_verified", "failed", "delivered", "accepted", "archived"]
+      "enum": ["new", "planning", "planned", "in_progress", "blocked", "verifying", "verified", "needs_decision", "not_verified", "failed", "delivered", "canceled", "accepted", "archived"]
     },
     "phase": {
       "type": "string",
