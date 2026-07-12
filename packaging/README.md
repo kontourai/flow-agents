@@ -25,6 +25,27 @@ All targets also receive shared canonical directories where supported: `context/
 
 `docs/` and `evals/` are intentionally included in generated bundles today. `docs/` gives installed agents durable local reference material, and `evals/` provides install-time and runtime smoke tests for the exported bundle. If bundle size becomes a product constraint, prune these through `packaging/manifest.json` and update install tests rather than deleting generated output by hand.
 
+## Documentation And Instruction Discovery
+
+Every runtime bundle puts generated-source provenance and the complete exported-agent inventory in `README.md`. That content is maintainer documentation, not agent instructions. A shared runtime capability policy separately decides whether a bundle publishes a concise repository instruction file:
+
+| Runtime | Bundle documentation | Repository instruction surface |
+| --- | --- | --- |
+| Base | `README.md` | `AGENTS.md` |
+| Kiro | `README.md` | `AGENTS.md` |
+| Claude Code | `README.md` | `CLAUDE.md` |
+| Codex | `README.md` | None |
+| OpenCode | `README.md` | `AGENTS.md` |
+| pi | `README.md` | `AGENTS.md` |
+
+Instruction files contain only concise operational guidance discoverable by the target harness. They do not contain regeneration advice, packaging provenance, or the exported-agent catalog.
+
+## Repository Instruction Preservation
+
+All generated installers use one preservation policy for repository instructions. An existing `AGENTS.md` or `CLAUDE.md` is repository-owned and is never overwritten or deleted. The installer excludes both paths from synchronization, including Kiro's `rsync --delete` path, and creates a runtime's declared instruction file only when that destination path is absent. This applies equally to direct bundle installation and `flow-agents init`.
+
+The CLI does not own a second instruction policy: `flow-agents init` selects a generated runtime bundle and invokes that bundle's `install.sh`. Changes to discovery or preservation therefore belong in the shared bundle capability and installer generation code, with direct and CLI-mediated fixtures covering the same behavior.
+
 ## Generated And Runtime Boundaries
 
 `dist/` is a generated export surface, not the source of truth. Installed runtime directories such as `.codex/` and `.claude/` are also not source. They are created from the generated target bundle and installer scripts. If generated or installed hook config is wrong, fix the canonical source, rebuild `dist/`, and reinstall the runtime config.
