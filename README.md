@@ -91,7 +91,7 @@ npx @kontourai/flow-agents init --runtime pi --dest /path/to/workspace --yes
 
 For Codex global installs, omit `--dest` and use `--global`: Flow Agents installs into `CODEX_HOME` when it is set, otherwise `~/.codex`. Pass `--dest` only when you intentionally want an isolated or test-specific Codex home.
 
-Runtime auto-detection is best-effort: it first checks environment markers set by the invoking coding agent (e.g. `CLAUDECODE`, `CODEX_SESSION_ID`, `OPENCODE_SESSION_ID`), then falls back to checking whether exactly one of `~/.claude`, `~/.codex` (or `$CODEX_HOME`), or opencode's global config dir already exists. If neither signal is unambiguous, it defaults to `base`. Pass `--runtime` explicitly to override the detected default at any time.
+Runtime auto-detection is best-effort: it first checks environment markers set by the invoking coding agent (e.g. `CLAUDECODE`, Codex's preferred `CODEX_THREAD_ID`, the backward-compatible `CODEX_SESSION_ID`, or `OPENCODE_SESSION_ID`), then falls back to checking whether exactly one of `~/.claude`, `~/.codex` (or `$CODEX_HOME`), or opencode's global config dir already exists. If neither signal is unambiguous, it defaults to `base`. Pass `--runtime` explicitly to override the detected default at any time. Codex thread identifiers are never written into actor keys verbatim; Flow Agents derives a stable, domain-separated opaque token instead.
 
 Working from a checkout (for contributors): `npm install && npm run build`, then `node build/src/cli.js init --dest /path/to/workspace`.
 

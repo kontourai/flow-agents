@@ -275,7 +275,9 @@ function resolveEnsureSessionActor(p: ReturnType<typeof parseArgs>): { actorStru
     die("ensure-session --actor value strips to empty under the allowed actor charset ([A-Za-z0-9_.-]) — pass a value containing at least one letter, digit, underscore, period, or hyphen.");
   }
   const explicitActor = explicitActorRaw ? helper.sanitizeSegment(explicitActorRaw) : "";
-  const resolved = explicitActor ? { actor: explicitActor, source: "explicit-override" } : helper.resolveActor(process.env);
+  const resolved = explicitActor
+    ? { actor: explicitActor, source: "explicit-override", actorStruct: { runtime: "explicit-override", session_id: explicitActor, host: os.hostname() } }
+    : helper.resolveActorIdentity(process.env);
   const unresolved = helper.isUnresolvedActor(resolved.actor);
   const branchActorKey = unresolved ? `unknown-actor-${unknownDisambiguator(resolved.actor)}` : resolved.actor;
 
@@ -286,17 +288,8 @@ function resolveEnsureSessionActor(p: ReturnType<typeof parseArgs>): { actorStru
     return { actorStruct: { runtime: "unresolved", session_id: branchActorKey, host: os.hostname() }, actorKey: resolved.actor, branchActorKey, unresolved: true };
   }
 
-  // #398: the CI-runtime tier must reconstruct the SAME struct resolveActor serialized, or
-  // `serializeActor(actorStruct)` would diverge from `resolved.actor` (the else-branch would rebuild
-  // an ANCESTRY struct — detectRuntime→unknown, runtimeSessionId→'' — so the claim's stored
-  // actor_key would not match the CI actor at publish → self not recognized → false-block, the exact
-  // bug this issue removes). Uses the SAME helper.detectCiActor as resolveActor, single-sourced.
-  const ciActor = resolved.source.startsWith("ci-runtime") ? helper.detectCiActor(process.env) : null;
-  const actorStruct: ActorStruct = resolved.source === "explicit-override"
-    ? { runtime: "explicit-override", session_id: resolved.actor, host: os.hostname() }
-    : ciActor && ciActor.session_id
-      ? { runtime: ciActor.runtime, session_id: ciActor.session_id, host: os.hostname() }
-      : { runtime: helper.detectRuntime(process.env), session_id: helper.runtimeSessionId(process.env) || (() => { const seed = helper.ancestorActorSeed(); return seed ? `anc-${seed}` : ""; })(), host: os.hostname() };
+  if (!resolved.actorStruct) die("ensure-session could not resolve a canonical actor struct");
+  const actorStruct: ActorStruct = resolved.actorStruct;
   const actorKey = helper.serializeActor(actorStruct);
   return { actorStruct, actorKey, branchActorKey, unresolved: false };
 }
@@ -6088,6 +6081,7 @@ export const LIVENESS_TERMINAL = new Set(["delivered", "canceled", "accepted", "
  */
 function loadActorIdentityHelper(): {
   resolveActor: (env: NodeJS.ProcessEnv) => { actor: string; source: string };
+  resolveActorIdentity: (env: NodeJS.ProcessEnv) => { actor: string; source: string; actorStruct: ActorStruct | null };
   sanitizeSegment: (value: unknown) => string;
   isUnresolvedActor: (actor: string) => boolean;
   // #291 Wave 2 Task 2.1: widened (additive only — every existing caller above keeps using only
@@ -6097,22 +6091,15 @@ function loadActorIdentityHelper(): {
   // assignment-claim identity (a DIFFERENT identity concept from the flat actorKey used for
   // branch-naming/liveness — see resolveEnsureSessionActor's doc comment for why both exist).
   serializeActor: (actor: Partial<ActorStruct> | undefined) => string;
-  detectRuntime: (env: NodeJS.ProcessEnv) => string;
-  runtimeSessionId: (env: NodeJS.ProcessEnv) => string;
-  detectCiActor: (env: NodeJS.ProcessEnv) => { runtime: string; session_id: string } | null;
-  ancestorActorSeed: () => string;
 } {
   const _req = createRequire(import.meta.url);
   const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/actor-identity.js");
   return _req(helperPath) as {
     resolveActor: (env: NodeJS.ProcessEnv) => { actor: string; source: string };
+    resolveActorIdentity: (env: NodeJS.ProcessEnv) => { actor: string; source: string; actorStruct: ActorStruct | null };
     sanitizeSegment: (value: unknown) => string;
     isUnresolvedActor: (actor: string) => boolean;
     serializeActor: (actor: Partial<ActorStruct> | undefined) => string;
-    detectRuntime: (env: NodeJS.ProcessEnv) => string;
-    runtimeSessionId: (env: NodeJS.ProcessEnv) => string;
-    detectCiActor: (env: NodeJS.ProcessEnv) => { runtime: string; session_id: string } | null;
-    ancestorActorSeed: () => string;
   };
 }
 function resolveLivenessActor(): string {

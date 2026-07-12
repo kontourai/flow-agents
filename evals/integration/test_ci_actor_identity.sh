@@ -60,7 +60,7 @@ process.stdout.write(process.argv[2] === "source" ? r.source : r.actor);
 verify_hold_under_ci() {
   local dir="$1"; shift
   (
-    unset FLOW_AGENTS_ACTOR CLAUDE_CODE_SESSION_ID CODEX_SESSION_ID OPENCODE_SESSION_ID PI_SESSION_ID CLAUDECODE
+    unset FLOW_AGENTS_ACTOR CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID CODEX_SESSION_ID OPENCODE_SESSION_ID PI_SESSION_ID CLAUDECODE
     while [[ $# -gt 0 ]]; do export "${1?}"; shift; done
     flow_agents_node "$WRITER" verify-hold "$dir"
   )
@@ -150,7 +150,7 @@ CLI="$ROOT/build/src/cli.js"
 RT_ROOT="$TMPDIR_EVAL/rt-artifact-root"
 RT_SLUG="ci-roundtrip"
 (
-  unset FLOW_AGENTS_ACTOR CLAUDE_CODE_SESSION_ID CODEX_SESSION_ID OPENCODE_SESSION_ID PI_SESSION_ID CLAUDECODE
+  unset FLOW_AGENTS_ACTOR CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID CODEX_SESSION_ID OPENCODE_SESSION_ID PI_SESSION_ID CLAUDECODE
   export "${GHA[@]}"
   node "$CLI" assignment-provider claim --provider local-file --artifact-root "$RT_ROOT" \
     --subject-id "$RT_SLUG" --branch main --artifact-dir "$RT_SLUG"

@@ -245,6 +245,69 @@ else
   _fail "resolveActor did not honor a deliberate literal FLOW_AGENTS_ACTOR=unknown override"
 fi
 
+# 11 (#554). CODEX_THREAD_ID is the preferred native Codex signal. Its raw value must never
+# become durable actor text: it is transformed into a stable, domain-separated 96-bit token.
+if node - "$MODULE" <<'NODE'
+const path = process.argv[2];
+const { detectRuntime, runtimeSessionId, resolveActor, resolveActorIdentity, serializeActor } = require(path);
+const rawA = "thread:private/value\nwith-control";
+const rawB = "thread:other-private-value";
+const envA = { CODEX_THREAD_ID: rawA, CODEX_SESSION_ID: "legacy-must-lose" };
+if (detectRuntime(envA) !== "codex") throw new Error("CODEX_THREAD_ID did not detect codex");
+if (runtimeSessionId(envA) !== rawA) throw new Error("CODEX_THREAD_ID did not win ordered priority");
+if (runtimeSessionId({ CODEX_SESSION_ID: "legacy-ok" }) !== "legacy-ok") throw new Error("legacy CODEX_SESSION_ID stopped working");
+const first = resolveActor(envA);
+const repeat = resolveActor(envA);
+const distinct = resolveActor({ CODEX_THREAD_ID: rawB });
+const identity = resolveActorIdentity(envA);
+if (JSON.stringify(first) !== JSON.stringify(repeat)) throw new Error("same thread was unstable");
+if (first.actor === distinct.actor) throw new Error("distinct threads collided");
+if (first.source !== "runtime-session-id:codex") throw new Error(`wrong source: ${JSON.stringify(first)}`);
+if (!identity.actorStruct || identity.actor !== serializeActor(identity.actorStruct)) throw new Error("canonical actor struct/key diverged");
+if (identity.actorStruct.session_id.includes("private")) throw new Error("raw id leaked through canonical actor struct");
+if (!/^codex:thread-[a-f0-9]{24}:[A-Za-z0-9_.-]+$/.test(first.actor)) throw new Error(`unsafe actor shape: ${JSON.stringify(first)}`);
+if (first.actor.includes(rawA) || first.actor.includes("private") || first.actor.includes("legacy-must-lose")) throw new Error("raw native id leaked");
+NODE
+then
+  _pass "CODEX_THREAD_ID yields a stable, distinct, privacy-safe Codex actor and wins over the legacy signal"
+else
+  _fail "CODEX_THREAD_ID native identity contract failed"
+fi
+
+# 12 (#554). Ancestry is explicitly classified in its display string but remains unstable by source.
+if node - "$MODULE" <<'NODE'
+const path = process.argv[2];
+const { resolveActorIdentity, serializeActor } = require(path);
+const out = resolveActorIdentity({});
+if (!out || out.source !== "process-ancestry") throw new Error(`wrong fallback source: ${JSON.stringify(out)}`);
+if (!out.actor.startsWith("process-ancestry:anc-")) throw new Error(`fallback remains misleading: ${JSON.stringify(out)}`);
+if (out.actor.startsWith("unknown:anc-")) throw new Error(`legacy fallback still emitted: ${JSON.stringify(out)}`);
+if (!out.actorStruct || out.actorStruct.runtime !== "process-ancestry" || out.actor !== serializeActor(out.actorStruct)) throw new Error(`fallback struct/key diverged: ${JSON.stringify(out)}`);
+NODE
+then
+  _pass "ancestry fallback is explicitly labeled process-ancestry without changing its source classification"
+else
+  _fail "ancestry fallback label/source contract failed"
+fi
+
+# 13 (#554). Historical actor values remain opaque and readable; no alias/schema rewrite is needed.
+if node - "$ROOT/scripts/hooks/lib/liveness-read.js" <<'NODE'
+const { freshHolders } = require(process.argv[2]);
+const legacy = "unknown:anc-eabf4cb9ef38:old-host";
+const at = "2026-07-11T12:00:00.000Z";
+const events = [{ type: "claim", subjectId: "legacy-work", actor: legacy, at, ttlSeconds: 1800 }];
+const foreign = freshHolders(events, "legacy-work", "new-self", Date.parse(at) + 1000);
+const self = freshHolders(events, "legacy-work", legacy, Date.parse(at) + 1000);
+if (foreign.length !== 1 || foreign[0].actor !== legacy) throw new Error(`legacy record unreadable: ${JSON.stringify(foreign)}`);
+if (self.length !== 0) throw new Error(`legacy self-filter failed: ${JSON.stringify(self)}`);
+if (events[0].actor !== legacy || Object.prototype.hasOwnProperty.call(events[0], "actor_key")) throw new Error("legacy record was mutated");
+NODE
+then
+  _pass "legacy unknown:anc-* records remain readable, self-filterable, and unmodified"
+else
+  _fail "legacy unknown:anc-* compatibility failed"
+fi
+
 if [[ "$errors" -eq 0 ]]; then
   echo "Actor identity resolver integration passed."
   exit 0

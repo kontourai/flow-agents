@@ -268,6 +268,40 @@ fi
 [[ "$(json_query "$TMPDIR_EVAL/status-race.json" "assignment.assignee")" == "$EXPECTED_RACE_HOLDER" ]] && pass "on-disk record holder matches the process that actually exited 0 (no silent overwrite by the loser)" || fail "on-disk record holder matches the process that actually exited 0 (no silent overwrite by the loser)"
 
 echo ""
+
+# 8. #554: auto-derived Codex identity persists only the canonical privacy-safe struct/key.
+CODEX_ROOT="$TMPDIR_EVAL/codex-artifact-root"
+CODEX_SUBJECT="codex-private-identity"
+CODEX_RAW='PRIVATE-SENTINEL:thread/value-with-punctuation'
+CODEX_THREAD_ID="$CODEX_RAW" CODEX_SESSION_ID= node "$CLI" assignment-provider claim \
+  --provider local-file --artifact-root "$CODEX_ROOT" --subject-id "$CODEX_SUBJECT" \
+  --branch agent/codex-private --artifact-dir .kontourai/flow-agents/codex-private \
+  >"$TMPDIR_EVAL/codex-claim.json" 2>"$TMPDIR_EVAL/codex-claim.err"
+CODEX_RECORD="$CODEX_ROOT/assignment/$CODEX_SUBJECT.json"
+if node - "$CODEX_RECORD" "$ROOT/scripts/hooks/lib/actor-identity.js" <<'NODE'
+const fs = require('fs');
+const record = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const { serializeActor } = require(process.argv[3]);
+if (record.actor.runtime !== 'codex') throw new Error('wrong runtime');
+if (!/^thread-[a-f0-9]{24}$/.test(record.actor.session_id)) throw new Error('unsafe session token');
+if (record.actor_key !== serializeActor(record.actor)) throw new Error('actor_key differs from stored actor');
+NODE
+then pass "Codex assignment record stores one canonical privacy-safe struct/key"
+else fail "Codex assignment record did not store the canonical privacy-safe struct/key"
+fi
+if rg -qF 'PRIVATE-SENTINEL' "$CODEX_ROOT" "$TMPDIR_EVAL/codex-claim.json" "$TMPDIR_EVAL/codex-claim.err"; then
+  fail "raw CODEX_THREAD_ID sentinel leaked into assignment artifacts or command output"
+else
+  pass "raw CODEX_THREAD_ID sentinel is absent from the complete assignment artifact/output set"
+fi
+CODEX_KEY="$(json_query "$CODEX_RECORD" "actor_key")"
+CODEX_THREAD_ID="$CODEX_RAW" CODEX_SESSION_ID= node "$CLI" assignment-provider status \
+  --provider local-file --artifact-root "$CODEX_ROOT" --subject-id "$CODEX_SUBJECT" \
+  --liveness-events-json <(echo '[]') --self-actor "$CODEX_KEY" >"$TMPDIR_EVAL/codex-status.json"
+[[ "$(json_query "$TMPDIR_EVAL/codex-status.json" "effective.reason")" == "self_is_holder" ]] \
+  && pass "subsequent assignment status recognizes the canonical Codex actor as self" \
+  || fail "subsequent assignment status did not recognize the canonical Codex actor as self"
+
 if [[ "$errors" -eq 0 ]]; then
   echo "test_assignment_provider_local_file: all checks passed."
 else
