@@ -152,7 +152,7 @@
     "@kontourai/flow": "^3.1.4"
   },
   "optionalDependencies": {
-    "@kontourai/surface": "^2.0.0",
+    "@kontourai/surface": "^2.4.0",
     "hachure": "^0.9.0",
     "neo4j-driver": "^5.28.0"
   }
