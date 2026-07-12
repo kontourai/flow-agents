@@ -113,7 +113,7 @@ prompting. Add `--allow-network` to probe a non-local HTTPS Console endpoint.
 
 ## Install And Repo Utilities
 
-- `install-codex-home.sh`: installs the generated Codex bundle into `CODEX_HOME`, or `~/.codex` when `CODEX_HOME` is unset. A positional destination argument is the explicit override for isolated homes and tests.
+- `install-codex-home.sh`: installs Codex runtime assets into `CODEX_HOME` (or `~/.codex`) and portable skills into `$HOME/.agents/skills`. Use `--skills-dir PATH` or `FLOW_AGENTS_SKILLS_DIR` to select a hermetic or advanced-user skill catalog independently of the positional runtime destination. The installer reports both resolved roots, preserves user-owned files, migrates only unchanged Flow Agents-owned legacy skills, and refuses symlink destinations rather than creating a compatibility symlink.
 - `setup-repo-hooks.sh`: configures this clone's Git hook path.
 - `check-content-boundary.cjs`, `detect-tools.sh`, `discover-agents.sh`, `git-status.sh`: repo-local helper commands.
 - `context-budget/` and `statusline/`: specialized support tooling copied into bundles where needed.

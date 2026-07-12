@@ -9,10 +9,24 @@ function fail(message) {
   process.exit(1);
 }
 
-const [sourceArg, destArg, manifestArg] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const checkOnly = args[0] === "--check";
+if (checkOnly) args.shift();
+const [sourceArg, destArg, manifestArg] = args;
 if (!sourceArg || !destArg || !manifestArg) fail("usage: install-owned-files.js <overlay> <destination> <manifest-relative-path>");
 const source = fs.realpathSync(sourceArg);
-const dest = fs.realpathSync(destArg);
+function canonicalizeMissing(value) {
+  let current = path.resolve(value);
+  const missing = [];
+  while (!fs.existsSync(current)) {
+    missing.unshift(path.basename(current));
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return path.resolve(fs.realpathSync(current), ...missing);
+}
+const dest = canonicalizeMissing(destArg);
 const manifestPath = path.join(dest, manifestArg);
 
 function hashFile(file) {
@@ -131,6 +145,8 @@ for (const [rel] of previous) {
   ensureSafeParent(target, false);
   if (fs.existsSync(target) && fs.lstatSync(target).isSymbolicLink()) fail(`refusing to remove symlink replacing owned file: ${target}`);
 }
+
+if (checkOnly) process.exit(0);
 
 for (const entry of incoming) {
   const target = targetFor(entry.rel);

@@ -10,7 +10,7 @@ pass=0
 fail=0
 
 cleanup() {
-  rm -rf "$REPRO_FIRST_DIR" "$REPRO_SECOND_DIR" "$ROOT_DIR/kits/zzz-collision-eval-probe"
+  rm -rf "$REPRO_FIRST_DIR" "$REPRO_SECOND_DIR" "$ROOT_DIR/kits/zzz-collision-eval-probe" "${MISSING_SKILL_DIR:-}"
 }
 trap cleanup EXIT
 
@@ -64,6 +64,49 @@ for dir in "$DIST_DIR/kiro" "$DIST_DIR/claude-code" "$DIST_DIR/codex" "$DIST_DIR
     _fail "$(basename "$dir") bundle missing"
   fi
 done
+
+if [[ -d "$DIST_DIR/codex/.agents/skills/plan-work" && ! -e "$DIST_DIR/codex/.codex/skills" ]]; then
+  _pass "Codex exports portable skills only in the universal .agents catalog"
+else
+  _fail "Codex portable skills are not rooted exclusively at .agents/skills"
+fi
+
+if node - "$DIST_DIR/codex/.agents/skills" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const root = process.argv[2];
+const pattern = /(?:^|[`("'\s])(context\/contracts\/[A-Za-z0-9._/-]+\.md)(?=$|[`),"'\s])/gm;
+for (const name of fs.readdirSync(root)) {
+  const skill = path.join(root, name);
+  const file = path.join(skill, "SKILL.md");
+  if (!fs.existsSync(file)) continue;
+  for (const match of fs.readFileSync(file, "utf8").matchAll(pattern)) {
+    const resolved = path.resolve(skill, match[1]);
+    if (!resolved.startsWith(`${path.resolve(skill)}${path.sep}`) || !fs.existsSync(resolved)) throw new Error(`${name}: ${match[1]}`);
+  }
+}
+NODE
+then
+  _pass "Codex skill-local instruction resources resolve inside each package"
+else
+  _fail "Codex skill-local instruction resource closure failed"
+fi
+
+MISSING_SKILL_DIR="$ROOT_DIR/${SKILLS_SEGMENT:-skills}/zzz-missing-resource-probe"
+MISSING_CONTRACT="${CONTEXT_SEGMENT:-context}/contracts/definitely-missing.md"
+mkdir -p "$MISSING_SKILL_DIR"
+printf '%s\n' '# Probe' '' "Read \`$MISSING_CONTRACT\`." > "$MISSING_SKILL_DIR/SKILL.md"
+if (cd "$ROOT_DIR" && npm run build:bundles >/tmp/missing-skill-resource.stdout 2>/tmp/missing-skill-resource.stderr); then
+  _fail "bundle generation accepted a missing skill instruction resource"
+else
+  if rg -q "skill 'zzz-missing-resource-probe': missing local resource '$MISSING_CONTRACT'" /tmp/missing-skill-resource.stderr; then
+    _pass "bundle generation rejects missing skill resources with actionable diagnostics"
+  else
+    _fail "missing skill resource failure did not name its skill and path"
+  fi
+fi
+rm -rf "$MISSING_SKILL_DIR"
+(cd "$ROOT_DIR" && npm run build:bundles >/dev/null)
 
 source_agents=$(find "$ROOT_DIR/agents" -maxdepth 1 -name '*.json' | wc -l | tr -d ' ')
 codex_excluded_agents=$(node - "$ROOT_DIR/packaging/manifest.json" <<'NODE'

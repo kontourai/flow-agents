@@ -19,7 +19,7 @@ For the full source/generated/runtime inventory, see [Repository Structure](../d
 
 - `dist/kiro/` keeps native Kiro JSON agents and rewrites path-bound config through the install token.
 - `dist/claude-code/` exports `.claude/agents/*.md` and `.claude/skills/*/SKILL.md`.
-- `dist/codex/` exports `.codex/agents/*.toml`, `.codex/skills/*/SKILL.md`, and generated profile config for operating intents such as `builder` and `personal`.
+- `dist/codex/` exports Codex-only agents and profiles beneath `.codex/`, and portable, self-contained skills beneath the universal `.agents/skills/` catalog.
 
 All targets also receive shared canonical directories where supported: `context/`, `powers/`, `prompts/`, `scripts/`, and `evals/`.
 

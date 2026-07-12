@@ -133,6 +133,54 @@ function copyTree(src: string, dest: string, target: string, rootReplacement: st
   }
 }
 
+const skillResourcePattern = /(?:^|[`("'\s])(context\/contracts\/[A-Za-z0-9._/-]+\.md)(?=$|[`),"'\s])/gm;
+
+/** Export a skill as a self-contained package. Shared instruction resources
+ * retain the relative paths used by SKILL.md so runtime resolution is local. */
+function exportSkillPackage(src: string, dest: string, target: string): void {
+  const sourceDir = path.dirname(src);
+  copyTree(sourceDir, dest, target, "<bundle-root>");
+  const skillText = readText(src);
+  const resources = new Set<string>();
+  for (const match of skillText.matchAll(skillResourcePattern)) resources.add(match[1]);
+  for (const rel of [...resources].sort()) {
+    if (path.isAbsolute(rel) || rel.split("/").includes("..")) {
+      throw new Error(`skill '${path.basename(sourceDir)}': unsafe local resource '${rel}'`);
+    }
+    const source = path.resolve(root, rel);
+    const output = path.resolve(dest, rel);
+    if (!source.startsWith(`${path.resolve(root)}${path.sep}`) || !output.startsWith(`${path.resolve(dest)}${path.sep}`)) {
+      throw new Error(`skill '${path.basename(sourceDir)}': local resource escapes package '${rel}'`);
+    }
+    if (!fs.existsSync(source) || !fs.statSync(source).isFile()) {
+      throw new Error(`skill '${path.basename(sourceDir)}': missing local resource '${rel}'`);
+    }
+    if (fs.existsSync(output)) {
+      const existing = fs.readFileSync(output);
+      const incoming = fs.readFileSync(source);
+      if (!existing.equals(incoming)) throw new Error(`skill '${path.basename(sourceDir)}': resource collision '${rel}'`);
+      continue;
+    }
+    writeText(output, sanitizeText(readText(source), target, "<bundle-root>"));
+  }
+}
+
+function validateExportedSkillPackages(skillsRoot: string): void {
+  if (!fs.existsSync(skillsRoot)) return;
+  for (const skillName of fs.readdirSync(skillsRoot).sort()) {
+    const skillDir = path.join(skillsRoot, skillName);
+    const skillFile = path.join(skillDir, "SKILL.md");
+    if (!fs.existsSync(skillFile)) continue;
+    for (const match of readText(skillFile).matchAll(skillResourcePattern)) {
+      const rel = match[1];
+      const resolved = path.resolve(skillDir, rel);
+      if (!resolved.startsWith(`${path.resolve(skillDir)}${path.sep}`) || !fs.existsSync(resolved)) {
+        throw new Error(`skill '${skillName}': unresolved exported resource '${rel}'`);
+      }
+    }
+  }
+}
+
 function resolveSourcePath(pathText: string): string {
   let normalized = pathText;
   for (const alias of manifest.source_root_aliases) normalized = normalized.split(alias).join(root);
@@ -440,9 +488,9 @@ function buildCodex(agents: Agent[]): void {
   for (const [profileName, profile] of Object.entries(manifest.codex.profiles ?? {})) writeText(path.join(bundle, ".codex", `${profileName}.config.toml`), exportCodexProfileConfig(profile as Record<string, unknown>, settings));
   writeText(path.join(bundle, ".codex/hooks.json"), exportCodexHooks());
   for (const spec of targetAgents) writeText(path.join(bundle, ".codex/agents", `${spec.name}.toml`), exportCodexAgent(spec));
-  for (const { name, src } of collectAllSkills()) {
-    writeText(path.join(bundle, ".codex/skills", name, "SKILL.md"), sanitizeText(readText(src), "codex", "<bundle-root>"));
-  }
+  const skillsRoot = path.join(bundle, ".agents/skills");
+  for (const { name, src } of collectAllSkills()) exportSkillPackage(src, path.join(skillsRoot, name), "codex");
+  validateExportedSkillPackages(skillsRoot);
   writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Codex", targetAgents, manifest.codex.task_dir));
   writeText(path.join(bundle, "README.md"), exportTargetReadme("Codex", "bash install.sh /path/to/workspace", CODEX_LIVE_HOOKS_README));
   writeText(path.join(bundle, "install.sh"), installScript("Codex", "/path/to/workspace", undefined, undefined, { configRelPath: ".codex/hooks.json", managedConfigRelPath: ".codex/hooks.json", runtime: "codex", version: pkgVersion }));

@@ -16,14 +16,21 @@ Options:
   --console-token-file PATH
                           Read Console telemetry bearer token from a file.
   --console-tenant ID     Persist Console tenant identifier.
+  --skills-dir PATH       Install portable skills here (default: $HOME/.agents/skills).
 EOF
 }
 
 DEST="${CODEX_HOME:-$HOME/.codex}"
+SKILLS_DIR="${FLOW_AGENTS_SKILLS_DIR:-$HOME/.agents/skills}"
 DEST_SET=0
 CONSOLE_CONFIG_ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --skills-dir)
+      [[ $# -ge 2 ]] || { echo "install-codex-home.sh: $1 requires a value" >&2; exit 2; }
+      SKILLS_DIR="$2"
+      shift 2
+      ;;
     --telemetry-sink|--telemetry-sinks|--console-url|--console-endpoint|--console-endpoint-url|--console-token-file|--console-tenant|--console-tenant-id)
       [[ $# -ge 2 ]] || { echo "install-codex-home.sh: $1 requires a value" >&2; exit 2; }
       CONSOLE_CONFIG_ARGS+=("$1" "$2")
@@ -69,9 +76,26 @@ NODE
 }
 
 [[ ! -L "$DEST" ]] || { echo "install-codex-home.sh: refusing symlink destination root: $DEST" >&2; exit 1; }
+[[ ! -L "$SKILLS_DIR" ]] || { echo "install-codex-home.sh: refusing symlink skills destination root: $SKILLS_DIR" >&2; exit 1; }
 ROOT_REAL="$(canonicalize_path "$ROOT_DIR")"
 BUNDLE_SOURCE_REAL="$(canonicalize_path "$ROOT_DIR/dist/codex")"
 DEST_REAL="$(canonicalize_path "$DEST")"
+SKILLS_DIR_REAL="$(canonicalize_path "$SKILLS_DIR")"
+if ! node - "$SKILLS_DIR" <<'NODE'
+const fs = require("node:fs"); const path = require("node:path");
+const absolute = path.resolve(process.argv[2]);
+let current = path.parse(absolute).root;
+for (const part of absolute.slice(current.length).split(path.sep).filter(Boolean)) {
+  current = path.join(current, part);
+  // macOS exposes /tmp as the system-managed /private/tmp symlink. Treat that
+  // mount alias as trusted while rejecting caller-controlled components.
+  if (current !== "/tmp" && fs.existsSync(current) && fs.lstatSync(current).isSymbolicLink()) process.exit(1);
+}
+NODE
+then
+  echo "install-codex-home.sh: refusing symlink component in skills destination: $SKILLS_DIR" >&2
+  exit 1
+fi
 REAL_CODEX_HOME_REAL="$(canonicalize_path "$REAL_CODEX_HOME")"
 case "$DEST_REAL/" in
   "$ROOT_REAL/"*|"$BUNDLE_SOURCE_REAL/"*)
@@ -85,6 +109,17 @@ case "$ROOT_REAL/" in
     exit 1
     ;;
 esac
+case "$SKILLS_DIR_REAL/" in
+  "$ROOT_REAL/"*|"$BUNDLE_SOURCE_REAL/"*) echo "install-codex-home.sh: skills destination overlaps Flow Agents source: $SKILLS_DIR_REAL" >&2; exit 1 ;;
+esac
+case "$ROOT_REAL/" in
+  "$SKILLS_DIR_REAL/"*) echo "install-codex-home.sh: Flow Agents source overlaps skills destination: $SKILLS_DIR_REAL" >&2; exit 1 ;;
+esac
+case "$BUNDLE_SOURCE_REAL/" in
+  "$SKILLS_DIR_REAL/"*) echo "install-codex-home.sh: generated bundle source overlaps skills destination: $SKILLS_DIR_REAL" >&2; exit 1 ;;
+esac
+SKILLS_PATH_ROOT="$(node -e 'process.stdout.write(require("node:path").parse(process.argv[1]).root)' "$SKILLS_DIR_REAL")"
+[[ "$SKILLS_DIR_REAL" != "$SKILLS_PATH_ROOT" ]] || { echo "install-codex-home.sh: refusing filesystem-root skills destination: $SKILLS_DIR_REAL" >&2; exit 1; }
 
 if command -v npm >/dev/null 2>&1; then
   (cd "$ROOT_DIR" && FLOW_AGENTS_EXPORT_DIAGNOSTICS=0 npm run build:bundles --silent >/dev/null)
@@ -92,10 +127,6 @@ else
   echo "install-codex-home.sh: requires npm on PATH" >&2
   exit 1
 fi
-
-mkdir -p "$DEST"
-DEST="$(cd "$DEST" && pwd -P)"
-DEST_REAL="$DEST"
 
 assert_safe_dest_path() {
   local rel="$1"
@@ -122,22 +153,17 @@ assert_safe_dest_path() {
   esac
 }
 
-# Stash the user's existing hooks.json (if any), so the merge step below can
-# preserve user hooks across installs while replacing Flow Agents-managed groups.
 FA_USER_HOOKS_STASH=""
-assert_safe_dest_path "hooks.json"
-if [[ -f "$DEST/hooks.json" ]]; then
-  FA_USER_HOOKS_STASH="$(mktemp /tmp/fa-user-hooks.XXXXXX.json)"
-  cp "$DEST/hooks.json" "$FA_USER_HOOKS_STASH"
-fi
 
 # A real Codex home can contain user-owned files in every shared directory.
 # Prepare an exact Flow Agents overlay, then synchronize only files recorded in
 # the ownership manifest. The synchronizer never uses directory-wide --delete:
 # it removes only unchanged files from its prior manifest and refuses collisions.
 FA_OWNED_OVERLAY="$(mktemp -d /tmp/fa-codex-overlay.XXXXXX)"
+FA_SKILLS_OVERLAY="$(mktemp -d /tmp/fa-codex-skills-overlay.XXXXXX)"
 cleanup_install_temps() {
   rm -rf "$FA_OWNED_OVERLAY"
+  rm -rf "$FA_SKILLS_OVERLAY"
   [[ -z "${FA_USER_HOOKS_STASH:-}" ]] || rm -f "$FA_USER_HOOKS_STASH"
 }
 trap cleanup_install_temps EXIT
@@ -157,22 +183,14 @@ for managed_dir in \
   scripts
 do
   if [[ -d "$ROOT_DIR/dist/codex/$managed_dir" ]]; then
-    assert_safe_dest_path "$managed_dir"
     mkdir -p "$FA_OWNED_OVERLAY/$managed_dir"
     rsync -a "$ROOT_DIR/dist/codex/$managed_dir/" "$FA_OWNED_OVERLAY/$managed_dir/"
   fi
 done
 
-# Skills are user-extensible in a real Codex home. Merge both bundle skill
-# layers into the flattened destination without deleting user-owned skills.
-if [[ -d "$ROOT_DIR/dist/codex/skills" ]]; then
-  mkdir -p "$FA_OWNED_OVERLAY/skills"
-  rsync -a "$ROOT_DIR/dist/codex/skills/" "$FA_OWNED_OVERLAY/skills/"
-fi
-
-if [[ -d "$ROOT_DIR/dist/codex/.codex/skills" ]]; then
-  mkdir -p "$FA_OWNED_OVERLAY/skills"
-  rsync -a "$ROOT_DIR/dist/codex/.codex/skills/" "$FA_OWNED_OVERLAY/skills/"
+# Portable skills use Codex's universal catalog, independently of CODEX_HOME.
+if [[ -d "$ROOT_DIR/dist/codex/.agents/skills" ]]; then
+  rsync -a "$ROOT_DIR/dist/codex/.agents/skills/" "$FA_SKILLS_OVERLAY/"
 fi
 
 if [[ -d "$ROOT_DIR/dist/codex/kits" ]]; then
@@ -193,9 +211,30 @@ for bundle_file in README.md console.telemetry.json install.sh; do
   fi
 done
 
-assert_safe_dest_path ".flow-agents/codex-install-manifest.json"
+# Check both destinations with the exact synchronizer before either can mutate.
+node "$ROOT_DIR/scripts/install-owned-files.js" \
+  --check "$FA_SKILLS_OVERLAY" "$SKILLS_DIR_REAL" ".flow-agents/codex-universal-skills-install-manifest.json"
+node "$ROOT_DIR/scripts/install-owned-files.js" \
+  --check "$FA_OWNED_OVERLAY" "$DEST_REAL" ".flow-agents/codex-install-manifest.json"
+
+mkdir -p "$SKILLS_DIR"
+SKILLS_DIR="$(cd "$SKILLS_DIR" && pwd -P)"
+node "$ROOT_DIR/scripts/install-owned-files.js" \
+  "$FA_SKILLS_OVERLAY" "$SKILLS_DIR" ".flow-agents/codex-universal-skills-install-manifest.json"
+
+mkdir -p "$DEST"
+DEST="$(cd "$DEST" && pwd -P)"
+DEST_REAL="$DEST"
 node "$ROOT_DIR/scripts/install-owned-files.js" \
   "$FA_OWNED_OVERLAY" "$DEST" ".flow-agents/codex-install-manifest.json"
+
+# Stash the user's existing hooks.json (if any), so the merge step below can
+# preserve user hooks across installs while replacing Flow Agents-managed groups.
+assert_safe_dest_path "hooks.json"
+if [[ -f "$DEST/hooks.json" ]]; then
+  FA_USER_HOOKS_STASH="$(mktemp /tmp/fa-user-hooks.XXXXXX.json)"
+  cp "$DEST/hooks.json" "$FA_USER_HOOKS_STASH"
+fi
 
 atomic_copy() {
   local source="$1"
@@ -289,6 +328,7 @@ if [[ ${#CONSOLE_CONFIG_ARGS[@]} -gt 0 || -n "${FLOW_AGENTS_TELEMETRY_SINK:-}" |
 fi
 
 echo "Installed Flow Agents into Codex home at $DEST"
+echo "Installed portable skills at $SKILLS_DIR"
 if [[ "${#profile_names[@]}" -gt 0 ]]; then
   echo "Profiles: ${profile_names[*]}"
 fi

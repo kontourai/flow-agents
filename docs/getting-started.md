@@ -30,7 +30,15 @@ For a normal Codex global install, target the Codex home instead of a project wo
 npx @kontourai/flow-agents init --runtime codex --global --activate-kits --yes
 ```
 
-That installs into `CODEX_HOME` when it is set, otherwise `~/.codex`. Use `--dest /path/to/codex-home` only when you need an explicit override for an isolated install, CI fixture, or test.
+That splits installation by ownership: Codex-only runtime assets go into `CODEX_HOME` when set (otherwise `~/.codex`), while portable skills go into Codex's documented user catalog at `$HOME/.agents/skills`. A repository bundle install similarly exposes skills at `<repo>/.agents/skills`.
+
+Pass a positional runtime destination and `--skills-dir PATH` when both roots must be isolated, or set `FLOW_AGENTS_SKILLS_DIR` for headless environments:
+
+```bash
+bash scripts/install-codex-home.sh /tmp/codex-home --skills-dir /tmp/agents/skills
+```
+
+Installer output reports both destinations. Reinstall preserves unknown user skills and migrates only unchanged Flow Agents-owned files from the former `CODEX_HOME/skills` layout; modified legacy content is retained. Flow Agents intentionally does not create a compatibility symlink because the Codex runtime home must not own or mask a universal user catalog, and the installer refuses to write through symlinked destinations.
 
 Keep generated Codex base config lean. Put profile-specific model, provider, and approval settings in separate `<profile>.config.toml` files and select them with `codex --profile <name>`.
 

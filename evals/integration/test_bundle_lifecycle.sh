@@ -164,7 +164,7 @@ OPENCODE_UPGRADE="$TMPDIR_EVAL/upgrade-opencode"
 # Touch a marker into skill files in the COPIES (not dist/ originals)
 UPGRADE_MARKER="# flow-agents-upgrade-test-marker"
 CLAUDE_SKILL_FILE="$CLAUDE_BUNDLE_COPY/.claude/skills/plan-work/SKILL.md"
-CODEX_SKILL_FILE="$CODEX_BUNDLE_COPY/.codex/skills/plan-work/SKILL.md"
+CODEX_SKILL_FILE="$CODEX_BUNDLE_COPY/.agents/skills/plan-work/SKILL.md"
 OPENCODE_SKILL_FILE="$OPENCODE_BUNDLE_COPY/.opencode/skills/plan-work/SKILL.md"
 
 if [[ -f "$CLAUDE_SKILL_FILE" ]]; then
@@ -191,12 +191,10 @@ else
   _fail "claude-code upgrade: skill change did not propagate to workspace"
 fi
 
-if [[ -f "$CODEX_SKILL_FILE" ]] && grep -qF "$UPGRADE_MARKER" "$CODEX_UPGRADE/.codex/skills/plan-work/SKILL.md" 2>/dev/null; then
+if [[ -f "$CODEX_SKILL_FILE" ]] && grep -qF "$UPGRADE_MARKER" "$CODEX_UPGRADE/.agents/skills/plan-work/SKILL.md" 2>/dev/null; then
   _pass "codex upgrade: modified skill file propagated to workspace"
-elif [[ ! -f "$CODEX_SKILL_FILE" ]]; then
-  _pass "codex upgrade: skill file not in bundle (skipped)"
 else
-  _fail "codex upgrade: skill change did not propagate to workspace"
+  _fail "codex upgrade: required universal skill missing or change did not propagate"
 fi
 
 if [[ -f "$OPENCODE_SKILL_FILE" ]] && grep -qF "$UPGRADE_MARKER" "$OPENCODE_UPGRADE/.opencode/skills/plan-work/SKILL.md" 2>/dev/null; then
@@ -246,7 +244,7 @@ echo '{"custom":"data"}' > "$OPENCODE_USER/.kontourai/flow-agents/my-session/sta
 
 # Modify an installed skill file to simulate user edits
 CLAUDE_INSTALLED_SKILL="$CLAUDE_USER/.claude/skills/plan-work/SKILL.md"
-CODEX_INSTALLED_SKILL="$CODEX_USER/.codex/skills/plan-work/SKILL.md"
+CODEX_INSTALLED_SKILL="$CODEX_USER/.agents/skills/plan-work/SKILL.md"
 OPENCODE_INSTALLED_SKILL="$OPENCODE_USER/.opencode/skills/plan-work/SKILL.md"
 
 USER_EDIT_MARKER="# USER EDIT - should be overwritten by re-install"
