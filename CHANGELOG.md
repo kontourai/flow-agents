@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.8.0](https://github.com/kontourai/flow-agents/compare/v3.7.0...v3.8.0) (2026-07-12)
+
+
+### Features
+
+* **packaging:** install portable skills under .agents ([#551](https://github.com/kontourai/flow-agents/issues/551)) ([12f12e3](https://github.com/kontourai/flow-agents/commit/12f12e3d0a32b398e47a9ac01604179c58bf14ba))
+
+
+### Fixes
+
+* **builder:** make gate evidence sync visit-safe ([#558](https://github.com/kontourai/flow-agents/issues/558)) ([1c0e8dc](https://github.com/kontourai/flow-agents/commit/1c0e8dcea6bdfd7d54484f950b2432fcf727b0ea))
+
 ## [3.7.0](https://github.com/kontourai/flow-agents/compare/v3.6.0...v3.7.0) (2026-07-12)
 
 
