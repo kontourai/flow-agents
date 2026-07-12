@@ -388,7 +388,7 @@ mkdir -p "$UNSTABLE_DIR"
 # (a) Unstable current actor: unset the explicit override, the native runtime session id, AND every
 # CI-provider marker (#398) so resolveActor() genuinely falls through to process-ancestry/unresolved
 # regardless of whether this suite is running inside a CI job.
-if (unset FLOW_AGENTS_ACTOR CLAUDE_CODE_SESSION_ID CODEX_SESSION_ID OPENCODE_SESSION_ID PI_SESSION_ID CLAUDECODE \
+if (unset FLOW_AGENTS_ACTOR CLAUDE_CODE_SESSION_ID CODEX_THREAD_ID CODEX_SESSION_ID OPENCODE_SESSION_ID PI_SESSION_ID CLAUDECODE \
       GITHUB_ACTIONS GITLAB_CI CIRCLECI JENKINS_URL TF_BUILD BUILDKITE; \
     flow_agents_node "$WRITER" verify-hold "$UNSTABLE_DIR") >"$TMPDIR_EVAL/vh-unstable.out" 2>"$TMPDIR_EVAL/vh-unstable.err"; then
   pass "verify-hold with an unstable (ancestry/unresolved) current actor does NOT hard-block a subject held by a different actor (advisory-only, AC1 SECOND fix)"

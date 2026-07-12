@@ -23,10 +23,8 @@
  *      passed through `sanitizeSegment` (64-char cap; strips `:`) before use
  *      — it is never returned verbatim.
  *   2. A runtime-native session-id env var already ambient in the current
- *      process's own environment (confirmed for Claude Code:
- *      `CLAUDECODE`/`CLAUDE_CODE_SESSION_ID`; Codex/opencode/pi candidate
- *      var names below are UNVERIFIED in this planning pass — accepted gap,
- *      see plan artifact — layer 3 is the correctness backstop for them).
+ *      process's own environment (including Codex's `CODEX_THREAD_ID`, with
+ *      `CODEX_SESSION_ID` retained as a backward-compatible legacy input).
  *   3. A process-ancestry fallback: `process.ppid` plus that parent
  *      process's exact start timestamp (an absolute timestamp, not an
  *      elapsed-time subtraction, to avoid clock-drift flicker across
@@ -46,7 +44,8 @@
  *   ancestorActorSeed()      → short opaque token from parent PID + start time, else ""
  *   sanitizeSegment(value)   → value restricted to [A-Za-z0-9_.-], capped 64 chars
  *   serializeActor(actor)    → actor struct serialized to a single grouping-key-safe string
- *   resolveActor(env)        → { actor: string, source: string }
+ *   resolveActorIdentity(env) → { actor: string, source: string, actorStruct: object|null }
+ *   resolveActor(env)        → backward-compatible { actor: string, source: string } projection
  *   isUnresolvedActor(actor) → boolean (true when actor is empty or the retired literal
  *                              "local", case-insensitive — single-sourced predicate shared by
  *                              the lifecycle auto-emit path, the direct CLI liveness path, and
@@ -61,13 +60,12 @@ const { execFileSync } = require('child_process');
 
 /** Candidate env var names for each runtime's native session id. */
 const RUNTIME_SESSION_ID_VARS = {
-  'claude-code': 'CLAUDE_CODE_SESSION_ID',
-  // Codex/opencode/pi candidate names are UNVERIFIED (no confirmed spike this
-  // planning pass) — accepted gap. Detection failure never blocks resolution;
-  // the process-ancestry fallback (layer 3) covers these runtimes either way.
-  codex: 'CODEX_SESSION_ID',
-  opencode: 'OPENCODE_SESSION_ID',
-  pi: 'PI_SESSION_ID',
+  'claude-code': ['CLAUDE_CODE_SESSION_ID'],
+  codex: ['CODEX_THREAD_ID', 'CODEX_SESSION_ID'],
+  // opencode/pi names remain candidate inputs. Detection failure never blocks
+  // resolution; process ancestry is the correctness backstop.
+  opencode: ['OPENCODE_SESSION_ID'],
+  pi: ['PI_SESSION_ID'],
 };
 
 /**
@@ -83,7 +81,7 @@ function detectRuntime(env = process.env) {
   if (env.CLAUDECODE === '1' || String(env.CLAUDE_CODE_SESSION_ID || '').trim()) {
     return 'claude-code';
   }
-  if (String(env.CODEX_SESSION_ID || '').trim()) return 'codex';
+  if (String(env.CODEX_THREAD_ID || '').trim() || String(env.CODEX_SESSION_ID || '').trim()) return 'codex';
   if (String(env.OPENCODE_SESSION_ID || '').trim()) return 'opencode';
   if (String(env.PI_SESSION_ID || '').trim()) return 'pi';
   return 'unknown';
@@ -99,12 +97,28 @@ function detectRuntime(env = process.env) {
  * @returns {string}  Non-empty session id, or "" if none present
  */
 function runtimeSessionId(env = process.env) {
+  return runtimeSessionCandidate(env).value;
+}
+
+/** Return the ordered native value together with the variable that supplied it. */
+function runtimeSessionCandidate(env = process.env) {
   env = env || {};
-  for (const varName of Object.values(RUNTIME_SESSION_ID_VARS)) {
-    const candidate = String(env[varName] || '').trim();
-    if (candidate) return candidate;
+  for (const [runtime, varNames] of Object.entries(RUNTIME_SESSION_ID_VARS)) {
+    for (const varName of varNames) {
+      const candidate = String(env[varName] || '').trim();
+      if (candidate) return { value: candidate, variable: varName, runtime };
+    }
   }
-  return '';
+  return { value: '', variable: '', runtime: '' };
+}
+
+/** Privacy-safe, domain-separated token for a Codex thread identifier. */
+function codexThreadToken(threadId) {
+  return `thread-${crypto.createHash('sha256')
+    .update('flow-agents:codex-thread:v1:')
+    .update(String(threadId))
+    .digest('hex')
+    .slice(0, 24)}`;
 }
 
 /**
@@ -362,11 +376,11 @@ function serializeActor(actor) {
  * @param {NodeJS.ProcessEnv} [env]  Environment to resolve from (default process.env)
  * @returns {{actor: string, source: string}}
  */
-function resolveActor(env = process.env) {
+function resolveActorIdentity(env = process.env) {
   env = env || {};
 
   if (env.FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED === '1' && env.NODE_ENV === 'test') {
-    return { actor: '', source: 'test-forced-unresolved' };
+    return { actor: '', source: 'test-forced-unresolved', actorStruct: null };
   }
 
   const explicit = String(env.FLOW_AGENTS_ACTOR || '').trim();
@@ -392,15 +406,26 @@ function resolveActor(env = process.env) {
         );
       } catch { /* best-effort diagnostic only */ }
     } else {
-      return { actor: sanitizeSegment(explicit), source: 'explicit-override' };
+      const actor = sanitizeSegment(explicit);
+      return {
+        actor,
+        source: 'explicit-override',
+        // Explicit overrides deliberately retain their historical flat canonical key. The struct
+        // exists for durable descriptive records, but serializeActor(actorStruct) is not the key.
+        actorStruct: { runtime: 'explicit-override', session_id: actor, host: os.hostname() },
+      };
     }
   }
 
   const runtime = detectRuntime(env);
-  const sessionId = runtimeSessionId(env);
-  if (sessionId) {
-    const actor = serializeActor({ runtime, session_id: sessionId, host: os.hostname() });
-    return { actor, source: `runtime-session-id:${runtime}` };
+  const nativeSession = runtimeSessionCandidate(env);
+  if (nativeSession.value) {
+    const sessionId = nativeSession.variable === 'CODEX_THREAD_ID'
+      ? codexThreadToken(nativeSession.value)
+      : nativeSession.value;
+    const actorStruct = { runtime, session_id: sessionId, host: os.hostname() };
+    const actor = serializeActor(actorStruct);
+    return { actor, source: `runtime-session-id:${runtime}`, actorStruct };
   }
 
   // #398: CI-runtime tier — sits ABOVE process-ancestry (stable across every subprocess in a CI
@@ -411,17 +436,24 @@ function resolveActor(env = process.env) {
   // verify-hold gate to advisory for. A stable CI identity lets that gate ENFORCE instead.
   const ci = detectCiActor(env);
   if (ci && ci.session_id) {
-    const actor = serializeActor({ runtime: ci.runtime, session_id: ci.session_id, host: os.hostname() });
-    return { actor, source: `ci-runtime:${ci.runtime}` };
+    const actorStruct = { runtime: ci.runtime, session_id: ci.session_id, host: os.hostname() };
+    const actor = serializeActor(actorStruct);
+    return { actor, source: `ci-runtime:${ci.runtime}`, actorStruct };
   }
 
   const seed = ancestorActorSeed();
   if (seed) {
-    const actor = serializeActor({ runtime, session_id: `anc-${seed}`, host: os.hostname() });
-    return { actor, source: 'process-ancestry' };
+    const actorStruct = { runtime: 'process-ancestry', session_id: `anc-${seed}`, host: os.hostname() };
+    const actor = serializeActor(actorStruct);
+    return { actor, source: 'process-ancestry', actorStruct };
   }
 
-  return { actor: '', source: 'unresolved' };
+  return { actor: '', source: 'unresolved', actorStruct: null };
+}
+
+function resolveActor(env = process.env) {
+  const { actor, source } = resolveActorIdentity(env);
+  return { actor, source };
 }
 
 /**
@@ -445,6 +477,7 @@ module.exports = {
   ancestorActorSeed,
   sanitizeSegment,
   serializeActor,
+  resolveActorIdentity,
   resolveActor,
   isUnresolvedActor,
 };

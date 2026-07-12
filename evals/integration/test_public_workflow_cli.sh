@@ -31,13 +31,13 @@ printf '#!/usr/bin/env bash\nset -eu\n( trap "" TERM; while ! sleep 5; do :; don
 chmod +x "$CONSUMER/checks/check-success-background.sh"
 
 run_candidate() {
-  (cd "$CONSUMER" && CODEX_SESSION_ID=public-workflow-eval npx --yes --package="file:$TARBALL" flow-agents workflow "$@")
+  (cd "$CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval npx --yes --package="file:$TARBALL" flow-agents workflow "$@")
 }
 
 run_candidate_as() {
   local actor="$1"
   shift
-  (cd "$CONSUMER" && CODEX_SESSION_ID="$actor" npx --yes --package="file:$TARBALL" flow-agents workflow "$@")
+  (cd "$CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID="$actor" npx --yes --package="file:$TARBALL" flow-agents workflow "$@")
 }
 
 snapshot_tree() {
@@ -134,7 +134,7 @@ mkdir -p "$LOCAL_RETRY_ROOT/local-retry"
 printf 'Selected Work Item: local:local-retry\n' > "$LOCAL_RETRY_ROOT/local-retry/local-retry--pull-work.md"
 printf 'not a run-store directory\n' >"$LOCAL_RETRY_PROJECT/.kontourai/flow"
 set +e
-(cd "$LOCAL_RETRY_PROJECT" && CODEX_SESSION_ID=public-workflow-eval npx --yes --package="file:$TARBALL" flow-agents-workflow-sidecar ensure-session \
+(cd "$LOCAL_RETRY_PROJECT" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval npx --yes --package="file:$TARBALL" flow-agents-workflow-sidecar ensure-session \
   --artifact-root "$LOCAL_RETRY_ROOT" --task-slug local-retry \
   --title "Local retry" --summary "Resume the bound local workflow." --flow-id builder.build >/dev/null 2>&1)
 LOCAL_SEED_RC=$?
@@ -147,7 +147,7 @@ rm -f "$LOCAL_RETRY_PROJECT/.kontourai/flow"
 FOREIGN_RETRY_CWD="$TMP/foreign-retry-cwd"
 mkdir -p "$FOREIGN_RETRY_CWD"
 EXECUTABLE_RETRY="$(node -e 'process.stdout.write(process.argv[1].replace(process.argv[2], process.argv[3]))' "$LOCAL_RETRY_COMMAND" "'@kontourai/flow-agents@$VERSION'" "'file:$TARBALL'")"
-(cd "$FOREIGN_RETRY_CWD" && CODEX_SESSION_ID=public-workflow-eval eval "$EXECUTABLE_RETRY" >/dev/null)
+(cd "$FOREIGN_RETRY_CWD" && unset CODEX_THREAD_ID && export CODEX_SESSION_ID=public-workflow-eval && eval "$EXECUTABLE_RETRY" >/dev/null)
 [[ -f "$LOCAL_RETRY_PROJECT/.kontourai/flow/runs/local-retry/state.json" && ! -e "$FOREIGN_RETRY_CWD/.kontourai" ]] || fail "emitted local retry mutated the caller cwd instead of the originating store"
 pass "emitted local retry executes from a foreign cwd against its exact originating store"
 
@@ -428,7 +428,7 @@ TIMEOUT_SESSION="$ARTIFACT_ROOT/acme-widgets-107"
 TIMEOUT_CHILD_PID="$TMP/command-timeout-child.pid"
 TIMEOUT_MARKER="$TMP/command-timeout-marker"
 set +e
-(cd "$CONSUMER" && CODEX_SESSION_ID=public-workflow-eval FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS=1000 FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS=250 npx --yes --package="file:$TARBALL" flow-agents workflow evidence --session-dir "$TIMEOUT_SESSION" --expectation pickup-probe-readiness --status not_verified --summary "Timeout fixture captures full process-group termination." --command "bash checks/check-command-timeout.sh '$TIMEOUT_CHILD_PID' '$TIMEOUT_MARKER'" --json) >"$TMP/command-timeout.out" 2>&1
+(cd "$CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS=1000 FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS=250 npx --yes --package="file:$TARBALL" flow-agents workflow evidence --session-dir "$TIMEOUT_SESSION" --expectation pickup-probe-readiness --status not_verified --summary "Timeout fixture captures full process-group termination." --command "bash checks/check-command-timeout.sh '$TIMEOUT_CHILD_PID' '$TIMEOUT_MARKER'" --json) >"$TMP/command-timeout.out" 2>&1
 TIMEOUT_RC=$?
 set -e
 [[ "$TIMEOUT_RC" -ne 0 && -s "$TIMEOUT_CHILD_PID" && ! -e "$TIMEOUT_MARKER" ]] || fail "timed-out evidence command did not complete its controlled capture"
@@ -439,7 +439,7 @@ pass "timed-out evidence commands terminate their complete process group"
 BACKGROUND_CHILD_PID="$TMP/success-background-child.pid"
 BACKGROUND_MARKER="$TMP/success-background-marker"
 TIMEOUT_PULL_REPORT="$TIMEOUT_SESSION/$(basename "$TIMEOUT_SESSION")--pull-work.md"
-(cd "$CONSUMER" && CODEX_SESSION_ID=public-workflow-eval FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS=50 npx --yes --package="file:$TARBALL" flow-agents workflow evidence \
+(cd "$CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS=50 npx --yes --package="file:$TARBALL" flow-agents workflow evidence \
   --session-dir "$TIMEOUT_SESSION" --expectation pickup-probe-readiness --status pass \
   --summary "Successful evidence cleans up surviving background processes." \
   --command "bash checks/check-success-background.sh '$BACKGROUND_CHILD_PID' '$BACKGROUND_MARKER'" \

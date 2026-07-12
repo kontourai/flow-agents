@@ -427,6 +427,45 @@ fi
 [[ "$(json_query "$TMPDIR_EVAL/status-race.json" "assignment.assignee")" == *"$EXPECTED_RACE_HOLDER"* ]] && pass "on-disk record holder matches the process that actually exited 0 (no silent overwrite by the loser) (AC6)" || fail "on-disk record holder does not match the winning process: $(cat "$TMPDIR_EVAL/status-race.json")"
 
 echo ""
+
+# 7. #554: ensure-session consumes the helper-owned safe struct and re-enters as self.
+CODEX_PRIVATE_ROOT="$TMPDIR_EVAL/codex-private-root"
+CODEX_PRIVATE_RAW='ENSURE-PRIVATE-SENTINEL:thread/value'
+CODEX_PRIVATE_WORK="kontourai/flow-agents#9554"
+CODEX_PRIVATE_SLUG="kontourai-flow-agents-9554"
+if CODEX_THREAD_ID="$CODEX_PRIVATE_RAW" CODEX_SESSION_ID= flow_agents_node "workflow-sidecar" ensure-session \
+  --artifact-root "$CODEX_PRIVATE_ROOT" --work-item "$CODEX_PRIVATE_WORK" \
+  --source-request "Canonical Codex identity fixture." --summary "Privacy-safe actor fixture." \
+  >"$TMPDIR_EVAL/codex-private-first.out" 2>"$TMPDIR_EVAL/codex-private-first.err"; then
+  pass "ensure-session succeeds with CODEX_THREAD_ID"
+else
+  fail "ensure-session failed with CODEX_THREAD_ID: $(cat "$TMPDIR_EVAL/codex-private-first.out" "$TMPDIR_EVAL/codex-private-first.err")"
+fi
+CODEX_PRIVATE_RECORD="$CODEX_PRIVATE_ROOT/assignment/$CODEX_PRIVATE_SLUG.json"
+if node - "$CODEX_PRIVATE_RECORD" "$ROOT/scripts/hooks/lib/actor-identity.js" <<'NODE'
+const fs = require('fs');
+const record = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const { serializeActor } = require(process.argv[3]);
+if (record.actor.runtime !== 'codex' || !/^thread-[a-f0-9]{24}$/.test(record.actor.session_id)) throw new Error('unsafe actor struct');
+if (record.actor_key !== serializeActor(record.actor)) throw new Error('key/struct mismatch');
+NODE
+then pass "ensure-session persists a canonical Codex actor struct whose serialization equals actor_key"
+else fail "ensure-session persisted a divergent or unsafe Codex actor struct/key"
+fi
+if rg -qF 'ENSURE-PRIVATE-SENTINEL' "$CODEX_PRIVATE_ROOT" "$TMPDIR_EVAL/codex-private-first.out" "$TMPDIR_EVAL/codex-private-first.err"; then
+  fail "raw CODEX_THREAD_ID sentinel leaked into ensure-session artifacts or output"
+else
+  pass "raw CODEX_THREAD_ID sentinel is absent from the complete ensure-session artifact/output set"
+fi
+if CODEX_THREAD_ID="$CODEX_PRIVATE_RAW" CODEX_SESSION_ID= flow_agents_node "workflow-sidecar" ensure-session \
+  --artifact-root "$CODEX_PRIVATE_ROOT" --work-item "$CODEX_PRIVATE_WORK" \
+  --source-request "Canonical Codex identity fixture reentry." --summary "Privacy-safe actor fixture reentry." \
+  >"$TMPDIR_EVAL/codex-private-second.out" 2>"$TMPDIR_EVAL/codex-private-second.err"; then
+  pass "second ensure-session recognizes the first canonical Codex claim as self"
+else
+  fail "second ensure-session did not recognize the canonical Codex claim as self: $(cat "$TMPDIR_EVAL/codex-private-second.out" "$TMPDIR_EVAL/codex-private-second.err")"
+fi
+
 if [[ "$errors" -eq 0 ]]; then
   echo "test_ensure_session_ownership_guard: all checks passed."
 else

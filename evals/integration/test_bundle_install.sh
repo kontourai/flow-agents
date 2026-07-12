@@ -890,11 +890,11 @@ NODE
 )"
 
 package_flow() {
-  (cd "$PACKAGE_PROJECT" && CODEX_SESSION_ID=packed-package-consumer node "$PACKAGE_CLI" workflow "$@")
+  (cd "$PACKAGE_PROJECT" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=packed-package-consumer node "$PACKAGE_CLI" workflow "$@")
 }
 
 package_review() {
-  (cd "$PACKAGE_PROJECT" && CODEX_SESSION_ID=packed-package-reviewer node "$PACKAGE_CLI" workflow "$@")
+  (cd "$PACKAGE_PROJECT" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=packed-package-reviewer node "$PACKAGE_CLI" workflow "$@")
 }
 
 if (cd "$ROOT_DIR" && npm pack --silent --pack-destination "$TMPDIR_EVAL" >"$PACKAGE_PACK_LOG") \
