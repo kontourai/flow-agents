@@ -1,0 +1,33 @@
+{
+  "schema_version": 2,
+  "audit": {
+    "first_tag": "v2.4.0",
+    "last_tag": "v3.9.0",
+    "selection": "Every reachable release tag whose scripts/install-codex-home.sh contains the exact root seed loop 'for seed_file in AGENTS.md'.",
+    "reproduction_command": "node scripts/audit-codex-legacy-agents.js packaging/codex-legacy-agents-fingerprints.json",
+    "gaps": []
+  },
+  "files": [
+    {
+      "sha256": "5273878130bdafc8a024a650bb5b66c9b003f1f859b5dc6e5b588cbf4ab23228",
+      "bytes": 3315,
+      "fixture": "evals/fixtures/codex-legacy-agents/5273878130bdafc8a024a650bb5b66c9b003f1f859b5dc6e5b588cbf4ab23228.md",
+      "covered_releases": [
+        { "tag": "v2.4.0", "commit": "bee760272b8bb770df02400ccc5881bd3dbc8806" },
+        { "tag": "v3.0.0", "commit": "99abf1f6f44a333867b03702548927a12ad01275" },
+        { "tag": "v3.1.0", "commit": "7e6a9594212ef7813c428069b9f7fc6f39def8f1" },
+        { "tag": "v3.2.0", "commit": "15d5e9ae2bb9a80c3b3a89bf7887b5eff596f5d8" },
+        { "tag": "v3.3.0", "commit": "21c98807a259dfc4449bae2f359e975893dc4f4f" },
+        { "tag": "v3.4.0", "commit": "130a94696dac17cf1a65e6525e9168a835db79ff" },
+        { "tag": "v3.4.1", "commit": "0b41434f6422de62a8e06e48998a0699e3f623d2" },
+        { "tag": "v3.4.2", "commit": "c0d1724f0a5212942b0f457f4a7ae99c5f71da6b" },
+        { "tag": "v3.4.3", "commit": "07f98df4b7f737b543e3469ce3792fee2e5e6b81" },
+        { "tag": "v3.5.0", "commit": "4ffc9f9d7a5eeea006acddcdb259299fcc56354d" },
+        { "tag": "v3.6.0", "commit": "9f59f16143d7c6cc877778e4ad6620e2fc0cd829" },
+        { "tag": "v3.7.0", "commit": "4901adc14036c25d4ed98a7eac8c8e7b15b6a048" },
+        { "tag": "v3.8.0", "commit": "697795c87b0296d037ae76ee1984ce0eaa6684fb" },
+        { "tag": "v3.9.0", "commit": "a5c272bd19b563bd4e3da5db017e996eb0f854d0" }
+      ]
+    }
+  ]
+}

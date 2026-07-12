@@ -118,7 +118,7 @@ else
   _pass "Codex install rejects unsafe hosted Console http URL"
 fi
 
-if node "$ROOT_DIR/build/src/cli.js" init --dest "$BASE_INIT_DEST" --telemetry-sink local-kontour-console --yes >/dev/null; then
+if node "$ROOT_DIR/build/src/cli.js" init --runtime base --dest "$BASE_INIT_DEST" --telemetry-sink local-kontour-console --yes >/dev/null; then
   _pass "flow-agents init headless base install succeeded"
 else
   _fail "flow-agents init headless base install failed"
