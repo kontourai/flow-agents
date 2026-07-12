@@ -45,6 +45,26 @@ export {
 } from "./builder-flow-runtime.js";
 export type { BuilderFlowAgentLifecycleInput, BuilderFlowAuthorizedLifecycleInput, BuilderFlowSessionInput, BuilderFlowSessionResult } from "./builder-flow-runtime.js";
 
+export {
+  createFileContinuationStore,
+  driveBuilderFlowSession,
+  runContinuationDriver,
+  withContinuationDriverLock,
+} from "./continuation-driver.js";
+export type {
+  ContinuationBarrier,
+  ContinuationDriverEvent,
+  ContinuationDriverOutcome,
+  ContinuationDriverState,
+  ContinuationRuntimePort,
+  ContinuationSnapshot,
+  ContinuationStateStore,
+  ContinuationTurnRequest,
+  ContinuationTurnResult,
+  DriveBuilderFlowSessionInput,
+  RunContinuationDriverInput,
+} from "./continuation-driver.js";
+
 // Pure serialization contract used by external lifecycle authorities when
 // signing requests. This does not load, create, or mutate a Flow run.
 export { builderLifecycleAuthorizationPayload, loadBuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";

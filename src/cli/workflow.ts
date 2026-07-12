@@ -6,6 +6,7 @@ import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { validateDefinition } from "@kontourai/flow";
 import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
+import { driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
 import { inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
@@ -14,6 +15,7 @@ import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { main as builderRun } from "./builder-run.js";
 import { currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
+import { executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -22,7 +24,7 @@ const PACKAGE_ROOT = flowAgentsPackageRoot();
 const REQUIRE = createRequire(import.meta.url);
 const PACKAGE_METADATA = readJsonFile(path.join(PACKAGE_ROOT, "package.json"), "Flow Agents package metadata");
 const CLI_VERSION = flowAgentsPackageVersion();
-const PUBLIC_VERBS = ["start", "status", "evidence", "critique", "pause", "resume", "release", "cancel", "archive", "doctor"] as const;
+const PUBLIC_VERBS = ["start", "status", "evidence", "critique", "drive", "pause", "resume", "release", "cancel", "archive", "doctor"] as const;
 
 function usage(): void {
   console.log(`Usage: flow-agents workflow <verb> [options]
@@ -32,6 +34,7 @@ Public workflow verbs:
   status              Show the current canonical run and projected next action.
   evidence            Record evidence for the current Flow gate and synchronize it.
   critique            Record review critique directly into the current trust bundle.
+  drive               Continue the canonical run through an explicit runtime adapter.
   pause               Pause the current run as its assignment actor.
   resume              Resume the current paused run as its assignment actor.
   release             Release the current assignment without canceling the run.
@@ -61,10 +64,39 @@ export async function main(argv: string[]): Promise<number> {
   if (verb === "status") return status(sessionDir, flagBool(parsed.flags, "json"));
   if (verb === "evidence") return evidence(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "critique") return critique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
+  if (verb === "drive") return drive(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
 
   const forwarded = stripPublicFlags(argv.slice(1), new Set(["artifact-root", "session-dir", "json"]));
   if (verb === "release" && !flagString(parsed.flags, "reason")) throw new Error("workflow release requires --reason <text>");
   return builderRun([verb === "release" ? "release-assignment" : verb, "--session-dir", sessionDir, ...forwarded]);
+}
+
+async function drive(sessionDir: string, argv: string[], json: boolean): Promise<number> {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "adapter-command-file", "max-turns", "turn-timeout-ms", "barrier-wait-ms", "barrier-poll-ms"]), "workflow drive");
+  const adapterCommandFile = flagString(parsed.flags, "adapter-command-file");
+  if (!adapterCommandFile) throw new Error("workflow drive requires --adapter-command-file <path>");
+  const maxTurns = integerFlag(parsed.flags, "max-turns", 4, 1, 100);
+  const turnTimeoutMs = integerFlag(parsed.flags, "turn-timeout-ms", 900_000, 1, 86_400_000);
+  const barrierWaitMs = integerFlag(parsed.flags, "barrier-wait-ms", 300_000, 0, 86_400_000);
+  const barrierPollMs = integerFlag(parsed.flags, "barrier-poll-ms", 1_000, 1, 60_000);
+  const { slug, projectRoot } = readBoundSession(sessionDir);
+  assertMatchingAssignmentActor(sessionDir, slug);
+  const adapterCommand = loadContinuationAdapterCommand(adapterCommandFile);
+  const result = await withContinuationDriverLock(sessionDir, async () => {
+    assertMatchingAssignmentActor(sessionDir, slug);
+    return driveBuilderFlowSession({
+      sessionDir,
+      maxTurns,
+      adapterCommandIdentity: adapterCommand.identity,
+      authorizeTurn: async () => { assertMatchingAssignmentActor(sessionDir, slug); },
+      execute: async (request) => executeLoadedContinuationAdapter(adapterCommand, request, { cwd: projectRoot, timeoutMs: turnTimeoutMs }),
+      waitForBarrier: async (barrier) => waitForContinuationBarrier(barrier, { maxWaitMs: barrierWaitMs, pollMs: barrierPollMs }),
+    });
+  });
+  if (json) console.log(JSON.stringify(result));
+  else console.log(`Continuation driver ${result.outcome} after ${result.turns_started} turn(s); canonical Flow is ${result.snapshot.status} at ${result.snapshot.current_step}.`);
+  return 0;
 }
 
 async function start(argv: string[]): Promise<number> {
@@ -568,6 +600,21 @@ function keepFlags(argv: string[], kept: Set<string>): string[] {
 function assertOnlyFlags(flags: ReturnType<typeof parseArgs>["flags"], allowed: Set<string>, command: string): void {
   const unsupported = Object.keys(flags).find((key) => !allowed.has(key));
   if (unsupported) throw new Error(`${command} does not support --${unsupported}`);
+}
+
+function integerFlag(
+  flags: ReturnType<typeof parseArgs>["flags"],
+  name: string,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const raw = flagString(flags, name);
+  if (raw === undefined) return fallback;
+  if (!/^(0|[1-9][0-9]*)$/.test(raw)) throw new Error(`workflow drive --${name} must be an integer from ${min} through ${max}`);
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < min || value > max) throw new Error(`workflow drive --${name} must be an integer from ${min} through ${max}`);
+  return value;
 }
 
 function isWithin(candidate: string, root: string): boolean {
