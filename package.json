@@ -144,9 +144,9 @@
     "kit": "npm run build --silent && node build/src/cli.js kit"
   },
   "devDependencies": {
-    "@types/node": "^26.1.0",
-    "promptfoo": "^0.121.17",
-    "typescript": "^6.0.3"
+    "@types/node": "^26.1.1",
+    "promptfoo": "^0.121.18",
+    "typescript": "^7.0.2"
   },
   "dependencies": {
     "@kontourai/flow": "^3.1.4"
