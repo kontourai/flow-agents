@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.7.0](https://github.com/kontourai/flow-agents/compare/v3.6.0...v3.7.0) (2026-07-12)
+
+
+### Features
+
+* **builder:** align kit skills with canonical Flow ([#552](https://github.com/kontourai/flow-agents/issues/552)) ([2d672ed](https://github.com/kontourai/flow-agents/commit/2d672ede2dc16f96ef2d5186a3f0b6fc1c9d162f))
+
 ## [3.6.0](https://github.com/kontourai/flow-agents/compare/v3.5.0...v3.6.0) (2026-07-11)
 
 
