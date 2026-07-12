@@ -193,7 +193,7 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
     // session state cannot change mid-invocation.
     const caller = assertMatchingAssignmentActor(sessionDir, slug);
     const repaired = await recoverBuilderFlowSession({ sessionDir });
-    const beforeEvidence = manifestEvidenceDigests(repaired.run.manifest);
+    const beforeEvidence = manifestEvidenceIdentity(repaired.run.manifest);
     await mainFromPublicWorkflow([
       "record-gate-claim",
       sessionDir,
@@ -202,26 +202,33 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
       caller.actorKey,
     ]);
 
-    await syncBuilderFlowSession({ sessionDir });
+    const synchronized = await syncBuilderFlowSession({ sessionDir });
 
     const digest = fileSha256(path.join(sessionDir, "trust.bundle"));
     const run = await loadBuilderFlowRun({ cwd: repaired.projectRoot, runId: slug });
-    const afterEvidence = manifestEvidenceDigests(run.manifest);
-    const newEvidence = afterEvidence.filter((value) => !beforeEvidence.includes(value));
-    if (newEvidence.length !== 1 || newEvidence[0] !== digest) {
+    const afterEvidence = manifestEvidenceIdentity(run.manifest);
+    const beforeIds = new Set(beforeEvidence.map((entry) => entry.id));
+    const newEvidence = afterEvidence.filter((entry) => !beforeIds.has(entry.id));
+    if (synchronized.attached && (newEvidence.length !== 1 || newEvidence[0]?.sha256 !== digest)) {
       throw new Error("workflow evidence did not attach exactly this invocation's resulting trust.bundle digest");
+    }
+    if (!synchronized.attached && newEvidence.length !== 0) {
+      throw new Error("workflow evidence changed the canonical manifest while synchronization reported no attachment");
     }
     const updatedSidecar = readBoundSession(sessionDir).sidecar;
     return immutableReport({
       run_id: run.runId,
       status: run.state.status,
       current_step: run.state.current_step,
-      attached: true,
+      attached: synchronized.attached,
+      awaiting_evidence: !synchronized.attached,
       next_action: updatedSidecar.next_action ?? null,
     });
   });
   if (json) console.log(JSON.stringify(report));
-  else console.log(`Recorded evidence; canonical run is ${report.status} at ${report.current_step}.`);
+  else console.log(report.attached
+    ? `Recorded evidence; canonical run is ${report.status} at ${report.current_step}.`
+    : `Recorded evidence; canonical run is awaiting the remaining gate expectations at ${report.current_step}.`);
   return 0;
 }
 
@@ -511,11 +518,14 @@ function immutableReport<T>(value: T): T {
   return Object.freeze(value);
 }
 
-function manifestEvidenceDigests(manifest: JsonRecord): string[] {
+function manifestEvidenceIdentity(manifest: JsonRecord): Array<{ id: string; sha256: string }> {
   const evidence = Array.isArray(manifest.evidence) ? manifest.evidence : [];
   return evidence
-    .map((entry) => entry && typeof entry === "object" ? (entry as JsonRecord).sha256 : null)
-    .filter((digest): digest is string => typeof digest === "string");
+    .flatMap((entry) => entry && typeof entry === "object"
+      && typeof (entry as JsonRecord).id === "string"
+      && typeof (entry as JsonRecord).sha256 === "string"
+      ? [{ id: String((entry as JsonRecord).id), sha256: String((entry as JsonRecord).sha256) }]
+      : []);
 }
 
 function optionalFileDigest(file: string): string | null {

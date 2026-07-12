@@ -63,8 +63,36 @@ does not create a Flow run.
 
 After a gate producer writes `trust.bundle`, the public evidence path
 synchronizes the existing run while holding the assignment subject lock.
-Synchronization is digest-idempotent: the same trust bundle is not attached
-twice.
+Synchronization selects only live claims: producer-superseded claims and claims
+carrying `metadata.superseded_by` remain auditable history but never determine
+the current outcome. Passing evidence is published atomically only when every
+required expectation for the gate is present; this prevents sequential critique
+writes from attaching an intermediate partial snapshot and consuming a
+route-back attempt. Failed evidence may still synchronize immediately when it
+carries a route reason declared by the gate; a disputed report-only critique is
+not itself a routed gate decision and remains pending.
+
+Attachments carry the exact expectation ids selected from the current bundle.
+Digest idempotence applies only while an unsuperseded attachment for that gate
+and expectation set remains live. After route-back, claims must be current for
+the new gate visit before synchronization, and claim/evidence identities used
+by any earlier attachment to that gate can never satisfy the later visit.
+Gate claims, verified criteria, and critiques carry producer-recorded version
+timestamps plus `identity_version: 2` in their identity derivation so legitimate
+re-verification creates new identities. Unmarked pre-upgrade records retain the
+legacy identity formula during rebuild; installing new code alone can never
+manufacture a fresh identity. Because those identities are embedded in TrustBundle bytes, a
+genuinely new identity necessarily changes the bundle SHA-256; byte-identical
+replay remains pending rather than consuming another attempt.
+
+Every gate visit has a canonical boundary: the latest Flow transition into the
+step, or the run's initial timestamp for its entry step. Claim creation and
+observation timestamps must fall within that visit and may not be more than 30
+seconds ahead of synchronization. The sole pre-boundary allowance is the
+30-second acquisition window for the assignment-backed `selected-work` claim,
+which is intentionally produced immediately before the canonical run starts.
+Previously attached claim and evidence identities are excluded from every later
+visit to the same gate regardless of timestamp skew.
 
 ## Public Status And Recovery
 
@@ -119,6 +147,12 @@ Workflow steering surfaces these fields on session start and prompt submission. 
 Stop hook treats an unfinished canonical Flow run as active even during pickup or
 planning, blocks a premature stop in block mode, and does not release its liveness
 claim. A run is complete only when Flow reaches its terminal step.
+
+Projection is always derived from the canonical run's `current_step`, including
+composed steps that have no legacy sidecar phase (`merge-ready-ci` and `learn`).
+Both the legacy `current.json` pointer and every matching per-actor pointer are
+updated from that canonical step; `phase_map` is presentation metadata, not the
+authority for pointer navigation.
 # Builder Lifecycle Authority
 
 The canonical Flow run owns pause, resume, and cancellation. The current assignment actor may

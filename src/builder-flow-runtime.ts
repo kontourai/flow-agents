@@ -367,10 +367,21 @@ async function syncAndProject(
     const snapshot = stageTrustBundleSnapshot(context);
     try {
       const rawBundle = JSON.parse(snapshot.raw.toString("utf8"));
-      const gateEvidence = await bundleGateEvidence(rawBundle, gates[0]!, run.state.subject, context.projectRoot);
+      const gateEvidence = await bundleGateEvidence(
+        rawBundle,
+        gates[0]!,
+        run.state,
+        run.state.subject,
+        context.projectRoot,
+        manifestEvidence(run.manifest),
+      );
       if (gateEvidence) {
         const alreadyAttached = manifestEvidence(run.manifest).some((entry) =>
-          entry.gate_id === gates[0]!.id && entry.sha256 === snapshot.sha256
+          entry.gate_id === gates[0]!.id
+          && entry.sha256 === snapshot.sha256
+          && typeof entry.superseded_by !== "string"
+          && timestampAtOrAfter(entry.attached_at, gateEvidence.visitEnteredAt)
+          && gateEvidence.expectationIds.every((expectationId) => Array.isArray(entry.expectation_ids) && entry.expectation_ids.includes(expectationId))
         );
         if (!alreadyAttached) {
           const supersede = manifestEvidence(run.manifest)
@@ -386,6 +397,7 @@ async function syncAndProject(
               ...(supersede.length > 0 ? { supersede } : {}),
               ...(gateEvidence.failed ? { status: "failed" } : {}),
               ...(gateEvidence.routeReason ? { routeReason: gateEvidence.routeReason } : {}),
+              expectationIds: gateEvidence.expectationIds,
             },
           });
           attached = true;
@@ -478,21 +490,72 @@ function openGatesForResult(run: BuilderFlowRunResult): Array<FlowGate & { id: s
   ) as Array<FlowGate & { id: string }>;
 }
 
-async function bundleGateEvidence(bundle: unknown, gate: FlowGate, subject: string, projectRoot: string): Promise<{ failed: boolean; routeReason: string | null } | null> {
+async function bundleGateEvidence(
+  bundle: unknown,
+  gate: FlowGate,
+  state: FlowRunState,
+  subject: string,
+  projectRoot: string,
+  manifest: AnyRecord[],
+): Promise<{ failed: boolean; routeReason: string | null; expectationIds: string[]; visitEnteredAt: number } | null> {
   if (!isRecord(bundle) || !Array.isArray(bundle.claims)) return null;
-  const selectors = (expectationsForGate(gate) as FlowExpectation[]).map((expectation) => expectation.bundle_claim);
+  const expectations = expectationsForGate(gate) as FlowExpectation[];
+  const visit = currentGateVisit(state, String((gate as AnyRecord).step));
+  const enteredAt = visit.enteredAt;
+  const synchronizedAt = Date.now();
+  const maxClockSkewMs = 30_000;
+  const priorVisitClaimIds = new Set<string>();
+  const priorVisitEvidenceIds = new Set<string>();
+  for (const entry of manifest) {
+    if (entry.gate_id !== String((gate as AnyRecord).id)) continue;
+    const claims = isRecord(entry.bundle) && Array.isArray(entry.bundle.claims) ? entry.bundle.claims : [];
+    for (const historical of claims) {
+      if (isRecord(historical) && typeof historical.id === "string") priorVisitClaimIds.add(historical.id);
+    }
+    const evidence = isRecord(entry.bundle) && Array.isArray(entry.bundle.evidence) ? entry.bundle.evidence : [];
+    for (const historical of evidence) {
+      if (isRecord(historical) && typeof historical.id === "string") priorVisitEvidenceIds.add(historical.id);
+    }
+  }
+  const claimIsCurrent = (claim: AnyRecord): boolean => {
+    if (typeof claim.id !== "string" || priorVisitClaimIds.has(claim.id)) return false;
+    const timestamps: number[] = [];
+    const createdAt = parseTimestamp(claim.createdAt);
+    if (createdAt !== null) timestamps.push(createdAt);
+    if (Array.isArray((bundle as AnyRecord).evidence)) for (const evidence of (bundle as AnyRecord).evidence) {
+      if (!isRecord(evidence) || evidence.claimId !== claim.id) continue;
+      if (typeof evidence.id !== "string" || priorVisitEvidenceIds.has(evidence.id)) return false;
+      const observedAt = parseTimestamp(evidence.observedAt);
+      if (observedAt !== null) timestamps.push(observedAt);
+    }
+    const initialAcquisitionSkew = visit.initial && claim.claimType === "builder.pull-work.selected" ? maxClockSkewMs : 0;
+    return timestamps.some((timestamp) => timestamp >= enteredAt - initialAcquisitionSkew
+      && timestamp <= synchronizedAt + maxClockSkewMs);
+  };
   const relevant = bundle.claims.filter((claim: unknown): claim is AnyRecord => {
     if (!isRecord(claim)) return false;
-    return selectors.some((candidate: FlowExpectation["bundle_claim"]) =>
+    if (claim.producerStatus === "superseded") return false;
+    const metadata = isRecord(claim.metadata) ? claim.metadata : null;
+    if (metadata && typeof metadata.superseded_by === "string") return false;
+    return expectations.some((expectation) => {
+      const candidate = expectation.bundle_claim;
+      return candidate
+      && claimIsCurrent(claim)
+      &&
       candidate.claimType === claim.claimType
       && (!candidate.subjectType || candidate.subjectType === claim.subjectType)
-    );
+    });
   });
   if (relevant.length === 0) return null;
   if (relevant.some((claim) => workflowSubjectRef(claim) !== subject)) {
     throw new BuilderBuildRunInputError("evidence.claims.metadata.workflow_subject_ref", "must match the persisted run subject");
   }
   const failed = relevant.some((claim) => claim.value === "fail" || claim.status === "disputed");
+  const expectationIds = expectations.filter((expectation) => relevant.some((claim: AnyRecord) => {
+    const selector = expectation.bundle_claim;
+    return selector.claimType === claim.claimType && (!selector.subjectType || selector.subjectType === claim.subjectType);
+  })).map((expectation) => expectation.id);
+  const missingRequired = expectations.filter((expectation) => expectation.required && !expectationIds.includes(expectation.id));
   const routeReasons = [...new Set(relevant.flatMap((claim) => {
     const metadata = isRecord(claim.metadata) ? claim.metadata : null;
     const gateClaim = metadata && isRecord(metadata.gate_claim) ? metadata.gate_claim : null;
@@ -502,6 +565,11 @@ async function bundleGateEvidence(bundle: unknown, gate: FlowGate, subject: stri
     throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.route_reason", "must agree across current-gate claims");
   }
   const routeReason = routeReasons[0] ?? null;
+  if (failed && !routeReason) return null;
+  // Passing evidence waits for the complete expectation set. A failing
+  // snapshot is complete only when a gate producer explicitly declares its
+  // route reason; report-only disputed critique state remains pending.
+  if (!failed && missingRequired.length > 0) return null;
   if (routeReason && !failed) {
     throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.route_reason", "requires failed current-gate evidence");
   }
@@ -512,7 +580,31 @@ async function bundleGateEvidence(bundle: unknown, gate: FlowGate, subject: stri
   if (String((gate as AnyRecord).id) === "verify-gate" && relevant.some((claim) => claim.claimType === "builder.verify.tests" && claim.value === "pass")) {
     await assertVerifiedTestsTrust(bundle.claims, projectRoot);
   }
-  return { failed, routeReason };
+  return { failed, routeReason, expectationIds, visitEnteredAt: enteredAt };
+}
+
+function currentGateVisit(state: FlowRunState, step: string): { enteredAt: number; initial: boolean } {
+  let enteredAt: number | null = null;
+  for (const transition of state.transitions ?? []) {
+    if (transition.to_step !== step) continue;
+    const parsed = parseTimestamp(transition.at);
+    if (parsed !== null) enteredAt = parsed;
+  }
+  const initial = parseTimestamp(state.updated_at);
+  if (enteredAt !== null) return { enteredAt, initial: false };
+  if (initial !== null) return { enteredAt: initial, initial: true };
+  throw new BuilderBuildRunInputError("flow_run.state.updated_at", "must establish the current gate visit boundary");
+}
+
+function parseTimestamp(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function timestampAtOrAfter(value: unknown, boundary: number): boolean {
+  const parsed = parseTimestamp(value);
+  return parsed !== null && parsed >= boundary;
 }
 
 async function assertVerifiedTestsTrust(claims: unknown[], projectRoot: string): Promise<void> {

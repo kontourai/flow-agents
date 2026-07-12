@@ -456,6 +456,9 @@ record_public_expectation() {
     *) _fail "public producer fixture has no durable artifact for $expectation"; return ;;
   esac
   local -a args=(evidence --session-dir "$PUBLIC_SESSION" --expectation "$expectation" --status "$status" --summary "public producer fixture records a reviewable durable artifact" --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$artifact\",\"summary\":\"Fixture artifact for $expectation.\"}")
+  if [ "$expectation" = "tests-evidence" ] && [ "$status" = "fail" ]; then
+    args+=(--route-reason implementation_defect)
+  fi
   if [ "$expectation" = "tests-evidence" ] && [ "$status" = "pass" ]; then
     local test_command criterion_one criterion_two command_ref
     test_command="bash checks/check-public-session.sh .kontourai/flow-agents/$slug/state.json"
@@ -614,16 +617,46 @@ ROUTE_CRITIQUE_OUTPUT="$(public_review critique --session-dir "$PUBLIC_SESSION" 
   --artifact-ref "$PUBLIC_SESSION/$(basename "$PUBLIC_SESSION")--deliver.md" \
   --lane-json "{\"id\":\"code-review\",\"status\":\"pass\",\"summary\":\"Public fixture code review completed.\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$PUBLIC_SESSION/$(basename "$PUBLIC_SESSION")--deliver.md\",\"summary\":\"Reviewed public fixture delivery artifact.\"}]}" 2>&1)" \
   || _fail "public authenticated critique failed before failed tests-evidence: $ROUTE_CRITIQUE_OUTPUT"
+# Seed current verified acceptance prerequisites through the private producer
+# without synchronizing Flow. The subsequent public failed tests claim replaces
+# the provisional passing tests check, preserves these criteria + the clean
+# critique, and is the only attachment/evaluation for this gate visit.
+ROUTE_TEST_COMMAND="bash checks/check-public-session.sh .kontourai/flow-agents/$(basename "$PUBLIC_SESSION")/state.json"
+ROUTE_COMMAND_REF="$(node - "$ROUTE_TEST_COMMAND" <<'NODE'
+const command = process.argv[2];
+process.stdout.write(JSON.stringify({ kind: 'command', excerpt: command, summary: 'Current route-back prerequisite command.' }));
+NODE
+)"
+ROUTE_CRITERION_ONE="$(node - "$ROUTE_TEST_COMMAND" <<'NODE'
+const command = process.argv[2];
+process.stdout.write(JSON.stringify({ id: 'AC-1', status: 'pass', evidence_refs: [{ kind: 'command', excerpt: command, summary: 'Current AC-1 prerequisite.' }] }));
+NODE
+)"
+ROUTE_CRITERION_TWO="$(node - "$ROUTE_TEST_COMMAND" <<'NODE'
+const command = process.argv[2];
+process.stdout.write(JSON.stringify({ id: 'AC-2', status: 'pass', evidence_refs: [{ kind: 'command', excerpt: command, summary: 'Current AC-2 prerequisite.' }] }));
+NODE
+)"
+ROUTE_OBSERVED="$(node - "$ROUTE_TEST_COMMAND" <<'NODE'
+const command = process.argv[2];
+process.stdout.write(JSON.stringify({ command, exit_code: 0, test_count: 1, output_sha256: '0'.repeat(64) }));
+NODE
+)"
+CODEX_SESSION_ID=builder-public-producers flow_agents_node "workflow-sidecar" record-gate-claim "$PUBLIC_SESSION" \
+  --expectation tests-evidence --status pass --summary "Seed complete current acceptance prerequisites before routed failure." \
+  --command "$ROUTE_TEST_COMMAND" --observed-command-json "$ROUTE_OBSERVED" \
+  --evidence-ref-json "$ROUTE_COMMAND_REF" --criterion-json "$ROUTE_CRITERION_ONE" --criterion-json "$ROUTE_CRITERION_TWO" >/dev/null 2>&1 \
+  || _fail "failed to seed current acceptance prerequisites for routed failure"
 record_public_expectation "tests-evidence" "fail"
 ROUTE_REPORT="$(public_flow status --session-dir "$PUBLIC_SESSION" --json 2>/dev/null)"
 if node - "$ROUTE_REPORT" <<'NODE'
 const report = JSON.parse(process.argv[2]);
-if (report.current_step !== 'verify') process.exit(1);
-if ((report.next_action?.skills || []).join(',') !== 'review-work,verify-work') process.exit(2);
-if (!/attempt 1\/3 returned to `verify`/.test(report.next_action?.summary || '')) process.exit(3);
+if (report.current_step !== 'execute') process.exit(1);
+if ((report.next_action?.skills || []).join(',') !== 'execute-plan') process.exit(2);
+if (!/attempt 1\/3 returned to `execute` for `implementation_defect`/.test(report.next_action?.summary || '')) process.exit(3);
 NODE
 then
-  _pass "failed verify evidence routes back through Flow with attempt 1/3 and canonical producers"
+  _pass "complete failed verify evidence routes back through Flow once to execute for implementation_defect"
 else
   _fail "public failed-verify route-back was not projected correctly: $ROUTE_REPORT"
 fi
