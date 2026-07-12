@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.9.0](https://github.com/kontourai/flow-agents/compare/v3.8.0...v3.9.0) (2026-07-12)
+
+
+### Features
+
+* **workflow:** add bounded continuation driver ([#560](https://github.com/kontourai/flow-agents/issues/560)) ([e6365ab](https://github.com/kontourai/flow-agents/commit/e6365aba324c76ee164681c987d20916c315444e))
+
 ## [3.8.0](https://github.com/kontourai/flow-agents/compare/v3.7.0...v3.8.0) (2026-07-12)
 
 
