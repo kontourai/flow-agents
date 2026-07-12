@@ -22,6 +22,10 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMPDIR_EVAL="$(mktemp -d /tmp/install-merge.XXXXXX)"
+export HOME="$TMPDIR_EVAL/hermetic-home"
+export FLOW_AGENTS_SKILLS_DIR="$TMPDIR_EVAL/hermetic-universal/skills"
+mkdir -p "$HOME/.agents" "$FLOW_AGENTS_SKILLS_DIR"
+printf 'installer tests must not replace this file\n' > "$HOME/.agents/ambient-sentinel"
 pass=0
 fail=0
 
@@ -1138,7 +1142,8 @@ echo ""
 echo "--- CH4: codex-home preserves user config, profiles, hooks, local kit state, and user skills ---"
 
 CH4_DEST="$TMPDIR_EVAL/codex-home-ch4"
-mkdir -p "$CH4_DEST/kits/local/repositories/user-kit" "$CH4_DEST/sk""ills/user-owned-skill" "$CH4_DEST/ag""ents"
+CH4_SKILLS="$TMPDIR_EVAL/codex-home-ch4-universal-skills"
+mkdir -p "$CH4_DEST/kits/local/repositories/user-kit" "$CH4_SKILLS/user-owned-skill" "$CH4_DEST/ag""ents"
 
 CH4_GENERIC_DIRS=(agent-cards build context docs evals integrations packaging powers prompts schemas scripts kits)
 for CH4_DIR in "${CH4_GENERIC_DIRS[@]}"; do
@@ -1197,14 +1202,14 @@ JSON
 cat > "$CH4_DEST/kits/local/repositories/user-kit/kit.json" << 'JSON'
 {"id":"user-kit","name":"User Kit"}
 JSON
-cat > "$CH4_DEST/sk""ills/user-owned-skill/SKILL.md" << 'EOF_SKILL'
+cat > "$CH4_SKILLS/user-owned-skill/SKILL.md" << 'EOF_SKILL'
 # User Owned Skill
 EOF_SKILL
 cat > "$CH4_DEST/ag""ents/user-owned-agent.toml" << 'EOF_AGENT'
 name = "user-owned-agent"
 EOF_AGENT
 
-CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex" bash "$ROOT_DIR/scripts/install-codex-home.sh" "$CH4_DEST" >/dev/null 2>&1
+CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex" FLOW_AGENTS_SKILLS_DIR="$CH4_SKILLS" bash "$ROOT_DIR/scripts/install-codex-home.sh" "$CH4_DEST" >/dev/null 2>&1
 
 if grep -q 'user-model' "$CH4_DEST/config.toml" \
   && grep -q 'user-profile-model' "$CH4_DEST/custom.config.toml" \
@@ -1243,10 +1248,10 @@ else
   _fail "CH4: kits/local registry or repository was removed"
 fi
 
-if [[ -f "$CH4_DEST/sk""ills/search-first/SKILL.md" && -f "$CH4_DEST/sk""ills/plan-work/SKILL.md" && -f "$CH4_DEST/sk""ills/user-owned-skill/SKILL.md" ]]; then
-  _pass "CH4: root, Builder Kit workflow, and user-owned skills coexist in flattened Codex skills"
+if [[ -f "$CH4_SKILLS/search-first/SKILL.md" && -f "$CH4_SKILLS/plan-work/SKILL.md" && -f "$CH4_SKILLS/user-owned-skill/SKILL.md" ]]; then
+  _pass "CH4: root, Builder Kit workflow, and user-owned skills coexist in universal Codex skills"
 else
-  _fail "CH4: root skill, Builder Kit workflow skill, or user-owned skill missing from flattened Codex skills"
+  _fail "CH4: root skill, Builder Kit workflow skill, or user-owned skill missing from universal Codex skills"
 fi
 
 if [[ -f "$CH4_DEST/scripts/install-merge.js" && -f "$CH4_DEST/build/src/cli/kit.js" && -f "$CH4_DEST/ag""ents/tool-worker.toml" && -f "$CH4_DEST/ag""ents/user-owned-agent.toml" && -f "$CH4_DEST/hooks.json" ]] \
@@ -1272,7 +1277,7 @@ else
   _fail "CH4: installed scripts/kit.js could not run with installed build bundle"
 fi
 
-CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex" bash "$ROOT_DIR/scripts/install-codex-home.sh" "$CH4_DEST" >/dev/null 2>&1
+CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex" FLOW_AGENTS_SKILLS_DIR="$CH4_SKILLS" bash "$ROOT_DIR/scripts/install-codex-home.sh" "$CH4_DEST" >/dev/null 2>&1
 CH4_GENERIC_PRESERVED=1
 for CH4_DIR in "${CH4_GENERIC_DIRS[@]}"; do
   [[ "$(cat "$CH4_DEST/$CH4_DIR/user-owned.txt" 2>/dev/null)" == "user-owned-$CH4_DIR" ]] || CH4_GENERIC_PRESERVED=0
@@ -1288,7 +1293,7 @@ echo ""
 # ─── codex-home: CH5: destination symlink containment ───────────────────────
 echo "--- CH5: codex-home refuses managed destination symlinks ---"
 
-for CH5_REL in scripts kits sk""ills hooks.json; do
+for CH5_REL in scripts kits hooks.json; do
   CH5_DEST="$TMPDIR_EVAL/codex-home-ch5-${CH5_REL//\//-}"
   CH5_OUTSIDE="$TMPDIR_EVAL/codex-home-ch5-outside-${CH5_REL//\//-}"
   mkdir -p "$CH5_DEST" "$CH5_OUTSIDE"
@@ -1680,6 +1685,11 @@ echo ""
 
 echo ""
 echo "==========================="
+if [[ "$(cat "$HOME/.agents/ambient-sentinel" 2>/dev/null)" == "installer tests must not replace this file" ]]; then
+  _pass "dedicated Codex installer calls remain inside hermetic universal roots"
+else
+  _fail "dedicated Codex installer calls mutated the isolated default-home sentinel"
+fi
 total=$((pass + fail))
 echo "Results: ${pass}/${total} passed, ${fail} failed"
 [[ "$fail" -gt 0 ]] && exit 1

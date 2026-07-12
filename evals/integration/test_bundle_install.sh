@@ -285,7 +285,7 @@ else
   _fail "pi install failed"
 fi
 
-USER_SKILLS_DIR="$CODEX_FULL_DEST/.codex/sk""ills/user-skill"
+USER_SKILLS_DIR="$CODEX_FULL_DEST/.agents/sk""ills/user-skill"
 mkdir -p "$CODEX_FULL_DEST/.codex/ag""ents" "$USER_SKILLS_DIR"
 printf 'name = "user-agent"\n' > "$CODEX_FULL_DEST/.codex/ag""ents/user-agent.toml"
 printf '# user skill\n' > "$USER_SKILLS_DIR/SKILL.md"
@@ -309,7 +309,7 @@ for dir in \
   "$CLAUDE_DEST/.flow-agents" \
   "$CLAUDE_DEST/.kontourai/flow-agents" \
   "$CODEX_DEST/.codex/agents" \
-  "$CODEX_DEST/.codex/skills" \
+  "$CODEX_DEST/.agents/skills" \
   "$CODEX_DEST/.flow-agents" \
   "$CODEX_DEST/.kontourai/flow-agents" \
   "$CODEX_FULL_DEST/.flow-agents" \
@@ -1069,7 +1069,7 @@ else
   _fail "packed npm consumer did not complete the public Builder workflow contract and lifecycle commands"
 fi
 
-if node - "$CODEX_FULL_DEST/.codex/skills" "$CODEX_FULL_DEST" <<'NODE'
+if node - "$CODEX_FULL_DEST/.agents/skills" "$CODEX_FULL_DEST" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
 const [root, installRoot] = process.argv.slice(2);
@@ -1094,7 +1094,12 @@ for (const skill of [...builder, 'agentic-engineering']) {
       throw new Error('verify-work must ship criterion-backed substantive verification evidence guidance');
     }
     const refs = [...text.matchAll(/\b(?:context|docs|kits)\/[A-Za-z0-9_./-]+\.(?:md|json)\b/g)].map((match) => match[0]);
-    for (const ref of refs) if (!fs.existsSync(path.join(installRoot, ref))) throw new Error(`${skill} has unresolved installed resource ${ref}`);
+    for (const ref of refs) {
+      const skillLocal = path.join(path.dirname(file), ref);
+      if (!fs.existsSync(skillLocal) && !fs.existsSync(path.join(installRoot, ref))) {
+        throw new Error(`${skill} has unresolved installed resource ${ref}`);
+      }
+    }
   }
 }
 NODE
@@ -1108,6 +1113,105 @@ if [[ -f "$CODEX_AGENTS_DIR/user-agent.toml" && -d "$USER_SKILLS_DIR" ]]; then
   _pass "Codex full install preserves unknown user files"
 else
   _fail "Codex full install removed unknown user files"
+fi
+
+echo ""
+echo "--- Dedicated Codex Home Universal Skills ---"
+GLOBAL_HOME="$TMPDIR_EVAL/global-home"
+GLOBAL_CODEX="$TMPDIR_EVAL/global-codex"
+GLOBAL_SKILLS="$TMPDIR_EVAL/global-agents/skills"
+mkdir -p "$GLOBAL_SKILLS/user-skill"
+printf '# user skill\n' > "$GLOBAL_SKILLS/user-skill/SKILL.md"
+GLOBAL_OUTPUT="$TMPDIR_EVAL/global-install.out"
+if HOME="$GLOBAL_HOME" CODEX_REAL_HOME="$GLOBAL_CODEX" bash "$ROOT_DIR/scripts/install-codex-home.sh" "$GLOBAL_CODEX" --skills-dir "$GLOBAL_SKILLS" >"$GLOBAL_OUTPUT"; then
+  _pass "dedicated Codex installer accepts independent hermetic runtime and skill roots"
+else
+  _fail "dedicated Codex installer failed with independent hermetic roots"
+fi
+if [[ -f "$GLOBAL_SKILLS/plan-work/SKILL.md" && -f "$GLOBAL_SKILLS/plan-work/context/contracts/planning-contract.md" && -f "$GLOBAL_SKILLS/user-skill/SKILL.md" && ! -e "$GLOBAL_CODEX/skills/plan-work" ]]; then
+  _pass "global install uses self-contained universal skills and preserves user skills"
+else
+  _fail "global universal skill layout, resource closure, or user preservation is wrong"
+fi
+if rg -q 'Installed Flow Agents into Codex home at .+/global-codex$' "$GLOBAL_OUTPUT" && rg -q 'Installed portable skills at .+/global-agents/skills$' "$GLOBAL_OUTPUT"; then
+  _pass "installer reports both runtime and portable skill destinations"
+else
+  _fail "installer output does not report both destinations"
+fi
+if HOME="$GLOBAL_HOME" CODEX_REAL_HOME="$GLOBAL_CODEX" bash "$ROOT_DIR/scripts/install-codex-home.sh" "$GLOBAL_CODEX" --skills-dir "$GLOBAL_SKILLS" >/dev/null; then
+  _pass "split-root reinstall is idempotent"
+else
+  _fail "split-root reinstall is not idempotent"
+fi
+
+CONFLICT_CODEX="$TMPDIR_EVAL/conflict-codex"
+CONFLICT_SKILLS="$TMPDIR_EVAL/conflict-agents/skills"
+mkdir -p "$CONFLICT_SKILLS/plan-work" "$CONFLICT_CODEX/skills/plan-work" "$CONFLICT_CODEX/.flow-agents"
+printf '# user collision\n' > "$CONFLICT_SKILLS/plan-work/SKILL.md"
+cp "$ROOT_DIR/dist/codex/.agents/skills/plan-work/SKILL.md" "$CONFLICT_CODEX/skills/plan-work/SKILL.md"
+printf 'runtime sentinel\n' > "$CONFLICT_CODEX/runtime-sentinel"
+node - "$CONFLICT_CODEX" <<'NODE'
+const fs=require('node:fs'), path=require('node:path'), crypto=require('node:crypto'); const root=process.argv[2];
+const rel='skills' + '/plan-work/SKILL.md'; const sha256=crypto.createHash('sha256').update(fs.readFileSync(path.join(root,rel))).digest('hex');
+fs.writeFileSync(path.join(root,'.flow-agents/codex-install-manifest.json'), JSON.stringify({schema_version:'1.0',files:[{path:rel,sha256}]},null,2)+'\n');
+NODE
+CONFLICT_RUNTIME_BEFORE="$(shasum -a 256 "$CONFLICT_CODEX/skills/plan-work/SKILL.md" "$CONFLICT_CODEX/.flow-agents/codex-install-manifest.json" "$CONFLICT_CODEX/runtime-sentinel")"
+if HOME="$GLOBAL_HOME" CODEX_REAL_HOME="$CONFLICT_CODEX" bash "$ROOT_DIR/scripts/install-codex-home.sh" "$CONFLICT_CODEX" --skills-dir "$CONFLICT_SKILLS" >/dev/null 2>&1; then
+  _fail "global installer overwrote a user-owned skill collision"
+else
+  CONFLICT_RUNTIME_AFTER="$(shasum -a 256 "$CONFLICT_CODEX/skills/plan-work/SKILL.md" "$CONFLICT_CODEX/.flow-agents/codex-install-manifest.json" "$CONFLICT_CODEX/runtime-sentinel")"
+  if [[ "$(cat "$CONFLICT_SKILLS/plan-work/SKILL.md")" == "# user collision" && "$CONFLICT_RUNTIME_BEFORE" == "$CONFLICT_RUNTIME_AFTER" && ! -e "$CONFLICT_SKILLS/.flow-agents" ]]; then
+    _pass "cross-root collision preflight preserves universal content, legacy skill, runtime sentinel, and manifests"
+  else
+    _fail "cross-root collision failure partially mutated an install root"
+  fi
+fi
+
+SYMLINK_TARGET="$TMPDIR_EVAL/symlink-target"
+SYMLINK_PARENT="$TMPDIR_EVAL/symlink-parent"
+mkdir -p "$SYMLINK_TARGET" "$SYMLINK_PARENT"
+ln -s "$SYMLINK_TARGET" "$SYMLINK_PARENT/catalog"
+if HOME="$GLOBAL_HOME" CODEX_REAL_HOME="$TMPDIR_EVAL/symlink-codex" bash "$ROOT_DIR/scripts/install-codex-home.sh" "$TMPDIR_EVAL/symlink-codex" --skills-dir "$SYMLINK_PARENT/catalog/skills" >/dev/null 2>&1; then
+  _fail "global installer followed a symlinked skill destination component"
+else
+  [[ ! -e "$SYMLINK_TARGET/skills" ]] && _pass "global installer refuses symlinked skill destination components without mutation" || _fail "symlink rejection mutated its target"
+fi
+
+SOURCE_ANCESTOR="$(dirname "$ROOT_DIR")"
+SOURCE_DESCENDANT="$ROOT_DIR/.fa-550-forbidden-skills"
+for unsafe in / "$SOURCE_ANCESTOR" "$SOURCE_DESCENDANT"; do
+  rm -rf "$SOURCE_DESCENDANT"
+  if HOME="$GLOBAL_HOME" CODEX_REAL_HOME="$TMPDIR_EVAL/unsafe-codex" bash "$ROOT_DIR/scripts/install-codex-home.sh" "$TMPDIR_EVAL/unsafe-codex" --skills-dir "$unsafe" >/dev/null 2>&1; then
+    _fail "global installer accepted unsafe skill namespace root: $unsafe"
+  elif [[ ! -e "$SOURCE_DESCENDANT" && ! -e "$TMPDIR_EVAL/unsafe-codex" ]]; then
+    _pass "unsafe root/overlap rejection occurs before destination mutation: $unsafe"
+  else
+    _fail "unsafe root/overlap rejection left destination mutations: $unsafe"
+  fi
+done
+
+MIGRATE_CODEX="$TMPDIR_EVAL/migrate-codex"
+MIGRATE_SKILLS="$TMPDIR_EVAL/migrate-agents/skills"
+LEGACY_SKILLS_SEGMENT="skills"
+LEGACY_USER_DIR="$MIGRATE_CODEX/$LEGACY_SKILLS_SEGMENT/user-legacy"
+mkdir -p "$MIGRATE_CODEX/skills/plan-work" "$LEGACY_USER_DIR" "$MIGRATE_CODEX/.flow-agents"
+cp "$ROOT_DIR/dist/codex/.agents/skills/plan-work/SKILL.md" "$MIGRATE_CODEX/skills/plan-work/SKILL.md"
+printf '# modified legacy user content\n' > "$LEGACY_USER_DIR/SKILL.md"
+node - "$MIGRATE_CODEX" <<'NODE'
+const fs = require('node:fs'); const path = require('node:path'); const crypto = require('node:crypto');
+const root = process.argv[2];
+const rels = ['skills' + '/plan-work/SKILL.md', 'skills' + '/user-legacy/SKILL.md'];
+const files = rels.map(p => ({path:p, sha256:crypto.createHash('sha256').update(fs.readFileSync(path.join(root,p))).digest('hex')}));
+fs.writeFileSync(path.join(root,'.flow-agents/codex-install-manifest.json'), JSON.stringify({schema_version:'1.0',files},null,2)+'\n');
+fs.appendFileSync(path.join(root,'skills' + '/user-legacy/SKILL.md'), 'kept modification\n');
+NODE
+if HOME="$GLOBAL_HOME" CODEX_REAL_HOME="$MIGRATE_CODEX" bash "$ROOT_DIR/scripts/install-codex-home.sh" "$MIGRATE_CODEX" --skills-dir "$MIGRATE_SKILLS" >/dev/null 2>"$TMPDIR_EVAL/migrate.err" \
+  && [[ ! -e "$MIGRATE_CODEX/skills/plan-work/SKILL.md" ]] \
+  && rg -q 'kept modification' "$LEGACY_USER_DIR/SKILL.md" \
+  && [[ -f "$MIGRATE_SKILLS/plan-work/SKILL.md" ]]; then
+  _pass "legacy migration removes unchanged owned skills and preserves modified legacy content"
+else
+  _fail "legacy Flow Agents skill migration was destructive or incomplete"
 fi
 
 OPENCODE_AGENTS_DIR="$OPENCODE_FULL_DEST/.opencode/agents"
