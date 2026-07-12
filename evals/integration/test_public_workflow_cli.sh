@@ -160,15 +160,21 @@ pass "status is canonical and byte-read-only"
 
 FLOW_MANIFEST="$CONSUMER/.kontourai/flow/runs/acme-widgets-101/evidence/manifest.json"
 BEFORE_EVIDENCE="$(node -p "JSON.parse(require('fs').readFileSync('$FLOW_MANIFEST')).evidence.length")"
-run_candidate evidence --session-dir "$RELEASE_SESSION" --expectation pickup-probe-readiness --status not_verified --summary "Consumer fixture intentionally leaves this claim unverified." --json >/dev/null
+PARTIAL_EVIDENCE="$(run_candidate evidence --session-dir "$RELEASE_SESSION" --expectation pickup-probe-readiness --status not_verified --summary "Consumer fixture intentionally leaves this claim unverified." --json)"
 AFTER_EVIDENCE="$(node -p "JSON.parse(require('fs').readFileSync('$FLOW_MANIFEST')).evidence.length")"
-[[ "$AFTER_EVIDENCE" -eq $((BEFORE_EVIDENCE + 1)) ]] || fail "evidence invocation did not attach exactly once"
-pass "evidence records and synchronizes exactly once"
+[[ "$AFTER_EVIDENCE" -eq "$BEFORE_EVIDENCE" ]] || fail "partial evidence changed the canonical manifest"
+node -e 'const r=JSON.parse(process.argv[1]);if(r.attached!==false||r.awaiting_evidence!==true||r.current_step!=="design-probe")process.exit(1)' "$PARTIAL_EVIDENCE" || fail "partial evidence did not report an explicit awaiting-evidence result"
+pass "partial evidence records locally without evaluation or canonical attachment"
 
 PULL_REPORT="$RELEASE_SESSION/$(basename "$RELEASE_SESSION")--pull-work.md"
 PULL_REPORT_REF="{\"kind\":\"artifact\",\"file\":\"$PULL_REPORT\",\"summary\":\"Concrete selected-work and probe report.\"}"
-run_candidate evidence --session-dir "$RELEASE_SESSION" --expectation pickup-probe-readiness --status pass --summary "Complete the consumer readiness expectation after exercising NOT_VERIFIED." --evidence-ref-json "$PULL_REPORT_REF" --json >/dev/null
-run_candidate evidence --session-dir "$RELEASE_SESSION" --expectation probe-decisions-or-accepted-gaps --status pass --summary "Complete the consumer probe gate." --evidence-ref-json "$PULL_REPORT_REF" --json >/dev/null
+READINESS_PARTIAL="$(run_candidate evidence --session-dir "$RELEASE_SESSION" --expectation pickup-probe-readiness --status pass --summary "Complete the consumer readiness expectation after exercising NOT_VERIFIED." --evidence-ref-json "$PULL_REPORT_REF" --json)"
+node -e 'const r=JSON.parse(process.argv[1]);if(r.attached!==false||r.awaiting_evidence!==true||r.current_step!=="design-probe")process.exit(1)' "$READINESS_PARTIAL" || fail "first passing member of a multi-expectation gate did not remain pending"
+PROBE_COMPLETE="$(run_candidate evidence --session-dir "$RELEASE_SESSION" --expectation probe-decisions-or-accepted-gaps --status pass --summary "Complete the consumer probe gate." --evidence-ref-json "$PULL_REPORT_REF" --json)"
+node -e 'const r=JSON.parse(process.argv[1]);if(r.attached!==true||r.awaiting_evidence!==false||r.current_step!=="plan")process.exit(1)' "$PROBE_COMPLETE" || fail "complete multi-expectation gate did not attach and advance exactly once"
+AFTER_COMPLETE_EVIDENCE="$(node -p "JSON.parse(require('fs').readFileSync('$FLOW_MANIFEST')).evidence.length")"
+[[ "$AFTER_COMPLETE_EVIDENCE" -eq $((BEFORE_EVIDENCE + 1)) ]] || fail "complete multi-expectation gate did not attach exactly once"
+pass "multi-expectation evidence attaches atomically only when complete"
 seed_pull_work acme/widgets#104
 run_candidate_as poison-pointer start --artifact-root "$ARTIFACT_ROOT" --flow builder.build --work-item acme/widgets#104 --assignment-provider local-file --summary "Poison global pointer fixture" >/dev/null
 node - "$ARTIFACT_ROOT" "$(basename "$RELEASE_SESSION")" <<'NODE'

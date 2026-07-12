@@ -19,9 +19,9 @@ import {
 } from "../../build/src/builder-flow-runtime.js";
 import { builderLifecycleAuthorizationPayload, loadBuilderLifecycleAuthorization, recordAuthorizationConsumed } from "../../build/src/builder-lifecycle-authority.js";
 import { cancelBuilderBuildRun } from "../../build/src/builder-flow-run-adapter.js";
-import { performLocalClaim, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
+import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
-import { inferExecutedTestCount } from "../../build/src/cli/workflow-sidecar.js";
+import { buildTrustBundle, inferExecutedTestCount, main as workflowSidecarMain } from "../../build/src/cli/workflow-sidecar.js";
 
 const SUBJECT = "local:work-item/runtime-projection";
 const NOW = "2026-07-09T20:00:00.000Z";
@@ -214,7 +214,7 @@ async function assertRecoveryRejectsWithoutWrites(session, pattern) {
   assert.deepEqual(snapshotProjectionTargets(session), beforeProjection);
 }
 
-function bundleClaim({ expectation, claimType, subjectType, status = "pass", routeReason, subject = SUBJECT, testCount = 1, timestamp = NOW }) {
+function bundleClaim({ expectation, claimType, subjectType, status = "pass", routeReason, subject = SUBJECT, testCount = 1, timestamp = new Date().toISOString() }) {
   const claimId = `claim.${expectation}`;
   return {
     claim: {
@@ -264,7 +264,7 @@ function bundleClaim({ expectation, claimType, subjectType, status = "pass", rou
   };
 }
 
-function verifiedTestsPrerequisites(session, timestamp = NOW) {
+function verifiedTestsPrerequisites(session, timestamp = new Date().toISOString()) {
   const reviewArtifact = path.join(session.projectRoot, "review-target", "delivery.md");
   const implementation = path.join(session.projectRoot, "review-target", "implementation.txt");
   const implementationFile = path.relative(session.projectRoot, implementation);
@@ -310,6 +310,24 @@ function writeBundle(sessionDir, entries) {
     policies: [],
     events: entries.map((entry) => entry.event),
   });
+}
+
+function historicalProducerSuperseded(entry, suffix = "historical") {
+  const copy = withIdentitySuffix(entry, suffix);
+  copy.claim.producerStatus = "superseded";
+  return copy;
+}
+
+function withIdentitySuffix(entry, suffix) {
+  const copy = structuredClone(entry);
+  const priorId = copy.claim.id;
+  copy.claim.id = `${priorId}.${suffix}`;
+  copy.evidence.id = `${copy.evidence.id}.${suffix}`;
+  copy.evidence.claimId = copy.claim.id;
+  copy.event.id = `${copy.event.id}.${suffix}`;
+  copy.event.claimId = copy.claim.id;
+  copy.event.evidenceIds = [copy.evidence.id];
+  return copy;
 }
 
 async function writeAndSync(session, entries) {
@@ -736,13 +754,15 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
   const verify = await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
   assert.equal(verify.run.state.current_step, "verify");
 
+  const failureTimestamp = new Date().toISOString();
   const routed = await writeAndSync(session, [bundleClaim({
     expectation: "tests-evidence",
     claimType: "builder.verify.tests",
     subjectType: "flow-step",
     status: "fail",
     routeReason: "implementation_defect",
-  })]);
+    timestamp: failureTimestamp,
+  }), ...verifiedTestsPrerequisites(session, failureTimestamp)]);
 
   assert.equal(routed.run.state.current_step, "execute");
   assert.equal(routed.projection.flow_run.route_back_attempt, 1);
@@ -750,22 +770,217 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
   assert.match(routed.projection.next_action.summary, /Route-back history: attempt 1\/3 returned to `execute` for `implementation_defect`/);
   assert.deepEqual(routed.projection.next_action.skills, ["execute-plan"]);
 
-  const reentered = await writeAndSync(session, [bundleClaim({
+  const reentered = await writeAndSync(session, [withIdentitySuffix(bundleClaim({
     expectation: "implementation-scope",
     claimType: "builder.execute.scope",
     subjectType: "change",
     timestamp: new Date().toISOString(),
-  })]);
+  }), "reentry")]);
   assert.equal(reentered.run.state.current_step, "verify");
+  const staleRetry = await writeAndSync(session, [bundleClaim({
+    expectation: "tests-evidence",
+    claimType: "builder.verify.tests",
+    subjectType: "flow-step",
+    status: "fail",
+    routeReason: "implementation_defect",
+    timestamp: NOW,
+  })]);
+  assert.equal(staleRetry.attached, false);
+  assert.equal(staleRetry.run.state.current_step, "verify");
+  assert.equal(staleRetry.run.state.transitions.filter((transition) => transition.type === "route_back").length, 1);
   const correctedAt = new Date(Date.parse(reentered.run.state.transitions.at(-1).at) + 1).toISOString();
   const corrected = await writeAndSync(session, [
-    bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", timestamp: correctedAt }),
-    ...verifiedTestsPrerequisites(session, correctedAt),
+    withIdentitySuffix(bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", timestamp: correctedAt }), "corrected"),
+    ...verifiedTestsPrerequisites(session, correctedAt).map((entry, index) => withIdentitySuffix(entry, `corrected-${index}`)),
   ]);
   assert.equal(corrected.run.state.current_step, "merge-ready");
   const verifyEvidence = corrected.run.manifest.evidence.filter((entry) => entry.gate_id === "verify-gate");
   assert.equal(verifyEvidence.length, 2);
   assert.equal(verifyEvidence[0].superseded_by, verifyEvidence[1].id);
+});
+
+test("producer-superseded FAIL is audit history and live PASS drives verify", async () => {
+  const session = makeSession("producer-superseded-verify");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+
+  const livePass = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
+  const historicalFail = historicalProducerSuperseded(bundleClaim({
+    expectation: "tests-evidence",
+    claimType: "builder.verify.tests",
+    subjectType: "flow-step",
+    status: "fail",
+    routeReason: "implementation_defect",
+  }));
+  const result = await writeAndSync(session, [historicalFail, livePass, ...verifiedTestsPrerequisites(session)]);
+
+  assert.equal(result.run.state.current_step, "merge-ready");
+  const attached = result.run.manifest.evidence.filter((entry) => entry.gate_id === "verify-gate" && !entry.superseded_by);
+  assert.equal(attached.length, 1);
+  assert.deepEqual(attached[0].expectation_ids.sort(), ["acceptance-criteria", "clean-critique", "tests-evidence"]);
+});
+
+test("partial passing review snapshot waits for the complete verify expectation set", async () => {
+  const session = makeSession("atomic-review-sync");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+
+  const disputedCritique = verifiedTestsPrerequisites(session)[0];
+  disputedCritique.claim.value = "fail";
+  disputedCritique.claim.status = "disputed";
+  disputedCritique.event.status = "disputed";
+  const disputedPartial = await writeAndSync(session, [disputedCritique]);
+  assert.equal(disputedPartial.attached, false);
+  assert.equal(disputedPartial.run.state.transitions.filter((transition) => transition.type === "route_back").length, 0);
+
+  const partial = await writeAndSync(session, verifiedTestsPrerequisites(session).slice(0, 1));
+  assert.equal(partial.attached, false);
+  assert.equal(partial.run.state.current_step, "verify");
+  assert.equal(partial.run.state.transitions.filter((transition) => transition.type === "route_back").length, 0);
+
+  const complete = await writeAndSync(session, [
+    bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }),
+    ...verifiedTestsPrerequisites(session),
+  ]);
+  assert.equal(complete.run.state.current_step, "merge-ready");
+});
+
+test("initial gate boundary rejects pre-run and far-future claims", async () => {
+  for (const [name, timestamp] of [
+    ["pre-run", NOW],
+    ["far-future", new Date(Date.now() + 60 * 60_000).toISOString()],
+  ]) {
+    const session = makeSession(`freshness-${name}`);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    const result = await writeAndSync(session, [bundleClaim({
+      expectation: "selected-work",
+      claimType: "builder.pull-work.selected",
+      subjectType: "work-item",
+      timestamp,
+    })]);
+    assert.equal(result.attached, false, name);
+    assert.equal(result.run.state.current_step, "pull-work", name);
+  }
+});
+
+test("prior claim identity is rejected after re-entry and a new identity can recover", async () => {
+  const session = makeSession("same-digest-reentry");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+  const future = new Date(Date.now() + 10_000).toISOString();
+  const failure = [bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", status: "fail", routeReason: "implementation_defect", timestamp: future }), ...verifiedTestsPrerequisites(session, future)];
+  const first = await writeAndSync(session, failure);
+  assert.equal(first.run.state.current_step, "execute");
+  await writeAndSync(session, [withIdentitySuffix(bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change", timestamp: future }), "reentry")]);
+  const replay = await writeAndSync(session, failure);
+  assert.equal(replay.attached, false);
+  assert.equal(replay.run.state.current_step, "verify");
+  assert.equal(replay.run.state.transitions.filter((transition) => transition.type === "route_back").length, 1);
+  const newIdentity = failure.map((entry, index) => withIdentitySuffix(entry, `visit-2-${index}`));
+  const second = await writeAndSync(session, newIdentity);
+  assert.equal(second.run.state.current_step, "execute");
+  const verifyEvidence = second.run.manifest.evidence.filter((entry) => entry.gate_id === "verify-gate");
+  assert.equal(verifyEvidence.length, 2);
+  assert.equal(verifyEvidence[0].superseded_by, verifyEvidence[1].id);
+});
+
+test("legacy colon-bearing assignment actor releases only through its normalized equivalent", () => {
+  const session = makeSession("legacy-actor-release");
+  const legacyActor = { runtime: "unknown", session_id: "legacy-session", host: "Kontour", human: null };
+  performLocalClaim(session.artifactRoot, session.slug, legacyActor, {
+    ttlSeconds: 1800,
+    actorKey: "unknown:legacy-session:Kontour",
+    branch: `agent/${session.slug}`,
+    artifactDir: session.sessionDir,
+    workItemRef: SUBJECT,
+    reason: "legacy fixture",
+  });
+  assert.throws(() => performLocalRelease(session.artifactRoot, session.slug, legacyActor, {
+    actorKey: "different-actor",
+  }), /refusing to release/);
+  assert.throws(() => performLocalRelease(session.artifactRoot, session.slug, { ...legacyActor, session_id: "different" }, {
+    actorKey: "unknownlegacy-sessionKontour",
+  }), /refusing to release/);
+  const released = performLocalRelease(session.artifactRoot, session.slug, legacyActor, {
+    actorKey: "unknownlegacy-sessionKontour",
+  });
+  assert.equal(released.status, "released");
+});
+
+test("string-only legacy liveness identity cannot be released by a colliding modern actor", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-legacy-liveness-"));
+  const eventsFile = path.join(root, "liveness", "events.jsonl");
+  fs.mkdirSync(path.dirname(eventsFile), { recursive: true });
+  fs.writeFileSync(eventsFile, `${JSON.stringify({
+    type: "claim",
+    subjectId: "legacy-subject",
+    actor: "unknown:anc-123456789abc:Kontour",
+    at: NOW,
+    ttlSeconds: 1800,
+  })}\n`);
+
+  await assert.rejects(() => workflowSidecarMain([
+    "liveness", "release", "legacy-subject",
+    "--actor", "unknownanc-123456789abcKontour",
+    "--artifact-root", root,
+    "--at", "2026-07-09T20:01:00.000Z",
+  ]), /prior claim/);
+  const events = fs.readFileSync(eventsFile, "utf8").trim().split("\n").map(JSON.parse);
+  assert.equal(events.length, 1);
+});
+
+test("lossy modern liveness key collision cannot release a non-reversible legacy actor", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-lossy-liveness-"));
+  const eventsFile = path.join(root, "liveness", "events.jsonl");
+  fs.mkdirSync(path.dirname(eventsFile), { recursive: true });
+  fs.writeFileSync(eventsFile, `${JSON.stringify({ type: "claim", subjectId: "collision", actor: "a:b", at: NOW, ttlSeconds: 1800 })}\n`);
+  await assert.rejects(() => workflowSidecarMain([
+    "liveness", "release", "collision", "--actor", "ab", "--artifact-root", root,
+  ]), /prior claim/);
+  assert.equal(fs.readFileSync(eventsFile, "utf8").trim().split("\n").length, 1);
+});
+
+test("upgrade rebuild preserves legacy critique identity until a versioned new review", async () => {
+  const legacy = {
+    id: "upgrade-review",
+    reviewer: "reviewer",
+    reviewed_at: "2026-07-01T00:00:00Z",
+    verdict: "pass",
+    summary: "Legacy clean review",
+    findings: [],
+    lanes: [{ id: "code", status: "pass" }],
+    review_target: { artifacts: [] },
+    artifact_refs: [],
+  };
+  const beforeUpgrade = await buildTrustBundle("upgrade-fixture", "2026-07-01T00:00:00Z", [], [], [legacy]);
+  const rebuiltAfterUpgrade = await buildTrustBundle("upgrade-fixture", "2026-07-12T00:00:00Z", [], [], [legacy]);
+  const newReview = await buildTrustBundle("upgrade-fixture", "2026-07-12T00:01:00Z", [], [], [{
+    ...legacy,
+    reviewed_at: "2026-07-12T00:01:00Z",
+    identity_version: 2,
+  }]);
+  assert.equal(beforeUpgrade.claims[0].id, rebuiltAfterUpgrade.claims[0].id);
+  assert.notEqual(newReview.claims[0].id, beforeUpgrade.claims[0].id);
+  assert.equal(rebuiltAfterUpgrade.claims[0].metadata.identity_version, undefined);
+  assert.equal(newReview.claims[0].metadata.identity_version, 2);
 });
 
 test("passing tests-evidence rejects a critique whose reviewed artifact changed", async () => {
@@ -837,25 +1052,30 @@ test("verified sidecar claims drive the composed publish and learning prefix to 
   claimSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
   const steps = [
-    [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })],
-    [
+    () => [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })],
+    () => [
       bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
       bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
     ],
-    [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })],
-    [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })],
-    [bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }), ...verifiedTestsPrerequisites(session)],
-    [bundleClaim({ expectation: "merge-readiness", claimType: "builder.merge-ready.readiness", subjectType: "change" })],
+    () => [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })],
+    () => [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })],
+    () => [bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }), ...verifiedTestsPrerequisites(session)],
+    () => [bundleClaim({ expectation: "merge-readiness", claimType: "builder.merge-ready.readiness", subjectType: "change" })],
   ];
-  for (const entries of steps) await writeAndSync(session, entries);
+  for (const entries of steps) await writeAndSync(session, entries());
 
   const prOpen = readJson(path.join(session.sessionDir, "state.json"));
   assert.equal(prOpen.flow_run.current_step, "pr-open");
+  assert.equal(readJson(path.join(session.artifactRoot, "current.json")).active_step_id, "pr-open");
   assert.deepEqual(prOpen.next_action.skills, []);
   assert.deepEqual(prOpen.next_action.operations, ["publish-change"]);
 
-  await writeAndSync(session, [bundleClaim({ expectation: "pull-request-opened", claimType: "builder.pr-open.pull-request", subjectType: "pull-request" })]);
-  await writeAndSync(session, [bundleClaim({ expectation: "ci-merge-readiness", claimType: "builder.merge-ready-ci.readiness", subjectType: "pull-request" })]);
+  const mergeReadyCi = await writeAndSync(session, [bundleClaim({ expectation: "pull-request-opened", claimType: "builder.pr-open.pull-request", subjectType: "pull-request" })]);
+  assert.equal(mergeReadyCi.run.state.current_step, "merge-ready-ci");
+  assert.equal(readJson(path.join(session.artifactRoot, "current.json")).active_step_id, "merge-ready-ci");
+  const learn = await writeAndSync(session, [bundleClaim({ expectation: "ci-merge-readiness", claimType: "builder.merge-ready-ci.readiness", subjectType: "pull-request" })]);
+  assert.equal(learn.run.state.current_step, "learn");
+  assert.equal(readJson(path.join(session.artifactRoot, "current.json")).active_step_id, "learn");
   const completed = await writeAndSync(session, [
     bundleClaim({ expectation: "decision-evidence", claimType: "builder.learn.decisions", subjectType: "decision" }),
     bundleClaim({ expectation: "learning-evidence", claimType: "builder.learn.evidence", subjectType: "release" }),
@@ -865,6 +1085,18 @@ test("verified sidecar claims drive the composed publish and learning prefix to 
   assert.equal(completed.run.state.status, "completed");
   assert.equal(completed.projection.status, "delivered");
   assert.deepEqual(completed.projection.next_action, { status: "done", summary: "Canonical Flow run is complete." });
+  const liveEvidence = completed.run.manifest.evidence.filter((entry) => !entry.superseded_by);
+  assert.deepEqual(liveEvidence.map((entry) => entry.expectation_ids), [
+    ["selected-work"],
+    ["pickup-probe-readiness", "probe-decisions-or-accepted-gaps"],
+    ["implementation-plan"],
+    ["implementation-scope"],
+    ["clean-critique", "acceptance-criteria", "tests-evidence"],
+    ["merge-readiness"],
+    ["pull-request-opened"],
+    ["ci-merge-readiness"],
+    ["decision-evidence", "learning-evidence"],
+  ]);
 
   const flowDirectory = runDir(session.slug, session.projectRoot);
   const beforeFlow = snapshotTree(flowDirectory);

@@ -915,7 +915,9 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     if (!check.id) continue;
     const subjectId = `${slug}/${check.id}`;
     const fieldOrBehavior = String(check.summary ?? check.id);
-    const claimId = generateClaimId(subjectId, "flow-agents.workflow", fieldOrBehavior);
+    const gateClaimIdentityVersion = check._gate_claim_identity_version === 2 ? 2 : 1;
+    const gateClaimRecordedAt = gateClaimIdentityVersion === 2 && typeof check._gate_claim_recorded_at === "string" ? check._gate_claim_recorded_at : null;
+    const claimId = generateClaimId(subjectId, "flow-agents.workflow", gateClaimRecordedAt ? `${fieldOrBehavior}::gate-visit::${gateClaimRecordedAt}` : fieldOrBehavior);
     const evId = `ev:${claimId}`;
     const legacyClaimType = `workflow.check.${check.kind ?? "external"}`;
 
@@ -1071,7 +1073,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       // restored stamp) takes the currently-active step's id.
       const declaredStepId = gateClaimDeclaredStepId ?? (activeStep ? activeStep.stepId : null);
       const declaredMetadata: AnyObj = gateClaimExpectationId
-        ? { ...claimMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}) } }
+        ? { ...claimMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}) } }
         : claimMetadata;
       const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, ...(declaredMetadata ? { metadata: declaredMetadata } : {}) };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
@@ -1089,7 +1091,9 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     if (!criterion.id) continue;
     const subjectId = `${slug}/${criterion.id}`;
     const fieldOrBehavior = String(criterion.description ?? criterion.id);
-    const claimId = generateClaimId(subjectId, "flow-agents.workflow", fieldOrBehavior);
+    const criterionIdentityVersion = criterion.identity_version === 2 ? 2 : 1;
+    const criterionVerifiedAt = criterionIdentityVersion === 2 && typeof criterion.verified_at === "string" ? criterion.verified_at : null;
+    const claimId = generateClaimId(subjectId, "flow-agents.workflow", criterionVerifiedAt ? `${fieldOrBehavior}::verified::${criterionVerifiedAt}` : fieldOrBehavior);
     const legacyClaimType = "workflow.acceptance.criterion";
     const policy = ensurePolicy(legacyClaimType, "high", []);
     const evStatus = criterionStatusToEventStatus(String(criterion.status ?? ""));
@@ -1105,7 +1109,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     if (declared) {
       // Declared kit-typed claim only — no legacy shadow (ADR 0016 P-d).
       const declaredPolicy = ensurePolicy(declared.claimType, "high", []);
-      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, metadata: { origin: "acceptance", criterion: { id: criterion.id, description: criterion.description ?? criterion.id, status: criterion.status, evidence_refs: Array.isArray(criterion.evidence_refs) ? criterion.evidence_refs : [] }, ...(workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}) } };
+      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, metadata: { origin: "acceptance", criterion: { id: criterion.id, description: criterion.description ?? criterion.id, status: criterion.status, evidence_refs: Array.isArray(criterion.evidence_refs) ? criterion.evidence_refs : [], ...(criterionIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(criterionVerifiedAt ? { verified_at: criterionVerifiedAt } : {}) }, ...(workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}) } };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
       claims.push({ ...declaredClaimObj, status: declaredStatus });
     } else {
@@ -1128,10 +1132,12 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const supersededBy = typeof c.superseded_by === "string" && c.superseded_by.length > 0 ? c.superseded_by : null;
     const critiqueReviewer = String(c.reviewer ?? "tool-code-reviewer");
     const critiqueReviewedAt = String(c.reviewed_at ?? ts);
+    const critiqueIdentityVersion = c.identity_version === 2 ? 2 : 1;
     const critMeta: AnyObj = {
       origin: "critique",
       reviewer: critiqueReviewer,
       reviewed_at: critiqueReviewedAt,
+      ...(critiqueIdentityVersion === 2 ? { identity_version: 2 } : {}),
       findings: Array.isArray(c.findings) ? c.findings : [],
       lanes: Array.isArray(c.lanes) ? c.lanes : [],
       review_target: c.review_target && typeof c.review_target === "object" ? c.review_target : { artifacts: [] },
@@ -1143,7 +1149,9 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     // A superseded historical write gets a distinct, stable claimId so it co-exists with the live
     // claim of the same critique id (never overwrites or duplicates it). The salt is reproducible
     // across rebuilds because superseded_by + reviewed_at are preserved in metadata.
-    const claimIdSalt = supersededBy ? `${fieldOrBehavior}::superseded::${supersededBy}::${critiqueReviewedAt}` : fieldOrBehavior;
+    const claimIdSalt = critiqueIdentityVersion === 2
+      ? `${fieldOrBehavior}::reviewed::${critiqueReviewedAt}${supersededBy ? `::superseded::${supersededBy}` : ""}`
+      : (supersededBy ? `${fieldOrBehavior}::superseded::${supersededBy}::${critiqueReviewedAt}` : fieldOrBehavior);
     const claimId = generateClaimId(subjectId, "flow-agents.workflow", claimIdSalt);
     const legacyClaimType = "workflow.critique.review";
     const policy = ensurePolicy(legacyClaimType, "medium", []);
@@ -2727,7 +2735,7 @@ function requireObservedCommandRefs(refs: AnyObj[], observedCommands: ReadonlySe
   }
 }
 
-function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: ReadonlySet<string>): AnyObj[] {
+function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: ReadonlySet<string>, verifiedAt: string): AnyObj[] {
   if (raw.length === 0) die("record-gate-claim requires --criterion-json for a passing tests-evidence claim");
   const incoming = raw.map((value) => parseJson(value, "--criterion-json"));
   const expectedById = new Map<string, AnyObj>();
@@ -2746,7 +2754,7 @@ function completePassingCriteria(existing: AnyObj[], raw: string[], observedComm
     const refs = normalizeEvidenceRefs(criterion.evidence_refs, `criterion ${ids[index]} evidence_refs`);
     if (refs.length === 0) die(`criterion ${ids[index]} requires reviewable evidence_refs`);
     requireObservedCommandRefs(refs, observedCommands, `criterion ${ids[index]}`);
-    return { ...expectedById.get(ids[index])!, status: "pass", evidence_refs: refs };
+    return { ...expectedById.get(ids[index])!, status: "pass", evidence_refs: refs, identity_version: 2, verified_at: verifiedAt };
   });
 }
 
@@ -3133,6 +3141,8 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (typeof gc.claim_type === "string") check._gate_claim_declared_type = gc.claim_type;
     if (typeof gc.subject_type === "string") check._gate_claim_declared_subject = gc.subject_type;
     if (typeof gc.step_id === "string") check._gate_claim_declared_step_id = gc.step_id;
+    if (typeof gc.recorded_at === "string") check._gate_claim_recorded_at = gc.recorded_at;
+    if (gc.identity_version === 2) check._gate_claim_identity_version = 2;
     if (typeof gc.route_reason === "string") check._gate_claim_route_reason = gc.route_reason;
   };
   // #270 CRITICAL/HIGH fix: a claim that is gate-claim-SHAPED but carries NO metadata.gate_claim
@@ -3294,6 +3304,7 @@ function critiquesFromBundle(dir: string): AnyObj[] {
       review_target: md.review_target && typeof md.review_target === "object" && !Array.isArray(md.review_target) ? md.review_target : { artifacts: [] },
       reviewer: typeof md.reviewer === "string" ? md.reviewer : "tool-code-reviewer",
       reviewed_at: typeof md.reviewed_at === "string" ? md.reviewed_at : (c.updatedAt || c.createdAt || now()),
+      ...(md.identity_version === 2 ? { identity_version: 2 } : {}),
       artifact_refs: Array.isArray(md.artifact_refs) ? md.artifact_refs : [],
       ...(typeof md.superseded_by === "string" && md.superseded_by.length > 0 ? { superseded_by: md.superseded_by } : {}),
     };
@@ -3314,6 +3325,8 @@ function criteriaFromBundle(dir: string): AnyObj[] {
         description: typeof saved.description === "string" ? saved.description : (claim.fieldOrBehavior || ""),
         status: typeof saved.status === "string" ? saved.status : (claim.value ?? "not_verified"),
         evidence_refs: Array.isArray(saved.evidence_refs) ? saved.evidence_refs : [],
+        ...(typeof saved.verified_at === "string" ? { verified_at: saved.verified_at } : {}),
+        ...(saved.identity_version === 2 ? { identity_version: 2 } : {}),
       };
     })
     .filter((criterion: AnyObj) => typeof criterion.id === "string" && criterion.id.length > 0);
@@ -3369,7 +3382,7 @@ async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> 
   if (!checks.length && opts(p, "surface-trust-json").length === 0) die("record-evidence requires at least one --check-json or --surface-trust-json");
   validateAcceptanceEvidenceRefs(dir, p);
   // Phase 4c: bundle is the sole verification artifact — stop writing evidence.json and acceptance.json update.
-  const ts = opt(p, "timestamp", now());
+  const ts = opt(p, "timestamp", new Date().toISOString());
   // #298: readBundleState + merge-by-id instead of unconditionally replacing every prior check —
   // record-evidence previously never called checksFromBundle(dir), so it dropped every check
   // recorded by an earlier record-evidence/record-check/record-gate-claim call. A later check
@@ -3576,7 +3589,7 @@ function diagnostic(dir: string, code: string, summary: string): never {
 async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
-  const ts = opt(p, "timestamp", now());
+  const ts = opt(p, "timestamp", new Date().toISOString());
   const statusVal = opt(p, "status");
   if (!["pass", "fail", "not_verified"].includes(statusVal)) die("--status must be one of: pass, fail, not_verified");
   const summary = opt(p, "summary") || die("--summary is required");
@@ -3652,6 +3665,8 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
     status: statusVal,
     summary,
     _gate_claim_expectation_id: targetExpectation.id,
+    _gate_claim_identity_version: 2,
+    _gate_claim_recorded_at: ts,
     ...(routeReason ? { _gate_claim_route_reason: routeReason } : {}),
   };
 
@@ -3690,7 +3705,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   // SAME expectation id supersedes the earlier check for that expectation (mergeChecksById); a
   // gate claim against a different expectation is additive.
   const _existingState = readBundleState(dir);
-  const criteria = mustRunTests ? completePassingCriteria(_existingState.criteria, opts(p, "criterion-json"), observedCommandNames) : _existingState.criteria;
+  const criteria = mustRunTests ? completePassingCriteria(_existingState.criteria, opts(p, "criterion-json"), observedCommandNames, ts) : _existingState.criteria;
   if (mustRunTests) {
     const liveCritiques = _existingState.critiques.filter((critique) => !critique.superseded_by);
     if (liveCritiques.length === 0 || liveCritiques.some((critique) => !critiqueIsCleanAndCurrent(dir, critique))) {
@@ -3907,7 +3922,8 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   const critique = {
     id: critiqueId,
     reviewer: opt(p, "reviewer", "tool-code-reviewer"),
-    reviewed_at: opt(p, "timestamp", now()),
+    reviewed_at: opt(p, "timestamp", new Date().toISOString()),
+    identity_version: 2,
     verdict,
     summary,
     lanes,

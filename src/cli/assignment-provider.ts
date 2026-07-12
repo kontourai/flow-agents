@@ -775,7 +775,19 @@ export function performLocalReleaseUnderLock(
       // seam, relocated to this write path).
       const holderActorKey = existing.actor_key || helper.serializeActor(existing.actor);
       const releasedByActorKey = opts.actorKey || helper.serializeActor(releasedBy);
-      if (holderActorKey !== releasedByActorKey) {
+      // Pre-3.7 lifecycle events could persist the derived ancestry actor before
+      // sanitizeSegment removed ':' separators. Modern explicit/env release paths
+      // always use the sanitized form. Accept only that one-way legacy migration;
+      // never normalize two modern keys or relax ownership to a prefix match.
+      const sameActorStruct = existing.actor.runtime === releasedBy.runtime
+        && existing.actor.session_id === releasedBy.session_id
+        && existing.actor.host === releasedBy.host
+        && (existing.actor.human ?? null) === (releasedBy.human ?? null);
+      const legacyActorKeyMatches = holderActorKey.includes(":")
+        && holderActorKey === helper.serializeActor(existing.actor)
+        && helper.sanitizeSegment(holderActorKey) === releasedByActorKey
+        && sameActorStruct;
+      if (holderActorKey !== releasedByActorKey && !legacyActorKeyMatches) {
         if (tolerateNoActiveClaim) return null;
         throw new Error(`--actor-json does not match the current holder (${holderActorKey}); refusing to release a claim held by someone else`);
       }
