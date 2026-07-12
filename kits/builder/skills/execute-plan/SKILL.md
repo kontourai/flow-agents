@@ -1,140 +1,69 @@
 ---
 name: "execute-plan"
-description: "Parallel execution primitive — plan artifact path to implemented code via tool-worker (x4). Reads plan directly. Updates session file between waves."
+description: "Execution primitive that turns a structured plan into implemented scope through tool-worker delegation."
 ---
 
-# Execute
+# Execute Plan
 
-Plan artifact in, implemented code out. Fans out to tool-worker subagents in parallel waves.
+Implement an approved plan while preserving scope, traceability, and recovery context.
 
-## Agents
+## Role And Binding
 
-| Agent | Role |
-|---|---|
-| tool-worker | Implementation per task spec (up to 4 parallel) |
+- **Role:** canonical Builder build-step producer and standalone execution primitive.
+- **Binding:** `builder.build` step `execute`.
+- **Produces:** the active session execution report (`<slug>--deliver.md`), `state.json`, and `implementation-scope` for an active matching run.
+- **Standalone no-run behavior:** execute the supplied plan and return execution evidence. Do not start a Builder run, record Builder evidence, or imply that an inactive Builder flow advanced.
 
 ## Model Routing
 
-Worker slices (`tool-worker`) route by task shape: `delegate-implementation` for
-precisely-planned implementation (the default), `delegate-mechanical` for
-fully-specified mechanical slices (issue sync, doc/scan bookkeeping),
-`delegate-design` when a slice genuinely needs design latitude. Resolve the role
-from `.datum/config.json` (`npx @kontourai/datum resolve <role> --json`) and pass
-the model explicitly. On a review/verify gate failure of a slice, re-dispatch its
-fix one tier higher and record the escalation. See
-`context/contracts/execution-contract.md` § Delegation: Model Routing (and
-§ Escalation on gate failure). Fallback: inherit the session model when
-datum/config is absent, noted in the artifact.
+Delegate implementation tasks to `tool-worker`. Select `delegate-mechanical`, `delegate-implementation`, or `delegate-design` according to the planned task, resolving the role from `.datum/config.json` when available. Use parallel workers only when the plan's file ownership and dependencies make concurrent work safe; no fixed worker count is part of this contract.
+Apply the routing and escalation contract in `context/contracts/execution-contract.md`.
 
-## Orchestrator Rule
+## Provider Boundaries
 
-You do not write source files. You read the plan artifact, fan out tasks to tool-worker, and update the session file between waves.
+Use `RepositoryAdapter` for repository, target revision, worktree, and changed-file context. Carry provider-backed work-item, board, and ownership context from `WorkItemProvider`, `BoardProvider`, and `AssignmentProvider` when present. GitHub is an optional adapter, never a required execution contract.
 
-## Shared Contracts
+## Inputs
 
-Follow:
-- `context/contracts/artifact-contract.md`
-- `context/contracts/execution-contract.md`
-- `context/contracts/planning-contract.md` for the plan artifact and Definition Of Done
-- `context/contracts/sandbox-policy.md`
+- structured implementation plan and optional host session/artifact location
+- Definition Of Done, stable acceptance criteria, task-to-criterion mapping, and required evidence
+- sandbox/worktree mode, expected modified files, source revision, and conflict risks
 
-This skill owns orchestration between waves. The contracts own artifact continuity, worker task expectations, conflict handling, validation expectations, and completion rules.
+## Procedure
 
-## Input
+1. Read the plan. Return it to `plan-work` when it lacks a Definition Of Done, stable acceptance criteria, task mapping, sandbox boundary, or usable execution scope.
+2. Before delegation, compare the current target revision with the plan's base through `RepositoryAdapter`. Re-ground the plan when changed scope intersects its assumptions; record missing confirmation as `NOT_VERIFIED` rather than treating it as fresh.
+3. Give each worker its bounded task, owned files, relevant acceptance IDs, required evidence, sandbox/worktree constraints, rollback conditions, and plan reference.
+4. Run safe independent tasks concurrently and dependent tasks in order. Between waves, collect results, resolve conflicts, and update the execution record with completed work, remaining work, changed files, and supported acceptance criteria.
+5. For UI tasks, include the applicable frontend design guidance in the worker instruction.
+6. When implementation completes, record scope integrity: changed files, accepted deviations, task-to-criterion traceability, evidence, and outstanding gaps. Hand off to report-only review and verification; do not treat implementation as verification.
+7. Reconcile the execution report and `state.json` with the active session artifact directory.
+   Any missing, stale, or unwritable durable record is a blocker or
+   `NOT_VERIFIED` gap, not a reason to substitute chat prose. Publish only
+   structured, resolving evidence references through the public CLI.
 
-- **Plan artifact path**: path to the `-plan.md` file in `.kontourai/flow-agents/<slug>/`
-- **Session file path**: the session file to update with progress
+## Execution Record
 
-## Workflow
+The execution record must identify:
 
-1. Read the plan artifact directly
-2. Confirm the plan follows `context/contracts/planning-contract.md`, including `## Definition Of Done`. If missing, return to `plan-work` before implementation.
-3. Confirm the plan records an appropriate `sandbox_mode` using `context/contracts/sandbox-policy.md`. If missing, infer the smallest safe mode and record it before delegation.
-4. Confirm execution traceability before any worker starts:
-   - acceptance criteria have stable ids, preferably matching `acceptance.json`
-   - every wave/task lists the acceptance ids it supports
-   - the session/deliver file copies or links the criteria and includes a `Requirements Trace` or equivalent mapping
-   - each worker prompt includes the relevant acceptance ids and required evidence, not only a loose task title
-   - if traceability is missing, update the session file and/or send the plan back for refinement before delegation
-5. Set session file `status: executing` and use `npm run workflow:sidecar -- advance-state <artifact-dir> --status in_progress --phase execution --summary ... --next-action ...` when the repository provides it
-6. **Frontend design check:** If any tasks involve UI, CSS, layouts, components, or visual design, read the `frontend-design` skill and include its aesthetics guidelines in the tool-worker prompts for those tasks
-7. **Before fan-out, run the [Pre-Fan-Out Freshness Re-Check](#pre-fan-out-freshness-re-check) and re-ground if the plan is stale.** Then fan out each wave to tool-worker subagents (up to 4 parallel):
-   - Delegate to the exact `tool-worker` role for every implementation worker. Do not spawn unnamed/default implementation agents.
-   ```
-   Each tool-worker gets:
-   - Task description from plan
-   - Files to create/modify
-   - Acceptance criteria
-   - Acceptance criterion ids and requirement ids this task supports
-   - Required evidence for those criteria
-   - Definition Of Done items that this task supports
-   - Sandbox mode, approval assumptions, rollback expectations, and escalation stop conditions
-   - Context from plan + prior wave results
-   - Plan artifact path (so it can read full context directly)
-   ```
-8. Between waves:
-   - Collect results from all tool-worker subagents
-   - Check for conflicts before next wave
-   - Feed completed wave context forward
-   - **Checkpoint**: update session file with completed tasks and next wave
-   - Record worker progress with `npm run workflow:sidecar -- record-agent-event --artifact-dir <artifact-dir> --agent-id <worker-id> --kind evidence --status active|done --summary ...`
-9. After all waves: set session file `status: executed` and update `state.json` / `handoff.json` with `advance-state`
-10. For an active Builder Flow run, record the `implementation-scope` gate claim only after the changed-file scope and acceptance mapping are complete:
-    ```bash
-    npm run workflow:sidecar -- record-gate-claim .kontourai/flow-agents/<slug> \
-      --expectation implementation-scope \
-      --status pass \
-      --summary "Implementation completed within the planned scope; changed files and supported acceptance criteria are recorded." \
-      --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/<slug>/<slug>--execute-plan.md","summary":"Execution record with changed files, acceptance mapping, and worker evidence."}'
-    ```
-    Use `fail` or `not_verified` when scope integrity is unresolved. The sidecar writer synchronizes Flow; it does not declare the execute gate passed itself.
+- each completed task and its supported `AC*` identifiers
+- changed files and any scope deviation with approval or route-back reason
+- worker evidence, conflicts, rollback notes, remaining work, and next action
+- current revision comparison and re-grounding decision
 
-The orchestrator is responsible for keeping root `state.json` current, and performs that update **exclusively** through `npm run workflow:sidecar -- advance-state` — never through a direct Write/Edit tool call against the sidecar path. `config-protection.js` blocks direct tool-mediated writes to `state.json` by design; that block is expected and correct, not a bug to route around. Workers should receive the workflow artifact root explicitly and append agent events under that root instead of inferring the slug or rewriting shared sidecars.
+## Active Builder Evidence
 
-## Pre-Fan-Out Freshness Re-Check
+For an active `builder.build` `execute` step, record `implementation-scope` only after the changed-file scope and acceptance mapping are complete:
 
-A plan can go stale between planning and execution — upstream may have advanced, or the plan may simply be old. `plan-work` and `pull-work` stamp and check `planned_base_sha` / `revision_freshness` at planning and pickup; this is the same check at the **execution boundary**, where stale plans actually cause wasted work (parallel workers building what already landed upstream). Run it before any worker starts.
-
-- **Always — cheap SHA tripwire.** Re-fetch the target ref and compare the current target SHA to the plan's `planned_base_sha` (per `context/contracts/planning-contract.md`). If the base moved **and** the newer commits/files intersect `planning_scope_refs`, the plan is stale: do not fan out. Route back to `plan-work` (or `pickup-probe` for provider-backed work) to re-ground against the current base — the same `revision_freshness: stale` rule plan-work and pull-work already enforce. Missing `planned_base_sha` is not fresh; record a `NOT_VERIFIED` gap and confirm the base before fan-out.
-- **On plan age — deeper re-survey.** If the plan is older than the staleness window (default ~1h; shorter for fast-moving scope), do the costlier relook the SHA diff cannot: re-survey what now exists in the target area (recently merged PRs, new modules, sibling work) for anything that already does what this plan proposes. If it already shipped upstream, stop and route back to `plan-work` rather than building a duplicate. The SHA tripwire is the precise signal; plan age is the backstop for landscape drift the diff can't see.
-- Record the re-check result (`fresh`, or re-grounded with the compared SHAs and route-back) in the session file before continuing. Worktree/isolation needs stay owned by `pull-work`'s file-overlap decision — don't re-derive them here.
-
-## Session File Updates
-
-Between each wave, append to the session file:
-
-```markdown
-## Execution Progress
-
-### Wave 1 (completed)
-- [x] Task A — done. Supports: AC1, AC2. Evidence: <test/check/artifact>. Modified files: `<path>`.
-- [x] Task B — done. Supports: AC3. Evidence: <test/check/artifact>. Modified files: `<path>`.
-
-### Wave 2 (in progress)
-- [ ] Task C. Supports: AC4, AC5. Required evidence: <test/check/artifact>.
-- [ ] Task D. Supports: AC6. Required evidence: <test/check/artifact>.
-
-## Requirements Trace
-
-- R1 <requirement>. Acceptance: AC1, AC2.
-- R2 <requirement>. Acceptance: AC3.
-
-## Modified Files / Scope
-
-- Record changed paths in the session/deliver artifact and worker event summaries after each wave.
-- Do not add ad hoc `modified_files` keys to `state.json` unless the sidecar schema explicitly supports them.
-- Verification and optional governance providers such as Veritas should consume this scope from the session/evidence artifacts or a dedicated evidence sidecar, not from invalid state fields.
+```bash
+flow-agents workflow status --session-dir <session-dir>
+flow-agents workflow evidence --session-dir <session-dir> \
+  --expectation implementation-scope --status pass \
+  --summary "Implementation stayed within recorded scope; changed files and supported acceptance criteria are documented." \
+  --evidence-ref-json '{"kind":"artifact","file":"<session-dir>/<slug>--deliver.md","summary":"Execution report with changed scope and acceptance mapping."}' \
+  --evidence-ref-json '{"kind":"artifact","file":"<session-dir>/state.json","summary":"Current execution state and canonical next action."}'
 ```
 
-This is the recovery point. If context is lost, a new session reads this and knows which waves are done.
-
-## Output
-
-- Implemented code in the working directory
-- Session file updated with execution progress and `status: executed`
-- Execution progress follows `context/contracts/execution-contract.md`
-- Structured state/handoff sidecars advanced when `npm run workflow:sidecar --` is available
-
-If `advance-state` or artifact validation is unavailable or blocked, record that exact blocker in the session file and do not mark execution as cleanly complete.
-
-{context?}
+Use `fail` or `not_verified` when scope integrity is unresolved. A successful
+worker report does not override missing changed-file or acceptance mappings. Do
+not create a Builder run here or use private writer commands.

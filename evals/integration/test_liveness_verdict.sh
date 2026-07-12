@@ -292,23 +292,20 @@ else
 fi
 
 # ─── G. Static skill-text assertions (AC2) ──────────────────────────────────
-echo "--- G. Static pull-work tiebreaker/loser-release skill-text assertions ---"
+echo "--- G. Provider-neutral pull-work conflict contract assertions ---"
 
-require_text "$PULL" '### Post-Claim Conflict Re-check' "pull-work documents the Post-Claim Conflict Re-check subsection (AC2)"
-require_text "$PULL" 'When a double-hold is detected, immediately run the deterministic tiebreaker' "pull-work instructs running the deterministic tiebreaker immediately on a detected double-hold (AC2)"
-require_text "$PULL" 'liveness verdict <subjectId> --json' "pull-work references liveness verdict <subjectId> --json by exact command name (AC1, AC2)"
-require_text "$PULL" 'the same pinned .self_actor. and the same .subjectId. already in scope' "pull-work reuses the same pinned self_actor/subjectId already in scope for the verdict call, never re-derived (AC2)"
-require_text "$PULL" 'an exact-timestamp tie breaks by ascending actor-id string comparison \(.reason: \"tie-actor-lexicographic\".\)' "pull-work documents the exact-timestamp tiebreak and its reason value verbatim (AC1, AC2)"
-require_text "$PULL" 'the SAME verdict for the SAME stream state regardless of which actor invokes it' "pull-work states the verdict is deterministic regardless of which actor invokes it (AC1, AC2)"
-require_text "$PULL" 'If .winner\.actor !== self_actor., this session is the loser' "pull-work's loser branch is keyed on winner.actor !== self_actor (AC2)"
-require_text "$PULL" 'immediately run .npm run workflow:sidecar -- liveness release <subjectId> --actor <self_actor>.' "pull-work's loser branch runs liveness release <subjectId> --actor <self_actor> immediately (AC2)"
-require_text "$PULL" 'extend .post_claim_conflict. with .\{verdict_reason, winner_actor, conceded: true\}.' "pull-work's loser branch extends post_claim_conflict with {verdict_reason, winner_actor, conceded: true} (AC2)"
-require_text "$PULL" 'return to .### 3\. Select Work. to reselect within the same .pull-work. pass' "pull-work's loser branch returns to Select Work to reselect within the same pass (AC2)"
-require_text "$PULL" 'excluding the just-released subject' "pull-work's reselect excludes the just-released subject (AC2)"
-require_text "$PULL" 'If .winner\.actor === self_actor., this session wins' "pull-work's winner branch is keyed on winner.actor === self_actor (AC2)"
-require_text "$PULL" 'record the verdict for transparency \(.\{verdict_reason, winner_actor: self_actor, conceded: false\}.\) in .post_claim_conflict. and proceed normally; do not release' "pull-work's winner branch records the verdict for transparency and proceeds without releasing (AC2)"
-require_text "$PULL" 'closes the .detected but advisory-only. gap ADR 0012 §4 names for THIS session.s own double-hold' "pull-work's honesty note states the verdict+release loop closes the detected-but-advisory-only gap for this session's own double-hold (AC2)"
-require_text "$PULL" 'still does not provide true mutual exclusion across the read-then-write race window itself' "pull-work's honesty note distinguishes the new convergence guarantee from the unchanged read-then-write race residual (AC2)"
+require_text "$PULL" 'deterministic conflict arbitration' "pull-work uses provider conflict arbitration"
+require_text "$PULL" 'same pinned caller identity, subject, and observation' "pull-work reuses one conflict snapshot"
+require_text "$PULL" 'Prefer the earlier claim' "pull-work defines deterministic winner precedence"
+require_text "$PULL" 'exact timestamp tie by ascending' "pull-work defines deterministic tie handling"
+require_text "$PULL" 'same winner from the same state' "pull-work requires actor-independent verdicts"
+require_text "$PULL" 'If the caller loses' "pull-work defines loser behavior"
+require_text "$PULL" 'release or concede its claim immediately' "pull-work makes the loser concede"
+require_text "$PULL" 'conceded: true' "pull-work records loser concession"
+require_text "$PULL" 'exclude the contested subject' "pull-work excludes the lost subject before reselection"
+require_text "$PULL" 'If the caller wins' "pull-work defines winner behavior"
+require_text "$PULL" 'conceded: false' "pull-work records winner transparency"
+require_text "$PULL" 'underlying read-then-write race' "pull-work distinguishes convergence from mutual exclusion"
 
 # ─── H. Hostile-actor injection: winner.actor sanitized in --json and text (F5) ─────
 echo "--- H. Hostile-actor verdict sanitization (F5) ---"

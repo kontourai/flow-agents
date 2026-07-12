@@ -137,7 +137,7 @@ function renderKitSteering(trigger) {
     else lines.push(`Activate \`${defaultSkill}\`.`);
   }
   if (targetFlowId) {
-    lines.push(`Keep the session on \`${targetFlowId}\` and use \`npm run workflow:sidecar -- ensure-session --flow-id ${targetFlowId} ...\` when the repo provides the sidecar writer.`);
+    lines.push(`Keep the session on \`${targetFlowId}\`. Use the public \`flow-agents workflow\` interface only when it supports that Flow and its Work Item binding; otherwise report an unsupported-runtime blocker. Never call the package-internal writer from skill guidance.`);
   }
   if (requiredSequence.length) {
     lines.push(`Do not bypass ${requiredSequence.join(' -> ')} for matching work.`);

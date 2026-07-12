@@ -1,4 +1,6 @@
 import * as fs from "node:fs";
+import { execFileSync } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
@@ -8,9 +10,6 @@ import {
   expectationsForGate,
   lifecycleRequestMatches,
   openGates,
-  readJson,
-  runDir,
-  sha256File,
   type FlowGate,
   type FlowExpectation,
   type FlowRunState,
@@ -20,20 +19,22 @@ import { assertAuthorizationUnused, loadBuilderLifecycleAuthorization, readAutho
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock, type ActorStruct } from "./cli/assignment-provider.js";
 import {
   BUILDER_BUILD_FLOW_ID,
+  type BuilderFlowId,
   BuilderBuildRunInputError,
-  cancelBuilderBuildRun,
-  evaluateBuilderBuildRun,
-  loadBuilderBuildRun,
-  pauseBuilderBuildRun,
-  resumeBuilderBuildRun,
-  startBuilderBuildRun,
-  type BuilderBuildRunResult,
+  cancelBuilderFlowRun,
+  evaluateBuilderFlowRun,
+  loadBuilderFlowRun,
+  pauseBuilderFlowRun,
+  resumeBuilderFlowRun,
+  startBuilderFlowRun,
+  type BuilderFlowRunResult,
 } from "./builder-flow-run-adapter.js";
 
 type AnyRecord = Record<string, any>;
 
 export interface BuilderFlowSessionInput {
   sessionDir: string;
+  flowId?: BuilderFlowId;
 }
 
 export interface BuilderFlowAuthorizedLifecycleInput extends BuilderFlowSessionInput {
@@ -47,7 +48,7 @@ export interface BuilderFlowAgentLifecycleInput extends BuilderFlowSessionInput 
 export interface BuilderFlowSessionResult {
   sessionDir: string;
   projectRoot: string;
-  run: BuilderBuildRunResult;
+  run: BuilderFlowRunResult;
   projection: AnyRecord;
   attached: boolean;
 }
@@ -79,22 +80,33 @@ type PreparedProjectionWrites = {
   writes: Array<{ file: string; content: string }>;
 };
 
+type TrustBundleSnapshot = {
+  file: string;
+  raw: Buffer;
+  sha256: string;
+};
+
 export async function startBuilderFlowSession(input: BuilderFlowSessionInput): Promise<BuilderFlowSessionResult> {
   const context = resolveSessionContext(input.sessionDir);
   const sidecarSnapshot = readSidecarSnapshot(context);
   const subject = workflowSubject(sidecarSnapshot.state);
-  let run: BuilderBuildRunResult;
+  const requestedFlowId = input.flowId ?? persistedFlowId(sidecarSnapshot.state) ?? BUILDER_BUILD_FLOW_ID;
+  let run: BuilderFlowRunResult;
   try {
-    run = await loadBuilderBuildRun({
+    run = await loadBuilderFlowRun({
       cwd: context.projectRoot,
       runId: context.slug,
     });
+    if (run.definitionId !== requestedFlowId) {
+      throw new BuilderBuildRunInputError("flowId", `requested ${requestedFlowId} does not match the existing ${run.definitionId} run; start builder.build from a provider Work Item instead of retrying a local shape session`);
+    }
   } catch (error) {
     if (!isRunNotFound(error)) throw error;
-    run = await startBuilderBuildRun({
+    run = await startBuilderFlowRun({
       cwd: context.projectRoot,
       runId: context.slug,
       subject,
+      flowId: requestedFlowId,
       params: {
         subject,
       },
@@ -108,7 +120,7 @@ export async function syncBuilderFlowSession(input: BuilderFlowSessionInput): Pr
   const context = resolveSessionContext(input.sessionDir);
   const sidecarSnapshot = readSidecarSnapshot(context);
   const subject = workflowSubject(sidecarSnapshot.state);
-  const run = await loadBuilderBuildRun({
+  const run = await loadBuilderFlowRun({
     cwd: context.projectRoot,
     runId: context.slug,
   });
@@ -120,7 +132,7 @@ export async function recoverBuilderFlowSession(input: BuilderFlowSessionInput):
   const context = resolveSessionContext(input.sessionDir);
   const sidecarSnapshot = readSidecarSnapshot(context);
   const subject = workflowSubject(sidecarSnapshot.state);
-  const run = await loadBuilderBuildRun({
+  const run = await loadBuilderFlowRun({
     cwd: context.projectRoot,
     runId: context.slug,
   });
@@ -132,6 +144,21 @@ export async function recoverBuilderFlowSession(input: BuilderFlowSessionInput):
     projectRoot: context.projectRoot,
     run,
     projection,
+    attached: false,
+  };
+}
+
+export async function inspectBuilderFlowSession(input: BuilderFlowSessionInput): Promise<BuilderFlowSessionResult> {
+  const context = resolveSessionContext(input.sessionDir);
+  const sidecarSnapshot = readSidecarSnapshot(context);
+  const subject = workflowSubject(sidecarSnapshot.state);
+  const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
+  assertRunSubjectBinding(run, subject);
+  return {
+    sessionDir: context.sessionDir,
+    projectRoot: context.projectRoot,
+    run,
+    projection: projectFlowRun(context, run, sidecarSnapshot.state),
     attached: false,
   };
 }
@@ -149,7 +176,7 @@ export async function cancelBuilderFlowSession(input: BuilderFlowAuthorizedLifec
   return await withSubjectLock(context.artifactRoot, context.slug, async () => {
     const prepared = await prepareAuthorizedLifecycleChange(input, "cancel", context);
     assertAuthorizationUnused(prepared.context.artifactRoot, prepared.authorization);
-    const changed = await cancelBuilderBuildRun({ cwd: prepared.context.projectRoot, runId: prepared.context.slug, request: prepared.authorization.request });
+    const changed = await cancelBuilderFlowRun({ cwd: prepared.context.projectRoot, runId: prepared.context.slug, request: prepared.authorization.request });
     const released = performLocalReleaseUnderLock(prepared.context.artifactRoot, prepared.context.slug, prepared.authorization.assignment_actor, {
       actorKey: prepared.authorization.assignment_actor_key,
       reason: `canonical Flow run canceled by ${prepared.authorization.request.authority.request_ref}`,
@@ -166,7 +193,7 @@ export async function releaseBuilderFlowAssignment(input: BuilderFlowAgentLifecy
   const context = resolveSessionContext(input.sessionDir);
   return await withSubjectLock(context.artifactRoot, context.slug, async () => {
     const prepared = prepareAgentLifecycleChange(input, context);
-    const run = await loadBuilderBuildRun({ cwd: context.projectRoot, runId: context.slug });
+    const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
     const released = performLocalReleaseUnderLock(context.artifactRoot, context.slug, prepared.actor, { actorKey: prepared.actorKey, reason: input.reason });
     return { sessionDir: context.sessionDir, projectRoot: context.projectRoot, run, projection: prepared.sidecarSnapshot.state, attached: false, assignmentReleased: released !== null };
   });
@@ -179,7 +206,7 @@ export async function archiveBuilderFlowSession(input: BuilderFlowAuthorizedLife
   const priorConsumption = readAuthorizationConsumption(prepared.context.artifactRoot, prepared.authorization);
   const recoveringPreparedArchive = priorConsumption !== null && prepared.sidecarSnapshot.state.status === "archived";
   if (priorConsumption && !recoveringPreparedArchive) throw new Error("lifecycle authorization nonce has already been consumed");
-  const run = await loadBuilderBuildRun({ cwd: prepared.context.projectRoot, runId: prepared.context.slug });
+  const run = await loadBuilderFlowRun({ cwd: prepared.context.projectRoot, runId: prepared.context.slug });
   if (run.state.status !== "completed" && run.state.status !== "canceled") {
     throw new BuilderBuildRunInputError("flow_run.status", "must be completed or canceled before archival");
   }
@@ -223,7 +250,7 @@ async function changeBuilderFlowSessionLifecycle(
   const context = resolveSessionContext(input.sessionDir);
   return await withSubjectLock(context.artifactRoot, context.slug, async () => {
   const prepared = prepareAgentLifecycleChange(input, context);
-  const change = operation === "pause" ? pauseBuilderBuildRun : resumeBuilderBuildRun;
+  const change = operation === "pause" ? pauseBuilderFlowRun : resumeBuilderFlowRun;
   const at = new Date().toISOString();
   const run = await change({
     cwd: context.projectRoot,
@@ -254,7 +281,7 @@ async function prepareAuthorizedLifecycleChange(input: BuilderFlowAuthorizedLife
   const persistedAssignment = pathExistsNoFollow(assignmentFile)
     ? (assertSafeFile(assignmentFile, context.artifactRoot, "assignment record"), JSON.parse(fs.readFileSync(assignmentFile, "utf8")) as AnyRecord)
     : null;
-  const canonicalRun = await loadBuilderBuildRun({ cwd: context.projectRoot, runId: context.slug });
+  const canonicalRun = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
   const acceptsReleasedAssignment = (operation === "cancel" && canonicalRun.state.status === "canceled") || operation === "archive";
   const assignment = activeAssignment ?? (acceptsReleasedAssignment && persistedAssignment?.status === "released" ? persistedAssignment : null);
   if (!assignment || (assignment.status !== "claimed" && !acceptsReleasedAssignment) || !assignment.actor_key) {
@@ -325,21 +352,9 @@ function clearCurrentPointers(artifactRoot: string, slug: string): void {
   }
 }
 
-export async function syncBuilderFlowSessionIfPresent(sessionDir: string): Promise<BuilderFlowSessionResult | null> {
-  let context: SessionContext;
-  try {
-    context = resolveSessionContext(sessionDir);
-  } catch (error) {
-    if (error instanceof BuilderBuildRunInputError && error.field === "sessionDir") return null;
-    throw error;
-  }
-  if (!fs.existsSync(runDir(context.slug, context.projectRoot))) return null;
-  return syncBuilderFlowSession({ sessionDir });
-}
-
 async function syncAndProject(
   context: SessionContext,
-  initial: BuilderBuildRunResult,
+  initial: BuilderFlowRunResult,
   sidecarSnapshot: SidecarSnapshot,
 ): Promise<BuilderFlowSessionResult> {
   let run = initial;
@@ -349,26 +364,35 @@ async function syncAndProject(
     throw new BuilderBuildRunInputError("flow_run.open_gates", `expected exactly one gate for active step ${run.state.current_step}, found ${gates.length}`);
   }
   if (gates.length === 1 && fs.existsSync(context.bundleFile)) {
-    const rawBundle = await readJson(context.bundleFile);
-    const gateEvidence = bundleGateEvidence(rawBundle, gates[0]!, run.state.subject);
-    if (gateEvidence) {
-      const digest = await sha256File(context.bundleFile);
-      const alreadyAttached = manifestEvidence(run.manifest).some((entry) =>
-        entry.gate_id === gates[0]!.id && entry.sha256 === digest
-      );
-      if (!alreadyAttached) {
-        run = await evaluateBuilderBuildRun({
-          cwd: context.projectRoot,
-          runId: context.slug,
-          evidence: {
-            gate: gates[0]!.id,
-            file: path.relative(context.projectRoot, context.bundleFile),
-            ...(gateEvidence.failed ? { status: "failed" } : {}),
-            ...(gateEvidence.routeReason ? { routeReason: gateEvidence.routeReason } : {}),
-          },
-        });
-        attached = true;
+    const snapshot = stageTrustBundleSnapshot(context);
+    try {
+      const rawBundle = JSON.parse(snapshot.raw.toString("utf8"));
+      const gateEvidence = await bundleGateEvidence(rawBundle, gates[0]!, run.state.subject, context.projectRoot);
+      if (gateEvidence) {
+        const alreadyAttached = manifestEvidence(run.manifest).some((entry) =>
+          entry.gate_id === gates[0]!.id && entry.sha256 === snapshot.sha256
+        );
+        if (!alreadyAttached) {
+          const supersede = manifestEvidence(run.manifest)
+            .filter((entry) => entry.gate_id === gates[0]!.id && typeof entry.superseded_by !== "string")
+            .map((entry) => String(entry.id));
+          run = await evaluateBuilderFlowRun({
+            cwd: context.projectRoot,
+            runId: context.slug,
+            evidence: {
+              gate: gates[0]!.id,
+              file: path.relative(context.projectRoot, snapshot.file),
+              expectedSha256: snapshot.sha256,
+              ...(supersede.length > 0 ? { supersede } : {}),
+              ...(gateEvidence.failed ? { status: "failed" } : {}),
+              ...(gateEvidence.routeReason ? { routeReason: gateEvidence.routeReason } : {}),
+            },
+          });
+          attached = true;
+        }
       }
+    } finally {
+      removeTrustBundleSnapshot(snapshot);
     }
   }
   const projection = projectFlowRun(context, run, sidecarSnapshot.state);
@@ -382,7 +406,7 @@ async function syncAndProject(
   };
 }
 
-function assertRunSubjectBinding(run: BuilderBuildRunResult, subject: string): void {
+function assertRunSubjectBinding(run: BuilderFlowRunResult, subject: string): void {
   if (run.state.subject !== subject) {
     throw new BuilderBuildRunInputError("flow_run.state.subject", "must match the selected Work Item");
   }
@@ -441,14 +465,20 @@ function workflowSubject(state: AnyRecord): string {
   return refs[0]!;
 }
 
-function openGatesForResult(run: BuilderBuildRunResult): Array<FlowGate & { id: string }> {
+function persistedFlowId(state: AnyRecord): BuilderFlowId | null {
+  const flowRun = isRecord(state.flow_run) ? state.flow_run : null;
+  const flowId = flowRun?.definition_id;
+  return flowId === "builder.build" || flowId === "builder.shape" ? flowId : null;
+}
+
+function openGatesForResult(run: BuilderFlowRunResult): Array<FlowGate & { id: string }> {
   return openGates(
     JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8")),
     run.state,
   ) as Array<FlowGate & { id: string }>;
 }
 
-function bundleGateEvidence(bundle: unknown, gate: FlowGate, subject: string): { failed: boolean; routeReason: string | null } | null {
+async function bundleGateEvidence(bundle: unknown, gate: FlowGate, subject: string, projectRoot: string): Promise<{ failed: boolean; routeReason: string | null } | null> {
   if (!isRecord(bundle) || !Array.isArray(bundle.claims)) return null;
   const selectors = (expectationsForGate(gate) as FlowExpectation[]).map((expectation) => expectation.bundle_claim);
   const relevant = bundle.claims.filter((claim: unknown): claim is AnyRecord => {
@@ -479,7 +509,247 @@ function bundleGateEvidence(bundle: unknown, gate: FlowGate, subject: string): {
   if (routeReason && (!routeMap || typeof routeMap[routeReason] !== "string")) {
     throw new BuilderBuildRunInputError("evidence.claims.metadata.gate_claim.route_reason", `is not declared by gate ${String((gate as AnyRecord).id ?? "<unknown>")}`);
   }
+  if (String((gate as AnyRecord).id) === "verify-gate" && relevant.some((claim) => claim.claimType === "builder.verify.tests" && claim.value === "pass")) {
+    await assertVerifiedTestsTrust(bundle.claims, projectRoot);
+  }
   return { failed, routeReason };
+}
+
+async function assertVerifiedTestsTrust(claims: unknown[], projectRoot: string): Promise<void> {
+  const testClaims = claims.filter((claim): claim is AnyRecord => isRecord(claim)
+    && claim.claimType === "builder.verify.tests"
+    && claim.value === "pass"
+    && isRecord(claim.metadata)
+    && isRecord(claim.metadata.gate_claim)
+    && claim.metadata.gate_claim.expectation_id === "tests-evidence");
+  if (testClaims.length === 0) throw new BuilderBuildRunInputError("evidence.tests", "is missing a passing tests-evidence claim");
+  const liveCritiques = claims.filter((claim): claim is AnyRecord => isRecord(claim)
+    && isRecord(claim.metadata)
+    && claim.metadata.origin === "critique"
+    && typeof claim.metadata.superseded_by !== "string");
+  if (liveCritiques.length === 0 || liveCritiques.some((claim) => !isSubstantivePassingCritique(claim))) {
+    throw new BuilderBuildRunInputError("evidence.critique", "a passing tests-evidence claim requires a current clean critique");
+  }
+  const implementationActors = new Set(testClaims.map((claim) => claim.metadata.recorded_by).filter((actor): actor is string => typeof actor === "string" && actor.length > 0));
+  if (implementationActors.size !== 1 || liveCritiques.some((claim) => typeof claim.metadata.reviewer !== "string" || implementationActors.has(claim.metadata.reviewer))) {
+    throw new BuilderBuildRunInputError("evidence.critique.reviewer", "must identify a reviewer distinct from the tests-evidence implementation actor");
+  }
+  await Promise.all(liveCritiques.flatMap(async (claim) => {
+    const artifacts = reviewedArtifacts(claim);
+    await Promise.all(artifacts.map((artifact) => assertReviewedArtifactDigest(artifact, projectRoot)));
+    assertReviewedWorkspaceSnapshot(claim, artifacts, projectRoot);
+  }));
+  const criteria = claims.filter((claim): claim is AnyRecord => isRecord(claim) && isRecord(claim.metadata) && claim.metadata.origin === "acceptance");
+  if (criteria.length === 0 || criteria.some((claim) => {
+    const criterion = isRecord(claim.metadata.criterion) ? claim.metadata.criterion : null;
+    return claim.value !== "pass" || !criterion || !Array.isArray(criterion.evidence_refs) || criterion.evidence_refs.length === 0;
+  })) {
+    throw new BuilderBuildRunInputError("evidence.acceptance", "a passing tests-evidence claim requires complete verified acceptance criteria");
+  }
+  for (const testClaim of testClaims) assertObservedTestsEvidence(testClaim, criteria);
+}
+
+function assertObservedTestsEvidence(testClaim: AnyRecord, criteria: AnyRecord[]): void {
+  const observed = testClaim.metadata.observed_commands;
+  if (!Array.isArray(observed) || observed.length === 0) {
+    throw new BuilderBuildRunInputError("evidence.tests.observed_commands", "must contain successful command observations");
+  }
+  const commands = new Set<string>();
+  for (const entry of observed) {
+    if (!isRecord(entry) || typeof entry.command !== "string" || entry.exit_code !== 0 || !Number.isSafeInteger(entry.test_count) || Number(entry.test_count) <= 0 || typeof entry.output_sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(entry.output_sha256) || commands.has(entry.command)) {
+      throw new BuilderBuildRunInputError("evidence.tests.observed_commands", "must contain unique commands with exit_code 0, a positive executed-test count, and SHA-256 output digests");
+    }
+    commands.add(entry.command);
+  }
+  const topRefs = Array.isArray(testClaim.metadata.artifact_refs) ? testClaim.metadata.artifact_refs : [];
+  const topCommands = new Set(topRefs.flatMap((ref: unknown) => isRecord(ref) && ref.kind === "command" && typeof ref.excerpt === "string" ? [ref.excerpt.trim()] : []));
+  if ([...commands].some((command) => !topCommands.has(command))) {
+    throw new BuilderBuildRunInputError("evidence.tests.artifact_refs", "must reference every successful observed command exactly");
+  }
+  const criterionCommands = new Set<string>();
+  for (const claim of criteria) {
+    const criterion = claim.metadata.criterion as AnyRecord;
+    const refs = Array.isArray(criterion.evidence_refs) ? criterion.evidence_refs : [];
+    const matched = refs.flatMap((ref: unknown) => isRecord(ref) && ref.kind === "command" && typeof ref.excerpt === "string" && commands.has(ref.excerpt.trim()) ? [ref.excerpt.trim()] : []);
+    if (matched.length === 0) throw new BuilderBuildRunInputError("evidence.acceptance.evidence_refs", `criterion ${String(criterion.id ?? claim.id)} must reference a successful observed command`);
+    matched.forEach((command) => criterionCommands.add(command));
+  }
+  if ([...commands].some((command) => !criterionCommands.has(command))) {
+    throw new BuilderBuildRunInputError("evidence.acceptance.evidence_refs", "must bind every successful observed command to at least one criterion");
+  }
+}
+
+function isSubstantivePassingCritique(claim: AnyRecord): boolean {
+  if (claim.value !== "pass" || (Array.isArray(claim.metadata.findings) && claim.metadata.findings.some((finding: unknown) => isRecord(finding) && finding.status === "open"))) return false;
+  const lanes = claim.metadata.lanes;
+  return Array.isArray(lanes)
+    && lanes.length > 0
+    && lanes.every((lane) => isRecord(lane) && (lane.status === "pass" || lane.verdict === "pass"))
+    && reviewedArtifacts(claim).length > 0;
+}
+
+function reviewedArtifacts(claim: AnyRecord): AnyRecord[] {
+  const reviewTarget = isRecord(claim.metadata.review_target) ? claim.metadata.review_target : null;
+  const artifacts = reviewTarget?.artifacts;
+  if (!Array.isArray(artifacts) || artifacts.length === 0) return [];
+  if (!artifacts.every((artifact) => isRecord(artifact) && typeof artifact.file === "string" && typeof artifact.sha256 === "string" && /^[a-f0-9]{64}$/i.test(artifact.sha256))) return [];
+  return artifacts as AnyRecord[];
+}
+
+function assertReviewedWorkspaceSnapshot(claim: AnyRecord, artifacts: AnyRecord[], projectRoot: string): void {
+  const reviewTarget = isRecord(claim.metadata.review_target) ? claim.metadata.review_target : null;
+  const expected = reviewTarget?.workspace_snapshot;
+  if (!isRecord(expected)) {
+    throw new BuilderBuildRunInputError("evidence.critique.review_target.workspace_snapshot", "is required for a passing critique");
+  }
+  const current = captureReviewWorkspaceSnapshot(
+    projectRoot,
+    expected.kind === "reviewed-files"
+      ? reviewedWorkspaceFiles(expected)
+      : artifacts.map((artifact) => ({ file: artifact.file as string, sha256: artifact.sha256 as string })),
+  );
+  if (expected.version !== current.version || expected.kind !== current.kind || expected.algorithm !== current.algorithm) {
+    throw new BuilderBuildRunInputError("evidence.critique.review_target.workspace_snapshot", "does not match the current workspace snapshot strategy");
+  }
+  if (expected.digest !== current.digest) {
+    throw new BuilderBuildRunInputError("evidence.critique.review_target.workspace_snapshot.digest", "does not match the current implementation workspace");
+  }
+  if (current.kind === "git-worktree" && expected.head_sha !== current.head_sha) {
+    throw new BuilderBuildRunInputError("evidence.critique.review_target.workspace_snapshot.head_sha", "does not match the current Git HEAD");
+  }
+  if (current.kind === "reviewed-files" && !isDeepStrictEqual(expected.files, current.files)) {
+    throw new BuilderBuildRunInputError("evidence.critique.review_target.workspace_snapshot.files", "does not match the explicitly reviewed files");
+  }
+}
+
+function gitWorktreeSnapshot(projectRoot: string): AnyRecord | null {
+  const root = fs.realpathSync(projectRoot);
+  const hasGitMarker = fs.existsSync(path.join(root, ".git"));
+  try {
+    const gitRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    if (!gitRoot || fs.realpathSync(gitRoot) !== root) {
+      throw new BuilderBuildRunInputError("evidence.critique.review_target.workspace_snapshot", "requires the canonical project root to match the Git worktree root");
+    }
+    const headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const trackedDiff = execFileSync("git", ["diff", "--binary", "--no-ext-diff", "HEAD", "--"], { cwd: root, encoding: "buffer", stdio: ["ignore", "pipe", "ignore"] });
+    const untracked = execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], { cwd: root, encoding: "buffer", stdio: ["ignore", "pipe", "ignore"] })
+      .toString("utf8").split("\0").filter(Boolean).sort();
+    const hash = createHash("sha256");
+    hash.update("flow-agents:git-worktree:v1\0");
+    hash.update(headSha).update("\0");
+    hash.update(trackedDiff).update("\0");
+    for (const file of untracked) {
+      const absolute = path.resolve(root, file);
+      if (!pathIsWithin(absolute, root)) throw new Error("untracked file escapes repository root");
+      const stat = fs.lstatSync(absolute);
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("untracked entry is not a regular file");
+      hash.update(file).update("\0").update(fs.readFileSync(absolute)).update("\0");
+    }
+    return { version: 1, kind: "git-worktree", algorithm: "sha256", digest: hash.digest("hex"), head_sha: headSha };
+  } catch (error) {
+    if (hasGitMarker || error instanceof BuilderBuildRunInputError) {
+      if (error instanceof BuilderBuildRunInputError) throw error;
+      throw new BuilderBuildRunInputError("evidence.critique.review_target.workspace_snapshot", `could not inspect the Git worktree: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return null;
+  }
+}
+
+export function captureReviewWorkspaceSnapshot(
+  projectRoot: string,
+  reviewedFiles: Array<{ file: string; sha256: string }>,
+): AnyRecord {
+  return gitWorktreeSnapshot(projectRoot) ?? reviewedFilesSnapshot(projectRoot, reviewedFiles);
+}
+
+function reviewedWorkspaceFiles(snapshot: AnyRecord): Array<{ file: string; sha256: string }> {
+  if (!Array.isArray(snapshot.files) || snapshot.files.length === 0
+    || !snapshot.files.every((file) => isRecord(file) && typeof file.file === "string" && /^[a-f0-9]{64}$/i.test(String(file.sha256)))) {
+    throw new BuilderBuildRunInputError("evidence.critique.review_target.workspace_snapshot.files", "must list explicitly reviewed files with SHA-256 digests");
+  }
+  const files = snapshot.files.map((file) => ({ file: file.file as string, sha256: file.sha256 as string })).sort((left, right) => left.file.localeCompare(right.file));
+  if (new Set(files.map((file) => file.file)).size !== files.length) {
+    throw new BuilderBuildRunInputError("evidence.critique.review_target.workspace_snapshot.files", "must not contain duplicate files");
+  }
+  return files;
+}
+
+function reviewedFilesSnapshot(projectRoot: string, reviewedFiles: Array<{ file: string; sha256: string }>): AnyRecord {
+  const files = reviewedFiles.map((file) => ({ ...file }));
+  const hash = createHash("sha256");
+  hash.update("flow-agents:reviewed-files:v1\0");
+  for (const artifact of files) {
+    const absolute = safeReviewedArtifactPath(projectRoot, artifact.file);
+    hash.update(artifact.file).update("\0").update(fs.readFileSync(absolute)).update("\0");
+  }
+  return { version: 1, kind: "reviewed-files", algorithm: "sha256", digest: hash.digest("hex"), files };
+}
+
+async function assertReviewedArtifactDigest(artifact: AnyRecord, projectRoot: string): Promise<void> {
+  const canonicalArtifact = safeReviewedArtifactPath(projectRoot, artifact.file);
+  if (createHash("sha256").update(fs.readFileSync(canonicalArtifact)).digest("hex") !== artifact.sha256) {
+    throw new BuilderBuildRunInputError("evidence.critique.review_target.artifacts.sha256", `does not match ${artifact.file}`);
+  }
+}
+
+function safeReviewedArtifactPath(projectRoot: string, file: string): string {
+  const canonicalRoot = fs.realpathSync(projectRoot);
+  const candidate = path.resolve(canonicalRoot, file);
+  const relative = path.relative(canonicalRoot, candidate);
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new BuilderBuildRunInputError("evidence.critique.review_target.artifacts.file", "must resolve within the canonical project root");
+  }
+  let canonicalArtifact: string;
+  try {
+    canonicalArtifact = fs.realpathSync(candidate);
+  } catch {
+    throw new BuilderBuildRunInputError("evidence.critique.review_target.artifacts.file", `is missing: ${file}`);
+  }
+  const canonicalRelative = path.relative(canonicalRoot, canonicalArtifact);
+  if (canonicalRelative === ".." || canonicalRelative.startsWith(`..${path.sep}`) || path.isAbsolute(canonicalRelative) || !fs.statSync(canonicalArtifact).isFile()) {
+    throw new BuilderBuildRunInputError("evidence.critique.review_target.artifacts.file", "must be a regular file within the canonical project root");
+  }
+  return canonicalArtifact;
+}
+
+function stageTrustBundleSnapshot(context: SessionContext): TrustBundleSnapshot {
+  assertSafeFile(context.bundleFile, context.sessionDir, "trust.bundle");
+  const source = fs.openSync(context.bundleFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  let raw: Buffer;
+  try {
+    const stat = fs.fstatSync(source);
+    if (!stat.isFile()) throw new BuilderBuildRunInputError("trust.bundle", "must be a regular file");
+    raw = fs.readFileSync(source);
+  } finally {
+    fs.closeSync(source);
+  }
+  const directory = path.join(context.sessionDir, ".trust-bundle-snapshots");
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  assertSafeDirectory(directory, context.sessionDir, "trust.bundle snapshot directory");
+  fs.chmodSync(directory, 0o700);
+  const file = path.join(directory, `${randomBytes(16).toString("hex")}.json`);
+  const descriptor = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+  try {
+    fs.writeFileSync(descriptor, raw);
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  fs.chmodSync(file, 0o400);
+  return { file, raw, sha256: createHash("sha256").update(raw).digest("hex") };
+}
+
+function removeTrustBundleSnapshot(snapshot: TrustBundleSnapshot): void {
+  try {
+    fs.unlinkSync(snapshot.file);
+  } catch (error) {
+    if (!isRecord(error) || error.code !== "ENOENT") throw error;
+  }
+  try {
+    fs.rmdirSync(path.dirname(snapshot.file));
+  } catch (error) {
+    if (!isRecord(error) || (error.code !== "ENOENT" && error.code !== "ENOTEMPTY")) throw error;
+  }
 }
 
 function workflowSubjectRef(claim: AnyRecord): string | null {
@@ -493,13 +763,13 @@ function manifestEvidence(manifest: JsonObject): AnyRecord[] {
   return Array.isArray(manifest.evidence) ? manifest.evidence.filter(isRecord) : [];
 }
 
-function projectFlowRun(context: SessionContext, run: BuilderBuildRunResult, sidecar: AnyRecord): AnyRecord {
+function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, sidecar: AnyRecord): AnyRecord {
   const definition = JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8"));
   const gates = openGates(definition, run.state) as Array<FlowGate & { id: string }>;
   const complete = run.state.status === "completed";
   const paused = run.state.status === "paused";
   const canceled = run.state.status === "canceled";
-  const action = complete || paused || canceled ? { skills: [], operations: [] } : stepAction(run.state.current_step);
+  const action = complete || paused || canceled ? { skills: [], operations: [] } : stepAction(run.definitionId, run.state.current_step);
   if (!action) {
     throw new BuilderBuildRunInputError("kit.flow_step_actions", `does not declare Builder step ${run.state.current_step}`);
   }
@@ -606,7 +876,7 @@ function prepareProjectionWrites(
     if (!isRecord(pointer) || pointer.active_slug !== context.slug) continue;
     const output = {
       ...pointer,
-      active_flow_id: BUILDER_BUILD_FLOW_ID,
+      active_flow_id: projection.flow_run.definition_id,
       active_step_id: projection.flow_run.current_step,
       updated_at: projection.updated_at,
     };
@@ -713,12 +983,12 @@ function writeExistingFileNoFollow(file: string, content: string): void {
   }
 }
 
-function stepAction(stepId: string): { skills: string[]; operations: string[] } | null {
+function stepAction(flowId: BuilderFlowId, stepId: string): { skills: string[]; operations: string[] } | null {
   const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot(), "kits", "builder", "kit.json"), "utf8"));
   const actions = Array.isArray(manifest.flow_step_actions) ? manifest.flow_step_actions : [];
   const action = actions.find((candidate: unknown) =>
     isRecord(candidate)
-    && candidate.flow_id === BUILDER_BUILD_FLOW_ID
+    && candidate.flow_id === flowId
     && candidate.step_id === stepId
   );
   if (!isRecord(action) || !Array.isArray(action.skills) || !action.skills.every((skill: unknown) => typeof skill === "string")) {

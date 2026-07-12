@@ -653,26 +653,12 @@ const state = {
     target_phase: "goal_fit",
   },
 };
-const critique = {
-  schema_version: "1.0",
-  task_slug: "installed-hook-demo",
-  status: "fail",
-  required: true,
-  updated_at: "2026-05-09T00:01:00Z",
-  critiques: [{
-    id: "installed-hook-review",
-    reviewer: "tool-code-reviewer",
-    reviewed_at: "2026-05-09T00:01:00Z",
-    verdict: "fail",
-    summary: "Blocking installed hook verification remains.",
-    findings: [{ id: "missing-installed-exec", severity: "high", status: "open", description: "Execute the installed hook command." }],
-  }],
-};
+const trustBundle = { schema_version: "1.0", claims: [] };
 function writeFixture(root) {
   const taskDir = path.join(root, ".kontourai/flow-agents/installed-hook-demo");
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, "state.json"), JSON.stringify(state), "utf8");
-  fs.writeFileSync(path.join(taskDir, "critique.json"), JSON.stringify(critique), "utf8");
+  fs.writeFileSync(path.join(taskDir, "trust.bundle"), JSON.stringify(trustBundle), "utf8");
   fs.mkdirSync(path.join(root, "docs"), { recursive: true });
   fs.writeFileSync(path.join(root, "docs/context-map.md"), "# Context Map\n", "utf8");
 }
@@ -704,7 +690,7 @@ function runCommand(label, command, cwd, runtimeJson) {
   const ctx = runtimeJson ? (JSON.parse(result.stdout).hookSpecificOutput?.additionalContext || "") : result.stdout;
   if (!ctx.includes("WORKFLOW STATE ATTENTION")) throw new Error(`${label} installed hook did not emit workflow attention: ${result.stdout} ${result.stderr}`);
   if (!ctx.includes("STATE: installed-hook-demo is status:not_verified phase:verification")) throw new Error(`${label} installed hook missed state guidance: ${ctx}`);
-  if (!ctx.includes("CRITIQUE: required critique is status:fail")) throw new Error(`${label} installed hook missed critique guidance: ${ctx}`);
+  if (ctx.includes("CRITIQUE:")) throw new Error(`${label} installed hook read retired critique sidecar guidance: ${ctx}`);
 }
 writeFixture(claudeDest);
 writeFixture(codexDest);
@@ -736,19 +722,12 @@ const state = {
   updated_at: "2026-06-01T00:00:00Z",
   next_action: { status: "needs_user", summary: "Opencode hook test.", target_phase: "goal_fit" },
 };
-const critique = {
-  schema_version: "1.0",
-  task_slug: "opencode-hook-demo",
-  status: "fail",
-  required: true,
-  updated_at: "2026-06-01T00:01:00Z",
-  critiques: [{ id: "oc-review", reviewer: "tool-code-reviewer", reviewed_at: "2026-06-01T00:01:00Z", verdict: "fail", summary: "Blocking.", findings: [{ id: "oc-open", severity: "high", status: "open", description: "Open finding." }] }],
-};
+const trustBundle = { schema_version: "1.0", claims: [] };
 function writeFixture(root) {
   const taskDir = path.join(root, ".kontourai/flow-agents/opencode-hook-demo");
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, "state.json"), JSON.stringify(state), "utf8");
-  fs.writeFileSync(path.join(taskDir, "critique.json"), JSON.stringify(critique), "utf8");
+  fs.writeFileSync(path.join(taskDir, "trust.bundle"), JSON.stringify(trustBundle), "utf8");
   fs.mkdirSync(path.join(root, "docs"), { recursive: true });
   fs.writeFileSync(path.join(root, "docs/context-map.md"), "# Context Map\n", "utf8");
 }
@@ -767,7 +746,7 @@ function runOpencodeAdapter(bundleDest, cwd) {
   const ctx = out.context || "";
   if (!ctx.includes("WORKFLOW STATE ATTENTION")) throw new Error("opencode adapter did not emit workflow attention: stdout=" + result.stdout + " stderr=" + result.stderr);
   if (!ctx.includes("STATE: opencode-hook-demo is status:not_verified phase:verification")) throw new Error("opencode adapter missed state guidance: " + ctx);
-  if (!ctx.includes("CRITIQUE: required critique is status:fail")) throw new Error("opencode adapter missed critique guidance: " + ctx);
+  if (ctx.includes("CRITIQUE:")) throw new Error("opencode adapter read retired critique sidecar guidance: " + ctx);
 }
 writeFixture(opencodeWorkspace);
 runOpencodeAdapter(opencodeDest, opencodeWorkspace);
@@ -795,19 +774,12 @@ const state = {
   updated_at: "2026-06-01T00:00:00Z",
   next_action: { status: "needs_user", summary: "Pi hook test.", target_phase: "goal_fit" },
 };
-const critique = {
-  schema_version: "1.0",
-  task_slug: "pi-hook-demo",
-  status: "fail",
-  required: true,
-  updated_at: "2026-06-01T00:01:00Z",
-  critiques: [{ id: "pi-review", reviewer: "tool-code-reviewer", reviewed_at: "2026-06-01T00:01:00Z", verdict: "fail", summary: "Blocking.", findings: [{ id: "pi-open", severity: "high", status: "open", description: "Open finding." }] }],
-};
+const trustBundle = { schema_version: "1.0", claims: [] };
 function writeFixture(root) {
   const taskDir = path.join(root, ".kontourai/flow-agents/pi-hook-demo");
   fs.mkdirSync(taskDir, { recursive: true });
   fs.writeFileSync(path.join(taskDir, "state.json"), JSON.stringify(state), "utf8");
-  fs.writeFileSync(path.join(taskDir, "critique.json"), JSON.stringify(critique), "utf8");
+  fs.writeFileSync(path.join(taskDir, "trust.bundle"), JSON.stringify(trustBundle), "utf8");
   fs.mkdirSync(path.join(root, "docs"), { recursive: true });
   fs.writeFileSync(path.join(root, "docs/context-map.md"), "# Context Map\n", "utf8");
 }
@@ -826,7 +798,7 @@ function runPiAdapter(bundleDest, cwd) {
   const ctx = out.context || "";
   if (!ctx.includes("WORKFLOW STATE ATTENTION")) throw new Error("pi adapter did not emit workflow attention: stdout=" + result.stdout + " stderr=" + result.stderr);
   if (!ctx.includes("STATE: pi-hook-demo is status:not_verified phase:verification")) throw new Error("pi adapter missed state guidance: " + ctx);
-  if (!ctx.includes("CRITIQUE: required critique is status:fail")) throw new Error("pi adapter missed critique guidance: " + ctx);
+  if (ctx.includes("CRITIQUE:")) throw new Error("pi adapter read retired critique sidecar guidance: " + ctx);
 }
 writeFixture(piWorkspace);
 runPiAdapter(piDest, piWorkspace);
@@ -886,7 +858,9 @@ echo "--- Packed Package Builder Entry ---"
 PACKAGE_CONSUMER="$TMPDIR_EVAL/package-consumer"
 PACKAGE_PROJECT="$TMPDIR_EVAL/package-project"
 PACKAGE_AMBIENT="$TMPDIR_EVAL/package-ambient"
-mkdir -p "$PACKAGE_CONSUMER" "$PACKAGE_PROJECT/.kontourai/flow-agents" "$PACKAGE_AMBIENT/kits/builder/flows"
+mkdir -p "$PACKAGE_CONSUMER" "$PACKAGE_PROJECT/.kontourai/flow-agents" "$PACKAGE_PROJECT/checks" "$PACKAGE_AMBIENT/kits/builder/flows"
+printf '#!/usr/bin/env bash\nset -eu\ntest -f "$1"\nprintf "1..1\\nok 1 - session exists\\n"\n' > "$PACKAGE_PROJECT/checks/check-packed-workflow.sh"
+chmod +x "$PACKAGE_PROJECT/checks/check-packed-workflow.sh"
 cat >"$PACKAGE_AMBIENT/kits/builder/flows/build.flow.json" <<'JSON'
 {
   "id": "builder.build",
@@ -897,35 +871,152 @@ cat >"$PACKAGE_AMBIENT/kits/builder/flows/build.flow.json" <<'JSON'
 JSON
 PACKAGE_PACK_LOG="$TMPDIR_EVAL/package-pack.log"
 PACKAGE_CLI="$PACKAGE_CONSUMER/node_modules/@kontourai/flow-agents/build/src/cli.js"
-PACKAGE_SESSION="$PACKAGE_PROJECT/.kontourai/flow-agents/packed-builder-entry"
+PACKAGE_SESSION="$PACKAGE_PROJECT/.kontourai/flow-agents/acme-builder-901"
+PACKAGE_LIFECYCLE_SESSION="$PACKAGE_PROJECT/.kontourai/flow-agents/acme-builder-902"
+PACKAGE_TEST_COMMAND="bash checks/check-packed-workflow.sh .kontourai/flow-agents/acme-builder-901/state.json"
+PACKAGE_CRITERION_JSON="$(node - "$PACKAGE_TEST_COMMAND" <<'NODE'
+const command = process.argv[2];
+process.stdout.write(JSON.stringify({
+  id: 'AC-1',
+  status: 'pass',
+  evidence_refs: [{ kind: 'command', excerpt: command, summary: 'The packed public workflow fixture executed this exact assertion for AC-1.' }],
+}));
+NODE
+)"
+PACKAGE_COMMAND_REF="$(node - "$PACKAGE_TEST_COMMAND" <<'NODE'
+const command = process.argv[2];
+process.stdout.write(JSON.stringify({ kind: 'command', excerpt: command, summary: 'Runs the packed consumer workflow assertion.' }));
+NODE
+)"
+
+package_flow() {
+  (cd "$PACKAGE_PROJECT" && CODEX_SESSION_ID=packed-package-consumer node "$PACKAGE_CLI" workflow "$@")
+}
+
+package_review() {
+  (cd "$PACKAGE_PROJECT" && CODEX_SESSION_ID=packed-package-reviewer node "$PACKAGE_CLI" workflow "$@")
+}
+
 if (cd "$ROOT_DIR" && npm pack --silent --pack-destination "$TMPDIR_EVAL" >"$PACKAGE_PACK_LOG") \
   && PACKAGE_TARBALL="$(find "$TMPDIR_EVAL" -maxdepth 1 -type f -name 'kontourai-flow-agents-*.tgz' -print -quit)" \
   && [[ -n "$PACKAGE_TARBALL" ]] \
   && npm install --silent --no-audit --no-fund --ignore-scripts --prefix "$PACKAGE_CONSUMER" "$PACKAGE_TARBALL" \
-  && (cd "$PACKAGE_AMBIENT" && CODEX_SESSION_ID=packed-package-consumer node "$PACKAGE_CONSUMER/node_modules/@kontourai/flow-agents/build/src/cli/workflow-sidecar.js" ensure-session \
-    --artifact-root "$PACKAGE_PROJECT/.kontourai/flow-agents" \
-    --task-slug packed-builder-entry \
-    --title "Packed Builder entry" \
-    --summary "Installed package should project pickup-probe." \
-    --flow-id builder.build >/dev/null 2>&1) \
-  && node - "$PACKAGE_PROJECT" <<'NODE' &&
+  && mkdir -p "$PACKAGE_SESSION" "$PACKAGE_LIFECYCLE_SESSION" \
+  && printf 'Selected Work Item: acme/builder#901\n' > "$PACKAGE_SESSION/acme-builder-901--pull-work.md" \
+  && package_flow start --artifact-root "$PACKAGE_PROJECT/.kontourai/flow-agents" \
+    --flow builder.build --work-item acme/builder#901 --assignment-provider local-file --summary "Packed public workflow contract fixture." >/dev/null \
+  && node - "$PACKAGE_SESSION" <<'NODE' &&
+const fs = require('node:fs');
+const path = require('node:path');
+const session = process.argv[2];
+const slug = path.basename(session);
+const write = (name, body) => fs.writeFileSync(path.join(session, name), body, 'utf8');
+write(`${slug}--pull-work.md`, '# Pull And Probe Report\n\nSelected Work Item: acme/builder#901\n\nPickup readiness and recorded decisions are reviewable here.\n');
+write(`${slug}--plan-work.md`, '# Plan\n\n## Definition Of Done\n\n- AC-1: The packed workflow fixture records criterion-backed command evidence.\n');
+write(`${slug}--deliver.md`, '# Execute\n\nThe packed fixture changed only its declared fixture artifacts.\n');
+write(`${slug}--evidence-gate.md`, '# Evidence Gate\n\nScope and acceptance coverage are reviewable here.\n');
+write('acceptance.json', JSON.stringify({ schema_version: '1.0', task_slug: slug, criteria: [{ id: 'AC-1', description: 'The packed workflow fixture records criterion-backed command evidence.', status: 'pending', evidence_refs: [] }], goal_fit: { status: 'pending', summary: 'Fixture has not completed Goal Fit review.' } }, null, 2));
+write('release.json', JSON.stringify({ schema_version: '1.0', task_slug: slug, decision: 'hold', updated_at: '2026-07-11T00:00:00Z', scope: 'packed fixture', evidence_ref: `${slug}--evidence-gate.md`, gates: [{ name: 'merge', status: 'hold', summary: 'Fixture never publishes.' }], rollback_plan: { status: 'not_required', summary: 'No release.', owner: 'fixture' }, observability_plan: { status: 'not_required', summary: 'No release.' }, post_deploy_checks: [], docs: { status: 'not_needed', summary: 'Fixture.' } }, null, 2));
+write('learning.json', JSON.stringify({ schema_version: '1.0', task_slug: slug, status: 'learned', updated_at: '2026-07-11T00:00:00Z', records: [{ id: 'packed-fixture-learning', recorded_at: '2026-07-11T00:00:00Z', source_refs: [`${slug}--evidence-gate.md`], outcome: 'success', facts: ['Packed consumer produced declared durable artifacts.'], interpretation: 'The public workflow contract remained usable after npm install.', routing: [{ target: 'none', action: 'No follow-up required.', status: 'completed' }], correction: { needed: false, evidence: 'Fixture contract passes.' } }] }, null, 2));
+NODE
+  node - "$PACKAGE_PROJECT" <<'NODE' &&
 const fs = require('node:fs');
 const path = require('node:path');
 const project = process.argv[2];
-const state = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'packed-builder-entry', 'state.json'), 'utf8'));
-const flow = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', 'packed-builder-entry', 'state.json'), 'utf8'));
-const bundle = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'packed-builder-entry', 'trust.bundle'), 'utf8'));
+const state = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'acme-builder-901', 'state.json'), 'utf8'));
+const flow = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', 'acme-builder-901', 'state.json'), 'utf8'));
+const bundle = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'acme-builder-901', 'trust.bundle'), 'utf8'));
 if (flow.current_step !== 'design-probe' || state.flow_run?.current_step !== 'design-probe') process.exit(1);
 if (JSON.stringify(state.next_action?.skills) !== JSON.stringify(['pickup-probe'])) process.exit(1);
 if (!(bundle.claims || []).some((claim) => claim.claimType === 'builder.pull-work.selected' && claim.status === 'verified')) process.exit(1);
 NODE
-  node --input-type=module - "$PACKAGE_PROJECT" "$PACKAGE_CONSUMER" <<'NODE' &&
+  package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation pickup-probe-readiness --status pass \
+    --summary "Packed fixture records the declared pickup readiness artifact." \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/acme-builder-901--pull-work.md\",\"summary\":\"Durable pickup readiness artifact.\"}" >/dev/null \
+  && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation probe-decisions-or-accepted-gaps --status pass \
+    --summary "Packed fixture records the declared probe decisions artifact." \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/acme-builder-901--pull-work.md\",\"summary\":\"Durable probe decisions artifact.\"}" >/dev/null \
+  && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation implementation-plan --status pass \
+    --summary "Packed fixture records the declared implementation plan artifact." \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/acme-builder-901--plan-work.md\",\"summary\":\"Durable implementation plan artifact.\"}" >/dev/null \
+  && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation implementation-scope --status pass \
+    --summary "Packed fixture records the declared execution scope artifact." \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/acme-builder-901--deliver.md\",\"summary\":\"Durable execution scope artifact.\"}" >/dev/null \
+  && ! package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation tests-evidence --status pass \
+    --command "$PACKAGE_TEST_COMMAND" --criterion-json "$PACKAGE_CRITERION_JSON" \
+    --summary "This must reject tests evidence before a clean review." \
+    --evidence-ref-json "$PACKAGE_COMMAND_REF" >/dev/null 2>&1 \
+  && package_review critique --session-dir "$PACKAGE_SESSION" --verdict pass \
+    --summary "Authenticated packed review found no blocking fixture findings." \
+    --artifact-ref "$PACKAGE_SESSION/acme-builder-901--deliver.md" \
+    --lane-json "{\"id\":\"code-review\",\"status\":\"pass\",\"summary\":\"Reviewed the packed consumer delivery.\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/acme-builder-901--deliver.md\",\"summary\":\"Reviewed packed delivery artifact.\"}]}" >/dev/null \
+  && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation tests-evidence --status pass \
+    --command "$PACKAGE_TEST_COMMAND" --criterion-json "$PACKAGE_CRITERION_JSON" \
+    --summary "Packed fixture records criterion-backed command evidence after review." \
+    --evidence-ref-json "$PACKAGE_COMMAND_REF" >/dev/null \
+  && node - "$PACKAGE_SESSION" <<'NODE' &&
+const fs = require('node:fs');
+const path = require('node:path');
+const session = process.argv[2];
+const bundle = JSON.parse(fs.readFileSync(path.join(session, 'trust.bundle'), 'utf8'));
+const criterionClaim = (bundle.claims || []).find((claim) =>
+  claim.metadata?.origin === 'acceptance'
+  && claim.metadata?.criterion?.id === 'AC-1'
+  && claim.metadata.criterion.status === 'pass'
+  && claim.metadata.criterion.evidence_refs?.some((ref) => ref.kind === 'command'));
+if (!criterionClaim) {
+  console.error('AC-1 is missing criterion-backed command evidence');
+  process.exit(1);
+}
+NODE
+  package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation merge-readiness --status pass \
+    --summary "Packed fixture records the declared merge-readiness artifact." \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/acme-builder-901--evidence-gate.md\",\"summary\":\"Durable merge-readiness artifact.\"}" >/dev/null \
+  && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation pull-request-opened --status pass \
+    --summary "Packed fixture records the declared release artifact." \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/release.json\",\"summary\":\"Durable release artifact.\"}" >/dev/null \
+  && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation ci-merge-readiness --status pass \
+    --summary "Packed fixture records the declared CI readiness artifact." \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/release.json\",\"summary\":\"Durable CI readiness artifact.\"}" >/dev/null \
+  && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation decision-evidence --status pass \
+    --summary "Packed fixture records the declared learning decision artifact." \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/learning.json\",\"summary\":\"Durable learning decision artifact.\"}" >/dev/null \
+  && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation learning-evidence --status pass \
+    --summary "Packed fixture records the declared learning evidence artifact." \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/learning.json\",\"summary\":\"Durable learning evidence artifact.\"}" >/dev/null \
+  && node - "$PACKAGE_SESSION" <<'NODE' &&
+const fs = require('node:fs');
+const path = require('node:path');
+const session = process.argv[2];
+const bundle = JSON.parse(fs.readFileSync(path.join(session, 'trust.bundle'), 'utf8'));
+const types = new Set((bundle.claims || []).filter((claim) => claim.status === 'verified').map((claim) => claim.claimType));
+const requiredTypes = [
+  'builder.pull-work.selected',
+  'builder.design-probe.pickup-readiness',
+  'builder.design-probe.decisions',
+  'builder.plan.implementation',
+  'builder.execute.scope',
+  'builder.verify.tests',
+  'builder.merge-ready.readiness',
+  'builder.learn.decisions',
+  'builder.learn.evidence',
+];
+const missingTypes = requiredTypes.filter((type) => !types.has(type));
+if (missingTypes.length > 0) {
+  console.error(`missing verified public workflow claims: ${missingTypes.join(', ')}`);
+  process.exit(1);
+}
+NODE
+  printf 'Selected Work Item: acme/builder#902\n' > "$PACKAGE_LIFECYCLE_SESSION/acme-builder-902--pull-work.md" \
+  && package_flow start --artifact-root "$PACKAGE_PROJECT/.kontourai/flow-agents" \
+    --flow builder.build --work-item acme/builder#902 --assignment-provider local-file --summary "Packed public lifecycle fixture." >/dev/null \
+  && node --input-type=module - "$PACKAGE_PROJECT" "$PACKAGE_LIFECYCLE_SESSION" "$PACKAGE_CONSUMER" <<'NODE' &&
 import fs from 'node:fs';
 import path from 'node:path';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-const [project, consumer] = process.argv.slice(2);
-const slug = 'packed-builder-entry';
+const [project, session, consumer] = process.argv.slice(2);
+const slug = path.basename(session);
 const assignment = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'assignment', `${slug}.json`), 'utf8'));
 const state = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', slug, 'state.json'), 'utf8'));
 const packageEntry = path.join(consumer, 'node_modules', '@kontourai', 'flow-agents', 'build', 'src', 'index.js');
@@ -957,15 +1048,15 @@ for (const operation of ['cancel', 'archive']) {
   fs.writeFileSync(path.join(project, `${operation}.authorization.json`), JSON.stringify(authorization, null, 2));
 }
 NODE
-  (cd "$PACKAGE_PROJECT" && CODEX_SESSION_ID=packed-package-consumer node "$PACKAGE_CLI" builder-run pause --session-dir "$PACKAGE_SESSION" --reason "packed pause" >/dev/null) \
-  && (cd "$PACKAGE_PROJECT" && CODEX_SESSION_ID=packed-package-consumer node "$PACKAGE_CLI" builder-run resume --session-dir "$PACKAGE_SESSION" --reason "packed resume" >/dev/null) \
-  && (cd "$PACKAGE_PROJECT" && node "$PACKAGE_CLI" builder-run cancel --session-dir "$PACKAGE_SESSION" --authorization-file "$PACKAGE_PROJECT/cancel.authorization.json" >/dev/null) \
-  && (cd "$PACKAGE_PROJECT" && node "$PACKAGE_CLI" builder-run archive --session-dir "$PACKAGE_SESSION" --authorization-file "$PACKAGE_PROJECT/archive.authorization.json" >/dev/null) \
+  package_flow pause --session-dir "$PACKAGE_LIFECYCLE_SESSION" --reason "packed pause" >/dev/null \
+  && package_flow resume --session-dir "$PACKAGE_LIFECYCLE_SESSION" --reason "packed resume" >/dev/null \
+  && package_flow cancel --session-dir "$PACKAGE_LIFECYCLE_SESSION" --authorization-file "$PACKAGE_PROJECT/cancel.authorization.json" >/dev/null \
+  && package_flow archive --session-dir "$PACKAGE_LIFECYCLE_SESSION" --authorization-file "$PACKAGE_PROJECT/archive.authorization.json" >/dev/null \
   && node - "$PACKAGE_PROJECT" <<'NODE'
 const fs = require('node:fs');
 const path = require('node:path');
 const project = process.argv[2];
-const slug = 'packed-builder-entry';
+const slug = 'acme-builder-902';
 const archived = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow-agents', 'archive', slug, 'state.json'), 'utf8'));
 const flow = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', slug, 'state.json'), 'utf8'));
 const consumed = fs.readdirSync(path.join(project, '.kontourai', 'flow-agents', 'lifecycle-authority', 'consumed'));
@@ -973,13 +1064,42 @@ if (archived.status !== 'archived' || flow.status !== 'canceled' || consumed.len
 if (fs.existsSync(path.join(project, '.kontourai', 'flow-agents', slug))) process.exit(1);
 NODE
 then
-  _pass "packed npm consumer projects Builder entry and executes lifecycle commands"
+  _pass "packed npm consumer follows the public Builder workflow contract and lifecycle commands"
 else
-  _fail "packed npm consumer did not execute canonical Builder entry and lifecycle commands"
+  _fail "packed npm consumer did not complete the public Builder workflow contract and lifecycle commands"
 fi
 
-if [[ -d "$CODEX_FULL_DEST/.codex/skills/plan-work" && -d "$CODEX_FULL_DEST/.codex/skills/deliver" && -d "$CODEX_FULL_DEST/.codex/skills/agentic-engineering" ]]; then
-  _pass "Codex full install ships kit-skills and standalone skills together"
+if node - "$CODEX_FULL_DEST/.codex/skills" "$CODEX_FULL_DEST" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const [root, installRoot] = process.argv.slice(2);
+const builder = [
+  'builder-shape', 'continue-work', 'deliver', 'design-probe', 'evidence-gate',
+  'execute-plan', 'fix-bug', 'gate-review', 'idea-to-backlog', 'learning-review',
+  'pickup-probe', 'plan-work', 'pull-work', 'release-readiness', 'review-work',
+  'tdd-workflow', 'verify-work',
+];
+for (const skill of [...builder, 'agentic-engineering']) {
+  const file = path.join(root, skill, 'SKILL.md');
+  if (!fs.existsSync(file)) throw new Error(`missing installed skill ${skill}`);
+  if (builder.includes(skill)) {
+    const text = fs.readFileSync(file, 'utf8');
+    if (/npm run workflow:sidecar|flow-agents-workflow-sidecar|flow-agents builder-run/.test(text)) {
+      throw new Error(`${skill} exposes a private workflow command`);
+    }
+    if (/--reviewer/.test(text)) {
+      throw new Error(`${skill} exposes a caller-selected review identity`);
+    }
+    if (skill === 'verify-work' && (!/--criterion-json/.test(text) || /--command\s+"(?:true|node --version)"/.test(text))) {
+      throw new Error('verify-work must ship criterion-backed substantive verification evidence guidance');
+    }
+    const refs = [...text.matchAll(/\b(?:context|docs|kits)\/[A-Za-z0-9_./-]+\.(?:md|json)\b/g)].map((match) => match[0]);
+    for (const ref of refs) if (!fs.existsSync(path.join(installRoot, ref))) throw new Error(`${skill} has unresolved installed resource ${ref}`);
+  }
+}
+NODE
+then
+  _pass "Codex full install ships all 17 coherent Builder skills and standalone skills"
 else
   _fail "Codex full install is missing skills"
 fi
@@ -997,8 +1117,37 @@ else
   _fail "opencode full install is missing base agents"
 fi
 
-if [[ -d "$OPENCODE_FULL_DEST/.opencode/skills/plan-work" && -d "$OPENCODE_FULL_DEST/.opencode/skills/deliver" && -d "$OPENCODE_FULL_DEST/.opencode/skills/agentic-engineering" ]]; then
-  _pass "opencode full install ships kit-skills and standalone skills together"
+if node - "$OPENCODE_FULL_DEST/.opencode/skills" "$OPENCODE_FULL_DEST" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const [root, installRoot] = process.argv.slice(2);
+const builder = [
+  'builder-shape', 'continue-work', 'deliver', 'design-probe', 'evidence-gate',
+  'execute-plan', 'fix-bug', 'gate-review', 'idea-to-backlog', 'learning-review',
+  'pickup-probe', 'plan-work', 'pull-work', 'release-readiness', 'review-work',
+  'tdd-workflow', 'verify-work',
+];
+for (const skill of [...builder, 'agentic-engineering']) {
+  const file = path.join(root, skill, 'SKILL.md');
+  if (!fs.existsSync(file)) throw new Error(`missing installed skill ${skill}`);
+  if (builder.includes(skill)) {
+    const text = fs.readFileSync(file, 'utf8');
+    if (/npm run workflow:sidecar|flow-agents-workflow-sidecar|flow-agents builder-run/.test(text)) {
+      throw new Error(`${skill} exposes a private workflow command`);
+    }
+    if (/--reviewer/.test(text)) {
+      throw new Error(`${skill} exposes a caller-selected review identity`);
+    }
+    if (skill === 'verify-work' && (!/--criterion-json/.test(text) || /--command\s+"(?:true|node --version)"/.test(text))) {
+      throw new Error('verify-work must ship criterion-backed substantive verification evidence guidance');
+    }
+    const refs = [...text.matchAll(/\b(?:context|docs|kits)\/[A-Za-z0-9_./-]+\.(?:md|json)\b/g)].map((match) => match[0]);
+    for (const ref of refs) if (!fs.existsSync(path.join(installRoot, ref))) throw new Error(`${skill} has unresolved installed resource ${ref}`);
+  }
+}
+NODE
+then
+  _pass "opencode full install ships all 17 coherent Builder skills and standalone skills"
 else
   _fail "opencode full install is missing skills"
 fi

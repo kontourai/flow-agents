@@ -149,7 +149,7 @@
     "typescript": "^6.0.3"
   },
   "dependencies": {
-    "@kontourai/flow": "^3.1.0"
+    "@kontourai/flow": "^3.1.4"
   },
   "optionalDependencies": {
     "@kontourai/surface": "^2.0.0",

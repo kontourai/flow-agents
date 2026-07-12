@@ -3,12 +3,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { generateKeyPairSync, sign } from "node:crypto";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 
 import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, runDir } from "@kontourai/flow";
 import {
   archiveBuilderFlowSession,
   cancelBuilderFlowSession,
+  captureReviewWorkspaceSnapshot,
   pauseBuilderFlowSession,
   recoverBuilderFlowSession,
   releaseBuilderFlowAssignment,
@@ -20,6 +21,7 @@ import { builderLifecycleAuthorizationPayload, loadBuilderLifecycleAuthorization
 import { cancelBuilderBuildRun } from "../../build/src/builder-flow-run-adapter.js";
 import { performLocalClaim, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
+import { inferExecutedTestCount } from "../../build/src/cli/workflow-sidecar.js";
 
 const SUBJECT = "local:work-item/runtime-projection";
 const NOW = "2026-07-09T20:00:00.000Z";
@@ -51,6 +53,9 @@ function makeSession(slug = "runtime-projection") {
     schema_version: "1.0",
     keys: [{ id: AUTHORITY_KEY_ID, algorithm: "ed25519", public_key_pem: AUTHORITY_KEYS.publicKey.export({ type: "spki", format: "pem" }) }],
   });
+  fs.mkdirSync(path.join(projectRoot, "review-target"), { recursive: true });
+  fs.writeFileSync(path.join(projectRoot, "review-target", "implementation.txt"), "reviewed implementation\n");
+  fs.writeFileSync(path.join(projectRoot, "review-target", "delivery.md"), "reviewed delivery artifact\n");
   return { projectRoot, artifactRoot, sessionDir, slug };
 }
 
@@ -58,6 +63,15 @@ function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
+
+test("shell output cannot spoof an executed-test count", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-test-count-"));
+  fs.mkdirSync(path.join(root, "checks"), { recursive: true });
+  fs.writeFileSync(path.join(root, "checks", "fake-test.sh"), "#!/bin/sh\nset -e\nprintf '1 passed\\n'\n");
+  fs.writeFileSync(path.join(root, "checks", "real-test.sh"), "#!/bin/sh\nset -e\ntest -f checks/real-test.sh\n");
+  assert.equal(inferExecutedTestCount("sh checks/fake-test.sh", root, "1 passed\n"), 0);
+  assert.equal(inferExecutedTestCount("sh checks/real-test.sh", root, "1..1\nok 1 - file exists\n"), 1);
+});
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
@@ -200,7 +214,7 @@ async function assertRecoveryRejectsWithoutWrites(session, pattern) {
   assert.deepEqual(snapshotProjectionTargets(session), beforeProjection);
 }
 
-function bundleClaim({ expectation, claimType, subjectType, status = "pass", routeReason, subject = SUBJECT }) {
+function bundleClaim({ expectation, claimType, subjectType, status = "pass", routeReason, subject = SUBJECT, testCount = 1, timestamp = NOW }) {
   const claimId = `claim.${expectation}`;
   return {
     claim: {
@@ -212,6 +226,11 @@ function bundleClaim({ expectation, claimType, subjectType, status = "pass", rou
       value: status,
       metadata: {
         workflow_subject_ref: subject,
+        ...(expectation === "tests-evidence" ? {
+          recorded_by: "implementation-actor",
+          artifact_refs: [{ kind: "command", excerpt: "node --test src/cli/builder-flow-runtime.test.mjs", summary: "Runtime fixture assertion." }],
+          observed_commands: [{ command: "node --test src/cli/builder-flow-runtime.test.mjs", exit_code: 0, test_count: testCount, output_sha256: "0".repeat(64) }],
+        } : {}),
         gate_claim: {
           expectation_id: expectation,
           claim_type: claimType,
@@ -219,8 +238,8 @@ function bundleClaim({ expectation, claimType, subjectType, status = "pass", rou
           ...(routeReason ? { route_reason: routeReason } : {}),
         },
       },
-      createdAt: NOW,
-      updatedAt: NOW,
+      createdAt: timestamp,
+      updatedAt: timestamp,
     },
     evidence: {
       id: `evidence.${expectation}`,
@@ -229,7 +248,7 @@ function bundleClaim({ expectation, claimType, subjectType, status = "pass", rou
       method: "attestation",
       sourceRef: "src/cli/builder-flow-runtime.test.mjs",
       excerptOrSummary: `${expectation} fixture`,
-      observedAt: NOW,
+      observedAt: timestamp,
       collectedBy: "flow-agents-test",
     },
     event: {
@@ -239,10 +258,47 @@ function bundleClaim({ expectation, claimType, subjectType, status = "pass", rou
       actor: "flow-agents-test",
       method: "attestation",
       evidenceIds: [`evidence.${expectation}`],
-      createdAt: NOW,
-      verifiedAt: NOW,
+      createdAt: timestamp,
+      verifiedAt: timestamp,
     },
   };
+}
+
+function verifiedTestsPrerequisites(session, timestamp = NOW) {
+  const reviewArtifact = path.join(session.projectRoot, "review-target", "delivery.md");
+  const implementation = path.join(session.projectRoot, "review-target", "implementation.txt");
+  const implementationFile = path.relative(session.projectRoot, implementation);
+  const implementationBytes = fs.readFileSync(implementation);
+  const implementationSha256 = createHash("sha256").update(implementationBytes).digest("hex");
+  const workspaceDigest = createHash("sha256")
+    .update("flow-agents:reviewed-files:v1\0")
+    .update(implementationFile).update("\0").update(implementationBytes).update("\0")
+    .digest("hex");
+  const critique = bundleClaim({ expectation: "clean-critique", claimType: "workflow.critique.review", subjectType: "workflow-critique", timestamp });
+  critique.claim.metadata = {
+    workflow_subject_ref: SUBJECT,
+    origin: "critique",
+    reviewer: "reviewer-actor",
+    findings: [],
+    lanes: [{ id: "code", status: "pass" }],
+    review_target: {
+      artifacts: [{ file: path.relative(session.projectRoot, reviewArtifact), sha256: createHash("sha256").update(fs.readFileSync(reviewArtifact)).digest("hex") }],
+      workspace_snapshot: {
+        version: 1,
+        kind: "reviewed-files",
+        algorithm: "sha256",
+        digest: workspaceDigest,
+        files: [{ file: implementationFile, sha256: implementationSha256 }],
+      },
+    },
+  };
+  const criterion = bundleClaim({ expectation: "verified-criterion", claimType: "workflow.acceptance.criterion", subjectType: "flow-step", timestamp });
+  criterion.claim.metadata = {
+    workflow_subject_ref: SUBJECT,
+    origin: "acceptance",
+    criterion: { id: "ac-runtime", status: "pass", evidence_refs: [{ kind: "command", excerpt: "node --test src/cli/builder-flow-runtime.test.mjs", summary: "Runtime fixture assertion." }] },
+  };
+  return [critique, criterion];
 }
 
 function writeBundle(sessionDir, entries) {
@@ -289,6 +345,53 @@ test("small-model client can start and advance from projected actions without ch
   const duplicate = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
   assert.equal(duplicate.attached, false);
   assert.equal(duplicate.run.manifest.evidence.length, advanced.run.manifest.evidence.length);
+});
+
+test("sync attaches the staged trust.bundle bytes when the session bundle is replaced", async () => {
+  const session = makeSession("snapshot-attachment");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const originalEntries = [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })];
+  writeBundle(session.sessionDir, originalEntries);
+  const bundleFile = path.join(session.sessionDir, "trust.bundle");
+  const originalDigest = createHash("sha256").update(fs.readFileSync(bundleFile)).digest("hex");
+  let replaceBundle;
+  const replaced = new Promise((resolve) => { replaceBundle = resolve; });
+  const watcher = fs.watch(session.sessionDir, (_event, filename) => {
+    if (String(filename) !== ".trust-bundle-snapshots") return;
+    fs.writeFileSync(bundleFile, "{\"claims\":[]}");
+    replaceBundle();
+  });
+  try {
+    const syncing = syncBuilderFlowSession({ sessionDir: session.sessionDir });
+    await Promise.race([
+      replaced,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("trust.bundle snapshot was not staged")), 2_000)),
+    ]);
+    const synced = await syncing;
+    assert.equal(synced.attached, true);
+  } finally {
+    watcher.close();
+  }
+  const manifest = readJson(path.join(runDir(session.slug, session.projectRoot), FLOW_RUN_EVIDENCE_MANIFEST_PATH));
+  assert.equal(manifest.evidence.at(-1).sha256, originalDigest);
+  assert.equal(fs.existsSync(path.join(session.sessionDir, ".trust-bundle-snapshots")), false);
+});
+
+test("start rejects a requested Builder flow that differs from the existing run before projection mutation", async (t) => {
+  for (const [existingFlowId, requestedFlowId] of [["builder.shape", "builder.build"], ["builder.build", "builder.shape"]]) {
+    await t.test(`${existingFlowId} cannot resume as ${requestedFlowId}`, async () => {
+      const session = makeSession(`flow-mismatch-${existingFlowId.replace('.', '-')}`);
+      await startBuilderFlowSession({ sessionDir: session.sessionDir, flowId: existingFlowId });
+      const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
+      const beforeProjection = snapshotProjectionTargets(session);
+      await assert.rejects(
+        () => startBuilderFlowSession({ sessionDir: session.sessionDir, flowId: requestedFlowId }),
+        new RegExp(`requested ${requestedFlowId} does not match the existing ${existingFlowId} run`),
+      );
+      assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
+      assert.deepEqual(snapshotProjectionTargets(session), beforeProjection);
+    });
+  }
 });
 
 test("pause and resume preserve the current Flow step and active assignment", async () => {
@@ -546,6 +649,8 @@ test("builder-run exposes lifecycle actions without caller-selected Flow identit
   const ambient = resolveCurrentAssignmentActor();
   performLocalClaim(session.artifactRoot, session.slug, ambient.actor, { actorKey: ambient.actorKey, ttlSeconds: 1800, branch: `agent/${session.slug}`, artifactDir: session.sessionDir, workItemRef: SUBJECT, reason: "test" });
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(await builderRunMain(["start", "--session-dir", session.sessionDir]), 64);
+  assert.equal(await builderRunMain(["sync", "--session-dir", session.sessionDir]), 64);
   assert.equal(await builderRunMain([
     "pause", "--session-dir", session.sessionDir,
     "--reason", "cli pause",
@@ -644,6 +749,87 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
   assert.equal(routed.projection.flow_run.route_back_max_attempts, 3);
   assert.match(routed.projection.next_action.summary, /Route-back history: attempt 1\/3 returned to `execute` for `implementation_defect`/);
   assert.deepEqual(routed.projection.next_action.skills, ["execute-plan"]);
+
+  const reentered = await writeAndSync(session, [bundleClaim({
+    expectation: "implementation-scope",
+    claimType: "builder.execute.scope",
+    subjectType: "change",
+    timestamp: new Date().toISOString(),
+  })]);
+  assert.equal(reentered.run.state.current_step, "verify");
+  const correctedAt = new Date(Date.parse(reentered.run.state.transitions.at(-1).at) + 1).toISOString();
+  const corrected = await writeAndSync(session, [
+    bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", timestamp: correctedAt }),
+    ...verifiedTestsPrerequisites(session, correctedAt),
+  ]);
+  assert.equal(corrected.run.state.current_step, "merge-ready");
+  const verifyEvidence = corrected.run.manifest.evidence.filter((entry) => entry.gate_id === "verify-gate");
+  assert.equal(verifyEvidence.length, 2);
+  assert.equal(verifyEvidence[0].superseded_by, verifyEvidence[1].id);
+});
+
+test("passing tests-evidence rejects a critique whose reviewed artifact changed", async () => {
+  const session = makeSession("stale-critique-artifact");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+  const prerequisites = verifiedTestsPrerequisites(session);
+  fs.writeFileSync(path.join(session.projectRoot, "review-target", "delivery.md"), "changed after review\n");
+  await assert.rejects(
+    () => writeAndSync(session, [bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }), ...prerequisites]),
+    /review_target\.artifacts\.sha256.*does not match/,
+  );
+});
+
+test("passing tests-evidence rejects a successful command that executed zero tests", async () => {
+  const session = makeSession("zero-test-evidence");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+  await assert.rejects(
+    () => writeAndSync(session, [
+      bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", testCount: 0 }),
+      ...verifiedTestsPrerequisites(session),
+    ]),
+    /positive executed-test count/,
+  );
+});
+
+test("passing tests-evidence rejects a critique after implementation source changed", async () => {
+  const session = makeSession("stale-critique-workspace");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+  const prerequisites = verifiedTestsPrerequisites(session);
+  fs.writeFileSync(path.join(session.projectRoot, "review-target", "implementation.txt"), "source changed after review\n");
+  await assert.rejects(
+    () => writeAndSync(session, [bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }), ...prerequisites]),
+    /review_target\.workspace_snapshot\.digest.*does not match/,
+  );
+});
+
+test("workspace review fails closed when a Git worktree marker cannot be inspected", () => {
+  const session = makeSession("git-inspection-unavailable");
+  fs.mkdirSync(path.join(session.projectRoot, ".git"));
+  assert.throws(
+    () => captureReviewWorkspaceSnapshot(session.projectRoot, [{ file: "review-target/delivery.md", sha256: createHash("sha256").update("reviewed delivery\n").digest("hex") }]),
+    /could not inspect the Git worktree/,
+  );
 });
 
 test("verified sidecar claims drive the composed publish and learning prefix to completion", async () => {
@@ -658,7 +844,7 @@ test("verified sidecar claims drive the composed publish and learning prefix to 
     ],
     [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })],
     [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })],
-    [bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" })],
+    [bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }), ...verifiedTestsPrerequisites(session)],
     [bundleClaim({ expectation: "merge-readiness", claimType: "builder.merge-ready.readiness", subjectType: "change" })],
   ];
   for (const entries of steps) await writeAndSync(session, entries);

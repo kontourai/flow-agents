@@ -36,6 +36,15 @@ WRITER="workflow-sidecar"
 VALIDATOR="validate-workflow-artifacts"
 ARTIFACT_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/auto-sidecars"
 mkdir -p "$ARTIFACT_DIR"
+# Every direct critique write must identify a review lane. Individual focused cases below
+# additionally prove local artifact hashing and stale-target rejection.
+CRITIQUE_LANE='{"id":"code-review","status":"pass","summary":"Fixture code review completed.","evidence_refs":[{"kind":"external","url":"https://example.invalid/review-fixture","summary":"Fixture review evidence."}]}'
+
+canonical_review_target() {
+  local session_dir="$1"
+  local suffix="${session_dir#*/.kontourai/flow-agents/}"
+  printf '.kontourai/flow-agents/%s/%s--deliver.md' "$suffix" "$(basename "$session_dir")"
+}
 
 DEFAULT_ROOT_REPO="$TMPDIR_EVAL/default-root-repo"
 mkdir -p "$DEFAULT_ROOT_REPO"
@@ -951,12 +960,12 @@ else
   _fail "sidecar writer evidence failed: $(cat "$TMPDIR_EVAL/evidence.out" "$TMPDIR_EVAL/evidence.err")"
 fi
 
-# Phase 4c: acceptance.json criteria status no longer updated at verification time (bundle-only).
-# State is verified; bundle claims carry the criteria status.
-if rg -q '"status": "verified"' "$ARTIFACT_DIR/state.json"   && [[ -f "$ARTIFACT_DIR/trust.bundle" ]]   && node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const ac=b.claims.filter(c=>c.claimType==="workflow.acceptance.criterion"); if(ac.length===0) throw new Error("no acceptance criterion claims in bundle"); if(ac.some(c=>c.value!=="pass")) throw new Error("some acceptance criterion not pass in bundle: "+JSON.stringify(ac.map(c=>c.value)));' "$ARTIFACT_DIR/trust.bundle" 2>/dev/null; then
-  _pass "sidecar writer updates state and records acceptance in bundle from evidence"
+# A generic evidence write cannot fabricate acceptance success. Criteria remain pending until a
+# passing tests-evidence gate claim supplies one structured proof per declared criterion.
+if rg -q '"status": "verified"' "$ARTIFACT_DIR/state.json"   && [[ -f "$ARTIFACT_DIR/trust.bundle" ]]   && node -e 'const fs=require("fs"); const b=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); const ac=b.claims.filter(c=>c.claimType==="workflow.acceptance.criterion"); if(ac.length===0) throw new Error("no acceptance criterion claims in bundle"); if(ac.some(c=>c.value==="pass")) throw new Error("generic evidence fabricated acceptance pass: "+JSON.stringify(ac.map(c=>c.value)));' "$ARTIFACT_DIR/trust.bundle" 2>/dev/null; then
+  _pass "sidecar writer preserves unverified acceptance criteria during generic evidence writes"
 else
-  _fail "sidecar writer did not update state or bundle from evidence"
+  _fail "sidecar writer did not preserve state and bundle acceptance evidence correctly"
 fi
 
 # ─── WS8 (ADR 0020) AC1: producer evidence classification ─────────────────────
@@ -1461,7 +1470,8 @@ if flow_agents_node "$WRITER" record-critique "$ARTIFACT_DIR" \
   --reviewer tool-code-reviewer \
   --verdict pass \
   --summary "No blocking findings." \
-  --artifact-ref auto-sidecars--deliver.md \
+  --artifact-ref "$(canonical_review_target "$ARTIFACT_DIR")" \
+  --lane-json "$CRITIQUE_LANE" \
   --timestamp "2026-05-09T00:02:00Z" >"$TMPDIR_EVAL/critique.out" 2>"$TMPDIR_EVAL/critique.err"; then
   _pass "sidecar writer records passing critique"
 else
@@ -1486,6 +1496,8 @@ FLOW_AGENTS_WORKFLOW_SIDECAR_LOCK_DELAY=0.2 flow_agents_node "$WRITER" record-cr
   --reviewer tool-code-reviewer \
   --verdict pass \
   --summary "Concurrent review A passed." \
+  --artifact-ref "$(canonical_review_target "$CONCURRENT_DIR")" \
+  --lane-json "$CRITIQUE_LANE" \
   --timestamp "2026-05-09T00:02:00Z" >"$TMPDIR_EVAL/concurrent-a.out" 2>"$TMPDIR_EVAL/concurrent-a.err" &
 pid_a=$!
 FLOW_AGENTS_WORKFLOW_SIDECAR_LOCK_DELAY=0.2 flow_agents_node "$WRITER" record-critique "$CONCURRENT_DIR" \
@@ -1493,6 +1505,8 @@ FLOW_AGENTS_WORKFLOW_SIDECAR_LOCK_DELAY=0.2 flow_agents_node "$WRITER" record-cr
   --reviewer tool-code-reviewer \
   --verdict pass \
   --summary "Concurrent review B passed." \
+  --artifact-ref "$(canonical_review_target "$CONCURRENT_DIR")" \
+  --lane-json "$CRITIQUE_LANE" \
   --timestamp "2026-05-09T00:02:01Z" >"$TMPDIR_EVAL/concurrent-b.out" 2>"$TMPDIR_EVAL/concurrent-b.err" &
 pid_b=$!
 wait "$pid_a"
@@ -2167,14 +2181,13 @@ if flow_agents_node "$WRITER" dogfood-pass \
   --require-critique \
   --critique-id dogfood-clean-review \
   --critique-verdict pass \
-  --critique-summary "New critique is clean but prior critique is still open." \
-  --summary "Should fail before evidence." >"$TMPDIR_EVAL/dogfood-existing-dirty-critique.out" 2>&1; then
-  _fail "dogfood-pass should reject existing dirty critique before evidence writes"
-elif rg -q 'requires clean critique before recording pass evidence' "$TMPDIR_EVAL/dogfood-existing-dirty-critique.out" \
-  && [[ ! -f "$DIRTY_CRITIQUE_DOGFOOD_DIR/evidence.json" ]]; then
-  _pass "dogfood-pass rejects existing dirty critique before partial evidence writes"
+  --critique-summary "New bundle critique is clean; legacy residue is ignored." \
+  --artifact-ref "$(canonical_review_target "$DIRTY_CRITIQUE_DOGFOOD_DIR")" \
+  --lane-json "$CRITIQUE_LANE" \
+  --summary "Legacy critique.json cannot block bundle-only evidence." >"$TMPDIR_EVAL/dogfood-existing-dirty-critique.out" 2>&1; then
+  _pass "dogfood-pass ignores a dirty legacy critique.json and records a clean bundle critique"
 else
-  _fail "dogfood-pass existing dirty critique was not fail-closed"
+  _fail "dogfood-pass let legacy critique.json wedge bundle-only completion: $(cat "$TMPDIR_EVAL/dogfood-existing-dirty-critique.out")"
 fi
 
 FAILED_DOGFOOD_DIR="$TMPDIR_EVAL/repo/.kontourai/flow-agents/dogfood-failed-pass"
@@ -2194,6 +2207,8 @@ if flow_agents_node "$WRITER" dogfood-pass \
   --critique-id dogfood-failed-review \
   --critique-verdict fail \
   --critique-summary "Failed critique should be recorded for routing." \
+  --artifact-ref "$(canonical_review_target "$FAILED_DOGFOOD_DIR")" \
+  --lane-json "$CRITIQUE_LANE" \
   --finding-json '{"id":"failed-dogfood-finding","severity":"high","status":"open","description":"Failed dogfood finding remains open."}' \
   --summary "Dogfood pass failed and should route back to execution." \
   --timestamp "2026-05-09T00:04:30Z" >"$TMPDIR_EVAL/dogfood-failed-pass.out" 2>"$TMPDIR_EVAL/dogfood-failed-pass.err"; then
@@ -2232,6 +2247,8 @@ if flow_agents_node "$WRITER" dogfood-pass \
   --reviewer tool-code-reviewer \
   --critique-verdict pass \
   --critique-summary "Dogfood critique passed." \
+  --artifact-ref "$(canonical_review_target "$DOGFOOD_DIR")" \
+  --lane-json "$CRITIQUE_LANE" \
   --learning-record-json '{"id":"dogfood-learning","source_refs":["evidence.json","critique.json"],"outcome":"success","facts":["Dogfood pass command recorded evidence and critique."],"interpretation":"Dogfood pass can close a clean local loop.","routing":[{"target":"none","action":"No follow-up required.","status":"completed"}],"correction":{"needed":false,"evidence":"Evidence, critique, and learning matched intended dogfood behavior."}}' \
   --learning-summary "Dogfood command learning recorded." \
   --summary "Dogfood pass completed." \
@@ -2291,6 +2308,8 @@ if flow_agents_node "$WRITER" dogfood-pass \
   --reviewer tool-code-reviewer \
   --critique-verdict pass \
   --critique-summary "Dogfood release critique passed." \
+  --artifact-ref "$(canonical_review_target "$DOGFOOD_DIR")" \
+  --lane-json "$CRITIQUE_LANE" \
   --release-decision merge \
   --release-scope "Dogfood pass release readiness." \
   --release-summary "Dogfood pass can record release readiness after clean evidence and critique." \
@@ -2585,7 +2604,9 @@ if flow_agents_node "$WRITER" record-critique "$BAD_DIR" \
   --reviewer tool-code-reviewer \
   --verdict pass \
   --summary "Open finding should fail." \
+  --artifact-ref "$(canonical_review_target "$BAD_DIR")" \
   --finding-json '{"id":"open-medium","severity":"medium","status":"open","description":"Open finding."}' \
+  --lane-json "$CRITIQUE_LANE" \
   --timestamp "2026-05-09T00:02:00Z" >"$TMPDIR_EVAL/bad-critique.out" 2>&1; then
   _fail "sidecar writer should reject open critique findings"
 elif rg -q 'required critique must pass' "$TMPDIR_EVAL/bad-critique.out"; then
@@ -2734,6 +2755,8 @@ flow_agents_node "$WRITER" record-critique "$TB_CRITIQUE_DIR" \
   --reviewer tool-code-reviewer \
   --verdict fail \
   --summary "Critique failed — blocking finding." \
+  --artifact-ref "$(canonical_review_target "$TB_CRITIQUE_DIR")" \
+  --lane-json "$CRITIQUE_LANE" \
   --timestamp "2026-05-09T00:02:00Z" >"$TMPDIR_EVAL/tb-critique-fail.out" 2>"$TMPDIR_EVAL/tb-critique-fail.err" || true
 
 # Record a passing critique (verdict pass, no open findings → claim status verified)
@@ -2742,6 +2765,8 @@ if flow_agents_node "$WRITER" record-critique "$TB_CRITIQUE_DIR" \
   --reviewer tool-code-reviewer \
   --verdict pass \
   --summary "Critique passed — no blocking findings." \
+  --artifact-ref "$(canonical_review_target "$TB_CRITIQUE_DIR")" \
+  --lane-json "$CRITIQUE_LANE" \
   --timestamp "2026-05-09T00:02:30Z" >"$TMPDIR_EVAL/tb-critique-pass.out" 2>"$TMPDIR_EVAL/tb-critique-pass.err" \
   && [[ -f "$TB_CRITIQUE_DIR/trust.bundle" ]]; then
   if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/tb-critique-assert.err"
@@ -2887,6 +2912,8 @@ if flow_agents_node "$WRITER" record-critique "$TB_UNSTAMPED_DIR" \
   --reviewer tool-code-reviewer \
   --verdict pass \
   --summary "Should never be recorded -- the bundle is unstamped." \
+  --artifact-ref "$(canonical_review_target "$TB_UNSTAMPED_DIR")" \
+  --lane-json "$CRITIQUE_LANE" \
   --timestamp "2026-05-09T00:02:00Z" >"$TMPDIR_EVAL/tb-unstamped-critique.out" 2>"$TMPDIR_EVAL/tb-unstamped-critique.err"; then
   _fail "record-critique should refuse to read an unstamped (pre-#344) trust.bundle, not silently reclassify it by claimType"
 elif rg -q 'pre-supersession trust\.bundle' "$TMPDIR_EVAL/tb-unstamped-critique.out" "$TMPDIR_EVAL/tb-unstamped-critique.err" \
@@ -3204,7 +3231,7 @@ cp "$ARTIFACT_DIR/auto-sidecars--deliver.md" "$TB_FO_DIR/failopen--deliver.md"
 flow_agents_node "$WRITER" init-plan "$TB_FO_DIR/failopen--deliver.md" --task-slug failopen --source-request x --summary y --next-action z --timestamp "2026-05-09T00:00:00Z" >/dev/null 2>&1
 flow_agents_node "$WRITER" record-evidence "$TB_FO_DIR" --verdict pass --check-json '{"id":"c1","kind":"test","status":"pass","summary":"s"}' --timestamp "2026-05-09T00:01:00Z" >/dev/null 2>&1
 # With Surface forced-unavailable, record-critique MUST fail (non-zero), not silently drop the critique.
-if FLOW_AGENTS_SURFACE_UNAVAILABLE=1 flow_agents_node "$WRITER" record-critique "$TB_FO_DIR" --id rev-fo --reviewer r --verdict pass --summary fo --timestamp "2026-05-09T00:02:00Z" >"$TMPDIR_EVAL/failopen.out" 2>&1; then
+if FLOW_AGENTS_SURFACE_UNAVAILABLE=1 flow_agents_node "$WRITER" record-critique "$TB_FO_DIR" --id rev-fo --reviewer r --verdict pass --summary fo --artifact-ref "$(canonical_review_target "$TB_FO_DIR")" --lane-json "$CRITIQUE_LANE" --timestamp "2026-05-09T00:02:00Z" >"$TMPDIR_EVAL/failopen.out" 2>&1; then
   _fail "record-critique fail-opened (exit 0) when Surface unavailable — SILENT DATA LOSS: $(cat "$TMPDIR_EVAL/failopen.out")"
 elif grep -qiE "was NOT written|not persisted" "$TMPDIR_EVAL/failopen.out"; then
   _pass "bundle-writers fail loudly (no silent data loss) when Surface unavailable (#156)"
@@ -3402,7 +3429,7 @@ if flow_agents_node "$WRITER" ensure-session \
   --summary "Should fail." \
   --timestamp "2026-06-25T00:00:06Z" >"$TMPDIR_EVAL/wi-bad-slash.out" 2>&1; then
   _fail "ensure-session should reject work-item ref without # separator"
-elif grep -q 'owner/repo#id format' "$TMPDIR_EVAL/wi-bad-slash.out"; then
+elif grep -q 'provider-neutral provider:id ref or owner/repo#numeric-id' "$TMPDIR_EVAL/wi-bad-slash.out"; then
   _pass "ensure-session rejects work-item ref without # separator"
 else
   _fail "malformed ref rejection message was unexpected: $(cat "$TMPDIR_EVAL/wi-bad-slash.out")"
@@ -3532,11 +3559,13 @@ else
 fi
 
 # ─── AC1/AC10: record-gate-claim (pull-work-gate/selected-work) with --command ───────────────
+printf '%s\n' "# Pull Work Report" "" "Selected Work Item: local:${COMPOSE_SLUG}" > "$COMPOSE_DIR/${COMPOSE_SLUG}--pull-work.md"
 if flow_agents_node "$WRITER" record-gate-claim "$COMPOSE_DIR" \
   --actor compose-actor \
   --status pass \
   --summary "Work item selected for compose session" \
-  --command "npm run validate:source --" \
+  --command "test -f .kontourai/flow-agents/compose-270/compose-270--pull-work.md" \
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/compose-270/compose-270--pull-work.md","summary":"Concrete pull-work selection report naming local:compose-270."}' \
   --timestamp "2026-07-05T09:07:00Z" >"$TMPDIR_EVAL/compose-gate1.out" 2>"$TMPDIR_EVAL/compose-gate1.err"; then
   _pass "compose: record-gate-claim (selected-work) with --command succeeds"
 else
@@ -3554,7 +3583,7 @@ if (!buildClaim || !manualClaim) { process.stderr.write('record-gate-claim clobb
 if (!gateClaim) { process.stderr.write('gate claim missing metadata.gate_claim stamp\n'); process.exit(1); }
 if (gateClaim.claimType !== 'builder.pull-work.selected' || gateClaim.subjectType !== 'work-item') { process.stderr.write('gate claim typed incorrectly: ' + gateClaim.claimType + '/' + gateClaim.subjectType + '\n'); process.exit(1); }
 const ev = bundle.evidence.find((e) => e.claimId === gateClaim.id);
-if (!ev || !ev.execution || ev.execution.label !== 'npm run validate:source --') { process.stderr.write('AC10: --command did not stamp execution.label on the gate claim evidence\n'); process.exit(1); }
+if (!ev || !ev.execution || ev.execution.label !== 'test -f .kontourai/flow-agents/compose-270/compose-270--pull-work.md') { process.stderr.write('AC10: --command did not stamp execution.label on the gate claim evidence\n'); process.exit(1); }
 if (claims.length !== 4) { process.stderr.write('expected exactly 4 claims after record-gate-claim (2 checks + 1 acceptance + 1 gate claim), got ' + claims.length + '\n'); process.exit(1); }
 NODEOF
 then
@@ -3581,11 +3610,15 @@ fi
 
 # ─── AC1: a SECOND gate claim against a DIFFERENT expectation (plan-gate/implementation-plan) ──
 # is additive, not a replacement, of the FIRST gate claim (pull-work-gate/selected-work) ───────
+printf '%s\n' "# Implementation Plan" "" "Files: evals/integration/test_workflow_sidecar_writer.sh" "Evidence: acceptance.json, handoff.json" > "$COMPOSE_DIR/${COMPOSE_SLUG}--plan-work.md"
 if flow_agents_node "$WRITER" record-gate-claim "$COMPOSE_DIR" \
   --actor compose-actor \
   --status pass \
   --summary "Implementation plan recorded for compose session" \
   --expectation implementation-plan \
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/compose-270/compose-270--plan-work.md","summary":"Concrete plan-work report for the implementation plan."}' \
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/compose-270/acceptance.json","summary":"Declared acceptance criteria for the implementation plan."}' \
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/compose-270/handoff.json","summary":"Plan handoff for the implementation plan."}' \
   --timestamp "2026-07-05T09:07:30Z" >"$TMPDIR_EVAL/compose-gate2.out" 2>"$TMPDIR_EVAL/compose-gate2.err"; then
   _pass "compose: second record-gate-claim (different expectation, implementation-plan) succeeds"
 else
@@ -3631,6 +3664,8 @@ if flow_agents_node "$WRITER" record-critique "$COMPOSE_DIR" \
   --reviewer compose-reviewer \
   --verdict pass \
   --summary "Compose review looks good" \
+  --artifact-ref "$(canonical_review_target "$COMPOSE_DIR")" \
+  --lane-json "$CRITIQUE_LANE" \
   --timestamp "2026-07-05T09:09:00Z" >"$TMPDIR_EVAL/compose-critique.out" 2>"$TMPDIR_EVAL/compose-critique.err"; then
   _pass "compose: record-critique rebuilds the bundle at the new active step (merge-ready)"
 else
@@ -3663,6 +3698,180 @@ then
   _pass "AC2: gate-claim typing (claimType/subjectType/step_id) survives a rebuild after the active step advances — frozen at record time, not re-derived (#270(a)/(c))"
 else
   _fail "AC2: gate-claim-typing-survives-rebuild assertion failed: $(cat "$TMPDIR_EVAL/compose-ac2-assert.err")"
+fi
+
+# Legacy critique.json is unsupported historical residue. It must neither alter the
+# authoritative bundle nor create a live blocker during a subsequent critique write.
+LEGACY_CRITIQUE_PROJECT="$TMPDIR_EVAL/legacy-critique-project"
+LEGACY_CRITIQUE_ROOT="$LEGACY_CRITIQUE_PROJECT/.kontourai/flow-agents"
+mkdir -p "$LEGACY_CRITIQUE_PROJECT/.kontourai"
+cp -r "$COMPOSE_ROOT" "$LEGACY_CRITIQUE_ROOT"
+LEGACY_CRITIQUE_DIR="$LEGACY_CRITIQUE_ROOT/$COMPOSE_SLUG"
+cat > "$LEGACY_CRITIQUE_DIR/critique.json" <<'JSON'
+{
+  "critiques": [
+    {"id":"compose-review","reviewer":"legacy-reviewer","reviewed_at":"2026-07-05T08:00:00Z","verdict":"fail","summary":"Stale legacy duplicate must not replace the bundle record.","findings":[]},
+    {"id":"legacy-only-review","reviewer":"legacy-reviewer","reviewed_at":"2026-07-05T08:01:00Z","verdict":"not_verified","summary":"Legacy-only migration record.","findings":[]}
+  ]
+}
+JSON
+if flow_agents_node "$WRITER" record-critique "$LEGACY_CRITIQUE_DIR" \
+  --id bundle-only-review \
+  --reviewer compose-reviewer \
+  --verdict pass \
+  --summary "Bundle-only review looks good" \
+  --artifact-ref "$(canonical_review_target "$LEGACY_CRITIQUE_DIR")" \
+  --lane-json "$CRITIQUE_LANE" \
+  --timestamp "2026-07-05T09:09:30Z" >"$TMPDIR_EVAL/legacy-critique.out" 2>"$TMPDIR_EVAL/legacy-critique.err"; then
+  if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/legacy-critique-assert.err"
+import { readFileSync } from 'node:fs';
+const bundle = JSON.parse(readFileSync('${LEGACY_CRITIQUE_DIR}/trust.bundle', 'utf8'));
+const critiques = bundle.claims.filter((claim) => claim.metadata?.origin === 'critique');
+const byId = new Map(critiques.map((claim) => [String(claim.subjectId).split('/').pop(), claim]));
+if (critiques.length !== 2 || byId.size !== 2) process.exit(1);
+if (byId.get('compose-review')?.value !== 'pass') process.exit(2);
+if (byId.has('legacy-only-review')) process.exit(3);
+if (byId.get('bundle-only-review')?.value !== 'pass') process.exit(4);
+NODEOF
+  then
+    _pass "legacy critique.json cannot alter or wedge authoritative bundle critiques"
+  else
+    _fail "legacy critique isolation assertion failed: $(cat "$TMPDIR_EVAL/legacy-critique-assert.err")"
+  fi
+else
+  _fail "legacy critique isolation write failed: $(cat "$TMPDIR_EVAL/legacy-critique.out" "$TMPDIR_EVAL/legacy-critique.err")"
+fi
+
+# ─── Tests-evidence writer: immutable criteria, multiple observed commands, non-vacuous scripts ──
+MULTI_PROJECT="$TMPDIR_EVAL/multi-observed-project"
+MULTI_ROOT="$MULTI_PROJECT/.kontourai/flow-agents"
+MULTI_SLUG="multi-observed"
+MULTI_DIR="$MULTI_ROOT/$MULTI_SLUG"
+mkdir -p "$MULTI_ROOT" "$MULTI_PROJECT/checks" "$MULTI_PROJECT/test"
+printf '#!/usr/bin/env bash\nset -eu\ntest -f "$1"\nprintf "1..1\\nok 1 - fixture exists\\n"\n' > "$MULTI_PROJECT/checks/test-one.sh"
+printf '#!/usr/bin/env bash\nset -eu\ntest -f "$1"\nprintf "1..1\\nok 1 - fixture exists\\n"\n' > "$MULTI_PROJECT/checks/test-two.sh"
+chmod +x "$MULTI_PROJECT/checks/test-one.sh" "$MULTI_PROJECT/checks/test-two.sh"
+printf 'import test from "node:test";\nimport assert from "node:assert/strict";\ntest("fixture", () => assert.equal(1, 1));\n' > "$MULTI_PROJECT/test/sample.test.mjs"
+cat > "$MULTI_PROJECT/package.json" <<'JSON'
+{"scripts":{"test":"true","check":"echo check"}}
+JSON
+flow_agents_node "$WRITER" ensure-session \
+  --artifact-root "$MULTI_ROOT" --task-slug "$MULTI_SLUG" --actor multi-observed-actor \
+  --title "Multiple observed commands" --summary "Verify immutable acceptance criteria." \
+  --criterion "First immutable criterion" --criterion "Second immutable criterion" \
+  --timestamp "2026-07-11T11:00:00Z" >"$TMPDIR_EVAL/multi-seed.out" 2>"$TMPDIR_EVAL/multi-seed.err"
+flow_agents_node "$WRITER" advance-state "$MULTI_DIR" \
+  --actor multi-observed-actor --status in_progress --phase verification \
+  --summary "Move fixture to tests evidence." --next-action "Verify commands." \
+  --flow-definition builder.build --timestamp "2026-07-11T11:00:10Z" >"$TMPDIR_EVAL/multi-advance.out" 2>"$TMPDIR_EVAL/multi-advance.err"
+printf '# Plan evidence\n' > "$MULTI_DIR/$MULTI_SLUG--plan-work.md"
+if flow_agents_node "$WRITER" record-critique "$MULTI_DIR" \
+  --id multi-review --reviewer multi-reviewer --verdict pass --summary "Review completed." \
+  --artifact-ref "$(canonical_review_target "$MULTI_DIR")" --lane-json "$CRITIQUE_LANE" \
+  --timestamp "2026-07-11T11:00:20Z" >"$TMPDIR_EVAL/multi-critique.out" 2>"$TMPDIR_EVAL/multi-critique.err"; then
+  _pass "tests-evidence fixture records a clean critique with a record-time snapshot"
+else
+  _fail "tests-evidence fixture critique failed: $(cat "$TMPDIR_EVAL/multi-critique.out" "$TMPDIR_EVAL/multi-critique.err")"
+fi
+
+MULTI_ONE="bash checks/test-one.sh test/sample.test.mjs"
+MULTI_TWO="bash checks/test-two.sh test/sample.test.mjs"
+MULTI_DIGEST="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+MULTI_REF_ONE="{\"kind\":\"command\",\"excerpt\":\"$MULTI_ONE\",\"summary\":\"First exact command.\"}"
+MULTI_REF_TWO="{\"kind\":\"command\",\"excerpt\":\"$MULTI_TWO\",\"summary\":\"Second exact command.\"}"
+MULTI_OBS_ONE="{\"command\":\"$MULTI_ONE\",\"exit_code\":0,\"test_count\":1,\"output_sha256\":\"$MULTI_DIGEST\"}"
+MULTI_OBS_TWO="{\"command\":\"$MULTI_TWO\",\"exit_code\":0,\"test_count\":1,\"output_sha256\":\"$MULTI_DIGEST\"}"
+
+MULTI_VACUOUS_REJECTED=yes
+for multi_script_command in "npm test" "pnpm test" "yarn test" "bun run test"; do
+  if flow_agents_node "$WRITER" record-gate-claim "$MULTI_DIR" \
+    --actor multi-observed-actor --expectation tests-evidence --status pass --summary "Vacuous package script." \
+    --command "$multi_script_command" --evidence-ref-json "$MULTI_REF_ONE" \
+    --criterion-json "{\"id\":\"first-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_ONE]}" \
+    --criterion-json "{\"id\":\"second-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_ONE]}" \
+    >"$TMPDIR_EVAL/multi-vacuous.out" 2>"$TMPDIR_EVAL/multi-vacuous.err"; then
+    MULTI_VACUOUS_REJECTED=no
+  fi
+done
+if [ "$MULTI_VACUOUS_REJECTED" = yes ]; then
+  _pass "tests-evidence resolves npm/pnpm/yarn/bun scripts and rejects vacuous package bodies"
+else
+  _fail "tests-evidence accepted a vacuous npm/pnpm/yarn/bun package script"
+fi
+
+cat > "$MULTI_PROJECT/package.json" <<'JSON'
+{"scripts":{"build":"tsc --noEmit","test":"node --test test/*.test.mjs","test:unit":"npm run build && node --test test/*.test.mjs"}}
+JSON
+if node --input-type=module - "$ROOT/build/src/cli/workflow-sidecar.js" "$MULTI_PROJECT" <<'NODE'
+const [modulePath, projectRoot] = process.argv.slice(2);
+const { isMeaningfulTestCommand } = await import(modulePath);
+if (!isMeaningfulTestCommand('npm test', projectRoot)) process.exit(1);
+if (!isMeaningfulTestCommand('npm run test:unit', projectRoot)) process.exit(2);
+NODE
+then
+  _pass "tests-evidence accepts substantive direct and composed Node package test scripts"
+else
+  _fail "tests-evidence rejected a substantive package test script"
+fi
+if flow_agents_node "$WRITER" record-critique "$MULTI_DIR" \
+  --id multi-review --reviewer multi-reviewer --verdict pass --summary "Review refreshed after the package-script fixture changed." \
+  --artifact-ref "$(canonical_review_target "$MULTI_DIR")" --lane-json "$CRITIQUE_LANE" \
+  --timestamp "2026-07-11T11:00:25Z" >"$TMPDIR_EVAL/multi-critique-refresh.out" 2>"$TMPDIR_EVAL/multi-critique-refresh.err"; then
+  _pass "tests-evidence fixture refreshes review after an intentional source change"
+else
+  _fail "tests-evidence fixture failed to refresh stale review: $(cat "$TMPDIR_EVAL/multi-critique-refresh.out" "$TMPDIR_EVAL/multi-critique-refresh.err")"
+fi
+
+if flow_agents_node "$WRITER" record-gate-claim "$MULTI_DIR" \
+  --actor multi-observed-actor --expectation tests-evidence --status pass --summary "Rewritten criterion." \
+  --command "$MULTI_ONE" --observed-command-json "$MULTI_OBS_ONE" --evidence-ref-json "$MULTI_REF_ONE" \
+  --criterion-json "{\"id\":\"first-immutable-criterion\",\"description\":\"Caller rewrite.\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_ONE]}" \
+  --criterion-json "{\"id\":\"second-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_ONE]}" \
+  >"$TMPDIR_EVAL/multi-rewrite.out" 2>"$TMPDIR_EVAL/multi-rewrite.err"; then
+  _fail "tests-evidence accepted caller rewriting an immutable criterion description"
+else
+  _pass "tests-evidence rejects criterion description rewriting"
+fi
+
+if flow_agents_node "$WRITER" record-gate-claim "$MULTI_DIR" \
+  --actor multi-observed-actor --expectation tests-evidence --status pass --summary "Unknown criterion field." \
+  --command "$MULTI_ONE" --observed-command-json "$MULTI_OBS_ONE" --evidence-ref-json "$MULTI_REF_ONE" \
+  --criterion-json "{\"id\":\"first-immutable-criterion\",\"status\":\"pass\",\"unexpected\":true,\"evidence_refs\":[$MULTI_REF_ONE]}" \
+  --criterion-json "{\"id\":\"second-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_ONE]}" \
+  >"$TMPDIR_EVAL/multi-unknown.out" 2>"$TMPDIR_EVAL/multi-unknown.err"; then
+  _fail "tests-evidence accepted an unknown criterion field"
+else
+  _pass "tests-evidence rejects unknown criterion fields"
+fi
+
+if flow_agents_node "$WRITER" record-gate-claim "$MULTI_DIR" \
+  --actor multi-observed-actor --expectation tests-evidence --status pass --summary "Two exact observed commands." \
+  --command "$MULTI_ONE" --command "$MULTI_TWO" \
+  --observed-command-json "$MULTI_OBS_ONE" --observed-command-json "$MULTI_OBS_TWO" \
+  --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\".kontourai/flow-agents/$MULTI_SLUG/$MULTI_SLUG--plan-work.md\",\"summary\":\"Durable verification plan.\"}" \
+  --evidence-ref-json "$MULTI_REF_ONE" --evidence-ref-json "$MULTI_REF_TWO" \
+  --criterion-json "{\"id\":\"first-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_ONE]}" \
+  --criterion-json "{\"id\":\"second-immutable-criterion\",\"status\":\"pass\",\"evidence_refs\":[$MULTI_REF_TWO]}" \
+  --timestamp "2026-07-11T11:00:30Z" >"$TMPDIR_EVAL/multi-pass.out" 2>"$TMPDIR_EVAL/multi-pass.err"; then
+  if node - "$MULTI_DIR/acceptance.json" "$MULTI_DIR/trust.bundle" <<'NODE'
+const fs = require('node:fs');
+const [acceptanceFile, bundleFile] = process.argv.slice(2);
+const acceptance = JSON.parse(fs.readFileSync(acceptanceFile, 'utf8'));
+if (acceptance.criteria[0].description !== 'First immutable criterion' || acceptance.criteria[1].description !== 'Second immutable criterion') process.exit(1);
+const bundle = JSON.parse(fs.readFileSync(bundleFile, 'utf8'));
+const gate = bundle.claims.find((claim) => claim.metadata?.gate_claim?.expectation_id === 'tests-evidence');
+const review = bundle.claims.find((claim) => claim.metadata?.origin === 'critique');
+if (!gate || gate.metadata?.observed_commands?.length !== 2) process.exit(2);
+const snapshot = review?.metadata?.review_target?.workspace_snapshot;
+if (!snapshot || snapshot.version !== 1 || snapshot.algorithm !== 'sha256' || typeof snapshot.digest !== 'string') process.exit(3);
+NODE
+  then
+    _pass "tests-evidence preserves immutable acceptance semantics and maps each criterion to its successful observed command"
+  else
+    _fail "tests-evidence multi-command or review snapshot assertion failed"
+  fi
+else
+  _fail "tests-evidence multi-command write failed: $(cat "$TMPDIR_EVAL/multi-pass.out" "$TMPDIR_EVAL/multi-pass.err")"
 fi
 
 # ─── AC4: compose-three-writer (five writer calls total: evidence x2, gate-claim x2, critique, ──
@@ -4053,7 +4262,9 @@ fi
 # buildTrustBundle) needs them to resolve the flow definition for stamp validation. Copying only
 # the session dir would silently make sessionFlowId resolve to null, which changes what's being
 # tested (the "no flow definition resolvable" edge case) rather than the forged-stamp case.
-FORGED_ROOT="$TMPDIR_EVAL/forged-stamp-root"
+FORGED_PROJECT="$TMPDIR_EVAL/forged-stamp-project"
+FORGED_ROOT="$FORGED_PROJECT/.kontourai/flow-agents"
+mkdir -p "$FORGED_PROJECT/.kontourai"
 cp -r "$COMPOSE_ROOT" "$FORGED_ROOT"
 FORGED_DIR="$FORGED_ROOT/$COMPOSE_SLUG"
 
@@ -4076,6 +4287,8 @@ if flow_agents_node "$WRITER" record-critique "$FORGED_DIR" \
   --reviewer forged-stamp-tester \
   --verdict pass \
   --summary "Rebuild attempt against a forged gate_claim stamp" \
+  --artifact-ref "$(canonical_review_target "$FORGED_DIR")" \
+  --lane-json "$CRITIQUE_LANE" \
   --timestamp "2026-07-05T09:12:00Z" >"$TMPDIR_EVAL/forged-critique.out" 2>"$TMPDIR_EVAL/forged-critique.err"; then
   _fail "FORGED-STAMP REGRESSION: record-critique succeeded against a bundle with a forged metadata.gate_claim.expectation_id (silent re-typing fall-through, the #270 CRITICAL/HIGH defect)"
 elif grep -qi "forged or corrupt" "$TMPDIR_EVAL/forged-critique.out" "$TMPDIR_EVAL/forged-critique.err" \
@@ -4089,7 +4302,9 @@ fi
 # claim (origin:"check", check_kind:"external", kit-typed claimType) — mimicking the real
 # kontourai-flow-agents-303 bundle shape (a claim recorded before the gate_claim stamp existed).
 # Any rebuild must die with the re-record remedy, never silently re-type via matchExpectsEntry.
-PRECLUSTER_ROOT="$TMPDIR_EVAL/precluster-missing-stamp-root"
+PRECLUSTER_PROJECT="$TMPDIR_EVAL/precluster-missing-stamp-project"
+PRECLUSTER_ROOT="$PRECLUSTER_PROJECT/.kontourai/flow-agents"
+mkdir -p "$PRECLUSTER_PROJECT/.kontourai"
 cp -r "$COMPOSE_ROOT" "$PRECLUSTER_ROOT"
 PRECLUSTER_DIR="$PRECLUSTER_ROOT/$COMPOSE_SLUG"
 
@@ -4112,6 +4327,8 @@ if flow_agents_node "$WRITER" record-critique "$PRECLUSTER_DIR" \
   --reviewer precluster-tester \
   --verdict pass \
   --summary "Rebuild attempt against a pre-cluster-270 unstamped gate claim" \
+  --artifact-ref "$(canonical_review_target "$PRECLUSTER_DIR")" \
+  --lane-json "$CRITIQUE_LANE" \
   --timestamp "2026-07-05T09:13:00Z" >"$TMPDIR_EVAL/precluster-critique.out" 2>"$TMPDIR_EVAL/precluster-critique.err"; then
   _fail "PRE-CLUSTER-270 REGRESSION: record-critique succeeded against a bundle with an unstamped gate-claim-shaped claim (silent re-typing fall-through)"
 elif grep -qi "pre-cluster-270 gate claim" "$TMPDIR_EVAL/precluster-critique.out" "$TMPDIR_EVAL/precluster-critique.err" \
@@ -4207,6 +4424,8 @@ if flow_agents_node "$WRITER" record-critique "$COLLISION_DIR" \
   --reviewer collision-tester \
   --verdict pass \
   --summary "Rebuild after the rejected collision write — must succeed, no landmine" \
+  --artifact-ref "$(canonical_review_target "$COLLISION_DIR")" \
+  --lane-json "$CRITIQUE_LANE" \
   --timestamp "2026-07-05T09:16:30Z" >"$TMPDIR_EVAL/collision-rebuild.out" 2>"$TMPDIR_EVAL/collision-rebuild.err"; then
   _pass "#270 HIGH: a rebuild (record-critique) after the rejected collision write succeeds cleanly — no rebuild-time landmine"
 else
@@ -4222,31 +4441,32 @@ UNRESOLVABLE_ROOT="$TMPDIR_EVAL/unresolvable-project/.kontourai/flow-agents"
 UNRESOLVABLE_SLUG="unresolvable-270"
 UNRESOLVABLE_DIR="$UNRESOLVABLE_ROOT/$UNRESOLVABLE_SLUG"
 mkdir -p "$UNRESOLVABLE_ROOT"
+mkdir -p "$UNRESOLVABLE_DIR"
+printf '%s\n' "# Pull Work Report" "" "Selected Work Item: unresolvable:270" > "$UNRESOLVABLE_DIR/${UNRESOLVABLE_SLUG}--pull-work.md"
 
-flow_agents_node "$WRITER" ensure-session \
+FLOW_AGENTS_ACTOR=unresolvable-actor node "$ROOT/build/src/cli.js" workflow start \
   --artifact-root "$UNRESOLVABLE_ROOT" \
-  --task-slug "$UNRESOLVABLE_SLUG" \
-  --actor unresolvable-actor \
-  --flow-id builder.build \
-  --skip-ownership-guard \
+  --flow builder.build \
+  --work-item unresolvable:270 \
+  --assignment-provider local-file \
   --title "Unresolvable FlowDefinition regression" \
   --source-request "Regression: an unresolvable FlowDefinition must die with the dedicated cannot-be-loaded message." \
   --summary "Seed session with a REAL flow so a real stamped gate claim can be recorded." \
-  --criterion "Unresolvable FlowDefinition dies with the dedicated message" \
-  --timestamp "2026-07-05T09:17:00Z" >"$TMPDIR_EVAL/unresolvable-seed.out" 2>"$TMPDIR_EVAL/unresolvable-seed.err"
+  --criterion "Unresolvable FlowDefinition dies with the dedicated message" >"$TMPDIR_EVAL/unresolvable-seed.out" 2>"$TMPDIR_EVAL/unresolvable-seed.err"
 
-if flow_agents_node "$WRITER" record-gate-claim "$UNRESOLVABLE_DIR" \
-  --actor unresolvable-actor \
-  --status pass \
-  --summary "Work item selected for unresolvable-flow-definition regression" \
-  --timestamp "2026-07-05T09:17:15Z" >"$TMPDIR_EVAL/unresolvable-gate-claim.out" 2>"$TMPDIR_EVAL/unresolvable-gate-claim.err"; then
+if node - "$UNRESOLVABLE_DIR/trust.bundle" <<'NODEOF'
+const fs = require('node:fs');
+const bundle = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+if (!bundle.claims.some((claim) => claim.metadata?.gate_claim?.expectation_id === 'selected-work')) process.exit(1);
+NODEOF
+then
   _pass "#270 MEDIUM setup: real stamped gate claim recorded before breaking FlowDefinition resolution"
 else
-  _fail "#270 MEDIUM setup: record-gate-claim (real flow) failed: $(cat "$TMPDIR_EVAL/unresolvable-gate-claim.out" "$TMPDIR_EVAL/unresolvable-gate-claim.err")"
+  _fail "#270 MEDIUM setup: public workflow did not record a real selected-work gate claim: $(cat "$TMPDIR_EVAL/unresolvable-seed.out" "$TMPDIR_EVAL/unresolvable-seed.err")"
 fi
 
-# Break resolution: point BOTH the legacy and per-actor current-pointer files at a flow id with
-# no corresponding kits/<kit>/flows/<name>.flow.json file.
+# Poison BOTH navigation pointers. Exact-session writers must continue to use the persisted
+# canonical flow_run from the session instead of treating ambient pointers as authority.
 node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/unresolvable-mutate.err"
 import { readFileSync, writeFileSync } from 'node:fs';
 for (const f of ['${UNRESOLVABLE_ROOT}/current.json', '${UNRESOLVABLE_ROOT}/current/unresolvable-actor.json']) {
@@ -4265,14 +4485,12 @@ if flow_agents_node "$WRITER" record-critique "$UNRESOLVABLE_DIR" \
   --reviewer unresolvable-tester \
   --verdict pass \
   --summary "Rebuild attempt against an unresolvable FlowDefinition" \
+  --artifact-ref "$(canonical_review_target "$UNRESOLVABLE_DIR")" \
+  --lane-json "$CRITIQUE_LANE" \
   --timestamp "2026-07-05T09:17:30Z" >"$TMPDIR_EVAL/unresolvable-critique.out" 2>"$TMPDIR_EVAL/unresolvable-critique.err"; then
-  _fail "#270 MEDIUM REGRESSION: record-critique succeeded against a stamped gate claim whose FlowDefinition cannot be loaded"
-elif grep -qi "cannot be loaded" "$TMPDIR_EVAL/unresolvable-critique.out" "$TMPDIR_EVAL/unresolvable-critique.err" \
-  && grep -qi "cannot validate the gate-claim stamp" "$TMPDIR_EVAL/unresolvable-critique.out" "$TMPDIR_EVAL/unresolvable-critique.err" \
-  && ! grep -qi "forged or corrupt" "$TMPDIR_EVAL/unresolvable-critique.out" "$TMPDIR_EVAL/unresolvable-critique.err"; then
-  _pass "#270 MEDIUM: an unresolvable FlowDefinition dies with the dedicated 'cannot be loaded' message, naming the flow id — NEVER the 'forged or corrupt' message"
+  _pass "#270 MEDIUM: record-critique ignores poisoned navigation pointers and validates stamped claims against the exact session FlowDefinition"
 else
-  _fail "#270 MEDIUM: unresolvable-FlowDefinition rejection message was unexpected: $(cat "$TMPDIR_EVAL/unresolvable-critique.out" "$TMPDIR_EVAL/unresolvable-critique.err")"
+  _fail "#270 MEDIUM REGRESSION: poisoned navigation pointers blocked or redirected an exact-session critique rebuild: $(cat "$TMPDIR_EVAL/unresolvable-critique.out" "$TMPDIR_EVAL/unresolvable-critique.err")"
 fi
 
 # ─── Mutation test (#270 HIGH reserved-prefix guard): temporarily disable normalizeCheck's ──────
@@ -4364,10 +4582,12 @@ flow_agents_node "$WRITER" ensure-session \
 # not write trust.bundle yet) — a real, properly-stamped gate claim at pull-work-gate/selected-work,
 # exactly the compose-layer pattern above, so this session has a normal, valid bundle to seed the
 # mis-recorded claim alongside (never the sole content of the bundle).
+printf '%s\n' "# Pull Work Report" "" "Selected Work Item: local:${CORRECTION_SLUG}" > "$CORRECTION_DIR/${CORRECTION_SLUG}--pull-work.md"
 flow_agents_node "$WRITER" record-gate-claim "$CORRECTION_DIR" \
   --actor correction-actor \
   --status pass \
   --summary "Work item selected for correction-path session" \
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/correction-270/correction-270--pull-work.md","summary":"Concrete pull-work selection report naming local:correction-270."}' \
   --timestamp "2026-07-05T09:10:50Z" >"$TMPDIR_EVAL/correction-gate-seed.out" 2>"$TMPDIR_EVAL/correction-gate-seed.err"
 
 if [[ ! -f "$CORRECTION_DIR/trust.bundle" ]]; then
@@ -4500,7 +4720,8 @@ flow_agents_node "$WRITER" ensure-session   --artifact-root "$STAMPED_ROOT"   --
 
 # Real record-gate-claim call — a genuine, properly-stamped gate claim (metadata.gate_claim is
 # stamped by buildTrustBundle itself, never hand-constructed).
-flow_agents_node "$WRITER" record-gate-claim "$STAMPED_DIR"   --actor stamped-claim-actor   --status pass   --summary "Work item selected for stamped-claim supersession session"   --timestamp "2026-07-05T09:12:35Z" >"$TMPDIR_EVAL/stamped-claim-gate.out" 2>"$TMPDIR_EVAL/stamped-claim-gate.err"
+printf '%s\n' "# Pull Work Report" "" "Selected Work Item: local:${STAMPED_SLUG}" > "$STAMPED_DIR/${STAMPED_SLUG}--pull-work.md"
+flow_agents_node "$WRITER" record-gate-claim "$STAMPED_DIR"   --actor stamped-claim-actor   --status pass   --summary "Work item selected for stamped-claim supersession session"   --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/stamped-claim-270/stamped-claim-270--pull-work.md","summary":"Concrete pull-work selection report naming local:stamped-claim-270."}'   --timestamp "2026-07-05T09:12:35Z" >"$TMPDIR_EVAL/stamped-claim-gate.out" 2>"$TMPDIR_EVAL/stamped-claim-gate.err"
 
 if [[ ! -f "$STAMPED_DIR/trust.bundle" ]]; then
   _fail "eval setup: record-gate-claim did not create trust.bundle for the stamped-claim session: $(cat "$TMPDIR_EVAL/stamped-claim-gate.out" "$TMPDIR_EVAL/stamped-claim-gate.err")"
@@ -4747,16 +4968,22 @@ NODEOF
       cp "$MUTATION_SCRATCH/workflow-sidecar.mutated.js" "$DIST_SIDECAR"
       # Copy the WHOLE root again (see the FORGED_ROOT/PRECLUSTER_ROOT comment above) — same
       # current.json/current/<actor>.json resolution requirement applies here.
-      MUTATION_FORGED_ROOT="$TMPDIR_EVAL/mutation-forged-root"
+      MUTATION_FORGED_PROJECT="$TMPDIR_EVAL/mutation-forged-project"
+      MUTATION_FORGED_ROOT="$MUTATION_FORGED_PROJECT/.kontourai/flow-agents"
+      mkdir -p "$MUTATION_FORGED_PROJECT/.kontourai"
       cp -r "$FORGED_ROOT" "$MUTATION_FORGED_ROOT"
       MUTATION_FORGED_DIR="$MUTATION_FORGED_ROOT/$COMPOSE_SLUG"
-      MUTATION_PRECLUSTER_ROOT="$TMPDIR_EVAL/mutation-precluster-root"
+      MUTATION_PRECLUSTER_PROJECT="$TMPDIR_EVAL/mutation-precluster-project"
+      MUTATION_PRECLUSTER_ROOT="$MUTATION_PRECLUSTER_PROJECT/.kontourai/flow-agents"
+      mkdir -p "$MUTATION_PRECLUSTER_PROJECT/.kontourai"
       cp -r "$PRECLUSTER_ROOT" "$MUTATION_PRECLUSTER_ROOT"
       MUTATION_PRECLUSTER_DIR="$MUTATION_PRECLUSTER_ROOT/$COMPOSE_SLUG"
 
       if flow_agents_node "$WRITER" record-critique "$MUTATION_FORGED_DIR" \
         --id mutation-forged-review --reviewer mutation-tester --verdict pass \
         --summary "Mutation-test: forged-stamp guard disabled, must go red" \
+        --artifact-ref "$(canonical_review_target "$MUTATION_FORGED_DIR")" \
+        --lane-json "$CRITIQUE_LANE" \
         --timestamp "2026-07-05T09:14:00Z" >"$TMPDIR_EVAL/mutation-forged.out" 2>"$TMPDIR_EVAL/mutation-forged.err"; then
         _pass "mutation-test: with the stamp-mismatch guard neutered, the forged-stamp fixture now SUCCEEDS (eval correctly goes red without the guard, proving the guard is what the eval exercises)"
       else
@@ -4766,6 +4993,8 @@ NODEOF
       if flow_agents_node "$WRITER" record-critique "$MUTATION_PRECLUSTER_DIR" \
         --id mutation-precluster-review --reviewer mutation-tester --verdict pass \
         --summary "Mutation-test: pre-cluster-270 guard disabled, must go red" \
+        --artifact-ref "$(canonical_review_target "$MUTATION_PRECLUSTER_DIR")" \
+        --lane-json "$CRITIQUE_LANE" \
         --timestamp "2026-07-05T09:14:30Z" >"$TMPDIR_EVAL/mutation-precluster.out" 2>"$TMPDIR_EVAL/mutation-precluster.err"; then
         _pass "mutation-test: with the pre-cluster-270 unstamped guard neutered, the missing-stamp fixture now SUCCEEDS (eval correctly goes red without the guard)"
       else
@@ -4778,12 +5007,16 @@ NODEOF
     # Restore the real compiled guard immediately — never leave the mutated binary in place, and
     # re-run BOTH negatives to confirm the restored binary rejects them again (guard is back).
     cp "$MUTATION_SCRATCH/workflow-sidecar.orig.js" "$DIST_SIDECAR"
-    RESTORE_FORGED_ROOT="$TMPDIR_EVAL/restore-check-forged-root"
+    RESTORE_FORGED_PROJECT="$TMPDIR_EVAL/restore-check-forged-project"
+    RESTORE_FORGED_ROOT="$RESTORE_FORGED_PROJECT/.kontourai/flow-agents"
+    mkdir -p "$RESTORE_FORGED_PROJECT/.kontourai"
     cp -r "$FORGED_ROOT" "$RESTORE_FORGED_ROOT"
     RESTORE_FORGED_DIR="$RESTORE_FORGED_ROOT/$COMPOSE_SLUG"
     if flow_agents_node "$WRITER" record-critique "$RESTORE_FORGED_DIR" \
       --id restore-check-review --reviewer restore-check-tester --verdict pass \
       --summary "Restore check: forged-stamp guard must be back after mutation-test cleanup" \
+      --artifact-ref "$(canonical_review_target "$RESTORE_FORGED_DIR")" \
+      --lane-json "$CRITIQUE_LANE" \
       --timestamp "2026-07-05T09:15:00Z" >"$TMPDIR_EVAL/mutation-restore.out" 2>"$TMPDIR_EVAL/mutation-restore.err"; then
       _fail "mutation-test cleanup REGRESSION: the forged-stamp guard did not come back after restoring the original compiled file"
     else

@@ -1,216 +1,82 @@
 ---
 name: "plan-work"
-description: "Code planning primitive — goal + directory to structured execution plan. Delegates to tool-planner. No resume, no ideation."
+description: "Code planning primitive that turns a goal and directory into a structured implementation plan."
 ---
 
-# Plan
+# Plan Work
 
-Goal + directory in, structured plan artifact out. Pure planning primitive.
+Turn a bounded goal into an execution-ready plan. This skill plans; it does not implement or resume a Builder run.
 
-## Agents
+## Role And Binding
 
-| Agent | Role |
-|---|---|
-| tool-planner | Codebase analysis, structured execution plan, writes plan artifact |
+- **Role:** canonical Builder build-step producer and standalone planning primitive.
+- **Binding:** `builder.build` step `plan`.
+- **Produces:** `<slug>--plan-work.md`, `acceptance.json`, `handoff.json`, and `implementation-plan` for an active matching run.
+- **Standalone no-run behavior:** return a plan artifact without starting a Builder run, recording Builder evidence, or claiming the Builder prefix completed.
 
 ## Model Routing
 
-Planning delegation (`tool-planner`) resolves the `delegate-design` role from
-`.datum/config.json` (`npx @kontourai/datum resolve delegate-design --json`) and
-passes the resolved model explicitly — turning a goal into a plan needs design
-latitude, so it routes to the design tier. See
-`context/contracts/execution-contract.md` § Delegation: Model Routing. Fallback:
-inherit the session model when datum/config is absent, noted in the artifact.
+Delegate codebase analysis and plan writing to `tool-planner`. Resolve `delegate-design` from `.datum/config.json`; when unavailable, inherit the session model and record the fallback.
+Apply the routing and escalation contract in `context/contracts/execution-contract.md`.
 
-## Orchestrator Rule
+## Provider Boundaries
 
-You do not read source files. You delegate to tool-planner and read the artifact it produces.
+For provider-backed planning, consume context supplied by `WorkItemProvider`, `BoardProvider`, `RepositoryAdapter`, and `AssignmentProvider`. Do not assume a GitHub issue, pull request, branch convention, or provider-specific API. GitHub may be an optional adapter example only.
 
-## Shared Contracts
+## Inputs
 
-Follow:
-- `context/contracts/artifact-contract.md`
-- `context/contracts/planning-contract.md`
-- `context/contracts/sandbox-policy.md`
+- goal, working directory, and user or repository constraints
+- optional selected-work and pickup-probe records for provider-backed work
+- source revision, dependency, acceptance-criteria, sandbox, worktree, and conflict context when available
 
-This skill owns orchestration. The contracts own the required artifact shape, Definition Of Done, acceptance criteria, sandbox mode, evidence expectations, and stop-short risk rules.
+## Research And Readiness
 
-## Pre-Planning: Research
+1. Search the codebase for existing behavior and patterns. Use `search-first` when the work adds a capability that may already exist elsewhere.
+2. Before adding a type, schema, artifact, status, or algorithm, inspect existing contracts and dependency exports. Consume canonical concepts instead of creating parallel ones.
+3. For Builder-backed work, require a fresh pickup record with selected IDs, readiness, grouping decision, decisions or accepted gaps, expected modified files, conflict risks, route reason, and next action. Route a missing or contradictory record to `pickup-probe`.
+4. Carry forward revision freshness, target ref/SHA, planned base, source-scope intersections, dependency state, acceptance-criteria drift, and accepted fallback baseline. A stale or unaccepted unknown baseline stops planning.
 
-Before delegating to tool-planner, check if the goal can be solved with existing tools or libraries:
-1. Search the current codebase for similar functionality
-2. If the goal involves adding new capabilities, invoke the search-first skill
-3. Pass research findings to tool-planner as additional context
+## Plan Contract
 
-**Survey existing concepts before designing new ones.** Before the plan introduces a new
-artifact, schema, type, data shape, status, or derivation/algorithm, check what the project's
-**dependencies and contracts already define** — not just the local codebase. Inspect exported
-types, schemas, and builders from dependencies (e.g. `@kontourai/*` packages and vendored
-schemas) and the resource/data contracts under `context/contracts/`. Prefer **consuming the
-canonical concept over inventing a parallel one**: follow existing patterns, understand the
-dependency surface, and leverage existing concepts. If a planned shape resembles a dependency's
-existing concept, consume theirs and record which one. This operationalizes the consume-never-fork
-guardrail of ADR 0008 and ADR 0010 at planning time — the cheapest place to catch a fork.
+Ask `tool-planner` to produce an implementation plan containing:
 
-Skip the codebase-similarity search for pure bug-fix/refactor goals, but still apply the
-survey-existing-concepts check whenever the plan would add a new shape or algorithm.
+- goal, constraints, repository context, source revision, and accepted gaps
+- files or surfaces to change, sequence of work, dependencies, and rollback boundaries
+- `## Definition Of Done`, including stop-short risks and durable documentation target
+- stable acceptance criteria and a mapping from every task or wave to the criteria it supports
+- expected command/test evidence and structured source evidence for behavior changes
+- sandbox mode, escalation conditions, expected modified files, and conflict handling
+- execution handoff and next action
 
-## Input
+Require evidence that is proportionate to the change and named by the accepted criteria.
 
-The orchestrator (or user) provides:
-- **Goal**: what to build or change
-- **Directory**: working directory for the codebase
-- **Constraints**: from AGENTS.md, user preferences, conversation context
-- **Session file path** (optional): if part of a larger workflow, the orchestrator passes this
+## Procedure
 
-Direct `plan-work` remains a standalone planning primitive. Do not require Builder Kit pickup Probe state for ordinary direct planning prompts unless the user is trying to pick up provider-backed backlog work or continue a productized build/delivery workflow.
+1. Resolve the artifact location through the host contract when one exists. In an active Builder run, write `<slug>--plan-work.md`, update `acceptance.json` with the stable criteria and evidence plan, and update `handoff.json` with the execution target and next action.
+2. Delegate the goal, directory, constraints, research findings, pickup context, and evidence requirements to `tool-planner`.
+3. Read the returned plan. Send it back for refinement when task-to-criterion traceability, scope, stop-short risks, or evidence expectations are missing.
+4. Present the plan when a user decision is needed; otherwise hand the plan to `execute-plan` only when the caller requests execution.
 
-When `plan-work` is invoked from the Builder Kit `build` flow, from `deliver`, or from a pick-up-and-build request after `pull-work`, first read the recorded pickup Probe decisions, unresolved questions, accepted gaps, sandbox/worktree mode, expected modified files, and conflict risks from the pull-work or handoff artifact. If the handoff lacks required Probe decisions or explicitly accepted gaps, stop planning and route `decision_gap` back to `design-probe`; for pickup/planning gaps, that means returning to the pickup Probe before retrying planning.
+## Active Builder Evidence
 
-Only consume Builder Kit Probe `resolution_hints` in those Builder Kit build/deliver/pickup contexts. Direct primitive `plan-work` remains valid without Builder Kit-specific `resolution_hints`; do not require or synthesize them for ordinary planning requests.
+This skill does not create or restamp a Builder run. For an already active `builder.build` `plan` step, confirm the run and record the completed plan through the public interface:
 
-Required Builder Kit handoff fields before planning:
-
-- `probe_status` is `passed` or `accepted_gap`
-- `probe_artifact_ref` points to the pickup Probe record
-- selected item ids are present
-- grouping decision is `single-item`, `independent-items`, or `justified-bundle`
-- accepted gaps, expected modified files, conflict risks, route reason, and next action are recorded
-
-If the handoff came from stale broad continuation language after a previous merge, treat it as missing Probe evidence and route back to `design-probe` / `pickup-probe`. Do not infer permission to plan the next item from a previous continuation instruction.
-
-## Provider-Backed Baseline Preflight
-
-For provider-backed backlog work, `plan-work` consumes freshness context; it does not classify revision freshness itself. Before delegating to `tool-planner`, read the pull-work or pickup Probe artifact and carry forward:
-
-- `revision_freshness` from the upstream artifact
-- current target ref/SHA confirmed from the latest provider or repository state available to pull-work/pickup Probe
-- `planned_base_ref` and `planned_base_sha` when present
-- accepted gaps, including any accepted-gap baseline for missing historical `planned_base_sha`
-- Builder Kit Probe `resolution_hints` for `revision_freshness_not_verified` when the invocation came through Builder Kit build/deliver/pickup, especially hints for `planning.baseline.current`
-- changed scope intersections with `planning_scope_refs`, contracts, dependencies, expected files, or execution areas
-- dependency freshness and provider state, including blockers, PR links, board/project membership, and any `NOT_VERIFIED` checks
-
-If `revision_freshness` is `stale`, unresolved, missing without an accepted gap, or contradicted by dependency/provider state, stop planning. Route pickup/planning gaps back to `pickup-probe`; when `revision_freshness` is `stale`, route stale shaped work back to `idea-to-backlog` instead of handing the item to `tool-planner`.
-
-An explicit accepted-gap fallback baseline may allow planning to proceed, but it must name the fallback baseline used. Missing `planned_base_sha` is never fresh by itself. If baseline freshness is missing or `NOT_VERIFIED`, record the gap and stop planning unless it has been explicitly accepted as a fallback baseline naming the current target ref/SHA plus provider history or equivalent.
-
-For Builder Kit `resolution_hints` with `gap_id: revision_freshness_not_verified` and `claim_id: planning.baseline.current`, carry the accepted fallback baseline into the plan's baseline section exactly enough for execution and verification to recover it. If the missing baseline evidence does not include an explicit accepted fallback baseline, do not pass the item to `tool-planner`; route back to `pickup-probe` so the Probe can collect evidence or record the accepted gap.
-
-The `tool-planner` prompt context must include the latest-base confirmation and acceptance-criteria drift findings:
-
-- the current target ref/SHA that planning is based on
-- the source freshness state or accepted-gap baseline
-- each upstream AC id revalidated against drift
-- stale assumptions found during revalidation
-- any route-back decision already taken or still required
-
-## Workflow
-
-1. Create session file in `.kontourai/flow-agents/<slug>/` if one wasn't provided:
-   - Filename: `<slug>--plan-work.md`
-   - `status: planning`, `type: plan-work`
-   - Create or update `state.json` (phase `planning`) via `npm run workflow:sidecar -- init-plan`/`ensure-session` — never through a direct Write/Edit tool call (`config-protection.js` blocks that by design)
-   - use `npm run workflow:sidecar -- ensure-session --source-request ... --summary ... --criterion ...` when the repository provides it; this also writes `.kontourai/flow-agents/current.json`
-   - **Builder Kit build flow**: add `--flow-id builder.build` to the `ensure-session` call when `plan-work` is invoked from `deliver`, from the Builder Kit `build` flow, or from a pick-up-and-build request after `pull-work`. This activates the FlowDefinition-driven path so producers fire and gates enforce on builder.* claims. Do NOT add `--flow-id` for direct/ad-hoc primitive `plan-work` invocations that are not part of a builder-flow.
-2. Delegate to `tool-planner`:
-   ```
-   Goal: <goal>
-   Directory: <working directory>
-   Constraints: <constraints>
-   todo_file: <session file path>
-   Workflow artifact root: <path from npm run workflow:sidecar -- current --format path>
-   Latest-base confirmation: <current target ref/SHA, revision_freshness, planned base or accepted-gap baseline>
-   AC drift findings: <per-AC revalidation, stale assumptions, route-back decisions>
-   Evidence expectations: preserve AC ids; require command/test evidence and structured source refs for implementation behavior; require provider/closure `Acceptance Evidence` tables when comments claim behavior
-   ```
-3. tool-planner explores the codebase and writes the plan to the artifact file:
-   - `<session-basename>-plan.md`
-   - `acceptance.json` with pending criteria from Definition Of Done
-   - `handoff.json` with the execution/user-approval next steps
-   - use `npm run workflow:sidecar -- init-plan <artifact> --source-request ... --summary ... --next-action ...` when the repository provides it
-   - every acceptance criterion should have a stable id, either in Markdown or mirrored in `acceptance.json`
-   - every implementation task/wave should list which acceptance criterion ids it supports
-   - acceptance criteria for behavior changes should name expected command/test proof and expected source evidence refs or permalink upgrade expectations
-   - `acceptance.json` evidence refs must be structured objects, not legacy strings
-   - if task-to-acceptance mapping is unclear, send the planner feedback before presenting the plan as ready
-4. Read the plan artifact
-5. Update session file: paste plan summary into `## Plan`, set `status: planned`
-6. Update `state.json` (`status: planned`, phase `planning`, next action) via `npm run workflow:sidecar -- advance-state` — never through a direct Write/Edit tool call (`config-protection.js` blocks that by design)
-7. For an active Builder Flow run, record the `implementation-plan` gate claim after the plan and structured sidecars are complete:
-   ```bash
-   npm run workflow:sidecar -- record-gate-claim .kontourai/flow-agents/<slug> \
-     --expectation implementation-plan \
-     --status pass \
-     --summary "Implementation plan records files, sequencing, acceptance criteria, and required evidence." \
-     --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/<slug>/<session-basename>-plan.md","summary":"Structured implementation plan with acceptance and evidence traceability."}'
-   ```
-   Use `fail` or `not_verified` instead of `pass` when the plan contract is not satisfied. The sidecar writer synchronizes Flow; Flow, not this skill, decides whether execution is now active.
-8. Present the plan to the user
-9. If the user wants changes, re-delegate to tool-planner with feedback
-
-Never rely on conversational memory for the slug. Resolve the active artifact with `npm run workflow:sidecar -- current --format path` and pass that path to delegated agents.
-
-## Definition Of Done Contract
-
-Every plan artifact must include the `## Definition Of Done` defined in `context/contracts/planning-contract.md`, including `Stop-short risks` and `Durable docs target`. If the goal is exploratory or uncertain, the plan must still name what the user should be able to take away from the work. Do not let acceptance criteria stop at implementation tasks.
-
-Every non-trivial implementation plan must include traceability from requirements to acceptance criteria to execution tasks. At minimum, acceptance criteria need stable ids and each wave/task needs a `Supports:` line referencing those ids. Loose wave names without criterion references are not execution-ready.
-
-Every behavior-changing plan must also include evidence traceability expectations. The Definition Of Done should tell workers and verifiers which command/test evidence is expected and which source evidence refs should support claimed behavior. Source refs use the structured evidence ref object from `context/contracts/artifact-contract.md`; before publication they may be local file/line/excerpt refs, and provider-facing comments should upgrade them to immutable GitHub blob permalinks pinned to a commit SHA when available. Plans that expect provider, PR, issue, closure, or final acceptance comments must require an `Acceptance Evidence` table with columns `AC id`, `Status`, `Command/Test Evidence`, `Source Evidence / Permalinks`, and `Gaps`.
-
-Every plan artifact must also record `Sandbox mode` using `context/contracts/sandbox-policy.md`. If the needed mode is unclear, choose the smallest safe mode for the plan and list the escalation condition that would require a stronger boundary.
-
-## Structured Sidecars
-
-Follow `context/contracts/artifact-contract.md` and `context/contracts/planning-contract.md`.
-
-When `npm run workflow:sidecar --` exists, structured sidecars are not optional ceremony. Use the writer commands above, then validate the artifact directory when local validation is available. If the writer is unavailable or blocked, preserve the exact blocker in the Markdown artifact as a `NOT_VERIFIED` gap.
-
-Planning owns:
-
-- `state.json`: current phase/status and next action
-- `acceptance.json`: criteria from the Definition Of Done, initially `pending`
-- `handoff.json`: summary and execution/user-approval next steps
-
-If a target harness cannot write sidecars, record `NOT_VERIFIED` or an explicit gap in the session file instead of pretending the structured state exists.
-
-## Session File Format
-
-```markdown
-# <Goal one-liner>
-
-branch: <branch>
-worktree: <worktree>
-created: <date>
-status: planning | planned
-type: plan-work
-
-## Plan
-
-Structured plan from tool-planner (pasted from artifact).
-
-## Definition Of Done
-
-Copied from the plan artifact. This is the stop condition for delivery.
+```bash
+flow-agents workflow status --session-dir <session-dir>
+flow-agents workflow evidence --session-dir <session-dir> \
+  --expectation implementation-plan --status pass \
+  --summary "Implementation plan records scope, sequencing, acceptance criteria, and required evidence." \
+  --evidence-ref-json '{"kind":"artifact","file":"<session-dir>/<slug>--plan-work.md","summary":"Execution-ready plan with Definition Of Done and task-to-criterion mapping."}' \
+  --evidence-ref-json '{"kind":"artifact","file":"<session-dir>/acceptance.json","summary":"Stable acceptance criteria and evidence requirements."}' \
+  --evidence-ref-json '{"kind":"artifact","file":"<session-dir>/handoff.json","summary":"Execution handoff, route reason, and next action."}'
 ```
 
-`<branch>` is the branch recorded in `state.json`'s `branch` field (`ensure-session` derives `agent/<actor>/<slug>`; an explicit `--branch` flag overrides on a new session). `ensure-session` only records the name — creating and checking out the actual git branch/worktree remains this skill's responsibility.
+Use `fail` or `not_verified` when the plan is incomplete or cannot be evidenced. Do not enter `builder.build` at this step directly and do not use private writer commands.
 
-## Output
+## Baseline And Evidence Safeguards
 
-- Session file in `.kontourai/flow-agents/<slug>/` with status `planned`
-- Plan artifact: `<session-basename>-plan.md`
-- Structured sidecars: `state.json`, `acceptance.json`, and `handoff.json`
-- The plan artifact is the source of truth — tool-worker agents read it directly
-- Plan artifact follows `context/contracts/planning-contract.md`
+Follow `context/contracts/planning-contract.md`, `context/contracts/artifact-contract.md`, and `context/contracts/sandbox-policy.md`. In an active Builder run, consume the recorded pickup Probe decisions, accepted gaps, expected modified files, conflict risks, grouping decision, route reason, and `revision_freshness`; direct standalone planning does not require Builder-specific Probe state.
 
-{context?}
+For provider-backed work, require the current target ref/SHA and revalidate each upstream AC id against drift. Record stale assumptions. Missing `planned_base_sha` is never fresh. If baseline freshness is missing or `NOT_VERIFIED`, stop unless an accepted fallback baseline names the current target ref/SHA plus provider history. `stale` shaped work routes to `idea-to-backlog`; missing pickup decisions route to `pickup-probe`.
 
-## Workflow Entry
-
-Do not create or restamp a `builder.build` run from this planning primitive. A Builder
-run enters through `pull-work`, then `design-probe`; Flow advances it to `plan` only after
-the declared upstream gates pass. When `plan-work` is invoked directly outside that
-product workflow, run it as a standalone primitive without `--flow-id builder.build` and
-do not report the omitted Builder prefix as complete.
+Behavior-changing plans require structured evidence ref objects and an `Acceptance Evidence` table mapping AC ids to command/test evidence, source evidence, and gaps. A plan must not be handed to execution when Definition Of Done, Stop-short risks, Durable docs target, sandbox mode, or task-to-AC traceability is missing.

@@ -131,7 +131,7 @@
       ],
       "agent_must_do": [
         "delegate to review-work for report-only critique before verify-work",
-        "not count critique.json as verification evidence or evidence.json as critique",
+        "not count report-only critique as verification evidence",
         "route open critique findings back through execute-plan, then re-review and re-verify"
       ],
       "evidence": {
@@ -156,7 +156,7 @@
       "guidance_must_include": [
         "KIT WORKFLOW ROUTE",
         "activate `deliver`",
-        "--flow-id builder.build",
+        "public `flow-agents workflow` interface",
         "plan-work -> execute-plan -> review-work -> verify-work",
         "release-readiness and learning-review"
       ],

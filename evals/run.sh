@@ -135,6 +135,8 @@ run_static() {
   echo ""
   bash "$EVAL_DIR/static/test_workflow_skills.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/static/test_builder_skill_coherence.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/static/test_evidence_refs.sh" || result=1
   echo ""
   bash "$EVAL_DIR/static/test_decisions.sh" || result=1

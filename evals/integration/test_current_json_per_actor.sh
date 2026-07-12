@@ -371,6 +371,7 @@ set -e
 echo "--- 5. record-gate-claim resolves A's own per-actor flow/step, not B's legacy pointer (AC11) ---"
 
 AC11_ROOT="$TMPDIR_EVAL/ac11-project/.kontourai/flow-agents"
+AC11_WORK_ITEM="local:gate-actor-a"
 
 flow_agents_node "workflow-sidecar" ensure-session \
   --artifact-root "$AC11_ROOT" \
@@ -387,6 +388,16 @@ AC11_DELIVER_MD="$AC11_ROOT/gate-actor-a/gate-actor-a--deliver.md"
 flow_agents_node "workflow-sidecar" init-plan "$AC11_DELIVER_MD" \
   --source-request "Test" --summary "Testing" \
   --timestamp "2026-07-01T00:00:30Z" >"$TMPDIR_EVAL/ac11-a-initplan.out" 2>"$TMPDIR_EVAL/ac11-a-initplan.err"
+
+# A passing selected-work claim must cite pull-work's declared durable artifact. Keep it in A's
+# session so the generic producer/evidence contract is exercised without weakening AC11's
+# per-actor pointer differential.
+AC11_PULL_WORK_ARTIFACT="$AC11_ROOT/gate-actor-a/gate-actor-a--pull-work.md"
+safe_write "$AC11_PULL_WORK_ARTIFACT" <<EOF
+# Pull Work
+
+Selected Work Item: $AC11_WORK_ITEM
+EOF
 
 # Actor B runs a LATER, plain (non-FlowDefinition) ensure-session on an unrelated subject on the
 # SAME artifact root -- this overwrites the LEGACY global current.json (last-writer-wins, no
@@ -416,6 +427,7 @@ if flow_agents_node "workflow-sidecar" record-gate-claim "$AC11_GATE_ACTOR_A_DIR
   --status pass \
   --summary "Selected issue #291 for implementation." \
   --expectation selected-work \
+  --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$AC11_PULL_WORK_ARTIFACT\",\"summary\":\"Declared pull-work artifact naming bound Work Item $AC11_WORK_ITEM.\"}" \
   --timestamp "2026-07-01T00:02:00Z" \
   >"$TMPDIR_EVAL/ac11-gate-claim.out" 2>"$TMPDIR_EVAL/ac11-gate-claim.err"; then
   pass "record-gate-claim (actor A) succeeds by resolving A's OWN per-actor current pointer, not B's stale legacy pointer (AC11)"

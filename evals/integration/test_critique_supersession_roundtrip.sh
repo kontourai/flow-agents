@@ -48,15 +48,20 @@ seed() {
 # ─── (a) same-reviewer supersession: fail → pass ──────────────────────────────
 echo ""
 echo "=== (a) record-critique fail→pass (same reviewer) supersedes, history intact, reconcile 0 ==="
-A_AROOT="$TMP/a/aroot"; A_SLUG="supersede-same"; A_DIR="$A_AROOT/$A_SLUG"
+A_AROOT="$TMP/a/.kontourai/flow-agents"; A_SLUG="supersede-same"; A_DIR="$A_AROOT/$A_SLUG"
 seed "$A_AROOT" "$A_SLUG"
 flow_agents_node "$WRITER" record-evidence "$A_DIR" --verdict pass \
   --check-json '{"id":"c1","kind":"diff","status":"pass","summary":"diff check"}' \
   --timestamp "2026-07-01T00:01:00Z" >/dev/null 2>&1
 flow_agents_node "$WRITER" record-critique "$A_DIR" --id rv --reviewer alice --verdict fail \
-  --summary "found a bug" --timestamp "2026-07-01T00:02:00Z" >/dev/null 2>&1
+  --summary "found a bug" \
+  --lane-json "{\"id\":\"code\",\"status\":\"fail\",\"summary\":\"bug found\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$A_DIR/$A_SLUG--deliver.md\",\"summary\":\"Reviewed the failing delivery artifact.\"}]}" \
+  --timestamp "2026-07-01T00:02:00Z" >/dev/null 2>&1
 flow_agents_node "$WRITER" record-critique "$A_DIR" --id rv --reviewer alice --verdict pass \
-  --summary "bug fixed" --timestamp "2026-07-01T00:03:00Z" >/dev/null 2>&1
+  --summary "bug fixed" \
+  --lane-json "{\"id\":\"code\",\"status\":\"pass\",\"summary\":\"fix verified\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$A_DIR/$A_SLUG--deliver.md\",\"summary\":\"Reviewed the corrected delivery artifact.\"}]}" \
+  --artifact-ref "$A_DIR/$A_SLUG--deliver.md" \
+  --timestamp "2026-07-01T00:03:00Z" >/dev/null 2>&1
 
 node - "$A_DIR/trust.bundle" << 'NODE'
 const fs = require('fs');
@@ -80,7 +85,7 @@ if [[ $? -eq 0 ]]; then _pass "(a) trust-reconcile exits 0 (resolved session con
 # ─── (b) HEADLINE: --flow-id session converges ────────────────────────────────
 echo ""
 echo "=== (b) HEADLINE --flow-id builder.build/verify: mixed evidence + critique → reconcile 0 ==="
-B_AROOT="$TMP/b/aroot"; B_SLUG="flowid-converge"; B_DIR="$B_AROOT/$B_SLUG"
+B_AROOT="$TMP/b/.kontourai/flow-agents"; B_SLUG="flowid-converge"; B_DIR="$B_AROOT/$B_SLUG"
 seed "$B_AROOT" "$B_SLUG" --flow-id builder.build
 flow_agents_node "$WRITER" advance-state "$B_DIR" --status in_progress --phase verification \
   --summary "Testing at verify." --next-action "Record evidence." \
@@ -91,7 +96,10 @@ flow_agents_node "$WRITER" record-evidence "$B_DIR" --verdict pass \
   --check-json '{"id":"k-ext","kind":"external","status":"pass","summary":"attested"}' \
   --timestamp "2026-07-01T00:01:00Z" >/dev/null 2>&1
 flow_agents_node "$WRITER" record-critique "$B_DIR" --id code-review --reviewer alice --verdict pass \
-  --summary "looks good" --timestamp "2026-07-01T00:02:00Z" >/dev/null 2>&1
+  --summary "looks good" \
+  --lane-json "{\"id\":\"code\",\"status\":\"pass\",\"summary\":\"review passed\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$B_DIR/$B_SLUG--deliver.md\",\"summary\":\"Reviewed the delivery artifact.\"}]}" \
+  --artifact-ref "$B_DIR/$B_SLUG--deliver.md" \
+  --timestamp "2026-07-01T00:02:00Z" >/dev/null 2>&1
 
 node - "$B_DIR/trust.bundle" << 'NODE'
 const fs = require('fs');
@@ -132,15 +140,20 @@ if [[ $? -eq 0 ]]; then _pass "(c) critique history survives a later record-evid
 # ─── (d) ANTI-GAMING: cross-reviewer cannot supersede a reviewer fail ─────────
 echo ""
 echo "=== (d) ANTI-GAMING: a different reviewer cannot supersede a reviewer's fail ==="
-D_AROOT="$TMP/d/aroot"; D_SLUG="supersede-cross"; D_DIR="$D_AROOT/$D_SLUG"
+D_AROOT="$TMP/d/.kontourai/flow-agents"; D_SLUG="supersede-cross"; D_DIR="$D_AROOT/$D_SLUG"
 seed "$D_AROOT" "$D_SLUG"
 flow_agents_node "$WRITER" record-evidence "$D_DIR" --verdict pass \
   --check-json '{"id":"c1","kind":"diff","status":"pass","summary":"diff check"}' \
   --timestamp "2026-07-01T00:01:00Z" >/dev/null 2>&1
 flow_agents_node "$WRITER" record-critique "$D_DIR" --id rv --reviewer reviewer-bob --verdict fail \
-  --summary "reviewer found a real bug" --timestamp "2026-07-01T00:02:00Z" >/dev/null 2>&1
+  --summary "reviewer found a real bug" \
+  --lane-json "{\"id\":\"code\",\"status\":\"fail\",\"summary\":\"bug found\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$D_DIR/$D_SLUG--deliver.md\",\"summary\":\"Reviewed the failing delivery artifact.\"}]}" \
+  --timestamp "2026-07-01T00:02:00Z" >/dev/null 2>&1
 flow_agents_node "$WRITER" record-critique "$D_DIR" --id rv --reviewer worker-mallory --verdict pass \
-  --summary "worker claims fixed" --timestamp "2026-07-01T00:03:00Z" >/dev/null 2>&1
+  --summary "worker claims fixed" \
+  --lane-json "{\"id\":\"code\",\"status\":\"pass\",\"summary\":\"worker claims review passed\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$D_DIR/$D_SLUG--deliver.md\",\"summary\":\"Reviewed the claimed correction.\"}]}" \
+  --artifact-ref "$D_DIR/$D_SLUG--deliver.md" \
+  --timestamp "2026-07-01T00:03:00Z" >/dev/null 2>&1
 node - "$D_DIR/trust.bundle" << 'NODE'
 const fs = require('fs');
 const b = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));

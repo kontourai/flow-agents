@@ -28,26 +28,29 @@ expectations, and Builder Kit's structured action map.
 
 ## Entry And Synchronization
 
-A Builder session is created at the Flow Definition's entry step by the workflow
-sidecar. If automatic startup reports a failure, retry the canonical operation with:
+A Builder session is created at the Flow Definition's entry step by the public
+workflow command. Start the selected Work Item with its stable, human-readable
+provider reference:
 
 ```bash
-flow-agents builder-run start --session-dir .kontourai/flow-agents/<slug>
+flow-agents workflow start --flow builder.build --work-item <provider-ref> \
+  --assignment-provider <configured-kind> \
+  [--effective-state-json <provider-status.json>]
 ```
 
-`ensure-session --flow-id builder.build` starts or loads this canonical run before
-returning. When the local assignment provider durably assigns the exact Work Item
-to the resolved workflow actor, `ensure-session` rereads that record and produces
-the declared `builder.pull-work.selected` claim through the normal Surface trust
-bundle path. Flow evaluates that subject-bound evidence and advances to
-`design-probe`; Flow Agents does not write a transition or gate outcome directly.
-Skipped ownership, unresolved actors, precomputed state, and non-local providers do
-not produce selection evidence and remain at `pull-work`.
+The configured provider resolves and durably assigns the exact Work Item to the
+workflow actor. Non-local adapters pass their standard status result to start;
+Flow Agents retains it as provenance and creates a local runtime lease mirror.
+The start path then produces the declared
+`builder.pull-work.selected` claim through the normal Surface trust bundle path.
+Flow evaluates that subject-bound evidence and advances to `design-probe`; Flow
+Agents does not write a transition or gate outcome directly. Skipped ownership,
+unresolved actors, precomputed state, and unavailable provider resolution do not
+produce selection evidence and remain at `pull-work`.
 
-The command remains the explicit recovery path if Flow startup fails after sidecar
-creation; the failure is returned to the caller and no substitute run state is
-invented. Runtime hooks keep projected actions advisory while the agent performs
-their declared skills and operations.
+If start fails, the failure is returned to the caller and no substitute run state
+is invented. Runtime hooks keep projected actions advisory while the agent
+performs their declared skills and operations.
 
 Sidecars written by 3.4.2 may still contain `next_action.enforcement`. The 1.0
 schema accepts that deprecated field for artifact compatibility, but current
@@ -58,38 +61,36 @@ Item reference as the Flow run subject. It is idempotent for an existing canonic
 run. A direct primitive session without a Builder Flow stamp remains independent and
 does not create a Flow run.
 
-After a gate producer writes `trust.bundle`, the sidecar writer synchronizes an
-existing run automatically. Interrupted clients can replay the projected command:
+After a gate producer writes `trust.bundle`, the public evidence path
+synchronizes the existing run while holding the assignment subject lock.
+Synchronization is digest-idempotent: the same trust bundle is not attached
+twice.
+
+## Public Status And Recovery
+
+Inspect an interrupted canonical Builder session with:
 
 ```bash
-flow-agents builder-run sync --session-dir .kontourai/flow-agents/<slug>
+flow-agents workflow status --session-dir .kontourai/flow-agents/<slug> --json
 ```
 
-Synchronization is digest-idempotent. The same trust bundle is not attached twice.
-Inspection loads the run without evaluating it, so invalid evidence is rejected
-before Flow mutation.
+`workflow status` is read-only. It loads the canonical run and reports its run
+identity, definition, status, current step, projected `next_action`, and bound
+session directory. Callers cannot select a different run or force a step.
 
-## Recovery
-
-Recover an interrupted canonical Builder session with:
+For an active interrupted run, continue from the reported `next_action` and use
+its exact idempotent command to recheck the canonical state. The current step's
+producer records gate evidence through `flow-agents workflow evidence`; that
+public operation validates assignment and observations before attaching the new
+trust-bundle digest and evaluating the gate. For a paused run, the current
+assignment actor resumes it with an explicit reason:
 
 ```bash
-flow-agents builder-run recover --session-dir .kontourai/flow-agents/<slug>
+flow-agents workflow resume --session-dir .kontourai/flow-agents/<slug> --reason <text>
 ```
 
-`recover` derives the Flow run id from the session directory slug; callers cannot
-select a run id or step. It requires exactly one non-empty
-`state.work_item_refs` entry, loads the existing run through Flow's canonical load
-API, and verifies that the ref matches persisted `state.subject` and, when present,
-`state.params.subject`. A missing, foreign, or corrupt run fails closed and is not
-created or repaired.
-
-Recovery is load/validate/project only. It computes the complete projection before
-updating `state.json`, the matching global `current.json`, and matching per-actor
-current pointers. It does not inspect or attach `trust.bundle`, evaluate gates, or
-write any file in `.kontourai/flow/runs/<slug>/`; the complete Flow run tree remains
-byte-identical. Use `sync`, not `recover`, to attach recorded evidence and evaluate
-the current gate.
+Do not use a private synchronization or recovery command, manually project run
+state, or create a replacement run for a missing, foreign, or corrupt binding.
 
 ## Trust Binding
 
@@ -99,7 +100,7 @@ claims are ignored for that gate. A relevant claim with a missing or different
 subject reference is rejected; Flow is not mutated.
 
 A failed gate claim may include a Flow classifier through
-`record-gate-claim --status fail --route-reason <reason>`. Flow validates the reason
+`flow-agents workflow evidence --status fail --route-reason <reason>`. Flow validates the reason
 against the gate's `on_route_back` map and owns both the destination and attempt
 budget. Flow Agents only projects the resulting attempt and maximum into `state.json`.
 
@@ -112,7 +113,7 @@ While a run is active, `state.json` contains:
 - `next_action.skills`: ordered Builder skills for the current step.
 - `next_action.operations`: ordered non-skill product operations when present.
 - `next_action.summary`: required gate claims derived from the Flow Definition.
-- `next_action.command`: the exact idempotent synchronization command.
+- `next_action.command`: the exact idempotent public status command for reorientation.
 
 Workflow steering surfaces these fields on session start and prompt submission. The
 Stop hook treats an unfinished canonical Flow run as active even during pickup or

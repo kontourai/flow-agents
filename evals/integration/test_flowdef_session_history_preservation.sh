@@ -2,7 +2,7 @@
 # test_flowdef_session_history_preservation.sh — Integration eval for ADR 0016 Step 0.
 #
 # Proves:
-#   1. A FlowDefinition-driven session (ensure-session --flow-id builder.build, step=verify)
+#   1. A noncanonical FlowDefinition-projected session (advance-state, step=verify)
 #      records a check via the declared builder.verify.tests path, then record-critique and
 #      record-learning PRESERVE the prior declared check + critique claims in the rebuilt
 #      bundle (no history loss).
@@ -34,18 +34,18 @@ WRITER="workflow-sidecar"
 echo ""
 echo "=== 1. FlowDefinition-driven session: record-critique/record-learning preserve declared claims ==="
 
-FLOW_AROOT="$TMP/flow-aroot"
+FLOW_AROOT="$TMP/flow-project/.kontourai/flow-agents"
 SLUG="history-flow-test"
 SESSION_DIR="$FLOW_AROOT/$SLUG"
 mkdir -p "$FLOW_AROOT"
 
-# Start at the declared first step, then establish the verify-state fixture.
+# Create a plain sidecar session, then project it onto the verify step. This test covers the
+# generic ADR 0016 sidecar path; canonical Builder runs are covered by the public workflow tests.
 flow_agents_node "$WRITER" ensure-session \
   --artifact-root "$FLOW_AROOT" \
   --task-slug "$SLUG" \
   --title "History preservation test" \
   --summary "Test that declared builder.* claims survive round-trips." \
-  --flow-id builder.build \
   --timestamp "2026-06-01T00:00:00Z" >/dev/null 2>&1
 
 flow_agents_node "$WRITER" init-plan "$SESSION_DIR/$SLUG--deliver.md" \
@@ -80,6 +80,8 @@ flow_agents_node "$WRITER" record-critique "$SESSION_DIR" \
   --id "code-review" \
   --verdict pass \
   --summary "Code review passed." \
+  --lane-json "{\"id\":\"code\",\"status\":\"pass\",\"summary\":\"Code review passed.\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$SESSION_DIR/$SLUG--deliver.md\",\"summary\":\"Reviewed the delivery artifact.\"}]}" \
+  --artifact-ref "$SESSION_DIR/$SLUG--deliver.md" \
   --timestamp "2026-06-01T00:02:00Z" >/dev/null 2>&1
 
 # Assert builder.verify.tests survived the record-critique round-trip
@@ -93,24 +95,21 @@ console.log('after record-critique: builder.verify.tests status=' + declared.sta
   && _pass "builder.verify.tests declared claim preserved after record-critique (no history loss)" \
   || _fail "builder.verify.tests declared claim LOST after record-critique (history loss)"
 
-# Also verify the critique claim itself is present.
-# In a flow-driven session (verify step), critique maps to the declared builder.verify.policy-compliance
-# (the critique heuristic matches: subjectType=artifact + claimType contains "compliance").
-# workflow.critique.review is emitted in no-flow sessions only (P-d: shadow retired).
+# Also verify the critique claim itself is present and remains distinct from optional policy
+# evidence. The Builder runtime consumes metadata.origin=critique directly; a code review must
+# not be relabeled as builder.verify.policy-compliance merely because that expectation is open.
 node -e "
 const fs = require('fs');
 const bundle = JSON.parse(fs.readFileSync('$SESSION_DIR/trust.bundle', 'utf8'));
 const claims = bundle.claims || [];
-// Declared critique claim for verify-step: builder.verify.policy-compliance
-const crit = claims.find(c => c.claimType === 'builder.verify.policy-compliance');
-if (!crit) throw new Error('MISSING builder.verify.policy-compliance critique claim after record-critique; claims: ' + claims.map(c=>c.claimType).join(', '));
-// Must NOT have workflow.critique.review in a flow-driven session (no shadow, P-d)
-const legacy = claims.find(c => c.claimType === 'workflow.critique.review');
-if (legacy) throw new Error('UNEXPECTED workflow.critique.review in flow-driven session (P-d retired shadow); id=' + legacy.id);
-console.log('declared critique claim: claimType=' + crit.claimType + ' value=' + crit.value);
+const crit = claims.find(c => c.claimType === 'workflow.critique.review' && c.metadata?.origin === 'critique');
+if (!crit) throw new Error('MISSING first-class critique claim after record-critique; claims: ' + claims.map(c=>c.claimType).join(', '));
+const mislabeled = claims.find(c => c.claimType === 'builder.verify.policy-compliance' && c.metadata?.origin === 'critique');
+if (mislabeled) throw new Error('critique was mislabeled as optional policy-compliance evidence: ' + mislabeled.id);
+console.log('critique claim remains distinct: claimType=' + crit.claimType + ' value=' + crit.value);
 " 2>&1 \
-  && _pass "builder.verify.policy-compliance declared critique claim present (no workflow.critique.review shadow, P-d)" \
-  || _fail "declared critique claim MISSING or unexpected workflow.critique.review found after record-critique"
+  && _pass "first-class critique preserved without policy-compliance mislabeling" \
+  || _fail "critique claim missing or mislabeled after record-critique"
 
 # Now do record-learning (second round-trip)
 flow_agents_node "$WRITER" record-learning "$SESSION_DIR" \
@@ -140,7 +139,7 @@ console.log('after record-learning: builder.verify.tests status=' + declared.sta
 echo ""
 echo "=== 2. workflow.* session (no --flow-id): round-trip unchanged ==="
 
-NOFLOW_AROOT="$TMP/noflow-aroot"
+NOFLOW_AROOT="$TMP/noflow-project/.kontourai/flow-agents"
 NOFLOW_SLUG="history-noflow-test"
 NOFLOW_DIR="$NOFLOW_AROOT/$NOFLOW_SLUG"
 mkdir -p "$NOFLOW_AROOT"
@@ -167,6 +166,8 @@ flow_agents_node "$WRITER" record-critique "$NOFLOW_DIR" \
   --id "noflow-review" \
   --verdict pass \
   --summary "Review passed." \
+  --lane-json "{\"id\":\"code\",\"status\":\"pass\",\"summary\":\"Review passed.\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$NOFLOW_DIR/$NOFLOW_SLUG--deliver.md\",\"summary\":\"Reviewed the delivery artifact.\"}]}" \
+  --artifact-ref "$NOFLOW_DIR/$NOFLOW_SLUG--deliver.md" \
   --timestamp "2026-06-01T10:02:00Z" >/dev/null 2>&1
 
 # Assert only workflow.* claims survived (no builder.* contamination)
@@ -189,8 +190,8 @@ console.log('after record-critique: workflow.check.test + workflow.critique.revi
 echo ""
 echo "=== 3. evidenceClean/critiqueClean correct for builder.* bundle ==="
 
-# Create a fresh builder.build session at verify step for dogfood-pass test
-DOGFOOD_AROOT="$TMP/dogfood-aroot"
+# Create a fresh noncanonical FlowDefinition-projected session at verify for dogfood-pass.
+DOGFOOD_AROOT="$TMP/dogfood-project/.kontourai/flow-agents"
 DOGFOOD_SLUG="dogfood-clean-test"
 DOGFOOD_DIR="$DOGFOOD_AROOT/$DOGFOOD_SLUG"
 mkdir -p "$DOGFOOD_AROOT"
@@ -200,7 +201,6 @@ flow_agents_node "$WRITER" ensure-session \
   --task-slug "$DOGFOOD_SLUG" \
   --title "Dogfood clean test" \
   --summary "Test evidenceClean/critiqueClean on builder.build session." \
-  --flow-id builder.build \
   --timestamp "2026-06-01T20:00:00Z" >/dev/null 2>&1
 
 flow_agents_node "$WRITER" init-plan "$DOGFOOD_DIR/$DOGFOOD_SLUG--deliver.md" \
@@ -224,6 +224,8 @@ flow_agents_node "$WRITER" record-critique "$DOGFOOD_DIR" \
   --id "ev-critique" \
   --verdict pass \
   --summary "Critique passed." \
+  --lane-json "{\"id\":\"code\",\"status\":\"pass\",\"summary\":\"Critique passed.\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$DOGFOOD_DIR/$DOGFOOD_SLUG--deliver.md\",\"summary\":\"Reviewed the delivery artifact.\"}]}" \
+  --artifact-ref "$DOGFOOD_DIR/$DOGFOOD_SLUG--deliver.md" \
   --timestamp "2026-06-01T20:02:00Z" >/dev/null 2>&1
 
 # dogfood-pass --verdict pass should succeed: evidenceClean=true (builder.verify.tests passes)

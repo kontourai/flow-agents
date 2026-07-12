@@ -3,7 +3,7 @@
   "id": "builder",
   "name": "Builder Kit",
   "product_name": "Builder Kit",
-  "description": "A Flow Kit for shaping work, breaking it down, building changes, verifying evidence, preparing pull requests, checking merge readiness, and recording learning.",
+  "description": "A Flow Kit for shaping provider-backed work, breaking it down, building changes, verifying evidence, preparing provider change records, checking merge readiness, and recording learning.",
   "flows": [
     {
       "id": "builder.shape",
@@ -13,7 +13,7 @@
     {
       "id": "builder.build",
       "path": "flows/build.flow.json",
-      "description": "Pull ready work through design probing, planning, implementation, verification, pull request readiness, merge readiness, and learning."
+      "description": "Pull ready provider-backed work through design probing, planning, implementation, verification, provider change readiness, merge readiness, and learning."
     },
     {
       "id": "builder.publish-learn",
@@ -48,53 +48,88 @@
     {
       "flow_id": "builder.build",
       "step_id": "pull-work",
-      "skills": ["pull-work"]
+      "skills": ["pull-work"],
+      "expectation_ids": ["selected-work"]
     },
     {
       "flow_id": "builder.build",
       "step_id": "design-probe",
-      "skills": ["pickup-probe"]
+      "skills": ["pickup-probe"],
+      "expectation_ids": ["pickup-probe-readiness", "probe-decisions-or-accepted-gaps"]
     },
     {
       "flow_id": "builder.build",
       "step_id": "plan",
-      "skills": ["plan-work"]
+      "skills": ["plan-work"],
+      "expectation_ids": ["implementation-plan"]
     },
     {
       "flow_id": "builder.build",
       "step_id": "execute",
-      "skills": ["execute-plan"]
+      "skills": ["execute-plan"],
+      "expectation_ids": ["implementation-scope"]
     },
     {
       "flow_id": "builder.build",
       "step_id": "verify",
-      "skills": ["review-work", "verify-work"]
+      "skills": ["review-work", "verify-work"],
+      "expectation_ids": ["clean-critique", "acceptance-criteria", "tests-evidence", "policy-compliance"]
     },
     {
       "flow_id": "builder.build",
       "step_id": "merge-ready",
-      "skills": ["evidence-gate"]
+      "skills": ["evidence-gate"],
+      "expectation_ids": ["merge-readiness"]
     },
     {
       "flow_id": "builder.build",
       "step_id": "pr-open",
       "skills": [],
-      "operations": ["publish-change"]
+      "operations": ["publish-change"],
+      "expectation_ids": ["pull-request-opened"],
+      "artifacts": ["release.json"]
     },
     {
       "flow_id": "builder.build",
       "step_id": "merge-ready-ci",
-      "skills": ["release-readiness"]
+      "skills": ["release-readiness"],
+      "expectation_ids": ["ci-merge-readiness"]
     },
     {
       "flow_id": "builder.build",
       "step_id": "learn",
-      "skills": ["learning-review"]
+      "skills": ["learning-review"],
+      "expectation_ids": ["decision-evidence", "learning-evidence"]
     },
     {
       "flow_id": "builder.build",
       "step_id": "done",
-      "skills": []
+      "skills": [],
+      "expectation_ids": []
+    },
+    {
+      "flow_id": "builder.shape",
+      "step_id": "shape",
+      "skills": ["idea-to-backlog"],
+      "expectation_ids": ["shaped-problem", "shaped-outcome", "shaped-constraints", "shaped-non-goals", "shaped-success", "shaped-risk", "open-decisions"]
+    },
+    {
+      "flow_id": "builder.shape",
+      "step_id": "breakdown",
+      "skills": ["idea-to-backlog"],
+      "expectation_ids": ["slices-defined"]
+    },
+    {
+      "flow_id": "builder.shape",
+      "step_id": "file-issues",
+      "skills": ["idea-to-backlog"],
+      "expectation_ids": ["work-items-filed"]
+    },
+    {
+      "flow_id": "builder.shape",
+      "step_id": "shape-done",
+      "skills": [],
+      "expectation_ids": []
     }
   ],
   "hook_influence_expectations": [
@@ -124,7 +159,7 @@
       ],
       "must_include_actions": [
         "review-work for report-only critique before verify-work",
-        "not count critique.json as verification evidence"
+        "not count report-only critique as verification evidence"
       ]
     },
     {
@@ -135,7 +170,7 @@
       "must_include_guidance": [
         "KIT WORKFLOW ROUTE",
         "activate `deliver`",
-        "--flow-id builder.build",
+        "public `flow-agents workflow` interface",
         "plan-work -> execute-plan -> review-work -> verify-work",
         "release-readiness and learning-review"
       ],
@@ -146,6 +181,25 @@
         "publish, release readiness, and learning feedback"
       ]
     }
+  ],
+  "skill_roles": [
+    { "skill_id": "builder.builder-shape", "role": "entrypoint", "flow_id": "builder.shape", "step_ids": [], "artifacts": [], "expectation_ids": [] },
+    { "skill_id": "builder.deliver", "role": "entrypoint", "flow_id": "builder.build", "step_ids": [], "artifacts": [], "expectation_ids": [] },
+    { "skill_id": "builder.fix-bug", "role": "profile", "flow_id": "builder.build", "step_ids": [], "artifacts": [], "expectation_ids": [] },
+    { "skill_id": "builder.tdd-workflow", "role": "profile", "flow_id": "builder.build", "step_ids": [], "artifacts": [], "expectation_ids": [] },
+    { "skill_id": "builder.idea-to-backlog", "role": "step", "flow_id": "builder.shape", "step_ids": ["shape", "breakdown", "file-issues"], "artifacts": ["<slug>--idea-to-backlog.md", "trust.bundle#builder.shape"], "expectation_ids": ["shaped-problem", "shaped-outcome", "shaped-constraints", "shaped-non-goals", "shaped-success", "shaped-risk", "open-decisions", "slices-defined", "work-items-filed"] },
+    { "skill_id": "builder.pull-work", "role": "step", "flow_id": "builder.build", "step_ids": ["pull-work"], "artifacts": ["<slug>--pull-work.md", "trust.bundle#selected-work"], "expectation_ids": ["selected-work"] },
+    { "skill_id": "builder.pickup-probe", "role": "step", "flow_id": "builder.build", "step_ids": ["design-probe"], "artifacts": ["<slug>--pull-work.md", "trust.bundle#pickup-probe"], "expectation_ids": ["pickup-probe-readiness", "probe-decisions-or-accepted-gaps"] },
+    { "skill_id": "builder.plan-work", "role": "step", "flow_id": "builder.build", "step_ids": ["plan"], "artifacts": ["<slug>--plan-work.md", "acceptance.json", "handoff.json", "trust.bundle#implementation-plan"], "expectation_ids": ["implementation-plan"] },
+    { "skill_id": "builder.execute-plan", "role": "step", "flow_id": "builder.build", "step_ids": ["execute"], "artifacts": ["<slug>--deliver.md", "state.json", "trust.bundle#implementation-scope"], "expectation_ids": ["implementation-scope"] },
+    { "skill_id": "builder.review-work", "role": "step", "flow_id": "builder.build", "step_ids": ["verify"], "artifacts": ["trust.bundle#critique"], "expectation_ids": ["clean-critique"] },
+    { "skill_id": "builder.verify-work", "role": "step", "flow_id": "builder.build", "step_ids": ["verify"], "artifacts": ["trust.bundle#acceptance-criteria", "trust.bundle#tests-evidence", "trust.bundle#policy-compliance"], "expectation_ids": ["acceptance-criteria", "tests-evidence", "policy-compliance"] },
+    { "skill_id": "builder.evidence-gate", "role": "step", "flow_id": "builder.build", "step_ids": ["merge-ready"], "artifacts": ["<slug>--evidence-gate.md", "trust.bundle#merge-readiness"], "expectation_ids": ["merge-readiness"] },
+    { "skill_id": "builder.release-readiness", "role": "step", "flow_id": "builder.publish-learn", "step_ids": ["merge-ready-ci"], "artifacts": ["release.json", "trust.bundle#ci-merge-readiness"], "expectation_ids": ["ci-merge-readiness"] },
+    { "skill_id": "builder.learning-review", "role": "step", "flow_id": "builder.publish-learn", "step_ids": ["learn"], "artifacts": ["learning.json", "trust.bundle#decision-evidence", "trust.bundle#learning-evidence"], "expectation_ids": ["decision-evidence", "learning-evidence"] },
+    { "skill_id": "builder.design-probe", "role": "shared-primitive", "step_ids": [], "artifacts": ["ephemeral decision record"], "expectation_ids": [] },
+    { "skill_id": "builder.continue-work", "role": "extension", "step_ids": [], "artifacts": [], "expectation_ids": [] },
+    { "skill_id": "builder.gate-review", "role": "extension", "step_ids": [], "artifacts": ["<slug>--gate-review.md", "gate-review.inquiries.json"], "expectation_ids": [] }
   ],
   "skills": [
     {
@@ -191,7 +245,7 @@
     {
       "id": "builder.idea-to-backlog",
       "path": "skills/idea-to-backlog/SKILL.md",
-      "description": "Turn raw ideas into shaped, prioritized, executable GitHub issue backlog."
+      "description": "Turn raw ideas into shaped, prioritized, executable provider-backed work items; GitHub is an optional adapter."
     },
     {
       "id": "builder.learning-review",
@@ -211,7 +265,7 @@
     {
       "id": "builder.pull-work",
       "path": "skills/pull-work/SKILL.md",
-      "description": "Select ready GitHub issues from the executable backlog for implementation."
+      "description": "Select ready provider-backed work items from the executable backlog for implementation; GitHub is an optional adapter."
     },
     {
       "id": "builder.release-readiness",

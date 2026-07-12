@@ -108,7 +108,7 @@ flowchart TB
 
 **Current state:** The durable handoff surface is a pair of human-readable Markdown artifacts and machine-readable JSON sidecars under `.kontourai/flow-agents/<slug>/`. Verification, critique, release, and learning records are explicit artifacts rather than hidden chat memory.
 
-**Programmatic API (for native hosts):** The canonical sidecar writer/validator is importable as a library, not only via the `flow-agents-workflow-sidecar` CLI. A host that records workflow evidence natively should import the package root rather than reimplement validated read / merge / write:
+**Programmatic API (for native hosts):** The canonical Builder runtime and sidecar writer/validator remain importable from the package root so a native host does not reimplement validated workflow mutation. Agent-facing Kit guidance uses the public `flow-agents workflow` command so gate ownership, assignment checks, command observation, and projection happen through one portable interface:
 
 ```js
 import {

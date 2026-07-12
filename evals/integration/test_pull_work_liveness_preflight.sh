@@ -126,7 +126,7 @@ fi
 # duplicate validation logic was introduced for resolve-slug.
 if flow_agents_node "$WRITER" resolve-slug 'owner/repo' >"$TMPDIR_EVAL/a6.out" 2>"$TMPDIR_EVAL/a6.err"; then
   _fail "resolve-slug should reject a ref with no # separator"
-elif rg -q -- 'owner/repo#id format' "$TMPDIR_EVAL/a6.err"; then
+elif rg -q -- 'provider-neutral provider:id ref or owner/repo#numeric-id' "$TMPDIR_EVAL/a6.err"; then
   _pass "resolve-slug rejects a ref with no # separator using workItemSlug()'s existing message (AC7)"
 else
   _fail "resolve-slug malformed-ref rejection message mismatch: $(cat "$TMPDIR_EVAL/a6.out" "$TMPDIR_EVAL/a6.err")"
@@ -323,71 +323,27 @@ else
   _fail "liveness status unexpectedly did not acquire the lock — F1's bypass may have leaked beyond the whoami action: out=$(cat "$TMPDIR_EVAL/e3.out") err=$(cat "$TMPDIR_EVAL/e3.err")"
 fi
 
-# ─── D. Static skill-text assertions (AC6, AC8) ─────────────────────────────
-echo "--- D. Static skill-text assertions ---"
+# ─── D. Provider-neutral skill contract assertions ─────────────────────────
+echo "--- D. Provider-neutral skill contract assertions ---"
 
-require_text "$PULL" '### 1a\. Liveness Selection Preflight' "pull-work documents the Liveness Selection Preflight subsection (AC1, AC8)"
-require_text "$PULL" 'liveness whoami --json' "pull-work references liveness whoami --json by exact command name (AC1, AC8)"
-require_text "$PULL" 'liveness status --json' "pull-work references liveness status --json by exact command name (AC1, AC8)"
-require_text "$PULL" 'resolve-slug <owner>/<repo>#<issue-number>' "pull-work references resolve-slug by exact command name (AC1, AC4, AC8)"
-require_text "$PULL" 'liveness claim <subjectId>' "pull-work references liveness claim <subjectId> by exact command name (AC4, AC8)"
-require_text "$PULL" 'reading each row.s raw .status. field \(never .label.\)' "pull-work instructs consuming raw status, never label (AC1, AC8)"
-require_text "$PULL" 'a .verified. row for an actor other than self.*.held.' "pull-work documents held classification (AC1, AC2, AC8)"
-require_text "$PULL" 'excluded from the ready set by default' "pull-work excludes held candidates by default (AC2, AC8)"
-require_text "$PULL" 'effective_state: .reclaimable.' "pull-work documents reclaimable classification via the assignment-provider join (AC1, AC3, AC8, #290)"
-require_text "$PULL" 'requires an explicit recorded opt-in' "pull-work requires an explicit recorded opt-in for reclaimable selection (AC3, AC8)"
-require_text "$PULL" 'never a silent normal pick' "pull-work states reclaimable is never a silent normal pick (AC3, AC8)"
-require_text "$PULL" 'a .verified. row for the resolved self actor.*.mine.' "pull-work documents mine classification (AC1, AC5, AC8)"
-require_text "$PULL" 'do not re-offer as new, do not exclude as held-by-other' "pull-work folds own-actor mine into WIP logic, not re-offered or re-excluded (AC5, AC8)"
-require_text "$PULL" 'An explicit user instruction to proceed despite a .held. or .reclaimable. classification' "pull-work documents the --force/explicit-instruction override (AC2, AC3, AC8)"
-require_text "$PULL" '.--force.' "pull-work names --force as the override mechanism (AC2, AC8)"
-require_text "$PULL" 'override and its stated reason must be recorded in the artifact' "pull-work requires the override + reason to be recorded (AC2, AC8)"
-require_text "$PULL" 'do not mutate GitHub Projects, provider fields, or cross-repo provider state from this skill' "pull-work's existing no-provider-mutation sentence is present verbatim and unchanged (AC6, AC8)"
-require_text "$PULL" 'read/write the local runtime liveness stream, never GitHub issue/label/assignee state' "pull-work states the liveness claim is local runtime state, not a provider mutation (AC6, AC8)"
-require_text "$PULL" 'this is not\s*$|this is not a provider mutation' "pull-work explicitly states the liveness claim is not a provider mutation (AC6, AC8)"
-require_text "$PULL" '#290' "pull-work names #290 as the deferred assignment-provider seam (AC6, AC8)"
-require_text "$PULL" 'liveness_preflight' "pull-work artifact contract records liveness_preflight (AC1, AC8)"
-require_text "$PULL" 'liveness_claim' "pull-work artifact contract records liveness_claim (AC4, AC8)"
-require_text "$PICKUP_PROBE" 'flags the selected item .reclaimable., treat the recorded opt-in as a decision to re-confirm' "pickup-probe re-confirms (not silently accepts) a reclaimable opt-in on drift (AC3, AC8)"
-
-# ─── F2-F6 (fix-plan iteration 1) static assertions ─────────────────────────
-require_text "$PULL" 'group all rows for that .subjectId. by subject' "pull-work classifies per-subject (grouped rows), not per-row (F2, AC1, AC8)"
-require_text "$PULL" 'classify in this precedence order' "pull-work states the classification is an ordered precedence rule (F2, AC8)"
-# F2's original numbered precedence list was liveness-only (#166); #290 (Wave 3) replaced it with
-# the full ADR 0021 §1 assignment ⋈ liveness join, computed via `assignment-provider status`'s
-# `effective_state`/`reason` fields. These assertions are updated to match the new five-row list
-# (mine/held/reclaimable/human-held/free) rather than the old four-row liveness-only list.
-require_text "$PULL" '^1\. .effective_state: .held.. with .reason: .self_is_holder..' "pull-work's precedence rule step 1 (mine, via self_is_holder) is numbered verbatim (F2, #290, AC8)"
-require_text "$PULL" '^2\. else .effective_state: .held..' "pull-work's precedence rule step 2 (held, excluded) is numbered verbatim (F2, #290, AC8)"
-require_text "$PULL" '^3\. else .effective_state: .reclaimable..' "pull-work's precedence rule step 3 (reclaimable) is numbered verbatim (F2, #290, AC8)"
-require_text "$PULL" '^4\. else .effective_state: .human-held..' "pull-work's precedence rule step 4 (human-held) is numbered verbatim (F2, #290, AC11, AC8)"
-require_text "$PULL" '^5\. else .effective_state: .free..' "pull-work's precedence rule step 5 (free) is numbered verbatim (F2, #290, AC8)"
-require_text "$PULL" 'double-hold' "pull-work names the own-actor + other-actor co-existing row combination a double-hold (F2, AC8)"
-require_text "$PULL" 'explicit conflict warning \(per ADR 0012 §4 detection' "pull-work cites ADR 0012 §4 detection for the double-hold conflict warning (F2, AC8)"
-require_text "$PULL" 'never silently resolve it to .mine.' "pull-work states a double-hold is never silently resolved to mine (F2, AC8)"
-
-require_text "$PULL" 'pin it for reuse' "pull-work pins self_actor for reuse across the pass (F3, AC8)"
-require_text "$PULL" 'Capture the returned .actor. value as .self_actor.' "pull-work captures self_actor exactly once per pass from whoami (F3, AC8)"
-require_text "$PULL" 'liveness claim <subjectId> --actor <self_actor>' "pull-work's claim-on-selection command passes --actor <self_actor> explicitly (F3, AC4, AC8)"
-require_text "$PULL" 'always pass .--actor <self_actor>. explicitly on every claim in this pass' "pull-work requires --actor <self_actor> on every claim in the pass, not just the first (F3, AC8)"
-require_text "$PULL" 'never a fresh derivation per claim call' "pull-work states the actor is never re-derived per claim call (F3, AC8)"
-
-require_text "$PULL" 'On any claim-emit failure \(non-zero exit, unresolved actor, or liveness disabled/unavailable\)' "pull-work names the precise claim-emit failure modes covered by fail-open (F4, AC8)"
-require_text "$PULL" '\{skipped: <stderr reason>\}' "pull-work's fail-open shape records {skipped: <stderr reason>} (F4, AC8)"
-require_text "$PULL" 'also surface that skip reason in pull-work.s user-facing output' "pull-work requires the skip reason to be surfaced in user-facing output, never silent (F4, AC8)"
-require_text "$PULL" 'unresolved-actor failure.? additionally names? the remediation' "pull-work requires unresolved-actor failures to additionally name the remediation (F4, AC8)"
-
-require_text "$PULL" '.reclaimable_override.: recorded only when a .reclaimable.' "pull-work's Artifact Contract declares the reclaimable_override field (F5, AC8)"
-
-require_text "$PULL" '### Post-Claim Conflict Re-check' "pull-work documents the Post-Claim Conflict Re-check subsection (F6, AC8)"
-require_text "$PULL" 'coexists with this session.s own just-emitted claim on the same subject' "pull-work's post-claim re-check detects a double-hold against the just-emitted claim (F6, AC8)"
-require_text "$PULL" 'surface the conflict prominently in the user-facing output and instruct the user to coordinate before proceeding' "pull-work instructs surfacing the post-claim conflict prominently and coordinating before proceeding, not silently continuing (F6, AC8)"
-require_text "$PULL" 'does not provide true mutual exclusion across the read-then-write race window itself' "pull-work's honesty note states the exclusion guarantee still does not provide true mutual exclusion across the read-then-write race window (F6, AC8; updated #320 wording — see also test_liveness_verdict.sh)"
-require_text "$PULL" '.#290.\x27s provider assignment lease closes this gap for the .{0,2}local-file.{0,2} provider only' "pull-work scopes true mutual exclusion to the local-file provider only, via #290's lock (fix-plan iteration 1, F5, AC8)"
-require_text "$PULL" 'two concurrent local-file .claim. calls on the same subject genuinely cannot both win' "pull-work states local-file claim/claim races genuinely cannot both win under #290's lock (fix-plan iteration 1, F5, AC8)"
-require_text "$PULL" 'The .{0,2}GitHub.{0,2} provider \(assignee/label/claim-comment\) remains advisory/last-writer' "pull-work does NOT overclaim true mutual exclusion for the GitHub provider — advisory/last-writer, detect not prevent (fix-plan iteration 1, F5, AC8)"
-require_text "$PULL" 'Do not read .provider assignment lease. as closing the GitHub race; only the .verify-hold. publish gate \(#293\)' "pull-work explicitly warns not to read #290 as closing the GitHub race — only #293's verify-hold gate would (fix-plan iteration 1, F5, AC8)"
-
+require_text "$PULL" 'Assignment And Liveness Selection Preflight' "pull-work documents assignment/liveness preflight"
+require_text "$PULL" 'AssignmentProvider\.status' "pull-work consumes assignment status through the provider"
+require_text "$PULL" 'classify the subject, not individual observation rows' "pull-work classifies grouped subject state"
+require_text "$PULL" 'in this precedence' "pull-work documents ordered ownership states"
+require_text "$PULL" 'raw provider status' "pull-work consumes raw status instead of display labels"
+require_text "$PULL" 'double-hold conflict' "pull-work detects own/other live conflicts"
+require_text "$PULL" 'Exclude it by default' "pull-work excludes held work by default"
+require_text "$PULL" 'explicit recorded opt-in' "pull-work requires explicit reclaimable takeover"
+require_text "$PULL" 'reclaimable_override' "pull-work records reclaimable overrides"
+require_text "$PULL" 'takeover is resumption, not restart' "pull-work preserves incumbent continuation"
+require_text "$PULL" 'AssignmentProvider\.claim' "pull-work claims through the provider boundary"
+require_text "$PULL" 'After .AssignmentProvider\.claim' "pull-work rechecks ownership after claim"
+require_text "$PULL" 'post-claim' "pull-work records post-claim conflicts"
+require_text "$PULL" 'does not imply universal mutual exclusion' "pull-work does not overclaim race prevention"
+require_text "$PULL" 'local-file provider' "pull-work scopes serialized claims to capable providers"
+require_text "$PULL" 'without compare-and-swap' "pull-work treats non-atomic remote providers honestly"
+require_text "$PULL" 'unrelated provider state' "pull-work limits provider mutation"
+require_text "$PICKUP_PROBE" 're-confirm the recorded takeover opt-in' "pickup-probe re-confirms reclaimable takeover after drift"
 
 echo ""
 if [[ "$errors" -eq 0 ]]; then

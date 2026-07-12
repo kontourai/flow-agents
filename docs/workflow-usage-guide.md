@@ -4,10 +4,10 @@ title: Workflow Usage Guide
 
 # Workflow Usage Guide
 
-> Consumer repositories should use the supported public workflow surface and isolated exact-package
-> launcher documented in [Public Workflow CLI](public-workflow-cli.md). The lower-level writer
-> commands retained later in this guide describe internal/package migration mechanics and are not a
-> consumer prerequisite.
+> Consumer repositories and Builder skills use the supported public workflow
+> surface and isolated exact-package launcher documented in
+> [Public Workflow CLI](public-workflow-cli.md). Lower-level writer commands are
+> package internals, not a supported agent or consumer interface.
 
 This guide shows how to use the Builder Kit workflow skills in normal chats.
 
@@ -26,7 +26,7 @@ Workflow artifacts follow a closeout lifecycle. Local runtime artifacts live und
 For local artifact queue hygiene, run the read-only cleanup audit:
 
 ```bash
-npm run workflow-artifact-cleanup-audit -- --artifact-root .flow-agents
+npm run workflow-artifact-cleanup-audit -- --artifact-root .kontourai/flow-agents
 ```
 
 The audit is linked to the lifecycle policy in `docs/workflow-artifact-lifecycle.md`. It classifies active WIP, cleanup candidates, terminal done records, active learning follow-ups, and invalid sidecars without deleting or archiving anything.
@@ -43,20 +43,21 @@ Use Builder Kit shape. I have several ideas:
 - billing alert improvements
 - AI dashboard summary
 
-Separate these into distinct ideas, use Probe/alignment questions if the outcome or bundle is unclear, find the thinnest meaningful slice for each, push back if I bundle unrelated work, and stop at the backlog gate unless I explicitly ask you to sync GitHub issues.
+Separate these into distinct ideas, use Probe/alignment questions if the outcome or bundle is unclear, find the thinnest meaningful slice for each, push back if I bundle unrelated work, and stop at the backlog gate unless I explicitly ask you to sync configured provider work items (for example, GitHub issues).
 ```
 
 Expected behavior:
 
 - delegate shaping to `kits/builder/skills/idea-to-backlog/SKILL.md`
 - link the artifact to the Builder Kit Flow Definition at `kits/builder/flows/shape.flow.json`
+- start the public `builder.shape` Flow with a safe explicit slug, then inspect its public status before the step producer records evidence
 - inventory each distinct idea separately
 - classify each idea
 - identify the thinnest meaningful slice
 - shape executable work items with a readable story/outcome, scope, non-goals, stable `R*` requirement ids, stable `AC*` acceptance ids, verification expectation, milestone/delivery outcome, dependencies, and source artifact
 - require bundle justification before grouping ideas
 - map dependencies as blocking, blocked-by, or related-only
-- stop at the backlog gate unless you explicitly ask to continue or explicitly request GitHub issue sync
+- stop at the backlog gate unless you explicitly ask to continue or explicitly request configured provider work-item sync; GitHub issue sync is an optional adapter example
 
 Expected artifact:
 
@@ -94,7 +95,7 @@ If the relationship is only thematic, split the work. If there is a real depende
 
 ## 3. Pull Ready Work From The Backlog
 
-Use `pull-work` when provider-backed work items already exist and you want to choose what to work on next. GitHub issues are the first concrete adapter example, not the core workflow vocabulary.
+Use `pull-work` when provider-backed work items already exist and you want to choose what to work on next. The public `builder.build` interface accepts exactly two Work Item reference forms: `provider:id` and `owner/repo#numeric-id`. The latter is a GitHub-compatible adapter form; do not invent arbitrary reference formats. GitHub issues remain an optional adapter example, not the core workflow vocabulary.
 
 Example prompt:
 
@@ -117,11 +118,11 @@ Expected artifact:
 .kontourai/flow-agents/<slug>/<slug>--pull-work.md
 ```
 
-When a repository has backlog provider settings, `pull-work` should use those settings without requiring the user to name the board. In Flow Agents, `npm run effective-backlog-settings -- --repo-path . --json` resolves `kontourai/flow-agents` to GitHub Project `kontourai/1`, so a prompt like `use pull-work` is enough for the configured provider path.
+When a repository has backlog provider settings, `pull-work` should use those settings without requiring the user to name the board. In this repository, the optional GitHub adapter resolves `kontourai/flow-agents` to GitHub Project `kontourai/1`, so a prompt like `use pull-work` is enough for that configured provider path.
 
 ### Assignment ownership: the third provider leg
 
-Beside the `WorkItemProvider` (what work exists) and `BoardProvider` (how it is grouped/ranked) settings above, `pull-work` also reads `AssignmentProvider` settings to decide who currently owns a candidate work item before offering it. This is durable, human-visible ownership — a GitHub issue assignee, an `agent:claimed` label, and a versioned machine-readable claim comment (or, for tracker-less repos and evals, an equivalent local JSON record) — joined against the ephemeral liveness presence layer so a crashed session's stale claim never blocks a second session from picking up the same work.
+Beside the `WorkItemProvider` (what work exists) and `BoardProvider` (how it is grouped/ranked) settings above, `pull-work` also reads `AssignmentProvider` settings to decide who currently owns a candidate work item before offering it. This is durable, human-visible ownership represented by the configured provider. For example, the optional GitHub adapter can use an issue assignee, an `agent:claimed` label, and a versioned machine-readable claim comment; tracker-less repos and evals can use an equivalent local JSON record. Join it against the ephemeral liveness presence layer so a crashed session's stale claim never blocks a second session from picking up the same work.
 
 Settings live at `context/settings/assignment-provider-settings.json` (validated by `schemas/assignment-provider-settings.schema.json`), mirroring the same `defaults`/`projects[]` shape as the backlog provider settings above; resolve them with `npm run effective-assignment-provider-settings -- --repo-path . --json`. See `context/contracts/assignment-provider-contract.md` for the full `claim`/`release`/`supersede`/`status`/`list` vocabulary, the assignment ⋈ liveness join table, and the human-assignee ask-first policy.
 
@@ -129,7 +130,7 @@ Direct `pull-work` remains a normal workflow primitive. The Builder Kit build pa
 
 Builder Kit build is the product-level entry point for implementation pickup. In that mode, `pull-work` may guide the next step automatically as `pull-work -> design-probe / pickup-probe`; direct `pull-work` still stops with a `plan-work` handoff unless you ask to continue.
 
-If the board is empty or every issue is vague/stale, route back to Builder Kit shape / `idea-to-backlog`. Do not invent implementation work from an empty queue.
+If the board is empty or every work item is vague/stale, route back to Builder Kit shape / `idea-to-backlog`. Do not invent implementation work from an empty queue.
 
 Before selecting new work, `pull-work` must separate your WIP from global conflict context:
 
@@ -220,17 +221,17 @@ Use execute-plan for .kontourai/flow-agents/<slug>/<slug>--plan.md. Prefer isola
 
 Use `review-work` after implementation and before verification. Review is critique: it asks whether the code should change before you trust it.
 
-Review checks quality, security triggers, architecture fit, project standards, risky assumptions, and maintainability. It writes `critique.json`. A clean review does not prove the feature works; it only says the implementation has no open reviewer findings that block the next gate.
+Review checks quality, security triggers, architecture fit, project standards, risky assumptions, and maintainability. In the active `verify` step, `review-work` owns `clean-critique` through public `workflow critique` in `trust.bundle`. A clean review does not prove the feature works; it only says the implementation has no open reviewer findings that block the next gate.
 
 Example prompt:
 
 ```text
-Use review-work for .kontourai/flow-agents/<slug>/<slug>--deliver.md. Run code review, security review if triggered, and standards/architecture critique. Record findings in critique.json. Do not fix code.
+Use review-work for the current Builder session. Run code review, security review if triggered, and standards/architecture critique. Record findings through public workflow critique. Do not fix code.
 ```
 
 Then use `verify-work` for implementation verification. Verification is evidence: it asks what proves the accepted behavior works.
 
-Verification runs build/type/lint/test/security/browser/runtime checks as relevant, maps results to acceptance criteria and Goal Fit, and writes `evidence.json`.
+Verification runs build/type/lint/test/security/browser/runtime checks as relevant, maps results to acceptance criteria and Goal Fit, and records command-backed evidence in `trust.bundle`. In the active `verify` step, `verify-work` owns `acceptance-criteria`, `tests-evidence`, and applicable `policy-compliance`.
 
 Example prompt:
 
@@ -277,7 +278,61 @@ Goal Fit is the local stop condition before a final answer. The working artifact
 
 The `stop-goal-fit` hook also checks the latest workflow artifact and warns when the session is about to stop with missing `Definition Of Done`, incomplete Goal Fit, invalid sidecars, or open final acceptance work. Set `FLOW_AGENTS_GOAL_FIT_STRICT=true` to block incomplete local delivery. Set `FLOW_AGENTS_REQUIRE_SIDECARS=true` when structured workflow state should be mandatory. Set `FLOW_AGENTS_REQUIRE_CRITIQUE=true` when critique records should also be mandatory.
 
-Use `npm run workflow:sidecar --` to create routine sidecars instead of hand-writing JSON:
+For an active Builder run, inspect and record evidence through the public CLI:
+
+```bash
+flow-agents workflow status --session-dir .kontourai/flow-agents/<slug> --json
+flow-agents workflow evidence \
+  --session-dir .kontourai/flow-agents/<slug> \
+  --expectation <declared-expectation> \
+  --status <pass|fail|not_verified> \
+  --command "npm test" \
+  --summary "The recorded command supports the declared expectation." \
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/<slug>/<slug>--plan-work.md","summary":"Reviewable artifact for the declared expectation."}'
+
+# For tests-evidence, repeat --criterion-json for every accepted criterion.
+# Repeat --command and its matching top-level command ref when criteria use
+# different checks.
+flow-agents workflow evidence \
+  --session-dir .kontourai/flow-agents/<slug> \
+  --expectation tests-evidence \
+  --status pass \
+  --command "npm test" \
+  --summary "Each accepted criterion has command-backed verification evidence." \
+  --evidence-ref-json '{"kind":"command","excerpt":"npm test","summary":"Exact substantive project test command recorded for this verification result."}' \
+  --criterion-json '{"id":"<criterion-id>","status":"pass","evidence_refs":[{"kind":"command","excerpt":"npm test","summary":"Exact substantive project test command run for this criterion."}]}' \
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/<slug>/<slug>--plan-work.md","summary":"Criterion mapping and expected verification evidence."}'
+
+flow-agents workflow critique \
+  --session-dir .kontourai/flow-agents/<slug> \
+  --verdict <pass|fail|not_verified> \
+  --summary "Report-only critique findings and gaps are recorded." \
+  --artifact-ref ".kontourai/flow-agents/<slug>/<slug>--deliver.md" \
+  --artifact-ref "<reviewed-changed-file>" \
+  --lane-json '{"id":"code-review","status":"pass","summary":"Code quality, correctness, architecture, and standards were reviewed.","evidence_refs":[{"kind":"artifact","file":".kontourai/flow-agents/<slug>/<slug>--deliver.md","summary":"Reviewed delivery artifact and changed-scope context."}]}'
+```
+
+Only the step skill declared for that Flow expectation should publish it.
+Run authenticated critique before `tests-evidence`; the delegated reviewer
+invokes the public critique command under a runtime identity distinct from the
+active implementation actor. The command does not accept a caller-selected
+reviewer identity.
+Every critique must include at least one substantive lane. A passing critique
+must also cite the delivery report and reviewed changed files. Stored file
+hashes and the workspace snapshot prevent later implementation changes from
+inheriting a stale clean review.
+Entrypoints, profiles, shared primitives, and extensions do not claim step-gate
+completion. `review-work` owns only `clean-critique`; `verify-work` owns
+`acceptance-criteria`, `tests-evidence`, and applicable `policy-compliance`.
+
+### Package Maintainer Internals
+
+The following writer details explain existing package implementation and
+maintenance tests. They are not Builder skill or consumer commands. Skills use
+the public CLI shown above and treat an unavailable public operation as a
+blocker or `NOT_VERIFIED` gap.
+
+The package's internal writer can create and validate projected artifacts:
 
 ```bash
 npm run workflow:sidecar -- ensure-session \
@@ -293,15 +348,19 @@ npm run workflow:sidecar -- init-plan .kontourai/flow-agents/<slug>/<slug>--deli
 
 #### Deterministic slug from a work-item ref
 
-For issue-backed sessions, pass `--work-item <owner/repo#id>` instead of `--task-slug`. The
-derived slug has the format `<owner>-<repo>-<id>` — for example:
+For work-item-backed sessions, use one of the two supported reference forms:
+`provider:id` or `owner/repo#numeric-id`. The latter is the GitHub-compatible
+adapter form; do not use other formats. `--task-slug` is reserved for an
+existing local Work Item retry. The internal writer derives a deterministic slug
+from either supported form; the GitHub-compatible example has the format
+`<owner>-<repo>-<id>`:
 
 ```bash
 npm run workflow:sidecar -- ensure-session \
   --work-item "kontourai/flow-agents#161" \
   --source-request "Implement #161" \
   --summary "Deterministic slug demo."
-# Creates .flow-agents/kontourai-flow-agents-161/
+# Creates .kontourai/flow-agents/kontourai-flow-agents-161/
 ```
 
 The slug is deterministic and idempotent: any agent or worktree that runs `ensure-session
@@ -314,9 +373,10 @@ detectable via `liveness status --subject kontourai-flow-agents-161` (see
 Rules:
 - `--task-slug` always wins when both flags are supplied (back-compat).
 - Omitting both flags still dies with `--task-slug is required`.
-- The `id` part after `#` must be a plain integer (GitHub issue number). Non-integer ids are
-  rejected.
-- Issue-backed sessions should prefer `--work-item` over hand-supplied `--task-slug` so that
+- In `owner/repo#numeric-id`, the id after `#` must be a plain integer. In
+  `provider:id`, the provider and id must use the provider-neutral reference
+  grammar; nonconforming or arbitrary formats are rejected.
+- Work-item-backed sessions should prefer `--work-item` over hand-supplied `--task-slug` so that
   liveness subjectId alignment is automatic.
 
 #### Branch convention
@@ -422,24 +482,28 @@ version's rule set) — but it is not a partial/best-effort pass either.
   when a `state.json` has no `branch` field, naming the gap without breaking legacy
   sessions/fixtures.
 
-Reviewer Markdown artifacts can be imported into `critique.json`:
+Reviewer Markdown can be retained as a linked reference, but the public
+`workflow critique` operation is the only Builder review-recording interface.
 
-```bash
-npm run workflow:sidecar -- import-critique .kontourai/flow-agents/<slug> .kontourai/flow-agents/<slug>/<slug>--review.md
-```
-
-Core workflow skills should use these writer commands when available. If a writer command or validation is unavailable or blocked, the artifact should record the exact sidecar gap as `NOT_VERIFIED` rather than silently falling back to an unstructured pass.
+Package integration tests use these writer commands to exercise projection
+internals. Core workflow skills must use `flow-agents workflow`; if its required
+operation is unavailable or blocked, record the exact gap as `NOT_VERIFIED`
+rather than silently falling back to an internal command or unstructured pass.
 
 Manual sidecar writing is an exceptional recovery path only. If `npm run workflow:sidecar --` cannot acquire `.workflow-sidecar.lockdir` with `EPERM` or `EACCES`, first fix the artifact directory permissions or ownership, or rerun the workflow in an approved writable workspace. If the writer is still blocked by local permissions or sandboxing, manually write only schema-valid sidecars, record the exact writer failure as `NOT_VERIFIED`, and run `npm run workflow:validate-artifacts -- --require-sidecars <artifact-dir>` before treating recovery as complete.
 
-For substantial Flow Agents repo changes, maintainers can use the combined local evidence command after checks and critique are ready:
+The combined internal writer fixture below is documented only for maintainers
+of its integration tests. It is not a Builder workflow operation:
 
 ```bash
 npm run workflow:sidecar -- dogfood-pass \
   --check-json '{"id":"focused-check","kind":"test","status":"pass","summary":"Focused check passed."}' \
   --require-critique \
   --critique-id "dogfood-review" \
-  --critique-summary "Critique passed."
+  --critique-verdict pass \
+  --critique-summary "Critique passed." \
+  --artifact-ref ".kontourai/flow-agents/<slug>/<slug>--deliver.md" \
+  --lane-json '{"id":"code-review","status":"pass","summary":"Focused review completed.","evidence_refs":[{"kind":"artifact","file":".kontourai/flow-agents/<slug>/<slug>--deliver.md","summary":"Reviewed dogfood delivery artifact."}]}'
 ```
 
 `dogfood-pass` is fail-closed: it refuses a clean pass without evidence and refuses required critique gaps before writing partial evidence. When the same clean pass is also merge-ready, add `--release-decision merge` and one or more `--release-doc-ref` values to write `release.json` in the same validated pass. Release decisions require passing critique.
@@ -517,7 +581,7 @@ Completion gate:
 - `state.status` may be `delivered`, `accepted`, or `archived` with `phase: done` only when evidence is passing and either a promoted doc exists or the no-docs decision is explicit.
 - `NOT_VERIFIED` evidence cannot be promoted as a clean delivery doc. Promote it as a blocked or partial record only if the doc names the gap and next owner.
 - For adapter or provider work, the promoted doc should distinguish local/dry-run capability from live external mutation.
-- Final delivery must reconcile sidecars before stopping: `acceptance.json`, `evidence.json`, and `release.json` are authoritative gate inputs. Temporary verifier-local mismatch notes are superseded only when the final orchestrator evidence or release validation names the reconciled sidecars. If Markdown and sidecars still disagree, hold the terminal delivery.
+- Final delivery must reconcile `trust.bundle` before stopping. Temporary verifier-local notes are superseded only when the final public evidence or release validation names the reconciled trust slices. If linked reports and the bundle disagree, hold the terminal delivery.
 - Final acceptance should also close the active local state: after merge or accepted no-provider-change work, do not leave `state.status: verified` unless release, docs promotion, or learning still has an unresolved blocker.
 
 The validator and stop hook enforce this shape for terminal workflows. If a delivery is terminal and neither the Markdown artifact nor `state.json.artifact_paths` points at durable docs, validation should fail unless the artifact records an explicit no-docs decision.
@@ -589,24 +653,27 @@ Use learning-review. Capture facts, decisions, gaps, follow-ups, and durable kno
 ## Resumable sessions
 
 Builder build sessions also project their canonical Flow run into the resume block.
-Start a newly selected session with `flow-agents builder-run start --session-dir
-.kontourai/flow-agents/<slug>`. Thereafter, follow `next_action.skills` or
-`next_action.operations`, record the current gate evidence, and use the exact
-`next_action.command` if automatic synchronization was interrupted. See
+Start a newly selected session with `flow-agents workflow start --flow builder.build
+--work-item <provider-ref> --assignment-provider <configured-kind>` and add
+`--effective-state-json <provider-status.json>` for a non-local provider, where `<provider-ref>` is exactly `provider:id` or
+`owner/repo#numeric-id`; the latter is the GitHub-compatible adapter form. The
+adapter supplies the stable, human-readable Work Item reference. Thereafter, follow `next_action.skills` or `next_action.operations` and record the
+current gate through the public `workflow evidence` command. After interruption, inspect
+the read-only `workflow status` projection without attaching evidence or advancing the run. See
 [`docs/spec/builder-flow-runtime.md`](spec/builder-flow-runtime.md) for the ownership,
 trust-binding, route-back, and artifact-root contract.
 
-If the same Builder slice is interrupted and its sidecar/current pointers may be
-stale, restore the projection from the existing canonical Flow run with:
+If the same Builder slice is interrupted, inspect its canonical status. Resume
+only when the public status reports a paused run:
 
 ```bash
-flow-agents builder-run recover --session-dir .kontourai/flow-agents/<slug>
+flow-agents workflow status --session-dir .kontourai/flow-agents/<slug> --json
+flow-agents workflow resume --session-dir .kontourai/flow-agents/<slug> --reason "Continue the bound work item"
 ```
 
-The session slug is the run identity; recovery accepts no caller-selected run or
-step. It validates the sole Work Item binding and updates only the sidecar/current
-projection, leaving the entire Flow run byte-identical. Recovery never attaches or
-evaluates `trust.bundle`; use `builder-run sync` for that separate operation.
+The session slug is the run identity. Do not select a different run, force a
+step, or use an internal synchronization command to bypass the canonical next
+action.
 
 When a session resumes (after context compaction, an agent restart, or a cross-session
 handoff), the workflow-steering hook emits a `RESUME:` block on `SessionStart` that
@@ -619,7 +686,7 @@ The `RESUME:` block supplements the existing `STATE:` line and contains:
 - **Plan** — path to the plan artifact (`<slug>--plan-work.md` from `state.json artifact_paths` or conventional fallback).
 - **Next step** — the first `handoff.json next_steps` entry.
 - **Blockers** — any recorded blockers from `handoff.json`, or "none".
-- **Trust** — `Trust: N verified / M disputed / T total` from reading `trust.bundle`. Each disputed or unknown claim is listed with its id and a copy-pasteable remedy command: `npm run workflow:sidecar -- claim <id> <dir>`.
+- **Trust** — `Trust: N verified / M disputed / T total` from reading `trust.bundle`. Each disputed or unknown claim names the owning expectation so its step producer can attach resolving evidence through `flow-agents workflow evidence`.
 - **Liveness advisory** (when applicable) — `[LIVENESS WARNING: another agent appears live on this work: actor <X>, last seen <T>]` when the shared liveness stream (`.kontourai/flow-agents/liveness/events.jsonl`, ADR 0012) contains a fresh claim or heartbeat from a different actor for the same slug. This is advisory only — the hook exits 0 regardless. The block also always includes an `ACTOR: <actor> (<source>)` line — the same runtime-agnostic actor identity this session resolves for itself (see "Actor identity and liveness writes" below), so a resuming agent can see at a glance which identity its own liveness claims/heartbeats will be filed under.
 - **Route hint** — `To continue: resume this work. Or run pull-work to assess WIP and start new/parallel work.` — always routes the resume-vs-parallel decision through `pull-work` rather than auto-taking it.
 

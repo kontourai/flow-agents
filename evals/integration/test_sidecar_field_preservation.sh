@@ -31,7 +31,11 @@ WRITER="workflow-sidecar"
 TMPDIR_EVAL="$(mktemp -d)"
 errors=0
 
-cleanup() { rm -rf "$TMPDIR_EVAL"; }
+cleanup() {
+  local status=$?
+  rm -rf "$TMPDIR_EVAL"
+  return "$status"
+}
 trap cleanup EXIT
 
 _pass() { echo "  ✓ $1"; }
@@ -46,6 +50,7 @@ SESSION_ROOT="$TMPDIR_EVAL/repo/.kontourai/flow-agents"
 SLUG="sidecar-field-preservation-sweep"
 SESSION_DIR="$SESSION_ROOT/$SLUG"
 STATE="$SESSION_DIR/state.json"
+DELIVER_ARTIFACT="$SESSION_DIR/$SLUG--deliver.md"
 mkdir -p "$SESSION_ROOT"
 
 # ─── Field-identity assertion helpers ────────────────────────────────────────
@@ -58,7 +63,11 @@ mkdir -p "$SESSION_ROOT"
 # persistent field. No fixture forces a synthetic owner value — that would test a code path that
 # does not exist today.
 FIELDS=(branch task_slug repo created_at owner)
-declare -A BASELINE
+BASELINE_BRANCH=""
+BASELINE_TASK_SLUG=""
+BASELINE_REPO=""
+BASELINE_CREATED_AT=""
+BASELINE_OWNER=""
 
 _field() {
   local file="$1" field="$2"
@@ -66,19 +75,32 @@ _field() {
 }
 
 _capture_baseline() {
-  local field
-  for field in "${FIELDS[@]}"; do
-    BASELINE["$field"]="$(_field "$STATE" "$field")"
-  done
+  BASELINE_BRANCH="$(_field "$STATE" branch)"
+  BASELINE_TASK_SLUG="$(_field "$STATE" task_slug)"
+  BASELINE_REPO="$(_field "$STATE" repo)"
+  BASELINE_CREATED_AT="$(_field "$STATE" created_at)"
+  BASELINE_OWNER="$(_field "$STATE" owner)"
+}
+
+_baseline_field() {
+  case "$1" in
+    branch) printf '%s' "$BASELINE_BRANCH" ;;
+    task_slug) printf '%s' "$BASELINE_TASK_SLUG" ;;
+    repo) printf '%s' "$BASELINE_REPO" ;;
+    created_at) printf '%s' "$BASELINE_CREATED_AT" ;;
+    owner) printf '%s' "$BASELINE_OWNER" ;;
+    *) return 1 ;;
+  esac
 }
 
 _assert_preserved() {
   local label="$1"
-  local field actual ok=1
+  local field actual expected ok=1
   for field in "${FIELDS[@]}"; do
     actual="$(_field "$STATE" "$field")"
-    if [[ "$actual" != "${BASELINE[$field]}" ]]; then
-      _fail "$label dropped/changed persistent field '$field': expected '${BASELINE[$field]}' got '$actual'"
+    expected="$(_baseline_field "$field")"
+    if [[ "$actual" != "$expected" ]]; then
+      _fail "$label dropped/changed persistent field '$field': expected '$expected' got '$actual'"
       ok=0
     fi
   done
@@ -113,8 +135,8 @@ if [[ ! -f "$STATE" ]]; then
 fi
 
 _capture_baseline
-if [[ "${BASELINE[branch]}" != "agent/sweep-actor/$SLUG" || "${BASELINE[created_at]}" != "$SEED_TS" || "${BASELINE[task_slug]}" != "$SLUG" ]]; then
-  _fail "sweep setup: seeded baseline did not carry the expected branch/created_at/task_slug (branch=${BASELINE[branch]} created_at=${BASELINE[created_at]} task_slug=${BASELINE[task_slug]})"
+if [[ "$BASELINE_BRANCH" != "agent/sweep-actor/$SLUG" || "$BASELINE_CREATED_AT" != "$SEED_TS" || "$BASELINE_TASK_SLUG" != "$SLUG" ]]; then
+  _fail "sweep setup: seeded baseline did not carry the expected branch/created_at/task_slug (branch=$BASELINE_BRANCH created_at=$BASELINE_CREATED_AT task_slug=$BASELINE_TASK_SLUG)"
 fi
 
 # ─── 1. init-plan, run against a BRANCH-LESS plan artifact ───────────────────────────────────
@@ -194,6 +216,8 @@ if flow_agents_node "$WRITER" record-critique "$SESSION_DIR" \
   --reviewer tool-code-reviewer \
   --verdict pass \
   --summary "No blocking findings." \
+  --artifact-ref "$PLAN_ARTIFACT" \
+  --lane-json "{\"id\":\"code-review\",\"status\":\"pass\",\"summary\":\"Reviewed the field-preservation plan artifact.\",\"evidence_refs\":[{\"kind\":\"artifact\",\"file\":\"$PLAN_ARTIFACT\",\"summary\":\"Reviewed field-preservation plan artifact.\"}]}" \
   --finding-json '{"id":"sweep-finding","severity":"low","status":"fixed","description":"No blocking issues found during sweep sanity critique."}' \
   --timestamp "2026-06-20T08:25:00Z" >"$TMPDIR_EVAL/critique.out" 2>"$TMPDIR_EVAL/critique.err"; then
   _assert_preserved "record-critique"
@@ -211,6 +235,7 @@ fi
 if flow_agents_node "$WRITER" record-gate-claim "$SESSION_DIR" \
   --status pass \
   --summary "Implementation scope recorded for the sweep fixture." \
+  --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$DELIVER_ARTIFACT\",\"summary\":\"Durable delivery artifact for the field-preservation implementation scope.\"}" \
   --timestamp "2026-06-20T08:30:00Z" >"$TMPDIR_EVAL/gate-claim.out" 2>"$TMPDIR_EVAL/gate-claim.err"; then
   _assert_preserved "record-gate-claim"
 else

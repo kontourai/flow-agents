@@ -31,6 +31,21 @@ test("public API exports local artifact root helpers", () => {
   assert.notEqual(defaultArtifactRootForRead(cwd), durableFlowAgentsRoot(cwd));
 });
 
+test("public API retains the documented native-host compatibility surface", async () => {
+  const lib = await import("../../build/src/index.js");
+  for (const name of [
+    "startBuilderBuildRun", "evaluateBuilderBuildRun", "startBuilderFlowSession",
+    "pauseBuilderFlowSession", "resumeBuilderFlowSession", "cancelBuilderFlowSession",
+    "archiveBuilderFlowSession", "recoverBuilderFlowSession", "releaseBuilderFlowAssignment",
+    "writeJson", "appendJsonl", "sidecarBase", "writeState", "writeSidecar",
+  ]) {
+    assert.equal(typeof lib[name], "function", `${name} must remain package-root exported`);
+  }
+  assert.equal(typeof lib.loadJson, "function");
+  assert.equal(typeof lib.validateTrustBundle, "function");
+  assert.equal(typeof lib.builderLifecycleAuthorizationPayload, "function");
+});
+
 test("TS and CJS artifact helpers stay in parity without durable-root fallback", () => {
   const require = createRequire(import.meta.url);
   const cjs = require("../../scripts/hooks/lib/local-artifact-paths.js");

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
@@ -12,7 +12,6 @@ import {
   normalizeTrustBundle,
   openGates,
   pauseRun,
-  readJson,
   resumeRun,
   startRun,
   validateDefinition,
@@ -26,6 +25,9 @@ import { resolveEffectiveFlowDefinition } from "./lib/flow-resolver.js";
 
 export const BUILDER_BUILD_FLOW_ID = "builder.build";
 export const BUILDER_BUILD_FLOW_RELATIVE_PATH = "kits/builder/flows/build.flow.json";
+export const BUILDER_SHAPE_FLOW_ID = "builder.shape";
+export const BUILDER_SHAPE_FLOW_RELATIVE_PATH = "kits/builder/flows/shape.flow.json";
+export type BuilderFlowId = typeof BUILDER_BUILD_FLOW_ID | typeof BUILDER_SHAPE_FLOW_ID;
 
 export interface BuilderBuildTrustBundleEvidenceInput {
   gate: string;
@@ -34,6 +36,8 @@ export interface BuilderBuildTrustBundleEvidenceInput {
    * Callers must not pass raw user-controlled paths to this local runtime API.
    */
   file: string;
+  /** SHA-256 of the immutable snapshot validated by Flow Agents before Flow attaches it. */
+  expectedSha256?: string;
   status?: "passed" | "failed";
   producer?: string;
   authorityTrace?: string;
@@ -56,6 +60,10 @@ export interface StartBuilderBuildRunInput {
   runId?: string;
 }
 
+export interface StartBuilderFlowRunInput extends StartBuilderBuildRunInput {
+  flowId: BuilderFlowId;
+}
+
 export interface EvaluateBuilderBuildRunInput {
   runId: string;
   /**
@@ -76,8 +84,8 @@ export interface ChangeBuilderBuildRunLifecycleInput extends LoadBuilderBuildRun
   at?: string;
 }
 
-export interface BuilderBuildRunResult {
-  definitionId: typeof BUILDER_BUILD_FLOW_ID;
+export interface BuilderFlowRunResult {
+  definitionId: BuilderFlowId;
   definitionVersion: string;
   runId: string;
   dir: string;
@@ -86,6 +94,10 @@ export interface BuilderBuildRunResult {
   outcomes: GateOutcome[];
   manifest: JsonObject;
   freshnessTransitions: JsonObject[];
+}
+
+export interface BuilderBuildRunResult extends Omit<BuilderFlowRunResult, "definitionId"> {
+  definitionId: typeof BUILDER_BUILD_FLOW_ID;
 }
 
 export type BuilderBuildRunIdentityMismatch = "definition-id" | "definition-version" | "definition-content";
@@ -128,20 +140,29 @@ export class BuilderBuildRunIdentityError extends Error {
 }
 
 export function resolveBuilderBuildFlowDefinitionPath(startDir = moduleDirectory()): string {
-  const root = findPackageRoot(startDir);
-  return path.join(root, BUILDER_BUILD_FLOW_RELATIVE_PATH);
+  return resolveBuilderFlowDefinitionPath(BUILDER_BUILD_FLOW_ID, startDir);
 }
 
 export async function startBuilderBuildRun(input: StartBuilderBuildRunInput): Promise<BuilderBuildRunResult> {
+  const result = await startBuilderFlowRun({ ...input, flowId: BUILDER_BUILD_FLOW_ID });
+  return asBuilderBuildResult(result, input.runId ?? result.runId);
+}
+
+export function resolveBuilderFlowDefinitionPath(flowId: BuilderFlowId, startDir = moduleDirectory()): string {
+  const root = findPackageRoot(startDir);
+  return path.join(root, flowRelativePath(flowId));
+}
+
+export async function startBuilderFlowRun(input: StartBuilderFlowRunInput): Promise<BuilderFlowRunResult> {
   assertRuntimeInput(input, ["evidence", "now", "gate"]);
   if (!isNonEmptyString(input.subject)) {
     throw new BuilderBuildRunInputError("subject", "must be a non-empty string");
   }
 
   const cwd = input.cwd ?? process.cwd();
-  const definitionPath = resolveBuilderBuildFlowDefinitionPath();
-  const definition = await loadShippedBuilderBuildDefinition(definitionPath);
-  const runtimeDefinitionPath = materializeRuntimeDefinition(cwd, definition);
+  const definitionPath = resolveBuilderFlowDefinitionPath(input.flowId);
+  const definition = await loadShippedBuilderFlowDefinition(input.flowId, definitionPath);
+  const runtimeDefinitionPath = materializeRuntimeDefinition(cwd, input.flowId, definition);
   const started = await startRun(runtimeDefinitionPath, {
     cwd,
     runId: input.runId,
@@ -150,12 +171,17 @@ export async function startBuilderBuildRun(input: StartBuilderBuildRunInput): Pr
       subject: input.subject,
     },
   });
-  const run = await loadCanonicalBuilderBuildRun(started.runId, cwd, definition);
+  const run = await loadCanonicalBuilderFlowRun(started.runId, cwd, definition);
 
   return resultFromRun(run, started.runId);
 }
 
 export async function evaluateBuilderBuildRun(input: EvaluateBuilderBuildRunInput): Promise<BuilderBuildRunResult> {
+  const result = await evaluateBuilderFlowRun(input);
+  return asBuilderBuildResult(result, input.runId);
+}
+
+export async function evaluateBuilderFlowRun(input: EvaluateBuilderBuildRunInput): Promise<BuilderFlowRunResult> {
   assertRuntimeInput(input, ["now", "gate"]);
   if (Array.isArray(input.evidence)) {
     throw new BuilderBuildRunInputError("evidence", "must be zero or one evidence object, not an array");
@@ -163,16 +189,26 @@ export async function evaluateBuilderBuildRun(input: EvaluateBuilderBuildRunInpu
 
   const cwd = input.cwd ?? process.cwd();
   const run = await loadRun(input.runId, cwd);
-  const definition = await loadShippedBuilderBuildDefinition(resolveBuilderBuildFlowDefinitionPath());
+  const definition = await loadShippedBuilderFlowDefinitionForRun(input.runId, run.definition);
   assertCanonicalDefinition(input.runId, definition, run.definition);
 
   let attachedEvidence: FlowEvidenceEntry[] = [];
   if (input.evidence !== undefined) {
     const evidence = validateEvidenceInput(input.evidence);
     assertCurrentOpenGate(run.definition, run.state, evidence.gate);
-    const normalized = normalizeTrustBundle(await readJson(path.resolve(cwd, evidence.file)));
+    const source = path.resolve(cwd, evidence.file);
+    const bytes = readFileSync(source);
+    const validatedSha256 = createHash("sha256").update(bytes).digest("hex");
+    if (evidence.expectedSha256 && evidence.expectedSha256 !== validatedSha256) {
+      throw new BuilderBuildRunInputError("evidence.expectedSha256", "does not match the bytes presented for validation");
+    }
+    const normalized = normalizeTrustBundle(JSON.parse(bytes.toString("utf8")));
     assertBundleSubjects(normalized.bundle, run.state.subject, openGates(run.definition, run.state)[0]);
-    attachedEvidence = [await attachEvidence(input.runId, trustBundleAttachOptions(cwd, evidence))];
+    const attached = await attachEvidence(input.runId, trustBundleAttachOptions(cwd, evidence, validatedSha256));
+    if (attached.sha256 !== validatedSha256) {
+      throw new BuilderBuildRunInputError("evidence.file", "changed after validation before Flow attachment");
+    }
+    attachedEvidence = [attached];
   }
 
   const evaluated = await evaluateRun(input.runId, { cwd });
@@ -190,45 +226,65 @@ export async function evaluateBuilderBuildRun(input: EvaluateBuilderBuildRunInpu
 }
 
 export async function loadBuilderBuildRun(input: LoadBuilderBuildRunInput): Promise<BuilderBuildRunResult> {
+  const result = await loadBuilderFlowRun(input);
+  return asBuilderBuildResult(result, input.runId);
+}
+
+export async function loadBuilderFlowRun(input: LoadBuilderBuildRunInput): Promise<BuilderFlowRunResult> {
   assertRuntimeInput(input, ["evidence", "now", "gate"]);
   const cwd = input.cwd ?? process.cwd();
   const run = await loadRun(input.runId, cwd);
-  const definition = await loadShippedBuilderBuildDefinition(resolveBuilderBuildFlowDefinitionPath());
+  const definition = await loadShippedBuilderFlowDefinitionForRun(input.runId, run.definition);
   assertCanonicalDefinition(input.runId, definition, run.definition);
   return resultFromRun(run, input.runId);
 }
 
 export async function pauseBuilderBuildRun(input: ChangeBuilderBuildRunLifecycleInput): Promise<BuilderBuildRunResult> {
-  return changeBuilderBuildRunLifecycle(input, pauseRun);
+  const result = await pauseBuilderFlowRun(input);
+  return asBuilderBuildResult(result, input.runId);
 }
 
 export async function resumeBuilderBuildRun(input: ChangeBuilderBuildRunLifecycleInput): Promise<BuilderBuildRunResult> {
-  return changeBuilderBuildRunLifecycle(input, resumeRun);
+  const result = await resumeBuilderFlowRun(input);
+  return asBuilderBuildResult(result, input.runId);
 }
 
 export async function cancelBuilderBuildRun(input: ChangeBuilderBuildRunLifecycleInput): Promise<BuilderBuildRunResult & { idempotent: boolean }> {
-  const changed = await changeBuilderBuildRunLifecycleResult(input, cancelRun);
+  const changed = await changeBuilderFlowRunLifecycleResult(input, cancelRun);
+  return { ...asBuilderBuildResult(resultFromRun(changed, input.runId), input.runId), idempotent: changed.idempotent };
+}
+
+export async function pauseBuilderFlowRun(input: ChangeBuilderBuildRunLifecycleInput): Promise<BuilderFlowRunResult> {
+  return changeBuilderFlowRunLifecycle(input, pauseRun);
+}
+
+export async function resumeBuilderFlowRun(input: ChangeBuilderBuildRunLifecycleInput): Promise<BuilderFlowRunResult> {
+  return changeBuilderFlowRunLifecycle(input, resumeRun);
+}
+
+export async function cancelBuilderFlowRun(input: ChangeBuilderBuildRunLifecycleInput): Promise<BuilderFlowRunResult & { idempotent: boolean }> {
+  const changed = await changeBuilderFlowRunLifecycleResult(input, cancelRun);
   return { ...resultFromRun(changed, input.runId), idempotent: changed.idempotent };
 }
 
-async function changeBuilderBuildRunLifecycle(
+async function changeBuilderFlowRunLifecycle(
   input: ChangeBuilderBuildRunLifecycleInput,
   operation: typeof pauseRun | typeof resumeRun,
-): Promise<BuilderBuildRunResult> {
-  const changed = await changeBuilderBuildRunLifecycleResult(input, operation);
+): Promise<BuilderFlowRunResult> {
+  const changed = await changeBuilderFlowRunLifecycleResult(input, operation);
   return resultFromRun(changed, input.runId);
 }
 
-async function changeBuilderBuildRunLifecycleResult(
+async function changeBuilderFlowRunLifecycleResult(
   input: ChangeBuilderBuildRunLifecycleInput,
   operation: typeof pauseRun | typeof resumeRun | typeof cancelRun,
 ) {
   assertRuntimeInput(input, []);
   if (!isRecord(input.request)) throw new BuilderBuildRunInputError("request", "must be a lifecycle request object");
   const cwd = input.cwd ?? process.cwd();
-  const before = await loadBuilderBuildRun({ runId: input.runId, cwd });
+  const before = await loadBuilderFlowRun({ runId: input.runId, cwd });
   const changed = await operation(input.runId, { cwd, ...input.request, ...(input.at ? { at: input.at } : {}) });
-  const definition = await loadShippedBuilderBuildDefinition(resolveBuilderBuildFlowDefinitionPath());
+  const definition = await loadShippedBuilderFlowDefinitionForRun(input.runId, changed.definition);
   assertCanonicalDefinition(input.runId, definition, changed.definition);
   if (changed.state.subject !== before.state.subject) {
     throw new BuilderBuildRunInputError("flow_run.state.subject", "changed during lifecycle transition");
@@ -236,7 +292,7 @@ async function changeBuilderBuildRunLifecycleResult(
   return changed;
 }
 
-function resultFromRun(run: Awaited<ReturnType<typeof loadRun>>, runId: string): BuilderBuildRunResult {
+function resultFromRun(run: Awaited<ReturnType<typeof loadRun>>, runId: string): BuilderFlowRunResult {
   return {
     definitionId: run.definition.id,
     definitionVersion: run.definition.version,
@@ -250,7 +306,7 @@ function resultFromRun(run: Awaited<ReturnType<typeof loadRun>>, runId: string):
   };
 }
 
-async function loadCanonicalBuilderBuildRun(
+async function loadCanonicalBuilderFlowRun(
   runId: string,
   cwd: string,
   definition: { id: string; version: string },
@@ -260,27 +316,53 @@ async function loadCanonicalBuilderBuildRun(
   return run;
 }
 
-async function loadShippedBuilderBuildDefinition(definitionPath: string): Promise<{ id: string; version: string }> {
+async function loadShippedBuilderFlowDefinition(flowId: BuilderFlowId, definitionPath: string): Promise<{ id: string; version: string }> {
   const packageRoot = findPackageRoot(path.dirname(definitionPath));
-  const effective = resolveEffectiveFlowDefinition(BUILDER_BUILD_FLOW_ID, packageRoot, { allowOverride: false });
+  const effective = resolveEffectiveFlowDefinition(flowId, packageRoot, { allowOverride: false });
   if (!effective) {
     throw new BuilderBuildRunInputError("definition", "could not compile the shipped uses_flow composition");
   }
   const definition = validateDefinition(effective);
-  if (definition.id !== BUILDER_BUILD_FLOW_ID) {
-    throw new BuilderBuildRunInputError("definition", `expected shipped definition id ${BUILDER_BUILD_FLOW_ID}`);
+  if (definition.id !== flowId) {
+    throw new BuilderBuildRunInputError("definition", `expected shipped definition id ${flowId}`);
   }
   return definition;
 }
 
-function materializeRuntimeDefinition(cwd: string, definition: unknown): string {
+async function loadShippedBuilderFlowDefinitionForRun(runId: string, actualDefinition: { id: string; version: string }): Promise<{ id: string; version: string }> {
+  const flowId = actualDefinition.id;
+  if (!isBuilderFlowId(flowId)) {
+    throw new BuilderBuildRunIdentityError(runId, { id: BUILDER_BUILD_FLOW_ID, version: "unknown" }, actualDefinition, "definition-id");
+  }
+  return loadShippedBuilderFlowDefinition(flowId, resolveBuilderFlowDefinitionPath(flowId));
+}
+
+function materializeRuntimeDefinition(cwd: string, flowId: BuilderFlowId, definition: unknown): string {
   const content = `${JSON.stringify(definition, null, 2)}\n`;
   const digest = createHash("sha256").update(content).digest("hex").slice(0, 16);
   const directory = path.join(cwd, ".kontourai", "flow-agents", "runtime-definitions");
   mkdirSync(directory, { recursive: true });
-  const file = path.join(directory, `builder-build-${digest}.flow.json`);
+  const file = path.join(directory, `${flowId.replace(".", "-")}-${digest}.flow.json`);
   if (!existsSync(file)) writeFileSync(file, content);
   return file;
+}
+
+function flowRelativePath(flowId: BuilderFlowId): string {
+  return flowId === BUILDER_BUILD_FLOW_ID ? BUILDER_BUILD_FLOW_RELATIVE_PATH : BUILDER_SHAPE_FLOW_RELATIVE_PATH;
+}
+
+function isBuilderFlowId(value: string): value is BuilderFlowId {
+  return value === BUILDER_BUILD_FLOW_ID || value === BUILDER_SHAPE_FLOW_ID;
+}
+
+function assertExpectedFlow(runId: string, actual: BuilderFlowId, expected: BuilderFlowId): void {
+  if (actual === expected) return;
+  throw new BuilderBuildRunIdentityError(runId, { id: expected, version: "unknown" }, { id: actual, version: "unknown" }, "definition-id");
+}
+
+function asBuilderBuildResult(result: BuilderFlowRunResult, runId: string): BuilderBuildRunResult {
+  assertExpectedFlow(runId, result.definitionId, BUILDER_BUILD_FLOW_ID);
+  return result as BuilderBuildRunResult;
 }
 
 function assertCanonicalDefinition(
@@ -318,6 +400,9 @@ function validateEvidenceInput(evidence: unknown): BuilderBuildTrustBundleEviden
   }
   if (!isNonEmptyString(evidence.file)) {
     throw new BuilderBuildRunInputError("evidence.file", "must be a non-empty string");
+  }
+  if (evidence.expectedSha256 !== undefined && (!isNonEmptyString(evidence.expectedSha256) || !/^[a-f0-9]{64}$/i.test(evidence.expectedSha256))) {
+    throw new BuilderBuildRunInputError("evidence.expectedSha256", "must be a SHA-256 hex digest");
   }
   if (evidence.status !== undefined && evidence.status !== "passed" && evidence.status !== "failed") {
     throw new BuilderBuildRunInputError("evidence.status", "must be passed or failed");
@@ -358,11 +443,12 @@ function assertBundleSubjects(bundle: unknown, subject: string, gate: unknown): 
   }
 }
 
-function trustBundleAttachOptions(cwd: string, evidence: BuilderBuildTrustBundleEvidenceInput): JsonObject {
+function trustBundleAttachOptions(cwd: string, evidence: BuilderBuildTrustBundleEvidenceInput, expectedSha256: string): JsonObject {
   return {
     cwd,
     gate: evidence.gate,
     file: evidence.file,
+    expectedSha256,
     kind: "trust.bundle",
     bundle: true,
     ...(evidence.status ? { status: evidence.status } : {}),

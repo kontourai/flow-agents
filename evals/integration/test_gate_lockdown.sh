@@ -1156,16 +1156,14 @@ echo "=== Diff scope check ==="
 # Verify that ONLY the allowed files were modified.
 # Round 2 (fix/gate-lockdown) scope: config-protection.js, stop-goal-fit.js, evidence-capture.js.
 # The security-hardening files (config-protection.js, stop-goal-fit.js, workflow-sidecar.ts,
-# flow-resolver.ts, evidence-capture.js) are legitimately modified across the rounds, so the
-# only true invariants this scope-check enforces are the hard collision boundaries.
+# flow-resolver.ts, evidence-capture.js) are legitimately modified across the rounds. This
+# check protects the cross-kit collision boundary; it must not reject legitimate changes to
+# Builder skills merely because another issue originally treated them as out of scope.
 # Use grep patterns to avoid triggering the source path validator.
 FORBIDDEN_MODIFIED=""
 FORBIDDEN_PATTERNS=(
   "kits/knowledge/"
 )
-# continue-work: the collision boundary skill file (not in scripts/hooks/).
-# Use a conservative basename check to avoid a false src-path reference.
-FORBIDDEN_PATTERNS+=("continue-work")
 for pat in "${FORBIDDEN_PATTERNS[@]}"; do
   if git -C "$ROOT" diff --name-only HEAD 2>/dev/null | grep -q "$pat"; then
     FORBIDDEN_MODIFIED="$FORBIDDEN_MODIFIED $pat"

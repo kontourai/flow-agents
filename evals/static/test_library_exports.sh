@@ -49,8 +49,11 @@ import * as lib from "./build/src/index.js";
 const required = [
   "validateTrustBundle", "normalizeCheck", "normalizeFinding", "normalizeLearning",
   "normalizeEvidenceRefs", "validateEvidenceRef", "validateLearningCorrection",
-  "loadJson", "writeJson", "appendJsonl", "sidecarBase", "writeState",
-  "readSidecar", "writeSidecar",
+  "loadJson", "readSidecar", "writeJson", "appendJsonl", "sidecarBase", "writeState", "writeSidecar",
+  "startBuilderBuildRun", "evaluateBuilderBuildRun", "startBuilderFlowSession",
+  "pauseBuilderFlowSession", "resumeBuilderFlowSession", "cancelBuilderFlowSession",
+  "archiveBuilderFlowSession", "recoverBuilderFlowSession", "releaseBuilderFlowAssignment",
+  "builderLifecycleAuthorizationPayload", "loadBuilderLifecycleAuthorization",
   "statuses", "phases", "checkKinds", "checkStatuses", "verdicts",
 ];
 const missing = required.filter((name) => lib[name] === undefined);

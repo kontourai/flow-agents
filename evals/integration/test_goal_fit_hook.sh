@@ -2242,12 +2242,12 @@ node - "$ROOT/scripts/hooks/stop-goal-fit.js" <<'NODEEOF' 2>"$TMPDIR_EVAL/hardbl
 const fs = require('fs');
 const file = process.argv[2];
 let src = fs.readFileSync(file, 'utf8');
-const needle = "const HARD_BLOCK = /contradicts evidence\\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered|NOT_VERIFIED \\(ambiguous\\)/;";
+const needle = "const HARD_BLOCK = /contradicts evidence\\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered|NOT_VERIFIED \\(ambiguous\\)|canonical Flow (?:run remains active|state is unsafe or malformed)/;";
 if (!src.includes(needle)) {
   process.stderr.write('mutation: HARD_BLOCK NOT_VERIFIED (ambiguous) pattern not found — source pattern drifted, cannot mutation-test\n');
   process.exit(1);
 }
-const mutated = "const HARD_BLOCK = /contradicts evidence\\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered/;";
+const mutated = "const HARD_BLOCK = /contradicts evidence\\.json|caught false-completion|evidence verdict:|evidence check .+ status:|critique status|critique open|required sidecar is missing|command-log integrity check FAILED|gate misconfiguration:|exit-code-laundered|canonical Flow (?:run remains active|state is unsafe or malformed)/;";
 src = src.split(needle).join(mutated);
 fs.writeFileSync(file, src);
 NODEEOF
@@ -2710,6 +2710,64 @@ if ! grep -qi 'ambiguous\|NOT_VERIFIED\|caught false-completion' "$TMPDIR_EVAL/d
   _pass "mutation-test cleanup re-check: the restored real stop-goal-fit.js confirms a clean end-to-end pass again for the dialect fixture"
 else
   _fail "mutation-test cleanup re-check REGRESSION: restored stop-goal-fit.js no longer confirms a clean end-to-end pass for the dialect fixture: $(cat "$TMPDIR_EVAL/dialect-restore-e2e.out" "$TMPDIR_EVAL/dialect-restore-e2e.err")"
+fi
+
+# Canonical Flow is authoritative for an active scoped session. Parent-directory
+# symlinks and malformed run state must therefore fail closed instead of being
+# silently treated as a missing optional run.
+CANONICAL_UNSAFE_REPO="$TMPDIR_EVAL/canonical-unsafe-repo"
+CANONICAL_UNSAFE_SESSION="$CANONICAL_UNSAFE_REPO/.kontourai/flow-agents/canonical-unsafe"
+mkdir -p "$CANONICAL_UNSAFE_SESSION"
+printf '# Test Repo\n' > "$CANONICAL_UNSAFE_REPO/AGENTS.md"
+cat > "$CANONICAL_UNSAFE_SESSION/canonical-unsafe--deliver.md" <<'MARKDOWN'
+# Canonical unsafe fixture
+
+status: executing
+type: deliver
+MARKDOWN
+cat > "$CANONICAL_UNSAFE_SESSION/state.json" <<'JSON'
+{
+  "task_slug": "canonical-unsafe",
+  "status": "executing",
+  "phase": "execution",
+  "flow_run": { "status": "active", "current_step": "verify" }
+}
+JSON
+cat > "$CANONICAL_UNSAFE_REPO/.kontourai/flow-agents/current.json" <<'JSON'
+{ "active_slug": "canonical-unsafe" }
+JSON
+CANONICAL_OUTSIDE="$TMPDIR_EVAL/canonical-outside"
+mkdir -p "$CANONICAL_OUTSIDE"
+ln -s "$CANONICAL_OUTSIDE" "$CANONICAL_UNSAFE_REPO/.kontourai/flow"
+if FLOW_AGENTS_GOAL_FIT_STRICT=true node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/canonical-symlink.out" 2>"$TMPDIR_EVAL/canonical-symlink.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$CANONICAL_UNSAFE_REPO"}
+JSON
+then
+  _fail "strict goal-fit hook allowed an active scoped session with a symlinked canonical Flow parent"
+elif [[ "$?" -eq 2 ]] && grep -q 'canonical Flow state is unsafe or malformed' "$TMPDIR_EVAL/canonical-symlink.err"; then
+  _pass "strict goal-fit hook rejects symlinked canonical Flow parent components for an active scoped session"
+else
+  _fail "strict goal-fit hook did not report the unsafe canonical Flow parent: $(cat "$TMPDIR_EVAL/canonical-symlink.err")"
+fi
+
+rm "$CANONICAL_UNSAFE_REPO/.kontourai/flow"
+mkdir -p "$CANONICAL_UNSAFE_REPO/.kontourai/flow/runs/canonical-unsafe"
+printf 'not-json\n' > "$CANONICAL_UNSAFE_REPO/.kontourai/flow/runs/canonical-unsafe/state.json"
+if FLOW_AGENTS_GOAL_FIT_STRICT=true node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/canonical-malformed.out" 2>"$TMPDIR_EVAL/canonical-malformed.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$CANONICAL_UNSAFE_REPO"}
+JSON
+then
+  _fail "strict goal-fit hook allowed an active scoped session with malformed canonical Flow state"
+elif [[ "$?" -eq 2 ]] && grep -q 'canonical Flow state is unsafe or malformed' "$TMPDIR_EVAL/canonical-malformed.err"; then
+  _pass "strict goal-fit hook fails closed for malformed canonical Flow state of an active scoped session"
+else
+  _fail "strict goal-fit hook did not report malformed canonical Flow state: $(cat "$TMPDIR_EVAL/canonical-malformed.err")"
+fi
+
+if cmp -s "$ROOT/scripts/hooks/stop-goal-fit.js" "$ROOT/context/scripts/hooks/stop-goal-fit.js"; then
+  _pass "canonical Stop hook source and shipped context mirror remain byte-identical"
+else
+  _fail "canonical Stop hook source and shipped context mirror diverged"
 fi
 
 

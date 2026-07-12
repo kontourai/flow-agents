@@ -1,0 +1,90 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { inferExecutedTestCount, isMeaningfulTestCommand, testExecutionProof } from "../../build/src/cli/workflow-sidecar.js";
+
+function fixture(files) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-test-proof-"));
+  for (const [name, content] of Object.entries(files)) {
+    const file = path.join(root, name);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, content);
+  }
+  return root;
+}
+
+test("fake Vitest-looking stdout is not test execution proof", () => {
+  const root = fixture({
+    "package.json": JSON.stringify({ scripts: { test: "node fake-vitest.mjs" } }),
+    "fake-vitest.mjs": 'console.log("Tests 999 passed");\n',
+  });
+
+  assert.equal(isMeaningfulTestCommand("npm test", root), false);
+  assert.equal(testExecutionProof("npm test", root), null);
+  assert.equal(inferExecutedTestCount("npm test", root, "Tests 999 passed\n"), 0);
+});
+
+test("package-script output cannot manufacture a positive test count", () => {
+  const root = fixture({
+    "package.json": JSON.stringify({ scripts: { test: 'echo "# tests 999"' } }),
+  });
+
+  assert.equal(isMeaningfulTestCommand("npm test", root), false);
+  assert.equal(inferExecutedTestCount("npm test", root, "# tests 999\n"), 0);
+});
+
+test("supported node test workflows produce source-derived local proof", () => {
+  const root = fixture({
+    "package.json": JSON.stringify({ scripts: { test: "node --test test/contract.test.mjs" } }),
+    "test/contract.test.mjs": 'import test from "node:test";\ntest("contract", () => {});\n',
+  });
+
+  const proof = testExecutionProof("npm test", root);
+  assert.deepEqual(proof, { kind: "local-process-exit", runner: "node --test", static_test_units: 1 });
+  assert.equal(inferExecutedTestCount("npm test", root, "# tests 0\n"), 0);
+  assert.equal(inferExecutedTestCount("npm test", root, "# tests 1\n"), 1);
+  assert.equal(inferExecutedTestCount("npm test", root, "ℹ tests 1\n"), 1);
+});
+
+test("empty suite declarations are not counted as executed test cases", () => {
+  const root = fixture({
+    "package.json": JSON.stringify({ scripts: { test: "node --test test/empty.test.mjs" } }),
+    "test/empty.test.mjs": 'import { describe } from "node:test";\ndescribe("empty", () => {});\n',
+  });
+
+  assert.equal(testExecutionProof("npm test", root), null);
+  assert.equal(inferExecutedTestCount("npm test", root, "# tests 0\n"), 0);
+});
+
+test("runner-shaped executable names require explicit files with test cases", () => {
+  const root = fixture({
+    "pytest": "#!/bin/sh\nexit 0\n",
+    "test/contract_test.py": "def test_contract():\n    assert True\n",
+  });
+
+  assert.equal(testExecutionProof("./pytest", root), null);
+  assert.equal(testExecutionProof("./pytest test/contract_test.py", root), null);
+  assert.deepEqual(testExecutionProof("pytest test/contract_test.py", root), {
+    kind: "local-process-exit",
+    runner: "pytest",
+    static_test_units: 1,
+  });
+});
+
+test("cargo and go require substantive local test sources", () => {
+  const empty = fixture({ "Cargo.toml": "[package]\nname='empty'\nversion='0.1.0'\n", "go.mod": "module example.test/empty\n" });
+  assert.equal(testExecutionProof("cargo test", empty), null);
+  assert.equal(testExecutionProof("go test ./...", empty), null);
+
+  const covered = fixture({
+    "Cargo.toml": "[package]\nname='covered'\nversion='0.1.0'\n",
+    "src/lib.rs": "#[cfg(test)]\nmod tests { #[test] fn contract() { assert!(true); } }\n",
+    "go.mod": "module example.test/covered\n",
+    "contract_test.go": "package covered\nimport \"testing\"\nfunc TestContract(t *testing.T) {}\n",
+  });
+  assert.equal(testExecutionProof("cargo test", covered)?.static_test_units, 1);
+  assert.equal(testExecutionProof("go test ./...", covered)?.static_test_units, 1);
+});
