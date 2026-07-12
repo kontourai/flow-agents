@@ -113,6 +113,60 @@ flow_agents workflow archive --authorization-file archive.json
 state, and the canonical Flow run without rewriting either store. Its `next_action` is freshly
 derived from the canonical run, so a stale sidecar projection cannot misdirect recovery.
 
+## Bounded Continuation Driver
+
+`workflow drive` lets the active implementation assignment run multiple Flow steps without a
+human continuation prompt. Flow remains authoritative: the runtime adapter receives the current
+projected action, but its `completed` result means only that one model turn ended. The driver
+returns `done` only after the canonical Flow run is terminal.
+
+The adapter command is an explicit JSON argv file whose executable must be an absolute path. Flow
+Agents invokes it directly without a shell, writes one versioned continuation-turn request to stdin, and requires exactly one
+JSON result on stdout:
+
+```json
+{ "argv": ["/absolute/path/to/runtime-adapter", "--profile", "builder"] }
+```
+
+```json
+{ "status": "completed", "summary": "Turn ended; synchronize canonical evidence." }
+```
+
+An adapter may instead park on a process or deadline. A pending barrier is persisted and does not
+consume another turn when `workflow drive` is invoked again:
+
+```json
+{ "status": "wait", "barrier": { "kind": "pid", "pid": 12345 }, "summary": "Waiting for the verification process." }
+```
+
+```bash
+flow_agents workflow drive \
+  --session-dir .kontourai/flow-agents/example \
+  --adapter-command-file .kontourai/flow-agents/runtime-adapter.json \
+  --max-turns 6 \
+  --turn-timeout-ms 900000 \
+  --barrier-wait-ms 300000 \
+  --json
+```
+
+Driver state and its append-only event stream live under
+`.kontourai/flow-agents/<slug>/continuation-driver/`. The mission turn count survives reinvocation;
+subsequent invocations must use the same `--max-turns` value. The request contains the
+canonical run id, definition id, current step, projected `next_action`, iteration, and budget. It
+does not mutate or replace the runtime system prompt. Adapter errors are recorded as failed turns
+and fail open to canonical resynchronization and the next bounded turn; they cannot bypass the
+persisted mission budget. The Builder Flow projection supplies the canonical continue/wait/done/failed
+disposition, so the generic driver does not duplicate Flow lifecycle semantics. Human-decision and
+paused Flow states park, while remediable blocked and accepted-exception states continue; failed Flow
+runs stop as failed. Assignment ownership is revalidated before every adapter
+turn. A session-scoped process lock rejects concurrent drivers and safely removes unique lock files
+left by exited owners. The adapter argv plus the content digests of its executable and absolute
+regular-file arguments are bound to the mission on first invocation and rechecked before every turn.
+Adapter process groups are terminated after every non-wait result. In addition,
+state rollback or deletion is rejected when its append-only event history proves turns already
+started. These local coordination records detect accidental or in-process rollback; they are not a
+cryptographic boundary against a process that can rewrite the entire artifact directory.
+
 ## Compatibility Doctor
 
 Run doctor through the exact isolated package helper defined above:

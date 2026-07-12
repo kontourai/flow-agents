@@ -861,7 +861,9 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
   const complete = run.state.status === "completed";
   const paused = run.state.status === "paused";
   const canceled = run.state.status === "canceled";
-  const action = complete || paused || canceled ? { skills: [], operations: [] } : stepAction(run.definitionId, run.state.current_step);
+  const needsDecision = run.state.status === "needs_decision";
+  const failed = run.state.status === "failed";
+  const action = complete || paused || canceled || needsDecision || failed ? { skills: [], operations: [] } : stepAction(run.definitionId, run.state.current_step);
   if (!action) {
     throw new BuilderBuildRunInputError("kit.flow_step_actions", `does not declare Builder step ${run.state.current_step}`);
   }
@@ -886,6 +888,10 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
       ? { status: "done", summary: "Canonical Flow run was canceled by an authorized external request. Artifacts are retained until separately archived." }
       : paused
         ? { status: "blocked", summary: "Canonical Flow run is paused. The current assignment actor may resume it with a reason." }
+      : needsDecision
+        ? { status: "blocked", summary: "Canonical Flow requires an external decision before continuation." }
+      : failed
+        ? { status: "failed", summary: "Canonical Flow run failed; no continuation turn is allowed." }
     : {
         status: "continue",
         summary: `Flow step \`${run.state.current_step}\`: ${skillText}${operationText} ${gateText}${routeText} Then synchronize the recorded evidence.`,
@@ -896,8 +902,8 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
   const phase = phaseForStep(definition.phase_map, run.state.current_step) ?? sidecar.phase;
   return {
     ...sidecar,
-    status: complete ? "delivered" : canceled ? "canceled" : paused ? "blocked" : (run.state.transitions.length > 0 ? "in_progress" : sidecar.status),
-    phase: complete || canceled ? "done" : phase,
+    status: complete ? "delivered" : canceled ? "canceled" : failed ? "failed" : (paused || needsDecision) ? "blocked" : (run.state.transitions.length > 0 ? "in_progress" : sidecar.status),
+    phase: complete || canceled || failed ? "done" : phase,
     updated_at: run.state.updated_at,
     flow_run: {
       run_id: run.runId,

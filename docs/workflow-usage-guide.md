@@ -663,6 +663,13 @@ the read-only `workflow status` projection without attaching evidence or advanci
 [`docs/spec/builder-flow-runtime.md`](spec/builder-flow-runtime.md) for the ownership,
 trust-binding, route-back, and artifact-root contract.
 
+For unattended runtime re-entry, the active assignment actor may use `workflow drive` with an
+explicit runtime adapter argv file. The driver repeats the same public projection/evidence cycle,
+persists its mission turn budget, and parks on adapter-declared PID or deadline barriers instead of
+spending turns while external work is incomplete. Adapter completion never advances a gate by
+self-report; only trust evidence accepted by canonical Flow can change the current step. See
+[`docs/public-workflow-cli.md`](public-workflow-cli.md#bounded-continuation-driver) for the protocol.
+
 If the same Builder slice is interrupted, inspect its canonical status. Resume
 only when the public status reports a paused run:
 

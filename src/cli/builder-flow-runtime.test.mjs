@@ -18,9 +18,11 @@ import {
   syncBuilderFlowSession,
 } from "../../build/src/builder-flow-runtime.js";
 import { builderLifecycleAuthorizationPayload, loadBuilderLifecycleAuthorization, recordAuthorizationConsumed } from "../../build/src/builder-lifecycle-authority.js";
+import { driveBuilderFlowSession } from "../../build/src/continuation-driver.js";
 import { cancelBuilderBuildRun } from "../../build/src/builder-flow-run-adapter.js";
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
+import { main as workflowMain } from "../../build/src/cli/workflow.js";
 import { buildTrustBundle, inferExecutedTestCount, main as workflowSidecarMain } from "../../build/src/cli/workflow-sidecar.js";
 
 const SUBJECT = "local:work-item/runtime-projection";
@@ -88,7 +90,7 @@ function claimSessionAssignment(session) {
     ttlSeconds: 1800,
     actorKey: ACTOR_KEY,
     branch: `agent/${session.slug}`,
-    artifactDir: session.sessionDir,
+    artifactDir: session.slug,
     workItemRef: SUBJECT,
     reason: "test",
   });
@@ -100,7 +102,7 @@ function claimAmbientSessionAssignment(session) {
     ttlSeconds: 1800,
     actorKey: ambient.actorKey,
     branch: `agent/${session.slug}`,
-    artifactDir: session.sessionDir,
+    artifactDir: session.slug,
     workItemRef: SUBJECT,
     reason: "test",
   });
@@ -363,6 +365,130 @@ test("small-model client can start and advance from projected actions without ch
   const duplicate = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
   assert.equal(duplicate.attached, false);
   assert.equal(duplicate.run.manifest.evidence.length, advanced.run.manifest.evidence.length);
+});
+
+test("Builder projection preserves Flow continuation semantics for exceptional statuses", async () => {
+  const session = makeSession("continuation-status-projection");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const stateFile = path.join(runDir(session.slug, session.projectRoot), "state.json");
+  const original = readJson(stateFile);
+  for (const [status, expected] of [
+    ["blocked", "continue"],
+    ["accepted_by_exception", "continue"],
+    ["needs_decision", "blocked"],
+    ["failed", "failed"],
+  ]) {
+    writeJson(stateFile, { ...original, status, next_action: `fixture ${status}` });
+    const recovered = await recoverBuilderFlowSession({ sessionDir: session.sessionDir });
+    assert.equal(recovered.projection.next_action.status, expected, status);
+  }
+});
+
+test("continuation driver advances two real FlowDefinition steps unattended", async () => {
+  const session = makeSession("continuation-driver-two-steps");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const visited = [];
+
+  const result = await driveBuilderFlowSession({
+    sessionDir: session.sessionDir,
+    maxTurns: 2,
+    execute: async (request) => {
+      visited.push(request.current_step);
+      if (request.current_step === "pull-work") {
+        writeBundle(session.sessionDir, [bundleClaim({
+          expectation: "selected-work",
+          claimType: "builder.pull-work.selected",
+          subjectType: "work-item",
+        })]);
+      } else if (request.current_step === "design-probe") {
+        writeBundle(session.sessionDir, [
+          bundleClaim({
+            expectation: "pickup-probe-readiness",
+            claimType: "builder.design-probe.pickup-readiness",
+            subjectType: "work-item",
+          }),
+          bundleClaim({
+            expectation: "probe-decisions-or-accepted-gaps",
+            claimType: "builder.design-probe.decisions",
+            subjectType: "decision",
+          }),
+        ]);
+      } else {
+        assert.fail(`unexpected continuation step ${request.current_step}`);
+      }
+      return { status: "completed", summary: `completed ${request.current_step}` };
+    },
+  });
+
+  assert.equal(result.outcome, "budget_exhausted");
+  assert.equal(result.turns_started, 2);
+  assert.deepEqual(visited, ["pull-work", "design-probe"]);
+  assert.equal(result.snapshot.current_step, "plan");
+  assert.equal(result.snapshot.next_action.skills[0], "plan-work");
+  const driverState = readJson(path.join(session.sessionDir, "continuation-driver", "state.json"));
+  assert.equal(driverState.status, "budget_exhausted");
+  assert.equal(driverState.turns_started, 2);
+  const events = fs.readFileSync(path.join(session.sessionDir, "continuation-driver", "events.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
+  assert.deepEqual(events.filter((event) => event.type === "turn_started").map((event) => event.current_step), ["pull-work", "design-probe"]);
+});
+
+test("public workflow drive invokes an explicit adapter but preserves canonical completion authority", async () => {
+  const session = makeSession("continuation-driver-cli");
+  claimAmbientSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const adapter = path.join(session.projectRoot, "adapter.mjs");
+  const commandFile = path.join(session.projectRoot, "adapter-command.json");
+  fs.writeFileSync(adapter, `
+    import fs from "node:fs";
+    let input = "";
+    for await (const chunk of process.stdin) input += chunk;
+    fs.writeFileSync("adapter-request.json", input);
+    process.stdout.write(JSON.stringify({ status: "completed", summary: "adapter says done" }));
+  `);
+  writeJson(commandFile, { argv: [process.execPath, adapter] });
+
+  const rc = await workflowMain([
+    "drive",
+    "--session-dir", session.sessionDir,
+    "--adapter-command-file", commandFile,
+    "--max-turns", "1",
+    "--turn-timeout-ms", "5000",
+    "--barrier-wait-ms", "0",
+    "--json",
+  ]);
+
+  assert.equal(rc, 0);
+  const request = readJson(path.join(session.projectRoot, "adapter-request.json"));
+  assert.equal(request.current_step, "pull-work");
+  assert.deepEqual(request.next_action.skills, ["pull-work"]);
+  assert.equal(Object.hasOwn(request, "system_prompt"), false);
+  const driverState = readJson(path.join(session.sessionDir, "continuation-driver", "state.json"));
+  assert.equal(driverState.status, "budget_exhausted");
+  const canonical = await recoverBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(canonical.run.state.status, "active");
+  assert.equal(canonical.run.state.current_step, "pull-work");
+});
+
+test("public workflow drive rejects a non-owner before adapter execution", async () => {
+  const session = makeSession("continuation-driver-owner");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const marker = path.join(session.projectRoot, "adapter-ran");
+  const adapter = path.join(session.projectRoot, "adapter.mjs");
+  const commandFile = path.join(session.projectRoot, "adapter-command.json");
+  fs.writeFileSync(adapter, `
+    import fs from "node:fs";
+    fs.writeFileSync(${JSON.stringify(marker)}, "ran");
+    process.stdout.write(JSON.stringify({ status: "completed" }));
+  `);
+  writeJson(commandFile, { argv: [process.execPath, adapter] });
+
+  await assert.rejects(
+    workflowMain(["drive", "--session-dir", session.sessionDir, "--adapter-command-file", commandFile]),
+    /active, matching assignment actor/,
+  );
+  assert.equal(fs.existsSync(marker), false);
+  assert.equal(fs.existsSync(path.join(session.sessionDir, "continuation-driver")), false);
 });
 
 test("sync attaches the staged trust.bundle bytes when the session bundle is replaced", async () => {
