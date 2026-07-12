@@ -71,6 +71,39 @@ else
   _fail "Codex portable skills are not rooted exclusively at .agents/skills"
 fi
 
+if [[ ! -e "$DIST_DIR/codex/AGENTS.md" ]] \
+  && grep -q 'Generated from the canonical source' "$DIST_DIR/codex/README.md" \
+  && grep -q '## Exported agents' "$DIST_DIR/codex/README.md" \
+  && grep -q '`tool-worker`' "$DIST_DIR/codex/README.md" \
+  && ! grep -q 'Universal Agent Bundle (Codex)' "$DIST_DIR/codex/README.md"; then
+  _pass "Codex provenance and agent inventory are documentation, not global instructions"
+else
+  _fail "Codex bundle still exposes generated global instructions or lost README discovery metadata"
+fi
+
+if (cd "$ROOT_DIR" && node scripts/audit-codex-legacy-agents.js packaging/codex-legacy-agents-fingerprints.json >/tmp/codex-legacy-agents-audit.txt 2>&1) \
+  && grep -q 'Audited 14 seed-capable releases; 1 unique payload(s); gaps=0' /tmp/codex-legacy-agents-audit.txt; then
+  _pass "Codex legacy fingerprint catalog independently covers all seed-capable release tags"
+else
+  _fail "Codex legacy fingerprint catalog is incomplete, stale, or not byte-reproducible"
+fi
+
+if node - "$ROOT_DIR/scripts/classify-codex-legacy-agents.js" <<'NODE'
+const fs = require("node:fs");
+const source = fs.readFileSync(process.argv[2], "utf8");
+for (const forbidden of ["renameSync", "unlinkSync", "writeFileSync", "copyFileSync", "mkdirSync", "chmodSync", "MIGRATION_TEST", "--apply", "quarantine", "mv --", "rm --", "cp --"]) {
+  if (source.includes(forbidden)) throw new Error(`production classifier contains destructive/test path: ${forbidden}`);
+}
+for (const required of ["lstatSync", "openSync", "O_RDONLY", "O_NOFOLLOW", "fstatSync", "readFileSync(fd)", "createHash", "manual remediation checklist", "shellQuote"]) {
+  if (!source.includes(required)) throw new Error(`production classifier missing read-only behavior: ${required}`);
+}
+NODE
+then
+  _pass "Codex legacy classifier is read-only and exposes no production apply or test hooks"
+else
+  _fail "Codex legacy classifier contains mutation/apply/test-hook behavior"
+fi
+
 if node - "$DIST_DIR/codex/.agents/skills" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");

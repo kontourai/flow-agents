@@ -288,6 +288,11 @@ function exportTargetReadme(label: string, installHint: string, extra = ""): str
   return `# ${label} Bundle\n\nGenerated from the canonical source in this repository.\n\n## Install\n\n\`\`\`bash\n${installHint}\n\`\`\`\n\nThe install ships the full standalone base (skills, agents, powers) plus the\nFlow Kits. Kit depth is activated through the Kit Catalog, not at install time.\n\n## Contents\n\n- Harness-specific agents\n- Shared skills\n- Shared context, powers, prompts, scripts, and evals\n${extra}`;
 }
 
+function exportCodexReadme(agents: Agent[]): string {
+  const inventory = `\n## Exported agents\n\nThe following Codex agent definitions were generated from the canonical agent specifications in this repository. This inventory is documentation, not agent instructions.\n\n${generatedAgentsSummary(agents)}\n`;
+  return exportTargetReadme("Codex", "bash install.sh /path/to/workspace", `${inventory}${CODEX_LIVE_HOOKS_README}`);
+}
+
 function mapClaudeTools(allowedTools: unknown): string[] {
   const ordered: string[] = [];
   for (const tool of Array.isArray(allowedTools) ? allowedTools : []) {
@@ -491,8 +496,7 @@ function buildCodex(agents: Agent[]): void {
   const skillsRoot = path.join(bundle, ".agents/skills");
   for (const { name, src } of collectAllSkills()) exportSkillPackage(src, path.join(skillsRoot, name), "codex");
   validateExportedSkillPackages(skillsRoot);
-  writeText(path.join(bundle, "AGENTS.md"), exportRootAgentsMd("Codex", targetAgents, manifest.codex.task_dir));
-  writeText(path.join(bundle, "README.md"), exportTargetReadme("Codex", "bash install.sh /path/to/workspace", CODEX_LIVE_HOOKS_README));
+  writeText(path.join(bundle, "README.md"), exportCodexReadme(targetAgents));
   writeText(path.join(bundle, "install.sh"), installScript("Codex", "/path/to/workspace", undefined, undefined, { configRelPath: ".codex/hooks.json", managedConfigRelPath: ".codex/hooks.json", runtime: "codex", version: pkgVersion }));
   fs.chmodSync(path.join(bundle, "install.sh"), 0o755);
 }

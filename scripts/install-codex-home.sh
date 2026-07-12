@@ -217,6 +217,12 @@ node "$ROOT_DIR/scripts/install-owned-files.js" \
 node "$ROOT_DIR/scripts/install-owned-files.js" \
   --check "$FA_OWNED_OVERLAY" "$DEST_REAL" ".flow-agents/codex-install-manifest.json"
 
+# Refuse an exact historical Flow Agents global instruction file after both
+# install destinations pass read-only preflight and before any install write.
+# The classifier is intentionally read-only; remediation is operator-owned.
+node "$ROOT_DIR/scripts/classify-codex-legacy-agents.js" \
+  "$DEST_REAL" "$ROOT_DIR/packaging/codex-legacy-agents-fingerprints.json"
+
 mkdir -p "$SKILLS_DIR"
 SKILLS_DIR="$(cd "$SKILLS_DIR" && pwd -P)"
 node "$ROOT_DIR/scripts/install-owned-files.js" \
@@ -251,13 +257,8 @@ atomic_copy() {
   mv -f "$temp" "$target"
 }
 
-# Root Codex config/profiles and AGENTS.md may be user-owned in ~/.codex.
-# Seed Flow Agents defaults only when absent.
-for seed_file in AGENTS.md; do
-  if [[ -f "$ROOT_DIR/dist/codex/$seed_file" && ! -e "$DEST/$seed_file" ]]; then
-    atomic_copy "$ROOT_DIR/dist/codex/$seed_file" "$seed_file"
-  fi
-done
+# Root Codex config/profiles may be user-owned. Flow Agents does not install or
+# seed global AGENTS.md instructions.
 generated_profile_files=()
 profile_names=()
 for seed_source in "$ROOT_DIR/dist/codex/.codex/config.toml" "$ROOT_DIR"/dist/codex/.codex/*.config.toml; do
