@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.10.0](https://github.com/kontourai/flow-agents/compare/v3.9.0...v3.10.0) (2026-07-13)
+
+
+### Features
+
+* **telemetry:** per-turn model/tokens/cost on tool events ([#568](https://github.com/kontourai/flow-agents/issues/568) slice 1) ([80ac0e7](https://github.com/kontourai/flow-agents/commit/80ac0e73a524fb1f84f0bffac94fe78ce4883b74))
+* **telemetry:** per-turn model/tokens/cost on tool events ([#568](https://github.com/kontourai/flow-agents/issues/568) slice 1) ([2b6276d](https://github.com/kontourai/flow-agents/commit/2b6276d42b30123a61b3d9a9181ebd77affc0e70))
+
+
+### Fixes
+
+* **#440:** scope ownership signals to the actor's own per-actor pointer ([#586](https://github.com/kontourai/flow-agents/issues/586)) ([7a8fc82](https://github.com/kontourai/flow-agents/commit/7a8fc82f22201fd916631beff6bb85fe288d461e))
+* **liveness:** identify Codex actors by thread ([#556](https://github.com/kontourai/flow-agents/issues/556)) ([5ac02cb](https://github.com/kontourai/flow-agents/commit/5ac02cbc6f374d0b75bc03c4230f6d255568693a))
+* **packaging:** preserve runtime instruction files ([#575](https://github.com/kontourai/flow-agents/issues/575)) ([f55d288](https://github.com/kontourai/flow-agents/commit/f55d28839bf87f35aaecb5a7aae0ba7fe55f51c7))
+* **packaging:** stop seeding Codex global instructions ([#573](https://github.com/kontourai/flow-agents/issues/573)) ([2d25cb6](https://github.com/kontourai/flow-agents/commit/2d25cb65af2b5403a164a645ae615e2388681640))
+* resolve continuation validator from installed runtime ([#591](https://github.com/kontourai/flow-agents/issues/591)) ([86191c4](https://github.com/kontourai/flow-agents/commit/86191c4e39abcb3123b8823f4604ca7183d0be83))
+
 ## [3.9.0](https://github.com/kontourai/flow-agents/compare/v3.8.0...v3.9.0) (2026-07-12)
 
 
