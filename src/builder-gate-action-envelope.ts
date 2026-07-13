@@ -124,6 +124,8 @@ export type GateActionEnvelope = {
 
 export type GateActionProgressSnapshot = Pick<GateActionEnvelope["progress"], "canonical_evidence" | "observed_artifacts"> & {
   current_step: string;
+  /** Optional for compatibility with snapshots persisted before terminal status capture. */
+  canonical_status?: string;
 };
 
 export type GateActionPriorProgress = {
@@ -173,6 +175,21 @@ export function deriveBuilderGateActionEnvelope(input: BuilderGateActionEnvelope
   const envelope = assembleGateActionEnvelope(input, loaded, derived);
   assertBoundedEnvelope(envelope);
   return envelope;
+}
+
+/**
+ * Canonical progress is useful after a run becomes terminal, when no adapter
+ * action envelope may be emitted. Keep this deliberately separate from the
+ * request-only envelope so terminal snapshots cannot be mistaken for work.
+ */
+export function deriveBuilderGateActionProgressSnapshot(input: BuilderGateActionEnvelopeInput): GateActionProgressSnapshot {
+  const { actions } = loadGateAction(input);
+  return {
+    current_step: input.run.state.current_step,
+    canonical_status: input.run.state.status,
+    canonical_evidence: canonicalEvidence(input.run.manifest),
+    observed_artifacts: observeBuilderArtifactsForProgress(input.sessionDir, actions.flatMap((entry) => entry.artifacts)),
+  };
 }
 
 function loadGateAction(input: BuilderGateActionEnvelopeInput): LoadedGateAction {
@@ -291,6 +308,7 @@ function envelopeStopCondition(
 export function gateActionProgressSnapshot(envelope: GateActionEnvelope): GateActionProgressSnapshot {
   return {
     current_step: envelope.flow.current_step,
+    canonical_status: envelope.flow.status,
     canonical_evidence: [...envelope.progress.canonical_evidence],
     observed_artifacts: [...envelope.progress.observed_artifacts],
   };

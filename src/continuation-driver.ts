@@ -26,6 +26,8 @@ export type ContinuationSnapshot = {
   next_action: Record<string, unknown> | null;
   /** Additive Builder-specific execution context. Generic adapters may ignore it. */
   gate_action_envelope?: GateActionEnvelope;
+  /** Canonical progress observation, available even when no action envelope is emitted. */
+  progress_snapshot?: GateActionProgressSnapshot;
 };
 
 export type ContinuationTurnRequest = {
@@ -107,6 +109,13 @@ export interface ContinuationStateStore {
   load(): ContinuationDriverState | null;
   save(state: ContinuationDriverState): void;
   append(event: ContinuationDriverEvent): void;
+}
+
+/**
+ * Optional durable accepted-turn journal. Kept separate so existing stores that
+ * only implement load/save/append remain valid continuation drivers.
+ */
+export interface ContinuationAcceptedTurnJournal {
   captureAcceptedTurn(turn: ContinuationAcceptedTurn): void;
   acceptedTurns(): ContinuationAcceptedTurn[];
 }
@@ -346,7 +355,7 @@ async function recordAcceptedTurn(
 ): Promise<MissionPosition> {
   let measured = await synchronizeTurnMeasurement(input, state, previous, request, result, now);
   const capture = measured.state.active_turn_capture!;
-  input.store.captureAcceptedTurn(capture);
+  acceptedTurnJournal(input.store)?.captureAcceptedTurn(capture);
   if (input.onTurnAccepted) await captureAcceptedTurn(input.onTurnAccepted, request, result);
   if (result.status === "wait") return parkAcceptedTurn(input, measured, result, now);
   appendEvent(input.store, measured.state, measured.snapshot, "turn_completed", now, {
@@ -489,6 +498,7 @@ function builderSessionSnapshot(result: Awaited<ReturnType<typeof inspectBuilder
     next_action: nextAction && typeof nextAction === "object" && !Array.isArray(nextAction)
       ? structuredClone(nextAction as Record<string, unknown>)
       : null,
+    progress_snapshot: structuredClone(result.progressSnapshot),
     ...(result.gateActionEnvelope ? { gate_action_envelope: structuredClone(result.gateActionEnvelope) } : {}),
   });
 }
@@ -558,7 +568,7 @@ function reconcileInterruptedTurn(
   if (state.active_turn_phase === "measured") {
     if (!state.active_turn_capture) throw new Error("continuation measured turn is missing its durable capture");
     const capture = state.active_turn_capture;
-    store.captureAcceptedTurn(capture);
+    acceptedTurnJournal(store)?.captureAcceptedTurn(capture);
     let recovered = capture.result.status === "wait"
       ? saveState(store, state, { status: "waiting", pending_barrier: capture.result.barrier }, now)
       : state;
@@ -594,14 +604,36 @@ function reconcileInterruptedTurn(
 
 function sameProgressSnapshot(left: GateActionProgressSnapshot, right: GateActionProgressSnapshot): boolean {
   return left.current_step === right.current_step
+    && sameCanonicalStatus(left.canonical_status, right.canonical_status)
     && left.canonical_evidence.length === right.canonical_evidence.length
     && left.canonical_evidence.every((entry, index) => entry === right.canonical_evidence[index])
     && left.observed_artifacts.length === right.observed_artifacts.length
     && left.observed_artifacts.every((entry, index) => entry === right.observed_artifacts[index]);
 }
 
+function isTerminalCanonicalStatus(status: string | undefined): boolean {
+  return status === "completed" || status === "failed";
+}
+
+function sameCanonicalStatus(left: string | undefined, right: string | undefined): boolean {
+  if (left === right) return true;
+  // Pre-status snapshots remain compatible while active. A newly observed
+  // terminal status is still a real canonical transition from legacy state.
+  if (left === undefined) return !isTerminalCanonicalStatus(right);
+  if (right === undefined) return !isTerminalCanonicalStatus(left);
+  return false;
+}
+
 function progressSnapshot(snapshot: ContinuationSnapshot): GateActionProgressSnapshot | null {
+  if (snapshot.progress_snapshot) return structuredClone(snapshot.progress_snapshot);
   return snapshot.gate_action_envelope ? gateActionProgressSnapshot(snapshot.gate_action_envelope) : null;
+}
+
+function acceptedTurnJournal(store: ContinuationStateStore): ContinuationAcceptedTurnJournal | null {
+  const candidate = store as Partial<ContinuationAcceptedTurnJournal>;
+  return typeof candidate.captureAcceptedTurn === "function" && typeof candidate.acceptedTurns === "function"
+    ? candidate as ContinuationAcceptedTurnJournal
+    : null;
 }
 
 function initialProgress(): GateActionPriorProgress {
@@ -621,7 +653,9 @@ function measureProgress(
   after: GateActionProgressSnapshot | null,
 ): { snapshot: GateActionProgressSnapshot; delta: GateActionPriorProgress } | null {
   if (!before || !after) return null;
-  const stepAdvanced = before.current_step !== after.current_step;
+  const terminalStatusAdvanced = isTerminalCanonicalStatus(after.canonical_status)
+    && before.canonical_status !== after.canonical_status;
+  const stepAdvanced = before.current_step !== after.current_step || terminalStatusAdvanced;
   const evidenceAdded = after.canonical_evidence.filter((entry) => !before.canonical_evidence.includes(entry));
   const artifactChanges = after.observed_artifacts.filter((entry) => !before.observed_artifacts.includes(entry));
   const noProgress = !stepAdvanced && evidenceAdded.length === 0 && artifactChanges.length === 0;

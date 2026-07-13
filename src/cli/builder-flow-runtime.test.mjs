@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { createHash, generateKeyPairSync, sign, verify } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 
 import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, acceptException, defaultFlowConfig, flowConfigPath, runDir } from "@kontourai/flow";
 import {
@@ -19,7 +20,7 @@ import {
   syncBuilderFlowSession,
 } from "../../build/src/builder-flow-runtime.js";
 import { builderLifecycleAuthorizationPayload, loadBuilderLifecycleAuthorization, recordAuthorizationConsumed } from "../../build/src/builder-lifecycle-authority.js";
-import { driveBuilderFlowSession } from "../../build/src/continuation-driver.js";
+import { driveBuilderFlowSession, withContinuationDriverLock } from "../../build/src/continuation-driver.js";
 import { deriveBuilderGateActionEnvelope } from "../../build/src/builder-gate-action-envelope.js";
 import { WORKFLOW_CRITIQUE_STATUSES } from "../../build/src/cli/public-contracts.js";
 import { cancelBuilderBuildRun, startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js";
@@ -35,6 +36,8 @@ const ACTOR = { runtime: "codex", session_id: "runtime-projection", host: "test-
 const ACTOR_KEY = "codex:runtime-projection:test-host";
 const AUTHORITY_KEY_ID = "runtime-test";
 const AUTHORITY_KEYS = generateKeyPairSync("ed25519");
+const require = createRequire(import.meta.url);
+const activeTurnAuthority = require("../../scripts/hooks/lib/continuation-turn-authority.js");
 const AMBIENT_IDENTITY_ENV_KEYS = [
   "FLOW_AGENTS_ACTOR",
   "CODEX_THREAD_ID",
@@ -1594,6 +1597,53 @@ test("publish-change reports an external capability gap and self-authored result
   assert.equal(unchanged.run.state.current_step, "pr-open");
   assert.equal(unchanged.projection.next_action.status, "blocked");
   assert.equal(unchanged.run.manifest.evidence.some((entry) => entry.expectation_ids?.includes("pull-request-opened")), false);
+  const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
+  const beforeProjection = snapshotProjectionTargets(session);
+  const genericEvidenceArgs = ["evidence", "--session-dir", session.sessionDir, "--expectation", "pull-request-opened", "--status", "pass", "--summary", "self-completion", "--evidence-ref-json", JSON.stringify({ kind: "artifact", file: `.kontourai/flow-agents/${session.slug}/publish-change.result.json`, summary: "locally authored provider-shaped result" })];
+  await assert.rejects(
+    () => workflowMain(genericEvidenceArgs),
+    /operation-bound expectation.*authenticated external ChangeProvider/,
+  );
+  assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
+  assert.deepEqual(snapshotProjectionTargets(session), beforeProjection);
+
+  await withContinuationDriverLock(session.sessionDir, async (lock) => {
+    const driverDir = path.join(session.sessionDir, "continuation-driver");
+    writeJson(path.join(driverDir, "state.json"), {
+      schema_version: "1.0", run_id: session.slug, definition_id: "builder.build", max_turns: 1,
+      adapter_command_identity: "operation-rejection-test", status: "active", turns_started: 1,
+      active_turn_step: "pr-open", active_turn_public_key_digest: null, pending_barrier: null,
+    });
+    const issued = activeTurnAuthority.issueActiveTurnAuthority({
+      sessionDir: session.sessionDir,
+      runId: session.slug,
+      definitionId: "builder.build",
+      currentStep: "pr-open",
+      iteration: 1,
+      maxTurns: 1,
+      adapterCommandIdentity: "operation-rejection-test",
+      assignmentActor: ambient.actorKey,
+      assignmentActorStruct: ambient.actor,
+      lock,
+      timeoutMs: 10_000,
+    });
+    writeJson(path.join(driverDir, "state.json"), {
+      ...readJson(path.join(driverDir, "state.json")),
+      active_turn_public_key_digest: issued.publicKeyDigest,
+    });
+    const signedEnv = {
+      ...process.env,
+      FLOW_AGENTS_CONTINUATION_RUN_ID: issued.runId,
+      FLOW_AGENTS_CONTINUATION_TURN_SECRET: issued.turnSecret,
+    };
+    for (const key of AMBIENT_IDENTITY_ENV_KEYS) delete signedEnv[key];
+    const signed = spawnSync(process.execPath, [path.resolve(import.meta.dirname, "../../build/src/cli.js"), "workflow", ...genericEvidenceArgs], { cwd: session.projectRoot, encoding: "utf8", env: signedEnv });
+    assert.notEqual(signed.status, 0);
+    assert.match(signed.stderr, /operation-bound expectation.*authenticated external ChangeProvider/);
+    assert.equal(issued.cleanup(), true);
+  });
+  assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
+  assert.deepEqual(snapshotProjectionTargets(session), beforeProjection);
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
 });
 

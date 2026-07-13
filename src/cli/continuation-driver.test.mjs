@@ -35,14 +35,25 @@ function snapshot(step, status = "active") {
   };
 }
 
-function envelopeSnapshot(step, { evidence = [], artifacts = [], implementationAllowed = false } = {}) {
-  const value = snapshot(step);
+function envelopeSnapshot(step, { evidence = [], artifacts = [], implementationAllowed = false, status = "active" } = {}) {
+  const value = snapshot(step, status);
   value.gate_action_envelope = {
     schema_version: "1.0",
-    flow: { current_step: step },
+    flow: { current_step: step, status },
     action: { implementation_allowed: implementationAllowed },
     stop_condition: { kind: "one_turn", adapter_evidence_is_gate_evidence: false },
     progress: { canonical_evidence: evidence, observed_artifacts: artifacts },
+  };
+  return value;
+}
+
+function terminalProgressSnapshot(status, { step = "learn", evidence = [], artifacts = [] } = {}) {
+  const value = snapshot(step, status);
+  value.progress_snapshot = {
+    current_step: step,
+    canonical_status: status,
+    canonical_evidence: evidence,
+    observed_artifacts: artifacts,
   };
   return value;
 }
@@ -195,6 +206,65 @@ test("conforming canonical advancement and same-step evidence/artifact progress 
   assert.equal(sameStepStore.events.some((event) => event.type === "gate_not_advanced"), true, "legacy same-step event remains compatible");
 });
 
+test("accepted turns retain final progress when canonical Flow becomes done or failed without a terminal action envelope", async (t) => {
+  for (const [status, outcome] of [["completed", "done"], ["failed", "failed"]]) await t.test(outcome, async () => {
+    const store = memoryStore();
+    let terminal = false;
+    const result = await runContinuationDriver({
+      maxTurns: 1,
+      store,
+      runtime: {
+        inspect: async () => envelopeSnapshot("learn", { evidence: ["learn:before"], artifacts: ["learning.json:before"] }),
+        synchronize: async () => terminal
+          ? terminalProgressSnapshot(status, { evidence: ["learn:before"], artifacts: ["learning.json:before"] })
+          : envelopeSnapshot("learn", { evidence: ["learn:before"], artifacts: ["learning.json:before"] }),
+        execute: async () => { terminal = true; return { status: "completed" }; },
+      },
+    });
+    assert.equal(result.outcome, outcome);
+    assert.equal(Object.hasOwn(result.snapshot, "gate_action_envelope"), false);
+    assert.equal(result.snapshot.current_step, "learn");
+    assert.equal(result.snapshot.progress_snapshot.current_step, "learn");
+    assert.equal(result.snapshot.progress_snapshot.canonical_status, status);
+    const completed = store.events.find((event) => event.type === "turn_completed");
+    assert.equal(completed.progress.step_advanced, true);
+    assert.deepEqual(completed.progress.evidence_added, []);
+    assert.deepEqual(completed.progress.artifact_changes, []);
+    assert.equal(completed.progress.no_progress, false);
+    assert.equal(store.value().prior_progress.stagnation, "none");
+  });
+});
+
+test("progress snapshot canonical status is additive and validated", async () => {
+  const legacy = snapshot("plan");
+  legacy.progress_snapshot = { current_step: "plan", canonical_evidence: [], observed_artifacts: [] };
+  const legacyResult = await runContinuationDriver({
+    maxTurns: 1,
+    store: memoryStore(),
+    runtime: {
+      inspect: async () => legacy,
+      synchronize: async () => legacy,
+      execute: async () => ({ status: "completed" }),
+    },
+  });
+  assert.equal(legacyResult.outcome, "budget_exhausted");
+
+  const malformed = structuredClone(legacy);
+  malformed.progress_snapshot.canonical_status = 42;
+  await assert.rejects(
+    runContinuationDriver({
+      maxTurns: 1,
+      store: memoryStore(),
+      runtime: {
+        inspect: async () => malformed,
+        synchronize: async () => malformed,
+        execute: async () => ({ status: "completed" }),
+      },
+    }),
+    /progress snapshot is malformed/,
+  );
+});
+
 test("failed adapter turns record canonical artifact progress and repeated no-progress becomes stagnant", async () => {
   const failedStore = memoryStore();
   let artifactAdded = false;
@@ -293,18 +363,10 @@ test("reinvocation counts one interrupted unchanged turn as no progress exactly 
 
 test("interrupted turns are reconciled before waiting and terminal disposition branches", async (t) => {
   for (const [name, canonical, expectedOutcome] of [
-    ["waiting", envelopeSnapshot("verify", { evidence: [] }), "waiting"],
-    ["terminal", envelopeSnapshot("done", { evidence: [] }), "done"],
+    ["waiting", envelopeSnapshot("verify", { status: "paused" }), "waiting"],
+    ["terminal", terminalProgressSnapshot("completed", { step: "verify" }), "done"],
   ]) await t.test(name, async () => {
-    if (name === "waiting") {
-      canonical.status = "paused";
-      canonical.disposition = "waiting";
-    } else {
-      canonical.status = "completed";
-      canonical.disposition = "done";
-    }
-    const baseline = { current_step: canonical.flow?.current_step ?? canonical.gate_action_envelope.flow.current_step, canonical_evidence: [], observed_artifacts: [] };
-    baseline.current_step = name === "terminal" ? "verify" : canonical.current_step;
+    const baseline = { current_step: "verify", canonical_status: "active", canonical_evidence: [], observed_artifacts: [] };
     const store = memoryStore({
       schema_version: "1.0", run_id: "run-251", definition_id: "builder.build", max_turns: 2,
       adapter_command_identity: null, status: "active", turns_started: 1, active_turn_step: "verify",
@@ -320,6 +382,36 @@ test("interrupted turns are reconciled before waiting and terminal disposition b
     assert.ok(recovered);
     assert.equal(recovered.progress.no_progress, name === "waiting");
     assert.equal(recovered.progress.step_advanced, name === "terminal");
+  });
+});
+
+test("interruption recovery retains final terminal progress snapshots", async (t) => {
+  for (const [status, outcome] of [["completed", "done"], ["failed", "failed"]]) await t.test(outcome, async () => {
+    const baseline = { current_step: "learn", canonical_status: "active", canonical_evidence: ["learn:before"], observed_artifacts: ["learning.json:before"] };
+    const store = memoryStore({
+      schema_version: "1.0", run_id: "run-251", definition_id: "builder.build", max_turns: 2,
+      adapter_command_identity: null, status: "active", turns_started: 1, active_turn_step: "learn",
+      active_turn_public_key_digest: null, active_turn_phase: "started", active_turn_progress: baseline,
+      last_progress: baseline, prior_progress: null, pending_barrier: null, updated_at: "2026-07-13T12:00:00.000Z",
+    });
+    const result = await runContinuationDriver({
+      maxTurns: 2,
+      store,
+      runtime: {
+        inspect: async () => terminalProgressSnapshot(status, { evidence: ["learn:before"], artifacts: ["learning.json:before"] }),
+        synchronize: async () => terminalProgressSnapshot(status, { evidence: ["learn:before"], artifacts: ["learning.json:before"] }),
+        execute: async () => assert.fail("terminal recovery must not execute"),
+      },
+    });
+    assert.equal(result.outcome, outcome);
+    assert.equal(result.snapshot.current_step, "learn");
+    assert.equal(result.snapshot.progress_snapshot.canonical_status, status);
+    const recovered = store.events.find((event) => event.type === "turn_recovered");
+    assert.equal(recovered.progress.step_advanced, true);
+    assert.deepEqual(recovered.progress.evidence_added, []);
+    assert.deepEqual(recovered.progress.artifact_changes, []);
+    assert.equal(recovered.progress.no_progress, false);
+    assert.deepEqual(store.value().prior_progress, recovered.progress);
   });
 });
 
@@ -632,6 +724,28 @@ test("unsigned adapters retain extension-field compatibility", async () => {
   assert.equal(result.outcome, "budget_exhausted");
   assert.equal(store.events.some((event) => event.type === "turn_completed"), true);
   assert.equal(store.events.some((event) => event.type === "turn_failed"), false);
+});
+
+test("legacy continuation stores remain compatible without accepted-turn journaling", async () => {
+  let value = null;
+  const events = [];
+  const store = {
+    load: () => value,
+    save: (next) => { value = structuredClone(next); },
+    append: (event) => { events.push(structuredClone(event)); },
+  };
+  const result = await runContinuationDriver({
+    maxTurns: 1,
+    store,
+    runtime: {
+      inspect: async () => snapshot("plan"),
+      synchronize: async () => snapshot("plan"),
+      execute: async () => ({ status: "completed", summary: "legacy store turn" }),
+    },
+  });
+  assert.equal(result.outcome, "budget_exhausted");
+  assert.equal(value.active_turn_phase, null);
+  assert.equal(events.some((event) => event.type === "turn_completed"), true);
 });
 
 test("adapter errors fail open to another bounded turn and remain auditable", async () => {

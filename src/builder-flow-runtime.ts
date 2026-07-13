@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { flowAgentsPackageVersion } from "./lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "./lib/pinned-cli-command.js";
-import { deriveBuilderGateActionEnvelope, type GateActionEnvelope } from "./builder-gate-action-envelope.js";
+import { deriveBuilderGateActionEnvelope, deriveBuilderGateActionProgressSnapshot, type GateActionEnvelope, type GateActionProgressSnapshot } from "./builder-gate-action-envelope.js";
 import {
   evaluateGate,
   expectationsForGate,
@@ -53,6 +53,8 @@ export interface BuilderFlowSessionResult {
   projection: AnyRecord;
   /** Ephemeral adapter context; deliberately excluded from durable state.json projection. */
   gateActionEnvelope: GateActionEnvelope | null;
+  /** Canonical progress observation, retained even when terminal runs emit no action envelope. */
+  progressSnapshot: GateActionProgressSnapshot;
   attached: boolean;
 }
 
@@ -140,7 +142,7 @@ export async function recoverBuilderFlowSession(input: BuilderFlowSessionInput):
     runId: context.slug,
   });
   assertRunSubjectBinding(run, subject);
-  const { projection, gateActionEnvelope } = projectFlowRun(context, run, sidecarSnapshot.state);
+  const { projection, gateActionEnvelope, progressSnapshot } = projectFlowRun(context, run, sidecarSnapshot.state);
   writeProjection(context, projection, sidecarSnapshot.raw, "recovery");
   return {
     sessionDir: context.sessionDir,
@@ -148,6 +150,7 @@ export async function recoverBuilderFlowSession(input: BuilderFlowSessionInput):
     run,
     projection,
     gateActionEnvelope,
+    progressSnapshot,
     attached: false,
   };
 }
@@ -158,13 +161,14 @@ export async function inspectBuilderFlowSession(input: BuilderFlowSessionInput):
   const subject = workflowSubject(sidecarSnapshot.state);
   const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
   assertRunSubjectBinding(run, subject);
-  const { projection, gateActionEnvelope } = projectFlowRun(context, run, sidecarSnapshot.state);
+  const { projection, gateActionEnvelope, progressSnapshot } = projectFlowRun(context, run, sidecarSnapshot.state);
   return {
     sessionDir: context.sessionDir,
     projectRoot: context.projectRoot,
     run,
     projection,
     gateActionEnvelope,
+    progressSnapshot,
     attached: false,
   };
 }
@@ -188,10 +192,10 @@ export async function cancelBuilderFlowSession(input: BuilderFlowAuthorizedLifec
       reason: `canonical Flow run canceled by ${prepared.authorization.request.authority.request_ref}`,
       tolerateNoActiveClaim: true,
     });
-    const { projection, gateActionEnvelope } = projectFlowRun(prepared.context, changed, prepared.sidecarSnapshot.state);
+    const { projection, gateActionEnvelope, progressSnapshot } = projectFlowRun(prepared.context, changed, prepared.sidecarSnapshot.state);
     writeProjection(prepared.context, projection, prepared.sidecarSnapshot.raw, "cancellation projection");
     recordAuthorizationConsumed(prepared.context.artifactRoot, prepared.authorization);
-    return { sessionDir: prepared.context.sessionDir, projectRoot: prepared.context.projectRoot, run: changed, projection, gateActionEnvelope, attached: false, assignmentReleased: released !== null, idempotent: changed.idempotent };
+    return { sessionDir: prepared.context.sessionDir, projectRoot: prepared.context.projectRoot, run: changed, projection, gateActionEnvelope, progressSnapshot, attached: false, assignmentReleased: released !== null, idempotent: changed.idempotent };
   });
 }
 
@@ -201,7 +205,8 @@ export async function releaseBuilderFlowAssignment(input: BuilderFlowAgentLifecy
     const prepared = prepareAgentLifecycleChange(input, context);
     const run = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
     const released = performLocalReleaseUnderLock(context.artifactRoot, context.slug, prepared.actor, { actorKey: prepared.actorKey, reason: input.reason });
-    return { sessionDir: context.sessionDir, projectRoot: context.projectRoot, run, projection: prepared.sidecarSnapshot.state, gateActionEnvelope: null, attached: false, assignmentReleased: released !== null };
+    const { progressSnapshot } = projectFlowRun(context, run, prepared.sidecarSnapshot.state);
+    return { sessionDir: context.sessionDir, projectRoot: context.projectRoot, run, projection: prepared.sidecarSnapshot.state, gateActionEnvelope: null, progressSnapshot, attached: false, assignmentReleased: released !== null };
   });
 }
 
@@ -237,6 +242,7 @@ export async function archiveBuilderFlowSession(input: BuilderFlowAuthorizedLife
     clearCurrentPointers(prepared.context.artifactRoot, prepared.context.slug);
     recordAuthorizationConsumed(prepared.context.artifactRoot, prepared.authorization);
   }
+  const { progressSnapshot } = projectFlowRun(prepared.context, run, prepared.sidecarSnapshot.state);
   fs.renameSync(prepared.context.sessionDir, archiveDir);
   return {
     sessionDir: archiveDir,
@@ -244,6 +250,7 @@ export async function archiveBuilderFlowSession(input: BuilderFlowAuthorizedLife
     run,
     projection: archivedState,
     gateActionEnvelope: null,
+    progressSnapshot,
     attached: false,
     archiveDir,
   };
@@ -264,7 +271,7 @@ async function changeBuilderFlowSessionLifecycle(
     runId: context.slug,
     request: { reason: input.reason, authority: { kind: "operator_request", actor: prepared.actorKey, request_ref: `flow-agents://assignment/${context.slug}/${operation}/${at}`, requested_at: at } },
   });
-  const { projection, gateActionEnvelope } = projectFlowRun(context, run, prepared.sidecarSnapshot.state);
+  const { projection, gateActionEnvelope, progressSnapshot } = projectFlowRun(context, run, prepared.sidecarSnapshot.state);
   writeProjection(context, projection, prepared.sidecarSnapshot.raw, `${operation} projection`);
   return {
     sessionDir: context.sessionDir,
@@ -272,6 +279,7 @@ async function changeBuilderFlowSessionLifecycle(
     run,
     projection,
     gateActionEnvelope,
+    progressSnapshot,
     attached: false,
   };
   });
@@ -419,7 +427,7 @@ async function syncAndProject(
   if (!attached && gates.length === 1 && gateCanPassWithoutNewEvidence(run, gates[0]!)) {
     run = await evaluateBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
   }
-  const { projection, gateActionEnvelope } = projectFlowRun(context, run, sidecarSnapshot.state);
+  const { projection, gateActionEnvelope, progressSnapshot } = projectFlowRun(context, run, sidecarSnapshot.state);
   writeProjection(context, projection, sidecarSnapshot.raw, "projection");
   return {
     sessionDir: context.sessionDir,
@@ -427,6 +435,7 @@ async function syncAndProject(
     run,
     projection,
     gateActionEnvelope,
+    progressSnapshot,
     attached,
   };
 }
@@ -877,7 +886,7 @@ function manifestEvidence(manifest: JsonObject): AnyRecord[] {
   return Array.isArray(manifest.evidence) ? manifest.evidence.filter(isRecord) : [];
 }
 
-function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, sidecar: AnyRecord): { projection: AnyRecord; gateActionEnvelope: GateActionEnvelope | null } {
+function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, sidecar: AnyRecord): { projection: AnyRecord; gateActionEnvelope: GateActionEnvelope | null; progressSnapshot: GateActionProgressSnapshot } {
   const definition = JSON.parse(fs.readFileSync(path.join(run.dir, "definition.json"), "utf8"));
   const gates = openGates(definition, run.state) as Array<FlowGate & { id: string }>;
   const complete = run.state.status === "completed";
@@ -885,6 +894,12 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
   const canceled = run.state.status === "canceled";
   const needsDecision = run.state.status === "needs_decision";
   const failed = run.state.status === "failed";
+  const progressSnapshot = deriveBuilderGateActionProgressSnapshot({
+    sessionDir: context.sessionDir,
+    projectRoot: context.projectRoot,
+    run,
+    definition: definition as AnyRecord,
+  });
   const envelope = complete || paused || canceled || needsDecision || failed
     ? null
     : deriveBuilderGateActionEnvelope({
@@ -939,7 +954,7 @@ function projectFlowRun(context: SessionContext, run: BuilderFlowRunResult, side
         command: syncCommand,
       };
   const phase = phaseForStep(definition.phase_map, run.state.current_step) ?? sidecar.phase;
-  return { gateActionEnvelope: envelope, projection: {
+  return { gateActionEnvelope: envelope, progressSnapshot, projection: {
     ...sidecar,
     status: complete ? "delivered" : canceled ? "canceled" : failed ? "failed" : (paused || needsDecision) ? "blocked" : (run.state.transitions.length > 0 ? "in_progress" : sidecar.status),
     phase: complete || canceled || failed ? "done" : phase,

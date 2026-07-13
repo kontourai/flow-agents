@@ -1061,18 +1061,6 @@ NODE
   package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation merge-readiness --status pass \
     --summary "Packed fixture records the declared merge-readiness artifact." \
     --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/acme-builder-901--evidence-gate.md\",\"summary\":\"Durable merge-readiness artifact.\"}" >/dev/null \
-  && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation pull-request-opened --status pass \
-    --summary "Packed fixture records the declared release artifact." \
-    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/release.json\",\"summary\":\"Durable release artifact.\"}" >/dev/null \
-  && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation ci-merge-readiness --status pass \
-    --summary "Packed fixture records the declared CI readiness artifact." \
-    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/release.json\",\"summary\":\"Durable CI readiness artifact.\"}" >/dev/null \
-  && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation decision-evidence --status pass \
-    --summary "Packed fixture records the declared learning decision artifact." \
-    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/learning.json\",\"summary\":\"Durable learning decision artifact.\"}" >/dev/null \
-  && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation learning-evidence --status pass \
-    --summary "Packed fixture records the declared learning evidence artifact." \
-    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/learning.json\",\"summary\":\"Durable learning evidence artifact.\"}" >/dev/null \
   && node - "$PACKAGE_SESSION" <<'NODE' &&
 const fs = require('node:fs');
 const path = require('node:path');
@@ -1087,14 +1075,26 @@ const requiredTypes = [
   'builder.execute.scope',
   'builder.verify.tests',
   'builder.merge-ready.readiness',
-  'builder.learn.decisions',
-  'builder.learn.evidence',
 ];
 const missingTypes = requiredTypes.filter((type) => !types.has(type));
 if (missingTypes.length > 0) {
-  console.error(`missing verified public workflow claims: ${missingTypes.join(', ')}`);
+  console.error(`missing verified pre-operation workflow claims: ${missingTypes.join(', ')}`);
   process.exit(1);
 }
+fs.writeFileSync(path.join(session, 'publish-change.result.json'), JSON.stringify({ provider: 'fixture', repository: 'acme/builder', number: 901, url: 'https://example.test/acme/builder/pull/901', head_ref: 'fixture', base_ref: 'main' }));
+NODE
+  ! package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation pull-request-opened --status pass \
+    --summary "Locally authored publish-change result must not self-complete." \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/publish-change.result.json\",\"summary\":\"Locally authored provider-shaped result.\"}" >/dev/null 2>&1 \
+  && node - "$PACKAGE_SESSION" "$PACKAGE_PROJECT" <<'NODE' &&
+const fs = require('node:fs');
+const path = require('node:path');
+const [session, project] = process.argv.slice(2);
+const state = JSON.parse(fs.readFileSync(path.join(session, 'state.json'), 'utf8'));
+const flow = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', path.basename(session), 'state.json'), 'utf8'));
+const bundle = JSON.parse(fs.readFileSync(path.join(session, 'trust.bundle'), 'utf8'));
+if (state.flow_run?.current_step !== 'pr-open' || flow.current_step !== 'pr-open' || state.next_action?.status !== 'blocked') process.exit(1);
+if ((bundle.claims || []).some((claim) => claim.claimType === 'builder.pr-open.pull-request')) process.exit(2);
 NODE
   printf 'Selected Work Item: acme/builder#902\n' > "$PACKAGE_LIFECYCLE_SESSION/acme-builder-902--pull-work.md" \
   && package_flow start --artifact-root "$PACKAGE_PROJECT/.kontourai/flow-agents" \

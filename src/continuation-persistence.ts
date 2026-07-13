@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import * as path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { atomicWriteJson, ensureSafeDirectory } from "./lib/fs.js";
-import type { ContinuationAcceptedTurn, ContinuationBarrier, ContinuationDriverEvent, ContinuationDriverLockLease, ContinuationDriverState, ContinuationStateStore } from "./continuation-driver.js";
+import type { ContinuationAcceptedTurn, ContinuationAcceptedTurnJournal, ContinuationBarrier, ContinuationDriverEvent, ContinuationDriverLockLease, ContinuationDriverState, ContinuationStateStore } from "./continuation-driver.js";
 
 export const MAX_CONTINUATION_TURNS = 100;
 const MAX_STATE_BYTES = 1_048_576;
@@ -27,7 +27,7 @@ export async function withContinuationDriverLock<T>(sessionDirInput: string, bod
   finally { releaseDriverLock(lockFile, token); }
 }
 
-export function createFileContinuationStore(sessionDirInput: string): ContinuationStateStore {
+export function createFileContinuationStore(sessionDirInput: string): ContinuationStateStore & ContinuationAcceptedTurnJournal {
   const sessionDir = path.resolve(sessionDirInput);
   const driverDir = path.join(sessionDir, "continuation-driver");
   const stateFile = path.join(driverDir, "state.json");

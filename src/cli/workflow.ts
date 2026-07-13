@@ -6,6 +6,7 @@ import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { validateDefinition } from "@kontourai/flow";
 import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
+import { parseKitFlowStepActions } from "../flow-kit/validate.js";
 import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
 import { inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
@@ -342,6 +343,15 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
   if (Object.hasOwn(parsed.flags, "command") && commands.length === 0) {
     throw new Error("workflow evidence --command requires a shell command value");
   }
+  const expectation = flagString(parsed.flags, "expectation")!;
+  // Operation-bound expectations deliberately have no generic evidence writer.
+  // Check before recovery, locking, or actor resolution so a locally authored
+  // operation result cannot cause any canonical or projection mutation.
+  const inspected = await inspectBuilderFlowSession({ sessionDir });
+  const operation = builderOperationForExpectation(inspected.run.definitionId, expectation);
+  if (operation) {
+    throw new Error(`workflow evidence cannot satisfy operation-bound expectation ${expectation}; ${operation} requires authenticated external ChangeProvider completion`);
+  }
   const requiresTestEvidence = flagString(parsed.flags, "expectation") === "tests-evidence" && flagString(parsed.flags, "status") === "pass";
   // Argument and command-shape rejection must be read-only. Recovery below may
   // repair stale projections, so it runs only after every command is accepted.
@@ -389,6 +399,18 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
     ? `Recorded evidence; canonical run is ${report.status} at ${report.current_step}.`
     : `Recorded evidence; canonical run is awaiting the remaining gate expectations at ${report.current_step}.`);
   return 0;
+}
+
+function builderOperationForExpectation(flowId: string, expectationId: string): string | null {
+  const kit = readJsonFile(path.join(PACKAGE_ROOT, "kits", "builder", "kit.json"), "Builder kit metadata");
+  const parsed = parseKitFlowStepActions(kit, "kits/builder/kit.json");
+  if (parsed.errors.length) throw new Error(`Builder kit metadata is invalid: ${parsed.errors.join("; ")}`);
+  for (const action of parsed.entries) {
+    if (action.flow_id !== flowId) continue;
+    const binding = action.expectation_bindings.find((candidate) => candidate.expectation_id === expectationId);
+    if (binding?.interface === "operation") return binding.operation ?? "the declared external operation";
+  }
+  return null;
 }
 
 async function critique(sessionDir: string, argv: string[], json: boolean): Promise<number> {

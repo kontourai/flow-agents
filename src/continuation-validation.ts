@@ -11,6 +11,7 @@ export function validateSnapshot(value: ContinuationSnapshot): ContinuationSnaps
   if (!new Set(["continue", "waiting", "done", "failed"]).has(value.disposition)) throw new Error("continuation snapshot disposition is invalid");
   if (value.next_action !== null && (typeof value.next_action !== "object" || Array.isArray(value.next_action))) throw new Error("continuation snapshot next_action must be an object or null");
   if (value.gate_action_envelope !== undefined) validateGateActionEnvelope(value.gate_action_envelope);
+  if (value.progress_snapshot !== undefined) validateProgressSnapshot(value.progress_snapshot);
   return structuredClone(value);
 }
 
@@ -85,6 +86,7 @@ function validateAcceptedTurn(value: ContinuationAcceptedTurn): void {
 
 function validateProgressSnapshot(value: GateActionProgressSnapshot): void {
   if (!value || typeof value !== "object" || typeof value.current_step !== "string" || value.current_step.length === 0
+    || (value.canonical_status !== undefined && (typeof value.canonical_status !== "string" || value.canonical_status.length === 0))
     || !Array.isArray(value.canonical_evidence) || !value.canonical_evidence.every((entry) => typeof entry === "string")
     || !Array.isArray(value.observed_artifacts) || !value.observed_artifacts.every((entry) => typeof entry === "string")) throw new Error("continuation driver progress snapshot is malformed");
 }

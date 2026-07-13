@@ -190,6 +190,41 @@ test_produce_claim() {
     || _fail "$label: bundle missing or incorrect $expected_claim_type claim"
 }
 
+test_operation_claim_rejection() {
+  local label="$1" step="$2" expectation="$3" expected_claim_type="$4"
+  echo ""
+  echo "=== OPERATION REJECTION: $label ==="
+
+  local slug
+  slug="$(echo "operation-$step-$expectation" | tr '/' '-' | tr '.' '-')"
+  local aroot="$TMP/$slug/.kontourai/flow-agents"
+  setup_session_for_produce "$aroot" "$slug" "$step"
+  local artifact="$aroot/$slug/publish-change.result.json"
+  printf '{"provider":"fixture","repository":"acme/builder","number":1,"url":"https://example.test/acme/builder/pull/1","head_ref":"fixture","base_ref":"main"}\n' > "$artifact"
+
+  if flow_agents_node "workflow-sidecar" record-gate-claim "$aroot/$slug" \
+    --status pass \
+    --summary "Locally authored operation result must not self-complete." \
+    --expectation "$expectation" \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$artifact\",\"summary\":\"Locally authored provider-shaped result.\"}" \
+    --timestamp "2026-06-26T00:02:00Z" >/dev/null 2>&1; then
+    _fail "$label: record-gate-claim accepted operation self-completion"
+  else
+    _pass "$label: record-gate-claim rejects operation self-completion"
+  fi
+
+  node -e "
+    const fs = require('fs');
+    const current = JSON.parse(fs.readFileSync('$aroot/current.json', 'utf8'));
+    if (current.active_step_id !== '$step') throw new Error('expected active step $step, got ' + current.active_step_id);
+    const bundleFile = '$aroot/$slug/trust.bundle';
+    const bundle = fs.existsSync(bundleFile) ? JSON.parse(fs.readFileSync(bundleFile, 'utf8')) : { claims: [] };
+    if ((bundle.claims || []).some((claim) => claim.claimType === '$expected_claim_type')) throw new Error('operation-bound claim was recorded');
+  " 2>/dev/null \
+    && _pass "$label: no operation claim is recorded and pr-open remains active" \
+    || _fail "$label: operation rejection recorded a claim or changed the active step"
+}
+
 # ─── Test: tampered bundle at given step BLOCKS ───────────────────────────────
 test_tamper_blocks() {
   local label="$1" step="$2" claim_type="$3" subject_type="$4"
@@ -376,11 +411,11 @@ test_tamper_blocks \
   "builder.design-probe.decisions" \
   "design-probe" "builder.design-probe.decisions" "decision"
 
-# Claim 4: builder.pr-open.pull-request
-test_produce_claim \
+# Claim 4: builder.pr-open.pull-request is external-only and generic claims must reject it.
+test_operation_claim_rejection \
   "builder.pr-open.pull-request" \
   "pr-open" "pull-request-opened" \
-  "builder.pr-open.pull-request" "pull-request"
+  "builder.pr-open.pull-request"
 test_tamper_blocks \
   "builder.pr-open.pull-request" \
   "pr-open" "builder.pr-open.pull-request" "pull-request"
@@ -405,17 +440,17 @@ test_tamper_blocks \
 
 # ─── Public CLI happy path + route-back ─────────────────────────────────────
 echo ""
-echo "=== PUBLIC CLI: complete canonical skill/operation path ==="
+echo "=== PUBLIC CLI: canonical skill path and external operation boundary ==="
 flow_agents_build_ts || _fail "public CLI fixture build failed"
 PUBLIC_ROOT="$TMP/public/.kontourai/flow-agents"
 PUBLIC_SESSION="$PUBLIC_ROOT/acme-builder-901"
 
 public_flow() {
-  CODEX_SESSION_ID=builder-public-producers node "$ROOT/build/src/cli.js" workflow "$@"
+  env -u CODEX_THREAD_ID CODEX_SESSION_ID=builder-public-producers node "$ROOT/build/src/cli.js" workflow "$@"
 }
 
 public_review() {
-  CODEX_SESSION_ID=builder-public-reviewer node "$ROOT/build/src/cli.js" workflow "$@"
+  env -u CODEX_THREAD_ID CODEX_SESSION_ID=builder-public-reviewer node "$ROOT/build/src/cli.js" workflow "$@"
 }
 
 assert_public_step() {
@@ -578,25 +613,29 @@ else
 fi
 assert_public_step "merge-ready" "evidence-gate" ""
 record_public_expectation "merge-readiness"
-assert_public_step "pr-open" "" "publish-change"
-record_public_expectation "pull-request-opened"
-assert_public_step "merge-ready-ci" "release-readiness" ""
-record_public_expectation "ci-merge-readiness"
-assert_public_step "learn" "learning-review" ""
-record_public_expectation "decision-evidence"
-assert_public_step "learn" "learning-review" "" "active-or-blocked"
-record_public_expectation "learning-evidence"
-if node - "$PUBLIC_SESSION/trust.bundle" <<'NODE'
-const fs = require('node:fs');
-const bundle = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-if (!bundle.claims.some((claim) => claim.claimType === 'builder.learn.evidence' && claim.subjectType === 'release' && claim.status === 'verified')) process.exit(1);
+assert_public_step "pr-open" "" "publish-change" "active-or-blocked"
+PUBLIC_PR_OPEN_REPORT="$(public_flow status --session-dir "$PUBLIC_SESSION" --json 2>/dev/null)"
+if node - "$PUBLIC_PR_OPEN_REPORT" <<'NODE'
+const report = JSON.parse(process.argv[2]);
+const capability = report.next_action?.external_capability;
+if (report.current_step !== 'pr-open' || report.next_action?.status !== 'blocked') process.exit(1);
+if (capability?.operation !== 'publish-change' || capability?.completion !== 'external_verification_required') process.exit(2);
 NODE
 then
-  _pass "learning-review records verified learning.json evidence"
+  _pass "pr-open projects the external publish-change capability block"
 else
-  _fail "learning-review did not record durable learning.json evidence in trust.bundle"
+  _fail "pr-open did not expose the required external capability block: $PUBLIC_PR_OPEN_REPORT"
 fi
-assert_public_step "learn" "" "" "completed"
+node - "$PUBLIC_SESSION/publish-change.result.json" <<'NODE'
+const fs = require('node:fs');
+fs.writeFileSync(process.argv[2], JSON.stringify({ provider: 'fixture', repository: 'acme/builder', number: 901, url: 'https://example.test/acme/builder/pull/901', head_ref: 'fixture', base_ref: 'main' }));
+NODE
+if public_flow evidence --session-dir "$PUBLIC_SESSION" --expectation pull-request-opened --status pass --summary "Locally authored result must not self-complete publish-change." --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\".kontourai/flow-agents/$(basename "$PUBLIC_SESSION")/publish-change.result.json\",\"summary\":\"Locally authored provider-shaped result.\"}" >/dev/null 2>&1; then
+  _fail "generic workflow evidence accepted operation self-completion"
+else
+  _pass "generic workflow evidence rejects operation self-completion"
+fi
+assert_public_step "pr-open" "" "publish-change" "active-or-blocked"
 
 echo ""
 echo "=== PUBLIC CLI: failed verify route-back remains canonical ==="
