@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.11.0](https://github.com/kontourai/flow-agents/compare/v3.10.0...v3.11.0) (2026-07-13)
+
+
+### Features
+
+* sign continuation adapter evidence ([#598](https://github.com/kontourai/flow-agents/issues/598)) ([df14271](https://github.com/kontourai/flow-agents/commit/df14271a64c4de069dc47f5b3c18729caa025bbb))
+
+
+### Fixes
+
+* make Codex installs self-contained and bind GitHub claims ([#600](https://github.com/kontourai/flow-agents/issues/600)) ([57d1942](https://github.com/kontourai/flow-agents/commit/57d1942a5a8b3d005f1f91d778de385d924518bd))
+
 ## [3.10.0](https://github.com/kontourai/flow-agents/compare/v3.9.0...v3.10.0) (2026-07-13)
 
 
