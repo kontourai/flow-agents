@@ -1,0 +1,2 @@
+{"type": "assistant", "message": {"model": "claude-torn-trailing-safe", "usage": {"input_tokens": 15, "output_tokens": 25, "cache_creation_input_tokens": 1, "cache_read_input_tokens": 2}}}
+{"type":"assistant","message":{"model":"claude-torn-victim","usage":{"input_tokens":999,"output_tok

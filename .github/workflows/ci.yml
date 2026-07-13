@@ -330,6 +330,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check telemetry-usage-pipeline-integration
 
+      - name: Telemetry tool usage integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check telemetry-tool-usage-integration
+
       - name: Economics record integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check economics-record-integration
