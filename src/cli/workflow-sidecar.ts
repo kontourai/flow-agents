@@ -1606,6 +1606,7 @@ function resolveFirstStep(flowId: string, repoRoot: string): string | null {
 function loadCurrentPointerHelper(): {
   perActorCurrentFile: (flowAgentsDir: string, actorKey: string) => string;
   readCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: AnyObj | null; source: "per-actor" | "legacy" | "none"; file: string | null };
+  readOwnCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: AnyObj | null; source: "per-actor" | "legacy" | "none"; file: string | null };
   writePerActorCurrent: (flowAgentsDir: string, actorKey: string, payload: AnyObj) => void;
 } {
   const _req = createRequire(import.meta.url);
@@ -1613,6 +1614,7 @@ function loadCurrentPointerHelper(): {
   return _req(helperPath) as {
     perActorCurrentFile: (flowAgentsDir: string, actorKey: string) => string;
     readCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: AnyObj | null; source: "per-actor" | "legacy" | "none"; file: string | null };
+    readOwnCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: AnyObj | null; source: "per-actor" | "legacy" | "none"; file: string | null };
     writePerActorCurrent: (flowAgentsDir: string, actorKey: string, payload: AnyObj) => void;
   };
 }
@@ -1751,9 +1753,15 @@ function updateCurrentAgent(root: string, dir: string, agentId: string, status: 
 
   if (actorKey && !loadActorIdentityHelper().isUnresolvedActor(actorKey)) {
     const helper = loadCurrentPointerHelper();
-    const perActorFile = helper.perActorCurrentFile(root, actorKey);
-    let perActor: AnyObj | null = null;
-    try { perActor = fs.existsSync(perActorFile) ? (JSON.parse(fs.readFileSync(perActorFile, "utf8")) as AnyObj) : null; } catch { perActor = null; }
+    // #440 fix-wave 3: read through the legacy-aware path (readOwnCurrentPointer tries the new
+    // collision-resistant filename first, then falls back to the pre-fix-wave-2 legacy filename)
+    // instead of a direct fs read of perActorCurrentFile() alone — a direct read of ONLY the new
+    // filename would silently skip this active_agents/updated_at projection for a pointer a
+    // still-running pre-fix-wave-2 sidecar wrote under the old name. The write below always goes
+    // through writePerActorCurrent (new filename only), so the pointer migrates to the new name
+    // on first touch.
+    const pointer = helper.readOwnCurrentPointer(root, actorKey);
+    const perActor = pointer.payload;
     if (perActor && path.resolve(root, perActor.artifact_dir ?? "") === path.resolve(dir)) {
       helper.writePerActorCurrent(root, actorKey, applyAgentUpdate(perActor));
     }

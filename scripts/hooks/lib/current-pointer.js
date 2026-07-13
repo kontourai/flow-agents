@@ -27,8 +27,11 @@
  * strips (e.g. "a:bc" vs "ab:c", both sanitizing to "abc"), previously mapped onto the SAME file —
  * actor B's dual-write would silently overwrite actor A's pointer, and A's own hook reads would
  * then ground onto B's session. The appended hash of the FULL (untruncated, unsanitized) actor
- * key makes two distinct actor keys collide only in the astronomically unlikely case of a genuine
- * SHA-256 collision, while the sanitized prefix keeps the filename human-legible for debugging.
+ * key makes two distinct actor keys collide only on a 64-bit truncated-digest collision (the
+ * retained 16 hex chars of sha256, ~2^32-operation birthday bound) — negligible at any real fleet
+ * scale (nowhere near the number of distinct actor identities any deployment will ever generate),
+ * but NOT cryptographic full-strength collision resistance (that would need the full 256-bit
+ * digest); the sanitized prefix keeps the filename human-legible for debugging.
  *
  * Compatibility / transition (#440 fix-wave 2): `writePerActorCurrent` writes ONLY the new
  * collision-resistant filename from here on. `readCurrentPointer`'s per-actor branch and
@@ -39,9 +42,14 @@
  * (e.g. a still-running published-3.9.0-era session) keeps resolving during the rollout window.
  * This legacy-name fallback intentionally retains the OLD (status-quo, pre-fix) collision exposure
  * — but ONLY for that fallback read of a pre-existing file, never for a new write, which always
- * uses the collision-resistant name. The fallback is a permanent, small read-side allowance (not a
- * time-boxed cutover flag) — it costs one extra tolerant file read only when the new-name file is
- * absent, and never fires at all for a pointer written after this fix ships.
+ * uses the collision-resistant name. The fallback is TRANSITION-WINDOW ONLY, not a permanent
+ * feature of this module: every write (including a read-triggered migration via
+ * `updateCurrentAgent` in workflow-sidecar.ts, #440 fix-wave 3) upgrades a pointer to the new
+ * name, so live pointers self-migrate through ordinary use. Removal criterion: once every
+ * actively-read `current/` directory in practice contains only new-name pointers — practically,
+ * after one full session lifecycle past this fix's rollout, or at the next major version,
+ * whichever is a more deliberate cutover point — `legacyPerActorCurrentFile` and its two
+ * call sites below can be deleted outright.
  *
  * Exports:
  *   perActorCurrentFile(flowAgentsDir, actorKey)       → string (NEW collision-resistant path;
@@ -66,9 +74,11 @@ const { sanitizeSegment, isUnresolvedActor } = require('./actor-identity.js');
 
 // #440 fix-wave 2: readable-prefix cap for the NEW collision-resistant filename. Generous (not
 // the collision boundary — the appended hash below is), just keeps filenames legible for
-// debugging. First 16 hex chars of sha256(actorKey) is 64 bits of entropy — far beyond what any
-// real actor-key collision could hit — appended so two distinct actor keys collide only in the
-// astronomically unlikely case of a genuine SHA-256 collision.
+// debugging. First 16 hex chars of sha256(actorKey) is a 64-bit truncated digest (~2^32-operation
+// birthday bound) — negligible at any real fleet scale, though NOT cryptographic full-strength
+// collision resistance (that needs the full 256-bit digest) — appended so two distinct actor keys
+// collide only on a genuine 64-bit truncated-digest collision, not merely a shared 64-char
+// sanitized prefix.
 const PER_ACTOR_PREFIX_LEN = 40;
 const PER_ACTOR_HASH_LEN = 16;
 

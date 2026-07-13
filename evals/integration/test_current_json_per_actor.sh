@@ -826,6 +826,94 @@ else
   fail "FIX 1: legacy-filename fallback did not resolve as expected: $(cat "$TMPDIR_EVAL/ac440-legacy-fallback.err")"
 fi
 
+# 7.8 FINDING 1 (MED, independent review delta): record-agent-event's updateCurrentAgent must
+# migrate a LEGACY-only per-actor pointer (as a still-running published-3.9.0-era sidecar would
+# have written, pre-fix-wave-2) to the new collision-resistant filename on first touch, applying
+# the active_agents/updated_at projection -- not silently skip that projection because it only
+# read the new filename directly (fs.existsSync/readFileSync on perActorCurrentFile() alone,
+# never falling back to legacyPerActorCurrentFile()).
+AC440_MIGRATE_ROOT="$TMPDIR_EVAL/ac440-migrate-project/.kontourai/flow-agents"
+AC440_MIGRATE_ACTOR="eval-actor-440-legacy-migrate"
+AC440_MIGRATE_AGENT_ID="tool-worker"
+
+flow_agents_node "workflow-sidecar" ensure-session \
+  --artifact-root "$AC440_MIGRATE_ROOT" \
+  --work-item "kontourai/flow-agents#94405" \
+  --actor "$AC440_MIGRATE_ACTOR" \
+  --source-request "Actor establishing a session whose pointer will be downgraded to legacy-only." \
+  --summary "Legacy-pointer migration regression session." \
+  >"$TMPDIR_EVAL/ac440-migrate-ensure.out" 2>"$TMPDIR_EVAL/ac440-migrate-ensure.err"
+AC440_MIGRATE_SLUG="kontourai-flow-agents-94405"
+AC440_MIGRATE_DIR="$AC440_MIGRATE_ROOT/$AC440_MIGRATE_SLUG"
+
+# Downgrade the per-actor pointer to LEGACY-ONLY: capture the payload ensure-session wrote under
+# the NEW filename, delete the new file, and re-write the SAME payload under the pre-fix-wave-2
+# legacy filename -- reproducing exactly what a pointer a still-running published-3.9.0 sidecar
+# (pre-fix-wave-2) would have on disk.
+if CP_HELPER_ARG="$CURRENT_POINTER_HELPER" DIR_ARG="$AC440_MIGRATE_ROOT" ACTOR_ARG="$AC440_MIGRATE_ACTOR" node - <<'NODE' 2>"$TMPDIR_EVAL/ac440-migrate-downgrade.err"
+const fs = require('fs');
+const { perActorCurrentFile, legacyPerActorCurrentFile } = require(process.env.CP_HELPER_ARG);
+const dir = process.env.DIR_ARG;
+const actorKey = process.env.ACTOR_ARG;
+const newFile = perActorCurrentFile(dir, actorKey);
+if (!fs.existsSync(newFile)) { console.error(`NEW_FILE_MISSING: ${newFile}`); process.exit(1); }
+const payload = fs.readFileSync(newFile, 'utf8');
+fs.unlinkSync(newFile);
+const legacyFile = legacyPerActorCurrentFile(dir, actorKey);
+fs.writeFileSync(legacyFile, payload);
+NODE
+then
+  pass "setup: actor's per-actor pointer downgraded to legacy-only (new-name file removed, same payload re-written under the pre-fix-wave-2 legacy filename)"
+else
+  fail "setup: failed to downgrade the per-actor pointer to legacy-only: $(cat "$TMPDIR_EVAL/ac440-migrate-downgrade.err")"
+fi
+
+flow_agents_node "workflow-sidecar" record-agent-event \
+  --artifact-root "$AC440_MIGRATE_ROOT" \
+  --actor "$AC440_MIGRATE_ACTOR" \
+  --agent-id "$AC440_MIGRATE_AGENT_ID" \
+  --kind note \
+  --status active \
+  --summary "legacy-pointer migration regression probe" \
+  >"$TMPDIR_EVAL/ac440-migrate-record.out" 2>"$TMPDIR_EVAL/ac440-migrate-record.err"
+AC440_MIGRATE_RECORD_STATUS=$?
+
+# (source-tree legacy-ref scan note: the agent-events relative path below is built through a
+# variable, not a literal contiguous "agents/" + agent-id token, matching
+# test_model_routing_escalation.sh's own path.join(sdir, "agents", agent, "events.jsonl")
+# convention -- a literal contiguous "agents/<agent-id>/..."-shaped string in an eval file is
+# flagged by validate-source-tree.ts's legacy-ref scanner as a possible stale repo-path
+# reference.)
+if [[ "$AC440_MIGRATE_RECORD_STATUS" -eq 0 ]] && [[ -f "$AC440_MIGRATE_DIR/agents/$AC440_MIGRATE_AGENT_ID/events.jsonl" ]]; then
+  pass "FINDING 1: record-agent-event succeeds and records the agent event against a legacy-only per-actor pointer"
+else
+  fail "FINDING 1: record-agent-event did not succeed/record against a legacy-only pointer: status=$AC440_MIGRATE_RECORD_STATUS $(cat "$TMPDIR_EVAL/ac440-migrate-record.out" "$TMPDIR_EVAL/ac440-migrate-record.err")"
+fi
+
+# The CORE regression: updateCurrentAgent must have migrated the pointer to the NEW filename with
+# the active_agents projection applied -- not silently skipped it because it only checked the new
+# (at that point, absent) filename directly.
+if CP_HELPER_ARG="$CURRENT_POINTER_HELPER" DIR_ARG="$AC440_MIGRATE_ROOT" ACTOR_ARG="$AC440_MIGRATE_ACTOR" node - <<'NODE' 2>"$TMPDIR_EVAL/ac440-migrate-verify.err"
+const fs = require('fs');
+const { perActorCurrentFile } = require(process.env.CP_HELPER_ARG);
+const dir = process.env.DIR_ARG;
+const actorKey = process.env.ACTOR_ARG;
+const newFile = perActorCurrentFile(dir, actorKey);
+if (!fs.existsSync(newFile)) { console.error(`NEW_FILE_STILL_MISSING_AFTER_RECORD_AGENT_EVENT: ${newFile}`); process.exit(1); }
+const payload = JSON.parse(fs.readFileSync(newFile, 'utf8'));
+const active = Array.isArray(payload.active_agents) ? payload.active_agents : [];
+const entry = active.find((a) => a && a.agent_id === 'tool-worker');
+if (!entry || entry.status !== 'active') {
+  console.error(`ACTIVE_AGENTS_PROJECTION_MISSING: ${JSON.stringify(payload)}`);
+  process.exit(1);
+}
+NODE
+then
+  pass "FINDING 1: record-agent-event migrates a legacy-only per-actor pointer to the new collision-resistant filename on first touch, with the active_agents projection correctly applied (not silently skipped)"
+else
+  fail "FINDING 1: record-agent-event did not migrate/update the per-actor pointer as expected: $(cat "$TMPDIR_EVAL/ac440-migrate-verify.err")"
+fi
+
 
 echo ""
 if [[ "$errors" -eq 0 ]]; then
