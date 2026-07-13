@@ -36,6 +36,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 HOOK="$ROOT/scripts/hooks/stop-goal-fit.js"
 BUILT_SIDECAR="$ROOT/build/src/cli/workflow-sidecar.js"
 BUILT_PROVIDER="$ROOT/build/src/cli/assignment-provider.js"
+CURRENT_POINTER_HELPER="$ROOT/scripts/hooks/lib/current-pointer.js"
 
 for m in "$HOOK" "$BUILT_SIDECAR" "$BUILT_PROVIDER"; do
   if [[ ! -f "$m" ]]; then
@@ -127,6 +128,41 @@ write_session_state() {
   "next_action": { "status": "${next_action_status}", "summary": "Fixture next-action summary for ${slug}." }
 }
 JSON
+}
+
+# seed_current_pointer <repo> <slug> [actor_key] — #440: writes BOTH the legacy
+# current.json AND (when actor_key is given) the per-actor current/<actor>.json pointer, with
+# the SAME payload — mirroring workflow-sidecar.ts's real writeCurrent() dual-write exactly, via
+# the shared current-pointer.js helper's own writePerActorCurrent (not a hand-rolled
+# reimplementation of its sanitize/path rule), so #440's readOwnCurrentPointer finds this
+# fixture's session exactly like a real ensure-session'd one would. Call AFTER seed_session (same
+# slug). A resolved actor with no per-actor pointer is intentionally out of scope for the
+# Stop-hook's blocking/release scoping per #440 — every scenario below that exercises "self, owns
+# this session" behavior (release, handoff refresh, fail-open reachability) now needs this seed;
+# scenarios that are actually about an unresolved/foreign actor do not call this.
+seed_current_pointer() {
+  local repo="$1" slug="$2" actor_key="${3:-}"
+  CP_HELPER_ARG="$CURRENT_POINTER_HELPER" FLOW_AGENTS_DIR_ARG="$repo/.kontourai/flow-agents" \
+    SLUG_ARG="$slug" ACTOR_KEY_ARG="$actor_key" node - <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const { writePerActorCurrent } = require(process.env.CP_HELPER_ARG);
+const flowAgentsDir = process.env.FLOW_AGENTS_DIR_ARG;
+const slug = process.env.SLUG_ARG;
+const actorKey = process.env.ACTOR_KEY_ARG;
+const payload = {
+  schema_version: '1.0',
+  active_slug: slug,
+  artifact_dir: slug,
+  updated_at: '2026-06-25T00:00:00Z',
+  owner: 'eval',
+  source: 'test-fixture',
+  active_agents: [],
+};
+fs.mkdirSync(flowAgentsDir, { recursive: true });
+fs.writeFileSync(path.join(flowAgentsDir, 'current.json'), JSON.stringify(payload, null, 2) + '\n');
+if (actorKey) writePerActorCurrent(flowAgentsDir, actorKey, payload);
+NODE
 }
 
 # assignment_provider_settings_local_file <repo> — writes a project settings file
@@ -271,6 +307,10 @@ A_DIR="$(seed_session "$A_REPO" "task-a" "in_progress")"
 # (never a hardcoded placeholder, which the real process could never match).
 A_SESSION_ID="eval-a-session-$$"
 A_ACTOR_TRIPLE="claude-code:${A_SESSION_ID}:${REAL_HOSTNAME}"
+# #440: A owns task-a — seed its own per-actor current pointer so the Stop hook's
+# ownership-scoped analyze() finds it (FIXTURE-GAP: this scenario asserts real "self, owns this
+# session" release behavior, not stale ownership semantics).
+seed_current_pointer "$A_REPO" "task-a" "$A_ACTOR_TRIPLE"
 seed_liveness_claim "$A_REPO" "task-a" "$A_ACTOR_TRIPLE" "2026-06-25T09:00:00.000Z"
 seed_assignment_claim "$A_REPO" "task-a" "claude-code" "$A_SESSION_ID" "$REAL_HOSTNAME"
 
@@ -307,8 +347,16 @@ B_REPO="$(new_repo repo-b)"
 assignment_provider_settings_github "$B_REPO"
 B_DIR="$(seed_session "$B_REPO" "task-b" "in_progress")"
 seed_liveness_claim "$B_REPO" "task-b" "claude-code:sess-b:host-b" "2026-06-25T09:00:00.000Z"
+# #440: B owns task-b — a stable "self, derived form" actor (matching A's convention) plus its
+# own per-actor current pointer, so the Stop hook's ownership-scoped analyze() finds it
+# (FIXTURE-GAP: this scenario asserts real handoff/provider-release behavior for B's own session,
+# not stale ownership semantics). Previously this scenario ran under whatever ambient/ancestry
+# actor happened to resolve — never asserted on, but now load-bearing for scoping.
+B_SESSION_ID="eval-b-session-$$"
+B_ACTOR_TRIPLE="claude-code:${B_SESSION_ID}:${REAL_HOSTNAME}"
+seed_current_pointer "$B_REPO" "task-b" "$B_ACTOR_TRIPLE"
 
-B_OUT="$(call_stop_hook "$B_REPO" '{}' 2>"$TMPDIR_EVAL/b.err")"
+B_OUT="$(call_stop_hook "$B_REPO" "{\"CLAUDE_CODE_SESSION_ID\":\"$B_SESSION_ID\"}" 2>"$TMPDIR_EVAL/b.err")"
 B_STATUS=$?
 
 if ! grep -Eq '(^|[^a-zA-Z])gh (issue|api|pr) ' "$TMPDIR_EVAL/b.err" && ! grep -Eq '(^|[^a-zA-Z])gh (issue|api|pr) ' <<<"$B_OUT"; then
@@ -349,7 +397,13 @@ cat > "$C_DIR/handoff.json" <<'JSON'
 }
 JSON
 
-call_stop_hook "$C_REPO" '{}' > /dev/null 2>"$TMPDIR_EVAL/c.err"
+# #440: C owns task-c — stable "self, derived form" actor + own per-actor current pointer
+# (FIXTURE-GAP: this scenario asserts real handoff-refresh behavior for C's own session).
+C_SESSION_ID="eval-c-session-$$"
+C_ACTOR_TRIPLE="claude-code:${C_SESSION_ID}:${REAL_HOSTNAME}"
+seed_current_pointer "$C_REPO" "task-c" "$C_ACTOR_TRIPLE"
+
+call_stop_hook "$C_REPO" "{\"CLAUDE_CODE_SESSION_ID\":\"$C_SESSION_ID\"}" > /dev/null 2>"$TMPDIR_EVAL/c.err"
 
 C_HANDOFF="$C_DIR/handoff.json"
 C_SUMMARY="$(json_query "$C_HANDOFF" "summary")"
@@ -365,11 +419,18 @@ echo "--- D. Terminal (delivered) status: no release, no mutation ---"
 D_REPO="$(new_repo repo-d)"
 assignment_provider_settings_local_file "$D_REPO"
 D_DIR="$(seed_session "$D_REPO" "task-d" "delivered")"
-seed_liveness_claim "$D_REPO" "task-d" "claude-code:sess-d:host-d" "2026-06-25T09:00:00.000Z"
-seed_assignment_claim "$D_REPO" "task-d" "claude-code" "sess-d" "host-d"
+# #440 FIX 2 (de-vacuate, independent review): D owns task-d — a stable "self, derived form"
+# actor + own per-actor current pointer, so releaseOnNonTerminalStop is REACHED and its OWN
+# terminal-status (LIVENESS_TERMINAL) early-return is what's actually exercised here, not the
+# outer "no artifactDir at all" early-return (which would pass vacuously for the same reason).
+D_SESSION_ID="eval-d-session-$$"
+D_ACTOR_TRIPLE="claude-code:${D_SESSION_ID}:${REAL_HOSTNAME}"
+seed_current_pointer "$D_REPO" "task-d" "$D_ACTOR_TRIPLE"
+seed_liveness_claim "$D_REPO" "task-d" "$D_ACTOR_TRIPLE" "2026-06-25T09:00:00.000Z"
+seed_assignment_claim "$D_REPO" "task-d" "claude-code" "$D_SESSION_ID" "$REAL_HOSTNAME"
 
 D_LINES_BEFORE="$(liveness_line_count "$D_REPO")"
-call_stop_hook "$D_REPO" '{}' > /dev/null 2>"$TMPDIR_EVAL/d.err"
+call_stop_hook "$D_REPO" "{\"CLAUDE_CODE_SESSION_ID\":\"$D_SESSION_ID\"}" > /dev/null 2>"$TMPDIR_EVAL/d.err"
 D_LINES_AFTER="$(liveness_line_count "$D_REPO")"
 
 if [[ "$D_LINES_AFTER" -eq "$D_LINES_BEFORE" ]]; then
@@ -391,9 +452,18 @@ echo "--- E. Foreign-actor holder is never released (derived form) ---"
 E_REPO="$(new_repo repo-e)"
 assignment_provider_settings_local_file "$E_REPO"
 E_DIR="$(seed_session "$E_REPO" "task-e" "in_progress")"
+# #440 FIX 2 (de-vacuate, independent review): the ACTING actor (the one running the Stop hook
+# below) owns task-e — a stable "self, derived form" actor + own per-actor pointer, so
+# releaseOnNonTerminalStop is REACHED and its actual holder-comparison logic is what rejects the
+# release, not the outer "no artifactDir at all" early-return. The ASSIGNMENT claim itself stays
+# held by a genuinely DIFFERENT actor ("actor-other-session"/"actor-other-host") — the real
+# foreign-holder differential this scenario is about.
+E_SESSION_ID="eval-e-session-$$"
+E_ACTOR_TRIPLE="claude-code:${E_SESSION_ID}:${REAL_HOSTNAME}"
+seed_current_pointer "$E_REPO" "task-e" "$E_ACTOR_TRIPLE"
 seed_assignment_claim "$E_REPO" "task-e" "claude-code" "actor-other-session" "actor-other-host"
 
-E_OUT="$(call_stop_hook "$E_REPO" '{}' 2>"$TMPDIR_EVAL/e.err")"
+E_OUT="$(call_stop_hook "$E_REPO" "{\"CLAUDE_CODE_SESSION_ID\":\"$E_SESSION_ID\"}" 2>"$TMPDIR_EVAL/e.err")"
 E_STATUS=$?
 
 E_RECORD="$(assignment_record_file "$E_REPO" "task-e")"
@@ -421,8 +491,16 @@ F1_REPO="$(new_repo repo-f1)"
 assignment_provider_settings_local_file "$F1_REPO"
 seed_session "$F1_REPO" "task-f1" "in_progress" > /dev/null
 seed_liveness_claim "$F1_REPO" "task-f1" "claude-code:sess-f1:host-f1" "2026-06-25T09:00:00.000Z"
+# #440: F1 owns task-f1 — stable "self, derived form" actor + own per-actor current pointer, so
+# analyze() actually resolves an artifactDir and releaseOnNonTerminalStop is REACHED far enough to
+# emit its "missing build/" diagnostic (FIXTURE-GAP: this scenario asserts real fail-open
+# reachability for F1's own session, not stale ownership semantics — without this seed the Stop
+# hook never gets far enough to exercise the missing-build/ code path at all).
+F1_SESSION_ID="eval-f1-session-$$"
+F1_ACTOR_TRIPLE="claude-code:${F1_SESSION_ID}:${REAL_HOSTNAME}"
+seed_current_pointer "$F1_REPO" "task-f1" "$F1_ACTOR_TRIPLE"
 
-F1_OUT="$(STOP_HOOK_OVERRIDE="$F1_PKG_ROOT/scripts/hooks/stop-goal-fit.js" call_stop_hook "$F1_REPO" '{}' 2>"$TMPDIR_EVAL/f1.err")"
+F1_OUT="$(STOP_HOOK_OVERRIDE="$F1_PKG_ROOT/scripts/hooks/stop-goal-fit.js" call_stop_hook "$F1_REPO" "{\"CLAUDE_CODE_SESSION_ID\":\"$F1_SESSION_ID\"}" 2>"$TMPDIR_EVAL/f1.err")"
 F1_STATUS=$?
 if [[ "$F1_STATUS" -eq 0 || "$F1_STATUS" -eq 2 ]] && ! grep -q 'Node\.js v' "$TMPDIR_EVAL/f1.err" && ! grep -q '    at ' "$TMPDIR_EVAL/f1.err"; then
   pass "F(i): missing build/ fails open — hook does not crash, exit code unaffected by release logic (AC7)"
@@ -437,11 +515,18 @@ grep -q 'build/src/cli/workflow-sidecar.js not available' "$TMPDIR_EVAL/f1.err" 
 F2_REPO="$(new_repo repo-f2)"
 assignment_provider_settings_local_file "$F2_REPO"
 seed_session "$F2_REPO" "task-f2" "in_progress" > /dev/null
-seed_liveness_claim "$F2_REPO" "task-f2" "claude-code:sess-f2:host-f2" "2026-06-25T09:00:00.000Z"
+# #440 FIX 2 (de-vacuate, independent review): F2 owns task-f2 — stable "self, derived form"
+# actor + own per-actor pointer, so releaseOnNonTerminalStop is REACHED far enough to attempt
+# reading the corrupt assignment record below (not short-circuited by the outer "no artifactDir
+# at all" early-return, which would fail open for an unrelated reason).
+F2_SESSION_ID="eval-f2-session-$$"
+F2_ACTOR_TRIPLE="claude-code:${F2_SESSION_ID}:${REAL_HOSTNAME}"
+seed_current_pointer "$F2_REPO" "task-f2" "$F2_ACTOR_TRIPLE"
+seed_liveness_claim "$F2_REPO" "task-f2" "$F2_ACTOR_TRIPLE" "2026-06-25T09:00:00.000Z"
 mkdir -p "$F2_REPO/.kontourai/flow-agents/assignment"
 printf '{not valid json at all' > "$(assignment_record_file "$F2_REPO" "task-f2")"
 
-F2_OUT="$(call_stop_hook "$F2_REPO" '{}' 2>"$TMPDIR_EVAL/f2.err")"
+F2_OUT="$(call_stop_hook "$F2_REPO" "{\"CLAUDE_CODE_SESSION_ID\":\"$F2_SESSION_ID\"}" 2>"$TMPDIR_EVAL/f2.err")"
 F2_STATUS=$?
 if [[ "$F2_STATUS" -eq 0 || "$F2_STATUS" -eq 2 ]] && ! grep -q 'Node\.js v' "$TMPDIR_EVAL/f2.err" && ! grep -q '    at ' "$TMPDIR_EVAL/f2.err"; then
   pass "F(ii): corrupt assignment record fails open — no uncaught throw, exit unaffected (AC7)"
@@ -478,6 +563,10 @@ assignment_provider_settings_local_file "$G_REPO"
 seed_session "$G_REPO" "task-g" "in_progress" > /dev/null
 G_SESSION_ID="eval-g-session-$$"
 G_ENV_JSON="{\"CLAUDE_CODE_SESSION_ID\":\"$G_SESSION_ID\"}"
+# #440: G owns task-g — own per-actor current pointer, keyed to the SAME stable actor triple G
+# already uses for its liveness/assignment claims (FIXTURE-GAP: this scenario asserts real
+# idempotent-release behavior for G's own session).
+seed_current_pointer "$G_REPO" "task-g" "claude-code:${G_SESSION_ID}:${REAL_HOSTNAME}"
 seed_liveness_claim "$G_REPO" "task-g" "claude-code:${G_SESSION_ID}:${REAL_HOSTNAME}" "2026-06-25T09:00:00.000Z"
 seed_assignment_claim "$G_REPO" "task-g" "claude-code" "$G_SESSION_ID" "$REAL_HOSTNAME"
 
@@ -510,6 +599,11 @@ echo "--- H. Override-actor canonical-key release (Task A proof) ---"
 H1_REPO="$(new_repo repo-h1)"
 assignment_provider_settings_local_file "$H1_REPO"
 seed_session "$H1_REPO" "task-h1" "in_progress" > /dev/null
+# #440: H1 owns task-h1 under the SAME override actor ("canonical-x") the Stop hook will run as
+# below — own per-actor current pointer keyed to that exact override value (FIXTURE-GAP: this
+# scenario asserts real actor_key-keyed release for the override-actor's own session, the exact
+# Task A regression lock; not stale ownership semantics).
+seed_current_pointer "$H1_REPO" "task-h1" "canonical-x"
 seed_liveness_claim "$H1_REPO" "task-h1" "canonical-x" "2026-06-25T09:00:00.000Z"
 # runtime/host mirror what the Stop hook itself would derive (detectRuntime + os.hostname())
 # under a plain env with no runtime markers set — "unknown" runtime, real hostname — but the
@@ -532,6 +626,12 @@ fi
 H2_REPO="$(new_repo repo-h2)"
 assignment_provider_settings_local_file "$H2_REPO"
 seed_session "$H2_REPO" "task-h2" "in_progress" > /dev/null
+# #440 FIX 2 (de-vacuate, independent review): the ACTING override actor ("different-y") owns
+# task-h2 — its own per-actor pointer, keyed to that exact override value, so
+# releaseOnNonTerminalStop is REACHED and its actual actor_key comparison against the assignment
+# record's "canonical-x" holder is what rejects the release, not the outer "no artifactDir at
+# all" early-return.
+seed_current_pointer "$H2_REPO" "task-h2" "different-y"
 seed_assignment_claim "$H2_REPO" "task-h2" "unknown" "some-other-session-id" "some-other-host" "canonical-x"
 
 H2_OUT="$(call_stop_hook "$H2_REPO" '{"FLOW_AGENTS_ACTOR":"different-y"}' 2>"$TMPDIR_EVAL/h2.err")"

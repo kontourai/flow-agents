@@ -43,6 +43,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LIB_DIR="$ROOT/scripts/hooks/lib"
+CURRENT_POINTER_HELPER="$LIB_DIR/current-pointer.js"
 HEARTBEAT_MODULE="$LIB_DIR/liveness-heartbeat.js"
 READ_MODULE="$LIB_DIR/liveness-read.js"
 ACTOR_MODULE="$LIB_DIR/actor-identity.js"
@@ -76,6 +77,30 @@ new_scratch() {
   mktemp -d "$TMPDIR_EVAL/scratch-XXXXXX"
 }
 
+# seed_current_snapshot <root> <slug> [actor] — #440 FIXTURE-GAP: this suite's fixtures were
+# written before #440's per-actor ownership scoping and never establish a per-actor current
+# pointer for the invoking actor -- under a RESOLVED actor (every hook invocation below sets an
+# explicit FLOW_AGENTS_ACTOR override), liveness-heartbeat.js's readActiveSlug (via
+# readOwnCurrentPointer) now scopes to that actor's own (nonexistent) pointer and never reaches
+# the fixture-under-test. Writes BOTH the legacy current.json AND, when actor is given, the
+# per-actor current/<actor>.json pointer with the SAME minimal {"active_slug": slug} payload --
+# mirroring test_liveness_heartbeat.sh's own seed_current_snapshot helper and, ultimately,
+# workflow-sidecar.ts's real writeCurrent() dual-write via current-pointer.js's own
+# writePerActorCurrent.
+seed_current_snapshot() {
+  local root="$1" slug="$2" actor="${3:-}"
+  local artifact_root="$root/.kontourai/flow-agents"
+  mkdir -p "$artifact_root"
+  printf '{"active_slug":"%s"}\n' "$slug" >"$artifact_root/$SNAPSHOT_FILENAME"
+  if [[ -n "$actor" ]]; then
+    CP_HELPER_ARG="$CURRENT_POINTER_HELPER" FLOW_AGENTS_DIR_ARG="$artifact_root" \
+      SLUG_ARG="$slug" ACTOR_ARG="$actor" node - <<'NODE'
+const { writePerActorCurrent } = require(process.env.CP_HELPER_ARG);
+writePerActorCurrent(process.env.FLOW_AGENTS_DIR_ARG, process.env.ACTOR_ARG, { active_slug: process.env.SLUG_ARG });
+NODE
+  fi
+}
+
 # seed_claim <scratch_root> <slug> <actor> <at_iso> [ttl_seconds]
 # Seeds <root>/.kontourai/flow-agents/current.json (active_slug) and OVERWRITES
 # liveness/events.jsonl with a single `claim` event for <actor>.
@@ -83,7 +108,7 @@ seed_claim() {
   local root="$1" slug="$2" actor="$3" at="$4" ttl="${5:-1800}"
   local artifact_root="$root/.kontourai/flow-agents"
   mkdir -p "$artifact_root/liveness"
-  printf '{"active_slug":"%s"}\n' "$slug" >"$artifact_root/$SNAPSHOT_FILENAME"
+  seed_current_snapshot "$root" "$slug" "$actor"
   printf '{"type":"claim","subjectId":"%s","actor":"%s","at":"%s","ttlSeconds":%s}\n' \
     "$slug" "$actor" "$at" "$ttl" >"$artifact_root/liveness/events.jsonl"
 }
@@ -261,7 +286,7 @@ build_large_stream_with_conflict() {
   local root="$1" slug="$2" actor="$3" claim_at="$4" other_actor="$5" other_at="$6"
   local artifact_root="$root/.kontourai/flow-agents"
   mkdir -p "$artifact_root/liveness"
-  printf '{"active_slug":"%s"}\n' "$slug" >"$artifact_root/$SNAPSHOT_FILENAME"
+  seed_current_snapshot "$root" "$slug" "$actor"
   SLUG_ARG="$slug" ACTOR_ARG="$actor" CLAIM_AT_ARG="$claim_at" OTHER_ACTOR_ARG="$other_actor" \
   OTHER_AT_ARG="$other_at" STREAM_ARG="$artifact_root/liveness/events.jsonl" node - <<'NODE'
 const fs = require('fs');
@@ -498,9 +523,20 @@ fi
 # ─── G. Fail-open on a corrupted sidecar snapshot ────────────────────────────
 echo "--- G. Fail-open on a corrupted sidecar snapshot ---"
 
+# #440 FIX 2 (de-vacuate, delta review): corrupt agent-hb's OWN per-actor pointer file (the new
+# collision-resistant mapping via perActorCurrentFile), not the legacy current.json -- a resolved
+# actor never reads the legacy file at all (#440 D1), so corrupting only that no longer exercises
+# anything (the assertion would pass via "no own pointer", not malformed-pointer tolerance).
+# Mirrors test_liveness_heartbeat.sh's D2 precedent.
 G_ROOT="$(new_scratch)"
 mkdir -p "$G_ROOT/.kontourai/flow-agents/liveness"
-printf '{not valid json' >"$G_ROOT/.kontourai/flow-agents/$SNAPSHOT_FILENAME"
+G_PER_ACTOR_FILE="$(CP_HELPER_ARG="$CURRENT_POINTER_HELPER" ROOT_ARG="$G_ROOT/.kontourai/flow-agents" ACTOR_ARG="agent-hb" node - <<'NODE'
+const { perActorCurrentFile } = require(process.env.CP_HELPER_ARG);
+process.stdout.write(perActorCurrentFile(process.env.ROOT_ARG, process.env.ACTOR_ARG));
+NODE
+)"
+mkdir -p "$(dirname "$G_PER_ACTOR_FILE")"
+printf '{not valid json' >"$G_PER_ACTOR_FILE"
 G_OUT="$(cd "$G_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb \
   node "$CLAUDE_HOOK" PostToolUse dev <"$POST_TOOL_USE_PAYLOAD_FILE" 2>"$TMPDIR_EVAL/g.err")"
 G_STATUS=$?

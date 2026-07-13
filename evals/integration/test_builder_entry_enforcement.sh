@@ -478,7 +478,11 @@ else
   fail "preexisting assignment was treated as current selection evidence: $(cat "$TMP/preexisting.out")"
 fi
 
-if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=100000 \
+# #440 FIXTURE-GAP: $TMP/local's session was established under FLOW_AGENTS_ACTOR=builder-entry-local
+# (see the "workflow start" call above) -- the Stop hook must run as that SAME actor so
+# stop-goal-fit.js's ownership-scoped analyze() finds builder-entry-local's own per-actor pointer
+# (established by workflow start's dual-write), not nothing for an unrelated ambient actor.
+if FLOW_AGENTS_ACTOR=builder-entry-local FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=100000 \
   node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMP/stop.out" 2>"$TMP/stop.err" <<JSON
 {"hook_event_name":"Stop","cwd":"$TMP/local"}
 JSON

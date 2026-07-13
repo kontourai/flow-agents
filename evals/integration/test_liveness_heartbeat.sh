@@ -40,6 +40,7 @@ POLICY_MODULE="$LIB_DIR/liveness-policy.js"
 HEARTBEAT_MODULE="$LIB_DIR/liveness-heartbeat.js"
 READ_MODULE="$LIB_DIR/liveness-read.js"
 ACTOR_MODULE="$LIB_DIR/actor-identity.js"
+CURRENT_POINTER_HELPER="$LIB_DIR/current-pointer.js"
 CLAUDE_HOOK="$ROOT/scripts/hooks/claude-telemetry-hook.js"
 CODEX_HOOK="$ROOT/scripts/hooks/codex-telemetry-hook.js"
 
@@ -68,6 +69,29 @@ new_scratch() {
   mktemp -d "$TMPDIR_EVAL/scratch-XXXXXX"
 }
 
+# seed_current_snapshot <root> <slug> [actor] — #440: writes BOTH the legacy current.json
+# (SNAPSHOT_FILENAME, unconditional — every fixture below keeps writing this) AND, when actor is
+# given, the per-actor current/<actor>.json pointer with the SAME minimal {"active_slug": slug}
+# payload — mirroring workflow-sidecar.ts's real writeCurrent() dual-write, via the shared
+# current-pointer.js helper's own writePerActorCurrent (not a hand-rolled reimplementation of its
+# sanitize/path rule), so #440's readOwnCurrentPointer finds this fixture's claimed subject
+# exactly like a real session would. Every builder below that seeds a sidecar snapshot for a
+# RESOLVED actor (the FLOW_AGENTS_ACTOR value the corresponding call_heartbeat/wrapper invocation
+# uses) now routes through this, instead of hand-writing SNAPSHOT_FILENAME directly.
+seed_current_snapshot() {
+  local root="$1" slug="$2" actor="${3:-}"
+  local artifact_root="$root/.kontourai/flow-agents"
+  mkdir -p "$artifact_root"
+  printf '{"active_slug":"%s"}\n' "$slug" >"$artifact_root/$SNAPSHOT_FILENAME"
+  if [[ -n "$actor" ]]; then
+    CP_HELPER_ARG="$CURRENT_POINTER_HELPER" FLOW_AGENTS_DIR_ARG="$artifact_root" \
+      SLUG_ARG="$slug" ACTOR_ARG="$actor" node - <<'NODE'
+const { writePerActorCurrent } = require(process.env.CP_HELPER_ARG);
+writePerActorCurrent(process.env.FLOW_AGENTS_DIR_ARG, process.env.ACTOR_ARG, { active_slug: process.env.SLUG_ARG });
+NODE
+  fi
+}
+
 # seed_claim <scratch_root> <slug> <actor> <at_iso> [ttl_seconds]
 # Seeds <root>/.kontourai/flow-agents/<SNAPSHOT_FILENAME> (active_slug) and a
 # single `claim` event in liveness/events.jsonl for <actor>, matching the
@@ -77,7 +101,7 @@ seed_claim() {
   local root="$1" slug="$2" actor="$3" at="$4" ttl="${5:-1800}"
   local artifact_root="$root/.kontourai/flow-agents"
   mkdir -p "$artifact_root/liveness"
-  printf '{"active_slug":"%s"}\n' "$slug" >"$artifact_root/$SNAPSHOT_FILENAME"
+  seed_current_snapshot "$root" "$slug" "$actor"
   printf '{"type":"claim","subjectId":"%s","actor":"%s","at":"%s","ttlSeconds":%s}\n' \
     "$slug" "$actor" "$at" "$ttl" >"$artifact_root/liveness/events.jsonl"
 }
@@ -292,8 +316,9 @@ fi
 
 # C2: the sidecar snapshot names a slug with no prior events at all -> no-claim.
 C2_ROOT="$(new_scratch)"
-mkdir -p "$C2_ROOT/.kontourai/flow-agents"
-printf '{"active_slug":"c2-subj"}\n' >"$C2_ROOT/.kontourai/flow-agents/$SNAPSHOT_FILENAME"
+# #440 FIXTURE-GAP: agent-c2 owns c2-subj (never claimed) -- needs its own per-actor pointer so
+# readOwnCurrentPointer finds it and the code reaches the no-claim check, not an earlier no-current.
+seed_current_snapshot "$C2_ROOT" "c2-subj" "agent-c2"
 C2_RESULT="$(call_heartbeat "$C2_ROOT" '{"FLOW_AGENTS_ACTOR":"agent-c2"}')"
 if [[ "$C2_RESULT" == '{"emitted":false,"reason":"no-claim"}' ]]; then
   _pass "maybeEmitHeartbeat returns no-claim when the named subject has no prior claim for the actor (AC4)"
@@ -360,9 +385,19 @@ fi
 
 # D2: a corrupted sidecar snapshot (malformed JSON) fails open — wrapper still exits 0
 # with its normal stdout contract, and no heartbeat is fabricated from unparseable state.
+# #440 FIX 2 (de-vacuate, independent review): corrupt agent-hb's OWN per-actor pointer file (the
+# new collision-resistant mapping), not the legacy current.json — a resolved actor never reads
+# the legacy file at all (#440 D1), so corrupting only that no longer exercises anything; this
+# now proves fail-open tolerance for a corrupt OWN pointer, the actually-reachable code path.
 D2_ROOT="$(new_scratch)"
 mkdir -p "$D2_ROOT/.kontourai/flow-agents/liveness"
-printf '{not valid json' >"$D2_ROOT/.kontourai/flow-agents/$SNAPSHOT_FILENAME"
+D2_PER_ACTOR_FILE="$(CP_HELPER_ARG="$CURRENT_POINTER_HELPER" ROOT_ARG="$D2_ROOT/.kontourai/flow-agents" ACTOR_ARG="agent-hb" node - <<'NODE'
+const { perActorCurrentFile } = require(process.env.CP_HELPER_ARG);
+process.stdout.write(perActorCurrentFile(process.env.ROOT_ARG, process.env.ACTOR_ARG));
+NODE
+)"
+mkdir -p "$(dirname "$D2_PER_ACTOR_FILE")"
+printf '{not valid json' >"$D2_PER_ACTOR_FILE"
 D2_OUT="$(cd "$D2_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb \
   node "$CLAUDE_HOOK" PostToolUse dev <"$POST_TOOL_USE_PAYLOAD_FILE" 2>"$TMPDIR_EVAL/d2.err")"
 D2_STATUS=$?
@@ -436,7 +471,7 @@ build_large_liveness_stream() {
   local root="$1" slug="$2" actor="$3" claim_at="$4" include_hb="${5:-false}" hb_at="${6:-}"
   local artifact_root="$root/.kontourai/flow-agents"
   mkdir -p "$artifact_root/liveness"
-  printf '{"active_slug":"%s"}\n' "$slug" >"$artifact_root/$SNAPSHOT_FILENAME"
+  seed_current_snapshot "$root" "$slug" "$actor"
   SLUG_ARG="$slug" ACTOR_ARG="$actor" CLAIM_AT_ARG="$claim_at" INCLUDE_HB_ARG="$include_hb" \
   HB_AT_ARG="$hb_at" STREAM_ARG="$artifact_root/liveness/events.jsonl" node - <<'NODE'
 const fs = require('fs');
@@ -564,8 +599,7 @@ build_large_liveness_stream_release() {
   local root="$1" slug="$2" actor="$3" claim_at="$4" release_at="$5"
   local artifact_root="$root/.kontourai/flow-agents"
   mkdir -p "$artifact_root/liveness"
-  printf '{"active_slug":"%s"}
-' "$slug" >"$artifact_root/$SNAPSHOT_FILENAME"
+  seed_current_snapshot "$root" "$slug" "$actor"
   SLUG_ARG="$slug" ACTOR_ARG="$actor" CLAIM_AT_ARG="$claim_at" RELEASE_AT_ARG="$release_at"   STREAM_ARG="$artifact_root/liveness/events.jsonl" node - <<'NODE'
 const fs = require('fs');
 const filler = (i) =>
@@ -624,7 +658,10 @@ const { sanitizeSegment } = require(process.env.ACTOR_MODULE_ARG);
 process.stdout.write(sanitizeSegment(process.env.RAW_ARG));
 NODE
 )"
-printf '{"active_slug":"%s"}\n' "$I_RAW_SLUG" >"$I_ROOT/.kontourai/flow-agents/$SNAPSHOT_FILENAME"
+# #440 FIXTURE-GAP: agent-hb-i owns this (hostile-slug-named) subject -- needs its own per-actor
+# pointer. seed_current_snapshot writes the payload's active_slug verbatim (no pre-sanitization on
+# the write side), preserving this scenario's whole point: sanitization happens at READ time.
+seed_current_snapshot "$I_ROOT" "$I_RAW_SLUG" "agent-hb-i"
 printf '{"type":"claim","subjectId":"%s","actor":"agent-hb-i","at":"2026-06-25T11:00:00.000Z","ttlSeconds":1800}\n' \
   "$I_SANITIZED_SLUG" >"$(stream_file "$I_ROOT")"
 I_RESULT="$(call_heartbeat "$I_ROOT" '{"FLOW_AGENTS_ACTOR":"agent-hb-i"}' "2026-06-25T11:05:00.000Z")"
@@ -648,7 +685,7 @@ seed_heartbeat_only() {
   local root="$1" slug="$2" actor="$3" at="$4"
   local artifact_root="$root/.kontourai/flow-agents"
   mkdir -p "$artifact_root/liveness"
-  printf '{"active_slug":"%s"}\n' "$slug" >"$artifact_root/$SNAPSHOT_FILENAME"
+  seed_current_snapshot "$root" "$slug" "$actor"
   printf '{"type":"heartbeat","subjectId":"%s","actor":"%s","at":"%s"}\n' \
     "$slug" "$actor" "$at" >"$artifact_root/liveness/events.jsonl"
 }

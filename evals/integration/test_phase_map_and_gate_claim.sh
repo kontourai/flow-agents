@@ -417,11 +417,20 @@ node -e "
 " 2>/dev/null
 rm -f "$C_DIR/.kontourai/flow-agents/$CLEAN_SLUG/$CLEAN_SLUG--deliver.md"
 
+# #440 FIXTURE-GAP: this session was established under FLOW_AGENTS_ACTOR=clean-fixture-actor
+# (line ~394) -- the Stop hook must run as that SAME actor so stop-goal-fit.js's ownership-scoped
+# analyze() finds clean-fixture-actor's own per-actor pointer (established by workflow start's
+# dual-write) rather than finding nothing for the ambient/unrelated invoking actor. Do NOT force
+# an unresolved actor here: workflow start's own automatic selected-work gate-claim recording (and
+# the resulting pull-work -> design-probe canonical-Flow auto-transition this section's assertion
+# depends on) itself requires a genuinely RESOLVED actor to fire -- forcing unresolved for the
+# setup step silently suppresses that transition, a real behavior difference, not just a
+# fixture-reachability issue.
 clean_out=""
 clean_exit=0
 for attempt in 1 2; do
   set +e
-  attempt_out="$(FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=2 FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip \
+  attempt_out="$(FLOW_AGENTS_ACTOR=clean-fixture-actor FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=2 FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip \
       node "$GATE" 2>&1 <<< "{\"hook_event_name\":\"Stop\",\"cwd\":\"$C_DIR\"}")"
   attempt_exit="$?"
   set -e

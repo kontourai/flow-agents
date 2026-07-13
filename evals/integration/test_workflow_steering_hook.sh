@@ -3,6 +3,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CURRENT_POINTER_HELPER="$ROOT/scripts/hooks/lib/current-pointer.js"
 
 TMPDIR_EVAL="$(mktemp -d)"
 errors=0
@@ -43,7 +44,22 @@ cat > "$REPO/.kontourai/flow-agents/steering-demo/trust.bundle" <<'JSON'
 {"schema_version":"1.0","claims":[]}
 JSON
 
-if node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/steering.out" 2>"$TMPDIR_EVAL/steering.err" <<JSON
+# #440 FIXTURE-GAP: this file never set FLOW_AGENTS_ACTOR (every invocation ran under whichever
+# ambient/ancestry actor happened to resolve, never asserted on). The 4 assertions below that
+# expect steering-demo's STATE/RESUME banner need a RESOLVED actor that legitimately owns
+# steering-demo -- a stable, explicit override plus its own per-actor current pointer (mirroring
+# workflow-sidecar.ts's real writeCurrent() dual-write via current-pointer.js's own
+# writePerActorCurrent). Only the specific invocations that need this pass FLOW_AGENTS_ACTOR below
+# -- every other invocation in this file is untouched and keeps resolving via whatever ambient
+# actor it always has (harmless: none of the untouched assertions depend on `current`).
+STEERING_ACTOR="eval-workflow-steering-actor"
+CP_HELPER_ARG="$CURRENT_POINTER_HELPER" FLOW_AGENTS_DIR_ARG="$REPO/.kontourai/flow-agents" \
+  SLUG_ARG="steering-demo" ACTOR_ARG="$STEERING_ACTOR" node - <<'NODE'
+const { writePerActorCurrent } = require(process.env.CP_HELPER_ARG);
+writePerActorCurrent(process.env.FLOW_AGENTS_DIR_ARG, process.env.ACTOR_ARG, { active_slug: process.env.SLUG_ARG });
+NODE
+
+if FLOW_AGENTS_ACTOR="$STEERING_ACTOR" node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/steering.out" 2>"$TMPDIR_EVAL/steering.err" <<JSON
 {"cwd":"$REPO","tool_input":{"command":"InvokeSubagents","content":{"subagents":[{"agent_name":"tool-verifier"}]}},"tool_response":"verification finished"}
 JSON
 then
@@ -137,7 +153,7 @@ else
   _fail "workflow steering hook should not fail for ordinary non-subagent tools"
 fi
 
-if node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/prompt.out" 2>"$TMPDIR_EVAL/prompt.err" <<JSON
+if FLOW_AGENTS_ACTOR="$STEERING_ACTOR" node "$ROOT/scripts/hooks/workflow-steering.js" >"$TMPDIR_EVAL/prompt.out" 2>"$TMPDIR_EVAL/prompt.err" <<JSON
 {"hook_event_name":"UserPromptSubmit","cwd":"$REPO","prompt":"continue"}
 JSON
 then
@@ -174,7 +190,7 @@ else
   _fail "Claude hook adapter should not fail for workflow steering"
 fi
 
-if node "$ROOT/scripts/hooks/claude-hook-adapter.js" UserPromptSubmit prompt:workflow-steering workflow-steering.js standard,strict >"$TMPDIR_EVAL/claude-prompt-adapter.out" 2>"$TMPDIR_EVAL/claude-prompt-adapter.err" <<JSON
+if FLOW_AGENTS_ACTOR="$STEERING_ACTOR" node "$ROOT/scripts/hooks/claude-hook-adapter.js" UserPromptSubmit prompt:workflow-steering workflow-steering.js standard,strict >"$TMPDIR_EVAL/claude-prompt-adapter.out" 2>"$TMPDIR_EVAL/claude-prompt-adapter.err" <<JSON
 {"hook_event_name":"UserPromptSubmit","cwd":"$REPO","prompt":"continue"}
 JSON
 then
@@ -551,7 +567,7 @@ else
   _fail "Codex hook adapter should not fail after tool-worker execution"
 fi
 
-if node "$ROOT/scripts/hooks/codex-hook-adapter.js" prompt:workflow-steering workflow-steering.js standard,strict >"$TMPDIR_EVAL/codex-prompt-adapter.out" 2>"$TMPDIR_EVAL/codex-prompt-adapter.err" <<JSON
+if FLOW_AGENTS_ACTOR="$STEERING_ACTOR" node "$ROOT/scripts/hooks/codex-hook-adapter.js" prompt:workflow-steering workflow-steering.js standard,strict >"$TMPDIR_EVAL/codex-prompt-adapter.out" 2>"$TMPDIR_EVAL/codex-prompt-adapter.err" <<JSON
 {"hook_event_name":"UserPromptSubmit","cwd":"$REPO","prompt":"continue"}
 JSON
 then
