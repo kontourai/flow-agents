@@ -11,6 +11,10 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CAPTURE="$ROOT/scripts/hooks/evidence-capture.js"
 GATE="$ROOT/scripts/hooks/stop-goal-fit.js"
+CURRENT_POINTER_HELPER="$ROOT/scripts/hooks/lib/current-pointer.js"
+# #440: every fixture this file builds is "owned" by this one constant actor, once a given
+# invocation below applies FLOW_AGENTS_ACTOR="$EVIDENCE_ACTOR" to it (see seed_repo/capture()).
+EVIDENCE_ACTOR="eval-evidence-capture-actor"
 
 # Disable the block escape hatch so repeated independent assertions never trip it.
 export FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=100000
@@ -41,10 +45,21 @@ type: deliver
 
 ### Verdict: PASS
 MD
+  # #440 FIXTURE-GAP: seed EVIDENCE_ACTOR's own per-actor current pointer for this repo/slug,
+  # unconditionally (harmless/unused for any invocation below that does NOT set
+  # FLOW_AGENTS_ACTOR="$EVIDENCE_ACTOR") -- mirroring workflow-sidecar.ts's real writeCurrent()
+  # dual-write via current-pointer.js's own writePerActorCurrent, so #440's ownership-scoped
+  # resolveArtifactDir/preferredArtifactDir find this fixture's session exactly like a real
+  # ensure-session'd one would.
+  CP_HELPER_ARG="$CURRENT_POINTER_HELPER" FLOW_AGENTS_DIR_ARG="$p/.kontourai/flow-agents" \
+    SLUG_ARG="$slug" ACTOR_ARG="$EVIDENCE_ACTOR" node - <<'NODE'
+const { writePerActorCurrent } = require(process.env.CP_HELPER_ARG);
+writePerActorCurrent(process.env.FLOW_AGENTS_DIR_ARG, process.env.ACTOR_ARG, { active_slug: process.env.SLUG_ARG });
+NODE
 }
 
 capture() { # stdin = payload json
-  node "$CAPTURE" >/dev/null 2>&1
+  FLOW_AGENTS_ACTOR="$EVIDENCE_ACTOR" node "$CAPTURE" >/dev/null 2>&1
 }
 
 # ============================================================================
@@ -103,7 +118,7 @@ B="$TMP/contradict"; seed_repo "$B" t1
 printf '%s' '{"schema_version":"1.0","task_slug":"t1","verdict":"pass","checks":[{"id":"unit-tests","kind":"command","status":"pass","command":"npm test","summary":"tests passed"}]}' > "$B/.kontourai/flow-agents/t1/evidence.json"
 printf '%s\n' '{"command":"npm test","observedResult":"fail","exitCode":1,"capturedAt":"2026-06-23T00:00:00Z","source":"postToolUse-capture"}' > "$B/.kontourai/flow-agents/t1/command-log.jsonl"
 
-if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip node "$GATE" >/dev/null 2>"$TMP/b1.err" <<JSON
+if FLOW_AGENTS_ACTOR="$EVIDENCE_ACTOR" FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip node "$GATE" >/dev/null 2>"$TMP/b1.err" <<JSON
 {"hook_event_name":"Stop","cwd":"$B"}
 JSON
 then _fail "gate should BLOCK when capture log contradicts claimed pass"
@@ -140,7 +155,7 @@ printf '%s' '{"name":"x","scripts":{"test":"exit 7"}}' > "$D/package.json"
 printf '%s' '{"schema_version":"1.0","task_slug":"t1","verdict":"pass","checks":[{"id":"unit-tests","kind":"command","status":"pass","command":"npm test","summary":"tests passed"}]}' > "$D/.kontourai/flow-agents/t1/evidence.json"
 # command-log.jsonl intentionally absent — the command was never actually run.
 
-if FLOW_AGENTS_GOAL_FIT_MODE=block node "$GATE" >/dev/null 2>"$TMP/b3.err" <<JSON
+if FLOW_AGENTS_ACTOR="$EVIDENCE_ACTOR" FLOW_AGENTS_GOAL_FIT_MODE=block node "$GATE" >/dev/null 2>"$TMP/b3.err" <<JSON
 {"hook_event_name":"Stop","cwd":"$D"}
 JSON
 then _fail "gate should BLOCK when trusted backstop re-run of declared manifest target fails"
@@ -159,7 +174,7 @@ E="$TMP/notverified"; seed_repo "$E" t1
 printf '%s' '{"schema_version":"1.0","task_slug":"t1","status":"in_progress","phase":"verification","updated_at":"2026-06-23T00:00:00Z","next_action":{"status":"continue","summary":"verify command evidence"}}' > "$E/.kontourai/flow-agents/t1/state.json"
 printf '%s' '{"schema_version":"1.0","task_slug":"t1","verdict":"pass","checks":[{"id":"custom","kind":"command","status":"pass","command":"./my-thing.sh","summary":"ran custom"}]}' > "$E/.kontourai/flow-agents/t1/evidence.json"
 
-if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_RECHECK=false node "$GATE" >/dev/null 2>"$TMP/b4.err" <<JSON
+if FLOW_AGENTS_ACTOR="$EVIDENCE_ACTOR" FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_RECHECK=false node "$GATE" >/dev/null 2>"$TMP/b4.err" <<JSON
 {"hook_event_name":"Stop","cwd":"$E"}
 JSON
 then _fail "gate should not silently pass an un-captured, un-verifiable claimed-pass command"
@@ -182,7 +197,7 @@ F="$TMP/recheck"; seed_repo "$F" t1
 printf '%s' '{"schema_version":"1.0","task_slug":"t1","status":"in_progress","phase":"verification","updated_at":"2026-06-23T00:00:00Z","next_action":{"status":"continue","summary":"verify command evidence"}}' > "$F/.kontourai/flow-agents/t1/state.json"
 printf '%s' '{"schema_version":"1.0","task_slug":"t1","verdict":"pass","checks":[{"id":"custom","kind":"command","status":"pass","command":"exit 5","summary":"ran custom"}]}' > "$F/.kontourai/flow-agents/t1/evidence.json"
 # Opt-in ON (in-flight): the model's free-form "exit 5" is re-run and fails → block.
-if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_RECHECK=true node "$GATE" >/dev/null 2>"$TMP/b5.err" <<JSON
+if FLOW_AGENTS_ACTOR="$EVIDENCE_ACTOR" FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_RECHECK=true node "$GATE" >/dev/null 2>"$TMP/b5.err" <<JSON
 {"hook_event_name":"Stop","cwd":"$F"}
 JSON
 then _fail "with RECHECK=true the failing model command should block"
