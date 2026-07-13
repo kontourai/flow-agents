@@ -33,6 +33,20 @@ const ACTOR = { runtime: "codex", session_id: "runtime-projection", host: "test-
 const ACTOR_KEY = "codex:runtime-projection:test-host";
 const AUTHORITY_KEY_ID = "runtime-test";
 const AUTHORITY_KEYS = generateKeyPairSync("ed25519");
+const AMBIENT_IDENTITY_ENV_KEYS = [
+  "FLOW_AGENTS_ACTOR",
+  "CODEX_THREAD_ID",
+  "CODEX_SESSION_ID",
+  "CLAUDE_CODE_SESSION_ID",
+  "OPENCODE_SESSION_ID",
+  "PI_SESSION_ID",
+  "GITHUB_ACTIONS",
+  "GITLAB_CI",
+  "CIRCLECI",
+  "JENKINS_URL",
+  "TF_BUILD",
+  "BUILDKITE",
+];
 
 function makeSession(slug = "runtime-projection") {
   const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-builder-runtime-"));
@@ -460,7 +474,7 @@ test("public workflow evidence accepts only live signed turn authority after ord
     const request = JSON.parse(input);
     fs.writeFileSync("adapter-request.json", input);
     const evidenceEnv = { ...process.env };
-    for (const key of ["FLOW_AGENTS_ACTOR", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "OPENCODE_SESSION_ID", "PI_SESSION_ID"]) delete evidenceEnv[key];
+    for (const key of ${JSON.stringify(AMBIENT_IDENTITY_ENV_KEYS)}) delete evidenceEnv[key];
     const ordinaryChild = ${JSON.stringify(path.resolve(import.meta.dirname, "../../scripts/hooks/lib/actor-identity.js"))};
     const childIdentity = (await import("node:module")).createRequire(import.meta.url)(ordinaryChild).resolveActorIdentity(evidenceEnv);
     const record = (expectation) => {
@@ -534,7 +548,7 @@ test("public workflow evidence accepts only live signed turn authority after ord
   assert.deepEqual(events.filter((event) => event.type === "turn_started").map((event) => event.current_step), ["pull-work", "design-probe"]);
   assert.equal(events.some((event) => event.type === "gate_not_advanced"), false);
   const replayEnv = { ...process.env, FLOW_AGENTS_CONTINUATION_TURN_SECRET: authority.turnSecret, FLOW_AGENTS_CONTINUATION_RUN_ID: authority.runId };
-  for (const key of ["FLOW_AGENTS_ACTOR", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "OPENCODE_SESSION_ID", "PI_SESSION_ID"]) delete replayEnv[key];
+  for (const key of AMBIENT_IDENTITY_ENV_KEYS) delete replayEnv[key];
   const replay = spawnSync(process.execPath, [path.resolve(import.meta.dirname, "../../build/src/cli.js"), "workflow", "evidence", "--session-dir", session.sessionDir, "--expectation", "implementation-plan", "--status", "pass", "--summary", "replayed turn capability", "--evidence-ref-json", JSON.stringify({ kind: "artifact", file: "adapter.mjs", summary: "replay fixture" })], { cwd: session.projectRoot, encoding: "utf8", env: replayEnv });
   assert.notEqual(replay.status, 0, "copied capability values fail after active-turn cleanup");
   replayEnv.FLOW_AGENTS_CONTINUATION_TURN_SECRET = "A".repeat(43);
