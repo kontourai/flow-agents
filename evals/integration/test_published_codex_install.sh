@@ -34,8 +34,10 @@ echo "=== Published Codex Install Integration ==="
 (cd "$ROOT_DIR" && npm pack --json --pack-destination "$PACK_DIR" >/dev/null)
 TARBALL="$(find "$PACK_DIR" -maxdepth 1 -type f -name '*.tgz' -print -quit)"
 [[ -n "$TARBALL" ]] || { echo "npm pack did not produce a tarball" >&2; exit 1; }
-tar -tzf "$TARBALL" | grep -qx 'package/dist/codex/.codex/hooks.json'
-tar -tzf "$TARBALL" | grep -qx 'package/dist/codex/build/src/cli.js'
+TARBALL_LIST="$TMPDIR_EVAL/tarball.list"
+tar -tzf "$TARBALL" > "$TARBALL_LIST"
+grep -Fxq 'package/dist/codex/.codex/hooks.json' "$TARBALL_LIST"
+grep -Fxq 'package/dist/codex/build/src/cli.js' "$TARBALL_LIST"
 
 printf '{"name":"flow-agents-packed-consumer","private":true,"version":"1.0.0"}\n' > "$CONSUMER/package.json"
 (cd "$CONSUMER" && npm install --omit=dev --ignore-scripts --no-audit --no-fund --cache "$NPM_CACHE" "$TARBALL" >/dev/null)
