@@ -81,6 +81,78 @@ else
   _fail "Codex bundle still exposes generated global instructions or lost README discovery metadata"
 fi
 
+echo ""
+echo "--- Documentation and Instruction Discovery Contract ---"
+# Keep this table aligned with the supported-runtime capability policy.  A dash
+# means the harness has no bundle-owned repository instruction file.
+while IFS='|' read -r runtime bundle_dir instruction_rel; do
+  readme="$DIST_DIR/$bundle_dir/README.md"
+  if [[ -f "$readme" ]] \
+    && grep -q 'Generated from the canonical source' "$readme" \
+    && grep -q '## Exported agents' "$readme" \
+    && grep -q '`tool-worker`' "$readme"; then
+    _pass "$runtime keeps provenance and the exported-agent inventory in README.md"
+  else
+    _fail "$runtime README.md is missing canonical provenance or exported-agent inventory"
+  fi
+
+  if [[ "$instruction_rel" == "-" ]]; then
+    if [[ ! -e "$DIST_DIR/$bundle_dir/AGENTS.md" && ! -e "$DIST_DIR/$bundle_dir/CLAUDE.md" ]]; then
+      _pass "$runtime does not publish a repository instruction surface"
+    else
+      _fail "$runtime publishes an instruction file despite declaring no discovery surface"
+    fi
+    continue
+  fi
+
+  instruction="$DIST_DIR/$bundle_dir/$instruction_rel"
+  if [[ -f "$instruction" ]]; then
+    _pass "$runtime publishes concise guidance on $instruction_rel"
+  else
+    _fail "$runtime is missing its $instruction_rel discovery surface"
+    continue
+  fi
+
+  if ! grep -Eq 'Treat the repo root as the source of truth|regenerate the bundle|were copied from the canonical source|Kiro-only hook wiring was stripped|## Exported Agents|## Exported agents' "$instruction" \
+    && [[ "$(grep -Ec '^- `tool-' "$instruction" || true)" -eq 0 ]]; then
+    _pass "$runtime instructions exclude maintainer prose and the exported-agent catalog"
+  else
+    _fail "$runtime instructions contain maintainer provenance, copied-directory notes, Kiro stripping notes, or a full agent catalog"
+  fi
+done <<'MATRIX'
+Base|base|AGENTS.md
+Kiro|kiro|AGENTS.md
+Claude Code|claude-code|CLAUDE.md
+Codex|codex|-
+OpenCode|opencode|AGENTS.md
+pi|pi|AGENTS.md
+MATRIX
+
+if node - "$ROOT_DIR/src/tools/build-universal-bundles.ts" <<'NODE'
+const fs = require("node:fs");
+const source = fs.readFileSync(process.argv[2], "utf8");
+for (const runtime of ["base", "kiro", "claude-code", "codex", "opencode", "pi"]) {
+  if (!source.includes(`\"${runtime}\"`)) throw new Error(`shared capability policy missing ${runtime}`);
+}
+for (const required of ["BUNDLE_CAPABILITIES", "renderBundleReadme", "renderOperationalInstructions", "installScript"]) {
+  if (!source.includes(required)) throw new Error(`shared bundle policy missing ${required}`);
+}
+if (source.includes("exportRootAgentsMd")) throw new Error("legacy combined provenance/instruction renderer remains");
+
+const builders = source.match(/function build(?:Base|Kiro|ClaudeCode|Codex|Opencode|Pi)\([^]*?(?=\nfunction |\nexport |\nmain\()/g) || [];
+if (builders.length !== 6) throw new Error(`expected six runtime builders, found ${builders.length}`);
+for (const builder of builders) {
+  if (!builder.includes("BUNDLE_CAPABILITIES")) throw new Error("runtime builder does not select shared capability data");
+  if (!builder.includes("installScript(")) throw new Error("runtime builder bypasses the shared installer generator");
+  if (/AGENTS\.md|CLAUDE\.md/.test(builder)) throw new Error("runtime builder contains a local instruction-file branch");
+}
+NODE
+then
+  _pass "all runtime builders select shared capabilities, renderers, and installer policy without local instruction branches"
+else
+  _fail "runtime bundle policy is duplicated or bypasses shared capabilities/renderers/installer preservation"
+fi
+
 if (cd "$ROOT_DIR" && node scripts/audit-codex-legacy-agents.js packaging/codex-legacy-agents-fingerprints.json >/tmp/codex-legacy-agents-audit.txt 2>&1) \
   && grep -q 'Audited 14 seed-capable releases; 1 unique payload(s); gaps=0' /tmp/codex-legacy-agents-audit.txt; then
   _pass "Codex legacy fingerprint catalog independently covers all seed-capable release tags"

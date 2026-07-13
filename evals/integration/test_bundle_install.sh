@@ -44,35 +44,94 @@ OPENCODE_DEST="$TMPDIR_EVAL/opencode-workspace"
 OPENCODE_CONSOLE_DEST="$TMPDIR_EVAL/opencode-console-workspace"
 OPENCODE_FULL_DEST="$TMPDIR_EVAL/opencode-full-workspace"
 PI_DEST="$TMPDIR_EVAL/pi-workspace"
+INSTRUCTION_FIXTURES="$TMPDIR_EVAL/instruction-fixtures"
 CONSOLE_TOKEN_FILE="$TMPDIR_EVAL/console-token"
 printf 'test-token\n' > "$CONSOLE_TOKEN_FILE"
 chmod 600 "$CONSOLE_TOKEN_FILE" 2>/dev/null || true
 
+instruction_fixture_key() {
+  printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
+}
+
+instruction_file_identity() {
+  local file="$1"
+  printf '%s %s\n' "$(wc -c < "$file" | tr -d ' ')" "$(shasum -a 256 "$file" | awk '{print $1}')"
+}
+
+seed_instruction_fixture() {
+  local dest="$1"
+  local label="$2"
+  local key
+  key="$(instruction_fixture_key "$dest")"
+  mkdir -p "$dest" "$INSTRUCTION_FIXTURES"
+  printf '# Repository AGENTS instructions\nfixture=%s\nkind=agents\nliteral=__KIRO_PACKAGE_ROOT__\n' "$label" > "$dest/AGENTS.md"
+  printf '# Repository CLAUDE instructions\nfixture=%s\nkind=claude\nliteral=__KIRO_PACKAGE_ROOT__\n' "$label" > "$dest/CLAUDE.md"
+  instruction_file_identity "$dest/AGENTS.md" > "$INSTRUCTION_FIXTURES/$key.AGENTS.md.identity"
+  instruction_file_identity "$dest/CLAUDE.md" > "$INSTRUCTION_FIXTURES/$key.CLAUDE.md.identity"
+}
+
+assert_instruction_fixture_preserved() {
+  local dest="$1"
+  local label="$2"
+  local key filename expected actual
+  key="$(instruction_fixture_key "$dest")"
+  for filename in AGENTS.md CLAUDE.md; do
+    expected="$(cat "$INSTRUCTION_FIXTURES/$key.$filename.identity")"
+    if [[ -f "$dest/$filename" ]]; then
+      actual="$(instruction_file_identity "$dest/$filename")"
+    else
+      actual="missing"
+    fi
+    if [[ "$actual" == "$expected" ]]; then
+      _pass "$label preserves existing $filename byte-for-byte"
+    else
+      _fail "$label changed or deleted existing $filename (expected identity: $expected; actual: $actual)"
+    fi
+  done
+}
+
+# Every install path starts with distinct repository-owned instructions. Kiro's
+# fixture is intentionally at the rsync --delete destination root so deletion,
+# not only replacement, is covered by this regression test.
+seed_instruction_fixture "$KIRO_DEST" "direct-kiro-delete-sync"
+seed_instruction_fixture "$BASE_DEST" "direct-base"
+seed_instruction_fixture "$CLAUDE_DEST" "direct-claude-code"
+seed_instruction_fixture "$CODEX_DEST" "direct-codex"
+seed_instruction_fixture "$OPENCODE_DEST" "direct-opencode"
+seed_instruction_fixture "$PI_DEST" "direct-pi"
+seed_instruction_fixture "$BASE_INIT_DEST" "cli-base"
+seed_instruction_fixture "$CODEX_INIT_DEST" "cli-codex"
+seed_instruction_fixture "$OPENCODE_FULL_DEST" "cli-opencode"
+
 echo ""
 echo "--- Install ---"
-if (cd "$ROOT_DIR/dist/kiro" && bash install.sh "$KIRO_DEST" >/dev/null); then
+if (cd "$ROOT_DIR/dist/kiro" && bash install.sh "$KIRO_DEST/" >/dev/null); then
   _pass "Kiro install succeeded"
 else
   _fail "Kiro install failed"
 fi
+assert_instruction_fixture_preserved "$KIRO_DEST" "Kiro direct install with trailing-slash destination and rsync --delete"
 
 if (cd "$ROOT_DIR/dist/base" && bash install.sh "$BASE_DEST" >/dev/null); then
   _pass "Base install succeeded"
 else
   _fail "Base install failed"
 fi
+assert_instruction_fixture_preserved "$BASE_DEST" "Base direct install"
 
 if (cd "$ROOT_DIR/dist/claude-code" && bash install.sh "$CLAUDE_DEST" >/dev/null); then
   _pass "Claude Code install succeeded"
 else
   _fail "Claude Code install failed"
 fi
+assert_instruction_fixture_preserved "$CLAUDE_DEST" "Claude Code direct install"
 
 if (cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_DEST" >/dev/null); then
   _pass "Codex install succeeded"
 else
   _fail "Codex install failed"
 fi
+assert_instruction_fixture_preserved "$CODEX_DEST" "Codex direct install"
 
 if (cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_CONSOLE_DEST" --telemetry-sink local-kontour-console --console-token-file "$CONSOLE_TOKEN_FILE" --console-tenant tenant-a >/dev/null); then
   _pass "Codex install with Console telemetry config succeeded"
@@ -123,12 +182,14 @@ if node "$ROOT_DIR/build/src/cli.js" init --runtime base --dest "$BASE_INIT_DEST
 else
   _fail "flow-agents init headless base install failed"
 fi
+assert_instruction_fixture_preserved "$BASE_INIT_DEST" "flow-agents init Base install"
 
 if node "$ROOT_DIR/build/src/cli.js" init --runtime codex --dest "$CODEX_INIT_DEST" --telemetry-sink local-kontour-console --console-tenant tenant-a --activate-kits --yes >/dev/null; then
   _pass "flow-agents init headless Codex install succeeded"
 else
   _fail "flow-agents init headless Codex install failed"
 fi
+assert_instruction_fixture_preserved "$CODEX_INIT_DEST" "flow-agents init Codex install"
 
 echo ""
 echo "--- Guided Console-Connect Wizard (G2/G3): headless regression + summary/verify ---"
@@ -266,6 +327,7 @@ if (cd "$ROOT_DIR/dist/opencode" && bash install.sh "$OPENCODE_DEST" >/dev/null)
 else
   _fail "opencode install failed"
 fi
+assert_instruction_fixture_preserved "$OPENCODE_DEST" "OpenCode direct install"
 
 if (cd "$ROOT_DIR/dist/opencode" && bash install.sh "$OPENCODE_CONSOLE_DEST" --telemetry-sink local-kontour-console --console-token-file "$CONSOLE_TOKEN_FILE" --console-tenant tenant-oc >/dev/null); then
   _pass "opencode install with Console telemetry config succeeded"
@@ -278,12 +340,14 @@ if node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --dest "$OPENCODE_F
 else
   _fail "flow-agents init headless opencode install failed"
 fi
+assert_instruction_fixture_preserved "$OPENCODE_FULL_DEST" "flow-agents init OpenCode install"
 
 if (cd "$ROOT_DIR/dist/pi" && bash install.sh "$PI_DEST" >/dev/null); then
   _pass "pi install succeeded"
 else
   _fail "pi install failed"
 fi
+assert_instruction_fixture_preserved "$PI_DEST" "pi direct install"
 
 USER_SKILLS_DIR="$CODEX_FULL_DEST/.agents/sk""ills/user-skill"
 mkdir -p "$CODEX_FULL_DEST/.codex/ag""ents" "$USER_SKILLS_DIR"
@@ -323,7 +387,7 @@ done
 
 echo ""
 echo "--- Placeholder Rewriting ---"
-if rg -n '__KIRO_PACKAGE_ROOT__' "$KIRO_DEST" >/tmp/kiro-placeholder-leaks.txt 2>/dev/null; then
+if rg -n --glob '!AGENTS.md' --glob '!CLAUDE.md' '__KIRO_PACKAGE_ROOT__' "$KIRO_DEST" >/tmp/kiro-placeholder-leaks.txt 2>/dev/null; then
   _fail "Kiro install left placeholder tokens behind (see /tmp/kiro-placeholder-leaks.txt)"
 else
   _pass "Kiro install rewrote package root placeholders"
@@ -373,13 +437,13 @@ else
   _fail "flow-agents init did not persist Console config or activate Codex kits"
 fi
 
-if [[ -f "$BASE_INIT_DEST/AGENTS.md" ]] \
+if [[ -f "$BASE_INIT_DEST/README.md" ]] \
   && [[ -d "$BASE_INIT_DEST/.flow-agents" ]] \
   && [[ -d "$BASE_INIT_DEST/.kontourai/flow-agents" ]] \
   && rg -F -q "console_telemetry_url=$LOCAL_KONTOUR_CONSOLE_URL" "$BASE_INIT_DEST/scripts/telemetry/telemetry.conf"; then
-  _pass "flow-agents init default installs base AGENTS.md workspace contract"
+  _pass "flow-agents init default installs base documented workspace contract"
 else
-  _fail "flow-agents init default did not install base AGENTS.md workspace contract"
+  _fail "flow-agents init default did not install base documented workspace contract"
 fi
 
 if rg -F -q "console_telemetry_url=$LOCAL_KONTOUR_CONSOLE_URL" "$OPENCODE_CONSOLE_DEST/scripts/telemetry/telemetry.conf" \
