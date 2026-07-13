@@ -32,6 +32,15 @@ export type ContinuationTurnResult =
   | { status: "completed"; summary?: string }
   | { status: "wait"; barrier: ContinuationBarrier; summary?: string };
 
+export class ContinuationAdapterTimeoutError extends Error {
+  readonly code = "CONTINUATION_ADAPTER_TIMEOUT";
+
+  constructor(timeoutMs: number) {
+    super(`continuation adapter timed out after ${timeoutMs}ms`);
+    this.name = "ContinuationAdapterTimeoutError";
+  }
+}
+
 export type ContinuationDriverState = {
   schema_version: "1.0";
   run_id: string;
@@ -40,13 +49,17 @@ export type ContinuationDriverState = {
   adapter_command_identity: string | null;
   status: "active" | "waiting" | "done" | "failed" | "budget_exhausted";
   turns_started: number;
+  // Added after schema 1.0 shipped. Legacy state files may omit it.
+  active_turn_step?: string | null;
+  // Anchors the ephemeral signer outside active-turn.json. Legacy state files may omit it.
+  active_turn_public_key_digest?: string | null;
   pending_barrier: ContinuationBarrier | null;
   updated_at: string;
 };
 
 export type ContinuationDriverEvent = {
   schema_version: "1.0";
-  type: "started" | "turn_started" | "turn_completed" | "turn_failed" | "parked" | "resumed" | "done" | "budget_exhausted";
+  type: "started" | "turn_started" | "turn_completed" | "gate_not_advanced" | "turn_failed" | "authority_cleanup_failed" | "parked" | "resumed" | "done" | "budget_exhausted";
   run_id: string;
   definition_id: string;
   current_step: string;
@@ -54,6 +67,7 @@ export type ContinuationDriverEvent = {
   at: string;
   barrier?: ContinuationBarrier;
   summary?: string;
+  failure_kind?: "adapter_error" | "timeout";
 };
 
 export interface ContinuationStateStore {
@@ -65,8 +79,26 @@ export interface ContinuationStateStore {
 export interface ContinuationRuntimePort {
   inspect(): Promise<ContinuationSnapshot>;
   synchronize(): Promise<ContinuationSnapshot>;
-  execute(request: ContinuationTurnRequest): Promise<ContinuationTurnResult>;
+  execute(request: ContinuationTurnRequest, context?: ContinuationTurnContext): Promise<ContinuationTurnResult>;
 }
+
+export type ContinuationTurnContext = {
+  continuationTurnSecret?: string;
+  continuationRunId?: string;
+};
+
+export type ContinuationDriverLockLease = {
+  pid: number;
+  token: string;
+  created_at: string;
+};
+
+export type ContinuationTurnAuthority = {
+  runId: string;
+  turnSecret: string;
+  publicKeyDigest: string;
+  cleanup(): boolean;
+};
 
 export type ContinuationDriverOutcome = {
   outcome: "done" | "waiting" | "failed" | "budget_exhausted";
@@ -82,6 +114,7 @@ export interface RunContinuationDriverInput {
   store: ContinuationStateStore;
   waitForBarrier?: (barrier: ContinuationBarrier) => Promise<"ready" | "pending">;
   authorizeTurn?: () => Promise<void>;
+  issueTurnAuthority?: (request: ContinuationTurnRequest) => Promise<ContinuationTurnAuthority>;
   now?: () => Date;
 }
 
@@ -92,6 +125,7 @@ export interface DriveBuilderFlowSessionInput {
   execute: ContinuationRuntimePort["execute"];
   waitForBarrier?: RunContinuationDriverInput["waitForBarrier"];
   authorizeTurn?: RunContinuationDriverInput["authorizeTurn"];
+  issueTurnAuthority?: RunContinuationDriverInput["issueTurnAuthority"];
   now?: () => Date;
 }
 
@@ -100,6 +134,7 @@ export async function runContinuationDriver(input: RunContinuationDriverInput): 
   const now = input.now ?? (() => new Date());
   const waitForBarrier = input.waitForBarrier ?? (async () => "pending" as const);
   const authorizeTurn = input.authorizeTurn ?? (async () => {});
+  const issueTurnAuthority = input.issueTurnAuthority;
   const adapterCommandIdentity = input.adapterCommandIdentity ?? null;
   let snapshot = validateSnapshot(await input.runtime.inspect());
   let state = loadOrCreateState(input.store, snapshot, input.maxTurns, adapterCommandIdentity, now);
@@ -114,10 +149,10 @@ export async function runContinuationDriver(input: RunContinuationDriverInput): 
     const barrier = state.pending_barrier;
     const readiness = await waitForBarrier(barrier);
     if (readiness === "pending") {
-      state = saveState(input.store, state, { status: "waiting" }, now);
+      state = saveState(input.store, state, { status: "waiting", active_turn_step: null, active_turn_public_key_digest: null }, now);
       return { outcome: "waiting", turns_started: state.turns_started, snapshot, barrier };
     }
-    state = saveState(input.store, state, { status: "active", pending_barrier: null }, now);
+    state = saveState(input.store, state, { status: "active", active_turn_step: null, active_turn_public_key_digest: null, pending_barrier: null }, now);
     appendEvent(input.store, state, snapshot, "resumed", now, { barrier });
   }
 
@@ -127,18 +162,26 @@ export async function runContinuationDriver(input: RunContinuationDriverInput): 
   if (initialOutcome === "done") return finishDone(input.store, state, snapshot, now);
   if (initialOutcome === "failed") return finishFailed(input.store, state, snapshot, now);
   if (initialOutcome === "waiting") {
-    state = saveState(input.store, state, { status: "waiting" }, now);
+    state = saveState(input.store, state, { status: "waiting", active_turn_step: null, active_turn_public_key_digest: null }, now);
     return { outcome: "waiting", turns_started: state.turns_started, snapshot };
   }
 
   while (state.turns_started < input.maxTurns) {
     await authorizeTurn();
     const iteration = state.turns_started + 1;
-    state = saveState(input.store, state, { status: "active", turns_started: iteration }, now);
+    state = saveState(input.store, state, {
+      status: "active",
+      turns_started: iteration,
+      active_turn_step: snapshot.current_step,
+      active_turn_public_key_digest: null,
+    }, now);
     appendEvent(input.store, state, snapshot, "turn_started", now);
     let result: ContinuationTurnResult;
+    let request: ContinuationTurnRequest;
+    let authority: ContinuationTurnAuthority | undefined;
+    let terminalized = false;
     try {
-      result = validateTurnResult(await input.runtime.execute(Object.freeze({
+      request = Object.freeze({
         schema_version: "1.0",
         run_id: snapshot.run_id,
         definition_id: snapshot.definition_id,
@@ -146,19 +189,53 @@ export async function runContinuationDriver(input: RunContinuationDriverInput): 
         iteration,
         max_turns: input.maxTurns,
         next_action: snapshot.next_action ? structuredClone(snapshot.next_action) : null,
-      })));
+      });
+      authority = issueTurnAuthority ? await issueTurnAuthority(request) : undefined;
+      if (authority) {
+        state = saveState(input.store, state, { active_turn_public_key_digest: authority.publicKeyDigest }, now);
+      }
+      result = validateTurnResult(await input.runtime.execute(request, authority ? {
+        continuationTurnSecret: authority.turnSecret,
+        continuationRunId: authority.runId,
+      } : undefined));
     } catch (error) {
-      appendEvent(input.store, state, snapshot, "turn_failed", now, { summary: boundedErrorMessage(error) });
+      const summary = boundedErrorMessage(error);
+      appendEvent(input.store, state, snapshot, "turn_failed", now, { summary, failure_kind: error instanceof ContinuationAdapterTimeoutError ? "timeout" : "adapter_error" });
       snapshot = validateSnapshot(await input.runtime.synchronize());
       assertMissionIdentity(state, snapshot);
       const outcome = canonicalOutcome(snapshot);
-      if (outcome === "done") return finishDone(input.store, state, snapshot, now);
-      if (outcome === "failed") return finishFailed(input.store, state, snapshot, now);
+      if (outcome === "done") {
+        terminalized = true;
+        return finishDone(input.store, state, snapshot, now);
+      }
+      if (outcome === "failed") {
+        terminalized = true;
+        return finishFailed(input.store, state, snapshot, now);
+      }
       if (outcome === "waiting") {
         state = saveState(input.store, state, { status: "waiting" }, now);
         return { outcome: "waiting", turns_started: state.turns_started, snapshot };
       }
       continue;
+    } finally {
+      let cleanupFailure: string | undefined;
+      try {
+        if (authority && !authority.cleanup()) cleanupFailure = "continuation turn authority cleanup returned false";
+      } catch (error) {
+        cleanupFailure = boundedErrorMessage(error);
+      } finally {
+        if (!terminalized) state = saveState(input.store, state, {
+          active_turn_step: null,
+          active_turn_public_key_digest: null,
+        }, now);
+        if (cleanupFailure) {
+          try {
+            appendEvent(input.store, state, snapshot, "authority_cleanup_failed", now, { summary: cleanupFailure });
+          } catch {
+            // Audit is best effort. A cleanup extension must not replace the adapter outcome.
+          }
+        }
+      }
     }
     appendEvent(input.store, state, snapshot, "turn_completed", now, { summary: result.summary });
 
@@ -175,6 +252,9 @@ export async function runContinuationDriver(input: RunContinuationDriverInput): 
 
     snapshot = validateSnapshot(await input.runtime.synchronize());
     assertMissionIdentity(state, snapshot);
+    if (snapshot.status === "active" && snapshot.current_step === request.current_step) {
+      appendEvent(input.store, state, snapshot, "gate_not_advanced", now, { summary: "adapter completed without canonical gate advancement" });
+    }
     const outcome = canonicalOutcome(snapshot);
     if (outcome === "done") return finishDone(input.store, state, snapshot, now);
     if (outcome === "failed") return finishFailed(input.store, state, snapshot, now);
@@ -184,7 +264,11 @@ export async function runContinuationDriver(input: RunContinuationDriverInput): 
     }
   }
 
-  state = saveState(input.store, state, { status: "budget_exhausted" }, now);
+  state = saveState(input.store, state, {
+    status: "budget_exhausted",
+    active_turn_step: null,
+    active_turn_public_key_digest: null,
+  }, now);
   appendEvent(input.store, state, snapshot, "budget_exhausted", now);
   return { outcome: "budget_exhausted", turns_started: state.turns_started, snapshot };
 }
@@ -203,21 +287,23 @@ export async function driveBuilderFlowSession(input: DriveBuilderFlowSessionInpu
     store: createFileContinuationStore(sessionDir),
     ...(input.waitForBarrier ? { waitForBarrier: input.waitForBarrier } : {}),
     ...(input.authorizeTurn ? { authorizeTurn: input.authorizeTurn } : {}),
+    ...(input.issueTurnAuthority ? { issueTurnAuthority: input.issueTurnAuthority } : {}),
     ...(input.now ? { now: input.now } : {}),
   });
 }
 
-export async function withContinuationDriverLock<T>(sessionDirInput: string, body: () => Promise<T>): Promise<T> {
+export async function withContinuationDriverLock<T>(sessionDirInput: string, body: (lease: ContinuationDriverLockLease) => Promise<T>): Promise<T> {
   const sessionDir = path.resolve(sessionDirInput);
   const driverDir = path.join(sessionDir, "continuation-driver");
   const locksDir = path.join(driverDir, "locks");
   ensureSafeDirectory(sessionDir, locksDir);
   const token = randomUUID();
   const lockFile = path.join(locksDir, `${process.pid}-${token}.lock`);
-  const owner = { schema_version: "1.0" as const, pid: process.pid, token, created_at: new Date().toISOString() };
+  const lease: ContinuationDriverLockLease = { pid: process.pid, token, created_at: new Date().toISOString() };
+  const owner = { schema_version: "1.0" as const, ...lease };
   acquireDriverLock(locksDir, lockFile, owner);
   try {
-    return await body();
+    return await body(lease);
   } finally {
     releaseDriverLock(lockFile, token);
   }
@@ -362,6 +448,8 @@ function loadOrCreateState(
     adapter_command_identity: adapterCommandIdentity,
     status: "active",
     turns_started: 0,
+    active_turn_step: null,
+    active_turn_public_key_digest: null,
     pending_barrier: null,
     updated_at: now().toISOString(),
   };
@@ -375,20 +463,30 @@ function canonicalOutcome(snapshot: ContinuationSnapshot): "done" | "waiting" | 
 }
 
 function finishDone(store: ContinuationStateStore, state: ContinuationDriverState, snapshot: ContinuationSnapshot, now: () => Date): ContinuationDriverOutcome {
-  const done = saveState(store, state, { status: "done", pending_barrier: null }, now);
+  const done = saveState(store, state, {
+    status: "done",
+    active_turn_step: null,
+    active_turn_public_key_digest: null,
+    pending_barrier: null,
+  }, now);
   appendEvent(store, done, snapshot, "done", now);
   return { outcome: "done", turns_started: done.turns_started, snapshot };
 }
 
 function finishFailed(store: ContinuationStateStore, state: ContinuationDriverState, snapshot: ContinuationSnapshot, now: () => Date): ContinuationDriverOutcome {
-  const failed = saveState(store, state, { status: "failed", pending_barrier: null }, now);
+  const failed = saveState(store, state, {
+    status: "failed",
+    active_turn_step: null,
+    active_turn_public_key_digest: null,
+    pending_barrier: null,
+  }, now);
   return { outcome: "failed", turns_started: failed.turns_started, snapshot };
 }
 
 function saveState(
   store: ContinuationStateStore,
   current: ContinuationDriverState,
-  patch: Partial<Pick<ContinuationDriverState, "status" | "turns_started" | "pending_barrier">>,
+  patch: Partial<Pick<ContinuationDriverState, "status" | "turns_started" | "active_turn_step" | "active_turn_public_key_digest" | "pending_barrier">>,
   now: () => Date,
 ): ContinuationDriverState {
   const next = { ...current, ...patch, updated_at: now().toISOString() };
@@ -402,7 +500,7 @@ function appendEvent(
   snapshot: ContinuationSnapshot,
   type: ContinuationDriverEvent["type"],
   now: () => Date,
-  extra: Pick<ContinuationDriverEvent, "barrier" | "summary"> = {},
+  extra: Pick<ContinuationDriverEvent, "barrier" | "summary" | "failure_kind"> = {},
 ): void {
   store.append({
     schema_version: "1.0",
@@ -414,6 +512,7 @@ function appendEvent(
     at: now().toISOString(),
     ...(extra.barrier ? { barrier: extra.barrier } : {}),
     ...(extra.summary ? { summary: extra.summary } : {}),
+    ...(extra.failure_kind ? { failure_kind: extra.failure_kind } : {}),
   });
 }
 
@@ -461,6 +560,13 @@ function validateState(state: ContinuationDriverState): void {
   }
   if (!Number.isSafeInteger(state.turns_started) || state.turns_started < 0) throw new Error("continuation driver turns_started must be a non-negative integer");
   if (state.turns_started > state.max_turns) throw new Error("continuation driver turns_started cannot exceed max_turns");
+  if (state.active_turn_step !== undefined && state.active_turn_step !== null && (typeof state.active_turn_step !== "string" || state.active_turn_step.length === 0)) {
+    throw new Error("continuation driver active_turn_step must be a non-empty string or null");
+  }
+  if (state.active_turn_public_key_digest !== undefined && state.active_turn_public_key_digest !== null
+    && (typeof state.active_turn_public_key_digest !== "string" || !/^[a-f0-9]{64}$/.test(state.active_turn_public_key_digest))) {
+    throw new Error("continuation driver active_turn_public_key_digest must be a SHA-256 hex digest or null");
+  }
   if (!new Set(["active", "waiting", "done", "failed", "budget_exhausted"]).has(state.status)) throw new Error("continuation driver state status is invalid");
   if (state.status === "budget_exhausted" && state.turns_started !== state.max_turns) {
     throw new Error("continuation driver budget_exhausted state must consume max_turns");

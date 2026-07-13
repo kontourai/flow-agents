@@ -2764,6 +2764,172 @@ else
   _fail "strict goal-fit hook did not report malformed canonical Flow state: $(cat "$TMPDIR_EVAL/canonical-malformed.err")"
 fi
 
+# A live driver turn may return from one ordinary active Flow gate, but the
+# exception is strictly record-bound. It must not release assignment/liveness
+# (releaseOnNonTerminalStop sees the active canonical run) or hide a hard
+# evidence failure.
+AUTHORITY_REPO="$TMPDIR_EVAL/continuation-authority-repo"
+AUTHORITY_SESSION="$AUTHORITY_REPO/.kontourai/flow-agents/continuation-authority"
+mkdir -p "$AUTHORITY_SESSION/continuation-driver/locks" "$AUTHORITY_REPO/.kontourai/flow/runs/continuation-authority"
+printf '# Test Repo\n' > "$AUTHORITY_REPO/AGENTS.md"
+cat > "$AUTHORITY_SESSION/continuation-authority--deliver.md" <<'MARKDOWN'
+# Continuation authority fixture
+
+status: planned
+type: deliver
+MARKDOWN
+cat > "$AUTHORITY_SESSION/state.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "continuation-authority",
+  "status": "planned",
+  "phase": "planning",
+  "updated_at": "2026-07-13T00:00:00.000Z",
+  "flow_run": { "status": "active", "run_id": "continuation-authority", "definition_id": "builder.build", "definition_version": "1.0", "current_step": "pull-work", "run_ref": ".kontourai/flow/runs/continuation-authority", "open_gate_ids": ["pull-work-gate"] },
+  "next_action": { "status": "continue", "summary": "Continue the canonical gate." }
+}
+JSON
+cat > "$AUTHORITY_REPO/.kontourai/flow-agents/current.json" <<'JSON'
+{ "active_slug": "continuation-authority" }
+JSON
+cat > "$AUTHORITY_REPO/.kontourai/flow/runs/continuation-authority/state.json" <<'JSON'
+{ "run_id": "continuation-authority", "definition_id": "builder.build", "definition_version": "1.0", "status": "active", "current_step": "pull-work" }
+JSON
+cat > "$AUTHORITY_REPO/.kontourai/flow/runs/continuation-authority/definition.json" <<'JSON'
+{ "id": "builder.build", "version": "1.0", "steps": [{ "id": "pull-work" }, { "id": "design-probe" }] }
+JSON
+AUTHORITY_PID="$$"
+AUTHORITY_TOKEN="authority-lock"
+AUTHORITY_ENV="$TMPDIR_EVAL/continuation-authority-env.json"
+AUTHORITY_REPO="$AUTHORITY_REPO" AUTHORITY_SESSION="$AUTHORITY_SESSION" AUTHORITY_PID="$AUTHORITY_PID" AUTHORITY_TOKEN="$AUTHORITY_TOKEN" AUTHORITY_ENV="$AUTHORITY_ENV" AUTHORITY_ROOT="$ROOT" node - <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const issued = new Date();
+const lock = { schema_version: '1.0', pid: Number(process.env.AUTHORITY_PID), token: process.env.AUTHORITY_TOKEN, created_at: issued.toISOString() };
+fs.writeFileSync(path.join(process.env.AUTHORITY_SESSION, 'continuation-driver', 'locks', `${lock.pid}-${lock.token}.lock`), `${JSON.stringify(lock)}\n`);
+fs.writeFileSync(path.join(process.env.AUTHORITY_SESSION, 'continuation-driver', 'state.json'), JSON.stringify({
+  schema_version: '1.0', run_id: 'continuation-authority', definition_id: 'builder.build', max_turns: 2,
+  adapter_command_identity: 'adapter-identity', status: 'active', turns_started: 1, active_turn_step: 'pull-work', pending_barrier: null,
+}));
+const actor = { runtime: 'explicit-override', session_id: 'driver-actor', host: 'fixture-host', human: null };
+const assignment = path.join(process.env.AUTHORITY_REPO, '.kontourai', 'flow-agents', 'assignment', 'continuation-authority.json');
+fs.mkdirSync(path.dirname(assignment), { recursive: true });
+fs.writeFileSync(assignment, JSON.stringify({ schema_version: '1.0', role: 'AssignmentClaimRecord', subject_id: 'continuation-authority', actor, actor_key: 'driver-actor', artifact_dir: 'continuation-authority', status: 'claimed' }));
+const authority = require(path.join(process.env.AUTHORITY_ROOT, 'scripts', 'hooks', 'lib', 'continuation-turn-authority.js'));
+const turn = authority.issueActiveTurnAuthority({ sessionDir: process.env.AUTHORITY_SESSION, runId: 'continuation-authority', definitionId: 'builder.build', currentStep: 'pull-work', iteration: 1, maxTurns: 2, adapterCommandIdentity: 'adapter-identity', assignmentActor: 'driver-actor', assignmentActorStruct: actor, lock, timeoutMs: 60_000 });
+const missionFile = path.join(process.env.AUTHORITY_SESSION, 'continuation-driver', 'state.json');
+const mission = JSON.parse(fs.readFileSync(missionFile, 'utf8'));
+fs.writeFileSync(missionFile, JSON.stringify({ ...mission, active_turn_public_key_digest: turn.publicKeyDigest }));
+fs.writeFileSync(process.env.AUTHORITY_ENV, JSON.stringify({ runId: turn.runId, turnSecret: turn.turnSecret }));
+NODE
+AUTHORITY_TURN_SECRET="$(node -p "require(process.argv[1]).turnSecret" "$AUTHORITY_ENV")"
+AUTHORITY_RUN_ID="$(node -p "require(process.argv[1]).runId" "$AUTHORITY_ENV")"
+cat > "$AUTHORITY_REPO/.kontourai/flow/runs/continuation-authority/state.json" <<'JSON'
+{ "run_id": "continuation-authority", "definition_id": "builder.build", "definition_version": "1.0", "status": "active", "current_step": "design-probe" }
+JSON
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-valid.out" 2>"$TMPDIR_EVAL/authority-valid.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
+JSON
+then
+  _pass "a matching live continuation authority makes only the ordinary active Flow gate advisory"
+else
+  _fail "matching continuation authority did not return control to the driver: $(cat "$TMPDIR_EVAL/authority-valid.err")"
+fi
+if grep -q 'continuation driver active turn is authorized' "$TMPDIR_EVAL/authority-valid.err"; then
+  _pass "authorized continuation turn remains observable in Goal Fit output"
+else
+  _fail "authorized continuation turn was not disclosed: $(cat "$TMPDIR_EVAL/authority-valid.err")"
+fi
+mv "$AUTHORITY_SESSION/continuation-authority--deliver.md" "$AUTHORITY_SESSION/continuation-authority--deliver.md.saved"
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-no-markdown.out" 2>"$TMPDIR_EVAL/authority-no-markdown.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
+JSON
+then
+  _pass "a matching continuation authority returns control before any workflow markdown exists"
+else
+  _fail "matching continuation authority still required workflow markdown before returning control: $(cat "$TMPDIR_EVAL/authority-no-markdown.err")"
+fi
+printf '{"verdict":"fail","checks":[]}\n' > "$AUTHORITY_SESSION/evidence.json"
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-no-markdown-hard.out" 2>"$TMPDIR_EVAL/authority-no-markdown-hard.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
+JSON
+then
+  _fail "a no-markdown continuation session bypassed a non-markdown evidence hard block"
+elif [[ "$?" -eq 2 ]] && grep -q 'evidence verdict:fail' "$TMPDIR_EVAL/authority-no-markdown-hard.err"; then
+  _pass "a no-markdown continuation session still enforces non-markdown evidence hard blocks"
+else
+  _fail "no-markdown evidence hard block returned an unexpected result: $(cat "$TMPDIR_EVAL/authority-no-markdown-hard.err")"
+fi
+rm -f "$AUTHORITY_SESSION/evidence.json"
+mv "$AUTHORITY_SESSION/continuation-authority--deliver.md.saved" "$AUTHORITY_SESSION/continuation-authority--deliver.md"
+AUTHORITY_SESSION="$AUTHORITY_SESSION" node - <<'NODE' >/dev/null 2>"$TMPDIR_EVAL/authority-terminal-sidecar-setup.err"
+const fs = require('fs');
+const path = require('path');
+const session = process.env.AUTHORITY_SESSION;
+const state = JSON.parse(fs.readFileSync(path.join(session, 'state.json'), 'utf8'));
+fs.writeFileSync(path.join(session, 'state.json'), JSON.stringify({ ...state, status: 'delivered', phase: 'release' }));
+fs.writeFileSync(path.join(session, 'evidence.json'), JSON.stringify({ verdict: 'pass', checks: [], not_verified_gaps: ['terminal authority FULL_BLOCK-only regression'] }));
+NODE
+if AUTHORITY_SESSION="$AUTHORITY_SESSION" AUTHORITY_REPO="$AUTHORITY_REPO" AUTHORITY_TURN_SECRET="$AUTHORITY_TURN_SECRET" AUTHORITY_RUN_ID="$AUTHORITY_RUN_ID" AUTHORITY_ROOT="$ROOT" FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=10 FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node - <<'NODE' >"$TMPDIR_EVAL/authority-terminal-sidecar.out" 2>"$TMPDIR_EVAL/authority-terminal-sidecar.err"
+const assert = require('assert/strict');
+const hook = require(`${process.env.AUTHORITY_ROOT}/scripts/hooks/stop-goal-fit.js`);
+(async () => {
+  const analyzed = await hook.analyze(process.env.AUTHORITY_REPO);
+  assert.equal(analyzed.activeTurnAuthority, true, 'fixture authority remains valid');
+  assert.equal(analyzed.blocking, true, 'authorized terminal sidecar evaluates FULL_BLOCK-only gaps');
+  assert.ok(analyzed.warnings.some((warning) => warning.includes('NOT_VERIFIED gap')), 'fixture produced a FULL_BLOCK-only warning');
+  const result = await hook.run(JSON.stringify({ hook_event_name: 'Stop', cwd: process.env.AUTHORITY_REPO }));
+  assert.equal(result.exitCode, 2, 'run preserves the terminal FULL_BLOCK-only block');
+  assert.match(result.stderr, /NOT_VERIFIED gap/);
+})().catch((error) => { console.error(error.stack || error); process.exitCode = 1; });
+NODE
+then
+  _pass "valid continuation authority still blocks a terminal sidecar FULL_BLOCK-only warning through analyze and run"
+else
+  _fail "authorized terminal sidecar did not preserve the FULL_BLOCK-only warning: $(cat "$TMPDIR_EVAL/authority-terminal-sidecar.out" "$TMPDIR_EVAL/authority-terminal-sidecar.err" "$TMPDIR_EVAL/authority-terminal-sidecar-setup.err")"
+fi
+rm -f "$AUTHORITY_SESSION/evidence.json"
+AUTHORITY_SESSION="$AUTHORITY_SESSION" node - <<'NODE' >/dev/null 2>"$TMPDIR_EVAL/authority-terminal-sidecar-restore.err"
+const fs = require('fs');
+const path = require('path');
+const session = process.env.AUTHORITY_SESSION;
+const state = JSON.parse(fs.readFileSync(path.join(session, 'state.json'), 'utf8'));
+fs.writeFileSync(path.join(session, 'state.json'), JSON.stringify({ ...state, status: 'planned', phase: 'planning' }));
+NODE
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_ACTOR=driver-actor FLOW_AGENTS_CONTINUATION_TURN_SECRET="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-wrong-secret.out" 2>"$TMPDIR_EVAL/authority-wrong-secret.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
+JSON
+then
+  _fail "wrong continuation secret bypassed active Flow Stop blocking"
+elif [[ "$?" -eq 2 ]]; then
+  _pass "wrong continuation secret preserves active Flow Stop blocking"
+else
+  _fail "wrong continuation secret returned an unexpected Stop exit code"
+fi
+cat > "$AUTHORITY_SESSION/evidence.json" <<'JSON'
+{ "verdict": "fail", "checks": [] }
+JSON
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=1 FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-hard-block.out" 2>"$TMPDIR_EVAL/authority-hard-block.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
+JSON
+then
+  _fail "active continuation authority bypassed an evidence hard block"
+elif [[ "$?" -eq 2 ]] && grep -q 'evidence verdict:fail' "$TMPDIR_EVAL/authority-hard-block.err"; then
+  _pass "active continuation authority preserves evidence hard blocking"
+else
+  _fail "active continuation authority did not preserve the evidence hard block: $(cat "$TMPDIR_EVAL/authority-hard-block.err")"
+fi
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=1 FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-hard-block-repeat.out" 2>"$TMPDIR_EVAL/authority-hard-block-repeat.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
+JSON
+then
+  _fail "nonordinary FULL_BLOCK escaped through max-block release"
+elif [[ "$?" -eq 2 ]] && grep -q 'max-blocks reached but the block' "$TMPDIR_EVAL/authority-hard-block-repeat.err"; then
+  _pass "nonordinary FULL_BLOCK cannot burn through max-block release"
+else
+  _fail "nonordinary FULL_BLOCK did not remain hard after max blocks: $(cat "$TMPDIR_EVAL/authority-hard-block-repeat.err")"
+fi
+
 if cmp -s "$ROOT/scripts/hooks/stop-goal-fit.js" "$ROOT/context/scripts/hooks/stop-goal-fit.js"; then
   _pass "canonical Stop hook source and shipped context mirror remain byte-identical"
 else
