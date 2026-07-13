@@ -74,6 +74,7 @@
     "console.telemetry.json",
     "context/",
     "docs/",
+    "dist/",
     "evals/",
     "install.sh",
     "integrations/",
@@ -140,7 +141,7 @@
     "check:decisions": "node scripts/check-decisions.cjs check",
     "gen:decisions-index": "node scripts/check-decisions.cjs gen-index",
     "freeze:adrs": "node scripts/freeze-adrs.mjs",
-    "prepack": "npm run build --silent && npm run validate:source --",
+    "prepack": "npm run build:bundles --silent && npm run validate:source --",
     "kit": "npm run build --silent && node build/src/cli.js kit"
   },
   "devDependencies": {

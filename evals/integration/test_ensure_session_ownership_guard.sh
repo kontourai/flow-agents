@@ -466,6 +466,157 @@ else
   fail "second ensure-session did not recognize the canonical Codex claim as self: $(cat "$TMPDIR_EVAL/codex-private-second.out" "$TMPDIR_EVAL/codex-private-second.err")"
 fi
 
+# 8. #596: a GitHub renderer-produced claim/status can enter the public Builder workflow even
+# when the provider login deliberately differs from the runtime actor. Runtime ownership comes
+# from actor_key + actor struct + exact Work Item + self_is_holder, never the GitHub login.
+echo "--- 8. GitHub renderer status enters Builder with distinct provider/runtime identities (#596) ---"
+
+GITHUB_ACTOR_KEY="github-runtime-actor"
+GITHUB_PROVIDER_LOGIN="github-notification-login"
+GITHUB_WORK_ITEM="kontourai/flow-agents#9596"
+GITHUB_SLUG="kontourai-flow-agents-9596"
+GITHUB_PROJECT="$TMPDIR_EVAL/github-builder-project"
+GITHUB_ROOT="$GITHUB_PROJECT/.kontourai/flow-agents"
+mkdir -p "$GITHUB_ROOT/$GITHUB_SLUG"
+printf '# Pull Work\n\nSelected Work Item: %s\n' "$GITHUB_WORK_ITEM" > "$GITHUB_ROOT/$GITHUB_SLUG/$GITHUB_SLUG--pull-work.md"
+
+node - "$TMPDIR_EVAL/github-actor.json" <<'NODE'
+const fs = require('node:fs');
+const os = require('node:os');
+fs.writeFileSync(process.argv[2], JSON.stringify({
+  runtime: 'explicit-override', session_id: 'github-runtime-actor', host: os.hostname(), human: null,
+}, null, 2));
+NODE
+cat > "$TMPDIR_EVAL/github-render-input.json" <<JSON
+{
+  "repo": {"owner": "kontourai", "name": "flow-agents"},
+  "issue_number": 9596,
+  "assignee_login": "$GITHUB_PROVIDER_LOGIN",
+  "actor_key": "$GITHUB_ACTOR_KEY",
+  "work_item_ref": "$GITHUB_WORK_ITEM",
+  "branch": "agent/$GITHUB_ACTOR_KEY/$GITHUB_SLUG",
+  "artifact_dir": ".kontourai/flow-agents/$GITHUB_SLUG"
+}
+JSON
+node "$CLI" assignment-provider render-claim --provider github --subject-id "$GITHUB_SLUG" \
+  --input-json "$TMPDIR_EVAL/github-render-input.json" --actor-json "$TMPDIR_EVAL/github-actor.json" \
+  > "$TMPDIR_EVAL/github-render.json"
+node - "$TMPDIR_EVAL/github-render.json" "$TMPDIR_EVAL/github-issue.json" "$GITHUB_PROVIDER_LOGIN" <<'NODE'
+const fs = require('node:fs');
+const render = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+fs.writeFileSync(process.argv[3], JSON.stringify({
+  number: 9596,
+  state: 'OPEN',
+  assignees: [{ login: process.argv[4] }],
+  labels: [{ name: 'agent:claimed' }],
+  comments: [{ id: 'IC_kwDOopaque-9596', createdAt: '2026-07-13T11:00:00Z', author: { login: process.argv[4] }, body: render.claim_comment_body }],
+}, null, 2));
+NODE
+node "$CLI" assignment-provider status --provider github \
+  --repo "kontourai/flow-agents" \
+  --issue-json "$TMPDIR_EVAL/github-issue.json" --subject-id "$GITHUB_SLUG" \
+  --liveness-events-json <(echo '[]') --self-actor "$GITHUB_ACTOR_KEY" \
+  > "$TMPDIR_EVAL/github-status.json"
+
+[[ "$(json_query "$TMPDIR_EVAL/github-status.json" "assignment.assignee")" == "$GITHUB_PROVIDER_LOGIN" ]] \
+  && pass "GitHub status preserves the raw provider assignee login" \
+  || fail "GitHub status replaced the raw provider login with runtime identity"
+[[ "$(json_query "$TMPDIR_EVAL/github-status.json" "assignment.claim_comment_author")" == "$GITHUB_PROVIDER_LOGIN" ]] \
+  && pass "GitHub status binds the selected claim comment author to the provider assignee" \
+  || fail "GitHub status did not expose the selected claim comment author"
+[[ "$(json_query "$TMPDIR_EVAL/github-status.json" "assignment.claim_comment_id")" == "IC_kwDOopaque-9596" ]] \
+  && pass "GitHub status preserves the selected provider comment's opaque id" \
+  || fail "GitHub status did not preserve the selected opaque comment id"
+[[ "$(json_query "$TMPDIR_EVAL/github-status.json" "effective.reason")" == "self_is_holder" ]] \
+  && pass "renderer-produced status recognizes the canonical runtime actor as self" \
+  || fail "renderer-produced status did not recognize the runtime actor: $(cat "$TMPDIR_EVAL/github-status.json")"
+
+if FLOW_AGENTS_ACTOR="$GITHUB_ACTOR_KEY" node "$CLI" workflow start \
+  --artifact-root "$GITHUB_ROOT" --flow builder.build --work-item "$GITHUB_WORK_ITEM" \
+  --assignment-provider github --effective-state-json "$TMPDIR_EVAL/github-status.json" \
+  > "$TMPDIR_EVAL/github-workflow-start.out" 2> "$TMPDIR_EVAL/github-workflow-start.err"; then
+  pass "renderer-produced GitHub status enters the public Builder workflow with a distinct provider login"
+else
+  fail "renderer-produced GitHub status failed public workflow start: $(cat "$TMPDIR_EVAL/github-workflow-start.out" "$TMPDIR_EVAL/github-workflow-start.err")"
+fi
+
+# Produce three fail-closed variants without hand-building a positive status: each begins with
+# the renderer-produced status above, changes exactly one ownership dimension, and targets a
+# fresh canonical artifact root so refusal can be checked for zero session mutation.
+node - "$TMPDIR_EVAL/github-status.json" "$TMPDIR_EVAL" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const source = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const variants = {
+  actor: value => { value.assignment.record.actor.session_id = 'different-runtime-actor'; },
+  work_item: value => { value.assignment.record.work_item_ref = 'kontourai/flow-agents#9999'; },
+  effective: value => { value.effective.reason = 'fresh_liveness_heartbeat'; },
+};
+for (const [name, mutate] of Object.entries(variants)) {
+  const value = structuredClone(source);
+  mutate(value);
+  fs.writeFileSync(path.join(process.argv[3], `github-status-${name}.json`), JSON.stringify(value, null, 2));
+}
+NODE
+
+# Provider-authorization negatives are themselves produced through `assignment-provider status`
+# from distinct GitHub issue documents, rather than hand-editing AssignmentStatus fields.
+node - "$TMPDIR_EVAL/github-issue.json" "$TMPDIR_EVAL" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const source = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const variants = {
+  forged_author: value => { value.comments[0].author.login = 'unrelated-commenter'; },
+  newer_forged_author: value => { value.comments.push({ ...value.comments[0], id: 'IC_kwDOopaque-9596-forged', createdAt: '2026-07-13T11:01:00Z', author: { login: 'unrelated-commenter' } }); },
+  missing_author: value => { delete value.comments[0].author; },
+  missing_label: value => { value.labels = []; },
+  missing_assignee: value => { value.assignees = []; },
+  other_assignee: value => { value.assignees = [{ login: 'different-provider-assignee' }]; },
+  wrong_number: value => { value.number = 123; },
+};
+for (const [name, mutate] of Object.entries(variants)) {
+  const value = structuredClone(source);
+  mutate(value);
+  fs.writeFileSync(path.join(process.argv[3], `github-issue-${name}.json`), JSON.stringify(value, null, 2));
+}
+NODE
+for variant in forged_author newer_forged_author missing_author missing_label missing_assignee other_assignee wrong_number; do
+  node "$CLI" assignment-provider status --provider github \
+    --repo "kontourai/flow-agents" \
+    --issue-json "$TMPDIR_EVAL/github-issue-$variant.json" --subject-id "$GITHUB_SLUG" \
+    --liveness-events-json <(echo '[]') --self-actor "$GITHUB_ACTOR_KEY" \
+    > "$TMPDIR_EVAL/github-status-$variant.json"
+done
+node "$CLI" assignment-provider status --provider github \
+  --repo "kontourai/not-flow-agents" \
+  --issue-json "$TMPDIR_EVAL/github-issue.json" --subject-id "$GITHUB_SLUG" \
+  --liveness-events-json <(echo '[]') --self-actor "$GITHUB_ACTOR_KEY" \
+  > "$TMPDIR_EVAL/github-status-wrong_repository.json"
+[[ "$(json_query "$TMPDIR_EVAL/github-status-wrong_number.json" "assignment.issue_number")" == "123" \
+  && "$(json_query "$TMPDIR_EVAL/github-status-wrong_number.json" "assignment.record.work_item_ref")" == "$GITHUB_WORK_ITEM" ]] \
+  && pass "reviewer repro preserves provider issue #123 beside requested/recorded #9596 so the origin guard is exercised" \
+  || fail "reviewer #123 -> #9596 repro status did not preserve both conflicting identities"
+[[ "$(json_query "$TMPDIR_EVAL/github-status-wrong_repository.json" "assignment.repository.name")" == "not-flow-agents" ]] \
+  && pass "wrong-repository status preserves the trusted provider repository mismatch" \
+  || fail "wrong-repository status did not preserve the provider repository mismatch"
+
+for variant in actor work_item effective forged_author newer_forged_author missing_author missing_label missing_assignee other_assignee wrong_number wrong_repository; do
+  NEGATIVE_PROJECT="$TMPDIR_EVAL/github-negative-$variant"
+  NEGATIVE_ROOT="$NEGATIVE_PROJECT/.kontourai/flow-agents"
+  mkdir -p "$NEGATIVE_ROOT/$GITHUB_SLUG"
+  printf '# Pull Work\n\nSelected Work Item: %s\n' "$GITHUB_WORK_ITEM" > "$NEGATIVE_ROOT/$GITHUB_SLUG/$GITHUB_SLUG--pull-work.md"
+  if FLOW_AGENTS_ACTOR="$GITHUB_ACTOR_KEY" node "$CLI" workflow start \
+    --artifact-root "$NEGATIVE_ROOT" --flow builder.build --work-item "$GITHUB_WORK_ITEM" \
+    --assignment-provider github --effective-state-json "$TMPDIR_EVAL/github-status-$variant.json" \
+    > "$TMPDIR_EVAL/github-negative-$variant.out" 2> "$TMPDIR_EVAL/github-negative-$variant.err"; then
+    fail "workflow start accepted mismatched GitHub $variant ownership evidence"
+  elif [[ ! -f "$NEGATIVE_ROOT/$GITHUB_SLUG/state.json" ]]; then
+    pass "workflow start rejects mismatched GitHub $variant evidence before session mutation"
+  else
+    fail "workflow start rejected mismatched GitHub $variant evidence only after mutating session state"
+  fi
+done
+
 if [[ "$errors" -eq 0 ]]; then
   echo "test_ensure_session_ownership_guard: all checks passed."
 else

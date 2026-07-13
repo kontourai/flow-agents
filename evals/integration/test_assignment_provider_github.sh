@@ -30,6 +30,7 @@ ISSUE_CLAIMED="$FIXTURES/github-issue-claimed.json"
 ISSUE_UNASSIGNED="$FIXTURES/github-issue-unassigned.json"
 LIVENESS_FRESH="$FIXTURES/liveness-fresh.json"
 LIVENESS_STALE="$FIXTURES/liveness-stale.json"
+GITHUB_REPO="kontourai/flow-agents"
 
 TMPDIR_EVAL="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_EVAL"' EXIT
@@ -69,6 +70,8 @@ cat > "$TMPDIR_EVAL/render-claim-input.json" <<JSON
   "label_name": "agent:claimed",
   "claim_comment_marker": "<!-- flow-agents:assignment-claim -->",
   "ttl_seconds": 1800,
+  "actor_key": "claude-code:eval-actor-a-session:eval-host",
+  "work_item_ref": "kontourai/flow-agents#9101",
   "branch": "agent/claude-code-eval-actor-a-session-eval-host/flow-agents-9101",
   "artifact_dir": ".kontourai/flow-agents/flow-agents-9101"
 }
@@ -105,14 +108,124 @@ fenced_status=$?
 [[ "$(json_query "$TMPDIR_EVAL/fenced-record.json" "role")" == "AssignmentClaimRecord" ]] && pass "fenced record role is AssignmentClaimRecord" || fail "fenced record role is AssignmentClaimRecord"
 [[ "$(json_query "$TMPDIR_EVAL/fenced-record.json" "subject_id")" == "kontourai/flow-agents#9101" ]] && pass "fenced record subject_id matches" || fail "fenced record subject_id matches"
 [[ "$(json_query "$TMPDIR_EVAL/fenced-record.json" "actor.session_id")" == "eval-actor-a-session" ]] && pass "fenced record actor matches the actor-json fixture" || fail "fenced record actor matches the actor-json fixture"
+[[ "$(json_query "$TMPDIR_EVAL/fenced-record.json" "actor_key")" == "claude-code:eval-actor-a-session:eval-host" ]] && pass "fenced record carries the canonical actor_key supplied by pull-work" || fail "fenced record carries the canonical actor_key supplied by pull-work"
+[[ "$(json_query "$TMPDIR_EVAL/fenced-record.json" "work_item_ref")" == "kontourai/flow-agents#9101" ]] && pass "fenced record carries the exact Work Item reference" || fail "fenced record carries the exact Work Item reference"
 [[ "$(json_query "$TMPDIR_EVAL/fenced-record.json" "ttl_seconds")" == "1800" ]] && pass "fenced record ttl_seconds matches input" || fail "fenced record ttl_seconds matches input"
 [[ "$(json_query "$TMPDIR_EVAL/fenced-record.json" "branch")" == "agent/claude-code-eval-actor-a-session-eval-host/flow-agents-9101" ]] && pass "fenced record branch matches input" || fail "fenced record branch matches input"
 [[ "$(json_query "$TMPDIR_EVAL/fenced-record.json" "artifact_dir")" == ".kontourai/flow-agents/flow-agents-9101" ]] && pass "fenced record artifact_dir matches input" || fail "fenced record artifact_dir matches input"
 [[ "$(json_query "$TMPDIR_EVAL/fenced-record.json" "status")" == "claimed" ]] && pass "fenced record status is claimed" || fail "fenced record status is claimed"
 
+# Builder provenance is required and fail-closed: a renderer must not mint a record whose
+# runtime actor or Work Item identity cannot be checked by workflow start.
+node -e '
+const fs = require("fs");
+const input = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+delete input.actor_key;
+fs.writeFileSync(process.argv[2], JSON.stringify(input));
+input.actor_key = "claude-code:eval-actor-a-session:eval-host";
+input.work_item_ref = "kontourai/flow-agents#9999";
+fs.writeFileSync(process.argv[3], JSON.stringify(input));
+input.work_item_ref = "kontourai/flow-agents#9101";
+input.actor_key = "different-runtime-actor";
+fs.writeFileSync(process.argv[4], JSON.stringify(input));
+' "$TMPDIR_EVAL/render-claim-input.json" "$TMPDIR_EVAL/render-claim-missing-actor.json" "$TMPDIR_EVAL/render-claim-wrong-work-item.json" "$TMPDIR_EVAL/render-claim-wrong-actor.json"
+node "$CLI" assignment-provider render-claim --provider github --subject-id "kontourai/flow-agents#9101" --input-json "$TMPDIR_EVAL/render-claim-missing-actor.json" --actor-json "$ACTOR_A" > /dev/null 2>&1
+[[ $? -ne 0 ]] && pass "render-claim rejects a missing canonical actor_key" || fail "render-claim accepted a missing canonical actor_key"
+node "$CLI" assignment-provider render-claim --provider github --subject-id "kontourai/flow-agents#9101" --input-json "$TMPDIR_EVAL/render-claim-wrong-work-item.json" --actor-json "$ACTOR_A" > /dev/null 2>&1
+[[ $? -ne 0 ]] && pass "render-claim rejects a work_item_ref that differs from repo/issue provenance" || fail "render-claim accepted a mismatched work_item_ref"
+node "$CLI" assignment-provider render-claim --provider github --subject-id "kontourai/flow-agents#9101" --input-json "$TMPDIR_EVAL/render-claim-wrong-actor.json" --actor-json "$ACTOR_A" > /dev/null 2>&1
+[[ $? -ne 0 ]] && pass "render-claim rejects an actor_key that differs from the canonical actor JSON identity" || fail "render-claim accepted a mismatched canonical actor_key"
+
+# Status preserves provider authorization metadata for the exact selected marker comment.
+# Duplicate markers select the unique latest createdAt while treating IDs as opaque.
+node - "$TMPDIR_EVAL/render-claim.json" "$TMPDIR_EVAL" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const render = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const base = {
+  number: 9101,
+  state: 'OPEN',
+  assignees: [{ login: 'flow-agents-eval-bot' }],
+  labels: [{ name: 'agent:claimed' }],
+};
+const authorized = {
+  ...base,
+  comments: [
+    { id: 'IC_kwDOopaque-old', createdAt: '2026-07-13T10:00:00Z', author: { login: 'unrelated-commenter' }, body: render.claim_comment_body },
+    { id: 'IC_kwDOopaque-authorized', createdAt: '2026-07-13T10:01:00Z', author: { login: 'flow-agents-eval-bot' }, body: render.claim_comment_body },
+  ],
+};
+const forgedLatest = {
+  ...base,
+  comments: [
+    authorized.comments[1],
+    authorized.comments[0],
+    { id: 'IC_kwDOopaque-forged-new', createdAt: '2026-07-13T10:02:00Z', author: { login: 'forged-latest-commenter' }, body: render.claim_comment_body },
+  ],
+};
+const missingTimestamp = { ...base, comments: [authorized.comments[0], { ...authorized.comments[1], createdAt: undefined }] };
+const invalidTimestamp = { ...base, comments: [authorized.comments[0], { ...authorized.comments[1], createdAt: 'not-a-timestamp' }] };
+const tiedTimestamp = { ...base, comments: [authorized.comments[0], { ...authorized.comments[1], createdAt: authorized.comments[0].createdAt }] };
+for (const [name, value] of Object.entries({
+  authorized,
+  authorized_reordered: { ...authorized, comments: [...authorized.comments].reverse() },
+  forged_latest: forgedLatest,
+  missing_timestamp: missingTimestamp,
+  invalid_timestamp: invalidTimestamp,
+  tied_timestamp: tiedTimestamp,
+  missing_issue_number: { ...authorized, number: undefined },
+})) fs.writeFileSync(path.join(process.argv[3], `github-rendered-${name.replaceAll('_', '-')}.json`), JSON.stringify(value, null, 2));
+NODE
+node "$CLI" assignment-provider status --provider github \
+  --repo "$GITHUB_REPO" \
+  --issue-json "$TMPDIR_EVAL/github-rendered-authorized.json" --subject-id "kontourai/flow-agents#9101" \
+  --liveness-events-json <(echo '[]') --self-actor "claude-code:eval-actor-a-session:eval-host" \
+  > "$TMPDIR_EVAL/status-rendered-authorized.json"
+[[ "$(json_query "$TMPDIR_EVAL/status-rendered-authorized.json" "assignment.assignee")" == "flow-agents-eval-bot" ]] && pass "status preserves the raw GitHub assignee login" || fail "status did not preserve the raw GitHub assignee login"
+[[ "$(json_query "$TMPDIR_EVAL/status-rendered-authorized.json" "assignment.claim_comment_author")" == "flow-agents-eval-bot" ]] && pass "status exposes the selected claim-comment author matching the assignee" || fail "status did not expose the authorized claim-comment author"
+[[ "$(json_query "$TMPDIR_EVAL/status-rendered-authorized.json" "assignment.claim_comment_id")" == "IC_kwDOopaque-authorized" ]] && pass "duplicate markers select the unique latest createdAt and expose its opaque id" || fail "duplicate marker selection did not preserve the latest comment's opaque id"
+[[ "$(json_query "$TMPDIR_EVAL/status-rendered-authorized.json" "assignment.repository.owner")" == "kontourai" ]] && pass "status exposes the trusted GitHub repository owner" || fail "status did not expose the trusted GitHub repository owner"
+[[ "$(json_query "$TMPDIR_EVAL/status-rendered-authorized.json" "assignment.repository.name")" == "flow-agents" ]] && pass "status exposes the trusted GitHub repository name" || fail "status did not expose the trusted GitHub repository name"
+[[ "$(json_query "$TMPDIR_EVAL/status-rendered-authorized.json" "assignment.issue_number")" == "9101" ]] && pass "status exposes the provider issue number" || fail "status did not expose the provider issue number"
+
+node "$CLI" assignment-provider status --provider github \
+  --repo "$GITHUB_REPO" \
+  --issue-json "$TMPDIR_EVAL/github-rendered-authorized-reordered.json" --subject-id "kontourai/flow-agents#9101" \
+  --liveness-events-json <(echo '[]') --self-actor "claude-code:eval-actor-a-session:eval-host" \
+  > "$TMPDIR_EVAL/status-rendered-authorized-reordered.json"
+[[ "$(json_query "$TMPDIR_EVAL/status-rendered-authorized-reordered.json" "assignment.claim_comment_id")" == "IC_kwDOopaque-authorized" ]] && pass "reordering duplicate marker input does not change createdAt-based selection" || fail "duplicate marker selection depended on issue input order"
+
+node "$CLI" assignment-provider status --provider github \
+  --repo "$GITHUB_REPO" \
+  --issue-json "$TMPDIR_EVAL/github-rendered-forged-latest.json" --subject-id "kontourai/flow-agents#9101" \
+  --liveness-events-json <(echo '[]') --self-actor "claude-code:eval-actor-a-session:eval-host" \
+  > "$TMPDIR_EVAL/status-rendered-forged-latest.json"
+[[ "$(json_query "$TMPDIR_EVAL/status-rendered-forged-latest.json" "assignment.claim_comment_author")" == "forged-latest-commenter" ]] && pass "status exposes an unrelated author on the exact latest selected marker instead of silently skipping it" || fail "status hid or skipped the latest forged marker author"
+[[ "$(json_query "$TMPDIR_EVAL/status-rendered-forged-latest.json" "assignment.claim_comment_id")" == "IC_kwDOopaque-forged-new" ]] && pass "newer forged marker is selected by createdAt while its opaque id remains data" || fail "newer forged marker was not selected by createdAt"
+
+for timestamp_case in missing invalid tied; do
+  if node "$CLI" assignment-provider status --provider github \
+    --repo "$GITHUB_REPO" \
+    --issue-json "$TMPDIR_EVAL/github-rendered-$timestamp_case-timestamp.json" --subject-id "kontourai/flow-agents#9101" \
+    --liveness-events-json <(echo '[]') --self-actor "claude-code:eval-actor-a-session:eval-host" \
+    > "$TMPDIR_EVAL/status-rendered-$timestamp_case-timestamp.out" 2>&1; then
+    fail "multiple marker comments with $timestamp_case createdAt evidence should fail closed"
+  else
+    pass "multiple marker comments with $timestamp_case createdAt evidence fail closed"
+  fi
+done
+if node "$CLI" assignment-provider status --provider github --repo "$GITHUB_REPO" \
+  --issue-json "$TMPDIR_EVAL/github-rendered-missing-issue-number.json" --subject-id "kontourai/flow-agents#9101" \
+  --liveness-events-json <(echo '[]') --self-actor "claude-code:eval-actor-a-session:eval-host" \
+  > "$TMPDIR_EVAL/status-rendered-missing-issue-number.out" 2>&1; then
+  fail "GitHub status should fail closed when provider issue number is missing"
+else
+  pass "GitHub status fails closed when provider issue number is missing"
+fi
+
 # 2. status on a claimed fixture extracts actor/claimedAt/ttl/branch/artifact_dir, and reports
 #    held (fresh liveness) or reclaimable (stale/absent liveness).
-node "$CLI" assignment-provider status --provider github --issue-json "$ISSUE_CLAIMED" \
+node "$CLI" assignment-provider status --provider github --repo "$GITHUB_REPO" --issue-json "$ISSUE_CLAIMED" \
   --liveness-events-json "$LIVENESS_FRESH" --now "2026-06-01T12:20:00Z" \
   > "$TMPDIR_EVAL/status-fresh.json"
 [[ "$(json_query "$TMPDIR_EVAL/status-fresh.json" "assignment.record.actor.session_id")" == "fixture-actor-a-session" ]] && pass "status extracts actor from the claim comment" || fail "status extracts actor from the claim comment"
@@ -122,18 +235,18 @@ node "$CLI" assignment-provider status --provider github --issue-json "$ISSUE_CL
 [[ "$(json_query "$TMPDIR_EVAL/status-fresh.json" "assignment.record.artifact_dir")" == ".kontourai/flow-agents/flow-agents-4242" ]] && pass "status extracts artifact_dir from the claim comment" || fail "status extracts artifact_dir from the claim comment"
 [[ "$(json_query "$TMPDIR_EVAL/status-fresh.json" "effective.effective_state")" == "held" ]] && pass "status reports held with fresh liveness fixture" || fail "status reports held with fresh liveness fixture"
 
-node "$CLI" assignment-provider status --provider github --issue-json "$ISSUE_CLAIMED" \
+node "$CLI" assignment-provider status --provider github --repo "$GITHUB_REPO" --issue-json "$ISSUE_CLAIMED" \
   --liveness-events-json "$LIVENESS_STALE" --now "2026-06-01T12:20:00Z" \
   > "$TMPDIR_EVAL/status-stale.json"
 [[ "$(json_query "$TMPDIR_EVAL/status-stale.json" "effective.effective_state")" == "reclaimable" ]] && pass "status reports reclaimable with stale liveness fixture" || fail "status reports reclaimable with stale liveness fixture"
 
-node "$CLI" assignment-provider status --provider github --issue-json "$ISSUE_CLAIMED" \
+node "$CLI" assignment-provider status --provider github --repo "$GITHUB_REPO" --issue-json "$ISSUE_CLAIMED" \
   --liveness-events-json <(echo '[]') --now "2026-06-01T12:20:00Z" \
   > "$TMPDIR_EVAL/status-absent.json"
 [[ "$(json_query "$TMPDIR_EVAL/status-absent.json" "effective.effective_state")" == "reclaimable" ]] && pass "status reports reclaimable with absent liveness (no events for this subject)" || fail "status reports reclaimable with absent liveness (no events for this subject)"
 
 # 3. status on an unassigned fixture reports free.
-node "$CLI" assignment-provider status --provider github --issue-json "$ISSUE_UNASSIGNED" \
+node "$CLI" assignment-provider status --provider github --repo "$GITHUB_REPO" --issue-json "$ISSUE_UNASSIGNED" \
   --subject-id "kontourai/flow-agents#4243" --liveness-events-json <(echo '[]') \
   > "$TMPDIR_EVAL/status-unassigned.json"
 [[ "$(json_query "$TMPDIR_EVAL/status-unassigned.json" "assignment.assignee")" == "null" ]] && pass "unassigned fixture has no assignee" || fail "unassigned fixture has no assignee"
@@ -163,7 +276,7 @@ const body = [
 const issue = { number: 9102, state: "OPEN", assignees: [{ login: "brian" }], labels: [{ name: "agent:claimed" }], comments: [{ id: 90201, body }] };
 fs.writeFileSync(process.argv[1], JSON.stringify(issue, null, 2) + "\n");
 ' "$TMPDIR_EVAL/github-issue-human.json"
-node "$CLI" assignment-provider status --provider github --issue-json "$TMPDIR_EVAL/github-issue-human.json" \
+node "$CLI" assignment-provider status --provider github --repo "$GITHUB_REPO" --issue-json "$TMPDIR_EVAL/github-issue-human.json" \
   --liveness-events-json <(echo '[]') --now "2026-05-31T00:00:00Z" \
   > "$TMPDIR_EVAL/status-human.json"
 [[ "$(json_query "$TMPDIR_EVAL/status-human.json" "effective.effective_state")" == "human-held" ]] && pass "idle human assignee reports human-held (never reclaimable)" || fail "idle human assignee reports human-held (never reclaimable)"
@@ -186,7 +299,7 @@ const body = [marker, "**Assignment claim** — Assigned to human brian.", "", "
 const issue = { number: 9103, state: "OPEN", assignees: [{ login: "brian" }], labels: [{ name: "agent:claimed" }], comments: [{ id: 90301, body }] };
 fs.writeFileSync(process.argv[1], JSON.stringify(issue, null, 2) + "\n");
 ' "$TMPDIR_EVAL/github-issue-human-no-now.json" ignored "$PAST_CLAIMED_AT"
-node "$CLI" assignment-provider status --provider github --issue-json "$TMPDIR_EVAL/github-issue-human-no-now.json" \
+node "$CLI" assignment-provider status --provider github --repo "$GITHUB_REPO" --issue-json "$TMPDIR_EVAL/github-issue-human-no-now.json" \
   --liveness-events-json <(echo '[]') \
   > "$TMPDIR_EVAL/status-human-no-now.json"
 [[ "$(json_query "$TMPDIR_EVAL/status-human-no-now.json" "effective.holder.idle_days")" -ge "4" ]] && pass "idle_days still computed correctly without --now (falls back to real Date.now(), ~5 days)" || fail "idle_days still computed correctly without --now (falls back to real Date.now(), ~5 days)"
@@ -247,6 +360,8 @@ cat > "$TMPDIR_EVAL/render-supersede-input.json" <<JSON
   "label_name": "agent:claimed",
   "claim_comment_marker": "<!-- flow-agents:assignment-claim -->",
   "ttl_seconds": 1800,
+  "actor_key": "claude-code:eval-actor-b-session:eval-host",
+  "work_item_ref": "kontourai/flow-agents#4242",
   "branch": "agent/claude-code-eval-actor-b-session-eval-host/flow-agents-4242",
   "artifact_dir": ".kontourai/flow-agents/flow-agents-4242",
   "existing_comment_id": 90002,
@@ -279,6 +394,8 @@ cat > "$TMPDIR_EVAL/render-supersede-no-comment-id.json" <<JSON
   "repo": {"owner": "kontourai", "name": "flow-agents"},
   "issue_number": 4242,
   "assignee_login": "flow-agents-eval-bot-2",
+  "actor_key": "claude-code:eval-actor-b-session:eval-host",
+  "work_item_ref": "kontourai/flow-agents#4242",
   "branch": "agent/claude-code-eval-actor-b-session-eval-host/flow-agents-4242",
   "artifact_dir": ".kontourai/flow-agents/flow-agents-4242"
 }

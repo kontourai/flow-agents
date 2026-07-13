@@ -84,6 +84,14 @@ function assignmentSubjectMatchesWorkItem(slug: string, ref: string): boolean {
   try { return workItemSlug(ref) === slug; } catch { return false; }
 }
 
+function githubWorkItemIdentity(ref: string): { owner: string; name: string; issueNumber: number } {
+  const match = ref.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#([1-9]\d*)$/);
+  if (!match) die("GitHub assignment ownership requires an exact owner/repo#numeric-id Work Item reference");
+  const issueNumber = Number(match[3]);
+  if (!Number.isSafeInteger(issueNumber)) die("GitHub Work Item issue number exceeds the safe integer range");
+  return { owner: match[1], name: match[2], issueNumber };
+}
+
 type SessionWorkItem = {
   ref: string;
   localRecord?: AnyObj;
@@ -1920,6 +1928,9 @@ function enforceEnsureSessionOwnership(
     const candidate = parsed && typeof parsed === "object" ? (parsed.effective as AnyObj | undefined) : undefined;
     const assignment = parsed && typeof parsed === "object" ? (parsed.assignment as AnyObj | undefined) : undefined;
     const record = assignment && typeof assignment.record === "object" && assignment.record !== null ? assignment.record as AnyObj : undefined;
+    const githubWorkItem = assignmentProviderKind === "github" && workItemRef
+      ? githubWorkItemIdentity(workItemRef)
+      : null;
     const validStates = new Set(["held", "reclaimable", "human-held", "free"]);
     if (!candidate || typeof candidate.effective_state !== "string" || !validStates.has(candidate.effective_state)) {
       die(`ensure-session --effective-state-json must contain an .effective object with a recognized effective_state (held|reclaimable|human-held|free); got ${JSON.stringify(candidate ? candidate.effective_state : candidate)}`);
@@ -1928,12 +1939,20 @@ function enforceEnsureSessionOwnership(
       || parsed.provider !== assignmentProviderKind
       || assignment?.provider !== assignmentProviderKind
       || assignment?.subject_id !== slug
+      || (assignmentProviderKind === "github" && (assignment?.has_claim_label !== true
+        || typeof assignment?.assignee !== "string"
+        || assignment.assignee.length === 0
+        || typeof assignment?.claim_comment_author !== "string"
+        || assignment.claim_comment_author.length === 0
+        || assignment.claim_comment_author !== assignment.assignee
+        || assignment?.repository?.owner !== githubWorkItem?.owner
+        || assignment?.repository?.name !== githubWorkItem?.name
+        || assignment?.issue_number !== githubWorkItem?.issueNumber))
       || record?.role !== "AssignmentClaimRecord"
       || record?.status !== "claimed"
       || record?.subject_id !== slug
       || record?.work_item_ref !== workItemRef
       || record?.actor_key !== resolution.branchActorKey
-      || assignment?.assignee !== resolution.branchActorKey
       || !record.actor || typeof record.actor !== "object"
       || record.actor.runtime !== resolution.actorStruct.runtime
       || record.actor.session_id !== resolution.actorStruct.session_id

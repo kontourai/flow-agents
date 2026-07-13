@@ -270,6 +270,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check bundle-install-integration
 
+      - name: Published Codex install integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check published-codex-install-integration
+
       - name: Public workflow CLI integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check public-workflow-cli-integration
