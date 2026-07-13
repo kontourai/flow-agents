@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.12.1](https://github.com/kontourai/flow-agents/compare/v3.12.0...v3.12.1) (2026-07-13)
+
+
+### Fixes
+
+* bind gate-action requirements to gates ([#608](https://github.com/kontourai/flow-agents/issues/608)) ([b1e9ad1](https://github.com/kontourai/flow-agents/commit/b1e9ad1a03ba1b88e09d6ace156e33c010bc6848))
+
 ## [3.12.0](https://github.com/kontourai/flow-agents/compare/v3.11.0...v3.12.0) (2026-07-13)
 
 
