@@ -46,7 +46,23 @@ export {
 export type { BuilderFlowAgentLifecycleInput, BuilderFlowAuthorizedLifecycleInput, BuilderFlowSessionInput, BuilderFlowSessionResult } from "./builder-flow-runtime.js";
 
 export {
+  deriveBuilderGateActionEnvelope,
+  gateActionProgressSnapshot,
+  withGateActionPriorProgress,
+} from "./builder-gate-action-envelope.js";
+export type {
+  BuilderGateActionEnvelopeInput,
+  GateActionEnvelope,
+  GateActionInterfaceParameter,
+  GateActionPriorProgress,
+  GateActionProgressSnapshot,
+  GateActionPublicMutation,
+} from "./builder-gate-action-envelope.js";
+
+export {
   ContinuationAdapterTimeoutError,
+  MAX_CONTINUATION_ADAPTER_EVIDENCE_BYTES,
+  MAX_CONTINUATION_TURN_RESULT_BYTES,
   createFileContinuationStore,
   driveBuilderFlowSession,
   runContinuationDriver,
@@ -54,6 +70,7 @@ export {
 } from "./continuation-driver.js";
 export type {
   ContinuationBarrier,
+  ContinuationAcceptedTurn,
   ContinuationDriverEvent,
   ContinuationDriverLockLease,
   ContinuationDriverOutcome,

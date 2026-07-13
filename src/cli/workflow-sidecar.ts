@@ -14,6 +14,7 @@ import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { runObservedCommand } from "../lib/observed-command.js";
 import { captureReviewWorkspaceSnapshot, startBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
+import { WORKFLOW_CRITIQUE_STATUSES } from "./public-contracts.js";
 // #291 Wave 1 Task 1.1 exports: ensure-session's ownership guard reuses the EXACT same
 // assignment ⋈ liveness join / claim / supersede logic #290 already ships for the
 // `assignment-provider` CLI, rather than reimplementing a second, parallel join (static ESM
@@ -2504,24 +2505,19 @@ function expectedGateProducer(flowId: string, stepId: string, expectationId: str
   const actions = Array.isArray(manifest.flow_step_actions) ? manifest.flow_step_actions as AnyObj[] : [];
   const action = actions.find((candidate) => candidate.flow_id === flowId && candidate.step_id === stepId);
   if (!action) die(`record-gate-claim cannot derive a producer for unknown Flow step ${flowId}/${stepId}`);
+  const binding = Array.isArray(action.expectation_bindings)
+    ? action.expectation_bindings.find((candidate): candidate is AnyObj => candidate && typeof candidate === "object" && !Array.isArray(candidate) && candidate.expectation_id === expectationId)
+    : undefined;
+  if (binding?.interface === "operation") {
+    const operation = typeof binding.operation === "string" ? binding.operation : "the declared external operation";
+    die(`record-gate-claim cannot satisfy operation-bound expectation ${expectationId}; ${operation} requires authenticated external ChangeProvider completion`);
+  }
   const skills = Array.isArray(action.skills) ? action.skills.filter((value: unknown): value is string => typeof value === "string") : [];
   const roles = Array.isArray(manifest.skill_roles) ? manifest.skill_roles as AnyObj[] : [];
   const owners = roles.filter((role) => typeof role.skill_id === "string"
     && Array.isArray(role.step_ids) && role.step_ids.includes(stepId)
     && Array.isArray(role.expectation_ids) && role.expectation_ids.includes(expectationId)
     && skills.includes(role.skill_id.replace(/^builder\./, "")));
-  if (owners.length === 0) {
-    const operations = Array.isArray(action.operations) ? action.operations.filter((value: unknown): value is string => typeof value === "string") : [];
-    const operationExpectations = Array.isArray(action.expectation_ids) ? action.expectation_ids : [];
-    if (operations.length === 1 && operationExpectations.includes(expectationId)) {
-      const artifacts = Array.isArray(action.artifacts) ? action.artifacts.filter((value: unknown): value is string => typeof value === "string") : [];
-      return {
-        id: `operation:${operations[0]}`,
-        artifactPatterns: artifacts.filter((value) => !value.includes("#")),
-        selfProducedTrustSlices: artifacts.filter((value) => value.startsWith("trust.bundle#")).map((value) => value.slice("trust.bundle#".length)),
-      };
-    }
-  }
   if (owners.length !== 1) die(`record-gate-claim cannot derive exactly one producer for ${flowId}/${stepId}/${expectationId}`);
   const owner = owners[0]!;
   const artifacts = (Array.isArray(owner.artifacts) ? owner.artifacts : []).filter((value): value is string => typeof value === "string" && value !== "ephemeral decision record");
@@ -2778,7 +2774,7 @@ function completePassingCriteria(existing: AnyObj[], raw: string[], observedComm
   });
 }
 
-const critiqueStatuses = new Set(["pass", "fail", "not_verified"]);
+const critiqueStatuses = new Set<string>(WORKFLOW_CRITIQUE_STATUSES);
 const safeCritiqueId = /^[a-z][a-z0-9_-]*$/;
 
 function normalizeCritiqueLanes(raw: string[]): AnyObj[] {

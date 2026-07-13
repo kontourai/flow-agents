@@ -6,7 +6,8 @@ import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { validateDefinition } from "@kontourai/flow";
 import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
-import { driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
+import { parseKitFlowStepActions } from "../flow-kit/validate.js";
+import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
 import { inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
@@ -86,12 +87,14 @@ async function drive(sessionDir: string, argv: string[], json: boolean): Promise
   assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
   const adapterCommand = loadContinuationAdapterCommand(adapterCommandFile);
   let evidenceSigner: EvidenceSigner | null = null;
-  const observedAdapterTurns: Array<Record<string, unknown>> = [];
+  let observedAdapterTurns: Array<Record<string, unknown>> = [];
   const result = await withContinuationDriverLock(sessionDir, async (lock) => {
     assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
     evidenceSigner = evidenceSigningKeyFile ? consumeEvidenceSigningKey(evidenceSigningKeyFile) : null;
-    return driveBuilderFlowSession({
+    const continuationStore = createFileContinuationStore(sessionDir);
+    const outcome = await driveBuilderFlowSession({
       sessionDir,
+      store: continuationStore,
       maxTurns,
       adapterCommandIdentity: adapterCommand.identity,
       authorizeTurn: async () => { assertOrdinaryMatchingAssignmentActor(sessionDir, slug); },
@@ -119,18 +122,13 @@ async function drive(sessionDir: string, argv: string[], json: boolean): Promise
         continuationTurnSecret: context?.continuationTurnSecret,
         continuationRunId: context?.continuationRunId,
       }),
-      ...(evidenceSigningKeyFile ? { onTurnAccepted: async (request, adapterResult) => {
-        const next = [...observedAdapterTurns, {
-          request: structuredClone(request),
-          result: structuredClone(adapterResult),
-        }];
-        if (Buffer.byteLength(JSON.stringify(next), "utf8") > 1_048_576) {
-          throw new Error("continuation accepted-turn evidence must not exceed 1048576 aggregate bytes");
-        }
-        observedAdapterTurns.push(next.at(-1)!);
+      ...(evidenceSigningKeyFile ? { preflightTurn: async (request) => {
+        assertAcceptedTurnEvidenceCapacity(attestationTurns(continuationStore.acceptedTurns()), request);
       } } : {}),
       waitForBarrier: async (barrier) => waitForContinuationBarrier(barrier, { maxWaitMs: barrierWaitMs, pollMs: barrierPollMs }),
     });
+    if (evidenceSigningKeyFile) observedAdapterTurns = attestationTurns(continuationStore.acceptedTurns());
+    return outcome;
   });
   const output = evidenceSigner
     ? { ...result, evidence_attestation: signDriveEvidence(evidenceSigner, adapterCommand.identity, maxTurns, result, observedAdapterTurns) }
@@ -138,6 +136,23 @@ async function drive(sessionDir: string, argv: string[], json: boolean): Promise
   if (json) console.log(JSON.stringify(output));
   else console.log(`Continuation driver ${result.outcome} after ${result.turns_started} turn(s); canonical Flow is ${result.snapshot.status} at ${result.snapshot.current_step}.`);
   return 0;
+}
+
+function attestationTurns(turns: Array<{ request: Record<string, unknown>; result: Record<string, unknown> }>): Array<Record<string, unknown>> {
+  const covered = turns.map((turn) => ({ request: structuredClone(turn.request), result: structuredClone(turn.result) }));
+  if (Buffer.byteLength(JSON.stringify(covered), "utf8") > 1_048_576) {
+    throw new Error("continuation accepted-turn evidence must not exceed 1048576 aggregate bytes");
+  }
+  return covered;
+}
+
+export function assertAcceptedTurnEvidenceCapacity(observedTurns: Array<Record<string, unknown>>, request: Record<string, unknown>): void {
+  const base = [...observedTurns, { request: structuredClone(request), result: null }];
+  const bytesWithPlaceholder = Buffer.byteLength(JSON.stringify(base), "utf8");
+  const exactReservedBytes = bytesWithPlaceholder - Buffer.byteLength("null", "utf8") + MAX_CONTINUATION_TURN_RESULT_BYTES;
+  if (exactReservedBytes > 1_048_576) {
+    throw new Error("continuation accepted-turn evidence lacks capacity for another bounded result");
+  }
 }
 
 type EvidenceSigner = { privateKey: KeyObject; publicKeySpkiB64: string };
@@ -328,6 +343,15 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
   if (Object.hasOwn(parsed.flags, "command") && commands.length === 0) {
     throw new Error("workflow evidence --command requires a shell command value");
   }
+  const expectation = flagString(parsed.flags, "expectation")!;
+  // Operation-bound expectations deliberately have no generic evidence writer.
+  // Check before recovery, locking, or actor resolution so a locally authored
+  // operation result cannot cause any canonical or projection mutation.
+  const inspected = await inspectBuilderFlowSession({ sessionDir });
+  const operation = builderOperationForExpectation(inspected.run.definitionId, expectation);
+  if (operation) {
+    throw new Error(`workflow evidence cannot satisfy operation-bound expectation ${expectation}; ${operation} requires authenticated external ChangeProvider completion`);
+  }
   const requiresTestEvidence = flagString(parsed.flags, "expectation") === "tests-evidence" && flagString(parsed.flags, "status") === "pass";
   // Argument and command-shape rejection must be read-only. Recovery below may
   // repair stale projections, so it runs only after every command is accepted.
@@ -375,6 +399,18 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
     ? `Recorded evidence; canonical run is ${report.status} at ${report.current_step}.`
     : `Recorded evidence; canonical run is awaiting the remaining gate expectations at ${report.current_step}.`);
   return 0;
+}
+
+function builderOperationForExpectation(flowId: string, expectationId: string): string | null {
+  const kit = readJsonFile(path.join(PACKAGE_ROOT, "kits", "builder", "kit.json"), "Builder kit metadata");
+  const parsed = parseKitFlowStepActions(kit, "kits/builder/kit.json");
+  if (parsed.errors.length) throw new Error(`Builder kit metadata is invalid: ${parsed.errors.join("; ")}`);
+  for (const action of parsed.entries) {
+    if (action.flow_id !== flowId) continue;
+    const binding = action.expectation_bindings.find((candidate) => candidate.expectation_id === expectationId);
+    if (binding?.interface === "operation") return binding.operation ?? "the declared external operation";
+  }
+  return null;
 }
 
 async function critique(sessionDir: string, argv: string[], json: boolean): Promise<number> {

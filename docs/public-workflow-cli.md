@@ -90,9 +90,10 @@ Critique derives reviewer identity from the calling runtime actor. An active
 implementation assignment is required, and its actor cannot review its own
 work; the delegated reviewer invokes the command directly under a distinct
 identity. The public interface does not accept a caller-selected reviewer
-label. Every critique includes an explicit verdict, at least one substantive
-`--lane-json`, and local reviewed `--artifact-ref` values. Passing critiques
-require every lane to pass; reviewed files and the workspace snapshot are
+label. Every critique includes an explicit `pass`, `fail`, or `not_verified`
+verdict and at least one substantive `--lane-json`. Passing critiques additionally
+require local reviewed `--artifact-ref` values and every lane to pass; reviewed
+files and the workspace snapshot are
 hashed into the stored review target so later implementation changes invalidate
 stale clean critiques.
 
@@ -173,7 +174,13 @@ flow_agents workflow drive \
 Driver state and its append-only event stream live under
 `.kontourai/flow-agents/<slug>/continuation-driver/`. The mission turn count survives reinvocation;
 subsequent invocations must use the same `--max-turns` value. The request contains the
-canonical run id, definition id, current step, projected `next_action`, iteration, and budget. It
+canonical run id, definition id, current step, projected `next_action`, iteration, and budget. Builder
+turns additionally carry one bounded top-level `gate_action_envelope` with immutable skill identities,
+declared artifacts/evidence, requirement satisfaction and unresolved ids, typed public
+`workflow.evidence`/`workflow.critique` argv or product-operation bindings, one-turn stop semantics,
+product-declared implementation policy, and prior canonical progress/stagnation. Parameter values are
+appended as separate argv entries; adapters must not perform string substitution into a shell command. The
+envelope is request-only and is not duplicated in projected `next_action` or durable `state.json`. It
 does not mutate or replace the runtime system prompt. Adapter errors are recorded as failed turns
 and fail open to canonical resynchronization and the next bounded turn; they cannot bypass the
 persisted mission budget. The Builder Flow projection supplies the canonical continue/wait/done/failed
@@ -187,6 +194,15 @@ Adapter process groups are terminated after every non-wait result. In addition,
 state rollback or deletion is rejected when its append-only event history proves turns already
 started. These local coordination records detect accidental or in-process rollback; they are not a
 cryptographic boundary against a process that can rewrite the entire artifact directory.
+
+An operation mutation is a structured product protocol, not necessarily a directly executable CLI
+command. In particular, `publish-change` identifies the provider capability `pull_request.create`,
+its bounded parameters, the required provider result, and `publish-change.result.json` as its dedicated
+result artifact. This release has no authenticated ChangeProvider executor. The operation therefore
+reports `external_capability_required` and `external_verification_required`, exposes no completion
+mutation, and parks the continuation. A locally authored result is not provider evidence. The installed
+`flow-agents publish-change` helper renders and validates publish artifacts and provider checks; it does
+not create a pull request and must not be treated as the operation executor.
 
 Immediately before spawning an adapter turn, the driver writes a transient, schema-versioned
 `active-turn.json` beside its mission state and passes a raw 32-byte turn secret plus the path-safe,
@@ -230,7 +246,27 @@ The event stream records `turn_completed`, `gate_not_advanced`, `turn_failed`, a
 outcome. Failed turns carry
 `failure_kind` of `timeout` or `adapter_error`; a completed adapter turn whose canonical run remains
 active at the same current step records `gate_not_advanced`. These events describe driver execution only and do not
-change canonical Flow state.
+change canonical Flow state. Adapter-returned `evidence` is not interpreted as gate evidence; only
+the public `workflow evidence` path can attach evidence for Flow evaluation. Same-step canonical
+evidence or declared-artifact hash changes are recorded as progress, while repeated no-progress turns are
+classified as possible stagnation and then stagnant without fabricating a gate outcome.
+Progress uses run-wide canonical evidence/artifact manifests and resumes
+from the durable `last_progress` baseline after interruption or reinvocation. Kit metadata, skill source,
+and observed artifact reads are bounded descriptor-stable regular-file reads that reject symlinks and
+identity changes.
+Request-facing declared and required artifacts exclude control `state.json`, even where legacy kit
+ownership metadata retains it.
+Kit validation and envelope construction both cap an action at 16 skills and a flow at 128 distinct
+observable file artifacts, excluding virtual trust-bundle refs and control artifacts consistently.
+Synchronization measures an interrupted, waiting, terminal, or callback-failed turn before clearing
+its recovery marker. Evidence-free canonical gate evaluation is limited to accepted exceptions and
+gates whose effective expectations are all optional; ordinary missing-required gates remain unevaluated.
+Signed drives reserve aggregate attestation capacity before adapter execution when another bounded
+signed result cannot fit.
+The complete serialized adapter result is capped at 74,000 bytes, and preflight reserves that exact
+maximum plus the actual request and JSON structure. Accepted request/result pairs and measured progress
+are journaled durably before the active marker is cleared. Restart idempotently completes missing audit
+writes, and signed attestation fails closed when persisted accepted events lack journal coverage.
 
 ## Compatibility Doctor
 
