@@ -9,6 +9,7 @@ import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto"
 
 import { MAX_CONTINUATION_ADAPTER_EVIDENCE_BYTES, MAX_CONTINUATION_TURN_RESULT_BYTES, ContinuationAdapterTimeoutError, createFileContinuationStore, runContinuationDriver, withContinuationDriverLock } from "../../build/src/continuation-driver.js";
 import { executeContinuationAdapter, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "../../build/src/cli/continuation-adapter.js";
+import { validateSnapshot } from "../../build/src/continuation-validation.js";
 
 const require = createRequire(import.meta.url);
 const activeTurnAuthority = require("../../scripts/hooks/lib/continuation-turn-authority.js");
@@ -38,7 +39,7 @@ function snapshot(step, status = "active") {
 function envelopeSnapshot(step, { evidence = [], artifacts = [], implementationAllowed = false, status = "active" } = {}) {
   const value = snapshot(step, status);
   value.gate_action_envelope = {
-    schema_version: "1.0",
+    schema_version: "2.0",
     flow: { current_step: step, status },
     action: { implementation_allowed: implementationAllowed },
     stop_condition: { kind: "one_turn", adapter_evidence_is_gate_evidence: false },
@@ -46,6 +47,20 @@ function envelopeSnapshot(step, { evidence = [], artifacts = [], implementationA
   };
   return value;
 }
+
+test("gate-action envelope rejects partial accepted-exception bindings", () => {
+  const partial = envelopeSnapshot("execute");
+  partial.gate_action_envelope.flow.gate_ids = ["execute-gate"];
+  partial.gate_action_envelope.gate = {
+    requirements: [
+      { id: "implemented", gate_id: "execute-gate", required: true, status: "accepted_exception" },
+      { id: "verified", gate_id: "execute-gate", required: true, status: "unresolved" },
+    ],
+    unresolved_requirement_ids: ["verified"],
+    accepted_exceptions: [{ gate_id: "execute-gate", exception_id: "exception-1" }],
+  };
+  assert.throws(() => validateSnapshot(partial), /inconsistent exception bindings/);
+});
 
 function terminalProgressSnapshot(status, { step = "learn", evidence = [], artifacts = [] } = {}) {
   const value = snapshot(step, status);

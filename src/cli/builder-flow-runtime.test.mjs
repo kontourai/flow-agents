@@ -372,7 +372,8 @@ test("small-model client can start and advance from projected actions without ch
   assert.ok(started.projection.next_action.command.includes(`'workflow' 'status' '--session-dir' '.kontourai/flow-agents/${session.slug}' '--json'`));
   const envelope = started.gateActionEnvelope;
   assert.equal(Object.hasOwn(started.projection.next_action, "gate_action_envelope"), false, "durable state has no duplicate envelope");
-  assert.equal(envelope.schema_version, "1.0");
+  assert.equal(envelope.schema_version, "2.0");
+  assert.equal(envelope.gate.requirements[0].gate_id, "pull-work-gate");
   assert.equal(envelope.action.implementation_allowed, false, "implementation is forbidden before builder.build/execute");
   assert.deepEqual(envelope.action.declared_evidence, ["selected-work"]);
   assert.deepEqual(envelope.action.declared_artifacts, [`<slug>--pull-work.md`, "trust.bundle#selected-work"]);
@@ -481,6 +482,7 @@ test("accepted Flow exceptions explicitly waive the current envelope requirement
   });
   const recovered = await recoverBuilderFlowSession({ sessionDir: session.sessionDir });
   assert.deepEqual(recovered.gateActionEnvelope.gate.accepted_exceptions, [{ gate_id: "pull-work-gate", exception_id: exception.id }]);
+  assert.equal(recovered.gateActionEnvelope.gate.requirements[0].gate_id, "pull-work-gate");
   assert.equal(recovered.gateActionEnvelope.gate.requirements[0].status, "accepted_exception");
   assert.deepEqual(recovered.gateActionEnvelope.stop_condition.required.unresolved_evidence_ids, []);
   assert.deepEqual(recovered.gateActionEnvelope.stop_condition.required.artifact_refs, []);
@@ -761,7 +763,7 @@ test("public workflow drive signs adapter evidence with a consumed one-time key"
   assert.deepEqual(payload.adapter_turns.map((turn) => turn.request), observedRequests);
   assert.equal(payload.adapter_turns[0].request.schema_version, "1.0");
   assert.equal(payload.adapter_turns[0].request.next_action.status, "continue");
-  assert.equal(payload.adapter_turns[0].request.gate_action_envelope.schema_version, "1.0");
+  assert.equal(payload.adapter_turns[0].request.gate_action_envelope.schema_version, "2.0");
   assert.deepEqual(payload.adapter_turns.map((turn) => turn.request), observedRequests, "the signed payload binds the unchanged envelope bytes observed by the adapter");
   assert.deepEqual(payload.adapter_turns[0].result.evidence.usage, { input_tokens: 10, output_tokens: 2 });
   const tampered = Buffer.from(JSON.stringify({ ...payload, max_turns: 2 }));
