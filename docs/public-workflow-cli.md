@@ -167,6 +167,50 @@ state rollback or deletion is rejected when its append-only event history proves
 started. These local coordination records detect accidental or in-process rollback; they are not a
 cryptographic boundary against a process that can rewrite the entire artifact directory.
 
+Immediately before spawning an adapter turn, the driver writes a transient, schema-versioned
+`active-turn.json` beside its mission state and passes a raw 32-byte turn secret plus the path-safe,
+signed run id in `FLOW_AGENTS_CONTINUATION_TURN_SECRET` and
+`FLOW_AGENTS_CONTINUATION_RUN_ID` to that child. Only the secret's SHA-256 is persisted in the signed
+record. The driver's schema-1-compatible mission state separately stores the ephemeral public-key
+digest before the adapter starts, so replacing and correctly re-signing the entire active-turn
+record with another key does not replace the signer anchor. The driver clears that digest with the
+active-turn step on every completion, error, cleanup, terminal, waiting, and budget path. It replaces
+every inherited continuation capability variable but preserves ordinary
+`FLOW_AGENTS_ACTOR`. The shared actor
+resolver remains ordinary: it never accepts continuation data as an identity override. When an
+assignment-gated public workflow command finds that ordinary resolution does not match, it may use
+only a live signed active-turn record bound to the exact session, turn secret, run id, assignment file and
+actor struct, mission, adapter identity, expiry, and driver lock; it returns the signed assignment
+identity only for that active-turn evidence gate. Pause, resume, release, cancel, and archive remain
+control-plane operations: they require ordinary actor identity or their existing explicit external
+authority and never accept this turn capability. The private key remains only in the driver process.
+The Stop hook resolves the signed run id under the canonical artifact root and fully validates that
+exact session before consulting ordinary current pointers. Once the base signed turn remains valid,
+that exact session stays selected even if canonical Flow has become paused, blocked, completed, or
+another canonical disposition; Stop never falls back to a conflicting actor or global pointer. It
+securely validates canonical state against the run's definition and treats only canonical `active`
+as authority to make the ordinary unfinished
+canonical-gate warning advisory so the adapter can return control to the driver. It never advances
+a Flow gate, releases assignment or liveness for a continuation-owned nonterminal run, or relaxes evidence, integrity, false-completion,
+malformed-state, or configuration blocks. The record is removed when the child completes, errors,
+or times out; parent identity changes leave it to expire instead of unlinking through a replacement.
+
+This is cooperative same-user protection, not cryptographic filesystem isolation from a hostile
+same-UID process. A same-UID process that can rewrite both mission state and authority records or
+control the driver process remains outside this boundary. Within the cooperative boundary, the
+mission digest anchors the driver's ephemeral signer, while descriptor reads, final-path inode rechecks, and realpath/device/inode parent
+rechecks detect practical replacement races. Active-turn and lock records are capped at 16 KiB;
+canonical assignment and continuation mission records are capped at a conservative 1 MiB so valid
+provider metadata is not rejected. PID liveness is best-effort only: PID reuse and same-UID process control remain outside this
+local coordination boundary.
+
+The event stream records `turn_completed`, `gate_not_advanced`, `turn_failed`, and best-effort
+`authority_cleanup_failed`. Cleanup failures are audited but do not replace the adapter or canonical
+outcome. Failed turns carry
+`failure_kind` of `timeout` or `adapter_error`; a completed adapter turn whose canonical run remains
+active at the same current step records `gate_not_advanced`. These events describe driver execution only and do not
+change canonical Flow state.
+
 ## Compatibility Doctor
 
 Run doctor through the exact isolated package helper defined above:

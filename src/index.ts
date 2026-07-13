@@ -46,6 +46,7 @@ export {
 export type { BuilderFlowAgentLifecycleInput, BuilderFlowAuthorizedLifecycleInput, BuilderFlowSessionInput, BuilderFlowSessionResult } from "./builder-flow-runtime.js";
 
 export {
+  ContinuationAdapterTimeoutError,
   createFileContinuationStore,
   driveBuilderFlowSession,
   runContinuationDriver,
@@ -54,11 +55,14 @@ export {
 export type {
   ContinuationBarrier,
   ContinuationDriverEvent,
+  ContinuationDriverLockLease,
   ContinuationDriverOutcome,
   ContinuationDriverState,
   ContinuationRuntimePort,
   ContinuationSnapshot,
   ContinuationStateStore,
+  ContinuationTurnAuthority,
+  ContinuationTurnContext,
   ContinuationTurnRequest,
   ContinuationTurnResult,
   DriveBuilderFlowSessionInput,

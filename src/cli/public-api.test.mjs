@@ -37,6 +37,7 @@ test("public API retains the documented native-host compatibility surface", asyn
     "startBuilderBuildRun", "evaluateBuilderBuildRun", "startBuilderFlowSession",
     "pauseBuilderFlowSession", "resumeBuilderFlowSession", "cancelBuilderFlowSession",
     "archiveBuilderFlowSession", "recoverBuilderFlowSession", "releaseBuilderFlowAssignment",
+    "ContinuationAdapterTimeoutError",
     "writeJson", "appendJsonl", "sidecarBase", "writeState", "writeSidecar",
   ]) {
     assert.equal(typeof lib[name], "function", `${name} must remain package-root exported`);

@@ -15,7 +15,7 @@ import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { main as builderRun } from "./builder-run.js";
 import { currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
-import { executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
+import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -81,22 +81,55 @@ async function drive(sessionDir: string, argv: string[], json: boolean): Promise
   const barrierWaitMs = integerFlag(parsed.flags, "barrier-wait-ms", 300_000, 0, 86_400_000);
   const barrierPollMs = integerFlag(parsed.flags, "barrier-poll-ms", 1_000, 1, 60_000);
   const { slug, projectRoot } = readBoundSession(sessionDir);
-  assertMatchingAssignmentActor(sessionDir, slug);
+  assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
   const adapterCommand = loadContinuationAdapterCommand(adapterCommandFile);
-  const result = await withContinuationDriverLock(sessionDir, async () => {
-    assertMatchingAssignmentActor(sessionDir, slug);
+  const result = await withContinuationDriverLock(sessionDir, async (lock) => {
+    assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
     return driveBuilderFlowSession({
       sessionDir,
       maxTurns,
       adapterCommandIdentity: adapterCommand.identity,
-      authorizeTurn: async () => { assertMatchingAssignmentActor(sessionDir, slug); },
-      execute: async (request) => executeLoadedContinuationAdapter(adapterCommand, request, { cwd: projectRoot, timeoutMs: turnTimeoutMs }),
+      authorizeTurn: async () => { assertOrdinaryMatchingAssignmentActor(sessionDir, slug); },
+      issueTurnAuthority: async (request) => {
+        const currentAssignment = assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
+        assertLoadedContinuationAdapterIntegrity(adapterCommand);
+        const authority = loadContinuationTurnAuthority();
+        return authority.issueActiveTurnAuthority({
+          sessionDir,
+          runId: request.run_id,
+          definitionId: request.definition_id,
+          currentStep: request.current_step,
+          iteration: request.iteration,
+          maxTurns: request.max_turns,
+          adapterCommandIdentity: adapterCommand.identity,
+          assignmentActor: currentAssignment.actorKey,
+          assignmentActorStruct: currentAssignment.actor,
+          lock,
+          timeoutMs: turnTimeoutMs,
+        });
+      },
+      execute: async (request, context) => executeLoadedContinuationAdapter(adapterCommand, request, {
+        cwd: projectRoot,
+        timeoutMs: turnTimeoutMs,
+        continuationTurnSecret: context?.continuationTurnSecret,
+        continuationRunId: context?.continuationRunId,
+      }),
       waitForBarrier: async (barrier) => waitForContinuationBarrier(barrier, { maxWaitMs: barrierWaitMs, pollMs: barrierPollMs }),
     });
   });
   if (json) console.log(JSON.stringify(result));
   else console.log(`Continuation driver ${result.outcome} after ${result.turns_started} turn(s); canonical Flow is ${result.snapshot.status} at ${result.snapshot.current_step}.`);
   return 0;
+}
+
+function loadContinuationTurnAuthority(): {
+  issueActiveTurnAuthority(input: Record<string, unknown>): { runId: string; turnSecret: string; publicKeyDigest: string; cleanup(): boolean };
+  validateSignedActiveTurnAssignmentAuthority(input: Record<string, unknown>): { valid: boolean; record?: { assignment_actor: string; assignment_actor_struct: Record<string, unknown> } };
+} {
+  return REQUIRE(path.resolve(PACKAGE_ROOT, "scripts", "hooks", "lib", "continuation-turn-authority.js")) as {
+    issueActiveTurnAuthority(input: Record<string, unknown>): { runId: string; turnSecret: string; publicKeyDigest: string; cleanup(): boolean };
+    validateSignedActiveTurnAssignmentAuthority(input: Record<string, unknown>): { valid: boolean; record?: { assignment_actor: string; assignment_actor_struct: Record<string, unknown> } };
+  };
 }
 
 async function start(argv: string[]): Promise<number> {
@@ -518,13 +551,40 @@ function readAssignment(sessionDir: string, slug: string): JsonRecord {
 }
 
 function assertMatchingAssignmentActor(sessionDir: string, slug: string): ReturnType<typeof resolveCurrentAssignmentActor> {
+  const { assignment, caller, matches } = assignmentActorContext(sessionDir, slug);
+  if (matches) return caller;
+
+  const authority = loadContinuationTurnAuthority().validateSignedActiveTurnAssignmentAuthority({
+    sessionDir,
+    runId: process.env.FLOW_AGENTS_CONTINUATION_RUN_ID,
+    turnSecret: process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET,
+  });
+  if (authority.valid && authority.record
+    && assignment.actor_key === authority.record.assignment_actor
+    && isDeepStrictEqual(normalizeAssignmentActor(assignment.actor), normalizeAssignmentActor(authority.record.assignment_actor_struct))) {
+    return { actorKey: authority.record.assignment_actor, actor: normalizeAssignmentActor(authority.record.assignment_actor_struct)! as ReturnType<typeof resolveCurrentAssignmentActor>["actor"] };
+  }
+  throw new Error("workflow mutation requires the session's active, matching assignment actor");
+}
+
+function assertOrdinaryMatchingAssignmentActor(sessionDir: string, slug: string): ReturnType<typeof resolveCurrentAssignmentActor> {
+  const { caller, matches } = assignmentActorContext(sessionDir, slug);
+  if (!matches) throw new Error("workflow mutation requires the session's active, matching assignment actor");
+  return caller;
+}
+
+function assignmentActorContext(sessionDir: string, slug: string): {
+  assignment: JsonRecord;
+  caller: ReturnType<typeof resolveCurrentAssignmentActor>;
+  matches: boolean;
+} {
   const assignment = readActiveAssignment(sessionDir, slug);
   const caller = resolveCurrentAssignmentActor();
-  const normalizeActor = (value: unknown): JsonRecord | null => value && typeof value === "object" ? { ...(value as JsonRecord), human: (value as JsonRecord).human ?? null } : null;
-  if (assignment.actor_key !== caller.actorKey || !isDeepStrictEqual(normalizeActor(assignment.actor), normalizeActor(caller.actor))) {
-    throw new Error("workflow mutation requires the session's active, matching assignment actor");
-  }
-  return caller;
+  return { assignment, caller, matches: assignment.actor_key === caller.actorKey && isDeepStrictEqual(normalizeAssignmentActor(assignment.actor), normalizeAssignmentActor(caller.actor)) };
+}
+
+function normalizeAssignmentActor(value: unknown): JsonRecord | null {
+  return value && typeof value === "object" ? { ...(value as JsonRecord), human: (value as JsonRecord).human ?? null } : null;
 }
 
 function readActiveAssignment(sessionDir: string, slug: string): JsonRecord {
