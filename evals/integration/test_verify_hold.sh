@@ -739,6 +739,12 @@ grep -qF "hostile-holder-actor" "$TMPDIR_EVAL/vh-hostile.out" && pass "the sanit
 STEERING_REPO="$TMPDIR_EVAL/steering-hostile-repo"
 STEERING_HOSTILE_NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 write_steering_fixture_repo "$STEERING_REPO" "$HOSTILE_SLUG" "$STEERING_HOSTILE_NOW"
+# #440 FIX 2 (de-vacuate, delta review): the invoking actor (eval-actor-hostile-reader) owns
+# HOSTILE_SLUG -- seed its own per-actor pointer (real dual-write helper) so
+# actorScopedWorkflowState finds it and supersessionSteering is REACHED at all; without this the
+# absence assertion below passed only because no steering output existed in the first place, not
+# because the sanitization itself was exercised.
+seed_current_pointer "$STEERING_REPO" "$HOSTILE_SLUG" "eval-actor-hostile-reader"
 append_liveness_event "$STEERING_REPO/.kontourai/flow-agents" "$HOSTILE_SLUG" "$HOSTILE_HOLDER_ACTOR" "$STEERING_HOSTILE_NOW" 1800
 
 if FLOW_AGENTS_ACTOR="eval-actor-hostile-reader" node "$ROOT/scripts/hooks/workflow-steering.js" \
@@ -749,6 +755,14 @@ then
   pass "steering hook processes the hostile-holder fixture without failing (AC7 setup)"
 else
   fail "steering hook should not fail for the hostile-holder fixture"
+fi
+# #440 FIX 2 reachability control (delta review): prove the supersession notice is ACTUALLY
+# present and names the sanitized holder -- the ANSI/control-byte absence checks below would
+# otherwise pass vacuously if no notice were emitted at all (exactly the pre-fix defect).
+if grep -qF "[SUPERSEDED:" "$TMPDIR_EVAL/steering-hostile.out" && grep -qF "hostile-holder-actor" "$TMPDIR_EVAL/steering-hostile.out"; then
+  pass "#440 reachability control: the steering supersession notice is present and names the sanitized (non-control-byte) hostile holder actor (AC7)"
+else
+  fail "#440 reachability control: no supersession notice was emitted, or it did not name the sanitized hostile holder actor: $(cat "$TMPDIR_EVAL/steering-hostile.out")"
 fi
 if grep -qF $'\x1b[31;1m' "$TMPDIR_EVAL/steering-hostile.out" || grep -qF $'\x07' "$TMPDIR_EVAL/steering-hostile.out"; then
   fail "hostile holder actor's raw ANSI/control bytes leaked into the steering supersession notice (AC7)"
@@ -896,6 +910,13 @@ NO_SUP_REPO="$TMPDIR_EVAL/steering-no-supersede-repo"
 NO_SUP_SLUG="steering-not-superseded-demo"
 NO_SUP_NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 write_steering_fixture_repo "$NO_SUP_REPO" "$NO_SUP_SLUG" "$NO_SUP_NOW"
+# #440 FIX 2 (de-vacuate, delta review): the invoking actor (eval-actor-steering-self-a) owns
+# NO_SUP_SLUG -- seed its own per-actor pointer (real dual-write helper) so
+# actorScopedWorkflowState finds it. Without this, the "no notice" assertions below would pass
+# only because NO scoped session existed at all (analyze()/actorScopedWorkflowState finds
+# nothing), not because a genuinely scoped session correctly found no other-actor holder -- the
+# exact "no scoped session" vs "scoped session, no other holder" distinction this case must prove.
+seed_current_pointer "$NO_SUP_REPO" "$NO_SUP_SLUG" "eval-actor-steering-self-a"
 # No liveness stream at all for this repo — no other-actor holder can exist.
 
 if FLOW_AGENTS_ACTOR="eval-actor-steering-self-a" node "$ROOT/scripts/hooks/workflow-steering.js" \
@@ -906,6 +927,14 @@ then
   pass "steering hook processes UserPromptSubmit for the non-superseded fixture without failing (AC5 setup)"
 else
   fail "steering hook should not fail for UserPromptSubmit on the non-superseded fixture"
+fi
+# #440 FIX 2 reachability control (delta review): prove the session WAS scoped/found (the STATE
+# banner is present) so the "no SUPERSEDED notice" checks below prove "scoped session, no other
+# holder" rather than vacuously "no scoped session at all".
+if grep -qF "STATE: $NO_SUP_SLUG is status:in_progress phase:execution" "$TMPDIR_EVAL/steering-no-sup-prompt.out"; then
+  pass "#440 reachability control: actor A's own scoped session is found at UserPromptSubmit (STATE banner present) (AC5)"
+else
+  fail "#440 reachability control: actor A's own scoped session was NOT found at UserPromptSubmit (no STATE banner): $(cat "$TMPDIR_EVAL/steering-no-sup-prompt.out")"
 fi
 if grep -qF "[SUPERSEDED:" "$TMPDIR_EVAL/steering-no-sup-prompt.out"; then
   fail "supersession notice incorrectly appeared at UserPromptSubmit with no other-actor fresh holder (false positive) (AC5)"
@@ -921,6 +950,13 @@ then
   pass "steering hook processes SessionStart for the non-superseded fixture without failing (AC5 setup)"
 else
   fail "steering hook should not fail for SessionStart on the non-superseded fixture"
+fi
+# #440 FIX 2 reachability control (delta review): same rationale as the UserPromptSubmit check
+# above, for SessionStart's RESUME block.
+if grep -qF "RESUME: $NO_SUP_SLUG" "$TMPDIR_EVAL/steering-no-sup-start.out"; then
+  pass "#440 reachability control: actor A's own scoped session is found at SessionStart (RESUME banner present) (AC5)"
+else
+  fail "#440 reachability control: actor A's own scoped session was NOT found at SessionStart (no RESUME banner): $(cat "$TMPDIR_EVAL/steering-no-sup-start.out")"
 fi
 if grep -qF "[SUPERSEDED:" "$TMPDIR_EVAL/steering-no-sup-start.out"; then
   fail "supersession notice incorrectly appeared at SessionStart with no other-actor fresh holder (false positive) (AC5)"
