@@ -2,6 +2,9 @@
 # transport.sh — Dual-channel telemetry transport
 
 source "${TELEMETRY_DIR}/lib/redact.sh"
+# Shared usage.model / numeric-bound validation constants (security review
+# HIGH + LOW findings) -- single source, also used by usage.sh's extractor.
+source "${TELEMETRY_DIR}/lib/usage_model_guard.sh"
 
 console_telemetry_endpoint_url() {
   if [[ -n "${CONSOLE_TELEMETRY_ENDPOINT_URL:-}" ]]; then
@@ -44,6 +47,66 @@ console_telemetry_timeout_seconds() {
   else
     echo "$fallback"
   fi
+}
+
+# console_post_json <endpoint_url> <body> [connect_timeout] [max_time] [tmp_dir]
+# Shared best-effort JSON POST to a Console records endpoint. BOTH the telemetry mirror
+# (console_telemetry_emit) and the liveness relay (#295, scripts/liveness/relay.sh) go through this
+# ONE core so endpoint-allow, auth (Bearer + tenant), timeouts, temp-file handling, and the detached
+# fire can never drift between the two paths (the #356 shared-not-forked discipline). Reads
+# CONSOLE_TELEMETRY_TOKEN / CONSOLE_TENANT_ID from the environment. Never blocks or fails the caller.
+console_post_json() {
+  local endpoint_url="$1"
+  local body="$2"
+  local connect_timeout max_time tmp_dir curl_config curl_body
+  [[ -z "$endpoint_url" ]] && return
+  if ! console_telemetry_endpoint_allowed "$endpoint_url"; then
+    # Dropped silently before today's change (no signal that the event never
+    # left the machine). Warn once per shell process (guarded by a plain,
+    # non-local var so it survives across repeated console_post_json calls
+    # within the same sourced shell) without changing the drop itself.
+    if [[ -z "${_CONSOLE_TELEMETRY_ENDPOINT_WARNED:-}" ]]; then
+      printf 'warning: transport.sh: console endpoint dropped by the allowlist (must be https://, or http://localhost|127.0.0.1): %s\n' "$endpoint_url" >&2
+      _CONSOLE_TELEMETRY_ENDPOINT_WARNED=1
+    fi
+    return
+  fi
+  connect_timeout=$(console_telemetry_timeout_seconds "${3:-2}" 2 30)
+  max_time=$(console_telemetry_timeout_seconds "${4:-5}" 5 60)
+  tmp_dir="${5:-${TELEMETRY_SESSION_DIR:-${TMPDIR:-/tmp}}}"
+  curl_config=$(mktemp "${tmp_dir%/}/console-curl.XXXXXX") || return
+  curl_body=$(mktemp "${tmp_dir%/}/console-body.XXXXXX") || {
+    rm -f "$curl_config"
+    return
+  }
+  chmod 600 "$curl_config" "$curl_body" 2>/dev/null
+  printf '%s' "$body" > "$curl_body" || {
+    rm -f "$curl_config" "$curl_body"
+    return
+  }
+
+  {
+    printf 'url = "%s"\n' "$endpoint_url"
+    printf 'request = "POST"\n'
+    printf 'connect-timeout = "%s"\n' "$connect_timeout"
+    printf 'max-time = "%s"\n' "$max_time"
+    printf 'header = "Content-Type: application/json"\n'
+    if [[ -n "${CONSOLE_TELEMETRY_TOKEN:-}" ]] && console_telemetry_safe_token "$CONSOLE_TELEMETRY_TOKEN"; then
+      printf 'header = "Authorization: Bearer %s"\n' "$CONSOLE_TELEMETRY_TOKEN"
+    fi
+    if [[ -n "${CONSOLE_TENANT_ID:-}" ]] && console_telemetry_safe_tenant "$CONSOLE_TENANT_ID"; then
+      printf 'header = "x-console-tenant-id: %s"\n' "$CONSOLE_TENANT_ID"
+    fi
+    printf 'data-binary = "@%s"\n' "$curl_body"
+  } > "$curl_config" || {
+    rm -f "$curl_config" "$curl_body"
+    return
+  }
+
+  (
+    curl -s --proto =https,http --proto-redir =https,http --config "$curl_config" >/dev/null 2>&1
+    rm -f "$curl_config" "$curl_body"
+  ) &
 }
 
 # Derive a coarse, path-free project label for console attribution, most-stable-first so the SAME
@@ -118,12 +181,79 @@ console_project_label() {
   printf '%s' "$label"
 }
 
+# Defense-in-depth sanitize backstop (#568 slice 1 security review, MEDIUM,
+# hardened per HIGH + LOW follow-up findings): nulls any
+# usage.{input_tokens,output_tokens,cache_creation_input_tokens,
+# cache_read_input_tokens,estimated_cost_usd} that isn't a JSON number within
+# [USAGE_NUMERIC_MIN, USAGE_NUMERIC_MAX] (negative/absurd-magnitude values are
+# as untrusted as a wrong-typed one), and bounds/validates usage.model against
+# the SAME shared vendor-prefix allowlist (USAGE_MODEL_REGEX/
+# USAGE_MODEL_MAX_LEN, from usage_model_guard.sh) usage_last_turn_usage
+# enforces at extraction time -- a charset-only check here would be, and
+# previously was, a strict superset of secret/credential shapes (API keys,
+# JWTs) that a regression in the primary extractor could otherwise relay
+# verbatim. FAILS CLOSED: if `.usage` is present but is not a JSON object (a
+# raw string/number/array -- e.g. a future caller populating it wrong), the
+# whole `.usage` is nulled rather than left unsanitized (a naive
+# `.usage? != null` + `?`-chained field check on a non-object silently
+# produces NO jq output at all, which the caller would then treat as "sanitize
+# failed" and fall through to the ORIGINAL unsanitized event -- exactly the
+# fail-OPEN bug this branch exists to close). This exists so a FUTURE
+# extractor regression (a new caller populating .usage from a less-trusted
+# source, a refactor that drops a type/shape guard, etc.) can never again
+# relay an untyped/oversized/malformed/secret-shaped value to the console; it
+# is not the primary defense (usage_last_turn_usage already type-guards and
+# allowlists every field) but a last-resort net right before the POST. One jq
+# pass, no extra process spawned beyond the jq call already needed here.
+console_telemetry_sanitize_usage() {
+  local event="$1"
+  # FAIL CLOSED if the shared guard constants didn't resolve (e.g. a partial
+  # dist/ sync dropped usage_model_guard.sh): null .usage entirely rather than
+  # running a broken/empty jq that would return nothing and let the caller relay
+  # the ORIGINAL unsanitized event. Never fail open on a packaging defect.
+  if [[ -z "$USAGE_MODEL_REGEX" || -z "$USAGE_MODEL_MAX_LEN" || -z "$USAGE_NUMERIC_MIN" || -z "$USAGE_NUMERIC_MAX" ]]; then
+    printf '%s' "$event" | jq -c 'if has("usage") then .usage = null else . end'
+    return
+  fi
+  printf '%s' "$event" | jq -c \
+    --arg model_regex "$USAGE_MODEL_REGEX" \
+    --argjson model_max_len "$USAGE_MODEL_MAX_LEN" \
+    --argjson numeric_min "$USAGE_NUMERIC_MIN" \
+    --argjson numeric_max "$USAGE_NUMERIC_MAX" '
+    def bounded_number($v):
+      if ($v | type) == "number" and $v >= $numeric_min and $v <= $numeric_max then $v else null end;
+    if (.usage? == null) then .
+    elif ((.usage | type) != "object") then (.usage = null)
+    else
+      .usage.input_tokens = bounded_number(.usage.input_tokens?)
+      | .usage.output_tokens = bounded_number(.usage.output_tokens?)
+      | .usage.cache_creation_input_tokens = bounded_number(.usage.cache_creation_input_tokens?)
+      | .usage.cache_read_input_tokens = bounded_number(.usage.cache_read_input_tokens?)
+      | .usage.estimated_cost_usd = bounded_number(.usage.estimated_cost_usd?)
+      | .usage.model = (
+          if ((.usage.model? | type) == "string")
+             and ((.usage.model | length) <= $model_max_len)
+             and (.usage.model | test($model_regex))
+          then .usage.model
+          else null
+          end
+        )
+    end
+  ' 2>/dev/null
+}
+
 console_telemetry_emit() {
   local event="$1"
   local endpoint_url
   endpoint_url=$(console_telemetry_endpoint_url)
   [[ -z "$endpoint_url" ]] && return
-  console_telemetry_endpoint_allowed "$endpoint_url" || return
+
+  # Sanitize backstop runs before anything else so labeling/redaction/POST all
+  # see the already-bounded event; a failed/empty sanitize pass (bad JSON)
+  # falls back to the original event unchanged (never blocks relay).
+  local sanitized_event
+  sanitized_event=$(console_telemetry_sanitize_usage "$event") || sanitized_event=""
+  [[ -n "$sanitized_event" ]] && event="$sanitized_event"
 
   # Attribution: stamp a coarse, path-free project label (see console_project_label) before redaction
   # so the console buckets by project consistently across developers. The full context.cwd is still
@@ -143,42 +273,14 @@ console_telemetry_emit() {
   local processed_event
   processed_event=$(redact_event "$event" "${CONSOLE_TELEMETRY_REDACT:-${TELEMETRY_CHANNEL_ANALYTICS_REDACT:-}}")
 
-  local curl_config curl_body connect_timeout max_time
-  connect_timeout=$(console_telemetry_timeout_seconds "${CONSOLE_TELEMETRY_CONNECT_TIMEOUT_SECONDS:-2}" 2 30)
-  max_time=$(console_telemetry_timeout_seconds "${CONSOLE_TELEMETRY_MAX_TIME_SECONDS:-5}" 5 60)
-  curl_config=$(mktemp "${TELEMETRY_SESSION_DIR}/console-curl.XXXXXX") || return
-  curl_body=$(mktemp "${TELEMETRY_SESSION_DIR}/console-body.XXXXXX") || {
-    rm -f "$curl_config"
-    return
-  }
-  chmod 600 "$curl_config" "$curl_body" 2>/dev/null
-  printf '%s' "$processed_event" > "$curl_body" || {
-    rm -f "$curl_config" "$curl_body"
-    return
-  }
-
-  {
-    printf 'url = "%s"\n' "$endpoint_url"
-    printf 'request = "POST"\n'
-    printf 'connect-timeout = "%s"\n' "$connect_timeout"
-    printf 'max-time = "%s"\n' "$max_time"
-    printf 'header = "Content-Type: application/json"\n'
-    if [[ -n "${CONSOLE_TELEMETRY_TOKEN:-}" ]] && console_telemetry_safe_token "$CONSOLE_TELEMETRY_TOKEN"; then
-      printf 'header = "Authorization: Bearer %s"\n' "$CONSOLE_TELEMETRY_TOKEN"
-    fi
-    if [[ -n "${CONSOLE_TENANT_ID:-}" ]] && console_telemetry_safe_tenant "$CONSOLE_TENANT_ID"; then
-      printf 'header = "x-console-tenant-id: %s"\n' "$CONSOLE_TENANT_ID"
-    fi
-    printf 'data-binary = "@%s"\n' "$curl_body"
-  } > "$curl_config" || {
-    rm -f "$curl_config" "$curl_body"
-    return
-  }
-
-  (
-    curl -s --proto =https,http --proto-redir =https,http --config "$curl_config" >/dev/null 2>&1
-    rm -f "$curl_config" "$curl_body"
-  ) &
+  # Delegate the endpoint-allow gate, auth, timeouts, temp files, and detached POST to the shared
+  # core. Timeouts/tmp-dir are passed explicitly so telemetry behavior is byte-for-byte unchanged.
+  console_post_json \
+    "$endpoint_url" \
+    "$processed_event" \
+    "${CONSOLE_TELEMETRY_CONNECT_TIMEOUT_SECONDS:-2}" \
+    "${CONSOLE_TELEMETRY_MAX_TIME_SECONDS:-5}" \
+    "${TELEMETRY_SESSION_DIR:-}"
 }
 
 transport_emit() {

@@ -1,0 +1,2 @@
+{"type":"user","message":{"role":"user","content":"benign filler line so the adversarial assistant line is not the only content"}}
+{"type":"assistant","message":{"model":"SYSTEM PROMPT LEAK: the user's SSN is 000-00-0000 and API key sk-FAKE-adversarial-fixture","usage":{"input_tokens":"the user's private prompt said: attack the server at 203.0.113.7 with admin/hunter2","output_tokens":"also-not-a-number","cache_creation_input_tokens":{"nested":"object"},"cache_read_input_tokens":[1,2,3]}}}

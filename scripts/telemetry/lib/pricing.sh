@@ -32,14 +32,26 @@ pricing_registry() {
       age=$(( now - mtime ))
       if [[ "$age" -lt "$ttl" ]] && pricing_registry_valid_json < "$cache"; then cat "$cache"; return 0; fi
     fi
-    if curl -fsS --max-time 5 "$url" -o "${cache}.tmp" 2>/dev/null && [[ -s "${cache}.tmp" ]]; then
-      if pricing_registry_valid_json < "${cache}.tmp"; then
-        mv "${cache}.tmp" "$cache"
-        cat "$cache"
-        return 0
+    # Cache-only callers (per-tool-call join; see usage.sh's usage_last_turn_usage,
+    # which runs once per tool call, not once per session) never perform a
+    # network fetch here. A STALE-but-JSON-valid cache is still served (by the
+    # unconditional `[[ -f "$cache" ]] && pricing_registry_valid_json ...`
+    # fallback just below) before ever falling through to the bundled
+    # snapshot -- only a genuinely MISSING (or invalid) cache reaches the
+    # bundled snapshot. This still avoids blocking on a `curl --max-time 5`
+    # round-trip (and racing this function's fixed ${cache}.tmp path) on
+    # every tool call. session.usage (once per session, at stop) is
+    # unaffected and still resolves the registry normally (network-eligible).
+    if [[ "${TELEMETRY_PRICING_CACHE_ONLY:-}" != "1" ]]; then
+      if curl -fsS --max-time 5 "$url" -o "${cache}.tmp" 2>/dev/null && [[ -s "${cache}.tmp" ]]; then
+        if pricing_registry_valid_json < "${cache}.tmp"; then
+          mv "${cache}.tmp" "$cache"
+          cat "$cache"
+          return 0
+        fi
       fi
+      rm -f "${cache}.tmp" 2>/dev/null
     fi
-    rm -f "${cache}.tmp" 2>/dev/null
     [[ -f "$cache" ]] && pricing_registry_valid_json < "$cache" && { cat "$cache"; return 0; }
   fi
 

@@ -2,6 +2,9 @@
 # transport.sh — Dual-channel telemetry transport
 
 source "${TELEMETRY_DIR}/lib/redact.sh"
+# Shared usage.model / numeric-bound validation constants (security review
+# HIGH + LOW findings) -- single source, also used by usage.sh's extractor.
+source "${TELEMETRY_DIR}/lib/usage_model_guard.sh"
 
 console_telemetry_endpoint_url() {
   if [[ -n "${CONSOLE_TELEMETRY_ENDPOINT_URL:-}" ]]; then
@@ -178,11 +181,79 @@ console_project_label() {
   printf '%s' "$label"
 }
 
+# Defense-in-depth sanitize backstop (#568 slice 1 security review, MEDIUM,
+# hardened per HIGH + LOW follow-up findings): nulls any
+# usage.{input_tokens,output_tokens,cache_creation_input_tokens,
+# cache_read_input_tokens,estimated_cost_usd} that isn't a JSON number within
+# [USAGE_NUMERIC_MIN, USAGE_NUMERIC_MAX] (negative/absurd-magnitude values are
+# as untrusted as a wrong-typed one), and bounds/validates usage.model against
+# the SAME shared vendor-prefix allowlist (USAGE_MODEL_REGEX/
+# USAGE_MODEL_MAX_LEN, from usage_model_guard.sh) usage_last_turn_usage
+# enforces at extraction time -- a charset-only check here would be, and
+# previously was, a strict superset of secret/credential shapes (API keys,
+# JWTs) that a regression in the primary extractor could otherwise relay
+# verbatim. FAILS CLOSED: if `.usage` is present but is not a JSON object (a
+# raw string/number/array -- e.g. a future caller populating it wrong), the
+# whole `.usage` is nulled rather than left unsanitized (a naive
+# `.usage? != null` + `?`-chained field check on a non-object silently
+# produces NO jq output at all, which the caller would then treat as "sanitize
+# failed" and fall through to the ORIGINAL unsanitized event -- exactly the
+# fail-OPEN bug this branch exists to close). This exists so a FUTURE
+# extractor regression (a new caller populating .usage from a less-trusted
+# source, a refactor that drops a type/shape guard, etc.) can never again
+# relay an untyped/oversized/malformed/secret-shaped value to the console; it
+# is not the primary defense (usage_last_turn_usage already type-guards and
+# allowlists every field) but a last-resort net right before the POST. One jq
+# pass, no extra process spawned beyond the jq call already needed here.
+console_telemetry_sanitize_usage() {
+  local event="$1"
+  # FAIL CLOSED if the shared guard constants didn't resolve (e.g. a partial
+  # dist/ sync dropped usage_model_guard.sh): null .usage entirely rather than
+  # running a broken/empty jq that would return nothing and let the caller relay
+  # the ORIGINAL unsanitized event. Never fail open on a packaging defect.
+  if [[ -z "$USAGE_MODEL_REGEX" || -z "$USAGE_MODEL_MAX_LEN" || -z "$USAGE_NUMERIC_MIN" || -z "$USAGE_NUMERIC_MAX" ]]; then
+    printf '%s' "$event" | jq -c 'if has("usage") then .usage = null else . end'
+    return
+  fi
+  printf '%s' "$event" | jq -c \
+    --arg model_regex "$USAGE_MODEL_REGEX" \
+    --argjson model_max_len "$USAGE_MODEL_MAX_LEN" \
+    --argjson numeric_min "$USAGE_NUMERIC_MIN" \
+    --argjson numeric_max "$USAGE_NUMERIC_MAX" '
+    def bounded_number($v):
+      if ($v | type) == "number" and $v >= $numeric_min and $v <= $numeric_max then $v else null end;
+    if (.usage? == null) then .
+    elif ((.usage | type) != "object") then (.usage = null)
+    else
+      .usage.input_tokens = bounded_number(.usage.input_tokens?)
+      | .usage.output_tokens = bounded_number(.usage.output_tokens?)
+      | .usage.cache_creation_input_tokens = bounded_number(.usage.cache_creation_input_tokens?)
+      | .usage.cache_read_input_tokens = bounded_number(.usage.cache_read_input_tokens?)
+      | .usage.estimated_cost_usd = bounded_number(.usage.estimated_cost_usd?)
+      | .usage.model = (
+          if ((.usage.model? | type) == "string")
+             and ((.usage.model | length) <= $model_max_len)
+             and (.usage.model | test($model_regex))
+          then .usage.model
+          else null
+          end
+        )
+    end
+  ' 2>/dev/null
+}
+
 console_telemetry_emit() {
   local event="$1"
   local endpoint_url
   endpoint_url=$(console_telemetry_endpoint_url)
   [[ -z "$endpoint_url" ]] && return
+
+  # Sanitize backstop runs before anything else so labeling/redaction/POST all
+  # see the already-bounded event; a failed/empty sanitize pass (bad JSON)
+  # falls back to the original event unchanged (never blocks relay).
+  local sanitized_event
+  sanitized_event=$(console_telemetry_sanitize_usage "$event") || sanitized_event=""
+  [[ -n "$sanitized_event" ]] && event="$sanitized_event"
 
   # Attribution: stamp a coarse, path-free project label (see console_project_label) before redaction
   # so the console buckets by project consistently across developers. The full context.cwd is still
