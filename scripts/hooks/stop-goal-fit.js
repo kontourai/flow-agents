@@ -176,14 +176,34 @@ function isEnvironmentError(line) {
   return /tsc[:\s]|command not found|npm ERR!|npm error|ENOENT|EACCES|Cannot find module|node_modules\/.bin|TypeScript version|version conflict|error TS[0-9]/i.test(line);
 }
 
+function readPackageManifest(packageRoot) {
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
+    return manifest && typeof manifest === 'object' && !Array.isArray(manifest) ? manifest : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveArtifactValidator() {
+  let packageRoot;
+  try { packageRoot = fs.realpathSync(path.resolve(__dirname, '..', '..')); } catch { return null; }
+  const rootManifest = readPackageManifest(packageRoot);
+  const buildManifest = readPackageManifest(path.join(packageRoot, 'build'));
+  if (rootManifest?.name !== '@kontourai/flow-agents'
+    && buildManifest?.name !== '@kontourai/flow-agents') return null;
+  const builtValidator = path.join(packageRoot, 'build', 'src', 'cli', 'validate-workflow-artifacts.js');
+  try {
+    const stat = fs.lstatSync(builtValidator);
+    if (stat.isFile() && !stat.isSymbolicLink()) return { packageRoot, builtValidator };
+  } catch { /* validator is unavailable until this package is built */ }
+  return null;
+}
+
 function sidecarValidation(root, artifactDir) {
   const requireSidecars = String(process.env.FLOW_AGENTS_REQUIRE_SIDECARS || '').toLowerCase() === 'true';
   const requireCritique = String(process.env.FLOW_AGENTS_REQUIRE_CRITIQUE || '').toLowerCase() === 'true';
   if (!requireSidecars && !requireCritique && !hasSidecars(artifactDir)) return [];
-
-  const packageRoot = fs.existsSync(path.join(root, 'package.json'))
-    ? root
-    : path.resolve(__dirname, '..', '..');
 
   let sidecarFiles = [];
   try {
@@ -222,36 +242,25 @@ function sidecarValidation(root, artifactDir) {
 
   if (sidecarFiles.length === 0) return [];
 
-  // Part 1 fix: invoke the already-built validator directly via `node`, bypassing
-  // `npm run build` (tsc). npm-installed packages ship build/ in the package files,
-  // so the compiled JS is always available. Only fall back to npm run if build/ is
-  // absent (a raw dev checkout that hasn't been built yet).
-  const builtValidator = path.join(packageRoot, 'build', 'src', 'cli', 'validate-workflow-artifacts.js');
-  const hasBuild = fs.existsSync(builtValidator);
+  // Resolve validation from Flow Agents itself. A consumer package.json does not imply
+  // that the consumer owns this script; installed hooks commonly run inside unrelated
+  // Node repositories whose npm scripts must not become Flow Agents validators.
+  const validator = resolveArtifactValidator();
+  if (!validator) {
+    return [`${relative(root, artifactDir)} sidecar validation skipped: Flow Agents validator is unavailable`];
+  }
 
   const validatorArgs = ['--skip-markdown-validation'];
   if (requireSidecars) validatorArgs.push('--require-sidecars');
   if (requireCritique) validatorArgs.push('--require-critique');
   validatorArgs.push(artifactDir);
 
-  let result;
-  if (hasBuild) {
-    // Direct node invocation: no tsc, no npm build step, works from any npm install.
-    result = spawnSync(process.execPath, [builtValidator, ...validatorArgs], {
-      cwd: packageRoot,
-      encoding: 'utf8',
-      timeout: 30000,
-    });
-  } else {
-    // Dev checkout without build/: fall back to npm run (may trigger tsc).
-    // If this also fails due to environment issues, Part 2 handles it below.
-    const npmArgs = ['run', 'workflow:validate-artifacts', '--silent', '--', ...validatorArgs];
-    result = spawnSync('npm', npmArgs, {
-      cwd: packageRoot,
-      encoding: 'utf8',
-      timeout: 30000,
-    });
-  }
+  // Direct node invocation: no PATH executable lookup and no consumer npm script.
+  const result = spawnSync(process.execPath, [validator.builtValidator, ...validatorArgs], {
+    cwd: validator.packageRoot,
+    encoding: 'utf8',
+    timeout: 30000,
+  });
 
   // Part 2 fix: treat validator-environment failures as SKIP, never as blocking.
   // A spawn error (ENOENT, timeout) means the validator couldn't run at all.

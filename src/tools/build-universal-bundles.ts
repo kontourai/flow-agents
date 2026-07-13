@@ -446,7 +446,11 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
     }
   }
   for (const dir of manifest.optional_copy_dirs ?? []) copyTree(path.join(root, dir), path.join(targetRoot, dir), targetName, token);
-  writeText(path.join(targetRoot, "build/package.json"), `${JSON.stringify({ type: "module" }, null, 2)}\n`);
+  writeText(path.join(targetRoot, "build/package.json"), `${JSON.stringify({
+    name: "@kontourai/flow-agents",
+    version: pkgVersion,
+    type: "module",
+  }, null, 2)}\n`);
   const commonBuilt = path.join(root, "build/src/tools/common.js");
   if (fs.existsSync(commonBuilt)) writeText(path.join(targetRoot, "scripts/common.mjs"), readText(commonBuilt));
   copyTree(path.join(root, "build/src"), path.join(targetRoot, "build/src"), targetName, token);
