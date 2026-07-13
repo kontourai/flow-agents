@@ -775,8 +775,21 @@ test("Stop ignores an unvalidated capability locator and preserves ordinary poin
   fs.writeFileSync(path.join(artifactRoot, "current.json"), JSON.stringify({ active_slug: ordinarySlug, artifact_dir: ordinarySlug }));
   const priorSecret = process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET;
   const priorRunId = process.env.FLOW_AGENTS_CONTINUATION_RUN_ID;
+  // #440 FIXTURE-GAP (post-rebase, #589 merge): this fixture only ever writes the legacy
+  // current.json, never a per-actor pointer -- under a RESOLVED ambient actor,
+  // stop-goal-fit.js's ownership-scoped analyze() now scopes to that actor's own (nonexistent)
+  // pointer and never falls through to the legacy-named ordinary session at all. This test is
+  // about continuation-locator validation (an unvalidated locator must not override ordinary
+  // pointer selection), not #440's per-actor ownership scoping, so forcing the documented
+  // test-only unresolved-actor escape hatch restores the legacy-fallback path this fixture was
+  // written against (D3 compat), matching the same fix applied throughout evals/ for this exact
+  // class of fixture gap.
+  const priorForceUnresolved = process.env.FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED;
+  const priorNodeEnv = process.env.NODE_ENV;
   process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET = "A".repeat(43);
   process.env.FLOW_AGENTS_CONTINUATION_RUN_ID = unvalidatedSlug;
+  process.env.FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED = "1";
+  process.env.NODE_ENV = "test";
   try {
     const result = await stopGoalFit.analyze(root);
     assert.equal(result.latestArtifactDir, path.join(artifactRoot, ordinarySlug));
@@ -785,6 +798,10 @@ test("Stop ignores an unvalidated capability locator and preserves ordinary poin
     else process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET = priorSecret;
     if (priorRunId === undefined) delete process.env.FLOW_AGENTS_CONTINUATION_RUN_ID;
     else process.env.FLOW_AGENTS_CONTINUATION_RUN_ID = priorRunId;
+    if (priorForceUnresolved === undefined) delete process.env.FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED;
+    else process.env.FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED = priorForceUnresolved;
+    if (priorNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = priorNodeEnv;
   }
 });
 
