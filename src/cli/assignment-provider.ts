@@ -80,13 +80,17 @@ export type AssignmentStatus = {
   assignee: string | null;
   record: AssignmentClaimRecord | null;
   has_claim_label?: boolean;
+  claim_comment_author?: string | null;
+  claim_comment_id?: string | null;
+  repository?: { owner: string; name: string } | null;
+  issue_number?: number | null;
 };
 
 type GithubIssueDoc = {
   number?: number;
   assignees?: Array<{ login?: string } | string>;
   labels?: Array<{ name?: string } | string>;
-  comments?: Array<{ id?: number; body?: string }>;
+  comments?: Array<{ id?: string | number; body?: string; author?: { login?: string } | string; createdAt?: string }>;
   state?: string;
 };
 
@@ -100,6 +104,8 @@ type RenderClaimInput = {
   ttl_seconds?: number;
   branch?: string;
   artifact_dir?: string;
+  actor_key?: string;
+  work_item_ref?: string;
   existing_comment_id?: number;
   previous_record?: AssignmentClaimRecord;
   reason?: string;
@@ -517,6 +523,8 @@ function sanitizeClaimRecordForDisplay(record: AssignmentClaimRecord): Assignmen
   return {
     ...record,
     subject_id: sanitizeDisplayField(record.subject_id, 64),
+    actor_key: record.actor_key != null ? sanitizeDisplayField(record.actor_key, 260) : record.actor_key,
+    work_item_ref: record.work_item_ref != null ? sanitizeDisplayField(record.work_item_ref, 240) : record.work_item_ref,
     branch: sanitizeDisplayField(record.branch, 240),
     artifact_dir: sanitizeDisplayField(record.artifact_dir, 240),
     actor: sanitizeActorForDisplay(record.actor),
@@ -532,39 +540,66 @@ function sanitizeClaimRecordForDisplay(record: AssignmentClaimRecord): Assignmen
  * return — this is the single choke point, so schema/role/status checks above still validate
  * the RAW parsed shape (never weakened), and only the string fields are transformed afterward.
  */
-function extractClaimRecord(issue: GithubIssueDoc, marker: string): AssignmentClaimRecord | null {
+function extractClaimRecord(issue: GithubIssueDoc, marker: string): {
+  record: AssignmentClaimRecord;
+  author: string | null;
+  commentId: string | null;
+} | null {
   const comments = Array.isArray(issue.comments) ? issue.comments : [];
-  for (const comment of comments) {
-    const body = String(comment.body ?? "");
-    const markerIndex = body.indexOf(marker);
-    if (markerIndex === -1) continue;
-    const fenceMatch = body.slice(markerIndex).match(/```json\s*([\s\S]*?)```/);
-    if (!fenceMatch) throw new Error(`claim comment (id ${comment.id ?? "?"}) has the claim marker but no fenced JSON block`);
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(fenceMatch[1]);
-    } catch (error) {
-      throw new Error(`claim comment (id ${comment.id ?? "?"}) fenced JSON is unparseable: ${(error as Error).message}`);
+  const candidates = comments.filter((comment) => String(comment.body ?? "").includes(marker));
+  if (candidates.length === 0) return null;
+  let selected = candidates[0];
+  if (candidates.length > 1) {
+    const timestamped = candidates.map((comment) => {
+      const timestamp = typeof comment.createdAt === "string" ? Date.parse(comment.createdAt) : Number.NaN;
+      if (!Number.isFinite(timestamp)) {
+        throw new Error(`multiple claim comments require a valid createdAt timestamp on every marker comment (id ${comment.id ?? "?"})`);
+      }
+      return { comment, timestamp };
+    });
+    const latestTimestamp = Math.max(...timestamped.map(({ timestamp }) => timestamp));
+    const latest = timestamped.filter(({ timestamp }) => timestamp === latestTimestamp);
+    if (latest.length !== 1) {
+      throw new Error(`multiple claim comments share the latest createdAt timestamp ${new Date(latestTimestamp).toISOString()}; claim selection is ambiguous`);
     }
-    if (typeof parsed !== "object" || parsed === null) throw new Error(`claim comment (id ${comment.id ?? "?"}) fenced JSON is not an object`);
-    const record = parsed as AssignmentClaimRecord;
-    if (record.schema_version !== "1.0") throw new Error(`claim comment (id ${comment.id ?? "?"}) has unsupported schema_version ${String((record as AnyObj).schema_version)}`);
-    if (record.role !== "AssignmentClaimRecord") throw new Error(`claim comment (id ${comment.id ?? "?"}) has unexpected role ${String((record as AnyObj).role)}`);
-    return sanitizeClaimRecordForDisplay(record);
+    selected = latest[0].comment;
   }
-  return null;
+
+  const body = String(selected.body ?? "");
+  const markerIndex = body.indexOf(marker);
+  const fenceMatch = body.slice(markerIndex).match(/```json\s*([\s\S]*?)```/);
+  if (!fenceMatch) throw new Error(`claim comment (id ${selected.id ?? "?"}) has the claim marker but no fenced JSON block`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fenceMatch[1]);
+  } catch (error) {
+    throw new Error(`claim comment (id ${selected.id ?? "?"}) fenced JSON is unparseable: ${(error as Error).message}`);
+  }
+  if (typeof parsed !== "object" || parsed === null) throw new Error(`claim comment (id ${selected.id ?? "?"}) fenced JSON is not an object`);
+  const record = parsed as AssignmentClaimRecord;
+  if (record.schema_version !== "1.0") throw new Error(`claim comment (id ${selected.id ?? "?"}) has unsupported schema_version ${String((record as AnyObj).schema_version)}`);
+  if (record.role !== "AssignmentClaimRecord") throw new Error(`claim comment (id ${selected.id ?? "?"}) has unexpected role ${String((record as AnyObj).role)}`);
+  const author = typeof selected.author === "string" ? selected.author : selected.author?.login;
+  return {
+    record: sanitizeClaimRecordForDisplay(record),
+    author: author ? String(author) : null,
+    commentId: selected.id != null ? String(selected.id) : null,
+  };
 }
 
 function githubAssignmentStatus(issue: GithubIssueDoc, labelName: string, marker: string): AssignmentStatus {
   const assignees = namesOf(issue.assignees, "login");
   const labels = namesOf(issue.labels, "name");
-  const record = extractClaimRecord(issue, marker);
+  const selectedClaim = extractClaimRecord(issue, marker);
+  const record = selectedClaim?.record ?? null;
   return {
     subject_id: record?.subject_id ?? "",
     provider: "github",
     assignee: assignees[0] ?? null,
     record,
     has_claim_label: labels.map((label) => label.toLowerCase()).includes(labelName.toLowerCase()),
+    claim_comment_author: selectedClaim?.author ?? null,
+    claim_comment_id: selectedClaim?.commentId ?? null,
   };
 }
 
@@ -887,6 +922,39 @@ function requireIssueNumber(input: RenderClaimInput): number {
   return Number(issueNumber);
 }
 
+function githubRepositoryIdentity(value: string | undefined): { owner: string; name: string } | null {
+  if (value == null) return null;
+  const match = value.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/);
+  if (!match) throw new Error("status --provider github --repo must be an exact owner/repo identity");
+  return { owner: match[1], name: match[2] };
+}
+
+function requireRenderedClaimProvenance(
+  input: RenderClaimInput,
+  actor: ActorStruct,
+  repo: { owner: string; name: string },
+  issueNumber: number,
+): { actorKey: string; workItemRef: string } {
+  const actorKey = input.actor_key;
+  if (typeof actorKey !== "string" || !actorKey || actorKey !== actorKey.trim()) {
+    throw new Error("input-json.actor_key is required and must be the exact canonical actor key");
+  }
+  const helper = loadActorIdentityHelper();
+  const expectedActorKey = actor.runtime === "explicit-override"
+    ? helper.sanitizeSegment(actor.session_id)
+    : helper.serializeActor(actor);
+  if (actorKey !== expectedActorKey) {
+    throw new Error(`input-json.actor_key must exactly match the canonical actor JSON identity (${expectedActorKey})`);
+  }
+
+  const workItemRef = input.work_item_ref;
+  const expectedWorkItemRef = `${repo.owner}/${repo.name}#${issueNumber}`;
+  if (typeof workItemRef !== "string" || workItemRef !== expectedWorkItemRef) {
+    throw new Error(`input-json.work_item_ref must exactly match ${expectedWorkItemRef}`);
+  }
+  return { actorKey, workItemRef };
+}
+
 function renderClaimCommentBody(record: AssignmentClaimRecord, marker: string): string {
   const humanNote = record.actor.human ? `Assigned to human ${record.actor.human}.` : `Claimed by an automated agent session (${record.actor.runtime}).`;
   return [
@@ -927,6 +995,7 @@ function renderClaim(argv: string[]): number {
   const actor = loadActorStructFromFile(requireFlag(args, "actor-json"));
   const repo = requireRepo(input);
   const issueNumber = requireIssueNumber(input);
+  const { actorKey, workItemRef } = requireRenderedClaimProvenance(input, actor, repo, issueNumber);
   const labelName = input.label_name ?? DEFAULT_LABEL_NAME;
   const marker = input.claim_comment_marker ?? CLAIM_COMMENT_MARKER_DEFAULT;
   const ttlSeconds = input.ttl_seconds ?? 1800;
@@ -940,6 +1009,8 @@ function renderClaim(argv: string[]): number {
     role: "AssignmentClaimRecord",
     subject_id: subjectId,
     actor,
+    actor_key: actorKey,
+    work_item_ref: workItemRef,
     claimed_at: isoNow(),
     ttl_seconds: ttlSeconds,
     branch,
@@ -993,6 +1064,7 @@ function renderSupersede(argv: string[]): number {
   const toActor = loadActorStructFromFile(requireFlag(args, "actor-json"));
   const repo = requireRepo(input);
   const issueNumber = requireIssueNumber(input);
+  const { actorKey, workItemRef } = requireRenderedClaimProvenance(input, toActor, repo, issueNumber);
   const labelName = input.label_name ?? DEFAULT_LABEL_NAME;
   const marker = input.claim_comment_marker ?? CLAIM_COMMENT_MARKER_DEFAULT;
   const ttlSeconds = input.ttl_seconds ?? 1800;
@@ -1009,6 +1081,8 @@ function renderSupersede(argv: string[]): number {
     role: "AssignmentClaimRecord",
     subject_id: subjectId,
     actor: toActor,
+    actor_key: actorKey,
+    work_item_ref: workItemRef,
     claimed_at: isoNow(),
     ttl_seconds: ttlSeconds,
     branch,
@@ -1055,6 +1129,7 @@ function statusCommand(argv: string[]): number {
   } else if (provider === "github") {
     const issueJsonPath = requireFlag(args, "issue-json");
     const issue = loadJsonInput(issueJsonPath) as GithubIssueDoc;
+    const repository = githubRepositoryIdentity(flagString(args.flags, "repo"));
     const labelName = flagString(args.flags, "label-name", DEFAULT_LABEL_NAME) ?? DEFAULT_LABEL_NAME;
     const marker = flagString(args.flags, "claim-comment-marker", CLAIM_COMMENT_MARKER_DEFAULT) ?? CLAIM_COMMENT_MARKER_DEFAULT;
     assignment = githubAssignmentStatus(issue, labelName, marker);
@@ -1062,6 +1137,12 @@ function statusCommand(argv: string[]): number {
       throw new Error(`claim record subject_id ${assignment.record.subject_id} does not match requested --subject-id ${requestedSubjectId}`);
     }
     if (requestedSubjectId) assignment.subject_id = requestedSubjectId;
+    const issueNumber = Number(issue.number);
+    if (!Number.isSafeInteger(issueNumber) || issueNumber <= 0) {
+      throw new Error("status --provider github issue JSON must expose a positive safe-integer issue number");
+    }
+    assignment.repository = repository;
+    assignment.issue_number = issueNumber;
   } else {
     throw new Error(`status: unsupported --provider ${provider}`);
   }

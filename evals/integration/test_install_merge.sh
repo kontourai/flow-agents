@@ -1336,9 +1336,24 @@ CH6_FAKE_BIN="$TMPDIR_EVAL/ch6-bin"
 CH_FIXTURE_SCRIPTS="scr""ipts"
 CH_FIXTURE_SKILLS="sk""ills"
 CH_FIXTURE_AGENTS="ag""ents"
-mkdir -p "$CH6_ROOT/$CH_FIXTURE_SCRIPTS" "$CH6_ROOT/packaging" "$CH6_ROOT/dist/codex/$CH_FIXTURE_SCRIPTS" "$CH6_FAKE_BIN"
-cp "$ROOT_DIR/scripts/install-codex-home.sh" "$ROOT_DIR/scripts/install-owned-files.js" "$ROOT_DIR/scripts/classify-codex-legacy-agents.js" "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/"
+mkdir -p \
+  "$CH6_ROOT/$CH_FIXTURE_SCRIPTS" \
+  "$CH6_ROOT/packaging" \
+  "$CH6_ROOT/dist/codex/packaging" \
+  "$CH6_ROOT/dist/codex/$CH_FIXTURE_SCRIPTS" \
+  "$CH6_ROOT/dist/codex/.codex" \
+  "$CH6_ROOT/dist/codex/.agents/skills/deliver" \
+  "$CH6_ROOT/dist/codex/build/src" \
+  "$CH6_FAKE_BIN"
+cp "$ROOT_DIR/scripts/install-codex-home.sh" "$ROOT_DIR/scripts/install-owned-files.js" "$ROOT_DIR/scripts/classify-codex-legacy-agents.js" "$ROOT_DIR/scripts/install-merge.js" "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/"
+cp "$ROOT_DIR/scripts/install-owned-files.js" "$ROOT_DIR/scripts/install-merge.js" "$ROOT_DIR/scripts/classify-codex-legacy-agents.js" "$CH6_ROOT/dist/codex/$CH_FIXTURE_SCRIPTS/"
 cp "$ROOT_DIR/packaging/codex-legacy-agents-fingerprints.json" "$CH6_ROOT/packaging/"
+cp "$ROOT_DIR/packaging/codex-legacy-agents-fingerprints.json" "$CH6_ROOT/dist/codex/packaging/"
+printf '{"name":"@kontourai/flow-agents","version":"0.0.0"}\n' > "$CH6_ROOT/package.json"
+printf '{"name":"@kontourai/flow-agents","version":"0.0.0"}\n' > "$CH6_ROOT/dist/codex/build/package.json"
+printf '{"hooks":{}}\n' > "$CH6_ROOT/dist/codex/.codex/hooks.json"
+printf '# deliver fixture\n' > "$CH6_ROOT/dist/codex/.agents/skills/deliver/SKILL.md"
+printf '// cli fixture\n' > "$CH6_ROOT/dist/codex/build/src/cli.js"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$CH6_FAKE_BIN/npm"
 chmod +x "$CH6_FAKE_BIN/npm"
 printf 'fixture\n' > "$CH6_ROOT/dist/codex/$CH_FIXTURE_SCRIPTS/fixture.txt"

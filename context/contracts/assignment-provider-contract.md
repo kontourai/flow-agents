@@ -156,8 +156,8 @@ detect an incompatible future shape before parsing fields it does not understand
 | `role` | yes | Constant `"AssignmentClaimRecord"`, for readers scanning mixed content (e.g. a GitHub comment thread) for this record type. |
 | `subject_id` | yes | The provider subject key. The local-file provider uses the deterministic session slug; provider-backed records may use their native subject identifier. |
 | `actor` | yes | `{ runtime, session_id, host, human? }` — the exact struct `actor-identity.js` defines. `human` is set (non-null) only for a human assignee; its presence, not a username heuristic, gates the human-held join state. |
-| `actor_key` | no (additive, #291) | The canonical `resolveActor(env).actor` string for the claiming actor — the same flat/bare token `liveness whoami`, `liveness claim --actor`, per-actor `current.json`, and pull-work's `--self-actor` all use. When present, `computeEffectiveState` compares against THIS (not a re-serialization of `actor`) for both self-recognition and the liveness join, because `serializeActor(actor)` and `resolveActor(env).actor` diverge for an explicit-override actor (a bare token vs. a `explicit-override:<value>:<host>` triple) while agreeing for a derived actor. Absent on any pre-#291 record or fixture — `computeEffectiveState` falls back to `serializeActor(actor)` in that case, reproducing pre-#291 behavior exactly. |
-| `work_item_ref` | no (additive, #541) | Exact Work Item reference acquired by Builder `ensure-session`. This preserves identity beyond the local provider's lossy filesystem slug and allows an interrupted acquisition to retry safely. Older records and ordinary assignment-provider claims omit it and cannot automatically satisfy `builder.pull-work.selected`. |
+| `actor_key` | conditionally required (additive, #291) | The canonical `resolveActor(env).actor` string for the claiming actor — the same flat/bare token `liveness whoami`, `liveness claim --actor`, per-actor `current.json`, and pull-work's `--self-actor` all use. Builder's GitHub `render-claim`/`render-supersede` producer must supply it; ordinary legacy records may omit it. When present, `computeEffectiveState` compares against THIS (not a re-serialization of `actor`) for both self-recognition and the liveness join, because `serializeActor(actor)` and `resolveActor(env).actor` diverge for an explicit-override actor (a bare token vs. a `explicit-override:<value>:<host>` triple) while agreeing for a derived actor. |
+| `work_item_ref` | conditionally required (additive, #541) | Exact Work Item reference acquired by Builder. Builder's GitHub `render-claim`/`render-supersede` producer must supply the exact `owner/repo#numeric-id` reference matching the rendered repository and issue; older records and non-Builder assignment records may omit it and cannot automatically satisfy `builder.pull-work.selected`. |
 | `claimed_at` | yes | ISO-8601 timestamp the claim was recorded. Mirrors the liveness stream's own claim-event field so a reader compares freshness with one mental model across both layers, even though the two are stored in different media. |
 | `ttl_seconds` | yes | Same field name/semantics as the liveness stream's `ttlSeconds` (default `1800`). |
 | `branch` | yes | The branch this actor is working on, per the `agent/<actor>/<slug>` convention. |
@@ -175,6 +175,22 @@ The GitHub implementation represents the record as:
 - **assignee**: the notification/board hook.
 - **a single `agent:claimed` label** (default name, configurable via
   `policy.label_name`): the board filter.
+- **distinct provider and runtime identities**: `AssignmentStatus.assignment.assignee` remains
+  the raw GitHub login used for notifications and board ownership. Runtime self-ownership is
+  proved by the claim record's canonical `actor_key` plus exact `actor` struct and by the
+  `self_is_holder` effective result; consumers must not compare the GitHub login to the runtime
+  actor key.
+- **provider-authorized claim metadata**: status exposes `claim_comment_author` and
+  `claim_comment_id` for the exact marker comment selected by the parser. Builder entry requires
+  the claim label, a nonempty assignee, and a selected claim-comment author exactly equal to that
+  assignee. This binds the runtime record to an account currently authorized by provider
+  metadata without conflating that GitHub login with the runtime actor key.
+- **provider Work Item origin**: GitHub status accepts the repository selected by the configured
+  provider adapter as explicit `--repo owner/repo` input and exposes it as
+  `assignment.repository`; the issue number comes from the provider issue document and is exposed
+  as `assignment.issue_number`. Builder entry compares exact owner, repository, and issue number
+  against the requested `owner/repo#numeric-id` before any session mutation. The claim comment's
+  attacker-writable `work_item_ref` is still checked, but is not treated as provider-origin proof.
 - **a machine-readable claim comment**: human-readable prose above a fenced JSON block containing
   the record above, located via a fixed marker (default
   `<!-- flow-agents:assignment-claim -->`, configurable via `policy.claim_comment_marker`) so the
@@ -183,6 +199,21 @@ The GitHub implementation represents the record as:
 The comment carries identity because the assignee field cannot: N agent sessions typically share
 one GitHub account, so per-session identity lives in the attached record. Each provider decides
 what it can natively represent versus what goes in the record.
+
+One marker comment is parsed directly. When multiple comments contain the configured marker,
+their GitHub `id` values are treated as opaque and never ordered. Every marker comment must carry
+a valid `createdAt`, and parsing selects the unique latest timestamp independent of input array
+order. Missing/invalid timestamps or a tie for latest fail closed as ambiguous provider state.
+The selected comment alone supplies the record, `claim_comment_author`, and the opaque string
+`claim_comment_id`. A newer forged marker is therefore not silently skipped: if its author is not
+the current assignee, Builder entry fails closed before session mutation and the provider state
+must be reconciled explicitly.
+
+Issue open/closed state is intentionally not an AssignmentProvider ownership gate. The current
+contract separates assignment from WorkItemProvider readiness/state normalization; `pull-work`
+must reject closed or otherwise ineligible work before claiming it. Re-checking issue state inside
+workflow ownership would fork that provider policy and is therefore not introduced as a weak
+default here.
 
 ### local-file mapping
 

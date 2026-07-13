@@ -277,6 +277,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_bundle_install.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_published_codex_install.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_skill_drift_check.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_bundle_lifecycle.sh" || result=1

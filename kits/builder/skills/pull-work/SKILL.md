@@ -150,6 +150,20 @@ stop before run creation with `FAIL` or `NOT_VERIFIED` in the pull-work artifact
 Do not use a private writer command, enter at a later step, or infer an active
 run from an artifact path.
 
+For GitHub, populate `render-claim` (and `render-supersede`) input with the
+canonical actor key captured for this selection pass as `actor_key` and the
+exact selected `owner/repo#numeric-id` as `work_item_ref`. Keep
+`assignee_login` as the GitHub account used for provider notifications; it is
+not the runtime actor identity. Execute every emitted `gh_commands` entry as
+the exact argv array returned by `AssignmentProvider` through an argv-capable
+process API. Never join, quote, or reconstruct a rendered argv array into a
+shell command. Re-read status after those argv arrays complete and pass that
+unaltered `AssignmentStatus` document to `workflow start`. For GitHub status,
+pass the exact configured provider repository as `--repo owner/repo`; do not
+derive it from the claim comment or its `work_item_ref`. Confirm the returned
+`assignment.repository` and provider-sourced `assignment.issue_number` exactly
+match the selected Work Item before starting the workflow.
+
 ## Handoff
 
 Pass `pickup-probe` the selected identifiers, artifact path, provider state, dependencies, revision-freshness result, expected modified files, conflict risks, assignment/liveness result, worktree mode, route reason, and next action. Stop here unless the next primitive is explicitly requested.
