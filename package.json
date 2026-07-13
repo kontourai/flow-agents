@@ -1,6 +1,6 @@
 {
   "name": "@kontourai/flow-agents",
-  "version": "3.9.0",
+  "version": "3.10.0",
   "description": "Flow Agents — a Kontour product that applies Flow and Veritas discipline as a portable process layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, pi, and GitHub Actions — with framework adapters (AWS Strands preview) on the same policy-engine contract.",
   "keywords": [
     "agents",
