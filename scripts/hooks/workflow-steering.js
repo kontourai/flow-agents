@@ -129,17 +129,20 @@ function readJson(file) {
 /**
  * #291 (Conflict #2, Wave 2 Task 2.4): actor-scoped preference consulted BEFORE the global
  * newest-mtime scan below. For each read-root, resolve the "current" pointer via
- * `readCurrentPointer` (per-actor `current/<actor>.json` preferred, legacy global
- * `current.json` fallback — the same single choke point every other Wave 2 consumer uses) and,
- * if it names a session dir whose `state.json` is still in an ACTIVE_STATE_STATUSES status,
- * return that state immediately — so actor A's own ambient steering hint always prefers A's own
- * current task over a globally-newer-mtime `state.json` some other actor (B) happened to touch
- * more recently. Returns null (never throws) when no root yields an actor-scoped resolution,
- * so the caller falls through to the unchanged global scan below — this is the compat-shim
- * guarantee: when `actorKey` is empty/unresolved and/or no per-actor file exists yet, this
- * degrades to the SAME legacy-`current.json`-or-nothing lookup the compat shim already performs
- * for every other Wave 2 reader, so a single-session/CI/legacy-only fixture cannot fail to
- * resolve here in a way it wouldn't already have resolved via the global scan.
+ * `readOwnCurrentPointer` and, if it names a session dir whose `state.json` is still in an
+ * ACTIVE_STATE_STATUSES status, return that state immediately — so actor A's own ambient
+ * steering hint always prefers A's own current task over a globally-newer-mtime `state.json`
+ * some other actor (B) happened to touch more recently. Returns null (never throws) when no root
+ * yields an actor-scoped resolution.
+ *
+ * #440: for a RESOLVED `actorKey`, `readOwnCurrentPointer` reads ONLY that actor's own per-actor
+ * `current/<actor>.json` projection — it never falls back to the shared legacy `current.json`.
+ * The caller (`latestWorkflowState`) gates its own global-scan fallback below to UNRESOLVED
+ * actors only (D1) — so a resolved actor with no own per-actor pointer yet now correctly returns
+ * null all the way up (no banner) rather than grounding onto another actor's globally-newer
+ * `state.json`, the exact cross-actor steering bug #440 fixes. Only for an empty/unresolved
+ * `actorKey` does `readOwnCurrentPointer` delegate to `readCurrentPointer`, which DOES fall back
+ * to the legacy global file — that compat-shim degrade (D3) is unchanged from before #291/#440.
  *
  * @param {string} root
  * @param {string} actorKey

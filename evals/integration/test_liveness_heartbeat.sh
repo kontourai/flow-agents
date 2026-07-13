@@ -385,9 +385,19 @@ fi
 
 # D2: a corrupted sidecar snapshot (malformed JSON) fails open — wrapper still exits 0
 # with its normal stdout contract, and no heartbeat is fabricated from unparseable state.
+# #440 FIX 2 (de-vacuate, independent review): corrupt agent-hb's OWN per-actor pointer file (the
+# new collision-resistant mapping), not the legacy current.json — a resolved actor never reads
+# the legacy file at all (#440 D1), so corrupting only that no longer exercises anything; this
+# now proves fail-open tolerance for a corrupt OWN pointer, the actually-reachable code path.
 D2_ROOT="$(new_scratch)"
 mkdir -p "$D2_ROOT/.kontourai/flow-agents/liveness"
-printf '{not valid json' >"$D2_ROOT/.kontourai/flow-agents/$SNAPSHOT_FILENAME"
+D2_PER_ACTOR_FILE="$(CP_HELPER_ARG="$CURRENT_POINTER_HELPER" ROOT_ARG="$D2_ROOT/.kontourai/flow-agents" ACTOR_ARG="agent-hb" node - <<'NODE'
+const { perActorCurrentFile } = require(process.env.CP_HELPER_ARG);
+process.stdout.write(perActorCurrentFile(process.env.ROOT_ARG, process.env.ACTOR_ARG));
+NODE
+)"
+mkdir -p "$(dirname "$D2_PER_ACTOR_FILE")"
+printf '{not valid json' >"$D2_PER_ACTOR_FILE"
 D2_OUT="$(cd "$D2_ROOT" && TELEMETRY_ENABLED=false FLOW_AGENTS_ACTOR=agent-hb \
   node "$CLAUDE_HOOK" PostToolUse dev <"$POST_TOOL_USE_PAYLOAD_FILE" 2>"$TMPDIR_EVAL/d2.err")"
 D2_STATUS=$?

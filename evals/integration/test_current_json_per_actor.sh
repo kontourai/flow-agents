@@ -169,8 +169,19 @@ else
   fail "legacy global current.json did not name B as expected: got '$LEGACY_SLUG' (err: $(cat "$TMPDIR_EVAL/ac7-current-legacy.err"))"
 fi
 
-PER_ACTOR_FILE_A="$AC7_ROOT/current/eval-actor-a-session.json"
-PER_ACTOR_FILE_B="$AC7_ROOT/current/eval-actor-b-session.json"
+# #440 fix-wave 2: the per-actor filename is now collision-resistant (sanitized prefix + hash of
+# the FULL actor key, see current-pointer.js's perActorCurrentFile) -- compute the expected path
+# via the real function rather than re-deriving the naming rule by hand.
+PER_ACTOR_FILE_A="$(CP_HELPER_ARG="$CURRENT_POINTER_HELPER" ROOT_ARG="$AC7_ROOT" ACTOR_ARG="eval-actor-a-session" node - <<'NODE'
+const { perActorCurrentFile } = require(process.env.CP_HELPER_ARG);
+process.stdout.write(perActorCurrentFile(process.env.ROOT_ARG, process.env.ACTOR_ARG));
+NODE
+)"
+PER_ACTOR_FILE_B="$(CP_HELPER_ARG="$CURRENT_POINTER_HELPER" ROOT_ARG="$AC7_ROOT" ACTOR_ARG="eval-actor-b-session" node - <<'NODE'
+const { perActorCurrentFile } = require(process.env.CP_HELPER_ARG);
+process.stdout.write(perActorCurrentFile(process.env.ROOT_ARG, process.env.ACTOR_ARG));
+NODE
+)"
 [[ -f "$PER_ACTOR_FILE_A" ]] && pass "actor A's per-actor current file exists on disk" || fail "actor A's per-actor current file was not written"
 [[ -f "$PER_ACTOR_FILE_B" ]] && pass "actor B's per-actor current file exists on disk" || fail "actor B's per-actor current file was not written"
 
@@ -457,16 +468,19 @@ fi
 
 # --- 6. F3 (fix-plan iteration 1, code-review-291 MEDIUM): legacy current.json names a
 # still-ACTIVE, non-newest-mtime session while a NEWER active state.json exists elsewhere under
-# the same artifact root, under a RESOLVED actor with no per-actor current file. Pre-#291,
+# the same artifact root, under a genuinely UNRESOLVED actor (#440: this section's fixture uses
+# the FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED escape hatch -- a RESOLVED actor with no per-actor
+# current file no longer falls through to the legacy pointer at all, see section 7; this section
+# is specifically about the unchanged D3/unresolved-actor compat path). Pre-#291,
 # latestWorkflowState() was a pure global newest-mtime scan with zero current.json involvement,
 # so the newer state.json would win. Post-#291, actorScopedWorkflowState() is consulted first and
-# falls through to the legacy current.json for an actor with no per-actor file (the compat-shim
-# guarantee section 3 already covers) -- but if that legacy pointer names a still-ACTIVE session,
-# it is now returned IMMEDIATELY, without ever comparing mtimes against the newer state.json. This
-# section test-pins that specific, deliberate behavior change (current.json preference wins over
-# newest-mtime) for the single-actor/resolved-actor case, not just the multi-actor case AC7/AC8
+# falls through to the legacy current.json for an unresolved actor (the compat-shim guarantee
+# section 3 already covers) -- but if that legacy pointer names a still-ACTIVE session, it is now
+# returned IMMEDIATELY, without ever comparing mtimes against the newer state.json. This section
+# test-pins that specific, deliberate behavior change (current.json preference wins over
+# newest-mtime) for the single-actor/unresolved-actor case, not just the multi-actor case AC7/AC8
 # are framed around -- the review's flagged, previously test-uncovered edge.
-echo "--- 6. legacy current.json (non-newest, still-active) wins over a newer state.json elsewhere, under a resolved actor (F3, fix-plan iteration 1) ---"
+echo "--- 6. legacy current.json (non-newest, still-active) wins over a newer state.json elsewhere, under an unresolved actor (F3, fix-plan iteration 1) ---"
 
 F3_REPO="$TMPDIR_EVAL/f3-legacy-vs-newest/repo"
 mkdir -p "$F3_REPO/.kontourai/flow-agents/older-named-slug"
@@ -522,7 +536,7 @@ JSON
 )"
 
 if [[ "$F3_OUT" == *"older-named-slug"* && "$F3_OUT" != *"newer-unnamed-slug"* ]]; then
-  pass "workflow-steering.js prefers the legacy current.json's named ACTIVE session over a newer-mtime state.json elsewhere, under a resolved actor with no per-actor file (F3 -- pins the post-#291 behavior change explicitly, not just AC7/AC8's multi-actor framing)"
+  pass "workflow-steering.js prefers the legacy current.json's named ACTIVE session over a newer-mtime state.json elsewhere, under an unresolved actor (F3 -- pins the post-#291 behavior change explicitly, not just AC7/AC8's multi-actor framing; #440: a resolved actor with no per-actor file no longer takes this path at all, see section 7)"
 else
   fail "workflow-steering.js did not prefer the legacy-named active session over the newer-mtime one: $F3_OUT"
 fi
@@ -735,6 +749,81 @@ if [[ -f "$AC440_A_LOG" ]] && grep -qF "actor-a-own-capture-check" "$AC440_A_LOG
   pass "evidence-capture.js (positive control): actor A's own capture still works once A has its own per-actor pointer"
 else
   fail "evidence-capture.js (positive control): actor A's own capture did not work: $(cat "$TMPDIR_EVAL/ac440-evidence-a-own.out" "$TMPDIR_EVAL/ac440-evidence-a-own.err")"
+fi
+
+# 7.6 FIX 1 (HIGH, collision -- independent review): two distinct resolved actor keys sharing a
+# >=64-char common sanitized prefix (differing only in a tail the pre-#440-fix-wave-2 64-char
+# truncation would have discarded) must map to DISTINCT per-actor pointer files, and each actor's
+# OWN read must resolve its OWN pointer -- never the other's -- proving neither session grounds
+# onto the other. Reproduces the exact collision the review found:
+# perActorCurrentFile(dir, A) === perActorCurrentFile(dir, B) under the pre-fix mapping.
+AC440_COLLIDE_DIR="$TMPDIR_EVAL/collide-root/.kontourai/flow-agents"
+if CP_HELPER_ARG="$CURRENT_POINTER_HELPER" DIR_ARG="$AC440_COLLIDE_DIR" node - <<'NODE' 2>"$TMPDIR_EVAL/ac440-collide.err"
+const { perActorCurrentFile, writePerActorCurrent, readOwnCurrentPointer } = require(process.env.CP_HELPER_ARG);
+const dir = process.env.DIR_ARG;
+const prefix = 'claude-code:' + 's'.repeat(52);
+const keyA = prefix + ':host-a';
+const keyB = prefix + ':host-b';
+
+const fileA = perActorCurrentFile(dir, keyA);
+const fileB = perActorCurrentFile(dir, keyB);
+if (fileA === fileB) {
+  console.error(`FILES_COLLIDE: ${fileA}`);
+  process.exit(1);
+}
+
+writePerActorCurrent(dir, keyA, { active_slug: 'collide-a-slug' });
+writePerActorCurrent(dir, keyB, { active_slug: 'collide-b-slug' });
+
+const resultA = readOwnCurrentPointer(dir, keyA);
+const resultB = readOwnCurrentPointer(dir, keyB);
+if (!resultA.payload || resultA.payload.active_slug !== 'collide-a-slug') {
+  console.error(`ACTOR_A_WRONG_SLUG: ${JSON.stringify(resultA)}`);
+  process.exit(1);
+}
+if (!resultB.payload || resultB.payload.active_slug !== 'collide-b-slug') {
+  console.error(`ACTOR_B_WRONG_SLUG: ${JSON.stringify(resultB)}`);
+  process.exit(1);
+}
+NODE
+then
+  pass "FIX 1: two actor keys sharing a >=64-char common sanitized prefix map to DISTINCT per-actor pointer files, and each actor's own read resolves its own session, never the other's (collision-resistant naming)"
+else
+  fail "FIX 1: colliding actor keys did not map to distinct files / grounded onto each other's session: $(cat "$TMPDIR_EVAL/ac440-collide.err")"
+fi
+
+# 7.7 FIX 1 (legacy-name fallback -- independent review): a pointer written under the PRE-fix-wave-2
+# filename scheme (legacyPerActorCurrentFile -- sanitizeSegment(actorKey) alone, no hash) with NO
+# new-scheme file present must still resolve for its owning actor -- the transition-window compat
+# guarantee (a still-running published-3.9.0-era session's pointer keeps resolving).
+if CP_HELPER_ARG="$CURRENT_POINTER_HELPER" DIR_ARG="$AC440_COLLIDE_DIR" node - <<'NODE' 2>"$TMPDIR_EVAL/ac440-legacy-fallback.err"
+const fs = require('fs');
+const path = require('path');
+const { legacyPerActorCurrentFile, perActorCurrentFile, readOwnCurrentPointer } = require(process.env.CP_HELPER_ARG);
+const dir = process.env.DIR_ARG;
+const actorKey = 'eval-actor-440-legacy-fallback';
+
+const newFile = perActorCurrentFile(dir, actorKey);
+if (fs.existsSync(newFile)) { console.error(`NEW_FILE_UNEXPECTEDLY_EXISTS: ${newFile}`); process.exit(1); }
+
+const legacyFile = legacyPerActorCurrentFile(dir, actorKey);
+fs.mkdirSync(path.dirname(legacyFile), { recursive: true });
+fs.writeFileSync(legacyFile, JSON.stringify({ active_slug: 'legacy-fallback-slug' }));
+
+const result = readOwnCurrentPointer(dir, actorKey);
+if (!result.payload || result.payload.active_slug !== 'legacy-fallback-slug') {
+  console.error(`FALLBACK_DID_NOT_RESOLVE: ${JSON.stringify(result)}`);
+  process.exit(1);
+}
+if (result.file !== legacyFile) {
+  console.error(`FALLBACK_FILE_MISMATCH: got ${result.file} expected ${legacyFile}`);
+  process.exit(1);
+}
+NODE
+then
+  pass "FIX 1: a pointer written under the pre-fix-wave-2 legacy filename (no new-scheme file present) still resolves for its owning actor (transition-window fallback)"
+else
+  fail "FIX 1: legacy-filename fallback did not resolve as expected: $(cat "$TMPDIR_EVAL/ac440-legacy-fallback.err")"
 fi
 
 

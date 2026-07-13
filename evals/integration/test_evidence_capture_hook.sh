@@ -139,7 +139,11 @@ printf '%s\n' '{"command":"npm test","observedResult":"pass","exitCode":0,"captu
 # A poisoned npm on PATH proves the gate does NOT re-run when the log confirms.
 POISON="$TMP/poison"; mkdir -p "$POISON"
 printf '#!/usr/bin/env bash\necho "npm should not run" >&2\nexit 99\n' > "$POISON/npm"; chmod +x "$POISON/npm"
-PATH="$POISON:$PATH" FLOW_AGENTS_GOAL_FIT_MODE=block node "$GATE" >/dev/null 2>"$TMP/b2.err" <<JSON
+# #440 FIX 2 (de-vacuate, independent review): apply EVIDENCE_ACTOR so the gate actually resolves
+# repo C's session (seed_repo already seeded EVIDENCE_ACTOR's own pointer for it) and reaches the
+# capture cross-reference / confirmed-pass-trusts-the-log logic, not the outer "no artifactDir at
+# all" early-return (which would also never re-run npm, for an unrelated reason).
+PATH="$POISON:$PATH" FLOW_AGENTS_ACTOR="$EVIDENCE_ACTOR" FLOW_AGENTS_GOAL_FIT_MODE=block node "$GATE" >/dev/null 2>"$TMP/b2.err" <<JSON
 {"hook_event_name":"Stop","cwd":"$C"}
 JSON
 if rg -q 'CONTRADICTS|backstop|npm should not run' "$TMP/b2.err"; then

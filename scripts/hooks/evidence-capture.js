@@ -204,9 +204,14 @@ function latestStateDir(flowAgentsDir) {
 }
 
 /**
- * Resolve the active artifact directory the same way the other hooks do:
- * prefer .kontourai/flow-agents/current.json (active_slug / artifact_dir), then fall back
- * to the newest-mtime state.json directory.
+ * Resolve the active artifact directory the same way the other #440-migrated hooks do: prefer
+ * the RESOLVED actor's own per-actor `current/<actor>.json` pointer (active_slug / artifact_dir)
+ * via `readOwnCurrentPointer` — never the shared legacy `current.json`, and never the repo-wide
+ * newest-mtime scan (D1: that would append this actor's OWN captured evidence into an unrelated
+ * actor's session directory). Only for an empty/unresolved actor does this fall back to the
+ * legacy global `current.json` and, failing that, the newest-mtime `state.json` directory scan —
+ * the pre-#440/#291 behavior, unchanged for that case (D3 compat). See the D1/D2/D3 comment
+ * inline below for the exact branching.
  */
 function resolveArtifactDir(root) {
   const actorKey = resolveActor(process.env).actor;

@@ -419,11 +419,18 @@ echo "--- D. Terminal (delivered) status: no release, no mutation ---"
 D_REPO="$(new_repo repo-d)"
 assignment_provider_settings_local_file "$D_REPO"
 D_DIR="$(seed_session "$D_REPO" "task-d" "delivered")"
-seed_liveness_claim "$D_REPO" "task-d" "claude-code:sess-d:host-d" "2026-06-25T09:00:00.000Z"
-seed_assignment_claim "$D_REPO" "task-d" "claude-code" "sess-d" "host-d"
+# #440 FIX 2 (de-vacuate, independent review): D owns task-d — a stable "self, derived form"
+# actor + own per-actor current pointer, so releaseOnNonTerminalStop is REACHED and its OWN
+# terminal-status (LIVENESS_TERMINAL) early-return is what's actually exercised here, not the
+# outer "no artifactDir at all" early-return (which would pass vacuously for the same reason).
+D_SESSION_ID="eval-d-session-$$"
+D_ACTOR_TRIPLE="claude-code:${D_SESSION_ID}:${REAL_HOSTNAME}"
+seed_current_pointer "$D_REPO" "task-d" "$D_ACTOR_TRIPLE"
+seed_liveness_claim "$D_REPO" "task-d" "$D_ACTOR_TRIPLE" "2026-06-25T09:00:00.000Z"
+seed_assignment_claim "$D_REPO" "task-d" "claude-code" "$D_SESSION_ID" "$REAL_HOSTNAME"
 
 D_LINES_BEFORE="$(liveness_line_count "$D_REPO")"
-call_stop_hook "$D_REPO" '{}' > /dev/null 2>"$TMPDIR_EVAL/d.err"
+call_stop_hook "$D_REPO" "{\"CLAUDE_CODE_SESSION_ID\":\"$D_SESSION_ID\"}" > /dev/null 2>"$TMPDIR_EVAL/d.err"
 D_LINES_AFTER="$(liveness_line_count "$D_REPO")"
 
 if [[ "$D_LINES_AFTER" -eq "$D_LINES_BEFORE" ]]; then
@@ -445,9 +452,18 @@ echo "--- E. Foreign-actor holder is never released (derived form) ---"
 E_REPO="$(new_repo repo-e)"
 assignment_provider_settings_local_file "$E_REPO"
 E_DIR="$(seed_session "$E_REPO" "task-e" "in_progress")"
+# #440 FIX 2 (de-vacuate, independent review): the ACTING actor (the one running the Stop hook
+# below) owns task-e — a stable "self, derived form" actor + own per-actor pointer, so
+# releaseOnNonTerminalStop is REACHED and its actual holder-comparison logic is what rejects the
+# release, not the outer "no artifactDir at all" early-return. The ASSIGNMENT claim itself stays
+# held by a genuinely DIFFERENT actor ("actor-other-session"/"actor-other-host") — the real
+# foreign-holder differential this scenario is about.
+E_SESSION_ID="eval-e-session-$$"
+E_ACTOR_TRIPLE="claude-code:${E_SESSION_ID}:${REAL_HOSTNAME}"
+seed_current_pointer "$E_REPO" "task-e" "$E_ACTOR_TRIPLE"
 seed_assignment_claim "$E_REPO" "task-e" "claude-code" "actor-other-session" "actor-other-host"
 
-E_OUT="$(call_stop_hook "$E_REPO" '{}' 2>"$TMPDIR_EVAL/e.err")"
+E_OUT="$(call_stop_hook "$E_REPO" "{\"CLAUDE_CODE_SESSION_ID\":\"$E_SESSION_ID\"}" 2>"$TMPDIR_EVAL/e.err")"
 E_STATUS=$?
 
 E_RECORD="$(assignment_record_file "$E_REPO" "task-e")"
@@ -499,11 +515,18 @@ grep -q 'build/src/cli/workflow-sidecar.js not available' "$TMPDIR_EVAL/f1.err" 
 F2_REPO="$(new_repo repo-f2)"
 assignment_provider_settings_local_file "$F2_REPO"
 seed_session "$F2_REPO" "task-f2" "in_progress" > /dev/null
-seed_liveness_claim "$F2_REPO" "task-f2" "claude-code:sess-f2:host-f2" "2026-06-25T09:00:00.000Z"
+# #440 FIX 2 (de-vacuate, independent review): F2 owns task-f2 — stable "self, derived form"
+# actor + own per-actor pointer, so releaseOnNonTerminalStop is REACHED far enough to attempt
+# reading the corrupt assignment record below (not short-circuited by the outer "no artifactDir
+# at all" early-return, which would fail open for an unrelated reason).
+F2_SESSION_ID="eval-f2-session-$$"
+F2_ACTOR_TRIPLE="claude-code:${F2_SESSION_ID}:${REAL_HOSTNAME}"
+seed_current_pointer "$F2_REPO" "task-f2" "$F2_ACTOR_TRIPLE"
+seed_liveness_claim "$F2_REPO" "task-f2" "$F2_ACTOR_TRIPLE" "2026-06-25T09:00:00.000Z"
 mkdir -p "$F2_REPO/.kontourai/flow-agents/assignment"
 printf '{not valid json at all' > "$(assignment_record_file "$F2_REPO" "task-f2")"
 
-F2_OUT="$(call_stop_hook "$F2_REPO" '{}' 2>"$TMPDIR_EVAL/f2.err")"
+F2_OUT="$(call_stop_hook "$F2_REPO" "{\"CLAUDE_CODE_SESSION_ID\":\"$F2_SESSION_ID\"}" 2>"$TMPDIR_EVAL/f2.err")"
 F2_STATUS=$?
 if [[ "$F2_STATUS" -eq 0 || "$F2_STATUS" -eq 2 ]] && ! grep -q 'Node\.js v' "$TMPDIR_EVAL/f2.err" && ! grep -q '    at ' "$TMPDIR_EVAL/f2.err"; then
   pass "F(ii): corrupt assignment record fails open — no uncaught throw, exit unaffected (AC7)"
@@ -603,6 +626,12 @@ fi
 H2_REPO="$(new_repo repo-h2)"
 assignment_provider_settings_local_file "$H2_REPO"
 seed_session "$H2_REPO" "task-h2" "in_progress" > /dev/null
+# #440 FIX 2 (de-vacuate, independent review): the ACTING override actor ("different-y") owns
+# task-h2 — its own per-actor pointer, keyed to that exact override value, so
+# releaseOnNonTerminalStop is REACHED and its actual actor_key comparison against the assignment
+# record's "canonical-x" holder is what rejects the release, not the outer "no artifactDir at
+# all" early-return.
+seed_current_pointer "$H2_REPO" "task-h2" "different-y"
 seed_assignment_claim "$H2_REPO" "task-h2" "unknown" "some-other-session-id" "some-other-host" "canonical-x"
 
 H2_OUT="$(call_stop_hook "$H2_REPO" '{"FLOW_AGENTS_ACTOR":"different-y"}' 2>"$TMPDIR_EVAL/h2.err")"

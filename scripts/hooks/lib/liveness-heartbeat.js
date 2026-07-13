@@ -115,16 +115,19 @@ function resolveNowMs(now) {
 }
 
 /**
- * Read the active_slug from the actor-scoped "current" pointer (#291: per-actor
- * `current/<actor>.json` preferred over the legacy global `current.json`, via
- * `readCurrentPointer` — the single choke point for that preference rule), sanitized through the
- * same charset+cap restriction as actor-identity.js's `sanitizeSegment` (F5, #288 fix iteration 1,
- * sec-LOW: this is a local file that could be hand-edited or otherwise hostile — `active_slug`
- * must never be trusted verbatim before it is used as a JSONL grouping key / emitted `subjectId`
- * or compared against event data). Tolerates a missing file or malformed JSON (returns "") exactly
- * like the plain-`fs.readFileSync` read this replaces; when `actorKey` is empty/unresolved,
- * `readCurrentPointer` falls straight to the legacy global file, so behavior for that case is
- * unchanged from before #291.
+ * Read the active_slug from the actor-scoped "current" pointer, via `readOwnCurrentPointer` — the
+ * single choke point for that preference rule. #440: for a RESOLVED actorKey this reads ONLY
+ * that actor's own per-actor `current/<actor>.json` projection — it never falls back to the
+ * shared legacy global `current.json`, so a session co-located with another actor's work never
+ * emits a heartbeat naming that other actor's subject (D1). When `actorKey` is empty/unresolved,
+ * `readOwnCurrentPointer` delegates unchanged to `readCurrentPointer`, which DOES fall straight
+ * to the legacy global file — behavior for that case is unchanged from before #291/#440 (D3
+ * compat). The returned `active_slug` is sanitized through the same charset+cap restriction as
+ * actor-identity.js's `sanitizeSegment` (F5, #288 fix iteration 1, sec-LOW: this is a local file
+ * that could be hand-edited or otherwise hostile — `active_slug` must never be trusted verbatim
+ * before it is used as a JSONL grouping key / emitted `subjectId` or compared against event
+ * data). Tolerates a missing file or malformed JSON (returns "") exactly like the plain-
+ * `fs.readFileSync` read this replaces.
  *
  * @param {string} root
  * @param {string} [actorKey]
