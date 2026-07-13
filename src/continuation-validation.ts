@@ -16,9 +16,39 @@ export function validateSnapshot(value: ContinuationSnapshot): ContinuationSnaps
 }
 
 function validateGateActionEnvelope(value: GateActionEnvelope): void {
-  if (!value || typeof value !== "object" || value.schema_version !== "1.0" || !value.flow || typeof value.flow.current_step !== "string"
+  if (!value || typeof value !== "object" || value.schema_version !== "2.0" || !value.flow || typeof value.flow.current_step !== "string"
     || !value.progress || !Array.isArray(value.progress.canonical_evidence) || !Array.isArray(value.progress.observed_artifacts)) throw new Error("continuation snapshot gate-action envelope is malformed");
+  if (value.gate !== undefined) validateGateRequirementBindings(value);
   if (Buffer.byteLength(JSON.stringify(value), "utf8") > 65_536) throw new Error("continuation snapshot gate-action envelope exceeds 65536 bytes");
+}
+
+function validateGateRequirementBindings(value: GateActionEnvelope): void {
+  if (!Array.isArray(value.flow.gate_ids) || !Array.isArray(value.gate.requirements) || !Array.isArray(value.gate.accepted_exceptions)) {
+    throw new Error("continuation snapshot gate-action envelope has malformed gate bindings");
+  }
+  const activeGates = new Set(value.flow.gate_ids);
+  const acceptedGates = new Set<string>();
+  for (const exception of value.gate.accepted_exceptions) {
+    if (!exception || typeof exception.gate_id !== "string" || typeof exception.exception_id !== "string"
+      || !activeGates.has(exception.gate_id) || acceptedGates.has(exception.gate_id)) {
+      throw new Error("continuation snapshot gate-action envelope has invalid accepted exceptions");
+    }
+    acceptedGates.add(exception.gate_id);
+  }
+  const gatesWithRequirements = new Set<string>();
+  for (const requirement of value.gate.requirements) {
+    if (!requirement || typeof requirement.gate_id !== "string" || !activeGates.has(requirement.gate_id)) {
+      throw new Error("continuation snapshot gate-action envelope has an invalid requirement gate binding");
+    }
+    gatesWithRequirements.add(requirement.gate_id);
+    if ((requirement.status === "accepted_exception") !== acceptedGates.has(requirement.gate_id)
+      && requirement.status !== "satisfied") {
+      throw new Error("continuation snapshot gate-action envelope has inconsistent exception bindings");
+    }
+  }
+  if ([...acceptedGates].some((gateId) => !gatesWithRequirements.has(gateId))) {
+    throw new Error("continuation snapshot gate-action envelope exception has no bound requirements");
+  }
 }
 
 export function validateTurnResult(value: ContinuationTurnResult): ContinuationTurnResult {

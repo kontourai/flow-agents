@@ -6,6 +6,11 @@ title: Migrations
 
 ## Unreleased
 
+- Gate-action envelopes now use `schema_version: "2.0"`. Each entry in
+  `gate.requirements` includes its originating `gate_id`, allowing consumers to
+  verify accepted exceptions without private Flow-definition knowledge. There
+  is no legacy envelope fallback; adapters that validate or project the public
+  envelope must require version 2.0 and the new binding.
 - Workflow runtime artifacts now live under `.kontourai/flow-agents/` instead
   of earlier runtime roots such as `.flow-agents/` or `.agents/flow-agents/`.
   Move any local session directories, sidecars, or `current.json` pointers you

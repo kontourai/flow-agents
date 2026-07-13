@@ -53,7 +53,7 @@ export type GateActionPublicMutation =
     };
 
 export type GateActionEnvelope = {
-  schema_version: "1.0";
+  schema_version: "2.0";
   flow: {
     run_id: string;
     definition_id: string;
@@ -65,6 +65,7 @@ export type GateActionEnvelope = {
   gate: {
     requirements: Array<{
       id: string;
+      gate_id: string;
       required: boolean;
       description: string;
       claim_type: string;
@@ -222,7 +223,7 @@ function deriveFlowRequirements(input: BuilderGateActionEnvelopeInput, action: K
     const matched = new Set((Array.isArray(outcome.matched_expectations) ? outcome.matched_expectations : [])
       .flatMap((entry) => isRecord(entry) && typeof entry.expectation_id === "string" ? [entry.expectation_id] : []));
     return (expectationsForGate(gate, input.run.config) as FlowExpectation[])
-      .map((expectation) => requirementFromExpectation(expectation, matched, typeof outcome.accepted_exception_id === "string"));
+      .map((expectation) => requirementFromExpectation(gate.id, expectation, matched, typeof outcome.accepted_exception_id === "string"));
   });
   if (requirements.length > MAX_REQUIREMENTS) throw new Error("Builder gate-action envelope requirements exceed the supported bound");
   if (!sameSet(action.expectation_ids, requirements.map((requirement) => requirement.id))) {
@@ -243,7 +244,7 @@ function assembleGateActionEnvelope(input: BuilderGateActionEnvelopeInput, loade
     .filter((binding) => !isControlArtifact(binding.artifact) && binding.expectation_ids.some((id) => unresolvedRequired.includes(id)))
     .map((binding) => binding.artifact);
   const envelope: GateActionEnvelope = {
-    schema_version: "1.0",
+    schema_version: "2.0",
     flow: {
       run_id: input.run.runId,
       definition_id: input.run.definitionId,
@@ -379,7 +380,7 @@ function workflowEvidenceMutation(expectationId: string, sessionArgument: string
   };
 }
 
-function requirementFromExpectation(expectation: FlowExpectation, satisfied: Set<string>, acceptedException: boolean): GateActionEnvelope["gate"]["requirements"][number] {
+function requirementFromExpectation(gateId: string, expectation: FlowExpectation, satisfied: Set<string>, acceptedException: boolean): GateActionEnvelope["gate"]["requirements"][number] {
   const record = expectation as unknown as AnyRecord;
   const claim = isRecord(record.bundle_claim) ? record.bundle_claim : null;
   if (typeof record.id !== "string" || typeof record.description !== "string" || !claim || typeof claim.claimType !== "string") {
@@ -387,6 +388,7 @@ function requirementFromExpectation(expectation: FlowExpectation, satisfied: Set
   }
   return {
     id: record.id,
+    gate_id: gateId,
     required: record.required === true,
     description: record.description,
     claim_type: claim.claimType,
