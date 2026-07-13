@@ -12,6 +12,19 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# #440 FIXTURE-GAP: this suite's fixtures were written before #440's per-actor ownership scoping
+# and never establish a per-actor current pointer for the invoking actor -- under a RESOLVED
+# ambient actor (ancestry-derived locally, GITHUB_RUN_ID-derived CI-runtime in CI), stop-goal-fit.js's
+# analyze() (and evidence-capture.js's resolveArtifactDir) now scope to that actor's own
+# (nonexistent) pointer and never reach the fixture-under-test at all. This suite is about
+# anti-gaming/capture-teeth mechanics, not #440's ownership scoping, so forcing the documented
+# test-only unresolved-actor escape hatch restores EXACTLY this suite's pre-#440 behavior (D3
+# compat: an unresolved actor keeps the unchanged legacy-fallback/global-scan discovery every
+# assertion below was written against). `env`-prefixed subprocess invocations below inherit this
+# exported pair (env without -i does not clear the parent environment).
+export FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED=1
+export NODE_ENV=test
+
 pass=0; fail=0
 _p(){ echo "  ✓ $1"; pass=$((pass+1)); }
 _f(){ echo "  ✗ $1"; fail=$((fail+1)); }

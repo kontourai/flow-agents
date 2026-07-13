@@ -3,6 +3,18 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# #440 FIXTURE-GAP: this suite's fixtures were written before #440's per-actor ownership scoping
+# and never establish a per-actor current pointer for the invoking actor (no ensure-session/
+# workflow-start call anywhere in this file) -- under a RESOLVED ambient actor (ancestry-derived
+# locally, GITHUB_RUN_ID-derived CI-runtime in CI), stop-goal-fit.js's analyze() now scopes to
+# that actor's own (nonexistent) pointer and never reaches the fixture-under-test at all. This
+# suite is about goal-fit gate mechanics, not #440's ownership scoping, so forcing the documented
+# test-only unresolved-actor escape hatch restores EXACTLY this suite's pre-#440 behavior (D3
+# compat: an unresolved actor keeps the unchanged legacy-fallback/global-scan discovery every
+# assertion below was written against).
+export FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED=1
+export NODE_ENV=test
+
 source "$ROOT/evals/lib/node.sh"
 
 # These checks exercise the block mechanism repeatedly against the same workspace

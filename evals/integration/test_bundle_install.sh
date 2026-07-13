@@ -700,11 +700,18 @@ fi
 
 KIRO_WORKSPACE="$TMPDIR_EVAL/kiro-workspace"
 mkdir -p "$KIRO_WORKSPACE"
-if node - "$CLAUDE_DEST" "$CODEX_DEST" "$KIRO_DEST" "$KIRO_WORKSPACE" <<'NODE'
+if node - "$CLAUDE_DEST" "$CODEX_DEST" "$KIRO_DEST" "$KIRO_WORKSPACE" "$ROOT_DIR/scripts/hooks/lib/current-pointer.js" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const [claudeDest, codexDest, kiroDest, kiroWorkspace] = process.argv.slice(2);
+const [claudeDest, codexDest, kiroDest, kiroWorkspace, currentPointerHelperPath] = process.argv.slice(2);
+const { writePerActorCurrent } = require(currentPointerHelperPath);
+// #440 FIXTURE-GAP: this fixture was written before #440's per-actor ownership scoping and never
+// established a per-actor current pointer for the invoking actor -- under a RESOLVED ambient
+// actor, workflow-steering.js's actorScopedWorkflowState now scopes to that actor's own
+// (nonexistent) pointer and never surfaces the WORKFLOW STATE ATTENTION banner. Give each
+// runCommand invocation a stable, explicit actor below (see FLOW_AGENTS_ACTOR in env).
+const installedHookActor = "eval-actor-bundle-install-installed-hook";
 const state = {
   schema_version: "1.0",
   task_slug: "installed-hook-demo",
@@ -725,6 +732,10 @@ function writeFixture(root) {
   fs.writeFileSync(path.join(taskDir, "trust.bundle"), JSON.stringify(trustBundle), "utf8");
   fs.mkdirSync(path.join(root, "docs"), { recursive: true });
   fs.writeFileSync(path.join(root, "docs/context-map.md"), "# Context Map\n", "utf8");
+  const flowAgentsDir = path.join(root, ".kontourai/flow-agents");
+  const currentPayload = { schema_version: "1.0", active_slug: "installed-hook-demo", artifact_dir: "installed-hook-demo" };
+  fs.writeFileSync(path.join(flowAgentsDir, "current.json"), JSON.stringify(currentPayload, null, 2) + "\n");
+  writePerActorCurrent(flowAgentsDir, installedHookActor, currentPayload);
 }
 function eventGroups(file, ...names) {
   const hooks = JSON.parse(fs.readFileSync(file, "utf8")).hooks || {};
@@ -747,7 +758,7 @@ function workflowCommand(file, ...eventNames) {
 }
 function runCommand(label, command, cwd, runtimeJson) {
   const payload = JSON.stringify({ hook_event_name: "UserPromptSubmit", cwd, prompt: "continue" });
-  const env = { ...process.env, SA_HOOK_PROFILE: "standard", CLAUDE_PROJECT_DIR: cwd };
+  const env = { ...process.env, SA_HOOK_PROFILE: "standard", CLAUDE_PROJECT_DIR: cwd, FLOW_AGENTS_ACTOR: installedHookActor };
   if (label === "Codex") env.CODEX_HOME = cwd;
   const result = spawnSync(command, { input: payload, cwd, env, shell: true, encoding: "utf8", timeout: 30000 });
   if (result.status !== 0) throw new Error(`${label} installed hook failed: rc=${result.status} stdout=${result.stdout} stderr=${result.stderr}`);
@@ -773,11 +784,14 @@ fi
 # Execute the opencode plugin's workflow-steering command path directly
 OPENCODE_WORKSPACE="$TMPDIR_EVAL/opencode-exec-workspace"
 mkdir -p "$OPENCODE_WORKSPACE"
-if node - "$OPENCODE_DEST" "$OPENCODE_WORKSPACE" <<'NODE'
+if node - "$OPENCODE_DEST" "$OPENCODE_WORKSPACE" "$ROOT_DIR/scripts/hooks/lib/current-pointer.js" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const [opencodeDest, opencodeWorkspace] = process.argv.slice(2);
+const [opencodeDest, opencodeWorkspace, currentPointerHelperPath] = process.argv.slice(2);
+const { writePerActorCurrent } = require(currentPointerHelperPath);
+// #440 FIXTURE-GAP: see the installed-prompt-submit block above for the full rationale.
+const opencodeHookActor = "eval-actor-bundle-install-opencode-hook";
 const state = {
   schema_version: "1.0",
   task_slug: "opencode-hook-demo",
@@ -794,6 +808,10 @@ function writeFixture(root) {
   fs.writeFileSync(path.join(taskDir, "trust.bundle"), JSON.stringify(trustBundle), "utf8");
   fs.mkdirSync(path.join(root, "docs"), { recursive: true });
   fs.writeFileSync(path.join(root, "docs/context-map.md"), "# Context Map\n", "utf8");
+  const flowAgentsDir = path.join(root, ".kontourai/flow-agents");
+  const currentPayload = { schema_version: "1.0", active_slug: "opencode-hook-demo", artifact_dir: "opencode-hook-demo" };
+  fs.writeFileSync(path.join(flowAgentsDir, "current.json"), JSON.stringify(currentPayload, null, 2) + "\n");
+  writePerActorCurrent(flowAgentsDir, opencodeHookActor, currentPayload);
 }
 function runOpencodeAdapter(bundleDest, cwd) {
   const adapterPath = path.join(bundleDest, "scripts", "hooks", "opencode-hook-adapter.js");
@@ -801,7 +819,7 @@ function runOpencodeAdapter(bundleDest, cwd) {
   const result = spawnSync(process.execPath, [adapterPath, "UserPromptSubmit", "workflow-steering", "workflow-steering.js", "default"], {
     input: payload,
     cwd,
-    env: { ...process.env, SA_HOOK_PROFILE: "standard", FLOW_AGENTS_HOOK_RUNTIME: "opencode" },
+    env: { ...process.env, SA_HOOK_PROFILE: "standard", FLOW_AGENTS_HOOK_RUNTIME: "opencode", FLOW_AGENTS_ACTOR: opencodeHookActor },
     encoding: "utf8",
     timeout: 30000,
   });
@@ -825,11 +843,14 @@ fi
 # Execute the pi extension's hook adapter command path directly
 PI_WORKSPACE="$TMPDIR_EVAL/pi-exec-workspace"
 mkdir -p "$PI_WORKSPACE"
-if node - "$PI_DEST" "$PI_WORKSPACE" <<'NODE'
+if node - "$PI_DEST" "$PI_WORKSPACE" "$ROOT_DIR/scripts/hooks/lib/current-pointer.js" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const [piDest, piWorkspace] = process.argv.slice(2);
+const [piDest, piWorkspace, currentPointerHelperPath] = process.argv.slice(2);
+const { writePerActorCurrent } = require(currentPointerHelperPath);
+// #440 FIXTURE-GAP: see the installed-prompt-submit block above for the full rationale.
+const piHookActor = "eval-actor-bundle-install-pi-hook";
 const state = {
   schema_version: "1.0",
   task_slug: "pi-hook-demo",
@@ -846,6 +867,10 @@ function writeFixture(root) {
   fs.writeFileSync(path.join(taskDir, "trust.bundle"), JSON.stringify(trustBundle), "utf8");
   fs.mkdirSync(path.join(root, "docs"), { recursive: true });
   fs.writeFileSync(path.join(root, "docs/context-map.md"), "# Context Map\n", "utf8");
+  const flowAgentsDir = path.join(root, ".kontourai/flow-agents");
+  const currentPayload = { schema_version: "1.0", active_slug: "pi-hook-demo", artifact_dir: "pi-hook-demo" };
+  fs.writeFileSync(path.join(flowAgentsDir, "current.json"), JSON.stringify(currentPayload, null, 2) + "\n");
+  writePerActorCurrent(flowAgentsDir, piHookActor, currentPayload);
 }
 function runPiAdapter(bundleDest, cwd) {
   const adapterPath = path.join(bundleDest, "scripts", "hooks", "pi-hook-adapter.js");
@@ -853,7 +878,7 @@ function runPiAdapter(bundleDest, cwd) {
   const result = spawnSync(process.execPath, [adapterPath, "UserPromptSubmit", "workflow-steering", "workflow-steering.js", "default"], {
     input: payload,
     cwd,
-    env: { ...process.env, SA_HOOK_PROFILE: "standard", FLOW_AGENTS_HOOK_RUNTIME: "pi" },
+    env: { ...process.env, SA_HOOK_PROFILE: "standard", FLOW_AGENTS_HOOK_RUNTIME: "pi", FLOW_AGENTS_ACTOR: piHookActor },
     encoding: "utf8",
     timeout: 30000,
   });

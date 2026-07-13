@@ -46,6 +46,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CURRENT_POINTER_HELPER="$ROOT/scripts/hooks/lib/current-pointer.js"
 source "$ROOT/evals/lib/node.sh"
 
 CLI="$ROOT/build/src/cli.js"
@@ -194,6 +195,31 @@ write_steering_fixture_repo() {
     "$repoRoot/.kontourai/flow-agents/$slug/state.dot.json.tmp" \
     "$slug" "in_progress" "execution" "$updatedAt" "Continue work."
   mv "$repoRoot/.kontourai/flow-agents/$slug/state.dot.json.tmp" "$repoRoot/.kontourai/flow-agents/$slug/state.json"
+}
+
+# seed_current_pointer <repo_root> <slug> <actor> — #440 FIXTURE-GAP: this suite's
+# write_steering_fixture_repo fixtures were written before #440's per-actor ownership scoping and
+# never establish a per-actor current pointer for the invoking actor -- under a RESOLVED
+# FLOW_AGENTS_ACTOR override, workflow-steering.js's actorScopedWorkflowState now scopes to that
+# actor's own (nonexistent) pointer and never reaches the fixture-under-test. Seeds BOTH the
+# legacy current.json AND the per-actor current/<actor>.json pointer with the SAME payload,
+# mirroring workflow-sidecar.ts's real writeCurrent() dual-write via current-pointer.js's own
+# writePerActorCurrent.
+seed_current_pointer() {
+  local repoRoot="$1" slug="$2" actor="$3"
+  local flowAgentsDir="$repoRoot/.kontourai/flow-agents"
+  CP_HELPER_ARG="$CURRENT_POINTER_HELPER" DIR_ARG="$flowAgentsDir" SLUG_ARG="$slug" ACTOR_ARG="$actor" node - <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const { writePerActorCurrent } = require(process.env.CP_HELPER_ARG);
+const dir = process.env.DIR_ARG;
+const slug = process.env.SLUG_ARG;
+const actor = process.env.ACTOR_ARG;
+const payload = { schema_version: '1.0', active_slug: slug, artifact_dir: slug };
+fs.mkdirSync(dir, { recursive: true });
+fs.writeFileSync(path.join(dir, 'current.json'), JSON.stringify(payload, null, 2) + '\n');
+writePerActorCurrent(dir, actor, payload);
+NODE
 }
 
 ROOT_SCRATCH_STATE_WRITER="$TMPDIR_EVAL/write-state-json.js"
@@ -835,6 +861,7 @@ STEERING_SUP_REPO="$TMPDIR_EVAL/steering-supersede-repo"
 SUP_SLUG="steering-superseded-demo"
 SUP_NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 write_steering_fixture_repo "$STEERING_SUP_REPO" "$SUP_SLUG" "$SUP_NOW"
+seed_current_pointer "$STEERING_SUP_REPO" "$SUP_SLUG" "eval-actor-steering-self-a"
 append_liveness_event "$STEERING_SUP_REPO/.kontourai/flow-agents" "$SUP_SLUG" "eval-actor-steering-holder-b" "$SUP_NOW" 1800
 
 # 7a. UserPromptSubmit on a SECOND, unrelated turn (not the takeover turn itself) — the

@@ -528,11 +528,11 @@ fi
 DOGFOOD_WORKSPACE="$CLAUDE_IDEM"  # reuse the installed workspace from the idempotent section
 mkdir -p "$DOGFOOD_WORKSPACE/.kontourai/flow-agents"
 
-if node - "$DOGFOOD_DEST2/.claude/settings.json" "$DOGFOOD_WORKSPACE" << 'NODE'
+if node - "$DOGFOOD_DEST2/.claude/settings.json" "$DOGFOOD_WORKSPACE" "$ROOT_DIR/scripts/hooks/lib/current-pointer.js" << 'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const [settingsPath, workspace] = process.argv.slice(2);
+const [settingsPath, workspace, currentPointerHelperPath] = process.argv.slice(2);
 
 // Write minimal fixtures for workflow-steering into the workspace
 const taskDir = path.join(workspace, ".kontourai", "flow-agents", "dogfood-hook-demo");
@@ -583,10 +583,24 @@ for (const group of groups) {
 }
 if (!wsCommand) throw new Error("workflow-steering hook command not found");
 
+// #440 FIXTURE-GAP: this fixture was written before #440's per-actor ownership scoping and
+// never established a per-actor current pointer for the invoking actor -- under a RESOLVED
+// ambient actor (ancestry-derived locally, GITHUB_RUN_ID-derived CI-runtime in CI),
+// workflow-steering.js's actorScopedWorkflowState now scopes to that actor's own (nonexistent)
+// pointer and never surfaces the WORKFLOW STATE ATTENTION banner. Give the hook a stable,
+// explicit actor and seed that actor's own per-actor pointer for dogfood-hook-demo, mirroring
+// workflow-sidecar.ts's real writeCurrent() dual-write via current-pointer.js's own
+// writePerActorCurrent.
+const dogfoodActor = "eval-actor-bundle-lifecycle-dogfood";
+const flowAgentsDir = path.join(workspace, ".kontourai", "flow-agents");
+const currentPayload = { schema_version: "1.0", active_slug: "dogfood-hook-demo", artifact_dir: "dogfood-hook-demo" };
+fs.writeFileSync(path.join(flowAgentsDir, "current.json"), JSON.stringify(currentPayload, null, 2) + "\n");
+require(currentPointerHelperPath).writePerActorCurrent(flowAgentsDir, dogfoodActor, currentPayload);
+
 // Execute the hook. CLAUDE_PROJECT_DIR must point to the workspace that has scripts/hooks/.
 // In the real dogfood use case this is the repo root; here we use the installed test workspace.
 const payload = JSON.stringify({ hook_event_name: "UserPromptSubmit", cwd: workspace, prompt: "continue" });
-const env = { ...process.env, SA_HOOK_PROFILE: "standard", CLAUDE_PROJECT_DIR: workspace };
+const env = { ...process.env, SA_HOOK_PROFILE: "standard", CLAUDE_PROJECT_DIR: workspace, FLOW_AGENTS_ACTOR: dogfoodActor };
 const result = spawnSync(wsCommand, {
   input: payload,
   cwd: workspace,
