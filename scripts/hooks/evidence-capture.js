@@ -57,8 +57,8 @@
 const fs = require('fs');
 const path = require('path');
 const { flowAgentsArtifactRootsForRead } = require('./lib/local-artifact-paths');
-const { resolveActor } = require('./lib/actor-identity.js');
-const { readCurrentPointer } = require('./lib/current-pointer.js');
+const { resolveActor, isUnresolvedActor } = require('./lib/actor-identity.js');
+const { readOwnCurrentPointer } = require('./lib/current-pointer.js');
 const { isAmbiguousAbsenceCommand } = require('./lib/runnable-command.js');
 const crypto = require('crypto');
 
@@ -211,7 +211,7 @@ function latestStateDir(flowAgentsDir) {
 function resolveArtifactDir(root) {
   const actorKey = resolveActor(process.env).actor;
   for (const flowAgentsDir of flowAgentsArtifactRootsForRead(root)) {
-    const { payload: current } = readCurrentPointer(flowAgentsDir, actorKey);
+    const { payload: current } = readOwnCurrentPointer(flowAgentsDir, actorKey);
     if (current) {
       const slug = current.artifact_dir || current.active_slug;
       if (typeof slug === 'string' && slug.trim()) {
@@ -222,6 +222,13 @@ function resolveArtifactDir(root) {
       }
     }
   }
+  // #440 D1: a resolved actor with no own per-actor pointer never falls back to the repo-wide
+  // newest-mtime scan below — that would append this actor's OWN captured evidence into an
+  // unrelated actor's session directory (write-side ownership conflation). D2 accepted gap:
+  // captured evidence is simply dropped (existing `if (!artifactDir) return rawInput;` no-op in
+  // run()) until this actor's next sidecar command establishes its own per-actor pointer. D3: an
+  // unresolved actor keeps today's exact global-scan fallback, unchanged.
+  if (!isUnresolvedActor(actorKey)) return null;
   for (const flowAgentsDir of flowAgentsArtifactRootsForRead(root)) {
     const latest = latestStateDir(flowAgentsDir);
     if (latest) return latest;

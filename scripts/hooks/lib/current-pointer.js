@@ -31,6 +31,11 @@
  *   readCurrentPointer(flowAgentsDir, actorKey)       → { payload: object|null,
  *                                                        source: "per-actor"|"legacy"|"none",
  *                                                        file: string|null }
+ *   readOwnCurrentPointer(flowAgentsDir, actorKey)    → { payload: object|null,
+ *                                                        source: "per-actor"|"legacy"|"none",
+ *                                                        file: string|null }  (#440 — ownership-bearing
+ *                                                        read; never falls back to the shared legacy
+ *                                                        current.json for a RESOLVED actor)
  *   writePerActorCurrent(flowAgentsDir, actorKey, payload) → void
  */
 
@@ -102,6 +107,28 @@ function readCurrentPointer(flowAgentsDir, actorKey) {
 }
 
 /**
+ * #440: the ownership-bearing read. Identical inputs/shape to readCurrentPointer, but for a
+ * RESOLVED actor NEVER falls back to the shared legacy current.json or (by construction, since
+ * this function makes no repo-wide scan) a global mtime scan — only this actor's own per-actor
+ * projection counts (D1). An unresolved/empty actorKey delegates unchanged to readCurrentPointer
+ * (D3 compat — today's legacy-fallback behavior is preserved exactly for that case).
+ *
+ * @param {string} flowAgentsDir
+ * @param {string} [actorKey]
+ * @returns {{ payload: object|null, source: "per-actor"|"none"|"legacy", file: string|null }}
+ */
+function readOwnCurrentPointer(flowAgentsDir, actorKey) {
+  const key = actorKey == null ? '' : String(actorKey);
+  if (!key || isUnresolvedActor(key)) {
+    return readCurrentPointer(flowAgentsDir, actorKey);
+  }
+  const perActorFile = perActorCurrentFile(flowAgentsDir, key);
+  const perActorPayload = readJsonFileTolerant(perActorFile);
+  if (perActorPayload !== null) return { payload: perActorPayload, source: 'per-actor', file: perActorFile };
+  return { payload: null, source: 'none', file: null };
+}
+
+/**
  * Durable write-side counterpart to `readCurrentPointer`'s per-actor branch — used only by
  * `workflow-sidecar.ts`'s `writeCurrent()` (Wave 2 Task 2.1), which calls this ALONGSIDE
  * (never instead of) its existing unconditional legacy `current.json` write, so the legacy
@@ -120,4 +147,4 @@ function writePerActorCurrent(flowAgentsDir, actorKey, payload) {
   fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`);
 }
 
-module.exports = { perActorCurrentFile, readCurrentPointer, writePerActorCurrent };
+module.exports = { perActorCurrentFile, readCurrentPointer, readOwnCurrentPointer, writePerActorCurrent };

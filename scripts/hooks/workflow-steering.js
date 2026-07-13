@@ -17,9 +17,9 @@
 const fs = require('fs');
 const path = require('path');
 const { readLivenessEvents, freshHolders } = require('./lib/liveness-read');
-const { resolveActor } = require('./lib/actor-identity');
+const { resolveActor, isUnresolvedActor } = require('./lib/actor-identity');
 const { flowAgentsArtifactRootsForRead, resolveSharedRepoRoot, warnIfFailingOpenInsideGitTree } = require('./lib/local-artifact-paths');
-const { readCurrentPointer } = require('./lib/current-pointer');
+const { readOwnCurrentPointer } = require('./lib/current-pointer');
 const { workflowTriggersFor } = require('./lib/kit-catalog');
 
 const STEERING = {
@@ -147,7 +147,7 @@ function readJson(file) {
  */
 function actorScopedWorkflowState(root, actorKey) {
   for (const flowAgentsDir of flowAgentsArtifactRootsForRead(root)) {
-    const { payload: current } = readCurrentPointer(flowAgentsDir, actorKey);
+    const { payload: current } = readOwnCurrentPointer(flowAgentsDir, actorKey);
     if (!current) continue;
     const slug = current.artifact_dir || current.active_slug;
     if (typeof slug !== 'string' || !slug.trim()) continue;
@@ -165,8 +165,14 @@ function actorScopedWorkflowState(root, actorKey) {
 }
 
 function latestWorkflowState(root) {
-  const preferred = actorScopedWorkflowState(root, resolveActor(process.env).actor);
+  const actorKey = resolveActor(process.env).actor;
+  const preferred = actorScopedWorkflowState(root, actorKey);
   if (preferred) return preferred;
+
+  // #440 D1/D2: a resolved actor's RESUME/STATE/SUPERSESSION banners never re-ground onto
+  // another actor's session via the global newest-mtime scan below — that fallback is
+  // legacy/unresolved-actor compat only (D3). No own active state this turn -> no banner.
+  if (!isUnresolvedActor(actorKey)) return null;
 
   const states = flowAgentsArtifactRootsForRead(root)
     .flatMap(artifactRoot => walkStateFiles(artifactRoot))

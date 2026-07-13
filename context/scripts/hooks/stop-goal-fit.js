@@ -45,7 +45,7 @@ const {
   warnIfFailingOpenInsideGitTree,
 } = require('./lib/local-artifact-paths');
 const { resolveActor, isUnresolvedActor, detectRuntime } = require('./lib/actor-identity.js');
-const { readCurrentPointer } = require('./lib/current-pointer.js');
+const { readCurrentPointer, readOwnCurrentPointer } = require('./lib/current-pointer.js');
 const { isRunnableCommandText, isAmbiguousAbsenceCommand } = require('./lib/runnable-command.js');
 let validateActiveTurnAuthority = () => ({ valid: false, reason: 'continuation authority validator is unavailable' });
 let validateSignedActiveTurnAssignmentAuthority = validateActiveTurnAuthority;
@@ -356,14 +356,14 @@ async function tryLoadSurface() {
 // returns null when build/ is absent, require throws, or current.json has no
 // active_flow_id / active_step_id. The caller (bundleEnforcement, sidecarGuidance)
 // treats null as "no active FlowDefinition" and falls back to the workflow.* path.
-function loadActiveFlowStep(flowAgentsDir) {
+function loadActiveFlowStep(flowAgentsDir, actorKey) {
   const packageRoot = path.resolve(__dirname, '..', '..');
   const builtResolver = path.join(packageRoot, 'build', 'src', 'lib', 'flow-resolver.js');
   if (!fs.existsSync(builtResolver)) return null; // hasBuild guard: no build/ yet
   try {
     const resolver = require(builtResolver);
     if (typeof resolver.resolveActiveFlowStep !== 'function') return null;
-    return resolver.resolveActiveFlowStep(flowAgentsDir);
+    return resolver.resolveActiveFlowStep(flowAgentsDir, actorKey);
   } catch {
     return null; // require failed or resolver threw — fail-open
   }
@@ -1766,7 +1766,7 @@ async function bundleEnforcement(artifactDir, activeFlowStep) {
  * to scanning all of .kontourai/flow-agents (newest-mtime).
  */
 function preferredArtifactDir(flowAgentsDir) {
-  const { payload: current } = readCurrentPointer(flowAgentsDir, resolveActor(process.env).actor);
+  const { payload: current } = readOwnCurrentPointer(flowAgentsDir, resolveActor(process.env).actor);
   if (!current) return null;
   const slug = current.artifact_dir || current.active_slug;
   if (typeof slug !== 'string' || !slug.trim()) return null;
@@ -1898,7 +1898,7 @@ function validatedActiveTurnScope(root) {
 // return that slug so analyze() can log the staleness rather than silently falling back to
 // a global mtime scan that could resurface an abandoned/never-real session as active.
 function staleCurrentSlug(flowAgentsDir) {
-  const { payload: current } = readCurrentPointer(flowAgentsDir, resolveActor(process.env).actor);
+  const { payload: current } = readOwnCurrentPointer(flowAgentsDir, resolveActor(process.env).actor);
   if (!current) return null;
   const slug = current.artifact_dir || current.active_slug;
   if (typeof slug !== 'string' || !slug.trim()) return null;
@@ -2012,10 +2012,35 @@ const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|cont
 
 async function analyze(root, now = Date.now()) {
   const flowAgentsDirs = flowAgentsArtifactRootsForRead(root);
+  const { actor: actorKey } = resolveActor(process.env);
   const activeTurnScope = validatedActiveTurnScope(root);
   // Scope to the session's current task when current.json names one, so an
   // unrelated active workflow elsewhere in the repo does not gate this stop.
   const scoped = activeTurnScope?.artifactDir || flowAgentsDirs.map(preferredArtifactDir).find(Boolean);
+
+  // #440 D1/D2: a RESOLVED actor with no scoped own artifactDir (no per-actor pointer, or an
+  // own pointer naming a nonexistent dir) never falls back to the legacy current.json or a
+  // global newest-mtime scan for BLOCKING purposes — those are informational-only for a
+  // resolved actor. Accepted gap: this actor's stop stays ungated until its next
+  // workflow-sidecar command re-establishes its own per-actor pointer; it is never gated on
+  // another actor's unrelated work. #589: a signed continuation active-turn scope (validated via
+  // FLOW_AGENTS_CONTINUATION_RUN_ID/TURN_SECRET, independent of actor identity/ownership) is
+  // resolved into `activeTurnScope` above and OR'd into `scoped` first, so a resolved actor
+  // legitimately handling an authorized continuation-driver turn is never treated as "no own
+  // work to scope to" here, even without its own per-actor current pointer — this check only
+  // fires when NEITHER mechanism finds a scope.
+  if (!scoped && !isUnresolvedActor(actorKey)) {
+    const ownStale = flowAgentsDirs.map(staleCurrentSlug).find(Boolean);
+    process.stderr.write(ownStale
+      ? `[Hook] Goal Fit: actor "${safeOneLine(actorKey, 80)}"'s own current-pointer names slug "${safeOneLine(ownStale, 80)}" but no such session directory exists — ignoring the stale own pointer; other sessions' sidecars are informational only, not blocking (#440).\n`
+      : `[Hook] Goal Fit: no per-actor current-pointer for actor "${safeOneLine(actorKey, 80)}" — stop-gate evidence scoping finds no own work to scope to; not blocking (any workflow-sidecar command re-establishes it; other sessions' sidecars are informational only, #440).\n`);
+    return { warnings: [], blocking: false, activeFlowRun: false, latestArtifactDir: null };
+  }
+
+  // Everything below this point is UNCHANGED for: (a) a resolved actor with a valid `scoped`
+  // own artifactDir (the common, post-fix path), (b) an unresolved actor (full legacy +
+  // global-scan compat, D3), and (c) an authorized continuation-driver turn (#589, scoped via
+  // activeTurnScope regardless of actor ownership).
   // WS8 (AC10a): if current.json points at a nonexistent slug, LOG the staleness and, in
   // the global fallback, require sidecar presence so a stale pointer cannot resurface an
   // abandoned/never-real markdown-only directory as "the active session".
@@ -2085,7 +2110,7 @@ async function analyze(root, now = Date.now()) {
 
   // ADR 0016 P-c: load the active FlowDefinition gate (fail-open: null when absent).
   // Null → existing workflow.* fallback path unchanged. Non-null → expects[]-driven claim selection.
-  const activeFlowStep = loadActiveFlowStep(path.dirname(latestArtifactDir));
+  const activeFlowStep = loadActiveFlowStep(path.dirname(latestArtifactDir), actorKey);
 
   warnings.push(...sidecarValidation(root, latestArtifactDir));
   warnings.push(...sidecarGuidance(root, latestArtifactDir, activeFlowStep));

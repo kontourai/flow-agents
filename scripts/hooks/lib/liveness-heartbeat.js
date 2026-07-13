@@ -93,7 +93,7 @@ const { livenessStreamFile, appendLivenessEvent } = require('./liveness-write');
 const { readLivenessEvents, readLivenessEventsTail, freshHolders } = require('./liveness-read');
 const { resolveActor, isUnresolvedActor, sanitizeSegment } = require('./actor-identity');
 const { flowAgentsArtifactRoot } = require('./local-artifact-paths');
-const { readCurrentPointer } = require('./current-pointer');
+const { readOwnCurrentPointer } = require('./current-pointer');
 
 /**
  * Resolve a caller-supplied `now` (Date, ISO string, or omitted) to epoch ms.
@@ -150,7 +150,7 @@ function mightHaveActiveSession(root) {
 }
 
 function readActiveSlug(root, actorKey) {
-  const { payload: current } = readCurrentPointer(root, actorKey);
+  const { payload: current } = readOwnCurrentPointer(root, actorKey);
   if (!current) return '';
   const activeSlug = (current && current.active_slug) || '';
   if (!activeSlug) return '';
