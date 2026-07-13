@@ -3,11 +3,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createRequire } from "node:module";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto";
 
-import { ContinuationAdapterTimeoutError, createFileContinuationStore, runContinuationDriver, withContinuationDriverLock } from "../../build/src/continuation-driver.js";
+import { MAX_CONTINUATION_ADAPTER_EVIDENCE_BYTES, MAX_CONTINUATION_TURN_RESULT_BYTES, ContinuationAdapterTimeoutError, createFileContinuationStore, runContinuationDriver, withContinuationDriverLock } from "../../build/src/continuation-driver.js";
 import { executeContinuationAdapter, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "../../build/src/cli/continuation-adapter.js";
 
 const require = createRequire(import.meta.url);
@@ -35,15 +35,38 @@ function snapshot(step, status = "active") {
   };
 }
 
+function envelopeSnapshot(step, { evidence = [], artifacts = [], implementationAllowed = false } = {}) {
+  const value = snapshot(step);
+  value.gate_action_envelope = {
+    schema_version: "1.0",
+    flow: { current_step: step },
+    action: { implementation_allowed: implementationAllowed },
+    stop_condition: { kind: "one_turn", adapter_evidence_is_gate_evidence: false },
+    progress: { canonical_evidence: evidence, observed_artifacts: artifacts },
+  };
+  return value;
+}
+
 function memoryStore(initial = null) {
   let value = initial;
   const events = [];
+  const accepted = [];
   return {
     load: () => value,
     save: (next) => { value = structuredClone(next); },
-    append: (event) => { events.push(structuredClone(event)); },
+    append: (event) => {
+      if (event.turn_id && events.some((entry) => entry.type === event.type && entry.turn_id === event.turn_id)) return;
+      events.push(structuredClone(event));
+    },
+    captureAcceptedTurn: (turn) => {
+      const prior = accepted.find((entry) => entry.turn_id === turn.turn_id);
+      if (prior) assert.deepEqual(prior, turn);
+      else accepted.push(structuredClone(turn));
+    },
+    acceptedTurns: () => structuredClone(accepted),
     value: () => value,
     events,
+    accepted,
   };
 }
 
@@ -104,6 +127,246 @@ test("driver advances multiple canonical Flow steps without a human continuation
   assert.deepEqual(requests.map((request) => request.next_action.skills), [["skill-plan"], ["skill-execute"]]);
   assert.equal(requests.some((request) => Object.hasOwn(request, "system_prompt")), false);
   assert.equal(store.value().status, "done");
+});
+
+test("weak structured consumers cannot turn adapter prose or adapter evidence into gate evidence", async () => {
+  const store = memoryStore();
+  const requests = [];
+  const result = await runContinuationDriver({
+    maxTurns: 1,
+    store,
+    runtime: {
+      inspect: async () => envelopeSnapshot("design-probe"),
+      synchronize: async () => envelopeSnapshot("design-probe"),
+      execute: async (request) => {
+        requests.push(request);
+        return { status: "completed", summary: "implemented directly", evidence: { forged: "gate evidence" } };
+      },
+    },
+  });
+
+  assert.equal(result.outcome, "budget_exhausted");
+  assert.equal(requests[0].gate_action_envelope.action.implementation_allowed, false);
+  assert.equal(requests[0].gate_action_envelope.stop_condition.adapter_evidence_is_gate_evidence, false);
+  assert.equal(store.events.some((event) => event.type === "gate_not_advanced"), true);
+  const completed = store.events.find((event) => event.type === "turn_completed");
+  assert.equal(completed.progress.no_progress, true);
+  assert.equal(completed.progress.evidence_added.length, 0);
+});
+
+test("conforming canonical advancement and same-step evidence/artifact progress are distinct", async () => {
+  const advancingStore = memoryStore();
+  let advanced = false;
+  await runContinuationDriver({
+    maxTurns: 1,
+    store: advancingStore,
+    runtime: {
+      inspect: async () => envelopeSnapshot("plan"),
+      synchronize: async () => advanced
+        ? envelopeSnapshot("execute", { evidence: ["plan-gate:advancing-evidence"], artifacts: ["plan.md:new-hash"], implementationAllowed: true })
+        : envelopeSnapshot("plan", { artifacts: ["plan.md:absent"] }),
+      execute: async () => { advanced = true; return { status: "completed" }; },
+    },
+  });
+  const advancedProgress = advancingStore.events.find((event) => event.type === "turn_completed").progress;
+  assert.equal(advancedProgress.step_advanced, true);
+  assert.deepEqual(advancedProgress.evidence_added, ["plan-gate:advancing-evidence"]);
+  assert.deepEqual(advancedProgress.artifact_changes, ["plan.md:new-hash"]);
+  assert.equal(advancedProgress.no_progress, false);
+
+  const sameStepStore = memoryStore();
+  let evidenceAdded = false;
+  await runContinuationDriver({
+    maxTurns: 1,
+    store: sameStepStore,
+    runtime: {
+      inspect: async () => envelopeSnapshot("verify"),
+      synchronize: async () => evidenceAdded
+        ? envelopeSnapshot("verify", { evidence: ["verify-gate:canonical-attachment"], artifacts: ["report.md:abc"] })
+        : envelopeSnapshot("verify"),
+      execute: async () => { evidenceAdded = true; return { status: "completed" }; },
+    },
+  });
+  const sameStepProgress = sameStepStore.events.find((event) => event.type === "turn_completed").progress;
+  assert.equal(sameStepProgress.step_advanced, false);
+  assert.deepEqual(sameStepProgress.evidence_added, ["verify-gate:canonical-attachment"]);
+  assert.deepEqual(sameStepProgress.artifact_changes, ["report.md:abc"]);
+  assert.equal(sameStepProgress.no_progress, false);
+  assert.equal(sameStepStore.events.some((event) => event.type === "gate_not_advanced"), true, "legacy same-step event remains compatible");
+});
+
+test("failed adapter turns record canonical artifact progress and repeated no-progress becomes stagnant", async () => {
+  const failedStore = memoryStore();
+  let artifactAdded = false;
+  await runContinuationDriver({
+    maxTurns: 1,
+    store: failedStore,
+    runtime: {
+      inspect: async () => envelopeSnapshot("plan"),
+      synchronize: async () => artifactAdded ? envelopeSnapshot("plan", { artifacts: ["plan.md:canonical"] }) : envelopeSnapshot("plan"),
+      execute: async () => { artifactAdded = true; throw new Error("adapter failed after writing artifact"); },
+    },
+  });
+  const failedProgress = failedStore.events.find((event) => event.type === "turn_failed").progress;
+  assert.deepEqual(failedProgress.artifact_changes, ["plan.md:canonical"]);
+  assert.equal(failedProgress.no_progress, false);
+
+  const stagnantStore = memoryStore();
+  const requests = [];
+  await runContinuationDriver({
+    maxTurns: 2,
+    store: stagnantStore,
+    runtime: {
+      inspect: async () => envelopeSnapshot("design-probe"),
+      synchronize: async () => envelopeSnapshot("design-probe"),
+      execute: async (request) => { requests.push(request); return { status: "completed" }; },
+    },
+  });
+  assert.equal(requests[1].gate_action_envelope.progress.prior_turn.stagnation, "possible");
+  const turns = stagnantStore.events.filter((event) => event.type === "turn_completed");
+  assert.equal(turns[1].progress.stagnation, "stagnant");
+  assert.equal(turns[1].progress.consecutive_no_progress, 2);
+});
+
+test("reinvoked missions compare synchronized progress with the durable baseline", async () => {
+  const barrier = { kind: "deadline", at: "2026-07-13T12:00:00.000Z" };
+  const store = memoryStore();
+  let canonicalEvidence = [];
+
+  const first = await runContinuationDriver({
+    maxTurns: 2,
+    store,
+    waitForBarrier: async () => "pending",
+    runtime: {
+      inspect: async () => envelopeSnapshot("verify", { evidence: canonicalEvidence }),
+      synchronize: async () => envelopeSnapshot("verify", { evidence: canonicalEvidence }),
+      execute: async () => ({ status: "wait", barrier }),
+    },
+  });
+  assert.equal(first.outcome, "waiting");
+
+  canonicalEvidence = ["verify-gate:interrupted-turn-evidence"];
+  let resumedRequest;
+  await runContinuationDriver({
+    maxTurns: 2,
+    store,
+    waitForBarrier: async () => "ready",
+    runtime: {
+      inspect: async () => envelopeSnapshot("verify", { evidence: canonicalEvidence }),
+      synchronize: async () => envelopeSnapshot("verify", { evidence: canonicalEvidence }),
+      execute: async (request) => {
+        resumedRequest = request;
+        return { status: "completed" };
+      },
+    },
+  });
+
+  assert.deepEqual(resumedRequest.gate_action_envelope.progress.prior_turn.evidence_added, canonicalEvidence);
+  assert.equal(resumedRequest.gate_action_envelope.progress.prior_turn.no_progress, false);
+});
+
+test("reinvocation counts one interrupted unchanged turn as no progress exactly once", async () => {
+  const baseline = { current_step: "execute", canonical_evidence: [], observed_artifacts: [] };
+  const store = memoryStore({
+    schema_version: "1.0", run_id: "run-251", definition_id: "builder.build", max_turns: 2,
+    adapter_command_identity: null, status: "active", turns_started: 1, active_turn_step: "execute",
+    active_turn_public_key_digest: null, active_turn_phase: "started", active_turn_progress: baseline,
+    last_progress: baseline,
+    prior_progress: { step_advanced: false, evidence_added: [], artifact_changes: [], no_progress: true, consecutive_no_progress: 1, stagnation: "possible" },
+    pending_barrier: null, updated_at: "2026-07-13T12:00:00.000Z",
+  });
+  const barrier = { kind: "deadline", at: "2026-07-14T12:00:00.000Z" };
+  let request;
+  const runtime = {
+    inspect: async () => envelopeSnapshot("execute"),
+    synchronize: async () => envelopeSnapshot("execute"),
+    execute: async (value) => { request = value; return { status: "wait", barrier }; },
+  };
+  await runContinuationDriver({ maxTurns: 2, store, runtime, waitForBarrier: async () => "pending" });
+  assert.equal(request.gate_action_envelope.progress.prior_turn.stagnation, "stagnant");
+  assert.equal(request.gate_action_envelope.progress.prior_turn.consecutive_no_progress, 2);
+  assert.equal(store.events.filter((event) => event.type === "turn_recovered").length, 1);
+  await runContinuationDriver({ maxTurns: 2, store, runtime, waitForBarrier: async () => "pending" });
+  assert.equal(store.value().prior_progress.consecutive_no_progress, 3, "the accepted wait turn is also measured once");
+  assert.equal(store.events.filter((event) => event.type === "turn_recovered").length, 1);
+});
+
+test("interrupted turns are reconciled before waiting and terminal disposition branches", async (t) => {
+  for (const [name, canonical, expectedOutcome] of [
+    ["waiting", envelopeSnapshot("verify", { evidence: [] }), "waiting"],
+    ["terminal", envelopeSnapshot("done", { evidence: [] }), "done"],
+  ]) await t.test(name, async () => {
+    if (name === "waiting") {
+      canonical.status = "paused";
+      canonical.disposition = "waiting";
+    } else {
+      canonical.status = "completed";
+      canonical.disposition = "done";
+    }
+    const baseline = { current_step: canonical.flow?.current_step ?? canonical.gate_action_envelope.flow.current_step, canonical_evidence: [], observed_artifacts: [] };
+    baseline.current_step = name === "terminal" ? "verify" : canonical.current_step;
+    const store = memoryStore({
+      schema_version: "1.0", run_id: "run-251", definition_id: "builder.build", max_turns: 2,
+      adapter_command_identity: null, status: "active", turns_started: 1, active_turn_step: "verify",
+      active_turn_public_key_digest: null, active_turn_phase: "started", active_turn_progress: baseline,
+      last_progress: baseline, prior_progress: null, pending_barrier: null, updated_at: "2026-07-13T12:00:00.000Z",
+    });
+    const result = await runContinuationDriver({
+      maxTurns: 2, store,
+      runtime: { inspect: async () => canonical, synchronize: async () => canonical, execute: async () => assert.fail("must not execute") },
+    });
+    assert.equal(result.outcome, expectedOutcome);
+    const recovered = store.events.find((event) => event.type === "turn_recovered");
+    assert.ok(recovered);
+    assert.equal(recovered.progress.no_progress, name === "waiting");
+    assert.equal(recovered.progress.step_advanced, name === "terminal");
+  });
+});
+
+test("a crash after accepted-turn measurement is journaled and completed exactly once on restart", async () => {
+  const durable = memoryStore();
+  let injected = false;
+  const crashing = {
+    ...durable,
+    load: () => {
+      if (injected) throw new Error("injected process death");
+      return durable.load();
+    },
+    save: (state) => {
+      durable.save(state);
+      if (!injected && state.active_turn_phase === "measured") {
+        injected = true;
+        throw new Error("injected process death");
+      }
+    },
+  };
+  await assert.rejects(runContinuationDriver({
+    maxTurns: 2,
+    store: crashing,
+    runtime: {
+      inspect: async () => envelopeSnapshot("plan"),
+      synchronize: async () => envelopeSnapshot("plan"),
+      execute: async () => ({ status: "completed", summary: "accepted before crash" }),
+    },
+  }), /injected process death/);
+  assert.equal(durable.value().active_turn_phase, "measured");
+  assert.equal(durable.accepted.length, 0, "capture append had not occurred before the injected crash");
+
+  const resumed = await runContinuationDriver({
+    maxTurns: 2,
+    store: durable,
+    runtime: {
+      inspect: async () => snapshot("done", "completed"),
+      synchronize: async () => snapshot("done", "completed"),
+      execute: async () => assert.fail("restart must not execute another turn"),
+    },
+  });
+  assert.equal(resumed.outcome, "done");
+  assert.equal(durable.accepted.length, 1);
+  assert.equal(durable.accepted[0].request.current_step, "plan");
+  assert.equal(durable.events.filter((event) => event.type === "turn_completed").length, 1);
+  assert.equal(durable.events.filter((event) => event.type === "turn_recovered").length, 1);
+  assert.equal(durable.value().active_turn_phase, null);
 });
 
 test("driver parks on a wait barrier without burning another turn and resumes durably", async () => {
@@ -228,13 +491,14 @@ test("canonical completion clears a stale barrier without waiting", async () => 
     updated_at: "2026-07-12T12:00:00.000Z",
   });
   let waitCalls = 0;
+  let synchronizeCalls = 0;
 
   const result = await runContinuationDriver({
     maxTurns: 3,
     store,
     runtime: {
       inspect: async () => snapshot("done", "completed"),
-      synchronize: async () => assert.fail("terminal inspection must not synchronize"),
+      synchronize: async () => { synchronizeCalls += 1; return snapshot("done", "completed"); },
       execute: async () => assert.fail("terminal inspection must not execute"),
     },
     waitForBarrier: async () => {
@@ -244,6 +508,7 @@ test("canonical completion clears a stale barrier without waiting", async () => 
   });
 
   assert.equal(result.outcome, "done");
+  assert.equal(synchronizeCalls, 1, "terminal disposition is confirmed after canonical synchronization");
   assert.equal(waitCalls, 0);
   assert.equal(store.value().pending_barrier, null);
 });
@@ -281,25 +546,73 @@ test("adapter evidence is bounded before the driver accepts the turn", async () 
   assert.equal(acceptedTurns, 0);
 });
 
-test("accepted-turn capture failures terminate signed execution", async () => {
+test("complete turn-result bytes are bounded with maximal evidence and a multibyte summary", async () => {
+  const evidenceOverhead = Buffer.byteLength(JSON.stringify({ value: "" }), "utf8");
+  const evidence = { value: "x".repeat(MAX_CONTINUATION_ADAPTER_EVIDENCE_BYTES - evidenceOverhead) };
+  assert.equal(Buffer.byteLength(JSON.stringify(evidence), "utf8"), MAX_CONTINUATION_ADAPTER_EVIDENCE_BYTES);
+  const boundary = { status: "completed", summary: "😀".repeat(2_000), evidence };
+  assert.ok(Buffer.byteLength(JSON.stringify(boundary), "utf8") <= MAX_CONTINUATION_TURN_RESULT_BYTES);
+  const accepted = await runContinuationDriver({
+    maxTurns: 1,
+    store: memoryStore(),
+    runtime: { inspect: async () => snapshot("plan"), synchronize: async () => snapshot("plan"), execute: async () => boundary },
+  });
+  assert.equal(accepted.outcome, "budget_exhausted");
+
+  const oversized = { status: "completed", summary: "ok", evidence: {}, padding: "x".repeat(MAX_CONTINUATION_TURN_RESULT_BYTES) };
   const store = memoryStore();
-  await assert.rejects(
-    runContinuationDriver({
-      maxTurns: 2,
-      store,
-      onTurnAccepted: async () => { throw new Error("attestation aggregate exceeded"); },
-      runtime: {
-        inspect: async () => snapshot("plan"),
-        synchronize: async () => snapshot("plan"),
-        execute: async () => ({ status: "completed", evidence: { value: "accepted" } }),
-      },
-    }),
-    /attestation aggregate exceeded/,
-  );
-  assert.equal(store.events.some((event) => event.type === "turn_failed"), false);
-  assert.equal(store.events.some((event) => event.type === "turn_completed"), false);
-  assert.equal(store.value().turns_started, 1);
-  assert.equal(store.value().active_turn_step, null);
+  await runContinuationDriver({
+    maxTurns: 1,
+    store,
+    runtime: { inspect: async () => snapshot("plan"), synchronize: async () => snapshot("plan"), execute: async () => oversized },
+  });
+  assert.match(store.events.find((event) => event.type === "turn_failed")?.summary, /result must not exceed 74000 bytes/);
+});
+
+test("accepted-turn capture failures measure canonical mutation and no-op before terminating", async (t) => {
+  for (const mutated of [false, true]) await t.test(mutated ? "canonical mutation" : "no-op", async () => {
+    const store = memoryStore();
+    let adapterFinished = false;
+    await assert.rejects(
+      runContinuationDriver({
+        maxTurns: 2,
+        store,
+        onTurnAccepted: async () => { throw new Error("attestation aggregate exceeded"); },
+        runtime: {
+          inspect: async () => envelopeSnapshot("plan"),
+          synchronize: async () => adapterFinished && mutated
+            ? envelopeSnapshot("execute", { evidence: ["plan-gate:canonical"] })
+            : envelopeSnapshot("plan"),
+          execute: async () => { adapterFinished = true; return { status: "completed", evidence: { value: "accepted" } }; },
+        },
+      }),
+      /attestation aggregate exceeded/,
+    );
+    const failed = store.events.find((event) => event.type === "turn_failed");
+    assert.equal(failed.progress.no_progress, !mutated);
+    assert.equal(failed.progress.step_advanced, mutated);
+    assert.equal(store.events.some((event) => event.type === "turn_completed"), false);
+    assert.equal(store.value().turns_started, 1);
+    assert.equal(store.value().active_turn_step, null);
+    assert.equal(store.value().active_turn_phase, null);
+  });
+});
+
+test("turn preflight failure occurs before adapter execution or durable turn start", async () => {
+  const store = memoryStore();
+  let executions = 0;
+  await assert.rejects(runContinuationDriver({
+    maxTurns: 1,
+    store,
+    preflightTurn: async () => { throw new Error("aggregate capacity exhausted"); },
+    runtime: {
+      inspect: async () => snapshot("plan"), synchronize: async () => snapshot("plan"),
+      execute: async () => { executions += 1; return { status: "completed" }; },
+    },
+  }), /aggregate capacity exhausted/);
+  assert.equal(executions, 0);
+  assert.equal(store.value().turns_started, 0);
+  assert.equal(store.events.some((event) => event.type === "turn_started"), false);
 });
 
 test("unsigned adapters retain extension-field compatibility", async () => {
@@ -310,7 +623,10 @@ test("unsigned adapters retain extension-field compatibility", async () => {
     runtime: {
       inspect: async () => snapshot("plan"),
       synchronize: async () => snapshot("plan"),
-      execute: async () => ({ status: "completed", metadata: { extension: true } }),
+      execute: async (request) => {
+        assert.equal(Object.hasOwn(request, "gate_action_envelope"), false, "generic external adapters keep their schema-1.0 request shape");
+        return { status: "completed", metadata: { extension: true } };
+      },
     },
   });
   assert.equal(result.outcome, "budget_exhausted");
@@ -1269,7 +1585,80 @@ test("file continuation store refuses a symlinked state target", (t) => {
   const outside = path.join(root, "outside.json");
   fs.writeFileSync(outside, "{}\n");
   fs.symlinkSync(outside, path.join(root, "continuation-driver", "state.json"));
-  assert.throws(() => store.load(), /must be a regular file/);
+  assert.throws(() => store.load(), /ELOOP|must be a regular file/);
+});
+
+test("file continuation store bounds and identity-checks state, event, and accepted-turn reads", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-store-hardening-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const store = createFileContinuationStore(root);
+  const driverDir = path.join(root, "continuation-driver");
+  const stateFile = path.join(driverDir, "state.json");
+  const eventsFile = path.join(driverDir, "events.jsonl");
+  const acceptedFile = path.join(driverDir, "accepted-turns.jsonl");
+
+  fs.writeFileSync(stateFile, Buffer.alloc(1_048_577));
+  assert.throws(() => store.load(), /state must be a regular file no larger than 1048576 bytes/);
+  fs.rmSync(stateFile);
+  fs.writeFileSync(eventsFile, `${"x".repeat(16_385)}\n`);
+  assert.throws(() => store.load(), /event log line exceeds 16384 bytes/);
+  fs.rmSync(eventsFile);
+  fs.writeFileSync(eventsFile, `${Array.from({ length: 617 }, () => "{}").join("\n")}\n`);
+  assert.throws(() => store.load(), /event log exceeds 616 lines/);
+  fs.rmSync(eventsFile);
+  fs.writeFileSync(acceptedFile, `${"x".repeat(196_609)}\n`);
+  assert.throws(() => store.acceptedTurns(), /accepted-turn log line exceeds 196608 bytes/);
+  fs.rmSync(acceptedFile);
+  fs.writeFileSync(path.join(root, "outside-events"), "{}\n");
+  fs.symlinkSync(path.join(root, "outside-events"), eventsFile);
+  assert.throws(() => store.load(), /ELOOP|changed identity/);
+});
+
+test("file continuation store rejects a state path replaced during descriptor open", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-store-replaced-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const store = createFileContinuationStore(root);
+  const state = {
+    schema_version: "1.0", run_id: "run-251", definition_id: "builder.build", max_turns: 1,
+    adapter_command_identity: null, status: "active", turns_started: 0, pending_barrier: null,
+    updated_at: "2026-07-12T12:00:00.000Z",
+  };
+  store.save(state);
+  const stateFile = path.join(root, "continuation-driver", "state.json");
+  const replacement = path.join(root, "replacement.json");
+  fs.writeFileSync(replacement, JSON.stringify(state));
+  const originalOpen = fs.openSync;
+  let swapped = false;
+  fs.openSync = (file, flags, mode) => {
+    const fd = originalOpen(file, flags, mode);
+    if (!swapped && path.resolve(String(file)) === path.resolve(stateFile)) {
+      fs.renameSync(replacement, stateFile);
+      swapped = true;
+    }
+    return fd;
+  };
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => store.load(), /changed identity while reading/);
+    assert.equal(swapped, true);
+  } finally {
+    fs.openSync = originalOpen;
+    syncBuiltinESMExports();
+  }
+});
+
+test("attestation turns fail closed when accepted events lack durable request/result coverage", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "continuation-store-coverage-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const store = createFileContinuationStore(root);
+  store.save({
+    schema_version: "1.0", run_id: "run-251", definition_id: "builder.build", max_turns: 1,
+    adapter_command_identity: null, status: "active", turns_started: 1, pending_barrier: null,
+    updated_at: "2026-07-12T12:00:00.000Z",
+  });
+  store.append({ schema_version: "1.0", type: "turn_started", run_id: "run-251", definition_id: "builder.build", current_step: "plan", turns_started: 1, at: "2026-07-12T12:00:00.000Z" });
+  store.append({ schema_version: "1.0", type: "turn_completed", run_id: "run-251", definition_id: "builder.build", current_step: "plan", turns_started: 1, at: "2026-07-12T12:00:01.000Z" });
+  assert.throws(() => store.acceptedTurns(), /attestation coverage is incomplete/);
 });
 
 test("file continuation store detects deleted and rolled-back mission state", (t) => {

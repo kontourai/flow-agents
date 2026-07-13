@@ -93,6 +93,7 @@ export interface BuilderFlowRunResult {
   attachedEvidence: FlowEvidenceEntry[];
   outcomes: GateOutcome[];
   manifest: JsonObject;
+  config: JsonObject;
   freshnessTransitions: JsonObject[];
 }
 
@@ -221,6 +222,7 @@ export async function evaluateBuilderFlowRun(input: EvaluateBuilderBuildRunInput
     attachedEvidence,
     outcomes: evaluated.outcomes,
     manifest: evaluated.manifest,
+    config: evaluated.config,
     freshnessTransitions: evaluated.freshness_transitions,
   };
 }
@@ -302,6 +304,7 @@ function resultFromRun(run: Awaited<ReturnType<typeof loadRun>>, runId: string):
     attachedEvidence: [],
     outcomes: [],
     manifest: run.manifest,
+    config: run.config,
     freshnessTransitions: [],
   };
 }

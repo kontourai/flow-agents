@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { validateDefinition } from "@kontourai/flow";
 import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
-import { driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
+import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
 import { inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
@@ -86,12 +86,14 @@ async function drive(sessionDir: string, argv: string[], json: boolean): Promise
   assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
   const adapterCommand = loadContinuationAdapterCommand(adapterCommandFile);
   let evidenceSigner: EvidenceSigner | null = null;
-  const observedAdapterTurns: Array<Record<string, unknown>> = [];
+  let observedAdapterTurns: Array<Record<string, unknown>> = [];
   const result = await withContinuationDriverLock(sessionDir, async (lock) => {
     assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
     evidenceSigner = evidenceSigningKeyFile ? consumeEvidenceSigningKey(evidenceSigningKeyFile) : null;
-    return driveBuilderFlowSession({
+    const continuationStore = createFileContinuationStore(sessionDir);
+    const outcome = await driveBuilderFlowSession({
       sessionDir,
+      store: continuationStore,
       maxTurns,
       adapterCommandIdentity: adapterCommand.identity,
       authorizeTurn: async () => { assertOrdinaryMatchingAssignmentActor(sessionDir, slug); },
@@ -119,18 +121,13 @@ async function drive(sessionDir: string, argv: string[], json: boolean): Promise
         continuationTurnSecret: context?.continuationTurnSecret,
         continuationRunId: context?.continuationRunId,
       }),
-      ...(evidenceSigningKeyFile ? { onTurnAccepted: async (request, adapterResult) => {
-        const next = [...observedAdapterTurns, {
-          request: structuredClone(request),
-          result: structuredClone(adapterResult),
-        }];
-        if (Buffer.byteLength(JSON.stringify(next), "utf8") > 1_048_576) {
-          throw new Error("continuation accepted-turn evidence must not exceed 1048576 aggregate bytes");
-        }
-        observedAdapterTurns.push(next.at(-1)!);
+      ...(evidenceSigningKeyFile ? { preflightTurn: async (request) => {
+        assertAcceptedTurnEvidenceCapacity(attestationTurns(continuationStore.acceptedTurns()), request);
       } } : {}),
       waitForBarrier: async (barrier) => waitForContinuationBarrier(barrier, { maxWaitMs: barrierWaitMs, pollMs: barrierPollMs }),
     });
+    if (evidenceSigningKeyFile) observedAdapterTurns = attestationTurns(continuationStore.acceptedTurns());
+    return outcome;
   });
   const output = evidenceSigner
     ? { ...result, evidence_attestation: signDriveEvidence(evidenceSigner, adapterCommand.identity, maxTurns, result, observedAdapterTurns) }
@@ -138,6 +135,23 @@ async function drive(sessionDir: string, argv: string[], json: boolean): Promise
   if (json) console.log(JSON.stringify(output));
   else console.log(`Continuation driver ${result.outcome} after ${result.turns_started} turn(s); canonical Flow is ${result.snapshot.status} at ${result.snapshot.current_step}.`);
   return 0;
+}
+
+function attestationTurns(turns: Array<{ request: Record<string, unknown>; result: Record<string, unknown> }>): Array<Record<string, unknown>> {
+  const covered = turns.map((turn) => ({ request: structuredClone(turn.request), result: structuredClone(turn.result) }));
+  if (Buffer.byteLength(JSON.stringify(covered), "utf8") > 1_048_576) {
+    throw new Error("continuation accepted-turn evidence must not exceed 1048576 aggregate bytes");
+  }
+  return covered;
+}
+
+export function assertAcceptedTurnEvidenceCapacity(observedTurns: Array<Record<string, unknown>>, request: Record<string, unknown>): void {
+  const base = [...observedTurns, { request: structuredClone(request), result: null }];
+  const bytesWithPlaceholder = Buffer.byteLength(JSON.stringify(base), "utf8");
+  const exactReservedBytes = bytesWithPlaceholder - Buffer.byteLength("null", "utf8") + MAX_CONTINUATION_TURN_RESULT_BYTES;
+  if (exactReservedBytes > 1_048_576) {
+    throw new Error("continuation accepted-turn evidence lacks capacity for another bounded result");
+  }
 }
 
 type EvidenceSigner = { privateKey: KeyObject; publicKeySpkiB64: string };

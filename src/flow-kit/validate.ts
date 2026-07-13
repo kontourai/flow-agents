@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import * as path from "node:path";
 import { readJson } from "../lib/fs.js";
+import { parseKitFlowStepActions, workflowTriggerIdentifier } from "./action-metadata.js";
+import { validateActionRepositoryMetadata } from "./action-repository-validation.js";
+export { isObservableBuilderArtifactRef, isSafeBuilderArtifactRef, parseKitFlowStepActions } from "./action-metadata.js";
+export type { KitFlowStepActionEntry, KitFlowStepArtifactBinding, KitFlowStepExpectationBinding } from "./action-metadata.js";
 
 // Extension-only asset classes: validated by Flow Agents. Flows are validated by @kontourai/flow.
 const EXTENSION_ASSET_CLASSES = ["skills", "docs", "adapters", "evals", "assets"] as const;
@@ -44,17 +48,6 @@ export interface KitHookInfluenceExpectationEntry {
   must_include_actions: string[];
 }
 
-export interface KitFlowStepActionEntry {
-  flow_id: string;
-  step_id: string;
-  skills: string[];
-  operations: string[];
-  /** Gate expectations produced by this action's explicit operation(s). */
-  expectation_ids?: string[];
-  /** Durable artifacts produced by an operation-only action. */
-  artifacts: string[];
-}
-
 export type KitSkillRole = "entrypoint" | "profile" | "step" | "shared-primitive" | "extension";
 
 export interface KitSkillRoleEntry {
@@ -64,74 +57,6 @@ export interface KitSkillRoleEntry {
   step_ids: string[];
   artifacts: string[];
   expectation_ids: string[];
-}
-
-const MAX_FLOW_DEFINITION_BYTES = 1024 * 1024;
-
-function sameFileIdentity(left: fs.Stats, right: fs.Stats): boolean {
-  return left.dev === right.dev && left.ino === right.ino;
-}
-
-function lstatSafePath(root: string, relativePath: string): { file?: string; stat?: fs.Stats; error?: string } {
-  const parts = relativePath.split(path.sep);
-  let current = root;
-  for (const [index, part] of parts.entries()) {
-    if (!part || part === "." || part === "..") return { error: "path must stay inside the kit directory" };
-    current = path.join(current, part);
-    const stat = fs.lstatSync(current);
-    if (stat.isSymbolicLink()) return { error: "path must not traverse a symbolic link" };
-    if (index < parts.length - 1 && !stat.isDirectory()) return { error: "path component must be a directory" };
-    if (index === parts.length - 1) return { file: current, stat };
-  }
-  return { error: "path must reference a regular file" };
-}
-
-function readSafeFlowDefinition(kitDir: string, relativePath: string): { definition?: Record<string, unknown>; error?: string } {
-  const root = path.resolve(kitDir);
-  if (path.isAbsolute(relativePath)) return { error: "path must be relative" };
-  const lexicalFile = path.resolve(root, relativePath);
-  if (lexicalFile === root || !lexicalFile.startsWith(`${root}${path.sep}`)) return { error: "path must stay inside the kit directory" };
-  let rootDescriptor: number | undefined;
-  let descriptor: number | undefined;
-  try {
-    const realRoot = fs.realpathSync.native(root);
-    rootDescriptor = fs.openSync(realRoot, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
-    const rootIdentity = fs.fstatSync(rootDescriptor);
-    if (!rootIdentity.isDirectory() || !sameFileIdentity(rootIdentity, fs.lstatSync(realRoot))) return { error: "kit directory identity changed while opening flow definition" };
-
-    const initialPath = lstatSafePath(realRoot, relativePath);
-    if (!initialPath.file || !initialPath.stat) return { error: initialPath.error };
-    if (!initialPath.stat.isFile()) return { error: "path must reference a regular file" };
-    if (initialPath.stat.size > MAX_FLOW_DEFINITION_BYTES) return { error: `file exceeds ${MAX_FLOW_DEFINITION_BYTES} bytes` };
-
-    // O_NOFOLLOW protects the terminal component. Identity checks before and after
-    // opening make a race on any intermediate component fail closed on macOS/Node,
-    // where openat-style traversal from a directory descriptor is not exposed.
-    descriptor = fs.openSync(initialPath.file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-    const stat = fs.fstatSync(descriptor);
-    if (!stat.isFile()) return { error: "path must reference a regular file" };
-    if (!sameFileIdentity(initialPath.stat, stat)) return { error: "flow definition identity changed while opening" };
-    if (stat.size > MAX_FLOW_DEFINITION_BYTES) return { error: `file exceeds ${MAX_FLOW_DEFINITION_BYTES} bytes` };
-    const verifiedPath = lstatSafePath(realRoot, relativePath);
-    if (!verifiedPath.stat || !sameFileIdentity(stat, verifiedPath.stat)) return { error: "flow definition identity changed while opening" };
-
-    const buffer = Buffer.alloc(stat.size);
-    let offset = 0;
-    while (offset < buffer.length) {
-      const read = fs.readSync(descriptor, buffer, offset, buffer.length - offset, offset);
-      if (read === 0) break;
-      offset += read;
-    }
-    const finalStat = fs.fstatSync(descriptor);
-    if (offset !== stat.size || finalStat.size !== stat.size || !sameFileIdentity(stat, finalStat)) return { error: "file changed while being read" };
-    return { definition: JSON.parse(buffer.toString("utf8")) as Record<string, unknown> };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ELOOP") return { error: "path must not reference a symbolic link" };
-    return { error: `path is not readable: ${(error as Error).message}` };
-  } finally {
-    if (descriptor !== undefined) fs.closeSync(descriptor);
-    if (rootDescriptor !== undefined) fs.closeSync(rootDescriptor);
-  }
 }
 
 /**
@@ -191,12 +116,6 @@ export function parseKitDependencies(manifest: Record<string, unknown>, manifest
 
 function nonEmptyStringList(value: unknown): value is string[] {
   return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === "string" && item.trim().length > 0);
-}
-
-const WORKFLOW_TRIGGER_IDENTIFIER_RE = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/;
-
-function workflowTriggerIdentifier(value: unknown): value is string {
-  return typeof value === "string" && WORKFLOW_TRIGGER_IDENTIFIER_RE.test(value);
 }
 
 function optionalWorkflowTriggerIdentifier(value: unknown): value is string | undefined {
@@ -342,76 +261,6 @@ export function parseKitHookInfluenceExpectations(manifest: Record<string, unkno
       ...(typeof record.event === "string" ? { event: record.event } : {}),
       must_include_guidance: record.must_include_guidance,
       must_include_actions: record.must_include_actions,
-    });
-  });
-  return { entries, errors };
-}
-
-export function parseKitFlowStepActions(manifest: Record<string, unknown>, manifestPath: string): { entries: KitFlowStepActionEntry[]; errors: string[] } {
-  const entries: KitFlowStepActionEntry[] = [];
-  const errors: string[] = [];
-  const raw = manifest.flow_step_actions;
-  if (raw === undefined) return { entries, errors };
-  if (!Array.isArray(raw)) {
-    errors.push(`${manifestPath}: .flow_step_actions must be a list`);
-    return { entries, errors };
-  }
-  const seen = new Set<string>();
-  raw.forEach((entry, index) => {
-    if (typeof entry !== "object" || entry === null) {
-      errors.push(`${manifestPath}: flow_step_actions[${index}] must be an object`);
-      return;
-    }
-    const record = entry as Record<string, unknown>;
-    if (!workflowTriggerIdentifier(record.flow_id)) {
-      errors.push(`${manifestPath}: flow_step_actions[${index}].flow_id must be a Flow identifier`);
-      return;
-    }
-    if (!workflowTriggerIdentifier(record.step_id)) {
-      errors.push(`${manifestPath}: flow_step_actions[${index}].step_id must be a step identifier`);
-      return;
-    }
-    const skills = record.skills;
-    const operations = record.operations ?? [];
-    const expectationIds = record.expectation_ids;
-    const artifacts = record.artifacts ?? [];
-    if (!Array.isArray(skills) || !skills.every(workflowTriggerIdentifier)) {
-      errors.push(`${manifestPath}: flow_step_actions[${index}].skills must be an identifier list`);
-      return;
-    }
-    if (new Set(skills).size !== skills.length) {
-      errors.push(`${manifestPath}: flow_step_actions[${index}].skills must not contain duplicates`);
-      return;
-    }
-    if (!Array.isArray(operations) || !operations.every(workflowTriggerIdentifier)) {
-      errors.push(`${manifestPath}: flow_step_actions[${index}].operations must be an identifier list when present`);
-      return;
-    }
-    if (new Set(operations).size !== operations.length) {
-      errors.push(`${manifestPath}: flow_step_actions[${index}].operations must not contain duplicates`);
-      return;
-    }
-    if (expectationIds !== undefined && (!Array.isArray(expectationIds) || !expectationIds.every(workflowTriggerIdentifier) || new Set(expectationIds).size !== expectationIds.length)) {
-      errors.push(`${manifestPath}: flow_step_actions[${index}].expectation_ids must be a unique identifier list when present`);
-      return;
-    }
-    if (!Array.isArray(artifacts) || !artifacts.every((artifact) => typeof artifact === "string" && artifact.trim().length > 0) || new Set(artifacts).size !== artifacts.length) {
-      errors.push(`${manifestPath}: flow_step_actions[${index}].artifacts must be a unique non-empty string list when present`);
-      return;
-    }
-    const key = `${record.flow_id}/${record.step_id}`;
-    if (seen.has(key)) {
-      errors.push(`${manifestPath}: flow_step_actions[${index}] duplicates '${key}'`);
-      return;
-    }
-    seen.add(key);
-    entries.push({
-      flow_id: record.flow_id,
-      step_id: record.step_id,
-      skills: skills as string[],
-      operations: operations as string[],
-      artifacts: artifacts as string[],
-      ...(Array.isArray(expectationIds) ? { expectation_ids: expectationIds as string[] } : {}),
     });
   });
   return { entries, errors };
@@ -654,15 +503,15 @@ export async function validateKitRepository(kitDir: string): Promise<string[]> {
     return errors;
   }
 
-  // Delegate core container validation (schema_version, id, name, flows including file
-  // existence) to @kontourai/flow — the container contract lives once, in Flow.
-  // This enforces the degradation invariant: a Flow Agents Kit must remain a valid
-  // core Flow Kit container when extension fields are stripped.
-  const coreErrors = await delegateCoreContainerValidation(kitDir, manifest);
-  for (const err of coreErrors) errors.push(err);
+  errors.push(...await delegateCoreContainerValidation(kitDir, manifest));
+  errors.push(...validateExtensionAssets(kitDir, manifestPath, manifest));
+  errors.push(...validateAgentMetadata(kitDir, manifestPath, manifest));
+  if (manifest.first_party !== undefined && typeof manifest.first_party !== "boolean") errors.push(`${manifestPath}: .first_party must be a boolean when present`);
+  return errors;
+}
 
-  // Flow Agents extension validation: skills, docs, adapters, evals, assets.
-  // Flows are validated above by @kontourai/flow; only extension classes are checked here.
+function validateExtensionAssets(kitDir: string, manifestPath: string, manifest: Record<string, unknown>): string[] {
+  const errors: string[] = [];
   for (const section of EXTENSION_ASSET_CLASSES) {
     const entries = manifest[section];
     if (entries === undefined) continue;
@@ -703,9 +552,11 @@ export async function validateKitRepository(kitDir: string): Promise<string[]> {
     });
   }
 
-  // Flow Agents metadata: cross-kit dependency declarations (extension-layer;
-  // see docs/adr/0019-kit-dependency-ownership.md). Shape-only here — presence is
-  // checked separately (non-blocking at install, hard error at activation).
+  return errors;
+}
+
+function validateAgentMetadata(kitDir: string, manifestPath: string, manifest: Record<string, unknown>): string[] {
+  const errors: string[] = [];
   const depResult = parseKitDependencies(manifest, manifestPath);
   for (const err of depResult.errors) errors.push(err);
   const workflowTriggerResult = parseKitWorkflowTriggers(manifest, manifestPath);
@@ -716,167 +567,9 @@ export async function validateKitRepository(kitDir: string): Promise<string[]> {
   for (const err of flowStepActionResult.errors) errors.push(err);
   const skillRoleResult = parseKitSkillRoles(manifest, manifestPath);
   for (const err of skillRoleResult.errors) errors.push(err);
-  if (manifest.skill_roles !== undefined && skillRoleResult.errors.length === 0) {
-    const declaredSkillIds = new Set(
-      Array.isArray(manifest.skills)
-        ? manifest.skills.flatMap((entry) => typeof entry === "object" && entry !== null && typeof (entry as Record<string, unknown>).id === "string" ? [(entry as Record<string, unknown>).id as string] : [])
-        : []
-    );
-    const roleSkillIds = new Set(skillRoleResult.entries.map((entry) => entry.skill_id));
-    for (const id of declaredSkillIds) if (!roleSkillIds.has(id)) errors.push(`${manifestPath}: skill_roles is missing declared skill '${id}'`);
-    for (const id of roleSkillIds) if (!declaredSkillIds.has(id)) errors.push(`${manifestPath}: skill_roles references undeclared skill '${id}'`);
-
-    type FlowExpectation = { id: string; exportKeys: Set<string> };
-    type FlowMetadata = {
-      steps: Set<string>;
-      expectationsByStep: Map<string, Map<string, FlowExpectation>>;
-      usesFlowByStep: Map<string, string>;
-      exports: Set<string>;
-    };
-    type EffectiveFlowStep = { sourceFlowId: string; stepId: string; expectations: Map<string, FlowExpectation>; flowIds: Set<string> };
-    const flows = new Map<string, FlowMetadata>();
-    if (Array.isArray(manifest.flows)) {
-      for (const entry of manifest.flows) {
-        if (typeof entry !== "object" || entry === null) continue;
-        const flow = entry as Record<string, unknown>;
-        if (typeof flow.id !== "string" || typeof flow.path !== "string") continue;
-        const safeDefinition = readSafeFlowDefinition(kitDir, flow.path);
-        if (!safeDefinition.definition) {
-          errors.push(`${manifestPath}: flows '${flow.id}' ${safeDefinition.error}`);
-          continue;
-        }
-        try {
-          const definition = safeDefinition.definition;
-          const steps = new Set(Array.isArray(definition.steps) ? definition.steps.flatMap((step) => typeof step === "object" && step !== null && typeof (step as Record<string, unknown>).id === "string" ? [(step as Record<string, unknown>).id as string] : []) : []);
-          const usesFlowByStep = new Map<string, string>();
-          if (Array.isArray(definition.steps)) {
-            for (const step of definition.steps) {
-              if (typeof step !== "object" || step === null) continue;
-              const stepRecord = step as Record<string, unknown>;
-              if (typeof stepRecord.id === "string" && typeof stepRecord.uses_flow === "string") usesFlowByStep.set(stepRecord.id, stepRecord.uses_flow);
-            }
-          }
-          const expectationsByStep = new Map<string, Map<string, FlowExpectation>>();
-          if (typeof definition.gates === "object" && definition.gates !== null) {
-            for (const gate of Object.values(definition.gates as Record<string, unknown>)) {
-              if (typeof gate !== "object" || gate === null) continue;
-              const gateRecord = gate as Record<string, unknown>;
-              if (typeof gateRecord.step !== "string" || !Array.isArray(gateRecord.expects)) continue;
-              const expectations = expectationsByStep.get(gateRecord.step) ?? new Map<string, FlowExpectation>();
-              for (const expectation of gateRecord.expects) {
-                if (typeof expectation !== "object" || expectation === null) continue;
-                const expectationRecord = expectation as Record<string, unknown>;
-                if (typeof expectationRecord.id !== "string") continue;
-                const exportKeys = new Set([expectationRecord.id]);
-                const claimType = (expectationRecord.bundle_claim as Record<string, unknown> | undefined)?.claimType;
-                if (typeof claimType === "string") exportKeys.add(claimType);
-                expectations.set(expectationRecord.id, { id: expectationRecord.id, exportKeys });
-              }
-              expectationsByStep.set(gateRecord.step, expectations);
-            }
-          }
-          flows.set(flow.id, {
-            steps,
-            expectationsByStep,
-            usesFlowByStep,
-            exports: new Set(Array.isArray(definition.exports) ? definition.exports.filter((entry): entry is string => typeof entry === "string" && entry.length > 0) : []),
-          });
-        } catch {
-          // Core Flow validation reports missing or malformed definitions.
-        }
-      }
-    }
-    const resolveEffectiveFlowStep = (flowId: string, stepId: string, seen = new Set<string>()): EffectiveFlowStep | undefined => {
-      const cycleKey = `${flowId}\u0000${stepId}`;
-      if (seen.has(cycleKey)) return undefined;
-      seen.add(cycleKey);
-      const flow = flows.get(flowId);
-      if (!flow) return undefined;
-      const direct = flow.expectationsByStep.get(stepId);
-      if (direct) return { sourceFlowId: flowId, stepId, expectations: direct, flowIds: new Set([flowId]) };
-      const childFlowId = flow.usesFlowByStep.get(stepId);
-      if (!childFlowId) return { sourceFlowId: flowId, stepId, expectations: new Map(), flowIds: new Set([flowId]) };
-      const child = resolveEffectiveFlowStep(childFlowId, stepId, seen);
-      const childFlow = flows.get(childFlowId);
-      if (!child || !childFlow || [...child.expectations.values()].some((expectation) => ![...expectation.exportKeys].some((key) => childFlow.exports.has(key)))) return undefined;
-      child.flowIds.add(flowId);
-      return child;
-    };
-
-    for (const row of skillRoleResult.entries) {
-      if (!row.flow_id) continue;
-      const flow = flows.get(row.flow_id);
-      if (!flow) {
-        errors.push(`${manifestPath}: skill_roles '${row.skill_id}' references unknown flow '${row.flow_id}'`);
-        continue;
-      }
-      for (const stepId of row.step_ids) if (!flow.steps.has(stepId)) errors.push(`${manifestPath}: skill_roles '${row.skill_id}' references unknown step '${row.flow_id}/${stepId}'`);
-      const allowedExpectations = new Set(row.step_ids.flatMap((stepId) => [...(resolveEffectiveFlowStep(row.flow_id!, stepId)?.expectations.keys() ?? [])]));
-      for (const expectationId of row.expectation_ids) if (!allowedExpectations.has(expectationId)) errors.push(`${manifestPath}: skill_roles '${row.skill_id}' expectation '${expectationId}' is not owned by its bound step(s)`);
-    }
-    const roleByShortId = new Map(skillRoleResult.entries.map((entry) => [entry.skill_id.replace(`${String(manifest.id)}.`, ""), entry]));
-    const producerOwners = new Map<string, string[]>();
-    for (const row of skillRoleResult.entries) {
-      if (row.role !== "step" || !row.flow_id) continue;
-      for (const stepId of row.step_ids) {
-        const effectiveStep = resolveEffectiveFlowStep(row.flow_id, stepId);
-        if (!effectiveStep) continue;
-        for (const expectationId of row.expectation_ids) {
-          if (!effectiveStep.expectations.has(expectationId)) continue;
-          const key = `${effectiveStep.sourceFlowId}\u0000${effectiveStep.stepId}\u0000${expectationId}`;
-          producerOwners.set(key, [...(producerOwners.get(key) ?? []), `skill:${row.skill_id}`]);
-        }
-      }
-    }
-    for (const action of flowStepActionResult.entries) {
-      const containingFlow = flows.get(action.flow_id);
-      if (!containingFlow || !containingFlow.steps.has(action.step_id)) {
-        errors.push(`${manifestPath}: flow_step_actions '${action.flow_id}/${action.step_id}' references an unknown flow step`);
-        continue;
-      }
-      const effectiveStep = resolveEffectiveFlowStep(action.flow_id, action.step_id);
-      if (!effectiveStep) {
-        errors.push(`${manifestPath}: flow_step_actions '${action.flow_id}/${action.step_id}' cannot resolve its composed Flow step`);
-        continue;
-      }
-      const expectedAtStep = effectiveStep.expectations;
-      for (const expectationId of action.expectation_ids ?? []) {
-        if (!expectedAtStep.has(expectationId)) errors.push(`${manifestPath}: flow_step_actions '${action.flow_id}/${action.step_id}' operation expectation '${expectationId}' is not owned by its resolved Flow step`);
-      }
-      if (action.skills.length === 0 && action.operations.length > 0 && expectedAtStep.size > 0 && !(action.expectation_ids?.length)) {
-        errors.push(`${manifestPath}: flow_step_actions '${action.flow_id}/${action.step_id}' operation-only action must explicitly declare expectation_ids`);
-      }
-      const actionRows: KitSkillRoleEntry[] = [];
-      for (const skill of action.skills) {
-        const row = roleByShortId.get(skill);
-        if (!row || row.role !== "step" || !row.flow_id || !effectiveStep.flowIds.has(row.flow_id) || !row.step_ids.includes(action.step_id)) {
-          errors.push(`${manifestPath}: flow_step_actions '${action.flow_id}/${action.step_id}' skill '${skill}' must match one step-role binding`);
-        } else {
-          actionRows.push(row);
-        }
-      }
-      for (const expectationId of expectedAtStep.keys()) {
-        const key = `${effectiveStep.sourceFlowId}\u0000${effectiveStep.stepId}\u0000${expectationId}`;
-        const owners = producerOwners.get(key) ?? [];
-        if (action.operations.length > 0 && action.expectation_ids?.includes(expectationId)) owners.push(`operation:${action.flow_id}/${action.step_id}`);
-        producerOwners.set(key, owners);
-      }
-    }
-    for (const [flowId, flow] of flows) {
-      for (const [stepId, expectations] of flow.expectationsByStep) {
-        for (const expectationId of expectations.keys()) {
-          const owners = producerOwners.get(`${flowId}\u0000${stepId}\u0000${expectationId}`) ?? [];
-          if (owners.length !== 1) {
-            errors.push(`${manifestPath}: flow expectation '${flowId}/${stepId}/${expectationId}' must have exactly one producer owner; found ${owners.length}`);
-          }
-        }
-      }
-    }
+  if ((manifest.skill_roles !== undefined || manifest.flow_step_actions !== undefined) && skillRoleResult.errors.length === 0) {
+    errors.push(...validateActionRepositoryMetadata({ kitDir, manifestPath, manifest, actions: flowStepActionResult.entries, skillRoles: skillRoleResult.entries }));
   }
-  if (manifest.first_party !== undefined && typeof manifest.first_party !== "boolean") {
-    errors.push(`${manifestPath}: .first_party must be a boolean when present`);
-  }
-
   return errors;
 }
 

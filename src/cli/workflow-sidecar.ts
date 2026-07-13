@@ -14,6 +14,7 @@ import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { runObservedCommand } from "../lib/observed-command.js";
 import { captureReviewWorkspaceSnapshot, startBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
+import { WORKFLOW_CRITIQUE_STATUSES } from "./public-contracts.js";
 // #291 Wave 1 Task 1.1 exports: ensure-session's ownership guard reuses the EXACT same
 // assignment ⋈ liveness join / claim / supersede logic #290 already ships for the
 // `assignment-provider` CLI, rather than reimplementing a second, parallel join (static ESM
@@ -2778,7 +2779,7 @@ function completePassingCriteria(existing: AnyObj[], raw: string[], observedComm
   });
 }
 
-const critiqueStatuses = new Set(["pass", "fail", "not_verified"]);
+const critiqueStatuses = new Set<string>(WORKFLOW_CRITIQUE_STATUSES);
 const safeCritiqueId = /^[a-z][a-z0-9_-]*$/;
 
 function normalizeCritiqueLanes(raw: string[]): AnyObj[] {
