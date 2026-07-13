@@ -132,6 +132,27 @@ JSON result on stdout:
 { "status": "completed", "summary": "Turn ended; synchronize canonical evidence." }
 ```
 
+A completed result may also include a generic JSON `evidence` object of at most 65,536 bytes. Flow
+does not interpret its domain semantics. Trust-sensitive callers can ask the long-lived driver to
+attest the exact request/result sequence it observed by providing a one-time Ed25519 private key:
+
+```bash
+flow_agents workflow drive \
+  --session-dir .kontourai/flow-agents/example \
+  --adapter-command-file .kontourai/flow-agents/runtime-adapter.json \
+  --evidence-signing-key-file /absolute/protected/one-time-ed25519-private.pem \
+  --max-turns 6 \
+  --json
+```
+
+The key file must be an absolute canonical regular file. The driver reads it no-follow and unlinks it
+before any adapter starts, retains the key only in driver memory, and adds an
+`evidence_attestation` to the final JSON outcome. That attestation carries the public key, a base64
+payload containing the canonical outcome and ordered adapter requests/results, and an Ed25519
+signature over the exact payload bytes. Consumers must compare the public key with the key they
+pinned before launch, verify the signature, and then validate any evidence-specific schema. Without
+this optional flag, the released outcome shape and behavior are unchanged.
+
 An adapter may instead park on a process or deadline. A pending barrier is persisted and does not
 consume another turn when `workflow drive` is invoked again:
 

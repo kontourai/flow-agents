@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { createHash, generateKeyPairSync, sign, verify } from "node:crypto";
 import { spawnSync } from "node:child_process";
 
 import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, runDir } from "@kontourai/flow";
@@ -554,6 +554,91 @@ test("public workflow evidence accepts only live signed turn authority after ord
   replayEnv.FLOW_AGENTS_CONTINUATION_TURN_SECRET = "A".repeat(43);
   const forged = spawnSync(process.execPath, [path.resolve(import.meta.dirname, "../../build/src/cli.js"), "workflow", "evidence", "--session-dir", session.sessionDir, "--expectation", "implementation-plan", "--status", "pass", "--summary", "forged turn capability", "--evidence-ref-json", JSON.stringify({ kind: "artifact", file: "adapter.mjs", summary: "forgery fixture" })], { cwd: session.projectRoot, encoding: "utf8", env: replayEnv });
   assert.notEqual(forged.status, 0, "fake nonce and digest without a signed active turn fail ownership");
+});
+
+test("public workflow drive signs adapter evidence with a consumed one-time key", async () => {
+  const session = makeSession("continuation-driver-signed-evidence");
+  claimAmbientSessionAssignment(session);
+  fs.writeFileSync(path.join(session.projectRoot, "AGENTS.md"), "# Test Repo\n");
+  fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--deliver.md`), "# Continuation\n\nstatus: executing\ntype: deliver\n");
+  fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--pull-work.md`), "# Pull Work\n\nSelected continuation fixture.\n");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+
+  const adapter = path.join(session.projectRoot, "signed-evidence-adapter.mjs");
+  const commandFile = path.join(session.projectRoot, "signed-evidence-adapter-command.json");
+  const keyFile = path.join(session.projectRoot, ".continuation-evidence-key.pem");
+  const keyConsumedMarker = path.join(session.projectRoot, "key-consumed.json");
+  const observedRequestsFile = path.join(session.projectRoot, "observed-adapter-requests.jsonl");
+  const keys = generateKeyPairSync("ed25519");
+  fs.writeFileSync(keyFile, keys.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
+  fs.writeFileSync(adapter, `
+    import fs from "node:fs";
+    let input = "";
+    for await (const chunk of process.stdin) input += chunk;
+    const request = JSON.parse(input);
+    fs.appendFileSync(${JSON.stringify(observedRequestsFile)}, JSON.stringify(request) + "\\n");
+    fs.writeFileSync(${JSON.stringify(keyConsumedMarker)}, JSON.stringify({ key_exists: fs.existsSync(${JSON.stringify(keyFile)}) }));
+    process.stdout.write(JSON.stringify({
+      status: "completed",
+      summary: "signed fixture",
+      evidence: { iteration: request.iteration, transcript_sha256: "a".repeat(64), usage: { input_tokens: 10, output_tokens: 2 } },
+    }));
+  `);
+  writeJson(commandFile, { argv: [process.execPath, adapter] });
+
+  await assert.rejects(
+    workflowMain([
+      "drive", "--session-dir", session.sessionDir,
+      "--adapter-command-file", commandFile,
+      "--evidence-signing-key-file", keyFile,
+      "--max-turns", "0",
+      "--json",
+    ]),
+    /max-turns must be an integer/,
+  );
+  assert.equal(fs.existsSync(keyFile), true, "preflight failure preserves the unused one-time key");
+
+  const output = [];
+  const originalLog = console.log;
+  console.log = (...args) => output.push(args.join(" "));
+  try {
+    const rc = await workflowMain([
+      "drive",
+      "--session-dir", session.sessionDir,
+      "--adapter-command-file", commandFile,
+      "--evidence-signing-key-file", keyFile,
+      "--max-turns", "10",
+      "--turn-timeout-ms", "5000",
+      "--barrier-wait-ms", "0",
+      "--json",
+    ]);
+    assert.equal(rc, 0);
+  } finally {
+    console.log = originalLog;
+  }
+
+  assert.equal(fs.existsSync(keyFile), false);
+  assert.deepEqual(readJson(keyConsumedMarker), { key_exists: false });
+  const result = JSON.parse(output.at(-1));
+  assert.equal(result.outcome, "budget_exhausted");
+  const attestation = result.evidence_attestation;
+  assert.equal(attestation.schema, "kontour.flow-agents.continuation_evidence_attestation");
+  const expectedPublicKey = keys.publicKey.export({ type: "spki", format: "der" }).toString("base64");
+  assert.equal(attestation.public_key_spki_b64, expectedPublicKey);
+  const payloadBytes = Buffer.from(attestation.payload_b64, "base64");
+  assert.equal(verify(null, payloadBytes, keys.publicKey, Buffer.from(attestation.signature_b64, "base64")), true);
+  const payload = JSON.parse(payloadBytes);
+  assert.equal(payload.schema, "kontour.flow-agents.continuation_evidence");
+  assert.equal(payload.outcome.outcome, "budget_exhausted");
+  assert.equal(payload.adapter_turns.length, 10);
+  assert.deepEqual(payload.adapter_turns.map((turn) => turn.request.iteration), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  const observedRequests = fs.readFileSync(observedRequestsFile, "utf8").trim().split("\n").map(JSON.parse);
+  assert.deepEqual(payload.adapter_turns.map((turn) => turn.request), observedRequests);
+  assert.equal(payload.adapter_turns[0].request.schema_version, "1.0");
+  assert.equal(payload.adapter_turns[0].request.next_action.status, "continue");
+  assert.deepEqual(payload.adapter_turns[0].result.evidence.usage, { input_tokens: 10, output_tokens: 2 });
+  const tampered = Buffer.from(JSON.stringify({ ...payload, max_turns: 2 }));
+  assert.equal(verify(null, tampered, keys.publicKey, Buffer.from(attestation.signature_b64, "base64")), false);
 });
 
 test("public workflow drive rejects a non-owner before adapter execution", async () => {

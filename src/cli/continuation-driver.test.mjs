@@ -261,6 +261,63 @@ test("adapter completion cannot declare the workflow done while canonical Flow r
   assert.equal(result.snapshot.status, "active");
 });
 
+test("adapter evidence is bounded before the driver accepts the turn", async () => {
+  const store = memoryStore();
+  let acceptedTurns = 0;
+  const result = await runContinuationDriver({
+    maxTurns: 1,
+    store,
+    onTurnAccepted: async () => { acceptedTurns += 1; },
+    runtime: {
+      inspect: async () => snapshot("plan"),
+      synchronize: async () => snapshot("plan"),
+      execute: async () => ({ status: "completed", evidence: { value: "x".repeat(65_537) } }),
+    },
+  });
+
+  assert.equal(result.outcome, "budget_exhausted");
+  assert.match(store.events.find((event) => event.type === "turn_failed")?.summary, /must not exceed 65536 bytes/);
+  assert.equal(store.events.some((event) => event.type === "turn_completed"), false);
+  assert.equal(acceptedTurns, 0);
+});
+
+test("accepted-turn capture failures terminate signed execution", async () => {
+  const store = memoryStore();
+  await assert.rejects(
+    runContinuationDriver({
+      maxTurns: 2,
+      store,
+      onTurnAccepted: async () => { throw new Error("attestation aggregate exceeded"); },
+      runtime: {
+        inspect: async () => snapshot("plan"),
+        synchronize: async () => snapshot("plan"),
+        execute: async () => ({ status: "completed", evidence: { value: "accepted" } }),
+      },
+    }),
+    /attestation aggregate exceeded/,
+  );
+  assert.equal(store.events.some((event) => event.type === "turn_failed"), false);
+  assert.equal(store.events.some((event) => event.type === "turn_completed"), false);
+  assert.equal(store.value().turns_started, 1);
+  assert.equal(store.value().active_turn_step, null);
+});
+
+test("unsigned adapters retain extension-field compatibility", async () => {
+  const store = memoryStore();
+  const result = await runContinuationDriver({
+    maxTurns: 1,
+    store,
+    runtime: {
+      inspect: async () => snapshot("plan"),
+      synchronize: async () => snapshot("plan"),
+      execute: async () => ({ status: "completed", metadata: { extension: true } }),
+    },
+  });
+  assert.equal(result.outcome, "budget_exhausted");
+  assert.equal(store.events.some((event) => event.type === "turn_completed"), true);
+  assert.equal(store.events.some((event) => event.type === "turn_failed"), false);
+});
+
 test("adapter errors fail open to another bounded turn and remain auditable", async () => {
   const store = memoryStore();
   let executeCalls = 0;

@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, sign, type KeyObject } from "node:crypto";
 import { createRequire } from "node:module";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -73,9 +73,11 @@ export async function main(argv: string[]): Promise<number> {
 
 async function drive(sessionDir: string, argv: string[], json: boolean): Promise<number> {
   const parsed = parseArgs(argv);
-  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "adapter-command-file", "max-turns", "turn-timeout-ms", "barrier-wait-ms", "barrier-poll-ms"]), "workflow drive");
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "adapter-command-file", "evidence-signing-key-file", "max-turns", "turn-timeout-ms", "barrier-wait-ms", "barrier-poll-ms"]), "workflow drive");
   const adapterCommandFile = flagString(parsed.flags, "adapter-command-file");
   if (!adapterCommandFile) throw new Error("workflow drive requires --adapter-command-file <path>");
+  const evidenceSigningKeyFile = flagString(parsed.flags, "evidence-signing-key-file");
+  if (evidenceSigningKeyFile && !json) throw new Error("workflow drive --evidence-signing-key-file requires --json");
   const maxTurns = integerFlag(parsed.flags, "max-turns", 4, 1, 100);
   const turnTimeoutMs = integerFlag(parsed.flags, "turn-timeout-ms", 900_000, 1, 86_400_000);
   const barrierWaitMs = integerFlag(parsed.flags, "barrier-wait-ms", 300_000, 0, 86_400_000);
@@ -83,8 +85,11 @@ async function drive(sessionDir: string, argv: string[], json: boolean): Promise
   const { slug, projectRoot } = readBoundSession(sessionDir);
   assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
   const adapterCommand = loadContinuationAdapterCommand(adapterCommandFile);
+  let evidenceSigner: EvidenceSigner | null = null;
+  const observedAdapterTurns: Array<Record<string, unknown>> = [];
   const result = await withContinuationDriverLock(sessionDir, async (lock) => {
     assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
+    evidenceSigner = evidenceSigningKeyFile ? consumeEvidenceSigningKey(evidenceSigningKeyFile) : null;
     return driveBuilderFlowSession({
       sessionDir,
       maxTurns,
@@ -114,12 +119,87 @@ async function drive(sessionDir: string, argv: string[], json: boolean): Promise
         continuationTurnSecret: context?.continuationTurnSecret,
         continuationRunId: context?.continuationRunId,
       }),
+      ...(evidenceSigningKeyFile ? { onTurnAccepted: async (request, adapterResult) => {
+        const next = [...observedAdapterTurns, {
+          request: structuredClone(request),
+          result: structuredClone(adapterResult),
+        }];
+        if (Buffer.byteLength(JSON.stringify(next), "utf8") > 1_048_576) {
+          throw new Error("continuation accepted-turn evidence must not exceed 1048576 aggregate bytes");
+        }
+        observedAdapterTurns.push(next.at(-1)!);
+      } } : {}),
       waitForBarrier: async (barrier) => waitForContinuationBarrier(barrier, { maxWaitMs: barrierWaitMs, pollMs: barrierPollMs }),
     });
   });
-  if (json) console.log(JSON.stringify(result));
+  const output = evidenceSigner
+    ? { ...result, evidence_attestation: signDriveEvidence(evidenceSigner, adapterCommand.identity, maxTurns, result, observedAdapterTurns) }
+    : result;
+  if (json) console.log(JSON.stringify(output));
   else console.log(`Continuation driver ${result.outcome} after ${result.turns_started} turn(s); canonical Flow is ${result.snapshot.status} at ${result.snapshot.current_step}.`);
   return 0;
+}
+
+type EvidenceSigner = { privateKey: KeyObject; publicKeySpkiB64: string };
+
+function consumeEvidenceSigningKey(fileInput: string): EvidenceSigner {
+  if (!path.isAbsolute(fileInput) || fileInput !== path.normalize(fileInput)) {
+    throw new Error("workflow drive evidence signing key file must be an absolute canonical path");
+  }
+  const stat = fs.lstatSync(fileInput, { bigint: true });
+  if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("workflow drive evidence signing key must be a regular file");
+  const noFollow = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
+  const fd = fs.openSync(fileInput, fs.constants.O_RDONLY | noFollow);
+  let keyText: Buffer;
+  try {
+    const opened = fs.fstatSync(fd, { bigint: true });
+    if (!opened.isFile() || opened.dev !== stat.dev || opened.ino !== stat.ino) {
+      throw new Error("workflow drive evidence signing key changed while opening");
+    }
+    keyText = fs.readFileSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const current = fs.lstatSync(fileInput, { bigint: true });
+  if (current.dev !== stat.dev || current.ino !== stat.ino || !current.isFile() || current.isSymbolicLink()) {
+    throw new Error("workflow drive evidence signing key changed before consumption");
+  }
+  let privateKey: KeyObject;
+  try {
+    privateKey = createPrivateKey(keyText);
+    if (privateKey.asymmetricKeyType !== "ed25519") throw new Error("wrong key type");
+  } catch {
+    throw new Error("workflow drive evidence signing key must be a valid Ed25519 private key");
+  }
+  fs.unlinkSync(fileInput);
+  const publicKeySpkiB64 = createPublicKey(privateKey as unknown as Parameters<typeof createPublicKey>[0])
+    .export({ type: "spki", format: "der" }).toString("base64");
+  return { privateKey, publicKeySpkiB64 };
+}
+
+function signDriveEvidence(
+  signer: EvidenceSigner,
+  adapterCommandIdentity: string,
+  maxTurns: number,
+  outcome: unknown,
+  observedAdapterTurns: Array<Record<string, unknown>>,
+): Record<string, unknown> {
+  const payload = {
+    schema: "kontour.flow-agents.continuation_evidence",
+    version: "1.0",
+    adapter_command_identity: adapterCommandIdentity,
+    max_turns: maxTurns,
+    outcome: structuredClone(outcome),
+    adapter_turns: structuredClone(observedAdapterTurns),
+  };
+  const payloadBytes = Buffer.from(JSON.stringify(payload), "utf8");
+  return {
+    schema: "kontour.flow-agents.continuation_evidence_attestation",
+    version: "1.0",
+    public_key_spki_b64: signer.publicKeySpkiB64,
+    payload_b64: payloadBytes.toString("base64"),
+    signature_b64: sign(null, payloadBytes, signer.privateKey).toString("base64"),
+  };
 }
 
 function loadContinuationTurnAuthority(): {
