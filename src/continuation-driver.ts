@@ -29,7 +29,7 @@ export type ContinuationTurnRequest = {
 };
 
 export type ContinuationTurnResult =
-  | { status: "completed"; summary?: string }
+  | { status: "completed"; summary?: string; evidence?: Record<string, unknown> }
   | { status: "wait"; barrier: ContinuationBarrier; summary?: string };
 
 export class ContinuationAdapterTimeoutError extends Error {
@@ -115,6 +115,7 @@ export interface RunContinuationDriverInput {
   waitForBarrier?: (barrier: ContinuationBarrier) => Promise<"ready" | "pending">;
   authorizeTurn?: () => Promise<void>;
   issueTurnAuthority?: (request: ContinuationTurnRequest) => Promise<ContinuationTurnAuthority>;
+  onTurnAccepted?: (request: ContinuationTurnRequest, result: ContinuationTurnResult) => void | Promise<void>;
   now?: () => Date;
 }
 
@@ -126,6 +127,7 @@ export interface DriveBuilderFlowSessionInput {
   waitForBarrier?: RunContinuationDriverInput["waitForBarrier"];
   authorizeTurn?: RunContinuationDriverInput["authorizeTurn"];
   issueTurnAuthority?: RunContinuationDriverInput["issueTurnAuthority"];
+  onTurnAccepted?: RunContinuationDriverInput["onTurnAccepted"];
   now?: () => Date;
 }
 
@@ -237,6 +239,7 @@ export async function runContinuationDriver(input: RunContinuationDriverInput): 
         }
       }
     }
+    if (input.onTurnAccepted) await input.onTurnAccepted(request, result);
     appendEvent(input.store, state, snapshot, "turn_completed", now, { summary: result.summary });
 
     if (result.status === "wait") {
@@ -288,6 +291,7 @@ export async function driveBuilderFlowSession(input: DriveBuilderFlowSessionInpu
     ...(input.waitForBarrier ? { waitForBarrier: input.waitForBarrier } : {}),
     ...(input.authorizeTurn ? { authorizeTurn: input.authorizeTurn } : {}),
     ...(input.issueTurnAuthority ? { issueTurnAuthority: input.issueTurnAuthority } : {}),
+    ...(input.onTurnAccepted ? { onTurnAccepted: input.onTurnAccepted } : {}),
     ...(input.now ? { now: input.now } : {}),
   });
 }
@@ -534,9 +538,30 @@ function validateTurnResult(value: ContinuationTurnResult): ContinuationTurnResu
   }
   if (value.status === "wait") validateBarrier(value.barrier);
   if (value.summary !== undefined && typeof value.summary !== "string") throw new Error("continuation adapter summary must be a string");
+  if (value.status === "completed" && value.evidence !== undefined) validateAdapterEvidence(value.evidence);
+  if (value.status === "wait" && Object.hasOwn(value, "evidence")) throw new Error("continuation wait results must not include evidence");
   const copy = structuredClone(value);
   if (copy.summary && copy.summary.length > 2_000) copy.summary = `${copy.summary.slice(0, 1_997)}...`;
   return copy;
+}
+
+function validateAdapterEvidence(value: unknown): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("continuation adapter evidence must be a JSON object");
+  }
+  let encoded: string;
+  try {
+    encoded = JSON.stringify(value);
+  } catch {
+    throw new Error("continuation adapter evidence must be JSON-serializable");
+  }
+  if (encoded === undefined || Buffer.byteLength(encoded, "utf8") > 65_536) {
+    throw new Error("continuation adapter evidence must not exceed 65536 bytes");
+  }
+  const parsed = JSON.parse(encoded) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("continuation adapter evidence must be a JSON object");
+  }
 }
 
 function validateBarrier(barrier: ContinuationBarrier): void {
