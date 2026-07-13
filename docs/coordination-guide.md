@@ -237,6 +237,16 @@ state rather than guesswork. A crash skips this — and that's fine: the livenes
 to `stale`, the assignment becomes `reclaimable`, and takeover (§10) handles it. Clean release just
 makes the common case instant instead of TTL-delayed.
 
+**Ownership scoping (#440):** the Stop hook's evidence scanning, its non-terminal release (above), the
+tool-activity liveness heartbeat, and the SessionStart/UserPromptSubmit re-ground banner all resolve
+**only** from the stopping/heartbeating/steered actor's own per-actor `current/<actor>.json` pointer
+when that actor is resolved — never from the shared legacy `current.json` or a repo-wide newest-mtime
+scan, which would otherwise let a session co-located with another actor's work inherit that actor's gate
+debt or steer onto its slug. Accepted gap: a resolved actor with no per-actor pointer yet (pre any
+`workflow-sidecar` command in this session) is simply ungated/unbannered until its next sidecar command
+establishes one — never gated on another actor's unrelated work. An unresolved actor keeps the pre-#440
+legacy-fallback behavior unchanged (compat + anti-gaming: identity cannot be unset to escape the gate).
+
 ## 8. Guard point 3 — the verify-hold publish gate (the one hard fence)
 
 This is the **only** place coordination *blocks*, and it earned three fix iterations, so its design is
