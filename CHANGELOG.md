@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.12.0](https://github.com/kontourai/flow-agents/compare/v3.11.0...v3.12.0) (2026-07-13)
+
+
+### Features
+
+* add canonical gate action envelopes ([#605](https://github.com/kontourai/flow-agents/issues/605)) ([a7cc3e5](https://github.com/kontourai/flow-agents/commit/a7cc3e553bf03ec47a008424c3d2f7693432286b))
+
 ## [3.11.0](https://github.com/kontourai/flow-agents/compare/v3.10.0...v3.11.0) (2026-07-13)
 
 
