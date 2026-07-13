@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { spawnSync } from "node:child_process";
 
 import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, runDir } from "@kontourai/flow";
 import {
@@ -432,18 +433,67 @@ test("continuation driver advances two real FlowDefinition steps unattended", as
   assert.deepEqual(events.filter((event) => event.type === "turn_started").map((event) => event.current_step), ["pull-work", "design-probe"]);
 });
 
-test("public workflow drive invokes an explicit adapter but preserves canonical completion authority", async () => {
+test("public workflow evidence accepts only live signed turn authority after ordinary ancestry resolution mismatches", async () => {
   const session = makeSession("continuation-driver-cli");
   claimAmbientSessionAssignment(session);
+  fs.writeFileSync(path.join(session.projectRoot, "AGENTS.md"), "# Test Repo\n");
+  fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--deliver.md`), "# Continuation\n\nstatus: executing\ntype: deliver\n");
+  fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--pull-work.md`), "# Pull Work\n\nSelected continuation fixture.\n");
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const unrelatedSlug = "unrelated-pointer-session";
+  const unrelatedDir = path.join(session.artifactRoot, unrelatedSlug);
+  fs.mkdirSync(unrelatedDir, { recursive: true });
+  fs.writeFileSync(path.join(unrelatedDir, `${unrelatedSlug}--deliver.md`), "# Unrelated\n\nstatus: executing\ntype: deliver\n");
+  writeJson(path.join(unrelatedDir, "state.json"), {
+    schema_version: "1.0", task_slug: unrelatedSlug, status: "executing", phase: "execution",
+    updated_at: new Date().toISOString(), next_action: { status: "continue", summary: "Unrelated work" },
+  });
+  writeJson(path.join(session.artifactRoot, "current.json"), { active_slug: unrelatedSlug, artifact_dir: unrelatedSlug });
   const adapter = path.join(session.projectRoot, "adapter.mjs");
   const commandFile = path.join(session.projectRoot, "adapter-command.json");
+  const authorityFile = path.join(session.sessionDir, "continuation-driver", "active-turn.json");
   fs.writeFileSync(adapter, `
     import fs from "node:fs";
+    import { spawnSync } from "node:child_process";
     let input = "";
     for await (const chunk of process.stdin) input += chunk;
+    const request = JSON.parse(input);
     fs.writeFileSync("adapter-request.json", input);
-    process.stdout.write(JSON.stringify({ status: "completed", summary: "adapter says done" }));
+    const evidenceEnv = { ...process.env };
+    for (const key of ["FLOW_AGENTS_ACTOR", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "OPENCODE_SESSION_ID", "PI_SESSION_ID"]) delete evidenceEnv[key];
+    const ordinaryChild = ${JSON.stringify(path.resolve(import.meta.dirname, "../../scripts/hooks/lib/actor-identity.js"))};
+    const childIdentity = (await import("node:module")).createRequire(import.meta.url)(ordinaryChild).resolveActorIdentity(evidenceEnv);
+    const record = (expectation) => {
+      const evidence = { kind: "artifact", file: ${JSON.stringify(`.kontourai/flow-agents/${session.slug}/${session.slug}--pull-work.md`)}, summary: "adapter child records " + expectation };
+      return spawnSync(process.execPath, [${JSON.stringify(path.resolve(import.meta.dirname, "../../build/src/cli.js"))}, "workflow", "evidence", "--session-dir", ${JSON.stringify(session.sessionDir)}, "--expectation", expectation, "--status", "pass", "--summary", "adapter child records " + expectation, "--evidence-ref-json", JSON.stringify(evidence), "--json"], { cwd: ${JSON.stringify(session.projectRoot)}, encoding: "utf8", env: evidenceEnv });
+    };
+    const evidenceRuns = request.current_step === "pull-work"
+      ? [record("selected-work")]
+      : [record("pickup-probe-readiness"), record("probe-decisions-or-accepted-gaps")];
+    if (evidenceRuns.some((result) => result.status !== 0)) {
+      fs.writeFileSync("adapter-evidence-error.json", JSON.stringify(evidenceRuns.map((result) => ({ status: result.status, stderr: result.stderr, stdout: result.stdout }))));
+      throw new Error("public workflow evidence rejected signed adapter authority: " + evidenceRuns.map((result) => result.stderr).join("\\n"));
+    }
+    const lifecycleRuns = [
+      ["pause", "--reason", "capability must not pause"],
+      ["resume"],
+      ["release", "--reason", "capability must not release"],
+      ["cancel"],
+      ["archive"],
+    ].map((args) => spawnSync(process.execPath, [${JSON.stringify(path.resolve(import.meta.dirname, "../../build/src/cli.js"))}, "workflow", ...args, "--session-dir", ${JSON.stringify(session.sessionDir)}], { cwd: ${JSON.stringify(session.projectRoot)}, encoding: "utf8", env: evidenceEnv }));
+    const currentPointer = (await import("node:module")).createRequire(import.meta.url)(${JSON.stringify(path.resolve(import.meta.dirname, "../../scripts/hooks/lib/current-pointer.js"))});
+    currentPointer.writePerActorCurrent(${JSON.stringify(session.artifactRoot)}, childIdentity.actor, { active_slug: ${JSON.stringify(unrelatedSlug)}, artifact_dir: ${JSON.stringify(unrelatedSlug)} });
+    fs.writeFileSync(${JSON.stringify(path.join(session.artifactRoot, "current.json"))}, JSON.stringify({ active_slug: ${JSON.stringify(unrelatedSlug)}, artifact_dir: ${JSON.stringify(unrelatedSlug)} }));
+    const unrelatedAssignment = ${JSON.stringify(path.join(session.artifactRoot, "assignment", `${unrelatedSlug}.json`))};
+    fs.mkdirSync((await import("node:path")).dirname(unrelatedAssignment), { recursive: true });
+    fs.writeFileSync(unrelatedAssignment, JSON.stringify({ schema_version: "1.0", role: "AssignmentClaimRecord", subject_id: ${JSON.stringify(unrelatedSlug)}, actor: childIdentity.actorStruct, actor_key: childIdentity.actor, artifact_dir: ${JSON.stringify(unrelatedSlug)}, status: "claimed" }));
+    const canonicalState = JSON.parse(fs.readFileSync(${JSON.stringify(path.join(runDir(session.slug, session.projectRoot), "state.json"))}, "utf8"));
+    const authorityValidation = (await import("node:module")).createRequire(import.meta.url)(${JSON.stringify(path.resolve(import.meta.dirname, "../../scripts/hooks/lib/continuation-turn-authority.js"))}).validateActiveTurnAuthority({ sessionDir: ${JSON.stringify(session.sessionDir)}, runId: process.env.FLOW_AGENTS_CONTINUATION_RUN_ID, turnSecret: process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET, canonicalState });
+    const hookEnv = { ...process.env, FLOW_AGENTS_GOAL_FIT_MODE: "block" };
+    const hook = spawnSync(process.execPath, [${JSON.stringify(path.resolve(import.meta.dirname, "../../scripts/hooks/stop-goal-fit.js"))}], { cwd: ${JSON.stringify(session.projectRoot)}, input: JSON.stringify({ hook_event_name: "Stop", cwd: ${JSON.stringify(session.projectRoot)} }), encoding: "utf8", env: hookEnv });
+    fs.writeFileSync("adapter-authority.json", JSON.stringify({ turnSecret: process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET || null, runId: process.env.FLOW_AGENTS_CONTINUATION_RUN_ID || null, childIdentity, evidenceRuns: evidenceRuns.map((result) => ({ status: result.status, stderr: result.stderr })), lifecycleRuns: lifecycleRuns.map((result) => ({ status: result.status, stderr: result.stderr })), unrelatedAssignment: JSON.parse(fs.readFileSync(unrelatedAssignment, "utf8")), unrelatedHandoffExists: fs.existsSync(${JSON.stringify(path.join(unrelatedDir, "handoff.json"))}), active: fs.existsSync(${JSON.stringify(authorityFile)}), authorityValidation, hookStatus: hook.status, hookStderr: hook.stderr }));
+    if (hook.status !== 0) throw new Error("Stop hook blocked canonical continuation: " + hook.stderr);
+    process.stdout.write(JSON.stringify({ status: "completed", summary: "adapter advanced " + request.current_step }));
   `);
   writeJson(commandFile, { argv: [process.execPath, adapter] });
 
@@ -451,7 +501,7 @@ test("public workflow drive invokes an explicit adapter but preserves canonical 
     "drive",
     "--session-dir", session.sessionDir,
     "--adapter-command-file", commandFile,
-    "--max-turns", "1",
+    "--max-turns", "2",
     "--turn-timeout-ms", "5000",
     "--barrier-wait-ms", "0",
     "--json",
@@ -459,14 +509,37 @@ test("public workflow drive invokes an explicit adapter but preserves canonical 
 
   assert.equal(rc, 0);
   const request = readJson(path.join(session.projectRoot, "adapter-request.json"));
-  assert.equal(request.current_step, "pull-work");
-  assert.deepEqual(request.next_action.skills, ["pull-work"]);
+  assert.equal(request.current_step, "design-probe", fs.existsSync(path.join(session.projectRoot, "adapter-evidence-error.json")) ? fs.readFileSync(path.join(session.projectRoot, "adapter-evidence-error.json"), "utf8") : "adapter did not advance canonical Flow");
+  assert.deepEqual(request.next_action.skills, ["pickup-probe"]);
   assert.equal(Object.hasOwn(request, "system_prompt"), false);
+  const authority = readJson(path.join(session.projectRoot, "adapter-authority.json"));
+  assert.match(authority.turnSecret, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(authority.runId, session.slug);
+  assert.equal(authority.childIdentity.source, "process-ancestry");
+  assert.ok(authority.evidenceRuns.every((result) => result.status === 0), JSON.stringify(authority.evidenceRuns));
+  assert.ok(authority.lifecycleRuns.every((result) => result.status !== 0), JSON.stringify(authority.lifecycleRuns));
+  assert.equal(authority.unrelatedAssignment.status, "claimed", "Stop does not release the unrelated per-actor/global-pointer session");
+  assert.equal(authority.unrelatedHandoffExists, false, "Stop does not relax or hand off the unrelated session");
+  assert.equal(authority.active, true);
+  assert.equal(authority.authorityValidation.valid, true, authority.authorityValidation.reason);
+  assert.equal(authority.hookStatus, 0, `the blocking Stop hook returns control during the signed adapter turn: ${authority.hookStderr}`);
+  assert.match(authority.hookStderr, /continuation driver active turn is authorized/);
+  assert.equal(fs.existsSync(authorityFile), false, "adapter turn authority is removed after the child exits");
   const driverState = readJson(path.join(session.sessionDir, "continuation-driver", "state.json"));
   assert.equal(driverState.status, "budget_exhausted");
   const canonical = await recoverBuilderFlowSession({ sessionDir: session.sessionDir });
   assert.equal(canonical.run.state.status, "active");
-  assert.equal(canonical.run.state.current_step, "pull-work");
+  assert.equal(canonical.run.state.current_step, "plan");
+  const events = fs.readFileSync(path.join(session.sessionDir, "continuation-driver", "events.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
+  assert.deepEqual(events.filter((event) => event.type === "turn_started").map((event) => event.current_step), ["pull-work", "design-probe"]);
+  assert.equal(events.some((event) => event.type === "gate_not_advanced"), false);
+  const replayEnv = { ...process.env, FLOW_AGENTS_CONTINUATION_TURN_SECRET: authority.turnSecret, FLOW_AGENTS_CONTINUATION_RUN_ID: authority.runId };
+  for (const key of ["FLOW_AGENTS_ACTOR", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "OPENCODE_SESSION_ID", "PI_SESSION_ID"]) delete replayEnv[key];
+  const replay = spawnSync(process.execPath, [path.resolve(import.meta.dirname, "../../build/src/cli.js"), "workflow", "evidence", "--session-dir", session.sessionDir, "--expectation", "implementation-plan", "--status", "pass", "--summary", "replayed turn capability", "--evidence-ref-json", JSON.stringify({ kind: "artifact", file: "adapter.mjs", summary: "replay fixture" })], { cwd: session.projectRoot, encoding: "utf8", env: replayEnv });
+  assert.notEqual(replay.status, 0, "copied capability values fail after active-turn cleanup");
+  replayEnv.FLOW_AGENTS_CONTINUATION_TURN_SECRET = "A".repeat(43);
+  const forged = spawnSync(process.execPath, [path.resolve(import.meta.dirname, "../../build/src/cli.js"), "workflow", "evidence", "--session-dir", session.sessionDir, "--expectation", "implementation-plan", "--status", "pass", "--summary", "forged turn capability", "--evidence-ref-json", JSON.stringify({ kind: "artifact", file: "adapter.mjs", summary: "forgery fixture" })], { cwd: session.projectRoot, encoding: "utf8", env: replayEnv });
+  assert.notEqual(forged.status, 0, "fake nonce and digest without a signed active turn fail ownership");
 });
 
 test("public workflow drive rejects a non-owner before adapter execution", async () => {

@@ -22,6 +22,10 @@ const sidecarSchemas: Record<string, string> = {
   "release.json": "schemas/workflow-release.schema.json",
   "learning.json": "schemas/workflow-learning.schema.json",
 };
+// Runtime coordination records live below a session but are not workflow
+// sidecars. Recursing into them would validate continuation-driver/state.json
+// against the public workflow-state schema and turn an active driver into a
+// false Goal Fit hard block.
 
 function readText(file: string): string {
   return fs.readFileSync(file, "utf8");
@@ -91,11 +95,25 @@ function hasExplicitAcceptance(text: string): boolean {
   return /explicitly accepted|accepted by user|user accepted|accepted gap/i.test(text);
 }
 
+function isPrivateRuntimeChild(dir: string): boolean {
+  if (path.basename(dir) !== "continuation-driver") return false;
+  const sessionDir = path.dirname(dir);
+  const sessionState = path.join(sessionDir, "state.json");
+  try {
+    const stat = fs.lstatSync(sessionState);
+    if (stat.isSymbolicLink() || !stat.isFile()) return false;
+    const state = JSON.parse(readText(sessionState)) as { task_slug?: unknown };
+    return state.task_slug === path.basename(sessionDir);
+  } catch {
+    return false;
+  }
+}
+
 function walk(dir: string): string[] {
   const out: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...walk(p));
+    if (entry.isDirectory() && !isPrivateRuntimeChild(p)) out.push(...walk(p));
     else out.push(p);
   }
   return out;

@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { ContinuationAdapterTimeoutError } from "../continuation-driver.js";
 import type { ContinuationBarrier, ContinuationTurnRequest, ContinuationTurnResult } from "../continuation-driver.js";
 
 export type ContinuationAdapterCommand = {
@@ -24,7 +25,7 @@ export function loadContinuationAdapterCommand(commandFileInput: string): Contin
 export async function executeContinuationAdapter(
   commandFileInput: string,
   request: ContinuationTurnRequest,
-  options: { cwd: string; timeoutMs: number },
+  options: ContinuationAdapterOptions,
 ): Promise<ContinuationTurnResult> {
   const command = loadContinuationAdapterCommand(commandFileInput);
   return executeLoadedContinuationAdapter(command, request, options);
@@ -33,15 +34,19 @@ export async function executeContinuationAdapter(
 export async function executeLoadedContinuationAdapter(
   command: ContinuationAdapterCommand,
   request: ContinuationTurnRequest,
-  options: { cwd: string; timeoutMs: number },
+  options: ContinuationAdapterOptions,
 ): Promise<ContinuationTurnResult> {
+  assertLoadedContinuationAdapterIntegrity(command);
+  assertPositiveInteger(options.timeoutMs, "continuation adapter timeoutMs", 1, 86_400_000);
+  return await spawnAdapter(command, request, options);
+}
+
+export function assertLoadedContinuationAdapterIntegrity(command: ContinuationAdapterCommand): void {
   for (const entry of command.integrity) {
     if (sha256File(entry.file, "continuation adapter integrity file") !== entry.sha256) {
       throw new Error(`continuation adapter integrity changed after mission binding: ${entry.file}`);
     }
   }
-  assertPositiveInteger(options.timeoutMs, "continuation adapter timeoutMs", 1, 86_400_000);
-  return await spawnAdapter(command, request, options);
 }
 
 export async function waitForContinuationBarrier(
@@ -73,12 +78,12 @@ export async function waitForContinuationBarrier(
 function spawnAdapter(
   command: ContinuationAdapterCommand,
   request: ContinuationTurnRequest,
-  options: { cwd: string; timeoutMs: number },
+  options: ContinuationAdapterOptions,
 ): Promise<ContinuationTurnResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(command.argv[0]!, command.argv.slice(1), {
       cwd: options.cwd,
-      env: process.env,
+      env: adapterEnvironment(options),
       detached: process.platform !== "win32",
       shell: false,
       stdio: ["pipe", "pipe", "pipe"],
@@ -93,7 +98,7 @@ function spawnAdapter(
     const maxBytes = 4 * 1024 * 1024;
     const timeout = setTimeout(() => {
       if (settled) return;
-      terminationError = new Error(`continuation adapter timed out after ${options.timeoutMs}ms`);
+      terminationError = new ContinuationAdapterTimeoutError(options.timeoutMs);
       terminateProcessGroup(child.pid, "SIGTERM");
       forcedKill = setTimeout(() => terminateProcessGroup(child.pid, "SIGKILL"), 250);
     }, options.timeoutMs);
@@ -158,6 +163,27 @@ function spawnAdapter(
     });
     child.stdin.end(`${JSON.stringify(request)}\n`);
   });
+}
+
+type ContinuationAdapterOptions = {
+  cwd: string;
+  timeoutMs: number;
+  continuationTurnSecret?: string;
+  continuationRunId?: string;
+};
+
+function adapterEnvironment(options: ContinuationAdapterOptions): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.FLOW_AGENTS_CONTINUATION_TURN_SECRET;
+  delete env.FLOW_AGENTS_CONTINUATION_RUN_ID;
+  delete env.FLOW_AGENTS_CONTINUATION_TURN_NONCE;
+  delete env.FLOW_AGENTS_CONTINUATION_TURN_PUBLIC_KEY_DIGEST;
+  delete env.FLOW_AGENTS_CONTINUATION_ACTOR_B64;
+  const { continuationTurnSecret: turnSecret, continuationRunId: runId } = options;
+  if (!turnSecret || !runId) return env;
+  env.FLOW_AGENTS_CONTINUATION_TURN_SECRET = turnSecret;
+  env.FLOW_AGENTS_CONTINUATION_RUN_ID = runId;
+  return env;
 }
 
 function validateAdapterCommand(value: unknown): Pick<ContinuationAdapterCommand, "argv"> {
