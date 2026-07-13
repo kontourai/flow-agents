@@ -294,6 +294,72 @@ add_tool_data_and_emit_delegation() {
   echo "$event"
 }
 
+# add_tool_usage_data — populates .usage on tool.invoke/tool.result events
+# (preToolUse/postToolUse only; see add_event_specific_data's explicit
+# permissionRequest exclusion) with the model/token/cost usage of the turn
+# that produced this specific tool call (#568 slice 1). Same field shape
+# session.usage already emits (model, input_tokens, output_tokens,
+# cache_creation_input_tokens, cache_read_input_tokens, estimated_cost_usd,
+# pricing_version) so console consumers reuse the same parsing path.
+#
+# Fallback tiers (never invent a number):
+#   1. transcript-tail join succeeds (usage_last_turn_usage) -> full usage,
+#      attributable to this exact turn (not the session aggregate).
+#   2. transcript join fails but hook.model is present (and not "unknown")
+#      -> .usage.model only, every token/cost field explicitly null.
+#   3. neither available -> all .usage.* fields null (today's pre-existing,
+#      unchanged no-data state).
+add_tool_usage_data() {
+  local event="$1"
+  local transcript_path hook_model
+  transcript_path=$(echo "$event" | jq -r '.hook.transcript_path // ""')
+  hook_model=$(echo "$event" | jq -r '.hook.model // ""')
+
+  local turn_usage
+  turn_usage=""
+  if [[ -n "$transcript_path" ]]; then
+    turn_usage=$(usage_last_turn_usage "$transcript_path")
+  fi
+
+  if [[ -n "$turn_usage" ]]; then
+    echo "$event" | jq -c --argjson tu "$turn_usage" '. + {
+      usage: {
+        model: $tu.model,
+        input_tokens: $tu.input_tokens,
+        output_tokens: $tu.output_tokens,
+        cache_creation_input_tokens: $tu.cache_creation_input_tokens,
+        cache_read_input_tokens: $tu.cache_read_input_tokens,
+        estimated_cost_usd: $tu.estimated_cost_usd,
+        pricing_version: $tu.pricing_version
+      }
+    }'
+  elif [[ -n "$hook_model" && "$hook_model" != "unknown" ]]; then
+    echo "$event" | jq -c --arg m "$hook_model" '. + {
+      usage: {
+        model: $m,
+        input_tokens: null,
+        output_tokens: null,
+        cache_creation_input_tokens: null,
+        cache_read_input_tokens: null,
+        estimated_cost_usd: null,
+        pricing_version: null
+      }
+    }'
+  else
+    echo "$event" | jq -c '. + {
+      usage: {
+        model: null,
+        input_tokens: null,
+        output_tokens: null,
+        cache_creation_input_tokens: null,
+        cache_read_input_tokens: null,
+        estimated_cost_usd: null,
+        pricing_version: null
+      }
+    }'
+  fi
+}
+
 add_stop_data_and_emit_usage() {
   local event="$1" agent_name="$2"
   local duration_s
@@ -399,7 +465,16 @@ add_event_specific_data() {
     userPromptSubmit|UserPromptSubmit)
       add_user_prompt_data "$event" "$stdin_json"
       ;;
-    preToolUse|PreToolUse|permissionRequest|PermissionRequest|postToolUse|PostToolUse|PostToolUseFailure)
+    preToolUse|PreToolUse|postToolUse|PostToolUse|PostToolUseFailure)
+      event=$(add_tool_data_and_emit_delegation "$event" "$event_type" "$stdin_json")
+      if [[ "$TELEMETRY_USAGE_TRACKING" == "true" ]]; then
+        event=$(add_tool_usage_data "$event")
+      fi
+      echo "$event"
+      ;;
+    permissionRequest|PermissionRequest)
+      # Explicit scope boundary (#568 slice 1): tool.permission_request does
+      # NOT receive .usage enrichment — only preToolUse/postToolUse do.
       add_tool_data_and_emit_delegation "$event" "$event_type" "$stdin_json"
       ;;
     stop|Stop|SessionEnd)

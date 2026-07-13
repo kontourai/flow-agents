@@ -1,6 +1,6 @@
 {
   "name": "@kontourai/flow-agents",
-  "version": "3.7.0",
+  "version": "3.12.0",
   "description": "Flow Agents — a Kontour product that applies Flow and Veritas discipline as a portable process layer inside the agent tools you already use: Claude Code, Codex, Kiro, opencode, pi, and GitHub Actions — with framework adapters (AWS Strands preview) on the same policy-engine contract.",
   "keywords": [
     "agents",
@@ -74,6 +74,7 @@
     "console.telemetry.json",
     "context/",
     "docs/",
+    "dist/",
     "evals/",
     "install.sh",
     "integrations/",
@@ -140,13 +141,13 @@
     "check:decisions": "node scripts/check-decisions.cjs check",
     "gen:decisions-index": "node scripts/check-decisions.cjs gen-index",
     "freeze:adrs": "node scripts/freeze-adrs.mjs",
-    "prepack": "npm run build --silent && npm run validate:source --",
+    "prepack": "npm run build:bundles --silent && npm run validate:source --",
     "kit": "npm run build --silent && node build/src/cli.js kit"
   },
   "devDependencies": {
-    "@types/node": "^26.1.0",
-    "promptfoo": "^0.121.17",
-    "typescript": "^6.0.3"
+    "@types/node": "^26.1.1",
+    "promptfoo": "^0.121.18",
+    "typescript": "^7.0.2"
   },
   "dependencies": {
     "@kontourai/flow": "^3.1.4"

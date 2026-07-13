@@ -27,12 +27,14 @@ Every Flow Agents event has a canonical name that is runtime-neutral. Adapters m
 | --- | --- | --- | --- |
 | `agentSpawn` | A new agent session starts. Maps from `SessionStart` on Claude Code and Codex. | `hook_event_name`, `cwd` | `session_id`, `agent_id`, `model`, `runtime` |
 | `userPromptSubmit` | The user submits a new turn or message. Maps from `UserPromptSubmit`. | `hook_event_name` | `turn.prompt_text` (redacted by default), `cwd` |
-| `preToolUse` | Immediately before a tool call is executed. Maps from `PreToolUse`. | `hook_event_name`, `tool_name`, `tool_input` | `tool_id`, `cwd` |
+| `preToolUse` | Immediately before a tool call is executed. Maps from `PreToolUse`. | `hook_event_name`, `tool_name`, `tool_input` | `tool_id`, `cwd`, `usage.model`, `usage.input_tokens`, `usage.output_tokens`, `usage.cache_creation_input_tokens`, `usage.cache_read_input_tokens`, `usage.estimated_cost_usd`, `usage.pricing_version` |
 | `permissionRequest` | The runtime is asking for permission to run a tool or action. Maps from `PermissionRequest`. | `hook_event_name`, `tool_name` | `tool_input`, `cwd` |
-| `postToolUse` | After a tool call completes (success or failure). Maps from `PostToolUse` and `PostToolUseFailure`. | `hook_event_name`, `tool_name`, `tool_response` | `tool_input`, `tool_output`, `error`, `cwd` |
+| `postToolUse` | After a tool call completes (success or failure). Maps from `PostToolUse` and `PostToolUseFailure`. | `hook_event_name`, `tool_name`, `tool_response` | `tool_input`, `tool_output`, `error`, `cwd`, `usage.model`, `usage.input_tokens`, `usage.output_tokens`, `usage.cache_creation_input_tokens`, `usage.cache_read_input_tokens`, `usage.estimated_cost_usd`, `usage.pricing_version` |
 | `stop` | The agent is about to stop and return control to the user. Maps from `Stop` and `SessionEnd`. | `hook_event_name` | `stop_reason`, `cwd` |
 | `subagentStart` | A subagent or specialist delegate is spawning. Maps from `SubagentStart` (Claude Code). | `hook_event_name` | `agent_name`, `agent_type` |
 | `subagentStop` | A subagent or specialist delegate has stopped. Maps from `SubagentStop` (Claude Code). | `hook_event_name` | `agent_name`, `outcome` |
+
+**`usage.*` on `preToolUse`/`postToolUse` (#568 slice 1).** These two events carry an optional `.usage` object — `model`, `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `estimated_cost_usd`, `pricing_version` — sourced from the runtime transcript's LAST assistant turn (the turn that produced this specific tool call), joined via a bounded tail-read of `hook.transcript_path`. This is **per-turn, not a per-tool-call cost fraction**: multiple tool calls inside the same assistant turn (parallel tool_use blocks) report the *same* whole-turn usage figures — do not sum `estimated_cost_usd` across `tool.invoke`/`tool.result` rows within one turn, or cost will be double-counted; `session.usage`'s cumulative totals remain the authoritative aggregate. When the transcript join is unavailable but the runtime's `.model` hook field is present, only `usage.model` is populated and every token/cost field is explicitly `null` (never a guessed number); `.model` itself is best-effort on these two events (see §8.2), not a contractually guaranteed field. `tool.permission_request` (`permissionRequest`) is explicitly excluded from this enrichment.
 
 ### Redaction Defaults
 
@@ -518,10 +520,12 @@ All payloads are a single JSON object on stdin. Required and optional fields:
 
 | Canonical event | Required fields | Optional fields |
 |----------------|-----------------|-----------------|
-| `preToolUse` | `hook_event_name` | `tool_name`, `tool_input.path`, `tool_input.file_path`, `cwd` |
-| `postToolUse` | `hook_event_name` | `tool_name`, `tool_input.path`, `tool_input.file_path`, `tool_response`, `cwd` |
+| `preToolUse` | `hook_event_name` | `tool_name`, `tool_input.path`, `tool_input.file_path`, `cwd`, `usage.model`, `usage.input_tokens`, `usage.output_tokens`, `usage.cache_creation_input_tokens`, `usage.cache_read_input_tokens`, `usage.estimated_cost_usd`, `usage.pricing_version` |
+| `postToolUse` | `hook_event_name` | `tool_name`, `tool_input.path`, `tool_input.file_path`, `tool_response`, `cwd`, `usage.model`, `usage.input_tokens`, `usage.output_tokens`, `usage.cache_creation_input_tokens`, `usage.cache_read_input_tokens`, `usage.estimated_cost_usd`, `usage.pricing_version` |
 | `userPromptSubmit` | `hook_event_name` | `tool_input` (for subagent calls), `cwd` |
 | `stop` | `hook_event_name` | `cwd`, `stop_reason` |
+
+`usage.*` on `preToolUse`/`postToolUse` above is emitted output, not required input — it is populated by the telemetry adapter from the runtime transcript's last assistant turn (or degrades to `usage.model`-only / fully-null per the documented fallback tiers in §1), not read from the hook's stdin payload. It is **per-turn**, not a per-tool-call cost fraction: consumers must not sum `estimated_cost_usd` across tool events within the same assistant turn (see §1). The runtime-native `.model` field these events derive part of this from is best-effort, not contractually guaranteed by any host today.
 
 `hook_event_name` is the **host-native** event name (e.g., `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`) or may be omitted — policy scripts read the canonical fields (`tool_input.path`, `cwd`) directly and do not require the event name field for their decisions.
 

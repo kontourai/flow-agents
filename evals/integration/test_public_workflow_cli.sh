@@ -17,8 +17,13 @@ TARBALL="$(find "$TMP" -maxdepth 1 -name 'kontourai-flow-agents-*.tgz' -print -q
 VERSION="$(node -p "require('./package.json').version")"
 CONSUMER="$TMP/consumer"
 ARTIFACT_ROOT="$CONSUMER/.kontourai/flow-agents"
+TOOL_ROOT="$TMP/tool"
 mkdir -p "$CONSUMER"
 mkdir -p "$CONSUMER/checks"
+npm install --silent --prefix "$TOOL_ROOT" --no-save "$TARBALL"
+FLOW_AGENTS_BIN="$TOOL_ROOT/node_modules/.bin/flow-agents"
+WORKFLOW_SIDECAR_BIN="$TOOL_ROOT/node_modules/.bin/flow-agents-workflow-sidecar"
+[[ -x "$FLOW_AGENTS_BIN" && -x "$WORKFLOW_SIDECAR_BIN" ]] || fail "packed install did not expose the expected binaries"
 printf '#!/usr/bin/env bash\nset -eu\ntest -f "$1"\nprintf "1..1\\nok 1 - session exists\\n"\n' > "$CONSUMER/checks/check-public-workflow.sh"
 chmod +x "$CONSUMER/checks/check-public-workflow.sh"
 printf '#!/usr/bin/env bash\nset -eu\ntouch "$1"\nsleep 1\n' > "$CONSUMER/checks/check-command-lock.sh"
@@ -31,13 +36,13 @@ printf '#!/usr/bin/env bash\nset -eu\n( trap "" TERM; while ! sleep 5; do :; don
 chmod +x "$CONSUMER/checks/check-success-background.sh"
 
 run_candidate() {
-  (cd "$CONSUMER" && CODEX_SESSION_ID=public-workflow-eval npx --yes --package="file:$TARBALL" flow-agents workflow "$@")
+  (cd "$CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval "$FLOW_AGENTS_BIN" workflow "$@")
 }
 
 run_candidate_as() {
   local actor="$1"
   shift
-  (cd "$CONSUMER" && CODEX_SESSION_ID="$actor" npx --yes --package="file:$TARBALL" flow-agents workflow "$@")
+  (cd "$CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID="$actor" "$FLOW_AGENTS_BIN" workflow "$@")
 }
 
 snapshot_tree() {
@@ -45,10 +50,10 @@ snapshot_tree() {
   find "$root" -type f -print0 | sort -z | xargs -0 shasum -a 256
 }
 
-PRIMARY_HELP="$(cd "$CONSUMER" && npx --yes --package="file:$TARBALL" flow-agents --help)"
+PRIMARY_HELP="$(cd "$CONSUMER" && "$FLOW_AGENTS_BIN" --help)"
 WORKFLOW_HELP="$(run_candidate --help)"
 [[ "$PRIMARY_HELP" == *"workflow"* && "$WORKFLOW_HELP" != *"workflow-sidecar"* && "$WORKFLOW_HELP" != *"npm run workflow:sidecar"* ]] || fail "public help exposes internal writer terminology or omits workflow"
-pass "primary help exposes the public workflow command without internal writer terminology"
+pass "isolated packed install exposes the public workflow command without internal writer terminology"
 
 seed_pull_work() {
   local work_item="$1"
@@ -134,7 +139,7 @@ mkdir -p "$LOCAL_RETRY_ROOT/local-retry"
 printf 'Selected Work Item: local:local-retry\n' > "$LOCAL_RETRY_ROOT/local-retry/local-retry--pull-work.md"
 printf 'not a run-store directory\n' >"$LOCAL_RETRY_PROJECT/.kontourai/flow"
 set +e
-(cd "$LOCAL_RETRY_PROJECT" && CODEX_SESSION_ID=public-workflow-eval npx --yes --package="file:$TARBALL" flow-agents-workflow-sidecar ensure-session \
+(cd "$LOCAL_RETRY_PROJECT" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval "$WORKFLOW_SIDECAR_BIN" ensure-session \
   --artifact-root "$LOCAL_RETRY_ROOT" --task-slug local-retry \
   --title "Local retry" --summary "Resume the bound local workflow." --flow-id builder.build >/dev/null 2>&1)
 LOCAL_SEED_RC=$?
@@ -147,7 +152,7 @@ rm -f "$LOCAL_RETRY_PROJECT/.kontourai/flow"
 FOREIGN_RETRY_CWD="$TMP/foreign-retry-cwd"
 mkdir -p "$FOREIGN_RETRY_CWD"
 EXECUTABLE_RETRY="$(node -e 'process.stdout.write(process.argv[1].replace(process.argv[2], process.argv[3]))' "$LOCAL_RETRY_COMMAND" "'@kontourai/flow-agents@$VERSION'" "'file:$TARBALL'")"
-(cd "$FOREIGN_RETRY_CWD" && CODEX_SESSION_ID=public-workflow-eval eval "$EXECUTABLE_RETRY" >/dev/null)
+(cd "$FOREIGN_RETRY_CWD" && unset CODEX_THREAD_ID && export CODEX_SESSION_ID=public-workflow-eval && eval "$EXECUTABLE_RETRY" >/dev/null)
 [[ -f "$LOCAL_RETRY_PROJECT/.kontourai/flow/runs/local-retry/state.json" && ! -e "$FOREIGN_RETRY_CWD/.kontourai" ]] || fail "emitted local retry mutated the caller cwd instead of the originating store"
 pass "emitted local retry executes from a foreign cwd against its exact originating store"
 
@@ -160,15 +165,21 @@ pass "status is canonical and byte-read-only"
 
 FLOW_MANIFEST="$CONSUMER/.kontourai/flow/runs/acme-widgets-101/evidence/manifest.json"
 BEFORE_EVIDENCE="$(node -p "JSON.parse(require('fs').readFileSync('$FLOW_MANIFEST')).evidence.length")"
-run_candidate evidence --session-dir "$RELEASE_SESSION" --expectation pickup-probe-readiness --status not_verified --summary "Consumer fixture intentionally leaves this claim unverified." --json >/dev/null
+PARTIAL_EVIDENCE="$(run_candidate evidence --session-dir "$RELEASE_SESSION" --expectation pickup-probe-readiness --status not_verified --summary "Consumer fixture intentionally leaves this claim unverified." --json)"
 AFTER_EVIDENCE="$(node -p "JSON.parse(require('fs').readFileSync('$FLOW_MANIFEST')).evidence.length")"
-[[ "$AFTER_EVIDENCE" -eq $((BEFORE_EVIDENCE + 1)) ]] || fail "evidence invocation did not attach exactly once"
-pass "evidence records and synchronizes exactly once"
+[[ "$AFTER_EVIDENCE" -eq "$BEFORE_EVIDENCE" ]] || fail "partial evidence changed the canonical manifest"
+node -e 'const r=JSON.parse(process.argv[1]);if(r.attached!==false||r.awaiting_evidence!==true||r.current_step!=="design-probe")process.exit(1)' "$PARTIAL_EVIDENCE" || fail "partial evidence did not report an explicit awaiting-evidence result"
+pass "partial evidence records locally without evaluation or canonical attachment"
 
 PULL_REPORT="$RELEASE_SESSION/$(basename "$RELEASE_SESSION")--pull-work.md"
 PULL_REPORT_REF="{\"kind\":\"artifact\",\"file\":\"$PULL_REPORT\",\"summary\":\"Concrete selected-work and probe report.\"}"
-run_candidate evidence --session-dir "$RELEASE_SESSION" --expectation pickup-probe-readiness --status pass --summary "Complete the consumer readiness expectation after exercising NOT_VERIFIED." --evidence-ref-json "$PULL_REPORT_REF" --json >/dev/null
-run_candidate evidence --session-dir "$RELEASE_SESSION" --expectation probe-decisions-or-accepted-gaps --status pass --summary "Complete the consumer probe gate." --evidence-ref-json "$PULL_REPORT_REF" --json >/dev/null
+READINESS_PARTIAL="$(run_candidate evidence --session-dir "$RELEASE_SESSION" --expectation pickup-probe-readiness --status pass --summary "Complete the consumer readiness expectation after exercising NOT_VERIFIED." --evidence-ref-json "$PULL_REPORT_REF" --json)"
+node -e 'const r=JSON.parse(process.argv[1]);if(r.attached!==false||r.awaiting_evidence!==true||r.current_step!=="design-probe")process.exit(1)' "$READINESS_PARTIAL" || fail "first passing member of a multi-expectation gate did not remain pending"
+PROBE_COMPLETE="$(run_candidate evidence --session-dir "$RELEASE_SESSION" --expectation probe-decisions-or-accepted-gaps --status pass --summary "Complete the consumer probe gate." --evidence-ref-json "$PULL_REPORT_REF" --json)"
+node -e 'const r=JSON.parse(process.argv[1]);if(r.attached!==true||r.awaiting_evidence!==false||r.current_step!=="plan")process.exit(1)' "$PROBE_COMPLETE" || fail "complete multi-expectation gate did not attach and advance exactly once"
+AFTER_COMPLETE_EVIDENCE="$(node -p "JSON.parse(require('fs').readFileSync('$FLOW_MANIFEST')).evidence.length")"
+[[ "$AFTER_COMPLETE_EVIDENCE" -eq $((BEFORE_EVIDENCE + 1)) ]] || fail "complete multi-expectation gate did not attach exactly once"
+pass "multi-expectation evidence attaches atomically only when complete"
 seed_pull_work acme/widgets#104
 run_candidate_as poison-pointer start --artifact-root "$ARTIFACT_ROOT" --flow builder.build --work-item acme/widgets#104 --assignment-provider local-file --summary "Poison global pointer fixture" >/dev/null
 node - "$ARTIFACT_ROOT" "$(basename "$RELEASE_SESSION")" <<'NODE'
@@ -422,7 +433,7 @@ TIMEOUT_SESSION="$ARTIFACT_ROOT/acme-widgets-107"
 TIMEOUT_CHILD_PID="$TMP/command-timeout-child.pid"
 TIMEOUT_MARKER="$TMP/command-timeout-marker"
 set +e
-(cd "$CONSUMER" && CODEX_SESSION_ID=public-workflow-eval FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS=1000 FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS=250 npx --yes --package="file:$TARBALL" flow-agents workflow evidence --session-dir "$TIMEOUT_SESSION" --expectation pickup-probe-readiness --status not_verified --summary "Timeout fixture captures full process-group termination." --command "bash checks/check-command-timeout.sh '$TIMEOUT_CHILD_PID' '$TIMEOUT_MARKER'" --json) >"$TMP/command-timeout.out" 2>&1
+(cd "$CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval FLOW_AGENTS_EVIDENCE_COMMAND_TIMEOUT_MS=1000 FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS=250 "$FLOW_AGENTS_BIN" workflow evidence --session-dir "$TIMEOUT_SESSION" --expectation pickup-probe-readiness --status not_verified --summary "Timeout fixture captures full process-group termination." --command "bash checks/check-command-timeout.sh '$TIMEOUT_CHILD_PID' '$TIMEOUT_MARKER'" --json) >"$TMP/command-timeout.out" 2>&1
 TIMEOUT_RC=$?
 set -e
 [[ "$TIMEOUT_RC" -ne 0 && -s "$TIMEOUT_CHILD_PID" && ! -e "$TIMEOUT_MARKER" ]] || fail "timed-out evidence command did not complete its controlled capture"
@@ -433,7 +444,7 @@ pass "timed-out evidence commands terminate their complete process group"
 BACKGROUND_CHILD_PID="$TMP/success-background-child.pid"
 BACKGROUND_MARKER="$TMP/success-background-marker"
 TIMEOUT_PULL_REPORT="$TIMEOUT_SESSION/$(basename "$TIMEOUT_SESSION")--pull-work.md"
-(cd "$CONSUMER" && CODEX_SESSION_ID=public-workflow-eval FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS=50 npx --yes --package="file:$TARBALL" flow-agents workflow evidence \
+(cd "$CONSUMER" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=public-workflow-eval FLOW_AGENTS_EVIDENCE_COMMAND_KILL_GRACE_MS=50 "$FLOW_AGENTS_BIN" workflow evidence \
   --session-dir "$TIMEOUT_SESSION" --expectation pickup-probe-readiness --status pass \
   --summary "Successful evidence cleans up surviving background processes." \
   --command "bash checks/check-success-background.sh '$BACKGROUND_CHILD_PID' '$BACKGROUND_MARKER'" \
@@ -520,7 +531,7 @@ pass "generated isolated package command defeats a hostile same-version local bi
 rm -f "$DOCTOR/kits/builder/kit.json" "$DOCTOR/kits/builder/flows/build.flow.json"
 printf '{"version":"%s","runtime":"codex","active_kit_ids":["builder"]}\n' "$VERSION" >"$DOCTOR/.flow-agents/install.json"
 set +e
-MISSING_JSON="$(cd "$DOCTOR" && npx --yes --package="file:$TARBALL" flow-agents workflow doctor --project-root "$DOCTOR" --artifact-root "$DOCTOR/.kontourai/flow-agents" --json 2>/dev/null)"
+MISSING_JSON="$(cd "$DOCTOR" && "$FLOW_AGENTS_BIN" workflow doctor --project-root "$DOCTOR" --artifact-root "$DOCTOR/.kontourai/flow-agents" --json 2>/dev/null)"
 MISSING_RC=$?
 set -e
 [[ "$MISSING_RC" -eq 2 ]] || fail "doctor should fail when an activated Kit is missing"
@@ -529,15 +540,15 @@ pass "doctor fails closed for missing activated Kit components"
 
 HEALTHY="$TMP/healthy-install"
 mkdir -p "$HEALTHY"
-(cd "$HEALTHY" && npx --yes --package="file:$TARBALL" flow-agents init --runtime codex --dest "$HEALTHY" --activate-kit builder --yes >/dev/null)
-HEALTHY_JSON="$(cd "$HEALTHY" && npx --yes --package="file:$TARBALL" flow-agents workflow doctor --project-root "$HEALTHY" --artifact-root "$HEALTHY/.kontourai/flow-agents" --json)"
+(cd "$HEALTHY" && "$FLOW_AGENTS_BIN" init --runtime codex --dest "$HEALTHY" --activate-kit builder --yes >/dev/null)
+HEALTHY_JSON="$(cd "$HEALTHY" && "$FLOW_AGENTS_BIN" workflow doctor --project-root "$HEALTHY" --artifact-root "$HEALTHY/.kontourai/flow-agents" --json)"
 node -e 'const r=JSON.parse(process.argv[1]);if(!r.ok||r.warnings.length||!r.hook.integrity.ok||r.installed.active_kit_ids[0]!=="builder")process.exit(1)' "$HEALTHY_JSON" || fail "doctor did not pass immediately after its own remediation install"
 pass "real init converges to doctor PASS"
 
 cp "$HEALTHY/build/src/cli/workflow.js" "$TMP/workflow.js.clean"
 printf '\n// WORKFLOW_CONTRACT_VERSION = "1.0"\n' >>"$HEALTHY/build/src/cli/workflow.js"
 set +e
-TAMPERED_CLI_JSON="$(cd "$HEALTHY" && npx --yes --package="file:$TARBALL" flow-agents workflow doctor --project-root "$HEALTHY" --artifact-root "$HEALTHY/.kontourai/flow-agents" --json 2>/dev/null)"
+TAMPERED_CLI_JSON="$(cd "$HEALTHY" && "$FLOW_AGENTS_BIN" workflow doctor --project-root "$HEALTHY" --artifact-root "$HEALTHY/.kontourai/flow-agents" --json 2>/dev/null)"
 TAMPERED_CLI_RC=$?
 set -e
 [[ "$TAMPERED_CLI_RC" -eq 2 && "$TAMPERED_CLI_JSON" == *"asset mismatch: build/src/cli/workflow.js"* ]] || fail "doctor accepted marker-preserving CLI tampering"
@@ -554,7 +565,7 @@ group.hooks[0].command += '; true';
 fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 NODE
 set +e
-TAMPERED_HOOK_JSON="$(cd "$HEALTHY" && npx --yes --package="file:$TARBALL" flow-agents workflow doctor --project-root "$HEALTHY" --artifact-root "$HEALTHY/.kontourai/flow-agents" --json 2>/dev/null)"
+TAMPERED_HOOK_JSON="$(cd "$HEALTHY" && "$FLOW_AGENTS_BIN" workflow doctor --project-root "$HEALTHY" --artifact-root "$HEALTHY/.kontourai/flow-agents" --json 2>/dev/null)"
 TAMPERED_HOOK_RC=$?
 set -e
 [[ "$TAMPERED_HOOK_RC" -eq 2 && "$TAMPERED_HOOK_JSON" == *"does not contain the packaged managed hooks"* ]] || fail "doctor accepted name-preserving hook tampering"
@@ -564,8 +575,8 @@ pass "doctor rejects name-preserving hook configuration tampering"
 for RUNTIME in base claude-code opencode pi kiro; do
   RUNTIME_ROOT="$TMP/runtime-$RUNTIME"
   mkdir -p "$RUNTIME_ROOT"
-  (cd "$RUNTIME_ROOT" && npx --yes --package="file:$TARBALL" flow-agents init --runtime "$RUNTIME" --dest "$RUNTIME_ROOT" --activate-kit builder --yes >/dev/null)
-  RUNTIME_JSON="$(cd "$RUNTIME_ROOT" && npx --yes --package="file:$TARBALL" flow-agents workflow doctor --project-root "$RUNTIME_ROOT" --artifact-root "$RUNTIME_ROOT/.kontourai/flow-agents" --json)"
+  (cd "$RUNTIME_ROOT" && "$FLOW_AGENTS_BIN" init --runtime "$RUNTIME" --dest "$RUNTIME_ROOT" --activate-kit builder --yes >/dev/null)
+  RUNTIME_JSON="$(cd "$RUNTIME_ROOT" && "$FLOW_AGENTS_BIN" workflow doctor --project-root "$RUNTIME_ROOT" --artifact-root "$RUNTIME_ROOT/.kontourai/flow-agents" --json)"
   node -e 'const r=JSON.parse(process.argv[1]);if(!r.ok||r.warnings.length||!r.hook.integrity.ok)process.exit(1)' "$RUNTIME_JSON" || fail "doctor did not validate $RUNTIME runtime wiring"
   pass "doctor validates $RUNTIME runtime wiring"
 done

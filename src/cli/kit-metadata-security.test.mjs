@@ -8,6 +8,7 @@ import { createRequire, syncBuiltinESMExports } from "node:module";
 import { readKitInventory } from "../../build/src/runtime-adapters.js";
 import { main as validateHookInfluence } from "../../build/src/cli/validate-hook-influence.js";
 import { parseKitFlowStepActions, parseKitSkillRoles, validateKitRepository } from "../../build/src/flow-kit/validate.js";
+import { observeBuilderArtifactsForProgress } from "../../build/src/builder-gate-action-envelope.js";
 
 const require = createRequire(import.meta.url);
 const { workflowTriggersFor } = require("../../scripts/hooks/lib/kit-catalog.js");
@@ -70,41 +71,169 @@ test("Builder flow step actions are structured, complete, and operation-aware", 
   assert.deepEqual(result.errors, []);
   assert.equal(result.entries.length, 14);
   assert.deepEqual(result.entries.find((entry) => entry.step_id === "plan")?.skills, ["plan-work"]);
+  assert.deepEqual(result.entries.filter((entry) => entry.implementation_allowed).map((entry) => `${entry.flow_id}/${entry.step_id}`), ["builder.build/execute"]);
+  assert.equal(result.entries.find((entry) => entry.step_id === "verify")?.expectation_bindings.find((binding) => binding.expectation_id === "clean-critique")?.interface, "workflow.critique");
   assert.deepEqual(result.entries.find((entry) => entry.step_id === "pr-open"), {
     flow_id: "builder.build",
     step_id: "pr-open",
     skills: [],
     operations: ["publish-change"],
-    artifacts: ["release.json"],
+    artifacts: ["publish-change.result.json"],
     expectation_ids: ["pull-request-opened"],
+    implementation_allowed: false,
+    expectation_bindings: [{ expectation_id: "pull-request-opened", interface: "operation", operation: "publish-change" }],
+    artifact_bindings: [{ artifact: "publish-change.result.json", expectation_ids: ["pull-request-opened"] }],
   });
 });
 
 test("flow step action metadata rejects malformed and duplicate entries", () => {
   const result = parseKitFlowStepActions({
     flow_step_actions: [
-      { flow_id: "builder.build", step_id: "plan", skills: ["plan-work"] },
-      { flow_id: "builder.build", step_id: "plan", skills: [] },
-      { flow_id: "builder.build", step_id: "verify", skills: "verify-work" },
-      { flow_id: "builder.build", step_id: "publish", skills: [], operations: ["publish-change"], expectation_ids: ["pull-request-opened", "pull-request-opened"] },
+      { flow_id: "builder.build", step_id: "plan", skills: ["plan-work"], implementation_allowed: false, artifacts: [], expectation_ids: [], expectation_bindings: [] },
+      { flow_id: "builder.build", step_id: "plan", skills: [], implementation_allowed: false, artifacts: [], expectation_ids: [], expectation_bindings: [] },
+      { flow_id: "builder.build", step_id: "verify", skills: "verify-work", implementation_allowed: false, artifacts: [], expectation_ids: [], expectation_bindings: [] },
+      { flow_id: "builder.build", step_id: "publish", skills: [], operations: ["publish-change"], implementation_allowed: false, artifacts: [], expectation_ids: ["pull-request-opened", "pull-request-opened"], expectation_bindings: [] },
+      { flow_id: "builder.build", step_id: "execute", skills: ["execute-plan"], implementation_allowed: true, artifacts: ["x".repeat(1025)], expectation_ids: [], expectation_bindings: [], unexpected: "ignored before #577" },
     ],
   }, "fixture/kit.json");
 
   assert.match(result.errors.join("\n"), /duplicates 'builder\.build\/plan'/);
   assert.match(result.errors.join("\n"), /skills must be an identifier list/);
-  assert.match(result.errors.join("\n"), /expectation_ids must be a unique identifier list when present/);
+  assert.match(result.errors.join("\n"), /expectation_ids must be a unique identifier list/);
+  assert.match(result.errors.join("\n"), /unsupported field\(s\): unexpected/);
+});
+
+test("flow step action metadata requires progress and policy fields", () => {
+  const base = {
+    flow_id: "builder.build",
+    step_id: "plan",
+    skills: ["plan-work"],
+    implementation_allowed: false,
+    artifacts: [],
+    expectation_ids: [],
+    expectation_bindings: [],
+  };
+  for (const field of ["expectation_ids", "artifacts", "implementation_allowed", "expectation_bindings"]) {
+    const action = { ...base };
+    delete action[field];
+    const result = parseKitFlowStepActions({ flow_step_actions: [action] }, "fixture/kit.json");
+    assert.match(result.errors.join("\n"), new RegExp(`flow_step_actions\\[0\\]\\.${field} must be explicitly declared`), field);
+  }
+});
+
+test("flow step action metadata rejects oversized action lists", () => {
+  const result = parseKitFlowStepActions({
+    flow_step_actions: [{
+      flow_id: "builder.build",
+      step_id: "plan",
+      skills: Array.from({ length: 33 }, (_, index) => `skill-${index}`),
+      implementation_allowed: false,
+      artifacts: [],
+      expectation_ids: [],
+      expectation_bindings: [],
+    }],
+  }, "fixture/kit.json");
+  assert.match(result.errors.join("\n"), /list exceeds 32 entries/);
 });
 
 test("flow step action metadata preserves explicit operation expectation ownership", () => {
   const result = parseKitFlowStepActions({
     flow_step_actions: [
-      { flow_id: "builder.build", step_id: "pr-open", skills: [], operations: ["publish-change"], expectation_ids: ["pull-request-opened"] },
+      { flow_id: "builder.build", step_id: "pr-open", skills: [], operations: ["publish-change"], implementation_allowed: false, artifacts: [], expectation_ids: ["pull-request-opened"], expectation_bindings: [{ expectation_id: "pull-request-opened", interface: "operation", operation: "publish-change" }], artifact_bindings: [] },
     ],
   }, "fixture/kit.json");
 
   assert.deepEqual(result.errors, []);
   assert.deepEqual(result.entries[0]?.expectation_ids, ["pull-request-opened"]);
   assert.deepEqual(result.entries[0]?.artifacts, []);
+});
+
+test("Builder action validation rejects expectation omissions, unsafe artifacts, and unknown operations", async () => {
+  async function errorsFor(name, mutate) {
+    const root = tempRoot(`flow-agents-action-contract-${name}-`);
+    const kit = path.join(root, "builder");
+    fs.cpSync("kits/builder", kit, { recursive: true });
+    const manifestFile = path.join(kit, "kit.json");
+    const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+    mutate(manifest);
+    writeJson(manifestFile, manifest);
+    return (await validateKitRepository(kit)).join("\n");
+  }
+
+  const omitted = await errorsFor("omitted-expectation", (manifest) => {
+    const action = manifest.flow_step_actions.find((entry) => entry.step_id === "verify");
+    action.expectation_ids = action.expectation_ids.filter((id) => id !== "policy-compliance");
+    action.expectation_bindings = action.expectation_bindings.filter((binding) => binding.expectation_id !== "policy-compliance");
+    action.artifacts = action.artifacts.filter((artifact) => artifact !== "trust.bundle#policy-compliance");
+    action.artifact_bindings = action.artifact_bindings.filter((binding) => binding.artifact !== "trust.bundle#policy-compliance");
+  });
+  assert.match(omitted, /expectation_ids must exactly equal its resolved Flow expectation set/);
+
+  const traversal = await errorsFor("artifact-traversal", (manifest) => {
+    const action = manifest.flow_step_actions.find((entry) => entry.step_id === "plan");
+    action.artifacts.push("../outside.md");
+    action.artifact_bindings.push({ artifact: "../outside.md", expectation_ids: ["implementation-plan"] });
+  });
+  assert.match(traversal, /safe session-relative paths/);
+
+  for (const [name, artifact] of [["absolute", "/tmp/outside.md"], ["fragment", "release.json#arbitrary"]]) {
+    const unsafe = await errorsFor(name, (manifest) => {
+      const action = manifest.flow_step_actions.find((entry) => entry.step_id === "pr-open");
+      action.artifacts = [artifact];
+      action.artifact_bindings = [{ artifact, expectation_ids: ["pull-request-opened"] }];
+    });
+    assert.match(unsafe, /safe session-relative paths/, name);
+  }
+
+  const typo = await errorsFor("operation-typo", (manifest) => {
+    const action = manifest.flow_step_actions.find((entry) => entry.step_id === "pr-open");
+    action.operations = ["publish-chagne"];
+    action.expectation_bindings[0].operation = "publish-chagne";
+  });
+  assert.match(typo, /canonical public operation catalog/);
+});
+
+test("artifact progress enforces deduplicated count and aggregate read budgets", (t) => {
+  const root = tempRoot("flow-agents-artifact-budget-");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  assert.throws(
+    () => observeBuilderArtifactsForProgress(root, Array.from({ length: 129 }, (_, index) => `artifact-${index}.json`)),
+    /exceeds 128 unique files/,
+  );
+  const refs = [];
+  for (let index = 0; index < 9; index += 1) {
+    const ref = `artifact-${index}.bin`;
+    fs.writeFileSync(path.join(root, ref), Buffer.alloc(1024 * 1024));
+    refs.push(ref);
+  }
+  assert.throws(() => observeBuilderArtifactsForProgress(root, refs), /exceeds 8388608 aggregate bytes/);
+});
+
+test("metadata validation matches runtime skill and run-wide observable artifact bounds", () => {
+  const tooManySkills = parseKitFlowStepActions({
+    flow_step_actions: [{
+      flow_id: "builder.build", step_id: "execute", skills: Array.from({ length: 17 }, (_, index) => `skill${index}`),
+      operations: [], implementation_allowed: true, artifacts: [], expectation_ids: [], expectation_bindings: [], artifact_bindings: [],
+    }],
+  }, "fixture/kit.json");
+  assert.match(tooManySkills.errors.join("\n"), /skills exceeds 16 entries/);
+
+  const artifacts = Array.from({ length: 129 }, (_, index) => `artifact-${index}.json`);
+  const actions = Array.from({ length: 5 }, (_, actionIndex) => {
+    const slice = artifacts.slice(actionIndex * 32, (actionIndex + 1) * 32);
+    return {
+      flow_id: "builder.build", step_id: `step${actionIndex}`, skills: [], operations: [], implementation_allowed: false,
+      artifacts: slice, expectation_ids: [], expectation_bindings: [],
+      artifact_bindings: slice.map((artifact) => ({ artifact, expectation_ids: [] })),
+    };
+  });
+  const tooManyArtifacts = parseKitFlowStepActions({ flow_step_actions: actions }, "fixture/kit.json");
+  assert.match(tooManyArtifacts.errors.join("\n"), /exceed 128 distinct observable file artifacts/);
+
+  actions[4].artifacts = ["state.json", "trust.bundle#virtual"];
+  actions[4].artifact_bindings = actions[4].artifacts.map((artifact) => ({ artifact, expectation_ids: [] }));
+  const excluded = parseKitFlowStepActions({ flow_step_actions: actions }, "fixture/kit.json");
+  assert.doesNotMatch(excluded.errors.join("\n"), /distinct observable file artifacts/);
 });
 
 test("Builder skill roles form one complete role and producer matrix", async () => {
@@ -225,7 +354,7 @@ test("operation-only composed actions must explicitly and exclusively own expect
     action.operations = ["publish-change"];
     delete action.expectation_ids;
   });
-  assert.match(missing, /operation-only action must explicitly declare expectation_ids/);
+  assert.match(missing, /expectation_ids must be explicitly declared/);
   assert.match(missing, /flow expectation 'builder\.publish-learn\/pr-open\/pull-request-opened' must have exactly one producer owner; found 0/);
 
   const duplicate = await errorsFor("duplicate", (manifest) => {
@@ -238,6 +367,30 @@ test("operation-only composed actions must explicitly and exclusively own expect
     role.expectation_ids = ["pull-request-opened", "ci-merge-readiness"];
   });
   assert.match(duplicate, /flow expectation 'builder\.publish-learn\/pr-open\/pull-request-opened' must have exactly one producer owner; found 2/);
+});
+
+test("mixed skill and operation ownership follows each expectation binding interface", async () => {
+  const root = tempRoot("flow-agents-mixed-operation-owner-");
+  const kit = path.join(root, "builder");
+  fs.cpSync("kits/builder", kit, { recursive: true });
+  const manifestFile = path.join(kit, "kit.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+  const action = manifest.flow_step_actions.find((entry) => entry.flow_id === "builder.build" && entry.step_id === "verify");
+  action.operations = ["publish-change"];
+  const policyBinding = action.expectation_bindings.find((entry) => entry.expectation_id === "policy-compliance");
+  policyBinding.interface = "operation";
+  policyBinding.operation = "publish-change";
+  const verifier = manifest.skill_roles.find((entry) => entry.skill_id === "builder.verify-work");
+  verifier.expectation_ids = verifier.expectation_ids.filter((id) => id !== "policy-compliance");
+  writeJson(manifestFile, manifest);
+  const valid = (await validateKitRepository(kit)).join("\n");
+  assert.doesNotMatch(valid, /verify\/policy-compliance.*producer owner/);
+
+  policyBinding.interface = "workflow.evidence";
+  delete policyBinding.operation;
+  writeJson(manifestFile, manifest);
+  const missing = (await validateKitRepository(kit)).join("\n");
+  assert.match(missing, /flow expectation 'builder\.build\/verify\/policy-compliance' must have exactly one producer owner; found 0/);
 });
 
 test("skill role cross-reference never reads Flow definitions through traversal, symlinks, or oversized files", async () => {

@@ -67,16 +67,18 @@ this section before the rest.
 
 ### The resolution chain
 
-`resolveActor(env)` (in `scripts/hooks/lib/actor-identity.js`, mirrored in `src/cli`) returns
+`resolveActor(env)` (in the canonical `scripts/hooks/lib/actor-identity.js`, loaded by TypeScript consumers rather than mirrored) returns
 `{ actor, source }` by trying four sources in strict priority order:
 
 1. **`explicit-override`** — `FLOW_AGENTS_ACTOR` is set. The actor is the **bare token** you provided,
    verbatim. Source string: `"explicit-override"`.
-2. **`runtime-session-id:<runtime>`** — the host runtime exposes a native session id (e.g. Claude
-   Code). The actor is a **serialized triple** `runtime:session:host`. Source string:
+2. **`runtime-session-id:<runtime>`** — the host runtime exposes a native session id. For Codex,
+   `CODEX_THREAD_ID` is preferred over the legacy-compatible `CODEX_SESSION_ID`. The raw thread id
+   is never persisted: it becomes a domain-separated 96-bit `thread-<digest>` token. The actor is a **serialized triple** `runtime:session:host`. Source string:
    `"runtime-session-id:<runtime>"`.
-3. **`process-ancestry`** — no session id; identity is derived by walking the process tree. Also a
-   serialized triple. Source string: `"process-ancestry"`.
+3. **`process-ancestry`** — no session id; identity is derived from the parent process and start
+   time. It is serialized explicitly as `process-ancestry:anc-<digest>:<host>`, never as an
+   `unknown` runtime. Source string: `"process-ancestry"`; this remains unstable/advisory.
 4. **`unresolved`** — nothing worked. Source string: `"unresolved"`.
 
 The `"local"` literal default from the old design is **retired as an error, not a fallback** — a
@@ -115,6 +117,10 @@ holderActorKey = record.actor_key || serializeActor(record.actor)
 A record written by a current session has `actor_key` and compares canonically; an old record without
 it falls back to `serializeActor`, reproducing pre-#291 behavior exactly. This one field is why the
 override/derived divergence no longer bites.
+
+Historical `unknown:anc-*` values remain opaque, readable actor keys and are not rewritten or
+aliased. Because ancestry is intentionally unstable, a process crossing this upgrade boundary may
+need to release/reclaim rather than treating the old and new display forms as the same identity.
 
 ### Stable vs. unstable identity (this powers the publish gate)
 
@@ -230,6 +236,16 @@ release, and writes a **handoff note** so the next session (human or agent) pick
 state rather than guesswork. A crash skips this — and that's fine: the liveness claim simply ages out
 to `stale`, the assignment becomes `reclaimable`, and takeover (§10) handles it. Clean release just
 makes the common case instant instead of TTL-delayed.
+
+**Ownership scoping (#440):** the Stop hook's evidence scanning, its non-terminal release (above), the
+tool-activity liveness heartbeat, and the SessionStart/UserPromptSubmit re-ground banner all resolve
+**only** from the stopping/heartbeating/steered actor's own per-actor `current/<actor>.json` pointer
+when that actor is resolved — never from the shared legacy `current.json` or a repo-wide newest-mtime
+scan, which would otherwise let a session co-located with another actor's work inherit that actor's gate
+debt or steer onto its slug. Accepted gap: a resolved actor with no per-actor pointer yet (pre any
+`workflow-sidecar` command in this session) is simply ungated/unbannered until its next sidecar command
+establishes one — never gated on another actor's unrelated work. An unresolved actor keeps the pre-#440
+legacy-fallback behavior unchanged (compat + anti-gaming: identity cannot be unset to escape the gate).
 
 ## 8. Guard point 3 — the verify-hold publish gate (the one hard fence)
 

@@ -175,6 +175,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_telemetry_usage_pipeline.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_telemetry_tool_usage.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_telemetry_doctor.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_usage_feedback_outcomes.sh" || result=1
@@ -274,6 +276,8 @@ run_integration() {
   bash "$EVAL_DIR/integration/test_codex_hook_resolution.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_bundle_install.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_published_codex_install.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_skill_drift_check.sh" || result=1
   echo ""

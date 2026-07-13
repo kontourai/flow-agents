@@ -45,10 +45,22 @@ const {
   warnIfFailingOpenInsideGitTree,
 } = require('./lib/local-artifact-paths');
 const { resolveActor, isUnresolvedActor, detectRuntime } = require('./lib/actor-identity.js');
-const { readCurrentPointer } = require('./lib/current-pointer.js');
+const { readCurrentPointer, readOwnCurrentPointer } = require('./lib/current-pointer.js');
 const { isRunnableCommandText, isAmbiguousAbsenceCommand } = require('./lib/runnable-command.js');
+let validateActiveTurnAuthority = () => ({ valid: false, reason: 'continuation authority validator is unavailable' });
+let validateSignedActiveTurnAssignmentAuthority = validateActiveTurnAuthority;
+try {
+  ({ validateActiveTurnAuthority, validateSignedActiveTurnAssignmentAuthority } = require('./lib/continuation-turn-authority.js'));
+} catch {
+  // A partial legacy install must retain ordinary hard Stop blocking, not fail
+  // open because the optional continuation feature is unavailable.
+}
 
 const MAX_STDIN = 1024 * 1024;
+const MAX_CANONICAL_FLOW_STATE_BYTES = 1024 * 1024;
+const MAX_CANONICAL_FLOW_DEFINITION_BYTES = 1024 * 1024;
+const CANONICAL_FLOW_STATUSES = new Set(['active', 'blocked', 'needs_decision', 'paused', 'canceled', 'completed', 'failed', 'accepted_by_exception']);
+const CANONICAL_FLOW_TERMINAL_STATUSES = new Set(['completed', 'canceled', 'failed']);
 const ACTIVE_STATUSES = new Set([
   'planning',
   'planned',
@@ -164,14 +176,34 @@ function isEnvironmentError(line) {
   return /tsc[:\s]|command not found|npm ERR!|npm error|ENOENT|EACCES|Cannot find module|node_modules\/.bin|TypeScript version|version conflict|error TS[0-9]/i.test(line);
 }
 
+function readPackageManifest(packageRoot) {
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
+    return manifest && typeof manifest === 'object' && !Array.isArray(manifest) ? manifest : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveArtifactValidator() {
+  let packageRoot;
+  try { packageRoot = fs.realpathSync(path.resolve(__dirname, '..', '..')); } catch { return null; }
+  const rootManifest = readPackageManifest(packageRoot);
+  const buildManifest = readPackageManifest(path.join(packageRoot, 'build'));
+  if (rootManifest?.name !== '@kontourai/flow-agents'
+    && buildManifest?.name !== '@kontourai/flow-agents') return null;
+  const builtValidator = path.join(packageRoot, 'build', 'src', 'cli', 'validate-workflow-artifacts.js');
+  try {
+    const stat = fs.lstatSync(builtValidator);
+    if (stat.isFile() && !stat.isSymbolicLink()) return { packageRoot, builtValidator };
+  } catch { /* validator is unavailable until this package is built */ }
+  return null;
+}
+
 function sidecarValidation(root, artifactDir) {
   const requireSidecars = String(process.env.FLOW_AGENTS_REQUIRE_SIDECARS || '').toLowerCase() === 'true';
   const requireCritique = String(process.env.FLOW_AGENTS_REQUIRE_CRITIQUE || '').toLowerCase() === 'true';
   if (!requireSidecars && !requireCritique && !hasSidecars(artifactDir)) return [];
-
-  const packageRoot = fs.existsSync(path.join(root, 'package.json'))
-    ? root
-    : path.resolve(__dirname, '..', '..');
 
   let sidecarFiles = [];
   try {
@@ -210,36 +242,25 @@ function sidecarValidation(root, artifactDir) {
 
   if (sidecarFiles.length === 0) return [];
 
-  // Part 1 fix: invoke the already-built validator directly via `node`, bypassing
-  // `npm run build` (tsc). npm-installed packages ship build/ in the package files,
-  // so the compiled JS is always available. Only fall back to npm run if build/ is
-  // absent (a raw dev checkout that hasn't been built yet).
-  const builtValidator = path.join(packageRoot, 'build', 'src', 'cli', 'validate-workflow-artifacts.js');
-  const hasBuild = fs.existsSync(builtValidator);
+  // Resolve validation from Flow Agents itself. A consumer package.json does not imply
+  // that the consumer owns this script; installed hooks commonly run inside unrelated
+  // Node repositories whose npm scripts must not become Flow Agents validators.
+  const validator = resolveArtifactValidator();
+  if (!validator) {
+    return [`${relative(root, artifactDir)} sidecar validation skipped: Flow Agents validator is unavailable`];
+  }
 
   const validatorArgs = ['--skip-markdown-validation'];
   if (requireSidecars) validatorArgs.push('--require-sidecars');
   if (requireCritique) validatorArgs.push('--require-critique');
   validatorArgs.push(artifactDir);
 
-  let result;
-  if (hasBuild) {
-    // Direct node invocation: no tsc, no npm build step, works from any npm install.
-    result = spawnSync(process.execPath, [builtValidator, ...validatorArgs], {
-      cwd: packageRoot,
-      encoding: 'utf8',
-      timeout: 30000,
-    });
-  } else {
-    // Dev checkout without build/: fall back to npm run (may trigger tsc).
-    // If this also fails due to environment issues, Part 2 handles it below.
-    const npmArgs = ['run', 'workflow:validate-artifacts', '--silent', '--', ...validatorArgs];
-    result = spawnSync('npm', npmArgs, {
-      cwd: packageRoot,
-      encoding: 'utf8',
-      timeout: 30000,
-    });
-  }
+  // Direct node invocation: no PATH executable lookup and no consumer npm script.
+  const result = spawnSync(process.execPath, [validator.builtValidator, ...validatorArgs], {
+    cwd: validator.packageRoot,
+    encoding: 'utf8',
+    timeout: 30000,
+  });
 
   // Part 2 fix: treat validator-environment failures as SKIP, never as blocking.
   // A spawn error (ENOENT, timeout) means the validator couldn't run at all.
@@ -335,14 +356,14 @@ async function tryLoadSurface() {
 // returns null when build/ is absent, require throws, or current.json has no
 // active_flow_id / active_step_id. The caller (bundleEnforcement, sidecarGuidance)
 // treats null as "no active FlowDefinition" and falls back to the workflow.* path.
-function loadActiveFlowStep(flowAgentsDir) {
+function loadActiveFlowStep(flowAgentsDir, actorKey) {
   const packageRoot = path.resolve(__dirname, '..', '..');
   const builtResolver = path.join(packageRoot, 'build', 'src', 'lib', 'flow-resolver.js');
   if (!fs.existsSync(builtResolver)) return null; // hasBuild guard: no build/ yet
   try {
     const resolver = require(builtResolver);
     if (typeof resolver.resolveActiveFlowStep !== 'function') return null;
-    return resolver.resolveActiveFlowStep(flowAgentsDir);
+    return resolver.resolveActiveFlowStep(flowAgentsDir, actorKey);
   } catch {
     return null; // require failed or resolver threw — fail-open
   }
@@ -1745,7 +1766,7 @@ async function bundleEnforcement(artifactDir, activeFlowStep) {
  * to scanning all of .kontourai/flow-agents (newest-mtime).
  */
 function preferredArtifactDir(flowAgentsDir) {
-  const { payload: current } = readCurrentPointer(flowAgentsDir, resolveActor(process.env).actor);
+  const { payload: current } = readOwnCurrentPointer(flowAgentsDir, resolveActor(process.env).actor);
   if (!current) return null;
   const slug = current.artifact_dir || current.active_slug;
   if (typeof slug !== 'string' || !slug.trim()) return null;
@@ -1760,9 +1781,9 @@ function hasSidecarPresence(artifactDir) {
 }
 
 function canonicalFlowState(root, artifactDir) {
-  if (!artifactDir) return { state: null, error: null };
+  if (!artifactDir) return { state: null, definition: null, error: null };
   const slug = path.basename(artifactDir);
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) return { state: null, error: 'canonical Flow run slug is malformed' };
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) return { state: null, definition: null, error: 'canonical Flow run slug is malformed' };
   const runDir = path.join(root, '.kontourai', 'flow', 'runs', slug);
   const components = [
     path.join(root, '.kontourai'),
@@ -1771,22 +1792,105 @@ function canonicalFlowState(root, artifactDir) {
     runDir,
   ];
   try {
-    for (const component of components) {
-      const stat = fs.lstatSync(component);
-      if (stat.isSymbolicLink() || !stat.isDirectory()) return { state: null, error: `canonical Flow run has an unsafe parent component: ${component}` };
-    }
-    const file = path.join(runDir, 'state.json');
-    const stat = fs.lstatSync(file);
-    if (stat.isSymbolicLink() || !stat.isFile()) return { state: null, error: 'canonical Flow state must be a non-symlink regular file' };
-    const state = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const parents = components.map(component => secureDirectoryIdentity(component, 'canonical Flow run parent'));
+    const stateRead = readSecureCanonicalJson(path.join(runDir, 'state.json'), 'canonical Flow state', parents, MAX_CANONICAL_FLOW_STATE_BYTES);
+    const definitionRead = readSecureCanonicalJson(path.join(runDir, 'definition.json'), 'canonical Flow definition', parents, MAX_CANONICAL_FLOW_DEFINITION_BYTES);
+    const state = stateRead.value;
+    const definition = definitionRead.value;
     if (!state || typeof state !== 'object' || Array.isArray(state)
-      || typeof state.status !== 'string' || !state.status.trim()
+      || !CANONICAL_FLOW_STATUSES.has(state.status)
+      || state.run_id !== slug
+      || typeof state.definition_id !== 'string' || !state.definition_id
+      || typeof state.definition_version !== 'string' || !state.definition_version
       || typeof state.current_step !== 'string' || !state.current_step.trim()) {
-      return { state: null, error: 'canonical Flow state is malformed' };
+      return { state: null, definition: null, error: 'canonical Flow state is malformed' };
     }
-    return { state, error: null };
+    if (!definition || typeof definition !== 'object' || Array.isArray(definition)
+      || typeof definition.id !== 'string' || !definition.id
+      || typeof definition.version !== 'string' || !definition.version
+      || !Array.isArray(definition.steps) || definition.steps.length === 0
+      || definition.steps.some(step => !step || typeof step !== 'object' || Array.isArray(step) || typeof step.id !== 'string' || !step.id)) {
+      return { state: null, definition: null, error: 'canonical Flow definition is malformed' };
+    }
+    if (state.definition_id !== definition.id || state.definition_version !== definition.version) {
+      return { state: null, definition: null, error: 'canonical Flow definition identity does not match state' };
+    }
+    if (!definition.steps.some(step => step.id === state.current_step)) {
+      return { state: null, definition: null, error: 'canonical Flow current_step is not present in definition' };
+    }
+    assertSecureCanonicalReadStable(stateRead);
+    assertSecureCanonicalReadStable(definitionRead);
+    assertSecureDirectoriesStable(parents);
+    return { state, definition, error: null };
   } catch (error) {
-    return { state: null, error: `canonical Flow state is unavailable or malformed: ${safeOneLine(error && error.message || error, 120)}` };
+    return { state: null, definition: null, error: `canonical Flow state is unavailable or malformed: ${safeOneLine(error && error.message || error, 120)}` };
+  }
+}
+
+function readSecureCanonicalJson(file, label, parents, maxBytes) {
+  const expected = secureFileIdentity(file, label);
+  if (expected.size > maxBytes) throw new Error(`${label} exceeds maximum size`);
+  assertSecureDirectoriesStable(parents);
+  const noFollow = typeof fs.constants.O_NOFOLLOW === 'number' ? fs.constants.O_NOFOLLOW : 0;
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | noFollow);
+  let bytes;
+  try {
+    const opened = fs.fstatSync(fd);
+    if (!opened.isFile() || opened.size > maxBytes || !sameFileIdentity(expected, opened)) throw new Error(`${label} identity changed while opening`);
+    bytes = fs.readFileSync(fd);
+    const after = fs.fstatSync(fd);
+    if (!sameFileIdentity(expected, after)) throw new Error(`${label} identity changed while reading`);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const final = secureFileIdentity(file, label);
+  if (!sameFileIdentity(expected, final)) throw new Error(`${label} identity changed after reading`);
+  assertSecureDirectoriesStable(parents);
+  return { value: JSON.parse(bytes.toString('utf8')), file, label, identity: expected };
+}
+
+function assertSecureCanonicalReadStable(read) {
+  const final = secureFileIdentity(read.file, read.label);
+  if (!sameFileIdentity(read.identity, final)) throw new Error(`${read.label} identity changed before authorization`);
+}
+
+function secureDirectoryIdentity(target, label) {
+  const stat = fs.lstatSync(target);
+  if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${label} must be a non-symlink directory: ${target}`);
+  return { path: target, realpath: fs.realpathSync(target), dev: stat.dev, ino: stat.ino };
+}
+
+function secureFileIdentity(target, label) {
+  const stat = fs.lstatSync(target);
+  if (stat.isSymbolicLink() || !stat.isFile()) throw new Error(`${label} must be a non-symlink regular file`);
+  return { dev: stat.dev, ino: stat.ino, size: stat.size };
+}
+
+function sameFileIdentity(left, right) {
+  return Boolean(left && right && left.dev === right.dev && left.ino === right.ino);
+}
+
+function assertSecureDirectoriesStable(parents) {
+  for (const parent of parents) {
+    const current = secureDirectoryIdentity(parent.path, 'canonical Flow run parent');
+    if (!sameFileIdentity(parent, current) || current.realpath !== parent.realpath) throw new Error('canonical Flow run parent identity changed');
+  }
+}
+
+function validatedActiveTurnScope(root) {
+  try {
+    const runId = process.env.FLOW_AGENTS_CONTINUATION_RUN_ID;
+    const turnSecret = process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET;
+    if (typeof runId !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(runId) || typeof turnSecret !== 'string' || !turnSecret) return null;
+    const artifactRoot = path.resolve(flowAgentsArtifactRoot(root));
+    const candidate = path.resolve(artifactRoot, runId);
+    if (path.dirname(candidate) !== artifactRoot) return null;
+    const base = validateSignedActiveTurnAssignmentAuthority({ sessionDir: candidate, runId, turnSecret });
+    if (!base.valid) return null;
+    const canonicalFlow = canonicalFlowState(root, candidate);
+    return { artifactDir: candidate, canonicalFlow, baseAuthority: base };
+  } catch {
+    return null;
   }
 }
 
@@ -1794,7 +1898,7 @@ function canonicalFlowState(root, artifactDir) {
 // return that slug so analyze() can log the staleness rather than silently falling back to
 // a global mtime scan that could resurface an abandoned/never-real session as active.
 function staleCurrentSlug(flowAgentsDir) {
-  const { payload: current } = readCurrentPointer(flowAgentsDir, resolveActor(process.env).actor);
+  const { payload: current } = readOwnCurrentPointer(flowAgentsDir, resolveActor(process.env).actor);
   if (!current) return null;
   const slug = current.artifact_dir || current.active_slug;
   if (typeof slug !== 'string' || !slug.trim()) return null;
@@ -1908,9 +2012,35 @@ const FULL_BLOCK = /status:|Definition Of Done|Goal Fit|sidecar validation:|cont
 
 async function analyze(root, now = Date.now()) {
   const flowAgentsDirs = flowAgentsArtifactRootsForRead(root);
+  const { actor: actorKey } = resolveActor(process.env);
+  const activeTurnScope = validatedActiveTurnScope(root);
   // Scope to the session's current task when current.json names one, so an
   // unrelated active workflow elsewhere in the repo does not gate this stop.
-  const scoped = flowAgentsDirs.map(preferredArtifactDir).find(Boolean);
+  const scoped = activeTurnScope?.artifactDir || flowAgentsDirs.map(preferredArtifactDir).find(Boolean);
+
+  // #440 D1/D2: a RESOLVED actor with no scoped own artifactDir (no per-actor pointer, or an
+  // own pointer naming a nonexistent dir) never falls back to the legacy current.json or a
+  // global newest-mtime scan for BLOCKING purposes — those are informational-only for a
+  // resolved actor. Accepted gap: this actor's stop stays ungated until its next
+  // workflow-sidecar command re-establishes its own per-actor pointer; it is never gated on
+  // another actor's unrelated work. #589: a signed continuation active-turn scope (validated via
+  // FLOW_AGENTS_CONTINUATION_RUN_ID/TURN_SECRET, independent of actor identity/ownership) is
+  // resolved into `activeTurnScope` above and OR'd into `scoped` first, so a resolved actor
+  // legitimately handling an authorized continuation-driver turn is never treated as "no own
+  // work to scope to" here, even without its own per-actor current pointer — this check only
+  // fires when NEITHER mechanism finds a scope.
+  if (!scoped && !isUnresolvedActor(actorKey)) {
+    const ownStale = flowAgentsDirs.map(staleCurrentSlug).find(Boolean);
+    process.stderr.write(ownStale
+      ? `[Hook] Goal Fit: actor "${safeOneLine(actorKey, 80)}"'s own current-pointer names slug "${safeOneLine(ownStale, 80)}" but no such session directory exists — ignoring the stale own pointer; other sessions' sidecars are informational only, not blocking (#440).\n`
+      : `[Hook] Goal Fit: no per-actor current-pointer for actor "${safeOneLine(actorKey, 80)}" — stop-gate evidence scoping finds no own work to scope to; not blocking (any workflow-sidecar command re-establishes it; other sessions' sidecars are informational only, #440).\n`);
+    return { warnings: [], blocking: false, activeFlowRun: false, latestArtifactDir: null };
+  }
+
+  // Everything below this point is UNCHANGED for: (a) a resolved actor with a valid `scoped`
+  // own artifactDir (the common, post-fix path), (b) an unresolved actor (full legacy +
+  // global-scan compat, D3), and (c) an authorized continuation-driver turn (#589, scoped via
+  // activeTurnScope regardless of actor ownership).
   // WS8 (AC10a): if current.json points at a nonexistent slug, LOG the staleness and, in
   // the global fallback, require sidecar presence so a stale pointer cannot resurface an
   // abandoned/never-real markdown-only directory as "the active session".
@@ -1928,7 +2058,9 @@ async function analyze(root, now = Date.now()) {
     artifacts = artifacts.filter(a => a && hasSidecarPresence(path.dirname(a.file)));
   }
 
-  const scopedCanonicalFlow = canonicalFlowState(root, scoped);
+  const scopedCanonicalFlow = activeTurnScope && scoped === activeTurnScope.artifactDir
+    ? activeTurnScope.canonicalFlow
+    : canonicalFlowState(root, scoped);
   const scopedState = scoped ? readJsonFile(path.join(scoped, 'state.json')) : null;
   const scopedProjectedActive = Boolean(scopedState && scopedState.flow_run && normalizedStatus(scopedState.flow_run.status) === 'active');
   if (scopedProjectedActive && scopedCanonicalFlow.error) {
@@ -1940,18 +2072,25 @@ async function analyze(root, now = Date.now()) {
       gatePrefix: '[stop-gate]',
     };
   }
+  if (activeTurnScope && scoped === activeTurnScope.artifactDir && scopedCanonicalFlow.error) {
+    return {
+      warnings: [`workflow state: canonical Flow state is unsafe or malformed for the signed continuation session: ${scopedCanonicalFlow.error}. Resolve the canonical run before stopping.`],
+      blocking: true,
+      activeFlowRun: false,
+      activeTurnAuthority: false,
+      latestArtifactDir: scoped,
+      gatePrefix: '[stop-gate]',
+    };
+  }
   if (artifacts.length === 0) {
-    if (normalizedStatus(scopedCanonicalFlow.state?.status) === 'active') {
-      const activeStep = safeOneLine(scopedCanonicalFlow.state.current_step || 'unknown', 80);
-      return {
-        warnings: [`workflow state: canonical Flow run remains active at step ${activeStep}; complete or explicitly cancel the run before stopping.`],
-        blocking: true,
-        activeFlowRun: true,
-        latestArtifactDir: scoped,
-        gatePrefix: '[stop-gate]',
-      };
+    if (scoped) {
+      const stateFile = path.join(scoped, 'state.json');
+      let mtimeMs = now;
+      try { mtimeMs = fs.statSync(stateFile).mtimeMs; } catch { /* missing state is evaluated below */ }
+      artifacts = [{ file: stateFile, status: normalizedStatus(scopedState?.status || 'unknown'), type: 'deliver', mtimeMs }];
+    } else {
+      return { warnings: [], blocking: false, activeFlowRun: false, latestArtifactDir: null };
     }
-    return { warnings: [], blocking: false, activeFlowRun: false, latestArtifactDir: null };
   }
 
   const latest = artifacts[0];
@@ -1971,7 +2110,7 @@ async function analyze(root, now = Date.now()) {
 
   // ADR 0016 P-c: load the active FlowDefinition gate (fail-open: null when absent).
   // Null → existing workflow.* fallback path unchanged. Non-null → expects[]-driven claim selection.
-  const activeFlowStep = loadActiveFlowStep(path.dirname(latestArtifactDir));
+  const activeFlowStep = loadActiveFlowStep(path.dirname(latestArtifactDir), actorKey);
 
   warnings.push(...sidecarValidation(root, latestArtifactDir));
   warnings.push(...sidecarGuidance(root, latestArtifactDir, activeFlowStep));
@@ -2020,7 +2159,9 @@ async function analyze(root, now = Date.now()) {
   // Use module-scope HARD_BLOCK / FULL_BLOCK (defined above analyze()).
   // pre-execution/terminal tasks: only HARD_BLOCK signals cause a block.
   // execution-onward tasks: FULL_BLOCK signals cause a block.
-  const canonicalFlow = canonicalFlowState(root, latestArtifactDir);
+  const canonicalFlow = activeTurnScope && latestArtifactDir === activeTurnScope.artifactDir
+    ? activeTurnScope.canonicalFlow
+    : canonicalFlowState(root, latestArtifactDir);
   const activeProjectedFlow = gateState && gateState.flow_run && normalizedStatus(gateState.flow_run.status) === 'active';
   const unsafeActiveCanonical = Boolean(activeProjectedFlow && canonicalFlow.error);
   if (unsafeActiveCanonical) {
@@ -2033,12 +2174,38 @@ async function analyze(root, now = Date.now()) {
     warnings.push(`workflow state: canonical Flow run remains active at step ${activeStep}; complete or explicitly cancel the run before stopping.`);
   }
   const blockRe = ((preExecution && !activeFlowRun) || terminal) ? HARD_BLOCK : FULL_BLOCK;
-  const blocking = activeFlowRun || warnings.some(w => {
+  const activeTurnAuthority = activeFlowRun && canonicalFlow.state && !unsafeActiveCanonical
+    ? validateActiveTurnAuthority({
+      sessionDir: latestArtifactDir,
+      runId: process.env.FLOW_AGENTS_CONTINUATION_RUN_ID,
+      turnSecret: process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET,
+      canonicalState: canonicalFlow.state,
+    })
+    : { valid: false, reason: 'canonical Flow is not safely active' };
+  if (activeTurnAuthority.valid) {
+    warnings.push('continuation driver active turn is authorized; the ordinary unfinished canonical Flow gate is advisory until this adapter turn returns.');
+  }
+  const blockingRe = activeTurnAuthority.valid ? FULL_BLOCK : blockRe;
+  const blocking = (activeFlowRun && !activeTurnAuthority.valid) || warnings.some(w => {
     // Capture cross-reference warn-mode notes never block (operator opted out).
     if (/\[backstop in warn mode — not blocking\]/.test(w)) return false;
-    return blockRe.test(w);
+    if (activeTurnAuthority.valid && isOrdinaryActiveGateWarning(w, relPath)) return false;
+    return blockingRe.test(w);
   });
-  return { warnings, blocking, activeFlowRun, preExecution, gatePrefix: gateLabel(activeFlowStep), latestArtifactDir };
+  return { warnings, blocking, activeFlowRun, activeTurnAuthority: activeTurnAuthority.valid, preExecution, gatePrefix: gateLabel(activeFlowStep), latestArtifactDir };
+}
+
+function isOrdinaryActiveGateWarning(warning, relPath) {
+  return warning.startsWith(`${relPath} is still status:`)
+    || /(?:^|\/)\.kontourai\/flow-agents\/[^/]+ workflow state:/.test(warning)
+    || /(?:^|\/)\.kontourai\/flow-agents\/[^/]+ (?:next action|required skills|required operations|next command):/.test(warning)
+    || /canonical Flow run remains active at step .+; complete or explicitly cancel the run before stopping\.$/.test(warning);
+}
+
+function isHardStopWarning(warning, relPath, activeTurnAuthority) {
+  if (/\[backstop in warn mode — not blocking\]/.test(warning)) return false;
+  if (!activeTurnAuthority) return HARD_BLOCK.test(warning);
+  return FULL_BLOCK.test(warning) && !isOrdinaryActiveGateWarning(warning, relPath);
 }
 
 /**
@@ -2286,9 +2453,16 @@ function releaseOnNonTerminalStop(root, artifactDir) {
 
     const state = readJsonFile(path.join(artifactDir, 'state.json'));
     if (!state) return; // AC5: no state.json — nothing to gate a release decision on.
-    const canonicalFlow = canonicalFlowState(root, artifactDir);
-    if (normalizedStatus(canonicalFlow.state?.status) === 'active' || (state.flow_run && normalizedStatus(state.flow_run.status) === 'active')) {
-      process.stderr.write(`[Hook] Goal Fit: stop-hook release skipped for active Flow run "${safeOneLine(state.flow_run?.run_id || state.task_slug || path.basename(artifactDir), 80)}"; continuation remains governed by Flow state.\n`);
+    const signedScope = validatedActiveTurnScope(root);
+    const exactSignedScope = signedScope && signedScope.artifactDir === artifactDir;
+    const canonicalFlow = exactSignedScope ? signedScope.canonicalFlow : canonicalFlowState(root, artifactDir);
+    const canonicalStatus = normalizedStatus(canonicalFlow.state?.status);
+    const projectedCanonicalStatus = normalizedStatus(state.flow_run?.status);
+    const canonicalOwned = CANONICAL_FLOW_STATUSES.has(canonicalStatus) && !CANONICAL_FLOW_TERMINAL_STATUSES.has(canonicalStatus);
+    const projectedCanonicalOwned = CANONICAL_FLOW_STATUSES.has(projectedCanonicalStatus) && !CANONICAL_FLOW_TERMINAL_STATUSES.has(projectedCanonicalStatus);
+    if ((exactSignedScope && canonicalFlow.error) || canonicalOwned || projectedCanonicalOwned) {
+      const ownershipLabel = canonicalStatus === 'active' || projectedCanonicalStatus === 'active' ? 'active Flow run' : 'nonterminal Flow run';
+      process.stderr.write(`[Hook] Goal Fit: stop-hook release skipped for ${ownershipLabel} "${safeOneLine(state.flow_run?.run_id || state.task_slug || path.basename(artifactDir), 80)}"; continuation remains governed by canonical Flow state.\n`);
       return;
     }
 
@@ -2434,15 +2608,12 @@ async function run(rawInput) {
     // with runtime-constructed paths or by modifying the warning
     // text so the hash changes. The real anchor is external (signed checkpoints + human
     // review). This raises the cost of the burn-through-the-counter escape vector.
-    const isHardBlock = result.activeFlowRun || result.warnings.some(w => {
-      if (/\[backstop in warn mode — not blocking\]/.test(w)) return false;
-      return HARD_BLOCK.test(w);
-    });
+    const isHardBlock = (result.activeFlowRun && !result.activeTurnAuthority) || result.warnings.some(w => isHardStopWarning(w, relative(root, result.latestArtifactDir || root), result.activeTurnAuthority));
     if (isHardBlock) {
       // Do NOT clear the streak — keep accumulating so the same hard block stays visible.
       return {
         stdout: rawInput,
-        stderr: result.activeFlowRun
+        stderr: result.activeFlowRun && !result.activeTurnAuthority
           ? `${message}\n${gatePrefix} max-blocks reached but canonical Flow remains active — not auto-releasing; complete or explicitly cancel the run.`
           : `${message}\n${gatePrefix} max-blocks reached but the block is a caught false-completion / integrity failure — not auto-releasing; requires a real fix or operator override.`,
         exitCode: 2,
@@ -2493,4 +2664,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop };
+module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop, isHardStopWarning, canonicalFlowState };

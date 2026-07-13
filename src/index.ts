@@ -45,6 +45,47 @@ export {
 } from "./builder-flow-runtime.js";
 export type { BuilderFlowAgentLifecycleInput, BuilderFlowAuthorizedLifecycleInput, BuilderFlowSessionInput, BuilderFlowSessionResult } from "./builder-flow-runtime.js";
 
+export {
+  deriveBuilderGateActionEnvelope,
+  gateActionProgressSnapshot,
+  withGateActionPriorProgress,
+} from "./builder-gate-action-envelope.js";
+export type {
+  BuilderGateActionEnvelopeInput,
+  GateActionEnvelope,
+  GateActionInterfaceParameter,
+  GateActionPriorProgress,
+  GateActionProgressSnapshot,
+  GateActionPublicMutation,
+} from "./builder-gate-action-envelope.js";
+
+export {
+  ContinuationAdapterTimeoutError,
+  MAX_CONTINUATION_ADAPTER_EVIDENCE_BYTES,
+  MAX_CONTINUATION_TURN_RESULT_BYTES,
+  createFileContinuationStore,
+  driveBuilderFlowSession,
+  runContinuationDriver,
+  withContinuationDriverLock,
+} from "./continuation-driver.js";
+export type {
+  ContinuationBarrier,
+  ContinuationAcceptedTurn,
+  ContinuationDriverEvent,
+  ContinuationDriverLockLease,
+  ContinuationDriverOutcome,
+  ContinuationDriverState,
+  ContinuationRuntimePort,
+  ContinuationSnapshot,
+  ContinuationStateStore,
+  ContinuationTurnAuthority,
+  ContinuationTurnContext,
+  ContinuationTurnRequest,
+  ContinuationTurnResult,
+  DriveBuilderFlowSessionInput,
+  RunContinuationDriverInput,
+} from "./continuation-driver.js";
+
 // Pure serialization contract used by external lifecycle authorities when
 // signing requests. This does not load, create, or mutate a Flow run.
 export { builderLifecycleAuthorizationPayload, loadBuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";

@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { createHash, generateKeyPairSync, sign, verify } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 
-import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, runDir } from "@kontourai/flow";
+import { FLOW_RUN_EVIDENCE_MANIFEST_PATH, acceptException, defaultFlowConfig, flowConfigPath, runDir } from "@kontourai/flow";
 import {
   archiveBuilderFlowSession,
   cancelBuilderFlowSession,
@@ -18,10 +20,14 @@ import {
   syncBuilderFlowSession,
 } from "../../build/src/builder-flow-runtime.js";
 import { builderLifecycleAuthorizationPayload, loadBuilderLifecycleAuthorization, recordAuthorizationConsumed } from "../../build/src/builder-lifecycle-authority.js";
-import { cancelBuilderBuildRun } from "../../build/src/builder-flow-run-adapter.js";
-import { performLocalClaim, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
+import { driveBuilderFlowSession, withContinuationDriverLock } from "../../build/src/continuation-driver.js";
+import { deriveBuilderGateActionEnvelope } from "../../build/src/builder-gate-action-envelope.js";
+import { WORKFLOW_CRITIQUE_STATUSES } from "../../build/src/cli/public-contracts.js";
+import { cancelBuilderBuildRun, startBuilderFlowRun } from "../../build/src/builder-flow-run-adapter.js";
+import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
-import { inferExecutedTestCount } from "../../build/src/cli/workflow-sidecar.js";
+import { assertAcceptedTurnEvidenceCapacity, main as workflowMain } from "../../build/src/cli/workflow.js";
+import { buildTrustBundle, inferExecutedTestCount, main as workflowSidecarMain } from "../../build/src/cli/workflow-sidecar.js";
 
 const SUBJECT = "local:work-item/runtime-projection";
 const NOW = "2026-07-09T20:00:00.000Z";
@@ -30,6 +36,22 @@ const ACTOR = { runtime: "codex", session_id: "runtime-projection", host: "test-
 const ACTOR_KEY = "codex:runtime-projection:test-host";
 const AUTHORITY_KEY_ID = "runtime-test";
 const AUTHORITY_KEYS = generateKeyPairSync("ed25519");
+const require = createRequire(import.meta.url);
+const activeTurnAuthority = require("../../scripts/hooks/lib/continuation-turn-authority.js");
+const AMBIENT_IDENTITY_ENV_KEYS = [
+  "FLOW_AGENTS_ACTOR",
+  "CODEX_THREAD_ID",
+  "CODEX_SESSION_ID",
+  "CLAUDE_CODE_SESSION_ID",
+  "OPENCODE_SESSION_ID",
+  "PI_SESSION_ID",
+  "GITHUB_ACTIONS",
+  "GITLAB_CI",
+  "CIRCLECI",
+  "JENKINS_URL",
+  "TF_BUILD",
+  "BUILDKITE",
+];
 
 function makeSession(slug = "runtime-projection") {
   const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-builder-runtime-"));
@@ -88,7 +110,7 @@ function claimSessionAssignment(session) {
     ttlSeconds: 1800,
     actorKey: ACTOR_KEY,
     branch: `agent/${session.slug}`,
-    artifactDir: session.sessionDir,
+    artifactDir: session.slug,
     workItemRef: SUBJECT,
     reason: "test",
   });
@@ -100,7 +122,7 @@ function claimAmbientSessionAssignment(session) {
     ttlSeconds: 1800,
     actorKey: ambient.actorKey,
     branch: `agent/${session.slug}`,
-    artifactDir: session.sessionDir,
+    artifactDir: session.slug,
     workItemRef: SUBJECT,
     reason: "test",
   });
@@ -214,7 +236,7 @@ async function assertRecoveryRejectsWithoutWrites(session, pattern) {
   assert.deepEqual(snapshotProjectionTargets(session), beforeProjection);
 }
 
-function bundleClaim({ expectation, claimType, subjectType, status = "pass", routeReason, subject = SUBJECT, testCount = 1, timestamp = NOW }) {
+function bundleClaim({ expectation, claimType, subjectType, status = "pass", routeReason, subject = SUBJECT, testCount = 1, timestamp = new Date().toISOString() }) {
   const claimId = `claim.${expectation}`;
   return {
     claim: {
@@ -226,6 +248,8 @@ function bundleClaim({ expectation, claimType, subjectType, status = "pass", rou
       value: status,
       metadata: {
         workflow_subject_ref: subject,
+        origin: "check",
+        check_kind: "external",
         ...(expectation === "tests-evidence" ? {
           recorded_by: "implementation-actor",
           artifact_refs: [{ kind: "command", excerpt: "node --test src/cli/builder-flow-runtime.test.mjs", summary: "Runtime fixture assertion." }],
@@ -264,7 +288,7 @@ function bundleClaim({ expectation, claimType, subjectType, status = "pass", rou
   };
 }
 
-function verifiedTestsPrerequisites(session, timestamp = NOW) {
+function verifiedTestsPrerequisites(session, timestamp = new Date().toISOString()) {
   const reviewArtifact = path.join(session.projectRoot, "review-target", "delivery.md");
   const implementation = path.join(session.projectRoot, "review-target", "implementation.txt");
   const implementationFile = path.relative(session.projectRoot, implementation);
@@ -312,6 +336,24 @@ function writeBundle(sessionDir, entries) {
   });
 }
 
+function historicalProducerSuperseded(entry, suffix = "historical") {
+  const copy = withIdentitySuffix(entry, suffix);
+  copy.claim.producerStatus = "superseded";
+  return copy;
+}
+
+function withIdentitySuffix(entry, suffix) {
+  const copy = structuredClone(entry);
+  const priorId = copy.claim.id;
+  copy.claim.id = `${priorId}.${suffix}`;
+  copy.evidence.id = `${copy.evidence.id}.${suffix}`;
+  copy.evidence.claimId = copy.claim.id;
+  copy.event.id = `${copy.event.id}.${suffix}`;
+  copy.event.claimId = copy.claim.id;
+  copy.event.evidenceIds = [copy.evidence.id];
+  return copy;
+}
+
 async function writeAndSync(session, entries) {
   writeBundle(session.sessionDir, entries);
   return syncBuilderFlowSession({ sessionDir: session.sessionDir });
@@ -328,6 +370,25 @@ test("small-model client can start and advance from projected actions without ch
   assert.match(started.projection.next_action.command, /--prefix "\$root"/);
   assert.ok(started.projection.next_action.command.includes(`'@kontourai/flow-agents@${PACKAGE_VERSION}'`));
   assert.ok(started.projection.next_action.command.includes(`'workflow' 'status' '--session-dir' '.kontourai/flow-agents/${session.slug}' '--json'`));
+  const envelope = started.gateActionEnvelope;
+  assert.equal(Object.hasOwn(started.projection.next_action, "gate_action_envelope"), false, "durable state has no duplicate envelope");
+  assert.equal(envelope.schema_version, "1.0");
+  assert.equal(envelope.action.implementation_allowed, false, "implementation is forbidden before builder.build/execute");
+  assert.deepEqual(envelope.action.declared_evidence, ["selected-work"]);
+  assert.deepEqual(envelope.action.declared_artifacts, [`<slug>--pull-work.md`, "trust.bundle#selected-work"]);
+  assert.equal(envelope.stop_condition.kind, "one_turn");
+  assert.equal(envelope.stop_condition.scope.current_gate_only, true);
+  assert.deepEqual(envelope.stop_condition.required.unresolved_evidence_ids, ["selected-work"]);
+  assert.deepEqual(envelope.stop_condition.sequence, ["activate_required_skills", "produce_declared_artifacts", "record_bound_evidence", "synchronize_canonical_flow", "return_adapter_result"]);
+  assert.equal(envelope.stop_condition.adapter_evidence_is_gate_evidence, false);
+  assert.equal(envelope.action.skills[0].id, "pull-work");
+  assert.equal(envelope.action.skills[0].package.name, "@kontourai/flow-agents");
+  assert.match(envelope.action.skills[0].path, /kits\/builder\/skills\/pull-work\/SKILL\.md$/);
+  assert.match(envelope.action.skills[0].sha256, /^[a-f0-9]{64}$/);
+  assert.equal(envelope.public_interfaces.mutations[0].expectation_id, "selected-work");
+  assert.deepEqual(envelope.public_interfaces.mutations[0].package, { name: "@kontourai/flow-agents", version: PACKAGE_VERSION });
+  assert.deepEqual(envelope.public_interfaces.mutations[0].argv.slice(0, 2), ["workflow", "evidence"]);
+  assert.equal(envelope.public_interfaces.mutations[0].argv.some((value) => value.includes("<")), false, "argv contains no substitution placeholders");
   assert.ok(fs.existsSync(runDir(session.slug, session.projectRoot)));
   assert.ok(!fs.existsSync(path.join(session.projectRoot, ".flow", "runs")), "retired runtime path must not be created");
 
@@ -340,11 +401,393 @@ test("small-model client can start and advance from projected actions without ch
   assert.equal(advanced.attached, true);
   assert.equal(advanced.run.state.current_step, "design-probe");
   assert.deepEqual(advanced.projection.next_action.skills, ["pickup-probe"]);
+  assert.equal(advanced.gateActionEnvelope.action.implementation_allowed, false);
+  assert.equal(advanced.gateActionEnvelope.progress.canonical_evidence.some((entry) => entry.startsWith("pull-work-gate:")), true, "advancing evidence remains attributable after the step namespace changes");
   assert.equal(readJson(path.join(session.artifactRoot, "current.json")).active_step_id, "design-probe");
 
   const duplicate = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
   assert.equal(duplicate.attached, false);
   assert.equal(duplicate.run.manifest.evidence.length, advanced.run.manifest.evidence.length);
+});
+
+test("gate-action implementation policy permits code only at builder.build/execute", async () => {
+  const session = makeSession("gate-action-implementation-policy");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  const executing = await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  assert.equal(executing.run.state.current_step, "execute");
+  assert.equal(executing.gateActionEnvelope.action.implementation_allowed, true);
+  assert.equal(executing.gateActionEnvelope.action.declared_artifacts.includes("state.json"), false, "control state is not a declared model artifact");
+  assert.equal(executing.gateActionEnvelope.stop_condition.required.artifact_refs.includes("state.json"), false, "control state is not a required model artifact");
+  assert.equal(executing.gateActionEnvelope.progress.observed_artifacts.some((entry) => entry.startsWith("state.json:")), false, "control state never counts as progress");
+
+  const requests = [];
+  await driveBuilderFlowSession({
+    sessionDir: session.sessionDir,
+    maxTurns: 2,
+    execute: async (request) => { requests.push(request); return { status: "completed" }; },
+  });
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].gate_action_envelope.progress.prior_turn.stagnation, "possible");
+  const mission = readJson(path.join(session.sessionDir, "continuation-driver", "state.json"));
+  assert.equal(mission.prior_progress.stagnation, "stagnant", "two no-op execute turns are true stagnation");
+});
+
+test("gate-action artifact identity reads reject symlinks and oversized files", async (t) => {
+  await t.test("symlink", async () => {
+    const session = makeSession("gate-action-artifact-symlink");
+    const outside = path.join(session.projectRoot, "outside-release.json");
+    fs.writeFileSync(outside, "{}\n");
+    fs.symlinkSync(outside, path.join(session.sessionDir, "release.json"));
+    await assert.rejects(startBuilderFlowSession({ sessionDir: session.sessionDir }), /ELOOP|regular file|changed identity/);
+  });
+
+  await t.test("oversized", async () => {
+    const session = makeSession("gate-action-artifact-oversized");
+    fs.writeFileSync(path.join(session.sessionDir, "release.json"), Buffer.alloc(1_048_577));
+    await assert.rejects(startBuilderFlowSession({ sessionDir: session.sessionDir }), /bounded regular file/);
+  });
+});
+
+test("Builder projection preserves Flow continuation semantics for exceptional statuses", async () => {
+  const session = makeSession("continuation-status-projection");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const stateFile = path.join(runDir(session.slug, session.projectRoot), "state.json");
+  const original = readJson(stateFile);
+  for (const [status, expected] of [
+    ["blocked", "continue"],
+    ["accepted_by_exception", "continue"],
+    ["needs_decision", "blocked"],
+    ["failed", "failed"],
+  ]) {
+    writeJson(stateFile, { ...original, status, next_action: `fixture ${status}` });
+    const recovered = await recoverBuilderFlowSession({ sessionDir: session.sessionDir });
+    assert.equal(recovered.projection.next_action.status, expected, status);
+  }
+});
+
+test("accepted Flow exceptions explicitly waive the current envelope requirements", async () => {
+  const session = makeSession("accepted-exception-envelope");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const exception = await acceptException(session.slug, {
+    cwd: session.projectRoot,
+    gate: "pull-work-gate",
+    reason: "authorized fixture waiver",
+    authority: "test-reviewer",
+  });
+  const recovered = await recoverBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.deepEqual(recovered.gateActionEnvelope.gate.accepted_exceptions, [{ gate_id: "pull-work-gate", exception_id: exception.id }]);
+  assert.equal(recovered.gateActionEnvelope.gate.requirements[0].status, "accepted_exception");
+  assert.deepEqual(recovered.gateActionEnvelope.stop_condition.required.unresolved_evidence_ids, []);
+  assert.deepEqual(recovered.gateActionEnvelope.stop_condition.required.artifact_refs, []);
+  assert.deepEqual(recovered.gateActionEnvelope.stop_condition.required.skill_ids, []);
+  const synchronized = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(synchronized.attached, false);
+  assert.equal(synchronized.run.state.current_step, "design-probe");
+  assert.deepEqual(synchronized.gateActionEnvelope.action.skills.map((skill) => skill.id), ["pickup-probe"]);
+});
+
+test("all-optional effective Flow gate overrides advance during canonical sync without bundle evidence", async () => {
+  const session = makeSession("gate-override-envelope");
+  const config = defaultFlowConfig();
+  config.gate_overrides["pull-work-gate"] = { expectations: { "selected-work": { required: false } } };
+  fs.mkdirSync(path.dirname(flowConfigPath(session.projectRoot)), { recursive: true });
+  writeJson(flowConfigPath(session.projectRoot), config);
+  const unevaluated = await startBuilderFlowRun({ cwd: session.projectRoot, runId: session.slug, subject: SUBJECT, flowId: "builder.build" });
+  const directEnvelope = deriveBuilderGateActionEnvelope({
+    sessionDir: session.sessionDir,
+    projectRoot: session.projectRoot,
+    run: unevaluated,
+    definition: readJson(path.join(unevaluated.dir, "definition.json")),
+  });
+  assert.deepEqual(directEnvelope.stop_condition.required.skill_ids, []);
+  fs.rmSync(unevaluated.dir, { recursive: true, force: true });
+  const started = await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(started.attached, false);
+  assert.equal(started.run.state.current_step, "design-probe");
+  assert.deepEqual(started.gateActionEnvelope.action.skills.map((skill) => skill.id), ["pickup-probe"]);
+  assert.equal(started.gateActionEnvelope.flow.current_step, "design-probe");
+});
+
+test("weak structured consumer advances real Builder gates through envelope public interfaces", async () => {
+  const session = makeSession("continuation-driver-two-steps");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const visited = [];
+
+  const result = await driveBuilderFlowSession({
+    sessionDir: session.sessionDir,
+    maxTurns: 2,
+    execute: async (request) => {
+      visited.push(request.current_step);
+      const expectationIds = request.gate_action_envelope.public_interfaces.mutations.map((mutation) => mutation.expectation_id);
+      if (expectationIds.includes("selected-work")) {
+        writeBundle(session.sessionDir, [bundleClaim({
+          expectation: "selected-work",
+          claimType: "builder.pull-work.selected",
+          subjectType: "work-item",
+        })]);
+      } else if (expectationIds.includes("pickup-probe-readiness")) {
+        writeBundle(session.sessionDir, [
+          bundleClaim({
+            expectation: "pickup-probe-readiness",
+            claimType: "builder.design-probe.pickup-readiness",
+            subjectType: "work-item",
+          }),
+          bundleClaim({
+            expectation: "probe-decisions-or-accepted-gaps",
+            claimType: "builder.design-probe.decisions",
+            subjectType: "decision",
+          }),
+        ]);
+      } else {
+        assert.fail(`unexpected public mutation set ${expectationIds.join(",")}`);
+      }
+      return { status: "completed", summary: `completed ${request.current_step}` };
+    },
+  });
+
+  assert.equal(result.outcome, "budget_exhausted");
+  assert.equal(result.turns_started, 2);
+  assert.deepEqual(visited, ["pull-work", "design-probe"]);
+  assert.equal(result.snapshot.current_step, "plan");
+  assert.equal(result.snapshot.next_action.skills[0], "plan-work");
+  const driverState = readJson(path.join(session.sessionDir, "continuation-driver", "state.json"));
+  assert.equal(driverState.status, "budget_exhausted");
+  assert.equal(driverState.turns_started, 2);
+  const events = fs.readFileSync(path.join(session.sessionDir, "continuation-driver", "events.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
+  assert.deepEqual(events.filter((event) => event.type === "turn_started").map((event) => event.current_step), ["pull-work", "design-probe"]);
+});
+
+test("public workflow evidence accepts only live signed turn authority after ordinary ancestry resolution mismatches", async () => {
+  const session = makeSession("continuation-driver-cli");
+  claimAmbientSessionAssignment(session);
+  fs.writeFileSync(path.join(session.projectRoot, "AGENTS.md"), "# Test Repo\n");
+  fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--deliver.md`), "# Continuation\n\nstatus: executing\ntype: deliver\n");
+  fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--pull-work.md`), "# Pull Work\n\nSelected continuation fixture.\n");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const unrelatedSlug = "unrelated-pointer-session";
+  const unrelatedDir = path.join(session.artifactRoot, unrelatedSlug);
+  fs.mkdirSync(unrelatedDir, { recursive: true });
+  fs.writeFileSync(path.join(unrelatedDir, `${unrelatedSlug}--deliver.md`), "# Unrelated\n\nstatus: executing\ntype: deliver\n");
+  writeJson(path.join(unrelatedDir, "state.json"), {
+    schema_version: "1.0", task_slug: unrelatedSlug, status: "executing", phase: "execution",
+    updated_at: new Date().toISOString(), next_action: { status: "continue", summary: "Unrelated work" },
+  });
+  writeJson(path.join(session.artifactRoot, "current.json"), { active_slug: unrelatedSlug, artifact_dir: unrelatedSlug });
+  const adapter = path.join(session.projectRoot, "adapter.mjs");
+  const commandFile = path.join(session.projectRoot, "adapter-command.json");
+  const authorityFile = path.join(session.sessionDir, "continuation-driver", "active-turn.json");
+  fs.writeFileSync(adapter, `
+    import fs from "node:fs";
+    import { spawnSync } from "node:child_process";
+    let input = "";
+    for await (const chunk of process.stdin) input += chunk;
+    const request = JSON.parse(input);
+    fs.writeFileSync("adapter-request.json", input);
+    const evidenceEnv = { ...process.env };
+    for (const key of ${JSON.stringify(AMBIENT_IDENTITY_ENV_KEYS)}) delete evidenceEnv[key];
+    const ordinaryChild = ${JSON.stringify(path.resolve(import.meta.dirname, "../../scripts/hooks/lib/actor-identity.js"))};
+    const childIdentity = (await import("node:module")).createRequire(import.meta.url)(ordinaryChild).resolveActorIdentity(evidenceEnv);
+    const record = (expectation) => {
+      const binding = request.gate_action_envelope.public_interfaces.mutations.find((entry) => entry.expectation_id === expectation && entry.interface === "workflow.evidence");
+      if (!binding) throw new Error("missing workflow.evidence binding for " + expectation);
+      const evidence = { kind: "artifact", file: ${JSON.stringify(`.kontourai/flow-agents/${session.slug}/${session.slug}--pull-work.md`)}, summary: "adapter child records " + expectation };
+      return spawnSync(process.execPath, [${JSON.stringify(path.resolve(import.meta.dirname, "../../build/src/cli.js"))}, ...binding.argv, "--status", "pass", "--summary", "adapter child records " + expectation, "--evidence-ref-json", JSON.stringify(evidence)], { cwd: ${JSON.stringify(session.projectRoot)}, encoding: "utf8", env: evidenceEnv });
+    };
+    const evidenceRuns = request.current_step === "pull-work"
+      ? [record("selected-work")]
+      : [record("pickup-probe-readiness"), record("probe-decisions-or-accepted-gaps")];
+    if (evidenceRuns.some((result) => result.status !== 0)) {
+      fs.writeFileSync("adapter-evidence-error.json", JSON.stringify(evidenceRuns.map((result) => ({ status: result.status, stderr: result.stderr, stdout: result.stdout }))));
+      throw new Error("public workflow evidence rejected signed adapter authority: " + evidenceRuns.map((result) => result.stderr).join("\\n"));
+    }
+    const lifecycleRuns = [
+      ["pause", "--reason", "capability must not pause"],
+      ["resume"],
+      ["release", "--reason", "capability must not release"],
+      ["cancel"],
+      ["archive"],
+    ].map((args) => spawnSync(process.execPath, [${JSON.stringify(path.resolve(import.meta.dirname, "../../build/src/cli.js"))}, "workflow", ...args, "--session-dir", ${JSON.stringify(session.sessionDir)}], { cwd: ${JSON.stringify(session.projectRoot)}, encoding: "utf8", env: evidenceEnv }));
+    const currentPointer = (await import("node:module")).createRequire(import.meta.url)(${JSON.stringify(path.resolve(import.meta.dirname, "../../scripts/hooks/lib/current-pointer.js"))});
+    currentPointer.writePerActorCurrent(${JSON.stringify(session.artifactRoot)}, childIdentity.actor, { active_slug: ${JSON.stringify(unrelatedSlug)}, artifact_dir: ${JSON.stringify(unrelatedSlug)} });
+    fs.writeFileSync(${JSON.stringify(path.join(session.artifactRoot, "current.json"))}, JSON.stringify({ active_slug: ${JSON.stringify(unrelatedSlug)}, artifact_dir: ${JSON.stringify(unrelatedSlug)} }));
+    const unrelatedAssignment = ${JSON.stringify(path.join(session.artifactRoot, "assignment", `${unrelatedSlug}.json`))};
+    fs.mkdirSync((await import("node:path")).dirname(unrelatedAssignment), { recursive: true });
+    fs.writeFileSync(unrelatedAssignment, JSON.stringify({ schema_version: "1.0", role: "AssignmentClaimRecord", subject_id: ${JSON.stringify(unrelatedSlug)}, actor: childIdentity.actorStruct, actor_key: childIdentity.actor, artifact_dir: ${JSON.stringify(unrelatedSlug)}, status: "claimed" }));
+    const canonicalState = JSON.parse(fs.readFileSync(${JSON.stringify(path.join(runDir(session.slug, session.projectRoot), "state.json"))}, "utf8"));
+    const authorityValidation = (await import("node:module")).createRequire(import.meta.url)(${JSON.stringify(path.resolve(import.meta.dirname, "../../scripts/hooks/lib/continuation-turn-authority.js"))}).validateActiveTurnAuthority({ sessionDir: ${JSON.stringify(session.sessionDir)}, runId: process.env.FLOW_AGENTS_CONTINUATION_RUN_ID, turnSecret: process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET, canonicalState });
+    const hookEnv = { ...process.env, FLOW_AGENTS_GOAL_FIT_MODE: "block" };
+    const hook = spawnSync(process.execPath, [${JSON.stringify(path.resolve(import.meta.dirname, "../../scripts/hooks/stop-goal-fit.js"))}], { cwd: ${JSON.stringify(session.projectRoot)}, input: JSON.stringify({ hook_event_name: "Stop", cwd: ${JSON.stringify(session.projectRoot)} }), encoding: "utf8", env: hookEnv });
+    fs.writeFileSync("adapter-authority.json", JSON.stringify({ turnSecret: process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET || null, runId: process.env.FLOW_AGENTS_CONTINUATION_RUN_ID || null, childIdentity, evidenceRuns: evidenceRuns.map((result) => ({ status: result.status, stderr: result.stderr })), lifecycleRuns: lifecycleRuns.map((result) => ({ status: result.status, stderr: result.stderr })), unrelatedAssignment: JSON.parse(fs.readFileSync(unrelatedAssignment, "utf8")), unrelatedHandoffExists: fs.existsSync(${JSON.stringify(path.join(unrelatedDir, "handoff.json"))}), active: fs.existsSync(${JSON.stringify(authorityFile)}), authorityValidation, hookStatus: hook.status, hookStderr: hook.stderr }));
+    if (hook.status !== 0) throw new Error("Stop hook blocked canonical continuation: " + hook.stderr);
+    process.stdout.write(JSON.stringify({ status: "completed", summary: "adapter advanced " + request.current_step }));
+  `);
+  writeJson(commandFile, { argv: [process.execPath, adapter] });
+
+  const rc = await workflowMain([
+    "drive",
+    "--session-dir", session.sessionDir,
+    "--adapter-command-file", commandFile,
+    "--max-turns", "2",
+    "--turn-timeout-ms", "5000",
+    "--barrier-wait-ms", "0",
+    "--json",
+  ]);
+
+  assert.equal(rc, 0);
+  const request = readJson(path.join(session.projectRoot, "adapter-request.json"));
+  assert.equal(request.current_step, "design-probe", fs.existsSync(path.join(session.projectRoot, "adapter-evidence-error.json")) ? fs.readFileSync(path.join(session.projectRoot, "adapter-evidence-error.json"), "utf8") : "adapter did not advance canonical Flow");
+  assert.deepEqual(request.next_action.skills, ["pickup-probe"]);
+  assert.equal(Object.hasOwn(request, "system_prompt"), false);
+  const authority = readJson(path.join(session.projectRoot, "adapter-authority.json"));
+  assert.match(authority.turnSecret, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(authority.runId, session.slug);
+  assert.equal(authority.childIdentity.source, "process-ancestry");
+  assert.ok(authority.evidenceRuns.every((result) => result.status === 0), JSON.stringify(authority.evidenceRuns));
+  assert.ok(authority.lifecycleRuns.every((result) => result.status !== 0), JSON.stringify(authority.lifecycleRuns));
+  assert.equal(authority.unrelatedAssignment.status, "claimed", "Stop does not release the unrelated per-actor/global-pointer session");
+  assert.equal(authority.unrelatedHandoffExists, false, "Stop does not relax or hand off the unrelated session");
+  assert.equal(authority.active, true);
+  assert.equal(authority.authorityValidation.valid, true, authority.authorityValidation.reason);
+  assert.equal(authority.hookStatus, 0, `the blocking Stop hook returns control during the signed adapter turn: ${authority.hookStderr}`);
+  assert.match(authority.hookStderr, /continuation driver active turn is authorized/);
+  assert.equal(fs.existsSync(authorityFile), false, "adapter turn authority is removed after the child exits");
+  const driverState = readJson(path.join(session.sessionDir, "continuation-driver", "state.json"));
+  assert.equal(driverState.status, "budget_exhausted");
+  const canonical = await recoverBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(canonical.run.state.status, "active");
+  assert.equal(canonical.run.state.current_step, "plan");
+  const events = fs.readFileSync(path.join(session.sessionDir, "continuation-driver", "events.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
+  assert.deepEqual(events.filter((event) => event.type === "turn_started").map((event) => event.current_step), ["pull-work", "design-probe"]);
+  assert.equal(events.some((event) => event.type === "gate_not_advanced"), false);
+  const replayEnv = { ...process.env, FLOW_AGENTS_CONTINUATION_TURN_SECRET: authority.turnSecret, FLOW_AGENTS_CONTINUATION_RUN_ID: authority.runId };
+  for (const key of AMBIENT_IDENTITY_ENV_KEYS) delete replayEnv[key];
+  const replay = spawnSync(process.execPath, [path.resolve(import.meta.dirname, "../../build/src/cli.js"), "workflow", "evidence", "--session-dir", session.sessionDir, "--expectation", "implementation-plan", "--status", "pass", "--summary", "replayed turn capability", "--evidence-ref-json", JSON.stringify({ kind: "artifact", file: "adapter.mjs", summary: "replay fixture" })], { cwd: session.projectRoot, encoding: "utf8", env: replayEnv });
+  assert.notEqual(replay.status, 0, "copied capability values fail after active-turn cleanup");
+  replayEnv.FLOW_AGENTS_CONTINUATION_TURN_SECRET = "A".repeat(43);
+  const forged = spawnSync(process.execPath, [path.resolve(import.meta.dirname, "../../build/src/cli.js"), "workflow", "evidence", "--session-dir", session.sessionDir, "--expectation", "implementation-plan", "--status", "pass", "--summary", "forged turn capability", "--evidence-ref-json", JSON.stringify({ kind: "artifact", file: "adapter.mjs", summary: "forgery fixture" })], { cwd: session.projectRoot, encoding: "utf8", env: replayEnv });
+  assert.notEqual(forged.status, 0, "fake nonce and digest without a signed active turn fail ownership");
+});
+
+test("signed turn evidence capacity is rejected by preflight before another bounded result", () => {
+  assert.doesNotThrow(() => assertAcceptedTurnEvidenceCapacity([], { schema_version: "1.0", iteration: 1 }));
+  assert.throws(
+    () => assertAcceptedTurnEvidenceCapacity([{ request: { padding: "x".repeat(980_000) }, result: {} }], { schema_version: "1.0", iteration: 2 }),
+    /lacks capacity for another bounded result/,
+  );
+});
+
+test("public workflow drive signs adapter evidence with a consumed one-time key", async () => {
+  const session = makeSession("continuation-driver-signed-evidence");
+  claimAmbientSessionAssignment(session);
+  fs.writeFileSync(path.join(session.projectRoot, "AGENTS.md"), "# Test Repo\n");
+  fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--deliver.md`), "# Continuation\n\nstatus: executing\ntype: deliver\n");
+  fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--pull-work.md`), "# Pull Work\n\nSelected continuation fixture.\n");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+
+  const adapter = path.join(session.projectRoot, "signed-evidence-adapter.mjs");
+  const commandFile = path.join(session.projectRoot, "signed-evidence-adapter-command.json");
+  const keyFile = path.join(session.projectRoot, ".continuation-evidence-key.pem");
+  const keyConsumedMarker = path.join(session.projectRoot, "key-consumed.json");
+  const observedRequestsFile = path.join(session.projectRoot, "observed-adapter-requests.jsonl");
+  const keys = generateKeyPairSync("ed25519");
+  fs.writeFileSync(keyFile, keys.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
+  fs.writeFileSync(adapter, `
+    import fs from "node:fs";
+    let input = "";
+    for await (const chunk of process.stdin) input += chunk;
+    const request = JSON.parse(input);
+    fs.appendFileSync(${JSON.stringify(observedRequestsFile)}, JSON.stringify(request) + "\\n");
+    fs.writeFileSync(${JSON.stringify(keyConsumedMarker)}, JSON.stringify({ key_exists: fs.existsSync(${JSON.stringify(keyFile)}) }));
+    process.stdout.write(JSON.stringify({
+      status: "completed",
+      summary: "signed fixture",
+      evidence: { iteration: request.iteration, transcript_sha256: "a".repeat(64), usage: { input_tokens: 10, output_tokens: 2 } },
+    }));
+  `);
+  writeJson(commandFile, { argv: [process.execPath, adapter] });
+
+  await assert.rejects(
+    workflowMain([
+      "drive", "--session-dir", session.sessionDir,
+      "--adapter-command-file", commandFile,
+      "--evidence-signing-key-file", keyFile,
+      "--max-turns", "0",
+      "--json",
+    ]),
+    /max-turns must be an integer/,
+  );
+  assert.equal(fs.existsSync(keyFile), true, "preflight failure preserves the unused one-time key");
+
+  const output = [];
+  const originalLog = console.log;
+  console.log = (...args) => output.push(args.join(" "));
+  try {
+    const rc = await workflowMain([
+      "drive",
+      "--session-dir", session.sessionDir,
+      "--adapter-command-file", commandFile,
+      "--evidence-signing-key-file", keyFile,
+      "--max-turns", "10",
+      "--turn-timeout-ms", "5000",
+      "--barrier-wait-ms", "0",
+      "--json",
+    ]);
+    assert.equal(rc, 0);
+  } finally {
+    console.log = originalLog;
+  }
+
+  assert.equal(fs.existsSync(keyFile), false);
+  assert.deepEqual(readJson(keyConsumedMarker), { key_exists: false });
+  const result = JSON.parse(output.at(-1));
+  assert.equal(result.outcome, "budget_exhausted");
+  const attestation = result.evidence_attestation;
+  assert.equal(attestation.schema, "kontour.flow-agents.continuation_evidence_attestation");
+  const expectedPublicKey = keys.publicKey.export({ type: "spki", format: "der" }).toString("base64");
+  assert.equal(attestation.public_key_spki_b64, expectedPublicKey);
+  const payloadBytes = Buffer.from(attestation.payload_b64, "base64");
+  assert.equal(verify(null, payloadBytes, keys.publicKey, Buffer.from(attestation.signature_b64, "base64")), true);
+  const payload = JSON.parse(payloadBytes);
+  assert.equal(payload.schema, "kontour.flow-agents.continuation_evidence");
+  assert.equal(payload.outcome.outcome, "budget_exhausted");
+  assert.equal(payload.adapter_turns.length, 10);
+  assert.deepEqual(payload.adapter_turns.map((turn) => turn.request.iteration), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  const observedRequests = fs.readFileSync(observedRequestsFile, "utf8").trim().split("\n").map(JSON.parse);
+  assert.deepEqual(payload.adapter_turns.map((turn) => turn.request), observedRequests);
+  assert.equal(payload.adapter_turns[0].request.schema_version, "1.0");
+  assert.equal(payload.adapter_turns[0].request.next_action.status, "continue");
+  assert.equal(payload.adapter_turns[0].request.gate_action_envelope.schema_version, "1.0");
+  assert.deepEqual(payload.adapter_turns.map((turn) => turn.request), observedRequests, "the signed payload binds the unchanged envelope bytes observed by the adapter");
+  assert.deepEqual(payload.adapter_turns[0].result.evidence.usage, { input_tokens: 10, output_tokens: 2 });
+  const tampered = Buffer.from(JSON.stringify({ ...payload, max_turns: 2 }));
+  assert.equal(verify(null, tampered, keys.publicKey, Buffer.from(attestation.signature_b64, "base64")), false);
+});
+
+test("public workflow drive rejects a non-owner before adapter execution", async () => {
+  const session = makeSession("continuation-driver-owner");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const marker = path.join(session.projectRoot, "adapter-ran");
+  const adapter = path.join(session.projectRoot, "adapter.mjs");
+  const commandFile = path.join(session.projectRoot, "adapter-command.json");
+  fs.writeFileSync(adapter, `
+    import fs from "node:fs";
+    fs.writeFileSync(${JSON.stringify(marker)}, "ran");
+    process.stdout.write(JSON.stringify({ status: "completed" }));
+  `);
+  writeJson(commandFile, { argv: [process.execPath, adapter] });
+
+  await assert.rejects(
+    workflowMain(["drive", "--session-dir", session.sessionDir, "--adapter-command-file", commandFile]),
+    /active, matching assignment actor/,
+  );
+  assert.equal(fs.existsSync(marker), false);
+  assert.equal(fs.existsSync(path.join(session.sessionDir, "continuation-driver")), false);
 });
 
 test("sync attaches the staged trust.bundle bytes when the session bundle is replaced", async () => {
@@ -736,13 +1179,15 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
   const verify = await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
   assert.equal(verify.run.state.current_step, "verify");
 
+  const failureTimestamp = new Date().toISOString();
   const routed = await writeAndSync(session, [bundleClaim({
     expectation: "tests-evidence",
     claimType: "builder.verify.tests",
     subjectType: "flow-step",
     status: "fail",
     routeReason: "implementation_defect",
-  })]);
+    timestamp: failureTimestamp,
+  }), ...verifiedTestsPrerequisites(session, failureTimestamp)]);
 
   assert.equal(routed.run.state.current_step, "execute");
   assert.equal(routed.projection.flow_run.route_back_attempt, 1);
@@ -750,22 +1195,296 @@ test("failed verification projects Flow-owned route-back attempt and budget", as
   assert.match(routed.projection.next_action.summary, /Route-back history: attempt 1\/3 returned to `execute` for `implementation_defect`/);
   assert.deepEqual(routed.projection.next_action.skills, ["execute-plan"]);
 
-  const reentered = await writeAndSync(session, [bundleClaim({
+  const reentered = await writeAndSync(session, [withIdentitySuffix(bundleClaim({
     expectation: "implementation-scope",
     claimType: "builder.execute.scope",
     subjectType: "change",
     timestamp: new Date().toISOString(),
-  })]);
+  }), "reentry")]);
   assert.equal(reentered.run.state.current_step, "verify");
+  const staleRetry = await writeAndSync(session, [bundleClaim({
+    expectation: "tests-evidence",
+    claimType: "builder.verify.tests",
+    subjectType: "flow-step",
+    status: "fail",
+    routeReason: "implementation_defect",
+    timestamp: NOW,
+  })]);
+  assert.equal(staleRetry.attached, false);
+  assert.equal(staleRetry.run.state.current_step, "verify");
+  assert.equal(staleRetry.run.state.transitions.filter((transition) => transition.type === "route_back").length, 1);
   const correctedAt = new Date(Date.parse(reentered.run.state.transitions.at(-1).at) + 1).toISOString();
   const corrected = await writeAndSync(session, [
-    bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", timestamp: correctedAt }),
-    ...verifiedTestsPrerequisites(session, correctedAt),
+    withIdentitySuffix(bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", timestamp: correctedAt }), "corrected"),
+    ...verifiedTestsPrerequisites(session, correctedAt).map((entry, index) => withIdentitySuffix(entry, `corrected-${index}`)),
   ]);
   assert.equal(corrected.run.state.current_step, "merge-ready");
   const verifyEvidence = corrected.run.manifest.evidence.filter((entry) => entry.gate_id === "verify-gate");
   assert.equal(verifyEvidence.length, 2);
   assert.equal(verifyEvidence[0].superseded_by, verifyEvidence[1].id);
+});
+
+test("producer-superseded FAIL is audit history and live PASS drives verify", async () => {
+  const session = makeSession("producer-superseded-verify");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+
+  const livePass = bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" });
+  const historicalFail = historicalProducerSuperseded(bundleClaim({
+    expectation: "tests-evidence",
+    claimType: "builder.verify.tests",
+    subjectType: "flow-step",
+    status: "fail",
+    routeReason: "implementation_defect",
+  }));
+  const result = await writeAndSync(session, [historicalFail, livePass, ...verifiedTestsPrerequisites(session)]);
+
+  assert.equal(result.run.state.current_step, "merge-ready");
+  const attached = result.run.manifest.evidence.filter((entry) => entry.gate_id === "verify-gate" && !entry.superseded_by);
+  assert.equal(attached.length, 1);
+  assert.deepEqual(attached[0].expectation_ids.sort(), ["acceptance-criteria", "clean-critique", "tests-evidence"]);
+});
+
+test("partial passing review snapshot waits for the complete verify expectation set", async () => {
+  const session = makeSession("atomic-review-sync");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+
+  const disputedCritique = verifiedTestsPrerequisites(session)[0];
+  disputedCritique.claim.value = "fail";
+  disputedCritique.claim.status = "disputed";
+  disputedCritique.event.status = "disputed";
+  const disputedPartial = await writeAndSync(session, [disputedCritique]);
+  assert.equal(disputedPartial.attached, false);
+  assert.equal(disputedPartial.run.state.transitions.filter((transition) => transition.type === "route_back").length, 0);
+
+  const partial = await writeAndSync(session, verifiedTestsPrerequisites(session).slice(0, 1));
+  assert.equal(partial.attached, false);
+  assert.equal(partial.run.state.current_step, "verify");
+  assert.equal(partial.run.state.transitions.filter((transition) => transition.type === "route_back").length, 0);
+
+  const definition = readJson(path.join(partial.run.dir, "definition.json"));
+  const validPartialBundle = readJson(path.join(session.sessionDir, "trust.bundle"));
+  const validPartialEvidence = {
+    id: "partial-verify-evidence",
+    gate_id: "verify-gate",
+    kind: "trust.bundle",
+    requested_kind: "trust.bundle",
+    sha256: "a".repeat(64),
+    status: "passed",
+    attached_at: new Date().toISOString(),
+    expectation_ids: ["clean-critique"],
+    bundle: validPartialBundle,
+  };
+  const partialEnvelope = deriveBuilderGateActionEnvelope({
+    sessionDir: session.sessionDir,
+    projectRoot: session.projectRoot,
+    run: {
+      ...partial.run,
+      manifest: {
+        ...partial.run.manifest,
+        evidence: [...partial.run.manifest.evidence, validPartialEvidence],
+      },
+    },
+    definition,
+  });
+  assert.equal(partialEnvelope.gate.requirements.find((entry) => entry.id === "clean-critique").status, "satisfied");
+  assert.deepEqual(partialEnvelope.gate.unresolved_requirement_ids.sort(), ["acceptance-criteria", "policy-compliance", "tests-evidence"]);
+  assert.equal(partialEnvelope.gate.requirements.find((entry) => entry.id === "policy-compliance").required, false);
+  assert.deepEqual(partialEnvelope.stop_condition.required.unresolved_evidence_ids.sort(), ["acceptance-criteria", "tests-evidence"]);
+  assert.equal(partialEnvelope.stop_condition.required.artifact_refs.includes("trust.bundle#policy-compliance"), false);
+  const critique = partialEnvelope.public_interfaces.mutations.find((entry) => entry.interface === "workflow.critique");
+  assert.deepEqual(critique.parameters.find((entry) => entry.name === "verdict").allowed_values, [...WORKFLOW_CRITIQUE_STATUSES]);
+  assert.deepEqual(critique.parameters.find((entry) => entry.name === "artifact_ref"), {
+    name: "artifact_ref", flag: "--artifact-ref", required: false, repeatable: true,
+    required_when: { parameter: "verdict", equals: "pass" },
+  });
+
+  const complete = await writeAndSync(session, [
+    bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }),
+    ...verifiedTestsPrerequisites(session),
+  ]);
+  assert.equal(complete.run.state.current_step, "merge-ready");
+});
+
+test("expectation_ids labels cannot satisfy a mismatched trust bundle claim", async () => {
+  const session = makeSession("mislabeled-partial-gate");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+  const partial = await writeAndSync(session, verifiedTestsPrerequisites(session).slice(0, 1));
+
+  const mislabeledBundle = readJson(path.join(session.sessionDir, "trust.bundle"));
+  mislabeledBundle.claims[0].claimType = "workflow.critique.wrong-claim";
+  const definition = readJson(path.join(partial.run.dir, "definition.json"));
+  const envelope = deriveBuilderGateActionEnvelope({
+    sessionDir: session.sessionDir,
+    projectRoot: session.projectRoot,
+    run: {
+      ...partial.run,
+      manifest: {
+        ...partial.run.manifest,
+        evidence: [...partial.run.manifest.evidence, {
+          id: "mislabeled-partial-verify-evidence",
+          gate_id: "verify-gate",
+          kind: "trust.bundle",
+          requested_kind: "trust.bundle",
+          sha256: "b".repeat(64),
+          status: "passed",
+          attached_at: new Date().toISOString(),
+          expectation_ids: ["clean-critique"],
+          bundle: mislabeledBundle,
+        }],
+      },
+    },
+    definition,
+  });
+
+  assert.equal(envelope.gate.requirements.find((entry) => entry.id === "clean-critique").status, "unresolved");
+  assert.equal(envelope.gate.unresolved_requirement_ids.includes("clean-critique"), true);
+});
+
+test("initial gate boundary rejects pre-run and far-future claims", async () => {
+  for (const [name, timestamp] of [
+    ["pre-run", NOW],
+    ["far-future", new Date(Date.now() + 60 * 60_000).toISOString()],
+  ]) {
+    const session = makeSession(`freshness-${name}`);
+    await startBuilderFlowSession({ sessionDir: session.sessionDir });
+    const result = await writeAndSync(session, [bundleClaim({
+      expectation: "selected-work",
+      claimType: "builder.pull-work.selected",
+      subjectType: "work-item",
+      timestamp,
+    })]);
+    assert.equal(result.attached, false, name);
+    assert.equal(result.run.state.current_step, "pull-work", name);
+  }
+});
+
+test("prior claim identity is rejected after re-entry and a new identity can recover", async () => {
+  const session = makeSession("same-digest-reentry");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await writeAndSync(session, [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })]);
+  await writeAndSync(session, [
+    bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+    bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+  ]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
+  await writeAndSync(session, [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })]);
+  const future = new Date(Date.now() + 10_000).toISOString();
+  const failure = [bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", status: "fail", routeReason: "implementation_defect", timestamp: future }), ...verifiedTestsPrerequisites(session, future)];
+  const first = await writeAndSync(session, failure);
+  assert.equal(first.run.state.current_step, "execute");
+  await writeAndSync(session, [withIdentitySuffix(bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change", timestamp: future }), "reentry")]);
+  const replay = await writeAndSync(session, failure);
+  assert.equal(replay.attached, false);
+  assert.equal(replay.run.state.current_step, "verify");
+  assert.equal(replay.run.state.transitions.filter((transition) => transition.type === "route_back").length, 1);
+  const newIdentity = failure.map((entry, index) => withIdentitySuffix(entry, `visit-2-${index}`));
+  const second = await writeAndSync(session, newIdentity);
+  assert.equal(second.run.state.current_step, "execute");
+  const verifyEvidence = second.run.manifest.evidence.filter((entry) => entry.gate_id === "verify-gate");
+  assert.equal(verifyEvidence.length, 2);
+  assert.equal(verifyEvidence[0].superseded_by, verifyEvidence[1].id);
+});
+
+test("legacy colon-bearing assignment actor releases only through its normalized equivalent", () => {
+  const session = makeSession("legacy-actor-release");
+  const legacyActor = { runtime: "unknown", session_id: "legacy-session", host: "Kontour", human: null };
+  performLocalClaim(session.artifactRoot, session.slug, legacyActor, {
+    ttlSeconds: 1800,
+    actorKey: "unknown:legacy-session:Kontour",
+    branch: `agent/${session.slug}`,
+    artifactDir: session.sessionDir,
+    workItemRef: SUBJECT,
+    reason: "legacy fixture",
+  });
+  assert.throws(() => performLocalRelease(session.artifactRoot, session.slug, legacyActor, {
+    actorKey: "different-actor",
+  }), /refusing to release/);
+  assert.throws(() => performLocalRelease(session.artifactRoot, session.slug, { ...legacyActor, session_id: "different" }, {
+    actorKey: "unknownlegacy-sessionKontour",
+  }), /refusing to release/);
+  const released = performLocalRelease(session.artifactRoot, session.slug, legacyActor, {
+    actorKey: "unknownlegacy-sessionKontour",
+  });
+  assert.equal(released.status, "released");
+});
+
+test("string-only legacy liveness identity cannot be released by a colliding modern actor", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-legacy-liveness-"));
+  const eventsFile = path.join(root, "liveness", "events.jsonl");
+  fs.mkdirSync(path.dirname(eventsFile), { recursive: true });
+  fs.writeFileSync(eventsFile, `${JSON.stringify({
+    type: "claim",
+    subjectId: "legacy-subject",
+    actor: "unknown:anc-123456789abc:Kontour",
+    at: NOW,
+    ttlSeconds: 1800,
+  })}\n`);
+
+  await assert.rejects(() => workflowSidecarMain([
+    "liveness", "release", "legacy-subject",
+    "--actor", "unknownanc-123456789abcKontour",
+    "--artifact-root", root,
+    "--at", "2026-07-09T20:01:00.000Z",
+  ]), /prior claim/);
+  const events = fs.readFileSync(eventsFile, "utf8").trim().split("\n").map(JSON.parse);
+  assert.equal(events.length, 1);
+});
+
+test("lossy modern liveness key collision cannot release a non-reversible legacy actor", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "flow-agents-lossy-liveness-"));
+  const eventsFile = path.join(root, "liveness", "events.jsonl");
+  fs.mkdirSync(path.dirname(eventsFile), { recursive: true });
+  fs.writeFileSync(eventsFile, `${JSON.stringify({ type: "claim", subjectId: "collision", actor: "a:b", at: NOW, ttlSeconds: 1800 })}\n`);
+  await assert.rejects(() => workflowSidecarMain([
+    "liveness", "release", "collision", "--actor", "ab", "--artifact-root", root,
+  ]), /prior claim/);
+  assert.equal(fs.readFileSync(eventsFile, "utf8").trim().split("\n").length, 1);
+});
+
+test("upgrade rebuild preserves legacy critique identity until a versioned new review", async () => {
+  const legacy = {
+    id: "upgrade-review",
+    reviewer: "reviewer",
+    reviewed_at: "2026-07-01T00:00:00Z",
+    verdict: "pass",
+    summary: "Legacy clean review",
+    findings: [],
+    lanes: [{ id: "code", status: "pass" }],
+    review_target: { artifacts: [] },
+    artifact_refs: [],
+  };
+  const beforeUpgrade = await buildTrustBundle("upgrade-fixture", "2026-07-01T00:00:00Z", [], [], [legacy]);
+  const rebuiltAfterUpgrade = await buildTrustBundle("upgrade-fixture", "2026-07-12T00:00:00Z", [], [], [legacy]);
+  const newReview = await buildTrustBundle("upgrade-fixture", "2026-07-12T00:01:00Z", [], [], [{
+    ...legacy,
+    reviewed_at: "2026-07-12T00:01:00Z",
+    identity_version: 2,
+  }]);
+  assert.equal(beforeUpgrade.claims[0].id, rebuiltAfterUpgrade.claims[0].id);
+  assert.notEqual(newReview.claims[0].id, beforeUpgrade.claims[0].id);
+  assert.equal(rebuiltAfterUpgrade.claims[0].metadata.identity_version, undefined);
+  assert.equal(newReview.claims[0].metadata.identity_version, 2);
 });
 
 test("passing tests-evidence rejects a critique whose reviewed artifact changed", async () => {
@@ -832,60 +1551,100 @@ test("workspace review fails closed when a Git worktree marker cannot be inspect
   );
 });
 
-test("verified sidecar claims drive the composed publish and learning prefix to completion", async () => {
+test("publish-change reports an external capability gap and self-authored results cannot pass", async () => {
   const session = makeSession("composed-completion");
-  claimSessionAssignment(session);
+  const ambient = claimAmbientSessionAssignment(session);
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
   const steps = [
-    [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })],
-    [
+    () => [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })],
+    () => [
       bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
       bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
     ],
-    [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })],
-    [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })],
-    [bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }), ...verifiedTestsPrerequisites(session)],
-    [bundleClaim({ expectation: "merge-readiness", claimType: "builder.merge-ready.readiness", subjectType: "change" })],
+    () => [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })],
+    () => [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })],
+    () => [bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }), ...verifiedTestsPrerequisites(session)],
+    () => [bundleClaim({ expectation: "merge-readiness", claimType: "builder.merge-ready.readiness", subjectType: "change" })],
   ];
-  for (const entries of steps) await writeAndSync(session, entries);
+  for (const entries of steps) await writeAndSync(session, entries());
 
   const prOpen = readJson(path.join(session.sessionDir, "state.json"));
   assert.equal(prOpen.flow_run.current_step, "pr-open");
+  assert.equal(readJson(path.join(session.artifactRoot, "current.json")).active_step_id, "pr-open");
   assert.deepEqual(prOpen.next_action.skills, []);
   assert.deepEqual(prOpen.next_action.operations, ["publish-change"]);
+  assert.equal(prOpen.next_action.status, "blocked");
+  assert.equal(prOpen.next_action.external_capability.completion, "external_verification_required");
 
-  await writeAndSync(session, [bundleClaim({ expectation: "pull-request-opened", claimType: "builder.pr-open.pull-request", subjectType: "pull-request" })]);
-  await writeAndSync(session, [bundleClaim({ expectation: "ci-merge-readiness", claimType: "builder.merge-ready-ci.readiness", subjectType: "pull-request" })]);
-  const completed = await writeAndSync(session, [
-    bundleClaim({ expectation: "decision-evidence", claimType: "builder.learn.decisions", subjectType: "decision" }),
-    bundleClaim({ expectation: "learning-evidence", claimType: "builder.learn.evidence", subjectType: "release" }),
-  ]);
-
-  assert.equal(completed.run.state.current_step, "learn", JSON.stringify(completed.run.state.gate_outcomes, null, 2));
-  assert.equal(completed.run.state.status, "completed");
-  assert.equal(completed.projection.status, "delivered");
-  assert.deepEqual(completed.projection.next_action, { status: "done", summary: "Canonical Flow run is complete." });
-
-  const flowDirectory = runDir(session.slug, session.projectRoot);
-  const beforeFlow = snapshotTree(flowDirectory);
-  const staleState = readJson(path.join(session.sessionDir, "state.json"));
-  staleState.status = "in_progress";
-  staleState.phase = "verification";
-  staleState.next_action = { status: "continue", summary: "stale" };
-  writeJson(path.join(session.sessionDir, "state.json"), staleState);
-  const recovered = await recoverBuilderFlowSession({ sessionDir: session.sessionDir });
-  assert.equal(recovered.attached, false);
-  assert.equal(recovered.projection.status, "delivered");
-  assert.equal(recovered.projection.phase, "done");
-  assert.deepEqual(recovered.projection.next_action, { status: "done", summary: "Canonical Flow run is complete." });
-  assert.deepEqual(snapshotTree(flowDirectory), beforeFlow);
-
-  const archived = await archiveBuilderFlowSession({
-    sessionDir: session.sessionDir,
-    authorizationFile: liveLifecycleAuthorization(session, "archive", "completed-archive"),
+  const operationView = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
+  const publish = operationView.gateActionEnvelope.public_interfaces.mutations.find((entry) => entry.interface === "operation");
+  assert.equal(publish.operation, "publish-change");
+  assert.equal(publish.protocol.capability, "pull_request.create");
+  assert.deepEqual(publish.protocol.result.required, ["provider", "repository", "number", "url", "head_ref", "base_ref"]);
+  assert.deepEqual(publish.protocol.result.properties.number, { type: "integer", minimum: 1 });
+  assert.deepEqual(publish.protocol.result.url_protocols, ["https:"]);
+  assert.equal(publish.protocol.result.persist_as, "publish-change.result.json");
+  assert.deepEqual(publish.completion, {
+    status: "external_verification_required",
+    executable_by_flow_agents: false,
+    gate_evidence_interface: null,
   });
-  assert.equal(readJson(path.join(archived.archiveDir, "state.json")).status, "archived");
-  assert.deepEqual(snapshotTree(flowDirectory), beforeFlow);
+  assert.equal(Object.hasOwn(publish, "record_completion"), false);
+  const providerResult = { provider: "fixture", repository: "kontourai/flow-agents", number: 577, url: "https://example.test/kontourai/flow-agents/pull/577", head_ref: "issue-577", base_ref: "main" };
+  writeJson(path.join(session.sessionDir, publish.protocol.result.persist_as), providerResult);
+  const unchanged = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
+  assert.equal(unchanged.attached, false);
+  assert.equal(unchanged.run.state.current_step, "pr-open");
+  assert.equal(unchanged.projection.next_action.status, "blocked");
+  assert.equal(unchanged.run.manifest.evidence.some((entry) => entry.expectation_ids?.includes("pull-request-opened")), false);
+  const beforeFlow = snapshotTree(runDir(session.slug, session.projectRoot));
+  const beforeProjection = snapshotProjectionTargets(session);
+  const genericEvidenceArgs = ["evidence", "--session-dir", session.sessionDir, "--expectation", "pull-request-opened", "--status", "pass", "--summary", "self-completion", "--evidence-ref-json", JSON.stringify({ kind: "artifact", file: `.kontourai/flow-agents/${session.slug}/publish-change.result.json`, summary: "locally authored provider-shaped result" })];
+  await assert.rejects(
+    () => workflowMain(genericEvidenceArgs),
+    /operation-bound expectation.*authenticated external ChangeProvider/,
+  );
+  assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
+  assert.deepEqual(snapshotProjectionTargets(session), beforeProjection);
+
+  await withContinuationDriverLock(session.sessionDir, async (lock) => {
+    const driverDir = path.join(session.sessionDir, "continuation-driver");
+    writeJson(path.join(driverDir, "state.json"), {
+      schema_version: "1.0", run_id: session.slug, definition_id: "builder.build", max_turns: 1,
+      adapter_command_identity: "operation-rejection-test", status: "active", turns_started: 1,
+      active_turn_step: "pr-open", active_turn_public_key_digest: null, pending_barrier: null,
+    });
+    const issued = activeTurnAuthority.issueActiveTurnAuthority({
+      sessionDir: session.sessionDir,
+      runId: session.slug,
+      definitionId: "builder.build",
+      currentStep: "pr-open",
+      iteration: 1,
+      maxTurns: 1,
+      adapterCommandIdentity: "operation-rejection-test",
+      assignmentActor: ambient.actorKey,
+      assignmentActorStruct: ambient.actor,
+      lock,
+      timeoutMs: 10_000,
+    });
+    writeJson(path.join(driverDir, "state.json"), {
+      ...readJson(path.join(driverDir, "state.json")),
+      active_turn_public_key_digest: issued.publicKeyDigest,
+    });
+    const signedEnv = {
+      ...process.env,
+      FLOW_AGENTS_CONTINUATION_RUN_ID: issued.runId,
+      FLOW_AGENTS_CONTINUATION_TURN_SECRET: issued.turnSecret,
+    };
+    for (const key of AMBIENT_IDENTITY_ENV_KEYS) delete signedEnv[key];
+    const signed = spawnSync(process.execPath, [path.resolve(import.meta.dirname, "../../build/src/cli.js"), "workflow", ...genericEvidenceArgs], { cwd: session.projectRoot, encoding: "utf8", env: signedEnv });
+    assert.notEqual(signed.status, 0);
+    assert.match(signed.stderr, /operation-bound expectation.*authenticated external ChangeProvider/);
+    assert.equal(issued.cleanup(), true);
+  });
+  assert.deepEqual(snapshotTree(runDir(session.slug, session.projectRoot)), beforeFlow);
+  assert.deepEqual(snapshotProjectionTargets(session), beforeProjection);
+  await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
 });
 
 test("recovery loads the slug-bound run, restores every matching projection, and preserves every Flow byte", async () => {

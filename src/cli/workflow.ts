@@ -1,11 +1,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, sign, type KeyObject } from "node:crypto";
 import { createRequire } from "node:module";
 import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { validateDefinition } from "@kontourai/flow";
 import { loadBuilderFlowRun } from "../builder-flow-run-adapter.js";
+import { parseKitFlowStepActions } from "../flow-kit/validate.js";
+import { MAX_CONTINUATION_TURN_RESULT_BYTES, createFileContinuationStore, driveBuilderFlowSession, withContinuationDriverLock } from "../continuation-driver.js";
 import { inspectBuilderFlowSession, recoverBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
 import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-version.js";
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
@@ -14,6 +16,7 @@ import { flagBool, flagList, flagString, parseArgs } from "../lib/args.js";
 import { main as builderRun } from "./builder-run.js";
 import { currentWorkflowSessionDir, isMeaningfulTestCommand, mainFromPublicWorkflow, WORKFLOW_WRITER_CONTRACT_VERSION } from "./workflow-sidecar.js";
 import { resolveCurrentAssignmentActor, withSubjectLock } from "./assignment-provider.js";
+import { assertLoadedContinuationAdapterIntegrity, executeLoadedContinuationAdapter, loadContinuationAdapterCommand, waitForContinuationBarrier } from "./continuation-adapter.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -22,7 +25,7 @@ const PACKAGE_ROOT = flowAgentsPackageRoot();
 const REQUIRE = createRequire(import.meta.url);
 const PACKAGE_METADATA = readJsonFile(path.join(PACKAGE_ROOT, "package.json"), "Flow Agents package metadata");
 const CLI_VERSION = flowAgentsPackageVersion();
-const PUBLIC_VERBS = ["start", "status", "evidence", "critique", "pause", "resume", "release", "cancel", "archive", "doctor"] as const;
+const PUBLIC_VERBS = ["start", "status", "evidence", "critique", "drive", "pause", "resume", "release", "cancel", "archive", "doctor"] as const;
 
 function usage(): void {
   console.log(`Usage: flow-agents workflow <verb> [options]
@@ -32,6 +35,7 @@ Public workflow verbs:
   status              Show the current canonical run and projected next action.
   evidence            Record evidence for the current Flow gate and synchronize it.
   critique            Record review critique directly into the current trust bundle.
+  drive               Continue the canonical run through an explicit runtime adapter.
   pause               Pause the current run as its assignment actor.
   resume              Resume the current paused run as its assignment actor.
   release             Release the current assignment without canceling the run.
@@ -61,10 +65,166 @@ export async function main(argv: string[]): Promise<number> {
   if (verb === "status") return status(sessionDir, flagBool(parsed.flags, "json"));
   if (verb === "evidence") return evidence(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
   if (verb === "critique") return critique(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
+  if (verb === "drive") return drive(sessionDir, argv.slice(1), flagBool(parsed.flags, "json"));
 
   const forwarded = stripPublicFlags(argv.slice(1), new Set(["artifact-root", "session-dir", "json"]));
   if (verb === "release" && !flagString(parsed.flags, "reason")) throw new Error("workflow release requires --reason <text>");
   return builderRun([verb === "release" ? "release-assignment" : verb, "--session-dir", sessionDir, ...forwarded]);
+}
+
+async function drive(sessionDir: string, argv: string[], json: boolean): Promise<number> {
+  const parsed = parseArgs(argv);
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "adapter-command-file", "evidence-signing-key-file", "max-turns", "turn-timeout-ms", "barrier-wait-ms", "barrier-poll-ms"]), "workflow drive");
+  const adapterCommandFile = flagString(parsed.flags, "adapter-command-file");
+  if (!adapterCommandFile) throw new Error("workflow drive requires --adapter-command-file <path>");
+  const evidenceSigningKeyFile = flagString(parsed.flags, "evidence-signing-key-file");
+  if (evidenceSigningKeyFile && !json) throw new Error("workflow drive --evidence-signing-key-file requires --json");
+  const maxTurns = integerFlag(parsed.flags, "max-turns", 4, 1, 100);
+  const turnTimeoutMs = integerFlag(parsed.flags, "turn-timeout-ms", 900_000, 1, 86_400_000);
+  const barrierWaitMs = integerFlag(parsed.flags, "barrier-wait-ms", 300_000, 0, 86_400_000);
+  const barrierPollMs = integerFlag(parsed.flags, "barrier-poll-ms", 1_000, 1, 60_000);
+  const { slug, projectRoot } = readBoundSession(sessionDir);
+  assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
+  const adapterCommand = loadContinuationAdapterCommand(adapterCommandFile);
+  let evidenceSigner: EvidenceSigner | null = null;
+  let observedAdapterTurns: Array<Record<string, unknown>> = [];
+  const result = await withContinuationDriverLock(sessionDir, async (lock) => {
+    assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
+    evidenceSigner = evidenceSigningKeyFile ? consumeEvidenceSigningKey(evidenceSigningKeyFile) : null;
+    const continuationStore = createFileContinuationStore(sessionDir);
+    const outcome = await driveBuilderFlowSession({
+      sessionDir,
+      store: continuationStore,
+      maxTurns,
+      adapterCommandIdentity: adapterCommand.identity,
+      authorizeTurn: async () => { assertOrdinaryMatchingAssignmentActor(sessionDir, slug); },
+      issueTurnAuthority: async (request) => {
+        const currentAssignment = assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
+        assertLoadedContinuationAdapterIntegrity(adapterCommand);
+        const authority = loadContinuationTurnAuthority();
+        return authority.issueActiveTurnAuthority({
+          sessionDir,
+          runId: request.run_id,
+          definitionId: request.definition_id,
+          currentStep: request.current_step,
+          iteration: request.iteration,
+          maxTurns: request.max_turns,
+          adapterCommandIdentity: adapterCommand.identity,
+          assignmentActor: currentAssignment.actorKey,
+          assignmentActorStruct: currentAssignment.actor,
+          lock,
+          timeoutMs: turnTimeoutMs,
+        });
+      },
+      execute: async (request, context) => executeLoadedContinuationAdapter(adapterCommand, request, {
+        cwd: projectRoot,
+        timeoutMs: turnTimeoutMs,
+        continuationTurnSecret: context?.continuationTurnSecret,
+        continuationRunId: context?.continuationRunId,
+      }),
+      ...(evidenceSigningKeyFile ? { preflightTurn: async (request) => {
+        assertAcceptedTurnEvidenceCapacity(attestationTurns(continuationStore.acceptedTurns()), request);
+      } } : {}),
+      waitForBarrier: async (barrier) => waitForContinuationBarrier(barrier, { maxWaitMs: barrierWaitMs, pollMs: barrierPollMs }),
+    });
+    if (evidenceSigningKeyFile) observedAdapterTurns = attestationTurns(continuationStore.acceptedTurns());
+    return outcome;
+  });
+  const output = evidenceSigner
+    ? { ...result, evidence_attestation: signDriveEvidence(evidenceSigner, adapterCommand.identity, maxTurns, result, observedAdapterTurns) }
+    : result;
+  if (json) console.log(JSON.stringify(output));
+  else console.log(`Continuation driver ${result.outcome} after ${result.turns_started} turn(s); canonical Flow is ${result.snapshot.status} at ${result.snapshot.current_step}.`);
+  return 0;
+}
+
+function attestationTurns(turns: Array<{ request: Record<string, unknown>; result: Record<string, unknown> }>): Array<Record<string, unknown>> {
+  const covered = turns.map((turn) => ({ request: structuredClone(turn.request), result: structuredClone(turn.result) }));
+  if (Buffer.byteLength(JSON.stringify(covered), "utf8") > 1_048_576) {
+    throw new Error("continuation accepted-turn evidence must not exceed 1048576 aggregate bytes");
+  }
+  return covered;
+}
+
+export function assertAcceptedTurnEvidenceCapacity(observedTurns: Array<Record<string, unknown>>, request: Record<string, unknown>): void {
+  const base = [...observedTurns, { request: structuredClone(request), result: null }];
+  const bytesWithPlaceholder = Buffer.byteLength(JSON.stringify(base), "utf8");
+  const exactReservedBytes = bytesWithPlaceholder - Buffer.byteLength("null", "utf8") + MAX_CONTINUATION_TURN_RESULT_BYTES;
+  if (exactReservedBytes > 1_048_576) {
+    throw new Error("continuation accepted-turn evidence lacks capacity for another bounded result");
+  }
+}
+
+type EvidenceSigner = { privateKey: KeyObject; publicKeySpkiB64: string };
+
+function consumeEvidenceSigningKey(fileInput: string): EvidenceSigner {
+  if (!path.isAbsolute(fileInput) || fileInput !== path.normalize(fileInput)) {
+    throw new Error("workflow drive evidence signing key file must be an absolute canonical path");
+  }
+  const stat = fs.lstatSync(fileInput, { bigint: true });
+  if (stat.isSymbolicLink() || !stat.isFile()) throw new Error("workflow drive evidence signing key must be a regular file");
+  const noFollow = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
+  const fd = fs.openSync(fileInput, fs.constants.O_RDONLY | noFollow);
+  let keyText: Buffer;
+  try {
+    const opened = fs.fstatSync(fd, { bigint: true });
+    if (!opened.isFile() || opened.dev !== stat.dev || opened.ino !== stat.ino) {
+      throw new Error("workflow drive evidence signing key changed while opening");
+    }
+    keyText = fs.readFileSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const current = fs.lstatSync(fileInput, { bigint: true });
+  if (current.dev !== stat.dev || current.ino !== stat.ino || !current.isFile() || current.isSymbolicLink()) {
+    throw new Error("workflow drive evidence signing key changed before consumption");
+  }
+  let privateKey: KeyObject;
+  try {
+    privateKey = createPrivateKey(keyText);
+    if (privateKey.asymmetricKeyType !== "ed25519") throw new Error("wrong key type");
+  } catch {
+    throw new Error("workflow drive evidence signing key must be a valid Ed25519 private key");
+  }
+  fs.unlinkSync(fileInput);
+  const publicKeySpkiB64 = createPublicKey(privateKey as unknown as Parameters<typeof createPublicKey>[0])
+    .export({ type: "spki", format: "der" }).toString("base64");
+  return { privateKey, publicKeySpkiB64 };
+}
+
+function signDriveEvidence(
+  signer: EvidenceSigner,
+  adapterCommandIdentity: string,
+  maxTurns: number,
+  outcome: unknown,
+  observedAdapterTurns: Array<Record<string, unknown>>,
+): Record<string, unknown> {
+  const payload = {
+    schema: "kontour.flow-agents.continuation_evidence",
+    version: "1.0",
+    adapter_command_identity: adapterCommandIdentity,
+    max_turns: maxTurns,
+    outcome: structuredClone(outcome),
+    adapter_turns: structuredClone(observedAdapterTurns),
+  };
+  const payloadBytes = Buffer.from(JSON.stringify(payload), "utf8");
+  return {
+    schema: "kontour.flow-agents.continuation_evidence_attestation",
+    version: "1.0",
+    public_key_spki_b64: signer.publicKeySpkiB64,
+    payload_b64: payloadBytes.toString("base64"),
+    signature_b64: sign(null, payloadBytes, signer.privateKey).toString("base64"),
+  };
+}
+
+function loadContinuationTurnAuthority(): {
+  issueActiveTurnAuthority(input: Record<string, unknown>): { runId: string; turnSecret: string; publicKeyDigest: string; cleanup(): boolean };
+  validateSignedActiveTurnAssignmentAuthority(input: Record<string, unknown>): { valid: boolean; record?: { assignment_actor: string; assignment_actor_struct: Record<string, unknown> } };
+} {
+  return REQUIRE(path.resolve(PACKAGE_ROOT, "scripts", "hooks", "lib", "continuation-turn-authority.js")) as {
+    issueActiveTurnAuthority(input: Record<string, unknown>): { runId: string; turnSecret: string; publicKeyDigest: string; cleanup(): boolean };
+    validateSignedActiveTurnAssignmentAuthority(input: Record<string, unknown>): { valid: boolean; record?: { assignment_actor: string; assignment_actor_struct: Record<string, unknown> } };
+  };
 }
 
 async function start(argv: string[]): Promise<number> {
@@ -183,6 +343,15 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
   if (Object.hasOwn(parsed.flags, "command") && commands.length === 0) {
     throw new Error("workflow evidence --command requires a shell command value");
   }
+  const expectation = flagString(parsed.flags, "expectation")!;
+  // Operation-bound expectations deliberately have no generic evidence writer.
+  // Check before recovery, locking, or actor resolution so a locally authored
+  // operation result cannot cause any canonical or projection mutation.
+  const inspected = await inspectBuilderFlowSession({ sessionDir });
+  const operation = builderOperationForExpectation(inspected.run.definitionId, expectation);
+  if (operation) {
+    throw new Error(`workflow evidence cannot satisfy operation-bound expectation ${expectation}; ${operation} requires authenticated external ChangeProvider completion`);
+  }
   const requiresTestEvidence = flagString(parsed.flags, "expectation") === "tests-evidence" && flagString(parsed.flags, "status") === "pass";
   // Argument and command-shape rejection must be read-only. Recovery below may
   // repair stale projections, so it runs only after every command is accepted.
@@ -193,7 +362,7 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
     // session state cannot change mid-invocation.
     const caller = assertMatchingAssignmentActor(sessionDir, slug);
     const repaired = await recoverBuilderFlowSession({ sessionDir });
-    const beforeEvidence = manifestEvidenceDigests(repaired.run.manifest);
+    const beforeEvidence = manifestEvidenceIdentity(repaired.run.manifest);
     await mainFromPublicWorkflow([
       "record-gate-claim",
       sessionDir,
@@ -202,27 +371,46 @@ async function evidence(sessionDir: string, argv: string[], json: boolean): Prom
       caller.actorKey,
     ]);
 
-    await syncBuilderFlowSession({ sessionDir });
+    const synchronized = await syncBuilderFlowSession({ sessionDir });
 
     const digest = fileSha256(path.join(sessionDir, "trust.bundle"));
     const run = await loadBuilderFlowRun({ cwd: repaired.projectRoot, runId: slug });
-    const afterEvidence = manifestEvidenceDigests(run.manifest);
-    const newEvidence = afterEvidence.filter((value) => !beforeEvidence.includes(value));
-    if (newEvidence.length !== 1 || newEvidence[0] !== digest) {
+    const afterEvidence = manifestEvidenceIdentity(run.manifest);
+    const beforeIds = new Set(beforeEvidence.map((entry) => entry.id));
+    const newEvidence = afterEvidence.filter((entry) => !beforeIds.has(entry.id));
+    if (synchronized.attached && (newEvidence.length !== 1 || newEvidence[0]?.sha256 !== digest)) {
       throw new Error("workflow evidence did not attach exactly this invocation's resulting trust.bundle digest");
+    }
+    if (!synchronized.attached && newEvidence.length !== 0) {
+      throw new Error("workflow evidence changed the canonical manifest while synchronization reported no attachment");
     }
     const updatedSidecar = readBoundSession(sessionDir).sidecar;
     return immutableReport({
       run_id: run.runId,
       status: run.state.status,
       current_step: run.state.current_step,
-      attached: true,
+      attached: synchronized.attached,
+      awaiting_evidence: !synchronized.attached,
       next_action: updatedSidecar.next_action ?? null,
     });
   });
   if (json) console.log(JSON.stringify(report));
-  else console.log(`Recorded evidence; canonical run is ${report.status} at ${report.current_step}.`);
+  else console.log(report.attached
+    ? `Recorded evidence; canonical run is ${report.status} at ${report.current_step}.`
+    : `Recorded evidence; canonical run is awaiting the remaining gate expectations at ${report.current_step}.`);
   return 0;
+}
+
+function builderOperationForExpectation(flowId: string, expectationId: string): string | null {
+  const kit = readJsonFile(path.join(PACKAGE_ROOT, "kits", "builder", "kit.json"), "Builder kit metadata");
+  const parsed = parseKitFlowStepActions(kit, "kits/builder/kit.json");
+  if (parsed.errors.length) throw new Error(`Builder kit metadata is invalid: ${parsed.errors.join("; ")}`);
+  for (const action of parsed.entries) {
+    if (action.flow_id !== flowId) continue;
+    const binding = action.expectation_bindings.find((candidate) => candidate.expectation_id === expectationId);
+    if (binding?.interface === "operation") return binding.operation ?? "the declared external operation";
+  }
+  return null;
 }
 
 async function critique(sessionDir: string, argv: string[], json: boolean): Promise<number> {
@@ -479,13 +667,40 @@ function readAssignment(sessionDir: string, slug: string): JsonRecord {
 }
 
 function assertMatchingAssignmentActor(sessionDir: string, slug: string): ReturnType<typeof resolveCurrentAssignmentActor> {
+  const { assignment, caller, matches } = assignmentActorContext(sessionDir, slug);
+  if (matches) return caller;
+
+  const authority = loadContinuationTurnAuthority().validateSignedActiveTurnAssignmentAuthority({
+    sessionDir,
+    runId: process.env.FLOW_AGENTS_CONTINUATION_RUN_ID,
+    turnSecret: process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET,
+  });
+  if (authority.valid && authority.record
+    && assignment.actor_key === authority.record.assignment_actor
+    && isDeepStrictEqual(normalizeAssignmentActor(assignment.actor), normalizeAssignmentActor(authority.record.assignment_actor_struct))) {
+    return { actorKey: authority.record.assignment_actor, actor: normalizeAssignmentActor(authority.record.assignment_actor_struct)! as ReturnType<typeof resolveCurrentAssignmentActor>["actor"] };
+  }
+  throw new Error("workflow mutation requires the session's active, matching assignment actor");
+}
+
+function assertOrdinaryMatchingAssignmentActor(sessionDir: string, slug: string): ReturnType<typeof resolveCurrentAssignmentActor> {
+  const { caller, matches } = assignmentActorContext(sessionDir, slug);
+  if (!matches) throw new Error("workflow mutation requires the session's active, matching assignment actor");
+  return caller;
+}
+
+function assignmentActorContext(sessionDir: string, slug: string): {
+  assignment: JsonRecord;
+  caller: ReturnType<typeof resolveCurrentAssignmentActor>;
+  matches: boolean;
+} {
   const assignment = readActiveAssignment(sessionDir, slug);
   const caller = resolveCurrentAssignmentActor();
-  const normalizeActor = (value: unknown): JsonRecord | null => value && typeof value === "object" ? { ...(value as JsonRecord), human: (value as JsonRecord).human ?? null } : null;
-  if (assignment.actor_key !== caller.actorKey || !isDeepStrictEqual(normalizeActor(assignment.actor), normalizeActor(caller.actor))) {
-    throw new Error("workflow mutation requires the session's active, matching assignment actor");
-  }
-  return caller;
+  return { assignment, caller, matches: assignment.actor_key === caller.actorKey && isDeepStrictEqual(normalizeAssignmentActor(assignment.actor), normalizeAssignmentActor(caller.actor)) };
+}
+
+function normalizeAssignmentActor(value: unknown): JsonRecord | null {
+  return value && typeof value === "object" ? { ...(value as JsonRecord), human: (value as JsonRecord).human ?? null } : null;
 }
 
 function readActiveAssignment(sessionDir: string, slug: string): JsonRecord {
@@ -511,11 +726,14 @@ function immutableReport<T>(value: T): T {
   return Object.freeze(value);
 }
 
-function manifestEvidenceDigests(manifest: JsonRecord): string[] {
+function manifestEvidenceIdentity(manifest: JsonRecord): Array<{ id: string; sha256: string }> {
   const evidence = Array.isArray(manifest.evidence) ? manifest.evidence : [];
   return evidence
-    .map((entry) => entry && typeof entry === "object" ? (entry as JsonRecord).sha256 : null)
-    .filter((digest): digest is string => typeof digest === "string");
+    .flatMap((entry) => entry && typeof entry === "object"
+      && typeof (entry as JsonRecord).id === "string"
+      && typeof (entry as JsonRecord).sha256 === "string"
+      ? [{ id: String((entry as JsonRecord).id), sha256: String((entry as JsonRecord).sha256) }]
+      : []);
 }
 
 function optionalFileDigest(file: string): string | null {
@@ -558,6 +776,21 @@ function keepFlags(argv: string[], kept: Set<string>): string[] {
 function assertOnlyFlags(flags: ReturnType<typeof parseArgs>["flags"], allowed: Set<string>, command: string): void {
   const unsupported = Object.keys(flags).find((key) => !allowed.has(key));
   if (unsupported) throw new Error(`${command} does not support --${unsupported}`);
+}
+
+function integerFlag(
+  flags: ReturnType<typeof parseArgs>["flags"],
+  name: string,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const raw = flagString(flags, name);
+  if (raw === undefined) return fallback;
+  if (!/^(0|[1-9][0-9]*)$/.test(raw)) throw new Error(`workflow drive --${name} must be an integer from ${min} through ${max}`);
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < min || value > max) throw new Error(`workflow drive --${name} must be an integer from ${min} through ${max}`);
+  return value;
 }
 
 function isWithin(candidate: string, root: string): boolean {

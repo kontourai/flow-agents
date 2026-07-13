@@ -206,7 +206,7 @@ node -e "
   || _fail "bundle missing selected-work claim or declared durable artifact evidence"
 
 echo ""
-echo "=== 4b. composed publish-learn gate claim emits builder.pr-open.pull-request ==="
+echo "=== 4b. composed publish-learn operation cannot self-complete through record-gate-claim ==="
 
 COMPOSED_ROOT="$TMP/composed-gate-claim-project/.kontourai/flow-agents"
 mkdir -p "$COMPOSED_ROOT"
@@ -237,9 +237,9 @@ if flow_agents_node "workflow-sidecar" record-gate-claim "$COMPOSED_ROOT/compose
   --expectation pull-request-opened \
   --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$COMPOSED_ARTIFACT\",\"summary\":\"Declared durable release artifact for pull-request-opened.\"}" \
   --timestamp "2026-06-26T00:01:00Z" >/dev/null 2>&1; then
-  _pass "record-gate-claim exits 0 at composed pr-open step"
+  _fail "record-gate-claim accepted composed operation self-completion"
 else
-  _fail "record-gate-claim failed at composed pr-open step"
+  _pass "record-gate-claim rejects composed operation self-completion"
 fi
 
 node -e "
@@ -247,32 +247,19 @@ node -e "
   const current = JSON.parse(fs.readFileSync('$COMPOSED_ROOT/current.json', 'utf8'));
   if (current.active_flow_id !== 'builder.build') throw new Error('expected active_flow_id=builder.build, got ' + current.active_flow_id);
   if (current.active_step_id !== 'pr-open') throw new Error('expected active_step_id=pr-open, got ' + current.active_step_id);
-  const bundle = JSON.parse(fs.readFileSync('$COMPOSED_ROOT/composed-gate-claim/trust.bundle', 'utf8'));
-  const target = (bundle.claims || []).find(c => c.claimType === 'builder.pr-open.pull-request');
-  if (!target) {
-    console.error('no builder.pr-open.pull-request claim found; claims:', (bundle.claims||[]).map(c=>c.claimType).join(', '));
+  const bundleFile = '$COMPOSED_ROOT/composed-gate-claim/trust.bundle';
+  const bundle = fs.existsSync(bundleFile) ? JSON.parse(fs.readFileSync(bundleFile, 'utf8')) : { claims: [] };
+  if ((bundle.claims || []).some(c => c.claimType === 'builder.pr-open.pull-request')) {
+    console.error('operation-bound claim was recorded despite generic producer rejection');
     process.exit(1);
   }
-  if (target.subjectType !== 'pull-request') {
-    console.error('expected subjectType=pull-request, got', target.subjectType);
-    process.exit(1);
-  }
-  if (target.status !== 'verified') {
-    console.error('expected status=verified, got', target.status);
-    process.exit(1);
-  }
-  const expectedArtifact = '.kontourai/flow-agents/composed-gate-claim/release.json';
   if (!fs.existsSync('$COMPOSED_ARTIFACT')) {
     console.error('missing declared durable pr-open artifact:', '$COMPOSED_ARTIFACT');
     process.exit(1);
   }
-  if (!target.metadata?.artifact_refs?.some(ref => ref.kind === 'artifact' && ref.file === expectedArtifact)) {
-    console.error('pr-open claim does not cite declared artifact:', JSON.stringify(target.metadata?.artifact_refs));
-    process.exit(1);
-  }
 " 2>/dev/null \
-  && _pass "composed bundle contains builder.pr-open.pull-request with declared durable artifact evidence" \
-  || _fail "composed bundle missing pr-open claim or declared durable artifact evidence"
+  && _pass "composed operation rejection leaves pr-open active with no claim or advancement" \
+  || _fail "composed operation rejection changed pr-open state or recorded a claim"
 
 # ─── Tamper-blocks: stored verified + evidence fail → BLOCK (exit 2) ─────────
 echo ""
@@ -417,11 +404,20 @@ node -e "
 " 2>/dev/null
 rm -f "$C_DIR/.kontourai/flow-agents/$CLEAN_SLUG/$CLEAN_SLUG--deliver.md"
 
+# #440 FIXTURE-GAP: this session was established under FLOW_AGENTS_ACTOR=clean-fixture-actor
+# (line ~394) -- the Stop hook must run as that SAME actor so stop-goal-fit.js's ownership-scoped
+# analyze() finds clean-fixture-actor's own per-actor pointer (established by workflow start's
+# dual-write) rather than finding nothing for the ambient/unrelated invoking actor. Do NOT force
+# an unresolved actor here: workflow start's own automatic selected-work gate-claim recording (and
+# the resulting pull-work -> design-probe canonical-Flow auto-transition this section's assertion
+# depends on) itself requires a genuinely RESOLVED actor to fire -- forcing unresolved for the
+# setup step silently suppresses that transition, a real behavior difference, not just a
+# fixture-reachability issue.
 clean_out=""
 clean_exit=0
 for attempt in 1 2; do
   set +e
-  attempt_out="$(FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=2 FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip \
+  attempt_out="$(FLOW_AGENTS_ACTOR=clean-fixture-actor FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=2 FLOW_AGENTS_GOAL_FIT_BACKSTOP=skip \
       node "$GATE" 2>&1 <<< "{\"hook_event_name\":\"Stop\",\"cwd\":\"$C_DIR\"}")"
   attempt_exit="$?"
   set -e

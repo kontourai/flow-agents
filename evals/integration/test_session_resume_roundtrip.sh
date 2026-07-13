@@ -13,6 +13,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CURRENT_POINTER_HELPER="$ROOT/scripts/hooks/lib/current-pointer.js"
 
 TMPDIR_EVAL="$(mktemp -d)"
 errors=0
@@ -24,6 +25,30 @@ trap cleanup EXIT
 
 _pass() { echo "  ✓ $1"; }
 _fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
+
+# seed_current_pointer <flow_agents_dir> <slug> <actor> — #440 FIXTURE-GAP: this suite's fixtures
+# were written before #440's per-actor ownership scoping and never establish a per-actor current
+# pointer for the invoking actor -- under a RESOLVED actor (every hook invocation below sets an
+# explicit FLOW_AGENTS_ACTOR override, or derives one from an injected CLAUDE_CODE_SESSION_ID),
+# workflow-steering.js's actorScopedWorkflowState now scopes to that actor's own (nonexistent)
+# pointer and never reaches the fixture-under-test. Seeds BOTH the legacy current.json AND the
+# per-actor current/<actor>.json pointer with the SAME payload, mirroring workflow-sidecar.ts's
+# real writeCurrent() dual-write via current-pointer.js's own writePerActorCurrent.
+seed_current_pointer() {
+  local flow_agents_dir="$1" slug="$2" actor="$3"
+  CP_HELPER_ARG="$CURRENT_POINTER_HELPER" DIR_ARG="$flow_agents_dir" SLUG_ARG="$slug" ACTOR_ARG="$actor" node - <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const { writePerActorCurrent } = require(process.env.CP_HELPER_ARG);
+const dir = process.env.DIR_ARG;
+const slug = process.env.SLUG_ARG;
+const actor = process.env.ACTOR_ARG;
+const payload = { schema_version: '1.0', active_slug: slug, artifact_dir: slug };
+fs.mkdirSync(dir, { recursive: true });
+fs.writeFileSync(path.join(dir, 'current.json'), JSON.stringify(payload, null, 2) + '\n');
+writePerActorCurrent(dir, actor, payload);
+NODE
+}
 
 # ─── Portable sha256 helper ────────────────────────────────────────────────────
 sha256_file() {
@@ -111,6 +136,8 @@ JSON
 FIVE_MIN_AGO="$(node -e "process.stdout.write(new Date(Date.now()-300000).toISOString().replace(/\\.\\d{3}Z$/,'Z'))")"
 printf '{"type":"claim","subjectId":"test-slug-153","actor":"other-agent","at":"%s","ttlSeconds":1800}\n' "$FIVE_MIN_AGO" > "$REPO/.kontourai/flow-agents/liveness/events.jsonl"
 printf '{"type":"heartbeat","subjectId":"test-slug-153","actor":"self-actor","at":"%s"}\n' "$FIVE_MIN_AGO" >> "$REPO/.kontourai/flow-agents/liveness/events.jsonl"
+
+seed_current_pointer "$REPO/.kontourai/flow-agents" "$SLUG" "self-actor"
 
 # ─── Snapshot checksums before hook run ───────────────────────────────────────
 CKSUM_STATE_BEFORE="$(sha256_file "$TASK_DIR/state.json")"
@@ -260,6 +287,7 @@ cp "$TASK_DIR/handoff.json" "$TASK_DIR2/handoff.json"
 cp "$TASK_DIR/trust.bundle" "$TASK_DIR2/trust.bundle"
 printf 'test-slug-153--plan-work.md stub\n' > "$TASK_DIR2/test-slug-153--plan-work.md"
 # No liveness directory → empty stream
+seed_current_pointer "$REPO2/.kontourai/flow-agents" "$SLUG" "self-actor"
 
 echo "{\"hook_event_name\":\"SessionStart\",\"cwd\":\"$REPO2\"}" | \
   FLOW_AGENTS_ACTOR="self-actor" node "$ROOT/scripts/hooks/workflow-steering.js" > "$TMPDIR_EVAL/nolive.out" 2>&1
@@ -330,6 +358,7 @@ fi
 FIVE_MIN_AGO_3="$(node -e "process.stdout.write(new Date(Date.now()-300000).toISOString().replace(/\\.\\d{3}Z$/,'Z'))")"
 printf '{"type":"claim","subjectId":"%s","actor":"other-agent-derived","at":"%s","ttlSeconds":1800}\n' "$SLUG3" "$FIVE_MIN_AGO_3" > "$REPO3/.kontourai/flow-agents/liveness/events.jsonl"
 printf '{"type":"heartbeat","subjectId":"%s","actor":"%s","at":"%s"}\n' "$SLUG3" "$DERIVED_SELF_ACTOR" "$FIVE_MIN_AGO_3" >> "$REPO3/.kontourai/flow-agents/liveness/events.jsonl"
+seed_current_pointer "$REPO3/.kontourai/flow-agents" "$SLUG3" "$DERIVED_SELF_ACTOR"
 
 echo "{\"hook_event_name\":\"SessionStart\",\"cwd\":\"$REPO3\"}" | \
   CLAUDE_CODE_SESSION_ID="$SELF_SESSION_ID" FLOW_AGENTS_ACTOR="" node "$ROOT/scripts/hooks/workflow-steering.js" > "$TMPDIR_EVAL/derived-actor.out" 2>&1
@@ -397,6 +426,7 @@ const fs = require('fs');
 const line = JSON.stringify({ type: 'claim', subjectId: process.argv[1], actor: JSON.parse(process.argv[2]), at: process.argv[3], ttlSeconds: 1800 });
 fs.writeFileSync(process.argv[4], line + '\n');
 " "$SLUG4" "$HOSTILE_ACTOR_JSON" "$FIVE_MIN_AGO_4" "$LIVENESS_FILE_4"
+seed_current_pointer "$REPO4/.kontourai/flow-agents" "$SLUG4" "self-actor-t2-hostile-check"
 
 echo "{\"hook_event_name\":\"SessionStart\",\"cwd\":\"$REPO4\"}" | \
   FLOW_AGENTS_ACTOR="self-actor-t2-hostile-check" node "$ROOT/scripts/hooks/workflow-steering.js" > "$TMPDIR_EVAL/hostile-actor.out" 2>&1

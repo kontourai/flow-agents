@@ -14,6 +14,7 @@ import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { runObservedCommand } from "../lib/observed-command.js";
 import { captureReviewWorkspaceSnapshot, startBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
+import { WORKFLOW_CRITIQUE_STATUSES } from "./public-contracts.js";
 // #291 Wave 1 Task 1.1 exports: ensure-session's ownership guard reuses the EXACT same
 // assignment ⋈ liveness join / claim / supersede logic #290 already ships for the
 // `assignment-provider` CLI, rather than reimplementing a second, parallel join (static ESM
@@ -82,6 +83,14 @@ function workItemSlug(ref: string): string {
 function assignmentSubjectMatchesWorkItem(slug: string, ref: string): boolean {
   if (ref === `local:${slug}`) return true;
   try { return workItemSlug(ref) === slug; } catch { return false; }
+}
+
+function githubWorkItemIdentity(ref: string): { owner: string; name: string; issueNumber: number } {
+  const match = ref.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#([1-9]\d*)$/);
+  if (!match) die("GitHub assignment ownership requires an exact owner/repo#numeric-id Work Item reference");
+  const issueNumber = Number(match[3]);
+  if (!Number.isSafeInteger(issueNumber)) die("GitHub Work Item issue number exceeds the safe integer range");
+  return { owner: match[1], name: match[2], issueNumber };
 }
 
 type SessionWorkItem = {
@@ -275,7 +284,9 @@ function resolveEnsureSessionActor(p: ReturnType<typeof parseArgs>): { actorStru
     die("ensure-session --actor value strips to empty under the allowed actor charset ([A-Za-z0-9_.-]) — pass a value containing at least one letter, digit, underscore, period, or hyphen.");
   }
   const explicitActor = explicitActorRaw ? helper.sanitizeSegment(explicitActorRaw) : "";
-  const resolved = explicitActor ? { actor: explicitActor, source: "explicit-override" } : helper.resolveActor(process.env);
+  const resolved = explicitActor
+    ? { actor: explicitActor, source: "explicit-override", actorStruct: { runtime: "explicit-override", session_id: explicitActor, host: os.hostname() } }
+    : helper.resolveActorIdentity(process.env);
   const unresolved = helper.isUnresolvedActor(resolved.actor);
   const branchActorKey = unresolved ? `unknown-actor-${unknownDisambiguator(resolved.actor)}` : resolved.actor;
 
@@ -286,17 +297,8 @@ function resolveEnsureSessionActor(p: ReturnType<typeof parseArgs>): { actorStru
     return { actorStruct: { runtime: "unresolved", session_id: branchActorKey, host: os.hostname() }, actorKey: resolved.actor, branchActorKey, unresolved: true };
   }
 
-  // #398: the CI-runtime tier must reconstruct the SAME struct resolveActor serialized, or
-  // `serializeActor(actorStruct)` would diverge from `resolved.actor` (the else-branch would rebuild
-  // an ANCESTRY struct — detectRuntime→unknown, runtimeSessionId→'' — so the claim's stored
-  // actor_key would not match the CI actor at publish → self not recognized → false-block, the exact
-  // bug this issue removes). Uses the SAME helper.detectCiActor as resolveActor, single-sourced.
-  const ciActor = resolved.source.startsWith("ci-runtime") ? helper.detectCiActor(process.env) : null;
-  const actorStruct: ActorStruct = resolved.source === "explicit-override"
-    ? { runtime: "explicit-override", session_id: resolved.actor, host: os.hostname() }
-    : ciActor && ciActor.session_id
-      ? { runtime: ciActor.runtime, session_id: ciActor.session_id, host: os.hostname() }
-      : { runtime: helper.detectRuntime(process.env), session_id: helper.runtimeSessionId(process.env) || (() => { const seed = helper.ancestorActorSeed(); return seed ? `anc-${seed}` : ""; })(), host: os.hostname() };
+  if (!resolved.actorStruct) die("ensure-session could not resolve a canonical actor struct");
+  const actorStruct: ActorStruct = resolved.actorStruct;
   const actorKey = helper.serializeActor(actorStruct);
   return { actorStruct, actorKey, branchActorKey, unresolved: false };
 }
@@ -915,7 +917,9 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     if (!check.id) continue;
     const subjectId = `${slug}/${check.id}`;
     const fieldOrBehavior = String(check.summary ?? check.id);
-    const claimId = generateClaimId(subjectId, "flow-agents.workflow", fieldOrBehavior);
+    const gateClaimIdentityVersion = check._gate_claim_identity_version === 2 ? 2 : 1;
+    const gateClaimRecordedAt = gateClaimIdentityVersion === 2 && typeof check._gate_claim_recorded_at === "string" ? check._gate_claim_recorded_at : null;
+    const claimId = generateClaimId(subjectId, "flow-agents.workflow", gateClaimRecordedAt ? `${fieldOrBehavior}::gate-visit::${gateClaimRecordedAt}` : fieldOrBehavior);
     const evId = `ev:${claimId}`;
     const legacyClaimType = `workflow.check.${check.kind ?? "external"}`;
 
@@ -1071,7 +1075,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       // restored stamp) takes the currently-active step's id.
       const declaredStepId = gateClaimDeclaredStepId ?? (activeStep ? activeStep.stepId : null);
       const declaredMetadata: AnyObj = gateClaimExpectationId
-        ? { ...claimMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}) } }
+        ? { ...claimMetadata, gate_claim: { expectation_id: gateClaimExpectationId, claim_type: declared.claimType, subject_type: declared.subjectType, step_id: declaredStepId, ...(gateClaimIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(gateClaimRecordedAt ? { recorded_at: gateClaimRecordedAt } : {}), ...(gateClaimRouteReason ? { route_reason: gateClaimRouteReason } : {}) } }
         : claimMetadata;
       const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: effectiveStatus, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, ...(declaredMetadata ? { metadata: declaredMetadata } : {}) };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [evItem] as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
@@ -1089,7 +1093,9 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     if (!criterion.id) continue;
     const subjectId = `${slug}/${criterion.id}`;
     const fieldOrBehavior = String(criterion.description ?? criterion.id);
-    const claimId = generateClaimId(subjectId, "flow-agents.workflow", fieldOrBehavior);
+    const criterionIdentityVersion = criterion.identity_version === 2 ? 2 : 1;
+    const criterionVerifiedAt = criterionIdentityVersion === 2 && typeof criterion.verified_at === "string" ? criterion.verified_at : null;
+    const claimId = generateClaimId(subjectId, "flow-agents.workflow", criterionVerifiedAt ? `${fieldOrBehavior}::verified::${criterionVerifiedAt}` : fieldOrBehavior);
     const legacyClaimType = "workflow.acceptance.criterion";
     const policy = ensurePolicy(legacyClaimType, "high", []);
     const evStatus = criterionStatusToEventStatus(String(criterion.status ?? ""));
@@ -1105,7 +1111,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     if (declared) {
       // Declared kit-typed claim only — no legacy shadow (ADR 0016 P-d).
       const declaredPolicy = ensurePolicy(declared.claimType, "high", []);
-      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, metadata: { origin: "acceptance", criterion: { id: criterion.id, description: criterion.description ?? criterion.id, status: criterion.status, evidence_refs: Array.isArray(criterion.evidence_refs) ? criterion.evidence_refs : [] }, ...(workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}) } };
+      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, metadata: { origin: "acceptance", criterion: { id: criterion.id, description: criterion.description ?? criterion.id, status: criterion.status, evidence_refs: Array.isArray(criterion.evidence_refs) ? criterion.evidence_refs : [], ...(criterionIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(criterionVerifiedAt ? { verified_at: criterionVerifiedAt } : {}) }, ...(workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}) } };
       const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
       claims.push({ ...declaredClaimObj, status: declaredStatus });
     } else {
@@ -1128,10 +1134,12 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     const supersededBy = typeof c.superseded_by === "string" && c.superseded_by.length > 0 ? c.superseded_by : null;
     const critiqueReviewer = String(c.reviewer ?? "tool-code-reviewer");
     const critiqueReviewedAt = String(c.reviewed_at ?? ts);
+    const critiqueIdentityVersion = c.identity_version === 2 ? 2 : 1;
     const critMeta: AnyObj = {
       origin: "critique",
       reviewer: critiqueReviewer,
       reviewed_at: critiqueReviewedAt,
+      ...(critiqueIdentityVersion === 2 ? { identity_version: 2 } : {}),
       findings: Array.isArray(c.findings) ? c.findings : [],
       lanes: Array.isArray(c.lanes) ? c.lanes : [],
       review_target: c.review_target && typeof c.review_target === "object" ? c.review_target : { artifacts: [] },
@@ -1143,7 +1151,9 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     // A superseded historical write gets a distinct, stable claimId so it co-exists with the live
     // claim of the same critique id (never overwrites or duplicates it). The salt is reproducible
     // across rebuilds because superseded_by + reviewed_at are preserved in metadata.
-    const claimIdSalt = supersededBy ? `${fieldOrBehavior}::superseded::${supersededBy}::${critiqueReviewedAt}` : fieldOrBehavior;
+    const claimIdSalt = critiqueIdentityVersion === 2
+      ? `${fieldOrBehavior}::reviewed::${critiqueReviewedAt}${supersededBy ? `::superseded::${supersededBy}` : ""}`
+      : (supersededBy ? `${fieldOrBehavior}::superseded::${supersededBy}::${critiqueReviewedAt}` : fieldOrBehavior);
     const claimId = generateClaimId(subjectId, "flow-agents.workflow", claimIdSalt);
     const legacyClaimType = "workflow.critique.review";
     const policy = ensurePolicy(legacyClaimType, "medium", []);
@@ -1605,6 +1615,7 @@ function resolveFirstStep(flowId: string, repoRoot: string): string | null {
 function loadCurrentPointerHelper(): {
   perActorCurrentFile: (flowAgentsDir: string, actorKey: string) => string;
   readCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: AnyObj | null; source: "per-actor" | "legacy" | "none"; file: string | null };
+  readOwnCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: AnyObj | null; source: "per-actor" | "legacy" | "none"; file: string | null };
   writePerActorCurrent: (flowAgentsDir: string, actorKey: string, payload: AnyObj) => void;
 } {
   const _req = createRequire(import.meta.url);
@@ -1612,6 +1623,7 @@ function loadCurrentPointerHelper(): {
   return _req(helperPath) as {
     perActorCurrentFile: (flowAgentsDir: string, actorKey: string) => string;
     readCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: AnyObj | null; source: "per-actor" | "legacy" | "none"; file: string | null };
+    readOwnCurrentPointer: (flowAgentsDir: string, actorKey?: string) => { payload: AnyObj | null; source: "per-actor" | "legacy" | "none"; file: string | null };
     writePerActorCurrent: (flowAgentsDir: string, actorKey: string, payload: AnyObj) => void;
   };
 }
@@ -1750,9 +1762,15 @@ function updateCurrentAgent(root: string, dir: string, agentId: string, status: 
 
   if (actorKey && !loadActorIdentityHelper().isUnresolvedActor(actorKey)) {
     const helper = loadCurrentPointerHelper();
-    const perActorFile = helper.perActorCurrentFile(root, actorKey);
-    let perActor: AnyObj | null = null;
-    try { perActor = fs.existsSync(perActorFile) ? (JSON.parse(fs.readFileSync(perActorFile, "utf8")) as AnyObj) : null; } catch { perActor = null; }
+    // #440 fix-wave 3: read through the legacy-aware path (readOwnCurrentPointer tries the new
+    // collision-resistant filename first, then falls back to the pre-fix-wave-2 legacy filename)
+    // instead of a direct fs read of perActorCurrentFile() alone — a direct read of ONLY the new
+    // filename would silently skip this active_agents/updated_at projection for a pointer a
+    // still-running pre-fix-wave-2 sidecar wrote under the old name. The write below always goes
+    // through writePerActorCurrent (new filename only), so the pointer migrates to the new name
+    // on first touch.
+    const pointer = helper.readOwnCurrentPointer(root, actorKey);
+    const perActor = pointer.payload;
     if (perActor && path.resolve(root, perActor.artifact_dir ?? "") === path.resolve(dir)) {
       helper.writePerActorCurrent(root, actorKey, applyAgentUpdate(perActor));
     }
@@ -1911,6 +1929,9 @@ function enforceEnsureSessionOwnership(
     const candidate = parsed && typeof parsed === "object" ? (parsed.effective as AnyObj | undefined) : undefined;
     const assignment = parsed && typeof parsed === "object" ? (parsed.assignment as AnyObj | undefined) : undefined;
     const record = assignment && typeof assignment.record === "object" && assignment.record !== null ? assignment.record as AnyObj : undefined;
+    const githubWorkItem = assignmentProviderKind === "github" && workItemRef
+      ? githubWorkItemIdentity(workItemRef)
+      : null;
     const validStates = new Set(["held", "reclaimable", "human-held", "free"]);
     if (!candidate || typeof candidate.effective_state !== "string" || !validStates.has(candidate.effective_state)) {
       die(`ensure-session --effective-state-json must contain an .effective object with a recognized effective_state (held|reclaimable|human-held|free); got ${JSON.stringify(candidate ? candidate.effective_state : candidate)}`);
@@ -1919,12 +1940,20 @@ function enforceEnsureSessionOwnership(
       || parsed.provider !== assignmentProviderKind
       || assignment?.provider !== assignmentProviderKind
       || assignment?.subject_id !== slug
+      || (assignmentProviderKind === "github" && (assignment?.has_claim_label !== true
+        || typeof assignment?.assignee !== "string"
+        || assignment.assignee.length === 0
+        || typeof assignment?.claim_comment_author !== "string"
+        || assignment.claim_comment_author.length === 0
+        || assignment.claim_comment_author !== assignment.assignee
+        || assignment?.repository?.owner !== githubWorkItem?.owner
+        || assignment?.repository?.name !== githubWorkItem?.name
+        || assignment?.issue_number !== githubWorkItem?.issueNumber))
       || record?.role !== "AssignmentClaimRecord"
       || record?.status !== "claimed"
       || record?.subject_id !== slug
       || record?.work_item_ref !== workItemRef
       || record?.actor_key !== resolution.branchActorKey
-      || assignment?.assignee !== resolution.branchActorKey
       || !record.actor || typeof record.actor !== "object"
       || record.actor.runtime !== resolution.actorStruct.runtime
       || record.actor.session_id !== resolution.actorStruct.session_id
@@ -2476,24 +2505,19 @@ function expectedGateProducer(flowId: string, stepId: string, expectationId: str
   const actions = Array.isArray(manifest.flow_step_actions) ? manifest.flow_step_actions as AnyObj[] : [];
   const action = actions.find((candidate) => candidate.flow_id === flowId && candidate.step_id === stepId);
   if (!action) die(`record-gate-claim cannot derive a producer for unknown Flow step ${flowId}/${stepId}`);
+  const binding = Array.isArray(action.expectation_bindings)
+    ? action.expectation_bindings.find((candidate): candidate is AnyObj => candidate && typeof candidate === "object" && !Array.isArray(candidate) && candidate.expectation_id === expectationId)
+    : undefined;
+  if (binding?.interface === "operation") {
+    const operation = typeof binding.operation === "string" ? binding.operation : "the declared external operation";
+    die(`record-gate-claim cannot satisfy operation-bound expectation ${expectationId}; ${operation} requires authenticated external ChangeProvider completion`);
+  }
   const skills = Array.isArray(action.skills) ? action.skills.filter((value: unknown): value is string => typeof value === "string") : [];
   const roles = Array.isArray(manifest.skill_roles) ? manifest.skill_roles as AnyObj[] : [];
   const owners = roles.filter((role) => typeof role.skill_id === "string"
     && Array.isArray(role.step_ids) && role.step_ids.includes(stepId)
     && Array.isArray(role.expectation_ids) && role.expectation_ids.includes(expectationId)
     && skills.includes(role.skill_id.replace(/^builder\./, "")));
-  if (owners.length === 0) {
-    const operations = Array.isArray(action.operations) ? action.operations.filter((value: unknown): value is string => typeof value === "string") : [];
-    const operationExpectations = Array.isArray(action.expectation_ids) ? action.expectation_ids : [];
-    if (operations.length === 1 && operationExpectations.includes(expectationId)) {
-      const artifacts = Array.isArray(action.artifacts) ? action.artifacts.filter((value: unknown): value is string => typeof value === "string") : [];
-      return {
-        id: `operation:${operations[0]}`,
-        artifactPatterns: artifacts.filter((value) => !value.includes("#")),
-        selfProducedTrustSlices: artifacts.filter((value) => value.startsWith("trust.bundle#")).map((value) => value.slice("trust.bundle#".length)),
-      };
-    }
-  }
   if (owners.length !== 1) die(`record-gate-claim cannot derive exactly one producer for ${flowId}/${stepId}/${expectationId}`);
   const owner = owners[0]!;
   const artifacts = (Array.isArray(owner.artifacts) ? owner.artifacts : []).filter((value): value is string => typeof value === "string" && value !== "ephemeral decision record");
@@ -2727,7 +2751,7 @@ function requireObservedCommandRefs(refs: AnyObj[], observedCommands: ReadonlySe
   }
 }
 
-function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: ReadonlySet<string>): AnyObj[] {
+function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: ReadonlySet<string>, verifiedAt: string): AnyObj[] {
   if (raw.length === 0) die("record-gate-claim requires --criterion-json for a passing tests-evidence claim");
   const incoming = raw.map((value) => parseJson(value, "--criterion-json"));
   const expectedById = new Map<string, AnyObj>();
@@ -2746,11 +2770,11 @@ function completePassingCriteria(existing: AnyObj[], raw: string[], observedComm
     const refs = normalizeEvidenceRefs(criterion.evidence_refs, `criterion ${ids[index]} evidence_refs`);
     if (refs.length === 0) die(`criterion ${ids[index]} requires reviewable evidence_refs`);
     requireObservedCommandRefs(refs, observedCommands, `criterion ${ids[index]}`);
-    return { ...expectedById.get(ids[index])!, status: "pass", evidence_refs: refs };
+    return { ...expectedById.get(ids[index])!, status: "pass", evidence_refs: refs, identity_version: 2, verified_at: verifiedAt };
   });
 }
 
-const critiqueStatuses = new Set(["pass", "fail", "not_verified"]);
+const critiqueStatuses = new Set<string>(WORKFLOW_CRITIQUE_STATUSES);
 const safeCritiqueId = /^[a-z][a-z0-9_-]*$/;
 
 function normalizeCritiqueLanes(raw: string[]): AnyObj[] {
@@ -3133,6 +3157,8 @@ function checksFromBundle(dir: string): AnyObj[] {
     if (typeof gc.claim_type === "string") check._gate_claim_declared_type = gc.claim_type;
     if (typeof gc.subject_type === "string") check._gate_claim_declared_subject = gc.subject_type;
     if (typeof gc.step_id === "string") check._gate_claim_declared_step_id = gc.step_id;
+    if (typeof gc.recorded_at === "string") check._gate_claim_recorded_at = gc.recorded_at;
+    if (gc.identity_version === 2) check._gate_claim_identity_version = 2;
     if (typeof gc.route_reason === "string") check._gate_claim_route_reason = gc.route_reason;
   };
   // #270 CRITICAL/HIGH fix: a claim that is gate-claim-SHAPED but carries NO metadata.gate_claim
@@ -3294,6 +3320,7 @@ function critiquesFromBundle(dir: string): AnyObj[] {
       review_target: md.review_target && typeof md.review_target === "object" && !Array.isArray(md.review_target) ? md.review_target : { artifacts: [] },
       reviewer: typeof md.reviewer === "string" ? md.reviewer : "tool-code-reviewer",
       reviewed_at: typeof md.reviewed_at === "string" ? md.reviewed_at : (c.updatedAt || c.createdAt || now()),
+      ...(md.identity_version === 2 ? { identity_version: 2 } : {}),
       artifact_refs: Array.isArray(md.artifact_refs) ? md.artifact_refs : [],
       ...(typeof md.superseded_by === "string" && md.superseded_by.length > 0 ? { superseded_by: md.superseded_by } : {}),
     };
@@ -3314,6 +3341,8 @@ function criteriaFromBundle(dir: string): AnyObj[] {
         description: typeof saved.description === "string" ? saved.description : (claim.fieldOrBehavior || ""),
         status: typeof saved.status === "string" ? saved.status : (claim.value ?? "not_verified"),
         evidence_refs: Array.isArray(saved.evidence_refs) ? saved.evidence_refs : [],
+        ...(typeof saved.verified_at === "string" ? { verified_at: saved.verified_at } : {}),
+        ...(saved.identity_version === 2 ? { identity_version: 2 } : {}),
       };
     })
     .filter((criterion: AnyObj) => typeof criterion.id === "string" && criterion.id.length > 0);
@@ -3369,7 +3398,7 @@ async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> 
   if (!checks.length && opts(p, "surface-trust-json").length === 0) die("record-evidence requires at least one --check-json or --surface-trust-json");
   validateAcceptanceEvidenceRefs(dir, p);
   // Phase 4c: bundle is the sole verification artifact — stop writing evidence.json and acceptance.json update.
-  const ts = opt(p, "timestamp", now());
+  const ts = opt(p, "timestamp", new Date().toISOString());
   // #298: readBundleState + merge-by-id instead of unconditionally replacing every prior check —
   // record-evidence previously never called checksFromBundle(dir), so it dropped every check
   // recorded by an earlier record-evidence/record-check/record-gate-claim call. A later check
@@ -3576,7 +3605,7 @@ function diagnostic(dir: string, code: string, summary: string): never {
 async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
-  const ts = opt(p, "timestamp", now());
+  const ts = opt(p, "timestamp", new Date().toISOString());
   const statusVal = opt(p, "status");
   if (!["pass", "fail", "not_verified"].includes(statusVal)) die("--status must be one of: pass, fail, not_verified");
   const summary = opt(p, "summary") || die("--summary is required");
@@ -3652,6 +3681,8 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
     status: statusVal,
     summary,
     _gate_claim_expectation_id: targetExpectation.id,
+    _gate_claim_identity_version: 2,
+    _gate_claim_recorded_at: ts,
     ...(routeReason ? { _gate_claim_route_reason: routeReason } : {}),
   };
 
@@ -3690,7 +3721,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   // SAME expectation id supersedes the earlier check for that expectation (mergeChecksById); a
   // gate claim against a different expectation is additive.
   const _existingState = readBundleState(dir);
-  const criteria = mustRunTests ? completePassingCriteria(_existingState.criteria, opts(p, "criterion-json"), observedCommandNames) : _existingState.criteria;
+  const criteria = mustRunTests ? completePassingCriteria(_existingState.criteria, opts(p, "criterion-json"), observedCommandNames, ts) : _existingState.criteria;
   if (mustRunTests) {
     const liveCritiques = _existingState.critiques.filter((critique) => !critique.superseded_by);
     if (liveCritiques.length === 0 || liveCritiques.some((critique) => !critiqueIsCleanAndCurrent(dir, critique))) {
@@ -3907,7 +3938,8 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   const critique = {
     id: critiqueId,
     reviewer: opt(p, "reviewer", "tool-code-reviewer"),
-    reviewed_at: opt(p, "timestamp", now()),
+    reviewed_at: opt(p, "timestamp", new Date().toISOString()),
+    identity_version: 2,
     verdict,
     summary,
     lanes,
@@ -6072,6 +6104,7 @@ export const LIVENESS_TERMINAL = new Set(["delivered", "canceled", "accepted", "
  */
 function loadActorIdentityHelper(): {
   resolveActor: (env: NodeJS.ProcessEnv) => { actor: string; source: string };
+  resolveActorIdentity: (env: NodeJS.ProcessEnv) => { actor: string; source: string; actorStruct: ActorStruct | null };
   sanitizeSegment: (value: unknown) => string;
   isUnresolvedActor: (actor: string) => boolean;
   // #291 Wave 2 Task 2.1: widened (additive only — every existing caller above keeps using only
@@ -6081,22 +6114,15 @@ function loadActorIdentityHelper(): {
   // assignment-claim identity (a DIFFERENT identity concept from the flat actorKey used for
   // branch-naming/liveness — see resolveEnsureSessionActor's doc comment for why both exist).
   serializeActor: (actor: Partial<ActorStruct> | undefined) => string;
-  detectRuntime: (env: NodeJS.ProcessEnv) => string;
-  runtimeSessionId: (env: NodeJS.ProcessEnv) => string;
-  detectCiActor: (env: NodeJS.ProcessEnv) => { runtime: string; session_id: string } | null;
-  ancestorActorSeed: () => string;
 } {
   const _req = createRequire(import.meta.url);
   const helperPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/hooks/lib/actor-identity.js");
   return _req(helperPath) as {
     resolveActor: (env: NodeJS.ProcessEnv) => { actor: string; source: string };
+    resolveActorIdentity: (env: NodeJS.ProcessEnv) => { actor: string; source: string; actorStruct: ActorStruct | null };
     sanitizeSegment: (value: unknown) => string;
     isUnresolvedActor: (actor: string) => boolean;
     serializeActor: (actor: Partial<ActorStruct> | undefined) => string;
-    detectRuntime: (env: NodeJS.ProcessEnv) => string;
-    runtimeSessionId: (env: NodeJS.ProcessEnv) => string;
-    detectCiActor: (env: NodeJS.ProcessEnv) => { runtime: string; session_id: string } | null;
-    ancestorActorSeed: () => string;
   };
 }
 function resolveLivenessActor(): string {

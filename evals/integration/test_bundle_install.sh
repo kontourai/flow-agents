@@ -44,35 +44,94 @@ OPENCODE_DEST="$TMPDIR_EVAL/opencode-workspace"
 OPENCODE_CONSOLE_DEST="$TMPDIR_EVAL/opencode-console-workspace"
 OPENCODE_FULL_DEST="$TMPDIR_EVAL/opencode-full-workspace"
 PI_DEST="$TMPDIR_EVAL/pi-workspace"
+INSTRUCTION_FIXTURES="$TMPDIR_EVAL/instruction-fixtures"
 CONSOLE_TOKEN_FILE="$TMPDIR_EVAL/console-token"
 printf 'test-token\n' > "$CONSOLE_TOKEN_FILE"
 chmod 600 "$CONSOLE_TOKEN_FILE" 2>/dev/null || true
 
+instruction_fixture_key() {
+  printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
+}
+
+instruction_file_identity() {
+  local file="$1"
+  printf '%s %s\n' "$(wc -c < "$file" | tr -d ' ')" "$(shasum -a 256 "$file" | awk '{print $1}')"
+}
+
+seed_instruction_fixture() {
+  local dest="$1"
+  local label="$2"
+  local key
+  key="$(instruction_fixture_key "$dest")"
+  mkdir -p "$dest" "$INSTRUCTION_FIXTURES"
+  printf '# Repository AGENTS instructions\nfixture=%s\nkind=agents\nliteral=__KIRO_PACKAGE_ROOT__\n' "$label" > "$dest/AGENTS.md"
+  printf '# Repository CLAUDE instructions\nfixture=%s\nkind=claude\nliteral=__KIRO_PACKAGE_ROOT__\n' "$label" > "$dest/CLAUDE.md"
+  instruction_file_identity "$dest/AGENTS.md" > "$INSTRUCTION_FIXTURES/$key.AGENTS.md.identity"
+  instruction_file_identity "$dest/CLAUDE.md" > "$INSTRUCTION_FIXTURES/$key.CLAUDE.md.identity"
+}
+
+assert_instruction_fixture_preserved() {
+  local dest="$1"
+  local label="$2"
+  local key filename expected actual
+  key="$(instruction_fixture_key "$dest")"
+  for filename in AGENTS.md CLAUDE.md; do
+    expected="$(cat "$INSTRUCTION_FIXTURES/$key.$filename.identity")"
+    if [[ -f "$dest/$filename" ]]; then
+      actual="$(instruction_file_identity "$dest/$filename")"
+    else
+      actual="missing"
+    fi
+    if [[ "$actual" == "$expected" ]]; then
+      _pass "$label preserves existing $filename byte-for-byte"
+    else
+      _fail "$label changed or deleted existing $filename (expected identity: $expected; actual: $actual)"
+    fi
+  done
+}
+
+# Every install path starts with distinct repository-owned instructions. Kiro's
+# fixture is intentionally at the rsync --delete destination root so deletion,
+# not only replacement, is covered by this regression test.
+seed_instruction_fixture "$KIRO_DEST" "direct-kiro-delete-sync"
+seed_instruction_fixture "$BASE_DEST" "direct-base"
+seed_instruction_fixture "$CLAUDE_DEST" "direct-claude-code"
+seed_instruction_fixture "$CODEX_DEST" "direct-codex"
+seed_instruction_fixture "$OPENCODE_DEST" "direct-opencode"
+seed_instruction_fixture "$PI_DEST" "direct-pi"
+seed_instruction_fixture "$BASE_INIT_DEST" "cli-base"
+seed_instruction_fixture "$CODEX_INIT_DEST" "cli-codex"
+seed_instruction_fixture "$OPENCODE_FULL_DEST" "cli-opencode"
+
 echo ""
 echo "--- Install ---"
-if (cd "$ROOT_DIR/dist/kiro" && bash install.sh "$KIRO_DEST" >/dev/null); then
+if (cd "$ROOT_DIR/dist/kiro" && bash install.sh "$KIRO_DEST/" >/dev/null); then
   _pass "Kiro install succeeded"
 else
   _fail "Kiro install failed"
 fi
+assert_instruction_fixture_preserved "$KIRO_DEST" "Kiro direct install with trailing-slash destination and rsync --delete"
 
 if (cd "$ROOT_DIR/dist/base" && bash install.sh "$BASE_DEST" >/dev/null); then
   _pass "Base install succeeded"
 else
   _fail "Base install failed"
 fi
+assert_instruction_fixture_preserved "$BASE_DEST" "Base direct install"
 
 if (cd "$ROOT_DIR/dist/claude-code" && bash install.sh "$CLAUDE_DEST" >/dev/null); then
   _pass "Claude Code install succeeded"
 else
   _fail "Claude Code install failed"
 fi
+assert_instruction_fixture_preserved "$CLAUDE_DEST" "Claude Code direct install"
 
 if (cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_DEST" >/dev/null); then
   _pass "Codex install succeeded"
 else
   _fail "Codex install failed"
 fi
+assert_instruction_fixture_preserved "$CODEX_DEST" "Codex direct install"
 
 if (cd "$ROOT_DIR/dist/codex" && bash install.sh "$CODEX_CONSOLE_DEST" --telemetry-sink local-kontour-console --console-token-file "$CONSOLE_TOKEN_FILE" --console-tenant tenant-a >/dev/null); then
   _pass "Codex install with Console telemetry config succeeded"
@@ -118,17 +177,19 @@ else
   _pass "Codex install rejects unsafe hosted Console http URL"
 fi
 
-if node "$ROOT_DIR/build/src/cli.js" init --dest "$BASE_INIT_DEST" --telemetry-sink local-kontour-console --yes >/dev/null; then
+if node "$ROOT_DIR/build/src/cli.js" init --runtime base --dest "$BASE_INIT_DEST" --telemetry-sink local-kontour-console --yes >/dev/null; then
   _pass "flow-agents init headless base install succeeded"
 else
   _fail "flow-agents init headless base install failed"
 fi
+assert_instruction_fixture_preserved "$BASE_INIT_DEST" "flow-agents init Base install"
 
 if node "$ROOT_DIR/build/src/cli.js" init --runtime codex --dest "$CODEX_INIT_DEST" --telemetry-sink local-kontour-console --console-tenant tenant-a --activate-kits --yes >/dev/null; then
   _pass "flow-agents init headless Codex install succeeded"
 else
   _fail "flow-agents init headless Codex install failed"
 fi
+assert_instruction_fixture_preserved "$CODEX_INIT_DEST" "flow-agents init Codex install"
 
 echo ""
 echo "--- Guided Console-Connect Wizard (G2/G3): headless regression + summary/verify ---"
@@ -266,6 +327,7 @@ if (cd "$ROOT_DIR/dist/opencode" && bash install.sh "$OPENCODE_DEST" >/dev/null)
 else
   _fail "opencode install failed"
 fi
+assert_instruction_fixture_preserved "$OPENCODE_DEST" "OpenCode direct install"
 
 if (cd "$ROOT_DIR/dist/opencode" && bash install.sh "$OPENCODE_CONSOLE_DEST" --telemetry-sink local-kontour-console --console-token-file "$CONSOLE_TOKEN_FILE" --console-tenant tenant-oc >/dev/null); then
   _pass "opencode install with Console telemetry config succeeded"
@@ -278,12 +340,14 @@ if node "$ROOT_DIR/build/src/cli.js" init --runtime opencode --dest "$OPENCODE_F
 else
   _fail "flow-agents init headless opencode install failed"
 fi
+assert_instruction_fixture_preserved "$OPENCODE_FULL_DEST" "flow-agents init OpenCode install"
 
 if (cd "$ROOT_DIR/dist/pi" && bash install.sh "$PI_DEST" >/dev/null); then
   _pass "pi install succeeded"
 else
   _fail "pi install failed"
 fi
+assert_instruction_fixture_preserved "$PI_DEST" "pi direct install"
 
 USER_SKILLS_DIR="$CODEX_FULL_DEST/.agents/sk""ills/user-skill"
 mkdir -p "$CODEX_FULL_DEST/.codex/ag""ents" "$USER_SKILLS_DIR"
@@ -323,7 +387,7 @@ done
 
 echo ""
 echo "--- Placeholder Rewriting ---"
-if rg -n '__KIRO_PACKAGE_ROOT__' "$KIRO_DEST" >/tmp/kiro-placeholder-leaks.txt 2>/dev/null; then
+if rg -n --glob '!AGENTS.md' --glob '!CLAUDE.md' '__KIRO_PACKAGE_ROOT__' "$KIRO_DEST" >/tmp/kiro-placeholder-leaks.txt 2>/dev/null; then
   _fail "Kiro install left placeholder tokens behind (see /tmp/kiro-placeholder-leaks.txt)"
 else
   _pass "Kiro install rewrote package root placeholders"
@@ -373,13 +437,13 @@ else
   _fail "flow-agents init did not persist Console config or activate Codex kits"
 fi
 
-if [[ -f "$BASE_INIT_DEST/AGENTS.md" ]] \
+if [[ -f "$BASE_INIT_DEST/README.md" ]] \
   && [[ -d "$BASE_INIT_DEST/.flow-agents" ]] \
   && [[ -d "$BASE_INIT_DEST/.kontourai/flow-agents" ]] \
   && rg -F -q "console_telemetry_url=$LOCAL_KONTOUR_CONSOLE_URL" "$BASE_INIT_DEST/scripts/telemetry/telemetry.conf"; then
-  _pass "flow-agents init default installs base AGENTS.md workspace contract"
+  _pass "flow-agents init default installs base documented workspace contract"
 else
-  _fail "flow-agents init default did not install base AGENTS.md workspace contract"
+  _fail "flow-agents init default did not install base documented workspace contract"
 fi
 
 if rg -F -q "console_telemetry_url=$LOCAL_KONTOUR_CONSOLE_URL" "$OPENCODE_CONSOLE_DEST/scripts/telemetry/telemetry.conf" \
@@ -636,11 +700,18 @@ fi
 
 KIRO_WORKSPACE="$TMPDIR_EVAL/kiro-workspace"
 mkdir -p "$KIRO_WORKSPACE"
-if node - "$CLAUDE_DEST" "$CODEX_DEST" "$KIRO_DEST" "$KIRO_WORKSPACE" <<'NODE'
+if node - "$CLAUDE_DEST" "$CODEX_DEST" "$KIRO_DEST" "$KIRO_WORKSPACE" "$ROOT_DIR/scripts/hooks/lib/current-pointer.js" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const [claudeDest, codexDest, kiroDest, kiroWorkspace] = process.argv.slice(2);
+const [claudeDest, codexDest, kiroDest, kiroWorkspace, currentPointerHelperPath] = process.argv.slice(2);
+const { writePerActorCurrent } = require(currentPointerHelperPath);
+// #440 FIXTURE-GAP: this fixture was written before #440's per-actor ownership scoping and never
+// established a per-actor current pointer for the invoking actor -- under a RESOLVED ambient
+// actor, workflow-steering.js's actorScopedWorkflowState now scopes to that actor's own
+// (nonexistent) pointer and never surfaces the WORKFLOW STATE ATTENTION banner. Give each
+// runCommand invocation a stable, explicit actor below (see FLOW_AGENTS_ACTOR in env).
+const installedHookActor = "eval-actor-bundle-install-installed-hook";
 const state = {
   schema_version: "1.0",
   task_slug: "installed-hook-demo",
@@ -661,6 +732,10 @@ function writeFixture(root) {
   fs.writeFileSync(path.join(taskDir, "trust.bundle"), JSON.stringify(trustBundle), "utf8");
   fs.mkdirSync(path.join(root, "docs"), { recursive: true });
   fs.writeFileSync(path.join(root, "docs/context-map.md"), "# Context Map\n", "utf8");
+  const flowAgentsDir = path.join(root, ".kontourai/flow-agents");
+  const currentPayload = { schema_version: "1.0", active_slug: "installed-hook-demo", artifact_dir: "installed-hook-demo" };
+  fs.writeFileSync(path.join(flowAgentsDir, "current.json"), JSON.stringify(currentPayload, null, 2) + "\n");
+  writePerActorCurrent(flowAgentsDir, installedHookActor, currentPayload);
 }
 function eventGroups(file, ...names) {
   const hooks = JSON.parse(fs.readFileSync(file, "utf8")).hooks || {};
@@ -683,7 +758,7 @@ function workflowCommand(file, ...eventNames) {
 }
 function runCommand(label, command, cwd, runtimeJson) {
   const payload = JSON.stringify({ hook_event_name: "UserPromptSubmit", cwd, prompt: "continue" });
-  const env = { ...process.env, SA_HOOK_PROFILE: "standard", CLAUDE_PROJECT_DIR: cwd };
+  const env = { ...process.env, SA_HOOK_PROFILE: "standard", CLAUDE_PROJECT_DIR: cwd, FLOW_AGENTS_ACTOR: installedHookActor };
   if (label === "Codex") env.CODEX_HOME = cwd;
   const result = spawnSync(command, { input: payload, cwd, env, shell: true, encoding: "utf8", timeout: 30000 });
   if (result.status !== 0) throw new Error(`${label} installed hook failed: rc=${result.status} stdout=${result.stdout} stderr=${result.stderr}`);
@@ -709,11 +784,14 @@ fi
 # Execute the opencode plugin's workflow-steering command path directly
 OPENCODE_WORKSPACE="$TMPDIR_EVAL/opencode-exec-workspace"
 mkdir -p "$OPENCODE_WORKSPACE"
-if node - "$OPENCODE_DEST" "$OPENCODE_WORKSPACE" <<'NODE'
+if node - "$OPENCODE_DEST" "$OPENCODE_WORKSPACE" "$ROOT_DIR/scripts/hooks/lib/current-pointer.js" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const [opencodeDest, opencodeWorkspace] = process.argv.slice(2);
+const [opencodeDest, opencodeWorkspace, currentPointerHelperPath] = process.argv.slice(2);
+const { writePerActorCurrent } = require(currentPointerHelperPath);
+// #440 FIXTURE-GAP: see the installed-prompt-submit block above for the full rationale.
+const opencodeHookActor = "eval-actor-bundle-install-opencode-hook";
 const state = {
   schema_version: "1.0",
   task_slug: "opencode-hook-demo",
@@ -730,6 +808,10 @@ function writeFixture(root) {
   fs.writeFileSync(path.join(taskDir, "trust.bundle"), JSON.stringify(trustBundle), "utf8");
   fs.mkdirSync(path.join(root, "docs"), { recursive: true });
   fs.writeFileSync(path.join(root, "docs/context-map.md"), "# Context Map\n", "utf8");
+  const flowAgentsDir = path.join(root, ".kontourai/flow-agents");
+  const currentPayload = { schema_version: "1.0", active_slug: "opencode-hook-demo", artifact_dir: "opencode-hook-demo" };
+  fs.writeFileSync(path.join(flowAgentsDir, "current.json"), JSON.stringify(currentPayload, null, 2) + "\n");
+  writePerActorCurrent(flowAgentsDir, opencodeHookActor, currentPayload);
 }
 function runOpencodeAdapter(bundleDest, cwd) {
   const adapterPath = path.join(bundleDest, "scripts", "hooks", "opencode-hook-adapter.js");
@@ -737,7 +819,7 @@ function runOpencodeAdapter(bundleDest, cwd) {
   const result = spawnSync(process.execPath, [adapterPath, "UserPromptSubmit", "workflow-steering", "workflow-steering.js", "default"], {
     input: payload,
     cwd,
-    env: { ...process.env, SA_HOOK_PROFILE: "standard", FLOW_AGENTS_HOOK_RUNTIME: "opencode" },
+    env: { ...process.env, SA_HOOK_PROFILE: "standard", FLOW_AGENTS_HOOK_RUNTIME: "opencode", FLOW_AGENTS_ACTOR: opencodeHookActor },
     encoding: "utf8",
     timeout: 30000,
   });
@@ -761,11 +843,14 @@ fi
 # Execute the pi extension's hook adapter command path directly
 PI_WORKSPACE="$TMPDIR_EVAL/pi-exec-workspace"
 mkdir -p "$PI_WORKSPACE"
-if node - "$PI_DEST" "$PI_WORKSPACE" <<'NODE'
+if node - "$PI_DEST" "$PI_WORKSPACE" "$ROOT_DIR/scripts/hooks/lib/current-pointer.js" <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const [piDest, piWorkspace] = process.argv.slice(2);
+const [piDest, piWorkspace, currentPointerHelperPath] = process.argv.slice(2);
+const { writePerActorCurrent } = require(currentPointerHelperPath);
+// #440 FIXTURE-GAP: see the installed-prompt-submit block above for the full rationale.
+const piHookActor = "eval-actor-bundle-install-pi-hook";
 const state = {
   schema_version: "1.0",
   task_slug: "pi-hook-demo",
@@ -782,6 +867,10 @@ function writeFixture(root) {
   fs.writeFileSync(path.join(taskDir, "trust.bundle"), JSON.stringify(trustBundle), "utf8");
   fs.mkdirSync(path.join(root, "docs"), { recursive: true });
   fs.writeFileSync(path.join(root, "docs/context-map.md"), "# Context Map\n", "utf8");
+  const flowAgentsDir = path.join(root, ".kontourai/flow-agents");
+  const currentPayload = { schema_version: "1.0", active_slug: "pi-hook-demo", artifact_dir: "pi-hook-demo" };
+  fs.writeFileSync(path.join(flowAgentsDir, "current.json"), JSON.stringify(currentPayload, null, 2) + "\n");
+  writePerActorCurrent(flowAgentsDir, piHookActor, currentPayload);
 }
 function runPiAdapter(bundleDest, cwd) {
   const adapterPath = path.join(bundleDest, "scripts", "hooks", "pi-hook-adapter.js");
@@ -789,7 +878,7 @@ function runPiAdapter(bundleDest, cwd) {
   const result = spawnSync(process.execPath, [adapterPath, "UserPromptSubmit", "workflow-steering", "workflow-steering.js", "default"], {
     input: payload,
     cwd,
-    env: { ...process.env, SA_HOOK_PROFILE: "standard", FLOW_AGENTS_HOOK_RUNTIME: "pi" },
+    env: { ...process.env, SA_HOOK_PROFILE: "standard", FLOW_AGENTS_HOOK_RUNTIME: "pi", FLOW_AGENTS_ACTOR: piHookActor },
     encoding: "utf8",
     timeout: 30000,
   });
@@ -890,11 +979,11 @@ NODE
 )"
 
 package_flow() {
-  (cd "$PACKAGE_PROJECT" && CODEX_SESSION_ID=packed-package-consumer node "$PACKAGE_CLI" workflow "$@")
+  (cd "$PACKAGE_PROJECT" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=packed-package-consumer node "$PACKAGE_CLI" workflow "$@")
 }
 
 package_review() {
-  (cd "$PACKAGE_PROJECT" && CODEX_SESSION_ID=packed-package-reviewer node "$PACKAGE_CLI" workflow "$@")
+  (cd "$PACKAGE_PROJECT" && env -u CODEX_THREAD_ID CODEX_SESSION_ID=packed-package-reviewer node "$PACKAGE_CLI" workflow "$@")
 }
 
 if (cd "$ROOT_DIR" && npm pack --silent --pack-destination "$TMPDIR_EVAL" >"$PACKAGE_PACK_LOG") \
@@ -972,18 +1061,6 @@ NODE
   package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation merge-readiness --status pass \
     --summary "Packed fixture records the declared merge-readiness artifact." \
     --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/acme-builder-901--evidence-gate.md\",\"summary\":\"Durable merge-readiness artifact.\"}" >/dev/null \
-  && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation pull-request-opened --status pass \
-    --summary "Packed fixture records the declared release artifact." \
-    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/release.json\",\"summary\":\"Durable release artifact.\"}" >/dev/null \
-  && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation ci-merge-readiness --status pass \
-    --summary "Packed fixture records the declared CI readiness artifact." \
-    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/release.json\",\"summary\":\"Durable CI readiness artifact.\"}" >/dev/null \
-  && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation decision-evidence --status pass \
-    --summary "Packed fixture records the declared learning decision artifact." \
-    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/learning.json\",\"summary\":\"Durable learning decision artifact.\"}" >/dev/null \
-  && package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation learning-evidence --status pass \
-    --summary "Packed fixture records the declared learning evidence artifact." \
-    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/learning.json\",\"summary\":\"Durable learning evidence artifact.\"}" >/dev/null \
   && node - "$PACKAGE_SESSION" <<'NODE' &&
 const fs = require('node:fs');
 const path = require('node:path');
@@ -998,14 +1075,26 @@ const requiredTypes = [
   'builder.execute.scope',
   'builder.verify.tests',
   'builder.merge-ready.readiness',
-  'builder.learn.decisions',
-  'builder.learn.evidence',
 ];
 const missingTypes = requiredTypes.filter((type) => !types.has(type));
 if (missingTypes.length > 0) {
-  console.error(`missing verified public workflow claims: ${missingTypes.join(', ')}`);
+  console.error(`missing verified pre-operation workflow claims: ${missingTypes.join(', ')}`);
   process.exit(1);
 }
+fs.writeFileSync(path.join(session, 'publish-change.result.json'), JSON.stringify({ provider: 'fixture', repository: 'acme/builder', number: 901, url: 'https://example.test/acme/builder/pull/901', head_ref: 'fixture', base_ref: 'main' }));
+NODE
+  ! package_flow evidence --session-dir "$PACKAGE_SESSION" --expectation pull-request-opened --status pass \
+    --summary "Locally authored publish-change result must not self-complete." \
+    --evidence-ref-json "{\"kind\":\"artifact\",\"file\":\"$PACKAGE_SESSION/publish-change.result.json\",\"summary\":\"Locally authored provider-shaped result.\"}" >/dev/null 2>&1 \
+  && node - "$PACKAGE_SESSION" "$PACKAGE_PROJECT" <<'NODE' &&
+const fs = require('node:fs');
+const path = require('node:path');
+const [session, project] = process.argv.slice(2);
+const state = JSON.parse(fs.readFileSync(path.join(session, 'state.json'), 'utf8'));
+const flow = JSON.parse(fs.readFileSync(path.join(project, '.kontourai', 'flow', 'runs', path.basename(session), 'state.json'), 'utf8'));
+const bundle = JSON.parse(fs.readFileSync(path.join(session, 'trust.bundle'), 'utf8'));
+if (state.flow_run?.current_step !== 'pr-open' || flow.current_step !== 'pr-open' || state.next_action?.status !== 'blocked') process.exit(1);
+if ((bundle.claims || []).some((claim) => claim.claimType === 'builder.pr-open.pull-request')) process.exit(2);
 NODE
   printf 'Selected Work Item: acme/builder#902\n' > "$PACKAGE_LIFECYCLE_SESSION/acme-builder-902--pull-work.md" \
   && package_flow start --artifact-root "$PACKAGE_PROJECT/.kontourai/flow-agents" \

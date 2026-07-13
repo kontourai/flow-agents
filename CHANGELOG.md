@@ -1,5 +1,60 @@
 # Changelog
 
+## [3.12.0](https://github.com/kontourai/flow-agents/compare/v3.11.0...v3.12.0) (2026-07-13)
+
+
+### Features
+
+* add canonical gate action envelopes ([#605](https://github.com/kontourai/flow-agents/issues/605)) ([a7cc3e5](https://github.com/kontourai/flow-agents/commit/a7cc3e553bf03ec47a008424c3d2f7693432286b))
+
+## [3.11.0](https://github.com/kontourai/flow-agents/compare/v3.10.0...v3.11.0) (2026-07-13)
+
+
+### Features
+
+* sign continuation adapter evidence ([#598](https://github.com/kontourai/flow-agents/issues/598)) ([df14271](https://github.com/kontourai/flow-agents/commit/df14271a64c4de069dc47f5b3c18729caa025bbb))
+
+
+### Fixes
+
+* make Codex installs self-contained and bind GitHub claims ([#600](https://github.com/kontourai/flow-agents/issues/600)) ([57d1942](https://github.com/kontourai/flow-agents/commit/57d1942a5a8b3d005f1f91d778de385d924518bd))
+
+## [3.10.0](https://github.com/kontourai/flow-agents/compare/v3.9.0...v3.10.0) (2026-07-13)
+
+
+### Features
+
+* **telemetry:** per-turn model/tokens/cost on tool events ([#568](https://github.com/kontourai/flow-agents/issues/568) slice 1) ([80ac0e7](https://github.com/kontourai/flow-agents/commit/80ac0e73a524fb1f84f0bffac94fe78ce4883b74))
+* **telemetry:** per-turn model/tokens/cost on tool events ([#568](https://github.com/kontourai/flow-agents/issues/568) slice 1) ([2b6276d](https://github.com/kontourai/flow-agents/commit/2b6276d42b30123a61b3d9a9181ebd77affc0e70))
+
+
+### Fixes
+
+* **#440:** scope ownership signals to the actor's own per-actor pointer ([#586](https://github.com/kontourai/flow-agents/issues/586)) ([7a8fc82](https://github.com/kontourai/flow-agents/commit/7a8fc82f22201fd916631beff6bb85fe288d461e))
+* **liveness:** identify Codex actors by thread ([#556](https://github.com/kontourai/flow-agents/issues/556)) ([5ac02cb](https://github.com/kontourai/flow-agents/commit/5ac02cbc6f374d0b75bc03c4230f6d255568693a))
+* **packaging:** preserve runtime instruction files ([#575](https://github.com/kontourai/flow-agents/issues/575)) ([f55d288](https://github.com/kontourai/flow-agents/commit/f55d28839bf87f35aaecb5a7aae0ba7fe55f51c7))
+* **packaging:** stop seeding Codex global instructions ([#573](https://github.com/kontourai/flow-agents/issues/573)) ([2d25cb6](https://github.com/kontourai/flow-agents/commit/2d25cb65af2b5403a164a645ae615e2388681640))
+* resolve continuation validator from installed runtime ([#591](https://github.com/kontourai/flow-agents/issues/591)) ([86191c4](https://github.com/kontourai/flow-agents/commit/86191c4e39abcb3123b8823f4604ca7183d0be83))
+
+## [3.9.0](https://github.com/kontourai/flow-agents/compare/v3.8.0...v3.9.0) (2026-07-12)
+
+
+### Features
+
+* **workflow:** add bounded continuation driver ([#560](https://github.com/kontourai/flow-agents/issues/560)) ([e6365ab](https://github.com/kontourai/flow-agents/commit/e6365aba324c76ee164681c987d20916c315444e))
+
+## [3.8.0](https://github.com/kontourai/flow-agents/compare/v3.7.0...v3.8.0) (2026-07-12)
+
+
+### Features
+
+* **packaging:** install portable skills under .agents ([#551](https://github.com/kontourai/flow-agents/issues/551)) ([12f12e3](https://github.com/kontourai/flow-agents/commit/12f12e3d0a32b398e47a9ac01604179c58bf14ba))
+
+
+### Fixes
+
+* **builder:** make gate evidence sync visit-safe ([#558](https://github.com/kontourai/flow-agents/issues/558)) ([1c0e8dc](https://github.com/kontourai/flow-agents/commit/1c0e8dcea6bdfd7d54484f950b2432fcf727b0ea))
+
 ## [3.7.0](https://github.com/kontourai/flow-agents/compare/v3.6.0...v3.7.0) (2026-07-12)
 
 

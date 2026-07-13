@@ -63,8 +63,36 @@ does not create a Flow run.
 
 After a gate producer writes `trust.bundle`, the public evidence path
 synchronizes the existing run while holding the assignment subject lock.
-Synchronization is digest-idempotent: the same trust bundle is not attached
-twice.
+Synchronization selects only live claims: producer-superseded claims and claims
+carrying `metadata.superseded_by` remain auditable history but never determine
+the current outcome. Passing evidence is published atomically only when every
+required expectation for the gate is present; this prevents sequential critique
+writes from attaching an intermediate partial snapshot and consuming a
+route-back attempt. Failed evidence may still synchronize immediately when it
+carries a route reason declared by the gate; a disputed report-only critique is
+not itself a routed gate decision and remains pending.
+
+Attachments carry the exact expectation ids selected from the current bundle.
+Digest idempotence applies only while an unsuperseded attachment for that gate
+and expectation set remains live. After route-back, claims must be current for
+the new gate visit before synchronization, and claim/evidence identities used
+by any earlier attachment to that gate can never satisfy the later visit.
+Gate claims, verified criteria, and critiques carry producer-recorded version
+timestamps plus `identity_version: 2` in their identity derivation so legitimate
+re-verification creates new identities. Unmarked pre-upgrade records retain the
+legacy identity formula during rebuild; installing new code alone can never
+manufacture a fresh identity. Because those identities are embedded in TrustBundle bytes, a
+genuinely new identity necessarily changes the bundle SHA-256; byte-identical
+replay remains pending rather than consuming another attempt.
+
+Every gate visit has a canonical boundary: the latest Flow transition into the
+step, or the run's initial timestamp for its entry step. Claim creation and
+observation timestamps must fall within that visit and may not be more than 30
+seconds ahead of synchronization. The sole pre-boundary allowance is the
+30-second acquisition window for the assignment-backed `selected-work` claim,
+which is intentionally produced immediately before the canonical run starts.
+Previously attached claim and evidence identities are excluded from every later
+visit to the same gate regardless of timestamp skew.
 
 ## Public Status And Recovery
 
@@ -119,6 +147,129 @@ Workflow steering surfaces these fields on session start and prompt submission. 
 Stop hook treats an unfinished canonical Flow run as active even during pickup or
 planning, blocks a premature stop in block mode, and does not release its liveness
 claim. A run is complete only when Flow reaches its terminal step.
+
+Projection is always derived from the canonical run's `current_step`, including
+composed steps that have no legacy sidecar phase (`merge-ready-ci` and `learn`).
+Both the legacy `current.json` pointer and every matching per-actor pointer are
+updated from that canonical step; `phase_map` is presentation metadata, not the
+authority for pointer navigation.
+
+### Gate-Action Envelope
+
+Every active Builder continuation request includes a bounded
+`gate_action_envelope` with schema version `1.0`. Flow Agents derives it from
+the persisted canonical Flow run and effective Flow Definition, then joins it
+to the installed Builder Kit's validated `flow_step_actions` record. It is an
+execution context, not a second gate evaluator: Flow remains the only authority
+that evaluates requirements, advances steps, routes back, or consumes attempt
+budget.
+
+The envelope provides the current gate ids and claim shapes, including each
+expectation's required flag and `satisfied`, `accepted_exception`, or `unresolved`
+status. Accepted exceptions are identified separately. Flow Agents evaluates
+these statuses with the run's effective Flow config, including gate overrides,
+so waived, satisfied, and optional work is never mislabeled as required. Skill
+identities bind package, version, stable package-relative source
+path, and SHA-256, so durable attestations never retain a stale absolute install path.
+Requirement status comes from Flow's canonical gate evaluation and therefore
+uses the expectation's trust-bundle selector, Surface-derived claim status,
+supersession, freshness, and current gate visit; `expectation_ids` labels alone
+never mark a requirement satisfied.
+Declared operations, artifacts, and evidence expectation ids come from product
+metadata. `implementation_allowed` is also product metadata; the shipped Builder
+Kit declares it true only for `builder.build/execute`.
+
+The read-only status interface is an exact version-pinned command. Mutation
+interfaces are typed per expectation: `workflow.evidence`, `workflow.critique`,
+or a named product operation such as `publish-change`. Evidence and critique
+interfaces expose fixed argv plus typed required parameters and allowed values;
+they do not publish shell strings with substitution placeholders. Consumers add
+parameter values as distinct argv entries.
+
+`publish-change` is a provider-capability protocol, not a claim that the local
+`flow-agents publish-change` helper opens a pull request. Its envelope binds the
+exact `pull_request.create` capability, bounded structured inputs, the required
+provider result, and the dedicated session-relative
+`publish-change.result.json` artifact. No authenticated ChangeProvider executor
+ships in this issue, so the operation is explicitly unavailable locally and has
+an `external_verification_required` completion state. It exposes no
+`record_completion` mutation, a self-authored result cannot satisfy
+`pull-request-opened`, and the projection waits instead of scheduling repeated
+adapter turns. The protocol remains the future provider contract. The local
+publish-change helper only renders and validates publish artifacts and provider
+checks; it is not the provider action executor.
+
+`flow_step_actions` must explicitly declare `artifacts`, `artifact_bindings`,
+`expectation_ids`, `expectation_bindings`, and `implementation_allowed`, including
+empty lists for terminal actions. Expectation ids must exactly equal the resolved
+Flow expectation set. Artifact bindings map each artifact to its owning
+expectations, allowing optional artifacts to remain declared without appearing
+under `stop_condition.required`. Operation bindings must resolve through the
+canonical public operation catalog, not merely a self-declared string. Artifact
+refs are either lexically safe session-relative paths or validated
+`trust.bundle#<safe-id>` virtual refs; absolute paths, traversal, and arbitrary
+fragments fail closed. Malformed,
+unknown-field, duplicate, oversized, unmatched, symlinked, or otherwise
+unbounded action metadata fails closed before an adapter is launched. The
+runtime verifies every named skill against the installed Builder package and
+binds its contents by SHA-256. Kit JSON, skill source, and artifact identity/hash
+reads open the final path once with `O_NOFOLLOW`, bound size from `fstat`, read
+through that descriptor, and recheck descriptor/path identity after the read.
+Run-wide artifact observation deduplicates refs and enforces count plus aggregate
+byte/hash budgets before reading file contents. Product validation and runtime
+both cap each action at 16 skills and each flow at 128 distinct observable file
+artifacts; virtual trust-bundle refs and control artifacts are excluded using the
+same classification in both layers.
+
+After every successful or failed adapter turn, Flow Agents synchronizes the
+canonical run and records a delta: step advancement, newly attached canonical
+evidence, changed hashes of declared artifacts (`artifact_changes`), or no
+progress. Evidence identities and the artifact manifest are run-wide rather
+than selected-step scoped, so the evidence/artifact that advances a gate remains
+attributable and files already present for later steps are part of the baseline.
+Control `state.json` is excluded from both request-facing declared/required
+artifacts and artifact progress. Legacy kit ownership metadata may retain it,
+but the envelope never instructs an adapter to produce Flow Agents control
+state or observes its own hash. Repeated
+no-progress deltas are classified as `possible` and then `stagnant`; they never
+invent evidence, auto-pass a gate, or change Flow state. A same-step evidence
+attachment is recorded as progress even though the legacy `gate_not_advanced`
+event remains for compatibility. Adapter-returned `evidence` remains optional
+adapter telemetry only and is never gate evidence.
+
+The durable `last_progress` snapshot is the recovery baseline. A durable active
+turn phase and pre-turn snapshot identify an adapter turn interrupted before its
+post-turn measurement. Reinvocation compares freshly synchronized canonical
+state with that snapshot, counts an unchanged started turn as no progress exactly
+once, records any delta, and clears the recovery marker. Synchronization and this
+reconciliation occur before waiting or terminal disposition handling, so the
+turn's audit and progress survive either outcome. Accepted turns, wait turns, and
+callback failures are likewise synchronized and measured before their durable
+turn marker is cleared. Signed workflow drives preflight the aggregate attestation
+capacity before launching an adapter when another bounded signed result cannot fit.
+Accepted request/result pairs and their measured progress are first stored in a
+durable idempotent journal while the active turn remains in `measured` phase.
+Only after journal and completion-event persistence does the driver clear that
+marker. Restart completes either write exactly once. Signed attestations reload
+the journal and fail closed if an accepted event lacks request/result coverage.
+The complete serialized turn result is capped at 74,000 bytes; signed preflight
+reserves that exact maximum in addition to the actual request and JSON structure.
+The authoritative envelope
+exists only at top-level in the turn request; projected `next_action` and durable
+`state.json` do not contain a duplicate.
+
+Canonical synchronization normally waits for attached bundle evidence before
+evaluating a gate. It may evaluate an evidence-free gate only when the run's
+effective config proves the gate can pass without new evidence: an accepted
+exception applies, or every effective expectation is optional. This advances
+those gates without prematurely evaluating ordinary missing-required gates, and
+once the run advances no obsolete action skill remains required.
+
+The envelope and its prior-turn delta are additive fields of
+`ContinuationTurnRequest` schema `1.0`; adapters that only consume the existing
+request fields remain compatible. When `workflow drive` produces its optional
+signed request/result attestation, the exact request object (including the
+envelope) is included in the signed payload without transformation.
 # Builder Lifecycle Authority
 
 The canonical Flow run owns pause, resume, and cancellation. The current assignment actor may

@@ -3,6 +3,18 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# #440 FIXTURE-GAP: this suite's fixtures were written before #440's per-actor ownership scoping
+# and never establish a per-actor current pointer for the invoking actor (no ensure-session/
+# workflow-start call anywhere in this file) -- under a RESOLVED ambient actor (ancestry-derived
+# locally, GITHUB_RUN_ID-derived CI-runtime in CI), stop-goal-fit.js's analyze() now scopes to
+# that actor's own (nonexistent) pointer and never reaches the fixture-under-test at all. This
+# suite is about goal-fit gate mechanics, not #440's ownership scoping, so forcing the documented
+# test-only unresolved-actor escape hatch restores EXACTLY this suite's pre-#440 behavior (D3
+# compat: an unresolved actor keeps the unchanged legacy-fallback/global-scan discovery every
+# assertion below was written against).
+export FLOW_AGENTS_ACTOR_TEST_FORCE_UNRESOLVED=1
+export NODE_ENV=test
+
 source "$ROOT/evals/lib/node.sh"
 
 # These checks exercise the block mechanism repeatedly against the same workspace
@@ -977,30 +989,31 @@ else
   _fail "hook leaked tsc error into goal-fit output"
 fi
 
-# Part 2 of fix: when the validator cannot run at all (build/ absent and npm fails),
-# the hook must skip cleanly — never block in strict mode due to an env error.
+# Part 2 of fix: when the hook-owned build is absent, the hook must skip cleanly
+# without executing npm or any other PATH-discovered fallback.
 mv "$ROOT/build" "$ROOT/build-absent"
 
 SPAWN_FAIL_DIR="$TMPDIR_EVAL/spawn-fail"
+SPAWN_FAIL_MARKER="$TMPDIR_EVAL/path-npm-was-executed"
 mkdir -p "$SPAWN_FAIL_DIR"
-printf '#!/usr/bin/env bash\necho "npm ERR! tsc: command not found" >&2\nexit 127\n' > "$SPAWN_FAIL_DIR/npm"
+printf '#!/usr/bin/env bash\nprintf "ran\\n" > "$SPAWN_FAIL_MARKER"\nexit 127\n' > "$SPAWN_FAIL_DIR/npm"
 chmod +x "$SPAWN_FAIL_DIR/npm"
 
-if PATH="$SPAWN_FAIL_DIR:$PATH" FLOW_AGENTS_GOAL_FIT_STRICT=true FLOW_AGENTS_REQUIRE_SIDECARS=true \
+if PATH="$SPAWN_FAIL_DIR:$PATH" SPAWN_FAIL_MARKER="$SPAWN_FAIL_MARKER" FLOW_AGENTS_GOAL_FIT_STRICT=true FLOW_AGENTS_REQUIRE_SIDECARS=true \
      node "$ROOT/scripts/hooks/stop-goal-fit.js" \
      >"$TMPDIR_EVAL/npm-install-env-err.out" 2>"$TMPDIR_EVAL/npm-install-env-err.err" <<JSON
 {"hook_event_name":"Stop","cwd":"$NPM_INSTALL_REPO"}
 JSON
 then
-  _pass "strict hook does not block when validator environment fails (build/ absent, tsc missing)"
+  _pass "strict hook does not block when its hook-owned validator build is unavailable"
 else
-  _fail "strict hook must not block when validator env fails: $(cat "$TMPDIR_EVAL/npm-install-env-err.err")"
+  _fail "strict hook must not block when its validator build is unavailable: $(cat "$TMPDIR_EVAL/npm-install-env-err.err")"
 fi
 
-if rg -q 'sidecar validation skipped' "$TMPDIR_EVAL/npm-install-env-err.err"; then
-  _pass "hook emits sidecar validation skipped warning for environment errors"
+if [ ! -e "$SPAWN_FAIL_MARKER" ] && rg -q 'sidecar validation skipped' "$TMPDIR_EVAL/npm-install-env-err.err"; then
+  _pass "unavailable validator is disclosed without executing a PATH-provided npm fallback"
 else
-  _fail "hook did not emit 'sidecar validation skipped' for environment errors"
+  _fail "hook executed PATH npm or hid the unavailable-validator warning"
 fi
 
 # Restore build/ so subsequent evals are unaffected.
@@ -2762,6 +2775,241 @@ elif [[ "$?" -eq 2 ]] && grep -q 'canonical Flow state is unsafe or malformed' "
   _pass "strict goal-fit hook fails closed for malformed canonical Flow state of an active scoped session"
 else
   _fail "strict goal-fit hook did not report malformed canonical Flow state: $(cat "$TMPDIR_EVAL/canonical-malformed.err")"
+fi
+
+# A live driver turn may return from one ordinary active Flow gate, but the
+# exception is strictly record-bound. It must not release assignment/liveness
+# (releaseOnNonTerminalStop sees the active canonical run) or hide a hard
+# evidence failure.
+AUTHORITY_REPO="$TMPDIR_EVAL/continuation-authority-repo"
+AUTHORITY_SESSION="$AUTHORITY_REPO/.kontourai/flow-agents/continuation-authority"
+mkdir -p "$AUTHORITY_SESSION/continuation-driver/locks" "$AUTHORITY_REPO/.kontourai/flow/runs/continuation-authority"
+printf '# Test Repo\n' > "$AUTHORITY_REPO/AGENTS.md"
+cat > "$AUTHORITY_SESSION/continuation-authority--deliver.md" <<'MARKDOWN'
+# Continuation authority fixture
+
+status: planned
+type: deliver
+MARKDOWN
+cat > "$AUTHORITY_SESSION/state.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "continuation-authority",
+  "status": "planned",
+  "phase": "planning",
+  "updated_at": "2026-07-13T00:00:00.000Z",
+  "flow_run": { "status": "active", "run_id": "continuation-authority", "definition_id": "builder.build", "definition_version": "1.0", "current_step": "pull-work", "run_ref": ".kontourai/flow/runs/continuation-authority", "open_gate_ids": ["pull-work-gate"] },
+  "next_action": { "status": "continue", "summary": "Continue the canonical gate." }
+}
+JSON
+cat > "$AUTHORITY_REPO/.kontourai/flow-agents/current.json" <<'JSON'
+{ "active_slug": "continuation-authority" }
+JSON
+cat > "$AUTHORITY_REPO/.kontourai/flow/runs/continuation-authority/state.json" <<'JSON'
+{ "run_id": "continuation-authority", "definition_id": "builder.build", "definition_version": "1.0", "status": "active", "current_step": "pull-work" }
+JSON
+cat > "$AUTHORITY_REPO/.kontourai/flow/runs/continuation-authority/definition.json" <<'JSON'
+{ "id": "builder.build", "version": "1.0", "steps": [{ "id": "pull-work" }, { "id": "design-probe" }] }
+JSON
+AUTHORITY_PID="$$"
+AUTHORITY_TOKEN="authority-lock"
+AUTHORITY_ENV="$TMPDIR_EVAL/continuation-authority-env.json"
+AUTHORITY_REPO="$AUTHORITY_REPO" AUTHORITY_SESSION="$AUTHORITY_SESSION" AUTHORITY_PID="$AUTHORITY_PID" AUTHORITY_TOKEN="$AUTHORITY_TOKEN" AUTHORITY_ENV="$AUTHORITY_ENV" AUTHORITY_ROOT="$ROOT" node - <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const issued = new Date();
+const lock = { schema_version: '1.0', pid: Number(process.env.AUTHORITY_PID), token: process.env.AUTHORITY_TOKEN, created_at: issued.toISOString() };
+fs.writeFileSync(path.join(process.env.AUTHORITY_SESSION, 'continuation-driver', 'locks', `${lock.pid}-${lock.token}.lock`), `${JSON.stringify(lock)}\n`);
+fs.writeFileSync(path.join(process.env.AUTHORITY_SESSION, 'continuation-driver', 'state.json'), JSON.stringify({
+  schema_version: '1.0', run_id: 'continuation-authority', definition_id: 'builder.build', max_turns: 2,
+  adapter_command_identity: 'adapter-identity', status: 'active', turns_started: 1, active_turn_step: 'pull-work', pending_barrier: null,
+}));
+const actor = { runtime: 'explicit-override', session_id: 'driver-actor', host: 'fixture-host', human: null };
+const assignment = path.join(process.env.AUTHORITY_REPO, '.kontourai', 'flow-agents', 'assignment', 'continuation-authority.json');
+fs.mkdirSync(path.dirname(assignment), { recursive: true });
+fs.writeFileSync(assignment, JSON.stringify({ schema_version: '1.0', role: 'AssignmentClaimRecord', subject_id: 'continuation-authority', actor, actor_key: 'driver-actor', artifact_dir: 'continuation-authority', status: 'claimed' }));
+const authority = require(path.join(process.env.AUTHORITY_ROOT, 'scripts', 'hooks', 'lib', 'continuation-turn-authority.js'));
+const turn = authority.issueActiveTurnAuthority({ sessionDir: process.env.AUTHORITY_SESSION, runId: 'continuation-authority', definitionId: 'builder.build', currentStep: 'pull-work', iteration: 1, maxTurns: 2, adapterCommandIdentity: 'adapter-identity', assignmentActor: 'driver-actor', assignmentActorStruct: actor, lock, timeoutMs: 60_000 });
+const missionFile = path.join(process.env.AUTHORITY_SESSION, 'continuation-driver', 'state.json');
+const mission = JSON.parse(fs.readFileSync(missionFile, 'utf8'));
+fs.writeFileSync(missionFile, JSON.stringify({ ...mission, active_turn_public_key_digest: turn.publicKeyDigest }));
+fs.writeFileSync(process.env.AUTHORITY_ENV, JSON.stringify({ runId: turn.runId, turnSecret: turn.turnSecret }));
+NODE
+AUTHORITY_TURN_SECRET="$(node -p "require(process.argv[1]).turnSecret" "$AUTHORITY_ENV")"
+AUTHORITY_RUN_ID="$(node -p "require(process.argv[1]).runId" "$AUTHORITY_ENV")"
+cat > "$AUTHORITY_REPO/.kontourai/flow/runs/continuation-authority/state.json" <<'JSON'
+{ "run_id": "continuation-authority", "definition_id": "builder.build", "definition_version": "1.0", "status": "active", "current_step": "design-probe" }
+JSON
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-valid.out" 2>"$TMPDIR_EVAL/authority-valid.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
+JSON
+then
+  _pass "a matching live continuation authority makes only the ordinary active Flow gate advisory"
+else
+  _fail "matching continuation authority did not return control to the driver: $(cat "$TMPDIR_EVAL/authority-valid.err")"
+fi
+if grep -q 'continuation driver active turn is authorized' "$TMPDIR_EVAL/authority-valid.err"; then
+  _pass "authorized continuation turn remains observable in Goal Fit output"
+else
+  _fail "authorized continuation turn was not disclosed: $(cat "$TMPDIR_EVAL/authority-valid.err")"
+fi
+AUTHORITY_CONSUMER_MARKER="$TMPDIR_EVAL/authority-consumer-validator-ran"
+mkdir -p "$AUTHORITY_REPO/build/src/cli"
+cat > "$AUTHORITY_REPO/package.json" <<'JSON'
+{
+  "name": "@kontourai/flow-agents",
+  "private": true,
+  "scripts": {
+    "test": "node --test",
+    "workflow:validate-artifacts": "node -e \"require('fs').writeFileSync(process.env.AUTHORITY_CONSUMER_MARKER, 'ran')\""
+  }
+}
+JSON
+cat > "$AUTHORITY_REPO/build/src/cli/validate-workflow-artifacts.js" <<'JS'
+require('fs').writeFileSync(process.env.AUTHORITY_CONSUMER_MARKER, 'ran');
+process.exit(0);
+JS
+if AUTHORITY_CONSUMER_MARKER="$AUTHORITY_CONSUMER_MARKER" FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-consumer-package.out" 2>"$TMPDIR_EVAL/authority-consumer-package.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
+JSON
+then
+  if [ ! -e "$AUTHORITY_CONSUMER_MARKER" ]; then
+    _pass "authorized continuation uses only the hook-owned validator, never a same-name consumer package"
+  else
+    _fail "hook executed a consumer-controlled same-name validator"
+  fi
+else
+  _fail "consumer package.json trapped an authorized continuation turn: $(cat "$TMPDIR_EVAL/authority-consumer-package.err")"
+fi
+printf '{}\n' > "$AUTHORITY_SESSION/handoff.json"
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-validator-finding.out" 2>"$TMPDIR_EVAL/authority-validator-finding.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
+JSON
+then
+  _fail "authorized continuation bypassed a real hook-owned validator finding"
+elif [[ "$?" -eq 2 ]] && grep -q 'sidecar validation:' "$TMPDIR_EVAL/authority-validator-finding.err"; then
+  _pass "authorized continuation preserves real hook-owned validator findings as hard blocks"
+else
+  _fail "hook-owned validator finding returned an unexpected result: $(cat "$TMPDIR_EVAL/authority-validator-finding.err")"
+fi
+rm -f "$AUTHORITY_SESSION/handoff.json"
+AUTHORITY_BUNDLE_DIST="$TMPDIR_EVAL/continuation-authority-bundles"
+if (cd "$ROOT" && FLOW_AGENTS_DIST_DIR="$AUTHORITY_BUNDLE_DIST" node build/src/cli.js build-bundles) >"$TMPDIR_EVAL/authority-bundle-build.out" 2>"$TMPDIR_EVAL/authority-bundle-build.err"; then
+  _pass "continuation authority fixture builds the shipped Codex bundle layout"
+else
+  _fail "continuation authority fixture could not build a Codex bundle: $(cat "$TMPDIR_EVAL/authority-bundle-build.err")"
+fi
+AUTHORITY_INSTALLED_HOME="$AUTHORITY_BUNDLE_DIST/codex"
+AUTHORITY_FAKE_PATH="$TMPDIR_EVAL/authority-hostile-path"
+AUTHORITY_PATH_MARKER="$TMPDIR_EVAL/authority-path-validator-ran"
+mkdir -p "$AUTHORITY_FAKE_PATH"
+cat > "$AUTHORITY_FAKE_PATH/flow-agents" <<'SH'
+#!/usr/bin/env bash
+printf 'ran\n' > "$AUTHORITY_PATH_MARKER"
+SH
+chmod +x "$AUTHORITY_FAKE_PATH/flow-agents"
+if PATH="$AUTHORITY_FAKE_PATH:$PATH" AUTHORITY_PATH_MARKER="$AUTHORITY_PATH_MARKER" FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$AUTHORITY_INSTALLED_HOME/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-installed-hook.out" 2>"$TMPDIR_EVAL/authority-installed-hook.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
+JSON
+then
+  if [ ! -e "$AUTHORITY_PATH_MARKER" ] && [ ! -e "$AUTHORITY_CONSUMER_MARKER" ] && ! grep -q 'Flow Agents validator is unavailable' "$TMPDIR_EVAL/authority-installed-hook.err"; then
+    _pass "bundle-installed continuation hook uses its own compiled validator and ignores PATH code"
+  else
+    _fail "bundle-installed hook used untrusted code or failed to recognize its compiled validator"
+  fi
+else
+  _fail "installed continuation hook trapped a signed driver handback: $(cat "$TMPDIR_EVAL/authority-installed-hook.err")"
+fi
+rm -f "$AUTHORITY_REPO/package.json"
+rm -rf "$AUTHORITY_REPO/build"
+mv "$AUTHORITY_SESSION/continuation-authority--deliver.md" "$AUTHORITY_SESSION/continuation-authority--deliver.md.saved"
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-no-markdown.out" 2>"$TMPDIR_EVAL/authority-no-markdown.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
+JSON
+then
+  _pass "a matching continuation authority returns control before any workflow markdown exists"
+else
+  _fail "matching continuation authority still required workflow markdown before returning control: $(cat "$TMPDIR_EVAL/authority-no-markdown.err")"
+fi
+printf '{"verdict":"fail","checks":[]}\n' > "$AUTHORITY_SESSION/evidence.json"
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-no-markdown-hard.out" 2>"$TMPDIR_EVAL/authority-no-markdown-hard.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
+JSON
+then
+  _fail "a no-markdown continuation session bypassed a non-markdown evidence hard block"
+elif [[ "$?" -eq 2 ]] && grep -q 'evidence verdict:fail' "$TMPDIR_EVAL/authority-no-markdown-hard.err"; then
+  _pass "a no-markdown continuation session still enforces non-markdown evidence hard blocks"
+else
+  _fail "no-markdown evidence hard block returned an unexpected result: $(cat "$TMPDIR_EVAL/authority-no-markdown-hard.err")"
+fi
+rm -f "$AUTHORITY_SESSION/evidence.json"
+mv "$AUTHORITY_SESSION/continuation-authority--deliver.md.saved" "$AUTHORITY_SESSION/continuation-authority--deliver.md"
+AUTHORITY_SESSION="$AUTHORITY_SESSION" node - <<'NODE' >/dev/null 2>"$TMPDIR_EVAL/authority-terminal-sidecar-setup.err"
+const fs = require('fs');
+const path = require('path');
+const session = process.env.AUTHORITY_SESSION;
+const state = JSON.parse(fs.readFileSync(path.join(session, 'state.json'), 'utf8'));
+fs.writeFileSync(path.join(session, 'state.json'), JSON.stringify({ ...state, status: 'delivered', phase: 'release' }));
+fs.writeFileSync(path.join(session, 'evidence.json'), JSON.stringify({ verdict: 'pass', checks: [], not_verified_gaps: ['terminal authority FULL_BLOCK-only regression'] }));
+NODE
+if AUTHORITY_SESSION="$AUTHORITY_SESSION" AUTHORITY_REPO="$AUTHORITY_REPO" AUTHORITY_TURN_SECRET="$AUTHORITY_TURN_SECRET" AUTHORITY_RUN_ID="$AUTHORITY_RUN_ID" AUTHORITY_ROOT="$ROOT" FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=10 FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node - <<'NODE' >"$TMPDIR_EVAL/authority-terminal-sidecar.out" 2>"$TMPDIR_EVAL/authority-terminal-sidecar.err"
+const assert = require('assert/strict');
+const hook = require(`${process.env.AUTHORITY_ROOT}/scripts/hooks/stop-goal-fit.js`);
+(async () => {
+  const analyzed = await hook.analyze(process.env.AUTHORITY_REPO);
+  assert.equal(analyzed.activeTurnAuthority, true, 'fixture authority remains valid');
+  assert.equal(analyzed.blocking, true, 'authorized terminal sidecar evaluates FULL_BLOCK-only gaps');
+  assert.ok(analyzed.warnings.some((warning) => warning.includes('NOT_VERIFIED gap')), 'fixture produced a FULL_BLOCK-only warning');
+  const result = await hook.run(JSON.stringify({ hook_event_name: 'Stop', cwd: process.env.AUTHORITY_REPO }));
+  assert.equal(result.exitCode, 2, 'run preserves the terminal FULL_BLOCK-only block');
+  assert.match(result.stderr, /NOT_VERIFIED gap/);
+})().catch((error) => { console.error(error.stack || error); process.exitCode = 1; });
+NODE
+then
+  _pass "valid continuation authority still blocks a terminal sidecar FULL_BLOCK-only warning through analyze and run"
+else
+  _fail "authorized terminal sidecar did not preserve the FULL_BLOCK-only warning: $(cat "$TMPDIR_EVAL/authority-terminal-sidecar.out" "$TMPDIR_EVAL/authority-terminal-sidecar.err" "$TMPDIR_EVAL/authority-terminal-sidecar-setup.err")"
+fi
+rm -f "$AUTHORITY_SESSION/evidence.json"
+AUTHORITY_SESSION="$AUTHORITY_SESSION" node - <<'NODE' >/dev/null 2>"$TMPDIR_EVAL/authority-terminal-sidecar-restore.err"
+const fs = require('fs');
+const path = require('path');
+const session = process.env.AUTHORITY_SESSION;
+const state = JSON.parse(fs.readFileSync(path.join(session, 'state.json'), 'utf8'));
+fs.writeFileSync(path.join(session, 'state.json'), JSON.stringify({ ...state, status: 'planned', phase: 'planning' }));
+NODE
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_ACTOR=driver-actor FLOW_AGENTS_CONTINUATION_TURN_SECRET="AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-wrong-secret.out" 2>"$TMPDIR_EVAL/authority-wrong-secret.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
+JSON
+then
+  _fail "wrong continuation secret bypassed active Flow Stop blocking"
+elif [[ "$?" -eq 2 ]]; then
+  _pass "wrong continuation secret preserves active Flow Stop blocking"
+else
+  _fail "wrong continuation secret returned an unexpected Stop exit code"
+fi
+cat > "$AUTHORITY_SESSION/evidence.json" <<'JSON'
+{ "verdict": "fail", "checks": [] }
+JSON
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=1 FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-hard-block.out" 2>"$TMPDIR_EVAL/authority-hard-block.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
+JSON
+then
+  _fail "active continuation authority bypassed an evidence hard block"
+elif [[ "$?" -eq 2 ]] && grep -q 'evidence verdict:fail' "$TMPDIR_EVAL/authority-hard-block.err"; then
+  _pass "active continuation authority preserves evidence hard blocking"
+else
+  _fail "active continuation authority did not preserve the evidence hard block: $(cat "$TMPDIR_EVAL/authority-hard-block.err")"
+fi
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_GOAL_FIT_MAX_BLOCKS=1 FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-hard-block-repeat.out" 2>"$TMPDIR_EVAL/authority-hard-block-repeat.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
+JSON
+then
+  _fail "nonordinary FULL_BLOCK escaped through max-block release"
+elif [[ "$?" -eq 2 ]] && grep -q 'max-blocks reached but the block' "$TMPDIR_EVAL/authority-hard-block-repeat.err"; then
+  _pass "nonordinary FULL_BLOCK cannot burn through max-block release"
+else
+  _fail "nonordinary FULL_BLOCK did not remain hard after max blocks: $(cat "$TMPDIR_EVAL/authority-hard-block-repeat.err")"
 fi
 
 if cmp -s "$ROOT/scripts/hooks/stop-goal-fit.js" "$ROOT/context/scripts/hooks/stop-goal-fit.js"; then

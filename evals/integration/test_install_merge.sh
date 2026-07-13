@@ -1169,7 +1169,11 @@ EOF_CFG
 
 cat > "$CH4_DEST/AGENTS.md" << 'EOF_AGENTS'
 # User Codex Instructions
+
+Arbitrary user bytes must survive exactly.
+Unicode: café / 雪
 EOF_AGENTS
+CH4_AGENTS_BEFORE="$(shasum -a 256 "$CH4_DEST/AGENTS.md" | awk '{print $1}')"
 
 cat > "$CH4_DEST/hooks.json" << 'JSON'
 {
@@ -1213,7 +1217,8 @@ CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex" FLOW_AGENTS_SKILLS_DIR="$CH4_SKIL
 
 if grep -q 'user-model' "$CH4_DEST/config.toml" \
   && grep -q 'user-profile-model' "$CH4_DEST/custom.config.toml" \
-  && grep -q 'User Codex Instructions' "$CH4_DEST/AGENTS.md"; then
+  && grep -q 'User Codex Instructions' "$CH4_DEST/AGENTS.md" \
+  && [[ "$CH4_AGENTS_BEFORE" == "$(shasum -a 256 "$CH4_DEST/AGENTS.md" | awk '{print $1}')" ]]; then
   _pass "CH4: user-owned config.toml, profile, and AGENTS.md preserved"
 else
   _fail "CH4: user-owned config.toml, profile, or AGENTS.md was overwritten"
@@ -1308,6 +1313,22 @@ for CH5_REL in scripts kits hooks.json; do
   fi
 done
 
+CH8_FIXTURES="$ROOT_DIR/evals/fixtures/codex-legacy-agents"
+CH8_PREFLIGHT="$TMPDIR_EVAL/codex-home-ch8-later-preflight"
+mkdir -p "$CH8_PREFLIGHT/scripts"
+cp "$CH8_FIXTURES/5273878130bdafc8a024a650bb5b66c9b003f1f859b5dc6e5b588cbf4ab23228.md" "$CH8_PREFLIGHT/AGENTS.md"
+printf 'unowned collision\n' > "$CH8_PREFLIGHT/scripts/kit.js"
+CH8_PREFLIGHT_BEFORE="$(shasum -a 256 "$CH8_PREFLIGHT/AGENTS.md" | awk '{print $1}')"
+if CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex" FLOW_AGENTS_SKILLS_DIR="$TMPDIR_EVAL/ch8-preflight-skills" \
+  bash "$ROOT_DIR/scripts/install-codex-home.sh" "$CH8_PREFLIGHT" >"$TMPDIR_EVAL/ch8-preflight.out" 2>&1; then
+  _fail "CH8: later owned-overlay collision unexpectedly installed"
+elif [[ "$CH8_PREFLIGHT_BEFORE" == "$(shasum -a 256 "$CH8_PREFLIGHT/AGENTS.md" | awk '{print $1}')" ]] \
+  && [[ ! -e "$CH8_PREFLIGHT/.flow-agents/manual-recovery" && ! -e "$CH8_PREFLIGHT/hooks.json" ]]; then
+  _pass "CH8: complete install preflight failure leaves exact legacy source and destination untouched"
+else
+  _fail "CH8: later install preflight failure partially migrated or mutated destination"
+fi
+
 echo ""
 echo "--- CH6: codex-home rejects canonical source/destination overlap before writes ---"
 CH6_ROOT="$TMPDIR_EVAL/ch6-fixture-root"
@@ -1315,8 +1336,24 @@ CH6_FAKE_BIN="$TMPDIR_EVAL/ch6-bin"
 CH_FIXTURE_SCRIPTS="scr""ipts"
 CH_FIXTURE_SKILLS="sk""ills"
 CH_FIXTURE_AGENTS="ag""ents"
-mkdir -p "$CH6_ROOT/$CH_FIXTURE_SCRIPTS" "$CH6_ROOT/dist/codex/$CH_FIXTURE_SCRIPTS" "$CH6_FAKE_BIN"
-cp "$ROOT_DIR/scripts/install-codex-home.sh" "$ROOT_DIR/scripts/install-owned-files.js" "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/"
+mkdir -p \
+  "$CH6_ROOT/$CH_FIXTURE_SCRIPTS" \
+  "$CH6_ROOT/packaging" \
+  "$CH6_ROOT/dist/codex/packaging" \
+  "$CH6_ROOT/dist/codex/$CH_FIXTURE_SCRIPTS" \
+  "$CH6_ROOT/dist/codex/.codex" \
+  "$CH6_ROOT/dist/codex/.agents/skills/deliver" \
+  "$CH6_ROOT/dist/codex/build/src" \
+  "$CH6_FAKE_BIN"
+cp "$ROOT_DIR/scripts/install-codex-home.sh" "$ROOT_DIR/scripts/install-owned-files.js" "$ROOT_DIR/scripts/classify-codex-legacy-agents.js" "$ROOT_DIR/scripts/install-merge.js" "$CH6_ROOT/$CH_FIXTURE_SCRIPTS/"
+cp "$ROOT_DIR/scripts/install-owned-files.js" "$ROOT_DIR/scripts/install-merge.js" "$ROOT_DIR/scripts/classify-codex-legacy-agents.js" "$CH6_ROOT/dist/codex/$CH_FIXTURE_SCRIPTS/"
+cp "$ROOT_DIR/packaging/codex-legacy-agents-fingerprints.json" "$CH6_ROOT/packaging/"
+cp "$ROOT_DIR/packaging/codex-legacy-agents-fingerprints.json" "$CH6_ROOT/dist/codex/packaging/"
+printf '{"name":"@kontourai/flow-agents","version":"0.0.0"}\n' > "$CH6_ROOT/package.json"
+printf '{"name":"@kontourai/flow-agents","version":"0.0.0"}\n' > "$CH6_ROOT/dist/codex/build/package.json"
+printf '{"hooks":{}}\n' > "$CH6_ROOT/dist/codex/.codex/hooks.json"
+printf '# deliver fixture\n' > "$CH6_ROOT/dist/codex/.agents/skills/deliver/SKILL.md"
+printf '// cli fixture\n' > "$CH6_ROOT/dist/codex/build/src/cli.js"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$CH6_FAKE_BIN/npm"
 chmod +x "$CH6_FAKE_BIN/npm"
 printf 'fixture\n' > "$CH6_ROOT/dist/codex/$CH_FIXTURE_SCRIPTS/fixture.txt"
@@ -1655,6 +1692,122 @@ then
 else
   _fail "CG2: codex --global fresh install: hooks.json missing or FA hooks absent"
 fi
+
+echo ""
+
+# ─── codex-home: CH8: global instruction cleanup and preservation ───────────
+echo "--- CH8: codex-home does not install global instructions and safely migrates exact legacy files ---"
+
+CH8_SKILLS="$TMPDIR_EVAL/codex-home-ch8-skills"
+CH8_CLEAN="$TMPDIR_EVAL/codex-home-ch8-clean"
+mkdir -p "$CH8_CLEAN"
+CH8_CLEAN_OUT="$TMPDIR_EVAL/ch8-clean.out"
+if CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex" FLOW_AGENTS_SKILLS_DIR="$CH8_SKILLS" \
+  bash "$ROOT_DIR/scripts/install-codex-home.sh" "$CH8_CLEAN" >"$CH8_CLEAN_OUT" 2>&1 \
+  && [[ ! -e "$CH8_CLEAN/AGENTS.md" ]] \
+  && [[ -f "$CH8_CLEAN/hooks.json" && -f "$CH8_CLEAN/ag""ents/tool-worker.toml" ]] \
+  && [[ -f "$CH8_SKILLS/plan-work/SKILL.md" ]]; then
+  _pass "CH8: clean install leaves global AGENTS.md absent while runtime assets and universal skills install"
+else
+  _fail "CH8: clean install created global instructions or lost required install assets"
+fi
+
+CH8_FIXTURES="$ROOT_DIR/evals/fixtures/codex-legacy-agents"
+while IFS=$'\t' read -r CH8_HASH CH8_BYTES; do
+  CH8_LEGACY="$TMPDIR_EVAL/codex-home-ch8-legacy-$CH8_HASH"
+  CH8_LEGACY_SKILLS="$TMPDIR_EVAL/codex-home-ch8-legacy-skills-$CH8_HASH"
+  mkdir -p "$CH8_LEGACY"
+  CH8_LEGACY_REAL="$(cd "$CH8_LEGACY" && pwd -P)"
+  cp "$CH8_FIXTURES/$CH8_HASH.md" "$CH8_LEGACY/AGENTS.md"
+  printf 'destination sentinel\n' > "$CH8_LEGACY/preflight-sentinel"
+  printf 'skills sentinel\n' > "$CH8_LEGACY_SKILLS.sentinel"
+  CH8_SOURCE_BEFORE="$(shasum -a 256 "$CH8_LEGACY/AGENTS.md" | awk '{print $1}')"
+  CH8_OUT="$TMPDIR_EVAL/ch8-$CH8_HASH.out"
+  if CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex" FLOW_AGENTS_SKILLS_DIR="$CH8_LEGACY_SKILLS" \
+    bash "$ROOT_DIR/scripts/install-codex-home.sh" "$CH8_LEGACY" >"$CH8_OUT" 2>&1; then
+    _fail "CH8: audited legacy fingerprint $CH8_HASH did not refuse installation"
+  elif [[ "$CH8_SOURCE_BEFORE" == "$(shasum -a 256 "$CH8_LEGACY/AGENTS.md" | awk '{print $1}')" ]] \
+    && [[ "$(cat "$CH8_LEGACY/preflight-sentinel")" == "destination sentinel" ]] \
+    && [[ ! -e "$CH8_LEGACY/hooks.json" && ! -e "$CH8_LEGACY_SKILLS" ]] \
+    && grep -F -q "path=$CH8_LEGACY_REAL/AGENTS.md" "$CH8_OUT" \
+    && grep -F -q "sha256=$CH8_HASH bytes=$CH8_BYTES" "$CH8_OUT" \
+    && grep -q 'matching_releases=v2.4.0@bee760272b8bb770df02400ccc5881bd3dbc8806' "$CH8_OUT" \
+    && grep -F -q "evidence command (hash): shasum -a 256 -- '$CH8_LEGACY_REAL/AGENTS.md'" "$CH8_OUT" \
+    && grep -F -q "evidence command (bytes): wc -c < '$CH8_LEGACY_REAL/AGENTS.md'" "$CH8_OUT" \
+    && grep -q 'Stop all agent and writer processes' "$CH8_OUT" \
+    && grep -q 'Move the file manually without overwrite using operator-trusted tooling' "$CH8_OUT" \
+    && ! grep -Eq '(^|: )(mv|rm|cp)( |$)| && (mv|rm|cp) ' "$CH8_OUT"; then
+    _pass "CH8: audited legacy fingerprint $CH8_HASH refuses before mutation with exact evidence and manual checklist"
+  else
+    _fail "CH8: audited legacy fingerprint $CH8_HASH refusal mutated state or lacked actionable evidence"
+  fi
+  mkdir -p "$CH8_LEGACY/.flow-agents/manual-recovery"
+  mv "$CH8_LEGACY/AGENTS.md" "$CH8_LEGACY/.flow-agents/manual-recovery/legacy-generated-AGENTS.$CH8_HASH.md"
+  if CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex" FLOW_AGENTS_SKILLS_DIR="$CH8_LEGACY_SKILLS" \
+    bash "$ROOT_DIR/scripts/install-codex-home.sh" "$CH8_LEGACY" >/dev/null 2>&1 \
+    && cmp -s "$CH8_FIXTURES/$CH8_HASH.md" "$CH8_LEGACY/.flow-agents/manual-recovery/legacy-generated-AGENTS.$CH8_HASH.md" \
+    && [[ ! -e "$CH8_LEGACY/AGENTS.md" && -f "$CH8_LEGACY/hooks.json" && -f "$CH8_LEGACY_SKILLS/plan-work/SKILL.md" ]]; then
+    _pass "CH8: simulated operator remediation enables install without recreating AGENTS.md"
+  else
+    _fail "CH8: operator-remediated rerun failed or recreated global instructions"
+  fi
+done < <(node - "$ROOT_DIR/packaging/codex-legacy-agents-fingerprints.json" <<'NODE'
+const fs = require("node:fs");
+const manifest = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+for (const entry of manifest.files || []) console.log(`${entry.sha256}\t${entry.bytes}`);
+NODE
+)
+
+CH8_QUOTED="$TMPDIR_EVAL/codex-home-ch8-operator-'quoted"
+mkdir -p "$CH8_QUOTED"
+cp "$CH8_FIXTURES/5273878130bdafc8a024a650bb5b66c9b003f1f859b5dc6e5b588cbf4ab23228.md" "$CH8_QUOTED/AGENTS.md"
+CH8_QUOTED_OUT="$TMPDIR_EVAL/ch8-quoted.out"
+if node "$ROOT_DIR/scripts/classify-codex-legacy-agents.js" "$CH8_QUOTED" "$ROOT_DIR/packaging/codex-legacy-agents-fingerprints.json" >"$CH8_QUOTED_OUT" 2>&1; then
+  _fail "CH8: quoted-path exact legacy classifier did not refuse"
+else
+  CH8_QUOTED_HASH_COMMAND="$(sed -n 's/^classify-codex-legacy-agents: evidence command (hash): //p' "$CH8_QUOTED_OUT")"
+  CH8_QUOTED_BYTES_COMMAND="$(sed -n 's/^classify-codex-legacy-agents: evidence command (bytes): //p' "$CH8_QUOTED_OUT")"
+  if [[ "$CH8_QUOTED_HASH_COMMAND" == *"'\"'\"'"* && "$CH8_QUOTED_BYTES_COMMAND" == *"'\"'\"'"* ]] \
+    && bash -n -c "$CH8_QUOTED_HASH_COMMAND" && bash -n -c "$CH8_QUOTED_BYTES_COMMAND"; then
+    _pass "CH8: evidence commands safely shell-quote apostrophes in paths"
+  else
+    _fail "CH8: evidence commands are not safely shell-quoted"
+  fi
+fi
+
+CH8_NEAR="$TMPDIR_EVAL/codex-home-ch8-near"
+mkdir -p "$CH8_NEAR"
+cp "$CH8_FIXTURES/5273878130bdafc8a024a650bb5b66c9b003f1f859b5dc6e5b588cbf4ab23228.md" "$CH8_NEAR/AGENTS.md"
+printf 'user modification\n' >> "$CH8_NEAR/AGENTS.md"
+CH8_NEAR_BEFORE="$(shasum -a 256 "$CH8_NEAR/AGENTS.md" | awk '{print $1}')"
+if CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex" FLOW_AGENTS_SKILLS_DIR="$TMPDIR_EVAL/ch8-near-skills" \
+  bash "$ROOT_DIR/scripts/install-codex-home.sh" "$CH8_NEAR" >"$TMPDIR_EVAL/ch8-near.out" 2>&1 \
+  && [[ "$CH8_NEAR_BEFORE" == "$(shasum -a 256 "$CH8_NEAR/AGENTS.md" | awk '{print $1}')" ]] \
+  && grep -q 'preserved unrecognized or user-owned' "$TMPDIR_EVAL/ch8-near.out"; then
+  _pass "CH8: near-match legacy-looking user instructions are byte-preserved"
+else
+  _fail "CH8: near-match user instructions changed or lacked preservation diagnostic"
+fi
+
+for CH8_KIND in symlink directory; do
+  CH8_UNSAFE="$TMPDIR_EVAL/codex-home-ch8-$CH8_KIND"
+  mkdir -p "$CH8_UNSAFE"
+  printf 'must remain untouched\n' > "$CH8_UNSAFE/preflight-sentinel"
+  case "$CH8_KIND" in
+    symlink) printf 'target\n' > "$CH8_UNSAFE/user-target"; ln -s user-target "$CH8_UNSAFE/AGENTS.md" ;;
+    directory) mkdir "$CH8_UNSAFE/AGENTS.md" ;;
+  esac
+  if CODEX_REAL_HOME="$TMPDIR_EVAL/fake-real-codex" FLOW_AGENTS_SKILLS_DIR="$TMPDIR_EVAL/ch8-$CH8_KIND-skills" \
+    bash "$ROOT_DIR/scripts/install-codex-home.sh" "$CH8_UNSAFE" >"$TMPDIR_EVAL/ch8-$CH8_KIND.out" 2>&1 \
+    && [[ "$(cat "$CH8_UNSAFE/preflight-sentinel")" == "must remain untouched" ]] \
+    && [[ -e "$CH8_UNSAFE/hooks.json" ]] \
+    && { [[ "$CH8_KIND" == "symlink" && -L "$CH8_UNSAFE/AGENTS.md" && "$(cat "$CH8_UNSAFE/user-target")" == "target" ]] \
+      || [[ "$CH8_KIND" == "directory" && -d "$CH8_UNSAFE/AGENTS.md" ]]; }; then
+    _pass "CH8: read-only classifier preserves ambiguous $CH8_KIND AGENTS.md object"
+  else
+    _fail "CH8: classifier altered ambiguous $CH8_KIND AGENTS.md object"
+  fi
+done
 
 echo ""
 

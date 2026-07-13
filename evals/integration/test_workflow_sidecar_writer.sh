@@ -3,6 +3,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+CURRENT_POINTER_HELPER="$ROOT/scripts/hooks/lib/current-pointer.js"
 source "$ROOT/evals/lib/node.sh"
 
 TMPDIR_EVAL="$(mktemp -d)"
@@ -4467,9 +4468,17 @@ fi
 
 # Poison BOTH navigation pointers. Exact-session writers must continue to use the persisted
 # canonical flow_run from the session instead of treating ambient pointers as authority.
+# #440 fix-wave 2: the per-actor filename is now collision-resistant (sanitized prefix + hash of
+# the FULL actor key, see current-pointer.js's perActorCurrentFile) -- resolve the real per-actor
+# path via the shared helper instead of hand-deriving the old (now-stale) "<actor>.json" name.
+UNRESOLVABLE_PER_ACTOR_FILE="$(CP_HELPER_ARG="$CURRENT_POINTER_HELPER" ROOT_ARG="$UNRESOLVABLE_ROOT" ACTOR_ARG="unresolvable-actor" node - <<'NODE'
+const { perActorCurrentFile } = require(process.env.CP_HELPER_ARG);
+process.stdout.write(perActorCurrentFile(process.env.ROOT_ARG, process.env.ACTOR_ARG));
+NODE
+)"
 node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/unresolvable-mutate.err"
 import { readFileSync, writeFileSync } from 'node:fs';
-for (const f of ['${UNRESOLVABLE_ROOT}/current.json', '${UNRESOLVABLE_ROOT}/current/unresolvable-actor.json']) {
+for (const f of ['${UNRESOLVABLE_ROOT}/current.json', '${UNRESOLVABLE_PER_ACTOR_FILE}']) {
   const d = JSON.parse(readFileSync(f, 'utf8'));
   d.active_flow_id = 'builder.bogus-nonexistent-flow-270';
   writeFileSync(f, JSON.stringify(d, null, 2) + '\n');
