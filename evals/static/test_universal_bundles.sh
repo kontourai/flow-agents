@@ -65,6 +65,24 @@ for dir in "$DIST_DIR/kiro" "$DIST_DIR/claude-code" "$DIST_DIR/codex" "$DIST_DIR
   fi
 done
 
+if node - "$ROOT_DIR/package.json" "$DIST_DIR" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const [sourcePackageFile, dist] = process.argv.slice(2);
+const source = JSON.parse(fs.readFileSync(sourcePackageFile, "utf8"));
+for (const runtime of ["base", "kiro", "claude-code", "codex", "opencode", "pi"]) {
+  const manifest = JSON.parse(fs.readFileSync(path.join(dist, runtime, "build", "package.json"), "utf8"));
+  if (manifest.name !== "@kontourai/flow-agents" || manifest.version !== source.version || manifest.type !== "module") {
+    throw new Error(`${runtime} build package identity does not match Flow Agents ${source.version}`);
+  }
+}
+NODE
+then
+  _pass "all bundles stamp their compiled runtime with Flow Agents package identity"
+else
+  _fail "bundle compiled-runtime package identity is missing or stale"
+fi
+
 if [[ -d "$DIST_DIR/codex/.agents/skills/plan-work" && ! -e "$DIST_DIR/codex/.codex/skills" ]]; then
   _pass "Codex exports portable skills only in the universal .agents catalog"
 else

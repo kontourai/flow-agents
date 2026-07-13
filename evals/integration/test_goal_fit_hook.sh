@@ -977,30 +977,31 @@ else
   _fail "hook leaked tsc error into goal-fit output"
 fi
 
-# Part 2 of fix: when the validator cannot run at all (build/ absent and npm fails),
-# the hook must skip cleanly — never block in strict mode due to an env error.
+# Part 2 of fix: when the hook-owned build is absent, the hook must skip cleanly
+# without executing npm or any other PATH-discovered fallback.
 mv "$ROOT/build" "$ROOT/build-absent"
 
 SPAWN_FAIL_DIR="$TMPDIR_EVAL/spawn-fail"
+SPAWN_FAIL_MARKER="$TMPDIR_EVAL/path-npm-was-executed"
 mkdir -p "$SPAWN_FAIL_DIR"
-printf '#!/usr/bin/env bash\necho "npm ERR! tsc: command not found" >&2\nexit 127\n' > "$SPAWN_FAIL_DIR/npm"
+printf '#!/usr/bin/env bash\nprintf "ran\\n" > "$SPAWN_FAIL_MARKER"\nexit 127\n' > "$SPAWN_FAIL_DIR/npm"
 chmod +x "$SPAWN_FAIL_DIR/npm"
 
-if PATH="$SPAWN_FAIL_DIR:$PATH" FLOW_AGENTS_GOAL_FIT_STRICT=true FLOW_AGENTS_REQUIRE_SIDECARS=true \
+if PATH="$SPAWN_FAIL_DIR:$PATH" SPAWN_FAIL_MARKER="$SPAWN_FAIL_MARKER" FLOW_AGENTS_GOAL_FIT_STRICT=true FLOW_AGENTS_REQUIRE_SIDECARS=true \
      node "$ROOT/scripts/hooks/stop-goal-fit.js" \
      >"$TMPDIR_EVAL/npm-install-env-err.out" 2>"$TMPDIR_EVAL/npm-install-env-err.err" <<JSON
 {"hook_event_name":"Stop","cwd":"$NPM_INSTALL_REPO"}
 JSON
 then
-  _pass "strict hook does not block when validator environment fails (build/ absent, tsc missing)"
+  _pass "strict hook does not block when its hook-owned validator build is unavailable"
 else
-  _fail "strict hook must not block when validator env fails: $(cat "$TMPDIR_EVAL/npm-install-env-err.err")"
+  _fail "strict hook must not block when its validator build is unavailable: $(cat "$TMPDIR_EVAL/npm-install-env-err.err")"
 fi
 
-if rg -q 'sidecar validation skipped' "$TMPDIR_EVAL/npm-install-env-err.err"; then
-  _pass "hook emits sidecar validation skipped warning for environment errors"
+if [ ! -e "$SPAWN_FAIL_MARKER" ] && rg -q 'sidecar validation skipped' "$TMPDIR_EVAL/npm-install-env-err.err"; then
+  _pass "unavailable validator is disclosed without executing a PATH-provided npm fallback"
 else
-  _fail "hook did not emit 'sidecar validation skipped' for environment errors"
+  _fail "hook executed PATH npm or hid the unavailable-validator warning"
 fi
 
 # Restore build/ so subsequent evals are unaffected.
@@ -2840,6 +2841,75 @@ if grep -q 'continuation driver active turn is authorized' "$TMPDIR_EVAL/authori
 else
   _fail "authorized continuation turn was not disclosed: $(cat "$TMPDIR_EVAL/authority-valid.err")"
 fi
+AUTHORITY_CONSUMER_MARKER="$TMPDIR_EVAL/authority-consumer-validator-ran"
+mkdir -p "$AUTHORITY_REPO/build/src/cli"
+cat > "$AUTHORITY_REPO/package.json" <<'JSON'
+{
+  "name": "@kontourai/flow-agents",
+  "private": true,
+  "scripts": {
+    "test": "node --test",
+    "workflow:validate-artifacts": "node -e \"require('fs').writeFileSync(process.env.AUTHORITY_CONSUMER_MARKER, 'ran')\""
+  }
+}
+JSON
+cat > "$AUTHORITY_REPO/build/src/cli/validate-workflow-artifacts.js" <<'JS'
+require('fs').writeFileSync(process.env.AUTHORITY_CONSUMER_MARKER, 'ran');
+process.exit(0);
+JS
+if AUTHORITY_CONSUMER_MARKER="$AUTHORITY_CONSUMER_MARKER" FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-consumer-package.out" 2>"$TMPDIR_EVAL/authority-consumer-package.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
+JSON
+then
+  if [ ! -e "$AUTHORITY_CONSUMER_MARKER" ]; then
+    _pass "authorized continuation uses only the hook-owned validator, never a same-name consumer package"
+  else
+    _fail "hook executed a consumer-controlled same-name validator"
+  fi
+else
+  _fail "consumer package.json trapped an authorized continuation turn: $(cat "$TMPDIR_EVAL/authority-consumer-package.err")"
+fi
+printf '{}\n' > "$AUTHORITY_SESSION/handoff.json"
+if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-validator-finding.out" 2>"$TMPDIR_EVAL/authority-validator-finding.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
+JSON
+then
+  _fail "authorized continuation bypassed a real hook-owned validator finding"
+elif [[ "$?" -eq 2 ]] && grep -q 'sidecar validation:' "$TMPDIR_EVAL/authority-validator-finding.err"; then
+  _pass "authorized continuation preserves real hook-owned validator findings as hard blocks"
+else
+  _fail "hook-owned validator finding returned an unexpected result: $(cat "$TMPDIR_EVAL/authority-validator-finding.err")"
+fi
+rm -f "$AUTHORITY_SESSION/handoff.json"
+AUTHORITY_BUNDLE_DIST="$TMPDIR_EVAL/continuation-authority-bundles"
+if (cd "$ROOT" && FLOW_AGENTS_DIST_DIR="$AUTHORITY_BUNDLE_DIST" node build/src/cli.js build-bundles) >"$TMPDIR_EVAL/authority-bundle-build.out" 2>"$TMPDIR_EVAL/authority-bundle-build.err"; then
+  _pass "continuation authority fixture builds the shipped Codex bundle layout"
+else
+  _fail "continuation authority fixture could not build a Codex bundle: $(cat "$TMPDIR_EVAL/authority-bundle-build.err")"
+fi
+AUTHORITY_INSTALLED_HOME="$AUTHORITY_BUNDLE_DIST/codex"
+AUTHORITY_FAKE_PATH="$TMPDIR_EVAL/authority-hostile-path"
+AUTHORITY_PATH_MARKER="$TMPDIR_EVAL/authority-path-validator-ran"
+mkdir -p "$AUTHORITY_FAKE_PATH"
+cat > "$AUTHORITY_FAKE_PATH/flow-agents" <<'SH'
+#!/usr/bin/env bash
+printf 'ran\n' > "$AUTHORITY_PATH_MARKER"
+SH
+chmod +x "$AUTHORITY_FAKE_PATH/flow-agents"
+if PATH="$AUTHORITY_FAKE_PATH:$PATH" AUTHORITY_PATH_MARKER="$AUTHORITY_PATH_MARKER" FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$AUTHORITY_INSTALLED_HOME/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-installed-hook.out" 2>"$TMPDIR_EVAL/authority-installed-hook.err" <<JSON
+{"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
+JSON
+then
+  if [ ! -e "$AUTHORITY_PATH_MARKER" ] && [ ! -e "$AUTHORITY_CONSUMER_MARKER" ] && ! grep -q 'Flow Agents validator is unavailable' "$TMPDIR_EVAL/authority-installed-hook.err"; then
+    _pass "bundle-installed continuation hook uses its own compiled validator and ignores PATH code"
+  else
+    _fail "bundle-installed hook used untrusted code or failed to recognize its compiled validator"
+  fi
+else
+  _fail "installed continuation hook trapped a signed driver handback: $(cat "$TMPDIR_EVAL/authority-installed-hook.err")"
+fi
+rm -f "$AUTHORITY_REPO/package.json"
+rm -rf "$AUTHORITY_REPO/build"
 mv "$AUTHORITY_SESSION/continuation-authority--deliver.md" "$AUTHORITY_SESSION/continuation-authority--deliver.md.saved"
 if FLOW_AGENTS_GOAL_FIT_MODE=block FLOW_AGENTS_CONTINUATION_TURN_SECRET="$AUTHORITY_TURN_SECRET" FLOW_AGENTS_CONTINUATION_RUN_ID="$AUTHORITY_RUN_ID" node "$ROOT/scripts/hooks/stop-goal-fit.js" >"$TMPDIR_EVAL/authority-no-markdown.out" 2>"$TMPDIR_EVAL/authority-no-markdown.err" <<JSON
 {"hook_event_name":"Stop","cwd":"$AUTHORITY_REPO"}
