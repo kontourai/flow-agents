@@ -45,11 +45,13 @@
  * uses the collision-resistant name. The fallback is TRANSITION-WINDOW ONLY, not a permanent
  * feature of this module: every write (including a read-triggered migration via
  * `updateCurrentAgent` in workflow-sidecar.ts, #440 fix-wave 3) upgrades a pointer to the new
- * name, so live pointers self-migrate through ordinary use. Removal criterion: once every
- * actively-read `current/` directory in practice contains only new-name pointers — practically,
- * after one full session lifecycle past this fix's rollout, or at the next major version,
- * whichever is a more deliberate cutover point — `legacyPerActorCurrentFile` and its two
- * call sites below can be deleted outright.
+ * name, so live pointers self-migrate through ordinary use. Note the migration WRITES the
+ * new-name file but never deletes the legacy file — stale legacy files may linger harmlessly
+ * (the new name always wins on read). Removal criterion: once no supported/live actor still
+ * depends EXCLUSIVELY on a legacy-name pointer (i.e. every live session has written at least
+ * once past this fix's rollout) — practically, at the next major version as a deliberate
+ * cutover point — `legacyPerActorCurrentFile` and its two call sites below can be deleted
+ * outright.
  *
  * Exports:
  *   perActorCurrentFile(flowAgentsDir, actorKey)       → string (NEW collision-resistant path;
