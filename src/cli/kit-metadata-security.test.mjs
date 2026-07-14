@@ -148,6 +148,85 @@ test("flow step action metadata preserves explicit operation expectation ownersh
   assert.deepEqual(result.entries[0]?.artifacts, []);
 });
 
+test("flow step action metadata preserves optional artifacts without expectation ownership", () => {
+  const result = parseKitFlowStepActions({
+    flow_step_actions: [{
+      flow_id: "builder.build",
+      step_id: "observe",
+      skills: ["observe-work"],
+      operations: [],
+      implementation_allowed: false,
+      artifacts: ["optional.md"],
+      expectation_ids: [],
+      expectation_bindings: [],
+      artifact_bindings: [{ artifact: "optional.md", expectation_ids: [] }],
+    }],
+  }, "fixture/kit.json");
+
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.entries[0].artifact_bindings, [{ artifact: "optional.md", expectation_ids: [] }]);
+});
+
+test("flow step action metadata rejects unowned trust slices without a recording interface", () => {
+  const result = parseKitFlowStepActions({
+    flow_step_actions: [{
+      flow_id: "builder.build",
+      step_id: "observe",
+      skills: [],
+      operations: [],
+      implementation_allowed: false,
+      artifacts: ["trust.bundle#optional"],
+      expectation_ids: [],
+      expectation_bindings: [],
+      artifact_bindings: [{ artifact: "trust.bundle#optional", expectation_ids: [] }],
+    }],
+  }, "fixture/kit.json");
+
+  assert.match(result.errors.join("\n"), /trust slice must own at least one expectation/);
+});
+
+test("flow step action metadata permits mixed workflow and operation ownership for files", () => {
+  const result = parseKitFlowStepActions({
+    flow_step_actions: [{
+      flow_id: "builder.build",
+      step_id: "publish",
+      skills: ["publish-summary"],
+      operations: ["publish-change"],
+      implementation_allowed: false,
+      artifacts: ["publish-change.result.json"],
+      expectation_ids: ["published-change", "published-summary"],
+      expectation_bindings: [
+        { expectation_id: "published-change", interface: "operation", operation: "publish-change" },
+        { expectation_id: "published-summary", interface: "workflow.evidence" },
+      ],
+      artifact_bindings: [{ artifact: "publish-change.result.json", expectation_ids: ["published-change", "published-summary"] }],
+    }],
+  }, "fixture/kit.json");
+
+  assert.deepEqual(result.errors, []);
+});
+
+test("flow step action metadata rejects artifact ownership without a compatible producer", () => {
+  const operationTrustSlice = parseKitFlowStepActions({
+    flow_step_actions: [{
+      flow_id: "builder.build", step_id: "publish", skills: [], operations: ["publish-change"], implementation_allowed: false,
+      artifacts: ["trust.bundle#published"], expectation_ids: ["published-change"],
+      expectation_bindings: [{ expectation_id: "published-change", interface: "operation", operation: "publish-change" }],
+      artifact_bindings: [{ artifact: "trust.bundle#published", expectation_ids: ["published-change"] }],
+    }],
+  }, "fixture/kit.json");
+  assert.match(operationTrustSlice.errors.join("\n"), /trust slice cannot own an operation expectation/);
+
+  const unproducedFile = parseKitFlowStepActions({
+    flow_step_actions: [{
+      flow_id: "builder.build", step_id: "observe", skills: [], operations: [], implementation_allowed: false,
+      artifacts: ["optional.md"], expectation_ids: [], expectation_bindings: [],
+      artifact_bindings: [{ artifact: "optional.md", expectation_ids: [] }],
+    }],
+  }, "fixture/kit.json");
+  assert.match(unproducedFile.errors.join("\n"), /file has no skill or operation producer/);
+});
+
 test("Builder action validation rejects expectation omissions, unsafe artifacts, and unknown operations", async () => {
   async function errorsFor(name, mutate) {
     const root = tempRoot(`flow-agents-action-contract-${name}-`);
@@ -222,7 +301,7 @@ test("metadata validation matches runtime skill and run-wide observable artifact
   const actions = Array.from({ length: 5 }, (_, actionIndex) => {
     const slice = artifacts.slice(actionIndex * 32, (actionIndex + 1) * 32);
     return {
-      flow_id: "builder.build", step_id: `step${actionIndex}`, skills: [], operations: [], implementation_allowed: false,
+      flow_id: "builder.build", step_id: `step${actionIndex}`, skills: ["observe-work"], operations: [], implementation_allowed: false,
       artifacts: slice, expectation_ids: [], expectation_bindings: [],
       artifact_bindings: slice.map((artifact) => ({ artifact, expectation_ids: [] })),
     };
@@ -231,7 +310,12 @@ test("metadata validation matches runtime skill and run-wide observable artifact
   assert.match(tooManyArtifacts.errors.join("\n"), /exceed 128 distinct observable file artifacts/);
 
   actions[4].artifacts = ["state.json", "trust.bundle#virtual"];
-  actions[4].artifact_bindings = actions[4].artifacts.map((artifact) => ({ artifact, expectation_ids: [] }));
+  actions[4].expectation_ids = ["virtual-evidence"];
+  actions[4].expectation_bindings = [{ expectation_id: "virtual-evidence", interface: "workflow.evidence" }];
+  actions[4].artifact_bindings = [
+    { artifact: "state.json", expectation_ids: [] },
+    { artifact: "trust.bundle#virtual", expectation_ids: ["virtual-evidence"] },
+  ];
   const excluded = parseKitFlowStepActions({ flow_step_actions: actions }, "fixture/kit.json");
   assert.doesNotMatch(excluded.errors.join("\n"), /distinct observable file artifacts/);
 });
@@ -380,6 +464,10 @@ test("mixed skill and operation ownership follows each expectation binding inter
   const policyBinding = action.expectation_bindings.find((entry) => entry.expectation_id === "policy-compliance");
   policyBinding.interface = "operation";
   policyBinding.operation = "publish-change";
+  const policyArtifactBinding = action.artifact_bindings.find((entry) => entry.expectation_ids.includes("policy-compliance"));
+  const policyArtifactIndex = action.artifacts.indexOf(policyArtifactBinding.artifact);
+  action.artifacts[policyArtifactIndex] = "publish-change.result.json";
+  policyArtifactBinding.artifact = "publish-change.result.json";
   const verifier = manifest.skill_roles.find((entry) => entry.skill_id === "builder.verify-work");
   verifier.expectation_ids = verifier.expectation_ids.filter((id) => id !== "policy-compliance");
   writeJson(manifestFile, manifest);

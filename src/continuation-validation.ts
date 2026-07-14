@@ -85,7 +85,7 @@ function validateGateActionEnvelope(value: GateActionEnvelope, snapshot: Continu
   for (const binding of value.action.artifact_bindings) {
     if (!binding || !hasExactKeys(binding, ["target", "expectation_ids"])
       || !Array.isArray(binding.expectation_ids) || !sameUniqueStrings(binding.expectation_ids)
-      || binding.expectation_ids.length === 0 || binding.expectation_ids.some((id) => !value.action.declared_evidence.includes(id))
+      || binding.expectation_ids.some((id) => !value.action.declared_evidence.includes(id))
       || !binding.target || !isDeepStrictEqual(declaredByRef.get(binding.target.ref), binding.target)
       || boundRefs.has(binding.target.ref)) {
       throw new Error("continuation snapshot gate-action artifact binding is malformed");

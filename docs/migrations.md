@@ -15,7 +15,9 @@ title: Migrations
   gate expectation ids it satisfies, so consumers can derive the exact required
   target set from unresolved required expectations without private kit metadata.
   The bindings are product-owned gate semantics, not grader hints or
-  consumer-authored guidance.
+  consumer-authored guidance. Empty expectation ownership on a file represents
+  a declared optional artifact that is never gate-required; trust slices must
+  own an expectation so their recording interface can be derived.
   Structured evidence parameters reference the canonical
   `public_interfaces.schemas.evidence_ref_json` JSON Schema. There is no legacy
   envelope fallback; adapters must require version 3.0 and stop treating

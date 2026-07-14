@@ -41,6 +41,11 @@ if [[ -f "build/src/index.js" && -f "build/src/index.d.ts" ]]; then
 else
   fail "build is missing index.js or index.d.ts (run npm run build)"
 fi
+if grep -q 'GateActionArtifactBinding' build/src/index.d.ts && grep -q 'GateActionArtifactTarget' build/src/index.d.ts; then
+  pass "package root exports the public gate-action artifact binding and target types"
+else
+  fail "build/src/index.d.ts is missing a public gate-action artifact type"
+fi
 
 # 3. importing the library does not run the CLI, and the public API is present.
 # If importing executed the CLI it would call process.exit before our marker prints.
