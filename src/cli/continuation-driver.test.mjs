@@ -406,8 +406,42 @@ test("driver advances multiple canonical Flow steps without a human continuation
   assert.equal(result.turns_started, 2);
   assert.deepEqual(requests.map((request) => request.current_step), ["plan", "execute"]);
   assert.deepEqual(requests.map((request) => request.next_action.skills), [["skill-plan"], ["skill-execute"]]);
+  assert.deepEqual(requests.map((request) => request.context_strategy), [
+    { thread: "new", handoff: "canonical", reason: "mission_start" },
+    { thread: "resume", handoff: "canonical", reason: "configured_policy" },
+  ]);
   assert.equal(requests.some((request) => Object.hasOwn(request, "system_prompt")), false);
   assert.equal(store.value().status, "done");
+});
+
+test("fresh context policy starts every bounded action from the canonical handoff", async () => {
+  const states = [snapshot("plan"), snapshot("execute"), snapshot("done", "completed")];
+  let index = 0;
+  const requests = [];
+  const store = memoryStore();
+  const runtime = {
+    inspect: async () => states[index],
+    synchronize: async () => states[index],
+    execute: async (request) => {
+      requests.push(request);
+      index += 1;
+      return { status: "completed" };
+    },
+  };
+
+  const result = await runContinuationDriver({ maxTurns: 2, contextPolicy: "fresh", store, runtime });
+
+  assert.equal(result.outcome, "done");
+  assert.equal(store.value().context_policy, "fresh");
+  assert.deepEqual(requests.map((request) => request.context_strategy), [
+    { thread: "new", handoff: "canonical", reason: "mission_start" },
+    { thread: "new", handoff: "canonical", reason: "configured_policy" },
+  ]);
+
+  await assert.rejects(
+    runContinuationDriver({ maxTurns: 2, contextPolicy: "warm", store, runtime }),
+    /context policy does not match the persisted mission policy/,
+  );
 });
 
 test("weak structured consumers cannot turn adapter prose or adapter evidence into gate evidence", async () => {
