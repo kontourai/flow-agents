@@ -308,6 +308,10 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_command_log_integrity.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_narrative_source_contract.sh" || result=1
+  echo ""
+  bash "$EVAL_DIR/integration/test_narrative_redaction_failclosed.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_gate_lockdown.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_resolvefirststep_security.sh" || result=1

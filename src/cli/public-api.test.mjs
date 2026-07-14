@@ -53,6 +53,7 @@ test("public API exports the pure narrative source contract", async () => {
     "parseSourceId", "formatSourceId", "compareSourceIds",
     "integrityClassForSource", "buildCaptureCompleteness",
     "effectiveNarrativeRedactionFields", "filterNarrativeRecord",
+    "snapshotNarrative", "validateNarrativeSourceManifest", "resolveSource", "verifyManifest",
   ]) {
     assert.equal(typeof lib[name], "function", `${name} must be package-root exported`);
   }

@@ -56,6 +56,19 @@ export {
   filterNarrativeRecord,
 } from "./narrative/policy-filter.js";
 export type { NarrativePolicyFilterResult } from "./narrative/policy-filter.js";
+export { snapshotNarrative, validateNarrativeSourceManifest } from "./narrative/snapshot.js";
+export type {
+  NarrativeLineageEvent,
+  NarrativeSourceManifest,
+  NarrativeSourceManifestEntry,
+  NarrativeSourceOrigin,
+  NarrativeSourceRequest,
+  NarrativeSourceRoots,
+  SnapshotNarrativeDependencies,
+  SnapshotNarrativeInput,
+} from "./narrative/snapshot.js";
+export { resolveSource, verifyManifest } from "./narrative/resolver.js";
+export type { ResolveSourceOptions, ResolveSourceResult, VerifyManifestReport } from "./narrative/resolver.js";
 
 export {
   BUILDER_BUILD_FLOW_ID,
