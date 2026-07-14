@@ -6,11 +6,19 @@ title: Migrations
 
 ## Unreleased
 
-- Gate-action envelopes now use `schema_version: "2.0"`. Each entry in
-  `gate.requirements` includes its originating `gate_id`, allowing consumers to
+- Gate-action envelopes now use `schema_version: "3.0"`. `action.declared_artifacts`
+  and `stop_condition.required.artifact_refs` contain typed targets instead of
+  strings. A `file` target names its project-relative `path` and whether it is
+  directly writable or must be produced through a declared operation; a
+  `trust_slice` target is explicitly non-writable and names the public interface
+  that records it. Structured evidence parameters reference the canonical
+  `public_interfaces.schemas.evidence_ref_json` JSON Schema. There is no legacy
+  envelope fallback; adapters must require version 3.0 and stop treating
+  `trust.bundle#<slice>` as a filesystem path.
+- Gate-action envelope version 2.0 added the originating `gate_id` to each
+  `gate.requirements` entry, allowing consumers to
   verify accepted exceptions without private Flow-definition knowledge. There
-  is no legacy envelope fallback; adapters that validate or project the public
-  envelope must require version 2.0 and the new binding.
+  was no legacy version 1.0 fallback.
 - Workflow runtime artifacts now live under `.kontourai/flow-agents/` instead
   of earlier runtime roots such as `.flow-agents/` or `.agents/flow-agents/`.
   Move any local session directories, sidecars, or `current.json` pointers you
