@@ -112,6 +112,8 @@ LANE_WORKFLOW_CONTRACTS=(
   "Workflow artifact integration"
   "Workflow artifact cleanup audit integration"
   "Fixture retirement audit integration"
+  "Narrative source contract integration"
+  "Narrative redaction fail-closed integration"
   "Publish-change helper integration"
   "Workflow sidecar writer integration"
   "Sidecar field preservation integration"
