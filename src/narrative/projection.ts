@@ -497,7 +497,14 @@ export function projectRuntimeNarrative(narrativeDir: string, opts: ProjectRunti
 
   const allStatements = [...turns.flatMap((turn) => turn.statements), ...orderedDocumentStatements];
   const cited = new Set(allStatements.flatMap((statement) => statement.source_refs));
-  const missing = manifest.sources.map((entry) => entry.source_id).filter((sourceId) => !cited.has(sourceId));
+  // Flow reports and Surface explanations are foreign-authority projections.
+  // The execution envelope embeds them directly; this runtime projection must
+  // neither reinterpret them into statements nor fail its statement-coverage
+  // gate merely because their frozen source refs are cited by another section.
+  const missing = manifest.sources.map((entry) => entry.source_id).filter((sourceId) => {
+    const stream = parseSourceId(sourceId).stream;
+    return stream !== "flow-report" && stream !== "surface-explanation" && !cited.has(sourceId);
+  });
   if (missing.length > 0) return projectionError("coverage_gap", `projection omitted ${missing.length} manifest source(s): ${missing.join(", ")}`, missing[0]);
   // Review H2a: fact-level coverage — a source carrying a material signal must
   // have produced its material statement (rule id match), not merely a citation.

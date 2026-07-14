@@ -12,9 +12,11 @@ import {
   readCommandLogCandidate,
   readDelegationCandidate,
   readFileCandidate,
+  readFlowReportCandidate,
   readFlowStateCandidate,
   readFlowTransitionCandidate,
   readTelemetryCandidates,
+  readSurfaceExplanationCandidate,
   readTranscriptCandidate,
   readTrustClaimCandidate,
   readTrustEvidenceCandidate,
@@ -43,6 +45,7 @@ export interface NarrativeSourceOrigin {
   path_class: string;
   path?: string;
   chain?: { seq: number; prevHash: string; hash: string };
+  package?: { name: string; version: string };
 }
 
 interface NarrativeSourceBase {
@@ -175,8 +178,8 @@ function originFor(request: NarrativeSourceRequest): NarrativeSourceOrigin {
   const { source, roots } = request;
   const store = source.stream;
   if (source.stream === "telemetry") return { store, path_class: "telemetry_root", ...(roots.telemetryDir ? { path: roots.telemetryDir } : {}) };
-  if (["cmdlog", "agent-event", "delegation", "trust-claim", "trust-evidence"].includes(source.stream)) return { store, path_class: "session_root", ...(roots.sessionDir ? { path: roots.sessionDir } : {}) };
-  if (source.stream === "flow-state" || source.stream === "flow-transition") return { store, path_class: "flow_root", ...(roots.flowRoot ? { path: roots.flowRoot } : {}) };
+  if (["cmdlog", "agent-event", "delegation", "trust-claim", "trust-evidence", "surface-explanation"].includes(source.stream)) return { store, path_class: "session_root", ...(roots.sessionDir ? { path: roots.sessionDir } : {}) };
+  if (source.stream === "flow-state" || source.stream === "flow-report" || source.stream === "flow-transition") return { store, path_class: "flow_root", ...(roots.flowRoot ? { path: roots.flowRoot } : {}) };
   if (source.stream === "transcript") return { store, path_class: "external_path", ...(roots.transcriptPath ? { path: roots.transcriptPath } : {}) };
   return { store, path_class: "repository", ...(roots.repoRoot ? { path: roots.repoRoot } : {}) };
 }
@@ -207,7 +210,9 @@ function locate(request: NarrativeSourceRequest): ReadCandidate | Buffer {
     case "trust-claim": return readTrustClaimCandidate({ sessionDir: sessionRootForSlug(roots, source.scope.slug, sourceId), bundleSha8: source.scope.bundleSha8, id: source.locator.id });
     case "trust-evidence": return readTrustEvidenceCandidate({ sessionDir: sessionRootForSlug(roots, source.scope.slug, sourceId), bundleSha8: source.scope.bundleSha8, id: source.locator.id });
     case "flow-state": return readFlowStateCandidate({ flowRoot: requiredRoot(roots.flowRoot, sourceId, "flow root"), runId: source.scope.runId, sha8: source.locator.sha8 });
+    case "flow-report": return readFlowReportCandidate({ flowRoot: requiredRoot(roots.flowRoot, sourceId, "flow root"), runId: source.scope.runId, sha8: source.locator.sha8 });
     case "flow-transition": return readFlowTransitionCandidate({ flowRoot: requiredRoot(roots.flowRoot, sourceId, "flow root"), runId: source.scope.runId, index: source.locator.index, sha8: source.locator.sha8 });
+    case "surface-explanation": return readSurfaceExplanationCandidate({ sessionDir: sessionRootForSlug(roots, source.scope.slug, sourceId), bundleSha8: source.scope.bundleSha8, claimId: source.locator.claimId });
     case "transcript": {
       const absolutePath = path.resolve(requiredRoot(roots.transcriptPath, sourceId, "transcript path"));
       // The ID's scope pin names one exact path; a mismatched root is a rebind.
@@ -277,7 +282,26 @@ export function snapshotNarrative(input: SnapshotNarrativeInput, dependencies: S
       sources.push(unavailableEntry(request, sourceCapturedAt, reason));
       continue;
     }
-    const origin = { ...originFor(request), ...(chainFrom(candidate) ? { chain: chainFrom(candidate) } : {}) };
+    const origin = {
+      ...originFor(request),
+      ...(!Buffer.isBuffer(candidate) && candidate.originPackage ? { package: candidate.originPackage } : {}),
+      ...(chainFrom(candidate) ? { chain: chainFrom(candidate) } : {}),
+    };
+    if (request.source.stream === "flow-report" || request.source.stream === "surface-explanation") {
+      // These streams are already authority-authored capture products. Preserve
+      // Flow's foreign formatting and Surface's stableStringify bytes exactly.
+      const bytes = Buffer.from((candidate as ReadCandidate).raw);
+      const digest = createHash("sha256").update(bytes).digest("hex");
+      if (!written.has(digest)) {
+        writeBlob(input.narrativeDir, path.join(input.narrativeDir, "sources", digest), bytes);
+        written.add(digest);
+      }
+      sources.push({
+        source_id: formatSourceId(request.source), integrity_class: integrityClassForSource(request.source), captured_at: sourceCapturedAt,
+        origin, status: "snapshotted", sha256: digest, bytes: bytes.length, lineage: lineageFor(request, sourceCapturedAt),
+      });
+      continue;
+    }
     const record = Buffer.isBuffer(candidate) ? candidate : candidate.record;
     const filtered = filterNarrativeRecord(record, input.redactionFields);
     if (filtered.kind === "redacted") {

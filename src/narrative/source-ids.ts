@@ -8,7 +8,9 @@ export type NarrativeSourceStream =
   | "trust-claim"
   | "trust-evidence"
   | "flow-state"
+  | "flow-report"
   | "flow-transition"
+  | "surface-explanation"
   | "transcript"
   | "file";
 
@@ -52,9 +54,19 @@ export interface FlowStateSourceId extends SourceIdBase<"flow-state"> {
   locator: { sha8: string };
 }
 
+export interface FlowReportSourceId extends SourceIdBase<"flow-report"> {
+  scope: { runId: string };
+  locator: { sha8: string };
+}
+
 export interface FlowTransitionSourceId extends SourceIdBase<"flow-transition"> {
   scope: { runId: string };
   locator: { index: number; sha8: string };
+}
+
+export interface SurfaceExplanationSourceId extends SourceIdBase<"surface-explanation"> {
+  scope: { slug: string; bundleSha8: string };
+  locator: { claimId: string };
 }
 
 export interface TranscriptSourceId extends SourceIdBase<"transcript"> {
@@ -73,7 +85,9 @@ export type NarrativeSourceId =
   | AgentEventSourceId
   | TrustSourceId
   | FlowStateSourceId
+  | FlowReportSourceId
   | FlowTransitionSourceId
+  | SurfaceExplanationSourceId
   | TranscriptSourceId
   | FileSourceId;
 
@@ -101,6 +115,7 @@ export class SourceIdParseError extends Error {
 const STREAMS = new Set<NarrativeSourceStream>([
   "telemetry", "cmdlog", "agent-event", "delegation", "trust-claim",
   "trust-evidence", "flow-state", "flow-transition", "transcript", "file",
+  "flow-report", "surface-explanation",
 ]);
 const ENCODED_COMPONENT = /^(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+$/;
 const SHA8 = /^[0-9a-f]{8}$/;
@@ -192,10 +207,21 @@ export function parseSourceId(sourceId: string): NarrativeSourceId {
       if (state !== "state") fail("invalid_locator", sourceId, "flow-state locator must begin with state");
       return { version, stream, scope: { runId }, locator: { sha8: sha8(hash, sourceId, "state hash pin") } };
     }
+    case "flow-report": {
+      const [runId] = splitComponents(rawScope, 1, sourceId, "scope") as [string];
+      const [report, hash] = splitComponents(rawLocator, 2, sourceId, "locator") as [string, string];
+      if (report !== "report") fail("invalid_locator", sourceId, "flow-report locator must begin with report");
+      return { version, stream, scope: { runId }, locator: { sha8: sha8(hash, sourceId, "report hash pin") } };
+    }
     case "flow-transition": {
       const [runId] = splitComponents(rawScope, 1, sourceId, "scope") as [string];
       const [index, hash] = splitComponents(rawLocator, 2, sourceId, "locator") as [string, string];
       return { version, stream, scope: { runId }, locator: { index: integer(index, sourceId, "transition index"), sha8: sha8(hash, sourceId, "transition hash pin") } };
+    }
+    case "surface-explanation": {
+      const [slug, bundleHash] = splitComponents(rawScope, 2, sourceId, "scope") as [string, string];
+      const [claimId] = splitComponents(rawLocator, 1, sourceId, "locator") as [string];
+      return { version, stream, scope: { slug, bundleSha8: sha8(bundleHash, sourceId, "bundle hash pin") }, locator: { claimId } };
     }
     case "transcript": {
       const [pathHash] = splitComponents(rawScope, 1, sourceId, "scope") as [string];
@@ -233,8 +259,12 @@ export function formatSourceId(source: NarrativeSourceId): string {
       return `${prefix}${encodeComponent(source.scope.slug)}/${source.scope.bundleSha8}:${encodeComponent(source.locator.id)}`;
     case "flow-state":
       return `${prefix}${encodeComponent(source.scope.runId)}:state/${source.locator.sha8}`;
+    case "flow-report":
+      return `${prefix}${encodeComponent(source.scope.runId)}:report/${source.locator.sha8}`;
     case "flow-transition":
       return `${prefix}${encodeComponent(source.scope.runId)}:${source.locator.index}/${source.locator.sha8}`;
+    case "surface-explanation":
+      return `${prefix}${encodeComponent(source.scope.slug)}/${source.scope.bundleSha8}:${encodeComponent(source.locator.claimId)}`;
     case "transcript":
       return `${prefix}${source.scope.pathSha8}:${source.locator.byteStart}-${source.locator.byteEnd}`;
     case "file":

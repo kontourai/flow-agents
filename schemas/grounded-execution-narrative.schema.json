@@ -1,0 +1,183 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://flow-agents.dev/schemas/grounded-execution-narrative.schema.json",
+  "title": "Flow Agents Grounded Execution Narrative",
+  "$comment": "compiler_sha256 identifies the built envelope module bytes and is therefore build-dependent.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "narrative_id",
+    "provenance",
+    "capture_completeness",
+    "sections",
+    "correlation",
+    "conclusions",
+    "coverage",
+    "unavailable_sources"
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source_id": {
+      "type": "string",
+      "pattern": "^fa1:(telemetry|cmdlog|agent-event|delegation|trust-claim|trust-evidence|flow-state|flow-report|flow-transition|surface-explanation|transcript|file):(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+(?:/(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+)*:(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+(?:/(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+)*(?:#(?:0|[1-9][0-9]*))?$"
+    },
+    "source_refs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/source_id" }
+    },
+    "capture_completeness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channels", "known_gaps"],
+      "properties": {
+        "channels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "enum": ["active", "inactive", "unknown"]
+          }
+        },
+        "known_gaps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["class", "ref"],
+            "properties": {
+              "class": {
+                "type": "string",
+                "enum": [
+                  "mcp_non_native_tools",
+                  "actor_attribution_conflation",
+                  "cross_session_event_contamination"
+                ]
+              },
+              "ref": { "type": "string", "minLength": 1 },
+              "note": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "flow_section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "kind", "source_refs", "sha256", "embedded"],
+      "properties": {
+        "authority": { "const": "flow" },
+        "kind": { "const": "flow-process-projection" },
+        "source_refs": { "$ref": "#/$defs/source_refs" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "embedded": { "type": "object" }
+      }
+    },
+    "surface_section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "kind", "source_refs", "sha256", "embedded"],
+      "properties": {
+        "authority": { "const": "surface" },
+        "kind": { "const": "claim-explanation" },
+        "source_refs": { "$ref": "#/$defs/source_refs" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "embedded": { "type": "object" }
+      }
+    },
+    "runtime_section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authority", "kind", "sha256", "embedded"],
+      "properties": {
+        "authority": { "const": "flow-agents" },
+        "kind": { "const": "runtime-projection" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "embedded": { "type": "object" }
+      }
+    }
+  },
+  "properties": {
+    "schema_version": { "const": "grounded-execution-narrative/v1" },
+    "narrative_id": { "type": "string", "minLength": 1 },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "compiler",
+        "compiled_at",
+        "manifest_sha256",
+        "schema_sha256",
+        "config_sha256",
+        "compiler_sha256"
+      ],
+      "properties": {
+        "compiler": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": { "const": "flow-agents-narrative-composer" },
+            "version": { "type": "string", "minLength": 1 }
+          }
+        },
+        "compiled_at": { "type": "string", "format": "date-time" },
+        "manifest_sha256": { "$ref": "#/$defs/sha256" },
+        "schema_sha256": { "$ref": "#/$defs/sha256" },
+        "config_sha256": { "$ref": "#/$defs/sha256" },
+        "compiler_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "capture_completeness": { "$ref": "#/$defs/capture_completeness" },
+    "sections": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "anyOf": [
+          { "$ref": "#/$defs/flow_section" },
+          { "$ref": "#/$defs/surface_section" },
+          { "$ref": "#/$defs/runtime_section" }
+        ]
+      }
+    },
+    "correlation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["turns", "unplaced"],
+      "properties": {
+        "turns": { "type": "array", "items": { "type": "object" } },
+        "unplaced": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+    "conclusions": { "type": "array", "items": { "type": "object" } },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sources", "embedded", "unavailable"],
+      "properties": {
+        "sources": { "type": "integer", "minimum": 0 },
+        "embedded": { "type": "integer", "minimum": 0 },
+        "unavailable": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "unavailable_sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_ref", "reason"],
+        "properties": {
+          "source_ref": { "$ref": "#/$defs/source_id" },
+          "reason": {
+            "type": "string",
+            "enum": ["expired", "redacted", "unauthorized", "not_captured", "corrupt"]
+          }
+        }
+      }
+    }
+  }
+}
