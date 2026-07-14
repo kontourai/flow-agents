@@ -141,6 +141,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check narrative-source-contract-integration
 
+      - name: Narrative runtime projection integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-runtime-projection-integration
+
       - name: Narrative redaction fail-closed integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check narrative-redaction-fail-closed-integration

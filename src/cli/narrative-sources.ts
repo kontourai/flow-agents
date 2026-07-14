@@ -7,6 +7,7 @@ import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
 import type { CaptureCompleteness } from "../narrative/integrity.js";
 import { effectiveNarrativeRedactionFields } from "../narrative/policy-filter.js";
+import { projectRuntimeNarrative, stableStringify, validateNarrativeRuntimeProjection } from "../narrative/projection.js";
 import { resolveSource, verifyManifest } from "../narrative/resolver.js";
 import { snapshotNarrative, type NarrativeSourceRoots } from "../narrative/snapshot.js";
 import { parseSourceId } from "../narrative/source-ids.js";
@@ -19,7 +20,7 @@ function packageVersion(): string {
 }
 
 function usage(): void {
-  console.error(`usage: flow-agents narrative-sources <snapshot|resolve|verify> [options]
+  console.error(`usage: flow-agents narrative-sources <snapshot|resolve|verify|project> [options]
 
 snapshot:
   (--session-slug SLUG | --artifact-root PATH) --narrative-id ID --source FA1 [--source FA1 ...]
@@ -31,6 +32,8 @@ snapshot:
   [--capture-completeness FILE]
 resolve:
   --narrative-dir PATH --source-id FA1 (--out FILE | --json)
+project:
+  --narrative-dir PATH (--out FILE | --json) [--projected-at DATE-TIME]
 verify:
   --narrative-dir PATH --json`);
 }
@@ -109,12 +112,30 @@ function verify(flags: ReturnType<typeof parseArgs>["flags"]): number {
   return report.ok ? 0 : 2;
 }
 
+function projectNarrative(flags: ReturnType<typeof parseArgs>["flags"]): number {
+  const narrativeDir = required(flags, "narrative-dir");
+  const out = flagString(flags, "out");
+  const json = flagBool(flags, "json");
+  if (Boolean(out) === json) throw new Error("exactly one of --out or --json is required");
+  const projectedAt = flagString(flags, "projected-at") ?? new Date().toISOString();
+  const projection = projectRuntimeNarrative(narrativeDir, { projectedAt });
+  const issues = validateNarrativeRuntimeProjection(projection);
+  if (issues.length > 0) {
+    throw new Error(`narrative runtime projection validation failed: ${issues.map((issue) => `${issue.path} ${issue.message}`).join("; ")}`);
+  }
+  const serialized = `${stableStringify(projection)}\n`;
+  if (out) atomicWriteFile(path.dirname(path.resolve(out)), path.resolve(out), Buffer.from(serialized));
+  else process.stdout.write(serialized);
+  return 0;
+}
+
 export function main(argv: string[] = process.argv.slice(2)): number {
   const args = parseArgs(argv);
   const verb = args.positionals[0];
   try {
     if (verb === "snapshot") return snapshot(args.flags);
     if (verb === "resolve") return resolve(args.flags);
+    if (verb === "project") return projectNarrative(args.flags);
     if (verb === "verify") return verify(args.flags);
     usage();
     return 64;
