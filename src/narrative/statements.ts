@@ -180,7 +180,7 @@ export function derivedRetry(input: {
 }
 
 export function derivedNoOpTurn(input: { turnRef: number; sourceIds: string[] }): Statement {
-  if (!Number.isSafeInteger(input.turnRef) || input.turnRef < 0) return fail("invalid_input", "turnRef must be a non-negative safe integer");
+  if (!Number.isSafeInteger(input.turnRef) || input.turnRef < -1) return fail("invalid_input", "turnRef must be a safe turn ordinal");
   return construct({
     class: "deterministic_derived",
     proposition: `Turn ${input.turnRef} was classified as a no-op`,

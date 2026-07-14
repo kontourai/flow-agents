@@ -40,6 +40,7 @@ test("derived constructors render rules with grounded inputs", () => {
     rule: { id: "retry-detection", version: "v1", inputs: [first, second] },
   });
   assert.equal(derivedNoOpTurn({ turnRef: 3, sourceIds: [first] }).proposition, "Turn 3 was classified as a no-op");
+  assert.equal(derivedNoOpTurn({ turnRef: -1, sourceIds: [first] }).turn_ref, -1);
   assert.equal(derivedTimeout({ sourceId: first, operation: "delegate worker", timeoutMs: 30000 }).proposition,
     "Operation delegate worker exceeded its 30000 ms timeout");
   assert.equal(derivedUnavailableSource({ sourceId: first, reason: "not_captured" }).proposition,

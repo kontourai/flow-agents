@@ -1,0 +1,134 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://flow-agents.dev/schemas/narrative-runtime-projection.schema.json",
+  "title": "Flow Agents Grounded Runtime Projection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "narrative_id", "provenance", "capture_completeness", "turns", "document_statements", "coverage"],
+  "$defs": {
+    "source_id": {
+      "type": "string",
+      "pattern": "^fa1:(telemetry|cmdlog|agent-event|delegation|trust-claim|trust-evidence|flow-state|flow-transition|transcript|file):(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+(?:/(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+)*:(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+(?:/(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+)*(?:#(?:0|[1-9][0-9]*))?$"
+    },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "known_gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "ref"],
+      "properties": {
+        "class": { "type": "string", "enum": ["mcp_non_native_tools", "actor_attribution_conflation", "cross_session_event_contamination"] },
+        "ref": { "type": "string", "minLength": 1 },
+        "note": { "type": "string", "minLength": 1 }
+      }
+    },
+    "capture_completeness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channels", "known_gaps"],
+      "properties": {
+        "channels": { "type": "object", "additionalProperties": { "type": "string", "enum": ["active", "inactive", "unknown"] } },
+        "known_gaps": { "type": "array", "items": { "$ref": "#/$defs/known_gap" } }
+      }
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "inputs"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "inputs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/source_id" } }
+      }
+    },
+    "statement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "class", "proposition", "source_refs"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[0-9a-f]{8}$" },
+        "class": { "type": "string", "enum": ["observed", "deterministic_derived"] },
+        "proposition": { "type": "string", "minLength": 1 },
+        "source_refs": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/source_id" } },
+        "turn_ref": { "type": "integer", "minimum": -1 },
+        "actor": { "type": "string", "minLength": 1 },
+        "rule": { "$ref": "#/$defs/rule" }
+      },
+      "oneOf": [
+        {
+          "properties": { "class": { "const": "observed" } },
+          "required": ["class"],
+          "not": { "required": ["rule"] }
+        },
+        {
+          "properties": { "class": { "const": "deterministic_derived" } },
+          "required": ["class", "rule"]
+        }
+      ]
+    },
+    "turn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ordinal", "sessionId", "boundary", "known_gap_refs", "statements"],
+      "properties": {
+        "ordinal": { "type": "integer", "minimum": -1 },
+        "sessionId": { "type": "string", "minLength": 1 },
+        "turnId": { "type": "string", "minLength": 1 },
+        "boundary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["derived"],
+          "properties": {
+            "derived": { "type": "boolean" },
+            "rule_id": { "type": "string", "const": "turn-spine/v1" }
+          }
+        },
+        "purpose": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["step", "gate"],
+          "properties": {
+            "step": { "type": "string", "minLength": 1 },
+            "gate": { "type": "string", "minLength": 1 }
+          }
+        },
+        "known_gap_refs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "statements": { "type": "array", "items": { "$ref": "#/$defs/statement" } }
+      }
+    }
+  },
+  "properties": {
+    "schema_version": { "type": "string", "const": "grounded-runtime-projection/v1" },
+    "narrative_id": { "type": "string", "minLength": 1 },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["projector", "projected_at", "manifest_sha256"],
+      "properties": {
+        "projector": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "version": { "type": "string", "minLength": 1 }
+          }
+        },
+        "projected_at": { "type": "string", "format": "date-time" },
+        "manifest_sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "capture_completeness": { "$ref": "#/$defs/capture_completeness" },
+    "turns": { "type": "array", "items": { "$ref": "#/$defs/turn" } },
+    "document_statements": { "type": "array", "items": { "$ref": "#/$defs/statement" } },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sources", "cited", "unavailable"],
+      "properties": {
+        "sources": { "type": "integer", "minimum": 0 },
+        "cited": { "type": "integer", "minimum": 0 },
+        "unavailable": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

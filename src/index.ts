@@ -69,6 +69,21 @@ export type {
 } from "./narrative/snapshot.js";
 export { resolveSource, verifyManifest } from "./narrative/resolver.js";
 export type { ResolveSourceOptions, ResolveSourceResult, VerifyManifestReport } from "./narrative/resolver.js";
+export {
+  NARRATIVE_RUNTIME_PROJECTION_SCHEMA_VERSION,
+  NARRATIVE_RUNTIME_PROJECTOR,
+  NarrativeProjectionError,
+  projectRuntimeNarrative,
+  stableStringify,
+  validateNarrativeRuntimeProjection,
+} from "./narrative/projection.js";
+export type {
+  NarrativeRuntimeProjection,
+  NarrativeProjectionErrorCode,
+  ProjectRuntimeNarrativeOptions,
+  RuntimePurpose,
+  RuntimeProjectionTurn,
+} from "./narrative/projection.js";
 export { QUARANTINE_SESSION_ID, TURN_SPINE_RULE_ID, buildTurnSpine } from "./narrative/turn-spine.js";
 export type { ResolvedTelemetryRecord, Turn, TurnBoundary } from "./narrative/turn-spine.js";
 export {

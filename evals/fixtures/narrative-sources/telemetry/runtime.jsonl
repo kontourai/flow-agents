@@ -1,0 +1,4 @@
+{"schema_version":"1","timestamp":"2026-07-14T13:00:00.000Z","session_id":"runtime-session","event_id":"runtime-turn-explicit","event_type":"turn.user","hook":{"turn_id":"turn-explicit"},"agent":{"name":"codex"}}
+{"schema_version":"1","timestamp":"2026-07-14T13:00:01.000Z","session_id":"runtime-session","event_id":"runtime-tool-timeout","event_type":"tool.result","hook":{"turn_id":"turn-explicit"},"tool":{"name":"execute_bash","command":"npm test","timeout_ms":30000},"timed_out":true,"agent":{"name":"codex"}}
+{"schema_version":"1","timestamp":"2026-07-14T13:01:00.000Z","session_id":"runtime-session","event_id":"runtime-turn-derived","event_type":"turn.user","agent":{"name":"codex"}}
+{"schema_version":"1","timestamp":"2026-07-14T13:02:00.000Z","session_id":"runtime-session","event_id":"runtime-session-end","event_type":"session.end","agent":{"name":"codex"}}
