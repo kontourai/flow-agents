@@ -108,6 +108,8 @@ export {
 } from "./builder-gate-action-envelope.js";
 export type {
   BuilderGateActionEnvelopeInput,
+  GateActionArtifactBinding,
+  GateActionArtifactTarget,
   GateActionEnvelope,
   GateActionInterfaceParameter,
   GateActionPriorProgress,

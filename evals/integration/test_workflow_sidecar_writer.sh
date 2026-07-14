@@ -3863,6 +3863,14 @@ const bundle = JSON.parse(fs.readFileSync(bundleFile, 'utf8'));
 const gate = bundle.claims.find((claim) => claim.metadata?.gate_claim?.expectation_id === 'tests-evidence');
 const review = bundle.claims.find((claim) => claim.metadata?.origin === 'critique');
 if (!gate || gate.metadata?.observed_commands?.length !== 2) process.exit(2);
+const criteria = bundle.claims.filter((claim) => claim.metadata?.origin === 'acceptance');
+if (criteria.length !== 2 || criteria.some((claim) => claim.value !== 'pass' || claim.status !== 'verified')) process.exit(4);
+for (const claim of criteria) {
+  const evidence = bundle.evidence.filter((item) => item.claimId === claim.id);
+  const event = bundle.events.find((item) => item.claimId === claim.id && item.status === 'verified');
+  if (evidence.length !== 1 || evidence[0].evidenceType !== 'test_output' || evidence[0].passing !== true) process.exit(5);
+  if (!event || event.evidenceIds.length !== 1 || event.evidenceIds[0] !== evidence[0].id) process.exit(6);
+}
 const snapshot = review?.metadata?.review_target?.workspace_snapshot;
 if (!snapshot || snapshot.version !== 1 || snapshot.algorithm !== 'sha256' || typeof snapshot.digest !== 'string') process.exit(3);
 NODE
@@ -3873,6 +3881,54 @@ NODE
   fi
 else
   _fail "tests-evidence multi-command write failed: $(cat "$TMPDIR_EVAL/multi-pass.out" "$TMPDIR_EVAL/multi-pass.err")"
+fi
+
+if flow_agents_node "$WRITER" record-evidence "$MULTI_DIR" \
+  --verdict not_verified \
+  --check-json '{"id":"acceptance-rebuild-probe","kind":"external","status":"not_verified","summary":"Trigger a valid unrelated bundle rebuild."}' \
+  --timestamp "2026-07-11T11:00:35Z" >"$TMPDIR_EVAL/multi-rebuild.out" 2>"$TMPDIR_EVAL/multi-rebuild.err" \
+  && node - "$MULTI_DIR/trust.bundle" <<'NODE'
+const fs = require('node:fs');
+const bundle = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const criteria = bundle.claims.filter((claim) => claim.metadata?.origin === 'acceptance');
+if (criteria.length !== 2 || criteria.some((claim) => claim.value !== 'pass' || claim.status !== 'verified')) process.exit(1);
+for (const claim of criteria) {
+  if (claim.createdAt !== '2026-07-11T11:00:30Z' || claim.updatedAt !== '2026-07-11T11:00:30Z') process.exit(2);
+  const event = bundle.events.find((item) => item.claimId === claim.id);
+  if (event?.createdAt !== '2026-07-11T11:00:30Z' || event?.verifiedAt !== '2026-07-11T11:00:30Z') process.exit(3);
+}
+NODE
+then
+  _pass "verified acceptance provenance survives an unrelated rebuild without timestamp laundering"
+else
+  _fail "unrelated rebuild regressed or refreshed verified acceptance provenance: $(cat "$TMPDIR_EVAL/multi-rebuild.out" "$TMPDIR_EVAL/multi-rebuild.err")"
+fi
+
+# A direct acceptance artifact edit cannot replace or erase the durable criterion contract on a
+# later, unrelated bundle write. This reproduces the issue #601 artifact-only erasure vector.
+node - "$MULTI_DIR/acceptance.json" <<'NODE'
+const fs = require('node:fs');
+const file = process.argv[2];
+const acceptance = JSON.parse(fs.readFileSync(file, 'utf8'));
+acceptance.criteria = [{ id: null, description: 'Attempted replacement', status: 'PASS' }];
+fs.writeFileSync(file, JSON.stringify(acceptance, null, 2) + '\n');
+NODE
+if flow_agents_node "$WRITER" record-evidence "$MULTI_DIR" \
+  --verdict not_verified \
+  --check-json '{"id":"acceptance-erasure-probe","kind":"external","status":"not_verified","summary":"Trigger an unrelated bundle rebuild."}' \
+  --timestamp "2026-07-11T11:00:40Z" >"$TMPDIR_EVAL/multi-erasure.out" 2>"$TMPDIR_EVAL/multi-erasure.err"; then
+  _fail "malformed acceptance artifact was accepted during an unrelated bundle rebuild"
+elif node - "$MULTI_DIR/trust.bundle" <<'NODE'
+const fs = require('node:fs');
+const bundle = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const criteria = bundle.claims.filter((claim) => claim.metadata?.origin === 'acceptance');
+if (criteria.length !== 2) process.exit(1);
+if (criteria.some((claim) => claim.value !== 'pass' || claim.status !== 'verified')) process.exit(2);
+NODE
+then
+  _pass "malformed acceptance replacement fails closed without erasing durable criteria"
+else
+  _fail "rejected acceptance replacement still erased or regressed durable criteria: $(cat "$TMPDIR_EVAL/multi-erasure.out" "$TMPDIR_EVAL/multi-erasure.err")"
 fi
 
 # ─── AC4: compose-three-writer (five writer calls total: evidence x2, gate-claim x2, critique, ──

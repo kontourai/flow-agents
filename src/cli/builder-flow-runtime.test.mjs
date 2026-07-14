@@ -27,7 +27,7 @@ import { cancelBuilderBuildRun, startBuilderFlowRun } from "../../build/src/buil
 import { performLocalClaim, performLocalRelease, readLocalAssignmentStatus, resolveCurrentAssignmentActor } from "../../build/src/cli/assignment-provider.js";
 import { main as builderRunMain } from "../../build/src/cli/builder-run.js";
 import { assertAcceptedTurnEvidenceCapacity, main as workflowMain } from "../../build/src/cli/workflow.js";
-import { buildTrustBundle, inferExecutedTestCount, main as workflowSidecarMain } from "../../build/src/cli/workflow-sidecar.js";
+import { buildTrustBundle, inferExecutedTestCount, main as workflowSidecarMain, validateEvidenceRef } from "../../build/src/cli/workflow-sidecar.js";
 
 const SUBJECT = "local:work-item/runtime-projection";
 const NOW = "2026-07-09T20:00:00.000Z";
@@ -372,11 +372,18 @@ test("small-model client can start and advance from projected actions without ch
   assert.ok(started.projection.next_action.command.includes(`'workflow' 'status' '--session-dir' '.kontourai/flow-agents/${session.slug}' '--json'`));
   const envelope = started.gateActionEnvelope;
   assert.equal(Object.hasOwn(started.projection.next_action, "gate_action_envelope"), false, "durable state has no duplicate envelope");
-  assert.equal(envelope.schema_version, "2.0");
+  assert.equal(envelope.schema_version, "3.0");
   assert.equal(envelope.gate.requirements[0].gate_id, "pull-work-gate");
   assert.equal(envelope.action.implementation_allowed, false, "implementation is forbidden before builder.build/execute");
   assert.deepEqual(envelope.action.declared_evidence, ["selected-work"]);
-  assert.deepEqual(envelope.action.declared_artifacts, [`<slug>--pull-work.md`, "trust.bundle#selected-work"]);
+  assert.deepEqual(envelope.action.declared_artifacts, [
+    { kind: "file", ref: "<slug>--pull-work.md", path: `.kontourai/flow-agents/${session.slug}/${session.slug}--pull-work.md`, direct_write_allowed: true, produced_via: { interface: "skill", skill_ids: ["pull-work"] } },
+    { kind: "trust_slice", ref: "trust.bundle#selected-work", bundle_file: "trust.bundle", slice_id: "selected-work", direct_write_allowed: false, record_via: ["workflow.evidence"] },
+  ]);
+  assert.deepEqual(envelope.action.artifact_bindings, envelope.action.declared_artifacts.map((target) => ({
+    target,
+    expectation_ids: ["selected-work"],
+  })));
   assert.equal(envelope.stop_condition.kind, "one_turn");
   assert.equal(envelope.stop_condition.scope.current_gate_only, true);
   assert.deepEqual(envelope.stop_condition.required.unresolved_evidence_ids, ["selected-work"]);
@@ -387,8 +394,19 @@ test("small-model client can start and advance from projected actions without ch
   assert.match(envelope.action.skills[0].path, /kits\/builder\/skills\/pull-work\/SKILL\.md$/);
   assert.match(envelope.action.skills[0].sha256, /^[a-f0-9]{64}$/);
   assert.equal(envelope.public_interfaces.mutations[0].expectation_id, "selected-work");
+  assert.deepEqual(envelope.public_interfaces.status, {
+    package: { name: "@kontourai/flow-agents", version: PACKAGE_VERSION },
+    command: "flow-agents",
+    argv: ["workflow", "status", "--session-dir", `.kontourai/flow-agents/${session.slug}`, "--json"],
+  });
   assert.deepEqual(envelope.public_interfaces.mutations[0].package, { name: "@kontourai/flow-agents", version: PACKAGE_VERSION });
   assert.deepEqual(envelope.public_interfaces.mutations[0].argv.slice(0, 2), ["workflow", "evidence"]);
+  assert.equal(envelope.public_interfaces.mutations[0].parameters.find((entry) => entry.name === "evidence_ref_json").value_schema_ref, "#/public_interfaces/schemas/evidence_ref_json");
+  assert.deepEqual(envelope.public_interfaces.schemas.evidence_ref_json.properties.kind.enum, ["source", "command", "artifact", "provider", "external"]);
+  assert.deepEqual(envelope.public_interfaces.schemas.evidence_ref_json.examples[0], { kind: "artifact", file: "<project-relative-artifact-path>", summary: "<what this artifact proves>" });
+  for (const example of envelope.public_interfaces.schemas.evidence_ref_json.examples) {
+    assert.deepEqual(validateEvidenceRef(structuredClone(example), "projected evidence example"), example);
+  }
   assert.equal(envelope.public_interfaces.mutations[0].argv.some((value) => value.includes("<")), false, "argv contains no substitution placeholders");
   assert.ok(fs.existsSync(runDir(session.slug, session.projectRoot)));
   assert.ok(!fs.existsSync(path.join(session.projectRoot, ".flow", "runs")), "retired runtime path must not be created");
@@ -422,8 +440,8 @@ test("gate-action implementation policy permits code only at builder.build/execu
   const executing = await writeAndSync(session, [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })]);
   assert.equal(executing.run.state.current_step, "execute");
   assert.equal(executing.gateActionEnvelope.action.implementation_allowed, true);
-  assert.equal(executing.gateActionEnvelope.action.declared_artifacts.includes("state.json"), false, "control state is not a declared model artifact");
-  assert.equal(executing.gateActionEnvelope.stop_condition.required.artifact_refs.includes("state.json"), false, "control state is not a required model artifact");
+  assert.equal(executing.gateActionEnvelope.action.declared_artifacts.some((artifact) => artifact.ref === "state.json"), false, "control state is not a declared model artifact");
+  assert.equal(executing.gateActionEnvelope.stop_condition.required.artifact_refs.some((artifact) => artifact.ref === "state.json"), false, "control state is not a required model artifact");
   assert.equal(executing.gateActionEnvelope.progress.observed_artifacts.some((entry) => entry.startsWith("state.json:")), false, "control state never counts as progress");
 
   const requests = [];
@@ -570,6 +588,18 @@ test("public workflow evidence accepts only live signed turn authority after ord
   fs.writeFileSync(path.join(session.projectRoot, "AGENTS.md"), "# Test Repo\n");
   fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--deliver.md`), "# Continuation\n\nstatus: executing\ntype: deliver\n");
   fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--pull-work.md`), "# Pull Work\n\nSelected continuation fixture.\n");
+  writeJson(path.join(session.sessionDir, "acceptance.json"), {
+    schema_version: "1.0",
+    task_slug: session.slug,
+    source_request: "Advance a bounded continuation through public workflow evidence.",
+    criteria: [{
+      id: "AC-1",
+      description: "The complete continuation reaches its terminal workflow gate.",
+      status: "pending",
+      evidence_refs: [],
+    }],
+    goal_fit: { status: "pending", summary: "The bounded continuation is still active." },
+  });
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
   const unrelatedSlug = "unrelated-pointer-session";
   const unrelatedDir = path.join(session.artifactRoot, unrelatedSlug);
@@ -657,6 +687,7 @@ test("public workflow evidence accepts only live signed turn authority after ord
   assert.equal(authority.authorityValidation.valid, true, authority.authorityValidation.reason);
   assert.equal(authority.hookStatus, 0, `the blocking Stop hook returns control during the signed adapter turn: ${authority.hookStderr}`);
   assert.match(authority.hookStderr, /continuation driver active turn is authorized/);
+  assert.match(authority.hookStderr, /Final Acceptance: 1 acceptance criterion\/criteria still pending/);
   assert.equal(fs.existsSync(authorityFile), false, "adapter turn authority is removed after the child exits");
   const driverState = readJson(path.join(session.sessionDir, "continuation-driver", "state.json"));
   assert.equal(driverState.status, "budget_exhausted");
@@ -763,7 +794,7 @@ test("public workflow drive signs adapter evidence with a consumed one-time key"
   assert.deepEqual(payload.adapter_turns.map((turn) => turn.request), observedRequests);
   assert.equal(payload.adapter_turns[0].request.schema_version, "1.0");
   assert.equal(payload.adapter_turns[0].request.next_action.status, "continue");
-  assert.equal(payload.adapter_turns[0].request.gate_action_envelope.schema_version, "2.0");
+  assert.equal(payload.adapter_turns[0].request.gate_action_envelope.schema_version, "3.0");
   assert.deepEqual(payload.adapter_turns.map((turn) => turn.request), observedRequests, "the signed payload binds the unchanged envelope bytes observed by the adapter");
   assert.deepEqual(payload.adapter_turns[0].result.evidence.usage, { input_tokens: 10, output_tokens: 2 });
   const tampered = Buffer.from(JSON.stringify({ ...payload, max_turns: 2 }));
@@ -1306,7 +1337,7 @@ test("partial passing review snapshot waits for the complete verify expectation 
   assert.deepEqual(partialEnvelope.gate.unresolved_requirement_ids.sort(), ["acceptance-criteria", "policy-compliance", "tests-evidence"]);
   assert.equal(partialEnvelope.gate.requirements.find((entry) => entry.id === "policy-compliance").required, false);
   assert.deepEqual(partialEnvelope.stop_condition.required.unresolved_evidence_ids.sort(), ["acceptance-criteria", "tests-evidence"]);
-  assert.equal(partialEnvelope.stop_condition.required.artifact_refs.includes("trust.bundle#policy-compliance"), false);
+  assert.equal(partialEnvelope.stop_condition.required.artifact_refs.some((artifact) => artifact.ref === "trust.bundle#policy-compliance"), false);
   const critique = partialEnvelope.public_interfaces.mutations.find((entry) => entry.interface === "workflow.critique");
   assert.deepEqual(critique.parameters.find((entry) => entry.name === "verdict").allowed_values, [...WORKFLOW_CRITIQUE_STATUSES]);
   assert.deepEqual(critique.parameters.find((entry) => entry.name === "artifact_ref"), {
@@ -1580,6 +1611,17 @@ test("publish-change reports an external capability gap and self-authored result
 
   const operationView = await syncBuilderFlowSession({ sessionDir: session.sessionDir });
   const publish = operationView.gateActionEnvelope.public_interfaces.mutations.find((entry) => entry.interface === "operation");
+  assert.deepEqual(operationView.gateActionEnvelope.action.declared_artifacts, [{
+    kind: "file",
+    ref: "publish-change.result.json",
+    path: `.kontourai/flow-agents/${session.slug}/publish-change.result.json`,
+    direct_write_allowed: false,
+    produced_via: { interface: "operation", operations: ["publish-change"] },
+  }]);
+  assert.deepEqual(operationView.gateActionEnvelope.action.artifact_bindings, [{
+    target: operationView.gateActionEnvelope.action.declared_artifacts[0],
+    expectation_ids: ["pull-request-opened"],
+  }]);
   assert.equal(publish.operation, "publish-change");
   assert.equal(publish.protocol.capability, "pull_request.create");
   assert.deepEqual(publish.protocol.result.required, ["provider", "repository", "number", "url", "head_ref", "base_ref"]);

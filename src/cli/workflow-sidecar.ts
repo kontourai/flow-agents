@@ -14,7 +14,13 @@ import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { runObservedCommand } from "../lib/observed-command.js";
 import { captureReviewWorkspaceSnapshot, startBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
-import { WORKFLOW_CRITIQUE_STATUSES } from "./public-contracts.js";
+import {
+  EVIDENCE_REF_FIELD_SCHEMAS,
+  EVIDENCE_REF_KINDS,
+  EVIDENCE_REF_RULES,
+  WORKFLOW_ACCEPTANCE_STATUSES,
+  WORKFLOW_CRITIQUE_STATUSES,
+} from "./public-contracts.js";
 // #291 Wave 1 Task 1.1 exports: ensure-session's ownership guard reuses the EXACT same
 // assignment ⋈ liveness join / claim / supersede logic #290 already ships for the
 // `assignment-provider` CLI, rather than reimplementing a second, parallel join (static ESM
@@ -533,6 +539,18 @@ function criterionStatusToEventStatus(status: string): string | null {
   if (status === "accepted_gap") return "assumed";
   return null; // pending / not_verified → no event → Surface returns "unknown"
 }
+
+const ACCEPTANCE_CRITERION_STATUSES = new Set<string>(WORKFLOW_ACCEPTANCE_STATUSES);
+const CANONICALLY_OBSERVED_ACCEPTANCE_CRITERIA = new WeakSet<object>();
+
+function markCanonicallyObservedCriterion<T extends AnyObj>(criterion: T): T {
+  CANONICALLY_OBSERVED_ACCEPTANCE_CRITERIA.add(criterion);
+  return criterion;
+}
+
+function normalizeCriterionStatus(status: unknown): string {
+  return typeof status === "string" && ACCEPTANCE_CRITERION_STATUSES.has(status) ? status : "pending";
+}
 /**
  * WS8 (ADR 0020): Derive Surface evidence classification (evidenceType + method)
  * from a workflow check's kind, replacing the previous hardcoded `test_output`.
@@ -830,8 +848,6 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
   //     "flow-step". Fallback: first non-decision, non-acceptance entry.
   //   check (kind=policy)     → expects[] entry whose claimType contains
   //     "compliance" or "policy". Fallback: same as non-policy.
-  //   acceptance criterion    → expects[] entry whose subjectType is "flow-step"
-  //     OR claimType contains "tests" OR "compliance". Fallback: first entry.
   //   critique                → expects[] entry whose claimType contains "policy"
   //     OR "compliance" AND subjectType is "artifact". Fallback: last entry.
   //
@@ -841,7 +857,7 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
   // Surface from that evidence (never hand-set).
   //
   // Per-gate producibility (ADR 0016 P-d):
-  //   (a) Already handled via subjectType=flow-step preference:
+  //   (a) Already handled via subjectType=flow-step preference for checks:
   //       builder.verify.tests       (verify-gate, subjectType=flow-step)
   //       builder.verify.policy-compliance (verify-gate, kind=policy match)
   //   (b) Producible via fallback (non-decision, non-acceptance, first match):
@@ -858,7 +874,10 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
   //       builder.learn.evidence            (learn-gate, subjectType=release)
   //   For category (c): record-gate-claim subcommand allows skills to target a specific
   //   expects[] entry by --expectation <id>, bypassing this semantic match entirely.
-  function matchExpectsEntry(kind: "check" | "acceptance" | "critique", checkKindVal?: string, expectationId?: string): { claimType: string; subjectType: string } | null {
+  //
+  // Acceptance criteria do not participate in this matching table. They are durable Work Item
+  // facts with invariant workflow.acceptance.criterion/flow-step identity across every gate.
+  function matchExpectsEntry(kind: "check" | "critique", checkKindVal?: string, expectationId?: string): { claimType: string; subjectType: string } | null {
     if (!activeStep || activeStep.gateExpects.length === 0) return null;
     const expects = activeStep.gateExpects;
     if (kind === "check") {
@@ -890,14 +909,6 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
       });
       if (fallback) return { claimType: fallback.bundle_claim.claimType, subjectType: fallback.bundle_claim.subjectType };
       return null;
-    }
-    if (kind === "acceptance") {
-      const match = expects.find((e) => {
-        const ct = e.bundle_claim.claimType.toLowerCase();
-        return e.bundle_claim.subjectType === "flow-step" || ct.includes("tests") || ct.includes("compliance");
-      });
-      if (match) return { claimType: match.bundle_claim.claimType, subjectType: match.bundle_claim.subjectType };
-      return { claimType: expects[0]!.bundle_claim.claimType, subjectType: expects[0]!.bundle_claim.subjectType };
     }
     if (kind === "critique") {
       const match = expects.find((e) => {
@@ -1093,33 +1104,74 @@ export async function buildTrustBundle(slug: string, timestamp: string, checks: 
     if (!criterion.id) continue;
     const subjectId = `${slug}/${criterion.id}`;
     const fieldOrBehavior = String(criterion.description ?? criterion.id);
+    const normalizedCriterionStatus = normalizeCriterionStatus(criterion.status);
     const criterionIdentityVersion = criterion.identity_version === 2 ? 2 : 1;
     const criterionVerifiedAt = criterionIdentityVersion === 2 && typeof criterion.verified_at === "string" ? criterion.verified_at : null;
+    const criterionEvidenceRefs = Array.isArray(criterion.evidence_refs) ? criterion.evidence_refs : [];
+    const commandRefs = criterionEvidenceRefs
+      .filter((ref: AnyObj) => ref?.kind === "command")
+      .map((ref: AnyObj) => commandFromEvidenceRef(ref))
+      .filter((command: string) => command.length > 0);
+    const rawObservedCommands = Array.isArray(criterion._observed_commands) ? criterion._observed_commands as AnyObj[] : [];
+    const observedCommands = rawObservedCommands.filter((observation: AnyObj) =>
+      typeof observation?.command === "string"
+      && commandRefs.includes(observation.command)
+      && observation.exit_code === 0
+      && typeof observation.output_sha256 === "string"
+      && /^[a-f0-9]{64}$/i.test(observation.output_sha256)
+      && Number.isSafeInteger(observation.test_count)
+      && observation.test_count > 0
+      && observation.execution_proof?.kind === "local-process-exit",
+    );
+    const hasObservedCommandProvenance = CANONICALLY_OBSERVED_ACCEPTANCE_CRITERIA.has(criterion)
+      && criterionIdentityVersion === 2
+      && criterionVerifiedAt !== null
+      && Number.isFinite(Date.parse(criterionVerifiedAt))
+      && observedCommands.length === rawObservedCommands.length
+      && observedCommands.length > 0
+      && commandRefs.every((command: string) => observedCommands.some((observation: AnyObj) => observation.command === command));
+    const criterionStatus = normalizedCriterionStatus === "pass" && !hasObservedCommandProvenance
+      ? "pending"
+      : normalizedCriterionStatus;
+    const criterionClaimTimestamp = criterionStatus === "pass" && criterionVerifiedAt ? criterionVerifiedAt : ts;
     const claimId = generateClaimId(subjectId, "flow-agents.workflow", criterionVerifiedAt ? `${fieldOrBehavior}::verified::${criterionVerifiedAt}` : fieldOrBehavior);
-    const legacyClaimType = "workflow.acceptance.criterion";
-    const policy = ensurePolicy(legacyClaimType, "high", []);
-    const evStatus = criterionStatusToEventStatus(String(criterion.status ?? ""));
+    const claimType = "workflow.acceptance.criterion";
+    const criterionEvidenceIds: string[] = [];
+    if (criterionStatus === "pass") {
+      for (const observation of observedCommands) {
+        const evidenceId = `ev:${claimId}:${createHash("sha256").update(observation.command).digest("hex").slice(0, 16)}`;
+        criterionEvidenceIds.push(evidenceId);
+        evidenceItems.push({
+          id: evidenceId,
+          claimId,
+          evidenceType: "test_output",
+          method: "validation",
+          sourceRef: `${slug}/observed-command`,
+          excerptOrSummary: observation.command,
+          observedAt: criterionVerifiedAt,
+          collectedBy: "flow-agents/workflow-sidecar",
+          passing: true,
+          execution: { runner: "bash", label: observation.command, isError: false, exitCode: 0 },
+        });
+      }
+    }
+    const policy = ensurePolicy(claimType, "high", criterionEvidenceIds.length > 0 ? ["test_output"] : []);
+    const evStatus = criterionStatusToEventStatus(criterionStatus);
     const claimEvents: AnyObj[] = [];
     if (evStatus) {
-      const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: "flow-agents/workflow-sidecar", method: "validation", evidenceIds: [], createdAt: ts, verifiedAt: ts };
+      const evt: AnyObj = { id: `evt:${claimId}`, claimId, status: evStatus, actor: "flow-agents/workflow-sidecar", method: "validation", evidenceIds: criterionEvidenceIds, createdAt: criterionClaimTimestamp, verifiedAt: criterionClaimTimestamp };
       events.push(evt);
       claimEvents.push(evt);
     }
 
-    // P-d: declared-only when active flow/step present (shadow retired); no-flow path unchanged.
-    const declared = matchExpectsEntry("acceptance");
-    if (declared) {
-      // Declared kit-typed claim only — no legacy shadow (ADR 0016 P-d).
-      const declaredPolicy = ensurePolicy(declared.claimType, "high", []);
-      const declaredClaimObj: AnyObj = { id: claimId, subjectType: declared.subjectType, subjectId, facet: "flow-agents.workflow", claimType: declared.claimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: declaredPolicy.id, metadata: { origin: "acceptance", criterion: { id: criterion.id, description: criterion.description ?? criterion.id, status: criterion.status, evidence_refs: Array.isArray(criterion.evidence_refs) ? criterion.evidence_refs : [], ...(criterionIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(criterionVerifiedAt ? { verified_at: criterionVerifiedAt } : {}) }, ...(workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}) } };
-      const { status: declaredStatus } = deriveClaimStatus({ claim: declaredClaimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [declaredPolicy] as Record<string, unknown>[] });
-      claims.push({ ...declaredClaimObj, status: declaredStatus });
-    } else {
-      // No active flow step — only the workflow.* primary claim (legitimate no-flow fallback path).
-      const claimObj: AnyObj = { id: claimId, subjectType: "workflow-acceptance-criterion", subjectId, facet: "flow-agents.workflow", claimType: legacyClaimType, fieldOrBehavior, value: criterion.status, createdAt: ts, updatedAt: ts, impactLevel: "high", verificationPolicyId: policy.id, metadata: { origin: "acceptance", criterion: { id: criterion.id, description: criterion.description ?? criterion.id, status: criterion.status, evidence_refs: Array.isArray(criterion.evidence_refs) ? criterion.evidence_refs : [] } } };
-      const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: [], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
-      claims.push({ ...claimObj, status: derivedStatus });
-    }
+    // Acceptance criteria are durable Work Item facts. Their identity must not change when a
+    // bundle is rebuilt at a different active gate. Missing or invalid status is conservatively
+    // projected as pending so direct artifact edits can never manufacture a pass or invalidate
+    // the Hachure claim shape.
+    const claimObj: AnyObj = { id: claimId, subjectType: "flow-step", subjectId, facet: "flow-agents.workflow", claimType, fieldOrBehavior, value: criterionStatus, createdAt: criterionClaimTimestamp, updatedAt: criterionClaimTimestamp, impactLevel: "high", verificationPolicyId: policy.id, metadata: { origin: "acceptance", criterion: { id: criterion.id, description: criterion.description ?? criterion.id, status: criterionStatus, evidence_refs: criterionEvidenceRefs, ...(observedCommands.length > 0 ? { observed_commands: observedCommands } : {}), ...(criterionIdentityVersion === 2 ? { identity_version: 2 } : {}), ...(criterionVerifiedAt ? { verified_at: criterionVerifiedAt } : {}) }, ...(workflowSubjectRef ? { workflow_subject_ref: workflowSubjectRef } : {}) } };
+    const criterionEvidence = evidenceItems.filter((evidence) => evidence.claimId === claimId);
+    const { status: derivedStatus } = deriveClaimStatus({ claim: claimObj as Record<string, unknown>, evidence: criterionEvidence as Record<string, unknown>[], events: claimEvents as Record<string, unknown>[], policies: [policy] as Record<string, unknown>[] });
+    claims.push({ ...claimObj, status: derivedStatus });
   }
 
   // Critique entries → claims + events
@@ -2444,19 +2496,28 @@ function hasPositiveInteger(value: unknown): boolean {
   return Number.isInteger(value) && Number(value) >= 1;
 }
 export function validateEvidenceRef(ref: AnyObj, label: string): AnyObj {
-  if (!["source", "command", "artifact", "provider", "external"].includes(ref.kind)) die(`${label} entry kind must be one of: source, command, artifact, provider, external`);
-  for (const key of Object.keys(ref)) if (!["kind", "url", "file", "line_start", "line_end", "excerpt", "summary"].includes(key)) die(`${label} entries contain unsupported field: ${key}`);
+  if (!(EVIDENCE_REF_KINDS as readonly unknown[]).includes(ref.kind)) die(`${label} entry kind must be one of: ${EVIDENCE_REF_KINDS.join(", ")}`);
+  for (const key of Object.keys(ref)) if (!Object.hasOwn(EVIDENCE_REF_FIELD_SCHEMAS, key)) die(`${label} entries contain unsupported field: ${key}`);
   if (ref.url !== undefined && !hasNonEmptyString(ref.url)) die(`${label} entry url must be a non-empty string`);
   if (ref.file !== undefined && !hasNonEmptyString(ref.file)) die(`${label} entry file must be a non-empty string`);
   if (ref.excerpt !== undefined && !hasNonEmptyString(ref.excerpt)) die(`${label} entry excerpt must be a non-empty string`);
   if (ref.summary !== undefined && !hasNonEmptyString(ref.summary)) die(`${label} entry summary must be a non-empty string`);
   if (ref.line_start !== undefined && !hasPositiveInteger(ref.line_start)) die(`${label} entry line_start must be a positive integer`);
   if (ref.line_end !== undefined && !hasPositiveInteger(ref.line_end)) die(`${label} entry line_end must be a positive integer`);
-  if (ref.kind === "source" && (!hasNonEmptyString(ref.file) || !hasPositiveInteger(ref.line_start) || !hasPositiveInteger(ref.line_end) || !hasNonEmptyString(ref.excerpt))) die(`${label} source refs require file, line_start, line_end, and excerpt`);
-  if (ref.kind === "artifact" && (!hasNonEmptyString(ref.file) && !hasNonEmptyString(ref.url))) die(`${label} artifact refs require file or url`);
-  if (ref.kind === "artifact" && (!hasNonEmptyString(ref.summary) && !hasNonEmptyString(ref.excerpt))) die(`${label} artifact refs require summary or excerpt`);
-  if (ref.kind === "command" && (!hasNonEmptyString(ref.summary) && !hasNonEmptyString(ref.excerpt) && !hasNonEmptyString(ref.url))) die(`${label} command refs require summary, excerpt, or url`);
-  if ((ref.kind === "provider" || ref.kind === "external") && !hasNonEmptyString(ref.url)) die(`${label} ${ref.kind} refs require url`);
+  const rules = EVIDENCE_REF_RULES[ref.kind as keyof typeof EVIDENCE_REF_RULES];
+  for (const rule of rules) {
+    const present = (field: string): boolean => field === "line_start" || field === "line_end"
+      ? hasPositiveInteger(ref[field])
+      : hasNonEmptyString(ref[field]);
+    const valid = rule.mode === "all" ? rule.fields.every(present) : rule.fields.some(present);
+    if (!valid) {
+      const separator = rule.fields.length > 2 ? ", " : " ";
+      const joined = rule.fields.length > 1
+        ? `${rule.fields.slice(0, -1).join(separator)}${rule.fields.length > 2 ? "," : ""} or ${rule.fields.at(-1)}`
+        : rule.fields[0];
+      die(`${label} ${ref.kind} refs require ${rule.mode === "all" && rule.fields.length > 1 ? joined.replace(/ or ([^,]+)$/, " and $1") : joined}`);
+    }
+  }
   return ref;
 }
 export function normalizeEvidenceRefs(raw: unknown, label: string): AnyObj[] {
@@ -2751,7 +2812,7 @@ function requireObservedCommandRefs(refs: AnyObj[], observedCommands: ReadonlySe
   }
 }
 
-function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: ReadonlySet<string>, verifiedAt: string): AnyObj[] {
+function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: readonly ObservedCommand[], verifiedAt: string): AnyObj[] {
   if (raw.length === 0) die("record-gate-claim requires --criterion-json for a passing tests-evidence claim");
   const incoming = raw.map((value) => parseJson(value, "--criterion-json"));
   const expectedById = new Map<string, AnyObj>();
@@ -2764,13 +2825,16 @@ function completePassingCriteria(existing: AnyObj[], raw: string[], observedComm
   if (new Set(ids).size !== ids.length || ids.length !== expectedIds.length || ids.some((id) => !expectedIds.includes(id))) {
     die(`--criterion-json must cover every declared acceptance criterion exactly once (expected: ${expectedIds.join(", ") || "none"}; received: ${ids.join(", ") || "none"})`);
   }
+  const observedCommandNames = new Set(observedCommands.map((observation) => observation.command));
   return incoming.map((criterion, index) => {
     if (Object.keys(criterion).some((key) => !["id", "status", "evidence_refs"].includes(key))) die(`criterion ${ids[index]} may update only id, status, and evidence_refs`);
     if (criterion.status !== "pass") die(`criterion ${ids[index]} must have status pass for a passing tests-evidence claim`);
     const refs = normalizeEvidenceRefs(criterion.evidence_refs, `criterion ${ids[index]} evidence_refs`);
     if (refs.length === 0) die(`criterion ${ids[index]} requires reviewable evidence_refs`);
-    requireObservedCommandRefs(refs, observedCommands, `criterion ${ids[index]}`);
-    return { ...expectedById.get(ids[index])!, status: "pass", evidence_refs: refs, identity_version: 2, verified_at: verifiedAt };
+    requireObservedCommandRefs(refs, observedCommandNames, `criterion ${ids[index]}`);
+    const referencedCommands = new Set(refs.filter((ref) => ref.kind === "command").map(commandFromEvidenceRef));
+    const criterionObservedCommands = observedCommands.filter((observation) => referencedCommands.has(observation.command));
+    return markCanonicallyObservedCriterion({ ...expectedById.get(ids[index])!, status: "pass", evidence_refs: refs, identity_version: 2, verified_at: verifiedAt, _observed_commands: criterionObservedCommands });
   });
 }
 
@@ -3275,10 +3339,20 @@ function readBundleState(dir: string): { checks: AnyObj[]; criteria: AnyObj[]; c
   const acceptance = loadJson(path.join(dir, "acceptance.json"));
   const bundledCriteria = criteriaFromBundle(dir);
   const acceptedCriteria = Array.isArray(acceptance.criteria) ? acceptance.criteria as AnyObj[] : [];
+  if (acceptedCriteria.some((criterion) => !hasNonEmptyString(criterion?.id) || !hasNonEmptyString(criterion?.description))) {
+    die("acceptance.json contains a criterion without a non-empty id and description — refusing to rebuild trust.bundle without durable acceptance identity");
+  }
+  const acceptedIds = acceptedCriteria.map((criterion) => String(criterion.id));
+  if (new Set(acceptedIds).size !== acceptedIds.length) {
+    die("acceptance.json criterion ids must be unique — refusing to rebuild trust.bundle with ambiguous acceptance identity");
+  }
   const contractSignature = (criteria: AnyObj[]): string => JSON.stringify(criteria.map((criterion) => ({
     id: criterion.id ?? null,
     description: criterion.description ?? null,
   })));
+  // Planning may establish or refine a valid criterion contract after session startup. Once the
+  // signatures agree, the bundle remains authoritative for verified status and observed-command
+  // provenance; artifact status edits alone cannot manufacture completion.
   const criteria = acceptedCriteria.length > 0 && contractSignature(acceptedCriteria) !== contractSignature(bundledCriteria)
     ? acceptedCriteria
     : (bundledCriteria.length > 0 ? bundledCriteria : acceptedCriteria);
@@ -3336,14 +3410,28 @@ function criteriaFromBundle(dir: string): AnyObj[] {
     .map((claim: AnyObj) => {
       const md = claim.metadata && typeof claim.metadata === "object" && !Array.isArray(claim.metadata) ? claim.metadata as AnyObj : {};
       const saved = md.criterion && typeof md.criterion === "object" && !Array.isArray(md.criterion) ? md.criterion as AnyObj : {};
-      return {
+      const criterion = {
         id: typeof saved.id === "string" ? saved.id : String(claim.subjectId || "").split("/").pop(),
         description: typeof saved.description === "string" ? saved.description : (claim.fieldOrBehavior || ""),
         status: typeof saved.status === "string" ? saved.status : (claim.value ?? "not_verified"),
         evidence_refs: Array.isArray(saved.evidence_refs) ? saved.evidence_refs : [],
+        ...(Array.isArray(saved.observed_commands) ? { _observed_commands: saved.observed_commands } : {}),
         ...(typeof saved.verified_at === "string" ? { verified_at: saved.verified_at } : {}),
         ...(saved.identity_version === 2 ? { identity_version: 2 } : {}),
       };
+      const observedCommands = Array.isArray(saved.observed_commands) ? saved.observed_commands as AnyObj[] : [];
+      const evidence = Array.isArray(bundle.evidence) ? bundle.evidence.filter((item: AnyObj) => item?.claimId === claim.id) : [];
+      const event = Array.isArray(bundle.events) ? bundle.events.find((item: AnyObj) => item?.claimId === claim.id && item.status === "verified") : null;
+      const evidenceIds = new Set(evidence.map((item: AnyObj) => item.id));
+      const hasCanonicalEvidence = claim.value === "pass"
+        && claim.status === "verified"
+        && observedCommands.length > 0
+        && evidence.length === observedCommands.length
+        && evidence.every((item: AnyObj) => item.evidenceType === "test_output" && item.passing === true && observedCommands.some((observation: AnyObj) => observation.command === item.execution?.label))
+        && Array.isArray(event?.evidenceIds)
+        && event.evidenceIds.length === evidenceIds.size
+        && event.evidenceIds.every((id: string) => evidenceIds.has(id));
+      return hasCanonicalEvidence ? markCanonicallyObservedCriterion(criterion) : criterion;
     })
     .filter((criterion: AnyObj) => typeof criterion.id === "string" && criterion.id.length > 0);
 }
@@ -3721,7 +3809,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   // SAME expectation id supersedes the earlier check for that expectation (mergeChecksById); a
   // gate claim against a different expectation is additive.
   const _existingState = readBundleState(dir);
-  const criteria = mustRunTests ? completePassingCriteria(_existingState.criteria, opts(p, "criterion-json"), observedCommandNames, ts) : _existingState.criteria;
+  const criteria = mustRunTests ? completePassingCriteria(_existingState.criteria, opts(p, "criterion-json"), observedCommands, ts) : _existingState.criteria;
   if (mustRunTests) {
     const liveCritiques = _existingState.critiques.filter((critique) => !critique.superseded_by);
     if (liveCritiques.length === 0 || liveCritiques.some((critique) => !critiqueIsCleanAndCurrent(dir, critique))) {
