@@ -226,8 +226,9 @@ under `stop_condition.required`. The same ownership is projected publicly as
 typed `action.artifact_bindings`; consumers derive required targets by selecting
 bindings that own an unresolved required expectation. These bindings are
 product-owned gate semantics, not grader hints or consumer-authored guidance.
-An empty `expectation_ids` list keeps an artifact declared and observable but
-never gate-required.
+For file artifacts, an empty `expectation_ids` list keeps the artifact declared
+and observable but never gate-required. Trust slices must own at least one
+expectation because ownership determines their recording interface.
 Operation bindings must resolve through the
 canonical public operation catalog, not merely a self-declared string. Artifact
 refs are either lexically safe session-relative paths or validated

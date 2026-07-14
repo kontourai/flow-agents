@@ -137,6 +137,7 @@ function parseArtifactBindings(value: unknown, artifacts: string[], expectationI
     const record = entry as Record<string, unknown>;
     if (Object.keys(record).some((key) => key !== "artifact" && key !== "expectation_ids") || typeof record.artifact !== "string" || !artifacts.includes(record.artifact)
       || !Array.isArray(record.expectation_ids) || !record.expectation_ids.every((id) => typeof id === "string" && expectationIds.includes(id)) || new Set(record.expectation_ids).size !== record.expectation_ids.length) return fail(errors, `${manifestPath}: flow_step_actions[${actionIndex}].artifact_bindings[${bindingIndex}] must bind one declared artifact to declared expectation_ids`);
+    if (record.artifact.startsWith("trust.bundle#") && record.expectation_ids.length === 0) return fail(errors, `${manifestPath}: flow_step_actions[${actionIndex}].artifact_bindings[${bindingIndex}] trust slice must own at least one expectation to derive its recording interface`);
     bindings.push({ artifact: record.artifact, expectation_ids: record.expectation_ids as string[] });
   }
   if (!sameStringSet(bindings.map((binding) => binding.artifact), artifacts)) return fail(errors, `${manifestPath}: flow_step_actions[${actionIndex}].artifact_bindings must bind every artifact exactly once`);

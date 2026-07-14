@@ -167,6 +167,24 @@ test("flow step action metadata preserves optional artifacts without expectation
   assert.deepEqual(result.entries[0].artifact_bindings, [{ artifact: "optional.md", expectation_ids: [] }]);
 });
 
+test("flow step action metadata rejects unowned trust slices without a recording interface", () => {
+  const result = parseKitFlowStepActions({
+    flow_step_actions: [{
+      flow_id: "builder.build",
+      step_id: "observe",
+      skills: [],
+      operations: [],
+      implementation_allowed: false,
+      artifacts: ["trust.bundle#optional"],
+      expectation_ids: [],
+      expectation_bindings: [],
+      artifact_bindings: [{ artifact: "trust.bundle#optional", expectation_ids: [] }],
+    }],
+  }, "fixture/kit.json");
+
+  assert.match(result.errors.join("\n"), /trust slice must own at least one expectation/);
+});
+
 test("Builder action validation rejects expectation omissions, unsafe artifacts, and unknown operations", async () => {
   async function errorsFor(name, mutate) {
     const root = tempRoot(`flow-agents-action-contract-${name}-`);
