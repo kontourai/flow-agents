@@ -575,6 +575,7 @@ echo "{\"hook_event_name\":\"UserPromptSubmit\",\"cwd\":\"$REPO5\",\"prompt\":\"
 if grep -qF 'GUIDANCE_CONFLICT:' "$TMPDIR_EVAL/canonical-conflict.out" \
   && grep -qF 'No executable workflow recommendation is available' "$TMPDIR_EVAL/canonical-conflict.out" \
   && ! grep -qF 'KIT WORKFLOW ROUTE' "$TMPDIR_EVAL/canonical-conflict.out" \
+  && ! grep -qF 'resume the next step' "$TMPDIR_EVAL/canonical-conflict.out" \
   && ! grep -qF 'Start the canonical Flow run' "$TMPDIR_EVAL/canonical-conflict.out"; then
   _pass "canonical disagreement emits a typed conflict and no executable fallback"
 else
@@ -632,27 +633,35 @@ else
   _fail "installed Builder action projection is incomplete or inaccurate"
 fi
 
-# A terminal canonical state is still authoritative but cannot recommend another action.
+# A production-shaped canceled projection remains canonical and cannot expose its parked step action.
 node - "$TASK_DIR5/state.json" "$FLOW_DIR5/state.json" <<'NODE'
 const fs = require('fs');
 for (const file of process.argv.slice(2)) {
   const value = JSON.parse(fs.readFileSync(file, 'utf8'));
   if (value.flow_run) {
-    value.flow_run.status = 'completed';
+    value.status = 'canceled';
+    value.flow_run.status = 'canceled';
+    value.flow_run.current_step = 'execute';
     value.next_action = {status: 'done', summary: 'Legacy projection says done.'};
   }
-  else value.status = 'completed';
+  else {
+    value.status = 'canceled';
+    value.current_step = 'execute';
+  }
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 NODE
 echo "{\"hook_event_name\":\"SessionStart\",\"cwd\":\"$REPO5\"}" | \
   FLOW_AGENTS_ACTOR="canonical-actor" node "$ROOT/scripts/hooks/workflow-steering.js" > "$TMPDIR_EVAL/canonical-terminal.out" 2>&1
-if grep -qF 'status:completed' "$TMPDIR_EVAL/canonical-terminal.out" \
-  && grep -qF 'This canonical run is terminal' "$TMPDIR_EVAL/canonical-terminal.out" \
+if grep -qF 'status:canceled' "$TMPDIR_EVAL/canonical-terminal.out" \
+  && grep -qF 'no gate action or implementation is authorized' "$TMPDIR_EVAL/canonical-terminal.out" \
+  && ! grep -qF 'Gate skills:' "$TMPDIR_EVAL/canonical-terminal.out" \
+  && ! grep -qF 'Gate operations:' "$TMPDIR_EVAL/canonical-terminal.out" \
+  && ! grep -qF 'Implementation allowed:' "$TMPDIR_EVAL/canonical-terminal.out" \
   && ! grep -qF 'KIT WORKFLOW ROUTE' "$TMPDIR_EVAL/canonical-terminal.out"; then
-  _pass "terminal Flow SessionStart supersedes legacy done suppression"
+  _pass "canceled Flow SessionStart suppresses parked gate actions and legacy done routing"
 else
-  _fail "terminal Flow SessionStart was suppressed or produced noncanonical routing: $(cat "$TMPDIR_EVAL/canonical-terminal.out")"
+  _fail "canceled Flow SessionStart was dropped or exposed executable guidance: $(cat "$TMPDIR_EVAL/canonical-terminal.out")"
 fi
 
 # A projected run with missing canonical artifacts is a conflict, never a legacy session.
@@ -661,6 +670,7 @@ echo "{\"hook_event_name\":\"SessionStart\",\"cwd\":\"$REPO5\"}" | \
   FLOW_AGENTS_ACTOR="canonical-actor" node "$ROOT/scripts/hooks/workflow-steering.js" > "$TMPDIR_EVAL/canonical-missing.out" 2>&1
 if grep -qF 'GUIDANCE_CONFLICT:' "$TMPDIR_EVAL/canonical-missing.out" \
   && ! grep -qF 'NON-CANONICAL FALLBACK' "$TMPDIR_EVAL/canonical-missing.out" \
+  && ! grep -qF 'RESUME:' "$TMPDIR_EVAL/canonical-missing.out" \
   && ! grep -qF 'KIT WORKFLOW ROUTE' "$TMPDIR_EVAL/canonical-missing.out"; then
   _pass "missing canonical artifacts fail closed without legacy routing"
 else

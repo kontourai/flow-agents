@@ -71,6 +71,7 @@ const ACTIVE_STATE_STATUSES = new Set([
   'not_verified',
   'failed',
   'delivered',
+  'canceled',
 ]);
 
 function findRepoRoot(startDir) {
@@ -300,12 +301,13 @@ function canonicalGuidance(root, current) {
     return guidanceConflict(`canonical Flow status ${state.status} is unsupported for guidance`);
   }
 
-  const resolved = flowStepAction(state.definition_id, state.current_step);
+  const terminal = CANONICAL_TERMINAL_STATUSES.has(state.status);
+  const resolved = terminal ? { action: null, error: null } : flowStepAction(state.definition_id, state.current_step);
   if (resolved.error) return guidanceConflict(resolved.error);
   const identityPayload = { state, definition: canonical.definition, action: resolved.action };
   const identity = crypto.createHash('sha256').update(JSON.stringify(identityPayload)).digest('hex');
   return {
-    kind: CANONICAL_TERMINAL_STATUSES.has(state.status) ? 'terminal' : 'canonical',
+    kind: terminal ? 'terminal' : 'canonical',
     state,
     action: resolved.action,
     identity,
@@ -319,18 +321,22 @@ function canonicalGuidanceLines(guidance) {
       'No executable workflow recommendation is available until canonical Flow and Flow Agents state agree.',
     ];
   }
-  const { state, action } = guidance;
+  const { state } = guidance;
   const lines = [
     `Canonical Flow: ${safeStateText(state.definition_id, 120)}@${safeStateText(state.definition_version, 80)}/${safeStateText(state.run_id, 120)} status:${state.status} current_step:${safeStateText(state.current_step, 120)}.`,
     `Canonical guidance identity: sha256:${guidance.identity}.`,
-    `Gate action source: installed kit ${safeStateText(action.kit_id, 80)}.`,
   ];
+  if (guidance.kind === 'terminal') {
+    lines.push('This canonical run is terminal; no gate action or implementation is authorized.');
+    return lines;
+  }
+  const { action } = guidance;
+  lines.push(`Gate action source: installed kit ${safeStateText(action.kit_id, 80)}.`);
   if (action.skills.length) lines.push(`Gate skills: ${action.skills.join(' -> ')}.`);
   if (action.operations.length) lines.push(`Gate operations: ${action.operations.join(' -> ')}.`);
   if (!action.skills.length && !action.operations.length) lines.push('Gate action: no skill or operation declared.');
   lines.push(`Implementation allowed: ${action.implementation_allowed ? 'yes' : 'no'}.`);
-  if (guidance.kind === 'terminal') lines.push('This canonical run is terminal; do not execute another workflow action.');
-  else if (state.status === 'blocked') lines.push('The run is blocked; clear or route the blocker before executing the gate action.');
+  if (state.status === 'blocked') lines.push('The run is blocked; clear or route the blocker before executing the gate action.');
   else if (state.status === 'needs_decision') lines.push('The run needs a decision; record it before executing the gate action.');
   else if (state.status === 'paused') lines.push('The run is paused; resume it before executing the gate action.');
   else lines.push(`Continue only with the declared action for ${safeStateText(state.current_step, 120)}; do not restart or route to another step.`);
@@ -534,9 +540,7 @@ function resumeSteering(root, current, resolvedGuidance = null) {
 
     const guidance = resolvedGuidance || canonicalGuidance(root, current);
     if (guidance.kind !== 'legacy') {
-      return [`RESUME: ${slug} status:${safeStateText(state.status, 60)} phase:${safeStateText(state.phase, 60)}`]
-        .concat(canonicalGuidanceLines(guidance))
-        .join('\n');
+      return canonicalGuidanceLines(guidance).join('\n');
     }
     if (next.status === 'done' || state.status === 'archived' || state.status === 'accepted') return '';
 
@@ -726,9 +730,11 @@ function run(rawInput) {
     if (event === 'UserPromptSubmit' && current) {
       const stateHint = stateSteering(root, current, guidance);
       if (stateHint) {
-        hints.push(stateNeedsAmbientSteering(current.payload)
-          ? 'WORKFLOW STATE ATTENTION: current sidecars show unresolved workflow state at turn start.'
-          : 'WORKFLOW STATE: an active task is in progress — re-ground the recorded goal and resume the next step before doing anything else.');
+        if (guidance.kind === 'legacy') {
+          hints.push(stateNeedsAmbientSteering(current.payload)
+            ? 'WORKFLOW STATE ATTENTION: current sidecars show unresolved workflow state at turn start.'
+            : 'WORKFLOW STATE: an active task is in progress — re-ground the recorded goal and resume the next step before doing anything else.');
+        }
         hints.push(stateHint);
         const contextHint = contextMapSteering(root);
         if (contextHint) hints.push(contextHint);
