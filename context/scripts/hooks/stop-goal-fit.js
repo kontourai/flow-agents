@@ -996,7 +996,12 @@ function verifyCommandLogChain(artifactDir) {
     sources.push(entry.source);
     parentSources.set(chain.prevHash, sources);
     if (sources.length > 1) {
-      if (!sources.every(s => s === 'postToolUse-capture')) {
+      // #634: the canonical writer's own execution observations
+      // ('canonical-writer-execution', appended by record-gate-claim under the
+      // same lockfile) legitimately race the PostToolUse capture on the same
+      // tip inside the lock's fail-open window. Both sources are benign fork
+      // siblings; any OTHER source on a shared parent stays tamper.
+      if (!sources.every(s => s === 'postToolUse-capture' || s === 'canonical-writer-execution')) {
         return { status: 'broken', brokenAt: i, forkAt: null };
       }
       if (firstForkAt === null) firstForkAt = i;

@@ -3573,6 +3573,61 @@ else
   _fail "compose: record-gate-claim (selected-work) failed: $(cat "$TMPDIR_EVAL/compose-gate1.out" "$TMPDIR_EVAL/compose-gate1.err")"
 fi
 
+# ─── #634: writer-observed execution — die-before-append + append-on-success ────────────────
+# A rejected expected-status mismatch must leave command-log.jsonl untouched (no writer
+# observation may exist for a claim that was refused); a successful gate claim with
+# --command must append a chain-linked canonical-writer-execution observation.
+CMDLOG_634="$COMPOSE_DIR/command-log.jsonl"
+CMDLOG_634_BEFORE=""
+[[ -f "$CMDLOG_634" ]] && CMDLOG_634_BEFORE="$(shasum -a 256 "$CMDLOG_634" | cut -d' ' -f1)"
+if flow_agents_node "$WRITER" record-gate-claim "$COMPOSE_DIR" \
+  --actor compose-actor \
+  --status pass \
+  --summary "634 mismatch: claiming pass while the command fails must die before any append" \
+  --command "test -f .kontourai/flow-agents/compose-270/definitely-not-a-real-file-634" \
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/compose-270/compose-270--pull-work.md","summary":"634 mismatch fixture."}' \
+  --timestamp "2026-07-14T15:00:00Z" >"$TMPDIR_EVAL/wo-mismatch.out" 2>"$TMPDIR_EVAL/wo-mismatch.err"; then
+  _fail "#634: record-gate-claim accepted a passing claim for a failing command"
+else
+  if grep -q "failed (exit" "$TMPDIR_EVAL/wo-mismatch.err"; then
+    _pass "#634: expected-status mismatch dies with the exit-code diagnostic"
+  else
+    _fail "#634: mismatch died with an unexpected diagnostic: $(cat "$TMPDIR_EVAL/wo-mismatch.err")"
+  fi
+fi
+CMDLOG_634_AFTER=""
+[[ -f "$CMDLOG_634" ]] && CMDLOG_634_AFTER="$(shasum -a 256 "$CMDLOG_634" | cut -d' ' -f1)"
+if [[ "$CMDLOG_634_BEFORE" == "$CMDLOG_634_AFTER" ]]; then
+  _pass "#634: rejected mismatch left command-log.jsonl byte-identical (die-before-append)"
+else
+  _fail "#634: rejected mismatch modified command-log.jsonl"
+fi
+
+if flow_agents_node "$WRITER" record-gate-claim "$COMPOSE_DIR" \
+  --actor compose-actor \
+  --status pass \
+  --summary "634 success: writer observation must append on a genuinely passing command" \
+  --command "test -f .kontourai/flow-agents/compose-270/compose-270--pull-work.md" \
+  --evidence-ref-json '{"kind":"artifact","file":".kontourai/flow-agents/compose-270/compose-270--pull-work.md","summary":"634 success fixture."}' \
+  --timestamp "2026-07-14T15:01:00Z" >"$TMPDIR_EVAL/wo-success.out" 2>"$TMPDIR_EVAL/wo-success.err"; then
+  if [[ -f "$CMDLOG_634" ]] && node -e "
+    const fs = require('fs');
+    const entries = fs.readFileSync(process.argv[1], 'utf8').split('\n').filter(Boolean).map(JSON.parse);
+    const writer = entries.filter((e) => e.source === 'canonical-writer-execution');
+    if (writer.length === 0) process.exit(1);
+    const last = writer[writer.length - 1];
+    if (last.observedResult !== 'pass' || last.exitCode !== 0) process.exit(1);
+    if (!last._chain || typeof last._chain.hash !== 'string') process.exit(1);
+  " "$CMDLOG_634"; then
+    _pass "#634: successful gate claim appended a chain-linked canonical-writer-execution pass"
+  else
+    _fail "#634: no chain-linked writer observation found after a successful gate claim"
+  fi
+else
+  _fail "#634: success-path record-gate-claim failed: $(cat "$TMPDIR_EVAL/wo-success.err")"
+fi
+
+
 if node --input-type=module <<NODEOF 2>"$TMPDIR_EVAL/compose-gate1-assert.err"
 import { readFileSync } from 'node:fs';
 const bundle = JSON.parse(readFileSync('${COMPOSE_DIR}/trust.bundle', 'utf8'));
@@ -5091,8 +5146,6 @@ NODEOF
 else
   _fail "mutation-test setup: could not locate the compiled build/src/cli/workflow-sidecar.js to mutate (ran 'npm run build' first?)"
 fi
-
-
 
 if [[ "$errors" -eq 0 ]]; then
   echo "Workflow sidecar writer integration passed."

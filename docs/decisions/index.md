@@ -36,3 +36,4 @@ Numbered ADRs under `docs/adr/` are frozen history and are not listed here.
 | [typescript-source-policy](./typescript-source-policy.md) | current | TypeScript-first source policy |
 | [workflow-enforcement](./workflow-enforcement.md) | current | Workflow Enforcement |
 | [workflow-trust-state](./workflow-trust-state.md) | needs-decision | Workflow trust state |
+| [writer-observed-execution](./writer-observed-execution.md) | current | Writer-observed execution |

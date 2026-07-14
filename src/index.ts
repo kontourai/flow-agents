@@ -163,6 +163,8 @@ export {
 } from "./continuation-driver.js";
 export type {
   ContinuationBarrier,
+  ContinuationContextPolicy,
+  ContinuationContextStrategy,
   ContinuationAcceptedTurn,
   ContinuationDriverEvent,
   ContinuationDriverLockLease,

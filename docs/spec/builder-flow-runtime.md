@@ -290,11 +290,16 @@ exception applies, or every effective expectation is optional. This advances
 those gates without prematurely evaluating ordinary missing-required gates, and
 once the run advances no obsolete action skill remains required.
 
-The envelope and its prior-turn delta are additive fields of
+The envelope, its prior-turn delta, and `context_strategy` are additive fields of
 `ContinuationTurnRequest` schema `1.0`; adapters that only consume the existing
-request fields remain compatible. When `workflow drive` produces its optional
+request fields remain compatible. `context_strategy` tells a capable adapter to
+start a `new` context or `resume` the mission context and identifies the handoff
+as canonical. The mission-bound policy defaults to warm continuation; selecting
+fresh context changes only transcript routing, never the Flow contract, gate
+requirements, or evidence authority. When `workflow drive` produces its optional
 signed request/result attestation, the exact request object (including the
-envelope) is included in the signed payload without transformation.
+envelope and context strategy) is included in the signed payload without
+transformation.
 # Builder Lifecycle Authority
 
 The canonical Flow run owns pause, resume, and cancellation. The current assignment actor may

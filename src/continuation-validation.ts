@@ -409,6 +409,7 @@ export function validateState(state: ContinuationDriverState): void {
   if (state.schema_version !== "1.0") throw new Error("continuation driver state schema_version must be 1.0");
   assertMaxTurns(state.max_turns);
   if (state.adapter_command_identity !== null && (typeof state.adapter_command_identity !== "string" || state.adapter_command_identity.length === 0)) throw new Error("continuation driver adapter_command_identity must be a non-empty string or null");
+  if (state.context_policy !== undefined && !new Set(["warm", "fresh"]).has(state.context_policy)) throw new Error("continuation driver context_policy must be warm or fresh");
   if (!Number.isSafeInteger(state.turns_started) || state.turns_started < 0 || state.turns_started > state.max_turns) throw new Error("continuation driver turns_started is outside its mission budget");
   if (state.active_turn_step !== undefined && state.active_turn_step !== null && (typeof state.active_turn_step !== "string" || state.active_turn_step.length === 0)) throw new Error("continuation driver active_turn_step must be a non-empty string or null");
   if (state.active_turn_public_key_digest !== undefined && state.active_turn_public_key_digest !== null && (typeof state.active_turn_public_key_digest !== "string" || !/^[a-f0-9]{64}$/.test(state.active_turn_public_key_digest))) throw new Error("continuation driver active_turn_public_key_digest must be a SHA-256 hex digest or null");
@@ -427,7 +428,18 @@ function validateAcceptedTurn(value: ContinuationAcceptedTurn): void {
   if (!value || typeof value !== "object" || value.schema_version !== "1.0" || typeof value.turn_id !== "string" || !Number.isSafeInteger(value.iteration)
     || value.iteration < 1 || value.request?.iteration !== value.iteration || typeof value.captured_at !== "string" || !Number.isFinite(Date.parse(value.captured_at))) throw new Error("continuation accepted-turn capture is malformed");
   validateTurnResult(value.result);
+  if (value.request.context_strategy !== undefined) validateContextStrategy(value.request.context_strategy);
   if (value.progress !== null) validatePriorProgress(value.progress);
+}
+
+function validateContextStrategy(value: unknown): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("continuation context strategy is malformed");
+  const strategy = value as Record<string, unknown>;
+  if (strategy.handoff !== "canonical" || !new Set(["new", "resume"]).has(String(strategy.thread))
+    || !new Set(["mission_start", "configured_policy"]).has(String(strategy.reason))
+    || Object.keys(strategy).some((key) => !new Set(["thread", "handoff", "reason"]).has(key))) {
+    throw new Error("continuation context strategy is malformed");
+  }
 }
 
 function validateProgressSnapshot(value: GateActionProgressSnapshot): void {
