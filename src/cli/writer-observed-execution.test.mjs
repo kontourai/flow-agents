@@ -71,13 +71,29 @@ test("chain verification tolerates writer/hook fork siblings but rejects any thi
   const writerSibling = { command: "npm test", observedResult: "pass", exitCode: 0, capturedAt: NOW, source: WRITER_OBSERVATION_SOURCE, writer: { output_sha256: "d".repeat(64) } };
   writerSibling._chain = { seq: 1, prevHash: baseHash, hash: chain.computeChainHash(baseHash, { command: writerSibling.command, observedResult: writerSibling.observedResult, exitCode: writerSibling.exitCode, capturedAt: writerSibling.capturedAt, source: writerSibling.source, writer: writerSibling.writer }) };
 
-  const forged = { command: "npm test", observedResult: "pass", exitCode: 0, capturedAt: NOW, source: "manual-injection" };
-  forged._chain = { seq: 1, prevHash: baseHash, hash: chain.computeChainHash(baseHash, { command: forged.command, observedResult: forged.observedResult, exitCode: forged.exitCode, capturedAt: forged.capturedAt, source: forged.source }) };
-
   const writeLog = (entries) => fs.writeFileSync(path.join(dir, "command-log.jsonl"), entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
   writeLog([base, hookSibling, writerSibling]);
   assert.equal(verifyCommandLogChain(dir).status, "forked");
-  writeLog([base, hookSibling, forged]);
+
+  // The benign set is EXACTLY {postToolUse-capture, canonical-writer-execution}: any other
+  // source on a shared parent is tamper, however plausible its name (review finding — a
+  // single pinned name would not catch the set being widened further).
+  for (const source of ["manual-injection", "canonical-writer-execution-v2", "postToolUse-capture2", "orchestrator-attest", ""]) {
+    const forged = { command: "npm test", observedResult: "pass", exitCode: 0, capturedAt: NOW, source };
+    forged._chain = { seq: 1, prevHash: baseHash, hash: chain.computeChainHash(baseHash, { command: forged.command, observedResult: forged.observedResult, exitCode: forged.exitCode, capturedAt: forged.capturedAt, source: forged.source }) };
+    writeLog([base, hookSibling, forged]);
+    assert.equal(verifyCommandLogChain(dir).status, "broken", `source "${source}" must poison the fork`);
+  }
+});
+
+test("mutating writer metadata after the fact breaks the entry's self-hash", (t) => {
+  const dir = tempSession(t);
+  appendWriterObservedCommands(dir, [{ command: "npm run test:unit", exit_code: 0, output_sha256: "f".repeat(64) }], NOW);
+  assert.equal(verifyCommandLogChain(dir).status, "ok");
+  const entries = readEntries(dir);
+  // An attacker upgrading the recorded observation (or its provenance) cannot keep the hash.
+  entries[0].writer.output_sha256 = "0".repeat(64);
+  fs.writeFileSync(path.join(dir, "command-log.jsonl"), entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
   assert.equal(verifyCommandLogChain(dir).status, "broken");
 });
 

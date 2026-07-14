@@ -253,7 +253,32 @@ test("a hook-observed fail is never buried by a writer-observed pass, in either 
   ]) {
     const fold = reduceCaptureLogByCommand(entries);
     assert.equal(fold.get("npm run test:unit").observedResult, "fail");
+    // Review finding (#634): fail/0 would be contradictory evidence (isError:true, exitCode:0) —
+    // the exit code must travel with the winning status, never a losing entry's.
+    assert.equal(fold.get("npm run test:unit").exitCode, 1);
   }
+});
+
+test("when both entries carry the winning status the newer non-null exit code wins", () => {
+  const sticky = reduceCaptureLogByCommand([
+    { command: "npm test", observedResult: "fail", exitCode: 2, source: "postToolUse-capture" },
+    { command: "npm test", observedResult: "fail", exitCode: null, source: "postToolUse-capture" },
+  ]);
+  assert.equal(sticky.get("npm test").exitCode, 2);
+  const newer = reduceCaptureLogByCommand([
+    { command: "npm test", observedResult: "fail", exitCode: 2, source: "postToolUse-capture" },
+    { command: "npm test", observedResult: "fail", exitCode: 3, source: "canonical-writer-execution" },
+  ]);
+  assert.equal(newer.get("npm test").exitCode, 3);
+});
+
+test("an ambiguous entry's null exit code never displaces the winning pass's code", () => {
+  const fold = reduceCaptureLogByCommand([
+    { command: "npm test", observedResult: "pass", exitCode: 0, source: "canonical-writer-execution" },
+    { command: "npm test", observedResult: "ambiguous", exitCode: null, source: "postToolUse-capture" },
+  ]);
+  assert.equal(fold.get("npm test").observedResult, "pass");
+  assert.equal(fold.get("npm test").exitCode, 0);
 });
 
 test("a writer-observed fail is sticky like any other observed fail", () => {

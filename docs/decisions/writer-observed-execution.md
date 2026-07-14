@@ -17,10 +17,12 @@ evidence:
 for tests, a `local-process-exit` execution proof), it appends that observation to the same
 hash-chained `command-log.jsonl` the PostToolUse capture hook writes, under the same
 lockfile protocol, visibly attributed via `source: "canonical-writer-execution"`. The
-capture fold's effective precedence is **observed fail > observed pass > ambiguous**
-regardless of source, which yields the intended ordering hook-fail > hook-pass >
-writer-pass > ambiguous: a writer observation can lift ambiguity but can never bury an
-independently captured failure, and a writer-observed failure is itself sticky. The chain
+capture fold's precedence is **outcome-ranked, source-blind**: observed fail > observed
+pass > ambiguous, with the exit code always traveling with the winning status. The
+properties that matter follow: a writer pass can lift ambiguity but can never bury an
+independently captured failure (fail is sticky from either source), and a writer-observed
+failure likewise defeats any pass. Passes from the two sources rank equally — the
+distinction between them lives in the permanent `source` attribution, not in the fold. The chain
 fork classifier tolerates shared-parent siblings only when every sibling's source is
 `postToolUse-capture` or `canonical-writer-execution`; any other source on a shared parent
 remains tamper.

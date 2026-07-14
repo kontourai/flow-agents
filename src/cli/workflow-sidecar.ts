@@ -653,7 +653,20 @@ export function reduceCaptureLogByCommand(commandLog: AnyObj[] | undefined): Map
       else if (prev.observedResult === "pass" || result === "pass") merged = "pass";
       else merged = "ambiguous";
     }
-    const mergedExitCode = exitCode !== null ? exitCode : (prev ? prev.exitCode : null);
+    // #634 review finding: the exit code must travel with the WINNING status, never a
+    // losing entry's — [hook fail exit 1, writer pass exit 0] must fold to fail/1, not
+    // fail/0 (contradictory isError:true, exitCode:0 evidence). When both entries carry
+    // the winning status, prefer the newer non-null code.
+    let mergedExitCode: number | null;
+    if (!prev) {
+      mergedExitCode = exitCode;
+    } else if (merged === result && merged === prev.observedResult) {
+      mergedExitCode = exitCode !== null ? exitCode : prev.exitCode;
+    } else if (merged === result) {
+      mergedExitCode = exitCode;
+    } else {
+      mergedExitCode = prev.exitCode;
+    }
     captureByCommand.set(key, { observedResult: merged, exitCode: mergedExitCode });
   }
   return captureByCommand;
