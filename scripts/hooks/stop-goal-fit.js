@@ -2174,7 +2174,7 @@ async function analyze(root, now = Date.now()) {
     warnings.push(`workflow state: canonical Flow run remains active at step ${activeStep}; complete or explicitly cancel the run before stopping.`);
   }
   const blockRe = ((preExecution && !activeFlowRun) || terminal) ? HARD_BLOCK : FULL_BLOCK;
-  const activeTurnAuthority = activeFlowRun && canonicalFlow.state && !unsafeActiveCanonical
+  const activeTurnAuthority = activeFlowRun && !terminal && canonicalFlow.state && !unsafeActiveCanonical
     ? validateActiveTurnAuthority({
       sessionDir: latestArtifactDir,
       runId: process.env.FLOW_AGENTS_CONTINUATION_RUN_ID,
@@ -2196,10 +2196,20 @@ async function analyze(root, now = Date.now()) {
 }
 
 function isOrdinaryActiveGateWarning(warning, relPath) {
+  const normalizedRelPath = relPath.replaceAll('\\', '/');
+  const sessionSlug = path.posix.basename(path.posix.dirname(normalizedRelPath));
+  const canonicalActive = /^workflow state: canonical Flow run remains active at step .+; complete or explicitly cancel the run before stopping\.$/.test(warning);
+  if (HARD_BLOCK.test(warning) && !canonicalActive) return false;
+  const finalAcceptancePrefix = `${sessionSlug} Final Acceptance:`;
+  const currentFinalAcceptance = warning.startsWith(finalAcceptancePrefix)
+    && /^ \d+ acceptance criterion\/criteria still pending; complete CI\/merge\/docs before final delivery\.$/.test(warning.slice(finalAcceptancePrefix.length));
+  const surfaceUnavailable = /^surface unavailable — \d+ high\/critical-impact claim\(s\) could not be re-derived at gate; stored claim status is trusted without independent re-derivation \(fail-closed: high-assurance path\)\. Ensure @kontourai\/surface is installed and importable, or escalate for operator review\.$/.test(warning);
   return warning.startsWith(`${relPath} is still status:`)
     || /(?:^|\/)\.kontourai\/flow-agents\/[^/]+ workflow state:/.test(warning)
     || /(?:^|\/)\.kontourai\/flow-agents\/[^/]+ (?:next action|required skills|required operations|next command):/.test(warning)
-    || /canonical Flow run remains active at step .+; complete or explicitly cancel the run before stopping\.$/.test(warning);
+    || currentFinalAcceptance
+    || surfaceUnavailable
+    || canonicalActive;
 }
 
 function isHardStopWarning(warning, relPath, activeTurnAuthority) {

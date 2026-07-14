@@ -588,6 +588,18 @@ test("public workflow evidence accepts only live signed turn authority after ord
   fs.writeFileSync(path.join(session.projectRoot, "AGENTS.md"), "# Test Repo\n");
   fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--deliver.md`), "# Continuation\n\nstatus: executing\ntype: deliver\n");
   fs.writeFileSync(path.join(session.sessionDir, `${session.slug}--pull-work.md`), "# Pull Work\n\nSelected continuation fixture.\n");
+  writeJson(path.join(session.sessionDir, "acceptance.json"), {
+    schema_version: "1.0",
+    task_slug: session.slug,
+    source_request: "Advance a bounded continuation through public workflow evidence.",
+    criteria: [{
+      id: "AC-1",
+      description: "The complete continuation reaches its terminal workflow gate.",
+      status: "pending",
+      evidence_refs: [],
+    }],
+    goal_fit: { status: "pending", summary: "The bounded continuation is still active." },
+  });
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
   const unrelatedSlug = "unrelated-pointer-session";
   const unrelatedDir = path.join(session.artifactRoot, unrelatedSlug);
@@ -675,6 +687,7 @@ test("public workflow evidence accepts only live signed turn authority after ord
   assert.equal(authority.authorityValidation.valid, true, authority.authorityValidation.reason);
   assert.equal(authority.hookStatus, 0, `the blocking Stop hook returns control during the signed adapter turn: ${authority.hookStderr}`);
   assert.match(authority.hookStderr, /continuation driver active turn is authorized/);
+  assert.match(authority.hookStderr, /Final Acceptance: 1 acceptance criterion\/criteria still pending/);
   assert.equal(fs.existsSync(authorityFile), false, "adapter turn authority is removed after the child exits");
   const driverState = readJson(path.join(session.sessionDir, "continuation-driver", "state.json"));
   assert.equal(driverState.status, "budget_exhausted");
