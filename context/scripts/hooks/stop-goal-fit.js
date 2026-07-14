@@ -2197,7 +2197,18 @@ async function analyze(root, now = Date.now()) {
     if (activeTurnAuthority.valid && isOrdinaryActiveGateWarning(w, relPath)) return false;
     return blockingRe.test(w);
   });
-  return { warnings, blocking, activeFlowRun, activeTurnAuthority: activeTurnAuthority.valid, preExecution, gatePrefix: gateLabel(activeFlowStep), latestArtifactDir };
+  return {
+    warnings,
+    blocking,
+    activeFlowRun,
+    activeTurnAuthority: activeTurnAuthority.valid,
+    activeTurnIssuedStep: activeTurnAuthority.valid ? activeTurnAuthority.record.issued_step : null,
+    activeFlowCurrentStep: canonicalFlow.state?.current_step || null,
+    preExecution,
+    gatePrefix: gateLabel(activeFlowStep),
+    warningRelPath: relPath,
+    latestArtifactDir,
+  };
 }
 
 function isOrdinaryActiveGateWarning(warning, relPath) {
@@ -2597,9 +2608,26 @@ async function run(rawInput) {
   }
 
   const gatePrefix = result.gatePrefix || '[stop-gate]';
+  const relPath = result.warningRelPath || relative(root, result.latestArtifactDir || root);
+  const remediationWarnings = result.activeTurnAuthority && result.blocking
+    ? result.warnings.filter(w => isHardStopWarning(w, relPath, true))
+    : result.warnings;
+  // A signed continuation turn owns one issued gate action. When a real blocker
+  // requires another model pass, do not mix the next gate's advisory actions into
+  // that remediation prompt: smaller models reasonably treat every visible next
+  // action as authorized work and can cross the driver's fresh-context boundary.
+  const issuedStep = safeOneLine(result.activeTurnIssuedStep || 'unknown', 80);
+  const canonicalStep = safeOneLine(result.activeFlowCurrentStep || 'unknown', 80);
+  const repairBoundary = issuedStep !== canonicalStep
+    ? `Do not perform work for later canonical step "${canonicalStep}" in this turn.`
+    : `Remain within issued step "${issuedStep}" in this turn.`;
+  const repairScope = result.activeTurnAuthority && result.blocking
+    ? ` - continuation repair scope: this signed turn was issued for step "${issuedStep}"; repair only the hard blocker(s) below and return control to the driver. ${repairBoundary}`
+    : null;
   const message = [
     `${gatePrefix} Goal Fit warning:`,
-    ...result.warnings.flatMap(w => {
+    ...(repairScope ? [repairScope] : []),
+    ...remediationWarnings.flatMap(w => {
       const lines = [` - ${w}`];
       const guidance = remediationFor(w);
       if (guidance) lines.push(guidance);
@@ -2613,7 +2641,7 @@ async function run(rawInput) {
   }
 
   const maxBlocks = resolveMaxBlocks();
-  const count = bumpBlockStreak(root, reasonsHash(result.warnings));
+  const count = bumpBlockStreak(root, reasonsHash(remediationWarnings));
   if (count >= maxBlocks) {
     // AC2: never auto-release a HARD block (caught false-completion, capture contradiction,
     // tamper signal, gate misconfiguration, integrity failure). An agent burning through
@@ -2643,7 +2671,7 @@ async function run(rawInput) {
   }
   return {
     stdout: rawInput,
-    stderr: `${message}\n${gatePrefix} Stop blocked — ${result.warnings.length} evidence gap(s) (block ${count}; after ${maxBlocks} identical blocks I stop blocking and hand this to you)`,
+    stderr: `${message}\n${gatePrefix} Stop blocked — ${remediationWarnings.length} evidence gap(s) (block ${count}; after ${maxBlocks} identical blocks I stop blocking and hand this to you)`,
     exitCode: 2,
   };
 }

@@ -2888,7 +2888,15 @@ JSON
 then
   _fail "authorized continuation bypassed a real hook-owned validator finding"
 elif [[ "$?" -eq 2 ]] && grep -q 'sidecar validation:' "$TMPDIR_EVAL/authority-validator-finding.err"; then
-  _pass "authorized continuation preserves real hook-owned validator findings as hard blocks"
+  if grep -q 'issued for step "pull-work"' "$TMPDIR_EVAL/authority-validator-finding.err" \
+    && grep -q 'Do not perform work for later canonical step "design-probe"' "$TMPDIR_EVAL/authority-validator-finding.err" \
+    && ! grep -q 'next action:' "$TMPDIR_EVAL/authority-validator-finding.err" \
+    && ! grep -q 'required skills:' "$TMPDIR_EVAL/authority-validator-finding.err" \
+    && ! grep -q 'is still status:' "$TMPDIR_EVAL/authority-validator-finding.err"; then
+    _pass "authorized continuation preserves hard validation while constraining remediation to the issued step"
+  else
+    _fail "authorized continuation mixed later-gate advice into hard-block remediation: $(cat "$TMPDIR_EVAL/authority-validator-finding.err")"
+  fi
 else
   _fail "hook-owned validator finding returned an unexpected result: $(cat "$TMPDIR_EVAL/authority-validator-finding.err")"
 fi
