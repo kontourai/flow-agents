@@ -1,0 +1,13 @@
+{
+  "channels": {
+    "full": "active",
+    "analytics": "inactive"
+  },
+  "known_gaps": [
+    {
+      "class": "mcp_non_native_tools",
+      "ref": "flow-agents#492",
+      "note": "Fixture includes an MCP tool event whose payload channel is not guaranteed native capture coverage."
+    }
+  ]
+}

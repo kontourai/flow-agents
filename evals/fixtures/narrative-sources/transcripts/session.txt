@@ -1,0 +1,1 @@
+{"kind":"transcript-fixture","text":"Fixture transcript content remains resolvable after the raw transcript store is removed."}
