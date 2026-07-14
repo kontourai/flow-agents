@@ -1,5 +1,70 @@
 export const WORKFLOW_CRITIQUE_STATUSES = ["pass", "fail", "not_verified"] as const;
 
+export const EVIDENCE_REF_KINDS = ["source", "command", "artifact", "provider", "external"] as const;
+export const EVIDENCE_REF_FIELD_SCHEMAS = {
+  kind: { type: "string", enum: EVIDENCE_REF_KINDS },
+  url: { type: "string", minLength: 1 },
+  file: { type: "string", minLength: 1 },
+  line_start: { type: "integer", minimum: 1 },
+  line_end: { type: "integer", minimum: 1 },
+  excerpt: { type: "string", minLength: 1 },
+  summary: { type: "string", minLength: 1 },
+} as const;
+
+export const EVIDENCE_REF_RULES = {
+  source: [{ mode: "all", fields: ["file", "line_start", "line_end", "excerpt"] }],
+  artifact: [
+    { mode: "any", fields: ["file", "url"] },
+    { mode: "any", fields: ["summary", "excerpt"] },
+  ],
+  command: [{ mode: "any", fields: ["summary", "excerpt", "url"] }],
+  provider: [{ mode: "all", fields: ["url"] }],
+  external: [{ mode: "all", fields: ["url"] }],
+} as const;
+
+function evidenceRuleSchema(kind: keyof typeof EVIDENCE_REF_RULES): Record<string, unknown> {
+  const clauses = EVIDENCE_REF_RULES[kind].map((clause) => clause.mode === "all"
+    ? { required: [...clause.fields] }
+    : { anyOf: clause.fields.map((field) => ({ required: [field] })) });
+  return {
+    if: { properties: { kind: { const: kind } }, required: ["kind"] },
+    then: clauses.length === 1 ? clauses[0] : { allOf: clauses },
+  };
+}
+
+export const EVIDENCE_REF_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["kind"],
+  properties: EVIDENCE_REF_FIELD_SCHEMAS,
+  allOf: EVIDENCE_REF_KINDS.map((kind) => evidenceRuleSchema(kind)),
+  examples: [
+    { kind: "artifact", file: "<project-relative-artifact-path>", summary: "<what this artifact proves>" },
+    { kind: "command", summary: "<command result and what it proves>" },
+  ],
+} as const;
+
+export const WORKFLOW_EVIDENCE_PARAMETERS = [
+  { name: "status", flag: "--status", required: true, allowed_values: ["pass", "fail", "not_verified"] },
+  { name: "summary", flag: "--summary", required: true },
+  { name: "evidence_ref_json", flag: "--evidence-ref-json", required: true, repeatable: true, value_schema_ref: "#/public_interfaces/schemas/evidence_ref_json" },
+  { name: "route_reason", flag: "--route-reason", required: false },
+  { name: "criterion_json", flag: "--criterion-json", required: false, repeatable: true },
+  { name: "accepted_gap_reason", flag: "--accepted-gap-reason", required: false },
+  { name: "waived_by", flag: "--waived-by", required: false },
+  { name: "command", flag: "--command", required: false, repeatable: true },
+] as const;
+
+export const WORKFLOW_CRITIQUE_PARAMETERS = [
+  { name: "id", flag: "--id", required: false },
+  { name: "verdict", flag: "--verdict", required: true, allowed_values: WORKFLOW_CRITIQUE_STATUSES },
+  { name: "summary", flag: "--summary", required: true },
+  { name: "lane_json", flag: "--lane-json", required: true, repeatable: true },
+  { name: "artifact_ref", flag: "--artifact-ref", required: false, repeatable: true, required_when: { parameter: "verdict", equals: "pass" } },
+  { name: "finding_json", flag: "--finding-json", required: false, repeatable: true },
+  { name: "timestamp", flag: "--timestamp", required: false },
+] as const;
+
 export const PUBLISH_CHANGE_OPERATION = "publish-change" as const;
 
 export const PUBLISH_CHANGE_OPERATION_PROTOCOL = {

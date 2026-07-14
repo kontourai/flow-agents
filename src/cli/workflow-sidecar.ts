@@ -14,7 +14,12 @@ import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { runObservedCommand } from "../lib/observed-command.js";
 import { captureReviewWorkspaceSnapshot, startBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
-import { WORKFLOW_CRITIQUE_STATUSES } from "./public-contracts.js";
+import {
+  EVIDENCE_REF_FIELD_SCHEMAS,
+  EVIDENCE_REF_KINDS,
+  EVIDENCE_REF_RULES,
+  WORKFLOW_CRITIQUE_STATUSES,
+} from "./public-contracts.js";
 // #291 Wave 1 Task 1.1 exports: ensure-session's ownership guard reuses the EXACT same
 // assignment ⋈ liveness join / claim / supersede logic #290 already ships for the
 // `assignment-provider` CLI, rather than reimplementing a second, parallel join (static ESM
@@ -2444,19 +2449,28 @@ function hasPositiveInteger(value: unknown): boolean {
   return Number.isInteger(value) && Number(value) >= 1;
 }
 export function validateEvidenceRef(ref: AnyObj, label: string): AnyObj {
-  if (!["source", "command", "artifact", "provider", "external"].includes(ref.kind)) die(`${label} entry kind must be one of: source, command, artifact, provider, external`);
-  for (const key of Object.keys(ref)) if (!["kind", "url", "file", "line_start", "line_end", "excerpt", "summary"].includes(key)) die(`${label} entries contain unsupported field: ${key}`);
+  if (!(EVIDENCE_REF_KINDS as readonly unknown[]).includes(ref.kind)) die(`${label} entry kind must be one of: ${EVIDENCE_REF_KINDS.join(", ")}`);
+  for (const key of Object.keys(ref)) if (!Object.hasOwn(EVIDENCE_REF_FIELD_SCHEMAS, key)) die(`${label} entries contain unsupported field: ${key}`);
   if (ref.url !== undefined && !hasNonEmptyString(ref.url)) die(`${label} entry url must be a non-empty string`);
   if (ref.file !== undefined && !hasNonEmptyString(ref.file)) die(`${label} entry file must be a non-empty string`);
   if (ref.excerpt !== undefined && !hasNonEmptyString(ref.excerpt)) die(`${label} entry excerpt must be a non-empty string`);
   if (ref.summary !== undefined && !hasNonEmptyString(ref.summary)) die(`${label} entry summary must be a non-empty string`);
   if (ref.line_start !== undefined && !hasPositiveInteger(ref.line_start)) die(`${label} entry line_start must be a positive integer`);
   if (ref.line_end !== undefined && !hasPositiveInteger(ref.line_end)) die(`${label} entry line_end must be a positive integer`);
-  if (ref.kind === "source" && (!hasNonEmptyString(ref.file) || !hasPositiveInteger(ref.line_start) || !hasPositiveInteger(ref.line_end) || !hasNonEmptyString(ref.excerpt))) die(`${label} source refs require file, line_start, line_end, and excerpt`);
-  if (ref.kind === "artifact" && (!hasNonEmptyString(ref.file) && !hasNonEmptyString(ref.url))) die(`${label} artifact refs require file or url`);
-  if (ref.kind === "artifact" && (!hasNonEmptyString(ref.summary) && !hasNonEmptyString(ref.excerpt))) die(`${label} artifact refs require summary or excerpt`);
-  if (ref.kind === "command" && (!hasNonEmptyString(ref.summary) && !hasNonEmptyString(ref.excerpt) && !hasNonEmptyString(ref.url))) die(`${label} command refs require summary, excerpt, or url`);
-  if ((ref.kind === "provider" || ref.kind === "external") && !hasNonEmptyString(ref.url)) die(`${label} ${ref.kind} refs require url`);
+  const rules = EVIDENCE_REF_RULES[ref.kind as keyof typeof EVIDENCE_REF_RULES];
+  for (const rule of rules) {
+    const present = (field: string): boolean => field === "line_start" || field === "line_end"
+      ? hasPositiveInteger(ref[field])
+      : hasNonEmptyString(ref[field]);
+    const valid = rule.mode === "all" ? rule.fields.every(present) : rule.fields.some(present);
+    if (!valid) {
+      const separator = rule.fields.length > 2 ? ", " : " ";
+      const joined = rule.fields.length > 1
+        ? `${rule.fields.slice(0, -1).join(separator)}${rule.fields.length > 2 ? "," : ""} or ${rule.fields.at(-1)}`
+        : rule.fields[0];
+      die(`${label} ${ref.kind} refs require ${rule.mode === "all" && rule.fields.length > 1 ? joined.replace(/ or ([^,]+)$/, " and $1") : joined}`);
+    }
+  }
   return ref;
 }
 export function normalizeEvidenceRefs(raw: unknown, label: string): AnyObj[] {
