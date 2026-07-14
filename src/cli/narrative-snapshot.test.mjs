@@ -96,3 +96,54 @@ test("schema rejects malformed fa1 ids and entries without lineage", () => {
     assert.notEqual(validateNarrativeSourceManifest(noLineage).length, 0);
   });
 });
+
+test("session-scoped IDs are refused when the session root does not carry the ID's slug", () => {
+  const { root, narrativeDir } = fixture();
+  const wrongSession = path.join(root, "some-other-session");
+  fs.mkdirSync(wrongSession, { recursive: true });
+  fs.writeFileSync(path.join(wrongSession, "command-log.jsonl"), "");
+  const request = {
+    source: parseSourceId("fa1:cmdlog:expected-slug:0/01234567"),
+    roots: { sessionDir: wrongSession },
+  };
+  const { manifest } = snapshotNarrative(input(narrativeDir, [request]), { now: () => NOW });
+  assert.equal(manifest.sources[0].status, "unavailable");
+  assert.equal(manifest.sources[0].unavailable_reason, "unauthorized");
+});
+
+test("creation-only publication rejects a racer that lands between the pre-check and the link", () => {
+  const { repo, narrativeDir } = fixture();
+  const request = fileRequest(repo, "raced.json", Buffer.from(JSON.stringify({ ok: true })));
+  const manifestPath = path.join(narrativeDir, "source-manifest.json");
+  const racerContent = '{"racer":"winner"}\n';
+  let raced = false;
+  // The racer publishes AFTER snapshotNarrative's advisory exists pre-check has
+  // passed (we publish from inside the blob write), so only the link(2)
+  // creation-only path can refuse the replacement.
+  assert.throws(() => snapshotNarrative(input(narrativeDir, [request]), {
+    now: () => NOW,
+    writeBlob: (rootDir, file, data) => {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, data);
+      if (!raced) {
+        raced = true;
+        fs.writeFileSync(manifestPath, racerContent);
+      }
+    },
+  }), /already exists/);
+  assert.equal(fs.readFileSync(manifestPath, "utf8"), racerContent);
+});
+
+test("schema requires lineage on unavailable entries too", () => {
+  const { narrativeDir } = fixture();
+  const wrongSession = path.join(path.dirname(narrativeDir), "not-the-slug");
+  fs.mkdirSync(wrongSession, { recursive: true });
+  const request = { source: parseSourceId("fa1:cmdlog:someslug:0/01234567"), roots: { sessionDir: wrongSession } };
+  const { manifest } = snapshotNarrative(input(narrativeDir, [request]), { now: () => NOW });
+  assert.equal(manifest.sources[0].status, "unavailable");
+  const clone = JSON.parse(JSON.stringify(manifest));
+  delete clone.sources[0].lineage;
+  return import("../../build/src/narrative/snapshot.js").then(({ validateNarrativeSourceManifest }) => {
+    assert.notEqual(validateNarrativeSourceManifest(clone).length, 0);
+  });
+});

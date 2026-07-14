@@ -83,3 +83,32 @@ test("verifyManifest reports every source and fails after corruption", () => {
   assert.equal(report.ok, false);
   assert.deepEqual(report.perSource, [{ sourceId: entry.source_id, status: "unavailable", reason: "corrupt" }]);
 });
+
+test("a symlinked sources directory is rejected as corrupt, never followed", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-resolver-symdir-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const narrativeDir = path.join(root, "narrative", "n1");
+  const elsewhere = path.join(root, "elsewhere");
+  const { repo } = { repo: path.join(root, "repo") };
+  fs.mkdirSync(repo, { recursive: true });
+  const content = Buffer.from(JSON.stringify({ ok: true }));
+  fs.writeFileSync(path.join(repo, "f.json"), content);
+  const hash = createHash("sha256").update(content).digest("hex");
+  const request = { source: parseSourceId(`fa1:file:f.json:${hash}`), roots: { repoRoot: repo } };
+  const { manifest } = snapshotNarrative({
+    narrativeDir, narrativeId: "n1", requests: [request], redactionFields: [],
+    compiler: { name: "test", version: "1", policy_hash: "p" },
+    captureCompleteness: { channels: {}, known_gaps: [] },
+  }, { now: () => "2026-07-14T12:00:00Z" });
+  const entry = manifest.sources[0];
+  assert.equal(entry.status, "snapshotted");
+  // Replace the sources directory (the blob's intermediate ancestor) with a
+  // symlink pointing elsewhere carrying an identical blob.
+  fs.mkdirSync(elsewhere, { recursive: true });
+  fs.copyFileSync(path.join(narrativeDir, "sources", entry.sha256), path.join(elsewhere, entry.sha256));
+  fs.rmSync(path.join(narrativeDir, "sources"), { recursive: true });
+  fs.symlinkSync(elsewhere, path.join(narrativeDir, "sources"));
+  const result = resolveSource(narrativeDir, entry.source_id);
+  assert.equal(result.status, "unavailable");
+  assert.equal(result.reason, "corrupt");
+});

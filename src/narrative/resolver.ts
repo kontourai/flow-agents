@@ -102,9 +102,14 @@ export function resolveSource(narrativeDir: string, sourceId: string, opts: Reso
 }
 
 function resolveEntry(root: string, entry: Extract<NarrativeSourceManifestEntry, { status: "snapshotted" }>): ResolveSourceResult {
-  const blob = path.join(root, "sources", entry.sha256);
+  const sourcesDir = path.join(root, "sources");
+  const blob = path.join(sourcesDir, entry.sha256);
   let bytes: Buffer;
   try {
+    // The blob's ancestor must be a real directory inside the narrative dir —
+    // a symlinked sources/ would silently serve content from elsewhere.
+    const dirStat = fs.lstatSync(sourcesDir);
+    if (dirStat.isSymbolicLink() || !dirStat.isDirectory()) throw new Error("sources directory is not a real directory");
     assertPathContained(root, blob);
     bytes = readRegularFile(blob);
   } catch {
