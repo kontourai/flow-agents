@@ -80,7 +80,8 @@ function parseFlowStepActionEntry(raw: unknown, manifestPath: string, index: num
     return null;
   }
   const artifactBindings = parseArtifactBindings(record.artifact_bindings ?? [], lists.artifacts, lists.expectation_ids, manifestPath, index, errors);
-  return artifactBindings ? { flow_id: record.flow_id, step_id: record.step_id, ...lists, implementation_allowed: record.implementation_allowed, expectation_bindings: expectationBindings, artifact_bindings: artifactBindings } : null;
+  if (!artifactBindings || !validateArtifactProducers(artifactBindings, expectationBindings, lists.skills, manifestPath, index, errors)) return null;
+  return { flow_id: record.flow_id, step_id: record.step_id, ...lists, implementation_allowed: record.implementation_allowed, expectation_bindings: expectationBindings, artifact_bindings: artifactBindings };
 }
 
 function parseFlowStepActionLists(record: Record<string, unknown>, manifestPath: string, index: number, errors: string[]): FlowStepActionLists | null {
@@ -142,6 +143,23 @@ function parseArtifactBindings(value: unknown, artifacts: string[], expectationI
   }
   if (!sameStringSet(bindings.map((binding) => binding.artifact), artifacts)) return fail(errors, `${manifestPath}: flow_step_actions[${actionIndex}].artifact_bindings must bind every artifact exactly once`);
   return bindings;
+}
+
+function validateArtifactProducers(bindings: KitFlowStepArtifactBinding[], expectationBindings: KitFlowStepExpectationBinding[], skills: string[], manifestPath: string, actionIndex: number, errors: string[]): boolean {
+  const expectationById = new Map(expectationBindings.map((binding) => [binding.expectation_id, binding]));
+  for (const [bindingIndex, binding] of bindings.entries()) {
+    const owners = binding.expectation_ids.map((id) => expectationById.get(id)!);
+    const operationOwners = owners.filter((owner) => owner.interface === "operation");
+    if (binding.artifact.startsWith("trust.bundle#") && operationOwners.length > 0) {
+      errors.push(`${manifestPath}: flow_step_actions[${actionIndex}].artifact_bindings[${bindingIndex}] trust slice cannot own an operation expectation`);
+      return false;
+    }
+    if (!binding.artifact.includes("#") && operationOwners.length === 0 && skills.length === 0) {
+      errors.push(`${manifestPath}: flow_step_actions[${actionIndex}].artifact_bindings[${bindingIndex}] file has no skill or operation producer`);
+      return false;
+    }
+  }
+  return true;
 }
 
 export function isSafeBuilderArtifactRef(value: unknown): value is string {
