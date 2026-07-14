@@ -54,12 +54,40 @@ test("explainClaim (Surface): projects status, policy, evidence, and filtered ga
   });
   const out = explainClaim(buildTrustReport(builder.build()), "c1");
   assert.equal(out.found, true);
+  assert.equal(out.status, "proposed");               // derived by the report (no verifying event), projected verbatim
+  assert.equal(out.value, "pass");                    // String coercion of the claim value
+  assert.equal(out.claimType, "workflow.check");
   assert.equal(out.policy.id, "p1");
   assert.deepEqual(out.policy.requiredEvidence, ["test_output"]);
   assert.equal(out.evidence.length, 1);
   assert.equal(out.evidence[0].passing, true);        // exitCode 0 → not error → passing
   assert.equal(out.evidence[0].execution.exitCode, 0);
-  assert.ok(Array.isArray(out.why.transparencyGaps)); // filtered to this claim by Surface
+  // Gap filtering: only THIS claim's transparency gaps appear (none seeded for c1,
+  // and a report-level gap for another claim must not leak in).
+  assert.deepEqual(out.why.transparencyGaps.filter((gap) => gap.claimId !== "c1"), []);
+});
+
+test("explainClaim (Surface): legacy evidence label/summary fallback tolerance survives the lift", () => {
+  // Pre-lift bundles could carry top-level label/summary on evidence; the consumed
+  // function keeps the prototype's fallback chains (label ?? excerptOrSummary ?? ...).
+  const builder = new TrustBundleBuilder({ source: "unit:171-legacy" });
+  builder.addClaim({
+    id: "c2", subjectType: "repo", subjectId: "flow-agents", claimType: "workflow.check",
+    fieldOrBehavior: "legacy", value: "pass",
+    createdAt: "2026-07-14T00:00:00.000Z", updatedAt: "2026-07-14T00:00:00.000Z",
+  });
+  builder.addEvidence({
+    id: "e2", claimId: "c2", evidenceType: "attestation", method: "attestation",
+    sourceRef: "run:e2", excerptOrSummary: "excerpt-wins-for-summary", observedAt: "2026-07-14T00:00:00.000Z",
+    collectedBy: "ci",
+  });
+  const out = explainClaim(buildTrustReport(builder.build()), "c2");
+  assert.equal(out.found, true);
+  assert.equal(out.evidence.length, 1);
+  assert.equal(out.evidence[0].label, "excerpt-wins-for-summary");   // label falls back to excerptOrSummary
+  assert.equal(out.evidence[0].summary, "excerpt-wins-for-summary"); // summary prefers excerptOrSummary
+  assert.equal(out.evidence[0].execution, null);
+  assert.equal(out.evidence[0].passing, true);                       // no execution, not disputed → passing
 });
 
 // ── deriveGateCalibration (pure mapping) ─────────────────────────────────────
