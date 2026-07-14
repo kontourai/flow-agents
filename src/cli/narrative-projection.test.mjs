@@ -33,7 +33,7 @@ function writeJsonLines(file, records) {
   return lines;
 }
 
-function constructedNarrative({ includeTrust = false, fileOnly = false } = {}) {
+function constructedNarrative({ includeTrust = false, fileOnly = false, timeoutWithoutDuration = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-projection-"));
   const narrativeDir = path.join(root, "artifacts", "narrative", "runtime-test");
   const telemetryDir = path.join(root, "telemetry");
@@ -44,9 +44,12 @@ function constructedNarrative({ includeTrust = false, fileOnly = false } = {}) {
 
   const requests = [];
   if (!fileOnly) {
+    const timeoutTool = timeoutWithoutDuration
+      ? { name: "execute_bash", command: "npm test" }
+      : { name: "execute_bash", command: "npm test", timeout_ms: 5000 };
     const telemetry = [
       { session_id: "runtime-session", event_id: "turn-explicit", event_type: "turn.user", hook: { turn_id: "turn-1" } },
-      { session_id: "runtime-session", event_id: "tool-timeout", event_type: "tool.result", hook: { turn_id: "turn-1" }, tool: { name: "execute_bash", command: "npm test", timeout_ms: 5000 }, timed_out: true },
+      { session_id: "runtime-session", event_id: "tool-timeout", event_type: "tool.result", hook: { turn_id: "turn-1" }, tool: timeoutTool, timed_out: true },
       { session_id: "runtime-session", event_id: "turn-derived", event_type: "turn.user" },
       { session_id: "runtime-session", event_id: "session-end", event_type: "session.end" },
     ];
@@ -183,4 +186,37 @@ test("malformed JSON inside an integrity-valid snapshot fails with a typed error
     () => projectRuntimeNarrative(narrativeDir, { projectedAt: PROJECTED_AT }),
     (error) => error instanceof NarrativeProjectionError && error.code === "malformed_snapshot",
   );
+});
+
+test("M2: stableStringify emits lexically sorted keys at every level (JSON.stringify would fail this)", () => {
+  const { narrativeDir } = constructedNarrative();
+  const projection = projectRuntimeNarrative(narrativeDir, { projectedAt: PROJECTED_AT });
+  const walk = (value, where) => {
+    if (Array.isArray(value)) { value.forEach((item, i) => walk(item, `${where}[${i}]`)); return; }
+    if (value && typeof value === "object") {
+      const keys = Object.keys(value);
+      assert.deepEqual(keys, [...keys].sort(), `unsorted keys at ${where}`);
+      keys.forEach((key) => walk(value[key], `${where}.${key}`));
+    }
+  };
+  walk(JSON.parse(stableStringify(projection)), "$");
+});
+
+test("H2b: a read-only tool event does not suppress the no-op classification", () => {
+  const { narrativeDir } = constructedNarrative();
+  const toolOnlyTurnOrdinal = undefined;
+  const projection = projectRuntimeNarrative(narrativeDir, { projectedAt: PROJECTED_AT });
+  const turns = projection.turns.filter((turn) => turn.statements.some((s) => s.rule?.id === "no-op-turn"));
+  assert.ok(turns.length >= 1, "expected at least one no-op-classified turn despite tool events");
+  if (toolOnlyTurnOrdinal !== undefined) {
+    assert.ok(turns.some((turn) => turn.ordinal === toolOnlyTurnOrdinal), "the tool-event-only turn must be no-op-classified");
+  }
+});
+
+test("H2a: a timeout signal without a duration still yields the material timeout statement", () => {
+  const { narrativeDir } = constructedNarrative({ timeoutWithoutDuration: true });
+  const projection = projectRuntimeNarrative(narrativeDir, { projectedAt: PROJECTED_AT });
+  const all = [...projection.turns.flatMap((turn) => turn.statements), ...projection.document_statements];
+  assert.ok(all.some((s) => s.rule?.id === "timeout-detection" && s.proposition.includes("duration unknown")),
+    "material timeout fact missing despite timeout signal");
 });

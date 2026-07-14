@@ -44,8 +44,20 @@ function fail(code: NarrativeStatementErrorCode, message: string): never {
 
 function text(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) return fail("invalid_input", `${label} must be a non-empty string`);
-  if (/[\r\n]/.test(value) || value.includes("; ")) return fail("non_atomic_proposition", `${label} must not contain clause separators`);
+  if (/[\r\n`]/.test(value) || value.includes("; ")) return fail("non_atomic_proposition", `${label} must not contain clause separators or backticks`);
   return value;
+}
+
+// Review H3: identifier-shaped inputs (tool names, event types, agent ids,
+// paths) must not be able to smuggle prose into a proposition — a charset
+// constraint kills the injection class wholesale instead of chasing
+// conjunction blacklists. Free text (commands) is backtick-quoted by the
+// templates and excluded from the atomicity scan instead.
+const IDENTIFIER = /^[A-Za-z0-9._:@#/\\-]+$/;
+function identifier(value: unknown, label: string): string {
+  const checked = text(value, label);
+  if (!IDENTIFIER.test(checked)) return fail("invalid_input", `${label} must be identifier-shaped (no spaces or prose): ${checked}`);
+  return checked;
 }
 
 function sourceRefs(values: readonly string[]): string[] {
@@ -61,7 +73,12 @@ function sourceRefs(values: readonly string[]): string[] {
 }
 
 function atomic(proposition: string): string {
-  if (/[\r\n]/.test(proposition) || proposition.includes("; ") || /\sand\s/i.test(proposition)) {
+  // Review H3: the atomicity scan runs over the template SKELETON — backtick-
+  // quoted free-text spans (commands) are excluded, so a command containing
+  // English conjunctions cannot trip it, while nothing outside quotes may
+  // introduce a second clause via any common conjunction.
+  const skeleton = proposition.replace(/`[^`]*`/g, "`_`");
+  if (/[\r\n]/.test(skeleton) || skeleton.includes("; ") || /\s(and|but|then|while|or|so)\s/i.test(skeleton)) {
     return fail("non_atomic_proposition", "statement proposition must contain exactly one clause");
   }
   return proposition;
@@ -69,7 +86,9 @@ function atomic(proposition: string): string {
 
 function statementId(statementClass: StatementClass, proposition: string, refs: readonly string[]): string {
   const identity = JSON.stringify([statementClass, proposition, [...refs].sort()]);
-  return createHash("sha256").update(identity, "utf8").digest("hex").slice(0, 8);
+  // Review M1: 16 hex chars (64 bits) — 8 was collision-plausible at realistic
+  // statement volumes (~1% at 9.3k statements).
+  return createHash("sha256").update(identity, "utf8").digest("hex").slice(0, 16);
 }
 
 function construct(input: {
@@ -123,7 +142,7 @@ export function observedCommand(input: {
   const exit = input.exitCode === null ? "unknown" : String(input.exitCode);
   return construct({
     class: "observed",
-    proposition: `Command ${command} was observed to ${result} (exit ${exit})`,
+    proposition: `Command \`${command}\` was observed to ${result} (exit ${exit})`,
     sourceRefs: [input.sourceId],
     ...(input.actor !== undefined ? { actor: input.actor } : {}),
   });
@@ -137,7 +156,7 @@ export function observedToolAction(input: {
 }): Statement {
   return construct({
     class: "observed",
-    proposition: `Tool ${text(input.toolName, "toolName")} emitted event ${text(input.eventType, "eventType")}`,
+    proposition: `Tool ${identifier(input.toolName, "toolName")} emitted event ${identifier(input.eventType, "eventType")}`,
     sourceRefs: [input.sourceId],
     ...(input.actor !== undefined ? { actor: input.actor } : {}),
   });
@@ -148,8 +167,8 @@ export function observedDelegation(input: {
   agentId?: string | null;
   targets?: string[];
 }): Statement {
-  const actor = input.agentId == null || input.agentId === "" ? "unattributed" : text(input.agentId, "agentId");
-  const targets = input.targets?.map((target) => text(target, "target")) ?? [];
+  const actor = input.agentId == null || input.agentId === "" ? "unattributed" : identifier(input.agentId, "agentId");
+  const targets = input.targets?.map((target) => identifier(target, "target")) ?? [];
   const proposition = targets.length > 0
     ? `Agent ${actor} delegated work to ${targets.join(", ")}`
     : `Agent ${actor} delegated work`;
@@ -159,7 +178,7 @@ export function observedDelegation(input: {
 export function observedFileCreation(input: { sourceId: string; path: string }): Statement {
   return construct({
     class: "observed",
-    proposition: `File ${text(input.path, "path")} was observed to be created`,
+    proposition: `File ${identifier(input.path, "path")} was observed to be created`,
     sourceRefs: [input.sourceId],
   });
 }
@@ -171,9 +190,10 @@ export function derivedRetry(input: {
   ruleInputs: string[];
 }): Statement {
   if (!Number.isSafeInteger(input.attempts) || input.attempts < 2) return fail("invalid_input", "attempts must be an integer of at least two");
+  const command = text(input.command, "command");
   return construct({
     class: "deterministic_derived",
-    proposition: `Command ${text(input.command, "command")} was retried across ${input.attempts} attempts`,
+    proposition: `Command \`${command}\` was retried across ${input.attempts} attempts`,
     sourceRefs: input.sourceIds,
     rule: { id: "retry-detection", version: "v1", inputs: input.ruleInputs },
   });
@@ -190,11 +210,13 @@ export function derivedNoOpTurn(input: { turnRef: number; sourceIds: string[] })
   });
 }
 
-export function derivedTimeout(input: { sourceId: string; operation: string; timeoutMs: number }): Statement {
-  if (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs < 0) return fail("invalid_input", "timeoutMs must be a non-negative safe integer");
+export function derivedTimeout(input: { sourceId: string; operation: string; timeoutMs?: number }): Statement {
+  // Review H2a: the timeout fact is material with or without a recorded duration.
+  if (input.timeoutMs !== undefined && (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs < 0)) return fail("invalid_input", "timeoutMs must be a non-negative safe integer when present");
+  const budget = input.timeoutMs === undefined ? "its timeout (duration unknown)" : `its ${input.timeoutMs} ms timeout`;
   return construct({
     class: "deterministic_derived",
-    proposition: `Operation ${text(input.operation, "operation")} exceeded its ${input.timeoutMs} ms timeout`,
+    proposition: `Operation \`${text(input.operation, "operation")}\` exceeded ${budget}`,
     sourceRefs: [input.sourceId],
     rule: { id: "timeout-detection", version: "v1", inputs: [input.sourceId] },
   });

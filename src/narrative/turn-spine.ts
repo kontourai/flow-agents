@@ -71,6 +71,10 @@ export function buildTurnSpine(records: readonly ResolvedTelemetryRecord[]): Tur
         byTurnId.set(turnId, turn);
       }
       turn.sources.push(input.sourceId);
+      // Review H1: an explicit turn is a boundary for the session's derived
+      // spine too — close any active derived turn so a later spine-less event
+      // starts a fresh turn instead of merging across this boundary.
+      derivedBySession.delete(sessionId);
       continue;
     }
 

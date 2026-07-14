@@ -390,6 +390,10 @@ export function projectRuntimeNarrative(narrativeDir: string, opts: ProjectRunti
   const turnStatements = new Map<number, OrderedStatement[]>();
   const documentStatements: OrderedStatement[] = [...unavailable];
   const actualActivity = new Set<number>();
+  // Review H2a: material facts are tracked per source and re-checked by the
+  // coverage gate — a cited source whose material signal produced no material
+  // statement is a coverage gap, not a pass.
+  const materialFacts = new Map<string, "timeout">();
   const append = (ordered: OrderedStatement, turnOrdinal?: number): void => {
     if (turnOrdinal === undefined) { documentStatements.push(ordered); return; }
     const bucket = turnStatements.get(turnOrdinal) ?? [];
@@ -404,7 +408,9 @@ export function projectRuntimeNarrative(narrativeDir: string, opts: ProjectRunti
     let emissionIndex = 0;
     if (event.startsWith("tool.") || event === "turn.user" || event.startsWith("session.")) {
       append({ statement: observedToolAction({ sourceId: entry.sourceId, toolName: toolName(entry.record, event), eventType: event }), sourceIndex: entry.sourceIndex, emissionIndex: emissionIndex++ }, turnOrdinal);
-      if (event.startsWith("tool.") && turnOrdinal !== undefined) actualActivity.add(turnOrdinal);
+      // Review H2b: a bare tool event is not "activity" for no-op purposes —
+      // the plan defines a no-op turn as zero commands/writes. Activity is
+      // marked below only for commands, writes, and delegations.
     }
     const tool = toolName(entry.record, event);
     const command = commandFrom(entry.record, tool);
@@ -413,9 +419,14 @@ export function projectRuntimeNarrative(narrativeDir: string, opts: ProjectRunti
       append({ statement: observedCommand({ sourceId: entry.sourceId, command, observedResult: observedResultFrom(entry.record, exitCode), exitCode }), sourceIndex: entry.sourceIndex, emissionIndex: emissionIndex++ }, turnOrdinal);
       if (turnOrdinal !== undefined) actualActivity.add(turnOrdinal);
     }
-    const timeoutMs = timeoutMsFrom(entry.record);
-    if (carriesTimeoutSignal(entry.record) && timeoutMs !== undefined) {
+    // Review H2a: a timeout SIGNAL is material by itself — the statement must
+    // not be conditional on a duration also being present. Duration, when
+    // absent, renders as unknown; the material fact still enters the record,
+    // and the material-coverage gate below enforces it.
+    if (carriesTimeoutSignal(entry.record)) {
+      const timeoutMs = timeoutMsFrom(entry.record);
       append({ statement: derivedTimeout({ sourceId: entry.sourceId, operation: command ?? tool, timeoutMs }), sourceIndex: entry.sourceIndex, emissionIndex: emissionIndex++ }, turnOrdinal);
+      materialFacts.set(entry.sourceId, "timeout");
     }
   }
 
@@ -483,6 +494,13 @@ export function projectRuntimeNarrative(narrativeDir: string, opts: ProjectRunti
   const cited = new Set(allStatements.flatMap((statement) => statement.source_refs));
   const missing = manifest.sources.map((entry) => entry.source_id).filter((sourceId) => !cited.has(sourceId));
   if (missing.length > 0) return projectionError("coverage_gap", `projection omitted ${missing.length} manifest source(s): ${missing.join(", ")}`, missing[0]);
+  // Review H2a: fact-level coverage — a source carrying a material signal must
+  // have produced its material statement (rule id match), not merely a citation.
+  for (const [sourceId, fact] of materialFacts) {
+    const ruleId = fact === "timeout" ? "timeout-detection" : fact;
+    const covered = allStatements.some((statement) => statement.rule?.id === ruleId && statement.source_refs.includes(sourceId));
+    if (!covered) return projectionError("coverage_gap", `material ${fact} signal on ${sourceId} produced no ${ruleId} statement`, sourceId);
+  }
 
   return {
     schema_version: NARRATIVE_RUNTIME_PROJECTION_SCHEMA_VERSION,
