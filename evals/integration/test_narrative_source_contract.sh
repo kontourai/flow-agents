@@ -28,7 +28,7 @@ if npm run build --silent; then _pass "TypeScript build completed"; else _fail "
 
 RAW="$TMP/raw"
 ARTIFACT_ROOT="$TMP/artifacts"
-SESSION="$RAW/session"
+SESSION="$RAW/fixture-session"
 AGENTS_DIR="$SESSION/agents"
 AGENT_EVENTS="$AGENTS_DIR/agent-fixture/events.jsonl"
 TELEMETRY="$RAW/telemetry"
@@ -61,9 +61,16 @@ TRANSITION_HASH8="$(node -e "const fs=require('fs'),c=require('crypto'),s=JSON.p
 PATH_HASH8="$(node -e "const c=require('crypto');process.stdout.write(c.createHash('sha256').update(process.argv[1]).digest('hex').slice(0,8))" "$TRANSCRIPT")"
 FILE_SHA="$(sha256_file "$REPO/fixture.txt")"
 
+# Telemetry IDs carry a content pin: sha8 of the exact fixture line.
+telemetry_pin() {
+  node -e "const fs=require('fs'),c=require('crypto');const line=fs.readFileSync(process.argv[1],'utf8').split('\n').find(l=>l.trim()&&JSON.parse(l).event_id===process.argv[2]);process.stdout.write(c.createHash('sha256').update(Buffer.from(line)).digest('hex').slice(0,8))" "$1" "$2"
+}
+TEL_PIN="$(telemetry_pin "$TELEMETRY/full.jsonl" evt-telemetry)"
+MCP_PIN="$(telemetry_pin "$TELEMETRY/full.jsonl" evt-mcp-gap)"
+
 SOURCES=(
-  "fa1:telemetry:full/session-fixture:evt-telemetry"
-  "fa1:telemetry:full/session-fixture:evt-mcp-gap"
+  "fa1:telemetry:full/session-fixture:evt-telemetry/$TEL_PIN"
+  "fa1:telemetry:full/session-fixture:evt-mcp-gap/$MCP_PIN"
   "fa1:cmdlog:fixture-session:0/$CMD_HASH8"
   "fa1:agent-event:fixture-session/agent-fixture:0/$AGENT0_HASH8"
   "fa1:delegation:fixture-session/agent-fixture:1/$AGENT1_HASH8"
@@ -77,9 +84,35 @@ SOURCES=(
 
 SNAPSHOT_ARGS=(narrative-sources snapshot --artifact-root "$ARTIFACT_ROOT" --narrative-id contract-fixture
   --telemetry-root "$TELEMETRY" --session-root "$SESSION" --flow-root "$FLOW"
-  --transcript-path "$TRANSCRIPT" --repo-root "$REPO"
+  --transcript-path "$TRANSCRIPT" --repo-root "$REPO" --allow-transcript-content
   --capture-completeness "$FIXTURES/expected-capture-completeness.json")
 for source in "${SOURCES[@]}"; do SNAPSHOT_ARGS+=(--source "$source"); done
+
+# Transcript content is default-deny: without the explicit grant the same
+# request must be recorded path_only as unavailable/redacted with no blob.
+DENY_ARGS=(narrative-sources snapshot --artifact-root "$ARTIFACT_ROOT" --narrative-id transcript-deny-fixture
+  --transcript-path "$TRANSCRIPT" --capture-completeness "$FIXTURES/expected-capture-completeness.json"
+  --source "fa1:transcript:$PATH_HASH8:0-$(wc -c < "$TRANSCRIPT" | tr -d ' ')")
+node "$ROOT/build/src/cli.js" "${DENY_ARGS[@]}" >"$TMP/deny-snapshot.json" 2>"$TMP/deny-snapshot.stderr"
+DENY_MANIFEST="$ARTIFACT_ROOT/narrative/transcript-deny-fixture/source-manifest.json"
+if json_assert "$DENY_MANIFEST" 'value.sources.length === 1 && value.sources[0].status === "unavailable" && value.sources[0].unavailable_reason === "redacted"' \
+  && [[ -z "$(ls -A "$ARTIFACT_ROOT/narrative/transcript-deny-fixture/sources" 2>/dev/null)" ]]; then
+  _pass "AC6: transcript content is default-deny (path_only, unavailable/redacted, zero blobs)"
+else
+  _fail "AC6: transcript default-deny was not enforced"
+fi
+
+# A transcript ID whose path pin does not match the supplied path must not snapshot.
+BOGUS_ARGS=(narrative-sources snapshot --artifact-root "$ARTIFACT_ROOT" --narrative-id transcript-pin-fixture
+  --transcript-path "$TRANSCRIPT" --allow-transcript-content --capture-completeness "$FIXTURES/expected-capture-completeness.json"
+  --source "fa1:transcript:00000000:0-4")
+node "$ROOT/build/src/cli.js" "${BOGUS_ARGS[@]}" >"$TMP/pin-snapshot.json" 2>"$TMP/pin-snapshot.stderr"
+PIN_MANIFEST="$ARTIFACT_ROOT/narrative/transcript-pin-fixture/source-manifest.json"
+if json_assert "$PIN_MANIFEST" 'value.sources.length === 1 && value.sources[0].status === "unavailable" && value.sources[0].unavailable_reason === "corrupt"'; then
+  _pass "AC4: mismatched transcript path pin is rejected, never rebound"
+else
+  _fail "AC4: bogus transcript path pin was accepted"
+fi
 
 node "$ROOT/build/src/cli.js" "${SNAPSHOT_ARGS[@]}" >"$TMP/snapshot.json" 2>"$TMP/snapshot.stderr"
 snapshot_exit=$?
@@ -127,10 +160,20 @@ if [[ "$?" -eq 0 && -s "$TMP/rotated-telemetry.json" ]] && json_assert "$TMP/rot
 else
   _fail "AC2: rotated telemetry did not resolve"
 fi
-if json_assert "$MANIFEST" 'value.sources.find(s => s.source_id === "fa1:telemetry:full/session-fixture:evt-telemetry").lineage.some(l => l.event === "source_snapshotted")'; then
+if json_assert "$MANIFEST" 'value.sources.find(s => s.source_id.startsWith("fa1:telemetry:full/session-fixture:evt-telemetry/")).lineage.some(l => l.event === "source_snapshotted")'; then
   _pass "AC2: telemetry snapshot records a lineage event"
 else
   _fail "AC2: telemetry lineage event missing"
+fi
+
+# The raw log is gone (rotated fully away below via the raw-store move); verify
+# must report the post-compile divergence as a rotation lineage note.
+rm -f "$TELEMETRY/full.1.jsonl"
+node "$ROOT/build/src/cli.js" narrative-sources verify --narrative-dir "$NARRATIVE_DIR" --json >"$TMP/verify-rotated.json" 2>&1
+if json_assert "$TMP/verify-rotated.json" 'value.perSource.some(s => s.sourceId.startsWith("fa1:telemetry:") && s.status === "resolved" && s.lineageNote === "raw_source_rotated_away")'; then
+  _pass "AC2: verify reports raw_source_rotated_away once the raw log is gone"
+else
+  _fail "AC2: rotation divergence lineage note missing from verify report"
 fi
 
 # Remove every raw store, then resolve every source only from the narrative directory.
@@ -167,7 +210,7 @@ node "$ROOT/build/src/cli.js" narrative-sources resolve --narrative-dir "$NARRAT
 if json_assert "$TMP/corrupt-resolve.json" 'value.status === "unavailable" && value.reason === "corrupt"'; then _pass "AC3: byte-flipped blob resolves as corrupt"; else _fail "AC3: byte-flipped blob was not reported corrupt"; fi
 
 node "$ROOT/build/src/cli.js" narrative-sources verify --narrative-dir "$NARRATIVE_DIR" --json >"$TMP/verify.json" 2>"$TMP/verify.stderr"
-if json_assert "$TMP/verify.json" 'value.ok === false && value.perSource.length === 11 && value.perSource.some(s => s.sourceId === "fa1:telemetry:full/session-fixture:evt-telemetry" && s.status === "unavailable" && s.reason === "corrupt") && value.perSource.filter(s => s.status === "resolved").length === 10'; then
+if json_assert "$TMP/verify.json" 'value.ok === false && value.perSource.length === 11 && value.perSource.some(s => s.sourceId.startsWith("fa1:telemetry:full/session-fixture:evt-telemetry/") && s.status === "unavailable" && s.reason === "corrupt") && value.perSource.filter(s => s.status === "resolved").length === 10'; then
   _pass "AC3: verify reports the corrupt source and re-verifies the other ten"
 else
   _fail "AC3: whole-manifest verification report is incomplete"

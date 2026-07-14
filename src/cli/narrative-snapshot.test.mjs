@@ -63,3 +63,36 @@ test("filter failure records unavailable redacted without leaking source values"
   assert.equal(allNarrativeText.includes(secret), false);
   assert.deepEqual(fs.readdirSync(path.join(narrativeDir, "sources")), []);
 });
+
+test("manifest publication is creation-only: a concurrent racer cannot replace the winner", () => {
+  const { repo, narrativeDir } = fixture();
+  const request = fileRequest(repo, "good.json", Buffer.from(JSON.stringify({ ok: true })));
+  const first = snapshotNarrative(input(narrativeDir, [request]), { now: () => NOW });
+  assert.equal(first.manifest.sources[0].status, "snapshotted");
+  const before = fs.readFileSync(path.join(narrativeDir, "source-manifest.json"), "utf8");
+  // A second snapshot into the same narrative dir must fail without replacing
+  // the frozen manifest, even when it skips the advisory exists pre-check by
+  // racing straight to publication.
+  assert.throws(() => snapshotNarrative(input(narrativeDir, [request]), { now: () => NOW }), /already exists/);
+  assert.equal(fs.readFileSync(path.join(narrativeDir, "source-manifest.json"), "utf8"), before);
+});
+
+test("schema rejects malformed fa1 ids and entries without lineage", () => {
+  const { repo, narrativeDir } = fixture();
+  const request = fileRequest(repo, "s.json", Buffer.from(JSON.stringify({ ok: 1 })));
+  const { manifest } = snapshotNarrative(input(narrativeDir, [request]), { now: () => NOW });
+  const validate = (mutate) => {
+    const clone = JSON.parse(JSON.stringify(manifest));
+    mutate(clone);
+    return clone;
+  };
+  // Malformed fa1 id: right prefix, structurally invalid remainder.
+  const badId = validate((m) => { m.sources[0].source_id = "fa1:file:not a valid component:zz"; });
+  // Missing lineage on a snapshotted entry.
+  const noLineage = validate((m) => { delete m.sources[0].lineage; });
+  return import("../../build/src/narrative/snapshot.js").then(({ validateNarrativeSourceManifest }) => {
+    assert.equal(validateNarrativeSourceManifest(manifest).length, 0);
+    assert.notEqual(validateNarrativeSourceManifest(badId).length, 0);
+    assert.notEqual(validateNarrativeSourceManifest(noLineage).length, 0);
+  });
+});

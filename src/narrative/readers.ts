@@ -82,7 +82,10 @@ function readRegularFileBytes(file: string, source: string): Buffer {
     return readerError("corrupt", source, `${source} could not be opened without following links`);
   }
   try {
-    if (!fs.fstatSync(fd).isFile()) return readerError("corrupt", source, `${source} must remain a regular file`);
+    const opened = fs.fstatSync(fd);
+    // The descriptor must be the same inode the pre-open lstat admitted;
+    // a swap between the checks reads as corruption, not as the new file.
+    if (!opened.isFile() || opened.dev !== stat.dev || opened.ino !== stat.ino) return readerError("corrupt", source, `${source} changed between validation and read`);
     return fs.readFileSync(fd);
   } finally {
     fs.closeSync(fd);
@@ -146,17 +149,22 @@ export function readTelemetryCandidates(input: {
   channel: string;
   sessionId: string;
   eventId: string;
+  sha8: string;
   ordinal?: number;
 }): ReadCandidate<Record<string, unknown>>[] {
-  const matches: ReadCandidate<Record<string, unknown>>[] = [];
+  const idMatches: ReadCandidate<Record<string, unknown>>[] = [];
   for (const file of telemetryFiles(input.telemetryDir, input.channel)) {
     const lines = nonEmptyLines(readRegularFileBytes(file, "telemetry log"));
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
       const raw = lines[lineIndex];
       const record = parseObject(raw, "telemetry log");
-      if (record["session_id"] === input.sessionId && record["event_id"] === input.eventId) matches.push({ file, raw, record, lineIndex });
+      if (record["session_id"] === input.sessionId && record["event_id"] === input.eventId) idMatches.push({ file, raw, record, lineIndex });
     }
   }
+  // The content pin decides which record the id names. Records sharing the
+  // event id but not the pinned content are rebind attempts, never candidates.
+  const matches = idMatches.filter((candidate) => sha8(candidate.raw) === input.sha8);
+  if (idMatches.length > 0 && matches.length === 0) return readerError("corrupt", "telemetry", "telemetry content pin does not match any record with this event id");
   if (input.ordinal === undefined) return matches;
   if (!Number.isSafeInteger(input.ordinal) || input.ordinal < 0) return readerError("corrupt", "telemetry", "telemetry ordinal is invalid");
   const selected = matches[input.ordinal];
@@ -173,6 +181,11 @@ interface ChainLink {
 function verifiedCommandLogEntries(lines: Buffer[]): Array<{ raw: Buffer; record: Record<string, unknown> }> {
   const entries = lines.map((raw) => ({ raw, record: parseObject(raw, "command log") }));
   const reachable = new Set([commandLogChain.CHAIN_GENESIS]);
+  // Mirrors the canonical fork classification in scripts/hooks/stop-goal-fit.js:
+  // a parent claimed by more than one entry is benign only when EVERY sibling is
+  // a PostToolUse capture racing on the same tip; any non-capture sibling is
+  // structural tamper and poisons the whole log for citation purposes.
+  const parentSources = new Map<string, string[]>();
   let chainStarted = false;
   for (const entry of entries) {
     const chain = entry.record["_chain"] as ChainLink | undefined;
@@ -184,6 +197,12 @@ function verifiedCommandLogEntries(lines: Buffer[]): Array<{ raw: Buffer; record
     if (!Number.isSafeInteger(chain.seq) || typeof chain.prevHash !== "string") return readerError("corrupt", "command log", "command log chain metadata is malformed");
     if (commandLogChain.computeChainHash(chain.prevHash, entry.record) !== chain.hash || !reachable.has(chain.prevHash)) {
       return readerError("corrupt", "command log", "command log chain verification failed");
+    }
+    const siblings = parentSources.get(chain.prevHash) ?? [];
+    siblings.push(String(entry.record["source"] ?? ""));
+    parentSources.set(chain.prevHash, siblings);
+    if (siblings.length > 1 && !siblings.every((source) => source === "postToolUse-capture")) {
+      return readerError("corrupt", "command log", "command log chain contains a non-capture fork sibling");
     }
     reachable.add(chain.hash);
   }

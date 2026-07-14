@@ -19,7 +19,9 @@ interface SourceIdBase<S extends NarrativeSourceStream> {
 
 export interface TelemetrySourceId extends SourceIdBase<"telemetry"> {
   scope: { channel: string; sessionId: string };
-  locator: { eventId: string };
+  // sha8 pins the exact record content: duplicate event_ids cannot silently
+  // rebind to a different record when the log is reordered or rewritten.
+  locator: { eventId: string; sha8: string };
   ordinal?: number;
 }
 
@@ -162,8 +164,8 @@ export function parseSourceId(sourceId: string): NarrativeSourceId {
   switch (stream) {
     case "telemetry": {
       const [channel, sessionId] = splitComponents(rawScope, 2, sourceId, "scope") as [string, string];
-      const [eventId] = splitComponents(rawLocator, 1, sourceId, "locator") as [string];
-      return { version, stream, scope: { channel, sessionId }, locator: { eventId }, ...(ordinal === undefined ? {} : { ordinal }) };
+      const [eventId, hash] = splitComponents(rawLocator, 2, sourceId, "locator") as [string, string];
+      return { version, stream, scope: { channel, sessionId }, locator: { eventId, sha8: sha8(hash, sourceId, "telemetry content pin") }, ...(ordinal === undefined ? {} : { ordinal }) };
     }
     case "cmdlog": {
       const [slug] = splitComponents(rawScope, 1, sourceId, "scope") as [string];
@@ -218,7 +220,7 @@ export function formatSourceId(source: NarrativeSourceId): string {
   const prefix = `${NARRATIVE_SOURCE_ID_VERSION}:${source.stream}:`;
   switch (source.stream) {
     case "telemetry":
-      return `${prefix}${encodeComponent(source.scope.channel)}/${encodeComponent(source.scope.sessionId)}:${encodeComponent(source.locator.eventId)}${source.ordinal === undefined ? "" : `#${source.ordinal}`}`;
+      return `${prefix}${encodeComponent(source.scope.channel)}/${encodeComponent(source.scope.sessionId)}:${encodeComponent(source.locator.eventId)}/${source.locator.sha8}${source.ordinal === undefined ? "" : `#${source.ordinal}`}`;
     case "cmdlog":
       return source.locator.kind === "legacy"
         ? `${prefix}${encodeComponent(source.scope.slug)}:line-${source.locator.line}/${source.locator.sha8}`

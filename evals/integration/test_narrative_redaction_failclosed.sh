@@ -24,9 +24,11 @@ if npm run build --silent; then _pass "TypeScript build completed"; else _fail "
 
 RAW="$TMP/raw-telemetry"
 ARTIFACT_ROOT="$TMP/artifacts"
-SOURCE_ID="fa1:telemetry:full/session-fixture:evt-redaction"
 SECRET="NARRATIVE_AC6_SECRET_7b31e9"
 cp -R "$FIXTURES/telemetry" "$RAW"
+# Telemetry IDs carry a content pin: sha8 of the exact fixture line.
+PIN="$(node -e "const fs=require('fs'),c=require('crypto');const line=fs.readFileSync(process.argv[1],'utf8').split('\n').find(l=>l.trim()&&JSON.parse(l).event_id==='evt-redaction');process.stdout.write(c.createHash('sha256').update(Buffer.from(line)).digest('hex').slice(0,8))" "$RAW/full.jsonl")"
+SOURCE_ID="fa1:telemetry:full/session-fixture:evt-redaction/$PIN"
 
 node "$ROOT/build/src/cli.js" narrative-sources snapshot \
   --artifact-root "$ARTIFACT_ROOT" \

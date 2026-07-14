@@ -11,7 +11,7 @@ import {
 } from "../../build/src/index.js";
 
 const ids = [
-  "fa1:telemetry:full/session%2Fone:event%3Aone#1",
+  "fa1:telemetry:full/session%2Fone:event%3Aone/0123abcd#1",
   "fa1:cmdlog:task-617:7/0123abcd",
   "fa1:cmdlog:task-617:line-2/89abcdef",
   "fa1:agent-event:task-617/agent%3A1:0/0123abcd",
@@ -30,19 +30,26 @@ test("source IDs round-trip every stream with canonical component encoding", () 
 });
 
 test("telemetry ordinal is a stable duplicate disambiguator", () => {
-  const first = parseSourceId("fa1:telemetry:full/s:event#0");
-  const second = parseSourceId("fa1:telemetry:full/s:event#1");
+  const first = parseSourceId("fa1:telemetry:full/s:event/0123abcd#0");
+  const second = parseSourceId("fa1:telemetry:full/s:event/0123abcd#1");
   assert.equal(first.stream, "telemetry");
+  assert.equal(first.locator.sha8, "0123abcd");
   assert.equal(first.ordinal, 0);
   assert.equal(second.ordinal, 1);
   assert.equal(compareSourceIds(first, second), -1);
 });
 
+test("telemetry locator requires a content pin", () => {
+  for (const id of ["fa1:telemetry:full/s:event", "fa1:telemetry:full/s:event/XYZ", "fa1:telemetry:full/s:event/0123abcd/extra"]) {
+    assert.throws(() => parseSourceId(id), (error) => error instanceof SourceIdParseError, id);
+  }
+});
+
 test("parser rejects malformed, noncanonical, and misplaced components with typed errors", () => {
   for (const id of [
-    "fa2:telemetry:full/s:e",
+    "fa2:telemetry:full/s:e/0123abcd",
     "fa1:unknown:a:b",
-    "fa1:telemetry:full/s:e#01",
+    "fa1:telemetry:full/s:e/0123abcd#01",
     "fa1:cmdlog:slug:1/ABCDEF12",
     "fa1:flow-state:run:other/0123abcd",
     "fa1:transcript:0123abcd:9-2",

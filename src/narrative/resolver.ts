@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { assertPathContained } from "../lib/fs.js";
+import { parseSourceId } from "./source-ids.js";
 import type { IntegrityClass, UnavailableReason } from "./integrity.js";
 import {
   validateNarrativeSourceManifest,
@@ -28,7 +29,17 @@ export interface ResolveSourceOptions { scope?: string }
 
 export interface VerifyManifestReport {
   ok: boolean;
-  perSource: Array<{ sourceId: string; status: "resolved" | "unavailable"; reason?: UnavailableReason }>;
+  perSource: Array<{
+    sourceId: string;
+    status: "resolved" | "unavailable";
+    reason?: UnavailableReason;
+    /**
+     * Post-compile divergence between the frozen snapshot and its raw origin,
+     * e.g. `raw_source_rotated_away` once telemetry rotation deletes the log.
+     * Reported here (the manifest itself is frozen and never mutated).
+     */
+    lineageNote?: "raw_source_rotated_away";
+  }>;
 }
 
 function unavailable(sourceId: string, reason: UnavailableReason, detail: string): ResolveSourceResult {
@@ -41,7 +52,9 @@ function readRegularFile(file: string): Buffer {
   const noFollow = typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0;
   const descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow);
   try {
-    if (!fs.fstatSync(descriptor).isFile()) throw new Error("not a regular file");
+    const opened = fs.fstatSync(descriptor);
+    // The descriptor must be the same inode the pre-open lstat admitted.
+    if (!opened.isFile() || opened.dev !== stat.dev || opened.ino !== stat.ino) throw new Error("file changed between validation and read");
     return fs.readFileSync(descriptor);
   } finally {
     fs.closeSync(descriptor);
@@ -119,9 +132,29 @@ export function verifyManifest(narrativeDir: string): VerifyManifestReport {
   }
   const perSource = read.manifest.sources.map((entry) => {
     const result = resolveSource(root, entry.source_id);
+    const lineageNote = rawSourceRotatedAway(entry) ? ({ lineageNote: "raw_source_rotated_away" as const }) : {};
     return result.status === "resolved"
-      ? { sourceId: entry.source_id, status: "resolved" as const }
-      : { sourceId: entry.source_id, status: "unavailable" as const, reason: result.reason };
+      ? { sourceId: entry.source_id, status: "resolved" as const, ...lineageNote }
+      : { sourceId: entry.source_id, status: "unavailable" as const, reason: result.reason, ...lineageNote };
   });
   return { ok: perSource.every((result) => result.status === "resolved"), perSource };
+}
+
+function rawSourceRotatedAway(entry: NarrativeSourceManifestEntry): boolean {
+  if (entry.status !== "snapshotted") return false;
+  const originPath = entry.origin?.path;
+  if (typeof originPath !== "string") return false;
+  if (!fs.existsSync(originPath)) return true;
+  // Telemetry origins record the log directory; the rotatable stores are the
+  // channel files inside it, so divergence means no channel file remains.
+  if (entry.origin.store !== "telemetry") return false;
+  try {
+    const parsed = parseSourceId(entry.source_id);
+    if (parsed.stream !== "telemetry") return false;
+    const names = fs.readdirSync(originPath);
+    const channel = parsed.scope.channel;
+    return !names.some((name) => name === `${channel}.jsonl` || new RegExp(`^${channel}\\.[1-9][0-9]*\\.jsonl$`).test(name));
+  } catch {
+    return false;
+  }
 }

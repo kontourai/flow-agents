@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { atomicWriteFile, atomicWriteJson, ensureSafeDirectory } from "../lib/fs.js";
+import { atomicWriteFile, ensureSafeDirectory } from "../lib/fs.js";
 import type { CaptureCompleteness, IntegrityClass, UnavailableReason } from "./integrity.js";
 import { integrityClassForSource } from "./integrity.js";
 import { filterNarrativeRecord } from "./policy-filter.js";
@@ -74,6 +74,13 @@ export interface SnapshotNarrativeInput {
   redactionFields: readonly string[];
   compiler: NarrativeSourceManifest["compiler"];
   captureCompleteness: CaptureCompleteness;
+  /**
+   * Transcript content is DEFAULT-DENY: transcripts are arbitrary runtime
+   * payloads that whole-field policy cannot meaningfully filter, so without
+   * this explicit grant a transcript request is recorded path_only as
+   * unavailable/redacted and no content is snapshotted.
+   */
+  allowTranscriptContent?: boolean;
 }
 
 export interface SnapshotNarrativeDependencies {
@@ -174,24 +181,40 @@ function originFor(request: NarrativeSourceRequest): NarrativeSourceOrigin {
   return { store, path_class: "repository", ...(roots.repoRoot ? { path: roots.repoRoot } : {}) };
 }
 
+function sessionRootForSlug(roots: NarrativeSourceRoots, slug: string, sourceId: string): string {
+  const sessionDir = requiredRoot(roots.sessionDir, sourceId, "session root");
+  // A session-scoped ID names its slug; the supplied root must BE that session,
+  // not merely any directory the caller controls.
+  if (path.basename(path.resolve(sessionDir)) !== slug) {
+    throw new NarrativeReaderError("unauthorized", sourceId, `${sourceId} names slug ${slug} but the session root does not`);
+  }
+  return sessionDir;
+}
+
 function locate(request: NarrativeSourceRequest): ReadCandidate | Buffer {
   const sourceId = formatSourceId(request.source);
   const { source, roots } = request;
   switch (source.stream) {
     case "telemetry": {
-      const matches = readTelemetryCandidates({ telemetryDir: requiredRoot(roots.telemetryDir, sourceId, "telemetry root"), channel: source.scope.channel, sessionId: source.scope.sessionId, eventId: source.locator.eventId, ordinal: source.ordinal });
+      const matches = readTelemetryCandidates({ telemetryDir: requiredRoot(roots.telemetryDir, sourceId, "telemetry root"), channel: source.scope.channel, sessionId: source.scope.sessionId, eventId: source.locator.eventId, sha8: source.locator.sha8, ordinal: source.ordinal });
       if (matches.length === 0) throw new NarrativeReaderError("not_captured", sourceId, `${sourceId} was not captured`);
       if (matches.length > 1) throw new NarrativeReaderError("corrupt", sourceId, `${sourceId} requires an ordinal because it is not unique`);
       return matches[0];
     }
-    case "cmdlog": return readCommandLogCandidate({ sessionDir: requiredRoot(roots.sessionDir, sourceId, "session root"), locator: source.locator });
-    case "agent-event": return readAgentEventCandidate({ sessionDir: requiredRoot(roots.sessionDir, sourceId, "session root"), agentId: source.scope.agentId, lineIndex: source.locator.lineIndex, sha8: source.locator.sha8 });
-    case "delegation": return readDelegationCandidate({ sessionDir: requiredRoot(roots.sessionDir, sourceId, "session root"), agentId: source.scope.agentId, lineIndex: source.locator.lineIndex, sha8: source.locator.sha8 });
-    case "trust-claim": return readTrustClaimCandidate({ sessionDir: requiredRoot(roots.sessionDir, sourceId, "session root"), bundleSha8: source.scope.bundleSha8, id: source.locator.id });
-    case "trust-evidence": return readTrustEvidenceCandidate({ sessionDir: requiredRoot(roots.sessionDir, sourceId, "session root"), bundleSha8: source.scope.bundleSha8, id: source.locator.id });
+    case "cmdlog": return readCommandLogCandidate({ sessionDir: sessionRootForSlug(roots, source.scope.slug, sourceId), locator: source.locator });
+    case "agent-event": return readAgentEventCandidate({ sessionDir: sessionRootForSlug(roots, source.scope.slug, sourceId), agentId: source.scope.agentId, lineIndex: source.locator.lineIndex, sha8: source.locator.sha8 });
+    case "delegation": return readDelegationCandidate({ sessionDir: sessionRootForSlug(roots, source.scope.slug, sourceId), agentId: source.scope.agentId, lineIndex: source.locator.lineIndex, sha8: source.locator.sha8 });
+    case "trust-claim": return readTrustClaimCandidate({ sessionDir: sessionRootForSlug(roots, source.scope.slug, sourceId), bundleSha8: source.scope.bundleSha8, id: source.locator.id });
+    case "trust-evidence": return readTrustEvidenceCandidate({ sessionDir: sessionRootForSlug(roots, source.scope.slug, sourceId), bundleSha8: source.scope.bundleSha8, id: source.locator.id });
     case "flow-state": return readFlowStateCandidate({ flowRoot: requiredRoot(roots.flowRoot, sourceId, "flow root"), runId: source.scope.runId, sha8: source.locator.sha8 });
     case "flow-transition": return readFlowTransitionCandidate({ flowRoot: requiredRoot(roots.flowRoot, sourceId, "flow root"), runId: source.scope.runId, index: source.locator.index, sha8: source.locator.sha8 });
-    case "transcript": return readTranscriptCandidate({ absolutePath: requiredRoot(roots.transcriptPath, sourceId, "transcript path"), byteStart: source.locator.byteStart, byteEnd: source.locator.byteEnd });
+    case "transcript": {
+      const absolutePath = path.resolve(requiredRoot(roots.transcriptPath, sourceId, "transcript path"));
+      // The ID's scope pin names one exact path; a mismatched root is a rebind.
+      const pathSha8 = createHash("sha256").update(absolutePath, "utf8").digest("hex").slice(0, 8);
+      if (pathSha8 !== source.scope.pathSha8) throw new NarrativeReaderError("corrupt", sourceId, `${sourceId} path pin does not match the supplied transcript path`);
+      return readTranscriptCandidate({ absolutePath, byteStart: source.locator.byteStart, byteEnd: source.locator.byteEnd });
+    }
     case "file": return readFileCandidate({ repoRoot: requiredRoot(roots.repoRoot, sourceId, "repository root"), repoRelativePath: source.scope.repoRelativePath, hash: source.locator.hash });
   }
 }
@@ -215,10 +238,26 @@ function unavailableEntry(request: NarrativeSourceRequest, capturedAt: string, r
   };
 }
 
+function createOnlyWriteManifest(root: string, file: string, value: unknown): void {
+  // Creation-only publication: link(2) fails with EEXIST if any concurrent
+  // writer published first, so a frozen manifest can never be replaced by a
+  // second racer (a replace-style atomic rename would let the loser win).
+  const temp = path.join(root, `.source-manifest.${process.pid}.${Date.now().toString(36)}.tmp`);
+  atomicWriteFile(root, temp, Buffer.from(`${JSON.stringify(value, null, 2)}\n`));
+  try {
+    fs.linkSync(temp, file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error("narrative source manifest already exists");
+    throw error;
+  } finally {
+    fs.rmSync(temp, { force: true });
+  }
+}
+
 export function snapshotNarrative(input: SnapshotNarrativeInput, dependencies: SnapshotNarrativeDependencies = {}): { narrativeDir: string; manifest: NarrativeSourceManifest } {
   const now = dependencies.now ?? (() => new Date().toISOString());
   const writeBlob = dependencies.writeBlob ?? atomicWriteFile;
-  const writeManifest = dependencies.writeManifest ?? atomicWriteJson;
+  const writeManifest = dependencies.writeManifest ?? createOnlyWriteManifest;
   const capturedAt = now();
   const sources: NarrativeSourceManifestEntry[] = [];
   const written = new Set<string>();
@@ -227,6 +266,10 @@ export function snapshotNarrative(input: SnapshotNarrativeInput, dependencies: S
 
   for (const request of input.requests) {
     const sourceCapturedAt = now();
+    if (request.source.stream === "transcript" && input.allowTranscriptContent !== true) {
+      sources.push(unavailableEntry(request, sourceCapturedAt, "redacted"));
+      continue;
+    }
     let candidate: ReadCandidate | Buffer;
     try { candidate = locate(request); }
     catch (error) {

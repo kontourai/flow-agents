@@ -25,6 +25,9 @@ snapshot:
   (--session-slug SLUG | --artifact-root PATH) --narrative-id ID --source FA1 [--source FA1 ...]
   [--telemetry-root PATH] [--session-root PATH] [--flow-root PATH]
   [--transcript-path FILE] [--repo-root PATH] [--redact-fields FIELD,...]
+  [--allow-transcript-content]  (transcript content is default-deny: without
+                                 this grant transcript sources are recorded
+                                 path_only as unavailable/redacted)
   [--capture-completeness FILE]
 resolve:
   --narrative-dir PATH --source-id FA1 (--out FILE | --json)
@@ -75,6 +78,7 @@ function snapshot(flags: ReturnType<typeof parseArgs>["flags"]): number {
       policy_hash: createHash("sha256").update(JSON.stringify(redactionFields)).digest("hex"),
     },
     captureCompleteness: readCaptureCompleteness(flagString(flags, "capture-completeness")),
+    allowTranscriptContent: flagBool(flags, "allow-transcript-content"),
   });
   console.log(JSON.stringify(result));
   return 0;
