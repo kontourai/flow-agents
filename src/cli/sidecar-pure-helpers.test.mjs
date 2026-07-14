@@ -230,3 +230,37 @@ test("buildGateInquiryRecords: emits a single missed_block record for an empty b
   assert.equal(records.length, 1);
   assert.equal(records[0].answer.value.calibration, "missed_block");
 });
+
+// ── #634: writer-observed execution entries in the capture fold ─────────────
+test("writer-observed pass lifts an otherwise ambiguous command to pass", () => {
+  const fold = reduceCaptureLogByCommand([
+    { command: "npm run test:unit", observedResult: "ambiguous", exitCode: null, source: "postToolUse-capture" },
+    { command: "npm run test:unit", observedResult: "pass", exitCode: 0, source: "canonical-writer-execution" },
+  ]);
+  assert.equal(fold.get("npm run test:unit").observedResult, "pass");
+});
+
+test("a hook-observed fail is never buried by a writer-observed pass, in either order", () => {
+  for (const entries of [
+    [
+      { command: "npm run test:unit", observedResult: "fail", exitCode: 1, source: "postToolUse-capture" },
+      { command: "npm run test:unit", observedResult: "pass", exitCode: 0, source: "canonical-writer-execution" },
+    ],
+    [
+      { command: "npm run test:unit", observedResult: "pass", exitCode: 0, source: "canonical-writer-execution" },
+      { command: "npm run test:unit", observedResult: "fail", exitCode: 1, source: "postToolUse-capture" },
+    ],
+  ]) {
+    const fold = reduceCaptureLogByCommand(entries);
+    assert.equal(fold.get("npm run test:unit").observedResult, "fail");
+  }
+});
+
+test("a writer-observed fail is sticky like any other observed fail", () => {
+  const fold = reduceCaptureLogByCommand([
+    { command: "npm run test:unit", observedResult: "fail", exitCode: 2, source: "canonical-writer-execution" },
+    { command: "npm run test:unit", observedResult: "ambiguous", exitCode: null, source: "postToolUse-capture" },
+  ]);
+  assert.equal(fold.get("npm run test:unit").observedResult, "fail");
+  assert.equal(fold.get("npm run test:unit").exitCode, 2);
+});

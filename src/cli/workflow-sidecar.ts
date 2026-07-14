@@ -2800,6 +2800,102 @@ async function normalizeObservedCommands(commands: string[], projectRoot: string
   return commands.map((command) => byCommand.get(command)!);
 }
 
+// #634: the canonical writer's own execution is a first-class observation. On hosts whose
+// PostToolUse capture never surfaces exit codes, every hook-captured entry is "ambiguous",
+// the independent capture can never confirm a pass, and the verify gate dead-ends. The writer
+// just ran the command itself — a real process exit, not an inference — so it appends that
+// observation to the SAME hash-chained command-log, under the SAME lock protocol the capture
+// hook uses, visibly attributed via source: "canonical-writer-execution". Precedence stays
+// honest in the fold (reduceCaptureLogByCommand): any observed fail beats any pass, so a
+// writer pass can lift ambiguity but can never bury a hook-observed failure. The append is
+// fail-open with a stderr note: losing the supplementary observation must never fail the
+// gate-claim write itself. Decision record: docs/decisions/writer-observed-execution.md.
+export const WRITER_OBSERVATION_SOURCE = "canonical-writer-execution";
+const WRITER_LOCK_RETRY_MS = 5;
+const WRITER_LOCK_MAX_TRIES = 200;
+const WRITER_LOCK_STALE_MS = 10000;
+
+function loadCommandLogChain(): { CHAIN_GENESIS: string; computeChainHash: (prevHash: string, record: AnyObj) => string } {
+  const _req = createRequire(import.meta.url);
+  const chainPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../scripts/lib/command-log-chain.js");
+  return _req(chainPath) as { CHAIN_GENESIS: string; computeChainHash: (prevHash: string, record: AnyObj) => string };
+}
+
+function writerSleepSync(ms: number): void {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); }
+  catch { /* SharedArrayBuffer/Atomics unavailable — skip the backoff */ }
+}
+
+function writerAcquireLock(lockFile: string): number | null {
+  for (let i = 0; i < WRITER_LOCK_MAX_TRIES; i++) {
+    try {
+      const fd = fs.openSync(lockFile, "wx");
+      try { fs.writeSync(fd, String(process.pid)); } catch { /* pid is advisory only */ }
+      return fd;
+    } catch (err) {
+      if (!err || (err as NodeJS.ErrnoException).code !== "EEXIST") return null;
+      try {
+        const st = fs.statSync(lockFile);
+        if (Date.now() - st.mtimeMs > WRITER_LOCK_STALE_MS) { fs.unlinkSync(lockFile); continue; }
+      } catch { continue; }
+      writerSleepSync(WRITER_LOCK_RETRY_MS);
+    }
+  }
+  return null;
+}
+
+function writerReadLastChainState(logFile: string, genesis: string): { seq: number; hash: string } {
+  let raw = "";
+  try { raw = fs.readFileSync(logFile, "utf8"); } catch { return { seq: -1, hash: genesis }; }
+  const lines = raw.split("\n").filter((l) => l.trim());
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let entry: AnyObj;
+    try { entry = JSON.parse(lines[i]!); } catch { continue; }
+    if (entry && entry._chain && typeof entry._chain.hash === "string" && typeof entry._chain.seq === "number") {
+      return { seq: entry._chain.seq, hash: entry._chain.hash };
+    }
+  }
+  return { seq: -1, hash: genesis };
+}
+
+export function appendWriterObservedCommands(dir: string, observed: ObservedCommand[], timestamp: string): void {
+  if (observed.length === 0) return;
+  try {
+    const chain = loadCommandLogChain();
+    const logFile = path.join(dir, "command-log.jsonl");
+    const lockFile = `${logFile}.lock`;
+    const fd = writerAcquireLock(lockFile);
+    try {
+      let { seq, hash: prevHash } = writerReadLastChainState(logFile, chain.CHAIN_GENESIS);
+      const lines: string[] = [];
+      for (const entry of observed) {
+        const record: AnyObj = {
+          command: entry.command,
+          observedResult: entry.exit_code === 0 ? "pass" : "fail",
+          exitCode: entry.exit_code,
+          capturedAt: timestamp,
+          source: WRITER_OBSERVATION_SOURCE,
+          writer: {
+            output_sha256: entry.output_sha256,
+            ...(Number.isSafeInteger(entry.test_count) ? { test_count: entry.test_count } : {}),
+            ...(entry.execution_proof ? { execution_proof: entry.execution_proof } : {}),
+          },
+        };
+        seq += 1;
+        const hashValue = chain.computeChainHash(prevHash, record);
+        record._chain = { seq, prevHash, hash: hashValue };
+        prevHash = hashValue;
+        lines.push(JSON.stringify(record));
+      }
+      fs.appendFileSync(logFile, `${lines.join("\n")}\n`);
+    } finally {
+      if (fd !== null) { try { fs.closeSync(fd); } catch { /* closed */ } try { fs.unlinkSync(lockFile); } catch { /* removed */ } }
+    }
+  } catch (error) {
+    process.stderr.write(`[record-gate-claim] writer observation append failed (fail-open, capture unaffected): ${error instanceof Error ? error.message : String(error)}\n`);
+  }
+}
+
 function requireObservedCommandRefs(refs: AnyObj[], observedCommands: ReadonlySet<string>, label: string, requireAll = false): void {
   const commandRefs = refs.filter((ref) => ref.kind === "command");
   if (commandRefs.length === 0) die(`${label} requires a command evidence ref matching a successful observed command`);
@@ -3747,6 +3843,9 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   const observedCommands = gateCommands.length > 0
     ? await normalizeObservedCommands(gateCommands, projectRoot!, mustRunTests, statusVal)
     : [];
+  // #634: persist the writer's real executions into the hash-chained command-log so the
+  // capture fold has a deterministic observation even on exit-code-blind hosts.
+  appendWriterObservedCommands(dir, observedCommands, ts);
   const observedCommandNames = new Set(observedCommands.map((entry) => entry.command));
   let outputSha256: string | null = null;
   if (!mustRunTests && gateCommands.length > 1) die("record-gate-claim accepts repeatable --command only for passing tests-evidence claims");
