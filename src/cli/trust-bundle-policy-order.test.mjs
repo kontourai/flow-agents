@@ -12,8 +12,11 @@
 // Run: `npm run test:unit`. Requires @kontourai/surface (the bundle producer's dependency).
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 
-import { buildTrustBundle } from "../../build/src/cli/workflow-sidecar.js";
+import { WORKFLOW_ACCEPTANCE_STATUSES } from "../../build/src/cli/public-contracts.js";
+import { buildTrustBundle, validateTrustBundle } from "../../build/src/cli/workflow-sidecar.js";
 
 const TS = "2026-07-02T00:00:00Z";
 
@@ -84,4 +87,134 @@ test("buildTrustBundle: same-kind checks with different command-presence get DIS
   assert.notEqual(cmdClaim.verificationPolicyId, noCmdClaim.verificationPolicyId);
   assert.equal(statuses[cmdClaim.id], "verified");
   assert.equal(statuses[noCmdClaim.id], "verified");
+});
+
+test("workflow acceptance status contract stays aligned with the artifact schema", () => {
+  const schema = JSON.parse(fs.readFileSync(path.join(process.cwd(), "schemas", "workflow-acceptance.schema.json"), "utf8"));
+  assert.deepEqual(schema.properties.criteria.items.properties.status.enum, [...WORKFLOW_ACCEPTANCE_STATUSES]);
+});
+
+test("buildTrustBundle: malformed acceptance statuses remain pending and keep invariant identity at the plan step", async () => {
+  const flowAgentsDir = path.join(process.cwd(), ".kontourai", "flow-agents");
+  const malformedStatuses = [undefined, null, "", "PASS", " pass ", true, false, 0, 1, {}, [], "verified", "unknown"];
+  for (const [index, status] of malformedStatuses.entries()) {
+    const criterion = { id: `ac-malformed-${index}`, description: "The implementation satisfies the requested behavior" };
+    if (status !== undefined) criterion.status = status;
+    const bundle = await buildTrustBundle(
+      "acceptance-integrity",
+      TS,
+      [],
+      [criterion],
+      [],
+      undefined,
+      flowAgentsDir,
+      undefined,
+      { flowId: "builder.build", stepId: "plan" },
+    );
+    assert.ok(bundle, "buildTrustBundle returned null (is @kontourai/surface installed?)");
+
+    const claim = bundle.claims.find((candidate) => candidate.metadata?.origin === "acceptance");
+    assert.ok(claim, "expected an acceptance criterion claim");
+    assert.equal(claim.claimType, "workflow.acceptance.criterion");
+    assert.equal(claim.subjectType, "flow-step");
+    assert.equal(claim.value, "pending");
+    assert.equal(claim.status, "proposed");
+    assert.equal(claim.metadata.criterion.status, "pending");
+    assert.equal(bundle.events.filter((event) => event.claimId === claim.id).length, 0);
+    assert.deepEqual(await validateTrustBundle(bundle), { valid: true, errors: [], available: true });
+  }
+});
+
+test("buildTrustBundle: evidence-free acceptance pass cannot manufacture verified trust", async () => {
+  const bundle = await buildTrustBundle(
+    "acceptance-no-evidence",
+    TS,
+    [],
+    [{ id: "ac-no-evidence", description: "The behavior is complete", status: "pass", evidence_refs: [] }],
+    [],
+  );
+  assert.ok(bundle, "buildTrustBundle returned null (is @kontourai/surface installed?)");
+  const claim = bundle.claims.find((candidate) => candidate.metadata?.origin === "acceptance");
+  assert.ok(claim, "expected an acceptance criterion claim");
+  assert.equal(claim.value, "pending");
+  assert.equal(claim.status, "proposed");
+  assert.equal(bundle.events.filter((event) => event.claimId === claim.id).length, 0);
+});
+
+test("buildTrustBundle: pass metadata without observed execution remains pending", async () => {
+  const bundle = await buildTrustBundle(
+    "acceptance-forged-provenance",
+    TS,
+    [],
+    [{
+      id: "ac-forged",
+      description: "The behavior is complete",
+      status: "pass",
+      evidence_refs: [{ kind: "command", excerpt: "npm test", summary: "Claimed test command." }],
+      identity_version: 2,
+      verified_at: TS,
+      _observed_commands: [{
+        command: "npm test",
+        exit_code: 0,
+        output_sha256: "0".repeat(64),
+        test_count: 1,
+        execution_proof: { kind: "local-process-exit", runner: "npm", static_test_units: 1 },
+      }],
+    }],
+    [],
+  );
+  assert.ok(bundle, "buildTrustBundle returned null (is @kontourai/surface installed?)");
+  const claim = bundle.claims.find((candidate) => candidate.metadata?.origin === "acceptance");
+  assert.ok(claim, "expected an acceptance criterion claim");
+  assert.equal(claim.value, "pending");
+  assert.equal(claim.status, "proposed");
+  assert.equal(bundle.evidence.filter((evidence) => evidence.claimId === claim.id).length, 0);
+  assert.equal(bundle.events.filter((event) => event.claimId === claim.id).length, 0);
+});
+
+test("buildTrustBundle: direct observed-command metadata cannot manufacture verified trust", async () => {
+  const flowAgentsDir = path.join(process.cwd(), ".kontourai", "flow-agents");
+  const criterion = {
+    id: "ac-stable",
+    description: "The accepted behavior remains independently verified",
+    status: "pass",
+    evidence_refs: [{ kind: "command", excerpt: "npm test", summary: "The observed test command passed." }],
+    identity_version: 2,
+    verified_at: TS,
+    _observed_commands: [{
+      command: "npm test",
+      exit_code: 0,
+      output_sha256: "0".repeat(64),
+      test_count: 1,
+      execution_proof: { kind: "local-process-exit", runner: "npm", static_test_units: 1 },
+    }],
+  };
+  const bundles = await Promise.all(["plan", "verify"].map((stepId) => buildTrustBundle(
+    "acceptance-stability",
+    TS,
+    [],
+    [criterion],
+    [],
+    undefined,
+    flowAgentsDir,
+    undefined,
+    { flowId: "builder.build", stepId },
+  )));
+
+  const claimIds = [];
+  for (const bundle of bundles) {
+    assert.ok(bundle, "buildTrustBundle returned null (is @kontourai/surface installed?)");
+    const claim = bundle.claims.find((candidate) => candidate.metadata?.origin === "acceptance");
+    assert.ok(claim, "expected an acceptance criterion claim");
+    assert.equal(claim.claimType, "workflow.acceptance.criterion");
+    assert.equal(claim.subjectType, "flow-step");
+    assert.equal(claim.value, "pending");
+    assert.equal(claim.status, "proposed");
+    const evidence = bundle.evidence.filter((candidate) => candidate.claimId === claim.id);
+    assert.equal(evidence.length, 0);
+    const event = bundle.events.find((candidate) => candidate.claimId === claim.id);
+    assert.equal(event, undefined);
+    claimIds.push(claim.id);
+  }
+  assert.equal(new Set(claimIds).size, 1, "acceptance claim identity changed across Builder gates");
 });

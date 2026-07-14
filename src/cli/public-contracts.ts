@@ -1,4 +1,5 @@
 export const WORKFLOW_CRITIQUE_STATUSES = ["pass", "fail", "not_verified"] as const;
+export const WORKFLOW_ACCEPTANCE_STATUSES = ["pending", "pass", "fail", "not_verified", "accepted_gap"] as const;
 
 export const EVIDENCE_REF_KINDS = ["source", "command", "artifact", "provider", "external"] as const;
 export const EVIDENCE_REF_FIELD_SCHEMAS = {
