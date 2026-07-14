@@ -33,7 +33,7 @@ function writeJsonLines(file, records) {
   return lines;
 }
 
-function constructedNarrative({ includeTrust = false, fileOnly = false, timeoutWithoutDuration = false } = {}) {
+function constructedNarrative({ includeTrust = false, fileOnly = false, timeoutWithoutDuration = false, spacedFileName = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-projection-"));
   const narrativeDir = path.join(root, "artifacts", "narrative", "runtime-test");
   const telemetryDir = path.join(root, "telemetry");
@@ -82,10 +82,11 @@ function constructedNarrative({ includeTrust = false, fileOnly = false, timeoutW
     );
   }
 
-  const created = Buffer.from(JSON.stringify({ kind: "created-file", path: "created.txt" }));
-  fs.writeFileSync(path.join(repoRoot, "created.txt"), created);
+  const createdName = spacedFileName ? "created file.txt" : "created.txt";
+  const created = Buffer.from(JSON.stringify({ kind: "created-file", path: createdName }));
+  fs.writeFileSync(path.join(repoRoot, createdName), created);
   requests.push(
-    { source: parseSourceId(`fa1:file:created.txt:${sha256(created)}`), roots: { repoRoot } },
+    { source: parseSourceId(`fa1:file:${encodeURIComponent(createdName)}:${sha256(created)}`), roots: { repoRoot } },
     { source: parseSourceId(`fa1:file:missing.txt:${"a".repeat(64)}`), roots: { repoRoot } },
   );
 
@@ -128,7 +129,7 @@ test("constructed snapshot projects the complete runtime account deterministical
   assert.ok(statements.some((statement) => statement.proposition.includes("5000 ms timeout")));
   assert.ok(statements.some((statement) => statement.proposition.includes("classified as a no-op")));
   assert.ok(statements.some((statement) => statement.actor === "unattributed" && statement.proposition.includes("delegated")));
-  assert.ok(statements.some((statement) => statement.proposition.includes("created.txt")));
+  assert.ok(statements.some((statement) => statement.proposition.includes("`created.txt`")));
   assert.ok(statements.some((statement) => statement.proposition.includes("unavailable because not_captured")));
 });
 
@@ -202,15 +203,28 @@ test("M2: stableStringify emits lexically sorted keys at every level (JSON.strin
   walk(JSON.parse(stableStringify(projection)), "$");
 });
 
-test("H2b: a read-only tool event does not suppress the no-op classification", () => {
+test("H2b: no-op classification never coexists with commands, delegations, or created files in the same turn", () => {
   const { narrativeDir } = constructedNarrative();
-  const toolOnlyTurnOrdinal = undefined;
   const projection = projectRuntimeNarrative(narrativeDir, { projectedAt: PROJECTED_AT });
-  const turns = projection.turns.filter((turn) => turn.statements.some((s) => s.rule?.id === "no-op-turn"));
-  assert.ok(turns.length >= 1, "expected at least one no-op-classified turn despite tool events");
-  if (toolOnlyTurnOrdinal !== undefined) {
-    assert.ok(turns.some((turn) => turn.ordinal === toolOnlyTurnOrdinal), "the tool-event-only turn must be no-op-classified");
+  const activityRules = (turn) => turn.statements.filter((s) =>
+    s.proposition.startsWith("Command `") || s.proposition.includes("delegated work") || s.proposition.includes("was observed to be created"));
+  for (const turn of projection.turns) {
+    const noOp = turn.statements.some((s) => s.rule?.id === "no-op-turn");
+    if (noOp) assert.deepEqual(activityRules(turn).map((s) => s.proposition), [],
+      `turn ${turn.ordinal} is no-op yet carries activity statements`);
   }
+  // A turn consisting solely of tool events (read-only) IS no-op-classified.
+  const readOnly = projection.turns.filter((turn) =>
+    turn.statements.length > 0 && activityRules(turn).length === 0 && turn.ordinal !== -1);
+  assert.ok(readOnly.some((turn) => turn.statements.some((s) => s.rule?.id === "no-op-turn")),
+    "expected a read-only turn to be no-op-classified");
+});
+
+test("H3 regression: space-bearing file paths are quoted free text, not rejected identifiers", () => {
+  const { narrativeDir } = constructedNarrative({ spacedFileName: true });
+  const projection = projectRuntimeNarrative(narrativeDir, { projectedAt: PROJECTED_AT });
+  const all = [...projection.turns.flatMap((turn) => turn.statements), ...projection.document_statements];
+  assert.ok(all.some((s) => s.proposition.includes("`created file.txt`")), "spaced path must project quoted");
 });
 
 test("H2a: a timeout signal without a duration still yields the material timeout statement", () => {

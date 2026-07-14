@@ -461,6 +461,9 @@ export function projectRuntimeNarrative(narrativeDir: string, opts: ProjectRunti
       sourceIndex: entry.sourceIndex,
       emissionIndex: 0,
     }, ordinal);
+    // Re-review H2b: a delegation IS activity — a turn cannot simultaneously
+    // delegate work and be a no-op.
+    if (ordinal !== undefined) actualActivity.add(ordinal);
   }
 
   for (const entry of resolved.filter((candidate) => candidate.stream === "flow-state" || candidate.stream === "flow-transition")) {
@@ -475,6 +478,8 @@ export function projectRuntimeNarrative(narrativeDir: string, opts: ProjectRunti
     if (parsed.stream !== "file") continue;
     const ordinal = nearestTurnOrdinal(entry, turns, turnSourceIndexes);
     append({ statement: observedFileCreation({ sourceId: entry.sourceId, path: parsed.scope.repoRelativePath }), sourceIndex: entry.sourceIndex, emissionIndex: 0 }, ordinal);
+    // Re-review H2b: a created file IS a write — never no-op alongside it.
+    if (ordinal !== undefined) actualActivity.add(ordinal);
   }
 
   for (const turn of turns) {

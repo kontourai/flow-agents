@@ -26,7 +26,7 @@ test("observed constructors render one grounded proposition", () => {
   assert.equal(observedDelegation({ sourceId: source("delegation"), agentId: "agent-1", targets: ["worker-1", "worker-2"] }).proposition,
     "Agent agent-1 delegated work to worker-1, worker-2");
   assert.equal(observedFileCreation({ sourceId: fileSource, path: "created.txt" }).proposition,
-    "File created.txt was observed to be created");
+    "File `created.txt` was observed to be created");
 });
 
 test("derived constructors render rules with grounded inputs", () => {

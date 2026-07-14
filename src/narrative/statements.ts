@@ -176,9 +176,13 @@ export function observedDelegation(input: {
 }
 
 export function observedFileCreation(input: { sourceId: string; path: string }): Statement {
+  // Re-review H3 regression fix: paths are legitimately space-bearing free
+  // text (the fa1 file scope is percent-encoded), so they quote like commands
+  // rather than passing the identifier charset — injection stays impossible
+  // because the atomicity scan runs over the backtick-stripped skeleton.
   return construct({
     class: "observed",
-    proposition: `File ${identifier(input.path, "path")} was observed to be created`,
+    proposition: `File \`${text(input.path, "path")}\` was observed to be created`,
     sourceRefs: [input.sourceId],
   });
 }
