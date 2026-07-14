@@ -54,10 +54,14 @@ test("public API exports the pure narrative source contract", async () => {
     "integrityClassForSource", "buildCaptureCompleteness",
     "effectiveNarrativeRedactionFields", "filterNarrativeRecord",
     "snapshotNarrative", "validateNarrativeSourceManifest", "resolveSource", "verifyManifest",
+    "buildTurnSpine", "observedCommand", "observedToolAction", "observedDelegation",
+    "observedFileCreation", "derivedRetry", "derivedNoOpTurn", "derivedTimeout",
+    "derivedUnavailableSource",
   ]) {
     assert.equal(typeof lib[name], "function", `${name} must be package-root exported`);
   }
   assert.equal(lib.NARRATIVE_SOURCE_ID_VERSION, "fa1");
+  assert.equal(lib.TURN_SPINE_RULE_ID, "turn-spine/v1");
 });
 
 test("TS and CJS artifact helpers stay in parity without durable-root fallback", () => {
