@@ -142,7 +142,8 @@
     "gen:decisions-index": "node scripts/check-decisions.cjs gen-index",
     "freeze:adrs": "node scripts/freeze-adrs.mjs",
     "prepack": "npm run build:bundles --silent && npm run validate:source --",
-    "kit": "npm run build --silent && node build/src/cli.js kit"
+    "kit": "npm run build --silent && node build/src/cli.js kit",
+    "narrative-sources": "npm run build --silent && node build/src/cli.js narrative-sources"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
@@ -153,7 +154,7 @@
     "@kontourai/flow": "^3.1.4"
   },
   "optionalDependencies": {
-    "@kontourai/surface": "^2.0.0",
+    "@kontourai/surface": "^2.10.0",
     "hachure": "^0.9.0",
     "neo4j-driver": "^5.28.0"
   }

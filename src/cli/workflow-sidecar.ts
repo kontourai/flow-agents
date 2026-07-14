@@ -477,6 +477,8 @@ type SurfaceModule = {
   ) => SurfaceInquiryRecord;
   buildTrustReport: (bundle: Record<string, unknown>, options?: { now?: Date }) => Record<string, unknown>;
   buildDerivationDrilldown: (report: Record<string, unknown>, claimId: string) => Record<string, unknown>;
+  /** #171: consumer-ready claim explanation (Surface >=2.10); composes the drilldown internally, fail-soft. */
+  explainClaim: (report: Record<string, unknown>, claimId: string) => import("@kontourai/surface").ClaimExplanation;
   /** Canonical trust-bundle validator from @kontourai/surface. Throws on invalid input; returns TrustBundle on success. */
   validateTrustBundle: (input: unknown) => Record<string, unknown>;
   /** Freeze a derivation checkpoint from a report. */
@@ -6589,14 +6591,13 @@ async function liveness(p: ReturnType<typeof parseArgs>): Promise<number> {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ─── Claim Lookup — pure helper (promotable to Surface #171) ─────────────────
-// buildClaimExplanation + its types are extracted to ./sidecar-claim-explain.ts
-// (ops#22): a PURE projection (report + bundle + id in, structured explanation out)
-// with no fs/CLI/shared state, unit-tested in isolation. Re-exported here so the
-// library facade (src/index.ts) and the IO `claimLookup` handler below are unchanged.
-export { buildClaimExplanation } from "./sidecar-claim-explain.js";
-export type { ClaimEvidenceItem, ClaimExplanation } from "./sidecar-claim-explain.js";
-import { buildClaimExplanation } from "./sidecar-claim-explain.js";
+// ─── Claim Lookup — consumes Surface explainClaim (#171 lift complete) ───────
+// The pure projection this file once hosted (sidecar-claim-explain.ts, ops#22)
+// was lifted verbatim into @kontourai/surface as explainClaim(report, claimId)
+// (kontourai/surface#151, 2.10.0) with the drilldown composition folded inside
+// (same fail-soft semantics the caller-side enrichment had). Types re-export
+// from Surface so the library facade keeps compiling for downstream importers.
+export type { ClaimEvidenceItem, ClaimExplanation } from "@kontourai/surface";
 
 /**
  * claim <id> <dir>
@@ -6638,29 +6639,17 @@ Available claim ids:
 
   // Load Surface via tryLoadSurface() (ESM, cached, fail-open pattern)
   const surface = await tryLoadSurface();
-  if (!surface || typeof surface.buildTrustReport !== "function" || typeof surface.buildDerivationDrilldown !== "function") {
-    process.stderr.write(`[claim] @kontourai/surface unavailable or missing buildTrustReport/buildDerivationDrilldown
+  if (!surface || typeof surface.buildTrustReport !== "function" || typeof surface.explainClaim !== "function") {
+    process.stderr.write(`[claim] @kontourai/surface unavailable or missing buildTrustReport/explainClaim (needs >=2.10)
 `);
     return 0; // fail-open, consistent with gate-review pattern
   }
 
-  // Build TrustReport (required — buildDerivationDrilldown needs TrustReport, not TrustBundle)
+  // Build TrustReport, then the structured explanation — Surface's explainClaim
+  // (#171 lift) composes the derivation drilldown internally, fail-soft, exactly
+  // as the retired local helper + caller-side enrichment did.
   const report = surface.buildTrustReport(bundle as unknown as Record<string, unknown>);
-
-  // Build the structured explanation (pure, promotable to #171)
-  const explanation = buildClaimExplanation(report, bundle as unknown as Record<string, unknown>, claimId);
-
-  // Enrich the why.directInputs/leafClaims/diagnostics from the drilldown
-  try {
-    const drilldown = surface.buildDerivationDrilldown(report, claimId) as AnyObj;
-    if (drilldown) {
-      explanation.why.directInputs = Array.isArray(drilldown.directInputs) ? drilldown.directInputs : [];
-      explanation.why.leafClaims = Array.isArray(drilldown.leafClaims) ? drilldown.leafClaims : [];
-      explanation.why.diagnostics = Array.isArray(drilldown.diagnostics) ? drilldown.diagnostics : [];
-    }
-  } catch {
-    // buildDerivationDrilldown threw (e.g. claim not in report) — proceed without drilldown
-  }
+  const explanation = surface.explainClaim(report, claimId) as import("@kontourai/surface").ClaimExplanation;
 
   if (p.flags.has("json")) {
     console.log(JSON.stringify(explanation, null, 2));
@@ -6747,7 +6736,7 @@ Available claim ids:
   if (explanation.why.changeRecords.length > 0) {
     lines.push(`  Change records: ${explanation.why.changeRecords.length}`);
     for (const cr of explanation.why.changeRecords) {
-      lines.push(`    - ${cr.action ?? "?"} at ${cr.at ?? cr.createdAt ?? "?"}`);
+      lines.push(`    - ${cr.action ?? "?"} at ${(cr as AnyObj).at ?? cr.createdAt ?? "?"}`);
     }
   }
 

@@ -74,7 +74,7 @@ export async function main(argv: string[]): Promise<number> {
 
 async function drive(sessionDir: string, argv: string[], json: boolean): Promise<number> {
   const parsed = parseArgs(argv);
-  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "adapter-command-file", "evidence-signing-key-file", "max-turns", "turn-timeout-ms", "barrier-wait-ms", "barrier-poll-ms"]), "workflow drive");
+  assertOnlyFlags(parsed.flags, new Set(["artifact-root", "session-dir", "json", "adapter-command-file", "evidence-signing-key-file", "max-turns", "turn-timeout-ms", "barrier-wait-ms", "barrier-poll-ms", "context-policy"]), "workflow drive");
   const adapterCommandFile = flagString(parsed.flags, "adapter-command-file");
   if (!adapterCommandFile) throw new Error("workflow drive requires --adapter-command-file <path>");
   const evidenceSigningKeyFile = flagString(parsed.flags, "evidence-signing-key-file");
@@ -83,6 +83,7 @@ async function drive(sessionDir: string, argv: string[], json: boolean): Promise
   const turnTimeoutMs = integerFlag(parsed.flags, "turn-timeout-ms", 900_000, 1, 86_400_000);
   const barrierWaitMs = integerFlag(parsed.flags, "barrier-wait-ms", 300_000, 0, 86_400_000);
   const barrierPollMs = integerFlag(parsed.flags, "barrier-poll-ms", 1_000, 1, 60_000);
+  const contextPolicy = enumFlag(parsed.flags, "context-policy", ["warm", "fresh"] as const, "warm");
   const { slug, projectRoot } = readBoundSession(sessionDir);
   assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
   const adapterCommand = loadContinuationAdapterCommand(adapterCommandFile);
@@ -97,6 +98,7 @@ async function drive(sessionDir: string, argv: string[], json: boolean): Promise
       store: continuationStore,
       maxTurns,
       adapterCommandIdentity: adapterCommand.identity,
+      contextPolicy,
       authorizeTurn: async () => { assertOrdinaryMatchingAssignmentActor(sessionDir, slug); },
       issueTurnAuthority: async (request) => {
         const currentAssignment = assertOrdinaryMatchingAssignmentActor(sessionDir, slug);
@@ -791,6 +793,18 @@ function integerFlag(
   const value = Number(raw);
   if (!Number.isSafeInteger(value) || value < min || value > max) throw new Error(`workflow drive --${name} must be an integer from ${min} through ${max}`);
   return value;
+}
+
+function enumFlag<const T extends readonly string[]>(
+  flags: ReturnType<typeof parseArgs>["flags"],
+  name: string,
+  allowed: T,
+  fallback: T[number],
+): T[number] {
+  const raw = flagString(flags, name);
+  if (raw === undefined) return fallback;
+  if (!allowed.includes(raw)) throw new Error(`workflow drive --${name} must be one of: ${allowed.join(", ")}`);
+  return raw;
 }
 
 function isWithin(candidate: string, root: string): boolean {

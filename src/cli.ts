@@ -11,6 +11,7 @@ import { main as init } from "./cli/init.js";
 import { main as promoteWorkflowArtifact } from "./cli/promote-workflow-artifact.js";
 import { main as publishChange } from "./cli/publish-change-helper.js";
 import { main as pullWorkProvider } from "./cli/pull-work-provider.js";
+import { main as narrativeSources } from "./cli/narrative-sources.js";
 import { main as telemetryDoctor } from "./cli/telemetry-doctor.js";
 import { main as usageFeedback } from "./cli/usage-feedback.js";
 import { main as veritasGovernance } from "./cli/veritas-governance.js";
@@ -36,6 +37,7 @@ const availableCommands = new Map<string, (argv: string[]) => number | Promise<n
   ["effective-backlog-settings", effectiveBacklogSettings],
   ["fixture-retirement-audit", fixtureRetirementAudit],
   ["kit", kit],
+  ["narrative-sources", narrativeSources],
   ["init", init],
   ["promote-workflow-artifact", promoteWorkflowArtifact],
   ["publish-change", publishChange],

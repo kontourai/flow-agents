@@ -137,6 +137,14 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check fixture-retirement-audit-integration
 
+      - name: Narrative source contract integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-source-contract-integration
+
+      - name: Narrative redaction fail-closed integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-redaction-fail-closed-integration
+
       - name: Publish-change helper integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check publish-change-helper-integration

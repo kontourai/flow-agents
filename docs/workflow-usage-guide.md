@@ -667,7 +667,10 @@ For unattended runtime re-entry, the active assignment actor may use `workflow d
 explicit runtime adapter argv file. The driver repeats the same public projection/evidence cycle,
 persists its mission turn budget, and parks on adapter-declared PID or deadline barriers instead of
 spending turns while external work is incomplete. Adapter completion never advances a gate by
-self-report; only trust evidence accepted by canonical Flow can change the current step. See
+self-report; only trust evidence accepted by canonical Flow can change the current step. Use
+`--context-policy fresh` when the selected adapter supports canonical fresh-context handoffs and
+the runtime capability profile calls for bounded contexts. This preserves every gate while avoiding
+prior-transcript replay between actions; `warm` remains the default. See
 [`docs/public-workflow-cli.md`](public-workflow-cli.md#bounded-continuation-driver) for the protocol.
 
 If the same Builder slice is interrupted, inspect its canonical status. Resume

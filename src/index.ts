@@ -15,6 +15,62 @@ import * as path from "node:path";
 import { loadJson as _loadJson, writeJson as _writeJson } from "./cli/workflow-sidecar.js";
 
 export {
+  NARRATIVE_SOURCE_ID_VERSION,
+  SourceIdParseError,
+  compareSourceIds,
+  formatSourceId,
+  parseSourceId,
+} from "./narrative/source-ids.js";
+export type {
+  AgentEventSourceId,
+  ChainedCommandLogSourceId,
+  CommandLogSourceId,
+  FileSourceId,
+  FlowStateSourceId,
+  FlowTransitionSourceId,
+  LegacyCommandLogSourceId,
+  NarrativeSourceId,
+  NarrativeSourceStream,
+  SourceIdErrorCode,
+  TelemetrySourceId,
+  TranscriptSourceId,
+  TrustSourceId,
+} from "./narrative/source-ids.js";
+export {
+  DEFAULT_INTEGRITY_CLASS,
+  KNOWN_CAPTURE_GAPS,
+  buildCaptureCompleteness,
+  integrityClassForSource,
+} from "./narrative/integrity.js";
+export type {
+  CaptureChannelStatus,
+  CaptureCompleteness,
+  IntegrityClass,
+  KnownGapClass,
+  UnavailableReason,
+} from "./narrative/integrity.js";
+export {
+  TELEMETRY_CHANNEL_ANALYTICS_REDACT_DEFAULT,
+  TELEMETRY_CHANNEL_FULL_REDACT_DEFAULT,
+  effectiveNarrativeRedactionFields,
+  filterNarrativeRecord,
+} from "./narrative/policy-filter.js";
+export type { NarrativePolicyFilterResult } from "./narrative/policy-filter.js";
+export { snapshotNarrative, validateNarrativeSourceManifest } from "./narrative/snapshot.js";
+export type {
+  NarrativeLineageEvent,
+  NarrativeSourceManifest,
+  NarrativeSourceManifestEntry,
+  NarrativeSourceOrigin,
+  NarrativeSourceRequest,
+  NarrativeSourceRoots,
+  SnapshotNarrativeDependencies,
+  SnapshotNarrativeInput,
+} from "./narrative/snapshot.js";
+export { resolveSource, verifyManifest } from "./narrative/resolver.js";
+export type { ResolveSourceOptions, ResolveSourceResult, VerifyManifestReport } from "./narrative/resolver.js";
+
+export {
   BUILDER_BUILD_FLOW_ID,
   BUILDER_BUILD_FLOW_RELATIVE_PATH,
   BuilderBuildRunInputError,
@@ -72,6 +128,8 @@ export {
 } from "./continuation-driver.js";
 export type {
   ContinuationBarrier,
+  ContinuationContextPolicy,
+  ContinuationContextStrategy,
   ContinuationAcceptedTurn,
   ContinuationDriverEvent,
   ContinuationDriverLockLease,

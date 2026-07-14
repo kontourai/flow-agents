@@ -406,8 +406,42 @@ test("driver advances multiple canonical Flow steps without a human continuation
   assert.equal(result.turns_started, 2);
   assert.deepEqual(requests.map((request) => request.current_step), ["plan", "execute"]);
   assert.deepEqual(requests.map((request) => request.next_action.skills), [["skill-plan"], ["skill-execute"]]);
+  assert.deepEqual(requests.map((request) => request.context_strategy), [
+    { thread: "new", handoff: "canonical", reason: "mission_start" },
+    { thread: "resume", handoff: "canonical", reason: "configured_policy" },
+  ]);
   assert.equal(requests.some((request) => Object.hasOwn(request, "system_prompt")), false);
   assert.equal(store.value().status, "done");
+});
+
+test("fresh context policy starts every bounded action from the canonical handoff", async () => {
+  const states = [snapshot("plan"), snapshot("execute"), snapshot("done", "completed")];
+  let index = 0;
+  const requests = [];
+  const store = memoryStore();
+  const runtime = {
+    inspect: async () => states[index],
+    synchronize: async () => states[index],
+    execute: async (request) => {
+      requests.push(request);
+      index += 1;
+      return { status: "completed" };
+    },
+  };
+
+  const result = await runContinuationDriver({ maxTurns: 2, contextPolicy: "fresh", store, runtime });
+
+  assert.equal(result.outcome, "done");
+  assert.equal(store.value().context_policy, "fresh");
+  assert.deepEqual(requests.map((request) => request.context_strategy), [
+    { thread: "new", handoff: "canonical", reason: "mission_start" },
+    { thread: "new", handoff: "canonical", reason: "configured_policy" },
+  ]);
+
+  await assert.rejects(
+    runContinuationDriver({ maxTurns: 2, contextPolicy: "warm", store, runtime }),
+    /context policy does not match the persisted mission policy/,
+  );
 });
 
 test("weak structured consumers cannot turn adapter prose or adapter evidence into gate evidence", async () => {
@@ -1612,6 +1646,14 @@ test("Stop keeps a base-valid signed session selected across paused and complete
   process.env.FLOW_AGENTS_CONTINUATION_TURN_SECRET = issued.turnSecret;
   process.env.FLOW_AGENTS_CONTINUATION_RUN_ID = issued.runId;
   try {
+    fs.writeFileSync(path.join(runDir, "state.json"), JSON.stringify({
+      run_id: exactSlug, definition_id: "builder.build", definition_version: "1.0", status: "active", current_step: "plan",
+    }));
+    fs.writeFileSync(path.join(exactDir, "state.json"), JSON.stringify(sidecar(exactSlug, "active", "delivered")));
+    const terminalSidecar = await stopGoalFit.analyze(root);
+    assert.equal(terminalSidecar.activeTurnAuthority, false, "a terminal sidecar cannot relax an active canonical Flow gate");
+    assert.equal(terminalSidecar.blocking, true, "a terminal sidecar paired with active canonical Flow remains blocking");
+
     for (const canonicalStatus of ["paused", "needs_decision", "completed"]) {
       const terminal = canonicalStatus === "completed";
       fs.writeFileSync(path.join(runDir, "state.json"), JSON.stringify({
@@ -1654,12 +1696,22 @@ test("artifact validation skips only a private continuation driver child", (t) =
 });
 
 test("max-block hard classification preserves the no-authority baseline and tightens only authorized turns", () => {
-  const ordinary = ".kontourai/flow-agents/session-a is still status:planned (1m old). Do not final-answer as complete unless the next step is explicit.";
+  const relPath = ".kontourai/flow-agents/session-a/session-a--deliver.md";
+  const ordinary = `${relPath} is still status:planned (1m old). Do not final-answer as complete unless the next step is explicit.`;
   const evidenceFailure = "evidence verdict:fail";
-  assert.equal(stopGoalFit.isHardStopWarning(ordinary, ".kontourai/flow-agents/session-a", false), false, "ordinary FULL_BLOCK stays releasable without authority");
-  assert.equal(stopGoalFit.isHardStopWarning(evidenceFailure, ".kontourai/flow-agents/session-a", false), true, "existing HARD_BLOCK stays permanent without authority");
-  assert.equal(stopGoalFit.isHardStopWarning(ordinary, ".kontourai/flow-agents/session-a", true), false, "ordinary active-gate warning is advisory for a valid authority");
-  assert.equal(stopGoalFit.isHardStopWarning("Definition Of Done is incomplete", ".kontourai/flow-agents/session-a", true), true, "nonordinary FULL_BLOCK stays permanent for a valid authority");
+  const unavailableSurface = "surface unavailable — 1 high/critical-impact claim(s) could not be re-derived at gate; stored claim status is trusted without independent re-derivation (fail-closed: high-assurance path). Ensure @kontourai/surface is installed and importable, or escalate for operator review.";
+  const finalAcceptance = "session-a Final Acceptance: 1 acceptance criterion/criteria still pending; complete CI/merge/docs before final delivery.";
+  assert.equal(stopGoalFit.isHardStopWarning(ordinary, relPath, false), false, "ordinary FULL_BLOCK stays releasable without authority");
+  assert.equal(stopGoalFit.isHardStopWarning(evidenceFailure, relPath, false), true, "existing HARD_BLOCK stays permanent without authority");
+  assert.equal(stopGoalFit.isHardStopWarning(unavailableSurface, relPath, false), false, "Surface unavailability retains its existing FULL_BLOCK classification without authority");
+  assert.equal(stopGoalFit.isHardStopWarning(ordinary, relPath, true), false, "ordinary active-gate warning is advisory for a valid authority");
+  assert.equal(stopGoalFit.isHardStopWarning(unavailableSurface, relPath, true), false, "exact Surface unavailability is advisory only while returning a valid signed turn to the driver");
+  assert.equal(stopGoalFit.isHardStopWarning(finalAcceptance, relPath, true), false, "exact current-session Final Acceptance is advisory during a valid signed turn");
+  assert.equal(stopGoalFit.isHardStopWarning(`${unavailableSurface} caught false-completion`, relPath, true), true, "an appended contradiction cannot hide behind the Surface advisory");
+  assert.equal(stopGoalFit.isHardStopWarning(`${finalAcceptance} caught false-completion`, relPath, true), true, "an appended contradiction cannot hide behind the Final Acceptance advisory");
+  assert.equal(stopGoalFit.isHardStopWarning(`${ordinary} caught false-completion`, relPath, true), true, "an appended contradiction cannot hide behind a legacy ordinary status warning");
+  assert.equal(stopGoalFit.isHardStopWarning(".kontourai/flow-agents/session-a next action: continue; evidence verdict:fail", relPath, true), true, "an evidence failure cannot hide inside legacy ordinary guidance");
+  assert.equal(stopGoalFit.isHardStopWarning("Definition Of Done is incomplete", relPath, true), true, "nonordinary FULL_BLOCK stays permanent for a valid authority");
 });
 
 test("driver binds the adapter command identity for the mission", async () => {

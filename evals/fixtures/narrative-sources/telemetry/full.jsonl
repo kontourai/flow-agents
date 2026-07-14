@@ -1,0 +1,3 @@
+{"session_id":"session-fixture","event_id":"evt-telemetry","kind":"tool.complete","tool":{"name":"native.shell","input":"safe fixture input","output":"safe fixture output"}}
+{"session_id":"session-fixture","event_id":"evt-redaction","kind":"tool.complete","tool":{"name":"native.shell","input":"NARRATIVE_AC6_SECRET_7b31e9","output":"safe result"}}
+{"session_id":"session-fixture","event_id":"evt-mcp-gap","kind":"tool.complete","tool":{"name":"mcp__fixture__lookup","input":"fixture query","output":"fixture result"}}
