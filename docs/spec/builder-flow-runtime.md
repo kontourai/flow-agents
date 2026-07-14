@@ -222,7 +222,11 @@ checks; it is not the provider action executor.
 empty lists for terminal actions. Expectation ids must exactly equal the resolved
 Flow expectation set. Artifact bindings map each artifact to its owning
 expectations, allowing optional artifacts to remain declared without appearing
-under `stop_condition.required`. Operation bindings must resolve through the
+under `stop_condition.required`. The same ownership is projected publicly as
+typed `action.artifact_bindings`; consumers derive required targets by selecting
+bindings that own an unresolved required expectation. These bindings are
+product-owned gate semantics, not grader hints or consumer-authored guidance.
+Operation bindings must resolve through the
 canonical public operation catalog, not merely a self-declared string. Artifact
 refs are either lexically safe session-relative paths or validated
 `trust.bundle#<safe-id>` virtual refs; absolute paths, traversal, and arbitrary

@@ -34,7 +34,7 @@ function validateGateActionEnvelope(value: GateActionEnvelope, snapshot: Continu
   if (!hasExactKeys(value, ["schema_version", "flow", "gate", "action", "public_interfaces", "stop_condition", "progress"])) {
     throw new Error("continuation snapshot gate-action envelope has unsupported root fields");
   }
-  if (!value.gate || !value.action || !Array.isArray(value.action.declared_artifacts)
+  if (!value.gate || !value.action || !Array.isArray(value.action.declared_artifacts) || !Array.isArray(value.action.artifact_bindings)
     || !value.stop_condition?.required || !Array.isArray(value.stop_condition.required.artifact_refs)
     || !value.public_interfaces?.schemas?.evidence_ref_json) throw new Error("continuation snapshot gate-action envelope is missing typed public interfaces");
   if (!isDeepStrictEqual(value.public_interfaces.schemas.evidence_ref_json, EVIDENCE_REF_JSON_SCHEMA)) throw new Error("continuation snapshot gate-action evidence schema is not canonical");
@@ -80,6 +80,20 @@ function validateGateActionEnvelope(value: GateActionEnvelope, snapshot: Continu
     validateArtifactTarget(artifact, value.flow.run_id, declaredSkillIds, declaredOperations, operationMutations, mutationInterfaces);
     if (declaredByRef.has(artifact.ref)) throw new Error("continuation snapshot gate-action artifact targets contain duplicate refs");
     declaredByRef.set(artifact.ref, artifact);
+  }
+  const boundRefs = new Set<string>();
+  for (const binding of value.action.artifact_bindings) {
+    if (!binding || !hasExactKeys(binding, ["target", "expectation_ids"])
+      || !Array.isArray(binding.expectation_ids) || !sameUniqueStrings(binding.expectation_ids)
+      || binding.expectation_ids.length === 0 || binding.expectation_ids.some((id) => !value.action.declared_evidence.includes(id))
+      || !binding.target || !isDeepStrictEqual(declaredByRef.get(binding.target.ref), binding.target)
+      || boundRefs.has(binding.target.ref)) {
+      throw new Error("continuation snapshot gate-action artifact binding is malformed");
+    }
+    boundRefs.add(binding.target.ref);
+  }
+  if (boundRefs.size !== declaredByRef.size || [...declaredByRef.keys()].some((ref) => !boundRefs.has(ref))) {
+    throw new Error("continuation snapshot gate-action artifact bindings are incomplete");
   }
   for (const artifact of value.stop_condition.required.artifact_refs) {
     validateArtifactTarget(artifact, value.flow.run_id, declaredSkillIds, declaredOperations, operationMutations, mutationInterfaces);
@@ -231,7 +245,7 @@ function validateFixedEnvelopeShape(value: GateActionEnvelope): void {
     || !Array.isArray(value.gate.accepted_exceptions)) {
     throw new Error("continuation snapshot gate-action gate binding is malformed");
   }
-  if (!hasExactKeys(value.action, ["skills", "operations", "declared_artifacts", "declared_evidence", "implementation_allowed"])
+  if (!hasExactKeys(value.action, ["skills", "operations", "declared_artifacts", "artifact_bindings", "declared_evidence", "implementation_allowed"])
     || typeof value.action.implementation_allowed !== "boolean") {
     throw new Error("continuation snapshot gate-action action policy is malformed");
   }
@@ -339,7 +353,7 @@ function validateGateRequirementBindings(
     throw new Error("continuation snapshot gate-action required skills are inconsistent");
   }
   const unresolvedRequired = new Set(unresolvedRequiredIds);
-  const expectedArtifacts = authority.artifact_bindings
+  const expectedArtifacts = value.action.artifact_bindings
     .filter((binding) => binding.expectation_ids.some((id) => unresolvedRequired.has(id)))
     .map((binding) => binding.target);
   if (!sameArtifactTargets(expectedArtifacts, value.stop_condition.required.artifact_refs)) {

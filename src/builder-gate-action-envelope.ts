@@ -59,6 +59,11 @@ export type GateActionArtifactTarget =
       record_via: Array<"workflow.evidence" | "workflow.critique">;
     };
 
+export type GateActionArtifactBinding = {
+  target: GateActionArtifactTarget;
+  expectation_ids: string[];
+};
+
 export type GateActionWorkflowMutation = {
       expectation_id: string;
       interface: "workflow.evidence" | "workflow.critique";
@@ -115,6 +120,7 @@ export type GateActionEnvelope = {
     }>;
     operations: string[];
     declared_artifacts: GateActionArtifactTarget[];
+    artifact_bindings: GateActionArtifactBinding[];
     declared_evidence: string[];
     implementation_allowed: boolean;
   };
@@ -232,7 +238,7 @@ export function installedBuilderGateActionAuthority(definitionId: string, curren
   requirements: Array<Omit<GateActionEnvelope["gate"]["requirements"][number], "status">>;
   action: GateActionEnvelope["action"];
   mutations: GateActionPublicMutation[];
-  artifact_bindings: Array<{ target: GateActionArtifactTarget; expectation_ids: string[] }>;
+  artifact_bindings: GateActionArtifactBinding[];
   external_capability?: NonNullable<GateActionEnvelope["stop_condition"]["external_capability"]>;
 } {
   const packageRoot = flowAgentsPackageRoot();
@@ -274,17 +280,19 @@ export function installedBuilderGateActionAuthority(definitionId: string, curren
     }));
   const operation = action.operations[0];
   const protocol = operation ? PUBLIC_OPERATION_CONTRACTS[operation as keyof typeof PUBLIC_OPERATION_CONTRACTS] : undefined;
+  const actionEnvelope: GateActionEnvelope["action"] = {
+    skills: action.skills.map((skill) => skillIdentity(kit, packageRoot, packageVersion, skill)),
+    operations: [...action.operations],
+    declared_artifacts: declaredArtifacts,
+    artifact_bindings: artifactBindings,
+    declared_evidence: [...action.expectation_ids],
+    implementation_allowed: action.implementation_allowed,
+  };
   return {
     definition_version: definition.version,
     gate_id: gateId,
     requirements,
-    action: {
-      skills: action.skills.map((skill) => skillIdentity(kit, packageRoot, packageVersion, skill)),
-      operations: [...action.operations],
-      declared_artifacts: declaredArtifacts,
-      declared_evidence: [...action.expectation_ids],
-      implementation_allowed: action.implementation_allowed,
-    },
+    action: actionEnvelope,
     mutations: action.expectation_bindings.map((binding) => publicMutation(binding, sessionArgument, packageVersion)),
     artifact_bindings: artifactBindings,
     ...(protocol?.availability.status === "external_capability_required" ? {
@@ -402,10 +410,17 @@ function assembleGateActionEnvelope(input: BuilderGateActionEnvelopeInput, loade
 }
 
 function envelopeAction(action: KitFlowStepActionEntry, artifacts: string[], sessionDir: string, sessionArgument: string, kit: AnyRecord, packageRoot: string, packageVersion: string): GateActionEnvelope["action"] {
+  const declaredArtifacts = artifacts.map((artifact) => artifactTarget(artifact, sessionDir, sessionArgument, action));
   return {
     skills: action.skills.map((skill) => skillIdentity(kit, packageRoot, packageVersion, skill)),
     operations: [...action.operations],
-    declared_artifacts: artifacts.map((artifact) => artifactTarget(artifact, sessionDir, sessionArgument, action)),
+    declared_artifacts: declaredArtifacts,
+    artifact_bindings: action.artifact_bindings
+      .filter((binding) => !isControlArtifact(binding.artifact))
+      .map((binding) => ({
+        target: artifactTarget(binding.artifact, sessionDir, sessionArgument, action),
+        expectation_ids: [...binding.expectation_ids],
+      })),
     declared_evidence: [...action.expectation_ids],
     implementation_allowed: action.implementation_allowed,
   };

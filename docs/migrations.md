@@ -11,7 +11,12 @@ title: Migrations
   strings. A `file` target names its project-relative `path` and whether it is
   directly writable or must be produced through a declared operation; a
   `trust_slice` target is explicitly non-writable and names the public interface
-  that records it. Structured evidence parameters reference the canonical
+  that records it. `action.artifact_bindings` maps each typed target to the
+  gate expectation ids it satisfies, so consumers can derive the exact required
+  target set from unresolved required expectations without private kit metadata.
+  The bindings are product-owned gate semantics, not grader hints or
+  consumer-authored guidance.
+  Structured evidence parameters reference the canonical
   `public_interfaces.schemas.evidence_ref_json` JSON Schema. There is no legacy
   envelope fallback; adapters must require version 3.0 and stop treating
   `trust.bundle#<slice>` as a filesystem path.
