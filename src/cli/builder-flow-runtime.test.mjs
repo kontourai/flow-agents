@@ -380,6 +380,10 @@ test("small-model client can start and advance from projected actions without ch
     { kind: "file", ref: "<slug>--pull-work.md", path: `.kontourai/flow-agents/${session.slug}/${session.slug}--pull-work.md`, direct_write_allowed: true, produced_via: { interface: "skill", skill_ids: ["pull-work"] } },
     { kind: "trust_slice", ref: "trust.bundle#selected-work", bundle_file: "trust.bundle", slice_id: "selected-work", direct_write_allowed: false, record_via: ["workflow.evidence"] },
   ]);
+  assert.deepEqual(envelope.action.artifact_bindings, envelope.action.declared_artifacts.map((target) => ({
+    target,
+    expectation_ids: ["selected-work"],
+  })));
   assert.equal(envelope.stop_condition.kind, "one_turn");
   assert.equal(envelope.stop_condition.scope.current_gate_only, true);
   assert.deepEqual(envelope.stop_condition.required.unresolved_evidence_ids, ["selected-work"]);
@@ -1600,6 +1604,10 @@ test("publish-change reports an external capability gap and self-authored result
     path: `.kontourai/flow-agents/${session.slug}/publish-change.result.json`,
     direct_write_allowed: false,
     produced_via: { interface: "operation", operations: ["publish-change"] },
+  }]);
+  assert.deepEqual(operationView.gateActionEnvelope.action.artifact_bindings, [{
+    target: operationView.gateActionEnvelope.action.declared_artifacts[0],
+    expectation_ids: ["pull-request-opened"],
   }]);
   assert.equal(publish.operation, "publish-change");
   assert.equal(publish.protocol.capability, "pull_request.create");

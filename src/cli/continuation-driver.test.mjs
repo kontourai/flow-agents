@@ -119,6 +119,43 @@ test("gate-action envelope rejects paths outside the active run and loosened evi
   assert.throws(() => validateSnapshot(loosened), /evidence schema is not canonical/);
 });
 
+test("gate-action envelope binds every target to its owning expectations", () => {
+  const missing = envelopeSnapshot("design-probe");
+  missing.gate_action_envelope.action.artifact_bindings.pop();
+  assert.throws(() => validateSnapshot(missing), /artifact bindings are incomplete/);
+
+  const duplicate = envelopeSnapshot("design-probe");
+  duplicate.gate_action_envelope.action.artifact_bindings.push(structuredClone(duplicate.gate_action_envelope.action.artifact_bindings[0]));
+  assert.throws(() => validateSnapshot(duplicate), /artifact binding is malformed/);
+
+  const extraTarget = envelopeSnapshot("design-probe");
+  extraTarget.gate_action_envelope.action.artifact_bindings.push({
+    target: {
+      kind: "file",
+      ref: "extra.md",
+      path: ".kontourai/flow-agents/run-251/extra.md",
+      direct_write_allowed: true,
+      produced_via: { interface: "skill", skill_ids: ["pickup-probe"] },
+    },
+    expectation_ids: [extraTarget.gate_action_envelope.action.declared_evidence[0]],
+  });
+  assert.throws(() => validateSnapshot(extraTarget), /artifact binding is malformed/);
+
+  const swappedOwnership = envelopeSnapshot("verify");
+  const firstExpectationIds = swappedOwnership.gate_action_envelope.action.artifact_bindings[0].expectation_ids;
+  swappedOwnership.gate_action_envelope.action.artifact_bindings[0].expectation_ids = swappedOwnership.gate_action_envelope.action.artifact_bindings[1].expectation_ids;
+  swappedOwnership.gate_action_envelope.action.artifact_bindings[1].expectation_ids = firstExpectationIds;
+  assert.throws(() => validateSnapshot(swappedOwnership), /action does not match installed Builder authority/);
+
+  const unknownExpectation = envelopeSnapshot("design-probe");
+  unknownExpectation.gate_action_envelope.action.artifact_bindings[0].expectation_ids = ["fabricated-expectation"];
+  assert.throws(() => validateSnapshot(unknownExpectation), /artifact binding is malformed/);
+
+  const omittedRequired = envelopeSnapshot("design-probe");
+  omittedRequired.gate_action_envelope.stop_condition.required.artifact_refs.shift();
+  assert.throws(() => validateSnapshot(omittedRequired), /required artifacts are inconsistent/);
+});
+
 test("gate-action envelope binds identity, file refs, and producers to the canonical snapshot", () => {
   const crossRun = envelopeSnapshot("design-probe");
   crossRun.gate_action_envelope.flow.run_id = "other-run";
