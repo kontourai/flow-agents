@@ -165,11 +165,20 @@ consume another turn when `workflow drive` is invoked again:
 flow_agents workflow drive \
   --session-dir .kontourai/flow-agents/example \
   --adapter-command-file .kontourai/flow-agents/runtime-adapter.json \
+  --context-policy fresh \
   --max-turns 6 \
   --turn-timeout-ms 900000 \
   --barrier-wait-ms 300000 \
   --json
 ```
+
+`--context-policy warm` remains the default and requests one new adapter context for the mission,
+then resumes it. `--context-policy fresh` requests a new context for every bounded Flow action. Both
+policies pass the same canonical gate-action handoff and preserve the same Flow gates, evidence rules,
+mission budget, and adapter authority. The selected policy is persisted with the mission and cannot be
+changed on resume. Adapters must honor the request's `context_strategy.thread` value and must not infer
+context routing from model names. This is a context-management capability, not permission to drop gates,
+invent evidence, or replay a prior transcript into a nominally fresh context.
 
 Driver state and its append-only event stream live under
 `.kontourai/flow-agents/<slug>/continuation-driver/`. The mission turn count survives reinvocation;

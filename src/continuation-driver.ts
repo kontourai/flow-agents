@@ -40,6 +40,16 @@ export type ContinuationTurnRequest = {
   next_action: Record<string, unknown> | null;
   /** Additive schema-1.0 field; older external adapters remain valid. */
   gate_action_envelope?: GateActionEnvelope;
+  /** Product-owned context routing; adapters must not infer this from model names. */
+  context_strategy?: ContinuationContextStrategy;
+};
+
+export type ContinuationContextPolicy = "warm" | "fresh";
+
+export type ContinuationContextStrategy = {
+  thread: "new" | "resume";
+  handoff: "canonical";
+  reason: "mission_start" | "configured_policy";
 };
 
 export type ContinuationTurnResult =
@@ -62,6 +72,8 @@ export type ContinuationDriverState = {
   definition_id: string;
   max_turns: number;
   adapter_command_identity: string | null;
+  /** Additive to schema 1.0. Missing legacy values mean warm. */
+  context_policy?: ContinuationContextPolicy;
   status: "active" | "waiting" | "done" | "failed" | "budget_exhausted";
   turns_started: number;
   // Added after schema 1.0 shipped. Legacy state files may omit it.
@@ -154,6 +166,7 @@ export type ContinuationDriverOutcome = {
 export interface RunContinuationDriverInput {
   maxTurns: number;
   adapterCommandIdentity?: string;
+  contextPolicy?: ContinuationContextPolicy;
   runtime: ContinuationRuntimePort;
   store: ContinuationStateStore;
   waitForBarrier?: (barrier: ContinuationBarrier) => Promise<"ready" | "pending">;
@@ -168,6 +181,7 @@ export interface DriveBuilderFlowSessionInput {
   sessionDir: string;
   maxTurns: number;
   adapterCommandIdentity?: string;
+  contextPolicy?: ContinuationContextPolicy;
   execute: ContinuationRuntimePort["execute"];
   waitForBarrier?: RunContinuationDriverInput["waitForBarrier"];
   authorizeTurn?: RunContinuationDriverInput["authorizeTurn"];
@@ -182,10 +196,12 @@ export async function runContinuationDriver(input: RunContinuationDriverInput): 
   assertMaxTurns(input.maxTurns);
   const now = input.now ?? (() => new Date());
   const adapterCommandIdentity = input.adapterCommandIdentity ?? null;
+  const contextPolicy = input.contextPolicy ?? "warm";
   const inspected = validateSnapshot(await input.runtime.inspect());
-  let state = loadOrCreateState(input.store, inspected, input.maxTurns, adapterCommandIdentity, now);
+  let state = loadOrCreateState(input.store, inspected, input.maxTurns, adapterCommandIdentity, contextPolicy, now);
   if (state.max_turns !== input.maxTurns) throw new Error(`continuation maxTurns ${input.maxTurns} does not match the persisted mission budget ${state.max_turns}`);
   if (state.adapter_command_identity !== adapterCommandIdentity) throw new Error("continuation adapter command identity does not match the persisted mission adapter");
+  if ((state.context_policy ?? "warm") !== contextPolicy) throw new Error("continuation context policy does not match the persisted mission policy");
   let settled = await settleMissionStart(input, state, now);
   if (settled.outcome) return settled.outcome;
   ({ state } = settled);
@@ -288,7 +304,17 @@ function continuationTurnRequest(input: RunContinuationDriverInput, state: Conti
     max_turns: input.maxTurns,
     next_action: snapshot.next_action ? structuredClone(snapshot.next_action) : null,
     ...(envelope ? { gate_action_envelope: envelope } : {}),
+    context_strategy: contextStrategy(input.contextPolicy ?? "warm", state.turns_started + 1),
   });
+}
+
+function contextStrategy(policy: ContinuationContextPolicy, iteration: number): ContinuationContextStrategy {
+  const missionStart = iteration === 1;
+  return {
+    thread: missionStart || policy === "fresh" ? "new" : "resume",
+    handoff: "canonical",
+    reason: missionStart ? "mission_start" : "configured_policy",
+  };
 }
 
 function beginContinuationTurn(store: ContinuationStateStore, state: ContinuationDriverState, snapshot: ContinuationSnapshot, iteration: number, now: () => Date): ContinuationDriverState {
@@ -474,8 +500,9 @@ export async function driveBuilderFlowSession(input: DriveBuilderFlowSessionInpu
     execute: input.execute,
   };
   return runContinuationDriver({
-      maxTurns: input.maxTurns,
-      ...(input.adapterCommandIdentity ? { adapterCommandIdentity: input.adapterCommandIdentity } : {}),
+    maxTurns: input.maxTurns,
+    ...(input.adapterCommandIdentity ? { adapterCommandIdentity: input.adapterCommandIdentity } : {}),
+    ...(input.contextPolicy ? { contextPolicy: input.contextPolicy } : {}),
     runtime,
     store: input.store ?? createFileContinuationStore(sessionDir),
     ...(input.waitForBarrier ? { waitForBarrier: input.waitForBarrier } : {}),
@@ -508,6 +535,7 @@ function loadOrCreateState(
   snapshot: ContinuationSnapshot,
   maxTurns: number,
   adapterCommandIdentity: string | null,
+  contextPolicy: ContinuationContextPolicy,
   now: () => Date,
 ): ContinuationDriverState {
   const existing = store.load();
@@ -522,6 +550,7 @@ function loadOrCreateState(
     definition_id: snapshot.definition_id,
     max_turns: maxTurns,
     adapter_command_identity: adapterCommandIdentity,
+    context_policy: contextPolicy,
     status: "active",
     turns_started: 0,
     active_turn_step: null,

@@ -664,6 +664,7 @@ test("public workflow evidence accepts only live signed turn authority after ord
     "drive",
     "--session-dir", session.sessionDir,
     "--adapter-command-file", commandFile,
+    "--context-policy", "fresh",
     "--max-turns", "2",
     "--turn-timeout-ms", "5000",
     "--barrier-wait-ms", "0",
@@ -674,6 +675,7 @@ test("public workflow evidence accepts only live signed turn authority after ord
   const request = readJson(path.join(session.projectRoot, "adapter-request.json"));
   assert.equal(request.current_step, "design-probe", fs.existsSync(path.join(session.projectRoot, "adapter-evidence-error.json")) ? fs.readFileSync(path.join(session.projectRoot, "adapter-evidence-error.json"), "utf8") : "adapter did not advance canonical Flow");
   assert.deepEqual(request.next_action.skills, ["pickup-probe"]);
+  assert.deepEqual(request.context_strategy, { thread: "new", handoff: "canonical", reason: "configured_policy" });
   assert.equal(Object.hasOwn(request, "system_prompt"), false);
   const authority = readJson(path.join(session.projectRoot, "adapter-authority.json"));
   assert.match(authority.turnSecret, /^[A-Za-z0-9_-]{43}$/);
@@ -691,6 +693,7 @@ test("public workflow evidence accepts only live signed turn authority after ord
   assert.equal(fs.existsSync(authorityFile), false, "adapter turn authority is removed after the child exits");
   const driverState = readJson(path.join(session.sessionDir, "continuation-driver", "state.json"));
   assert.equal(driverState.status, "budget_exhausted");
+  assert.equal(driverState.context_policy, "fresh");
   const canonical = await recoverBuilderFlowSession({ sessionDir: session.sessionDir });
   assert.equal(canonical.run.state.status, "active");
   assert.equal(canonical.run.state.current_step, "plan");
