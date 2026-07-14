@@ -243,6 +243,26 @@ function unavailableEntry(request: NarrativeSourceRequest, capturedAt: string, r
   };
 }
 
+function matchingObjectKeys(value: unknown, configuredFields: readonly string[]): string[] {
+  const fields = [...new Set(configuredFields.map((field) => field.trim()).filter(Boolean))];
+  if (fields.length === 0) return [];
+  const configured = new Set(fields);
+  const matched = new Set<string>();
+  const visit = (candidate: unknown): void => {
+    if (!candidate || typeof candidate !== "object") return;
+    if (Array.isArray(candidate)) {
+      for (const item of candidate) visit(item);
+      return;
+    }
+    for (const [key, child] of Object.entries(candidate as Record<string, unknown>)) {
+      if (configured.has(key)) matched.add(key);
+      visit(child);
+    }
+  };
+  visit(value);
+  return fields.filter((field) => matched.has(field));
+}
+
 function createOnlyWriteManifest(root: string, file: string, value: unknown): void {
   // Creation-only publication: link(2) fails with EEXIST if any concurrent
   // writer published first, so a frozen manifest can never be replaced by a
@@ -290,6 +310,19 @@ export function snapshotNarrative(input: SnapshotNarrativeInput, dependencies: S
     if (request.source.stream === "flow-report" || request.source.stream === "surface-explanation") {
       // These streams are already authority-authored capture products. Preserve
       // Flow's foreign formatting and Surface's stableStringify bytes exactly.
+      // Because rewriting those bytes would destroy that authority property,
+      // configured redaction keys make the entire source unavailable instead.
+      let authorityRecord: unknown;
+      try { authorityRecord = JSON.parse((candidate as ReadCandidate).raw.toString("utf8")); }
+      catch {
+        sources.push({ ...unavailableEntry(request, sourceCapturedAt, "corrupt"), origin });
+        continue;
+      }
+      const matchedFields = matchingObjectKeys(authorityRecord, input.redactionFields);
+      if (matchedFields.length > 0) {
+        sources.push({ ...unavailableEntry(request, sourceCapturedAt, "redacted", matchedFields), origin });
+        continue;
+      }
       const bytes = Buffer.from((candidate as ReadCandidate).raw);
       const digest = createHash("sha256").update(bytes).digest("hex");
       if (!written.has(digest)) {

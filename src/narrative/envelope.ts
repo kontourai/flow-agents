@@ -49,7 +49,7 @@ export interface GroundedNarrativeConfig {
 export interface GroundedNarrativeRule {
   id: "flow-turn-correlation/v1";
   version: "v1";
-  inputs: [string, string];
+  inputs: string[];
 }
 
 export interface GroundedNarrativeFlowTransition {
@@ -57,13 +57,13 @@ export interface GroundedNarrativeFlowTransition {
   from: string;
   to: string;
   at?: string;
-  source_refs: [string, string];
+  source_refs: [string];
   rule: GroundedNarrativeRule;
 }
 
 export interface GroundedNarrativeCorrelation {
   turns: Array<{ turn_ordinal: number; placed: GroundedNarrativeFlowTransition[] }>;
-  unplaced: Array<GroundedNarrativeFlowTransition & { reason: "ambiguous_window" | "no_timestamp" | "no_turns" }>;
+  unplaced: Array<GroundedNarrativeFlowTransition & { reason: "ambiguous_window" | "no_timestamp" | "no_timezone" | "no_turns" }>;
 }
 
 export type GroundedNarrativeConclusion =
@@ -75,7 +75,7 @@ export interface GroundedNarrativeForeignSection {
   kind: "flow-process-projection" | "claim-explanation";
   source_refs: [string];
   sha256: string;
-  embedded: unknown;
+  embedded_bytes: string;
 }
 
 export interface GroundedNarrativeRuntimeSection {
@@ -169,6 +169,7 @@ function validateSchemaValue(value: unknown, schema: JsonSchema, loc: string, is
   if (schema.type === "array") {
     if (!Array.isArray(value)) { issues.push({ path: loc, message: "must be array" }); return; }
     if (typeof schema.minItems === "number" && value.length < schema.minItems) issues.push({ path: loc, message: `must contain at least ${schema.minItems} item(s)` });
+    if (typeof schema.maxItems === "number" && value.length > schema.maxItems) issues.push({ path: loc, message: `must contain at most ${schema.maxItems} item(s)` });
     if (schema.uniqueItems && new Set(value.map((item) => JSON.stringify(item))).size !== value.length) issues.push({ path: loc, message: "must contain unique items" });
     if (schema.items) value.forEach((item, index) => validateSchemaValue(item, schema.items, `${loc}[${index}]`, issues, root));
     return;
@@ -193,7 +194,74 @@ export function validateGroundedNarrative(value: unknown): SchemaIssue[] {
   catch { return [{ path: "$", message: "grounded execution narrative schema is unavailable" }]; }
   const issues: SchemaIssue[] = [];
   validateSchemaValue(value, schema, "$", issues, schema);
+  validateGroundingSemantics(value, issues);
   return issues;
+}
+
+function resolveJsonPointer(value: unknown, pointer: string): boolean {
+  if (!pointer.startsWith("/")) return false;
+  let current = value;
+  for (const encoded of pointer.slice(1).split("/")) {
+    const token = encoded.replace(/~1/g, "/").replace(/~0/g, "~");
+    if (Array.isArray(current)) {
+      if (!/^(?:0|[1-9][0-9]*)$/.test(token)) return false;
+      const index = Number(token);
+      if (index >= current.length) return false;
+      current = current[index];
+      continue;
+    }
+    const record = object(current);
+    if (!record || !Object.prototype.hasOwnProperty.call(record, token)) return false;
+    current = record[token];
+  }
+  return true;
+}
+
+function validateGroundingSemantics(value: unknown, issues: SchemaIssue[]): void {
+  const envelope = object(value);
+  if (!envelope || !Array.isArray(envelope["sections"]) || !Array.isArray(envelope["conclusions"])) return;
+  const sections = envelope["sections"].flatMap((candidate) => object(candidate) ? [candidate as Record<string, unknown>] : []);
+  for (const [index, section] of sections.entries()) {
+    if (section["authority"] !== "flow" && section["authority"] !== "surface") continue;
+    const embeddedBytes = nonEmptyString(section["embedded_bytes"]);
+    const declaredSha = nonEmptyString(section["sha256"]);
+    if (embeddedBytes && declaredSha && sha256(Buffer.from(embeddedBytes, "utf8")) !== declaredSha) {
+      issues.push({ path: `$.sections[${index}].embedded_bytes`, message: "must hash to the section sha256" });
+    }
+    if (embeddedBytes) {
+      try { JSON.parse(embeddedBytes); }
+      catch { issues.push({ path: `$.sections[${index}].embedded_bytes`, message: "must contain valid JSON" }); }
+    }
+  }
+  for (const [index, candidate] of (envelope["conclusions"] as unknown[]).entries()) {
+    const conclusion = object(candidate);
+    const grounding = object(conclusion?.["grounding"]);
+    const kind = nonEmptyString(grounding?.["kind"]);
+    const sourceRef = nonEmptyString(grounding?.["source_ref"]);
+    if (!kind || !sourceRef) continue;
+    const authority = kind === "flow_gate_derivation" ? "flow" : kind === "surface_explanation" ? "surface" : undefined;
+    if (!authority) continue;
+    const matches = sections.filter((section) => section["authority"] === authority
+      && Array.isArray(section["source_refs"])
+      && (section["source_refs"] as unknown[]).includes(sourceRef));
+    if (matches.length !== 1) {
+      issues.push({ path: `$.conclusions[${index}].grounding.source_ref`, message: `must resolve to exactly one ${authority} section` });
+      continue;
+    }
+    if (kind !== "flow_gate_derivation") continue;
+    const pointer = nonEmptyString(grounding?.["pointer"]);
+    const embeddedBytes = nonEmptyString(matches[0]!["embedded_bytes"]);
+    if (!pointer || !embeddedBytes) continue;
+    let embedded: unknown;
+    try { embedded = JSON.parse(embeddedBytes); }
+    catch {
+      issues.push({ path: `$.sections`, message: `flow section ${sourceRef} embedded_bytes must contain valid JSON` });
+      continue;
+    }
+    if (!resolveJsonPointer(embedded, pointer)) {
+      issues.push({ path: `$.conclusions[${index}].grounding.pointer`, message: "must resolve inside the grounded flow section" });
+    }
+  }
 }
 
 function readVerifiedManifest(narrativeDir: string): { manifest: NarrativeSourceManifest; bytes: Buffer } {
@@ -227,15 +295,33 @@ function nonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function telemetryTimestamp(value: unknown): number | undefined {
+type CorrelationTimestamp =
+  | { kind: "valid"; value: number }
+  | { kind: "missing" }
+  | { kind: "invalid" }
+  | { kind: "no_timezone" };
+
+function correlationTimestamp(value: unknown): CorrelationTimestamp {
   const record = object(value);
   const raw = nonEmptyString(record?.["timestamp"])
     ?? nonEmptyString(record?.["observed_at"])
     ?? nonEmptyString(record?.["recorded_at"])
     ?? nonEmptyString(record?.["at"]);
-  if (!raw) return undefined;
-  const parsed = Date.parse(raw);
-  return Number.isNaN(parsed) ? undefined : parsed;
+  if (!raw) return { kind: "missing" };
+  if (!/(?:Z|[+-][0-9]{2}:[0-9]{2})$/.test(raw)) return { kind: "no_timezone" };
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|([+-])(\d{2}):(\d{2}))$/.exec(raw);
+  if (!match) return { kind: "invalid" };
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, fraction = "", zone, sign, offsetHourText = "0", offsetMinuteText = "0"] = match;
+  const [year, month, day, hour, minute, second, offsetHour, offsetMinute] = [yearText, monthText, dayText, hourText, minuteText, secondText, offsetHourText, offsetMinuteText].map(Number);
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59 || offsetHour > 23 || offsetMinute > 59) return { kind: "invalid" };
+  const milliseconds = Number(fraction.padEnd(3, "0"));
+  const local = new Date(0);
+  local.setUTCFullYear(year, month - 1, day);
+  local.setUTCHours(hour, minute, second, milliseconds);
+  if (local.getUTCFullYear() !== year || local.getUTCMonth() !== month - 1 || local.getUTCDate() !== day
+    || local.getUTCHours() !== hour || local.getUTCMinutes() !== minute || local.getUTCSeconds() !== second) return { kind: "invalid" };
+  const offset = zone === "Z" ? 0 : (offsetHour * 60 + offsetMinute) * (sign === "+" ? 1 : -1);
+  return { kind: "valid", value: local.getTime() - offset * 60_000 };
 }
 
 function correlationFor(
@@ -243,20 +329,31 @@ function correlationFor(
   manifest: NarrativeSourceManifest,
   projection: NarrativeRuntimeProjection,
 ): GroundedNarrativeCorrelation {
-  const timestampsByRef = new Map<string, number>();
+  const timestampsByRef = new Map<string, CorrelationTimestamp>();
   for (const entry of manifest.sources) {
     if (parseSourceId(entry.source_id).stream !== "telemetry") continue;
     const resolved = resolveSource(narrativeDir, entry.source_id);
     if (resolved.status !== "resolved") continue;
-    const timestamp = telemetryTimestamp(parseEmbeddedJson(entry.source_id, resolved.content));
-    if (timestamp !== undefined) timestampsByRef.set(entry.source_id, timestamp);
+    timestampsByRef.set(entry.source_id, correlationTimestamp(parseEmbeddedJson(entry.source_id, resolved.content)));
   }
   const windows = projection.turns.map((turn) => {
-    const values = [...new Set(turn.statements.flatMap((statement) => statement.source_refs))]
-      .flatMap((sourceRef) => timestampsByRef.has(sourceRef) ? [timestampsByRef.get(sourceRef)!] : []);
-    return values.length === 0
-      ? { ordinal: turn.ordinal }
-      : { ordinal: turn.ordinal, start: Math.min(...values), end: Math.max(...values) };
+    const sourceRefs = [...new Set(turn.statements.flatMap((statement) => statement.source_refs))]
+      .filter((sourceRef) => timestampsByRef.has(sourceRef));
+    const readings = sourceRefs.map((sourceRef) => ({ sourceRef, timestamp: timestampsByRef.get(sourceRef)! }));
+    const valid = readings.flatMap(({ sourceRef, timestamp }) => timestamp.kind === "valid" ? [{ sourceRef, value: timestamp.value }] : []);
+    if (valid.length === 0) return {
+      ordinal: turn.ordinal,
+      timezoneInvalid: readings.some(({ timestamp }) => timestamp.kind === "no_timezone"),
+    };
+    const start = Math.min(...valid.map(({ value }) => value));
+    const end = Math.max(...valid.map(({ value }) => value));
+    return {
+      ordinal: turn.ordinal,
+      start,
+      end,
+      inputRefs: valid.filter(({ value }) => value === start || value === end).map(({ sourceRef }) => sourceRef),
+      timezoneInvalid: readings.some(({ timestamp }) => timestamp.kind === "no_timezone"),
+    };
   });
   const turns = projection.turns.map((turn) => ({ turn_ordinal: turn.ordinal, placed: [] as GroundedNarrativeFlowTransition[] }));
   const turnsByOrdinal = new Map(turns.map((turn) => [turn.turn_ordinal, turn]));
@@ -265,11 +362,6 @@ function correlationFor(
   for (const entry of manifest.sources) {
     const parsedId = parseSourceId(entry.source_id);
     if (parsedId.stream !== "flow-state") continue;
-    const reportRef = manifest.sources.find((candidate) => {
-      const candidateId = parseSourceId(candidate.source_id);
-      return candidateId.stream === "flow-report" && candidateId.scope.runId === parsedId.scope.runId;
-    })?.source_id;
-    if (!reportRef) continue;
     const resolved = resolveSource(narrativeDir, entry.source_id);
     if (resolved.status !== "resolved") continue;
     const state = object(parseEmbeddedJson(entry.source_id, resolved.content));
@@ -280,31 +372,41 @@ function correlationFor(
       const to = nonEmptyString(transition?.["to"]);
       if (!from || !to) continue;
       const at = nonEmptyString(transition?.["at"]);
-      const source_refs: [string, string] = [entry.source_id, reportRef];
+      const source_refs: [string] = [entry.source_id];
       const record: GroundedNarrativeFlowTransition = {
         kind: "flow-transition",
         from,
         to,
         ...(at ? { at } : {}),
         source_refs,
-        rule: { id: "flow-turn-correlation/v1", version: "v1", inputs: source_refs },
+        rule: { id: "flow-turn-correlation/v1", version: "v1", inputs: [...source_refs] },
       };
       if (windows.length === 0) {
         unplaced.push({ ...record, reason: "no_turns" });
         continue;
       }
-      const timestamp = at ? Date.parse(at) : Number.NaN;
-      if (!at || Number.isNaN(timestamp)) {
+      const timestamp = correlationTimestamp({ at });
+      if (timestamp.kind === "missing" || timestamp.kind === "invalid") {
         unplaced.push({ ...record, reason: "no_timestamp" });
         continue;
       }
-      const matches = windows.filter((window) => window.start !== undefined && window.end !== undefined
-        && timestamp > window.start && timestamp < window.end);
-      if (matches.length !== 1) {
-        unplaced.push({ ...record, reason: "ambiguous_window" });
+      if (timestamp.kind === "no_timezone") {
+        unplaced.push({ ...record, reason: "no_timezone" });
         continue;
       }
-      turnsByOrdinal.get(matches[0]!.ordinal)!.placed.push(record);
+      if (windows.some((window) => window.timezoneInvalid)) {
+        unplaced.push({ ...record, reason: "no_timezone" });
+        continue;
+      }
+      const matches = windows.filter((window) => window.start !== undefined && window.end !== undefined
+        && timestamp.value > window.start && timestamp.value < window.end);
+      if (matches.length !== 1) {
+        const inputs = [...new Set([entry.source_id, ...matches.flatMap((window) => window.inputRefs ?? [])])];
+        unplaced.push({ ...record, rule: { ...record.rule, inputs }, reason: "ambiguous_window" });
+        continue;
+      }
+      const inputs = [...new Set([entry.source_id, ...(matches[0]!.inputRefs ?? [])])];
+      turnsByOrdinal.get(matches[0]!.ordinal)!.placed.push({ ...record, rule: { ...record.rule, inputs } });
     }
   }
   return { turns, unplaced };
@@ -314,7 +416,7 @@ function conclusionsFor(sections: readonly GroundedNarrativeSection[]): Grounded
   const conclusions: GroundedNarrativeConclusion[] = [];
   for (const section of sections) {
     if (section.authority === "flow") {
-      const report = object(section.embedded);
+      const report = object(parseEmbeddedJson(section.source_refs[0], Buffer.from(section.embedded_bytes, "utf8")));
       const summaries = Array.isArray(report?.["gate_summaries"]) ? report!["gate_summaries"] as unknown[] : [];
       summaries.forEach((value, index) => {
         const summary = object(value);
@@ -328,7 +430,7 @@ function conclusionsFor(sections: readonly GroundedNarrativeSection[]): Grounded
       continue;
     }
     if (section.authority === "surface") {
-      const explanation = object(section.embedded);
+      const explanation = object(parseEmbeddedJson(section.source_refs[0], Buffer.from(section.embedded_bytes, "utf8")));
       const status = nonEmptyString(explanation?.["status"]);
       const parsed = parseSourceId(section.source_refs[0]);
       if (status && parsed.stream === "surface-explanation") conclusions.push({
@@ -370,35 +472,29 @@ export function composeGroundedNarrative(
     }
     const parsedId = parseSourceId(entry.source_id);
     if (parsedId.stream !== "flow-report" && parsedId.stream !== "surface-explanation") continue;
-    const embedded = parseEmbeddedJson(entry.source_id, resolved.content);
-    if (parsedId.stream === "surface-explanation") {
-      const serialized = Buffer.from(stableStringify(embedded));
-      if (sha256(serialized) !== resolved.sha256) {
-        throw new GroundedNarrativeError(
-          "embedded_integrity_failed",
-          `stable serialization of ${entry.source_id} does not reproduce its frozen blob hash`,
-          entry.source_id,
-        );
-      }
-      sections.push({
-        authority: "surface",
-        kind: "claim-explanation",
-        source_refs: [entry.source_id],
-        sha256: resolved.sha256,
-        embedded,
-      });
-    } else {
-      // Flow owns the foreign formatting. The manifest hash pins those raw
-      // bytes; parsing is only the envelope representation and is not used to
-      // claim that a reserialization preserves the author's whitespace.
-      sections.push({
-        authority: "flow",
-        kind: "flow-process-projection",
-        source_refs: [entry.source_id],
-        sha256: resolved.sha256,
-        embedded,
-      });
+    parseEmbeddedJson(entry.source_id, resolved.content);
+    const embeddedBytes = Buffer.from(resolved.content).toString("utf8");
+    const embeddedSha = sha256(Buffer.from(embeddedBytes, "utf8"));
+    if (embeddedSha !== resolved.sha256 || entry.status !== "snapshotted" || embeddedSha !== entry.sha256) {
+      throw new GroundedNarrativeError(
+        "embedded_integrity_failed",
+        `embedded bytes for ${entry.source_id} do not reproduce the frozen manifest hash`,
+        entry.source_id,
+      );
     }
+    sections.push(parsedId.stream === "surface-explanation" ? {
+      authority: "surface",
+      kind: "claim-explanation",
+      source_refs: [entry.source_id],
+      sha256: embeddedSha,
+      embedded_bytes: embeddedBytes,
+    } : {
+      authority: "flow",
+      kind: "flow-process-projection",
+      source_refs: [entry.source_id],
+      sha256: embeddedSha,
+      embedded_bytes: embeddedBytes,
+    });
     embeddedCount += 1;
   }
 

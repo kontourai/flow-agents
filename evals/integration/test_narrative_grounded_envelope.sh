@@ -40,6 +40,12 @@ cp -R "$FIXTURES/flow" "$FLOW"
 cp -R "$FIXTURES/repo" "$REPO"
 printf '%s\n' 'AC6_CANARY' >"$TRANSCRIPT"
 
+# A foreign authority blob containing a configured sensitive key must be
+# unavailable as a whole. Its verbatim bytes must never reach the snapshot.
+FOREIGN_REPORT_FILE="$FLOW/runs/run-redacted/report.json"
+mkdir -p "$(dirname "$FOREIGN_REPORT_FILE")"
+printf '%s\n' '{"run_id":"run-redacted","nested":{"foreignSecret":"AC6_CANARY"}}' >"$FOREIGN_REPORT_FILE"
+
 # Add one attributed nested-worker event beside the fixture's lineage-less event.
 printf '%s\n' '{"kind":"delegation","at":"2026-07-14T13:00:03.000Z","target":"attributed-leaf","task":"attributed fixture","lineage":{"actor":"nested-worker"}}' >>"$NESTED_EVENTS"
 
@@ -67,6 +73,7 @@ NESTED0="$(sha8_line "$NESTED_EVENTS" 0)"
 NESTED1="$(sha8_line "$NESTED_EVENTS" 1)"
 FLOW_STATE="$(sha256_file "$FLOW/runs/run-runtime/state.json")"; FLOW_STATE="${FLOW_STATE:0:8}"
 FLOW_REPORT="$(sha256_file "$FLOW/runs/run-fixture/report.json")"; FLOW_REPORT="${FLOW_REPORT:0:8}"
+FOREIGN_REPORT="$(sha256_file "$FOREIGN_REPORT_FILE")"; FOREIGN_REPORT="${FOREIGN_REPORT:0:8}"
 BUNDLE="$(sha256_file "$SESSION/trust.bundle")"; BUNDLE="${BUNDLE:0:8}"
 FILE_SHA="$(sha256_file "$REPO/created.txt")"
 MISSING_SHA="$(printf 'missing fixture' | node -e "const c=require('crypto');let d='';process.stdin.on('data',x=>d+=x).on('end',()=>process.stdout.write(c.createHash('sha256').update(d).digest('hex')))")"
@@ -82,6 +89,7 @@ SOURCES=(
   "fa1:telemetry:runtime/runtime-session:runtime-tool-timeout/$TIMEOUT"
   "fa1:flow-state:run-runtime:state/$FLOW_STATE"
   "fa1:flow-report:run-fixture:report/$FLOW_REPORT"
+  "fa1:flow-report:run-redacted:report/$FOREIGN_REPORT"
   "fa1:surface-explanation:fixture-session/$BUNDLE:claim-fixture"
   "fa1:delegation:fixture-session/nested-worker:0/$NESTED0"
   "fa1:delegation:fixture-session/nested-worker:1/$NESTED1"
@@ -96,7 +104,8 @@ SOURCES=(
 )
 ARGS=(narrative-sources snapshot --artifact-root "$ARTIFACT_ROOT" --narrative-id grounded-fixture
   --telemetry-root "$TELEMETRY" --session-root "$SESSION" --flow-root "$FLOW" --repo-root "$REPO"
-  --transcript-path "$TRANSCRIPT" --capture-completeness "$FIXTURES/expected-capture-completeness.json")
+  --transcript-path "$TRANSCRIPT" --redact-fields foreignSecret
+  --capture-completeness "$FIXTURES/expected-capture-completeness.json")
 for source in "${SOURCES[@]}"; do ARGS+=(--source "$source"); done
 
 export https_proxy=http://127.0.0.1:9 http_proxy=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 NO_PROXY='*'
@@ -115,7 +124,14 @@ if cmp -s "$ENVELOPE1" "$ENVELOPE2"; then _pass "AC7: identical compiled-at prod
 if json_assert "$ENVELOPE1" 'value.schema_version === "grounded-execution-narrative/v1" && ["manifest_sha256","schema_sha256","config_sha256","compiler_sha256"].every(k => /^[0-9a-f]{64}$/.test(value.provenance[k]))'; then _pass "AC1/AC7: schema and provenance hashes are present"; else _fail "AC1/AC7: envelope provenance is incomplete"; fi
 if json_assert "$ENVELOPE1" 'JSON.stringify(value.sections.find(s=>s.authority==="flow-agents").embedded).includes("was observed to fail") && JSON.stringify(value).includes("was retried across 2 attempts") && JSON.stringify(value).includes("30000 ms timeout") && JSON.stringify(value).includes("classified as a no-op") && JSON.stringify(value).includes("created.txt")'; then _pass "AC3: failure, retry, timeout, no-op, and created-file facts survive"; else _fail "AC3: material runtime fact was dropped"; fi
 if json_assert "$ENVELOPE1" 'JSON.stringify(value).includes("nested-worker") && [...value.sections.find(s=>s.authority==="flow-agents").embedded.turns.flatMap(t=>t.statements),...value.sections.find(s=>s.authority==="flow-agents").embedded.document_statements].some(s=>s.actor==="unattributed")'; then _pass "AC5: attributed and unattributed multi-agent facts survive"; else _fail "AC5: agent attribution disclosure is incomplete"; fi
-if ! grep -q 'AC6_CANARY' "$ENVELOPE1" "$RENDER1" && grep -q 'redacted' "$RENDER1"; then _pass "AC6: canary is absent and typed redaction renders"; else _fail "AC6: canary leaked or redaction reason missing"; fi
+if ! grep -R -q 'AC6_CANARY' "$NARRATIVE_DIR" "$OUT1" "$OUT2" \
+  && grep -q 'redacted' "$RENDER1" \
+  && node - "$NARRATIVE_DIR/source-manifest.json" "${SOURCES[4]}" <<'NODE'
+const fs=require('fs'); const manifest=JSON.parse(fs.readFileSync(process.argv[2]));
+const entry=manifest.sources.find(source=>source.source_id===process.argv[3]);
+if (!entry || entry.status!=='unavailable' || entry.unavailable_reason!=='redacted' || entry.sha256!==undefined) process.exit(1);
+NODE
+then _pass "AC6: foreign authority canary is wholly unavailable/redacted and absent"; else _fail "AC6: foreign authority canary leaked or was partially captured"; fi
 
 # Every reference either resolves hash-verified or is the manifest-declared unavailable source.
 if node --input-type=module - "$NARRATIVE_DIR" "$ENVELOPE1" "$ROOT/build/src/index.js" <<'NODE'
@@ -135,19 +151,49 @@ const api=await import(`file://${process.argv[3]}`); process.exit(api.validateGr
 NODE
 then _pass "AC4: grounding-less conclusion is rejected"; else _fail "AC4: grounding-less conclusion validated"; fi
 
-# Foreign authority sections equal their parsed frozen blobs and retain raw manifest hashes.
-if node - "$NARRATIVE_DIR" "$ENVELOPE1" <<'NODE'
-const fs=require('fs'),c=require('crypto'); const dir=process.argv[2],env=JSON.parse(fs.readFileSync(process.argv[3])),m=JSON.parse(fs.readFileSync(`${dir}/source-manifest.json`));
-const stable=v=>JSON.stringify(v,(_k,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.entries(x).sort(([a],[b])=>a.localeCompare(b))):x);
+# A syntactically valid but nonexistent authority ref must not ground a
+# conclusion, even when another section of that authority exists.
+if node --input-type=module - "$ENVELOPE1" "$ROOT/build/src/index.js" <<'NODE'
+import fs from 'node:fs'; const env=JSON.parse(fs.readFileSync(process.argv[2]));
+env.conclusions[0].grounding={kind:'flow_gate_derivation',source_ref:'fa1:flow-report:missing:report/00000000',pointer:'/gates/0'};
+const api=await import(`file://${process.argv[3]}`); process.exit(api.validateGroundedNarrative(env).length ? 0 : 1);
+NODE
+then _pass "AC4: nonexistent grounding source_ref is rejected"; else _fail "AC4: nonexistent grounding source_ref validated"; fi
+
+# A grounding pointer must RFC6901-resolve within the exact frozen Flow blob.
+if node --input-type=module - "$ENVELOPE1" "$ROOT/build/src/index.js" <<'NODE'
+import fs from 'node:fs'; const env=JSON.parse(fs.readFileSync(process.argv[2]));
+const conclusion=env.conclusions.find(item=>item.grounding?.kind==='flow_gate_derivation');
+if (!conclusion) process.exit(1);
+conclusion.grounding.pointer='/definitely/not/present';
+const api=await import(`file://${process.argv[3]}`); process.exit(api.validateGroundedNarrative(env).length ? 0 : 1);
+NODE
+then _pass "AC4: nonexistent RFC6901 grounding pointer is rejected"; else _fail "AC4: nonexistent grounding pointer validated"; fi
+
+# Extract the JSON string without normalization, then compare its decoded bytes
+# directly to the content-addressed authority blob. Also prove all three hashes
+# (section, manifest, and raw bytes) agree.
+if node - "$NARRATIVE_DIR" "$ENVELOPE1" "$TMP" <<'NODE'
+const fs=require('fs'),c=require('crypto'); const dir=process.argv[2],env=JSON.parse(fs.readFileSync(process.argv[3])),out=process.argv[4],m=JSON.parse(fs.readFileSync(`${dir}/source-manifest.json`));
 for (const authority of ['flow','surface']) {
-  const s=env.sections.find(x=>x.authority===authority), e=m.sources.find(x=>x.source_id===s.source_refs[0]), raw=fs.readFileSync(`${dir}/sources/${e.sha256}`);
-  if (stable(s.embedded)!==stable(JSON.parse(raw)) || s.sha256!==e.sha256 || c.createHash('sha256').update(raw).digest('hex')!==e.sha256) {
-    console.error(`${authority}: parsed=${stable(s.embedded)===stable(JSON.parse(raw))} section=${s.sha256} manifest=${e.sha256} raw=${c.createHash('sha256').update(raw).digest('hex')}`);
-    process.exit(1);
-  }
+  const section=env.sections.find(item=>item.authority===authority);
+  if (!section || typeof section.embedded_bytes!=='string') process.exit(1);
+  const entry=m.sources.find(item=>section.source_refs.includes(item.source_id));
+  if (!entry || entry.status!=='snapshotted') process.exit(1);
+  const raw=fs.readFileSync(`${dir}/sources/${entry.sha256}`);
+  const digest=c.createHash('sha256').update(raw).digest('hex');
+  if (section.sha256!==entry.sha256 || digest!==entry.sha256 || c.createHash('sha256').update(section.embedded_bytes).digest('hex')!==section.sha256) process.exit(1);
+  fs.writeFileSync(`${out}/${authority}.embedded`,section.embedded_bytes);
+  fs.writeFileSync(`${out}/${authority}.blob`,raw);
 }
 NODE
-then _pass "AC8: Flow and Surface embeds match frozen authority blobs and hashes"; else _fail "AC8: foreign authority embedding mismatch"; fi
+then
+  if cmp -s "$TMP/flow.embedded" "$TMP/flow.blob" && cmp -s "$TMP/surface.embedded" "$TMP/surface.blob"; then
+    _pass "AC8: Flow and Surface embedded_bytes are byte-identical to frozen blobs"
+  else
+    _fail "AC8: extracted authority bytes differ from frozen blobs"
+  fi
+else _fail "AC8: foreign authority hash or embedded_bytes contract failed"; fi
 
 # Mutating a copied blob must be detected, then restored byte-identically.
 ENTRY_SHA="$(node -e "const m=JSON.parse(require('fs').readFileSync(process.argv[1]));process.stdout.write(m.sources.find(s=>s.status==='snapshotted').sha256)" "$NARRATIVE_DIR/source-manifest.json")"

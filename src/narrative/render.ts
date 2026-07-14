@@ -4,6 +4,15 @@ function refs(values: readonly string[]): string {
   return values.map((value) => `\`${value}\``).join(" ");
 }
 
+function foreignDetail(section: Extract<GroundedExecutionNarrative["sections"][number], { authority: "flow" | "surface" }>): string {
+  const parsed: unknown = JSON.parse(section.embedded_bytes);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "";
+  const record = parsed as Record<string, unknown>;
+  if (section.authority === "flow" && typeof record["run_id"] === "string") return ` for run ${record["run_id"]}`;
+  if (section.authority === "surface" && typeof record["status"] === "string") return ` with verdict ${record["status"]}`;
+  return "";
+}
+
 /** Render only statements already present in the grounded envelope. */
 export function renderGroundedNarrative(envelope: GroundedExecutionNarrative): string {
   const lines: string[] = [
@@ -14,7 +23,7 @@ export function renderGroundedNarrative(envelope: GroundedExecutionNarrative): s
   ];
   for (const section of envelope.sections) {
     if (section.authority === "flow-agents") continue;
-    lines.push(`- ${section.authority} supplied ${section.kind} (${section.sha256}). ${refs(section.source_refs)}`);
+    lines.push(`- ${section.authority} supplied ${section.kind}${foreignDetail(section)} (${section.sha256}). ${refs(section.source_refs)}`);
   }
 
   const runtime = envelope.sections.find((section) => section.authority === "flow-agents");
@@ -44,14 +53,14 @@ export function renderGroundedNarrative(envelope: GroundedExecutionNarrative): s
     if (turn.placed.length === 0) continue;
     lines.push(`### Turn ${turn.turn_ordinal}`, "");
     for (const placed of turn.placed) {
-      lines.push(`- Flow transitioned from ${placed.from} to ${placed.to}${placed.at ? ` at ${placed.at}` : ""} (${placed.rule.id}). ${refs(placed.source_refs)}`);
+      lines.push(`- Flow transitioned from ${placed.from} to ${placed.to}${placed.at ? ` at ${placed.at}` : ""} (${placed.rule.id}). ${refs(placed.rule.inputs)}`);
     }
     lines.push("");
   }
   lines.push("### Unplaced", "");
   if (envelope.correlation.unplaced.length === 0) lines.push("_None._", "");
   for (const transition of envelope.correlation.unplaced) {
-    lines.push(`- Flow transition ${transition.from} to ${transition.to} was unplaced (${transition.reason}). ${refs(transition.source_refs)}`);
+    lines.push(`- Flow transition ${transition.from} to ${transition.to} was unplaced (${transition.reason}). ${refs(transition.rule.inputs)}`);
   }
 
   lines.push("## Conclusions", "");

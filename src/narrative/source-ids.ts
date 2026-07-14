@@ -159,6 +159,11 @@ function sha8(value: string, sourceId: string, label: string): string {
   return value;
 }
 
+function pathSafeScope(value: string, sourceId: string, label: string): string {
+  if (value.includes("/") || value.includes("\\")) fail("invalid_scope", sourceId, `${label} must not contain a path separator`);
+  return value;
+}
+
 export function parseSourceId(sourceId: string): NarrativeSourceId {
   const ordinalParts = sourceId.split("#");
   if (ordinalParts.length > 2) fail("invalid_syntax", sourceId, "source ID has more than one ordinal delimiter");
@@ -208,7 +213,8 @@ export function parseSourceId(sourceId: string): NarrativeSourceId {
       return { version, stream, scope: { runId }, locator: { sha8: sha8(hash, sourceId, "state hash pin") } };
     }
     case "flow-report": {
-      const [runId] = splitComponents(rawScope, 1, sourceId, "scope") as [string];
+      const [decodedRunId] = splitComponents(rawScope, 1, sourceId, "scope") as [string];
+      const runId = pathSafeScope(decodedRunId, sourceId, "flow-report run ID");
       const [report, hash] = splitComponents(rawLocator, 2, sourceId, "locator") as [string, string];
       if (report !== "report") fail("invalid_locator", sourceId, "flow-report locator must begin with report");
       return { version, stream, scope: { runId }, locator: { sha8: sha8(hash, sourceId, "report hash pin") } };
@@ -219,7 +225,8 @@ export function parseSourceId(sourceId: string): NarrativeSourceId {
       return { version, stream, scope: { runId }, locator: { index: integer(index, sourceId, "transition index"), sha8: sha8(hash, sourceId, "transition hash pin") } };
     }
     case "surface-explanation": {
-      const [slug, bundleHash] = splitComponents(rawScope, 2, sourceId, "scope") as [string, string];
+      const [decodedSlug, bundleHash] = splitComponents(rawScope, 2, sourceId, "scope") as [string, string];
+      const slug = pathSafeScope(decodedSlug, sourceId, "surface-explanation slug");
       const [claimId] = splitComponents(rawLocator, 1, sourceId, "locator") as [string];
       return { version, stream, scope: { slug, bundleSha8: sha8(bundleHash, sourceId, "bundle hash pin") }, locator: { claimId } };
     }
@@ -260,11 +267,19 @@ export function formatSourceId(source: NarrativeSourceId): string {
     case "flow-state":
       return `${prefix}${encodeComponent(source.scope.runId)}:state/${source.locator.sha8}`;
     case "flow-report":
-      return `${prefix}${encodeComponent(source.scope.runId)}:report/${source.locator.sha8}`;
+      {
+        const formatted = `${prefix}${encodeComponent(source.scope.runId)}:report/${source.locator.sha8}`;
+        pathSafeScope(source.scope.runId, formatted, "flow-report run ID");
+        return formatted;
+      }
     case "flow-transition":
       return `${prefix}${encodeComponent(source.scope.runId)}:${source.locator.index}/${source.locator.sha8}`;
     case "surface-explanation":
-      return `${prefix}${encodeComponent(source.scope.slug)}/${source.scope.bundleSha8}:${encodeComponent(source.locator.claimId)}`;
+      {
+        const formatted = `${prefix}${encodeComponent(source.scope.slug)}/${source.scope.bundleSha8}:${encodeComponent(source.locator.claimId)}`;
+        pathSafeScope(source.scope.slug, formatted, "surface-explanation slug");
+        return formatted;
+      }
     case "transcript":
       return `${prefix}${source.scope.pathSha8}:${source.locator.byteStart}-${source.locator.byteEnd}`;
     case "file":

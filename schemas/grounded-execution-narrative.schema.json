@@ -28,6 +28,7 @@
     "source_refs": {
       "type": "array",
       "minItems": 1,
+      "maxItems": 1,
       "uniqueItems": true,
       "items": { "$ref": "#/$defs/source_id" }
     },
@@ -68,25 +69,25 @@
     "flow_section": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["authority", "kind", "source_refs", "sha256", "embedded"],
+      "required": ["authority", "kind", "source_refs", "sha256", "embedded_bytes"],
       "properties": {
         "authority": { "const": "flow" },
         "kind": { "const": "flow-process-projection" },
         "source_refs": { "$ref": "#/$defs/source_refs" },
         "sha256": { "$ref": "#/$defs/sha256" },
-        "embedded": { "type": "object" }
+        "embedded_bytes": { "type": "string", "minLength": 1 }
       }
     },
     "surface_section": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["authority", "kind", "source_refs", "sha256", "embedded"],
+      "required": ["authority", "kind", "source_refs", "sha256", "embedded_bytes"],
       "properties": {
         "authority": { "const": "surface" },
         "kind": { "const": "claim-explanation" },
         "source_refs": { "$ref": "#/$defs/source_refs" },
         "sha256": { "$ref": "#/$defs/sha256" },
-        "embedded": { "type": "object" }
+        "embedded_bytes": { "type": "string", "minLength": 1 }
       }
     },
     "runtime_section": {
@@ -109,8 +110,7 @@
         "version": { "const": "v1" },
         "inputs": {
           "type": "array",
-          "minItems": 2,
-          "maxItems": 2,
+          "minItems": 1,
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/source_id" }
         }
@@ -127,8 +127,8 @@
         "at": { "type": "string", "format": "date-time" },
         "source_refs": {
           "type": "array",
-          "minItems": 2,
-          "maxItems": 2,
+          "minItems": 1,
+          "maxItems": 1,
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/source_id" }
         },
@@ -143,16 +143,16 @@
         "kind": { "const": "flow-transition" },
         "from": { "type": "string", "minLength": 1 },
         "to": { "type": "string", "minLength": 1 },
-        "at": { "type": "string", "format": "date-time" },
+        "at": { "type": "string", "minLength": 1 },
         "source_refs": {
           "type": "array",
-          "minItems": 2,
-          "maxItems": 2,
+          "minItems": 1,
+          "maxItems": 1,
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/source_id" }
         },
         "rule": { "$ref": "#/$defs/correlation_rule" },
-        "reason": { "type": "string", "enum": ["ambiguous_window", "no_timestamp", "no_turns"] }
+        "reason": { "type": "string", "enum": ["ambiguous_window", "no_timestamp", "no_timezone", "no_turns"] }
       }
     },
     "flow_gate_conclusion": {
