@@ -2957,8 +2957,8 @@ const assert = require('assert/strict');
 const hook = require(`${process.env.AUTHORITY_ROOT}/scripts/hooks/stop-goal-fit.js`);
 (async () => {
   const analyzed = await hook.analyze(process.env.AUTHORITY_REPO);
-  assert.equal(analyzed.activeTurnAuthority, true, 'fixture authority remains valid');
-  assert.equal(analyzed.blocking, true, 'authorized terminal sidecar evaluates FULL_BLOCK-only gaps');
+  assert.equal(analyzed.activeTurnAuthority, false, 'terminal sidecar invalidates active-turn relaxation');
+  assert.equal(analyzed.blocking, true, 'terminal sidecar remains blocked while canonical Flow is active');
   assert.ok(analyzed.warnings.some((warning) => warning.includes('NOT_VERIFIED gap')), 'fixture produced a FULL_BLOCK-only warning');
   const result = await hook.run(JSON.stringify({ hook_event_name: 'Stop', cwd: process.env.AUTHORITY_REPO }));
   assert.equal(result.exitCode, 2, 'run preserves the terminal FULL_BLOCK-only block');
@@ -2966,9 +2966,9 @@ const hook = require(`${process.env.AUTHORITY_ROOT}/scripts/hooks/stop-goal-fit.
 })().catch((error) => { console.error(error.stack || error); process.exitCode = 1; });
 NODE
 then
-  _pass "valid continuation authority still blocks a terminal sidecar FULL_BLOCK-only warning through analyze and run"
+  _pass "terminal sidecar invalidates continuation authority and preserves blocking through analyze and run"
 else
-  _fail "authorized terminal sidecar did not preserve the FULL_BLOCK-only warning: $(cat "$TMPDIR_EVAL/authority-terminal-sidecar.out" "$TMPDIR_EVAL/authority-terminal-sidecar.err" "$TMPDIR_EVAL/authority-terminal-sidecar-setup.err")"
+  _fail "terminal sidecar did not invalidate authority and preserve blocking: $(cat "$TMPDIR_EVAL/authority-terminal-sidecar.out" "$TMPDIR_EVAL/authority-terminal-sidecar.err" "$TMPDIR_EVAL/authority-terminal-sidecar-setup.err")"
 fi
 rm -f "$AUTHORITY_SESSION/evidence.json"
 AUTHORITY_SESSION="$AUTHORITY_SESSION" node - <<'NODE' >/dev/null 2>"$TMPDIR_EVAL/authority-terminal-sidecar-restore.err"
