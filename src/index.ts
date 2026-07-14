@@ -87,14 +87,20 @@ export {
   validateGroundedNarrative,
   writeEnvelope,
 } from "./narrative/envelope.js";
+export { renderGroundedNarrative } from "./narrative/render.js";
 export type {
   GroundedExecutionNarrative,
+  GroundedNarrativeConclusion,
   GroundedNarrativeConfig,
+  GroundedNarrativeCorrelation,
   GroundedNarrativeErrorCode,
+  GroundedNarrativeFlowTransition,
   GroundedNarrativeForeignSection,
+  GroundedNarrativeRule,
   GroundedNarrativeRuntimeSection,
   GroundedNarrativeSection,
   SchemaIssue as GroundedNarrativeSchemaIssue,
+  WriteEnvelopeOptions,
   WrittenGroundedNarrative,
 } from "./narrative/envelope.js";
 export type {

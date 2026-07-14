@@ -11,6 +11,7 @@ import {
   composeGroundedNarrative,
   formatSourceId,
   parseSourceId,
+  renderGroundedNarrative,
   resolveSource,
   snapshotNarrative,
   stableStringify,
@@ -33,7 +34,7 @@ function constructedNarrative({ missingReport = false } = {}) {
   const narrativeDir = path.join(root, "narrative");
   const flowRoot = path.join(root, "flow");
   const sessionDir = path.join(root, "session");
-  const reportBytes = Buffer.from('{\n  "run_id": "run-envelope",\n  "status": "passed",\n  "steps": []\n}\n');
+  const reportBytes = Buffer.from('{\n  "run_id": "run-envelope",\n  "status": "passed",\n  "steps": [],\n  "gate_summaries": [{"gate_id":"tests-evidence","status":"passed"}]\n}\n');
   if (!missingReport) {
     fs.mkdirSync(path.join(flowRoot, "runs", "run-envelope"), { recursive: true });
     fs.writeFileSync(path.join(flowRoot, "runs", "run-envelope", "report.json"), reportBytes);
@@ -63,6 +64,50 @@ function constructedNarrative({ missingReport = false } = {}) {
     captureCompleteness,
   }, { now: () => CAPTURED_AT });
   return { root, narrativeDir, reportBytes, fixtureBundle, manifest };
+}
+
+function correlationNarrative(transitions, { overlapping = false } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-correlation-"));
+  const narrativeDir = path.join(root, "narrative");
+  const telemetryDir = path.join(root, "telemetry");
+  const flowRoot = path.join(root, "flow");
+  const telemetry = overlapping
+    ? [
+        { session_id: "session", event_id: "turn-a", event_type: "turn.user", timestamp: "2026-07-14T13:00:00.000Z", hook: { turn_id: "a" } },
+        { session_id: "session", event_id: "tool-a", event_type: "tool.result", timestamp: "2026-07-14T13:00:20.000Z", hook: { turn_id: "a" }, tool: { name: "read" } },
+        { session_id: "session", event_id: "turn-b", event_type: "turn.user", timestamp: "2026-07-14T13:00:05.000Z", hook: { turn_id: "b" } },
+        { session_id: "session", event_id: "tool-b", event_type: "tool.result", timestamp: "2026-07-14T13:00:15.000Z", hook: { turn_id: "b" }, tool: { name: "read" } },
+      ]
+    : [
+        { session_id: "session", event_id: "turn-a", event_type: "turn.user", timestamp: "2026-07-14T13:00:00.000Z", hook: { turn_id: "a" } },
+        { session_id: "session", event_id: "tool-a", event_type: "tool.result", timestamp: "2026-07-14T13:00:20.000Z", hook: { turn_id: "a" }, tool: { name: "read" } },
+      ];
+  fs.mkdirSync(telemetryDir, { recursive: true });
+  const telemetryLines = telemetry.map((record) => JSON.stringify(record));
+  fs.writeFileSync(path.join(telemetryDir, "full.jsonl"), `${telemetryLines.join("\n")}\n`);
+
+  const stateBytes = Buffer.from(JSON.stringify({ run_id: "run-correlation", session_id: "session", transitions }));
+  const reportBytes = Buffer.from(JSON.stringify({ run_id: "run-correlation", gate_summaries: [] }));
+  fs.mkdirSync(path.join(flowRoot, "runs", "run-correlation"), { recursive: true });
+  fs.writeFileSync(path.join(flowRoot, "runs", "run-correlation", "state.json"), stateBytes);
+  fs.writeFileSync(path.join(flowRoot, "runs", "run-correlation", "report.json"), reportBytes);
+  const requests = telemetry.map((record, index) => ({
+    source: parseSourceId(`fa1:telemetry:full/session:${record.event_id}/${sha8(Buffer.from(telemetryLines[index]))}`),
+    roots: { telemetryDir },
+  }));
+  requests.push(
+    { source: parseSourceId(`fa1:flow-state:run-correlation:state/${sha8(stateBytes)}`), roots: { flowRoot } },
+    { source: parseSourceId(`fa1:flow-report:run-correlation:report/${sha8(reportBytes)}`), roots: { flowRoot } },
+  );
+  snapshotNarrative({
+    narrativeDir,
+    narrativeId: "correlation-test",
+    requests,
+    redactionFields: [],
+    compiler,
+    captureCompleteness,
+  }, { now: () => CAPTURED_AT });
+  return composeGroundedNarrative(narrativeDir, { compiledAt: COMPILED_AT });
 }
 
 test("new source-id streams round-trip encoded components and reject invalid locators", () => {
@@ -114,7 +159,23 @@ test("compiler emits byte-stable grounded sections with verbatim foreign hashes"
   assert.deepEqual(validateGroundedNarrative(first), []);
   assert.deepEqual(first.capture_completeness, manifest.capture_completeness);
   assert.deepEqual(first.correlation, { turns: [], unplaced: [] });
-  assert.deepEqual(first.conclusions, []);
+  assert.deepEqual(first.conclusions, [
+    {
+      proposition: "Gate tests-evidence was passed.",
+      grounding: {
+        kind: "flow_gate_derivation",
+        source_ref: first.sections.find((section) => section.authority === "flow").source_refs[0],
+        pointer: "/gate_summaries/0",
+      },
+    },
+    {
+      proposition: "Claim claim-fixture was unknown.",
+      grounding: {
+        kind: "surface_explanation",
+        source_ref: first.sections.find((section) => section.authority === "surface").source_refs[0],
+      },
+    },
+  ]);
   assert.deepEqual(first.coverage, { sources: 2, embedded: 2, unavailable: 0 });
 
   const flow = first.sections.find((section) => section.authority === "flow");
@@ -140,6 +201,51 @@ test("validator rejects missing sections/provenance and unknown keys", () => {
   const unknown = structuredClone(valid);
   unknown.unratified = true;
   assert.ok(validateGroundedNarrative(unknown).some((issue) => issue.path === "$.unratified" && issue.message === "is not allowed"));
+  const ungrounded = structuredClone(valid);
+  delete ungrounded.conclusions[0].grounding;
+  assert.ok(validateGroundedNarrative(ungrounded).some((issue) => issue.path === "$.conclusions[0]"));
+});
+
+test("flow transitions correlate only strictly inside exactly one observed turn window", () => {
+  const envelope = correlationNarrative([
+    { from: "planned", to: "executing", at: "2026-07-14T13:00:10.000Z" },
+    { from: "executing", to: "boundary", at: "2026-07-14T13:00:00.000Z" },
+    { from: "boundary", to: "unknown-time" },
+  ]);
+  assert.equal(envelope.correlation.turns.length, 1);
+  assert.deepEqual(envelope.correlation.turns[0].placed.map(({ from, to }) => ({ from, to })), [
+    { from: "planned", to: "executing" },
+  ]);
+  const placed = envelope.correlation.turns[0].placed[0];
+  assert.deepEqual(placed.rule, {
+    id: "flow-turn-correlation/v1",
+    version: "v1",
+    inputs: placed.source_refs,
+  });
+  assert.deepEqual(envelope.correlation.unplaced.map(({ to, reason }) => ({ to, reason })), [
+    { to: "boundary", reason: "ambiguous_window" },
+    { to: "unknown-time", reason: "no_timestamp" },
+  ]);
+});
+
+test("a transition inside two observed turn windows is left ambiguous", () => {
+  const envelope = correlationNarrative([
+    { from: "planned", to: "executing", at: "2026-07-14T13:00:10.000Z" },
+  ], { overlapping: true });
+  assert.equal(envelope.correlation.turns.length, 2);
+  assert.ok(envelope.correlation.turns.every((turn) => turn.placed.length === 0));
+  assert.equal(envelope.correlation.unplaced[0].reason, "ambiguous_window");
+});
+
+test("renderer is deterministic, prints typed unavailable reasons, and never invents a canary", () => {
+  const { narrativeDir } = constructedNarrative({ missingReport: true });
+  const envelope = composeGroundedNarrative(narrativeDir, { compiledAt: COMPILED_AT });
+  const first = renderGroundedNarrative(envelope);
+  const second = renderGroundedNarrative(envelope);
+  assert.equal(first, second);
+  assert.match(first, /not_captured/);
+  assert.doesNotMatch(stableStringify(envelope), /AC6_CANARY/);
+  assert.doesNotMatch(first, /AC6_CANARY/);
 });
 
 test("writer is content-addressed/idempotent and lineage remains append-only", () => {

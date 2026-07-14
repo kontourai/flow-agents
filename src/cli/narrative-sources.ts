@@ -5,6 +5,11 @@ import { fileURLToPath } from "node:url";
 import { atomicWriteFile } from "../lib/fs.js";
 import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
+import {
+  composeGroundedNarrative,
+  validateGroundedNarrative,
+  writeEnvelope,
+} from "../narrative/envelope.js";
 import type { CaptureCompleteness } from "../narrative/integrity.js";
 import { effectiveNarrativeRedactionFields } from "../narrative/policy-filter.js";
 import { projectRuntimeNarrative, stableStringify, validateNarrativeRuntimeProjection } from "../narrative/projection.js";
@@ -20,7 +25,7 @@ function packageVersion(): string {
 }
 
 function usage(): void {
-  console.error(`usage: flow-agents narrative-sources <snapshot|resolve|verify|project> [options]
+  console.error(`usage: flow-agents narrative-sources <snapshot|resolve|verify|project|compose> [options]
 
 snapshot:
   (--session-slug SLUG | --artifact-root PATH) --narrative-id ID --source FA1 [--source FA1 ...]
@@ -34,6 +39,8 @@ resolve:
   --narrative-dir PATH --source-id FA1 (--out FILE | --json)
 project:
   --narrative-dir PATH (--out FILE | --json) [--projected-at DATE-TIME]
+compose:
+  --narrative-dir PATH --compiled-at DATE-TIME (--out-dir DIR | --json) [--render]
 verify:
   --narrative-dir PATH --json`);
 }
@@ -129,6 +136,29 @@ function projectNarrative(flags: ReturnType<typeof parseArgs>["flags"]): number 
   return 0;
 }
 
+function composeNarrative(flags: ReturnType<typeof parseArgs>["flags"]): number {
+  const narrativeDir = required(flags, "narrative-dir");
+  const compiledAt = required(flags, "compiled-at");
+  const outDir = flagString(flags, "out-dir");
+  const json = flagBool(flags, "json");
+  const render = flagBool(flags, "render");
+  if (Boolean(outDir) === json) throw new Error("exactly one of --out-dir or --json is required");
+  if (render && !outDir) throw new Error("--render requires --out-dir");
+
+  const envelope = composeGroundedNarrative(narrativeDir, { compiledAt });
+  const issues = validateGroundedNarrative(envelope);
+  if (issues.length > 0) {
+    throw new Error(`grounded execution narrative validation failed: ${issues.map((issue) => `${issue.path} ${issue.message}`).join("; ")}`);
+  }
+  if (outDir) {
+    const written = writeEnvelope(narrativeDir, envelope, { outDir, render });
+    process.stdout.write(`${stableStringify(written)}\n`);
+  } else {
+    process.stdout.write(`${stableStringify(envelope)}\n`);
+  }
+  return 0;
+}
+
 export function main(argv: string[] = process.argv.slice(2)): number {
   const args = parseArgs(argv);
   const verb = args.positionals[0];
@@ -136,6 +166,7 @@ export function main(argv: string[] = process.argv.slice(2)): number {
     if (verb === "snapshot") return snapshot(args.flags);
     if (verb === "resolve") return resolve(args.flags);
     if (verb === "project") return projectNarrative(args.flags);
+    if (verb === "compose") return composeNarrative(args.flags);
     if (verb === "verify") return verify(args.flags);
     usage();
     return 64;

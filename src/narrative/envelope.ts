@@ -10,6 +10,7 @@ import {
   stableStringify,
   type NarrativeRuntimeProjection,
 } from "./projection.js";
+import { renderGroundedNarrative } from "./render.js";
 import { resolveSource, verifyManifest } from "./resolver.js";
 import { parseSourceId } from "./source-ids.js";
 import {
@@ -45,6 +46,30 @@ export interface GroundedNarrativeConfig {
   renderTitle?: string;
 }
 
+export interface GroundedNarrativeRule {
+  id: "flow-turn-correlation/v1";
+  version: "v1";
+  inputs: [string, string];
+}
+
+export interface GroundedNarrativeFlowTransition {
+  kind: "flow-transition";
+  from: string;
+  to: string;
+  at?: string;
+  source_refs: [string, string];
+  rule: GroundedNarrativeRule;
+}
+
+export interface GroundedNarrativeCorrelation {
+  turns: Array<{ turn_ordinal: number; placed: GroundedNarrativeFlowTransition[] }>;
+  unplaced: Array<GroundedNarrativeFlowTransition & { reason: "ambiguous_window" | "no_timestamp" | "no_turns" }>;
+}
+
+export type GroundedNarrativeConclusion =
+  | { proposition: string; grounding: { kind: "flow_gate_derivation"; source_ref: string; pointer: string } }
+  | { proposition: string; grounding: { kind: "surface_explanation"; source_ref: string } };
+
 export interface GroundedNarrativeForeignSection {
   authority: "flow" | "surface";
   kind: "flow-process-projection" | "claim-explanation";
@@ -75,8 +100,8 @@ export interface GroundedExecutionNarrative {
   };
   capture_completeness: CaptureCompleteness;
   sections: GroundedNarrativeSection[];
-  correlation: { turns: Record<string, unknown>[]; unplaced: Record<string, unknown>[] };
-  conclusions: Record<string, unknown>[];
+  correlation: GroundedNarrativeCorrelation;
+  conclusions: GroundedNarrativeConclusion[];
   coverage: { sources: number; embedded: number; unavailable: number };
   unavailable_sources: Array<{ source_ref: string; reason: UnavailableReason }>;
 }
@@ -85,7 +110,10 @@ export interface WrittenGroundedNarrative {
   envelopePath: string;
   lineagePath: string;
   envelopeSha256: string;
+  renderPath?: string;
 }
+
+export interface WriteEnvelopeOptions { render?: boolean; outDir?: string }
 
 export type SchemaIssue = { path: string; message: string };
 type JsonSchema = Record<string, any>;
@@ -189,6 +217,129 @@ function parseEmbeddedJson(sourceId: string, content: Uint8Array): unknown {
   catch { throw new GroundedNarrativeError("malformed_embedded_json", `${sourceId} does not contain valid JSON`, sourceId); }
 }
 
+function object(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function telemetryTimestamp(value: unknown): number | undefined {
+  const record = object(value);
+  const raw = nonEmptyString(record?.["timestamp"])
+    ?? nonEmptyString(record?.["observed_at"])
+    ?? nonEmptyString(record?.["recorded_at"])
+    ?? nonEmptyString(record?.["at"]);
+  if (!raw) return undefined;
+  const parsed = Date.parse(raw);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+function correlationFor(
+  narrativeDir: string,
+  manifest: NarrativeSourceManifest,
+  projection: NarrativeRuntimeProjection,
+): GroundedNarrativeCorrelation {
+  const timestampsByRef = new Map<string, number>();
+  for (const entry of manifest.sources) {
+    if (parseSourceId(entry.source_id).stream !== "telemetry") continue;
+    const resolved = resolveSource(narrativeDir, entry.source_id);
+    if (resolved.status !== "resolved") continue;
+    const timestamp = telemetryTimestamp(parseEmbeddedJson(entry.source_id, resolved.content));
+    if (timestamp !== undefined) timestampsByRef.set(entry.source_id, timestamp);
+  }
+  const windows = projection.turns.map((turn) => {
+    const values = [...new Set(turn.statements.flatMap((statement) => statement.source_refs))]
+      .flatMap((sourceRef) => timestampsByRef.has(sourceRef) ? [timestampsByRef.get(sourceRef)!] : []);
+    return values.length === 0
+      ? { ordinal: turn.ordinal }
+      : { ordinal: turn.ordinal, start: Math.min(...values), end: Math.max(...values) };
+  });
+  const turns = projection.turns.map((turn) => ({ turn_ordinal: turn.ordinal, placed: [] as GroundedNarrativeFlowTransition[] }));
+  const turnsByOrdinal = new Map(turns.map((turn) => [turn.turn_ordinal, turn]));
+  const unplaced: GroundedNarrativeCorrelation["unplaced"] = [];
+
+  for (const entry of manifest.sources) {
+    const parsedId = parseSourceId(entry.source_id);
+    if (parsedId.stream !== "flow-state") continue;
+    const reportRef = manifest.sources.find((candidate) => {
+      const candidateId = parseSourceId(candidate.source_id);
+      return candidateId.stream === "flow-report" && candidateId.scope.runId === parsedId.scope.runId;
+    })?.source_id;
+    if (!reportRef) continue;
+    const resolved = resolveSource(narrativeDir, entry.source_id);
+    if (resolved.status !== "resolved") continue;
+    const state = object(parseEmbeddedJson(entry.source_id, resolved.content));
+    const transitions = Array.isArray(state?.["transitions"]) ? state!["transitions"] as unknown[] : [];
+    for (const value of transitions) {
+      const transition = object(value);
+      const from = nonEmptyString(transition?.["from"]);
+      const to = nonEmptyString(transition?.["to"]);
+      if (!from || !to) continue;
+      const at = nonEmptyString(transition?.["at"]);
+      const source_refs: [string, string] = [entry.source_id, reportRef];
+      const record: GroundedNarrativeFlowTransition = {
+        kind: "flow-transition",
+        from,
+        to,
+        ...(at ? { at } : {}),
+        source_refs,
+        rule: { id: "flow-turn-correlation/v1", version: "v1", inputs: source_refs },
+      };
+      if (windows.length === 0) {
+        unplaced.push({ ...record, reason: "no_turns" });
+        continue;
+      }
+      const timestamp = at ? Date.parse(at) : Number.NaN;
+      if (!at || Number.isNaN(timestamp)) {
+        unplaced.push({ ...record, reason: "no_timestamp" });
+        continue;
+      }
+      const matches = windows.filter((window) => window.start !== undefined && window.end !== undefined
+        && timestamp > window.start && timestamp < window.end);
+      if (matches.length !== 1) {
+        unplaced.push({ ...record, reason: "ambiguous_window" });
+        continue;
+      }
+      turnsByOrdinal.get(matches[0]!.ordinal)!.placed.push(record);
+    }
+  }
+  return { turns, unplaced };
+}
+
+function conclusionsFor(sections: readonly GroundedNarrativeSection[]): GroundedNarrativeConclusion[] {
+  const conclusions: GroundedNarrativeConclusion[] = [];
+  for (const section of sections) {
+    if (section.authority === "flow") {
+      const report = object(section.embedded);
+      const summaries = Array.isArray(report?.["gate_summaries"]) ? report!["gate_summaries"] as unknown[] : [];
+      summaries.forEach((value, index) => {
+        const summary = object(value);
+        const gateId = nonEmptyString(summary?.["gate_id"]);
+        const status = nonEmptyString(summary?.["status"]);
+        if (gateId && status) conclusions.push({
+          proposition: `Gate ${gateId} was ${status}.`,
+          grounding: { kind: "flow_gate_derivation", source_ref: section.source_refs[0], pointer: `/gate_summaries/${index}` },
+        });
+      });
+      continue;
+    }
+    if (section.authority === "surface") {
+      const explanation = object(section.embedded);
+      const status = nonEmptyString(explanation?.["status"]);
+      const parsed = parseSourceId(section.source_refs[0]);
+      if (status && parsed.stream === "surface-explanation") conclusions.push({
+        proposition: `Claim ${parsed.locator.claimId} was ${status}.`,
+        grounding: { kind: "surface_explanation", source_ref: section.source_refs[0] },
+      });
+    }
+  }
+  return conclusions;
+}
+
 /** Compile exclusively from the frozen manifest and its content-addressed blobs. */
 export function composeGroundedNarrative(
   narrativeDir: string,
@@ -281,20 +432,24 @@ export function composeGroundedNarrative(
     },
     capture_completeness: manifest.capture_completeness,
     sections,
-    correlation: { turns: [], unplaced: [] },
-    conclusions: [],
+    correlation: correlationFor(narrativeDir, manifest, runtimeProjection),
+    conclusions: conclusionsFor(sections),
     coverage: { sources: manifest.sources.length, embedded: embeddedCount, unavailable: unavailableSources.length },
     unavailable_sources: unavailableSources,
   };
 }
 
-export function writeEnvelope(narrativeDir: string, envelope: GroundedExecutionNarrative): WrittenGroundedNarrative {
+export function writeEnvelope(
+  narrativeDir: string,
+  envelope: GroundedExecutionNarrative,
+  options: WriteEnvelopeOptions = {},
+): WrittenGroundedNarrative {
   const bytes = Buffer.from(stableStringify(envelope));
   const envelopeSha256 = sha256(bytes);
-  const envelopesDir = path.join(narrativeDir, "envelopes");
+  const envelopesDir = options.outDir ? path.resolve(options.outDir) : path.join(narrativeDir, "envelopes");
   const envelopePath = path.join(envelopesDir, `${envelopeSha256}.json`);
   const lineagePath = path.join(narrativeDir, "envelope-lineage.jsonl");
-  ensureSafeDirectory(narrativeDir, envelopesDir);
+  ensureSafeDirectory(options.outDir ? envelopesDir : narrativeDir, envelopesDir);
   try {
     fs.writeFileSync(envelopePath, bytes, { flag: "wx" });
   } catch (error) {
@@ -320,5 +475,16 @@ export function writeEnvelope(narrativeDir: string, envelope: GroundedExecutionN
   const descriptor = fs.openSync(lineagePath, fs.constants.O_APPEND | fs.constants.O_CREAT | fs.constants.O_WRONLY | noFollow, 0o600);
   try { fs.writeSync(descriptor, `${JSON.stringify(lineage)}\n`, undefined, "utf8"); }
   finally { fs.closeSync(descriptor); }
-  return { envelopePath, lineagePath, envelopeSha256 };
+  let renderPath: string | undefined;
+  if (options.render) {
+    renderPath = path.join(envelopesDir, `${envelopeSha256}.md`);
+    const rendered = renderGroundedNarrative(envelope);
+    try { fs.writeFileSync(renderPath, rendered, { flag: "wx" }); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const existing = fs.readFileSync(renderPath, "utf8");
+      if (existing !== rendered) throw new Error(`content-addressed rendering collision at ${renderPath}`);
+    }
+  }
+  return { envelopePath, lineagePath, envelopeSha256, ...(renderPath ? { renderPath } : {}) };
 }

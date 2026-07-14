@@ -99,6 +99,96 @@
         "sha256": { "$ref": "#/$defs/sha256" },
         "embedded": { "type": "object" }
       }
+    },
+    "correlation_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "inputs"],
+      "properties": {
+        "id": { "const": "flow-turn-correlation/v1" },
+        "version": { "const": "v1" },
+        "inputs": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/source_id" }
+        }
+      }
+    },
+    "flow_transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "from", "to", "source_refs", "rule"],
+      "properties": {
+        "kind": { "const": "flow-transition" },
+        "from": { "type": "string", "minLength": 1 },
+        "to": { "type": "string", "minLength": 1 },
+        "at": { "type": "string", "format": "date-time" },
+        "source_refs": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/source_id" }
+        },
+        "rule": { "$ref": "#/$defs/correlation_rule" }
+      }
+    },
+    "unplaced_flow_transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "from", "to", "source_refs", "rule", "reason"],
+      "properties": {
+        "kind": { "const": "flow-transition" },
+        "from": { "type": "string", "minLength": 1 },
+        "to": { "type": "string", "minLength": 1 },
+        "at": { "type": "string", "format": "date-time" },
+        "source_refs": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/source_id" }
+        },
+        "rule": { "$ref": "#/$defs/correlation_rule" },
+        "reason": { "type": "string", "enum": ["ambiguous_window", "no_timestamp", "no_turns"] }
+      }
+    },
+    "flow_gate_conclusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["proposition", "grounding"],
+      "properties": {
+        "proposition": { "type": "string", "minLength": 1 },
+        "grounding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "source_ref", "pointer"],
+          "properties": {
+            "kind": { "const": "flow_gate_derivation" },
+            "source_ref": { "$ref": "#/$defs/source_id" },
+            "pointer": { "type": "string", "pattern": "^/(?:[^~/]|~[01])*(?:/(?:[^~/]|~[01])*)*$" }
+          }
+        }
+      }
+    },
+    "surface_conclusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["proposition", "grounding"],
+      "properties": {
+        "proposition": { "type": "string", "minLength": 1 },
+        "grounding": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "source_ref"],
+          "properties": {
+            "kind": { "const": "surface_explanation" },
+            "source_ref": { "$ref": "#/$defs/source_id" }
+          }
+        }
+      }
     }
   },
   "properties": {
@@ -149,11 +239,30 @@
       "additionalProperties": false,
       "required": ["turns", "unplaced"],
       "properties": {
-        "turns": { "type": "array", "items": { "type": "object" } },
-        "unplaced": { "type": "array", "items": { "type": "object" } }
+        "turns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["turn_ordinal", "placed"],
+            "properties": {
+              "turn_ordinal": { "type": "integer", "minimum": -1 },
+              "placed": { "type": "array", "items": { "$ref": "#/$defs/flow_transition" } }
+            }
+          }
+        },
+        "unplaced": { "type": "array", "items": { "$ref": "#/$defs/unplaced_flow_transition" } }
       }
     },
-    "conclusions": { "type": "array", "items": { "type": "object" } },
+    "conclusions": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          { "$ref": "#/$defs/flow_gate_conclusion" },
+          { "$ref": "#/$defs/surface_conclusion" }
+        ]
+      }
+    },
     "coverage": {
       "type": "object",
       "additionalProperties": false,
