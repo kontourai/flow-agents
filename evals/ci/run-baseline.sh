@@ -22,6 +22,8 @@ CHECKS=(
   "Workflow sidecar writer integration|bash evals/integration/test_workflow_sidecar_writer.sh"
   "Sidecar field preservation integration|bash evals/integration/test_sidecar_field_preservation.sh"
   "Record-check integration|bash evals/integration/test_record_check.sh"
+  "Narrative source contract integration|bash evals/integration/test_narrative_source_contract.sh"
+  "Narrative redaction fail-closed integration|bash evals/integration/test_narrative_redaction_failclosed.sh"
   "Actor identity resolver integration|bash evals/integration/test_actor_identity.sh"
   "CI-runtime actor identity integration|bash evals/integration/test_ci_actor_identity.sh"
   "Assignment provider local-file integration|bash evals/integration/test_assignment_provider_local_file.sh"

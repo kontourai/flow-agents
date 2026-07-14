@@ -24,7 +24,7 @@ if npm run build --silent; then _pass "TypeScript build completed"; else _fail "
 
 RAW="$TMP/raw-telemetry"
 ARTIFACT_ROOT="$TMP/artifacts"
-SECRET="NARRATIVE_AC6_SECRET_7b31e9"
+AC6_CANARY="NARRATIVE_AC6_SECRET_7b31e9" # deliberate test canary, never a real credential
 cp -R "$FIXTURES/telemetry" "$RAW"
 # Telemetry IDs carry a content pin: sha8 of the exact fixture line.
 PIN="$(node -e "const fs=require('fs'),c=require('crypto');const line=fs.readFileSync(process.argv[1],'utf8').split('\n').find(l=>l.trim()&&JSON.parse(l).event_id==='evt-redaction');process.stdout.write(c.createHash('sha256').update(Buffer.from(line)).digest('hex').slice(0,8))" "$RAW/full.jsonl")"
@@ -63,7 +63,7 @@ else
   _fail "AC6: resolved record did not null sensitive tool fields"
 fi
 
-if ! grep -R -F -q -- "$SECRET" "$SUCCESS_DIR" && ! grep -F -q -- "$SECRET" "$TMP/snapshot-success.stderr" "$TMP/resolve-success.stderr"; then
+if ! grep -R -F -q -- "$AC6_CANARY" "$SUCCESS_DIR" && ! grep -F -q -- "$AC6_CANARY" "$TMP/snapshot-success.stderr" "$TMP/resolve-success.stderr"; then
   _pass "AC6: zero secret hits in narrative directory and captured stderr"
 else
   _fail "AC6: secret leaked into snapshot artifacts or diagnostics"
@@ -99,7 +99,7 @@ blob_count=0
 if [[ -d "$FAILURE_DIR/sources" ]]; then blob_count="$(find "$FAILURE_DIR/sources" -type f | wc -l | tr -d ' ')"; fi
 if [[ "$blob_count" -eq 0 ]]; then _pass "AC6: filter failure writes zero source blobs"; else _fail "AC6: filter failure wrote $blob_count source blob(s)"; fi
 
-if ! grep -R -F -q -- "$SECRET" "$FAILURE_DIR" && ! grep -F -q -- "$SECRET" "$TMP/snapshot-failure.stderr"; then
+if ! grep -R -F -q -- "$AC6_CANARY" "$FAILURE_DIR" && ! grep -F -q -- "$AC6_CANARY" "$TMP/snapshot-failure.stderr"; then
   _pass "AC6: failed-filter artifacts and stderr contain no secret value"
 else
   _fail "AC6: failed-filter path leaked the secret value"
