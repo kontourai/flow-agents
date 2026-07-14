@@ -83,6 +83,31 @@ else
   _fail "bundle compiled-runtime package identity is missing or stale"
 fi
 
+if node - "$ROOT_DIR/package.json" "$DIST_DIR" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const [sourcePackageFile, dist] = process.argv.slice(2);
+const source = JSON.parse(fs.readFileSync(sourcePackageFile, "utf8"));
+const codexPackage = JSON.parse(fs.readFileSync(path.join(dist, "codex", "package.json"), "utf8"));
+if (JSON.stringify(codexPackage.dependencies) !== JSON.stringify(source.dependencies)) {
+  throw new Error("Codex runtime package dependencies do not match the source package");
+}
+for (const runtime of ["base", "kiro", "claude-code", "opencode", "pi"]) {
+  if (fs.existsSync(path.join(dist, runtime, "package.json"))) {
+    throw new Error(`${runtime} must not publish a root package.json into adopter workspaces`);
+  }
+}
+const closure = JSON.parse(fs.readFileSync(path.join(dist, "codex", "build", "runtime-dependencies.json"), "utf8"));
+if (!closure.packages.some((item) => item.name === "@kontourai/flow")) {
+  throw new Error("Codex required runtime closure omits @kontourai/flow");
+}
+NODE
+then
+  _pass "only Codex carries a root runtime package and its required dependency closure"
+else
+  _fail "runtime root package or Codex dependency closure boundary is invalid"
+fi
+
 if [[ -d "$DIST_DIR/codex/.agents/skills/plan-work" && ! -e "$DIST_DIR/codex/.codex/skills" ]]; then
   _pass "Codex exports portable skills only in the universal .agents catalog"
 else

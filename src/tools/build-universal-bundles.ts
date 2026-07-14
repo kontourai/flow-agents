@@ -9,7 +9,8 @@ import { DURABLE_FLOW_AGENTS_DIR, FLOW_AGENTS_RUNTIME_DIR } from "../lib/local-a
 type Agent = Record<string, unknown> & { name: string; prompt: string };
 const dist = process.env.FLOW_AGENTS_DIST_DIR ? path.resolve(process.env.FLOW_AGENTS_DIST_DIR) : path.join(root, "dist");
 const manifest = loadJson<Record<string, any>>(path.join(root, "packaging/manifest.json"));
-const pkgVersion: string = (loadJson<Record<string, unknown>>(path.join(root, "package.json")) as Record<string, string>)["version"] ?? "0.0.0";
+const rootPackageManifest = loadJson<Record<string, unknown>>(path.join(root, "package.json"));
+const pkgVersion: string = (rootPackageManifest as Record<string, string>)["version"] ?? "0.0.0";
 const runtimeTaskDir = FLOW_AGENTS_RUNTIME_DIR;
 const durableInstallRecordRel = `${DURABLE_FLOW_AGENTS_DIR}/install.json`;
 const textExtensions = new Set([".css", ".html", ".js", ".json", ".md", ".sh", ".toml", ".txt", ".yaml", ".yml", ".ts"]);
@@ -20,6 +21,91 @@ const dropDiagnostics: string[] = [];
 // (see main()) instead of an uncaught thrown Error / stack trace.
 let skillCollisionDiagnostic: string | null = null;
 const printDiagnostics = !["0", "false", "no"].includes(String(process.env.FLOW_AGENTS_EXPORT_DIAGNOSTICS ?? "1").toLowerCase());
+
+type RuntimeDependency = {
+  name: string;
+  version: string;
+  packageRoot: string;
+  packageJson: string;
+};
+
+function resolveRuntimeDependency(packageName: string, declaringPackageJson: string): RuntimeDependency {
+  if (!/^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/i.test(packageName)) {
+    throw new Error(`unsafe runtime dependency package name: ${packageName}`);
+  }
+  let current = path.dirname(declaringPackageJson);
+  const filesystemRoot = path.parse(current).root;
+  while (true) {
+    const packageRoot = path.join(current, "node_modules", ...packageName.split("/"));
+    const packageJson = path.join(packageRoot, "package.json");
+    if (fs.existsSync(packageJson)) {
+      const parsed = loadJson<Record<string, unknown>>(packageJson);
+      if (parsed["name"] !== packageName) throw new Error(`runtime dependency identity mismatch at ${packageJson}`);
+      const version = parsed["version"];
+      if (typeof version !== "string" || !version) throw new Error(`runtime dependency ${packageName} has no version`);
+      return { name: packageName, version, packageRoot, packageJson };
+    }
+    if (current === filesystemRoot) break;
+    current = path.dirname(current);
+  }
+  throw new Error(`could not resolve runtime dependency ${packageName} from ${declaringPackageJson}`);
+}
+
+function copyRuntimePackageTree(source: string, destination: string): void {
+  function visit(absolute: string, relative: string): void {
+    const stat = fs.lstatSync(absolute);
+    if (stat.isSymbolicLink()) throw new Error(`runtime dependency contains symlink: ${absolute}`);
+    if (stat.isDirectory()) {
+      if (relative && ["node_modules", ".git"].includes(path.basename(relative))) return;
+      fs.mkdirSync(path.join(destination, relative), { recursive: true, mode: stat.mode & 0o777 });
+      for (const entry of fs.readdirSync(absolute).sort()) visit(path.join(absolute, entry), path.join(relative, entry));
+      return;
+    }
+    if (!stat.isFile()) throw new Error(`runtime dependency contains non-regular entry: ${absolute}`);
+    const output = path.join(destination, relative);
+    fs.mkdirSync(path.dirname(output), { recursive: true });
+    fs.copyFileSync(absolute, output);
+    fs.chmodSync(output, stat.mode & 0o777);
+  }
+  visit(source, "");
+}
+
+function exportRequiredRuntimeDependencies(bundleRoot: string): void {
+  const rootPackageJson = path.join(root, "package.json");
+  const rootPackage = loadJson<Record<string, unknown>>(rootPackageJson);
+  const seeds = Object.keys((rootPackage["dependencies"] as Record<string, unknown> | undefined) ?? {}).sort();
+  const pending = seeds.map((name) => ({ name, declaringPackageJson: rootPackageJson }));
+  const resolved = new Map<string, RuntimeDependency>();
+
+  while (pending.length > 0) {
+    const next = pending.shift()!;
+    const dependency = resolveRuntimeDependency(next.name, next.declaringPackageJson);
+    const prior = resolved.get(dependency.name);
+    if (prior) {
+      if (prior.version !== dependency.version || fs.realpathSync(prior.packageRoot) !== fs.realpathSync(dependency.packageRoot)) {
+        throw new Error(`runtime dependency version collision for ${dependency.name}: ${prior.version} and ${dependency.version}`);
+      }
+      continue;
+    }
+    resolved.set(dependency.name, dependency);
+    const manifest = loadJson<Record<string, unknown>>(dependency.packageJson);
+    for (const name of Object.keys((manifest["dependencies"] as Record<string, unknown> | undefined) ?? {}).sort()) {
+      pending.push({ name, declaringPackageJson: dependency.packageJson });
+    }
+  }
+
+  const stagingRoot = path.join(bundleRoot, "build", "runtime-node-modules");
+  for (const dependency of [...resolved.values()].sort((a, b) => a.name.localeCompare(b.name))) {
+    copyRuntimePackageTree(dependency.packageRoot, path.join(stagingRoot, ...dependency.name.split("/")));
+  }
+  writeText(path.join(bundleRoot, "build", "runtime-dependencies.json"), `${JSON.stringify({
+    schema_version: "1.0",
+    source: "package.dependencies",
+    packages: [...resolved.values()]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(({ name, version }) => ({ name, version })),
+  }, null, 2)}\n`);
+}
 
 /**
  * Collect all skill source paths across skills/ and kit-owned skills.
@@ -446,11 +532,14 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
     }
   }
   for (const dir of manifest.optional_copy_dirs ?? []) copyTree(path.join(root, dir), path.join(targetRoot, dir), targetName, token);
-  writeText(path.join(targetRoot, "build/package.json"), `${JSON.stringify({
+  const runtimePackage = {
     name: "@kontourai/flow-agents",
     version: pkgVersion,
     type: "module",
-  }, null, 2)}\n`);
+    private: true,
+    dependencies: rootPackageManifest["dependencies"] ?? {},
+  };
+  writeText(path.join(targetRoot, "build/package.json"), `${JSON.stringify(runtimePackage, null, 2)}\n`);
   const commonBuilt = path.join(root, "build/src/tools/common.js");
   if (fs.existsSync(commonBuilt)) writeText(path.join(targetRoot, "scripts/common.mjs"), readText(commonBuilt));
   copyTree(path.join(root, "build/src"), path.join(targetRoot, "build/src"), targetName, token);
@@ -519,6 +608,14 @@ function buildCodex(agents: Agent[]): void {
   const targetAgents = agents.filter((spec) => !excluded.has(spec.name));
   resetDir(bundle);
   copySharedContent(bundle, "codex", "<bundle-root>");
+  writeText(path.join(bundle, "package.json"), `${JSON.stringify({
+    name: "@kontourai/flow-agents",
+    version: pkgVersion,
+    type: "module",
+    private: true,
+    dependencies: rootPackageManifest["dependencies"] ?? {},
+  }, null, 2)}\n`);
+  exportRequiredRuntimeDependencies(bundle);
   writeText(path.join(bundle, manifest.codex.task_dir, ".gitkeep"), "");
   writeText(path.join(bundle, ".codex/config.toml"), exportCodexConfig());
   const settings = manifest.codex.settings ?? {};

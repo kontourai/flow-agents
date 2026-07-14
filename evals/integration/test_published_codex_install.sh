@@ -38,6 +38,7 @@ TARBALL_LIST="$TMPDIR_EVAL/tarball.list"
 tar -tzf "$TARBALL" > "$TARBALL_LIST"
 grep -Fxq 'package/dist/codex/.codex/hooks.json' "$TARBALL_LIST"
 grep -Fxq 'package/dist/codex/build/src/cli.js' "$TARBALL_LIST"
+grep -Fxq 'package/dist/codex/build/runtime-node-modules/@kontourai/flow/package.json' "$TARBALL_LIST"
 
 printf '{"name":"flow-agents-packed-consumer","private":true,"version":"1.0.0"}\n' > "$CONSUMER/package.json"
 (cd "$CONSUMER" && npm install --omit=dev --ignore-scripts --no-audit --no-fund --cache "$NPM_CACHE" "$TARBALL" >/dev/null)
@@ -158,4 +159,26 @@ if grep -Fq 'npm run build:bundles --silent' "$CORRUPT_ROOT/scripts/install-code
   exit 1
 fi
 
-echo "Published Codex install integration passed."
+# The installed runtime must remain executable after its package source and npm
+# cache are gone. This is the supported seam used by installed hooks, not merely
+# a check that the npm-managed package binary can run before global installation.
+rm -rf "$CONSUMER" "$NPM_CACHE"
+[[ ! -e "$PACKAGE_ROOT" && ! -e "$NPM_CACHE" ]]
+NPM_CONFIG_OFFLINE=true node "$CODEX_DIR/build/src/cli.js" --help >/dev/null
+NPM_CONFIG_OFFLINE=true node "$CODEX_DIR/build/src/cli.js" workflow --help >/dev/null
+
+node - "$CODEX_DIR" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const codexHome = process.argv[2];
+const dependency = "build/node_modules/@kontourai/flow/package.json";
+const manifest = JSON.parse(fs.readFileSync(path.join(codexHome, ".flow-agents/codex-install-manifest.json"), "utf8"));
+if (!manifest.files.some((item) => item.path === dependency)) {
+  throw new Error(`${dependency} is not owned by the Codex install manifest`);
+}
+if (!fs.existsSync(path.join(codexHome, dependency))) {
+  throw new Error(`${dependency} is missing from the installed runtime`);
+}
+NODE
+
+printf '1..1\nok 1 - published Codex install integration\n'

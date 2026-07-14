@@ -74,8 +74,11 @@ const packageJson = JSON.parse(readRegular(path.join(root, "package.json")).toSt
 const requiredFiles = [
   ".codex/hooks.json",
   ".agents/skills/deliver/SKILL.md",
+  "package.json",
   "build/package.json",
   "build/src/cli.js",
+  "build/runtime-dependencies.json",
+  "build/runtime-node-modules/@kontourai/flow/package.json",
   "scripts/install-owned-files.js",
   "scripts/install-merge.js",
   "scripts/classify-codex-legacy-agents.js",
@@ -88,11 +91,11 @@ for (const relative of requiredFiles) {
     throw new Error(`missing or empty ${relative}`);
   }
 }
-const hooks = JSON.parse(fs.readFileSync(path.join(snapshot, requiredFiles[0]), "utf8"));
+const hooks = JSON.parse(fs.readFileSync(path.join(snapshot, ".codex/hooks.json"), "utf8"));
 if (!hooks || typeof hooks !== "object" || !hooks.hooks || typeof hooks.hooks !== "object") {
   throw new Error(".codex/hooks.json has no hooks object");
 }
-const bundlePackage = JSON.parse(fs.readFileSync(path.join(snapshot, requiredFiles[2]), "utf8"));
+const bundlePackage = JSON.parse(fs.readFileSync(path.join(snapshot, "build/package.json"), "utf8"));
 if (bundlePackage.name !== packageJson.name || bundlePackage.version !== packageJson.version) {
   throw new Error("dist/codex/build/package.json does not match the package name and version");
 }
@@ -291,9 +294,21 @@ for managed_dir in \
 do
   if [[ -d "$BUNDLE_SOURCE/$managed_dir" ]]; then
     mkdir -p "$FA_OWNED_OVERLAY/$managed_dir"
-    rsync -a "$BUNDLE_SOURCE/$managed_dir/" "$FA_OWNED_OVERLAY/$managed_dir/"
+    if [[ "$managed_dir" == "build" ]]; then
+      rsync -a --exclude 'runtime-node-modules/' "$BUNDLE_SOURCE/$managed_dir/" "$FA_OWNED_OVERLAY/$managed_dir/"
+    else
+      rsync -a "$BUNDLE_SOURCE/$managed_dir/" "$FA_OWNED_OVERLAY/$managed_dir/"
+    fi
   fi
 done
+
+# npm pack excludes directories literally named node_modules. Bundle the
+# required production closure under a packable staging name, then project it
+# into build/node_modules so Node's normal resolution works after installation.
+if [[ -d "$BUNDLE_SOURCE/build/runtime-node-modules" ]]; then
+  mkdir -p "$FA_OWNED_OVERLAY/build/node_modules"
+  rsync -a "$BUNDLE_SOURCE/build/runtime-node-modules/" "$FA_OWNED_OVERLAY/build/node_modules/"
+fi
 
 # Portable skills use Codex's universal catalog, independently of CODEX_HOME.
 if [[ -d "$BUNDLE_SOURCE/.agents/skills" ]]; then
@@ -312,7 +327,7 @@ if [[ -d "$BUNDLE_SOURCE/.codex/agents" ]]; then
   rsync -a "$BUNDLE_SOURCE/.codex/agents/" "$FA_OWNED_OVERLAY/agents/"
 fi
 
-for bundle_file in README.md console.telemetry.json install.sh; do
+for bundle_file in README.md console.telemetry.json install.sh package.json; do
   if [[ -f "$BUNDLE_SOURCE/$bundle_file" ]]; then
     cp "$BUNDLE_SOURCE/$bundle_file" "$FA_OWNED_OVERLAY/$bundle_file"
   fi
