@@ -156,6 +156,18 @@ test("gate-action envelope binds every target to its owning expectations", () =>
   assert.throws(() => validateSnapshot(omittedRequired), /required artifacts are inconsistent/);
 });
 
+test("gate-action envelope permits declared optional artifacts with empty ownership", () => {
+  const optional = envelopeSnapshot("design-probe");
+  optional.gate_action_envelope.action.artifact_bindings[0].expectation_ids = [];
+  optional.gate_action_envelope.stop_condition.required.artifact_refs = optional.gate_action_envelope.stop_condition.required.artifact_refs
+    .filter((target) => target.ref !== optional.gate_action_envelope.action.artifact_bindings[0].target.ref);
+  assert.throws(
+    () => validateSnapshot(optional),
+    /action does not match installed Builder authority/,
+    "structurally valid empty ownership must reach installed product authority validation",
+  );
+});
+
 test("gate-action envelope binds identity, file refs, and producers to the canonical snapshot", () => {
   const crossRun = envelopeSnapshot("design-probe");
   crossRun.gate_action_envelope.flow.run_id = "other-run";

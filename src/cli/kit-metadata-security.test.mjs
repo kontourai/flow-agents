@@ -148,6 +148,25 @@ test("flow step action metadata preserves explicit operation expectation ownersh
   assert.deepEqual(result.entries[0]?.artifacts, []);
 });
 
+test("flow step action metadata preserves optional artifacts without expectation ownership", () => {
+  const result = parseKitFlowStepActions({
+    flow_step_actions: [{
+      flow_id: "builder.build",
+      step_id: "observe",
+      skills: ["observe-work"],
+      operations: [],
+      implementation_allowed: false,
+      artifacts: ["optional.md"],
+      expectation_ids: [],
+      expectation_bindings: [],
+      artifact_bindings: [{ artifact: "optional.md", expectation_ids: [] }],
+    }],
+  }, "fixture/kit.json");
+
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.entries[0].artifact_bindings, [{ artifact: "optional.md", expectation_ids: [] }]);
+});
+
 test("Builder action validation rejects expectation omissions, unsafe artifacts, and unknown operations", async () => {
   async function errorsFor(name, mutate) {
     const root = tempRoot(`flow-agents-action-contract-${name}-`);
