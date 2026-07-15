@@ -60,6 +60,26 @@ test("AC4: undeclared capability → typed unsupported", () => {
   assert.equal(typeof answer.reason, "string");
 });
 
+// R4 totality against prototype-member keys: `__proto__`, `constructor`, `toString`, etc. must
+// resolve to a typed `unsupported` — a bare bracket lookup would leak the inherited Object.prototype
+// member (a function / the prototype object) that is not a CapabilityStatus and breaks the contract.
+test("R4: prototype-member keys never leak Object.prototype members (typed unsupported, string return)", () => {
+  const protoNames = ["__proto__", "constructor", "toString", "hasOwnProperty", "valueOf", "__defineGetter__"];
+  for (const key of protoNames) {
+    // capability axis: must be a typed unsupported CapabilityStatus, never a function/prototype object.
+    const answer = queryCapability("kiro", key);
+    assert.equal(answer.status, "unsupported", `capability '${key}' → unsupported`);
+    assert.equal(typeof answer.reason, "string", `capability '${key}' carries a string reason`);
+    // runtime axis: normalizeRuntimeId must return a string (its declared type), never an object.
+    assert.equal(typeof normalizeRuntimeId(key), "string", `normalizeRuntimeId('${key}') stays a string`);
+    // and querying a prototype-name RUNTIME degrades to typed unsupported too.
+    const byRuntime = queryCapability(key, "per_delegation_tokens");
+    assert.equal(byRuntime.status, "unsupported", `runtime '${key}' → unsupported`);
+    // getDeclaration must be undefined, not an inherited member.
+    assert.equal(getDeclaration(key), undefined, `getDeclaration('${key}') → undefined`);
+  }
+});
+
 // D1 alias normalization: the load-bearing kiro-cli→kiro fold, plus raw-model/base spellings,
 // case, and whitespace. This is the #1 correctness risk (silent kiro/kiro-cli lookup miss).
 test("D1: normalizeRuntimeId folds aliases (kiro-cli→kiro is load-bearing)", () => {

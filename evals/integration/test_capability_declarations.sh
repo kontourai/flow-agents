@@ -49,6 +49,31 @@ echo "=== capability declarations (#620) ==="
 ADAPTERS=(claude-code codex kiro opencode pi codex-local strands-local)
 CAPABILITIES=(turn_id transcript_path intent_annotation per_delegation_trace_context per_delegation_tokens terminal_verdict)
 
+# ── alias single-source cross-check ────────────────────────────────────────────────────────────────
+# The runtime-id alias map (kiro-cli→kiro, raw-model→base, …) exists in TWO hand-maintained places:
+# the TS RUNTIME_ID_ALIASES literal and the emitter's inline jq fold. A future alias added to one and
+# not the other would silently drift (the emitter would sentinel-false the new alias — fails safe, but
+# in the #1-risk area). Assert the two tables are byte-identical sets so divergence fails CI.
+extract_ts_aliases() {
+  awk 'BEGIN{f=0}
+       /RUNTIME_ID_ALIASES/{f=1}
+       f && match($0, /"[a-z0-9-]+"[ \t]*:[ \t]*"[a-z0-9-]+"/){ s=substr($0,RSTART,RLENGTH); gsub(/["[:space:]]/,"",s); sub(/:/,"=",s); print s }
+       f && /};/{f=0}' "$LIB_TS" | sort
+}
+extract_bash_aliases() {
+  grep -oE '\$lc == "[a-z0-9-]+"[[:space:]]+then "[a-z0-9-]+"' "$EMITTER" \
+    | sed -E 's/.*"([a-z0-9-]+)"[[:space:]]+then "([a-z0-9-]+)".*/\1=\2/' | sort
+}
+TS_ALIASES="$(extract_ts_aliases)"
+BASH_ALIASES="$(extract_bash_aliases)"
+if [[ -z "$TS_ALIASES" || -z "$BASH_ALIASES" ]]; then
+  fail "alias cross-check extracted no pairs (TS='$TS_ALIASES' bash='$BASH_ALIASES') — parser drift, not a pass"
+elif [[ "$TS_ALIASES" == "$BASH_ALIASES" ]]; then
+  pass "alias table single-source: TS RUNTIME_ID_ALIASES == emitter jq fold ($(echo "$TS_ALIASES" | wc -l | tr -d ' ') pairs)"
+else
+  fail "alias table DRIFT between TS and emitter:"$'\n'"--- TS ---"$'\n'"$TS_ALIASES"$'\n'"--- bash ---"$'\n'"$BASH_ALIASES"
+fi
+
 # Synthesize a minimal session.usage event for a given runtime value.
 mk_event() { jq -cn --arg rt "$1" '{
   schema_version:"0.3.0", timestamp:"1751731200000", session_id:"cap-run-01", event_id:"evt-01",

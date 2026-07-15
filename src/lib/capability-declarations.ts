@@ -214,13 +214,19 @@ export function normalizeRuntimeId(raw: string | null | undefined): string {
   const lowered = String(raw ?? "").trim().toLowerCase();
   if (!lowered) return "";
   const collapsed = lowered.replace(/\s+/g, "-");
-  return RUNTIME_ID_ALIASES[collapsed] ?? collapsed;
+  // Object.hasOwn guards against prototype-member keys (`__proto__`,
+  // `constructor`, `toString`, …): a bare bracket lookup would resolve those to
+  // inherited Object.prototype members instead of `undefined`, breaking the
+  // total-string contract. Own-property only; unknown keys fall through.
+  return Object.hasOwn(RUNTIME_ID_ALIASES, collapsed) ? RUNTIME_ID_ALIASES[collapsed] : collapsed;
 }
 
 /** Return the full declaration for a runtime (after alias normalization), or `undefined`. */
 export function getDeclaration(runtimeId: string | null | undefined): RuntimeCapabilityDeclaration | undefined {
   const canonical = normalizeRuntimeId(runtimeId);
-  return (RUNTIME_CAPABILITY_DECLARATIONS as Record<string, RuntimeCapabilityDeclaration>)[canonical];
+  return Object.hasOwn(RUNTIME_CAPABILITY_DECLARATIONS, canonical)
+    ? (RUNTIME_CAPABILITY_DECLARATIONS as Record<string, RuntimeCapabilityDeclaration>)[canonical]
+    : undefined;
 }
 
 /**
@@ -231,14 +237,20 @@ export function getDeclaration(runtimeId: string | null | undefined): RuntimeCap
  */
 export function queryCapability(runtimeId: string | null | undefined, capability: string): CapabilityStatus {
   const canonical = normalizeRuntimeId(runtimeId);
-  const declaration = (RUNTIME_CAPABILITY_DECLARATIONS as Record<string, RuntimeCapabilityDeclaration>)[canonical];
+  const declaration = getDeclaration(canonical);
   if (!declaration) {
     return {
       status: "unsupported",
       reason: `No capability declaration for runtime '${canonical || String(runtimeId ?? "")}'.`,
     };
   }
-  const status = (declaration.capabilities as Record<string, CapabilityStatus>)[capability];
+  // Own-property guard: a prototype-member capability name (`constructor`,
+  // `__proto__`, …) must resolve to a typed `unsupported`, not an inherited
+  // Object.prototype value (a function / the prototype object) that is not a
+  // CapabilityStatus at all.
+  const status = Object.hasOwn(declaration.capabilities, capability)
+    ? (declaration.capabilities as Record<string, CapabilityStatus>)[capability]
+    : undefined;
   if (!status) {
     return {
       status: "unsupported",
