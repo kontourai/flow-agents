@@ -2559,6 +2559,28 @@ function canonicalProjectRootForSession(dir: string): string {
   return projectRoot;
 }
 
+// #619: the narrative isolation guard must run for EVERY session layout (canonical,
+// tmp, or legacy .flow-agents/) without imposing the canonical-session requirement that
+// canonicalProjectRootForSession enforces. It only needs a best-effort project root to
+// resolve relative evidence paths; the namespace regex and content-shape checks are
+// location-independent. It mirrors canonicalProjectRootForSession's path computation for a
+// canonical .kontourai/flow-agents/<slug> session (project root is three levels up), handles
+// the legacy .flow-agents/<slug> layout (two levels up), and never dies on any layout.
+function narrativeGuardRoot(dir: string): string {
+  const artifactRoot = path.dirname(dir);
+  const parentRoot = path.dirname(artifactRoot);
+  if (path.basename(artifactRoot) === "flow-agents" && path.basename(parentRoot) === ".kontourai") {
+    return path.dirname(parentRoot);
+  }
+  if (path.basename(artifactRoot) === ".flow-agents") {
+    return parentRoot;
+  }
+  // Unknown/tmp layout: best-effort. Relative-path resolution may be imperfect, but the
+  // namespace regex and content-shape checks are location-independent, so the isolation
+  // guarantee holds regardless.
+  return artifactRoot;
+}
+
 function pathIsWithinRoot(candidate: string, root: string): boolean {
   const relative = path.relative(root, candidate);
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
@@ -3111,7 +3133,7 @@ function reviewTargetArtifacts(dir: string, rawPaths: string[], label: string): 
 
 function reviewTargetArtifactsMatch(dir: string, reviewTarget: unknown): boolean {
   if (reviewTarget && typeof reviewTarget === "object" && !Array.isArray(reviewTarget)) {
-    const projectRoot = canonicalProjectRootForSession(dir);
+    const projectRoot = narrativeGuardRoot(dir);
     const artifacts = (reviewTarget as AnyObj).artifacts;
     if (Array.isArray(artifacts)) {
       artifacts.forEach((artifact, index) => rejectNarrativeReference(projectRoot, artifact?.file, `critique review_target artifact ${index}`));
@@ -3328,7 +3350,7 @@ function surfaceCheckFromArtifact(file: string, index: number, projectRoot = pro
  * not the first thing an agent reaches for.
  */
 function validateAcceptanceEvidenceRefs(dir: string, p?: ReturnType<typeof parseArgs>): void {
-  const projectRoot = canonicalProjectRootForSession(dir);
+  const projectRoot = narrativeGuardRoot(dir);
   const skipRunnabilityGuard = p?.flags.has("skip-evidence-ref-runnability-guard") ?? false;
   if (skipRunnabilityGuard) {
     process.stderr.write("[record-evidence] evidence-ref runnability guard skipped via --skip-evidence-ref-runnability-guard\n");
@@ -3733,7 +3755,7 @@ async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> 
   // (not re-read) as _existingState for the compose-safe merge — one readBundleState call.
   const _existingState = readBundleState(dir);
   const _existingCheckStampById = existingCheckStampMap(_existingState.checks);
-  const projectRoot = canonicalProjectRootForSession(dir);
+  const projectRoot = narrativeGuardRoot(dir);
   const _checksRaw = [
     ...opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"), false, _existingCheckStampById, projectRoot)),
     ...opts(p, "surface-trust-json").map((file, index) => surfaceCheckFromArtifact(file, index, projectRoot)),
@@ -4015,10 +4037,15 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   const mustRunTests = targetExpectation.id === "tests-evidence" && statusVal === "pass";
   const observedCommandRaw = opts(p, "observed-command-json");
   if (mustRunTests && gateCommands.length === 0) die("record-gate-claim requires at least one --command for a passing tests-evidence claim");
-  const projectRoot = canonicalProjectRootForSession(dir);
+  // #619: the narrative evidence-ref guards (validateEvidenceRef / normalizeCheck /
+  // completePassingCriteria) need a non-null, location-independent project root that never
+  // dies on a non-canonical session. normalizeObservedCommands still requires the strict
+  // canonical root, but only when there are commands to normalize.
+  const projectRoot = narrativeGuardRoot(dir);
+  const canonicalRoot = gateCommands.length > 0 ? canonicalProjectRootForSession(dir) : null;
   for (const command of gateCommands) rejectNarrativeReference(projectRoot, command, "record-gate-claim command");
   const observedCommands = gateCommands.length > 0
-    ? await normalizeObservedCommands(gateCommands, projectRoot, mustRunTests, statusVal)
+    ? await normalizeObservedCommands(gateCommands, canonicalRoot!, mustRunTests, statusVal)
     : [];
   // #634: persist the writer's real executions into the hash-chained command-log so the
   // capture fold has a deterministic observation even on exit-code-blind hosts.
@@ -4410,7 +4437,7 @@ function rejectNarrativeReleaseReferences(projectRoot: string, value: unknown, l
 async function recordRelease(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
-  const projectRoot = canonicalProjectRootForSession(dir);
+  const projectRoot = narrativeGuardRoot(dir);
   const decision = opt(p, "decision");
   if (!["merge", "release", "deploy", "hold", "rollback_required"].includes(decision)) die("decision must be one of: merge, release, deploy, hold, rollback_required");
   const gates = opts(p, "gate-json").map((v) => parseJson(v, "--gate-json"));
@@ -5801,7 +5828,7 @@ async function recordLearning(p: ReturnType<typeof parseArgs>): Promise<number> 
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const timestamp = opt(p, "timestamp", now());
-  const projectRoot = canonicalProjectRootForSession(dir);
+  const projectRoot = narrativeGuardRoot(dir);
   const records = opts(p, "record-json").map((v) => normalizeLearning(parseJson(v, "--record-json"), timestamp, projectRoot));
   const status = opt(p, "status", "learned");
   if (status === "learned" && records.some((r) => r.routing.some((x: AnyObj) => x.status === "open"))) die("learning status learned cannot have open routing");
@@ -5861,7 +5888,7 @@ function assertExistingLearningValid(dir: string): void {
   const file = path.join(dir, "learning.json");
   if (!fs.existsSync(file)) return;
   const data = loadJson(file);
-  const projectRoot = canonicalProjectRootForSession(dir);
+  const projectRoot = narrativeGuardRoot(dir);
   if (!Array.isArray(data.records)) die("learning records must be an array");
   for (const record of data.records) {
     if (!Array.isArray(record.source_refs)) die("source_refs must be an array");
@@ -5879,7 +5906,7 @@ async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
   const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : defaultArtifactRootForRead();
   const dir = path.resolve(opt(p, "artifact-dir") || currentDir(root) || "");
   requireArtifactDirUnderRoot(dir, root);
-  const projectRoot = canonicalProjectRootForSession(dir);
+  const projectRoot = narrativeGuardRoot(dir);
   assertExistingLearningValid(dir);
   const verdict = opt(p, "verdict");
   if (verdict === "pass") {
