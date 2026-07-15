@@ -251,8 +251,14 @@ export async function prepareBuilderCancelRequest(input: BuilderCancelRequestInp
     : null;
   // When the run is already canceled, its assignment is released — accept the
   // persisted holder so an operator can still mint a (recovery) authorization.
+  // Mirror prepareAuthorizedLifecycleChange's redemption gate EXACTLY so we never
+  // mint an authorization the real cancel would reject: a cancel may reuse a
+  // released assignment only when the run is already `canceled` (idempotent
+  // recovery) and the persisted record's status is `released`. A completed or
+  // archived run with no active holder is not cancel-redeemable, so refuse.
+  const acceptsReleasedAssignment = canonicalRun.state.status === "canceled";
   const assignment = activeAssignment
-    ?? (alreadyTerminal && persistedAssignment?.actor_key ? persistedAssignment : null);
+    ?? (acceptsReleasedAssignment && persistedAssignment?.status === "released" ? persistedAssignment : null);
   if (!assignment || !assignment.actor_key || !assignment.actor) {
     throw new BuilderBuildRunInputError("assignment", "the run has no assignment holder to authorize a cancel against");
   }

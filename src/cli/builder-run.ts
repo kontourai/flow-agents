@@ -30,8 +30,10 @@ async function runCancelRequest(sessionDir: string, flags: Record<string, string
   let expiresInHours: number | undefined;
   if (expiresRaw !== undefined) {
     expiresInHours = Number(expiresRaw);
-    if (!Number.isFinite(expiresInHours) || expiresInHours <= 0) {
-      console.error("builder-run cancel-request --expires-in-hours must be a positive number");
+    // Upper-bound it (1 year) so a pathological value can't overflow the Date
+    // math into an Invalid Date / uncaught RangeError; return the usual usage code.
+    if (!Number.isFinite(expiresInHours) || expiresInHours <= 0 || expiresInHours > 8760) {
+      console.error("builder-run cancel-request --expires-in-hours must be a positive number of at most 8760 (1 year)");
       return 64;
     }
   }
@@ -42,7 +44,15 @@ async function runCancelRequest(sessionDir: string, flags: Record<string, string
     expiresInHours,
   });
   const outFile = flagString(flags, "out") ?? prepared.suggestedOutFile;
-  fs.writeFileSync(outFile, `${JSON.stringify(prepared.authorization, null, 2)}\n`);
+  // Symlink-safe write, matching this codebase's O_NOFOLLOW pattern for writes
+  // into session dirs (recordAuthorizationConsumed / writeExistingFileNoFollow):
+  // never follow a symlink planted at the target and clobber it.
+  const fd = fs.openSync(outFile, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW, 0o600);
+  try {
+    fs.writeFileSync(fd, `${JSON.stringify(prepared.authorization, null, 2)}\n`);
+  } finally {
+    fs.closeSync(fd);
+  }
   console.log(JSON.stringify({
     run_id: prepared.runId,
     subject: prepared.subject,

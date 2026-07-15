@@ -1041,6 +1041,53 @@ test("builder-run cancel-request CLI writes the unsigned authorization and print
 
   // Unknown flags are rejected with a usage error, not silently accepted.
   assert.equal(await builderRunMain(["cancel-request", "--session-dir", session.sessionDir, "--bogus", "x"]), 64);
+  // --expires-in-hours is bounded: non-positive, non-finite, and absurd values
+  // return a clean usage code instead of crashing the Date math.
+  assert.equal(await builderRunMain(["cancel-request", "--session-dir", session.sessionDir, "--expires-in-hours", "0"]), 64);
+  assert.equal(await builderRunMain(["cancel-request", "--session-dir", session.sessionDir, "--expires-in-hours", "1e309"]), 64);
+  assert.equal(await builderRunMain(["cancel-request", "--session-dir", session.sessionDir, "--expires-in-hours", "100000"]), 64);
+});
+
+test("cancel-request signing-payload parity holds for non-ASCII reason/actor (unicode regression)", async () => {
+  const session = makeSession("friendly-cancel-unicode");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const req = await prepareBuilderCancelRequest({
+    sessionDir: session.sessionDir,
+    reason: "café — Ünïcödé 😀 العربية",
+    requestActor: "brián-Ω-中文",
+  });
+  assert.equal(req.signingPayload, JSON.stringify(req.authorization));
+  const signed = {
+    ...req.authorization,
+    signature: { algorithm: "ed25519", key_id: AUTHORITY_KEY_ID, value: sign(null, Buffer.from(req.signingPayload), AUTHORITY_KEYS.privateKey).toString("base64") },
+  };
+  const file = path.join(session.projectRoot, "unicode.authorization.json");
+  writeJson(file, signed);
+  const canceled = await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file });
+  assert.equal(canceled.run.state.status, "canceled");
+});
+
+test("prepareBuilderCancelRequest mints from the released assignment once the run is canceled (redemption-gate aligned)", async () => {
+  const session = makeSession("friendly-cancel-recovery");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  // Cancel the run first — this releases the assignment and sets status=canceled.
+  const first = await prepareBuilderCancelRequest({ sessionDir: session.sessionDir });
+  const firstSigned = {
+    ...first.authorization,
+    signature: { algorithm: "ed25519", key_id: AUTHORITY_KEY_ID, value: sign(null, Buffer.from(first.signingPayload), AUTHORITY_KEYS.privateKey).toString("base64") },
+  };
+  const firstFile = path.join(session.projectRoot, "recovery-1.authorization.json");
+  writeJson(firstFile, firstSigned);
+  await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: firstFile });
+
+  // Now canceled with a RELEASED assignment: the mint-time fallback matches the
+  // redemption gate, so cancel-request still mints (an idempotent-recovery auth).
+  const recovery = await prepareBuilderCancelRequest({ sessionDir: session.sessionDir });
+  assert.equal(recovery.runStatus, "canceled");
+  assert.equal(recovery.alreadyTerminal, true);
+  assert.equal(recovery.authorization.assignment_actor_key, ACTOR_KEY);
 });
 
 test("assignment release is independent of Flow lifecycle", async () => {
