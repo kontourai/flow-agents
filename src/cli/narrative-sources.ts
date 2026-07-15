@@ -10,6 +10,10 @@ import {
   validateGroundedNarrative,
   writeEnvelope,
 } from "../narrative/envelope.js";
+import {
+  NarrativeGroundingError,
+  validateNarrativeGrounding,
+} from "../narrative/grounding-validator.js";
 import type { CaptureCompleteness } from "../narrative/integrity.js";
 import { effectiveNarrativeRedactionFields } from "../narrative/policy-filter.js";
 import { projectRuntimeNarrative, stableStringify, validateNarrativeRuntimeProjection } from "../narrative/projection.js";
@@ -153,6 +157,8 @@ function composeNarrative(flags: ReturnType<typeof parseArgs>["flags"]): number 
   if (issues.length > 0) {
     throw new Error(`grounded execution narrative validation failed: ${issues.map((issue) => `${issue.path} ${issue.message}`).join("; ")}`);
   }
+  const grounding = validateNarrativeGrounding(envelope, narrativeDir);
+  if (!grounding.ok) throw new NarrativeGroundingError(grounding.violations);
   if (outDir) {
     const written = writeEnvelope(narrativeDir, envelope, { outDir, render });
     process.stdout.write(`${stableStringify(written)}\n`);
