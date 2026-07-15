@@ -80,6 +80,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check context-map-drift
 
+      - name: Capability matrix drift
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check capability-matrix-drift
+
       - name: Static eval suite
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check static-eval-suite
@@ -373,6 +377,10 @@ jobs:
       - name: Economics record integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check economics-record-integration
+
+      - name: Capability declarations integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check capability-declarations-integration
 
       - name: Learning review proposals integration
         continue-on-error: true

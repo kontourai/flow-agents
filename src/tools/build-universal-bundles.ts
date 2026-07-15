@@ -454,6 +454,14 @@ function copySharedContent(targetRoot: string, targetName: string, token: string
   const commonBuilt = path.join(root, "build/src/tools/common.js");
   if (fs.existsSync(commonBuilt)) writeText(path.join(targetRoot, "scripts/common.mjs"), readText(commonBuilt));
   copyTree(path.join(root, "build/src"), path.join(targetRoot, "build/src"), targetName, token);
+  // #620: ship the build-only capability-declarations JSON inside each bundle so an
+  // installed economics-record emitter (and hooks) can read it at build/generated/
+  // relative to the bundle root. It is generated unconditionally by `npm run build`
+  // (the tsc build's --json-only step) and is never committed (build/ is gitignored).
+  const capabilityDeclJson = path.join(root, "build/generated/capability-declarations.json");
+  if (fs.existsSync(capabilityDeclJson)) {
+    writeText(path.join(targetRoot, "build/generated/capability-declarations.json"), readText(capabilityDeclJson));
+  }
 }
 function installScript(label: string, capability: BundleCapability, defaultDestDisplay: string, token?: string, destFallbackShell?: string, mergeConfig?: { configRelPath: string; managedConfigRelPath: string; runtime: string; version: string }, stampConfig?: { runtime: string; version: string }): string {
   const replaceBlock = token ? `\nexport DEST\nfind "$DEST" \\( -path "$DEST/AGENTS.md" -o -path "$DEST/CLAUDE.md" \\) -prune -o -type f \\( -name '*.json' -o -name '*.md' -o -name '*.sh' -o -name '*.js' -o -name '*.ts' -o -name '*.yaml' -o -name '*.yml' \\) -print0 | xargs -0 perl -0pi -e 's#${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}#$ENV{DEST}#g'` : "";

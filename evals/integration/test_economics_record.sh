@@ -653,6 +653,48 @@ assert_eq_d "signals.runtime carried from the usage event" '.signals.runtime' '"
 assert_eq_d "re-dispatch (2 delegations, no escalation) → dispatch_count=2, outcome rework" \
   '.delegations[] | select(.agent_id=="tool-worker-5") | [.dispatch_count,.outcome]' \
   '[2,"rework"]'
+
+# #620: signals.per_delegation_tokens is DERIVED from the runtime capability declaration, NOT a
+# hardcoded literal. claude-code's declared status is unsupported → the emitted boolean is false;
+# prove derivation by pointing the emitter at a declaration JSON where the value is flipped to
+# supported and observing the emitted signal flip to true. And prove the highest-value adversarial
+# risk is closed: a kiro-cli record (.agent.runtime carries "kiro-cli") folds to the canonical `kiro`
+# declaration rather than silently missing.
+echo "--- AC8 (#620): per_delegation_tokens is declaration-derived (not hardcoded); kiro-cli alias fold ---"
+DECL_JSON_REAL="$ROOT/build/generated/capability-declarations.json"
+# The build-only declaration JSON is what the emitter derives the signal from; generate it if a
+# prior build step in this lane has not (keeps the suite self-contained when run standalone).
+[[ -f "$DECL_JSON_REAL" ]] || (cd "$ROOT" && npm run build) >/dev/null 2>&1 || true
+if [[ -f "$DECL_JSON_REAL" ]]; then
+  DECL_CC_SUPPORTED="$TMP/decl-cc-supported.json"
+  jq '."claude-code".per_delegation_tokens={status:"supported"}' < "$DECL_JSON_REAL" > "$DECL_CC_SUPPORTED"
+  LOG_PDT="$TMP/econ-pdt.jsonl"; : > "$LOG_PDT"
+  FLOW_AGENTS_CAPABILITY_DECL_FILE="$DECL_CC_SUPPORTED" TELEMETRY_ECONOMICS_LOG_FILE="$LOG_PDT" \
+    bash "$EMITTER" "$USAGE_EVENT" --state "$FIX/state.json" >/dev/null 2>&1
+  GOT_PDT="$(jq -c '.signals.per_delegation_tokens' < "$LOG_PDT" 2>/dev/null)"
+  [[ "$GOT_PDT" == "true" ]] && pass "per_delegation_tokens is declaration-DERIVED (flipped decl → true), not a hardcoded false" || fail "per_delegation_tokens not declaration-derived: expected true got $GOT_PDT"
+else
+  fail "declaration JSON missing ($DECL_JSON_REAL) — the build must generate it"
+fi
+
+# kiro-cli record: runtime carried verbatim; per_delegation_tokens derives the DECLARED kiro value
+# (false today) via the alias fold — a silent lookup miss would instead hit the unresolved sentinel.
+KIRO_EVENT="$(printf '%s' "$USAGE_EVENT" | jq -c '.agent.runtime="kiro-cli"')"
+LOG_KIRO="$TMP/econ-kiro.jsonl"; : > "$LOG_KIRO"
+TELEMETRY_ECONOMICS_LOG_FILE="$LOG_KIRO" bash "$EMITTER" "$KIRO_EVENT" --state "$FIX/state.json" >/dev/null 2>&1
+assert_kiro() { local got; got="$(jq -c "$1" < "$LOG_KIRO" 2>/dev/null)"; [[ "$got" == "$2" ]] && pass "$3 ($got)" || fail "$3: expected $2 got $got"; }
+assert_kiro '.signals.runtime' '"kiro-cli"' "kiro-cli record carries runtime verbatim"
+assert_kiro '.signals.per_delegation_tokens' 'false' "kiro-cli derives the declared per_delegation_tokens (alias fold to kiro → declared false)"
+if [[ -f "$DECL_JSON_REAL" ]]; then
+  DECL_KIRO_SUPPORTED="$TMP/decl-kiro-supported.json"
+  jq '."kiro".per_delegation_tokens={status:"supported"}' < "$DECL_JSON_REAL" > "$DECL_KIRO_SUPPORTED"
+  LOG_KIRO2="$TMP/econ-kiro2.jsonl"; : > "$LOG_KIRO2"
+  FLOW_AGENTS_CAPABILITY_DECL_FILE="$DECL_KIRO_SUPPORTED" TELEMETRY_ECONOMICS_LOG_FILE="$LOG_KIRO2" \
+    bash "$EMITTER" "$KIRO_EVENT" --state "$FIX/state.json" >/dev/null 2>&1
+  GOT_KIRO="$(jq -c '.signals.per_delegation_tokens' < "$LOG_KIRO2" 2>/dev/null)"
+  [[ "$GOT_KIRO" == "true" ]] && pass "kiro-cli resolves the kiro declaration via alias fold (kiro flipped→supported yields true)" || fail "kiro-cli did NOT fold to kiro: expected true got $GOT_KIRO"
+fi
+
 # absent --agents-dir → delegations [] and signals.per_delegation_outcome n/a (backward compatible)
 assert_eq "delegations defaults to [] with no --agents-dir (golden path)" '.delegations' '[]'
 assert_eq "signals.per_delegation_outcome == n/a with no delegations" '.signals.per_delegation_outcome' '"n/a"'

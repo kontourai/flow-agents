@@ -156,7 +156,7 @@ from a harness-blind gap (full doctrine + per-runtime matrix in `harness-capabil
 | Field | Meaning |
 | --- | --- |
 | `runtime` | the runtime that produced the record (`claude-code`, `kiro-cli`, …), from `session.usage .agent.runtime` |
-| `per_delegation_tokens` | `true` iff the runtime isolates per-sub-agent tokens. `false` everywhere today → per-delegation cost unavailable |
+| `per_delegation_tokens` | `true` iff the runtime isolates per-sub-agent tokens. **Derived (not a hardcoded literal, #620)** from the runtime's capability declaration — the emitter reads the build-only `build/generated/capability-declarations.json` (generated from `src/lib/capability-declarations.ts`), keys it on the normalized `.agent.runtime` (`kiro-cli`→`kiro`), and emits `true` iff the declared `per_delegation_tokens` status is `supported`. An unresolved runtime or a missing declaration JSON yields the explicit sentinel `false` — never a fabricated `true`. `false` everywhere today → per-delegation cost unavailable |
 | `per_delegation_outcome` | outcome-signal coverage this run: `full`\|`partial`\|`none`\|`n/a` |
 
 Consumers MUST read `signals` before rendering a delegation metric: if the needed signal is unavailable,

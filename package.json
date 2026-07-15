@@ -41,6 +41,7 @@
   "bin": {
     "flow-agents": "build/src/cli.js",
     "flow-agents-build-bundles": "build/src/cli.js",
+    "flow-agents-capability-matrix": "build/src/cli.js",
     "flow-agents-console-learning-projection": "build/src/cli.js",
     "flow-agents-context-map": "build/src/cli.js",
     "flow-agents-effective-backlog-settings": "build/src/cli.js",
@@ -99,13 +100,15 @@
     "!**/node_modules/"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node build/src/cli.js capability-matrix --json-only",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test:unit": "npm run build --silent && node --test src/cli/*.test.mjs",
     "validate:source": "npm run build --silent && node build/src/cli.js validate-source",
     "validate:artifacts": "npm run build --silent && node build/src/cli/validate-workflow-artifacts.js",
     "context-map": "npm run build --silent && node build/src/cli.js context-map",
     "context-map:check": "npm run build --silent && node build/src/cli.js context-map --check",
+    "capability-matrix": "npm run build --silent && node build/src/cli.js capability-matrix",
+    "capability-matrix:check": "npm run build --silent && node build/src/cli.js capability-matrix --check",
     "build:bundles": "npm run build --silent && node build/src/cli.js build-bundles",
     "validate:package": "npm run build --silent && node build/src/cli.js validate-package",
     "workflow:sidecar": "npm run build --silent && node build/src/cli/workflow-sidecar.js",
