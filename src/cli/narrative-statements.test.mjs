@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  AGENT_STATED_PURPOSE_MAX_LENGTH,
   NarrativeStatementError,
+  agentStatedIntent,
   derivedNoOpTurn,
   derivedRetry,
   derivedTimeout,
@@ -12,6 +14,7 @@ import {
   observedFileCreation,
   observedToolAction,
   summarizerInferredConnective,
+  workflowDerivedPurpose,
 } from "../../build/src/index.js";
 
 const source = (suffix) => `fa1:telemetry:full/session:event-${suffix}/0123abcd`;
@@ -166,4 +169,46 @@ test("#614: summarizerInferredConnective rejects invariant violations with typed
   ]) {
     assert.throws(invoke, (error) => error instanceof NarrativeStatementError && typeof error.code === "string");
   }
+});
+
+// ── #622: agent_stated intent + deterministic fallback constructors ──────────
+
+test("#622: agentStatedIntent builds a bounded typed self-report", () => {
+  const action = source("intent-action");
+  const statement = agentStatedIntent({ sourceId: action, purpose: "prepare the release notes", actor: "codex" });
+  assert.equal(statement.class, "agent_stated");
+  assert.equal(statement.self_report, true);
+  assert.equal(statement.actor, "codex");
+  assert.equal("rule" in statement, false);
+  assert.deepEqual(statement.source_refs, [action]);
+  assert.equal(statement.proposition, "Agent stated the purpose of this action is to prepare the release notes");
+  assert.match(statement.id, /^[0-9a-f]{16}$/);
+});
+
+test("#622: agentStatedIntent enforces the chain-of-thought / length bound at construct", () => {
+  const action = source("intent-bound");
+  for (const invoke of [
+    // multi-clause reasoning dump (conjunction) — rejected by atomic()
+    () => agentStatedIntent({ sourceId: action, purpose: "ship the fix and explain my reasoning", actor: "codex" }),
+    // clause separator — rejected by text()
+    () => agentStatedIntent({ sourceId: action, purpose: "do a thing; then another", actor: "codex" }),
+    // over the hard length cap — rejected by the cap
+    () => agentStatedIntent({ sourceId: action, purpose: "x".repeat(AGENT_STATED_PURPOSE_MAX_LENGTH + 1), actor: "codex" }),
+    // empty purpose
+    () => agentStatedIntent({ sourceId: action, purpose: "", actor: "codex" }),
+    // backtick — rejected by strict text()
+    () => agentStatedIntent({ sourceId: action, purpose: "run `deploy`", actor: "codex" }),
+  ]) {
+    assert.throws(invoke, (error) => error instanceof NarrativeStatementError && typeof error.code === "string");
+  }
+});
+
+test("#622: workflowDerivedPurpose is a deterministic_derived fallback, never a self-report", () => {
+  const gate = source("gate-ref");
+  const statement = workflowDerivedPurpose({ activeGateRef: gate });
+  assert.equal(statement.class, "deterministic_derived");
+  assert.equal("self_report" in statement, false);
+  assert.deepEqual(statement.rule, { id: "workflow-derived-purpose", version: "v1", inputs: [gate] });
+  assert.deepEqual(statement.source_refs, [gate]);
+  assert.equal(statement.proposition, `Intent for this action was derived from active gate reference ${gate}`);
 });

@@ -2,8 +2,13 @@ import { createHash } from "node:crypto";
 import type { UnavailableReason } from "./integrity.js";
 import { parseSourceId } from "./source-ids.js";
 
-export type StatementClass = "observed" | "deterministic_derived" | "summarizer_inferred";
+export type StatementClass = "observed" | "deterministic_derived" | "summarizer_inferred" | "agent_stated";
 export type ObservedResult = "pass" | "fail" | "ambiguous";
+
+// #622: hard length cap on a stated-intent purpose. A bounded single-clause
+// purpose (enforced by the strict text()+atomic() guards below) may never grow
+// into a free-form reasoning dump, so the cap is deliberately small.
+export const AGENT_STATED_PURPOSE_MAX_LENGTH = 200;
 
 export interface StatementRule {
   id: string;
@@ -19,6 +24,10 @@ export interface Statement {
   turn_ref?: number;
   actor?: string;
   rule?: StatementRule;
+  // #622: only ever the literal `true`, and only on an `agent_stated` statement.
+  // A typed self-report flag — NOT prose — that marks the proposition as the
+  // agent's own stated purpose (self-report, never proof).
+  self_report?: true;
 }
 
 export type NarrativeStatementErrorCode =
@@ -110,14 +119,25 @@ function construct(input: {
   turnRef?: number;
   actor?: string;
   rule?: StatementRule;
+  selfReport?: true;
   id?: string;
 }): Statement {
   const refs = sourceRefs(input.sourceRefs);
   const proposition = atomic(input.proposition);
-  if ((input.class === "observed" || input.class === "summarizer_inferred") && input.rule) {
+  if ((input.class === "observed" || input.class === "summarizer_inferred" || input.class === "agent_stated") && input.rule) {
     return fail("invalid_rule", `${input.class} statements must not carry a rule`);
   }
   if (input.class === "deterministic_derived" && !input.rule) return fail("invalid_rule", "deterministic_derived statements require a rule");
+  // #622: an agent_stated annotation is a typed self-report. It MUST carry an
+  // attributed actor and the required literal self_report:true, and ONLY the
+  // agent_stated class may carry that flag — no other class can masquerade as a
+  // self-report, and a self-report can never be anonymous.
+  if (input.class === "agent_stated") {
+    if (input.actor === undefined) return fail("invalid_input", "agent_stated statements require an actor");
+    if (input.selfReport !== true) return fail("invalid_input", "agent_stated statements require self_report: true");
+  } else if (input.selfReport !== undefined) {
+    return fail("invalid_input", "self_report is only valid on agent_stated statements");
+  }
   if (input.turnRef !== undefined && (!Number.isSafeInteger(input.turnRef) || input.turnRef < -1)) {
     return fail("invalid_input", "turn_ref must be a safe turn ordinal");
   }
@@ -139,6 +159,7 @@ function construct(input: {
     ...(input.turnRef !== undefined ? { turn_ref: input.turnRef } : {}),
     ...(actor !== undefined ? { actor } : {}),
     ...(rule ? { rule } : {}),
+    ...(input.selfReport === true ? { self_report: true as const } : {}),
   };
 }
 
@@ -274,5 +295,53 @@ export function summarizerInferredConnective(input: {
     ...(input.turn_ref !== undefined ? { turnRef: input.turn_ref } : {}),
     ...(input.actor !== undefined ? { actor: input.actor } : {}),
     ...(input.id !== undefined ? { id: input.id } : {}),
+  });
+}
+
+// #622: the agent's STATED purpose for a material action — a typed self-report
+// (never proof, never gate evidence). Modeled on summarizerInferredConnective
+// but deliberately using the STRICT text()+atomic() guards (NOT the relaxed
+// nonEmptyText path) plus a hard length cap: a multi-clause / reasoning-dump /
+// over-length purpose is rejected AT CONSTRUCT TIME. There is no
+// reasoning/alternatives/hidden_alternative field — the field allowlist forbids
+// free-form chain-of-thought (R2). The purpose cites exactly the material
+// action's fa1 source (sourceId); self_report:true and an attributed actor are
+// REQUIRED (enforced in construct()).
+export function agentStatedIntent(input: {
+  sourceId: string;
+  purpose: string;
+  actor: string;
+  turnRef?: number;
+}): Statement {
+  const purpose = text(input.purpose, "purpose");
+  if (purpose.length > AGENT_STATED_PURPOSE_MAX_LENGTH) {
+    return fail("invalid_input", `purpose must be at most ${AGENT_STATED_PURPOSE_MAX_LENGTH} characters`);
+  }
+  return construct({
+    class: "agent_stated",
+    proposition: `Agent stated the purpose of this action is to ${purpose}`,
+    sourceRefs: [input.sourceId],
+    actor: text(input.actor, "actor"),
+    selfReport: true,
+    ...(input.turnRef !== undefined ? { turnRef: input.turnRef } : {}),
+  });
+}
+
+// #622: the deterministic fallback emitted where at-action intent capture is not
+// supported (or no purpose survives the policy filter). A deterministic_derived
+// statement whose proposition is derived ONLY from the active gate reference —
+// NEVER a fabricated agent rationale. Structurally distinct from agent_stated
+// (a different class carrying a rule and NO self_report flag), so the fallback
+// can never be mistaken for a self-report the agent did not make (R4).
+export function workflowDerivedPurpose(input: {
+  activeGateRef: string;
+  objectiveRef?: string;
+}): Statement {
+  const refs = input.objectiveRef ? [input.activeGateRef, input.objectiveRef] : [input.activeGateRef];
+  return construct({
+    class: "deterministic_derived",
+    proposition: `Intent for this action was derived from active gate reference ${input.activeGateRef}`,
+    sourceRefs: refs,
+    rule: { id: "workflow-derived-purpose", version: "v1", inputs: [input.activeGateRef] },
   });
 }

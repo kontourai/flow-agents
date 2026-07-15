@@ -113,7 +113,9 @@ export type {
 export { QUARANTINE_SESSION_ID, TURN_SPINE_RULE_ID, buildTurnSpine } from "./narrative/turn-spine.js";
 export type { ResolvedTelemetryRecord, Turn, TurnBoundary } from "./narrative/turn-spine.js";
 export {
+  AGENT_STATED_PURPOSE_MAX_LENGTH,
   NarrativeStatementError,
+  agentStatedIntent,
   derivedNoOpTurn,
   derivedRetry,
   derivedTimeout,
@@ -123,6 +125,7 @@ export {
   observedFileCreation,
   observedToolAction,
   summarizerInferredConnective,
+  workflowDerivedPurpose,
 } from "./narrative/statements.js";
 export type {
   NarrativeStatementErrorCode,
@@ -131,6 +134,35 @@ export type {
   StatementClass,
   StatementRule,
 } from "./narrative/statements.js";
+
+// #622: bounded, capability-declared at-action stated-intent capture + the
+// annotation-on/off A/B measurement with uncertainty.
+export {
+  INTENT_ANNOTATION_FILE,
+  INTENT_ANNOTATION_SCHEMA_VERSION,
+  bindIntentAnnotation,
+  captureIntent,
+} from "./narrative/intent.js";
+export type {
+  BindIntentAnnotationDependencies,
+  CaptureIntentInput,
+  CapturedIntent,
+  IntentAnnotation,
+  IntentCapabilityStatus,
+  IntentCaptureMode,
+} from "./narrative/intent.js";
+export {
+  INTENT_ECONOMICS_FILE,
+  appendIntentEconomics,
+  readIntentEconomics,
+  reduceIntentEconomics,
+} from "./narrative/intent-economics.js";
+export type {
+  IntentAnnotationMode,
+  IntentEconomicsDelta,
+  IntentEconomicsRecord,
+  IntentEconomicsSummary,
+} from "./narrative/intent-economics.js";
 export {
   entailmentIndependenceHolds,
   isAssertionProhibited,

@@ -114,6 +114,23 @@ else
   fail "AC1: copied narrative changed state or sidecar read behavior"
 fi
 
+# #622: an at-action agent_stated intent annotation is narrative-kind self-report
+# and can NEVER be cited as trust/gate evidence. A planted annotation content
+# canary must be rejected as evidence AND never appear in trust.bundle.
+INTENT_CANARY="INTENT_ANNOTATION_MUST_NOT_ENTER_TRUST_BUNDLE"
+cat >"$NARRATIVE/intent-annotation.json" <<JSON
+{"schema_version":"1.0","mode":"agent_stated","captured_at":"2026-07-15T00:00:00.000Z","runtime":"claude-code","action_ref":"fa1:file:action.json:$(printf 'a%.0s' {1..64})","statement":{"id":"0123456789abcdef","class":"agent_stated","proposition":"Agent stated the purpose of this action is to $INTENT_CANARY","source_refs":["fa1:file:action.json:$(printf 'a%.0s' {1..64})"],"actor":"codex","self_report":true},"redactions":[]}
+JSON
+if node "$ROOT/build/src/cli/workflow-sidecar.js" record-evidence "$SESSION" --verdict pass \
+  --check-json '{"id":"intent-annotation","kind":"policy","status":"pass","summary":"must reject","artifact_refs":[{"kind":"artifact","file":".kontourai/narrative/isolation-fixture/narrative-1/intent-annotation.json","summary":"intent annotation"}]}' \
+  >"$TMP/intent.out" 2>"$TMP/intent.err"; then
+  fail "#622: intent annotation accepted as trust evidence"
+elif rg -q 'narrative trust isolation \(#619\)' "$TMP/intent.err" && ! rg -q "$INTENT_CANARY" "$SESSION/trust.bundle"; then
+  pass "#622: intent annotation rejected as trust evidence and canary absent from trust.bundle"
+else
+  fail "#622: intent annotation isolation failed: $(tail -n 3 "$TMP/intent.err")"
+fi
+
 # AC2: a narrative envelope renamed trust.bundle is rejected before a writer can recompute it.
 BAD="$ARTIFACT_ROOT/renamed-envelope"
 mkdir -p "$BAD"
