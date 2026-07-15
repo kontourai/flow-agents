@@ -28,8 +28,15 @@ const UNICODE_LINE_SEPARATORS = /[\r\n\u2028\u2029\p{Zl}\p{Zp}]/u;
 // punctuation or terminator is a separator.
 //   - NON_SPACE_WHITESPACE: any whitespace that is NOT a plain U+0020 space (tab, VT U+000B,
 //     FF U+000C, CR, LF, NBSP U+00A0, U+2028/9, every other \p{Zs}/\p{Zl}/\p{Zp}).
-//   - HIDDEN_FORMAT_CHARS: zero-width, bidi, and BOM/format controls that are not \s and could
-//     hide a clause break (U+200B\u2013200F, U+202A\u2013202E, U+2060\u20132064, U+FEFF, U+180E).
+//   - HIDDEN_FORMAT_CHARS: any invisible / non-rendering code point that could hide a clause
+//     break without tripping the whitespace rule. Rejects the WHOLE Unicode "Other" category
+//     \p{C} (Cc control incl. NEL U+0085, Cf format incl. soft-hyphen U+00AD, ALM U+061C, the
+//     zero-width block, bidi embeds/overrides U+202A\u2013202E AND isolates U+2066\u20132069, the
+//     deprecated-format block U+206A\u2013206F, BOM U+FEFF, Mongolian U+180E; plus Cs/Co/Cn), and
+//     the invisible marks/fillers that are NOT \p{C}: combining grapheme joiner U+034F, Hangul
+//     fillers U+115F/U+1160/U+3164/U+FFA0, and Khmer invisible vowels U+17B4/U+17B5. (Second
+//     adversarial pass: the earlier explicit-range blocklist missed the isolate/ALM/NEL/SHY/CGJ
+//     classes \u2014 categorical \p{C} coverage closes the whole invisible-character bypass surface.)
 //   - CLAUSE_PUNCTUATION: colon, semicolon, ellipsis (U+2026/U+22EF), any Unicode dash
 //     (U+2012\u20132015), and a spaced ASCII hyphen " - " used as a clause dash (intra-word
 //     hyphens like `test-suite` have no surrounding spaces and are allowed).
@@ -42,7 +49,7 @@ const UNICODE_LINE_SEPARATORS = /[\r\n\u2028\u2029\p{Zl}\p{Zp}]/u;
 //     meanwhile/thereafter). "next"/"plus"/"finally" are deliberately EXCLUDED \u2014 they are
 //     plausible intra-clause object words and would over-reject legitimate purposes.
 const NON_SPACE_WHITESPACE = /[^\S ]/u;
-const HIDDEN_FORMAT_CHARS = /[\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff\u180e]/u;
+const HIDDEN_FORMAT_CHARS = /[\p{C}\u034f\u115f\u1160\u17b4\u17b5\u3164\uffa0]/u;
 const CLAUSE_PUNCTUATION = /[;:\u2026\u22ef\u2012-\u2015]| - /u;
 const NON_ASCII_TERMINATOR = /(?=\P{ASCII})\p{Sentence_Terminal}/u;
 const CLAUSE_COORDINATORS = /\s(also|however|additionally|furthermore|afterwards?|meanwhile|thereafter)\s/i;

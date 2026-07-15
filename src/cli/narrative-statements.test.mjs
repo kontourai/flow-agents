@@ -277,6 +277,58 @@ test("#622 (re-review HIGH-2): the single-clause guard closes the residual separ
   }
 });
 
+test("#622 (2nd adversarial pass HIGH-2): the whole invisible / format-control class is rejected, not an explicit blocklist", () => {
+  const action = source("intent-invisible");
+  // A 2nd adversarial probe found the earlier explicit-range HIDDEN_FORMAT_CHARS blocklist
+  // missed the bidi-isolate block, ALM, NEL, soft hyphen, CGJ, Khmer invisibles, and the
+  // deprecated-format block. The guard now rejects the whole Unicode \p{C} category plus the
+  // non-\p{C} invisible marks/fillers. Each code point below joins two clauses invisibly and
+  // must throw non_atomic_proposition at construct time.
+  const invisible = [
+    0x2066, 0x2067, 0x2068, 0x2069, // LRI / RLI / FSI / PDI bidi isolates
+    0x061C,                         // Arabic letter mark
+    0x00AD,                         // soft hyphen
+    0x0085,                         // NEL (a control char that is NOT matched by \s)
+    0x206A,                         // deprecated "inhibit symmetric swapping" format control
+    0x034F,                         // combining grapheme joiner
+    0x17B4, 0x17B5,                 // Khmer invisible inherent vowels
+    0x200B, 0xFEFF, 0x180E,         // zero-width space / BOM / Mongolian vowel separator
+    0x115F, 0x1160, 0x3164, 0xFFA0, // Hangul fillers (invisible, not \p{C})
+  ];
+  for (const cp of invisible) {
+    const purpose = `patch the config file${String.fromCodePoint(cp)}secretly disable the limiter`;
+    assert.throws(
+      () => agentStatedIntent({ sourceId: action, actor: "codex", purpose }),
+      (error) => error instanceof NarrativeStatementError && error.code === "non_atomic_proposition",
+      `expected rejection for invisible U+${cp.toString(16).toUpperCase().padStart(4, "0")}`,
+    );
+  }
+});
+
+test("#622 (HIGH-2 disclosed residual): a punctuation-free, coordinator-free ASCII run-on is NOT structurally caught", () => {
+  // HONEST-DISCLOSURE PIN. The single-clause guard rejects every separator/punctuation/
+  // format-control/coordinator multi-clause form and hard-caps length, but a bare run-on of
+  // imperatives joined only by ordinary spaces ("ship the fix hide the audit trail avoid
+  // detection") has NO lexical separator and is not distinguishable from a legitimate long
+  // single clause without a natural-language parser. This is a DISCLOSED structural residual
+  // (deliver.md accepted gaps): agent_stated is a non-authoritative typed self-report, barred
+  // by construction from being gate evidence (isolation) and from post-hoc reconstruction
+  // (write-once), and the dump is still bounded by AGENT_STATED_PURPOSE_MAX_LENGTH — so the
+  // residual carries no gate/security consequence. This test PINS the current behavior: if a
+  // future change adds clause-level NLP, this assertion will flip and force a re-evaluation of
+  // the disclosure rather than letting the behavior change silently.
+  const action = source("intent-runon");
+  const runOn = "ship the fix hide the audit trail avoid detection";
+  assert.ok(runOn.length <= AGENT_STATED_PURPOSE_MAX_LENGTH);
+  assert.equal(agentStatedIntent({ sourceId: action, actor: "codex", purpose: runOn }).class, "agent_stated");
+  // The hard length cap is the active bound on dump size for this residual.
+  assert.throws(
+    () => agentStatedIntent({ sourceId: action, actor: "codex", purpose: "word ".repeat(60).trim() }),
+    (error) => error instanceof NarrativeStatementError,
+    "an over-length run-on is still rejected by the length cap",
+  );
+});
+
 test("#622 (review HIGH R2): the agent_stated actor is a bounded identifier, never a prose/keyword smuggle channel", () => {
   const action = source("intent-actor");
   for (const invoke of [
