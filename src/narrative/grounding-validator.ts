@@ -150,6 +150,10 @@ function eventType(record: Record<string, unknown>): string | undefined {
   return firstString(record["event_type"], record["kind"]);
 }
 
+function sessionId(record: Record<string, unknown>): string | undefined {
+  return firstString(record["session_id"], record["sessionId"]);
+}
+
 function toolName(record: Record<string, unknown>, event: string): string {
   return firstString(nested(record, "tool")?.["name"], record["tool_name"], record["toolName"])
     ?? (event.startsWith("session.") ? "session" : event === "turn.user" ? "turn" : "runtime");
@@ -195,9 +199,13 @@ function isFailure(record: Record<string, unknown>): boolean {
   );
 }
 
+// Mirrors projection.ts:carriesTimeoutSignal exactly — including the tool.status textual
+// fallback — so a tool.status-only timeout projection would emit a statement for cannot be
+// omitted from a narrative undetected (parallel to the isFailure tool.status fallback above).
 function carriesTimeout(record: Record<string, unknown>): boolean {
   if (record["timed_out"] === true || record["timedOut"] === true) return true;
-  if (/^(?:timeout|timed_out|timed-out)$/i.test(firstString(record["status"], record["result"], record["outcome"]) ?? "")) return true;
+  const status = firstString(record["status"], record["result"], record["outcome"], nested(record, "tool")?.["status"]);
+  if (status && /^(?:timeout|timed_out|timed-out)$/i.test(status)) return true;
   const error = nested(record, "error");
   return /timeout/i.test(firstString(error?.["code"], error?.["name"]) ?? "");
 }
@@ -382,7 +390,17 @@ function deriveMaterialEvents(manifest: NarrativeSourceManifest, resolved: reado
     });
   }
 
-  const spine = buildTurnSpine(telemetry.map((entry) => ({ sourceId: entry.sourceId, record: entry.record! })));
+  // Normalize session_id/event_type aliases before building the turn spine, exactly as
+  // projection.ts:normalizedTelemetry does, so the validator's independently-rebuilt spine
+  // matches projection's turn assignment and cannot diverge on alias-keyed records.
+  const spine = buildTurnSpine(telemetry.map((entry) => ({
+    sourceId: entry.sourceId,
+    record: {
+      ...entry.record!,
+      ...(sessionId(entry.record!) ? { session_id: sessionId(entry.record!) } : {}),
+      ...(eventType(entry.record!) ? { event_type: eventType(entry.record!) } : {}),
+    },
+  })));
   const indexBySource = new Map(manifest.sources.map((entry, index) => [entry.source_id, index]));
   const activeTurns = new Set<number>();
   for (const entry of telemetry) {

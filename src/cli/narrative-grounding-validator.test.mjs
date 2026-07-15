@@ -150,6 +150,14 @@ const materialCases = [
     records: [{ stream: "telemetry", record: { session_id: "session", event_type: "tool.result", timed_out: true, tool: { name: "shell" } } }],
   },
   {
+    // #623 (re-review HIGH): a timeout signalled ONLY via tool.status must be derived and
+    // coverage-enforced too — carriesTimeout must mirror projection's carriesTimeoutSignal
+    // tool.status fallback, or a tool.status-only timeout can be omitted undetected.
+    name: "tool_status_timeout",
+    eventKind: "timeout",
+    records: [{ stream: "telemetry", record: { session_id: "session", event_type: "tool.result", tool: { name: "shell", status: "timeout" } } }],
+  },
+  {
     name: "no_op_turn",
     records: [{ stream: "telemetry", record: { session_id: "session", event_type: "tool.result", tool: { name: "read" } } }],
   },
