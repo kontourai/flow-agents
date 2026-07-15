@@ -122,6 +122,7 @@ export {
   observedDelegation,
   observedFileCreation,
   observedToolAction,
+  summarizerInferredConnective,
 } from "./narrative/statements.js";
 export type {
   NarrativeStatementErrorCode,
@@ -130,6 +131,54 @@ export type {
   StatementClass,
   StatementRule,
 } from "./narrative/statements.js";
+export {
+  entailmentIndependenceHolds,
+  isAssertionProhibited,
+  NarrativeGroundingError,
+  validateNarrativeGrounding,
+} from "./narrative/grounding-validator.js";
+export type {
+  AssertionKind,
+  EntailmentIdentity,
+  EntailmentProvenance,
+  EntailmentVerdict,
+  GroundingKnownGap,
+  GroundingViolation,
+  GroundingViolationCode,
+  GroundingVerdict,
+  MaterialEventKind,
+  ValidateNarrativeGroundingOptions,
+} from "./narrative/grounding-validator.js";
+
+// #614: model-assisted prose renderer (display-only, fail-closed). Lives outside
+// src/narrative/ (I/O, provider gating, timeout orchestration; see narrative-render.ts's
+// header comment) but is exported here alongside the pure narrative primitives it composes.
+export {
+  GeneratorTimeoutError,
+  PROSE_ECONOMICS_FILE,
+  PROSE_PROMPT_VERSION,
+  ProviderNotAllowedError,
+  hostedModelGenerator,
+  localModelGenerator,
+  providerAllowed,
+  renderProse,
+  stubGenerator,
+} from "./cli/narrative-render.js";
+export type {
+  GeneratedProse,
+  ModelGeneratorConfig,
+  ProseEconomicsRecord,
+  ProseGenerator,
+  ProseGeneratorInput,
+  ProseGeneratorSentence,
+  ProseGeneratorUsage,
+  ProseRenderOutcome,
+  ProseSourceView,
+  ProviderConfig,
+  ProviderOptIn,
+  RenderProseOptions,
+  RenderProseResult,
+} from "./cli/narrative-render.js";
 
 export {
   BUILDER_BUILD_FLOW_ID,

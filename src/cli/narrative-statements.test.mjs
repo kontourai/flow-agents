@@ -11,6 +11,7 @@ import {
   observedDelegation,
   observedFileCreation,
   observedToolAction,
+  summarizerInferredConnective,
 } from "../../build/src/index.js";
 
 const source = (suffix) => `fa1:telemetry:full/session:event-${suffix}/0123abcd`;
@@ -124,4 +125,45 @@ test("H2a: derivedTimeout is material without a duration", () => {
   const out = derivedTimeout({ sourceId: source("tool"), operation: "delegate worker" });
   assert.equal(out.proposition, "Operation `delegate worker` exceeded its timeout (duration unknown)");
   assert.equal(out.rule.id, "timeout-detection");
+});
+
+// ── #614: summarizer_inferred connective constructor ────────────────────────
+
+test("#614: summarizerInferredConnective mirrors the atomicity/charset/sourceRefs discipline", () => {
+  const first = source("summary-1");
+  const second = source("summary-2");
+  const statement = summarizerInferredConnective({
+    proposition: "The retried command `npm test` is summarized from the underlying attempts",
+    source_refs: [first, second],
+    turn_ref: 2,
+    actor: "prose-renderer",
+  });
+  assert.equal(statement.class, "summarizer_inferred");
+  assert.equal("rule" in statement, false);
+  assert.deepEqual(statement.source_refs, [first, second]);
+  assert.equal(statement.turn_ref, 2);
+  assert.equal(statement.actor, "prose-renderer");
+  assert.match(statement.id, /^[0-9a-f]{16}$/);
+});
+
+test("#614: summarizerInferredConnective accepts an explicit identifier-shaped id", () => {
+  const statement = summarizerInferredConnective({
+    id: "prose-sentence-1",
+    proposition: "The run completed",
+    source_refs: [source("summary-explicit-id")],
+  });
+  assert.equal(statement.id, "prose-sentence-1");
+});
+
+test("#614: summarizerInferredConnective rejects invariant violations with typed errors", () => {
+  const first = source("summary-invalid");
+  for (const invoke of [
+    () => summarizerInferredConnective({ proposition: "", source_refs: [first] }),
+    () => summarizerInferredConnective({ proposition: "one thing and then another", source_refs: [first] }),
+    () => summarizerInferredConnective({ proposition: "valid sentence", source_refs: [] }),
+    () => summarizerInferredConnective({ proposition: "valid sentence", source_refs: ["not-fa1"] }),
+    () => summarizerInferredConnective({ proposition: "valid sentence\nwith a newline", source_refs: [first] }),
+  ]) {
+    assert.throws(invoke, (error) => error instanceof NarrativeStatementError && typeof error.code === "string");
+  }
 });
