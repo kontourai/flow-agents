@@ -16,7 +16,7 @@ import {
   type FlowRunState,
   type JsonObject,
 } from "@kontourai/flow";
-import { assertAuthorizationUnused, loadBuilderLifecycleAuthorization, readAuthorizationConsumption, recordAuthorizationConsumed } from "./builder-lifecycle-authority.js";
+import { assertAuthorizationUnused, buildUnsignedLifecycleAuthorization, loadBuilderLifecycleAuthorization, readAuthorizationConsumption, recordAuthorizationConsumed, type BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
 import { assignmentFilePath, performLocalReleaseUnderLock, readLocalAssignmentStatus, resolveCurrentAssignmentActor, withSubjectLock, type ActorStruct } from "./cli/assignment-provider.js";
 import {
   BUILDER_BUILD_FLOW_ID,
@@ -197,6 +197,101 @@ export async function cancelBuilderFlowSession(input: BuilderFlowAuthorizedLifec
     recordAuthorizationConsumed(prepared.context.artifactRoot, prepared.authorization);
     return { sessionDir: prepared.context.sessionDir, projectRoot: prepared.context.projectRoot, run: changed, projection, gateActionEnvelope, progressSnapshot, attached: false, assignmentReleased: released !== null, idempotent: changed.idempotent };
   });
+}
+
+export interface BuilderCancelRequestInput extends BuilderFlowSessionInput {
+  /** Free-text reason recorded in the authorization request. */
+  reason?: string;
+  /** Human/operator identity recorded as request.authority.actor. */
+  requestActor?: string;
+  /** Validity window for the emitted authorization (default 24h). */
+  expiresInHours?: number;
+  /** Override the request timestamp (tests); defaults to now. */
+  now?: string;
+  /** Override the nonce (tests); defaults to a fresh unique value. */
+  nonce?: string;
+}
+
+export interface BuilderCancelRequestResult {
+  runId: string;
+  subject: string;
+  runStatus: string;
+  /** True when the run is already terminal (cancel would be idempotent/no-op). */
+  alreadyTerminal: boolean;
+  /** The unsigned, ready-to-sign authorization (schema-valid, canonical order). */
+  authorization: Omit<BuilderLifecycleAuthorization, "signature">;
+  /** The exact bytes the operator must sign; a signature over these verifies. */
+  signingPayload: string;
+  /** Where the CLI writes the unsigned authorization by default. */
+  suggestedOutFile: string;
+}
+
+/**
+ * Generate a ready-to-sign cancel authorization for a run (#659 Slice C).
+ *
+ * READ-ONLY: this mints the *unsigned* payload (correct run identity, active
+ * assignment holder, fresh nonce/expiry) so an operator no longer has to
+ * hand-assemble the JSON. It does NOT sign, cancel, or mutate anything — the
+ * ed25519 signature lock is fully preserved; the operator still signs
+ * `signingPayload` with their key, and `builder-run cancel --authorization-file`
+ * verifies it as before.
+ */
+export async function prepareBuilderCancelRequest(input: BuilderCancelRequestInput): Promise<BuilderCancelRequestResult> {
+  const context = resolveSessionContext(input.sessionDir);
+  const sidecarSnapshot = readSidecarSnapshot(context);
+  const subject = workflowSubject(sidecarSnapshot.state);
+  const canonicalRun = await loadBuilderFlowRun({ cwd: context.projectRoot, runId: context.slug });
+  const terminalStatuses = ["canceled", "completed", "archived"];
+  const alreadyTerminal = terminalStatuses.includes(canonicalRun.state.status);
+
+  const activeAssignment = readLocalAssignmentStatus(context.artifactRoot, context.slug).record;
+  const assignmentFile = assignmentFilePath(context.artifactRoot, context.slug);
+  const persistedAssignment = pathExistsNoFollow(assignmentFile)
+    ? JSON.parse(fs.readFileSync(assignmentFile, "utf8")) as AnyRecord
+    : null;
+  // When the run is already canceled, its assignment is released — accept the
+  // persisted holder so an operator can still mint a (recovery) authorization.
+  const assignment = activeAssignment
+    ?? (alreadyTerminal && persistedAssignment?.actor_key ? persistedAssignment : null);
+  if (!assignment || !assignment.actor_key || !assignment.actor) {
+    throw new BuilderBuildRunInputError("assignment", "the run has no assignment holder to authorize a cancel against");
+  }
+
+  const now = input.now ? new Date(input.now) : new Date();
+  if (!Number.isFinite(now.getTime())) throw new BuilderBuildRunInputError("now", "must be a valid date-time");
+  const requestedAt = now.toISOString();
+  const hours = input.expiresInHours && input.expiresInHours > 0 ? input.expiresInHours : 24;
+  const expiresAt = new Date(now.getTime() + hours * 3_600_000).toISOString();
+  const nonce = input.nonce ?? `cancel-request-${context.slug}-${now.getTime()}-${randomBytes(6).toString("hex")}`;
+
+  const { unsigned, signingPayload } = buildUnsignedLifecycleAuthorization({
+    operation: "cancel",
+    run_id: context.slug,
+    subject,
+    assignment_actor_key: assignment.actor_key as string,
+    assignment_actor: assignment.actor,
+    nonce,
+    expires_at: expiresAt,
+    request: {
+      reason: (input.reason && input.reason.trim()) || `Operator-requested cancellation of run ${context.slug}.`,
+      authority: {
+        kind: "user_request",
+        actor: (input.requestActor && input.requestActor.trim()) || "operator",
+        request_ref: `flow-agents://cancel-request/${context.slug}/${now.getTime()}`,
+        requested_at: requestedAt,
+      },
+    },
+  });
+
+  return {
+    runId: context.slug,
+    subject,
+    runStatus: canonicalRun.state.status,
+    alreadyTerminal,
+    authorization: unsigned,
+    signingPayload,
+    suggestedOutFile: path.join(context.sessionDir, "cancel.authorization.unsigned.json"),
+  };
 }
 
 export async function releaseBuilderFlowAssignment(input: BuilderFlowAgentLifecycleInput): Promise<BuilderFlowSessionResult & { assignmentReleased: boolean }> {

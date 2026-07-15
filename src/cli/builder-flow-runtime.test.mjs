@@ -13,6 +13,7 @@ import {
   cancelBuilderFlowSession,
   captureReviewWorkspaceSnapshot,
   pauseBuilderFlowSession,
+  prepareBuilderCancelRequest,
   recoverBuilderFlowSession,
   releaseBuilderFlowAssignment,
   resumeBuilderFlowSession,
@@ -922,6 +923,124 @@ test("authorized cancellation is canonical, terminal, and releases the assignmen
     authorizationFile,
   }), /nonce has already been consumed/);
   assert.deepEqual(readJson(assignmentFile).audit_trail, firstAudit);
+});
+
+// #659 Slice C — friendly cancel. The linchpin: a payload minted by
+// prepareBuilderCancelRequest, once signed by the operator key, must verify and
+// cancel the run. If buildUnsignedLifecycleAuthorization's signing payload
+// diverged by even one byte from what the verifier recomputes, this fails.
+test("prepareBuilderCancelRequest emits a payload that, signed by the operator key, cancels the run end-to-end", async () => {
+  const session = makeSession("friendly-cancel-e2e");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+
+  const req = await prepareBuilderCancelRequest({ sessionDir: session.sessionDir });
+  // Identity is carried from the run's active assignment, never fabricated.
+  assert.equal(req.runId, session.slug);
+  assert.equal(req.authorization.operation, "cancel");
+  assert.equal(req.authorization.run_id, session.slug);
+  assert.equal(req.authorization.subject, SUBJECT);
+  assert.equal(req.authorization.assignment_actor_key, ACTOR_KEY);
+  assert.deepEqual(req.authorization.assignment_actor, ACTOR);
+  assert.equal(req.alreadyTerminal, false);
+  // signing_payload is exactly JSON.stringify(unsigned) — the bytes to sign.
+  assert.equal(req.signingPayload, JSON.stringify(req.authorization));
+  assert.ok(Date.parse(req.authorization.expires_at) > Date.parse(req.authorization.request.authority.requested_at));
+
+  // The operator signs EXACTLY the emitted payload with their ed25519 key and
+  // drops the signature into the file — nothing else changes.
+  const signed = {
+    ...req.authorization,
+    signature: {
+      algorithm: "ed25519",
+      key_id: AUTHORITY_KEY_ID,
+      value: sign(null, Buffer.from(req.signingPayload), AUTHORITY_KEYS.privateKey).toString("base64"),
+    },
+  };
+  const file = path.join(session.projectRoot, "friendly-cancel-e2e.authorization.json");
+  writeJson(file, signed);
+
+  const canceled = await cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file });
+  assert.equal(canceled.run.state.status, "canceled");
+  assert.equal(canceled.assignmentReleased, true);
+  assert.equal(canceled.idempotent, false);
+});
+
+test("prepareBuilderCancelRequest refuses a run with no assignment holder", async () => {
+  const session = makeSession("friendly-cancel-no-holder");
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  await assert.rejects(
+    () => prepareBuilderCancelRequest({ sessionDir: session.sessionDir }),
+    /no assignment holder/,
+  );
+});
+
+test("prepareBuilderCancelRequest respects a custom reason, actor, and expiry window", async () => {
+  const session = makeSession("friendly-cancel-custom");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const req = await prepareBuilderCancelRequest({
+    sessionDir: session.sessionDir,
+    reason: "stale orphaned run",
+    requestActor: "brian",
+    expiresInHours: 2,
+    now: "2026-07-15T12:00:00.000Z",
+  });
+  assert.equal(req.authorization.request.reason, "stale orphaned run");
+  assert.equal(req.authorization.request.authority.actor, "brian");
+  assert.equal(req.authorization.request.authority.requested_at, "2026-07-15T12:00:00.000Z");
+  assert.equal(req.authorization.expires_at, "2026-07-15T14:00:00.000Z");
+});
+
+test("a cancel-request payload signed with the WRONG key is rejected (signature lock intact)", async () => {
+  const session = makeSession("friendly-cancel-badsig");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  // Default (live) timing so the request is not expired — the signature, not the
+  // clock, must be what rejects it.
+  const req = await prepareBuilderCancelRequest({ sessionDir: session.sessionDir });
+  const wrongKey = generateKeyPairSync("ed25519");
+  const badSigned = {
+    ...req.authorization,
+    signature: { algorithm: "ed25519", key_id: AUTHORITY_KEY_ID, value: sign(null, Buffer.from(req.signingPayload), wrongKey.privateKey).toString("base64") },
+  };
+  const file = path.join(session.projectRoot, "friendly-cancel-badsig.authorization.json");
+  writeJson(file, badSigned);
+  await assert.rejects(() => cancelBuilderFlowSession({ sessionDir: session.sessionDir, authorizationFile: file }), /signature is invalid/);
+});
+
+test("builder-run cancel-request CLI writes the unsigned authorization and prints signing guidance", async () => {
+  const session = makeSession("friendly-cancel-cli");
+  claimSessionAssignment(session);
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const outFile = path.join(session.projectRoot, "out.unsigned.json");
+
+  const output = [];
+  const originalLog = console.log;
+  console.log = (...args) => output.push(args.join(" "));
+  let rc;
+  try {
+    rc = await builderRunMain(["cancel-request", "--session-dir", session.sessionDir, "--out", outFile, "--actor", "brian"]);
+  } finally {
+    console.log = originalLog;
+  }
+  assert.equal(rc, 0);
+
+  // The unsigned authorization file is written and structurally valid.
+  const unsigned = readJson(outFile);
+  assert.equal(unsigned.operation, "cancel");
+  assert.equal(unsigned.run_id, session.slug);
+  assert.equal(unsigned.assignment_actor_key, ACTOR_KEY);
+  assert.equal(unsigned.signature, undefined, "the emitted file is UNSIGNED — the operator adds the signature");
+
+  // The printed JSON carries the signing payload + human next-steps.
+  const printed = JSON.parse(output.join("\n"));
+  assert.equal(printed.unsigned_authorization_file, outFile);
+  assert.equal(printed.signing_payload, JSON.stringify(unsigned));
+  assert.ok(Array.isArray(printed.next_steps) && printed.next_steps.some((s) => s.includes("builder-run cancel")));
+
+  // Unknown flags are rejected with a usage error, not silently accepted.
+  assert.equal(await builderRunMain(["cancel-request", "--session-dir", session.sessionDir, "--bogus", "x"]), 64);
 });
 
 test("assignment release is independent of Flow lifecycle", async () => {
