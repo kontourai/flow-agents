@@ -158,7 +158,7 @@
   },
   "optionalDependencies": {
     "@kontourai/surface": "^2.10.0",
-    "hachure": "^0.9.0",
+    "hachure": "^0.14.0",
     "neo4j-driver": "^5.28.0"
   }
 }

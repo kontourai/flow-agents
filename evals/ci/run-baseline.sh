@@ -43,6 +43,7 @@ CHECKS=(
   "Liveness console relay integration|bash evals/integration/test_liveness_console_relay.sh"
   "Console tenant isolation integration|bash evals/integration/test_console_tenant_isolation.sh"
   "Goal Fit hook integration|bash evals/integration/test_goal_fit_hook.sh"
+  "Plain stop messaging integration|bash evals/integration/test_plain_stop_messaging.sh"
   "Goal Fit narrative exclusion integration|env -u FLOW_AGENTS_GOAL_FIT_MODE bash evals/integration/test_goal_fit_narrative_exclusion.sh"
   "Hook category behavior integration|bash evals/integration/test_hook_category_behaviors.sh"
   "Workflow steering hook integration|bash evals/integration/test_workflow_steering_hook.sh"
@@ -149,6 +150,7 @@ LANE_WORKFLOW_CONTRACTS=(
 
 LANE_RUNTIME_AND_KIT=(
   "Goal Fit hook integration"
+  "Plain stop messaging integration"
   "Goal Fit narrative exclusion integration"
   "Hook category behavior integration"
   "Workflow steering hook integration"
