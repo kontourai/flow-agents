@@ -131,7 +131,7 @@
         "runtime": { "type": ["string", "null"] },
         "per_delegation_tokens": {
           "type": "boolean",
-          "description": "Whether the runtime isolates per-sub-agent token usage. False on every runtime today → per-delegation cost is unavailable."
+          "description": "Whether the runtime isolates per-sub-agent token usage. DERIVED (not hardcoded, #620) from the runtime's capability declaration (build/generated/capability-declarations.json, keyed on the normalized .agent.runtime with kiro-cli→kiro): true IFF the declared per_delegation_tokens status is 'supported'. An unresolved runtime or a missing declaration JSON yields the explicit sentinel false, never a fabricated true. False on every runtime today → per-delegation cost is unavailable."
         },
         "per_delegation_outcome": {
           "type": "string",

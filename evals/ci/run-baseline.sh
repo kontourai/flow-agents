@@ -14,6 +14,7 @@ CHECKS=(
   "Decision registry|npm run check:decisions --"
   "Source tree validation|npm run validate:source --"
   "Context map drift|npm run context-map -- --check"
+  "Capability matrix drift|npm run capability-matrix -- --check"
   "Static eval suite|bash evals/run.sh static"
   "Workflow artifact integration|bash evals/integration/test_workflow_artifacts.sh"
   "Workflow artifact cleanup audit integration|bash evals/integration/test_workflow_artifact_cleanup_audit.sh"
@@ -72,6 +73,7 @@ CHECKS=(
   "Telemetry tool usage integration|bash evals/integration/test_telemetry_tool_usage.sh"
   "Telemetry task slug integration|bash evals/integration/test_telemetry_task_slug.sh"
   "Economics record integration|bash evals/integration/test_economics_record.sh"
+  "Capability declarations integration|bash evals/integration/test_capability_declarations.sh"
   "Learning review proposals integration|bash evals/integration/test_learning_review_proposals.sh"
   "Utterance check integration|bash evals/integration/test_utterance_check.sh"
   "Pull work provider integration|bash evals/integration/test_pull_work_provider.sh"
@@ -113,6 +115,7 @@ LANE_SOURCE_AND_STATIC=(
   "Decision registry"
   "Source tree validation"
   "Context map drift"
+  "Capability matrix drift"
   "Static eval suite"
 )
 
@@ -177,6 +180,7 @@ LANE_RUNTIME_AND_KIT=(
   "Telemetry tool usage integration"
   "Telemetry task slug integration"
   "Economics record integration"
+  "Capability declarations integration"
   "Learning review proposals integration"
   "Utterance check integration"
   "Pull work provider integration"
