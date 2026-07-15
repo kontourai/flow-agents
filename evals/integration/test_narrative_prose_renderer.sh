@@ -206,16 +206,33 @@ if (result) {
   if (result.outcome === 'prose_published') console.log('prose:', fs.readFileSync(result.prose.path, 'utf8'));
   if (result.written.renderPath) console.log('deterministic markdown:', fs.readFileSync(result.written.renderPath, 'utf8'));
 }
+
+// PUBLISH-PATH canary: run the benign stub generator over the SAME redacted-canary
+// fixture into a fresh out-dir. The stub produces publishable prose (it never restates
+// banned outcome verbs), so this exercises the prose_published path -- proving the
+// redacted secret is absent from PUBLISHED prose + economics, not merely on the reject
+// path. (The generator only ever sees the frozen, policy-filtered resolveSource view,
+// in which tool.input -- where the canary lives -- is nulled.)
+const pubOutDir=path.join(tmp,'canary-pub-out');
+const pub = await api.renderProse(narrativeDir, { compiledAt:'2026-07-14T16:00:00.000Z', outDir: pubOutDir, generator: api.stubGenerator });
+console.log('publish outcome:', pub.outcome, pub.reason ?? '');
+console.log('publish economics:', fs.readFileSync(path.join(narrativeDir, api.PROSE_ECONOMICS_FILE), 'utf8'));
+if (pub.outcome === 'prose_published') console.log('published prose:', fs.readFileSync(pub.prose.path, 'utf8'));
 NODE
 if grep -q -- 'NPR614_SECRET_CANARY_9f2c' "$TMP/canary.out" "$TMP/canary.err"; then
   _fail "R8/AC5: value-based canary leaked into prose, economics, or generator diagnostics"
 else
   _pass "R8/AC5/D7: redacted value-based canary never surfaces in prose, economics, or stderr, even against an echo-everything generator"
 fi
+if grep -q 'publish outcome: prose_published' "$TMP/canary.out"; then
+  _pass "R8/AC5/D7 (publish path): benign generator over the redacted-canary fixture actually publishes prose"
+else
+  _fail "R8/AC5/D7 publish-path canary did not exercise the prose_published path: $(grep 'publish outcome' "$TMP/canary.out")"
+fi
 
 echo ""
 if [[ "$errors" -eq 0 ]]; then
-  echo "narrative prose renderer tests passed: 11/11."
+  echo "narrative prose renderer tests passed: 12/12."
   exit 0
 fi
 echo "narrative prose renderer tests FAILED: $errors issue(s)."
