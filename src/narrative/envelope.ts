@@ -198,23 +198,45 @@ export function validateGroundedNarrative(value: unknown): SchemaIssue[] {
   return issues;
 }
 
-function resolveJsonPointer(value: unknown, pointer: string): boolean {
-  if (!pointer.startsWith("/")) return false;
+function resolveJsonPointer(value: unknown, pointer: string): { found: true; value: unknown } | { found: false } {
+  if (!pointer.startsWith("/")) return { found: false };
   let current = value;
   for (const encoded of pointer.slice(1).split("/")) {
     const token = encoded.replace(/~1/g, "/").replace(/~0/g, "~");
     if (Array.isArray(current)) {
-      if (!/^(?:0|[1-9][0-9]*)$/.test(token)) return false;
+      if (!/^(?:0|[1-9][0-9]*)$/.test(token)) return { found: false };
       const index = Number(token);
-      if (index >= current.length) return false;
+      if (index >= current.length) return { found: false };
       current = current[index];
       continue;
     }
     const record = object(current);
-    if (!record || !Object.prototype.hasOwnProperty.call(record, token)) return false;
+    if (!record || !Object.prototype.hasOwnProperty.call(record, token)) return { found: false };
     current = record[token];
   }
-  return true;
+  return { found: true, value: current };
+}
+
+function flowGateProposition(value: unknown): string | undefined {
+  const gate = object(value);
+  const gateId = nonEmptyString(gate?.["gate_id"])
+    ?? nonEmptyString(gate?.["id"])
+    ?? nonEmptyString(gate?.["name"]);
+  const outcome = nonEmptyString(gate?.["status"])
+    ?? nonEmptyString(gate?.["outcome"]);
+  return gateId && outcome ? `Gate ${gateId} was ${outcome}.` : undefined;
+}
+
+function surfaceExplanationProposition(value: unknown, sourceRef: string): string | undefined {
+  const explanation = object(value);
+  const status = nonEmptyString(explanation?.["status"]);
+  const claimValue = explanation?.["value"];
+  if (!status || typeof claimValue !== "string") return undefined;
+  let parsed: ReturnType<typeof parseSourceId>;
+  try { parsed = parseSourceId(sourceRef); }
+  catch { return undefined; }
+  if (parsed.stream !== "surface-explanation") return undefined;
+  return `Claim ${parsed.locator.claimId} was ${status}${claimValue.length > 0 ? ` with value ${JSON.stringify(claimValue)}` : ""}.`;
 }
 
 function validateGroundingSemantics(value: unknown, issues: SchemaIssue[]): void {
@@ -248,18 +270,35 @@ function validateGroundingSemantics(value: unknown, issues: SchemaIssue[]): void
       issues.push({ path: `$.conclusions[${index}].grounding.source_ref`, message: `must resolve to exactly one ${authority} section` });
       continue;
     }
-    if (kind !== "flow_gate_derivation") continue;
-    const pointer = nonEmptyString(grounding?.["pointer"]);
     const embeddedBytes = nonEmptyString(matches[0]!["embedded_bytes"]);
-    if (!pointer || !embeddedBytes) continue;
+    if (!embeddedBytes) continue;
     let embedded: unknown;
     try { embedded = JSON.parse(embeddedBytes); }
     catch {
-      issues.push({ path: `$.sections`, message: `flow section ${sourceRef} embedded_bytes must contain valid JSON` });
+      issues.push({ path: "$.sections", message: `${authority} section ${sourceRef} embedded_bytes must contain valid JSON` });
       continue;
     }
-    if (!resolveJsonPointer(embedded, pointer)) {
+    if (kind === "surface_explanation") {
+      const expected = surfaceExplanationProposition(embedded, sourceRef);
+      if (!expected) {
+        issues.push({ path: `$.conclusions[${index}].grounding.source_ref`, message: "must resolve to a typed surface explanation" });
+      } else if (conclusion?.["proposition"] !== expected) {
+        issues.push({ path: `$.conclusions[${index}].proposition`, message: "must equal the proposition derived from the surface explanation" });
+      }
+      continue;
+    }
+    const pointer = nonEmptyString(grounding?.["pointer"]);
+    if (!pointer) continue;
+    const resolved = resolveJsonPointer(embedded, pointer);
+    if (!resolved.found) {
       issues.push({ path: `$.conclusions[${index}].grounding.pointer`, message: "must resolve inside the grounded flow section" });
+      continue;
+    }
+    const expected = flowGateProposition(resolved.value);
+    if (!expected) {
+      issues.push({ path: `$.conclusions[${index}].grounding.pointer`, message: "must resolve to a typed flow gate derivation" });
+    } else if (conclusion?.["proposition"] !== expected) {
+      issues.push({ path: `$.conclusions[${index}].proposition`, message: "must equal the proposition derived from the flow gate" });
     }
   }
 }
@@ -341,9 +380,10 @@ function correlationFor(
       .filter((sourceRef) => timestampsByRef.has(sourceRef));
     const readings = sourceRefs.map((sourceRef) => ({ sourceRef, timestamp: timestampsByRef.get(sourceRef)! }));
     const valid = readings.flatMap(({ sourceRef, timestamp }) => timestamp.kind === "valid" ? [{ sourceRef, value: timestamp.value }] : []);
+    const timezoneInputRefs = readings.filter(({ timestamp }) => timestamp.kind === "no_timezone").map(({ sourceRef }) => sourceRef);
     if (valid.length === 0) return {
       ordinal: turn.ordinal,
-      timezoneInvalid: readings.some(({ timestamp }) => timestamp.kind === "no_timezone"),
+      timezoneInputRefs,
     };
     const start = Math.min(...valid.map(({ value }) => value));
     const end = Math.max(...valid.map(({ value }) => value));
@@ -352,7 +392,7 @@ function correlationFor(
       start,
       end,
       inputRefs: valid.filter(({ value }) => value === start || value === end).map(({ sourceRef }) => sourceRef),
-      timezoneInvalid: readings.some(({ timestamp }) => timestamp.kind === "no_timezone"),
+      timezoneInputRefs,
     };
   });
   const turns = projection.turns.map((turn) => ({ turn_ordinal: turn.ordinal, placed: [] as GroundedNarrativeFlowTransition[] }));
@@ -390,12 +430,13 @@ function correlationFor(
         unplaced.push({ ...record, reason: "no_timestamp" });
         continue;
       }
-      if (timestamp.kind === "no_timezone") {
-        unplaced.push({ ...record, reason: "no_timezone" });
-        continue;
-      }
-      if (windows.some((window) => window.timezoneInvalid)) {
-        unplaced.push({ ...record, reason: "no_timezone" });
+      const timezoneInputs = [...new Set(windows.flatMap((window) => window.timezoneInputRefs))];
+      if (timestamp.kind === "no_timezone" || timezoneInputs.length > 0) {
+        unplaced.push({
+          ...record,
+          rule: { ...record.rule, inputs: [...new Set([entry.source_id, ...timezoneInputs])] },
+          reason: "no_timezone",
+        });
         continue;
       }
       const matches = windows.filter((window) => window.start !== undefined && window.end !== undefined
@@ -419,11 +460,9 @@ function conclusionsFor(sections: readonly GroundedNarrativeSection[]): Grounded
       const report = object(parseEmbeddedJson(section.source_refs[0], Buffer.from(section.embedded_bytes, "utf8")));
       const summaries = Array.isArray(report?.["gate_summaries"]) ? report!["gate_summaries"] as unknown[] : [];
       summaries.forEach((value, index) => {
-        const summary = object(value);
-        const gateId = nonEmptyString(summary?.["gate_id"]);
-        const status = nonEmptyString(summary?.["status"]);
-        if (gateId && status) conclusions.push({
-          proposition: `Gate ${gateId} was ${status}.`,
+        const proposition = flowGateProposition(value);
+        if (proposition) conclusions.push({
+          proposition,
           grounding: { kind: "flow_gate_derivation", source_ref: section.source_refs[0], pointer: `/gate_summaries/${index}` },
         });
       });
@@ -431,10 +470,9 @@ function conclusionsFor(sections: readonly GroundedNarrativeSection[]): Grounded
     }
     if (section.authority === "surface") {
       const explanation = object(parseEmbeddedJson(section.source_refs[0], Buffer.from(section.embedded_bytes, "utf8")));
-      const status = nonEmptyString(explanation?.["status"]);
-      const parsed = parseSourceId(section.source_refs[0]);
-      if (status && parsed.stream === "surface-explanation") conclusions.push({
-        proposition: `Claim ${parsed.locator.claimId} was ${status}.`,
+      const proposition = surfaceExplanationProposition(explanation, section.source_refs[0]);
+      if (proposition) conclusions.push({
+        proposition,
         grounding: { kind: "surface_explanation", source_ref: section.source_refs[0] },
       });
     }

@@ -251,6 +251,15 @@ test("validator rejects missing sections/provenance and unknown keys", () => {
   const wrongAuthority = structuredClone(valid);
   wrongAuthority.conclusions[1].grounding.source_ref = valid.sections.find((section) => section.authority === "flow").source_refs[0];
   assert.ok(validateGroundedNarrative(wrongAuthority).some((issue) => issue.path === "$.conclusions[1].grounding.source_ref"));
+  const existingNonGatePointer = structuredClone(valid);
+  existingNonGatePointer.conclusions[0].grounding.pointer = "/run_id";
+  assert.ok(validateGroundedNarrative(existingNonGatePointer).some((issue) => issue.path === "$.conclusions[0].grounding.pointer"));
+  const mismatchedGateProposition = structuredClone(valid);
+  mismatchedGateProposition.conclusions[0].proposition = "Gate fabricated was failed.";
+  assert.ok(validateGroundedNarrative(mismatchedGateProposition).some((issue) => issue.path === "$.conclusions[0].proposition"));
+  const mismatchedSurfaceProposition = structuredClone(valid);
+  mismatchedSurfaceProposition.conclusions[1].proposition = "Claim claim-fixture was accepted.";
+  assert.ok(validateGroundedNarrative(mismatchedSurfaceProposition).some((issue) => issue.path === "$.conclusions[1].proposition"));
 });
 
 test("flow transitions correlate only strictly inside exactly one observed turn window", () => {
@@ -305,6 +314,7 @@ test("timezone-less correlation is deterministic across process timezones", () =
   const envelope = JSON.parse(utc.toString("utf8"));
   assert.equal(envelope.correlation.turns.every((turn) => turn.placed.length === 0), true);
   assert.deepEqual(envelope.correlation.unplaced.map((transition) => transition.reason), ["no_timezone"]);
+  assert.equal(envelope.correlation.unplaced[0].rule.inputs.filter((sourceRef) => sourceRef.startsWith("fa1:telemetry:")).length, 2);
   assert.deepEqual(validateGroundedNarrative(envelope), []);
 });
 

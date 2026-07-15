@@ -170,6 +170,76 @@ const api=await import(`file://${process.argv[3]}`); process.exit(api.validateGr
 NODE
 then _pass "AC4: nonexistent RFC6901 grounding pointer is rejected"; else _fail "AC4: nonexistent grounding pointer validated"; fi
 
+# An existing Flow pointer is still invalid grounding unless its resolved value
+# has the typed gate-summary shape consumed by the derivation.
+if node --input-type=module - "$ENVELOPE1" "$ROOT/build/src/index.js" <<'NODE'
+import fs from 'node:fs'; const env=JSON.parse(fs.readFileSync(process.argv[2]));
+const conclusion=env.conclusions.find(item=>item.grounding?.kind==='flow_gate_derivation');
+if (!conclusion) process.exit(1);
+conclusion.grounding.pointer='/run_id';
+const api=await import(`file://${process.argv[3]}`); process.exit(api.validateGroundedNarrative(env).length ? 0 : 1);
+NODE
+then _pass "AC4: existing non-gate Flow pointer is rejected"; else _fail "AC4: non-gate Flow pointer validated"; fi
+
+# A proposition is a deterministic derivation of its Flow gate fields, not
+# caller-supplied prose, even when its source and pointer otherwise validate.
+if node --input-type=module - "$ENVELOPE1" "$ROOT/build/src/index.js" <<'NODE'
+import fs from 'node:fs'; const env=JSON.parse(fs.readFileSync(process.argv[2]));
+const conclusion=env.conclusions.find(item=>item.grounding?.kind==='flow_gate_derivation');
+if (!conclusion) process.exit(1);
+conclusion.proposition='Gate result was replaced with free prose.';
+const api=await import(`file://${process.argv[3]}`); process.exit(api.validateGroundedNarrative(env).length ? 0 : 1);
+NODE
+then _pass "AC4: mismatched Flow proposition is rejected"; else _fail "AC4: mismatched Flow proposition validated"; fi
+
+# Surface conclusions carry the same deterministic proposition discipline.
+if node --input-type=module - "$ENVELOPE1" "$ROOT/build/src/index.js" <<'NODE'
+import fs from 'node:fs'; const env=JSON.parse(fs.readFileSync(process.argv[2]));
+const conclusion=env.conclusions.find(item=>item.grounding?.kind==='surface_explanation');
+if (!conclusion) process.exit(1);
+conclusion.proposition='Claim result was replaced with free prose.';
+const api=await import(`file://${process.argv[3]}`); process.exit(api.validateGroundedNarrative(env).length ? 0 : 1);
+NODE
+then _pass "AC4: mismatched Surface proposition is rejected"; else _fail "AC4: mismatched Surface proposition validated"; fi
+
+# A timezone-invalid window must retain the telemetry refs that made it
+# unusable so the no_timezone derivation has complete, inspectable inputs.
+if node --input-type=module - "$TMP/timezone-correlation" "$ROOT/build/src/index.js" <<'NODE'
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+const root=process.argv[2], api=await import(`file://${process.argv[3]}`);
+const narrativeDir=path.join(root,'narrative'), telemetryDir=path.join(root,'telemetry'), flowRoot=path.join(root,'flow');
+fs.mkdirSync(telemetryDir,{recursive:true}); fs.mkdirSync(path.join(flowRoot,'runs','timezone-run'),{recursive:true});
+const telemetry=[
+  {session_id:'timezone-session',event_id:'turn-start',event_type:'turn.user',timestamp:'2026-07-14T13:00:00.000',hook:{turn_id:'turn-one'}},
+  {session_id:'timezone-session',event_id:'turn-end',event_type:'tool.result',timestamp:'2026-07-14T13:00:20.000',hook:{turn_id:'turn-one'},tool:{name:'read'}},
+];
+const lines=telemetry.map(JSON.stringify);
+fs.writeFileSync(path.join(telemetryDir,'full.jsonl'),`${lines.join('\n')}\n`);
+const stateBytes=Buffer.from(JSON.stringify({run_id:'timezone-run',session_id:'timezone-session',transitions:[{from:'planned',to:'executing',at:'2026-07-14T13:00:10.000Z'}]}));
+const reportBytes=Buffer.from(JSON.stringify({run_id:'timezone-run',gate_summaries:[]}));
+fs.writeFileSync(path.join(flowRoot,'runs','timezone-run','state.json'),stateBytes);
+fs.writeFileSync(path.join(flowRoot,'runs','timezone-run','report.json'),reportBytes);
+const sha8=bytes=>createHash('sha256').update(bytes).digest('hex').slice(0,8);
+const telemetryRefs=telemetry.map((event,index)=>`fa1:telemetry:full/timezone-session:${event.event_id}/${sha8(Buffer.from(lines[index]))}`);
+const requests=telemetryRefs.map(sourceId=>({source:api.parseSourceId(sourceId),roots:{telemetryDir}}));
+requests.push(
+  {source:api.parseSourceId(`fa1:flow-state:timezone-run:state/${sha8(stateBytes)}`),roots:{flowRoot}},
+  {source:api.parseSourceId(`fa1:flow-report:timezone-run:report/${sha8(reportBytes)}`),roots:{flowRoot}},
+);
+api.snapshotNarrative({
+  narrativeDir,narrativeId:'timezone-correlation',requests,redactionFields:[],
+  compiler:{name:'grounded-envelope-integration',version:'1',policy_hash:'fixture'},
+  captureCompleteness:{channels:{full:'active'},known_gaps:[]},
+},{now:()=> '2026-07-14T15:00:00.000Z'});
+const envelope=api.composeGroundedNarrative(narrativeDir,{compiledAt:'2026-07-14T16:00:00.000Z'});
+const unplaced=envelope.correlation.unplaced.filter(item=>item.reason==='no_timezone');
+if (unplaced.length!==1) process.exit(1);
+if (!telemetryRefs.every(ref=>unplaced.every(item=>item.rule.inputs.includes(ref)))) process.exit(1);
+NODE
+then _pass "AC correlation: no_timezone rule inputs retain offending telemetry refs"; else _fail "AC correlation: no_timezone rule inputs omit offending telemetry refs"; fi
+
 # Extract the JSON string without normalization, then compare its decoded bytes
 # directly to the content-addressed authority blob. Also prove all three hashes
 # (section, manifest, and raw bytes) agree.

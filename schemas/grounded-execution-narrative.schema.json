@@ -168,7 +168,7 @@
           "properties": {
             "kind": { "const": "flow_gate_derivation" },
             "source_ref": { "$ref": "#/$defs/source_id" },
-            "pointer": { "type": "string", "pattern": "^/(?:[^~/]|~[01])*(?:/(?:[^~/]|~[01])*)*$" }
+            "pointer": { "type": "string", "pattern": "^/gate_summaries/(?:0|[1-9][0-9]*)$" }
           }
         }
       }
