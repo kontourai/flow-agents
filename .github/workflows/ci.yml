@@ -153,6 +153,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check narrative-redaction-fail-closed-integration
 
+      - name: Narrative trust isolation integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-trust-isolation-integration
+
       - name: Publish-change helper integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check publish-change-helper-integration
@@ -261,6 +265,10 @@ jobs:
       - name: Goal Fit hook integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check goal-fit-hook-integration
+
+      - name: Goal Fit narrative exclusion integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check goal-fit-narrative-exclusion-integration
 
       - name: Hook category behavior integration
         continue-on-error: true

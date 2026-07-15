@@ -140,7 +140,7 @@ function walkMarkdown(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name === 'archive') continue;
+      if (entry.name === 'archive' || entry.name === 'narrative') continue;
       walkMarkdown(full, out);
     } else if (entry.isFile() && entry.name.endsWith('.md')) {
       out.push(full);
@@ -1031,10 +1031,15 @@ function verifyCommandLogChain(artifactDir) {
 // WS8 (AC10b): isRunnableCommandText now lives in ./lib/runnable-command.js (single
 // source of truth shared with workflow-sidecar.ts's record-time validation, #412).
 
+function referencesNarrativeNamespace(command) {
+  return /(?:^|[^A-Za-z0-9._-])\.kontourai(?:\/[^/\s"'`]+)*\/narrative(?:$|[/\s"'`])/.test(String(command || '').replaceAll('\\', '/'));
+}
+
 function resolveTrustedCommand(root, artifactDir, check, acceptance) {
   // (a) acceptance criterion command for the matching criterion.
   const fromAcceptance = acceptanceCommandFor(check, acceptance);
   if (fromAcceptance) {
+    if (referencesNarrativeNamespace(fromAcceptance)) return { refused: fromAcceptance, refusal: 'narrative trust isolation (#619)' };
     // WS8 (AC10b): never spawn a prose "excerpt" as bash. A kind:"command" ref whose text
     // is not a runnable shell command is malformed-evidence — reported distinctly, not
     // executed, and not conflated with a caught false-completion.
@@ -1075,6 +1080,7 @@ function resolveTrustedCommand(root, artifactDir, check, acceptance) {
   // (c) free-form model command — opt-in only.
   if (String(process.env.FLOW_AGENTS_GOAL_FIT_RECHECK || '').toLowerCase() === 'true') {
     const cmd = normalizeCommand(check && check.command);
+    if (cmd && referencesNarrativeNamespace(cmd)) return { refused: cmd, refusal: 'narrative trust isolation (#619)' };
     if (cmd) return { argv: ['bash', '-lc', cmd], cwd: root, source: 'model-command (FLOW_AGENTS_GOAL_FIT_RECHECK)' };
   }
   return null;
@@ -1385,6 +1391,10 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
       continue;
     }
     const trusted = resolveTrustedCommand(root, artifactDir, check, acceptance);
+    if (trusted && trusted.refused) {
+      warnings.push(`${base} evidence check ${id}: ${trusted.refusal} — command "${safeOneLine(trusted.refused, 120)}" references the narrative namespace and was NOT executed.`);
+      continue;
+    }
     if (trusted && trusted.malformed) {
       // WS8 (AC10b): the matching acceptance criterion named a kind:"command" evidence ref
       // whose text is prose, not a runnable command. Do NOT execute it; classify it.

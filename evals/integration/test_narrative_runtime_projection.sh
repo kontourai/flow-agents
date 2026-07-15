@@ -97,7 +97,7 @@ else
   _fail "snapshot failed: $(<"$TMP/snapshot.err")"
 fi
 
-NARRATIVE_DIR="$ARTIFACT_ROOT/narrative/runtime-fixture"
+NARRATIVE_DIR="$ARTIFACT_ROOT/.kontourai/narrative/runtime-fixture"
 PROJECTED_AT="2026-07-14T14:00:00.000Z"
 node "$ROOT/build/src/cli.js" narrative-sources project --narrative-dir "$NARRATIVE_DIR" --out "$TMP/one.json" --projected-at "$PROJECTED_AT" 2>"$TMP/project-one.err"
 first_status=$?

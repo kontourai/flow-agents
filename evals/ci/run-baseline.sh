@@ -26,6 +26,7 @@ CHECKS=(
   "Narrative runtime projection integration|bash evals/integration/test_narrative_runtime_projection.sh"
   "Narrative grounded envelope integration|bash evals/integration/test_narrative_grounded_envelope.sh"
   "Narrative redaction fail-closed integration|bash evals/integration/test_narrative_redaction_failclosed.sh"
+  "Narrative trust isolation integration|bash evals/integration/test_narrative_trust_isolation.sh"
   "Actor identity resolver integration|bash evals/integration/test_actor_identity.sh"
   "CI-runtime actor identity integration|bash evals/integration/test_ci_actor_identity.sh"
   "Assignment provider local-file integration|bash evals/integration/test_assignment_provider_local_file.sh"
@@ -39,6 +40,7 @@ CHECKS=(
   "Liveness console relay integration|bash evals/integration/test_liveness_console_relay.sh"
   "Console tenant isolation integration|bash evals/integration/test_console_tenant_isolation.sh"
   "Goal Fit hook integration|bash evals/integration/test_goal_fit_hook.sh"
+  "Goal Fit narrative exclusion integration|env -u FLOW_AGENTS_GOAL_FIT_MODE bash evals/integration/test_goal_fit_narrative_exclusion.sh"
   "Hook category behavior integration|bash evals/integration/test_hook_category_behaviors.sh"
   "Workflow steering hook integration|bash evals/integration/test_workflow_steering_hook.sh"
   "Hook influence contract integration|bash evals/integration/test_hook_influence_cases.sh"
@@ -118,6 +120,7 @@ LANE_WORKFLOW_CONTRACTS=(
   "Narrative runtime projection integration"
   "Narrative grounded envelope integration"
   "Narrative redaction fail-closed integration"
+  "Narrative trust isolation integration"
   "Publish-change helper integration"
   "Workflow sidecar writer integration"
   "Sidecar field preservation integration"
@@ -138,6 +141,7 @@ LANE_WORKFLOW_CONTRACTS=(
 
 LANE_RUNTIME_AND_KIT=(
   "Goal Fit hook integration"
+  "Goal Fit narrative exclusion integration"
   "Hook category behavior integration"
   "Workflow steering hook integration"
   "Hook influence contract integration"

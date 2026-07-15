@@ -100,8 +100,37 @@ export const PUBLISH_CHANGE_OPERATION_PROTOCOL = {
   },
 } as const;
 
+export const NARRATIVE_PROMOTE_OPERATION = "narrative.promote" as const;
+
+export const NARRATIVE_PROMOTE_OPERATION_PROTOCOL = {
+  schema_version: "1.0",
+  operation: NARRATIVE_PROMOTE_OPERATION,
+  kind: "provider_capability",
+  capability: NARRATIVE_PROMOTE_OPERATION,
+  parameters: [
+    { name: "narrative_id", required: true, type: "string", max_length: 255 },
+    { name: "envelope_sha256", required: true, type: "string", pattern: "^[a-f0-9]{64}$" },
+  ],
+  result: {
+    required: ["provider", "completion_id", "evidence"],
+    properties: {
+      provider: { type: "string", max_length: 128 },
+      completion_id: { type: "string", max_length: 1_024 },
+      evidence: { type: "object" },
+    },
+    persist_as: "evidence",
+  },
+  availability: {
+    status: "external_capability_required",
+    executable_by_flow_agents: false,
+    direct_write_allowed: false,
+    completion_verification: "authenticated_narrative_provider_required",
+  },
+} as const;
+
 export const PUBLIC_OPERATION_CONTRACTS = {
   [PUBLISH_CHANGE_OPERATION]: PUBLISH_CHANGE_OPERATION_PROTOCOL,
+  [NARRATIVE_PROMOTE_OPERATION]: NARRATIVE_PROMOTE_OPERATION_PROTOCOL,
 } as const;
 
 export const PUBLIC_OPERATION_IDS = new Set<string>(Object.keys(PUBLIC_OPERATION_CONTRACTS));

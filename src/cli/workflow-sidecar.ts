@@ -14,10 +14,12 @@ import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { runObservedCommand } from "../lib/observed-command.js";
 import { captureReviewWorkspaceSnapshot, startBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
+import { NARRATIVE_NAMESPACE_ROOT } from "./narrative-sources.js";
 import {
   EVIDENCE_REF_FIELD_SCHEMAS,
   EVIDENCE_REF_KINDS,
   EVIDENCE_REF_RULES,
+  NARRATIVE_PROMOTE_OPERATION,
   WORKFLOW_ACCEPTANCE_STATUSES,
   WORKFLOW_CRITIQUE_STATUSES,
 } from "./public-contracts.js";
@@ -2519,6 +2521,9 @@ export function validateEvidenceRef(ref: AnyObj, label: string): AnyObj {
   if (ref.summary !== undefined && !hasNonEmptyString(ref.summary)) die(`${label} entry summary must be a non-empty string`);
   if (ref.line_start !== undefined && !hasPositiveInteger(ref.line_start)) die(`${label} entry line_start must be a positive integer`);
   if (ref.line_end !== undefined && !hasPositiveInteger(ref.line_end)) die(`${label} entry line_end must be a positive integer`);
+  rejectNarrativeNamespaceReference(process.cwd(), ref.file, `${label} entry file`);
+  rejectNarrativeNamespaceReference(process.cwd(), ref.url, `${label} entry url`);
+  rejectNarrativeNamespaceReference(process.cwd(), ref.excerpt, `${label} entry excerpt`);
   const rules = EVIDENCE_REF_RULES[ref.kind as keyof typeof EVIDENCE_REF_RULES];
   for (const rule of rules) {
     const present = (field: string): boolean => field === "line_start" || field === "line_end"
@@ -2559,9 +2564,26 @@ function pathIsWithinRoot(candidate: string, root: string): boolean {
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }
 
+export const NARRATIVE_TRUST_ISOLATION_DIAGNOSTIC = "narrative trust isolation (#619): narrative namespace artifacts cannot be used as workflow evidence";
+
+export function isNarrativeNamespacePath(projectRoot: string, resolvedPath: string): boolean {
+  const canonicalRoot = path.resolve(projectRoot, NARRATIVE_NAMESPACE_ROOT);
+  const candidate = path.resolve(projectRoot, resolvedPath);
+  if (pathIsWithinRoot(candidate, canonicalRoot)) return true;
+  const normalized = resolvedPath.replaceAll("\\", "/");
+  return /(?:^|[^A-Za-z0-9._-])\.kontourai(?:\/[^/\s"'`]+)*\/narrative(?:$|[/\s"'`])/.test(normalized);
+}
+
+function rejectNarrativeNamespaceReference(projectRoot: string, value: unknown, label: string): void {
+  if (typeof value === "string" && isNarrativeNamespacePath(projectRoot, value)) {
+    die(`${label}: ${NARRATIVE_TRUST_ISOLATION_DIAGNOSTIC}`);
+  }
+}
+
 function validateLocalEvidenceFile(projectRoot: string, raw: string, label: string): string {
   const candidate = path.resolve(projectRoot, raw);
   if (!pathIsWithinRoot(candidate, projectRoot)) die(`${label} must remain inside the canonical project root`);
+  if (isNarrativeNamespacePath(projectRoot, candidate)) die(`${label}: ${NARRATIVE_TRUST_ISOLATION_DIAGNOSTIC}`);
   let stat: fs.Stats;
   try { stat = fs.lstatSync(candidate); } catch { die(`${label} does not exist`); }
   if (stat.isSymbolicLink() || !stat.isFile()) die(`${label} must be a non-symlink regular file`);
@@ -2576,6 +2598,13 @@ function globMatches(pattern: string, relative: string): boolean {
 
 type GateProducer = { id: string; artifactPatterns: string[]; selfProducedTrustSlices: string[] };
 
+export function rejectOperationBoundExpectation(expectationId: string, operation: string): never {
+  const completion = operation === NARRATIVE_PROMOTE_OPERATION
+    ? "authenticated external narrative provider completion"
+    : "authenticated external ChangeProvider completion";
+  die(`record-gate-claim cannot satisfy operation-bound expectation ${expectationId}; ${operation} requires ${completion}`);
+}
+
 function expectedGateProducer(flowId: string, stepId: string, expectationId: string): GateProducer {
   const manifest = loadJson(path.join(flowAgentsPackageRoot(), "kits", "builder", "kit.json"));
   const actions = Array.isArray(manifest.flow_step_actions) ? manifest.flow_step_actions as AnyObj[] : [];
@@ -2586,7 +2615,7 @@ function expectedGateProducer(flowId: string, stepId: string, expectationId: str
     : undefined;
   if (binding?.interface === "operation") {
     const operation = typeof binding.operation === "string" ? binding.operation : "the declared external operation";
-    die(`record-gate-claim cannot satisfy operation-bound expectation ${expectationId}; ${operation} requires authenticated external ChangeProvider completion`);
+    rejectOperationBoundExpectation(expectationId, operation);
   }
   const skills = Array.isArray(action.skills) ? action.skills.filter((value: unknown): value is string => typeof value === "string") : [];
   const roles = Array.isArray(manifest.skill_roles) ? manifest.skill_roles as AnyObj[] : [];
@@ -2979,6 +3008,13 @@ function reviewTargetArtifacts(dir: string, rawPaths: string[], label: string): 
 }
 
 function reviewTargetArtifactsMatch(dir: string, reviewTarget: unknown): boolean {
+  if (reviewTarget && typeof reviewTarget === "object" && !Array.isArray(reviewTarget)) {
+    const projectRoot = canonicalProjectRootForSession(dir);
+    const artifacts = (reviewTarget as AnyObj).artifacts;
+    if (Array.isArray(artifacts)) {
+      artifacts.forEach((artifact, index) => rejectNarrativeNamespaceReference(projectRoot, artifact?.file, `critique review_target artifact ${index}`));
+    }
+  }
   try {
     if (!reviewTarget || typeof reviewTarget !== "object" || Array.isArray(reviewTarget)) return false;
     const artifacts = (reviewTarget as AnyObj).artifacts;
@@ -3183,9 +3219,9 @@ function surfaceCheckFromArtifact(file: string, index: number): AnyObj {
  * not the first thing an agent reaches for.
  */
 function validateAcceptanceEvidenceRefs(dir: string, p?: ReturnType<typeof parseArgs>): void {
-  if (p?.flags.has("skip-evidence-ref-runnability-guard")) {
+  const skipRunnabilityGuard = p?.flags.has("skip-evidence-ref-runnability-guard") ?? false;
+  if (skipRunnabilityGuard) {
     process.stderr.write("[record-evidence] evidence-ref runnability guard skipped via --skip-evidence-ref-runnability-guard\n");
-    return;
   }
   const file = path.join(dir, "acceptance.json");
   if (!fs.existsSync(file)) return;
@@ -3195,6 +3231,7 @@ function validateAcceptanceEvidenceRefs(dir: string, p?: ReturnType<typeof parse
   data.criteria.forEach((criterion: AnyObj, index: number) => {
     if (criterion.evidence_refs === undefined) return;
     const refs = normalizeEvidenceRefs(criterion.evidence_refs, `acceptance.criteria[${index}].evidence_refs`);
+    if (skipRunnabilityGuard) return;
     // #412 (AC8): a kind:"command" ref's command source (excerpt, falling back to url when that
     // is where the command string lives) must be a literally runnable shell command, not prose
     // describing a manual verification step — reject at RECORD time instead of letting it reach
@@ -3264,8 +3301,17 @@ function requireStampedClaim(claim: AnyObj, dir: string): string {
   }
   return origin;
 }
-function checksFromBundle(dir: string): AnyObj[] {
+
+function loadTrustBundleForTrustMachinery(dir: string): AnyObj {
   const bundle = loadJson(path.join(dir, "trust.bundle"));
+  if (bundle.schema_version === "grounded-execution-narrative/v1" || hasNonEmptyString(bundle.narrative_id)) {
+    die(`trust.bundle in ${dir}: ${NARRATIVE_TRUST_ISOLATION_DIAGNOSTIC}; restore a genuine trust.bundle and keep rendered narratives under ${NARRATIVE_NAMESPACE_ROOT}`);
+  }
+  return bundle;
+}
+
+function checksFromBundle(dir: string): AnyObj[] {
+  const bundle = loadTrustBundleForTrustMachinery(dir);
   const allClaims: AnyObj[] = Array.isArray(bundle.claims) ? bundle.claims : [];
   // Validate stamps on every claim up front — any unstamped claim anywhere in the bundle marks
   // it pre-supersession, regardless of whether it is check/acceptance/critique-typed.
@@ -3487,7 +3533,7 @@ function mergeChecksById(existing: AnyObj[], incoming: AnyObj[]): AnyObj[] {
   return [...byId.values()];
 }
 function critiquesFromBundle(dir: string): AnyObj[] {
-  const bundle = loadJson(path.join(dir, "trust.bundle"));
+  const bundle = loadTrustBundleForTrustMachinery(dir);
   if (!Array.isArray(bundle.claims)) return [];
   for (const c of bundle.claims) requireStampedClaim(c, dir);
   // A claim is a CRITIQUE when its origin is "critique" (authoritative — see requireStampedClaim
@@ -3513,7 +3559,7 @@ function critiquesFromBundle(dir: string): AnyObj[] {
 }
 
 function criteriaFromBundle(dir: string): AnyObj[] {
-  const bundle = loadJson(path.join(dir, "trust.bundle"));
+  const bundle = loadTrustBundleForTrustMachinery(dir);
   if (!Array.isArray(bundle.claims)) return [];
   for (const claim of bundle.claims) requireStampedClaim(claim, dir);
   return bundle.claims
@@ -5620,7 +5666,7 @@ function evidenceClean(dir: string): boolean {
   // legacy (pre-bundle-era) sessions that never wrote a trust.bundle at all — unrelated to origin
   // stamping. When a trust.bundle IS present, every claim must be stamped (requireStampedClaim);
   // there is no claimType-derivation fallback for an unstamped claim (#268/#344).
-  const bundle = loadJson(path.join(dir, "trust.bundle"));
+  const bundle = loadTrustBundleForTrustMachinery(dir);
   if (Array.isArray(bundle.claims)) {
     for (const c of bundle.claims) requireStampedClaim(c, dir);
     const checkClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => c && claimOrigin(c) === "check");
@@ -5639,7 +5685,7 @@ function evidenceClean(dir: string): boolean {
 }
 function critiqueClean(dir: string): boolean {
   // trust.bundle is the sole critique artifact. Legacy critique.json must not influence gates.
-  const bundle = loadJson(path.join(dir, "trust.bundle"));
+  const bundle = loadTrustBundleForTrustMachinery(dir);
   if (Array.isArray(bundle.claims)) {
     for (const c of bundle.claims) requireStampedClaim(c, dir);
     const critiqueClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => {

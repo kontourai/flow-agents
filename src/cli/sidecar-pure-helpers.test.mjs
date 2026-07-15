@@ -13,6 +13,7 @@ import {
   deriveGateCalibration,
   gateAdvisoryFix,
   buildGateInquiryRecords,
+  isNarrativeNamespacePath,
   validateEvidenceRef,
   normalizeEvidenceRefs,
   normalizeCheck,
@@ -124,6 +125,22 @@ test("validateEvidenceRef: rejects bad kind, unsupported field, and incomplete s
   assert.throws(() => validateEvidenceRef({ kind: "nope" }, "refs"), /kind must be one of/);
   assert.throws(() => validateEvidenceRef({ kind: "command", bogus: 1, summary: "s" }, "refs"), /unsupported field/);
   assert.throws(() => validateEvidenceRef({ kind: "source", file: "a.ts" }, "refs"), /source refs require/);
+});
+
+test("narrative namespace paths and free-form references are rejected with the typed #619 diagnostic", () => {
+  const root = "/tmp/project";
+  assert.equal(isNarrativeNamespacePath(root, "/tmp/project/.kontourai/narrative/run/n1/envelope.json"), true);
+  assert.equal(isNarrativeNamespacePath(root, "/tmp/project/.kontourai/flow-agents/run/narrative/legacy.md"), true);
+  assert.equal(isNarrativeNamespacePath(root, "/tmp/project/docs/narrative/design.md"), false);
+  for (const ref of [
+    { kind: "source", file: "src/file.ts", line_start: 1, line_end: 1, excerpt: "see .kontourai/narrative/run/n1/envelope.json" },
+    { kind: "artifact", file: ".kontourai/narrative/run/n1/envelope.json", summary: "rendered narrative" },
+    { kind: "command", excerpt: "cat .kontourai/flow-agents/run/narrative/envelope.md" },
+    { kind: "provider", url: "file:///.kontourai/narrative/run/n1/envelope.json" },
+    { kind: "external", url: "https://example.invalid/.kontourai/narrative/run/n1/envelope.json" },
+  ]) {
+    assert.throws(() => validateEvidenceRef(ref, "refs"), /narrative trust isolation \(#619\)/);
+  }
 });
 
 test("normalizeEvidenceRefs: rejects non-arrays and legacy string refs; passes valid arrays", () => {

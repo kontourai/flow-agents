@@ -17,6 +17,8 @@ import { resolveSource, verifyManifest } from "../narrative/resolver.js";
 import { snapshotNarrative, type NarrativeSourceRoots } from "../narrative/snapshot.js";
 import { parseSourceId } from "../narrative/source-ids.js";
 
+export const NARRATIVE_NAMESPACE_ROOT = path.join(".kontourai", "narrative");
+
 function packageVersion(): string {
   try {
     const packageFile = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../package.json");
@@ -71,9 +73,10 @@ function snapshot(flags: ReturnType<typeof parseArgs>["flags"]): number {
 
   const artifactRoot = explicitArtifactRoot ? path.resolve(explicitArtifactRoot) : flowAgentsArtifactRoot();
   const sessionDir = sessionSlug ? path.join(artifactRoot, sessionSlug) : flagString(flags, "session-root");
+  const projectRoot = sessionSlug ? path.dirname(path.dirname(artifactRoot)) : artifactRoot;
   const narrativeDir = sessionSlug
-    ? path.join(artifactRoot, sessionSlug, "narrative", narrativeId)
-    : path.join(artifactRoot, "narrative", narrativeId);
+    ? path.join(projectRoot, NARRATIVE_NAMESPACE_ROOT, sessionSlug, narrativeId)
+    : path.join(projectRoot, NARRATIVE_NAMESPACE_ROOT, narrativeId);
   const roots: NarrativeSourceRoots = {
     telemetryDir: flagString(flags, "telemetry-root"), sessionDir,
     flowRoot: flagString(flags, "flow-root"), transcriptPath: flagString(flags, "transcript-path"),
