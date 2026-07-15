@@ -262,6 +262,22 @@ export { builderLifecycleAuthorizationPayload, loadBuilderLifecycleAuthorization
 export type { BuilderLifecycleAuthorization } from "./builder-lifecycle-authority.js";
 
 export {
+  CAPABILITIES,
+  RUNTIME_ADAPTER_IDS,
+  RUNTIME_CAPABILITY_DECLARATIONS,
+  RUNTIME_ID_ALIASES,
+  getDeclaration,
+  normalizeRuntimeId,
+  queryCapability,
+} from "./lib/capability-declarations.js";
+export type {
+  Capability,
+  CapabilityStatus,
+  RuntimeAdapterId,
+  RuntimeCapabilityDeclaration,
+} from "./lib/capability-declarations.js";
+
+export {
   defaultArtifactRootForRead,
   defaultCodexHome,
   defaultTelemetryDirForRead,
