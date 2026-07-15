@@ -101,6 +101,36 @@ export function resolveSource(narrativeDir: string, sourceId: string, opts: Reso
   return resolveEntry(root, entry);
 }
 
+/** The frozen-manifest existence + provenance of a source, independent of content availability. */
+export interface FrozenManifestEntry {
+  sourceId: string;
+  /** The source's own frozen `captured_at` — the authoritative at-capture timestamp. */
+  capturedAt: string;
+  status: NarrativeSourceManifestEntry["status"];
+}
+
+/**
+ * Resolve a source's FROZEN MANIFEST ENTRY (existence + authoritative captured_at),
+ * NOT its content. #622 (R1): at-action intent annotation co-binds to the action's
+ * PRESENCE in the frozen manifest and its own captured_at. A source that is present
+ * but content-unavailable (redacted / expired / rotated away) still legitimately
+ * EXISTS and is frozen — only an ABSENT / fabricated ref, an unreadable/malformed
+ * manifest, or a non-unique id yields `undefined` (fail closed).
+ */
+export function resolveManifestEntry(narrativeDir: string, sourceId: string): FrozenManifestEntry | undefined {
+  let root: string;
+  try { root = safeNarrativeDir(narrativeDir); }
+  catch { return undefined; }
+  let manifest: NarrativeSourceManifest | undefined;
+  try { manifest = readManifest(root).manifest; }
+  catch { return undefined; }
+  if (!manifest) return undefined;
+  const matches = manifest.sources.filter((entry) => entry.source_id === sourceId);
+  if (matches.length !== 1) return undefined;
+  const entry = matches[0];
+  return { sourceId, capturedAt: entry.captured_at, status: entry.status };
+}
+
 function resolveEntry(root: string, entry: Extract<NarrativeSourceManifestEntry, { status: "snapshotted" }>): ResolveSourceResult {
   const sourcesDir = path.join(root, "sources");
   const blob = path.join(sourcesDir, entry.sha256);

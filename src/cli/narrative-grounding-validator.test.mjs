@@ -214,6 +214,28 @@ test("AC3: declared dormant summarizer rule rejects a synthetic observed outcome
   assert.equal(isAssertionProhibited("observed", "observed_outcome"), false);
 });
 
+test("#622 (review HIGH R2): the prohibited-assertion scan covers the actor field, not only the proposition", () => {
+  const { narrativeDir, sources } = narrativeDirFor([{ stream: "cmdlog", record: { command: "npm test", result: "fail", exitCode: 1 } }]);
+  // An agent_stated self-report with a benign proposition but an identifier-shaped
+  // actor that smuggles a prohibited-assertion keyword ("authoritative" -> authority).
+  // The proposition-only scan would have missed it; the actor-inclusive scan must fire.
+  const smuggled = statement({
+    id: "actor-smuggle",
+    class: "agent_stated",
+    self_report: true,
+    actor: "authoritative",
+    proposition: "Agent stated the purpose of this action is to prepare the release notes",
+    source_refs: [sources[0].source_id],
+  });
+  const verdict = validateNarrativeGrounding(envelope([smuggled]), narrativeDir);
+  assert.ok(codes(verdict).includes("prohibited_assertion"), "actor-smuggled authority keyword must be rejected");
+  // Mutation-guard: the same statement with a clean identifier-shaped actor is NOT
+  // rejected for a prohibited assertion (proves the test fails if the scan reverts to
+  // proposition-only and stops seeing the actor at all).
+  const clean = validateNarrativeGrounding(envelope([{ ...smuggled, id: "actor-clean", actor: "claude-code" }]), narrativeDir);
+  assert.equal(codes(clean).includes("prohibited_assertion"), false, "a clean actor must not trip the prohibited-assertion scan");
+});
+
 test("#614 D3: a summarizer_inferred statement citing a real atomic statement's refs is accepted", () => {
   const { narrativeDir, sources } = narrativeDirFor([{ stream: "cmdlog", record: { command: "npm test", result: "fail", exitCode: 1 } }]);
   const atomic = statement({

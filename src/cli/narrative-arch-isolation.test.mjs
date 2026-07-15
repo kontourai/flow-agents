@@ -137,6 +137,22 @@ test("Flow evidence matching rejects narrative-shaped entries", () => {
       status: "passed",
       original_path: ".kontourai/narrative/run-619/narrative-1/envelopes/rendered.md",
     },
+    {
+      // #622 (D4/R3/AC4): an at-action agent_stated intent annotation is a typed
+      // self-report and can NEVER be cited as gate evidence — a narrative-kind
+      // entry referencing its write-once channel must not satisfy a trust.bundle.
+      id: "intent-annotation",
+      kind: "file",
+      requested_kind: "file",
+      status: "passed",
+      original_path: ".kontourai/narrative/run-622/narrative-1/intent-annotation.json",
+    },
+    {
+      id: "intent-annotation-narrative",
+      kind: "narrative",
+      requested_kind: "narrative",
+      status: "passed",
+    },
   ];
 
   for (const entry of narrativeEntries) {

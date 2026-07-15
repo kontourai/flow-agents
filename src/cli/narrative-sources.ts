@@ -2,14 +2,22 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { atomicWriteFile } from "../lib/fs.js";
+import { atomicWriteFile, ensureSafeDirectory } from "../lib/fs.js";
 import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { flowAgentsArtifactRoot } from "../lib/local-artifact-root.js";
+import { queryCapability, type CapabilityStatus } from "../lib/capability-declarations.js";
 import {
   composeGroundedNarrative,
   validateGroundedNarrative,
   writeEnvelope,
 } from "../narrative/envelope.js";
+import { bindIntentAnnotation, captureIntent } from "../narrative/intent.js";
+import {
+  appendIntentEconomics,
+  readIntentEconomics,
+  reduceIntentEconomics,
+  type IntentAnnotationMode,
+} from "../narrative/intent-economics.js";
 import {
   NarrativeGroundingError,
   validateNarrativeGrounding,
@@ -17,7 +25,7 @@ import {
 import type { CaptureCompleteness } from "../narrative/integrity.js";
 import { effectiveNarrativeRedactionFields } from "../narrative/policy-filter.js";
 import { projectRuntimeNarrative, stableStringify, validateNarrativeRuntimeProjection } from "../narrative/projection.js";
-import { resolveSource, verifyManifest } from "../narrative/resolver.js";
+import { resolveManifestEntry, resolveSource, verifyManifest } from "../narrative/resolver.js";
 import { snapshotNarrative, type NarrativeSourceRoots } from "../narrative/snapshot.js";
 import { parseSourceId } from "../narrative/source-ids.js";
 
@@ -48,7 +56,18 @@ project:
 compose:
   --narrative-dir PATH --compiled-at DATE-TIME (--out-dir DIR | --json) [--render]
 verify:
-  --narrative-dir PATH --json`);
+  --narrative-dir PATH --json
+capture-intent:
+  --narrative-dir PATH --runtime ID --actor ID --action-ref FA1 --active-gate-ref FA1
+  [--purpose TEXT] [--objective-ref FA1] [--redact-fields FIELD,...]
+  [--capability-fixture supported|unsupported]  (fixture-only: inject a resolved
+                                 CapabilityStatus; default resolves via the
+                                 runtime's intent_annotation declaration)
+intent-economics:
+  --narrative-dir PATH
+  (--record --mode annotation_on|annotation_off --input-tokens N --output-tokens N
+     --wall-clock-ms N [--attempted-at DATE-TIME]
+   | --report)`);
 }
 
 function required(flags: ReturnType<typeof parseArgs>["flags"], name: string): string {
@@ -168,6 +187,75 @@ function composeNarrative(flags: ReturnType<typeof parseArgs>["flags"]): number 
   return 0;
 }
 
+function captureIntentVerb(flags: ReturnType<typeof parseArgs>["flags"]): number {
+  const narrativeDir = path.resolve(required(flags, "narrative-dir"));
+  const runtime = required(flags, "runtime");
+  const actor = required(flags, "actor");
+  const actionRef = required(flags, "action-ref");
+  const activeGateRef = required(flags, "active-gate-ref");
+  const purpose = flagString(flags, "purpose");
+  const objectiveRef = flagString(flags, "objective-ref");
+  const narrativeFields = (flagString(flags, "redact-fields") ?? "").split(",").map((field) => field.trim()).filter(Boolean);
+  const redactionFields = effectiveNarrativeRedactionFields(narrativeFields);
+
+  // The capability is caller-resolved. By default it comes from the runtime's
+  // programmatic declaration (queryCapability, #620); --capability-fixture lets a
+  // FIXTURE inject a resolved status directly (D2) — no real runtime feeds
+  // at-action annotations yet, so the supported path is exercised via a fixture.
+  const fixture = flagString(flags, "capability-fixture");
+  let capability: CapabilityStatus;
+  if (fixture === "supported") capability = { status: "supported" };
+  else if (fixture === "unsupported") capability = { status: "unsupported", reason: "fixture-injected unsupported status" };
+  else if (fixture !== undefined) throw new Error("--capability-fixture must be 'supported' or 'unsupported'");
+  else capability = queryCapability(runtime, "intent_annotation");
+
+  ensureSafeDirectory(narrativeDir, narrativeDir);
+  // R1 (review HIGH): the action ref is co-bound to the frozen narrative manifest.
+  // captureIntent resolves it to its frozen manifest entry (existence + the action's
+  // own captured_at); a fabricated/nonexistent action ref is rejected (throws) before
+  // any annotation is written, and the annotation's captured_at derives from the
+  // resolved action entry rather than bind-time wall-clock.
+  const captured = captureIntent({
+    capability, actor, runtimeId: runtime, actionRef, activeGateRef, redactionFields,
+    ...(purpose !== undefined ? { purpose } : {}),
+    ...(objectiveRef !== undefined ? { objectiveRef } : {}),
+  }, { resolveAction: (ref) => resolveManifestEntry(narrativeDir, ref) });
+  const { path: annotationPath, annotation } = bindIntentAnnotation(narrativeDir, captured);
+  console.error(`captured ${annotation.mode} intent annotation at ${annotationPath}`);
+  console.log(JSON.stringify(annotation));
+  return 0;
+}
+
+function intentEconomicsVerb(flags: ReturnType<typeof parseArgs>["flags"]): number {
+  const narrativeDir = path.resolve(required(flags, "narrative-dir"));
+  const report = flagBool(flags, "report");
+  const record = flagBool(flags, "record");
+  if (report === record) throw new Error("exactly one of --record or --report is required");
+  if (report) {
+    const summary = reduceIntentEconomics(readIntentEconomics(narrativeDir));
+    console.log(JSON.stringify(summary));
+    return 0;
+  }
+  const mode = flagString(flags, "mode");
+  if (mode !== "annotation_on" && mode !== "annotation_off") throw new Error("--mode must be annotation_on or annotation_off");
+  const number = (name: string): number => {
+    const raw = required(flags, name);
+    const value = Number(raw);
+    if (!Number.isFinite(value)) throw new Error(`--${name} must be a number`);
+    return value;
+  };
+  ensureSafeDirectory(narrativeDir, narrativeDir);
+  appendIntentEconomics(narrativeDir, {
+    mode: mode as IntentAnnotationMode,
+    input_tokens: number("input-tokens"),
+    output_tokens: number("output-tokens"),
+    wall_clock_ms: number("wall-clock-ms"),
+    attempted_at: flagString(flags, "attempted-at") ?? new Date().toISOString(),
+  });
+  console.error(`recorded ${mode} intent-economics sample`);
+  return 0;
+}
+
 export function main(argv: string[] = process.argv.slice(2)): number {
   const args = parseArgs(argv);
   const verb = args.positionals[0];
@@ -177,6 +265,8 @@ export function main(argv: string[] = process.argv.slice(2)): number {
     if (verb === "project") return projectNarrative(args.flags);
     if (verb === "compose") return composeNarrative(args.flags);
     if (verb === "verify") return verify(args.flags);
+    if (verb === "capture-intent") return captureIntentVerb(args.flags);
+    if (verb === "intent-economics") return intentEconomicsVerb(args.flags);
     usage();
     return 64;
   } catch (error) {
