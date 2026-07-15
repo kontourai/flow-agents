@@ -45,7 +45,7 @@ cat >"$FLOW_ROOT/runs/run-1/state.json" <<'JSON'
 {"run_id":"run-1","status":"executing","current_step":"execute"}
 JSON
 cat >"$NARRATIVE/envelopes/envelope.json" <<'JSON'
-{"schema_version":"grounded-execution-narrative/v1","narrative_id":"narrative-1","sections":[],"conclusions":[]}
+{"schema_version":"grounded-execution-narrative/v1","narrative_id":"narrative-1","content_canary":"NARRATIVE_CONTENT_MUST_NOT_ENTER_TRUST_BUNDLE","sections":[],"conclusions":[]}
 JSON
 cat >"$NARRATIVE/envelopes/rendered.md" <<'MARKDOWN'
 # Grounded Execution Narrative
@@ -175,12 +175,45 @@ for (const ref of aliases) {
   try { api.validateEvidenceRef(ref,'AC5 alias',root); process.exit(3); }
   catch (error) { if (!/narrative trust isolation \(#619\)/.test(String(error.message))) process.exit(4); }
 }
+for (const check of [
+  {id:'standard-ref',kind:'test',status:'pass',summary:'must reject',standard_refs:[{standard:'junit',ref:'.kontourai/narrative/run/n1/envelope.json'}]},
+  {id:'surface-ref',kind:'policy',status:'pass',summary:'must reject',surface_trust_refs:[{artifact_kind:'trust.bundle',artifact_ref:'.kontourai/narrative/run/n1/envelope.json',claim_status:'accepted',freshness:{status:'fresh'},authority:{producer:'surface-local'},integrity:{status:'matched'},status:'pass',summary:'accepted'}]},
+]) {
+  try { api.normalizeCheck(check,false,undefined,root); process.exit(5); }
+  catch (error) { if (!/narrative trust isolation \(#619\)/.test(String(error.message))) process.exit(6); }
+}
 api.validateEvidenceRef({kind:'source',file:'src/narrative/source-only.ts',line_start:1,line_end:1,excerpt:'source code'},'positive source',root);
 NODE
 then
-  pass "AC5: 15 kind/form refs plus case, percent, symlink, hardlink, and relocation reject; source code remains valid"
+  pass "AC5: all evidence forms, aliases, standard refs, and surface refs reject; source code remains valid"
 else
   fail "AC5: a narrative evidence-reference channel was not rejected"
+fi
+
+if node "$ROOT/build/src/cli/workflow-sidecar.js" record-evidence "$SESSION" --verdict pass \
+  --check-json '{"id":"standard-ref","kind":"test","status":"pass","summary":"must reject","standard_refs":[{"standard":"junit","ref":".kontourai/narrative/run/n1/envelope.json"}]}' \
+  >"$TMP/residual-standard.out" 2>"$TMP/residual-standard.err"; then
+  fail "residual 2: writer accepted narrative standard_refs[].ref"
+elif ! rg -q 'narrative trust isolation \(#619\)' "$TMP/residual-standard.err"; then
+  fail "residual 2: standard_refs rejection omitted typed diagnostic"
+elif node "$ROOT/build/src/cli/workflow-sidecar.js" record-evidence "$SESSION" --verdict pass \
+  --check-json '{"id":"surface-ref","kind":"policy","status":"pass","summary":"must reject","surface_trust_refs":[{"artifact_kind":"trust.bundle","artifact_ref":".kontourai/narrative/run/n1/envelope.json","claim_status":"accepted","freshness":{"status":"fresh"},"authority":{"producer":"surface-local"},"integrity":{"status":"matched"},"status":"pass","summary":"accepted"}]}' \
+  >"$TMP/residual-surface.out" 2>"$TMP/residual-surface.err"; then
+  fail "residual 2: writer accepted narrative surface_trust_refs[].artifact_ref"
+elif rg -q 'narrative trust isolation \(#619\)' "$TMP/residual-surface.err"; then
+  pass "residual 2: writer rejects standard and surface trust reference channels with typed diagnostics"
+else
+  fail "residual 2: surface trust ref rejection omitted typed diagnostic"
+fi
+
+if node "$ROOT/build/src/cli/workflow-sidecar.js" record-check "$SESSION" \
+  --command 'cd .kontourai && test -f narrative/isolation-fixture/narrative-1/envelopes/envelope.json' \
+  >"$TMP/h2-composed.out" 2>"$TMP/h2-composed.err"; then
+  fail "H2: record-check accepted the tractable cd-plus-relative narrative command"
+elif rg -q 'narrative trust isolation \(#619\)' "$TMP/h2-composed.err"; then
+  pass "H2: writer refuses cd into .kontourai followed by a relative narrative path"
+else
+  fail "H2: composed-command rejection omitted typed diagnostic"
 fi
 
 # H2: direct writer commands and both stop-hook command sources refuse raw and indirect narrative paths.
@@ -203,6 +236,7 @@ const commands=[
   'bash evidence/narrative-symlink.sh',
   'cat evidence/hardlink-output.json',
   'cat evidence/relocated-output.json',
+  'cd .kontourai && test -f narrative/isolation-fixture/narrative-1/envelopes/envelope.json',
 ];
 for (const command of commands) {
   const model=hook.resolveTrustedCommand(root,dir,{id:'probe',command},{criteria:[]});
@@ -216,6 +250,29 @@ then
   pass "H2: stop hook refuses normal/RECHECK command aliases and relocated narrative content"
 else
   fail "H2: a stop-hook trusted-command source accepted narrative content"
+fi
+
+# Residual compensation: arbitrary shell variables are statically undecidable, but command
+# evidence must never materialize the referenced narrative bytes into trust.bundle.
+VARIABLE_SESSION="$ARTIFACT_ROOT/variable-composition"
+mkdir -p "$VARIABLE_SESSION"
+cp "$SESSION/trust.bundle" "$VARIABLE_SESSION/trust.bundle"
+variable_command='base=.kontourai; test -f "$base/narrative/isolation-fixture/narrative-1/envelopes/envelope.json"'
+if node "$ROOT/build/src/cli/workflow-sidecar.js" record-check "$VARIABLE_SESSION" --command "$variable_command" \
+  >"$TMP/h2-variable.out" 2>"$TMP/h2-variable.err" \
+  && node - "$VARIABLE_SESSION/trust.bundle" "$variable_command" <<'NODE'
+const fs=require('fs');
+const bundle=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+const command=process.argv[3];
+const serialized=JSON.stringify(bundle);
+if (serialized.includes('NARRATIVE_CONTENT_MUST_NOT_ENTER_TRUST_BUNDLE')) process.exit(1);
+if (serialized.includes('grounded-execution-narrative/v1')) process.exit(2);
+if (!bundle.evidence.some(entry => entry?.execution?.label === command && entry.execution.isError === false)) process.exit(3);
+NODE
+then
+  pass "H2 residual control: variable-composed command records execution only; narrative content bytes never enter trust.bundle"
+else
+  fail "H2 residual control: variable-composed command imported content or failed to record safely: $(tail -n 3 "$TMP/h2-variable.err")"
 fi
 
 GATE_SESSION="$ARTIFACT_ROOT/gate-command"

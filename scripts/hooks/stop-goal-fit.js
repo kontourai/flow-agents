@@ -1065,8 +1065,28 @@ function isNarrativeArtifactContent(bytes) {
 }
 
 function referencesNarrativeNamespace(root, command) {
+  // Static scanning cannot resolve arbitrary runtime shell composition such as
+  // `base=.kontourai; test -f "$base/narrative/..."`. The compensating control
+  // is that command evidence persists only the command, exit status, and an
+  // observed-output digest; it never materializes referenced file bytes. Every
+  // channel that does materialize files is independently content-shape guarded.
   const decoded = decodeNarrativeReference(command).replaceAll('\\', '/');
+  const foldedCommand = decoded.toLowerCase();
+  if (foldedCommand.includes('.kontourai/narrative')) return true;
   if (/(?:^|[^A-Za-z0-9._-])\.kontourai(?:\/[^/\s"'`]+)*\/narrative(?:$|[/\s"'`])/.test(decoded.toLowerCase())) return true;
+
+  // A relative narrative path becomes namespace-bearing after a shell `cd`.
+  // Resolve the directory operand, then inspect only the subsequent command.
+  for (const match of decoded.matchAll(/(?:^|[;&|]\s*)cd\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))\s*&&([\s\S]*?)(?=(?:[;&|]\s*cd\s+)|$)/gi)) {
+    const cdTarget = match[1] || match[2] || match[3];
+    const canonicalTarget = realpathWithExistingPrefix(path.isAbsolute(cdTarget) ? cdTarget : path.resolve(root, cdTarget));
+    const foldedTarget = canonicalTarget.replaceAll('\\', '/').toLowerCase();
+    const inKontouraiTree = foldedTarget.endsWith('/.kontourai') || foldedTarget.includes('/.kontourai/');
+    if (!inKontouraiTree) continue;
+    const subsequentTokens = match[4].split(/[\s"'`;|&<>]+/).filter(Boolean);
+    if (subsequentTokens.some(token => /(?:^|\/)narrative\//i.test(token.replaceAll('\\', '/')))) return true;
+  }
+
   const matches = [...decoded.matchAll(/(?:file:\/\/[^\s"'`;&|<>]+|(?:\.{0,2}\/|\/)[^\s"'`;&|<>]+|[^\s"'`;&|<>]+\/[^\s"'`;&|<>]+)/g)].map(match => match[0]);
   const tokens = [decoded, ...matches];
   const canonicalNamespace = realpathWithExistingPrefix(path.join(root, '.kontourai', 'narrative')).toLowerCase();

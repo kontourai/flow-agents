@@ -187,9 +187,38 @@ test("narrative isolation canonicalizes aliases and rejects narrative content in
       "test -f .KONTOURAI/NARRATIVE/run/n1/envelope.json",
       "test -f .kontourai%2Fnarrative%2Frun%2Fn1%2Fenvelope.json",
       "bash evidence/narrative-symlink.sh",
+      "cd .kontourai && test -f narrative/run/n1/envelope.json",
     ]) {
       assert.throws(() => normalizeCheck({ id: "n", kind: "command", status: "pass", summary: "n", command }, false, undefined, root), /narrative trust isolation \(#619\)/);
     }
+    assert.doesNotThrow(() => normalizeCheck({
+      id: "variable-composition", kind: "command", status: "pass", summary: "static scanner residual",
+      command: 'base=.kontourai; test -f "$base/narrative/run/n1/envelope.json"',
+    }, false, undefined, root));
+    assert.throws(() => normalizeCheck({
+      id: "standard-ref", kind: "test", status: "pass", summary: "must reject",
+      standard_refs: [{ standard: "junit", ref: ".kontourai/narrative/run/n1/envelope.json" }],
+    }, false, undefined, root), /narrative trust isolation \(#619\)/);
+    assert.throws(() => normalizeCheck({
+      id: "surface-ref", kind: "policy", status: "pass", summary: "must reject",
+      surface_trust_refs: [{
+        artifact_kind: "trust.bundle", artifact_ref: ".kontourai/narrative/run/n1/envelope.json",
+        claim_status: "accepted", freshness: { status: "fresh" }, authority: { producer: "surface-local" },
+        integrity: { status: "matched" }, status: "pass", summary: "accepted",
+      }],
+    }, false, undefined, root), /narrative trust isolation \(#619\)/);
+    assert.throws(() => normalizeCheck({
+      id: "standard-content", kind: "test", status: "pass", summary: "must reject",
+      standard_refs: [{ standard: "junit", ref: hardlink }],
+    }, false, undefined, root), /narrative trust isolation \(#619\)/);
+    assert.throws(() => normalizeCheck({
+      id: "surface-content", kind: "policy", status: "pass", summary: "must reject",
+      surface_trust_refs: [{
+        artifact_kind: "trust.bundle", artifact_ref: relocated, claim_status: "accepted",
+        freshness: { status: "fresh" }, authority: { producer: "surface-local" },
+        integrity: { status: "matched" }, status: "pass", summary: "accepted",
+      }],
+    }, false, undefined, root), /narrative trust isolation \(#619\)/);
     assert.throws(() => normalizeFinding({ file_refs: [hardlink] }, root), /narrative trust isolation \(#619\)/);
     assert.throws(() => normalizeLearning({ source_refs: [relocated], facts: [], routing: [], outcome: "unknown", correction: { needed: false, evidence: "none" } }, "2026-07-14T00:00:00.000Z", root), /narrative trust isolation \(#619\)/);
   } finally {

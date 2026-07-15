@@ -2626,6 +2626,34 @@ function localPathTokens(value: string): string[] {
   return tokens.map((token) => token.replace(/^[([{<]+/, "").replace(/[\])}>;,]+$/, ""));
 }
 
+function referencesComposedNarrativePath(projectRoot: string, value: string): boolean {
+  const decoded = decodeNarrativeReference(value);
+  const folded = decoded.replaceAll("\\", "/").toLowerCase();
+  if (folded.includes(".kontourai/narrative")) return true;
+
+  // Static shell inspection cannot decide arbitrary runtime variable composition such as
+  // `base=.kontourai; test -f "$base/narrative/..."`. The compensating invariant is that a
+  // command check persists only its command plus exit/observed-output digest; it never reads file
+  // bytes into trust.bundle. Every channel that DOES materialize a file is independently guarded
+  // by canonical path and narrative content shape. Keep that invariant covered end-to-end.
+  const cdPattern = /(?:^|[;&|]\s*)cd\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))\s*&&([\s\S]*)/gi;
+  for (const match of decoded.matchAll(cdPattern)) {
+    const cdTarget = match[1] ?? match[2] ?? match[3] ?? "";
+    const remainder = (match[4] ?? "").replaceAll("\\", "/").toLowerCase();
+    if (!/(?:^|[^a-z0-9._-])narrative\//.test(remainder)) continue;
+    const canonicalTarget = realpathWithExistingPrefix(path.resolve(projectRoot, decodeNarrativeReference(cdTarget)))
+      .replaceAll("\\", "/")
+      .toLowerCase();
+    const canonicalKontourai = realpathWithExistingPrefix(path.resolve(projectRoot, ".kontourai"))
+      .replaceAll("\\", "/")
+      .toLowerCase();
+    if (canonicalTarget === canonicalKontourai
+      || canonicalTarget.startsWith(`${canonicalKontourai}/`)
+      || /(?:^|\/)\.kontourai(?:\/|$)/.test(canonicalTarget)) return true;
+  }
+  return false;
+}
+
 function narrativeCandidateFile(projectRoot: string, raw: string): string | null {
   let decoded = decodeNarrativeReference(raw);
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(decoded)) {
@@ -2643,6 +2671,7 @@ function narrativeCandidateFile(projectRoot: string, raw: string): string | null
 function rejectNarrativeReference(projectRoot: string, value: unknown, label: string): void {
   if (typeof value !== "string") return;
   const decoded = decodeNarrativeReference(value);
+  if (referencesComposedNarrativePath(projectRoot, decoded)) die(`${label}: ${NARRATIVE_TRUST_ISOLATION_DIAGNOSTIC}`);
   const candidates = [decoded, ...localPathTokens(decoded)];
   for (const candidate of new Set(candidates)) {
     if (isNarrativeNamespacePath(projectRoot, candidate)) die(`${label}: ${NARRATIVE_TRUST_ISOLATION_DIAGNOSTIC}`);
@@ -3165,12 +3194,15 @@ export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false, existi
   if (!checkStatuses.has(check.status)) die("status must be one of: pass, fail, not_verified, skip");
   rejectNarrativeReference(projectRoot, check.command, `check ${String(check.id)} command`);
   validateRunnableCheckCommand(check, `check ${String(check.id)}`);
-  if (Array.isArray(check.standard_refs)) for (const ref of check.standard_refs) if (!["junit", "sarif", "coverage", "veritas"].includes(ref.standard)) die("standard must be one of");
+  if (Array.isArray(check.standard_refs)) for (const ref of check.standard_refs) {
+    if (!["junit", "sarif", "coverage", "veritas"].includes(ref.standard)) die("standard must be one of");
+    rejectNarrativeReference(projectRoot, ref.ref, `check ${String(check.id)} standard_ref`);
+  }
   if (check.artifact_refs) check.artifact_refs = normalizeEvidenceRefs(check.artifact_refs, "artifact_refs", projectRoot);
-  if (check.surface_trust_refs) check.surface_trust_refs = normalizeSurfaceRefs(check.surface_trust_refs);
+  if (check.surface_trust_refs) check.surface_trust_refs = normalizeSurfaceRefs(check.surface_trust_refs, projectRoot);
   return check;
 }
-function normalizeSurfaceRefs(refs: any): AnyObj[] {
+function normalizeSurfaceRefs(refs: any, projectRoot: string): AnyObj[] {
   if (!Array.isArray(refs)) die("surface_trust_refs must be an array");
   // Use the cached @kontourai/surface module for advisory inline validation of referenced
   // trust.bundle files. Fail-open when surface is not yet loaded (surface loads on first
@@ -3180,6 +3212,7 @@ function normalizeSurfaceRefs(refs: any): AnyObj[] {
     const keys = JSON.stringify(ref).match(/"([^"]+)":/g) ?? [];
     for (const key of keys.map((k) => k.slice(1, -2))) if (key.toLowerCase().includes("veritas")) die(`unsupported field in Surface trust ref: ${key}`);
     const out = { ...ref };
+    rejectNarrativeReference(projectRoot, out.artifact_ref, "surface trust artifact_ref");
     // trust.bundle is the canonical Hachure-aligned artifact kind; TrustReport/Trust Snapshot are legacy aliases
     if (!["trust.bundle", "TrustReport", "Trust Snapshot"].includes(out.artifact_kind)) die("artifact_kind must be one of: trust.bundle, TrustReport, Trust Snapshot");
     // When surface is loaded, validate the referenced trust artifact if it is a local file.
