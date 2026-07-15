@@ -66,6 +66,54 @@ export function builderLifecycleAuthorizationPayload(value: Omit<BuilderLifecycl
   return JSON.stringify(value);
 }
 
+/**
+ * Build the canonical UNSIGNED authorization for a lifecycle operation, plus the
+ * exact bytes an operator must sign (#659 Slice C — "friendly cancel").
+ *
+ * The whole point is signing-payload parity: `verifyAuthorizationSignature`
+ * recomputes the signed bytes from the *loaded* authorization, after normalizing
+ * `assignment_actor`/`request` through `validateActor`/`validateRequest` and
+ * re-assembling the top-level keys in a fixed order. So we build the unsigned
+ * object here through the *same* validators and the *same* key order, and derive
+ * `signingPayload` from it — guaranteeing that a signature produced over
+ * `signingPayload` will verify. (The validators are idempotent, so re-running
+ * them on this already-canonical object at load time yields identical bytes.)
+ */
+export function buildUnsignedLifecycleAuthorization(fields: {
+  operation: AuthorizedBuilderLifecycleOperation;
+  run_id: string;
+  subject: string;
+  assignment_actor_key: string;
+  assignment_actor: unknown;
+  nonce: string;
+  expires_at: string;
+  request: unknown;
+}): { unsigned: Omit<BuilderLifecycleAuthorization, "signature">; signingPayload: string } {
+  boundedText(fields.run_id, "run_id", 256);
+  boundedText(fields.subject, "subject", 2048);
+  boundedText(fields.assignment_actor_key, "assignment_actor_key", 256);
+  boundedText(fields.nonce, "nonce", 256);
+  const assignment_actor = validateActor(fields.assignment_actor);
+  const request = validateRequest(fields.request);
+  const expiresAt = dateTime(fields.expires_at, "expires_at");
+  const requestedAt = Date.parse(request.authority.requested_at);
+  if (expiresAt < requestedAt) {
+    throw new Error("lifecycle authorization expires_at must not precede request.authority.requested_at");
+  }
+  const unsigned = {
+    schema_version: "1.0",
+    operation: fields.operation,
+    run_id: fields.run_id,
+    subject: fields.subject,
+    assignment_actor_key: fields.assignment_actor_key,
+    assignment_actor,
+    nonce: fields.nonce,
+    expires_at: fields.expires_at,
+    request,
+  } satisfies Omit<BuilderLifecycleAuthorization, "signature">;
+  return { unsigned, signingPayload: builderLifecycleAuthorizationPayload(unsigned) };
+}
+
 export function assertAuthorizationUnused(artifactRoot: string, authorization: BuilderLifecycleAuthorization): void {
   if (!readAuthorizationConsumption(artifactRoot, authorization)) return;
   throw new Error("lifecycle authorization nonce has already been consumed");

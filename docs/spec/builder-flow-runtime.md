@@ -325,6 +325,7 @@ Flow issue #118.
 ```text
 flow-agents builder-run pause --session-dir <dir> --reason <text>
 flow-agents builder-run resume --session-dir <dir> --reason <text>
+flow-agents builder-run cancel-request --session-dir <dir> [--out <file>] [--reason <text>] [--actor <name>] [--expires-in-hours <n>]
 flow-agents builder-run cancel --session-dir <dir> --authorization-file <record.json>
 flow-agents builder-run release-assignment --session-dir <dir> --reason <text>
 flow-agents builder-run archive --session-dir <dir> --authorization-file <record.json>
@@ -337,3 +338,13 @@ assignment while holding the same lock; a successfully consumed cancellation non
 replayed. Archive accepts only completed or canceled runs, moves the session under
 `.kontourai/flow-agents/archive/<slug>/`, and retains the canonical Flow run. None of these
 operations deletes a branch or worktree; cleanup requires a separate provider-aware action.
+
+`cancel-request` is a **read-only convenience** that removes the friction of hand-assembling a
+cancellation record: it mints the *unsigned* authorization for the run (correct `run_id`,
+`subject`, active `assignment_actor`, a fresh `nonce` and expiry) and prints the exact
+`signing_payload` bytes to sign. It does not sign, cancel, or mutate anything — the operator signs
+the payload with their Ed25519 lifecycle-authority key, adds the `signature` block to the emitted
+file, and runs `cancel --authorization-file` as above. The signing payload is produced through the
+same actor/request normalization the verifier applies, so a signature over it verifies by
+construction. Like `cancel`, it requires an active assignment holder; an active run whose
+assignment has already been released cannot be authorized this way without re-claiming it first.
