@@ -146,10 +146,30 @@ function firstString(...values: unknown[]): string | undefined {
   return undefined;
 }
 
-function commandFrom(record: Record<string, unknown>): string | undefined {
-  const tool = nested(record, "tool");
-  const input = tool?.["input"];
-  return firstString(record["command"], tool?.["command"], object(input)?.["command"], input);
+function eventType(record: Record<string, unknown>): string | undefined {
+  return firstString(record["event_type"], record["kind"]);
+}
+
+function toolName(record: Record<string, unknown>, event: string): string {
+  return firstString(nested(record, "tool")?.["name"], record["tool_name"], record["toolName"])
+    ?? (event.startsWith("session.") ? "session" : event === "turn.user" ? "turn" : "runtime");
+}
+
+// #623: the validator's material-event derivation must observe commands through the
+// SAME extraction projection.ts uses, or a real command failure emitted by projection
+// would have no derived event and could be omitted from a narrative undetected. This
+// mirrors projection.ts:commandFrom(record, tool) exactly — including the tool-gated
+// bare-input fallback — for telemetry-stream commands. Cmdlog commands use
+// record["command"] directly, matching projection.ts's cmdlog reader.
+function commandFrom(record: Record<string, unknown>, tool: string): string | undefined {
+  const toolRecord = nested(record, "tool");
+  const input = toolRecord?.["input"];
+  return firstString(
+    record["command"],
+    toolRecord?.["command"],
+    object(input)?.["command"],
+    /(?:shell|bash|command|exec)/i.test(tool) ? input : undefined,
+  );
 }
 
 function exitCodeFrom(record: Record<string, unknown>): number | null {
@@ -164,10 +184,15 @@ function exitCodeFrom(record: Record<string, unknown>): number | null {
     ?? null;
 }
 
+// Mirrors projection.ts:observedResultFrom's fail determination (including the
+// tool.status textual fallback) so the derived material event agrees with the
+// observed statement projection would emit.
 function isFailure(record: Record<string, unknown>): boolean {
   const exitCode = exitCodeFrom(record);
   if (exitCode !== null) return exitCode !== 0;
-  return /^(?:fail|failed|failure|error)$/i.test(firstString(record["result"], record["status"], record["outcome"]) ?? "");
+  return /^(?:fail|failed|failure|error)$/i.test(
+    firstString(record["result"], record["status"], record["outcome"], nested(record, "tool")?.["status"]) ?? "",
+  );
 }
 
 function carriesTimeout(record: Record<string, unknown>): boolean {
@@ -241,6 +266,14 @@ function citationViolations(
   return violations;
 }
 
+// #623 (review MEDIUM): this keyword heuristic is a BEST-EFFORT deterministic backstop,
+// not a security boundary. It reliably classifies the fixed-form propositions that today's
+// two deterministic classes emit (observed/deterministic_derived constructors). It is NOT a
+// robust check against free-form model prose — once summarizer_inferred prose ships, a
+// paraphrase ("did not succeed", "broke") evades these patterns. The authoritative check for
+// model prose is the model-entailment layer (R2/R3), which #614 activates; the prohibited-
+// assertion engine here is the dormant-class scaffolding, and #614/#622 must not treat this
+// regex as sufficient enforcement on its own.
 function assertionKinds(proposition: string): AssertionKind[] {
   const kinds: AssertionKind[] = [];
   if (/\bgate\b.*\b(?:pass|fail|accept|reject)(?:ed)?\b/i.test(proposition)) kinds.push("gate_status");
@@ -290,18 +323,21 @@ function epistemicViolations(statements: readonly Statement[]): GroundingViolati
 
 function deriveMaterialEvents(manifest: NarrativeSourceManifest, resolved: readonly ResolvedRecord[]): MaterialEvent[] {
   const events: MaterialEvent[] = [];
+  const commandFailureEvent = (entry: ResolvedRecord, command: string): MaterialEvent => {
+    const exitCode = exitCodeFrom(entry.record!);
+    return {
+      kind: "command_failure",
+      sourceRef: entry.sourceId,
+      sourceRefs: [entry.sourceId],
+      expectedProposition: `Command \`${command}\` was observed to fail (exit ${exitCode === null ? "unknown" : String(exitCode)})`,
+    };
+  };
+
+  // Cmdlog stream: projection.ts reads record["command"] directly for cmdlog entries.
   const cmdlog = resolved.filter((entry) => entry.stream === "cmdlog" && entry.record);
   for (const entry of cmdlog) {
-    const command = commandFrom(entry.record!);
-    if (isFailure(entry.record!) && command) {
-      const exitCode = exitCodeFrom(entry.record!);
-      events.push({
-        kind: "command_failure",
-        sourceRef: entry.sourceId,
-        sourceRefs: [entry.sourceId],
-        expectedProposition: `Command \`${command}\` was observed to fail (exit ${exitCode === null ? "unknown" : String(exitCode)})`,
-      });
-    }
+    const command = string(entry.record!["command"]);
+    if (command && isFailure(entry.record!)) events.push(commandFailureEvent(entry, command));
   }
 
   let run: ResolvedRecord[] = [];
@@ -312,9 +348,9 @@ function deriveMaterialEvents(manifest: NarrativeSourceManifest, resolved: reado
     run = [];
   };
   for (const entry of cmdlog) {
-    const command = commandFrom(entry.record!);
+    const command = string(entry.record!["command"]);
     if (!command) { flushRun(); continue; }
-    const firstCommand = run[0]?.record ? commandFrom(run[0].record) : undefined;
+    const firstCommand = run[0]?.record ? string(run[0].record["command"]) : undefined;
     if (firstCommand && normalizeCommand(firstCommand) !== normalizeCommand(command)) flushRun();
     run.push(entry);
     if (!isFailure(entry.record!) && run.length === 1) flushRun();
@@ -323,7 +359,17 @@ function deriveMaterialEvents(manifest: NarrativeSourceManifest, resolved: reado
 
   const telemetry = resolved.filter((entry) => entry.stream === "telemetry" && entry.record);
   for (const entry of telemetry) {
-    if (carriesTimeout(entry.record!)) events.push({ kind: "timeout", sourceRef: entry.sourceId, sourceRefs: [entry.sourceId] });
+    // #623 (review HIGH): projection.ts also emits an observed command statement for
+    // commands captured via the telemetry stream (a tool.result event carrying a command
+    // + non-zero exit). Derive the matching command_failure event through the SAME
+    // tool-gated extraction so a telemetry-sourced failure cannot be omitted undetected.
+    const record = entry.record!;
+    const event = eventType(record);
+    if (event) {
+      const command = commandFrom(record, toolName(record, event));
+      if (command && isFailure(record)) events.push(commandFailureEvent(entry, command));
+    }
+    if (carriesTimeout(record)) events.push({ kind: "timeout", sourceRef: entry.sourceId, sourceRefs: [entry.sourceId] });
   }
 
   for (const entry of resolved.filter((candidate) => candidate.stream === "file")) {
@@ -340,7 +386,8 @@ function deriveMaterialEvents(manifest: NarrativeSourceManifest, resolved: reado
   const indexBySource = new Map(manifest.sources.map((entry, index) => [entry.source_id, index]));
   const activeTurns = new Set<number>();
   for (const entry of telemetry) {
-    if (!commandFrom(entry.record!)) continue;
+    const event = eventType(entry.record!);
+    if (!event || !commandFrom(entry.record!, toolName(entry.record!, event))) continue;
     const turn = spine.find((candidate) => candidate.sources.includes(entry.sourceId));
     if (turn) activeTurns.add(turn.ordinal);
   }

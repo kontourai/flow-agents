@@ -26,7 +26,7 @@ if node "$FIXTURES/scorer.mjs" all >"$TMP/scorer.out" 2>"$TMP/scorer.err"; then
 else
   _fail "adversarial corpus failed: $(cat "$TMP/scorer.out" "$TMP/scorer.err")"
 fi
-if grep -q 'scorer counts: accept=2 reject=7 total=9' "$TMP/scorer.out" \
+if grep -q 'scorer counts: accept=2 reject=8 total=10' "$TMP/scorer.out" \
   && grep -q 'unsupported observed-claim rate=0' "$TMP/scorer.out" \
   && grep -q 'citation-resolver failures for published observed statements=0' "$TMP/scorer.out" \
   && grep -q 'fixture provenance: kontourai/flow-agents#623' "$TMP/scorer.out"; then

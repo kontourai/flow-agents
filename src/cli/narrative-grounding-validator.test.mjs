@@ -131,6 +131,14 @@ const materialCases = [
     records: [{ stream: "cmdlog", record: { command: "npm test", result: "fail", exitCode: 1 } }],
   },
   {
+    // #623 (review HIGH): a command failure captured via the telemetry stream (a tool.result
+    // event carrying a command + non-zero exit) must be derived and coverage-enforced, exactly
+    // like a cmdlog failure — otherwise a telemetry-sourced failure can be omitted undetected.
+    name: "telemetry_command_failure",
+    eventKind: "command_failure",
+    records: [{ stream: "telemetry", record: { session_id: "session", event_type: "tool.result", tool: { name: "execute_bash", input: { command: "false" } }, exit_code: 1 } }],
+  },
+  {
     name: "retry_group",
     records: [
       { stream: "cmdlog", record: { command: "npm test", result: "fail", exitCode: 1 } },
@@ -157,7 +165,7 @@ for (const fixture of materialCases) {
     const verdict = validateNarrativeGrounding(envelope(), narrativeDir);
     assert.equal(verdict.ok, false);
     assert.ok(verdict.violations.some((violation) =>
-      violation.code === "uncovered_material_event" && violation.event_kind === fixture.name));
+      violation.code === "uncovered_material_event" && violation.event_kind === (fixture.eventKind ?? fixture.name)));
   });
 }
 

@@ -57,6 +57,9 @@ function buildMaterialFixture(temp) {
   const telemetryRecords = [
     { session_id: "idle-session", event_id: "idle-turn", event_type: "turn.user", timestamp: "2026-07-14T13:00:00.000Z", hook: { turn_id: "idle" } },
     { session_id: "timeout-session", event_id: "timeout-tool", event_type: "tool.result", timestamp: "2026-07-14T13:01:00.000Z", tool: { name: "shell" }, timed_out: true, timeout_ms: 30000 },
+    // #623 (review HIGH): a command failure captured via the telemetry stream must be
+    // coverage-enforced exactly like a cmdlog failure. Its omission is scored below.
+    { session_id: "cmd-session", event_id: "cmd-fail", event_type: "tool.result", timestamp: "2026-07-14T13:02:00.000Z", tool: { name: "execute_bash", input: { command: "false" } }, exit_code: 1 },
   ];
   const telemetryLines = telemetryRecords.map(JSON.stringify);
   fs.writeFileSync(path.join(telemetryDir, "full.jsonl"), `${telemetryLines.join("\n")}\n`);
@@ -147,7 +150,8 @@ try {
 
   if (mode === "all" || mode === "material") {
     const omissions = [
-      ["omitted-command-failure", "command_failure", (statement) => statement.class === "observed" && /observed to fail/.test(statement.proposition)],
+      ["omitted-command-failure", "command_failure", (statement) => statement.class === "observed" && /`npm test` was observed to fail/.test(statement.proposition)],
+      ["omitted-telemetry-command-failure", "command_failure", (statement) => statement.class === "observed" && /`false` was observed to fail/.test(statement.proposition)],
       ["omitted-retry", "retry_group", (statement) => statement.rule?.id === "retry-detection"],
       ["omitted-timeout", "timeout", (statement) => statement.rule?.id === "timeout-detection"],
       ["omitted-no-op", "no_op_turn", (statement) => statement.rule?.id === "no-op-turn"],
