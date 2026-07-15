@@ -188,19 +188,22 @@ export function main(argv = process.argv.slice(2)): number {
       console.error(`${rel(matrixDocPath)} is stale; run npm run capability-matrix`);
       return 1;
     }
-    console.log(`${rel(matrixDocPath)} is current.`);
+    console.error(`${rel(matrixDocPath)} is current.`);
     return 0;
   }
 
   writeGeneratedJson();
   if (jsonOnly) {
-    console.log(`Wrote ${rel(generatedJsonPath)}`);
+    // Progress/diagnostics go to stderr so stdout stays data-only: this runs inside `npm run build`,
+    // and any downstream `npm run build --silent && node … --json` command would otherwise inherit
+    // this line on stdout and corrupt the JSON its consumer parses.
+    console.error(`Wrote ${rel(generatedJsonPath)}`);
     return 0;
   }
 
   writeText(matrixDocPath, markdown);
-  console.log(`Wrote ${rel(matrixDocPath)}`);
-  console.log(`Wrote ${rel(generatedJsonPath)}`);
+  console.error(`Wrote ${rel(matrixDocPath)}`);
+  console.error(`Wrote ${rel(generatedJsonPath)}`);
   return 0;
 }
 

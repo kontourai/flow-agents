@@ -97,6 +97,15 @@ derive_signal() { # <runtime> [decl_json_path]
 (cd "$ROOT" && npm run build) >/dev/null 2>&1 || fail "npm run build failed"
 [[ -f "$JSON" ]] && pass "build produced build/generated/capability-declarations.json" || fail "generated JSON missing after build"
 
+# stdout hygiene: the --json-only generate step runs INSIDE `npm run build`, and many scripts are
+# `npm run build --silent && node ... --json`. If the generator prints progress to stdout, it corrupts
+# the JSON those consumers parse (regressed the effective-backlog-settings test once). Guard: the
+# generator and a silent build must emit NOTHING on stdout (diagnostics go to stderr).
+jo_stdout="$(cd "$ROOT" && node build/src/cli.js capability-matrix --json-only 2>/dev/null)"
+[[ -z "$jo_stdout" ]] && pass "capability-matrix --json-only stdout is clean (data-only; diagnostics on stderr)" || fail "capability-matrix --json-only polluted stdout: >>>$jo_stdout<<<"
+build_stdout="$(cd "$ROOT" && npm run build --silent 2>/dev/null)"
+[[ -z "$build_stdout" ]] && pass "npm run build stdout is clean (downstream --json consumers unpolluted)" || fail "npm run build polluted stdout: >>>$build_stdout<<<"
+
 # ── (1) conformance: 7 adapters × 6 capabilities, each a typed status ───────────────────────────────
 missing=0
 for a in "${ADAPTERS[@]}"; do
