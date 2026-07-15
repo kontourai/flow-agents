@@ -21,6 +21,32 @@ export const AGENT_STATED_ACTOR_MAX_LENGTH = 120;
 // below rejects this whole class, not just the ASCII line breaks.
 const UNICODE_LINE_SEPARATORS = /[\r\n\u2028\u2029\p{Zl}\p{Zp}]/u;
 
+// #622 (review HIGH R2, second pass): the single-clause guard below must reject clause
+// separators STRUCTURALLY, not via a blocklist of the few code points named in the first
+// finding. A single clause may only contain letters/digits/ordinary punctuation joined by a
+// single ASCII space; every other whitespace, zero-width/format control, and clause-joining
+// punctuation or terminator is a separator.
+//   - NON_SPACE_WHITESPACE: any whitespace that is NOT a plain U+0020 space (tab, VT U+000B,
+//     FF U+000C, CR, LF, NBSP U+00A0, U+2028/9, every other \p{Zs}/\p{Zl}/\p{Zp}).
+//   - HIDDEN_FORMAT_CHARS: zero-width, bidi, and BOM/format controls that are not \s and could
+//     hide a clause break (U+200B\u2013200F, U+202A\u2013202E, U+2060\u20132064, U+FEFF, U+180E).
+//   - CLAUSE_PUNCTUATION: colon, semicolon, ellipsis (U+2026/U+22EF), any Unicode dash
+//     (U+2012\u20132015), and a spaced ASCII hyphen " - " used as a clause dash (intra-word
+//     hyphens like `test-suite` have no surrounding spaces and are allowed).
+//   - NON_ASCII_TERMINATOR: any non-ASCII Sentence_Terminal (ideographic U+3002, fullwidth
+//     U+FF01/FF1F, Arabic U+061F/06D4, Devanagari danda, \u2026) \u2014 these never appear intra-word in
+//     a short English purpose, so they are rejected anywhere. ASCII . ! ? are handled by the
+//     "terminator + whitespace + more text" rule so a trailing period / `v1.2` still pass.
+//   - CLAUSE_COORDINATORS: clause-joining adverbs NOT already caught by atomic()'s
+//     and|but|then|while|or|so list (also/however/additionally/furthermore/afterward(s)/
+//     meanwhile/thereafter). "next"/"plus"/"finally" are deliberately EXCLUDED \u2014 they are
+//     plausible intra-clause object words and would over-reject legitimate purposes.
+const NON_SPACE_WHITESPACE = /[^\S ]/u;
+const HIDDEN_FORMAT_CHARS = /[\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff\u180e]/u;
+const CLAUSE_PUNCTUATION = /[;:\u2026\u22ef\u2012-\u2015]| - /u;
+const NON_ASCII_TERMINATOR = /(?=\P{ASCII})\p{Sentence_Terminal}/u;
+const CLAUSE_COORDINATORS = /\s(also|however|additionally|furthermore|afterwards?|meanwhile|thereafter)\s/i;
+
 export interface StatementRule {
   id: string;
   version: string;
@@ -91,9 +117,13 @@ function nonEmptyText(value: unknown, label: string): string {
 // (a single subordinate aside) — two or more comma-separated segments is a list /
 // clause chain and is rejected. The full Unicode separator class is rejected too.
 function singleClause(value: string, label: string): void {
-  if (UNICODE_LINE_SEPARATORS.test(value)) return fail("non_atomic_proposition", `${label} must be a single clause (no line or paragraph separators)`);
+  if (NON_SPACE_WHITESPACE.test(value)) return fail("non_atomic_proposition", `${label} must be a single clause (no whitespace other than single spaces)`);
+  if (HIDDEN_FORMAT_CHARS.test(value)) return fail("non_atomic_proposition", `${label} must be a single clause (no zero-width or format-control characters)`);
+  if (CLAUSE_PUNCTUATION.test(value)) return fail("non_atomic_proposition", `${label} must be a single clause (no colon/semicolon/dash/ellipsis clause separators)`);
+  if (NON_ASCII_TERMINATOR.test(value)) return fail("non_atomic_proposition", `${label} must be a single clause (no non-ASCII sentence terminators)`);
   if (/[.!?]\s+\S/u.test(value)) return fail("non_atomic_proposition", `${label} must be a single clause (no sentence-terminated sub-clauses)`);
   if ((value.match(/,/gu)?.length ?? 0) >= 2) return fail("non_atomic_proposition", `${label} must be a single clause (no comma-chained sub-clauses)`);
+  if (CLAUSE_COORDINATORS.test(value)) return fail("non_atomic_proposition", `${label} must be a single clause (no clause-joining coordinators)`);
 }
 
 // Review H3: identifier-shaped inputs (tool names, event types, agent ids,

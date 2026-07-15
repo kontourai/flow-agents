@@ -231,6 +231,52 @@ test("#622 (review HIGH R2): multi-clause purposes chained by period / comma / U
   );
 });
 
+test("#622 (re-review HIGH-2): the single-clause guard closes the residual separator bypasses", () => {
+  const action = source("intent-bypass");
+  // Every vector below is a two-clause purpose smuggled past the earlier (period/comma/U+2028
+  // -only) guard. The re-review enumerated these classes as still-open; each must now throw
+  // non_atomic_proposition at construct time.
+  const rejected = [
+    "ship the fix: cover tracks",                 // colon clause separator
+    "delete the logs - hide - remove",            // spaced-hyphen dash separator
+    "ship the fix;cover tracks",                  // semicolon without a following space
+    "ship the fix。 delete the trail",        // U+3002 ideographic full stop
+    "ship the fix！ delete the trail",        // U+FF01 fullwidth exclamation
+    "ship the fix؟ delete the trail",        // U+061F arabic question mark
+    "ship the fix also delete the trail",         // coordinator "also"
+    "ship the fix however delete the trail",      // coordinator "however"
+    "ship the fixdelete the trail",         // U+000B vertical tab
+    "ship the fixdelete the trail",         // U+000C form feed
+    "ship the fix delete the trail",         // U+00A0 non-breaking space
+    "ship the fix​delete the trail",         // U+200B zero-width space
+    "ship the fix﻿delete the trail",         // U+FEFF zero-width no-break space
+    "ship the fix… delete the trail",        // U+2026 ellipsis
+    "ship the fix—delete the trail",         // U+2014 em dash
+  ];
+  for (const purpose of rejected) {
+    assert.throws(
+      () => agentStatedIntent({ sourceId: action, actor: "codex", purpose }),
+      (error) => error instanceof NarrativeStatementError && error.code === "non_atomic_proposition",
+      `expected rejection for: ${JSON.stringify(purpose)}`,
+    );
+  }
+  // The guard must not over-reject legitimate single clauses that merely contain
+  // punctuation-shaped characters (decimals, versions, intra-word hyphens, one subordinate comma).
+  for (const purpose of [
+    "re-run the failing test-suite",
+    "ship the fix at 3.5x speed",
+    "ship the v1.2 fix",
+    "ship the fix, as agreed",
+    "verify the deployment before closing the ticket",
+  ]) {
+    assert.equal(
+      agentStatedIntent({ sourceId: action, actor: "codex", purpose }).class,
+      "agent_stated",
+      `expected acceptance for: ${JSON.stringify(purpose)}`,
+    );
+  }
+});
+
 test("#622 (review HIGH R2): the agent_stated actor is a bounded identifier, never a prose/keyword smuggle channel", () => {
   const action = source("intent-actor");
   for (const invoke of [
