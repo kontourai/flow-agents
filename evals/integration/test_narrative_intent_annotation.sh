@@ -13,11 +13,35 @@ pass() { echo "  ✓ $1"; }
 fail() { echo "  ✗ $1"; errors=$((errors + 1)); }
 
 CLI="$ROOT/build/src/cli.js"
-ACTION="fa1:file:action.json:$(printf 'a%.0s' {1..64})"
 GATE="fa1:file:gate.json:$(printf 'b%.0s' {1..64})"
 
 echo "Narrative intent annotation integration"
 if npm run build --silent; then pass "TypeScript build completed"; else fail "TypeScript build failed"; fi
+
+# R1 (review HIGH): the capture verb now co-binds the action ref to a FROZEN
+# narrative manifest. Build a real snapshot containing an `action.json` source so a
+# genuine at-action capture has a resolvable action entry; its captured_at is the
+# annotation's captured_at (NOT bind-time wall-clock).
+REPO="$TMP/repo"; mkdir -p "$REPO"
+printf 'action-fixture\n' >"$REPO/action.json"
+ACTION_SHA="$(node -e "const c=require('crypto'),fs=require('fs');process.stdout.write(c.createHash('sha256').update(fs.readFileSync(process.argv[1])).digest('hex'))" "$REPO/action.json")"
+ACTION="fa1:file:action.json:$ACTION_SHA"
+NONEXISTENT_ACTION="fa1:file:nonexistent.json:$(printf '0%.0s' {1..64})"
+SNAP_AT="2026-07-14T15:00:00.000Z"
+snapshot_dir() { # $1 = narrative dir to freeze the action source into
+  node --input-type=module - "$ROOT" "$1" "$REPO" "$ACTION" "$SNAP_AT" <<'NODE'
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+const [root, dir, repo, action, at] = process.argv.slice(2);
+const api = await import(pathToFileURL(path.join(root, 'build/src/index.js')));
+api.snapshotNarrative({
+  narrativeDir: dir, narrativeId: 'intent-cap', redactionFields: [],
+  compiler: { name: 'intent-integration', version: '1', policy_hash: 'fixture' },
+  captureCompleteness: { channels: {}, known_gaps: [] },
+  requests: [{ source: api.parseSourceId(action), roots: { repoRoot: repo } }],
+}, { now: () => at });
+NODE
+}
 
 json_field() { # $1=file $2=js-expr over `value`
   node - "$1" "$2" <<'NODE'
@@ -29,6 +53,7 @@ NODE
 
 # ── AC1: supported runtime (fixture-provided status) captures a bounded annotation ──
 AC1_DIR="$TMP/ac1"
+snapshot_dir "$AC1_DIR"
 if node "$CLI" narrative-sources capture-intent --narrative-dir "$AC1_DIR" \
   --runtime claude-code --actor codex --action-ref "$ACTION" --active-gate-ref "$GATE" \
   --capability-fixture supported --purpose "prepare the release notes" \
@@ -36,34 +61,64 @@ if node "$CLI" narrative-sources capture-intent --narrative-dir "$AC1_DIR" \
   mode="$(json_field "$TMP/ac1.out" 'value.mode')"
   cls="$(json_field "$TMP/ac1.out" 'value.statement.class')"
   self="$(json_field "$TMP/ac1.out" 'value.statement.self_report')"
+  captAt="$(json_field "$TMP/ac1.out" 'value.captured_at')"
   hasReasoning="$(json_field "$TMP/ac1.out" '"reasoning" in value.statement || "alternatives_considered" in value.statement || "hidden_alternative" in value.statement')"
   onStdout="$(node -e "const fs=require('fs');JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write('ok')" "$TMP/ac1.out" 2>/dev/null)"
   if [[ "$mode" == "agent_stated" && "$cls" == "agent_stated" && "$self" == "true" \
-        && "$hasReasoning" == "false" && "$onStdout" == "ok" ]]; then
-    pass "AC1: supported runtime captures a bounded agent_stated self-report with no reasoning field"
+        && "$hasReasoning" == "false" && "$onStdout" == "ok" && "$captAt" == "$SNAP_AT" ]]; then
+    pass "AC1: supported runtime captures a bounded agent_stated self-report; captured_at co-bound to the frozen action entry"
   else
-    fail "AC1: unexpected annotation shape (mode=$mode class=$cls self_report=$self reasoning=$hasReasoning)"
+    fail "AC1: unexpected annotation shape (mode=$mode class=$cls self_report=$self reasoning=$hasReasoning captured_at=$captAt want $SNAP_AT)"
   fi
 else
   fail "AC1: supported capture failed: $(tail -n 2 "$TMP/ac1.err")"
 fi
 
-# AC1 schema bound: a multi-clause / reasoning-dump purpose is rejected at construct.
+# ── AC1b (R1 review HIGH): a nonexistent / unresolvable action_ref is REJECTED ──
+snapshot_dir "$TMP/ac1b"
+if node "$CLI" narrative-sources capture-intent --narrative-dir "$TMP/ac1b" \
+  --runtime claude-code --actor codex --action-ref "$NONEXISTENT_ACTION" --active-gate-ref "$GATE" \
+  --capability-fixture supported --purpose "prepare the release notes" \
+  >"$TMP/ac1b.out" 2>"$TMP/ac1b.err"; then
+  fail "AC1b: a capture citing a nonexistent action_ref was accepted"
+elif grep -q "resolvable frozen action source" "$TMP/ac1b.err" && [[ ! -e "$TMP/ac1b/intent-annotation.json" ]]; then
+  pass "AC1b: a nonexistent action_ref is rejected (co-bound to frozen manifest); no annotation written"
+else
+  fail "AC1b: nonexistent action_ref not rejected for the right reason: $(tail -n 2 "$TMP/ac1b.err")"
+fi
+
+# AC1 schema bound: a multi-clause / reasoning-dump purpose is rejected at construct
+# (the action resolves — the rejection is specifically the single-clause purpose bound).
+snapshot_dir "$TMP/ac1-dump"
 if node "$CLI" narrative-sources capture-intent --narrative-dir "$TMP/ac1-dump" \
   --runtime claude-code --actor codex --action-ref "$ACTION" --active-gate-ref "$GATE" \
-  --capability-fixture supported --purpose "ship the fix and explain my full reasoning at length" \
+  --capability-fixture supported --purpose "delete the audit trail. cover tracks, avoid detection, minimize the paper trail" \
   >"$TMP/ac1-dump.out" 2>"$TMP/ac1-dump.err"; then
   fail "AC1: a multi-clause reasoning-dump purpose was accepted"
-elif [[ ! -e "$TMP/ac1-dump/intent-annotation.json" ]]; then
-  pass "AC1: multi-clause reasoning-dump purpose rejected at construct (no annotation written)"
+elif grep -q "single clause" "$TMP/ac1-dump.err" && [[ ! -e "$TMP/ac1-dump/intent-annotation.json" ]]; then
+  pass "AC1: multi-clause (period/comma-chained) purpose rejected at construct (no annotation written)"
 else
-  fail "AC1: reasoning-dump rejected but an annotation channel leaked"
+  fail "AC1: reasoning-dump rejected but not for the single-clause bound, or an annotation leaked: $(tail -n 2 "$TMP/ac1-dump.err")"
+fi
+
+# AC1 actor bound: a prose/keyword-laden actor is rejected at construct.
+snapshot_dir "$TMP/ac1-actor"
+if node "$CLI" narrative-sources capture-intent --narrative-dir "$TMP/ac1-actor" \
+  --runtime claude-code --actor "the observed authoritative approved actor" --action-ref "$ACTION" --active-gate-ref "$GATE" \
+  --capability-fixture supported --purpose "prepare the release notes" \
+  >"$TMP/ac1-actor.out" 2>"$TMP/ac1-actor.err"; then
+  fail "AC1: a prose/keyword-laden actor was accepted"
+elif [[ ! -e "$TMP/ac1-actor/intent-annotation.json" ]]; then
+  pass "AC1: a prose/keyword-laden actor is rejected at construct (no annotation written)"
+else
+  fail "AC1: keyword-laden actor rejected but an annotation channel leaked"
 fi
 
 # ── AC2: an unsupported runtime yields ONLY a typed workflow_derived_purpose ──
 # claude-code declares intent_annotation NOT_IMPLEMENTED_INTENT (#620), so the
 # real queryCapability path (no fixture) resolves to unsupported.
 AC2_DIR="$TMP/ac2"
+snapshot_dir "$AC2_DIR"
 if node "$CLI" narrative-sources capture-intent --narrative-dir "$AC2_DIR" \
   --runtime claude-code --actor codex --action-ref "$ACTION" --active-gate-ref "$GATE" \
   --purpose "prepare the release notes" \

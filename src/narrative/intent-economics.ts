@@ -40,16 +40,26 @@ export function appendIntentEconomics(dir: string, record: IntentEconomicsRecord
   finally { fs.closeSync(descriptor); }
 }
 
-/** A mean delta reported WITH its uncertainty spread (never a bare point estimate). */
-export interface IntentEconomicsDelta {
-  /** Number of paired (on,off) deltas contributing to this metric. */
-  n: number;
-  mean: number;
-  /** Sample standard deviation (Bessel-corrected); 0 for a single pair. */
-  sample_std: number;
-  min: number;
-  max: number;
-}
+/**
+ * A mean delta reported WITH its uncertainty spread (never a bare point estimate).
+ *
+ * #622 (review MEDIUM A/B): an EMPTY window (no paired samples) reports
+ * `has_data:false` rather than a false-precise `{mean:0, sample_std:0, min:0,
+ * max:0}` — a consumer must not misread "we measured nothing" as "we measured and
+ * confirmed a null delta". `n` is retained in both shapes.
+ */
+export type IntentEconomicsDelta =
+  | { has_data: false; n: 0 }
+  | {
+      has_data: true;
+      /** Number of paired (on,off) deltas contributing to this metric. */
+      n: number;
+      mean: number;
+      /** Sample standard deviation (Bessel-corrected); 0 for a single pair. */
+      sample_std: number;
+      min: number;
+      max: number;
+    };
 
 export interface IntentEconomicsSummary {
   pairs: number;
@@ -62,11 +72,12 @@ export interface IntentEconomicsSummary {
 
 function summarizeDeltas(values: readonly number[]): IntentEconomicsDelta {
   const n = values.length;
-  if (n === 0) return { n: 0, mean: 0, sample_std: 0, min: 0, max: 0 };
+  // #622 (review MEDIUM A/B): an empty window is NOT a confirmed zero delta.
+  if (n === 0) return { has_data: false, n: 0 };
   const mean = values.reduce((sum, value) => sum + value, 0) / n;
   // Bessel-corrected sample variance; a single pair has undefined spread -> 0.
   const variance = n > 1 ? values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / (n - 1) : 0;
-  return { n, mean, sample_std: Math.sqrt(variance), min: Math.min(...values), max: Math.max(...values) };
+  return { has_data: true, n, mean, sample_std: Math.sqrt(variance), min: Math.min(...values), max: Math.max(...values) };
 }
 
 export function reduceIntentEconomics(records: readonly IntentEconomicsRecord[]): IntentEconomicsSummary {
@@ -76,6 +87,9 @@ export function reduceIntentEconomics(records: readonly IntentEconomicsRecord[])
   const inputDeltas: number[] = [];
   const outputDeltas: number[] = [];
   const wallDeltas: number[] = [];
+  // #622 (review LOW, disclosed mechanism-scope): pairs annotation_on/off samples
+  // by INDEX for the dry-run harness (not by attempted_at / matched conditions);
+  // scaled cross-run attribution is sequenced to #612.
   for (let index = 0; index < pairs; index += 1) {
     inputDeltas.push(on[index].input_tokens - off[index].input_tokens);
     outputDeltas.push(on[index].output_tokens - off[index].output_tokens);

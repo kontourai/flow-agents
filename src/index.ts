@@ -69,8 +69,8 @@ export type {
   SnapshotNarrativeDependencies,
   SnapshotNarrativeInput,
 } from "./narrative/snapshot.js";
-export { resolveSource, verifyManifest } from "./narrative/resolver.js";
-export type { ResolveSourceOptions, ResolveSourceResult, VerifyManifestReport } from "./narrative/resolver.js";
+export { resolveManifestEntry, resolveSource, verifyManifest } from "./narrative/resolver.js";
+export type { FrozenManifestEntry, ResolveSourceOptions, ResolveSourceResult, VerifyManifestReport } from "./narrative/resolver.js";
 export {
   NARRATIVE_RUNTIME_PROJECTION_SCHEMA_VERSION,
   NARRATIVE_RUNTIME_PROJECTOR,
@@ -113,6 +113,7 @@ export type {
 export { QUARANTINE_SESSION_ID, TURN_SPINE_RULE_ID, buildTurnSpine } from "./narrative/turn-spine.js";
 export type { ResolvedTelemetryRecord, Turn, TurnBoundary } from "./narrative/turn-spine.js";
 export {
+  AGENT_STATED_ACTOR_MAX_LENGTH,
   AGENT_STATED_PURPOSE_MAX_LENGTH,
   NarrativeStatementError,
   agentStatedIntent,
@@ -144,7 +145,7 @@ export {
   captureIntent,
 } from "./narrative/intent.js";
 export type {
-  BindIntentAnnotationDependencies,
+  CaptureIntentDependencies,
   CaptureIntentInput,
   CapturedIntent,
   IntentAnnotation,

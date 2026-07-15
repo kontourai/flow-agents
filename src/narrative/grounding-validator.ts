@@ -324,7 +324,14 @@ function epistemicViolations(statements: readonly Statement[]): GroundingViolati
         violations.push({ code: "invalid_rule_binding", statement_id: statement.id, detail: "rule inputs must be a subset of source_refs" });
       }
     }
-    for (const kind of assertionKinds(statement.proposition)) {
+    // #622 (review HIGH R2): the prohibited-assertion scan must cover the `actor`
+    // too, not just the proposition. On agent_stated / summarizer_inferred an
+    // unbounded actor field could otherwise embed prohibited-assertion keywords
+    // ("observed", "authoritative", "approved") that the proposition-only scan would
+    // miss. Concatenating is inert for observed/deterministic_derived classes (they
+    // carry no prohibited-assertion policy) and for identifier-shaped actors.
+    const assertionSource = statement.actor ? `${statement.proposition} ${statement.actor}` : statement.proposition;
+    for (const kind of assertionKinds(assertionSource)) {
       if (isAssertionProhibited(statementClass, kind)) {
         violations.push({
           code: "prohibited_assertion",

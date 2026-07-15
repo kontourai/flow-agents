@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  AGENT_STATED_ACTOR_MAX_LENGTH,
   AGENT_STATED_PURPOSE_MAX_LENGTH,
   NarrativeStatementError,
   agentStatedIntent,
@@ -201,6 +202,49 @@ test("#622: agentStatedIntent enforces the chain-of-thought / length bound at co
   ]) {
     assert.throws(invoke, (error) => error instanceof NarrativeStatementError && typeof error.code === "string");
   }
+});
+
+test("#622 (review HIGH R2): multi-clause purposes chained by period / comma / U+2028 are rejected at construct", () => {
+  const action = source("intent-multiclause");
+  for (const invoke of [
+    // period-chained probe: a sentence terminator that starts a new clause.
+    () => agentStatedIntent({ sourceId: action, actor: "codex", purpose: "delete the audit trail. cover tracks" }),
+    // comma-chained probe: two-or-more comma-separated segments (a clause list).
+    () => agentStatedIntent({ sourceId: action, actor: "codex", purpose: "cover tracks, avoid detection, minimize the paper trail" }),
+    // Unicode line separator (U+2028) probe.
+    () => agentStatedIntent({ sourceId: action, actor: "codex", purpose: "cover tracks\u2028avoid detection" }),
+    // Unicode paragraph separator (U+2029) probe.
+    () => agentStatedIntent({ sourceId: action, actor: "codex", purpose: "cover tracks\u2029avoid detection" }),
+    // "! " and "? " sub-clause chaining are rejected too.
+    () => agentStatedIntent({ sourceId: action, actor: "codex", purpose: "do the thing! then do more" }),
+  ]) {
+    assert.throws(invoke, (error) => error instanceof NarrativeStatementError && error.code === "non_atomic_proposition");
+  }
+  // A single short clause with a trailing terminator (or one subordinate comma) is still allowed.
+  assert.equal(
+    agentStatedIntent({ sourceId: action, actor: "codex", purpose: "ship the fix." }).class,
+    "agent_stated",
+  );
+  assert.equal(
+    agentStatedIntent({ sourceId: action, actor: "codex", purpose: "prepare the release notes, carefully" }).class,
+    "agent_stated",
+  );
+});
+
+test("#622 (review HIGH R2): the agent_stated actor is a bounded identifier, never a prose/keyword smuggle channel", () => {
+  const action = source("intent-actor");
+  for (const invoke of [
+    // over the hard actor length cap — rejected even though the charset is valid.
+    () => agentStatedIntent({ sourceId: action, actor: "a".repeat(AGENT_STATED_ACTOR_MAX_LENGTH + 1), purpose: "ship the fix" }),
+    // prohibited-assertion keywords smuggled as prose (spaces) — rejected by identifier().
+    () => agentStatedIntent({ sourceId: action, actor: "the observed authoritative approved actor", purpose: "ship the fix" }),
+    // empty actor.
+    () => agentStatedIntent({ sourceId: action, actor: "", purpose: "ship the fix" }),
+  ]) {
+    assert.throws(invoke, (error) => error instanceof NarrativeStatementError && typeof error.code === "string");
+  }
+  // A legitimate identifier-shaped actor is still accepted.
+  assert.equal(agentStatedIntent({ sourceId: action, actor: "claude-code", purpose: "ship the fix" }).actor, "claude-code");
 });
 
 test("#622: workflowDerivedPurpose is a deterministic_derived fallback, never a self-report", () => {

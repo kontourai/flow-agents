@@ -10,6 +10,17 @@ export type ObservedResult = "pass" | "fail" | "ambiguous";
 // into a free-form reasoning dump, so the cap is deliberately small.
 export const AGENT_STATED_PURPOSE_MAX_LENGTH = 200;
 
+// #622 (review HIGH R2): a hard length cap on a stated-intent actor. An actor is
+// an identifier-shaped attribution key (see identifier() below), never a place to
+// smuggle prose or prohibited-assertion keywords past the proposition scan.
+export const AGENT_STATED_ACTOR_MAX_LENGTH = 120;
+
+// #622 (review HIGH R2): the FULL Unicode line/paragraph separator class. `\r`/`\n`
+// alone let a caller chain clauses with U+2028 (LINE SEPARATOR) / U+2029 (PARAGRAPH
+// SEPARATOR) or any other `\p{Zl}`/`\p{Zp}` code point. Every clause-separator guard
+// below rejects this whole class, not just the ASCII line breaks.
+const UNICODE_LINE_SEPARATORS = /[\r\n\u2028\u2029\p{Zl}\p{Zp}]/u;
+
 export interface StatementRule {
   id: string;
   version: string;
@@ -53,7 +64,7 @@ function fail(code: NarrativeStatementErrorCode, message: string): never {
 
 function text(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) return fail("invalid_input", `${label} must be a non-empty string`);
-  if (/[\r\n`]/.test(value) || value.includes("; ")) return fail("non_atomic_proposition", `${label} must not contain clause separators or backticks`);
+  if (/`/.test(value) || UNICODE_LINE_SEPARATORS.test(value) || value.includes("; ")) return fail("non_atomic_proposition", `${label} must not contain clause separators or backticks`);
   return value;
 }
 
@@ -65,8 +76,24 @@ function text(value: unknown, label: string): string {
 // single-clause/no-clause-separator discipline exactly like every other constructor.
 function nonEmptyText(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) return fail("invalid_input", `${label} must be a non-empty string`);
-  if (/[\r\n]/.test(value)) return fail("non_atomic_proposition", `${label} must not contain line breaks`);
+  if (UNICODE_LINE_SEPARATORS.test(value)) return fail("non_atomic_proposition", `${label} must not contain line breaks`);
   return value;
+}
+
+// #622 (review HIGH R2): the strict single-clause bound for a stated purpose.
+// text()/atomic() reject the conjunction / "; " / backtick / line-break classes,
+// but a purpose could still chain clauses with SENTENCE TERMINATORS ("delete the
+// audit trail. cover tracks"), COMMA LISTS ("cover tracks, avoid detection, ..."),
+// or Unicode line/paragraph separators. This guard closes that class at construct.
+// Rule (documented, defensible): a sentence terminator (. ! ?) that is FOLLOWED by
+// more text starts a second clause and is rejected; a single trailing terminator on
+// one short clause (e.g. "ship the fix.") is allowed. At most one comma is tolerated
+// (a single subordinate aside) — two or more comma-separated segments is a list /
+// clause chain and is rejected. The full Unicode separator class is rejected too.
+function singleClause(value: string, label: string): void {
+  if (UNICODE_LINE_SEPARATORS.test(value)) return fail("non_atomic_proposition", `${label} must be a single clause (no line or paragraph separators)`);
+  if (/[.!?]\s+\S/u.test(value)) return fail("non_atomic_proposition", `${label} must be a single clause (no sentence-terminated sub-clauses)`);
+  if ((value.match(/,/gu)?.length ?? 0) >= 2) return fail("non_atomic_proposition", `${label} must be a single clause (no comma-chained sub-clauses)`);
 }
 
 // Review H3: identifier-shaped inputs (tool names, event types, agent ids,
@@ -99,7 +126,7 @@ function atomic(proposition: string): string {
   // English conjunctions cannot trip it, while nothing outside quotes may
   // introduce a second clause via any common conjunction.
   const skeleton = proposition.replace(/`[^`]*`/g, "`_`");
-  if (/[\r\n]/.test(skeleton) || skeleton.includes("; ") || /\s(and|but|then|while|or|so)\s/i.test(skeleton)) {
+  if (UNICODE_LINE_SEPARATORS.test(skeleton) || skeleton.includes("; ") || /\s(and|but|then|while|or|so)\s/i.test(skeleton)) {
     return fail("non_atomic_proposition", "statement proposition must contain exactly one clause");
   }
   return proposition;
@@ -301,12 +328,16 @@ export function summarizerInferredConnective(input: {
 // #622: the agent's STATED purpose for a material action — a typed self-report
 // (never proof, never gate evidence). Modeled on summarizerInferredConnective
 // but deliberately using the STRICT text()+atomic() guards (NOT the relaxed
-// nonEmptyText path) plus a hard length cap: a multi-clause / reasoning-dump /
-// over-length purpose is rejected AT CONSTRUCT TIME. There is no
+// nonEmptyText path) plus a hard length cap AND a single-clause bound: a
+// multi-clause / reasoning-dump / sentence-chained / comma-listed / over-length
+// purpose is rejected AT CONSTRUCT TIME (review HIGH R2). There is no
 // reasoning/alternatives/hidden_alternative field — the field allowlist forbids
 // free-form chain-of-thought (R2). The purpose cites exactly the material
 // action's fa1 source (sourceId); self_report:true and an attributed actor are
-// REQUIRED (enforced in construct()).
+// REQUIRED (enforced in construct()). The `actor` is constrained to the strict
+// identifier charset + a hard length cap (review HIGH R2): it is an attribution
+// KEY, never a place to smuggle prose or prohibited-assertion keywords past the
+// proposition scan (grounding-validator additionally scans the actor).
 export function agentStatedIntent(input: {
   sourceId: string;
   purpose: string;
@@ -317,11 +348,16 @@ export function agentStatedIntent(input: {
   if (purpose.length > AGENT_STATED_PURPOSE_MAX_LENGTH) {
     return fail("invalid_input", `purpose must be at most ${AGENT_STATED_PURPOSE_MAX_LENGTH} characters`);
   }
+  singleClause(purpose, "purpose");
+  const actor = identifier(input.actor, "actor");
+  if (actor.length > AGENT_STATED_ACTOR_MAX_LENGTH) {
+    return fail("invalid_input", `actor must be at most ${AGENT_STATED_ACTOR_MAX_LENGTH} characters`);
+  }
   return construct({
     class: "agent_stated",
     proposition: `Agent stated the purpose of this action is to ${purpose}`,
     sourceRefs: [input.sourceId],
-    actor: text(input.actor, "actor"),
+    actor,
     selfReport: true,
     ...(input.turnRef !== undefined ? { turnRef: input.turnRef } : {}),
   });

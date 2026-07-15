@@ -25,7 +25,7 @@ import {
 import type { CaptureCompleteness } from "../narrative/integrity.js";
 import { effectiveNarrativeRedactionFields } from "../narrative/policy-filter.js";
 import { projectRuntimeNarrative, stableStringify, validateNarrativeRuntimeProjection } from "../narrative/projection.js";
-import { resolveSource, verifyManifest } from "../narrative/resolver.js";
+import { resolveManifestEntry, resolveSource, verifyManifest } from "../narrative/resolver.js";
 import { snapshotNarrative, type NarrativeSourceRoots } from "../narrative/snapshot.js";
 import { parseSourceId } from "../narrative/source-ids.js";
 
@@ -210,11 +210,16 @@ function captureIntentVerb(flags: ReturnType<typeof parseArgs>["flags"]): number
   else capability = queryCapability(runtime, "intent_annotation");
 
   ensureSafeDirectory(narrativeDir, narrativeDir);
+  // R1 (review HIGH): the action ref is co-bound to the frozen narrative manifest.
+  // captureIntent resolves it to its frozen manifest entry (existence + the action's
+  // own captured_at); a fabricated/nonexistent action ref is rejected (throws) before
+  // any annotation is written, and the annotation's captured_at derives from the
+  // resolved action entry rather than bind-time wall-clock.
   const captured = captureIntent({
     capability, actor, runtimeId: runtime, actionRef, activeGateRef, redactionFields,
     ...(purpose !== undefined ? { purpose } : {}),
     ...(objectiveRef !== undefined ? { objectiveRef } : {}),
-  });
+  }, { resolveAction: (ref) => resolveManifestEntry(narrativeDir, ref) });
   const { path: annotationPath, annotation } = bindIntentAnnotation(narrativeDir, captured);
   console.error(`captured ${annotation.mode} intent annotation at ${annotationPath}`);
   console.log(JSON.stringify(annotation));

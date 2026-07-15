@@ -66,8 +66,27 @@ export interface CapturedIntent {
   statement: Statement;
   runtime: string;
   action_ref: string;
+  /**
+   * The action source's OWN frozen-manifest `captured_at` (R1 temporal co-binding).
+   * Derived from the resolved action entry — NOT a fresh clock read at bind time —
+   * so a forged or late annotation cannot claim at-action timing for an action it
+   * did not co-occur with.
+   */
+  action_captured_at: string;
   /** Redaction field names that nulled the supplied purpose (empty when none applied). */
   redactions: string[];
+}
+
+/**
+ * Dependencies for {@link captureIntent}. `resolveAction` resolves the material
+ * action's fa1 id to its FROZEN MANIFEST ENTRY (existence + the action's own
+ * `capturedAt`) — R1 co-binding. It returns `undefined` for an absent / fabricated
+ * ref (or an unreadable manifest), which captureIntent rejects. Injected so the pure
+ * capture logic stays testable and this module never itself does I/O — the CLI wires
+ * in `(ref) => resolveManifestEntry(narrativeDir, ref)`.
+ */
+export interface CaptureIntentDependencies {
+  resolveAction: (actionRef: string) => { capturedAt: string } | undefined;
 }
 
 /**
@@ -80,11 +99,31 @@ function filterPurpose(purpose: string, redactionFields: readonly string[]): { p
   const filtered = filterNarrativeRecord({ purpose }, redactionFields);
   if (filtered.kind !== "filtered") return { redactions: filtered.fields };
   const value = filtered.record.purpose;
-  const redactions = filtered.redactions.filter((field) => field === "purpose" || field.endsWith(".purpose"));
+  // #622 (review LOW): the record handed to filterNarrativeRecord is the FLAT
+  // single-key shape `{ purpose }`, so an actual purpose redaction is reported as
+  // exactly the field `"purpose"`. Matching `.endsWith(".purpose")` would let an
+  // unrelated `foo.purpose`-style redaction masquerade as a purpose redaction; only
+  // the exact flat key is a real purpose redaction for this record.
+  const redactions = filtered.redactions.filter((field) => field === "purpose");
   return typeof value === "string" && value.length > 0 ? { purpose: value, redactions } : { redactions };
 }
 
-export function captureIntent(input: CaptureIntentInput): CapturedIntent {
+export function captureIntent(input: CaptureIntentInput, deps: CaptureIntentDependencies): CapturedIntent {
+  // R1 (review HIGH): the annotation MUST cite a material action that actually
+  // exists in the FROZEN narrative manifest. Resolve the action ref to its frozen
+  // manifest entry; a fabricated / nonexistent action (absent from the manifest, or
+  // an unreadable manifest) is rejected outright — you cannot annotate an action
+  // that is not in the frozen manifest.
+  const actionEntry = deps.resolveAction(input.actionRef);
+  if (actionEntry === undefined) {
+    throw new Error(
+      `intent capture requires a resolvable frozen action source: ${input.actionRef} is not present in the frozen narrative manifest`,
+    );
+  }
+  // Co-bind timing to the action's OWN frozen captured_at (not a fresh clock),
+  // so a forged/late annotation cannot claim at-action timing.
+  const actionCapturedAt = actionEntry.capturedAt;
+
   const redactionFields = input.redactionFields ?? effectiveNarrativeRedactionFields();
   const { purpose, redactions } = typeof input.purpose === "string" && input.purpose.length > 0
     ? filterPurpose(input.purpose, redactionFields)
@@ -101,6 +140,7 @@ export function captureIntent(input: CaptureIntentInput): CapturedIntent {
       }),
       runtime: input.runtimeId,
       action_ref: input.actionRef,
+      action_captured_at: actionCapturedAt,
       redactions,
     };
   }
@@ -115,6 +155,7 @@ export function captureIntent(input: CaptureIntentInput): CapturedIntent {
     }),
     runtime: input.runtimeId,
     action_ref: input.actionRef,
+    action_captured_at: actionCapturedAt,
     redactions,
   };
 }
@@ -125,7 +166,12 @@ export const INTENT_ANNOTATION_SCHEMA_VERSION = "1.0" as const;
 export interface IntentAnnotation {
   schema_version: typeof INTENT_ANNOTATION_SCHEMA_VERSION;
   mode: IntentCaptureMode;
-  /** Frozen at bind time and co-bound to this single capture (R1). */
+  /**
+   * The material action's OWN frozen-manifest captured_at (R1 temporal co-binding).
+   * Derived from the resolved action entry at capture time — NOT a fresh wall-clock
+   * read at bind time — so a fabricated/late annotation cannot claim at-action
+   * timing for an action it did not co-occur with.
+   */
   captured_at: string;
   runtime: string;
   action_ref: string;
@@ -133,28 +179,23 @@ export interface IntentAnnotation {
   redactions: string[];
 }
 
-export interface BindIntentAnnotationDependencies {
-  now?: () => string;
-}
-
 /**
  * Freeze a captured annotation into a write-once channel (R1/AC3). Uses the same
  * create-only link(2)/EEXIST discipline as snapshot.ts:createOnlyWriteManifest:
  * a second/late write to an already-frozen channel throws (EEXIST), so a
  * post-hoc-reconstructed rationale can never overwrite or masquerade as the
- * at-action annotation. `captured_at` is stamped once, co-binding the annotation
- * to this capture.
+ * at-action annotation. `captured_at` is carried from the resolved action entry
+ * (see {@link captureIntent}), co-binding the annotation to the real action
+ * capture rather than to bind-time wall-clock.
  */
 export function bindIntentAnnotation(
   channelDir: string,
   captured: CapturedIntent,
-  deps: BindIntentAnnotationDependencies = {},
 ): { path: string; annotation: IntentAnnotation } {
-  const now = deps.now ?? (() => new Date().toISOString());
   const annotation: IntentAnnotation = {
     schema_version: INTENT_ANNOTATION_SCHEMA_VERSION,
     mode: captured.mode,
-    captured_at: now(),
+    captured_at: captured.action_captured_at,
     runtime: captured.runtime,
     action_ref: captured.action_ref,
     statement: captured.statement,
