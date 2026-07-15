@@ -111,7 +111,7 @@ for source in "${SOURCES[@]}"; do ARGS+=(--source "$source"); done
 export https_proxy=http://127.0.0.1:9 http_proxy=http://127.0.0.1:9 HTTPS_PROXY=http://127.0.0.1:9 HTTP_PROXY=http://127.0.0.1:9 NO_PROXY='*'
 if node "$ROOT/build/src/cli.js" "${ARGS[@]}" >"$TMP/snapshot.json" 2>"$TMP/snapshot.err"; then _pass "AC9: snapshot succeeds with network disabled"; else _fail "snapshot failed: $(<"$TMP/snapshot.err")"; fi
 
-NARRATIVE_DIR="$ARTIFACT_ROOT/narrative/grounded-fixture"
+NARRATIVE_DIR="$ARTIFACT_ROOT/.kontourai/narrative/grounded-fixture"
 OUT1="$TMP/out-one"; OUT2="$TMP/out-two"
 COMPILED_AT="2026-07-14T16:00:00.000Z"
 if node "$ROOT/build/src/cli.js" narrative-sources compose --narrative-dir "$NARRATIVE_DIR" --compiled-at "$COMPILED_AT" --out-dir "$OUT1" --render >"$TMP/compose-one.json" 2>"$TMP/compose-one.err"; then _pass "AC1/AC9: compose validates and renders offline"; else _fail "compose failed: $(<"$TMP/compose-one.err")"; fi

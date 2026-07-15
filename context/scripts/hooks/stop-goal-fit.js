@@ -140,7 +140,7 @@ function walkMarkdown(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name === 'archive') continue;
+      if (entry.name === 'archive' || entry.name === 'narrative') continue;
       walkMarkdown(full, out);
     } else if (entry.isFile() && entry.name.endsWith('.md')) {
       out.push(full);
@@ -1031,10 +1031,86 @@ function verifyCommandLogChain(artifactDir) {
 // WS8 (AC10b): isRunnableCommandText now lives in ./lib/runnable-command.js (single
 // source of truth shared with workflow-sidecar.ts's record-time validation, #412).
 
+function decodeNarrativeReference(value) {
+  try { return decodeURIComponent(String(value || '')); } catch { return String(value || ''); }
+}
+
+function realpathWithExistingPrefix(candidate) {
+  let cursor = path.resolve(candidate);
+  const suffix = [];
+  while (!fs.existsSync(cursor)) {
+    const parent = path.dirname(cursor);
+    if (parent === cursor) return path.resolve(candidate);
+    suffix.unshift(path.basename(cursor));
+    cursor = parent;
+  }
+  try {
+    const real = fs.realpathSync.native ? fs.realpathSync.native(cursor) : fs.realpathSync(cursor);
+    return path.resolve(real, ...suffix);
+  } catch { return path.resolve(candidate); }
+}
+
+function isNarrativeArtifactContent(bytes) {
+  const text = Buffer.isBuffer(bytes) ? bytes.toString('utf8') : String(bytes || '');
+  try {
+    const value = JSON.parse(text);
+    if (value && typeof value === 'object') {
+      if (value.schema_version === 'grounded-execution-narrative/v1' || value.schema_version === 'grounded-runtime-projection/v1') return true;
+      if (value.schema_version === '1.0' && typeof value.narrative_id === 'string' && typeof value.captured_at === 'string'
+        && value.compiler && typeof value.compiler === 'object' && value.capture_completeness && typeof value.capture_completeness === 'object'
+        && Array.isArray(value.sources)) return true;
+    }
+  } catch { /* non-JSON content may still be a rendered narrative */ }
+  return text.includes('flow-agents-narrative-composer') && text.includes('# Grounded Execution Narrative') && text.includes('## Authority provenance');
+}
+
+function referencesNarrativeNamespace(root, command) {
+  // Static scanning cannot resolve arbitrary runtime shell composition such as
+  // `base=.kontourai; test -f "$base/narrative/..."`. The compensating control
+  // is that command evidence persists only the command, exit status, and an
+  // observed-output digest; it never materializes referenced file bytes. Every
+  // channel that does materialize files is independently content-shape guarded.
+  const decoded = decodeNarrativeReference(command).replaceAll('\\', '/');
+  const foldedCommand = decoded.toLowerCase();
+  if (foldedCommand.includes('.kontourai/narrative')) return true;
+  if (/(?:^|[^A-Za-z0-9._-])\.kontourai(?:\/[^/\s"'`]+)*\/narrative(?:$|[/\s"'`])/.test(decoded.toLowerCase())) return true;
+
+  // A relative narrative path becomes namespace-bearing after a shell `cd`.
+  // Resolve the directory operand, then inspect only the subsequent command.
+  for (const match of decoded.matchAll(/(?:^|[;&|]\s*)cd\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))\s*&&([\s\S]*?)(?=(?:[;&|]\s*cd\s+)|$)/gi)) {
+    const cdTarget = match[1] || match[2] || match[3];
+    const canonicalTarget = realpathWithExistingPrefix(path.isAbsolute(cdTarget) ? cdTarget : path.resolve(root, cdTarget));
+    const foldedTarget = canonicalTarget.replaceAll('\\', '/').toLowerCase();
+    const inKontouraiTree = foldedTarget.endsWith('/.kontourai') || foldedTarget.includes('/.kontourai/');
+    if (!inKontouraiTree) continue;
+    const subsequentTokens = match[4].split(/[\s"'`;|&<>]+/).filter(Boolean);
+    if (subsequentTokens.some(token => /(?:^|\/)narrative\//i.test(token.replaceAll('\\', '/')))) return true;
+  }
+
+  const matches = [...decoded.matchAll(/(?:file:\/\/[^\s"'`;&|<>]+|(?:\.{0,2}\/|\/)[^\s"'`;&|<>]+|[^\s"'`;&|<>]+\/[^\s"'`;&|<>]+)/g)].map(match => match[0]);
+  const tokens = [decoded, ...matches];
+  const canonicalNamespace = realpathWithExistingPrefix(path.join(root, '.kontourai', 'narrative')).toLowerCase();
+  for (let token of tokens) {
+    token = token.replace(/^[('"`]+|[)'"`,:]+$/g, '');
+    if (!token || (token.includes('://') && !token.startsWith('file://'))) continue;
+    if (token.startsWith('file://')) {
+      try { token = new URL(token).pathname; } catch { continue; }
+    }
+    const candidate = realpathWithExistingPrefix(path.isAbsolute(token) ? token : path.resolve(root, token));
+    const folded = candidate.toLowerCase();
+    if (folded === canonicalNamespace || folded.startsWith(`${canonicalNamespace}${path.sep}`)) return true;
+    try {
+      if (fs.statSync(candidate).isFile() && isNarrativeArtifactContent(fs.readFileSync(candidate))) return true;
+    } catch { /* unresolved command tokens are handled by ordinary command validation */ }
+  }
+  return false;
+}
+
 function resolveTrustedCommand(root, artifactDir, check, acceptance) {
   // (a) acceptance criterion command for the matching criterion.
   const fromAcceptance = acceptanceCommandFor(check, acceptance);
   if (fromAcceptance) {
+    if (referencesNarrativeNamespace(root, fromAcceptance)) return { refused: fromAcceptance, refusal: 'narrative trust isolation (#619)' };
     // WS8 (AC10b): never spawn a prose "excerpt" as bash. A kind:"command" ref whose text
     // is not a runnable shell command is malformed-evidence — reported distinctly, not
     // executed, and not conflated with a caught false-completion.
@@ -1075,6 +1151,7 @@ function resolveTrustedCommand(root, artifactDir, check, acceptance) {
   // (c) free-form model command — opt-in only.
   if (String(process.env.FLOW_AGENTS_GOAL_FIT_RECHECK || '').toLowerCase() === 'true') {
     const cmd = normalizeCommand(check && check.command);
+    if (cmd && referencesNarrativeNamespace(root, cmd)) return { refused: cmd, refusal: 'narrative trust isolation (#619)' };
     if (cmd) return { argv: ['bash', '-lc', cmd], cwd: root, source: 'model-command (FLOW_AGENTS_GOAL_FIT_RECHECK)' };
   }
   return null;
@@ -1385,6 +1462,10 @@ function captureCrossReference(root, artifactDir, activeFlowStep) {
       continue;
     }
     const trusted = resolveTrustedCommand(root, artifactDir, check, acceptance);
+    if (trusted && trusted.refused) {
+      warnings.push(`${base} evidence check ${id}: ${trusted.refusal} — command "${safeOneLine(trusted.refused, 120)}" references the narrative namespace and was NOT executed.`);
+      continue;
+    }
     if (trusted && trusted.malformed) {
       // WS8 (AC10b): the matching acceptance criterion named a kind:"command" evidence ref
       // whose text is prose, not a runnable command. Do NOT execute it; classify it.

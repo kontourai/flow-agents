@@ -38,7 +38,7 @@ node "$ROOT/build/src/cli.js" narrative-sources snapshot \
   --redact-fields tool.input \
   >"$TMP/snapshot-success.json" 2>"$TMP/snapshot-success.stderr"
 success_exit=$?
-SUCCESS_DIR="$ARTIFACT_ROOT/narrative/redacted-success"
+SUCCESS_DIR="$ARTIFACT_ROOT/.kontourai/narrative/redacted-success"
 SUCCESS_MANIFEST="$SUCCESS_DIR/source-manifest.json"
 if [[ "$success_exit" -eq 0 && -f "$SUCCESS_MANIFEST" ]]; then
   _pass "AC6: redacted snapshot completed"
@@ -79,7 +79,7 @@ node "$ROOT/build/src/cli.js" narrative-sources snapshot \
   --redact-fields __proto__ \
   >"$TMP/snapshot-failure.json" 2>"$TMP/snapshot-failure.stderr"
 failure_exit=$?
-FAILURE_DIR="$ARTIFACT_ROOT/narrative/redacted-failure"
+FAILURE_DIR="$ARTIFACT_ROOT/.kontourai/narrative/redacted-failure"
 FAILURE_MANIFEST="$FAILURE_DIR/source-manifest.json"
 if [[ "$failure_exit" -eq 0 && -f "$FAILURE_MANIFEST" ]]; then
   _pass "AC6: filter failure still emits an auditable manifest"

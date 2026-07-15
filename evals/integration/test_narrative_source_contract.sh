@@ -94,9 +94,9 @@ DENY_ARGS=(narrative-sources snapshot --artifact-root "$ARTIFACT_ROOT" --narrati
   --transcript-path "$TRANSCRIPT" --capture-completeness "$FIXTURES/expected-capture-completeness.json"
   --source "fa1:transcript:$PATH_HASH8:0-$(wc -c < "$TRANSCRIPT" | tr -d ' ')")
 node "$ROOT/build/src/cli.js" "${DENY_ARGS[@]}" >"$TMP/deny-snapshot.json" 2>"$TMP/deny-snapshot.stderr"
-DENY_MANIFEST="$ARTIFACT_ROOT/narrative/transcript-deny-fixture/source-manifest.json"
+DENY_MANIFEST="$ARTIFACT_ROOT/.kontourai/narrative/transcript-deny-fixture/source-manifest.json"
 if json_assert "$DENY_MANIFEST" 'value.sources.length === 1 && value.sources[0].status === "unavailable" && value.sources[0].unavailable_reason === "redacted"' \
-  && [[ -z "$(ls -A "$ARTIFACT_ROOT/narrative/transcript-deny-fixture/sources" 2>/dev/null)" ]]; then
+  && [[ -z "$(ls -A "$ARTIFACT_ROOT/.kontourai/narrative/transcript-deny-fixture/sources" 2>/dev/null)" ]]; then
   _pass "AC6: transcript content is default-deny (path_only, unavailable/redacted, zero blobs)"
 else
   _fail "AC6: transcript default-deny was not enforced"
@@ -107,7 +107,7 @@ BOGUS_ARGS=(narrative-sources snapshot --artifact-root "$ARTIFACT_ROOT" --narrat
   --transcript-path "$TRANSCRIPT" --allow-transcript-content --capture-completeness "$FIXTURES/expected-capture-completeness.json"
   --source "fa1:transcript:00000000:0-4")
 node "$ROOT/build/src/cli.js" "${BOGUS_ARGS[@]}" >"$TMP/pin-snapshot.json" 2>"$TMP/pin-snapshot.stderr"
-PIN_MANIFEST="$ARTIFACT_ROOT/narrative/transcript-pin-fixture/source-manifest.json"
+PIN_MANIFEST="$ARTIFACT_ROOT/.kontourai/narrative/transcript-pin-fixture/source-manifest.json"
 if json_assert "$PIN_MANIFEST" 'value.sources.length === 1 && value.sources[0].status === "unavailable" && value.sources[0].unavailable_reason === "corrupt"'; then
   _pass "AC4: mismatched transcript path pin is rejected, never rebound"
 else
@@ -116,7 +116,7 @@ fi
 
 node "$ROOT/build/src/cli.js" "${SNAPSHOT_ARGS[@]}" >"$TMP/snapshot.json" 2>"$TMP/snapshot.stderr"
 snapshot_exit=$?
-NARRATIVE_DIR="$ARTIFACT_ROOT/narrative/contract-fixture"
+NARRATIVE_DIR="$ARTIFACT_ROOT/.kontourai/narrative/contract-fixture"
 MANIFEST="$NARRATIVE_DIR/source-manifest.json"
 if [[ "$snapshot_exit" -eq 0 && -f "$MANIFEST" ]]; then
   _pass "AC1: all-stream snapshot wrote its manifest last"

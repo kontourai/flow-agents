@@ -14,10 +14,12 @@ import { flowAgentsPackageRoot, flowAgentsPackageVersion } from "../lib/package-
 import { pinnedFlowAgentsCommand } from "../lib/pinned-cli-command.js";
 import { runObservedCommand } from "../lib/observed-command.js";
 import { captureReviewWorkspaceSnapshot, startBuilderFlowSession, syncBuilderFlowSession } from "../builder-flow-runtime.js";
+import { NARRATIVE_NAMESPACE_ROOT } from "./narrative-sources.js";
 import {
   EVIDENCE_REF_FIELD_SCHEMAS,
   EVIDENCE_REF_KINDS,
   EVIDENCE_REF_RULES,
+  NARRATIVE_PROMOTE_OPERATION,
   WORKFLOW_ACCEPTANCE_STATUSES,
   WORKFLOW_CRITIQUE_STATUSES,
 } from "./public-contracts.js";
@@ -2510,7 +2512,7 @@ function hasNonEmptyString(value: unknown): boolean {
 function hasPositiveInteger(value: unknown): boolean {
   return Number.isInteger(value) && Number(value) >= 1;
 }
-export function validateEvidenceRef(ref: AnyObj, label: string): AnyObj {
+export function validateEvidenceRef(ref: AnyObj, label: string, projectRoot = process.cwd()): AnyObj {
   if (!(EVIDENCE_REF_KINDS as readonly unknown[]).includes(ref.kind)) die(`${label} entry kind must be one of: ${EVIDENCE_REF_KINDS.join(", ")}`);
   for (const key of Object.keys(ref)) if (!Object.hasOwn(EVIDENCE_REF_FIELD_SCHEMAS, key)) die(`${label} entries contain unsupported field: ${key}`);
   if (ref.url !== undefined && !hasNonEmptyString(ref.url)) die(`${label} entry url must be a non-empty string`);
@@ -2519,6 +2521,9 @@ export function validateEvidenceRef(ref: AnyObj, label: string): AnyObj {
   if (ref.summary !== undefined && !hasNonEmptyString(ref.summary)) die(`${label} entry summary must be a non-empty string`);
   if (ref.line_start !== undefined && !hasPositiveInteger(ref.line_start)) die(`${label} entry line_start must be a positive integer`);
   if (ref.line_end !== undefined && !hasPositiveInteger(ref.line_end)) die(`${label} entry line_end must be a positive integer`);
+  rejectNarrativeReference(projectRoot, ref.file, `${label} entry file`);
+  rejectNarrativeReference(projectRoot, ref.url, `${label} entry url`);
+  rejectNarrativeReference(projectRoot, ref.excerpt, `${label} entry excerpt`);
   const rules = EVIDENCE_REF_RULES[ref.kind as keyof typeof EVIDENCE_REF_RULES];
   for (const rule of rules) {
     const present = (field: string): boolean => field === "line_start" || field === "line_end"
@@ -2535,12 +2540,12 @@ export function validateEvidenceRef(ref: AnyObj, label: string): AnyObj {
   }
   return ref;
 }
-export function normalizeEvidenceRefs(raw: unknown, label: string): AnyObj[] {
+export function normalizeEvidenceRefs(raw: unknown, label: string, projectRoot = process.cwd()): AnyObj[] {
   if (!Array.isArray(raw)) die(`${label} must be an array`);
   return raw.map((ref) => {
     if (typeof ref === "string") die(`${label} entries must be structured evidence reference objects; legacy string refs are not supported`);
     if (!ref || typeof ref !== "object" || Array.isArray(ref)) die(`${label} entries must be objects`);
-    return validateEvidenceRef({ ...ref as AnyObj }, label);
+    return validateEvidenceRef({ ...ref as AnyObj }, label, projectRoot);
   });
 }
 
@@ -2554,14 +2559,155 @@ function canonicalProjectRootForSession(dir: string): string {
   return projectRoot;
 }
 
+// #619: the narrative isolation guard must run for EVERY session layout (canonical,
+// tmp, or legacy .flow-agents/) without imposing the canonical-session requirement that
+// canonicalProjectRootForSession enforces. It only needs a best-effort project root to
+// resolve relative evidence paths; the namespace regex and content-shape checks are
+// location-independent. It mirrors canonicalProjectRootForSession's path computation for a
+// canonical .kontourai/flow-agents/<slug> session (project root is three levels up), handles
+// the legacy .flow-agents/<slug> layout (two levels up), and never dies on any layout.
+function narrativeGuardRoot(dir: string): string {
+  const artifactRoot = path.dirname(dir);
+  const parentRoot = path.dirname(artifactRoot);
+  if (path.basename(artifactRoot) === "flow-agents" && path.basename(parentRoot) === ".kontourai") {
+    return path.dirname(parentRoot);
+  }
+  if (path.basename(artifactRoot) === ".flow-agents") {
+    return parentRoot;
+  }
+  // Unknown/tmp layout: best-effort. Relative-path resolution may be imperfect, but the
+  // namespace regex and content-shape checks are location-independent, so the isolation
+  // guarantee holds regardless.
+  return artifactRoot;
+}
+
 function pathIsWithinRoot(candidate: string, root: string): boolean {
   const relative = path.relative(root, candidate);
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }
 
+export const NARRATIVE_TRUST_ISOLATION_DIAGNOSTIC = "narrative trust isolation (#619): narrative namespace artifacts cannot be used as workflow evidence";
+
+function decodeNarrativeReference(value: string): string {
+  try { return decodeURIComponent(value); } catch { return value; }
+}
+
+function realpathWithExistingPrefix(candidate: string): string {
+  let cursor = path.resolve(candidate);
+  const suffix: string[] = [];
+  while (!fs.existsSync(cursor)) {
+    const parent = path.dirname(cursor);
+    if (parent === cursor) break;
+    suffix.unshift(path.basename(cursor));
+    cursor = parent;
+  }
+  let canonical = cursor;
+  try { canonical = (fs.realpathSync.native ?? fs.realpathSync)(cursor); } catch { /* resolved lexical prefix is the fallback */ }
+  return path.resolve(canonical, ...suffix);
+}
+
+export function isNarrativeNamespacePath(projectRoot: string, resolvedPath: string): boolean {
+  const decoded = decodeNarrativeReference(resolvedPath);
+  const normalized = decoded.replaceAll("\\", "/").toLowerCase();
+  if (/(?:^|[^a-z0-9._-])\.kontourai(?:\/[^/\s"'`]+)*\/narrative(?:$|[/\s"'`])/.test(normalized)) return true;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(decoded) && !decoded.toLowerCase().startsWith("file://")) return false;
+  let local = decoded;
+  if (decoded.toLowerCase().startsWith("file://")) {
+    try { local = fileURLToPath(decoded); } catch { return false; }
+  }
+  const canonicalRoot = realpathWithExistingPrefix(path.resolve(projectRoot, NARRATIVE_NAMESPACE_ROOT)).toLowerCase();
+  const candidate = realpathWithExistingPrefix(path.resolve(projectRoot, local)).toLowerCase();
+  return pathIsWithinRoot(candidate, canonicalRoot);
+}
+
+export function isNarrativeArtifactContent(fileBytes: Buffer | string): boolean {
+  const text = Buffer.isBuffer(fileBytes) ? fileBytes.toString("utf8") : fileBytes;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+    const value = parsed as AnyObj;
+    if (value.schema_version === "grounded-execution-narrative/v1") return true;
+    if (value.schema_version === "grounded-runtime-projection/v1") return true;
+    if (value.schema_version === "1.0"
+      && hasNonEmptyString(value.narrative_id)
+      && hasNonEmptyString(value.captured_at)
+      && value.compiler && typeof value.compiler === "object"
+      && value.capture_completeness && typeof value.capture_completeness === "object"
+      && Array.isArray(value.sources)) return true;
+    return false;
+  } catch {
+    return text.includes("flow-agents-narrative-composer")
+      && text.includes("# Grounded Execution Narrative")
+      && text.includes("## Authority provenance");
+  }
+}
+
+function localPathTokens(value: string): string[] {
+  const decoded = decodeNarrativeReference(value);
+  const tokens = decoded.match(/(?:file:\/\/[^\s"'`]+)|(?:[A-Za-z]:[\\/][^\s"'`]+)|(?:\.{0,2}[\\/][^\s"'`]+)|(?:[^\s"'`]+[\\/][^\s"'`]+)/g) ?? [];
+  return tokens.map((token) => token.replace(/^[([{<]+/, "").replace(/[\])}>;,]+$/, ""));
+}
+
+function referencesComposedNarrativePath(projectRoot: string, value: string): boolean {
+  const decoded = decodeNarrativeReference(value);
+  const folded = decoded.replaceAll("\\", "/").toLowerCase();
+  if (folded.includes(".kontourai/narrative")) return true;
+
+  // Static shell inspection cannot decide arbitrary runtime variable composition such as
+  // `base=.kontourai; test -f "$base/narrative/..."`. The compensating invariant is that a
+  // command check persists only its command plus exit/observed-output digest; it never reads file
+  // bytes into trust.bundle. Every channel that DOES materialize a file is independently guarded
+  // by canonical path and narrative content shape. Keep that invariant covered end-to-end.
+  const cdPattern = /(?:^|[;&|]\s*)cd\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))\s*&&([\s\S]*)/gi;
+  for (const match of decoded.matchAll(cdPattern)) {
+    const cdTarget = match[1] ?? match[2] ?? match[3] ?? "";
+    const remainder = (match[4] ?? "").replaceAll("\\", "/").toLowerCase();
+    if (!/(?:^|[^a-z0-9._-])narrative\//.test(remainder)) continue;
+    const canonicalTarget = realpathWithExistingPrefix(path.resolve(projectRoot, decodeNarrativeReference(cdTarget)))
+      .replaceAll("\\", "/")
+      .toLowerCase();
+    const canonicalKontourai = realpathWithExistingPrefix(path.resolve(projectRoot, ".kontourai"))
+      .replaceAll("\\", "/")
+      .toLowerCase();
+    if (canonicalTarget === canonicalKontourai
+      || canonicalTarget.startsWith(`${canonicalKontourai}/`)
+      || /(?:^|\/)\.kontourai(?:\/|$)/.test(canonicalTarget)) return true;
+  }
+  return false;
+}
+
+function narrativeCandidateFile(projectRoot: string, raw: string): string | null {
+  let decoded = decodeNarrativeReference(raw);
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(decoded)) {
+    if (!decoded.toLowerCase().startsWith("file://")) return null;
+    try { decoded = fileURLToPath(decoded); } catch { return null; }
+  }
+  const candidate = path.isAbsolute(decoded) ? decoded : path.resolve(projectRoot, decoded);
+  try {
+    const canonical = (fs.realpathSync.native ?? fs.realpathSync)(candidate);
+    const stat = fs.statSync(canonical);
+    return stat.isFile() ? canonical : null;
+  } catch { return null; }
+}
+
+function rejectNarrativeReference(projectRoot: string, value: unknown, label: string): void {
+  if (typeof value !== "string") return;
+  const decoded = decodeNarrativeReference(value);
+  if (referencesComposedNarrativePath(projectRoot, decoded)) die(`${label}: ${NARRATIVE_TRUST_ISOLATION_DIAGNOSTIC}`);
+  const candidates = [decoded, ...localPathTokens(decoded)];
+  for (const candidate of new Set(candidates)) {
+    if (isNarrativeNamespacePath(projectRoot, candidate)) die(`${label}: ${NARRATIVE_TRUST_ISOLATION_DIAGNOSTIC}`);
+    const file = narrativeCandidateFile(projectRoot, candidate);
+    if (file && isNarrativeArtifactContent(fs.readFileSync(file))) {
+      die(`${label}: ${NARRATIVE_TRUST_ISOLATION_DIAGNOSTIC}`);
+    }
+  }
+}
+
 function validateLocalEvidenceFile(projectRoot: string, raw: string, label: string): string {
   const candidate = path.resolve(projectRoot, raw);
   if (!pathIsWithinRoot(candidate, projectRoot)) die(`${label} must remain inside the canonical project root`);
+  rejectNarrativeReference(projectRoot, raw, label);
   let stat: fs.Stats;
   try { stat = fs.lstatSync(candidate); } catch { die(`${label} does not exist`); }
   if (stat.isSymbolicLink() || !stat.isFile()) die(`${label} must be a non-symlink regular file`);
@@ -2576,6 +2722,13 @@ function globMatches(pattern: string, relative: string): boolean {
 
 type GateProducer = { id: string; artifactPatterns: string[]; selfProducedTrustSlices: string[] };
 
+export function rejectOperationBoundExpectation(expectationId: string, operation: string): never {
+  const completion = operation === NARRATIVE_PROMOTE_OPERATION
+    ? "authenticated external narrative provider completion"
+    : "authenticated external ChangeProvider completion";
+  die(`record-gate-claim cannot satisfy operation-bound expectation ${expectationId}; ${operation} requires ${completion}`);
+}
+
 function expectedGateProducer(flowId: string, stepId: string, expectationId: string): GateProducer {
   const manifest = loadJson(path.join(flowAgentsPackageRoot(), "kits", "builder", "kit.json"));
   const actions = Array.isArray(manifest.flow_step_actions) ? manifest.flow_step_actions as AnyObj[] : [];
@@ -2586,7 +2739,7 @@ function expectedGateProducer(flowId: string, stepId: string, expectationId: str
     : undefined;
   if (binding?.interface === "operation") {
     const operation = typeof binding.operation === "string" ? binding.operation : "the declared external operation";
-    die(`record-gate-claim cannot satisfy operation-bound expectation ${expectationId}; ${operation} requires authenticated external ChangeProvider completion`);
+    rejectOperationBoundExpectation(expectationId, operation);
   }
   const skills = Array.isArray(action.skills) ? action.skills.filter((value: unknown): value is string => typeof value === "string") : [];
   const roles = Array.isArray(manifest.skill_roles) ? manifest.skill_roles as AnyObj[] : [];
@@ -2923,7 +3076,7 @@ function requireObservedCommandRefs(refs: AnyObj[], observedCommands: ReadonlySe
   }
 }
 
-function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: readonly ObservedCommand[], verifiedAt: string): AnyObj[] {
+function completePassingCriteria(existing: AnyObj[], raw: string[], observedCommands: readonly ObservedCommand[], verifiedAt: string, projectRoot: string): AnyObj[] {
   if (raw.length === 0) die("record-gate-claim requires --criterion-json for a passing tests-evidence claim");
   const incoming = raw.map((value) => parseJson(value, "--criterion-json"));
   const expectedById = new Map<string, AnyObj>();
@@ -2940,7 +3093,7 @@ function completePassingCriteria(existing: AnyObj[], raw: string[], observedComm
   return incoming.map((criterion, index) => {
     if (Object.keys(criterion).some((key) => !["id", "status", "evidence_refs"].includes(key))) die(`criterion ${ids[index]} may update only id, status, and evidence_refs`);
     if (criterion.status !== "pass") die(`criterion ${ids[index]} must have status pass for a passing tests-evidence claim`);
-    const refs = normalizeEvidenceRefs(criterion.evidence_refs, `criterion ${ids[index]} evidence_refs`);
+    const refs = normalizeEvidenceRefs(criterion.evidence_refs, `criterion ${ids[index]} evidence_refs`, projectRoot);
     if (refs.length === 0) die(`criterion ${ids[index]} requires reviewable evidence_refs`);
     requireObservedCommandRefs(refs, observedCommandNames, `criterion ${ids[index]}`);
     const referencedCommands = new Set(refs.filter((ref) => ref.kind === "command").map(commandFromEvidenceRef));
@@ -2952,7 +3105,7 @@ function completePassingCriteria(existing: AnyObj[], raw: string[], observedComm
 const critiqueStatuses = new Set<string>(WORKFLOW_CRITIQUE_STATUSES);
 const safeCritiqueId = /^[a-z][a-z0-9_-]*$/;
 
-function normalizeCritiqueLanes(raw: string[]): AnyObj[] {
+function normalizeCritiqueLanes(raw: string[], projectRoot: string): AnyObj[] {
   if (raw.length === 0) die("record-critique requires at least one --lane-json");
   const lanes = raw.map((value, index) => {
     const lane = parseJson(value, "--lane-json");
@@ -2961,7 +3114,7 @@ function normalizeCritiqueLanes(raw: string[]): AnyObj[] {
     if (!safeCritiqueId.test(String(lane.id ?? ""))) die(`--lane-json ${index} id must be a unique safe identifier`);
     if (!critiqueStatuses.has(String(lane.status ?? ""))) die(`--lane-json ${index} status must be one of: pass, fail, not_verified`);
     if (!hasNonEmptyString(lane.summary)) die(`--lane-json ${index} summary must be non-empty`);
-    const evidenceRefs = normalizeEvidenceRefs(lane.evidence_refs, `--lane-json ${index} evidence_refs`);
+    const evidenceRefs = normalizeEvidenceRefs(lane.evidence_refs, `--lane-json ${index} evidence_refs`, projectRoot);
     if (evidenceRefs.length === 0) die(`--lane-json ${index} requires structured reviewable evidence_refs`);
     return { id: lane.id, status: lane.status, summary: lane.summary, evidence_refs: evidenceRefs };
   });
@@ -2979,6 +3132,13 @@ function reviewTargetArtifacts(dir: string, rawPaths: string[], label: string): 
 }
 
 function reviewTargetArtifactsMatch(dir: string, reviewTarget: unknown): boolean {
+  if (reviewTarget && typeof reviewTarget === "object" && !Array.isArray(reviewTarget)) {
+    const projectRoot = narrativeGuardRoot(dir);
+    const artifacts = (reviewTarget as AnyObj).artifacts;
+    if (Array.isArray(artifacts)) {
+      artifacts.forEach((artifact, index) => rejectNarrativeReference(projectRoot, artifact?.file, `critique review_target artifact ${index}`));
+    }
+  }
   try {
     if (!reviewTarget || typeof reviewTarget !== "object" || Array.isArray(reviewTarget)) return false;
     const artifacts = (reviewTarget as AnyObj).artifacts;
@@ -3044,7 +3204,7 @@ function critiqueIsCleanAndCurrent(dir: string, critique: AnyObj): boolean {
 // BEFORE normalizeCheck runs — see applyGateClaimStamp). This does not weaken new-mint
 // enforcement: a NOVEL gate-claim-* id (not already present at all) is still rejected exactly as
 // before, and superseding a STAMPED existing id is now rejected too.
-export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false, existingCheckStampById?: ReadonlyMap<string, boolean>): AnyObj {
+export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false, existingCheckStampById?: ReadonlyMap<string, boolean>, projectRoot = process.cwd()): AnyObj {
   const check = { ...raw };
   if (!check.id || !check.kind || !check.status || !check.summary) die("check requires id, kind, status, and summary");
   if (!allowGateClaimPrefix && typeof check.id === "string" && check.id.startsWith("gate-claim-")) {
@@ -3054,13 +3214,17 @@ export function normalizeCheck(raw: AnyObj, allowGateClaimPrefix = false, existi
   }
   if (!checkKinds.has(check.kind)) die("kind must be one of: build, types, lint, test, command, security, diff, browser, runtime, policy, external");
   if (!checkStatuses.has(check.status)) die("status must be one of: pass, fail, not_verified, skip");
+  rejectNarrativeReference(projectRoot, check.command, `check ${String(check.id)} command`);
   validateRunnableCheckCommand(check, `check ${String(check.id)}`);
-  if (Array.isArray(check.standard_refs)) for (const ref of check.standard_refs) if (!["junit", "sarif", "coverage", "veritas"].includes(ref.standard)) die("standard must be one of");
-  if (check.artifact_refs) check.artifact_refs = normalizeEvidenceRefs(check.artifact_refs, "artifact_refs");
-  if (check.surface_trust_refs) check.surface_trust_refs = normalizeSurfaceRefs(check.surface_trust_refs);
+  if (Array.isArray(check.standard_refs)) for (const ref of check.standard_refs) {
+    if (!["junit", "sarif", "coverage", "veritas"].includes(ref.standard)) die("standard must be one of");
+    rejectNarrativeReference(projectRoot, ref.ref, `check ${String(check.id)} standard_ref`);
+  }
+  if (check.artifact_refs) check.artifact_refs = normalizeEvidenceRefs(check.artifact_refs, "artifact_refs", projectRoot);
+  if (check.surface_trust_refs) check.surface_trust_refs = normalizeSurfaceRefs(check.surface_trust_refs, projectRoot);
   return check;
 }
-function normalizeSurfaceRefs(refs: any): AnyObj[] {
+function normalizeSurfaceRefs(refs: any, projectRoot: string): AnyObj[] {
   if (!Array.isArray(refs)) die("surface_trust_refs must be an array");
   // Use the cached @kontourai/surface module for advisory inline validation of referenced
   // trust.bundle files. Fail-open when surface is not yet loaded (surface loads on first
@@ -3070,6 +3234,7 @@ function normalizeSurfaceRefs(refs: any): AnyObj[] {
     const keys = JSON.stringify(ref).match(/"([^"]+)":/g) ?? [];
     for (const key of keys.map((k) => k.slice(1, -2))) if (key.toLowerCase().includes("veritas")) die(`unsupported field in Surface trust ref: ${key}`);
     const out = { ...ref };
+    rejectNarrativeReference(projectRoot, out.artifact_ref, "surface trust artifact_ref");
     // trust.bundle is the canonical Hachure-aligned artifact kind; TrustReport/Trust Snapshot are legacy aliases
     if (!["trust.bundle", "TrustReport", "Trust Snapshot"].includes(out.artifact_kind)) die("artifact_kind must be one of: trust.bundle, TrustReport, Trust Snapshot");
     // When surface is loaded, validate the referenced trust artifact if it is a local file.
@@ -3148,23 +3313,25 @@ export function kitIdentityFromBundle(
   // 3. Genuinely unknown — never fallback to "builder".
   return { claimType: "unknown.trust.bundle", kitId: "unknown", subject: "unknown-kit", gateId: "unknown.trust.bundle" };
 }
-function surfaceCheckFromArtifact(file: string, index: number): AnyObj {
-  const raw = JSON.parse(read(file));
+function surfaceCheckFromArtifact(file: string, index: number, projectRoot = process.cwd()): AnyObj {
+  rejectNarrativeReference(projectRoot, file, `--surface-trust-json ${index}`);
+  const resolvedFile = path.isAbsolute(file) ? file : path.resolve(projectRoot, decodeNarrativeReference(file));
+  const raw = JSON.parse(read(resolvedFile));
   const lower = JSON.stringify(raw).toLowerCase();
   // Structurally read kit identity from the bundle — never hardcode "builder".
-  const { claimType: bundleClaimType, subject: bundleSubject, gateId: bundleGateId } = kitIdentityFromBundle(raw, file);
+  const { claimType: bundleClaimType, subject: bundleSubject, gateId: bundleGateId } = kitIdentityFromBundle(raw, resolvedFile);
   let ref: AnyObj;
   if (lower.includes("provider") && lower.includes("absent")) {
-    ref = { artifact_kind: "trust.bundle", artifact_ref: file, gate_id: "provider.unavailable", claim_type: bundleClaimType, claim_status: "unknown", subject: bundleSubject, freshness: { status: "unknown", summary: "No trust provider is configured" }, authority: { producer: "unknown", summary: "No trust provider is configured" }, integrity: { status: "unknown", summary: "Unknown" }, status: "not_verified", summary: "No trust provider is configured" };
+    ref = { artifact_kind: "trust.bundle", artifact_ref: resolvedFile, gate_id: "provider.unavailable", claim_type: bundleClaimType, claim_status: "unknown", subject: bundleSubject, freshness: { status: "unknown", summary: "No trust provider is configured" }, authority: { producer: "unknown", summary: "No trust provider is configured" }, integrity: { status: "unknown", summary: "Unknown" }, status: "not_verified", summary: "No trust provider is configured" };
   } else if (lower.includes("artifact") && lower.includes("absent")) {
-    ref = { artifact_kind: "trust.bundle", artifact_ref: file, gate_id: "artifact.unavailable", claim_type: bundleClaimType, claim_status: "unknown", subject: bundleSubject, freshness: { status: "unknown", summary: "Artifact not readable" }, authority: { producer: "unknown", summary: "Artifact not readable" }, integrity: { status: "unknown", summary: "Artifact not readable" }, status: "not_verified", summary: "artifact not readable" };
+    ref = { artifact_kind: "trust.bundle", artifact_ref: resolvedFile, gate_id: "artifact.unavailable", claim_type: bundleClaimType, claim_status: "unknown", subject: bundleSubject, freshness: { status: "unknown", summary: "Artifact not readable" }, authority: { producer: "unknown", summary: "Artifact not readable" }, integrity: { status: "unknown", summary: "Artifact not readable" }, status: "not_verified", summary: "artifact not readable" };
   } else {
     const claimStatus = lower.includes("rejected") ? "rejected" : "accepted";
     const freshness = lower.includes("stale") ? "stale" : "fresh";
     const producer = lower.includes("missing-authority") ? "unknown" : "surface-local";
     const integrity = lower.includes("mismatch") ? "mismatch" : "matched";
     // Use trust.bundle as the canonical Hachure-aligned artifact_kind for all trust-backed evidence refs
-    ref = { artifact_kind: "trust.bundle", artifact_ref: file, gate_id: bundleGateId, claim_type: bundleClaimType, claim_status: claimStatus, subject: bundleSubject, freshness: { status: freshness, summary: freshness === "fresh" ? "fresh" : "not currently verifiable" }, authority: { producer, summary: producer === "unknown" ? "missing authority" : "Local Surface trust producer." }, integrity: { status: integrity, summary: integrity === "matched" ? "matched" : "integrity mismatch" } };
+    ref = { artifact_kind: "trust.bundle", artifact_ref: resolvedFile, gate_id: bundleGateId, claim_type: bundleClaimType, claim_status: claimStatus, subject: bundleSubject, freshness: { status: freshness, summary: freshness === "fresh" ? "fresh" : "not currently verifiable" }, authority: { producer, summary: producer === "unknown" ? "missing authority" : "Local Surface trust producer." }, integrity: { status: integrity, summary: integrity === "matched" ? "matched" : "integrity mismatch" } };
     ref.status = deriveSurfaceStatus(ref);
     ref.summary = ref.status === "pass" ? "accepted" : ref.status === "not_verified" ? "not currently verifiable" : (claimStatus === "rejected" ? "rejected" : producer === "unknown" ? "missing authority" : "integrity mismatch");
   }
@@ -3183,9 +3350,10 @@ function surfaceCheckFromArtifact(file: string, index: number): AnyObj {
  * not the first thing an agent reaches for.
  */
 function validateAcceptanceEvidenceRefs(dir: string, p?: ReturnType<typeof parseArgs>): void {
-  if (p?.flags.has("skip-evidence-ref-runnability-guard")) {
+  const projectRoot = narrativeGuardRoot(dir);
+  const skipRunnabilityGuard = p?.flags.has("skip-evidence-ref-runnability-guard") ?? false;
+  if (skipRunnabilityGuard) {
     process.stderr.write("[record-evidence] evidence-ref runnability guard skipped via --skip-evidence-ref-runnability-guard\n");
-    return;
   }
   const file = path.join(dir, "acceptance.json");
   if (!fs.existsSync(file)) return;
@@ -3194,7 +3362,8 @@ function validateAcceptanceEvidenceRefs(dir: string, p?: ReturnType<typeof parse
   const { isRunnableCommandText, isAmbiguousAbsenceCommand } = loadRunnableCommandHelper();
   data.criteria.forEach((criterion: AnyObj, index: number) => {
     if (criterion.evidence_refs === undefined) return;
-    const refs = normalizeEvidenceRefs(criterion.evidence_refs, `acceptance.criteria[${index}].evidence_refs`);
+    const refs = normalizeEvidenceRefs(criterion.evidence_refs, `acceptance.criteria[${index}].evidence_refs`, projectRoot);
+    if (skipRunnabilityGuard) return;
     // #412 (AC8): a kind:"command" ref's command source (excerpt, falling back to url when that
     // is where the command string lives) must be a literally runnable shell command, not prose
     // describing a manual verification step — reject at RECORD time instead of letting it reach
@@ -3264,8 +3433,17 @@ function requireStampedClaim(claim: AnyObj, dir: string): string {
   }
   return origin;
 }
+
+function loadTrustBundleForTrustMachinery(dir: string): AnyObj {
+  const bundleFile = path.join(dir, "trust.bundle");
+  if (fs.existsSync(bundleFile) && isNarrativeArtifactContent(fs.readFileSync(bundleFile))) {
+    die(`trust.bundle in ${dir}: ${NARRATIVE_TRUST_ISOLATION_DIAGNOSTIC}; restore a genuine trust.bundle and keep rendered narratives under ${NARRATIVE_NAMESPACE_ROOT}`);
+  }
+  return loadJson(bundleFile);
+}
+
 function checksFromBundle(dir: string): AnyObj[] {
-  const bundle = loadJson(path.join(dir, "trust.bundle"));
+  const bundle = loadTrustBundleForTrustMachinery(dir);
   const allClaims: AnyObj[] = Array.isArray(bundle.claims) ? bundle.claims : [];
   // Validate stamps on every claim up front — any unstamped claim anywhere in the bundle marks
   // it pre-supersession, regardless of whether it is check/acceptance/critique-typed.
@@ -3487,7 +3665,7 @@ function mergeChecksById(existing: AnyObj[], incoming: AnyObj[]): AnyObj[] {
   return [...byId.values()];
 }
 function critiquesFromBundle(dir: string): AnyObj[] {
-  const bundle = loadJson(path.join(dir, "trust.bundle"));
+  const bundle = loadTrustBundleForTrustMachinery(dir);
   if (!Array.isArray(bundle.claims)) return [];
   for (const c of bundle.claims) requireStampedClaim(c, dir);
   // A claim is a CRITIQUE when its origin is "critique" (authoritative — see requireStampedClaim
@@ -3513,7 +3691,7 @@ function critiquesFromBundle(dir: string): AnyObj[] {
 }
 
 function criteriaFromBundle(dir: string): AnyObj[] {
-  const bundle = loadJson(path.join(dir, "trust.bundle"));
+  const bundle = loadTrustBundleForTrustMachinery(dir);
   if (!Array.isArray(bundle.claims)) return [];
   for (const claim of bundle.claims) requireStampedClaim(claim, dir);
   return bundle.claims
@@ -3577,7 +3755,11 @@ async function recordEvidence(p: ReturnType<typeof parseArgs>): Promise<number> 
   // (not re-read) as _existingState for the compose-safe merge — one readBundleState call.
   const _existingState = readBundleState(dir);
   const _existingCheckStampById = existingCheckStampMap(_existingState.checks);
-  const _checksRaw = [...opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"), false, _existingCheckStampById)), ...opts(p, "surface-trust-json").map(surfaceCheckFromArtifact)];
+  const projectRoot = narrativeGuardRoot(dir);
+  const _checksRaw = [
+    ...opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"), false, _existingCheckStampById, projectRoot)),
+    ...opts(p, "surface-trust-json").map((file, index) => surfaceCheckFromArtifact(file, index, projectRoot)),
+  ];
   // WS8 (AC4, iteration 2): a command-backed check reconciles against CI or fails — it can
   // NEVER be waived. Reject --accepted-gap-reason/--waived-by on any check whose evidence
   // classifies as test_output (build/types/lint/test/command, and security/browser/runtime
@@ -3669,6 +3851,7 @@ async function recordCheck(p: ReturnType<typeof parseArgs>, commandArgv: string[
   if (commandArgv?.length && commandString) die("record-check: pass the command via EITHER `-- <command...>` OR --command, not both");
 
   const repoRoot = findRepoRootFromDir(dir);
+  rejectNarrativeReference(repoRoot, commandArgv?.join(" ") ?? commandString, "record-check command");
   let displayCommand: string;
   let exitCode: number | null;
   let stdout = "";
@@ -3747,7 +3930,7 @@ ${stderr}` : ""}`.trim());
     status,
     summary,
     command: displayCommand,
-  }, false, _existingCheckStampById);
+  }, false, _existingCheckStampById, repoRoot);
   if (outputSha256) check._output_sha256 = outputSha256;
 
   const _mergedChecks = mergeChecksById(_existingState.checks, [check]);
@@ -3854,9 +4037,15 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   const mustRunTests = targetExpectation.id === "tests-evidence" && statusVal === "pass";
   const observedCommandRaw = opts(p, "observed-command-json");
   if (mustRunTests && gateCommands.length === 0) die("record-gate-claim requires at least one --command for a passing tests-evidence claim");
-  const projectRoot = gateCommands.length > 0 ? canonicalProjectRootForSession(dir) : null;
+  // #619: the narrative evidence-ref guards (validateEvidenceRef / normalizeCheck /
+  // completePassingCriteria) need a non-null, location-independent project root that never
+  // dies on a non-canonical session. normalizeObservedCommands still requires the strict
+  // canonical root, but only when there are commands to normalize.
+  const projectRoot = narrativeGuardRoot(dir);
+  const canonicalRoot = gateCommands.length > 0 ? canonicalProjectRootForSession(dir) : null;
+  for (const command of gateCommands) rejectNarrativeReference(projectRoot, command, "record-gate-claim command");
   const observedCommands = gateCommands.length > 0
-    ? await normalizeObservedCommands(gateCommands, projectRoot!, mustRunTests, statusVal)
+    ? await normalizeObservedCommands(gateCommands, canonicalRoot!, mustRunTests, statusVal)
     : [];
   // #634: persist the writer's real executions into the hash-chained command-log so the
   // capture fold has a deterministic observation even on exit-code-blind hosts.
@@ -3889,7 +4078,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   };
 
   // Include structured evidence refs if provided
-  const evidenceRefs: AnyObj[] = opts(p, "evidence-ref-json").map((v) => validateEvidenceRef(parseJson(v, "--evidence-ref-json"), "--evidence-ref-json"));
+  const evidenceRefs: AnyObj[] = opts(p, "evidence-ref-json").map((v) => validateEvidenceRef(parseJson(v, "--evidence-ref-json"), "--evidence-ref-json", projectRoot));
   const producer = expectedGateProducer(exactFlowContext?.flowId ?? activeStep.flowId, activeStep.stepId, targetExpectation.id);
   if (statusVal === "pass") validateReviewableGateEvidence(dir, slug, evidenceRefs, producer, `gate claim ${targetExpectation.id}`);
   if (mustRunTests) requireObservedCommandRefs(evidenceRefs, observedCommandNames, "a passing tests-evidence claim", true);
@@ -3910,7 +4099,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   if (gateCommand) check.command = gateCommand;
   if (observedCommands.length > 0) check._observed_commands = observedCommands;
 
-  const checkNormalized = normalizeCheck(check, /* allowGateClaimPrefix */ true);
+  const checkNormalized = normalizeCheck(check, /* allowGateClaimPrefix */ true, undefined, projectRoot);
   if (outputSha256) checkNormalized._output_sha256 = outputSha256;
   // WS8 (ADR 0020): honor the accepted-gap waiver flags for a gate claim too.
   const gateWaiver = parseWaiver(p, ts);
@@ -3923,7 +4112,7 @@ async function recordGateClaim(p: ReturnType<typeof parseArgs>): Promise<number>
   // SAME expectation id supersedes the earlier check for that expectation (mergeChecksById); a
   // gate claim against a different expectation is additive.
   const _existingState = readBundleState(dir);
-  const criteria = mustRunTests ? completePassingCriteria(_existingState.criteria, opts(p, "criterion-json"), observedCommands, ts) : _existingState.criteria;
+  const criteria = mustRunTests ? completePassingCriteria(_existingState.criteria, opts(p, "criterion-json"), observedCommands, ts, projectRoot) : _existingState.criteria;
   if (mustRunTests) {
     const liveCritiques = _existingState.critiques.filter((critique) => !critique.superseded_by);
     if (liveCritiques.length === 0 || liveCritiques.some((critique) => !critiqueIsCleanAndCurrent(dir, critique))) {
@@ -3980,6 +4169,7 @@ async function promote(p: ReturnType<typeof parseArgs>): Promise<number> {
   // repo-relative paths when the ref lives under the repo, so the claim is portable.
   const targets: string[] = [];
   for (const raw of rawPaths) {
+    rejectNarrativeReference(repoRoot, raw, "promote --evidence-path");
     const abs = path.isAbsolute(raw) ? raw : path.resolve(repoRoot, raw);
     if (!fs.existsSync(abs)) die(`promote --evidence-path does not exist on disk: ${raw} (resolved: ${abs}). Promotion evidence refs must point at durable docs that were actually written.`);
     const rel = path.relative(repoRoot, abs);
@@ -4106,19 +4296,24 @@ async function advanceState(p: ReturnType<typeof parseArgs>): Promise<number> {
   return 0;
 }
 
-export function normalizeFinding(raw: AnyObj): AnyObj {
+export function normalizeFinding(raw: AnyObj, projectRoot = process.cwd()): AnyObj {
   if (raw.file_refs !== undefined && !Array.isArray(raw.file_refs)) die("file_refs must be an array");
+  for (const ref of raw.file_refs ?? []) {
+    if (typeof ref !== "string") die("file_refs entries must be strings");
+    rejectNarrativeReference(projectRoot, ref, "finding file_ref");
+  }
   return raw;
 }
 
 async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
+  const projectRoot = canonicalProjectRootForSession(dir);
   const verdict = opt(p, "verdict");
   if (!critiqueStatuses.has(verdict)) die("record-critique requires --verdict pass, fail, or not_verified");
   const summary = opt(p, "summary");
   if (!hasNonEmptyString(summary)) die("record-critique requires --summary");
-  const lanes = normalizeCritiqueLanes(opts(p, "lane-json"));
+  const lanes = normalizeCritiqueLanes(opts(p, "lane-json"), projectRoot);
   const reviewArtifacts = reviewTargetArtifacts(dir, opts(p, "artifact-ref"), "record-critique review_target");
   if (verdict === "pass" && (lanes.some((lane) => lane.status !== "pass") || reviewArtifacts.length === 0)) {
     die("a passing critique requires every lane to pass and at least one local reviewed --artifact-ref");
@@ -4148,12 +4343,12 @@ async function recordCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
     review_target: {
       artifacts: reviewArtifacts,
       workspace_snapshot: captureReviewWorkspaceSnapshot(
-        canonicalProjectRootForSession(dir),
+        projectRoot,
         reviewArtifacts.map((artifact) => ({ file: String(artifact.file), sha256: String(artifact.sha256) })),
       ),
     },
     artifact_refs: reviewArtifacts.map((artifact) => artifact.file),
-    findings: opts(p, "finding-json").map((v) => normalizeFinding(parseJson(v, "--finding-json"))),
+    findings: opts(p, "finding-json").map((v) => normalizeFinding(parseJson(v, "--finding-json"), projectRoot)),
   };
   if (critique.verdict === "pass" && critique.findings.some((f: AnyObj) => f.status === "open")) die("required critique must pass");
   // #267/#282: supersede-by-critique-id. The latest write for a critique id wins for
@@ -4222,14 +4417,43 @@ async function importCritique(p: ReturnType<typeof parseArgs>): Promise<number> 
   if (verdict !== "pass") die("required critique must pass");
   return result;
 }
+
+function rejectNarrativeReleaseReferences(projectRoot: string, value: unknown, label: string, referenceField = false): void {
+  if (typeof value === "string") {
+    if (referenceField) rejectNarrativeReference(projectRoot, value, label);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) rejectNarrativeReleaseReferences(projectRoot, entry, label, referenceField);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  for (const [key, entry] of Object.entries(value as AnyObj)) {
+    const isReferenceField = /^(?:refs?|files?|paths?|(?:evidence|artifact|source)_(?:refs?|files?|paths?))$/.test(key);
+    rejectNarrativeReleaseReferences(projectRoot, entry, `${label}.${key}`, isReferenceField);
+  }
+}
+
 async function recordRelease(p: ReturnType<typeof parseArgs>): Promise<number> {
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
+  const projectRoot = narrativeGuardRoot(dir);
   const decision = opt(p, "decision");
   if (!["merge", "release", "deploy", "hold", "rollback_required"].includes(decision)) die("decision must be one of: merge, release, deploy, hold, rollback_required");
   const gates = opts(p, "gate-json").map((v) => parseJson(v, "--gate-json"));
   if (["merge", "release", "deploy"].includes(decision) && !gates.some((g) => g.name === decision && g.status === "pass")) die(`positive release decision requires ${decision} gate to pass`);
-  const payload = { ...sidecarBase(slug), decision: opt(p, "decision"), updated_at: opt(p, "timestamp", now()), scope: opt(p, "scope"), evidence_ref: opt(p, "evidence-ref"), gates: opts(p, "gate-json").map((v) => parseJson(v, "--gate-json")), rollback_plan: parseJson(opt(p, "rollback-json", '{"status":"not_required","summary":"Not required.","owner":"maintainer"}'), "--rollback-json"), observability_plan: parseJson(opt(p, "observability-json", '{"status":"not_required","summary":"Not required."}'), "--observability-json"), post_deploy_checks: opts(p, "post-deploy-json").map((v) => parseJson(v, "--post-deploy-json")), docs: parseJson(opt(p, "docs-json", '{"status":"not_needed","summary":"Not needed."}'), "--docs-json") };
+  const evidenceRef = opt(p, "evidence-ref");
+  const rollbackPlan = parseJson(opt(p, "rollback-json", '{"status":"not_required","summary":"Not required.","owner":"maintainer"}'), "--rollback-json");
+  const observabilityPlan = parseJson(opt(p, "observability-json", '{"status":"not_required","summary":"Not required."}'), "--observability-json");
+  const postDeployChecks = opts(p, "post-deploy-json").map((v) => parseJson(v, "--post-deploy-json"));
+  const docs = parseJson(opt(p, "docs-json", '{"status":"not_needed","summary":"Not needed."}'), "--docs-json");
+  rejectNarrativeReference(projectRoot, evidenceRef, "release evidence_ref");
+  rejectNarrativeReleaseReferences(projectRoot, gates, "release gates");
+  rejectNarrativeReleaseReferences(projectRoot, rollbackPlan, "release rollback_plan");
+  rejectNarrativeReleaseReferences(projectRoot, observabilityPlan, "release observability_plan");
+  rejectNarrativeReleaseReferences(projectRoot, postDeployChecks, "release post_deploy_checks");
+  rejectNarrativeReleaseReferences(projectRoot, docs, "release docs");
+  const payload = { ...sidecarBase(slug), decision: opt(p, "decision"), updated_at: opt(p, "timestamp", now()), scope: opt(p, "scope"), evidence_ref: evidenceRef, gates, rollback_plan: rollbackPlan, observability_plan: observabilityPlan, post_deploy_checks: postDeployChecks, docs };
   const stateSummary = opt(p, "summary").trim() || `Release readiness recorded for ${decision}.`;
   writeJson(path.join(dir, "release.json"), payload);
   writeState(dir, slug, "delivered", "release", payload.updated_at, stateSummary);
@@ -5588,8 +5812,12 @@ function validateLearningPrevention(prevention: unknown): void {
   if (typeof value.status !== "string" || value.status.length === 0) die("correction.prevention.status is required");
   if (!["open", "completed", "accepted", "deferred", "rejected"].includes(value.status)) die("correction.prevention.status must be one of: open, completed, accepted, deferred, rejected");
 }
-export function normalizeLearning(raw: AnyObj, timestamp: string): AnyObj {
+export function normalizeLearning(raw: AnyObj, timestamp: string, projectRoot = process.cwd()): AnyObj {
   if (!Array.isArray(raw.source_refs)) die("source_refs must be an array");
+  for (const ref of raw.source_refs) {
+    if (typeof ref !== "string") die("source_refs entries must be strings");
+    rejectNarrativeReference(projectRoot, ref, "learning source_ref");
+  }
   if (!Array.isArray(raw.facts)) die("facts must be an array");
   if (!Array.isArray(raw.routing)) die("routing must be an array");
   if (!["success", "failure", "mixed", "unknown"].includes(raw.outcome)) die("learning outcome must be one of: success, failure, mixed, unknown");
@@ -5600,7 +5828,8 @@ async function recordLearning(p: ReturnType<typeof parseArgs>): Promise<number> 
   const dir = artifactDirFrom(p.positional[0] || die("artifact directory is required"));
   const slug = taskSlugFor(dir, opt(p, "task-slug"));
   const timestamp = opt(p, "timestamp", now());
-  const records = opts(p, "record-json").map((v) => normalizeLearning(parseJson(v, "--record-json"), timestamp));
+  const projectRoot = narrativeGuardRoot(dir);
+  const records = opts(p, "record-json").map((v) => normalizeLearning(parseJson(v, "--record-json"), timestamp, projectRoot));
   const status = opt(p, "status", "learned");
   if (status === "learned" && records.some((r) => r.routing.some((x: AnyObj) => x.status === "open"))) die("learning status learned cannot have open routing");
   if (status === "learned" && records.some((r) => r.correction === undefined)) die("learning status learned requires every record to include correction.needed");
@@ -5620,7 +5849,7 @@ function evidenceClean(dir: string): boolean {
   // legacy (pre-bundle-era) sessions that never wrote a trust.bundle at all — unrelated to origin
   // stamping. When a trust.bundle IS present, every claim must be stamped (requireStampedClaim);
   // there is no claimType-derivation fallback for an unstamped claim (#268/#344).
-  const bundle = loadJson(path.join(dir, "trust.bundle"));
+  const bundle = loadTrustBundleForTrustMachinery(dir);
   if (Array.isArray(bundle.claims)) {
     for (const c of bundle.claims) requireStampedClaim(c, dir);
     const checkClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => c && claimOrigin(c) === "check");
@@ -5639,7 +5868,7 @@ function evidenceClean(dir: string): boolean {
 }
 function critiqueClean(dir: string): boolean {
   // trust.bundle is the sole critique artifact. Legacy critique.json must not influence gates.
-  const bundle = loadJson(path.join(dir, "trust.bundle"));
+  const bundle = loadTrustBundleForTrustMachinery(dir);
   if (Array.isArray(bundle.claims)) {
     for (const c of bundle.claims) requireStampedClaim(c, dir);
     const critiqueClaims = (bundle.claims as AnyObj[]).filter((c: AnyObj) => {
@@ -5659,9 +5888,14 @@ function assertExistingLearningValid(dir: string): void {
   const file = path.join(dir, "learning.json");
   if (!fs.existsSync(file)) return;
   const data = loadJson(file);
+  const projectRoot = narrativeGuardRoot(dir);
   if (!Array.isArray(data.records)) die("learning records must be an array");
   for (const record of data.records) {
     if (!Array.isArray(record.source_refs)) die("source_refs must be an array");
+    for (const ref of record.source_refs) {
+      if (typeof ref !== "string") die("source_refs entries must be strings");
+      rejectNarrativeReference(projectRoot, ref, "learning source_ref");
+    }
     if (!Array.isArray(record.facts)) die("facts must be an array");
     if (!Array.isArray(record.routing)) die("routing must be an array");
     validateLearningCorrection(record);
@@ -5672,6 +5906,7 @@ async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
   const root = opt(p, "artifact-root") ? path.resolve(opt(p, "artifact-root")) : defaultArtifactRootForRead();
   const dir = path.resolve(opt(p, "artifact-dir") || currentDir(root) || "");
   requireArtifactDirUnderRoot(dir, root);
+  const projectRoot = narrativeGuardRoot(dir);
   assertExistingLearningValid(dir);
   const verdict = opt(p, "verdict");
   if (verdict === "pass") {
@@ -5684,7 +5919,7 @@ async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
     // trust.bundle does not yet exist (loadJson falls back to {}), exactly as
     // recordEvidence/recordCheck rely on.
     const _dogfoodExistingCheckStampById = existingCheckStampMap(readBundleState(dir).checks);
-    const checks = opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"), false, _dogfoodExistingCheckStampById));
+    const checks = opts(p, "check-json").map((v) => normalizeCheck(parseJson(v, "--check-json"), false, _dogfoodExistingCheckStampById, projectRoot));
     if (checks.some((c) => c.status !== "pass" && c.status !== "skip")) die("clean evidence requires all non-skipped checks to pass");
     // Phase 4c: evidence check reads from trust.bundle (sole verification artifact); legacy evidence.json fallback in evidenceClean.
     // #268/#344: builder.* check/critique claims count as clean evidence via their authoritative origin stamp.
@@ -5695,13 +5930,13 @@ async function dogfoodPass(p: ReturnType<typeof parseArgs>): Promise<number> {
     if (!_hasBundleEvidence && !_hasLegacyEvidence && !fs.existsSync(path.join(dir, "trust.bundle")) && !fs.existsSync(path.join(dir, "evidence.json")) && checks.length === 0) die("cannot mark clean without passing evidence");
     if (p.flags.has("require-critique") || opt(p, "release-decision")) {
       const newCritiqueVerdict = opt(p, "critique-verdict", "pass");
-      for (const value of opts(p, "finding-json")) normalizeFinding(parseJson(value, "--finding-json"));
+      for (const value of opts(p, "finding-json")) normalizeFinding(parseJson(value, "--finding-json"), projectRoot);
       if (newCritiqueVerdict !== "pass") die(opt(p, "release-decision") ? "requires clean critique" : "requires clean critique before recording pass evidence");
       if (!opt(p, "critique-id") && !critiqueClean(dir)) die("requires passing critique");
       if (!critiqueClean(dir) && fs.existsSync(path.join(dir, "trust.bundle"))) die(opt(p, "release-decision") ? "requires clean critique" : "requires clean critique before recording pass evidence");
     }
   }
-  const learningRecords = opts(p, "learning-record-json").map((v) => normalizeLearning(parseJson(v, "--learning-record-json"), opt(p, "timestamp", now())));
+  const learningRecords = opts(p, "learning-record-json").map((v) => normalizeLearning(parseJson(v, "--learning-record-json"), opt(p, "timestamp", now()), projectRoot));
   if (opt(p, "learning-status") === "learned" && learningRecords.some((r) => r.routing.some((x: AnyObj) => x.status === "open"))) die("learned status cannot have open learning routing");
   if (opt(p, "learning-status") === "learned" && learningRecords.some((r) => r.correction === undefined)) die("learned status requires every learning record to include correction.needed");
   if (opts(p, "check-json").length) await recordEvidence({ ...p, positional: [dir], opts: { ...p.opts, verdict: [verdict] }, flags: p.flags });
