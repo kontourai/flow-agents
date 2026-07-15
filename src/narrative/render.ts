@@ -20,6 +20,7 @@ export function renderGroundedNarrative(envelope: GroundedExecutionNarrative): s
     "",
     "## Authority provenance",
     "",
+    `- Narrative composer: ${envelope.provenance.compiler.name} ${envelope.provenance.compiler.version}.`,
   ];
   for (const section of envelope.sections) {
     if (section.authority === "flow-agents") continue;

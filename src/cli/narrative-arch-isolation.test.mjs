@@ -29,8 +29,16 @@ const BANNED_IMPORTS = [
 ];
 
 function sourceImports(source) {
-  return [...source.matchAll(/\bfrom\s+["']([^"']+)["']|\bimport\s+["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']/g)]
-    .map((match) => match[1] ?? match[2] ?? match[3]);
+  const staticLiteral = String.raw`(?:"([^"]+)"|'([^']+)'|\x60((?:\$(?!\{)|[^\x60$])+)\x60)`;
+  const patterns = [
+    new RegExp(String.raw`\bfrom\s+${staticLiteral}`, "g"),
+    new RegExp(String.raw`\bimport\s+${staticLiteral}`, "g"),
+    new RegExp(String.raw`\bimport\s*\(\s*${staticLiteral}\s*\)`, "g"),
+    new RegExp(String.raw`\brequire\s*\(\s*${staticLiteral}\s*\)`, "g"),
+    new RegExp(String.raw`\bimport\.meta\.resolve\s*\(\s*${staticLiteral}\s*\)`, "g"),
+  ];
+  return patterns.flatMap((pattern) => [...source.matchAll(pattern)]
+    .map((match) => match[1] ?? match[2] ?? match[3]));
 }
 
 function isAllowedImport(file, specifier) {
@@ -39,6 +47,22 @@ function isAllowedImport(file, specifier) {
   if (/^\.\/[^/]+\.js$/.test(specifier)) return true;
   return path.basename(file) === "readers.ts" && specifier === "@kontourai/surface";
 }
+
+test("architecture import extraction covers static require and import.meta.resolve forms", () => {
+  const bannedSpecifier = "../cli/workflow-sidecar.js";
+  const fixtures = [
+    ["require with quotes", `const sidecar = require("${bannedSpecifier}");`],
+    ["require with a static template", `const sidecar = require(\`${bannedSpecifier}\`);`],
+    ["import.meta.resolve with quotes", `const sidecar = import.meta.resolve("${bannedSpecifier}");`],
+    ["import.meta.resolve with a static template", `const sidecar = import.meta.resolve(\`${bannedSpecifier}\`);`],
+  ];
+
+  for (const [name, source] of fixtures) {
+    assert.deepEqual(sourceImports(source), [bannedSpecifier], `${name} must be detected`);
+    assert.equal(isAllowedImport("src/narrative/fixture.ts", bannedSpecifier), false, `${name} must be disallowed`);
+    assert.match(bannedSpecifier, BANNED_IMPORTS.find(([label]) => label === "workflow-sidecar")[1]);
+  }
+});
 
 test("narrative sources remain isolated from Flow trust and mutation machinery", () => {
   const files = fs.readdirSync(NARRATIVE_SOURCE_ROOT)

@@ -8,15 +8,21 @@
 // Run: `npm run test:unit` (builds first). Requires `npm run build` output under build/.
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import {
   deriveGateCalibration,
   gateAdvisoryFix,
   buildGateInquiryRecords,
   isNarrativeNamespacePath,
+  isNarrativeArtifactContent,
   validateEvidenceRef,
   normalizeEvidenceRefs,
   normalizeCheck,
+  normalizeFinding,
+  normalizeLearning,
   reduceCaptureLogByCommand,
 } from "../../build/src/cli/workflow-sidecar.js";
 
@@ -140,6 +146,54 @@ test("narrative namespace paths and free-form references are rejected with the t
     { kind: "external", url: "https://example.invalid/.kontourai/narrative/run/n1/envelope.json" },
   ]) {
     assert.throws(() => validateEvidenceRef(ref, "refs"), /narrative trust isolation \(#619\)/);
+  }
+});
+
+test("narrative isolation canonicalizes aliases and rejects narrative content independent of location", { concurrency: false }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "narrative-isolation-unit-"));
+  const narrativeDir = path.join(root, ".kontourai", "narrative", "run", "n1");
+  const envelope = path.join(narrativeDir, "envelope.json");
+  const relocated = path.join(root, "evidence", "relocated.json");
+  const hardlink = path.join(root, "evidence", "hardlink.json");
+  const symlink = path.join(root, "evidence", "symlink.json");
+  const commandSymlink = path.join(root, "evidence", "narrative-symlink.sh");
+  const source = path.join(root, "src", "narrative", "composer.ts");
+  fs.mkdirSync(narrativeDir, { recursive: true });
+  fs.mkdirSync(path.dirname(relocated), { recursive: true });
+  fs.mkdirSync(path.dirname(source), { recursive: true });
+  const bytes = Buffer.from('{"schema_version":"grounded-execution-narrative/v1","narrative_id":"n1"}');
+  fs.writeFileSync(envelope, bytes);
+  fs.copyFileSync(envelope, relocated);
+  fs.linkSync(envelope, hardlink);
+  fs.symlinkSync(envelope, symlink);
+  fs.symlinkSync(envelope, commandSymlink);
+  fs.writeFileSync(source, 'export const narrativeSource = true;\n');
+  try {
+    assert.equal(isNarrativeNamespacePath(root, path.join(root, ".KONTOURAI", "NARRATIVE", "run", "n1", "envelope.json")), true);
+    assert.equal(isNarrativeArtifactContent(bytes), true);
+    for (const file of [envelope, relocated, hardlink, symlink]) {
+      assert.throws(
+        () => validateEvidenceRef({ kind: "artifact", file, summary: "must reject" }, "refs", root),
+        /narrative trust isolation \(#619\)/,
+      );
+    }
+    assert.throws(
+      () => validateEvidenceRef({ kind: "provider", url: "file%3A%2F%2F%2F.KONTOURAI%2FNARRATIVE%2Frun%2Fn1%2Fenvelope.json" }, "refs", root),
+      /narrative trust isolation \(#619\)/,
+    );
+    assert.doesNotThrow(() => validateEvidenceRef({ kind: "source", file: source, line_start: 1, line_end: 1, excerpt: "source code" }, "refs", root));
+    for (const command of [
+      "test -f .kontourai/narrative/run/n1/envelope.json",
+      "test -f .KONTOURAI/NARRATIVE/run/n1/envelope.json",
+      "test -f .kontourai%2Fnarrative%2Frun%2Fn1%2Fenvelope.json",
+      "bash evidence/narrative-symlink.sh",
+    ]) {
+      assert.throws(() => normalizeCheck({ id: "n", kind: "command", status: "pass", summary: "n", command }, false, undefined, root), /narrative trust isolation \(#619\)/);
+    }
+    assert.throws(() => normalizeFinding({ file_refs: [hardlink] }, root), /narrative trust isolation \(#619\)/);
+    assert.throws(() => normalizeLearning({ source_refs: [relocated], facts: [], routing: [], outcome: "unknown", correction: { needed: false, evidence: "none" } }, "2026-07-14T00:00:00.000Z", root), /narrative trust isolation \(#619\)/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
