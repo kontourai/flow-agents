@@ -161,6 +161,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check narrative-grounding-validator-integration
 
+      - name: Narrative prose renderer integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-prose-renderer-integration
+
       - name: Publish-change helper integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check publish-change-helper-integration

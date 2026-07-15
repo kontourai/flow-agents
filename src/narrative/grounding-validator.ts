@@ -38,6 +38,12 @@ export type GroundingViolation =
       statement_class: string;
       assertion_kind: AssertionKind;
       detail: string;
+    }
+  | {
+      code: "unsupported_summary";
+      statement_id: string;
+      unsupported_refs: string[];
+      detail: string;
     };
 
 export type GroundingViolationCode = GroundingViolation["code"];
@@ -75,6 +81,10 @@ export interface EntailmentProvenance extends EntailmentIdentity {
   estimated_cost_usd: number;
   wall_clock_ms: number;
   verdicts: EntailmentVerdict[];
+  /** sha256 of the exact frozen input (statements + policy-filtered views) handed to the generator. */
+  source_hash: string;
+  /** sha256 of the exact generator output bytes (pre- or post-rejection), for tamper-evident provenance. */
+  output_hash: string;
 }
 
 export function entailmentIndependenceHolds(generator: EntailmentIdentity, validator: EntailmentIdentity): boolean {
@@ -329,6 +339,39 @@ function epistemicViolations(statements: readonly Statement[]): GroundingViolati
   return violations;
 }
 
+// #614 (D3): the deterministic backstop for the model-assisted prose renderer's connective
+// class. A summarizer_inferred statement's fa1 source_refs must be a NON-EMPTY SUBSET of the
+// union of source_refs carried by the atomic (observed/deterministic_derived) statements
+// present alongside it -- i.e. it must cite >=1 real atomic statement and may never introduce
+// a fa1 ref that no atomic statement itself cites. This is a provenance-subset guard, not a
+// semantic-entailment check (that authoritative layer is R2/R3's model-entailment executor,
+// gated by entailmentIndependenceHolds); a summarizer citing a broad-but-real ref set while
+// asserting unsupported content is still caught by whichever layer runs, and this check never
+// substitutes for the other.
+function summaryViolations(statements: readonly Statement[]): GroundingViolation[] {
+  const atomicRefs = new Set(
+    statements
+      .filter((statement) => statement.class === "observed" || statement.class === "deterministic_derived")
+      .flatMap((statement) => statement.source_refs),
+  );
+  const violations: GroundingViolation[] = [];
+  for (const statement of statements) {
+    if ((statement.class as string) !== "summarizer_inferred") continue;
+    const unsupported = statement.source_refs.filter((sourceRef) => !atomicRefs.has(sourceRef));
+    if (statement.source_refs.length === 0 || unsupported.length > 0) {
+      violations.push({
+        code: "unsupported_summary",
+        statement_id: statement.id,
+        unsupported_refs: statement.source_refs.length === 0 ? [] : unsupported,
+        detail: statement.source_refs.length === 0
+          ? "summarizer_inferred statements must cite at least one atomic (observed/deterministic_derived) statement"
+          : `summarizer_inferred source_refs must be a subset of the cited atomic statements' source_refs (unsupported: ${unsupported.join(", ")})`,
+      });
+    }
+  }
+  return violations;
+}
+
 function deriveMaterialEvents(manifest: NarrativeSourceManifest, resolved: readonly ResolvedRecord[]): MaterialEvent[] {
   const events: MaterialEvent[] = [];
   const commandFailureEvent = (entry: ResolvedRecord, command: string): MaterialEvent => {
@@ -464,6 +507,7 @@ function describeViolation(violation: GroundingViolation): string {
     case "uncovered_material_event": return `${violation.code} ${violation.event_kind} ${violation.source_ref}`;
     case "invalid_rule_binding": return `${violation.code} ${violation.statement_id}: ${violation.detail}`;
     case "prohibited_assertion": return `${violation.code} ${violation.statement_id}/${violation.assertion_kind}: ${violation.detail}`;
+    case "unsupported_summary": return `${violation.code} ${violation.statement_id}: ${violation.detail}`;
   }
 }
 
@@ -496,6 +540,8 @@ export function validateNarrativeGrounding(
   violations.push(...materialViolations(deriveMaterialEvents(manifest, resolved), statements));
   /* grounding-check:epistemic */
   violations.push(...epistemicViolations(statements));
+  /* grounding-check:summary */
+  violations.push(...summaryViolations(statements));
 
   const known_gaps: GroundingKnownGap[] = [{
     code: "contradiction_detection_unavailable",

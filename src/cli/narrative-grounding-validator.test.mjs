@@ -214,6 +214,62 @@ test("AC3: declared dormant summarizer rule rejects a synthetic observed outcome
   assert.equal(isAssertionProhibited("observed", "observed_outcome"), false);
 });
 
+test("#614 D3: a summarizer_inferred statement citing a real atomic statement's refs is accepted", () => {
+  const { narrativeDir, sources } = narrativeDirFor([{ stream: "cmdlog", record: { command: "npm test", result: "fail", exitCode: 1 } }]);
+  const atomic = statement({
+    id: "atomic-failure",
+    class: "observed",
+    proposition: "Command `npm test` was observed to fail (exit 1)",
+    source_refs: [sources[0].source_id],
+  });
+  const summary = statement({
+    id: "summary-1",
+    class: "summarizer_inferred",
+    proposition: "The test command did not succeed",
+    source_refs: [sources[0].source_id],
+  });
+  const verdict = validateNarrativeGrounding(envelope([atomic, summary]), narrativeDir);
+  assert.equal(verdict.ok, true);
+});
+
+test("#614 D3: a summarizer_inferred statement with no atomic statements present is rejected", () => {
+  const { narrativeDir, sources } = narrativeDirFor([{ stream: "cmdlog", record: { command: "npm test", result: "fail", exitCode: 1 } }]);
+  const summary = statement({
+    id: "summary-orphan",
+    class: "summarizer_inferred",
+    proposition: "The test command did not succeed",
+    source_refs: [sources[0].source_id],
+  });
+  const verdict = validateNarrativeGrounding(envelope([summary]), narrativeDir);
+  assert.ok(codes(verdict).includes("unsupported_summary"));
+  assert.deepEqual(verdict.violations.find((violation) => violation.code === "unsupported_summary").unsupported_refs, [sources[0].source_id]);
+});
+
+test("#614 D3: a summarizer_inferred statement citing a fa1 ref no atomic statement carries is rejected", () => {
+  const { narrativeDir, sources } = narrativeDirFor([
+    { stream: "cmdlog", record: { command: "npm test", result: "fail", exitCode: 1 } },
+    { stream: "file", record: { kind: "created-file", path: "created.json" } },
+  ]);
+  const atomic = statement({
+    id: "atomic-failure",
+    class: "observed",
+    proposition: "Command `npm test` was observed to fail (exit 1)",
+    source_refs: [sources[0].source_id],
+  });
+  const summary = statement({
+    id: "summary-overreach",
+    class: "summarizer_inferred",
+    proposition: "The test command did not succeed and a file appeared",
+    // Cites a REAL fa1 ref (the file source) that no atomic statement in this
+    // section actually carries -- the subset guard must catch this even
+    // though the ref itself resolves fine (citationViolations would pass it).
+    source_refs: [sources[0].source_id, sources[1].source_id],
+  });
+  const verdict = validateNarrativeGrounding(envelope([atomic, summary]), narrativeDir);
+  assert.ok(codes(verdict).includes("unsupported_summary"));
+  assert.deepEqual(verdict.violations.find((violation) => violation.code === "unsupported_summary").unsupported_refs, [sources[1].source_id]);
+});
+
 test("R3: entailment validator must differ by model or configuration", () => {
   const generator = { provider: "provider-a", model: "model-a", config_hash: "same" };
   assert.equal(entailmentIndependenceHolds(generator, { ...generator }), false);
