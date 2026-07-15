@@ -2292,6 +2292,48 @@ async function analyze(root, now = Date.now()) {
   };
 }
 
+// #659 Slice B: internal Flow-step / expectation vocabulary → plain-English
+// labels, so the human lead below doesn't leak implementation terms.
+const PLAIN_STEP = {
+  'pull-work': 'work selection',
+  'design-probe': 'scoping',
+  plan: 'planning',
+  execute: 'the build',
+  verify: 'final review',
+  'release-readiness': 'release readiness',
+  'learning-review': 'the wrap-up review',
+};
+// Each entry maps a token that appears in the raw warnings to a plain label for
+// "what still needs recording". Order is display order.
+const PLAIN_EXPECTATIONS = [
+  { rx: /clean-critique|critique\.review/, label: 'a reviewer sign-off' },
+  { rx: /acceptance-criteria|acceptance\.criterion/, label: 'the acceptance checks' },
+  { rx: /tests?-evidence|verify\.tests/, label: 'test results' },
+  { rx: /policy-compliance/, label: 'a policy check' },
+];
+
+// #659 Slice A: a plain-language lead for the stop-hook output. Returns a short
+// human summary (what is paused, how many sign-offs remain, the two options), or
+// null when there is no active Builder run to explain. Presentation only — it
+// reads the same `result` the technical block is built from and never mutates it.
+function plainStopLead(result, gapCount) {
+  if (!result || !result.activeFlowRun) return null;
+  const name = result.latestArtifactDir ? path.basename(result.latestArtifactDir) : 'a task';
+  const step = String(result.activeFlowCurrentStep || '').trim();
+  const stepPhrase = PLAIN_STEP[step] || (step ? `the "${step}" step` : 'a checkpoint');
+  const haystack = Array.isArray(result.warnings) ? result.warnings.join('\n') : '';
+  const needs = PLAIN_EXPECTATIONS.filter(e => e.rx.test(haystack)).map(e => e.label);
+  const needsList = needs.length ? ` Still needed: ${needs.join(', ')}.` : '';
+  const count = Number.isFinite(gapCount) && gapCount > 0
+    ? (gapCount === 1 ? '1 sign-off' : `${gapCount} sign-offs`)
+    : 'a few sign-offs';
+  return [
+    `⏸ In plain terms: the task "${name}" is paused at its ${stepPhrase}. ${count} still need recording before it can finish on its own.${needsList}`,
+    `   Two ways forward: let it finish those checks, or cancel the run to close it now. Nothing else you're doing is blocked by this.`,
+    `   (The technical detail below is for the agent/debugging.)`,
+  ].join('\n');
+}
+
 function isOrdinaryActiveGateWarning(warning, relPath) {
   const normalizedRelPath = relPath.replaceAll('\\', '/');
   const sessionSlug = path.posix.basename(path.posix.dirname(normalizedRelPath));
@@ -2705,7 +2747,14 @@ async function run(rawInput) {
   const repairScope = result.activeTurnAuthority && result.blocking
     ? ` - continuation repair scope: this signed turn was issued for step "${issuedStep}"; repair only the hard blocker(s) below and return control to the driver. ${repairBoundary}`
     : null;
+  // #659 Slice A+B: lead with a plain-language summary so a human (not just an
+  // agent) can tell what is paused and what their options are. Presentation only
+  // — derived from the same state, prepended to the output string, and NEVER
+  // folded into remediationWarnings/result.warnings (those feed reasonsHash,
+  // block-dedup, and the HARD_BLOCK detector, which must stay byte-stable).
+  const plainLead = plainStopLead(result, remediationWarnings.length);
   const message = [
+    ...(plainLead ? [plainLead, ''] : []),
     `${gatePrefix} Goal Fit warning:`,
     ...(repairScope ? [repairScope] : []),
     ...remediationWarnings.flatMap(w => {
@@ -2788,4 +2837,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop, isHardStopWarning, canonicalFlowState };
+module.exports = { analyze, run, resolveGoalFitMode, uncheckedInSection, findRepoRoot, sidecarGuidance, safeOneLine, captureCrossReference, bundleEnforcement, loadActiveFlowStep, readCommandLog, resolveTrustedCommand, declaredManifestTarget, verifyCommandLogChain, CHAIN_GENESIS_VERIFY, hasLaunderingOperator, releaseOnNonTerminalStop, isHardStopWarning, canonicalFlowState, plainStopLead };
