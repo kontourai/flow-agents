@@ -294,6 +294,9 @@ test("#622 (2nd adversarial pass HIGH-2): the whole invisible / format-control c
     0x17B4, 0x17B5,                 // Khmer invisible inherent vowels
     0x200B, 0xFEFF, 0x180E,         // zero-width space / BOM / Mongolian vowel separator
     0x115F, 0x1160, 0x3164, 0xFFA0, // Hangul fillers (invisible, not \p{C})
+    0xFE00, 0xFE0F,                 // variation selectors 1 / 16 (\p{Variation_Selector}, \p{C}=false)
+    0xE0100, 0xE01EF,               // variation selectors supplement 17 / 256
+    0x180B, 0x180D,                 // Mongolian free variation selectors
   ];
   for (const cp of invisible) {
     const purpose = `patch the config file${String.fromCodePoint(cp)}secretly disable the limiter`;
@@ -301,6 +304,16 @@ test("#622 (2nd adversarial pass HIGH-2): the whole invisible / format-control c
       () => agentStatedIntent({ sourceId: action, actor: "codex", purpose }),
       (error) => error instanceof NarrativeStatementError && error.code === "non_atomic_proposition",
       `expected rejection for invisible U+${cp.toString(16).toUpperCase().padStart(4, "0")}`,
+    );
+  }
+  // No over-rejection: ORDINARY combining marks (\p{Mn} accents that render on their base
+  // letter) are NOT invisible clause-hiders and must still construct. The guard rejects only
+  // \p{C}, \p{Variation_Selector}, and the enumerated invisible marks/fillers — not diacritics.
+  for (const purpose of ["café the déjà-vu build", "ship the naïve résumé fix"]) {
+    assert.equal(
+      agentStatedIntent({ sourceId: action, actor: "codex", purpose }).class,
+      "agent_stated",
+      `accented single clause must accept: ${JSON.stringify(purpose)}`,
     );
   }
 });
