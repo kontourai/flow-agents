@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { UnavailableReason } from "./integrity.js";
 import { parseSourceId } from "./source-ids.js";
 
-export type StatementClass = "observed" | "deterministic_derived";
+export type StatementClass = "observed" | "deterministic_derived" | "summarizer_inferred";
 export type ObservedResult = "pass" | "fail" | "ambiguous";
 
 export interface StatementRule {
@@ -45,6 +45,18 @@ function fail(code: NarrativeStatementErrorCode, message: string): never {
 function text(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) return fail("invalid_input", `${label} must be a non-empty string`);
   if (/[\r\n`]/.test(value) || value.includes("; ")) return fail("non_atomic_proposition", `${label} must not contain clause separators or backticks`);
+  return value;
+}
+
+// The summarizer connective's proposition is a fully-formed sentence supplied by the
+// caller (the orchestrator, from generated prose) that MAY legitimately contain
+// backtick-quoted spans (quoting an underlying atomic proposition verbatim, per R2's
+// inherited-never-upgraded discipline). It is therefore only non-empty-checked here;
+// the shared `atomic()` scan (below, backtick-stripped skeleton) still enforces the
+// single-clause/no-clause-separator discipline exactly like every other constructor.
+function nonEmptyText(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.length === 0) return fail("invalid_input", `${label} must be a non-empty string`);
+  if (/[\r\n]/.test(value)) return fail("non_atomic_proposition", `${label} must not contain line breaks`);
   return value;
 }
 
@@ -98,10 +110,13 @@ function construct(input: {
   turnRef?: number;
   actor?: string;
   rule?: StatementRule;
+  id?: string;
 }): Statement {
   const refs = sourceRefs(input.sourceRefs);
   const proposition = atomic(input.proposition);
-  if (input.class === "observed" && input.rule) return fail("invalid_rule", "observed statements must not carry a rule");
+  if ((input.class === "observed" || input.class === "summarizer_inferred") && input.rule) {
+    return fail("invalid_rule", `${input.class} statements must not carry a rule`);
+  }
   if (input.class === "deterministic_derived" && !input.rule) return fail("invalid_rule", "deterministic_derived statements require a rule");
   if (input.turnRef !== undefined && (!Number.isSafeInteger(input.turnRef) || input.turnRef < -1)) {
     return fail("invalid_input", "turn_ref must be a safe turn ordinal");
@@ -115,8 +130,9 @@ function construct(input: {
   }
 
   const actor = input.actor === undefined ? undefined : text(input.actor, "actor");
+  const id = input.id !== undefined ? identifier(input.id, "id") : statementId(input.class, proposition, refs);
   return {
-    id: statementId(input.class, proposition, refs),
+    id,
     class: input.class,
     proposition,
     source_refs: refs,
@@ -235,5 +251,28 @@ export function derivedUnavailableSource(input: { sourceId: string; reason: Unav
     proposition: `Source ${input.sourceId} was unavailable because ${text(input.reason, "reason")}`,
     sourceRefs: [input.sourceId],
     rule: { id: "unavailable-source", version: "v1", inputs: [input.sourceId] },
+  });
+}
+
+// #614: the model-assisted prose renderer's connective class. A summarizer_inferred
+// statement carries generated connective text (never a raw model claim standing alone —
+// the dormant PROHIBITED_ASSERTIONS/grounding-check:summary checks in grounding-validator.ts
+// are the enforcement layer) and MUST cite the real fa1 source_refs of the atomic
+// (observed/deterministic_derived) statements it summarizes -- never a fabricated or
+// statement-id-shaped reference. No `rule`: that field is deterministic_derived-only.
+export function summarizerInferredConnective(input: {
+  id?: string;
+  proposition: string;
+  source_refs: string[];
+  turn_ref?: number;
+  actor?: string;
+}): Statement {
+  return construct({
+    class: "summarizer_inferred",
+    proposition: nonEmptyText(input.proposition, "proposition"),
+    sourceRefs: input.source_refs,
+    ...(input.turn_ref !== undefined ? { turnRef: input.turn_ref } : {}),
+    ...(input.actor !== undefined ? { actor: input.actor } : {}),
+    ...(input.id !== undefined ? { id: input.id } : {}),
   });
 }
