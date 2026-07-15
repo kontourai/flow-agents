@@ -87,6 +87,27 @@ way.
   supported, it resolves from step 3 onward. Adapters MUST document which manifests they honor so the
   attribution granularity difference is explicit, not surprising.
 
+#### Work-item attribution (`task_slug`)
+
+Where `context.project` groups events by *codebase*, `task_slug` groups them by the *active Builder
+work item* — so the console can report cost and activity per unit of work (the "Cost by work-item"
+breakdown), not just per project.
+
+| Field | Semantics | Redacted? | Producer requirement |
+| --- | --- | --- | --- |
+| `task_slug` | Top-level slug of the Builder run active in `context.cwd` at emission time. | **No** (an opaque work-item slug; carries no path or content) | Adapters SHOULD stamp `task_slug` when a Builder run is active in the working dir. **Omit the field entirely when no run is active — never emit an empty string and never fabricate a slug.** |
+
+Canonical resolution (harness adapter), first match wins, read from the *same* `current.json` the
+economics relay reads so both surfaces attribute to one identifier:
+
+1. `<cwd>/.kontourai/flow-agents/current.json` → `.active_slug`, else `.artifact_dir`.
+2. `<cwd>/.flow-agents/current.json` (legacy location) → `.active_slug`, else `.artifact_dir`.
+3. No file, or both fields empty → **no `task_slug` key on the record.**
+
+Only the slug string is stored; no prompt, args, or file content is ever read into it. A non-Builder
+session (no `current.json`) therefore emits records with no `task_slug`, and the console buckets
+those under "unknown" rather than inventing an attribution.
+
 ### Exit Code Protocol (Canonical Hook Scripts)
 
 Canonical hook scripts in `scripts/hooks/` use the following exit code contract — originally derived from Kiro conventions and shared across all harness adapters via the adapter translation layer:

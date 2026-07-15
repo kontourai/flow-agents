@@ -107,8 +107,20 @@ build_base_event() {
 
 add_hook_context() {
   local event="$1" event_type="$2" stdin_json="$3"
-  local cwd tty_name pid runtime_session_id runtime_turn_id transcript_path hook_event_name model_name source stop_hook_active last_assistant_message raw_hook_input
+  local cwd tty_name pid runtime_session_id runtime_turn_id transcript_path hook_event_name model_name source stop_hook_active last_assistant_message raw_hook_input task_slug
   cwd=$(echo "$stdin_json" | jq -r '.cwd // ""')
+  # Work-item attribution: stamp the active Builder run's slug (from the same
+  # current.json .active_slug the economics relay reads) so tool/turn events can
+  # be grouped per work item downstream. Absent for non-Builder sessions — never
+  # fabricated. Only the slug string is stored; no prompt/args/file content.
+  task_slug=""
+  if [[ -n "$cwd" ]]; then
+    if [[ -f "$cwd/.kontourai/flow-agents/current.json" ]]; then
+      task_slug=$(jq -r '.active_slug // .artifact_dir // empty' "$cwd/.kontourai/flow-agents/current.json" 2>/dev/null)
+    elif [[ -f "$cwd/.flow-agents/current.json" ]]; then
+      task_slug=$(jq -r '.active_slug // .artifact_dir // empty' "$cwd/.flow-agents/current.json" 2>/dev/null)
+    fi
+  fi
   runtime_session_id=$(echo "$stdin_json" | jq -r '.session_id // ""')
   runtime_turn_id=$(echo "$stdin_json" | jq -r '.turn_id // ""')
   transcript_path=$(echo "$stdin_json" | jq -r '.transcript_path // ""')
@@ -133,6 +145,7 @@ add_hook_context() {
     --arg source "$source" \
     --arg stop_hook_active "$stop_hook_active" \
     --arg last_assistant_message "$last_assistant_message" \
+    --arg task_slug "$task_slug" \
     --argjson raw "$raw_hook_input" \
     '. + {
       hook: {
@@ -146,7 +159,8 @@ add_hook_context() {
         last_assistant_message: $last_assistant_message,
         raw_input: $raw
       }
-    }'
+    }
+    + (if $task_slug == "" then {} else {task_slug: $task_slug} end)'
 }
 
 add_runtime_context() {
