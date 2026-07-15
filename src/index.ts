@@ -26,12 +26,14 @@ export type {
   ChainedCommandLogSourceId,
   CommandLogSourceId,
   FileSourceId,
+  FlowReportSourceId,
   FlowStateSourceId,
   FlowTransitionSourceId,
   LegacyCommandLogSourceId,
   NarrativeSourceId,
   NarrativeSourceStream,
   SourceIdErrorCode,
+  SurfaceExplanationSourceId,
   TelemetrySourceId,
   TranscriptSourceId,
   TrustSourceId,
@@ -77,6 +79,30 @@ export {
   stableStringify,
   validateNarrativeRuntimeProjection,
 } from "./narrative/projection.js";
+export {
+  GROUNDED_EXECUTION_NARRATIVE_COMPILER_NAME,
+  GROUNDED_EXECUTION_NARRATIVE_SCHEMA_VERSION,
+  GroundedNarrativeError,
+  composeGroundedNarrative,
+  validateGroundedNarrative,
+  writeEnvelope,
+} from "./narrative/envelope.js";
+export { renderGroundedNarrative } from "./narrative/render.js";
+export type {
+  GroundedExecutionNarrative,
+  GroundedNarrativeConclusion,
+  GroundedNarrativeConfig,
+  GroundedNarrativeCorrelation,
+  GroundedNarrativeErrorCode,
+  GroundedNarrativeFlowTransition,
+  GroundedNarrativeForeignSection,
+  GroundedNarrativeRule,
+  GroundedNarrativeRuntimeSection,
+  GroundedNarrativeSection,
+  SchemaIssue as GroundedNarrativeSchemaIssue,
+  WriteEnvelopeOptions,
+  WrittenGroundedNarrative,
+} from "./narrative/envelope.js";
 export type {
   NarrativeRuntimeProjection,
   NarrativeProjectionErrorCode,

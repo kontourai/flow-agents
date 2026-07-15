@@ -32,6 +32,7 @@ export interface ReadCandidate<T = unknown> {
   raw: Buffer;
   record: T;
   lineIndex?: number;
+  originPackage?: { name: string; version: string };
 }
 
 function readerError(reason: UnavailableReason, source: string, message: string): never {
@@ -299,6 +300,96 @@ export function readFlowStateCandidate(input: { flowRoot: string; runId: string;
   const { file, raw, state } = readFlowState(input.flowRoot, input.runId);
   if (sha8(raw) !== input.sha8) return readerError("corrupt", "flow run state", "flow state hash pin does not match");
   return { file, raw, record: state };
+}
+
+export function readFlowReportCandidate(input: { flowRoot: string; runId: string; sha8: string }): ReadCandidate<Record<string, unknown>> {
+  if (!input.runId || input.runId.includes("/") || input.runId.includes("\\")) return readerError("unauthorized", "flow report", "flow run id is invalid");
+  const file = path.join(input.flowRoot, "runs", input.runId, "report.json");
+  assertSafePathBelowRoot(input.flowRoot, file, "flow run");
+  const raw = readRegularFileBytes(file, "flow report");
+  if (sha8(raw) !== input.sha8) return readerError("corrupt", "flow report", "flow report hash pin does not match");
+  return { file, raw, record: parseObject(raw, "flow report") };
+}
+
+interface SurfaceModule {
+  buildTrustReport(bundle: Record<string, unknown>): unknown;
+  explainClaim(report: unknown, claimId: string): unknown;
+}
+
+let surfaceModule: { api: SurfaceModule; version: string } | null | undefined;
+
+function tryLoadSurface(): { api: SurfaceModule; version: string } | null {
+  if (process.env.FLOW_AGENTS_SURFACE_UNAVAILABLE === "1") return null;
+  if (surfaceModule !== undefined) return surfaceModule;
+  try {
+    // snapshotNarrative is intentionally synchronous. Node >=22 can require an
+    // ESM module synchronously, preserving that public contract while loading
+    // Surface only when this stream is actually captured.
+    const entry = fileURLToPath(import.meta.resolve("@kontourai/surface"));
+    const api = require(entry) as SurfaceModule;
+    const packageFile = path.resolve(path.dirname(entry), "../../package.json");
+    const metadata = parseObject(fs.readFileSync(packageFile), "surface package metadata");
+    const version = typeof metadata["version"] === "string" ? metadata["version"] : "unknown";
+    if (typeof api.buildTrustReport !== "function" || typeof api.explainClaim !== "function") {
+      surfaceModule = null;
+    } else {
+      surfaceModule = { api, version };
+    }
+  } catch {
+    surfaceModule = null;
+  }
+  return surfaceModule;
+}
+
+function stableStringify(value: unknown): string {
+  return JSON.stringify(value, (_key, child: unknown) => {
+    if (!child || typeof child !== "object" || Array.isArray(child)) return child;
+    return Object.fromEntries(Object.entries(child as Record<string, unknown>).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0));
+  }, 2);
+}
+
+export function readSurfaceExplanationCandidate(input: {
+  sessionDir: string;
+  bundleSha8: string;
+  claimId: string;
+}): ReadCandidate<Record<string, unknown>> {
+  const file = path.join(input.sessionDir, "trust.bundle");
+  assertSafePathBelowRoot(input.sessionDir, file, "trust bundle");
+  const rawBundle = readRegularFileBytes(file, "trust bundle");
+  if (sha8(rawBundle) !== input.bundleSha8) return readerError("corrupt", "surface explanation", "trust bundle hash pin does not match");
+  const bundle = parseObject(rawBundle, "trust bundle");
+  const claims = bundle["claims"];
+  if (!Array.isArray(claims)) return readerError("corrupt", "surface explanation", "trust bundle claims are malformed");
+  const matchingClaims = claims.filter((claim) => !!claim && typeof claim === "object" && !Array.isArray(claim) && (claim as Record<string, unknown>)["id"] === input.claimId);
+  if (matchingClaims.length === 0) return readerError("not_captured", "surface explanation", "surface claim was not captured");
+  if (matchingClaims.length !== 1) return readerError("corrupt", "surface explanation", "surface claim id is not unique");
+  const surface = tryLoadSurface();
+  if (!surface) return readerError("not_captured", "surface explanation", "@kontourai/surface is unavailable");
+  let explanation: unknown;
+  try {
+    // Flow Agents trust.bundle predates Surface's camel-case schema field and
+    // may omit empty collections. Supply only those structural compatibility
+    // defaults; Surface still owns all report and explanation derivation.
+    const surfaceBundle = {
+      ...bundle,
+      schemaVersion: bundle["schemaVersion"] ?? bundle["schema_version"],
+      source: bundle["source"] ?? "flow-agents:trust.bundle",
+      policies: bundle["policies"] ?? [],
+      events: bundle["events"] ?? [],
+    };
+    const report = surface.api.buildTrustReport(surfaceBundle);
+    explanation = surface.api.explainClaim(report, input.claimId);
+  } catch {
+    return readerError("not_captured", "surface explanation", "surface claim explanation could not be produced");
+  }
+  // explainClaim is deliberately fail-soft: a found:false result remains the
+  // authority-owned explanation and is frozen rather than treated as absence.
+  if (!explanation || typeof explanation !== "object" || Array.isArray(explanation)) {
+    return readerError("corrupt", "surface explanation", "surface returned a malformed claim explanation");
+  }
+  const record = explanation as Record<string, unknown>;
+  const raw = Buffer.from(stableStringify(record));
+  return { file, raw, record, originPackage: { name: "@kontourai/surface", version: surface.version } };
 }
 
 export function readFlowTransitionCandidate(input: { flowRoot: string; runId: string; index: number; sha8: string }): ReadCandidate<Record<string, unknown>> {

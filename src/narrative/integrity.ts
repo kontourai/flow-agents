@@ -18,7 +18,11 @@ export const DEFAULT_INTEGRITY_CLASS: Readonly<Record<Exclude<NarrativeSourceStr
   "trust-claim": "overwritten_in_place",
   "trust-evidence": "overwritten_in_place",
   "flow-state": "overwritten_in_place",
+  "flow-report": "path_only",
   "flow-transition": "overwritten_in_place",
+  // Derived from a rewritable trust.bundle at capture time; only the frozen
+  // explanation blob, not its origin path, is content-addressed thereafter.
+  "surface-explanation": "path_only",
   transcript: "path_only",
 };
 

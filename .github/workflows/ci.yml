@@ -145,6 +145,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check narrative-runtime-projection-integration
 
+      - name: Narrative grounded envelope integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-grounded-envelope-integration
+
       - name: Narrative redaction fail-closed integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check narrative-redaction-fail-closed-integration
