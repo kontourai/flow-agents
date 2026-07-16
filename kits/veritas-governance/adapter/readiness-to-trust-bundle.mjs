@@ -19,22 +19,21 @@
 // external-tool `fail`/`missing` (mirrors veritas/src/surface/readiness.mjs's own PRIVATE
 // `readinessHasBlockingFailure` helper, and matches Surface's `buildTrustReport` weakest-link
 // derivation, which downgrades a readiness claim to `rejected` on any rejected Require —
-// tests/surface/readiness-derived-claim.test.mjs:256-278). It intentionally does NOT apply
-// Veritas's EXPORTED `promotion_allowed` short-circuit (readinessSurfaceStatus/readinessVerdict
-// treat promotion_allowed===true as verified/ready regardless of blocking Require failures):
-// promotion_allowed is a workstream-routing hint from src/repo/routing.mjs `resolveWorkstream()`
-// (file-pattern lane resolution), not a safety signal — it never reads policy_results, evidence
-// checks, uncovered paths, or external tools, so it cannot account for blocking failures. This is
-// a filed Veritas bug, not a legitimate alternate reading: kontourai/veritas#106
-// (https://github.com/kontourai/veritas/issues/106) — "promotion_allowed short-circuit bypasses
-// blocking Require failures" — recommends veritas fix readiness.mjs to check
-// readinessHasBlockingFailure() before the promotion_allowed short-circuit. Conclusion: the
-// adapter's stricter derivation is correct today and will agree with veritas's own exported
-// functions once #106 lands; it is not a fork of Veritas's intended semantics, and the
-// Governance Kit's blocking-failure semantics are the successor the wider system is moving
-// toward (this adapter's independent CLI wrap was for reversibility while that landed). Ready
-// (no blocking failure) -> Surface derives `verified` -> gate passes. Not-ready -> Surface
-// derives a non-`verified` status -> gate blocks.
+// tests/surface/readiness-derived-claim.test.mjs:256-278). It does NOT treat Veritas's
+// `promotion_allowed` flag as a safety signal: promotion_allowed is a workstream-routing hint
+// from src/repo/routing.mjs `resolveWorkstream()` (file-pattern lane resolution) — it never
+// reads policy_results, evidence checks, uncovered paths, or external tools, so it cannot
+// account for blocking failures. The divergence this originally guarded against —
+// kontourai/veritas#106 (https://github.com/kontourai/veritas/issues/106), Veritas's exported
+// readinessVerdict/readinessSurfaceStatus honoring promotion_allowed before checking blocking
+// failures — is FIXED: veritas src/surface/readiness.mjs now checks
+// readinessHasBlockingFailure() before the promotion_allowed short-circuit (regression-tested
+// in veritas tests/surface/readiness-verdict.test.mjs), so this adapter and Veritas's exported
+// functions now agree. The adapter keeps its own derivation because kit code consumes the
+// recorded artifact, not Veritas library exports; the record fields and blocking-failure
+// semantics it reads are frozen in veritas docs/architecture/engine-surface-seam.md
+// (flow-agents#646 Slice 1). Ready (no blocking failure) -> Surface derives `verified` -> gate
+// passes. Not-ready -> Surface derives a non-`verified` status -> gate blocks.
 //
 // Usage: node readiness-to-trust-bundle.mjs --report <veritas-evidence-report.json> \
 //          --out <bundle.json> [--subject-id <id>]
@@ -54,10 +53,10 @@ function parseArgs(argv) {
   return out;
 }
 
-// Mirrors veritas/src/surface/readiness.mjs's PRIVATE readinessHasBlockingFailure — reads
-// Veritas's OWN recorded results; does not evaluate standards. Does NOT apply promotion_allowed
-// (see header comment above): that short-circuit is a filed veritas bug (kontourai/veritas#106),
-// not a safety signal — this stricter derivation is the settled-correct semantics.
+// Mirrors veritas/src/surface/readiness.mjs's readinessHasBlockingFailure — reads Veritas's
+// OWN recorded results; does not evaluate standards. Ignores promotion_allowed (a routing hint,
+// not a safety signal — see header comment above); since veritas#106 was fixed, Veritas's own
+// verdict functions (src/surface/readiness.mjs) apply this same blocking-failure-first semantics.
 export function hasBlockingFailure(record) {
   if (record.uncovered_path_result === "fail") return true;
   if ((record.policy_results ?? []).some((r) => r.passed === false && r.enforcementLevel === "Require")) return true;

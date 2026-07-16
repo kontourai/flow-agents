@@ -11,6 +11,12 @@ CLI invocation plus a small kit-local trust.bundle adapter. It does **not** fork
 reimplement Veritas's Repo Standards / evidence-check evaluation — Veritas evaluates; the kit
 only projects Veritas's own recorded verdict into the Flow trust.bundle vocabulary.
 
+The engine/surface line this kit builds on — which veritas capabilities stay an importable
+evaluation-engine library and which product surface moves into this kit (the thick-kit
+migration, [#646](https://github.com/kontourai/flow-agents/issues/646)–652) — is ratified in
+veritas's [Engine / Surface Seam](https://github.com/kontourai/veritas/blob/main/docs/architecture/engine-surface-seam.md)
+doc, which also freezes the CLI + artifact + claim-shape contract this kit's adapter consumes.
+
 ## What it contains
 
 | Asset | Path | Purpose |
@@ -156,13 +162,17 @@ verdict derives `verified` → the gate **passes**.
 
 This matches Veritas's own `readinessHasBlockingFailure` helper (`veritas/src/surface/readiness.mjs`)
 and Surface's weakest-link claim derivation (`buildTrustReport` downgrades a readiness claim to
-`rejected` on any rejected Require). The adapter intentionally does **not** apply Veritas's
-`promotion_allowed` short-circuit — `promotion_allowed` is a workstream-routing hint (set by
-file-pattern lane resolution in `src/repo/routing.mjs`), not a safety signal, and applying it as
-one lets a record with blocking Require failures read as ready. That short-circuit is a filed
-Veritas bug, [kontourai/veritas#106](https://github.com/kontourai/veritas/issues/106), not a
-legitimate alternate reading. Investigation conclusion: the adapter's stricter blocking-failure
-derivation is correct today and will agree with Veritas's own exported functions once #106 lands.
+`rejected` on any rejected Require). The adapter does **not** apply Veritas's `promotion_allowed`
+short-circuit as a safety signal — `promotion_allowed` is a workstream-routing hint (set by
+file-pattern lane resolution in `src/repo/routing.mjs`) and cannot account for blocking failures.
+The historical divergence this guarded against,
+[kontourai/veritas#106](https://github.com/kontourai/veritas/issues/106) (Veritas's exported
+verdict functions honored `promotion_allowed` before checking blocking failures), is **fixed**:
+`readinessVerdict`/`readinessSurfaceStatus` now check `readinessHasBlockingFailure()` first
+(regression-tested in veritas `tests/surface/readiness-verdict.test.mjs`), so the adapter's
+derivation and Veritas's exported functions agree. The adapter keeps its own derivation because
+kit code consumes Veritas's recorded artifact, not Veritas's library exports — that
+blocking-failure semantics is now frozen in veritas's Engine / Surface Seam doc (see above).
 
 ## Trust status
 
