@@ -249,6 +249,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check telemetry-tool-outcome-integration
 
+      - name: Telemetry delegation integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check telemetry-delegation-integration
+
       - name: Finalize CI evidence
         if: always()
         run: bash evals/ci/run-baseline.sh --finalize
