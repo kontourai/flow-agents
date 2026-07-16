@@ -169,6 +169,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check narrative-prose-renderer-integration
 
+      - name: Narrative grounded evals integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check narrative-grounded-evals-integration
+
       - name: Narrative intent annotation integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check narrative-intent-annotation-integration
