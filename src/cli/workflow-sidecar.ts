@@ -382,53 +382,22 @@ export async function validateTrustBundle(bundle: unknown): Promise<{ valid: boo
     return { valid: false, errors: [message], available: true };
   }
 }
-// Validate a single InquiryRecord against the hachure inquiry-record.schema.json.
-// Uses a separate AJV instance compiled against that schema (not the trust-bundle schema).
-let _hachureInquiryRecordValidator: ((record: unknown) => { valid: boolean; errors: string[] }) | null | undefined;
-function getHachureInquiryRecordValidator(): ((record: unknown) => { valid: boolean; errors: string[] }) | null {
-  if (_hachureInquiryRecordValidator !== undefined) return _hachureInquiryRecordValidator;
-  try {
-    const _require = createRequire(import.meta.url);
-    const hachureDir = path.dirname(_require.resolve("hachure"));
-    const schemasDir = path.join(hachureDir, "schemas");
-    const Ajv = _require("ajv/dist/2020");
-    const schemas: Record<string, any> = {};
-    for (const file of fs.readdirSync(schemasDir)) {
-      if (!file.endsWith(".schema.json")) continue;
-      schemas[file] = JSON.parse(fs.readFileSync(path.join(schemasDir, file), "utf8"));
-    }
-    const inquiryRecordSchema = schemas["inquiry-record.schema.json"];
-    if (!inquiryRecordSchema) { _hachureInquiryRecordValidator = null; return null; }
-    const ajv = new Ajv({ strict: false, allErrors: true });
-    for (const [filename, schema] of Object.entries(schemas)) {
-      if (filename === "inquiry-record.schema.json") continue;
-      ajv.addSchema(schema, filename);
-    }
-    const validate = ajv.compile(inquiryRecordSchema);
-    _hachureInquiryRecordValidator = (record: unknown) => {
-      const valid = validate(record);
-      if (valid) return { valid: true, errors: [] };
-      const errors = ((validate as any).errors ?? []).map((err: any) => {
-        const loc = err.instancePath || err.schemaPath || "";
-        return `${loc} ${err.message ?? "invalid"}`.trim();
-      });
-      return { valid: false, errors };
-    };
-    return _hachureInquiryRecordValidator;
-  } catch {
-    _hachureInquiryRecordValidator = null;
-    return null;
-  }
-}
 /**
- * Validate a record against the canonical hachure inquiry-record.schema.json
- * (https://kontourai.io/schemas/surface/inquiry-record.schema.json).
- * Returns `{ valid, errors, available }`. Fail-open when hachure is not installed.
+ * Validate a record against the canonical InquiryRecord schema via
+ * @kontourai/surface's `validateInquiryRecord` (symmetric to `validateTrustBundle`).
+ * Returns `{ valid, errors, available }`. Fail-open when Surface is unavailable.
  */
-export function validateInquiryRecord(record: unknown): { valid: boolean; errors: string[]; available: boolean } {
-  const validate = getHachureInquiryRecordValidator();
-  if (!validate) return { valid: true, errors: [], available: false };
-  return { ...validate(record), available: true };
+export async function validateInquiryRecord(record: unknown): Promise<{ valid: boolean; errors: string[]; available: boolean }> {
+  const m = await tryLoadSurface();
+  if (!m || typeof (m as { validateInquiryRecord?: unknown }).validateInquiryRecord !== "function") {
+    return { valid: true, errors: [], available: false };
+  }
+  try {
+    (m as unknown as { validateInquiryRecord: (r: unknown) => unknown }).validateInquiryRecord(record);
+    return { valid: true, errors: [], available: true };
+  } catch (err) {
+    return { valid: false, errors: [err instanceof Error ? err.message : String(err)], available: true };
+  }
 }
 // ─── @kontourai/surface status derivation ────────────────────────────────────
 // Surface is ESM-only; this module builds to CJS. Load Surface via a fail-open
@@ -483,6 +452,8 @@ type SurfaceModule = {
   explainClaim: (report: Record<string, unknown>, claimId: string) => import("@kontourai/surface").ClaimExplanation;
   /** Canonical trust-bundle validator from @kontourai/surface. Throws on invalid input; returns TrustBundle on success. */
   validateTrustBundle: (input: unknown) => Record<string, unknown>;
+  /** Canonical InquiryRecord validator from @kontourai/surface. Throws on invalid input; returns InquiryRecord on success. */
+  validateInquiryRecord: (input: unknown) => Record<string, unknown>;
   /** Freeze a derivation checkpoint from a report. */
   checkpointFromReport: (report: Record<string, unknown>) => Record<string, unknown>;
   /** Diff two derivations (prior checkpoint → later report) and emit freshness transition events. */
@@ -6092,7 +6063,7 @@ export function gateAdvisoryFix(
 }
 
 /**
- * Build a schema-conformant InquiryRecord for the hachure inquiry-record.schema.json.
+ * Build a schema-conformant InquiryRecord for @kontourai/surface's canonical InquiryRecord schema.
  * Strips Surface-internal fields (identityLinkIds, transitiveRuleIds) from
  * resolutionPath that are valid in the TS type but not in the JSON schema.
  * Sets answer.value to the gate-review value-add: { calibration, advisoryFix, gateFired, sessionSlug }.
@@ -6292,16 +6263,17 @@ async function gateReview(p: ReturnType<typeof parseArgs>): Promise<number> {
 
   const records = buildGateInquiryRecords(bundle, blockSignal, slug, expectedCriterionIds, surface);
 
-  // Validate each record against the hachure inquiry-record.schema.json (fail-open)
-  const validator = getHachureInquiryRecordValidator();
+  // Validate each record against the canonical InquiryRecord schema via Surface (fail-open)
   let schemaValid = true;
   const validationErrors: string[] = [];
-  for (const record of records) {
-    if (validator) {
-      const result = validator(record);
-      if (!result.valid) {
+  const inquiryValidator = (surface as { validateInquiryRecord?: (r: unknown) => unknown } | null)?.validateInquiryRecord;
+  if (typeof inquiryValidator === "function") {
+    for (const record of records) {
+      try {
+        inquiryValidator(record);
+      } catch (err) {
         schemaValid = false;
-        validationErrors.push(...result.errors.map((e) => `${record["id"] ?? "?"}: ${e}`));
+        validationErrors.push(`${record["id"] ?? "?"}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
   }
@@ -6322,7 +6294,7 @@ async function gateReview(p: ReturnType<typeof parseArgs>): Promise<number> {
     .filter(([, n]) => n > 0)
     .map(([k, n]) => `${k}=${n}`)
     .join(", ");
-  const schemaTag = validator ? (schemaValid ? " schema:valid" : " schema:INVALID") : " schema:unavailable";
+  const schemaTag = typeof inquiryValidator === "function" ? (schemaValid ? " schema:valid" : " schema:INVALID") : " schema:unavailable";
   console.log(`gate-review: ${records.length} InquiryRecord(s) [${summary}]${schemaTag} → ${outputPath}`);
   return 0;
 }

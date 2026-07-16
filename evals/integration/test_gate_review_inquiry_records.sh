@@ -2,7 +2,8 @@
 # test_gate_review_inquiry_records.sh — AC1 + AC2 integration tests for gate-review #119.
 #
 # Verifies that the gate-review subcommand emits canonical InquiryRecords
-# (gate-review.inquiries.json) validated against hachure inquiry-record.schema.json.
+# (gate-review.inquiries.json) validated against @kontourai/surface's canonical
+# InquiryRecord schema (Surface's validateInquiryRecord).
 #
 # AC1: a session with a gate event yields ≥1 InquiryRecord.
 # AC2: false_block scenario (claim verified + block) and missed_block scenario
@@ -220,35 +221,38 @@ if [[ -f "$AC2FB_INQUIRIES" ]]; then
     _fail "AC2a: false_block advisoryFix is empty"
   fi
 
-  # schema validation via hachure (validates against inquiry-record.schema.json)
+  # schema validation via @kontourai/surface's validateInquiryRecord (Surface's
+  # canonical InquiryRecord validator; symmetric to validateTrustBundle)
   SCHEMA_RESULT="$(node -e "
-try {
-  const { validateInquiryRecord } = require('$ROOT/build/src/cli/workflow-sidecar.js');
-  const records = JSON.parse(require('fs').readFileSync('$AC2FB_INQUIRIES','utf8'));
-  let allValid = true;
-  const errors = [];
-  for (const r of records) {
-    const result = validateInquiryRecord(r);
-    if (result.available && !result.valid) {
-      allValid = false;
-      errors.push(...result.errors);
+(async () => {
+  try {
+    const { validateInquiryRecord } = require('$ROOT/build/src/cli/workflow-sidecar.js');
+    const records = JSON.parse(require('fs').readFileSync('$AC2FB_INQUIRIES','utf8'));
+    let allValid = true;
+    const errors = [];
+    for (const r of records) {
+      const result = await validateInquiryRecord(r);
+      if (result.available && !result.valid) {
+        allValid = false;
+        errors.push(...result.errors);
+      }
     }
-  }
-  const available = records.length > 0 ? validateInquiryRecord(records[0]).available : false;
-  process.stdout.write(JSON.stringify({ available, allValid, errors }));
-} catch(e) { process.stdout.write(JSON.stringify({ available: false, allValid: true, errors: [String(e)] })); }
+    const available = records.length > 0 ? (await validateInquiryRecord(records[0])).available : false;
+    process.stdout.write(JSON.stringify({ available, allValid, errors }));
+  } catch(e) { process.stdout.write(JSON.stringify({ available: false, allValid: true, errors: [String(e)] })); }
+})();
 " 2>/dev/null)"
   SCHEMA_AVAILABLE="$(node -e "process.stdout.write(JSON.parse('${SCHEMA_RESULT}').available ? 'true' : 'false')" 2>/dev/null || echo "false")"
   SCHEMA_ALL_VALID="$(node -e "process.stdout.write(JSON.parse('${SCHEMA_RESULT}').allValid ? 'true' : 'false')" 2>/dev/null || echo "true")"
   if [[ "$SCHEMA_AVAILABLE" == "true" ]]; then
     if [[ "$SCHEMA_ALL_VALID" == "true" ]]; then
-      _pass "AC2a: false_block InquiryRecords validate against hachure inquiry-record.schema.json (available=true, valid=true)"
+      _pass "AC2a: false_block InquiryRecords validate against @kontourai/surface's InquiryRecord schema (available=true, valid=true)"
     else
       SCHEMA_ERRORS="$(node -e "process.stdout.write(JSON.parse('${SCHEMA_RESULT}').errors.slice(0,3).join('; '))" 2>/dev/null || echo "?")"
       _fail "AC2a: InquiryRecord schema validation failed: $SCHEMA_ERRORS"
     fi
   else
-    _pass "AC2a: hachure not available — schema validation skipped (fail-open)"
+    _pass "AC2a: @kontourai/surface not available — schema validation skipped (fail-open)"
   fi
 fi
 
@@ -320,35 +324,38 @@ if [[ -f "$AC2MB_INQUIRIES" ]]; then
     _fail "AC2b: missed_block advisoryFix is empty"
   fi
 
-  # schema validation
+  # schema validation via @kontourai/surface's validateInquiryRecord (Surface's
+  # canonical InquiryRecord validator; symmetric to validateTrustBundle)
   SCHEMA_RESULT_MB="$(node -e "
-try {
-  const { validateInquiryRecord } = require('$ROOT/build/src/cli/workflow-sidecar.js');
-  const records = JSON.parse(require('fs').readFileSync('$AC2MB_INQUIRIES','utf8'));
-  let allValid = true;
-  const errors = [];
-  for (const r of records) {
-    const result = validateInquiryRecord(r);
-    if (result.available && !result.valid) {
-      allValid = false;
-      errors.push(...result.errors);
+(async () => {
+  try {
+    const { validateInquiryRecord } = require('$ROOT/build/src/cli/workflow-sidecar.js');
+    const records = JSON.parse(require('fs').readFileSync('$AC2MB_INQUIRIES','utf8'));
+    let allValid = true;
+    const errors = [];
+    for (const r of records) {
+      const result = await validateInquiryRecord(r);
+      if (result.available && !result.valid) {
+        allValid = false;
+        errors.push(...result.errors);
+      }
     }
-  }
-  const available = records.length > 0 ? validateInquiryRecord(records[0]).available : false;
-  process.stdout.write(JSON.stringify({ available, allValid, errors }));
-} catch(e) { process.stdout.write(JSON.stringify({ available: false, allValid: true, errors: [String(e)] })); }
+    const available = records.length > 0 ? (await validateInquiryRecord(records[0])).available : false;
+    process.stdout.write(JSON.stringify({ available, allValid, errors }));
+  } catch(e) { process.stdout.write(JSON.stringify({ available: false, allValid: true, errors: [String(e)] })); }
+})();
 " 2>/dev/null)"
   SCHEMA_AVAILABLE_MB="$(node -e "process.stdout.write(JSON.parse('${SCHEMA_RESULT_MB}').available ? 'true' : 'false')" 2>/dev/null || echo "false")"
   SCHEMA_ALL_VALID_MB="$(node -e "process.stdout.write(JSON.parse('${SCHEMA_RESULT_MB}').allValid ? 'true' : 'false')" 2>/dev/null || echo "true")"
   if [[ "$SCHEMA_AVAILABLE_MB" == "true" ]]; then
     if [[ "$SCHEMA_ALL_VALID_MB" == "true" ]]; then
-      _pass "AC2b: missed_block InquiryRecords validate against hachure inquiry-record.schema.json (available=true, valid=true)"
+      _pass "AC2b: missed_block InquiryRecords validate against @kontourai/surface's InquiryRecord schema (available=true, valid=true)"
     else
       SCHEMA_ERRORS_MB="$(node -e "process.stdout.write(JSON.parse('${SCHEMA_RESULT_MB}').errors.slice(0,3).join('; '))" 2>/dev/null || echo "?")"
       _fail "AC2b: InquiryRecord schema validation failed: $SCHEMA_ERRORS_MB"
     fi
   else
-    _pass "AC2b: hachure not available — schema validation skipped (fail-open)"
+    _pass "AC2b: @kontourai/surface not available — schema validation skipped (fail-open)"
   fi
 
   # Verify the absent criterion is the inquiry target
