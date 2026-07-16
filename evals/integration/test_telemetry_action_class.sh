@@ -144,6 +144,22 @@ _assert_bash "claude-code" "Bash" "npm"            ""      "bare npm (unknown in
 _assert_bash "claude-code" "Bash" "npm run lint"   ""      "npm run lint (unknown script)"
 _assert_bash "claude-code" "Bash" "pnpm test"      "test"  "pnpm test"
 _assert_bash "claude-code" "Bash" "yarn run build" "build" "yarn run build"
+# word-boundary script-name matching (review fix #2): a script name that merely
+# STARTS WITH "test"/"build" as a substring must NOT match -- only test/build
+# as a whole segment (optionally followed by :, _, - ) should.
+_assert_bash "claude-code" "Bash" "npm run testimonials"       ""      "npm run testimonials (substring, NOT test)"
+_assert_bash "claude-code" "Bash" "npm run buildpacks-verify"  ""      "npm run buildpacks-verify (substring, NOT build)"
+_assert_bash "claude-code" "Bash" "npm run test:unit"          "test"  "npm run test:unit (word-boundary test)"
+_assert_bash "claude-code" "Bash" "npm run build:prod"         "build" "npm run build:prod (word-boundary build)"
+# make (review fix #1): only bare `make` or an explicit test/build target
+# classify; any OTHER explicit target is an honest no-guess absence.
+_assert_bash "claude-code" "Bash" "make"           "build" "make (bare, no target -> conventional default build)"
+_assert_bash "claude-code" "Bash" "make test"      "test"  "make test"
+_assert_bash "claude-code" "Bash" "make build"     "build" "make build"
+_assert_bash "claude-code" "Bash" "make deploy"    ""      "make deploy (explicit non-test/build target -> NO action, no guess)"
+_assert_bash "claude-code" "Bash" "make clean"     ""      "make clean (explicit non-test/build target -> NO action, no guess)"
+_assert_bash "claude-code" "Bash" "make lint"      ""      "make lint (explicit non-test/build target -> NO action, no guess)"
+_assert_bash "claude-code" "Bash" "make install"   ""      "make install (explicit non-test/build target -> NO action, no guess)"
 
 # --- (d) cross-runtime: Codex native vocabulary ------------------------------
 echo ""
@@ -193,15 +209,27 @@ out_g3=$(_run_tool_event "postToolUse" "$res_g")
 [[ "$(echo "$out_g3" | jq -r '.event_type')" == "tool.result" && "$(echo "$out_g3" | jq -r '.tool.action')" == "build" ]] \
   && _pass "tool.result carries .tool.action==build" || _fail "result branch missing action ($(echo "$out_g3" | jq -c '.tool'))"
 
-# --- (h) PRESENCE HONESTY: unclassifiable never emits the key ----------------
+# --- (h) PRESENCE HONESTY: unclassifiable never emits the key (all 3 branches) --
 echo ""
 echo "--- (h) presence honesty: unclassifiable -> .tool has NO action key ---"
 inv_h=$(jq -nc '{session_id:"ac-h",hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:"ls -la"}}')
 out_h=$(_run_tool_event "preToolUse" "$inv_h")
 has_h=$(echo "$out_h" | jq -r '.tool | has("action")')
-[[ "$has_h" == "false" ]] && _pass "'ls -la' -> .tool has no 'action' key (not action:null, not action:\"\")" || _fail "unclassifiable produced an action key ($(echo "$out_h" | jq -c '.tool'))"
+[[ "$has_h" == "false" ]] && _pass "preToolUse: 'ls -la' -> .tool has no 'action' key (not action:null, not action:\"\")" || _fail "unclassifiable produced an action key ($(echo "$out_h" | jq -c '.tool'))"
 # The rest of the tool object is still intact when action is absent.
 [[ "$(echo "$out_h" | jq -r '.tool.name')" == "Bash" ]] && _pass "tool.name still present when action absent" || _fail "tool object degraded when action absent"
+# Same negative for the postToolUse/result branch (shares the same stamping jq).
+res_h=$(jq -nc '{session_id:"ac-h2",hook_event_name:"PostToolUse",tool_name:"Bash",tool_input:{command:"ls -la"},tool_response:{output:"ok"}}')
+out_h2=$(_run_tool_event "postToolUse" "$res_h")
+has_h2=$(echo "$out_h2" | jq -r '.tool | has("action")')
+[[ "$has_h2" == "false" ]] && _pass "postToolUse/result: 'ls -la' -> .tool has no 'action' key" || _fail "result branch produced an action key for unclassifiable ($(echo "$out_h2" | jq -c '.tool'))"
+[[ "$(echo "$out_h2" | jq -r '.event_type')" == "tool.result" ]] && _pass "result branch event_type is tool.result" || _fail "unexpected event_type ($(echo "$out_h2" | jq -r '.event_type'))"
+# Same negative for the permissionRequest branch (shares the same stamping jq).
+perm_h=$(jq -nc '{session_id:"ac-h3",hook_event_name:"PermissionRequest",tool_name:"Bash",tool_input:{command:"ls -la",description:"list files"}}')
+out_h3=$(_run_tool_event "permissionRequest" "$perm_h")
+has_h3=$(echo "$out_h3" | jq -r '.tool | has("action")')
+[[ "$has_h3" == "false" ]] && _pass "permissionRequest: 'ls -la' -> .tool has no 'action' key" || _fail "permission_request branch produced an action key for unclassifiable ($(echo "$out_h3" | jq -c '.tool'))"
+[[ "$(echo "$out_h3" | jq -r '.event_type')" == "tool.permission_request" ]] && _pass "permission_request branch event_type is tool.permission_request" || _fail "unexpected event_type ($(echo "$out_h3" | jq -r '.event_type'))"
 
 # --- (i) no-block: malformed/absent tool_input still emits cleanly -----------
 echo ""

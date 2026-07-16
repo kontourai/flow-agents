@@ -76,13 +76,17 @@ classify_action_class() {
             | if $t0=="git" then "git"
               elif ($t0=="npm" or $t0=="pnpm" or $t0=="yarn" or $t0=="bun") then
                 ( if $t1=="test" then "test"
-                  elif ($t1=="run" and ($t2|test("^test"))) then "test"
-                  elif ($t1=="run" and ($t2|test("^build"))) then "build"
+                  elif ($t1=="run" and ($t2|test("^test([:_-]|$)"))) then "test"
+                  elif ($t1=="run" and ($t2|test("^build([:_-]|$)"))) then "build"
                   else "" end )
               elif ($t0=="pytest" or $t0=="jest" or $t0=="vitest" or $t0=="mocha" or $t0=="tox") then "test"
               elif $t0=="go" then (if $t1=="test" then "test" elif $t1=="build" then "build" else "" end)
               elif $t0=="cargo" then (if $t1=="test" then "test" elif $t1=="build" then "build" else "" end)
-              elif $t0=="make" then (if $t1=="test" then "test" else "build" end)
+              elif $t0=="make" then
+                ( if $t1=="" then "build"
+                  elif ($t1|test("^test([:_-]|$)")) then "test"
+                  elif ($t1|test("^build([:_-]|$)")) then "build"
+                  else "" end )
               elif ($t0=="tsc" or $t0=="webpack") then "build"
               elif ($t0=="vite" and $t1=="build") then "build"
               else "" end
