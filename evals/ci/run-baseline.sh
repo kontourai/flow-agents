@@ -115,6 +115,7 @@ CHECKS=(
 
 LANE_SOURCE_AND_STATIC=(
   "Content boundary"
+  "Hachure boundary"
   "Decision registry"
   "Source tree validation"
   "Context map drift"
