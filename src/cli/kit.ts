@@ -6,7 +6,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
 import { assertPathContained, assertPathsDisjoint, atomicWriteJson, copyDirAtomic, ensureSafeDirectory, isoNow, readJson, walkFiles } from "../lib/fs.js";
-import { assertKitRepository, deriveKitTargets, parseKitDependencies } from "../flow-kit/validate.js";
+import { assertKitRepository, deriveKitTargets, parseKitDependencies, validateKitRepositoryDiagnostics } from "../flow-kit/validate.js";
 import { activateCodexLocal, activateStrandsLocal } from "../runtime-adapters.js";
 import { defaultCodexHome } from "../lib/local-artifact-root.js";
 import { root } from "../tools/common.js";
@@ -62,6 +62,17 @@ function warnUninstalledDependencies(manifest: Record<string, unknown>, manifest
       console.log(`warning: kit '${kitId}' declares a dependency on '${dep.kit_id}'${dep.reason ? ` (${dep.reason})` : ""} which is not installed at ${dest}; install it first with 'flow-agents kit install <source>' or activation will fail`);
     }
   }
+}
+
+/**
+ * Print non-blocking kit-validation warnings (e.g. an agent-spawning trigger surface
+ * declared without complete guard config — context/contracts/trigger-guards.md).
+ * Shared by BOTH install source forms (local path and git clone) so the standing
+ * warning contract cannot silently diverge between them. Same non-blocking
+ * `warning:` convention as warnUninstalledDependencies above.
+ */
+async function printKitValidationWarnings(kitDir: string): Promise<void> {
+  for (const warning of (await validateKitRepositoryDiagnostics(kitDir)).warnings) console.log(`warning: ${warning}`);
 }
 
 function contentHash(root: string): string {
@@ -126,6 +137,7 @@ async function installLocalSource(source: string, argv: string[]): Promise<numbe
   let manifest: Record<string, unknown>;
   try {
     manifest = await assertKitRepository(source);
+    await printKitValidationWarnings(source);
   } catch (error) {
     console.log("Flow Kit repository validation failed:");
     for (const diagnostic of ((error as Error & { diagnostics?: string[] }).diagnostics ?? [(error as Error).message])) console.log(` - ${diagnostic}`);
@@ -213,6 +225,7 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
     let manifest: Record<string, unknown>;
     try {
       manifest = await assertKitRepository(tmpBase);
+      await printKitValidationWarnings(tmpBase);
     } catch (error) {
       console.log("Flow Kit repository validation failed:");
       for (const diagnostic of ((error as Error & { diagnostics?: string[] }).diagnostics ?? [(error as Error).message])) {
