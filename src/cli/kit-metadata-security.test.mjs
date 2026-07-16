@@ -1030,3 +1030,43 @@ test("kit repository diagnostics carry the guardless-spawn warning and never lea
   const targets = await deriveKitTargets(manifest, kit);
   assert.deepEqual(targets.third_party_extensions, []);
 });
+
+test("kit install surfaces the guardless-spawn warning non-blockingly for BOTH source forms (local path and git URL)", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const root = tempRoot("flow-agents-agent-spawn-trigger-install-");
+  const kitSource = path.join(root, "guarded-kit");
+  fs.mkdirSync(path.join(kitSource, "flows"), { recursive: true });
+  writeJson(path.join(kitSource, "kit.json"), {
+    schema_version: "1.0",
+    id: "guardless-demo",
+    name: "Guardless Demo Kit",
+    flows: [{ id: "demo.flow", path: "flows/demo.flow.json" }],
+    agent_spawn_triggers: [
+      { id: "on-check-failure", description: "Escalates failing checks to a headless agent run.", spawns_agent_runs: true },
+    ],
+  });
+  writeJson(path.join(kitSource, "flows", "demo.flow.json"), {
+    id: "demo.flow",
+    version: "1.0",
+    steps: [{ id: "only", next: null }],
+    gates: {},
+  });
+  const cli = path.resolve("build/src/cli.js");
+  const runInstall = (source, destName) => {
+    return execFileSync(process.execPath, [cli, "kit", "install", source, "--dest", path.join(root, destName)], { encoding: "utf8" });
+  };
+
+  // Local-path source form.
+  const localOut = runInstall(kitSource, "dest-local");
+  assert.match(localOut, /warning: .*agent_spawn_triggers\[0\] \('on-check-failure'\) spawns agent runs without complete guard config/);
+  assert.match(localOut, /installed local kit 'guardless-demo'/);
+
+  // Git-URL source form (file:// clone of the same kit).
+  const git = (args, cwd) => execFileSync("git", ["-c", "user.email=kit-test@example.invalid", "-c", "user.name=kit-test", ...args], { cwd, encoding: "utf8" });
+  git(["init", "--quiet"], kitSource);
+  git(["add", "-A"], kitSource);
+  git(["commit", "--quiet", "-m", "kit fixture"], kitSource);
+  const gitOut = runInstall(`file://${kitSource}`, "dest-git");
+  assert.match(gitOut, /warning: .*agent_spawn_triggers\[0\] \('on-check-failure'\) spawns agent runs without complete guard config/);
+  assert.match(gitOut, /installed git kit 'guardless-demo'/);
+});

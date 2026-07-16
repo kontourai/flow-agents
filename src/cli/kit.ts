@@ -64,6 +64,17 @@ function warnUninstalledDependencies(manifest: Record<string, unknown>, manifest
   }
 }
 
+/**
+ * Print non-blocking kit-validation warnings (e.g. an agent-spawning trigger surface
+ * declared without complete guard config — context/contracts/trigger-guards.md).
+ * Shared by BOTH install source forms (local path and git clone) so the standing
+ * warning contract cannot silently diverge between them. Same non-blocking
+ * `warning:` convention as warnUninstalledDependencies above.
+ */
+async function printKitValidationWarnings(kitDir: string): Promise<void> {
+  for (const warning of (await validateKitRepositoryDiagnostics(kitDir)).warnings) console.log(`warning: ${warning}`);
+}
+
 function contentHash(root: string): string {
   const hash = crypto.createHash("sha256");
   for (const file of walkFiles(root)) {
@@ -126,10 +137,7 @@ async function installLocalSource(source: string, argv: string[]): Promise<numbe
   let manifest: Record<string, unknown>;
   try {
     manifest = await assertKitRepository(source);
-    // Non-blocking validation warnings (e.g. an agent-spawning trigger surface declared
-    // without complete guard config — context/contracts/trigger-guards.md). Same
-    // non-blocking convention as warnUninstalledDependencies below.
-    for (const warning of (await validateKitRepositoryDiagnostics(source)).warnings) console.log(`warning: ${warning}`);
+    await printKitValidationWarnings(source);
   } catch (error) {
     console.log("Flow Kit repository validation failed:");
     for (const diagnostic of ((error as Error & { diagnostics?: string[] }).diagnostics ?? [(error as Error).message])) console.log(` - ${diagnostic}`);
@@ -217,6 +225,7 @@ async function installGitSource(rawUrl: string, argv: string[]): Promise<number>
     let manifest: Record<string, unknown>;
     try {
       manifest = await assertKitRepository(tmpBase);
+      await printKitValidationWarnings(tmpBase);
     } catch (error) {
       console.log("Flow Kit repository validation failed:");
       for (const diagnostic of ((error as Error & { diagnostics?: string[] }).diagnostics ?? [(error as Error).message])) {
