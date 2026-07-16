@@ -74,6 +74,7 @@ CHECKS=(
   "Usage and cost integration|bash evals/integration/test_usage_cost.sh"
   "Telemetry usage pipeline integration|bash evals/integration/test_telemetry_usage_pipeline.sh"
   "Telemetry tool usage integration|bash evals/integration/test_telemetry_tool_usage.sh"
+  "Telemetry tool outcome integration|bash evals/integration/test_telemetry_tool_outcome.sh"
   "Telemetry sanitize usage integration|bash evals/integration/test_telemetry_sanitize_usage.sh"
   "Telemetry task slug integration|bash evals/integration/test_telemetry_task_slug.sh"
   "Economics record integration|bash evals/integration/test_economics_record.sh"
@@ -153,6 +154,7 @@ LANE_WORKFLOW_CONTRACTS=(
   "Current.json per-actor integration"
   "Liveness console relay integration"
   "Console tenant isolation integration"
+  "Telemetry tool outcome integration"
 )
 
 LANE_RUNTIME_AND_KIT=(

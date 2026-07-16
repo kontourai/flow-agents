@@ -245,6 +245,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check console-tenant-isolation-integration
 
+      - name: Telemetry tool outcome integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check telemetry-tool-outcome-integration
+
       - name: Finalize CI evidence
         if: always()
         run: bash evals/ci/run-baseline.sh --finalize
