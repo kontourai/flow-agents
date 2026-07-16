@@ -17,14 +17,9 @@ import { readFileSync } from "node:fs";
 
 // ── Allowlist: current, pending-migration direct-hachure usage ───────────────
 // Remove an entry once its hachure usage is gone (routed through @kontourai/surface).
-const ALLOWLISTED_SOURCE_FILES = new Set([
-  // Resolves hachure's inquiry-record.schema.json for Ajv validation. Migrates
-  // onto Surface.validateInquiryRecord (added in @kontourai/surface) once that
-  // version is published — see the Portfolio Layer Doctrine "target" table.
-  "src/cli/workflow-sidecar.ts",
-]);
+const ALLOWLISTED_SOURCE_FILES = new Set([]);
 // package.json may still declare hachure while a source file above still needs it.
-const ALLOW_PACKAGE_JSON_HACHURE_DEP = true;
+const ALLOW_PACKAGE_JSON_HACHURE_DEP = false;
 
 // No `\b` before `require`: flow-agents calls `_require.resolve("hachure")`
 // (an aliased require), so a word-boundary anchor would miss it.
