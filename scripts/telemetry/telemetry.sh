@@ -329,14 +329,20 @@ add_tool_usage_data() {
   transcript_path=$(echo "$event" | jq -r '.hook.transcript_path // ""')
   hook_model=$(echo "$event" | jq -r '.hook.model // ""')
 
-  local turn_usage
+  local turn_usage joined
   turn_usage=""
   if [[ -n "$transcript_path" ]]; then
     turn_usage=$(usage_last_turn_usage "$transcript_path")
   fi
 
   if [[ -n "$turn_usage" ]]; then
-    echo "$event" | jq -c --argjson tu "$turn_usage" '. + {
+    # Guard the transcript-join jq. usage_last_turn_usage is well-formed today,
+    # but if it ever emits non-JSON (a future regression), `--argjson tu` errors
+    # to empty stdout, which would blackhole the ENTIRE tool event downstream
+    # (transport_emit drops an empty event). Degrade to the model-only / full-
+    # null tiers below instead of losing the record — consistent with this
+    # feature's "never invent, always degrade gracefully, never block" contract.
+    joined=$(echo "$event" | jq -c --argjson tu "$turn_usage" '. + {
       usage: {
         model: $tu.model,
         input_tokens: $tu.input_tokens,
@@ -346,8 +352,14 @@ add_tool_usage_data() {
         estimated_cost_usd: $tu.estimated_cost_usd,
         pricing_version: $tu.pricing_version
       }
-    }'
-  elif [[ -n "$hook_model" && "$hook_model" != "unknown" ]]; then
+    }' 2>/dev/null) || joined=""
+    if [[ -n "$joined" ]]; then
+      printf '%s\n' "$joined"
+      return
+    fi
+  fi
+
+  if [[ -n "$hook_model" && "$hook_model" != "unknown" ]]; then
     echo "$event" | jq -c --arg m "$hook_model" '. + {
       usage: {
         model: $m,

@@ -177,6 +177,8 @@ run_integration() {
   echo ""
   bash "$EVAL_DIR/integration/test_telemetry_tool_usage.sh" || result=1
   echo ""
+  bash "$EVAL_DIR/integration/test_telemetry_sanitize_usage.sh" || result=1
+  echo ""
   bash "$EVAL_DIR/integration/test_telemetry_doctor.sh" || result=1
   echo ""
   bash "$EVAL_DIR/integration/test_usage_feedback_outcomes.sh" || result=1
