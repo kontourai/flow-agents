@@ -76,6 +76,7 @@ CHECKS=(
   "Telemetry tool usage integration|bash evals/integration/test_telemetry_tool_usage.sh"
   "Telemetry tool outcome integration|bash evals/integration/test_telemetry_tool_outcome.sh"
   "Telemetry delegation integration|bash evals/integration/test_telemetry_delegation.sh"
+  "Telemetry action-class integration|bash evals/integration/test_telemetry_action_class.sh"
   "Telemetry sanitize usage integration|bash evals/integration/test_telemetry_sanitize_usage.sh"
   "Telemetry task slug integration|bash evals/integration/test_telemetry_task_slug.sh"
   "Economics record integration|bash evals/integration/test_economics_record.sh"
@@ -157,6 +158,7 @@ LANE_WORKFLOW_CONTRACTS=(
   "Console tenant isolation integration"
   "Telemetry tool outcome integration"
   "Telemetry delegation integration"
+  "Telemetry action-class integration"
 )
 
 LANE_RUNTIME_AND_KIT=(

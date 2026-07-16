@@ -21,6 +21,79 @@ normalize_tool_name() {
   esac
 }
 
+# classify_action_class — normalized cross-runtime activity taxonomy (#582).
+# Given a RAW tool_name and its compact tool_input JSON, echoes ONE of the
+# action classes {edit, search, test, git, build, web, read}, or empty when the
+# tool is not classifiable (delegation / unknown / ambiguous shell -> no class;
+# the field is then ABSENT, never fabricated). Additive & orthogonal to
+# normalize_tool_name (canonical tool identity): this describes WHAT KIND of
+# activity the tool performs. Privacy: for shell tools the command is read
+# transiently ONLY to extract the leading (and 2nd/3rd) verb token; the raw
+# command/args are never stored to derive the class. Any jq hiccup degrades to
+# empty and never blocks the event.
+classify_action_class() {
+  local tool_name="$1" tool_input="$2"
+  [[ -z "$tool_input" ]] && tool_input="null"
+  case "$tool_name" in
+    Edit|Write|MultiEdit|NotebookEdit|apply_patch|fs_write|write|code)
+      echo "edit" ;;
+    Grep|Glob|find|search)
+      echo "search" ;;
+    Read|fs_read|NotebookRead)
+      echo "read" ;;
+    WebFetch|WebSearch|web_search|web_fetch)
+      echo "web" ;;
+    Bash|bash|shell|execute_bash)
+      # Bash-family verb sub-classification. Reuses #581's leading-token
+      # extraction (resolve_delegation_targets): peel one bash/sh/zsh -c
+      # wrapper, strip leading VAR=val env-assignments, then match the WHOLE
+      # leading token (word-boundary: gitfoo / /path/git-helper / echo git MUST
+      # NOT match git). test-vs-build for pkg-runners (npm/pnpm/yarn/bun) is
+      # disambiguated by the 2nd (and 3rd for `run <script>`) token; a bare
+      # runner / unknown script -> empty (NO guess). The command is read
+      # transiently and never stored (privacy).
+      echo "$tool_input" | jq -r '
+        ((.command // "") | if type=="string" then . else "" end) as $cmd
+        | ($cmd | gsub("^\\s+|\\s+$";"")) as $s
+        | if $s=="" then ""
+          else
+            ( if ($s|test("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x27[\\s\\S]*\\x27\\s*$"))
+              then ($s|capture("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x27(?<i>[\\s\\S]*)\\x27\\s*$")|.i)
+              elif ($s|test("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x22[\\s\\S]*\\x22\\s*$"))
+              then ($s|capture("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x22(?<i>[\\s\\S]*)\\x22\\s*$")|.i)
+              else $s end
+            ) as $inner0
+            | ($inner0 | gsub("^\\s+|\\s+$";"")) as $inner
+            | ( {r:$inner}
+                | until( (.r|test("^[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+\\S")|not);
+                         .r |= (capture("^[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+(?<rest>\\S[\\s\\S]*)$")|.rest) )
+                | .r ) as $rest
+            | ($rest | gsub("^\\s+|\\s+$";"")) as $rt
+            | (if $rt=="" then [] else [$rt | splits("\\s+")] end) as $toks
+            | ($toks[0] // "") as $t0
+            | ($toks[1] // "") as $t1
+            | ($toks[2] // "") as $t2
+            | if $t0=="git" then "git"
+              elif ($t0=="npm" or $t0=="pnpm" or $t0=="yarn" or $t0=="bun") then
+                ( if $t1=="test" then "test"
+                  elif ($t1=="run" and ($t2|test("^test"))) then "test"
+                  elif ($t1=="run" and ($t2|test("^build"))) then "build"
+                  else "" end )
+              elif ($t0=="pytest" or $t0=="jest" or $t0=="vitest" or $t0=="mocha" or $t0=="tox") then "test"
+              elif $t0=="go" then (if $t1=="test" then "test" elif $t1=="build" then "build" else "" end)
+              elif $t0=="cargo" then (if $t1=="test" then "test" elif $t1=="build" then "build" else "" end)
+              elif $t0=="make" then (if $t1=="test" then "test" else "build" end)
+              elif ($t0=="tsc" or $t0=="webpack") then "build"
+              elif ($t0=="vite" and $t1=="build") then "build"
+              else "" end
+          end
+      ' 2>/dev/null || echo ""
+      ;;
+    *)
+      echo "" ;;
+  esac
+}
+
 telemetry_session_id() {
   local event_type="$1" agent_name="$2"
   local session_id=""
@@ -214,32 +287,39 @@ add_user_prompt_data() {
 
 add_tool_event_data() {
   local event="$1" event_type="$2" stdin_json="$3"
-  local tool_name tool_normalized_name tool_input tool_output permission_description
+  local tool_name tool_normalized_name tool_input tool_output permission_description tool_action
   tool_name=$(echo "$stdin_json" | jq -r '.tool_name // ""')
   tool_normalized_name=$(normalize_tool_name "$tool_name")
   tool_input=$(echo "$stdin_json" | jq -c '.tool_input // null')
   tool_output=$(echo "$stdin_json" | jq -c '.tool_response // null')
   permission_description=$(echo "$stdin_json" | jq -r '.tool_input.description // ""')
+  # #582: normalized action class {edit,search,test,git,build,web,read}, or
+  # empty when unclassifiable. Stamped additively inside .tool below (guarded so
+  # a classifier hiccup degrades to NO .tool.action, never a dropped event).
+  tool_action=$(classify_action_class "$tool_name" "$tool_input")
 
   if [[ "$event_type" == "preToolUse" ]]; then
     event=$(echo "$event" | jq -c \
       --arg tn "$tool_name" \
       --arg nn "$tool_normalized_name" \
+      --arg ac "$tool_action" \
       --argjson ti "$tool_input" \
-      '. + {tool: {name: $tn, normalized_name: $nn, input: $ti}}')
+      '. + {tool: ({name: $tn, normalized_name: $nn, input: $ti} + (if $ac == "" then {} else {action: $ac} end))}')
   elif [[ "$event_type" == "permissionRequest" || "$event_type" == "PermissionRequest" ]]; then
     event=$(echo "$event" | jq -c \
       --arg tn "$tool_name" \
       --arg nn "$tool_normalized_name" \
+      --arg ac "$tool_action" \
       --argjson ti "$tool_input" \
       --arg desc "$permission_description" \
-      '. + {tool: {name: $tn, normalized_name: $nn, input: $ti}, permission: {description: $desc}}')
+      '. + {tool: ({name: $tn, normalized_name: $nn, input: $ti} + (if $ac == "" then {} else {action: $ac} end)), permission: {description: $desc}}')
   else
     event=$(echo "$event" | jq -c \
       --arg tn "$tool_name" \
       --arg nn "$tool_normalized_name" \
+      --arg ac "$tool_action" \
       --argjson to "$tool_output" \
-      '. + {tool: {name: $tn, normalized_name: $nn, output: $to}}')
+      '. + {tool: ({name: $tn, normalized_name: $nn, output: $to} + (if $ac == "" then {} else {action: $ac} end))}')
   fi
 
   echo "$event"
