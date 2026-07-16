@@ -6,7 +6,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
 import { assertPathContained, assertPathsDisjoint, atomicWriteJson, copyDirAtomic, ensureSafeDirectory, isoNow, readJson, walkFiles } from "../lib/fs.js";
-import { assertKitRepository, deriveKitTargets, parseKitDependencies } from "../flow-kit/validate.js";
+import { assertKitRepository, deriveKitTargets, parseKitDependencies, validateKitRepositoryDiagnostics } from "../flow-kit/validate.js";
 import { activateCodexLocal, activateStrandsLocal } from "../runtime-adapters.js";
 import { defaultCodexHome } from "../lib/local-artifact-root.js";
 import { root } from "../tools/common.js";
@@ -126,6 +126,10 @@ async function installLocalSource(source: string, argv: string[]): Promise<numbe
   let manifest: Record<string, unknown>;
   try {
     manifest = await assertKitRepository(source);
+    // Non-blocking validation warnings (e.g. an agent-spawning trigger surface declared
+    // without complete guard config — context/contracts/trigger-guards.md). Same
+    // non-blocking convention as warnUninstalledDependencies below.
+    for (const warning of (await validateKitRepositoryDiagnostics(source)).warnings) console.log(`warning: ${warning}`);
   } catch (error) {
     console.log("Flow Kit repository validation failed:");
     for (const diagnostic of ((error as Error & { diagnostics?: string[] }).diagnostics ?? [(error as Error).message])) console.log(` - ${diagnostic}`);

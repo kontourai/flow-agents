@@ -7,7 +7,7 @@ import { createRequire, syncBuiltinESMExports } from "node:module";
 
 import { readKitInventory } from "../../build/src/runtime-adapters.js";
 import { main as validateHookInfluence } from "../../build/src/cli/validate-hook-influence.js";
-import { parseKitFlowStepActions, parseKitSkillRoles, validateKitRepository } from "../../build/src/flow-kit/validate.js";
+import { parseKitAgentSpawnTriggers, parseKitFlowStepActions, parseKitSkillRoles, validateKitRepository, validateKitRepositoryDiagnostics } from "../../build/src/flow-kit/validate.js";
 import { observeBuilderArtifactsForProgress } from "../../build/src/builder-gate-action-envelope.js";
 
 const require = createRequire(import.meta.url);
@@ -907,4 +907,126 @@ test("workflowTriggersFor returns Knowledge's structured capture trigger", () =>
   assert.match(trigger.steering, /`knowledge\.knowledge-capture`/);
   assert.match(trigger.steering, /Keep the session on `knowledge\.ingest`/);
   assert.match(trigger.steering, /unsupported-runtime blocker/);
+});
+
+test("agent spawn trigger metadata accepts a fully guarded declaration without errors or warnings", () => {
+  const result = parseKitAgentSpawnTriggers({
+    agent_spawn_triggers: [
+      {
+        id: "on-check-failure",
+        description: "Escalates failing checks to a headless agent run.",
+        spawns_agent_runs: true,
+        guards: { dedup_key: "check-name+failure-signature", cooldown_seconds: 900, daily_cap: 20, max_concurrent: 1 },
+      },
+      {
+        id: "notify-only",
+        description: "Fires a notification; never spawns agent runs.",
+        spawns_agent_runs: false,
+      },
+    ],
+  }, "fixture/kit.json");
+
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.warnings, []);
+  assert.equal(result.entries.length, 2);
+  assert.deepEqual(result.entries[0].guards, { dedup_key: "check-name+failure-signature", cooldown_seconds: 900, daily_cap: 20, max_concurrent: 1 });
+  assert.equal(result.entries[1].guards, undefined);
+});
+
+test("agent spawn trigger without guards warns (never errors) when it spawns agent runs", () => {
+  const missing = parseKitAgentSpawnTriggers({
+    agent_spawn_triggers: [
+      { id: "on-schedule", description: "Scheduled automation spawning agent runs.", spawns_agent_runs: true },
+    ],
+  }, "fixture/kit.json");
+  assert.deepEqual(missing.errors, []);
+  assert.equal(missing.warnings.length, 1);
+  assert.match(missing.warnings[0], /agent_spawn_triggers\[0\] \('on-schedule'\) spawns agent runs without complete guard config/);
+  assert.match(missing.warnings[0], /missing: dedup_key, cooldown_seconds, daily_cap, max_concurrent/);
+  assert.match(missing.warnings[0], /context\/contracts\/trigger-guards\.md/);
+  assert.equal(missing.entries.length, 1);
+
+  const incomplete = parseKitAgentSpawnTriggers({
+    agent_spawn_triggers: [
+      { id: "on-check-failure", description: "Escalation.", spawns_agent_runs: true, guards: { cooldown_seconds: 900 } },
+    ],
+  }, "fixture/kit.json");
+  assert.deepEqual(incomplete.errors, []);
+  assert.equal(incomplete.warnings.length, 1);
+  assert.match(incomplete.warnings[0], /missing: dedup_key, daily_cap, max_concurrent/);
+
+  const nonSpawning = parseKitAgentSpawnTriggers({
+    agent_spawn_triggers: [
+      { id: "notify-only", description: "Notification only.", spawns_agent_runs: false },
+    ],
+  }, "fixture/kit.json");
+  assert.deepEqual(nonSpawning.errors, []);
+  assert.deepEqual(nonSpawning.warnings, []);
+});
+
+test("agent spawn trigger metadata rejects malformed shapes as errors", () => {
+  const notAList = parseKitAgentSpawnTriggers({ agent_spawn_triggers: {} }, "fixture/kit.json");
+  assert.match(notAList.errors.join("\n"), /\.agent_spawn_triggers must be a list/);
+
+  const result = parseKitAgentSpawnTriggers({
+    agent_spawn_triggers: [
+      { id: "Bad Id", description: "x", spawns_agent_runs: true },
+      { id: "dup", description: "x", spawns_agent_runs: true, guards: { dedup_key: "sig", cooldown_seconds: 900, daily_cap: 20, max_concurrent: 1 } },
+      { id: "dup", description: "x", spawns_agent_runs: true, guards: { dedup_key: "sig", cooldown_seconds: 900, daily_cap: 20, max_concurrent: 1 } },
+      { id: "no-description", spawns_agent_runs: true },
+      { id: "no-boolean", description: "x", spawns_agent_runs: "yes" },
+      { id: "bad-guards", description: "x", spawns_agent_runs: true, guards: [] },
+      { id: "bad-guard-values", description: "x", spawns_agent_runs: true, guards: { dedup_key: " ", cooldown_seconds: 0, daily_cap: 1.5, max_concurrent: -1 } },
+      { id: "unknown-guard", description: "x", spawns_agent_runs: true, guards: { dedup_key: "sig", cooldown_seconds: 900, daily_cap: 20, max_concurrent: 1, burst: 5 } },
+      { id: "unknown-field", description: "x", spawns_agent_runs: true, command: "private-bypass" },
+    ],
+  }, "fixture/kit.json");
+
+  const errors = result.errors.join("\n");
+  assert.match(errors, /agent_spawn_triggers\[0\]\.id must match/);
+  assert.match(errors, /agent_spawn_triggers\[2\]\.id duplicates 'dup'/);
+  assert.match(errors, /agent_spawn_triggers\[3\]\.description must be a non-empty string/);
+  assert.match(errors, /agent_spawn_triggers\[4\]\.spawns_agent_runs must be a boolean/);
+  assert.match(errors, /agent_spawn_triggers\[5\]\.guards must be an object/);
+  assert.match(errors, /agent_spawn_triggers\[6\]\.guards\.dedup_key must be a non-empty string/);
+  assert.match(errors, /agent_spawn_triggers\[6\]\.guards\.cooldown_seconds must be an integer >= 1/);
+  assert.match(errors, /agent_spawn_triggers\[6\]\.guards\.daily_cap must be an integer >= 1/);
+  assert.match(errors, /agent_spawn_triggers\[6\]\.guards\.max_concurrent must be an integer >= 1/);
+  assert.match(errors, /agent_spawn_triggers\[7\]\.guards contains unsupported field\(s\): burst/);
+  assert.match(errors, /agent_spawn_triggers\[8\] contains unsupported field\(s\): command/);
+  // Malformed entries fail shape validation; only the first 'dup' entry (valid shape) parses.
+  assert.equal(result.entries.length, 1);
+  // Shape violations are errors, never demoted to the guard-completeness warning channel.
+  assert.deepEqual(result.warnings, []);
+});
+
+test("kit repository diagnostics carry the guardless-spawn warning and never leak it into errors", async () => {
+  const root = tempRoot("flow-agents-agent-spawn-trigger-repo-");
+  const kit = path.join(root, "builder");
+  fs.cpSync("kits/builder", kit, { recursive: true });
+  const manifestFile = path.join(kit, "kit.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+  manifest.agent_spawn_triggers = [
+    { id: "on-check-failure", description: "Escalates failing checks to a headless agent run.", spawns_agent_runs: true },
+  ];
+  writeJson(manifestFile, manifest);
+
+  const diagnostics = await validateKitRepositoryDiagnostics(kit);
+  assert.deepEqual(diagnostics.errors, []);
+  assert.equal(diagnostics.warnings.length, 1);
+  assert.match(diagnostics.warnings[0], /spawns agent runs without complete guard config/);
+  // validateKitRepository keeps its errors-only contract: a warning is not an error.
+  assert.deepEqual(await validateKitRepository(kit), []);
+
+  // A fully guarded declaration is clean on both channels.
+  manifest.agent_spawn_triggers[0].guards = { dedup_key: "check-name+failure-signature", cooldown_seconds: 900, daily_cap: 20, max_concurrent: 1 };
+  writeJson(manifestFile, manifest);
+  const guarded = await validateKitRepositoryDiagnostics(kit);
+  assert.deepEqual(guarded.errors, []);
+  assert.deepEqual(guarded.warnings, []);
+
+  // agent_spawn_triggers is recognized Flow Agents metadata, not a third-party namespace.
+  const { deriveKitTargets } = await import("../../build/src/flow-kit/validate.js");
+  const targets = await deriveKitTargets(manifest, kit);
+  assert.deepEqual(targets.third_party_extensions, []);
 });
