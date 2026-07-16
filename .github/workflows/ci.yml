@@ -386,6 +386,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check telemetry-tool-usage-integration
 
+      - name: Telemetry sanitize usage integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check telemetry-sanitize-usage-integration
+
       - name: Telemetry task slug integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check telemetry-task-slug-integration
