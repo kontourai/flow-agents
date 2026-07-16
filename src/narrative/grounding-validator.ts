@@ -518,12 +518,16 @@ function describeViolation(violation: GroundingViolation): string {
   }
 }
 
-export function validateNarrativeGrounding(
-  envelope: GroundedExecutionNarrative,
-  narrativeDir: string,
-  opts: ValidateNarrativeGroundingOptions = {},
-): GroundingVerdict {
-  const statements = statementsFrom(envelope);
+interface ResolvedManifestRecords {
+  manifest: NarrativeSourceManifest;
+  resolved: ResolvedRecord[];
+  resolver: NonNullable<ValidateNarrativeGroundingOptions["resolver"]>;
+}
+
+// Single canonical resolution path shared by validateNarrativeGrounding and
+// materialEventCoverage — the eval layer (#612) must measure against the SAME
+// resolution the product's gate uses, never a parallel copy that could drift.
+function resolveManifestRecords(narrativeDir: string, opts: ValidateNarrativeGroundingOptions): ResolvedManifestRecords {
   const manifest = readVerifiedManifest(narrativeDir);
   const resolver = opts.resolver ?? resolveSource;
   const resolved: ResolvedRecord[] = [];
@@ -536,6 +540,54 @@ export function validateNarrativeGrounding(
     if (stream === "flow-report" || stream === "surface-explanation") continue;
     resolved.push({ sourceId: entry.source_id, sourceIndex, stream, record: parseRecord(result.content) });
   }
+  return { manifest, resolved, resolver };
+}
+
+export interface MaterialEventClassCoverage {
+  total: number;
+  uncovered: number;
+}
+
+export interface MaterialEventCoverage {
+  total: number;
+  covered: number;
+  by_class: Partial<Record<MaterialEventKind, MaterialEventClassCoverage>>;
+}
+
+/**
+ * #612: the SAME canonical material-event extraction that
+ * validateNarrativeGrounding uses to derive `uncovered_material_event`
+ * violations, exposed as a coverage summary so the eval layer measures
+ * faithfulness against the real extraction (never a parallel one that could
+ * drift). `covered = total - sum(uncovered)`; `by_class` gives per-kind
+ * total/uncovered so the eval can report an honest omission rate per class.
+ */
+export function materialEventCoverage(
+  envelope: GroundedExecutionNarrative,
+  narrativeDir: string,
+  opts: ValidateNarrativeGroundingOptions = {},
+): MaterialEventCoverage {
+  const statements = statementsFrom(envelope);
+  const { manifest, resolved } = resolveManifestRecords(narrativeDir, opts);
+  const events = deriveMaterialEvents(manifest, resolved);
+  const by_class: Partial<Record<MaterialEventKind, MaterialEventClassCoverage>> = {};
+  let covered = 0;
+  for (const event of events) {
+    const bucket = (by_class[event.kind] ??= { total: 0, uncovered: 0 });
+    bucket.total += 1;
+    if (eventIsCovered(event, statements)) covered += 1;
+    else bucket.uncovered += 1;
+  }
+  return { total: events.length, covered, by_class };
+}
+
+export function validateNarrativeGrounding(
+  envelope: GroundedExecutionNarrative,
+  narrativeDir: string,
+  opts: ValidateNarrativeGroundingOptions = {},
+): GroundingVerdict {
+  const statements = statementsFrom(envelope);
+  const { manifest, resolved, resolver } = resolveManifestRecords(narrativeDir, opts);
 
   const violations: GroundingViolation[] = [];
   const declaredUnavailable = new Map(manifest.sources

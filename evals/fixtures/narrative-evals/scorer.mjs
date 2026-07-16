@@ -135,7 +135,11 @@ function buildRedacted(temp, id) {
   const commandLine = JSON.stringify({ command: "npm run build", result: "pass", exitCode: 0 });
   fs.writeFileSync(path.join(sessionDir, "command-log.jsonl"), `${commandLine}\n`);
   const transcriptPath = path.join(fixtureRoot, "transcript.json");
-  const pathSha8 = sha256(Buffer.from(path.resolve(transcriptPath), "utf8")).slice(0, 8);
+  // R2 determinism: derive the transcript locator from the STABLE fixture-logical
+  // path, NOT the absolute mkdtemp path (which churns every run and made the emitted
+  // artifact non-deterministic — HIGH-2). The redacted transcript is content-absent
+  // regardless; the id only needs to be a stable, fixture-unique fa1 transcript id.
+  const pathSha8 = sha8(Buffer.from(`${id}/transcript.json`, "utf8"));
   const cmdlogRef = `fa1:cmdlog:session:line-1/${sha8(Buffer.from(commandLine))}`;
   const transcriptRef = `fa1:transcript:${pathSha8}:0-16`;
   snapshot({
@@ -336,7 +340,7 @@ function scoreFixture(temp, fixture) {
   } else {
     actual = state.rejected ? "reject" : "accept";
   }
-  return { actual, verdict, statements, narrativeDir, sourceIds };
+  return { actual, verdict, statements, narrativeDir, sourceIds, envelope };
 }
 
 // ── metric accumulation over the honest (frozen-manifest) corpus ────────────
@@ -360,7 +364,9 @@ let materialTotal = 0;
 let materialCovered = 0;
 let epistemicStatements = 0;
 let epistemicCorrect = 0;
-const omissionByClass = {};
+// Per-class {total, uncovered} accumulated from the REAL canonical extraction
+// (grounding.materialEventCoverage); omission_rate_by_class is derived after the loop.
+const omissionByClassAcc = {};
 
 try {
   for (const fixture of selected) {
@@ -388,19 +394,41 @@ try {
           if (api.resolveSource(scored.narrativeDir, ref).status === "resolved") citationsResolved += 1;
         }
       }
-      for (const kind of fixture.expected.material_claims) {
-        materialTotal += 1;
-        materialCovered += 1; // an accepted honest narrative has every material event covered
-        omissionByClass[kind] = 0;
+      // REAL material-event coverage from the SAME canonical extraction the gate
+      // uses (grounding.materialEventCoverage → deriveMaterialEvents/eventIsCovered),
+      // never a lockstep counter. covered/total and per-class uncovered are measured
+      // against the actual narrative, so the metric and its threshold gate have teeth:
+      // a coverage regression drops material_claim_coverage below 1 and fails the gate.
+      const coverage = grounding.materialEventCoverage(scored.envelope, scored.narrativeDir);
+      materialTotal += coverage.total;
+      materialCovered += coverage.covered;
+      for (const [kind, bucket] of Object.entries(coverage.by_class)) {
+        const acc = (omissionByClassAcc[kind] ??= { total: 0, uncovered: 0 });
+        acc.total += bucket.total;
+        acc.uncovered += bucket.uncovered;
       }
-      epistemicStatements += scored.statements.length;
-      epistemicCorrect += scored.statements.length - epistemicViolationCount(scored.verdict);
+      // Answer-key binding: every DECLARED material claim kind must actually be
+      // derivable from the frozen manifest (declared events are real). Incidental
+      // extra events are allowed; a declared-but-absent kind is a corpus error.
+      for (const kind of fixture.expected.material_claims) {
+        if (!(kind in coverage.by_class)) {
+          log(`answer-key mismatch: ${fixture.id} declares material_claim '${kind}' not derivable from the manifest`);
+          process.exitCode = 1;
+        }
+      }
 
       // Grounded answer-key assertions: the frozen manifest must reproduce the
       // corpus's declared verdict, epistemic labels, and citation resolvability.
       const labels = [...new Set(scored.statements.map((statement) => statement.class))].sort();
       const expectedLabels = [...fixture.expected.epistemic_labels].sort();
-      if (JSON.stringify(labels) !== JSON.stringify(expectedLabels)) {
+      const labelSetCorrect = JSON.stringify(labels) === JSON.stringify(expectedLabels);
+      // Epistemic classification accuracy is NOT a tautology: a fixture contributes
+      // its statements as correct ONLY when its emitted label set matches the answer
+      // key AND it carries no epistemic (mislabel/prohibited-assertion) violation, so
+      // any real classification error drops the metric below 1.
+      epistemicStatements += scored.statements.length;
+      epistemicCorrect += (labelSetCorrect && epistemicViolationCount(scored.verdict) === 0) ? scored.statements.length : 0;
+      if (!labelSetCorrect) {
         log(`answer-key mismatch: ${fixture.id} epistemic_labels expected ${JSON.stringify(expectedLabels)} got ${JSON.stringify(labels)}`);
         process.exitCode = 1;
       }
@@ -421,6 +449,10 @@ try {
   const citationResolvability = rate(citationsResolved, citationsTotal);
   const materialCoverage = rate(materialCovered, materialTotal);
   const epistemicAccuracy = rate(epistemicCorrect, epistemicStatements);
+  // Per-class omission = uncovered/total for that material-event kind, from the real
+  // canonical extraction (never a hard-coded 0).
+  const omissionByClass = {};
+  for (const [kind, acc] of Object.entries(omissionByClassAcc)) omissionByClass[kind] = rate(acc.uncovered, acc.total);
 
   // Cross-runtime capability parity — DECLARED, not discovered (AC3/R7). Read the
   // #620 declaration and assert the emitted block equals it for >=2 runtimes.
@@ -437,7 +469,7 @@ try {
   const evalResult = {
     schema_version: "narrative-eval-result/v1",
     work_item: corpus.work_item,
-    measurement_note: "Per-corpus deterministic measurements over frozen manifests, not proofs; no metric is asserted from a single fixture, model, or runtime.",
+    measurement_note: "Per-corpus deterministic measurements over frozen manifests, not proofs; no metric is asserted from a single fixture, model, or runtime. Metric definitions (all offline): unsupported_claim_rate = observed statements with zero source_refs / all observed statements; citation_resolvability = citation, precision = resolved citations / emitted citations (offline, a citation is correct iff it resolves, so precision == resolvability here); citation_recall = material_claim_coverage = material events with a matching grounded statement / all material events (from the canonical deriveMaterialEvents/eventIsCovered extraction); omission_rate_by_class = per-kind uncovered/total; epistemic_classification_accuracy = statements in fixtures whose emitted label set matches the answer key with no epistemic violation / all classified statements.",
     results,
     metrics: {
       unsupported_claim_rate: unsupportedRate,

@@ -167,6 +167,7 @@ export type {
 export {
   entailmentIndependenceHolds,
   isAssertionProhibited,
+  materialEventCoverage,
   NarrativeGroundingError,
   validateNarrativeGrounding,
 } from "./narrative/grounding-validator.js";
@@ -179,6 +180,8 @@ export type {
   GroundingViolation,
   GroundingViolationCode,
   GroundingVerdict,
+  MaterialEventClassCoverage,
+  MaterialEventCoverage,
   MaterialEventKind,
   ValidateNarrativeGroundingOptions,
 } from "./narrative/grounding-validator.js";

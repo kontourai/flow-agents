@@ -76,6 +76,53 @@ else
   _fail "emitted result failed schema validation: $(cat "$TMP/schema.out" 2>/dev/null || echo 'result.json missing')"
 fi
 
+# R2 determinism: the emitted artifact must be byte-identical across runs (content-
+# addressed fa1 ids must not leak the random temp path). Guards review finding HIGH-2.
+NARRATIVE_EVAL_RESULT_OUT="$TMP/result-a.json" node "$SCORER" all >/dev/null 2>&1 || true
+NARRATIVE_EVAL_RESULT_OUT="$TMP/result-b.json" node "$SCORER" all >/dev/null 2>&1 || true
+if cmp -s "$TMP/result-a.json" "$TMP/result-b.json"; then
+  _pass "R2: emitted result is byte-identical across runs (deterministic artifact)"
+else
+  _fail "emitted result is non-deterministic across runs: $(diff "$TMP/result-a.json" "$TMP/result-b.json" | head -5)"
+fi
+
+# HIGH-1 guard: material_claim_coverage must be COMPUTED from the canonical extraction,
+# not a lockstep counter — removing a covering statement must drop covered below total.
+if node --input-type=module - "$ROOT" >"$TMP/covteeth.out" 2>&1 <<'NODE'
+import { pathToFileURL } from 'node:url';
+import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
+import { createHash } from 'node:crypto';
+const [root] = process.argv.slice(2);
+const api = await import(pathToFileURL(path.join(root, 'build/src/index.js')));
+const sha8 = (b) => createHash('sha256').update(b).digest('hex').slice(0, 8);
+const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'cov-teeth-'));
+const sessionDir = path.join(temp, 'session'); const narrativeDir = path.join(temp, 'narrative');
+fs.mkdirSync(sessionDir, { recursive: true });
+const line = JSON.stringify({ command: 'npm test', result: 'fail', exitCode: 1 });
+fs.writeFileSync(path.join(sessionDir, 'command-log.jsonl'), `${line}\n`);
+const ref = `fa1:cmdlog:session:line-1/${sha8(Buffer.from(line))}`;
+const at = '2026-01-01T00:00:00.000Z';
+api.snapshotNarrative({ narrativeDir, narrativeId: 'cov', requests: [{ source: api.parseSourceId(ref), roots: { sessionDir } }], redactionFields: [], compiler: { name: 'cov', version: '1', policy_hash: 'fixture' }, captureCompleteness: { channels: { full: 'active' }, known_gaps: [] } }, { now: () => at });
+const full = api.composeGroundedNarrative(narrativeDir, { compiledAt: at });
+const covFull = api.materialEventCoverage(full, narrativeDir);
+const stripped = JSON.parse(JSON.stringify(full));
+const rt = stripped.sections.find((s) => s.authority === 'flow-agents' && s.kind === 'runtime-projection');
+rt.embedded.turns = rt.embedded.turns.map((t) => ({ ...t, statements: t.statements.filter((s) => !/was observed to fail/.test(s.proposition)) }));
+rt.embedded.document_statements = rt.embedded.document_statements.filter((s) => !/was observed to fail/.test(s.proposition));
+const covStripped = api.materialEventCoverage(stripped, narrativeDir);
+fs.rmSync(temp, { recursive: true, force: true });
+if (!(covFull.total >= 1 && covFull.covered === covFull.total && covStripped.total === covFull.total && covStripped.covered < covStripped.total)) {
+  console.error(`coverage metric has no teeth: full=${covFull.covered}/${covFull.total} stripped=${covStripped.covered}/${covStripped.total}`); process.exit(1);
+}
+NODE
+then
+  _pass "HIGH-1: material_claim_coverage is computed from the canonical extraction (drops when coverage is removed)"
+else
+  _fail "material_claim_coverage does not react to removed coverage: $(cat "$TMP/covteeth.out")"
+fi
+
 # R3/AC2: the mutation battery. For EACH corruption class, disable the scorer's
 # detection at its named /* eval-check:<name> */ anchor, confirm the compiled
 # scorer still parses, confirm the matching reject fixture flips to accept
