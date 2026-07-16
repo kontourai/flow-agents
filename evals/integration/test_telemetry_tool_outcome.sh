@@ -184,6 +184,7 @@ battery_json=$(cat <<'JSON'
   {"name":"is_error","ti":{"command":"x"},"tr":{"is_error":true},"extra":{}},
   {"name":"success_false","ti":{"command":"x"},"tr":{"success":false},"extra":{}},
   {"name":"error_top","ti":{"command":"x"},"tr":{"output":"ok"},"extra":{"error":"boom"}},
+  {"name":"error_top_array","ti":{"command":"x"},"tr":{"output":"ok"},"extra":{"error":["boom"]}},
   {"name":"no_signal","ti":{"file":"a"},"tr":{"output":"contents"},"extra":{}},
   {"name":"grep_absence","ti":{"command":"grep -r foo src"},"tr":{"exitCode":1},"extra":{}},
   {"name":"grep_or_true","ti":{"command":"grep -r foo src || true"},"tr":{"exitCode":1},"extra":{}},

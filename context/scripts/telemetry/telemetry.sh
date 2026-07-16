@@ -360,7 +360,7 @@ def _is_ambiguous_absence($text):
 def _is_failure:
   (.error) as $err
   | ( ($err|type=="string") and (($err|gsub("^\\s+|\\s+$";""))|length>0) ) as $e1
-  | ( ($err|type=="object") and (($err|keys|length)>0) ) as $e2
+  | ( ($err|type=="object" or type=="array") and (($err|length)>0) ) as $e2
   | ( [ (.tool_response // null), (.tool_output // null) ]
       | map(select(type=="object"))
       | any(
