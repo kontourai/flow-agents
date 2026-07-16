@@ -305,7 +305,7 @@ resolve_delegation_targets() {
                 | until( (.r|test("^[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+\\S")|not);
                          .r |= (capture("^[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+(?<rest>\\S[\\s\\S]*)$")|.rest) )
                 | .r ) as $rest
-            | (($rest|gsub("^\\s+|\\s+$";"")) as $rt | ([$rt|splits("\\s+")][0] // "")) as $first
+            | (($rest|gsub("^\\s+|\\s+$";"")) as $rt | (first($rt|splits("\\s+")) // "")) as $first
             | if $first=="codex" then ["codex"] else [] end
           end
       ' 2>/dev/null || echo '[]'
