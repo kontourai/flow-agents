@@ -11,6 +11,7 @@ mkdir -p "$LOG_DIR"
 
 CHECKS=(
   "Content boundary|npm run check:content-boundary --"
+  "Hachure boundary|npm run check:hachure-boundary --"
   "Decision registry|npm run check:decisions --"
   "Source tree validation|npm run validate:source --"
   "Context map drift|npm run context-map -- --check"
