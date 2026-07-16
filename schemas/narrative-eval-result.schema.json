@@ -1,0 +1,205 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://flow-agents.dev/schemas/narrative-eval-result.schema.json",
+  "title": "Flow Agents Narrative Eval Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "work_item",
+    "measurement_note",
+    "results",
+    "metrics",
+    "uncertainty",
+    "capability_parity",
+    "known_gaps"
+  ],
+  "$defs": {
+    "verdict": {
+      "type": "string",
+      "enum": ["accept", "reject", "known_gap"]
+    },
+    "rate": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "metric_uncertainty": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sample_n", "range", "basis"],
+      "properties": {
+        "sample_n": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "range": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "number"
+          }
+        },
+        "basis": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "raw_source_link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "manifest_path"],
+      "properties": {
+        "source_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "manifest_path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "case_class", "expected", "actual", "pass", "raw_source_links"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "case_class": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected": {
+          "$ref": "#/$defs/verdict"
+        },
+        "actual": {
+          "$ref": "#/$defs/verdict"
+        },
+        "pass": {
+          "type": "boolean"
+        },
+        "raw_source_links": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/raw_source_link"
+          }
+        }
+      }
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": "narrative-eval-result/v1"
+    },
+    "work_item": {
+      "type": "string",
+      "minLength": 1
+    },
+    "measurement_note": {
+      "type": "string",
+      "minLength": 1
+    },
+    "results": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/result"
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unsupported_claim_rate",
+        "citation_precision",
+        "citation_recall",
+        "citation_resolvability",
+        "material_claim_coverage",
+        "omission_rate_by_class",
+        "epistemic_classification_accuracy"
+      ],
+      "properties": {
+        "unsupported_claim_rate": {
+          "$ref": "#/$defs/rate"
+        },
+        "citation_precision": {
+          "$ref": "#/$defs/rate"
+        },
+        "citation_recall": {
+          "$ref": "#/$defs/rate"
+        },
+        "citation_resolvability": {
+          "$ref": "#/$defs/rate"
+        },
+        "material_claim_coverage": {
+          "$ref": "#/$defs/rate"
+        },
+        "omission_rate_by_class": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/rate"
+          }
+        },
+        "epistemic_classification_accuracy": {
+          "$ref": "#/$defs/rate"
+        }
+      }
+    },
+    "uncertainty": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/metric_uncertainty"
+      }
+    },
+    "capability_parity": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["runtime", "capability", "declared_status"],
+        "properties": {
+          "runtime": {
+            "type": "string",
+            "minLength": 1
+          },
+          "capability": {
+            "type": "string",
+            "minLength": 1
+          },
+          "declared_status": {
+            "type": "string",
+            "enum": ["supported", "partial", "unsupported"]
+          }
+        }
+      }
+    },
+    "known_gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "detail"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1
+          },
+          "detail": {
+            "type": "string",
+            "minLength": 1
+          },
+          "ref": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

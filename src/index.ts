@@ -183,6 +183,25 @@ export type {
   ValidateNarrativeGroundingOptions,
 } from "./narrative/grounding-validator.js";
 
+// #612: consolidated grounded-narrative eval-result schema + ajv-free validator.
+// The shared, versioned package (corpus.json + this result schema) consumed by
+// kontourai/evals#95 unmodified (R6/AC6).
+export {
+  NARRATIVE_EVAL_RESULT_SCHEMA_VERSION,
+  validateNarrativeEvalResult,
+} from "./narrative/eval-result.js";
+export type {
+  NarrativeEvalCapabilityParity,
+  NarrativeEvalFixtureResult,
+  NarrativeEvalKnownGap,
+  NarrativeEvalMetricUncertainty,
+  NarrativeEvalMetrics,
+  NarrativeEvalRawSourceLink,
+  NarrativeEvalResult,
+  NarrativeEvalVerdict,
+  SchemaIssue as NarrativeEvalResultSchemaIssue,
+} from "./narrative/eval-result.js";
+
 // #614: model-assisted prose renderer (display-only, fail-closed). Lives outside
 // src/narrative/ (I/O, provider gating, timeout orchestration; see narrative-render.ts's
 // header comment) but is exported here alongside the pure narrative primitives it composes.
