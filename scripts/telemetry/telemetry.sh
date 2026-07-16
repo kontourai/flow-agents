@@ -245,66 +245,131 @@ add_tool_event_data() {
   echo "$event"
 }
 
+# resolve_delegation_targets — single source of truth for the delegation
+# vocabulary (#581 D1). Given a RAW tool_name and its compact tool_input JSON,
+# echoes a JSON array of delegation target identities, or [] when the tool does
+# not delegate. Both the standalone agent.delegate event (emit_delegation_event)
+# and the additive on-record .delegation enrichment (add_tool_data_and_emit_
+# delegation) call this, so the two can never drift. Privacy: only target
+# identities (agent type / "codex") are produced — never command args or prompt
+# content. Any jq hiccup degrades to [] and never blocks the event.
+resolve_delegation_targets() {
+  local tool_name="$1" tool_input="$2"
+  [[ -z "$tool_input" ]] && tool_input="null"
+  case "$tool_name" in
+    InvokeSubagents)
+      echo "$tool_input" | jq -c '.targets // []' 2>/dev/null || echo '[]'
+      ;;
+    spawn_agent)
+      echo "$tool_input" | jq -c '
+        ((.agent_type // "default") | tostring) as $t
+        | if ($t != "" and $t != "null") then [$t] else [] end
+      ' 2>/dev/null || echo '[]'
+      ;;
+    use_subagent|subagent|"delegate to a specialist agent")
+      echo "$tool_input" | jq -c '
+        if (.targets? | type) == "array" then .targets
+        elif (.subagents? | type) == "array" then .subagents | map(.agent_name // .agent // .subagent_type // .name // "subagent")
+        elif (.content.subagents? | type) == "array" then .content.subagents | map(.agent_name // .agent // .subagent_type // .name // "subagent")
+        elif (.agent_name? // .agent? // .subagent_type? // empty) != "" then [(.agent_name // .agent // .subagent_type)]
+        else ["subagent"]
+        end
+      ' 2>/dev/null || echo '[]'
+      ;;
+    Task|Agent)
+      echo "$tool_input" | jq -c '
+        ((.subagent_type // .agent_type // .agent // "general-purpose") | tostring) as $t
+        | if ($t != "" and $t != "null") then [$t] else [] end
+      ' 2>/dev/null || echo '[]'
+      ;;
+    Bash|bash|shell|execute_bash)
+      # Direct-CLI Codex (#581 D3): target is "codex" iff the command's FIRST
+      # real shell token is exactly `codex`. Mirrors _is_ambiguous_absence's
+      # unwrap/strip discipline — peel one `bash -lc '...'` / `sh -c "..."`
+      # wrapper, strip leading VAR=val env-assignments, then match the WHOLE
+      # first token (word-boundary: codexfoo, mycodex, /x/codex-helper MUST NOT
+      # match). The command is read transiently and never stored (privacy).
+      echo "$tool_input" | jq -c '
+        ((.command // "") | if type=="string" then . else "" end) as $cmd
+        | ($cmd | gsub("^\\s+|\\s+$";"")) as $s
+        | if $s=="" then []
+          else
+            ( if ($s|test("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x27[\\s\\S]*\\x27\\s*$"))
+              then ($s|capture("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x27(?<i>[\\s\\S]*)\\x27\\s*$")|.i)
+              elif ($s|test("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x22[\\s\\S]*\\x22\\s*$"))
+              then ($s|capture("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x22(?<i>[\\s\\S]*)\\x22\\s*$")|.i)
+              else $s end
+            ) as $inner0
+            | ($inner0 | gsub("^\\s+|\\s+$";"")) as $inner
+            | ( {r:$inner}
+                | until( (.r|test("^[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+\\S")|not);
+                         .r |= (capture("^[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+(?<rest>\\S[\\s\\S]*)$")|.rest) )
+                | .r ) as $rest
+            | (($rest|gsub("^\\s+|\\s+$";"")) as $rt | (first($rt|splits("\\s+")) // "")) as $first
+            | if $first=="codex" then ["codex"] else [] end
+          end
+      ' 2>/dev/null || echo '[]'
+      ;;
+    *)
+      echo '[]'
+      ;;
+  esac
+}
+
 emit_delegation_event() {
   local event="$1" event_type="$2" stdin_json="$3"
-  local tool_name tool_input
+  # The standalone agent.delegate event stays preToolUse-only (#581 D4) with
+  # targets IDENTICAL to pre-#581 for every existing vocabulary case.
+  case "$event_type" in
+    preToolUse|PreToolUse) ;;
+    *) return 0 ;;
+  esac
+  local tool_name
   tool_name=$(echo "$stdin_json" | jq -r '.tool_name // ""')
+  # Direct-CLI Codex is a Bash-family tool that never produced an agent.delegate
+  # event before #581; it is surfaced SOLELY via the additive on-record
+  # .delegation, so the agent.delegate stream (and delegation COUNTS) stay
+  # byte-identical to before. Only the subagent-tool vocabulary emits here.
+  case "$tool_name" in
+    Bash|bash|shell|execute_bash) return 0 ;;
+  esac
+  local tool_input targets
   tool_input=$(echo "$stdin_json" | jq -c '.tool_input // null')
-
-  if [[ "$tool_name" == "InvokeSubagents" && "$event_type" == "preToolUse" ]]; then
-    local targets
-    targets=$(echo "$tool_input" | jq -c '.targets // []')
-    if [[ "$targets" != "[]" ]]; then
-      local delegate_event
-      delegate_event=$(echo "$event" | jq -c \
-        --argjson targets "$targets" \
-        '.event_type = "agent.delegate" | . + {delegation: {targets: $targets}} | del(.tool)')
-      transport_emit "$delegate_event"
-    fi
-  elif [[ "$tool_name" == "spawn_agent" && "$event_type" == "preToolUse" ]]; then
-    local target
-    target=$(echo "$tool_input" | jq -r '.agent_type // "default"')
-    if [[ -n "$target" && "$target" != "null" ]]; then
-      local delegate_event
-      delegate_event=$(echo "$event" | jq -c \
-        --arg target "$target" \
-        '.event_type = "agent.delegate" | . + {delegation: {targets: [$target]}} | del(.tool)')
-      transport_emit "$delegate_event"
-    fi
-  elif [[ "$tool_name" == "use_subagent" || "$tool_name" == "subagent" || "$tool_name" == "delegate to a specialist agent" ]] && [[ "$event_type" == "preToolUse" ]]; then
-    local targets
-    targets=$(echo "$tool_input" | jq -c '
-      if (.targets? | type) == "array" then .targets
-      elif (.subagents? | type) == "array" then .subagents | map(.agent_name // .agent // .subagent_type // .name // "subagent")
-      elif (.content.subagents? | type) == "array" then .content.subagents | map(.agent_name // .agent // .subagent_type // .name // "subagent")
-      elif (.agent_name? // .agent? // .subagent_type? // empty) != "" then [(.agent_name // .agent // .subagent_type)]
-      else ["subagent"]
-      end
-    ')
-    if [[ "$targets" != "[]" ]]; then
-      local delegate_event
-      delegate_event=$(echo "$event" | jq -c \
-        --argjson targets "$targets" \
-        '.event_type = "agent.delegate" | . + {delegation: {targets: $targets}} | del(.tool)')
-      transport_emit "$delegate_event"
-    fi
-  elif [[ "$tool_name" == "Task" || "$tool_name" == "Agent" ]] && [[ "$event_type" == "preToolUse" ]]; then
-    local target
-    target=$(echo "$tool_input" | jq -r '.subagent_type // .agent_type // .agent // "general-purpose"')
-    if [[ -n "$target" && "$target" != "null" ]]; then
-      local delegate_event
-      delegate_event=$(echo "$event" | jq -c \
-        --arg target "$target" \
-        '.event_type = "agent.delegate" | . + {delegation: {targets: [$target]}} | del(.tool)')
-      transport_emit "$delegate_event"
-    fi
+  targets=$(resolve_delegation_targets "$tool_name" "$tool_input")
+  if [[ -n "$targets" && "$targets" != "[]" ]]; then
+    local delegate_event
+    delegate_event=$(echo "$event" | jq -c \
+      --argjson targets "$targets" \
+      '.event_type = "agent.delegate" | . + {delegation: {targets: $targets}} | del(.tool)')
+    transport_emit "$delegate_event"
   fi
 }
 
 add_tool_data_and_emit_delegation() {
   local event="$1" event_type="$2" stdin_json="$3"
   event=$(add_tool_event_data "$event" "$event_type" "$stdin_json")
+
+  # Emit the standalone agent.delegate event FIRST, from the UN-stamped tool
+  # event, so its shape stays byte-identical to pre-#581 (the on-record
+  # .delegation below is strictly additive — #581 D4).
   emit_delegation_event "$event" "$event_type" "$stdin_json"
+
+  # #581 W2: stamp .delegation = {targets, target} on the tool event whenever the
+  # invoked tool delegates (subagent tools OR direct-CLI codex).
+  # resolve_delegation_targets is the shared vocabulary source (D1). Guarded
+  # --argjson so a resolution hiccup degrades to no .delegation and never
+  # blackholes the event (D5). Privacy: target identities only.
+  local tool_name tool_input dtargets
+  tool_name=$(echo "$stdin_json" | jq -r '.tool_name // ""')
+  tool_input=$(echo "$stdin_json" | jq -c '.tool_input // null')
+  dtargets=$(resolve_delegation_targets "$tool_name" "$tool_input")
+  if [[ -n "$dtargets" && "$dtargets" != "[]" ]]; then
+    local stamped
+    stamped=$(echo "$event" | jq -c --argjson t "$dtargets" \
+      '. + {delegation: {targets: $t, target: ($t[0])}}' 2>/dev/null) || stamped=""
+    [[ -n "$stamped" ]] && event="$stamped"
+  fi
+
   echo "$event"
 }
 
