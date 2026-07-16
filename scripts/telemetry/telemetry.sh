@@ -308,6 +308,242 @@ add_tool_data_and_emit_delegation() {
   echo "$event"
 }
 
+# --- #580 tool.result enrichment: duration_ms / outcome / status -------------
+# These three fields are added to the existing .tool object of tool.result
+# records only (co-located with .tool.name/.tool.output). tool.invoke has no
+# result yet and tool.permission_request is not a tool result, so neither is
+# touched. Every unavailable signal degrades to null/ambiguous — never a
+# fabricated value.
+
+# Shared jq definitions for the deterministic outcome tri-state. This is a
+# faithful port of scripts/hooks/evidence-capture.js `observeResult` (the
+# canonical contract, docs/spec/runtime-hook-surface.md §2.5) into jq so the
+# Claude hot path stays hermetic (no node subprocess). A drift-guard test
+# (evals/integration/test_telemetry_tool_outcome.sh) feeds a shared fixture
+# battery through BOTH this jq path and node observeResult and asserts they
+# agree, so the port can never silently diverge from the canonical source.
+# Regex note: \x27 / \x22 are the single/double quote chars (avoids embedding a
+# literal quote inside this single-quoted bash string).
+_TOOL_OUTCOME_JQ_DEFS='
+def _clean(v):
+  (v) as $x
+  | if ($x|type)=="number" then (if $x==($x|floor) then $x else null end)
+    elif ($x|type)=="string"
+      then (($x|gsub("^\\s+|\\s+$";"")) as $t | if ($t|test("^-?[0-9]+$")) then ($t|tonumber) else null end)
+    else null end;
+def _is_ambiguous_absence($text):
+  (($text | if type=="string" then . else "" end) | gsub("^\\s+|\\s+$";"")) as $s
+  | if $s=="" then false
+    else
+      ( if ($s|test("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x27[\\s\\S]*\\x27\\s*$"))
+        then ($s|capture("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x27(?<i>[\\s\\S]*)\\x27\\s*$")|.i)
+        elif ($s|test("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x22[\\s\\S]*\\x22\\s*$"))
+        then ($s|capture("^(?:bash|sh|zsh)\\s+-\\S*c\\s+\\x22(?<i>[\\s\\S]*)\\x22\\s*$")|.i)
+        else $s end
+      ) as $inner0
+      | ($inner0 | gsub("^\\s+|\\s+$";"")) as $inner
+      | if $inner=="" then false
+        elif ($inner|test("^!\\s*")) then false
+        elif (($inner|test("\\|\\|")) or ($inner|test("&&"))) then false
+        else
+          ( {r:$inner}
+            | until( (.r|test("^[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+\\S")|not);
+                     .r |= (capture("^[A-Za-z_][A-Za-z0-9_]*=\\S*\\s+(?<rest>\\S[\\s\\S]*)$")|.rest) )
+            | .r ) as $rest
+          | if ($rest|test("\\|")) then false
+            else ( ($rest|gsub("^\\s+|\\s+$";"")) as $rt
+                   | ([$rt|splits("\\s+")][0] // "") as $first
+                   | ($first=="grep" or $first=="diff") )
+            end
+        end
+    end;
+def _is_failure:
+  (.error) as $err
+  | ( ($err|type=="string") and (($err|gsub("^\\s+|\\s+$";""))|length>0) ) as $e1
+  | ( ($err|type=="object") and (($err|keys|length)>0) ) as $e2
+  | ( [ (.tool_response // null), (.tool_output // null) ]
+      | map(select(type=="object"))
+      | any(
+          (.success==false)
+          or (.failed==true) or (.is_error==true) or (.isError==true)
+          or ((.error|type=="string") and ((.error|gsub("^\\s+|\\s+$";""))|length>0))
+          or ( ($err==null)
+               and (.stderr|type=="string")
+               and ((.stderr|gsub("^\\s+|\\s+$";""))|length>0)
+               and ( ((if (.stdout|type)=="string" then .stdout else "" end)|gsub("^\\s+|\\s+$";"")|length)==0 ) )
+        ) ) as $e3
+  | ($e1 or $e2 or $e3);
+'
+
+# Main program: derives {exitCode, observedResult} from the hook payload,
+# folding a PostToolUseFailure event to fail. Consumes $et (event_type).
+_TOOL_OUTCOME_JQ_MAIN='
+( [ (.tool_response // null), (.tool_output // null) ]
+  | map(select(type=="object"))
+  | [ .[] | (.exitCode, .exit_code, .exitcode, .status, .code, .returnCode, .return_code) ] ) as $srcCands
+| ( $srcCands + [ .exitCode, .exit_code, .status, .code ] ) as $cands
+| ( first( $cands[] | _clean(.) | select(.!=null) ) // null ) as $exit
+| ((.tool_input.command // "") | if type=="string" then . else "" end) as $cmd
+| ( if $exit != null
+    then ( if ($exit==1 and $cmd!="" and _is_ambiguous_absence($cmd))
+           then {exitCode:$exit, observedResult:"ambiguous"}
+           else {exitCode:$exit, observedResult:(if $exit==0 then "pass" else "fail" end)} end )
+    else ( if _is_failure then {exitCode:null, observedResult:"fail"} else {exitCode:null, observedResult:"ambiguous"} end )
+    end ) as $base
+| ( if ($et=="PostToolUseFailure") then ($base + {observedResult:"fail"}) else $base end )
+'
+
+# Codex re-derivation: given a host-banner $code and $cmd, produce the
+# observedResult string via the SAME tri-state (incl. the #362 grep/diff
+# carve-out) so the codex path can never diverge from the jq/node contract.
+_TOOL_OUTCOME_JQ_CODEX='
+( if ($code==0) then "pass"
+  elif ($code==1 and ($cmd|length)>0 and _is_ambiguous_absence($cmd)) then "ambiguous"
+  else "fail" end )
+'
+
+# now_epoch_ms — portable millisecond wall clock. Prefer bash5 $EPOCHREALTIME
+# (µs precision) -> ms; else GNU `date +%s%3N` when it returns pure digits
+# (BSD/macOS date echoes a literal "%3N", which is rejected); else the
+# second-granular `date +%s`*1000 fallback (resolution-honest).
+now_epoch_ms() {
+  local er="${EPOCHREALTIME:-}"
+  if [[ "$er" =~ ^([0-9]+)[.,]([0-9]{3}) ]]; then
+    printf '%s%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+    return
+  fi
+  local gnu
+  gnu=$(date +%s%3N 2>/dev/null)
+  if [[ "$gnu" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$gnu"
+    return
+  fi
+  printf '%s000\n' "$(date +%s)"
+}
+
+# tool_call_correlation_key — a best-effort key that is stable across a tool's
+# invoke and its result. Prefers a host-provided call id; else a content hash
+# of tool_name + compact(tool_input) via whichever portable hasher is present.
+# Output is filesystem-safe (any char outside [A-Za-z0-9._-] -> '_'). The
+# content-hash fallback can theoretically collide for two identical tool+input
+# runs with overlapping lifetimes (the disclosed start_record_liveness gap) —
+# correlation is best-effort and yields null rather than a wrong number.
+tool_call_correlation_key() {
+  local stdin_json="$1"
+  local call_id key
+  call_id=$(printf '%s' "$stdin_json" | jq -r '.tool_use_id // .tool_call_id // .call_id // .id // ""' 2>/dev/null)
+  if [[ -n "$call_id" && "$call_id" != "null" ]]; then
+    key="id:${call_id}"
+  else
+    local tool_name tool_input hash
+    tool_name=$(printf '%s' "$stdin_json" | jq -r '.tool_name // ""' 2>/dev/null)
+    tool_input=$(printf '%s' "$stdin_json" | jq -c '.tool_input // null' 2>/dev/null)
+    hash=$(printf '%s%s' "$tool_name" "$tool_input" | { shasum 2>/dev/null || sha256sum 2>/dev/null || cksum; } | awk '{print $1}')
+    key="sha:${hash}"
+  fi
+  printf '%s' "$key" | tr -c 'A-Za-z0-9._-' '_'
+}
+
+tool_start_record_path() {
+  printf '%s\n' "${TELEMETRY_SESSION_DIR}/toolstart-${session_id}-$1"
+}
+
+# write_tool_start_record — records the tool's start ms on preToolUse so the
+# matching result can compute duration_ms. Best-effort/non-blocking: any
+# failure is swallowed and simply yields duration_ms:null downstream. The
+# stored value is a timestamp only — never any args/output content (privacy).
+write_tool_start_record() {
+  local stdin_json="$1"
+  [[ -z "${TELEMETRY_SESSION_DIR:-}" ]] && return 0
+  local key path
+  key=$(tool_call_correlation_key "$stdin_json") || return 0
+  [[ -z "$key" ]] && return 0
+  path=$(tool_start_record_path "$key")
+  mkdir -p "${TELEMETRY_SESSION_DIR}" 2>/dev/null || true
+  now_epoch_ms >"$path" 2>/dev/null || true
+  return 0
+}
+
+# add_tool_result_meta — enriches a tool.result event with the three #580
+# fields on its existing .tool object: duration_ms (wall-clock ms since the
+# matching invoke, or null when the start record is absent), outcome
+# (deterministic pass|fail|ambiguous), and status (host exit code int or null).
+# Never fails the hook.
+add_tool_result_meta() {
+  local event="$1" event_type="$2" stdin_json="$3"
+
+  # --- duration_ms: read + unlink the matching start record ---
+  local duration_ms="null"
+  if [[ -n "${TELEMETRY_SESSION_DIR:-}" ]]; then
+    local key path start_ms end_ms
+    key=$(tool_call_correlation_key "$stdin_json")
+    if [[ -n "$key" ]]; then
+      path=$(tool_start_record_path "$key")
+      if [[ -f "$path" ]]; then
+        start_ms=$(cat "$path" 2>/dev/null)
+        rm -f "$path" 2>/dev/null || true
+        if [[ "$start_ms" =~ ^[0-9]+$ ]]; then
+          end_ms=$(now_epoch_ms)
+          if [[ "$end_ms" =~ ^[0-9]+$ ]]; then
+            duration_ms=$(( end_ms - start_ms ))
+            (( duration_ms < 0 )) && duration_ms=0
+          fi
+        fi
+      fi
+    fi
+  fi
+
+  # --- outcome/status: hermetic jq tri-state (canonical observeResult port) ---
+  local verdict outcome status
+  verdict=$(printf '%s' "$stdin_json" | jq -c --arg et "$event_type" \
+    "${_TOOL_OUTCOME_JQ_DEFS}${_TOOL_OUTCOME_JQ_MAIN}" 2>/dev/null)
+  [[ -z "$verdict" ]] && verdict='{"exitCode":null,"observedResult":"ambiguous"}'
+  status=$(printf '%s' "$verdict" | jq -c '.exitCode' 2>/dev/null)
+  outcome=$(printf '%s' "$verdict" | jq -r '.observedResult' 2>/dev/null)
+  [[ -z "$status" ]] && status="null"
+  [[ -z "$outcome" ]] && outcome="ambiguous"
+
+  # --- Codex-only exit-code resolution when the payload carried no clean code.
+  # Codex surfaces its exit code in the rollout banner, not the hook payload, so
+  # the jq scan alone yields ambiguous/null. Gated strictly to the codex runtime
+  # so the Claude path stays 100% hermetic (jq only, no node). An unreadable
+  # rollout leaves the honest ambiguous/null verdict untouched.
+  if [[ "${FLOW_AGENTS_TELEMETRY_RUNTIME:-}" == "codex" && "$status" == "null" ]]; then
+    local codex_lib
+    codex_lib="${TELEMETRY_DIR}/../hooks/lib/codex-exit-code.js"
+    if [[ -f "$codex_lib" ]]; then
+      local tpath call_id cmd code
+      tpath=$(printf '%s' "$stdin_json" | jq -r '.transcript_path // ""' 2>/dev/null)
+      call_id=$(printf '%s' "$stdin_json" | jq -r '.call_id // .tool_call_id // .id // ""' 2>/dev/null)
+      cmd=$(printf '%s' "$stdin_json" | jq -r '.tool_input.command // ""' 2>/dev/null)
+      if [[ -n "$tpath" ]]; then
+        code=$(FLOW_CODEX_LIB="$codex_lib" FLOW_TPATH="$tpath" FLOW_CALLID="$call_id" FLOW_CMD="$cmd" node -e '
+          try {
+            const m = require(process.env.FLOW_CODEX_LIB);
+            const c = m.readExitCodeFromRollout(process.env.FLOW_TPATH, {
+              callId: process.env.FLOW_CALLID || undefined,
+              command: process.env.FLOW_CMD || undefined,
+            });
+            if (Number.isInteger(c)) process.stdout.write(String(c));
+          } catch (e) {}
+        ' 2>/dev/null)
+        if [[ "$code" =~ ^-?[0-9]+$ ]]; then
+          status="$code"
+          outcome=$(jq -nr --argjson code "$code" --arg cmd "$cmd" \
+            "${_TOOL_OUTCOME_JQ_DEFS}${_TOOL_OUTCOME_JQ_CODEX}" 2>/dev/null)
+          [[ -z "$outcome" ]] && outcome="fail"
+        fi
+      fi
+    fi
+  fi
+
+  echo "$event" | jq -c \
+    --argjson dm "$duration_ms" \
+    --argjson st "$status" \
+    --arg oc "$outcome" \
+    '.tool = ((.tool // {}) + {duration_ms: $dm, outcome: $oc, status: $st})'
+}
+
 # add_tool_usage_data — populates .usage on tool.invoke/tool.result events
 # (preToolUse/postToolUse only; see add_event_specific_data's explicit
 # permissionRequest exclusion) with the model/token/cost usage of the turn
@@ -493,6 +729,16 @@ add_event_specific_data() {
       ;;
     preToolUse|PreToolUse|postToolUse|PostToolUse|PostToolUseFailure)
       event=$(add_tool_data_and_emit_delegation "$event" "$event_type" "$stdin_json")
+      case "$event_type" in
+        preToolUse|PreToolUse)
+          # #580: record the tool's start ms so its result can compute duration.
+          write_tool_start_record "$stdin_json"
+          ;;
+        postToolUse|PostToolUse|PostToolUseFailure)
+          # #580: add .tool.duration_ms / .tool.outcome / .tool.status.
+          event=$(add_tool_result_meta "$event" "$event_type" "$stdin_json")
+          ;;
+      esac
       if [[ "$TELEMETRY_USAGE_TRACKING" == "true" ]]; then
         event=$(add_tool_usage_data "$event")
       fi
