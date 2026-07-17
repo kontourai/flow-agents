@@ -8,6 +8,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { parseArgs, flagBool, flagList, flagString } from "../lib/args.js";
 import { activateCodexLocal } from "../runtime-adapters.js";
+import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
 import { main as buildBundles } from "../tools/build-universal-bundles.js";
 import { root } from "../tools/common.js";
 import { defaultCodexHome, durableInstallRecordPath, skillsManifestPath } from "../lib/local-artifact-root.js";
@@ -640,7 +641,21 @@ function installBundle(bundle: string, options: InitOptions): number {
   return result.status ?? 1;
 }
 
-function activateKits(options: InitOptions): number {
+function kitPathForInit(kitId: string, dest: string): string | null {
+  const catalogPath = path.join(root, "kits", "catalog.json");
+  if (fs.existsSync(catalogPath)) {
+    const catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8")) as { kits?: unknown[] };
+    const entry = Array.isArray(catalog.kits)
+      ? catalog.kits.find((item) => typeof item === "object" && item !== null && (item as Record<string, unknown>).id === kitId)
+      : undefined;
+    const rel = entry && typeof entry === "object" ? (entry as Record<string, unknown>).path : undefined;
+    if (typeof rel === "string") return path.resolve(root, rel);
+  }
+  const installed = path.join(dest, "kits", "local", "repositories", kitId);
+  return fs.existsSync(installed) ? installed : null;
+}
+
+async function activateKits(options: InitOptions): Promise<number> {
   const activeKitIds = options.activeKitIds ?? [];
   if (!options.activateKits || activeKitIds.length === 0 || options.runtime !== "codex") return 0;
   const result = activateCodexLocal(options.dest, options.dest, { kitIdFilter: activeKitIds });
@@ -650,6 +665,19 @@ function activateKits(options: InitOptions): number {
   }
   const generated = Array.isArray(result.generated_runtime_files) ? result.generated_runtime_files : [];
   console.log(`Activated ${generated.length} Codex local runtime asset(s)`);
+  for (const kitId of activeKitIds) {
+    const kitDir = kitPathForInit(kitId, options.dest);
+    if (!kitDir) throw new Error(`activated kit '${kitId}' could not be resolved for provisioning`);
+    try {
+      const provisioned = await provisionKit(kitDir, options.dest);
+      if (provisioned.files.length > 0) console.log(`Provisioned ${provisioned.files.length} file(s) from kit '${kitId}'`);
+    } catch (error) {
+      if (!(error instanceof ProvisionConflictError)) throw error;
+      for (const conflict of error.conflicts) {
+        console.warn(`flow-agents init: warning: skipped existing provision '${conflict.target}' from kit '${kitId}'`);
+      }
+    }
+  }
   return 0;
 }
 
@@ -867,7 +895,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       const installed = result.status ?? 1;
       if (installed !== 0) return installed;
       writeInstallRecord(options.dest, "codex", true, options.activeKitIds ?? []);
-      return activateKits(options);
+      return await activateKits(options);
     }
     // --global for pi: NOT_VERIFIED (no documented global dir). Warn and fall through to workspace install.
     if (options.global && options.runtime === "pi") {
@@ -881,7 +909,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     const installed = installBundle(bundle, options);
     if (installed !== 0) return installed;
     writeInstallRecord(options.dest, options.runtime, options.global, options.activeKitIds ?? []);
-    const activated = activateKits(options);
+    const activated = await activateKits(options);
     // G2/G3: shared post-install auto-verify + summary tail. Applies
     // identically whether main() reached here via headlessOptions() or
     // interactiveOptions() -- never changes `activated`'s exit code.

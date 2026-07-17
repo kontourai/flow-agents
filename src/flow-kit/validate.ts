@@ -7,12 +7,12 @@ export { isObservableBuilderArtifactRef, isSafeBuilderArtifactRef, parseKitFlowS
 export type { KitFlowStepActionEntry, KitFlowStepArtifactBinding, KitFlowStepExpectationBinding } from "./action-metadata.js";
 
 // Extension-only asset classes: validated by Flow Agents. Flows are validated by @kontourai/flow.
-const EXTENSION_ASSET_CLASSES = ["skills", "docs", "adapters", "evals", "assets"] as const;
+const EXTENSION_ASSET_CLASSES = ["skills", "docs", "adapters", "evals", "assets", "provisions"] as const;
 
 // Core container fields owned by kontourai/flow (flow-kit-container.schema.json).
 // agent-extension fields are skills, docs, adapters, evals, assets.
 const CORE_CONTAINER_FIELDS = new Set(["schema_version", "id", "name", "description", "product_name", "flows"]);
-const AGENT_EXTENSION_CLASSES = new Set(["skills", "docs", "adapters", "evals", "assets"]);
+const AGENT_EXTENSION_CLASSES = new Set(["skills", "docs", "adapters", "evals", "assets", "provisions"]);
 
 // Flow Agents-recognized metadata fields that are neither core container fields nor
 // agent-extension asset classes. Recognized here so they are never misreported as
@@ -28,6 +28,18 @@ export interface KitDependencyEntry {
   kit_id: string;
   reason?: string;
 }
+
+export interface KitProvisionEntry {
+  id: string;
+  path: string;
+  target: string;
+  description?: string;
+}
+
+// Consumer-repo-relative directory (posix, lowercase) where the engine writes its own
+// per-kit provision manifest. Reserved: a provision may not target inside it. Shared with
+// provision.ts so the reservation and the actual manifest write stay in agreement.
+export const PROVISION_MANIFEST_DIR = ".kontourai/flow-agents/provisions";
 
 export interface KitWorkflowTriggerEntry {
   id: string;
@@ -670,9 +682,13 @@ function validateExtensionAssets(kitDir: string, manifestPath: string, manifest:
       const record = entry as Record<string, unknown>;
       const id = record.id;
       const rel = record.path;
+      const kitId = typeof manifest.id === "string" ? manifest.id : "";
       if (typeof id === "string") {
         if (seen.has(id)) errors.push(`${manifestPath}: ${section}[${index}].id duplicates`);
         seen.add(id);
+      }
+      if (section === "provisions" && (typeof id !== "string" || !kitId || !id.startsWith(`${kitId}.`))) {
+        errors.push(`${manifestPath}: provisions[${index}].id must be prefixed with '${kitId}.'`);
       }
       if (typeof rel !== "string" || !rel) {
         errors.push(`${manifestPath}: ${section}[${index}].path must be a string`);
@@ -680,6 +696,10 @@ function validateExtensionAssets(kitDir: string, manifestPath: string, manifest:
       }
       if (path.isAbsolute(rel)) {
         errors.push(`${manifestPath}: ${section}[${index}].path must be relative`);
+        return;
+      }
+      if (rel.replace(/\\/g, "/").split("/").includes("..")) {
+        errors.push(`${manifestPath}: ${section}[${index}].path must not contain traversal segments`);
         return;
       }
       const resolved = path.resolve(kitDir, rel);
@@ -690,7 +710,64 @@ function validateExtensionAssets(kitDir: string, manifestPath: string, manifest:
       }
       if (!fs.existsSync(resolved)) {
         errors.push(`${manifestPath}: ${section}[${index}].path points at missing asset: ${rel}`);
+      } else if (section === "provisions") {
+        if (!fs.statSync(resolved).isFile()) {
+          errors.push(`${manifestPath}: provisions[${index}].path must point at a file: ${rel}`);
+        } else {
+          // A provisioned source is copied byte-for-byte into a consumer repo, so a symlink that
+          // resolves outside the kit would exfiltrate arbitrary readable host files. Require the
+          // link-resolved real path to stay inside the kit.
+          const realResolved = fs.realpathSync(resolved);
+          const realRoot = fs.realpathSync(root);
+          if (realResolved !== realRoot && !realResolved.startsWith(`${realRoot}${path.sep}`)) {
+            errors.push(`${manifestPath}: provisions[${index}].path must not resolve outside the kit directory`);
+          }
+        }
       }
+    });
+  }
+
+  const rawProvisions = manifest.provisions;
+  if (Array.isArray(rawProvisions)) {
+    const targets = new Set<string>();
+    rawProvisions.forEach((entry, index) => {
+      if (typeof entry !== "object" || entry === null) return;
+      const record = entry as Record<string, unknown>;
+      if (record.description !== undefined && typeof record.description !== "string") {
+        errors.push(`${manifestPath}: provisions[${index}].description must be a string when present`);
+      }
+      const target = record.target;
+      if (typeof target !== "string" || target.trim().length === 0) {
+        errors.push(`${manifestPath}: provisions[${index}].target must be a non-empty string`);
+        return;
+      }
+      if (path.isAbsolute(target) || path.win32.isAbsolute(target)) {
+        errors.push(`${manifestPath}: provisions[${index}].target must be relative`);
+        return;
+      }
+      const segments = target.replace(/\\/g, "/").split("/");
+      if (segments.includes("..")) {
+        errors.push(`${manifestPath}: provisions[${index}].target must not contain traversal segments`);
+        return;
+      }
+      const normalized = path.posix.normalize(segments.join("/"));
+      if (normalized === "." || normalized.startsWith("..")) {
+        errors.push(`${manifestPath}: provisions[${index}].target must stay inside the consumer repository`);
+        return;
+      }
+      // Case-fold reserved-directory and collision checks: on a case-insensitive filesystem
+      // `.GIT/` still lands in the real `.git`, and README.md/readme.md still collide.
+      const lowered = normalized.toLowerCase();
+      if (lowered === ".git" || lowered.startsWith(".git/")) {
+        errors.push(`${manifestPath}: provisions[${index}].target must not be inside .git`);
+        return;
+      }
+      if (lowered === PROVISION_MANIFEST_DIR || lowered.startsWith(`${PROVISION_MANIFEST_DIR}/`)) {
+        errors.push(`${manifestPath}: provisions[${index}].target must not be inside the provision manifest namespace (${PROVISION_MANIFEST_DIR}/)`);
+        return;
+      }
+      if (targets.has(lowered)) errors.push(`${manifestPath}: provisions[${index}].target duplicates '${normalized}'`);
+      targets.add(lowered);
     });
   }
 
