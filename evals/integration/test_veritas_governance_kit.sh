@@ -364,6 +364,74 @@ else
   echo "  - SKIP live Veritas leg (set VERITAS_BIN + VERITAS_GOVERNED_REPO to enable); fixtures are captured real output"
 fi
 
+# --- Starter-standards provisioning (Slice 2 PR2): the kit scaffolds a runnable .veritas/ ---
+# The kit declares its starter Repo Standards as provisions[]; `kit provision` copies them into
+# a consumer repo. This asserts the scaffold lands and is well-formed; when a Veritas binary is
+# available it further asserts `veritas readiness` runs end-to-end against the scaffolded repo.
+echo "--- starter-standards provisioning ---"
+FA_CLI="$ROOT/build/src/cli.js"
+if [[ ! -f "$FA_CLI" ]]; then
+  fail "flow-agents CLI not built at build/src/cli.js (run npm run build)"
+else
+  prov="$TMP_DIR/provisioned-repo"; mkdir -p "$prov"
+  if node "$FA_CLI" kit provision "$KIT" --target "$prov" >"$TMP_DIR/provision.out" 2>&1; then
+    pass "kit provision scaffolds starter standards into a consumer repo"
+  else
+    fail "kit provision failed"; sed -n '1,20p' "$TMP_DIR/provision.out"
+  fi
+  # Every declared provision target must land and (for JSON) parse.
+  starter_targets=(
+    ".veritas/repo-map.json"
+    ".veritas/repo-standards/default.repo-standards.json"
+    ".veritas/authority/default.authority-settings.json"
+    ".veritas/GOVERNANCE.md"
+    ".veritas/README.md"
+    "veritas.claims.json"
+  )
+  for rel in "${starter_targets[@]}"; do
+    if [[ -f "$prov/$rel" ]]; then
+      if [[ "$rel" == *.json ]]; then
+        if node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "$prov/$rel" >/dev/null 2>&1; then
+          pass "scaffolded $rel is present and valid JSON"
+        else
+          fail "scaffolded $rel is not valid JSON"
+        fi
+      else
+        pass "scaffolded $rel is present"
+      fi
+    else
+      fail "expected scaffolded file missing: $rel"
+    fi
+  done
+  # The scaffold must reference the Veritas engine's OWN starter output, not reimplement it:
+  # every provision source lives under assets/, never in adapter/ or flows/ (no-fork already
+  # scopes there). Assert the declared sources exist inside the kit's assets tree.
+  if node -e "
+    const fs=require('fs'),path=require('path');
+    const kit=JSON.parse(fs.readFileSync(process.argv[1]+'/kit.json','utf8'));
+    const bad=(kit.provisions||[]).filter(p=>!p.path.startsWith('assets/')||!fs.existsSync(path.join(process.argv[1],p.path)));
+    if(bad.length){console.error('bad provisions:',bad.map(p=>p.id).join(','));process.exit(1)}
+  " "$KIT" >/dev/null 2>&1; then
+    pass "all starter provisions source from the kit's assets/ tree"
+  else
+    fail "a starter provision points outside assets/ or at a missing file"
+  fi
+  # Live: a Veritas binary must be able to run readiness against the scaffolded repo.
+  VBIN2="${VERITAS_BIN:-veritas}"
+  if command -v "$VBIN2" >/dev/null 2>&1 || [[ -x "$VBIN2" ]]; then
+    ( cd "$prov" && git init -q && printf '{"name":"scaffold-eval","scripts":{"test":"node -e \"process.exit(0)\""}}\n' > package.json \
+        && git add -A && git -c user.email=eval@local -c user.name=eval commit -qm scaffold ) >/dev/null 2>&1
+    if ( cd "$prov" && "$VBIN2" readiness --working-tree >/dev/null 2>&1 ); then :; fi
+    if ls "$prov/.kontourai/veritas/evidence/"*.json >/dev/null 2>&1; then
+      pass "veritas readiness runs end-to-end on the kit-scaffolded repo (evidence report produced)"
+    else
+      fail "veritas readiness produced no evidence report on the scaffolded repo"
+    fi
+  else
+    echo "  - SKIP scaffold readiness leg (no Veritas binary; set VERITAS_BIN to enable)"
+  fi
+fi
+
 echo ""
 if [[ "$errors" -eq 0 ]]; then
   echo "PASS: veritas-governance kit gate demo (positive passes, negative blocks)"

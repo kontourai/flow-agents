@@ -26,6 +26,7 @@ doc, which also freezes the CLI + artifact + claim-shape contract this kit's ada
 | Fixtures | `fixtures/readiness/*.readiness-report.json` | Captured **real** Veritas readiness reports (a ready clean tree, and a not-ready tree with a required CLI artifact deleted) used by the eval. |
 | Flow | `flows/exemption-issuance.flow.json` | Single-gate agentless flow `request -> human-approval-gate -> issue`. The gate requires a **verified** `no-agent-delivery-exemption-approval` trust.bundle claim (`subjectType: "delivery-scope"`) before the `issue` step's write is flow-sanctioned. Issues a `delivery/DECLARED` exemption entry per ADR 0022 §2/§3. |
 | Skill | `skills/exemption-usage-review/SKILL.md` | Periodic audit skill (ADR 0022 §3): walks `delivery/DECLARED` + its `git log --follow` history and reports every standing exemption (scope, reason, approver, age since `declared_at`), flagging entries overdue for owner re-confirmation against a configurable staleness threshold. Process visibility, not enforcement — read-only, never mutates `delivery/DECLARED` or the reconciler. |
+| Provisions | `assets/starter-standards/**` → `provisions[]` | Starter `.veritas/` Repo Standards a consumer repo needs to run `veritas readiness` — a faithful snapshot of `veritas init`'s Day-0 output (Repo Map, Repo Standards, authority settings, `GOVERNANCE.md`, `README.md`, claim store), shipped as data and copied verbatim by `flow-agents kit provision`. See "Scaffolding starter standards" below. |
 
 The gate uses provider-neutral Flow vocabulary (`kind: "trust.bundle"`, `bundle_claim`) — the
 same vocabulary `kits/builder/flows/build.flow.json` uses. Veritas is simply the producer that
@@ -51,6 +52,35 @@ flow attach-evidence readiness --gate gate-check-gate --file readiness.bundle --
 flow evaluate readiness --gate gate-check-gate --exit-code
 #    exit 0 when readiness is ready (claim verified); exit 1 (block) otherwise.
 ```
+
+## Scaffolding starter standards
+
+A repo needs a `.veritas/` Repo Standards set before `veritas readiness` can evaluate it. For kit
+users this replaces standalone `veritas init`: the kit declares that starter set as `provisions[]`
+in `kit.json`, and the engine copies it into the repo.
+
+```bash
+# Copy the starter .veritas/ standards into the current repo (create-only; never overwrites).
+flow-agents kit provision veritas-governance
+#   -> .veritas/repo-map.json, .veritas/repo-standards/default.repo-standards.json,
+#      .veritas/authority/default.authority-settings.json, .veritas/GOVERNANCE.md,
+#      .veritas/README.md, veritas.claims.json
+# (flow-agents init --activate-kit veritas-governance provisions the same set at adoption time.)
+
+# Then run readiness against the scaffolded repo.
+veritas readiness --working-tree     # 0 failures on the fresh starter
+```
+
+The provisioned files are a **faithful snapshot of `veritas init`'s Day-0 output** — data the kit
+copies verbatim, not evaluation logic it reimplements. The project name is a `your-project`
+placeholder; edit the Repo Map's work-area graph and `evidence.evidenceChecks[0].command` for your
+repo, then regenerate the claim store with `veritas claim init`.
+
+**Not yet provisioned:** the per-repo *derivation* `veritas init` performs (project-name slug,
+repo-shape-adaptive Repo Map nodes, evidence-check inference) and the *splice* of the governance
+block into an existing `AGENTS.md`/`CLAUDE.md` (a create-only copy cannot edit files in place — the
+starter's `ai-instruction-files-synced` standard reports advisory until those blocks are wired).
+Those become the standards-authoring flow and the repo-hook setup slices (#647 follow-up, #648).
 
 ## How to issue a no-agent-delivery exemption
 
@@ -184,7 +214,10 @@ to a later slice (see the WS5 shaping's open decisions).
 
 Skills `consult-standards` and `governance-evidence`, the fuller `merge-readiness` flow, the
 `standards-authoring` flow, and the `knowledge` dependency are later slices — see the WS5
-backlog. `exemption-usage-review` (ADR 0022 §3's periodic audit skill, walking
+backlog. The **starter-standards scaffold** (`veritas init`'s Day-0 `.veritas/` set) **has now
+shipped** as `provisions[]` — see "Scaffolding starter standards" above; the per-repo derivation
+and instruction-file splicing it does not yet cover move to the `standards-authoring` flow and
+repo-hook setup (#648). `exemption-usage-review` (ADR 0022 §3's periodic audit skill, walking
 `delivery/DECLARED` history and surfacing standing exemptions for owner re-confirmation —
 process visibility, not enforcement) **has now shipped** — see "What it contains" above and
 "How to run the review". Nothing schedules it automatically; an operator runs it periodically
