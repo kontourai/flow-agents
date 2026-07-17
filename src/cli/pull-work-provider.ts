@@ -849,7 +849,13 @@ export function main(argv = process.argv.slice(2)): number {
     const freshness = revisionFreshness(item, freshnessInputs);
     return { ...item, dependency_impacts: dependencyImpacts(item, resolved), revision_freshness: freshness, readiness: applyFreshnessToReadiness(classify(item, settings, resolved), freshness) };
   });
-  console.log(JSON.stringify({ items }, null, 2));
+  // A configured BoardProvider is the canonical readiness source (docs/decisions/backlog-readiness-source.md).
+  // Reaching this issue-level listing path with a board configured is a bypass that must be loud, never silent.
+  const bypassedBoard = asRecord(asRecord(settings.board_provider)?.board);
+  const warnings = bypassedBoard
+    ? [{ code: "board_provider_bypassed", message: "A BoardProvider is configured but this pass used WorkItemProvider issue-level listing; board-driven selection is the canonical readiness source. Surface this bypass in the pull-work artifact instead of treating issue listing as a silent fallback." }]
+    : [];
+  console.log(JSON.stringify({ items, warnings }, null, 2));
   return 0;
 }
 
