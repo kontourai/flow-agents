@@ -326,6 +326,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check flow-kit-repository-integration
 
+      - name: Kit provisioning integration
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check kit-provisioning-integration
+
       - name: Runtime adapter activation integration
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check runtime-adapter-activation-integration

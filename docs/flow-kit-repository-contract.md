@@ -72,7 +72,7 @@ codex-local
 
 Unknown adapter ids fail with JSON diagnostics that include the available adapters. No Claude, Kiro, framework, API, npm module extraction, or remote install adapters are implemented by this activation surface.
 
-The `codex-local` adapter supports only Flow Definition assets declared in `flows`. It activates the built-in Builder Kit Flow Definitions, including `builder.shape` and `builder.build`, plus Flow Definitions from locally installed kit copies under:
+The `codex-local` adapter supports assets declared in `flows`, `skills`, and `docs`. It activates the built-in Builder Kit Flow Definitions, including `builder.shape` and `builder.build`, plus supported assets from locally installed kit copies under:
 
 ```text
 <dest>/kits/local/repositories/<kit-id>/
@@ -91,13 +91,13 @@ Flow Definition copies are placed under `flows/<kit-id>/<flow-id>.flow.json`, an
 The stable activation diagnostics include:
 
 - `selected_adapter`: selected adapter id, currently `codex-local`.
-- `supported_asset_classes`: asset classes the selected adapter activates, currently `["flows"]`.
+- `supported_asset_classes`: asset classes the selected adapter activates, currently `["flows", "skills", "docs"]`.
 - `generated_runtime_files`: generated runtime-local files with asset class, path, kit id, asset id, and source path.
 - `skipped_assets`: unsupported declared assets with asset class, path, kit id, asset id when present, and reason.
 - `warnings`: recoverable catalog, registry, or asset discovery problems.
 - `errors`: blocking discovery or activation problems.
 
-Declared `skills`, `docs`, `adapters`, `evals`, and generic `assets` are diagnostic-only for this adapter. They are skipped with explicit `skipped_assets` entries; they are not copied, installed, invoked, or treated as active runtime behavior.
+Declared `skills` and `docs` are copied into the runtime projection alongside flows. Declared `adapters`, `evals`, generic `assets`, and `provisions` are diagnostic-only for this adapter. They are skipped with explicit `skipped_assets` entries; they are not copied, installed, invoked, or treated as active runtime behavior.
 
 ## Root Manifest
 
@@ -122,6 +122,14 @@ Declared `skills`, `docs`, `adapters`, `evals`, and generic `assets` are diagnos
       "id": "example.readme",
       "path": "docs/README.md"
     }
+  ],
+  "provisions": [
+    {
+      "id": "example-kit.editor-policy",
+      "path": "provisions/editor-policy.json",
+      "target": ".editor/policy.json",
+      "description": "Initial repository policy."
+    }
   ]
 }
 ```
@@ -138,6 +146,29 @@ Optional fields:
 - `product_name`: non-empty display name when the product name differs from `name`.
 - `description`: non-empty summary.
 - `skills`, `docs`, `adapters`, `evals`, `assets`: lists of relative asset paths or objects with `id`, `path`, and optional `description`.
+- `provisions`: a list of objects with kit-id-prefixed `id`, source `path`, consumer-repository-relative `target`, and optional `description`.
+
+## Repository Provisioning
+
+Provision entries declare inert files; kits do not execute installer code. Source paths follow the other extension-asset rules: they must be relative, stay inside the kit directory, and name an existing regular file. Targets must be non-empty relative paths, must not contain traversal segments or resolve outside the consumer repository, must not be inside `.git`, and must be unique after normalization.
+
+Provision a catalog kit, an installed-registry kit, or a kit at a direct local path with:
+
+```bash
+flow-agents kit provision <kit-id-or-path> [--target <consumer-repo>] [--force] [--dry-run]
+```
+
+`--target` defaults to the current working directory and must already be a directory. The engine resolves the real path of the deepest existing destination ancestor before writing, so a symlink cannot redirect a provision outside the target repository. It preflights the whole declaration: by default, any existing destination reports every conflict, exits nonzero, and writes none of the provisioned files. `--force` replaces declared destination files. `--dry-run` prints every source-to-target mapping and writes nothing.
+
+After a successful non-dry-run copy, Flow Agents writes or replaces this bookkeeping manifest:
+
+```text
+<target>/.kontourai/flow-agents/provisions/<kit-id>.json
+```
+
+The schema is `{ schema_version: "1.0", kit_id, kit_hash, provisioned_at, files: [{ id, target }] }`. Provisioned files become consumer-repository content; uninstalling or deactivating the kit does not remove them.
+
+When `flow-agents init --activate-kit <id>` successfully activates a selected kit, init invokes the same provisioning engine against its destination with create-only semantics. Existing destinations are reported as skipped warnings and do not fail an init rerun. Provisions never enter the runtime projection directory.
 
 ## Path Rules
 

@@ -59,7 +59,7 @@ export type LoadedKit = {
   hook_influence_expectations: KitHookInfluenceExpectationRef[];
 };
 
-const ASSET_CLASSES = ["flows", "skills", "docs", "adapters", "evals", "assets"];
+const ASSET_CLASSES = ["flows", "skills", "docs", "adapters", "evals", "assets", "provisions"];
 const KIT_ID_RE = /^[a-z][a-z0-9-]*$/;
 
 function assetPath(root: string, value: string): string | null {
