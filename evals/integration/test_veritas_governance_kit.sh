@@ -498,6 +498,79 @@ else
   fi
 fi
 
+# --- Governance git-hook provisioning (Slice 3 PR / #648) --------------------------
+# The kit ships the two governance git hooks as provisions[]; `kit provision` lands them
+# (non-executable), and a documented chmod + core.hooksPath step activates them. This asserts
+# the hook files land with the expected bodies and that, once activated, the pre-push hook fires.
+echo "--- governance git-hook provisioning ---"
+FA_CLI2="$ROOT/build/src/cli.js"
+if [[ ! -f "$FA_CLI2" ]]; then
+  fail "flow-agents CLI not built at build/src/cli.js (run npm run build)"
+else
+  hookrepo="$TMP_DIR/hook-provisioned-repo"; mkdir -p "$hookrepo"
+  ( cd "$hookrepo" && git init -q && printf '{"name":"hook-eval","scripts":{"prepush":"echo PREPUSH-RAN"}}\n' > package.json )
+  if node "$FA_CLI2" kit provision "$KIT" --target "$hookrepo" >"$TMP_DIR/hookprov.out" 2>&1; then
+    pass "kit provision lands the governance git hooks"
+  else
+    fail "kit provision (hooks) failed"; sed -n '1,20p' "$TMP_DIR/hookprov.out"
+  fi
+  # Both hook files present, match the committed kit assets byte-for-byte, AND carry their
+  # defining command. The byte-match alone cannot catch a corrupted kit asset (a bad asset is
+  # copied verbatim and still matches itself), so a content assertion pins what each hook must do.
+  declare -A hook_must_contain=(
+    [pre-push]='npm run --if-present prepush'
+    [post-commit]='veritas readiness --changed-from HEAD~1 --changed-to HEAD'
+  )
+  for hook in pre-push post-commit; do
+    if [[ -f "$hookrepo/.githooks/$hook" ]]; then
+      if cmp -s "$hookrepo/.githooks/$hook" "$KIT/assets/starter-hooks/githooks/$hook"; then
+        pass "scaffolded .githooks/$hook matches the kit asset byte-for-byte"
+      else
+        fail "scaffolded .githooks/$hook differs from the kit asset"
+      fi
+      if grep -qF "${hook_must_contain[$hook]}" "$hookrepo/.githooks/$hook"; then
+        pass "scaffolded .githooks/$hook invokes its defining command (${hook_must_contain[$hook]})"
+      else
+        fail "scaffolded .githooks/$hook is missing its defining command (${hook_must_contain[$hook]}) — corrupted asset?"
+      fi
+    else
+      fail "expected git hook missing: .githooks/$hook"
+    fi
+  done
+  # Provisions land non-executable by design (the engine copy is agent-blind) — assert for BOTH.
+  for hook in pre-push post-commit; do
+    if [[ -x "$hookrepo/.githooks/$hook" ]]; then
+      fail "provisioned .githooks/$hook is already executable — provisioning should be agent-blind (no +x)"
+    else
+      pass "provisioned .githooks/$hook lands non-executable (agent-blind copy; activation is explicit)"
+    fi
+  done
+  ( cd "$hookrepo" && chmod +x .githooks/pre-push .githooks/post-commit && git config core.hooksPath .githooks )
+  if [[ "$(cd "$hookrepo" && git config --get core.hooksPath)" == ".githooks" ]]; then
+    pass "activation sets core.hooksPath to .githooks"
+  else
+    fail "activation did not set core.hooksPath"
+  fi
+  # Prove GIT actually dispatches the hook via core.hooksPath — not just direct invocation. Push
+  # to a local bare remote; the pre-push hook (runs `npm run --if-present prepush`) fires through
+  # git's own hook machinery. Output captured to a file so pipefail + git's SIGPIPE can't interfere.
+  ( cd "$hookrepo" && git -c user.email=eval@local -c user.name=eval commit -qm base --allow-empty ) >/dev/null 2>&1
+  bare="$TMP_DIR/hook-remote.git"; git init --bare -q "$bare"
+  ( cd "$hookrepo" && git remote add origin "$bare" && git push -q origin HEAD:refs/heads/main ) >"$TMP_DIR/gitpush.out" 2>&1
+  if grep -qF PREPUSH-RAN "$TMP_DIR/gitpush.out"; then
+    pass "git dispatches the pre-push hook via core.hooksPath (real git push fires it)"
+  else
+    fail "git push did not fire the pre-push hook via core.hooksPath"; sed -n '1,12p' "$TMP_DIR/gitpush.out"
+  fi
+  # No-fork: hook assets live under assets/, and invoke the veritas CLI — they must not vendor
+  # rule/claim evaluation. (assets/ is outside the adapter/flows no-fork scope; assert explicitly.)
+  if rg -q -i 'evaluateRepoStandards|evidence-check-runner\.mjs|class +[A-Za-z]*RuleEngine' "$KIT/assets/starter-hooks" 2>/dev/null; then
+    fail "governance hook assets appear to vendor Veritas evaluation logic (no-fork violated)"
+  else
+    pass "no-fork: governance hooks invoke the veritas CLI only (no vendored rule/claim engine)"
+  fi
+fi
+
 echo ""
 if [[ "$errors" -eq 0 ]]; then
   echo "PASS: veritas-governance kit gate demo (positive passes, negative blocks)"

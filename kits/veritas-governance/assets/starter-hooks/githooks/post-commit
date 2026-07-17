@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+if [ "${VERITAS_HOOK_SKIP:-${AI_GUIDANCE_HOOK_SKIP:-0}}" = "1" ]; then
+  exit 0
+fi
+
+if git rev-parse --verify --quiet HEAD~1 >/dev/null; then
+  npm exec -- veritas readiness --changed-from HEAD~1 --changed-to HEAD
+else
+  EMPTY_TREE="$(git hash-object -t tree /dev/null)"
+  npm exec -- veritas readiness --changed-from "$EMPTY_TREE" --changed-to HEAD
+fi

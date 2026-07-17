@@ -78,6 +78,18 @@
       "path": "assets/starter-standards/veritas.claims.json",
       "target": "veritas.claims.json",
       "description": "Starter Veritas claim store (from `veritas init`): the baseline surface claims the starter Repo Standards require to be present. A snapshot starting point; regenerate with `veritas claim init` once the Repo Map is customized."
+    },
+    {
+      "id": "veritas-governance.githook-pre-push",
+      "path": "assets/starter-hooks/githooks/pre-push",
+      "target": ".githooks/pre-push",
+      "description": "Governance pre-push git hook (from `veritas setup repo-hooks`): runs `npm run --if-present prepush` before a push. Static template. Landed non-executable — see \"Provisioning the governance hooks\" for the chmod + core.hooksPath activation a file copy cannot perform."
+    },
+    {
+      "id": "veritas-governance.githook-post-commit",
+      "path": "assets/starter-hooks/githooks/post-commit",
+      "target": ".githooks/post-commit",
+      "description": "Governance post-commit git hook (from `veritas setup repo-hooks`): runs `veritas readiness --changed-from HEAD~1 --changed-to HEAD` after each commit. Static template. Landed non-executable — see \"Provisioning the governance hooks\" for activation."
     }
   ]
 }
