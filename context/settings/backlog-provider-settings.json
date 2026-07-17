@@ -41,7 +41,7 @@
           "issue_state": "open",
           "include_labels": [],
           "ready_statuses": ["ready"],
-          "exclude_statuses": ["in_progress", "blocked", "review", "verification", "done"]
+          "exclude_statuses": ["triage", "in_progress", "blocked", "review", "verification", "done"]
         },
         "wip_policy": {
           "prefer_finishing_active_work": true,

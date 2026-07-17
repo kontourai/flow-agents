@@ -131,6 +131,24 @@ node "$SCRIPT" \
 [[ "$(json_query "$TMPDIR_EVAL/unresolved.json" "items.11.dependency_impacts.0.impact_state")" == "unknown" ]] && pass "structured-only dependency impact state is unknown without resolved ref" || fail "structured-only dependency impact state is unknown without resolved ref"
 [[ "$(json_query "$TMPDIR_EVAL/unresolved.json" "items.11.readiness.classification")" == "blocked" ]] && pass "structured-only blocker blocks without prose parsing" || fail "structured-only blocker blocks without prose parsing"
 
+# Readiness Source Integrity (docs/decisions/backlog-readiness-source.md):
+# reaching the issue-listing path while a BoardProvider is configured is a
+# bypass of the canonical readiness source and must be loud, never silent.
+[[ "$(json_query "$TMPDIR_EVAL/normalized.json" "warnings.0.code")" == "board_provider_bypassed" ]] && pass "issue-listing path with configured board surfaces board_provider_bypassed" || fail "issue-listing path with configured board surfaces board_provider_bypassed"
+
+node -e '
+const fs = require("fs");
+const doc = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const settings = doc.projects[0];
+delete settings.board_provider;
+fs.writeFileSync(process.argv[2], JSON.stringify(settings, null, 2));
+' "$SETTINGS" "$TMPDIR_EVAL/boardless-settings.json"
+node "$SCRIPT" \
+  --settings-json "$TMPDIR_EVAL/boardless-settings.json" \
+  --issues-json "$FIXTURE" \
+  > "$TMPDIR_EVAL/boardless.json"
+[[ "$(json_query "$TMPDIR_EVAL/boardless.json" "warnings.length")" == "0" ]] && pass "issue-listing path without a configured board emits no bypass warning" || fail "issue-listing path without a configured board emits no bypass warning"
+
 if [[ "$errors" -eq 0 ]]; then
   echo "Pull work provider checks passed"
 else
