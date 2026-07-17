@@ -1271,6 +1271,263 @@ else
   _fail "extra criteria failure did not mention criteria mismatch"
 fi
 
+# --- waves.json (#663 slice 1): wave manifest + reconcile-against-manifest as data ---------
+# The manifest is additive: every earlier fixture directory in this file has no waves.json and
+# still validates — that is the "absent file changes nothing" half of AC1.
+
+GOOD_WAVES="$TMPDIR_EVAL/good-waves"
+mkdir -p "$GOOD_WAVES"
+cat > "$GOOD_WAVES/waves.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "good-waves",
+  "waves": [
+    {
+      "wave_id": "execute-wave-1",
+      "step": "execute",
+      "declared_at": "2026-07-16T00:00:00Z",
+      "expected_workers": [
+        {"worker_id": "worker-1", "task": "implement module a", "owned_files": ["src/a.ts"]},
+        {"worker_id": "worker-2", "task": "implement module b"}
+      ],
+      "worker_results": [
+        {"worker_id": "worker-1", "status": "completed", "summary": "module a implemented", "recorded_at": "2026-07-16T01:00:00Z"},
+        {"worker_id": "worker-2", "status": "failed", "summary": "module b tests failing", "recorded_at": "2026-07-16T01:00:00Z"}
+      ],
+      "reconciliation": {
+        "status": "complete",
+        "expected_count": 2,
+        "reported_count": 2,
+        "summary": "2 of 2 reported; no workers not_reported",
+        "reconciled_at": "2026-07-16T01:05:00Z"
+      }
+    }
+  ]
+}
+JSON
+
+if flow_agents_node "$VALIDATOR" "$GOOD_WAVES" >"$TMPDIR_EVAL/good-waves.out" 2>&1; then
+  _pass "fully reported wave manifest passes (2 of 2 reported)"
+else
+  _fail "fully reported wave manifest should pass: $(cat "$TMPDIR_EVAL/good-waves.out")"
+fi
+
+# Scenario (issue #663 AC): 3 workers expected, one never lands a terminal record. The
+# reconciled manifest records worker-3 explicitly as not_reported with "2 of 3 reported" —
+# and that is VALID DATA (exit 0), not a hook block: slice 1 makes the drop visible, slice 2
+# (stop-goal-fit) decides whether to refuse. Silent absorption is what must fail, below.
+SCENARIO_WAVES="$TMPDIR_EVAL/scenario-waves"
+mkdir -p "$SCENARIO_WAVES"
+cat > "$SCENARIO_WAVES/waves.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "scenario-waves",
+  "waves": [
+    {
+      "wave_id": "execute-wave-1",
+      "step": "execute",
+      "declared_at": "2026-07-16T00:00:00Z",
+      "expected_workers": [
+        {"worker_id": "worker-1", "task": "task one"},
+        {"worker_id": "worker-2", "task": "task two"},
+        {"worker_id": "worker-3", "task": "task three"}
+      ],
+      "worker_results": [
+        {"worker_id": "worker-1", "status": "completed", "summary": "done", "recorded_at": "2026-07-16T01:00:00Z"},
+        {"worker_id": "worker-2", "status": "completed", "summary": "done", "recorded_at": "2026-07-16T01:00:00Z"},
+        {"worker_id": "worker-3", "status": "not_reported", "summary": "no terminal report received by wave close; routed to re-dispatch", "recorded_at": "2026-07-16T01:05:00Z"}
+      ],
+      "reconciliation": {
+        "status": "incomplete",
+        "expected_count": 3,
+        "reported_count": 2,
+        "summary": "2 of 3 reported; worker-3 not_reported",
+        "reconciled_at": "2026-07-16T01:05:00Z"
+      }
+    }
+  ]
+}
+JSON
+
+if flow_agents_node "$VALIDATOR" "$SCENARIO_WAVES" >"$TMPDIR_EVAL/scenario-waves.out" 2>&1; then
+  _pass "2-of-3 scenario with explicit not_reported worker validates as data (no silent drop, no block)"
+else
+  _fail "2-of-3 not_reported scenario should validate as data: $(cat "$TMPDIR_EVAL/scenario-waves.out")"
+fi
+
+# Silent drop: reconciliation claims complete 3-of-3 while worker-3 has NO terminal record.
+mkdir -p "$BAD/waves-silent-drop"
+cat > "$BAD/waves-silent-drop/waves.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "waves-silent-drop",
+  "waves": [
+    {
+      "wave_id": "execute-wave-1",
+      "step": "execute",
+      "declared_at": "2026-07-16T00:00:00Z",
+      "expected_workers": [
+        {"worker_id": "worker-1", "task": "task one"},
+        {"worker_id": "worker-2", "task": "task two"},
+        {"worker_id": "worker-3", "task": "task three"}
+      ],
+      "worker_results": [
+        {"worker_id": "worker-1", "status": "completed", "summary": "done", "recorded_at": "2026-07-16T01:00:00Z"},
+        {"worker_id": "worker-2", "status": "completed", "summary": "done", "recorded_at": "2026-07-16T01:00:00Z"}
+      ],
+      "reconciliation": {
+        "status": "complete",
+        "expected_count": 3,
+        "reported_count": 3,
+        "summary": "3 of 3 reported",
+        "reconciled_at": "2026-07-16T01:05:00Z"
+      }
+    }
+  ]
+}
+JSON
+
+if flow_agents_node "$VALIDATOR" "$BAD/waves-silent-drop" >"$TMPDIR_EVAL/waves-silent-drop.out" 2>&1; then
+  _fail "silently dropped worker behind a complete claim should fail"
+elif rg -q 'worker worker-3 has no terminal status record' "$TMPDIR_EVAL/waves-silent-drop.out" \
+  && rg -q 'reported_count is 3 but 2 of 3 expected workers' "$TMPDIR_EVAL/waves-silent-drop.out" \
+  && rg -q 'complete requires every expected worker' "$TMPDIR_EVAL/waves-silent-drop.out"; then
+  _pass "silently dropped worker fails with missing-record, count, and impossible-complete messages"
+else
+  _fail "silent-drop failure did not name the dropped worker and count mismatch: $(cat "$TMPDIR_EVAL/waves-silent-drop.out")"
+fi
+
+# A complete claim over an explicitly not_reported worker is still impossible.
+mkdir -p "$BAD/waves-complete-not-reported"
+cat > "$BAD/waves-complete-not-reported/waves.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "waves-complete-not-reported",
+  "waves": [
+    {
+      "wave_id": "execute-wave-1",
+      "step": "execute",
+      "declared_at": "2026-07-16T00:00:00Z",
+      "expected_workers": [
+        {"worker_id": "worker-1", "task": "task one"},
+        {"worker_id": "worker-2", "task": "task two"}
+      ],
+      "worker_results": [
+        {"worker_id": "worker-1", "status": "completed", "summary": "done", "recorded_at": "2026-07-16T01:00:00Z"},
+        {"worker_id": "worker-2", "status": "not_reported", "summary": "never reported", "recorded_at": "2026-07-16T01:05:00Z"}
+      ],
+      "reconciliation": {
+        "status": "complete",
+        "expected_count": 2,
+        "reported_count": 1,
+        "summary": "1 of 2 reported; worker-2 not_reported",
+        "reconciled_at": "2026-07-16T01:05:00Z"
+      }
+    }
+  ]
+}
+JSON
+
+if flow_agents_node "$VALIDATOR" "$BAD/waves-complete-not-reported" >"$TMPDIR_EVAL/waves-complete-not-reported.out" 2>&1; then
+  _fail "complete claim over a not_reported worker should fail"
+elif rg -q 'complete requires every expected worker' "$TMPDIR_EVAL/waves-complete-not-reported.out"; then
+  _pass "complete claim over a not_reported worker fails with actionable message"
+else
+  _fail "complete-over-not_reported failure did not mention the complete rule: $(cat "$TMPDIR_EVAL/waves-complete-not-reported.out")"
+fi
+
+# Exactly one terminal record per worker.
+mkdir -p "$BAD/waves-duplicate-record"
+cat > "$BAD/waves-duplicate-record/waves.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "waves-duplicate-record",
+  "waves": [
+    {
+      "wave_id": "execute-wave-1",
+      "step": "execute",
+      "declared_at": "2026-07-16T00:00:00Z",
+      "expected_workers": [
+        {"worker_id": "worker-1", "task": "task one"}
+      ],
+      "worker_results": [
+        {"worker_id": "worker-1", "status": "completed", "summary": "done", "recorded_at": "2026-07-16T01:00:00Z"},
+        {"worker_id": "worker-1", "status": "failed", "summary": "also failed?", "recorded_at": "2026-07-16T01:01:00Z"}
+      ]
+    }
+  ]
+}
+JSON
+
+if flow_agents_node "$VALIDATOR" "$BAD/waves-duplicate-record" >"$TMPDIR_EVAL/waves-duplicate-record.out" 2>&1; then
+  _fail "duplicate terminal record should fail"
+elif rg -q 'more than one terminal status record for worker worker-1' "$TMPDIR_EVAL/waves-duplicate-record.out"; then
+  _pass "duplicate terminal record fails with actionable message"
+else
+  _fail "duplicate-record failure did not name the worker: $(cat "$TMPDIR_EVAL/waves-duplicate-record.out")"
+fi
+
+# Every reporter must be declared in the manifest before dispatch.
+mkdir -p "$BAD/waves-undeclared-reporter"
+cat > "$BAD/waves-undeclared-reporter/waves.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "waves-undeclared-reporter",
+  "waves": [
+    {
+      "wave_id": "execute-wave-1",
+      "step": "execute",
+      "declared_at": "2026-07-16T00:00:00Z",
+      "expected_workers": [
+        {"worker_id": "worker-1", "task": "task one"}
+      ],
+      "worker_results": [
+        {"worker_id": "worker-1", "status": "completed", "summary": "done", "recorded_at": "2026-07-16T01:00:00Z"},
+        {"worker_id": "worker-9", "status": "completed", "summary": "surprise", "recorded_at": "2026-07-16T01:00:00Z"}
+      ]
+    }
+  ]
+}
+JSON
+
+if flow_agents_node "$VALIDATOR" "$BAD/waves-undeclared-reporter" >"$TMPDIR_EVAL/waves-undeclared-reporter.out" 2>&1; then
+  _fail "undeclared reporter should fail"
+elif rg -q 'worker worker-9 that is not declared in expected_workers' "$TMPDIR_EVAL/waves-undeclared-reporter.out"; then
+  _pass "undeclared reporter fails with actionable message"
+else
+  _fail "undeclared-reporter failure did not name the worker: $(cat "$TMPDIR_EVAL/waves-undeclared-reporter.out")"
+fi
+
+# Terminal status vocabulary is schema-enforced.
+mkdir -p "$BAD/waves-bad-status"
+cat > "$BAD/waves-bad-status/waves.json" <<'JSON'
+{
+  "schema_version": "1.0",
+  "task_slug": "waves-bad-status",
+  "waves": [
+    {
+      "wave_id": "execute-wave-1",
+      "step": "execute",
+      "declared_at": "2026-07-16T00:00:00Z",
+      "expected_workers": [
+        {"worker_id": "worker-1", "task": "task one"}
+      ],
+      "worker_results": [
+        {"worker_id": "worker-1", "status": "maybe-done", "summary": "unclear", "recorded_at": "2026-07-16T01:00:00Z"}
+      ]
+    }
+  ]
+}
+JSON
+
+if flow_agents_node "$VALIDATOR" "$BAD/waves-bad-status" >"$TMPDIR_EVAL/waves-bad-status.out" 2>&1; then
+  _fail "unknown worker status should fail"
+elif rg -q 'status must be one of: completed, failed, blocked, not_reported' "$TMPDIR_EVAL/waves-bad-status.out"; then
+  _pass "unknown worker status fails against the schema enum"
+else
+  _fail "bad-status failure did not mention the status enum: $(cat "$TMPDIR_EVAL/waves-bad-status.out")"
+fi
+
 if [[ "$errors" -eq 0 ]]; then
   echo "Workflow artifact integration passed."
   exit 0

@@ -21,6 +21,7 @@ const sidecarSchemas: Record<string, string> = {
   "critique.json": "schemas/workflow-critique.schema.json",
   "release.json": "schemas/workflow-release.schema.json",
   "learning.json": "schemas/workflow-learning.schema.json",
+  "waves.json": "schemas/workflow-waves.schema.json",
 };
 // Runtime coordination records live below a session but are not workflow
 // sidecars. Recursing into them would validate continuation-driver/state.json
@@ -321,10 +322,56 @@ function validateSidecar(file: string): { issues: Issue[]; warnings: Issue[] } {
       if (Array.isArray(value.post_deploy_checks) && value.post_deploy_checks.some((c: any) => !["planned", "pass"].includes(c.status))) issues.push({ path: file, message: "deploy decision requires post_deploy_checks to be planned or pass" });
     }
   }
+  if (path.basename(file) === "waves.json") {
+    validateWaves(file, value, issues);
+  }
   if (path.basename(file) === "state.json" && value && typeof value === "object" && !Array.isArray(value) && !("branch" in value)) {
     warnings.push({ path: file, message: "state.json has no branch field (legacy/pre-#289 session) — re-run `ensure-session` to backfill agent/<actor>/<slug>." });
   }
   return { issues, warnings };
+}
+
+// #663 slice 1: wave-result reconciliation is machine-checkable, not prose. The schema
+// (schemas/workflow-waves.schema.json) validates the shape; these semantic checks enforce the
+// cross-record arithmetic the mini schema engine cannot express: exactly one terminal status
+// record per declared worker, no undeclared reporters, reconciliation counts that match the
+// records, and a `complete` claim that is impossible while any expected worker lacks a
+// worker-landed terminal status. Missing workers must be recorded explicitly as not_reported —
+// a reconciled wave never silently absorbs a dropped worker. Enforcement here is data-level
+// validation only; stop-hook refusal of wave completion is #663 part 3 (slice 2).
+function validateWaves(file: string, value: any, issues: Issue[]): void {
+  const waves = Array.isArray(value?.waves) ? value.waves : [];
+  waves.forEach((wave: any, index: number) => {
+    const loc = `waves.json.waves[${index}]`;
+    const expected: any[] = Array.isArray(wave?.expected_workers) ? wave.expected_workers : [];
+    const results: any[] = Array.isArray(wave?.worker_results) ? wave.worker_results : [];
+    const expectedIds = expected.map((w) => w?.worker_id).filter((id) => typeof id === "string" && id.length > 0);
+    const expectedIdSet = new Set(expectedIds);
+    if (expectedIdSet.size !== expectedIds.length) issues.push({ path: file, message: `${loc}.expected_workers must declare unique worker_id values` });
+    const resultIds = results.map((r) => r?.worker_id).filter((id) => typeof id === "string" && id.length > 0);
+    const seen = new Set<string>();
+    for (const id of resultIds) {
+      if (seen.has(id)) issues.push({ path: file, message: `${loc}.worker_results has more than one terminal status record for worker ${id}; each worker lands exactly one` });
+      seen.add(id);
+      if (!expectedIdSet.has(id)) issues.push({ path: file, message: `${loc}.worker_results records worker ${id} that is not declared in expected_workers; declare every worker in the manifest before dispatch` });
+    }
+    const reconciliation = wave?.reconciliation;
+    if (!reconciliation || typeof reconciliation !== "object" || Array.isArray(reconciliation)) return;
+    const expectedCount = expectedIds.length;
+    const reportedIds = new Set(results.filter((r) => ["completed", "failed", "blocked"].includes(r?.status) && expectedIdSet.has(r?.worker_id)).map((r) => r.worker_id as string));
+    const reportedCount = reportedIds.size;
+    if (reconciliation.expected_count !== expectedCount) issues.push({ path: file, message: `${loc}.reconciliation.expected_count is ${reconciliation.expected_count} but expected_workers declares ${expectedCount}` });
+    if (reconciliation.reported_count !== reportedCount) issues.push({ path: file, message: `${loc}.reconciliation.reported_count is ${reconciliation.reported_count} but ${reportedCount} of ${expectedCount} expected workers have a worker-landed terminal status (completed|failed|blocked)` });
+    const missing = expectedIds.filter((id) => !results.some((r) => r?.worker_id === id));
+    for (const id of missing) issues.push({ path: file, message: `${loc} is reconciled but worker ${id} has no terminal status record; record it explicitly as not_reported — never silently absorb a missing worker` });
+    const notReported = results.filter((r) => r?.status === "not_reported" && expectedIdSet.has(r?.worker_id));
+    if (reconciliation.status === "complete" && (missing.length > 0 || notReported.length > 0 || reportedCount !== expectedCount)) {
+      issues.push({ path: file, message: `${loc}.reconciliation.status complete requires every expected worker to have a worker-landed terminal status; got ${reportedCount} of ${expectedCount} reported` });
+    }
+    if (reconciliation.status === "incomplete" && missing.length === 0 && notReported.length === 0 && reportedCount === expectedCount) {
+      issues.push({ path: file, message: `${loc}.reconciliation.status incomplete contradicts the records: all ${expectedCount} expected workers reported` });
+    }
+  });
 }
 
 function validateLearningCorrections(file: string, status: unknown, records: any[], issues: Issue[]): void {
