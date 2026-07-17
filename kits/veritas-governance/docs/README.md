@@ -27,6 +27,7 @@ doc, which also freezes the CLI + artifact + claim-shape contract this kit's ada
 | Flow | `flows/exemption-issuance.flow.json` | Single-gate agentless flow `request -> human-approval-gate -> issue`. The gate requires a **verified** `no-agent-delivery-exemption-approval` trust.bundle claim (`subjectType: "delivery-scope"`) before the `issue` step's write is flow-sanctioned. Issues a `delivery/DECLARED` exemption entry per ADR 0022 §2/§3. |
 | Skill | `skills/exemption-usage-review/SKILL.md` | Periodic audit skill (ADR 0022 §3): walks `delivery/DECLARED` + its `git log --follow` history and reports every standing exemption (scope, reason, approver, age since `declared_at`), flagging entries overdue for owner re-confirmation against a configurable staleness threshold. Process visibility, not enforcement — read-only, never mutates `delivery/DECLARED` or the reconciler. |
 | Provisions | `assets/starter-standards/**` → `provisions[]` | Starter `.veritas/` Repo Standards a consumer repo needs to run `veritas readiness` — a faithful snapshot of `veritas init`'s Day-0 output (Repo Map, Repo Standards, authority settings, `GOVERNANCE.md`, `README.md`, claim store), shipped as data and copied verbatim by `flow-agents kit provision`. See "Scaffolding starter standards" below. |
+| Provisions | `assets/starter-hooks/githooks/**` → `provisions[]` | The two governance git hooks (`veritas setup repo-hooks`'s static output): `.githooks/pre-push` (`npm run --if-present prepush`) and `.githooks/post-commit` (`veritas readiness`). Shipped verbatim; landed non-executable — activation (`chmod +x` + `git config core.hooksPath`) is a documented operator step a copy cannot perform. See "Provisioning the governance hooks". |
 | Flow | `flows/standards-authoring.flow.json` | Single-gate agentless flow `propose -> human-approval-gate -> apply`. The gate requires a **verified** `standards-authoring-approval` trust.bundle claim (`subjectType: "repo-governance-change"`) before `veritas init --apply` writes the derived standards. Veritas derives and writes; the kit gates the human sign-off. See "How to author standards for a repo". |
 | Skill | `skills/standards-authoring/SKILL.md` | Runbook for the standards-authoring flow: runs `veritas init --explore`/`--guided` to derive a recommendation (project name, adaptive Repo Map nodes, evidence-check inference, governance-block splice), surfaces it for human approval, then `veritas init --apply`. Wraps the veritas CLI; reimplements nothing. |
 
@@ -115,6 +116,33 @@ encodes, not a structural human-only guarantee — see "Human-approval evidence:
 enforced" below. This flow is **agentless** (the kit declares no `flow_step_actions`; the approval
 bundle is human-authored out of band, and the skill is the runbook, not a step-bound action). The
 kit **wraps** the `veritas` CLI and reimplements no derivation or evaluation.
+
+## Provisioning the governance hooks
+
+The kit ships the two governance git hooks (`veritas setup repo-hooks`'s static output) as
+`provisions[]`, so kit adoption drops them into the repo alongside the starter standards:
+
+- `.githooks/pre-push` — runs `npm run --if-present prepush` before a push.
+- `.githooks/post-commit` — runs `veritas readiness --changed-from HEAD~1 --changed-to HEAD` after each commit.
+
+```bash
+# 1. Land the hook files (part of `kit provision` / `init --activate-kit`).
+flow-agents kit provision veritas-governance
+
+# 2. ACTIVATE — the two steps a create-only file copy cannot perform:
+chmod +x .githooks/pre-push .githooks/post-commit
+git config core.hooksPath .githooks
+```
+
+**Activation is required and is not a copy.** A provision lands the hook files **non-executable**
+and does not touch git config — so until you `chmod +x` them and point `core.hooksPath` at
+`.githooks`, git will not run them. This is the same class of limitation as the governance-block
+splice above: the engine's file copy is deliberately agent-blind (it never sets an executable bit
+or mutates git config), so making the hooks *active* is an explicit operator step. The hooks
+themselves only **invoke** the `veritas` CLI (`npm run prepush`, `veritas readiness`); the kit
+reimplements no evaluation, and the live per-edit PreToolUse *evaluation* entry point stays in the
+engine (`evaluatePreToolUse` → `evaluateRepoStandards`), reached by the installed hook shelling
+into `veritas` — hook wiring is the kit's; per-edit evaluation is the engine's.
 
 ## How to issue a no-agent-delivery exemption
 
