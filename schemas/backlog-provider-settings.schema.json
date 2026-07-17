@@ -103,7 +103,7 @@
             "ready_statuses": { "type": "array", "items": { "enum": ["todo", "ready"] } },
             "exclude_statuses": {
               "type": "array",
-              "items": { "enum": ["in_progress", "blocked", "review", "verification", "done"] }
+              "items": { "enum": ["triage", "in_progress", "blocked", "review", "verification", "done"] }
             }
           }
         },
