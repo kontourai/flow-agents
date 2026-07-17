@@ -31,5 +31,43 @@
   ],
   "docs": [
     { "id": "veritas-governance.readme", "path": "docs/README.md" }
+  ],
+  "provisions": [
+    {
+      "id": "veritas-governance.starter-repo-map",
+      "path": "assets/starter-standards/veritas/repo-map.json",
+      "target": ".veritas/repo-map.json",
+      "description": "Starter Repo Map (from `veritas init`): work-area graph plus the `evidence.evidenceChecks` entry `veritas readiness` requires. Placeholder project name `your-project`; adopters edit for their repo shape and evidence-check command."
+    },
+    {
+      "id": "veritas-governance.starter-repo-standards",
+      "path": "assets/starter-standards/veritas/repo-standards/default.repo-standards.json",
+      "target": ".veritas/repo-standards/default.repo-standards.json",
+      "description": "Starter Repo Standards (from `veritas init`): the baseline required-artifacts / instruction-files-synced / routed-delivery rules the engine evaluates. Additive Standards Growth is expected on top."
+    },
+    {
+      "id": "veritas-governance.starter-authority-settings",
+      "path": "assets/starter-standards/veritas/authority/default.authority-settings.json",
+      "target": ".veritas/authority/default.authority-settings.json",
+      "description": "Starter authority settings (from `veritas init`): promotion preferences and attestation thresholds; keeps the readiness attestation-gate section clean before a bootstrap attestation is recorded."
+    },
+    {
+      "id": "veritas-governance.starter-governance",
+      "path": "assets/starter-standards/veritas/GOVERNANCE.md",
+      "target": ".veritas/GOVERNANCE.md",
+      "description": "Terse agent-facing governance instructions (from `veritas init`): names the Protected Standards and the attestation requirement. Static; no per-repo derivation."
+    },
+    {
+      "id": "veritas-governance.starter-readme",
+      "path": "assets/starter-standards/veritas/README.md",
+      "target": ".veritas/README.md",
+      "description": "Human-facing `.veritas/` orientation doc (from `veritas init`)."
+    },
+    {
+      "id": "veritas-governance.starter-claims",
+      "path": "assets/starter-standards/veritas.claims.json",
+      "target": "veritas.claims.json",
+      "description": "Starter Veritas claim store (from `veritas init`): the baseline surface claims the starter Repo Standards require to be present. A snapshot starting point; regenerate with `veritas claim init` once the Repo Map is customized."
+    }
   ]
 }
