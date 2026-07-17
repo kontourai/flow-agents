@@ -108,6 +108,7 @@ Primary tools: public `flow-agents workflow`, `trust.bundle`, artifact validatio
 | knowledge-capture | kits/knowledge/skills/knowledge-capture/SKILL.md | Save durable knowledge, lightweight pointers, user corrections, decisions, lessons, relationship context, or source references into the knowledge base. Use when the user says save, remember, capture, file this, bookmark context, or when... |
 | pickup-probe | kits/builder/skills/pickup-probe/SKILL.md | Provider-grounded pickup probe used at the Builder design-probe step before planning. |
 | search-first | skills/search-first/SKILL.md | Research-before-coding workflow. Search for existing tools, libraries, and patterns before writing custom code. |
+| standards-authoring | kits/veritas-governance/skills/standards-authoring/SKILL.md | Author or update a repo's Veritas Repo Standards through the kit's standards-authoring flow: run `veritas init --explore`/`--guided` to derive a proposed starter set (project name, repo-shape-adaptive Repo Map nodes, evidence-check infer... |
 
 ## Agents
 

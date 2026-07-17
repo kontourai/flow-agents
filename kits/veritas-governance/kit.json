@@ -13,6 +13,11 @@
       "id": "veritas-governance.exemption-issuance",
       "path": "flows/exemption-issuance.flow.json",
       "description": "Agentless K0 flow issuing a delivery/DECLARED no-agent-delivery exemption (ADR 0022 §2/§3): step request -> gate human-approval-gate (requires a verified no-agent-delivery-exemption-approval trust.bundle claim, satisfiable only by a human-authored approval bundle by convention -- see docs/README.md) -> step issue, which appends the approved entry to delivery/DECLARED. CI-callable."
+    },
+    {
+      "id": "veritas-governance.standards-authoring",
+      "path": "flows/standards-authoring.flow.json",
+      "description": "Agentless-gate flow authoring a repo's Veritas Repo Standards: step propose (the standards-authoring skill runs `veritas init --explore`/`--guided` to derive a recommendation) -> gate human-approval-gate (requires a verified standards-authoring-approval / repo-governance-change trust.bundle claim, human-authored by convention) -> step apply (`veritas init --apply` writes the approved standards and splices the governance block). Veritas derives and writes; the kit gates the human sign-off. No evaluation reimplemented."
     }
   ],
   "skills": [
@@ -20,6 +25,11 @@
       "id": "veritas-governance.exemption-usage-review",
       "path": "skills/exemption-usage-review/SKILL.md",
       "description": "Periodic audit skill (ADR 0022 §3): walks delivery/DECLARED + its git log --follow history and reports every standing no-agent-delivery exemption (scope, reason, approver, age since declared_at), flagging entries overdue for owner re-confirmation against a configurable staleness threshold. Process visibility, not enforcement -- read-only, never mutates delivery/DECLARED or scripts/ci/trust-reconcile.js's behavior."
+    },
+    {
+      "id": "veritas-governance.standards-authoring",
+      "path": "skills/standards-authoring/SKILL.md",
+      "description": "Author or re-derive a repo's Veritas Repo Standards by running `veritas init --explore`/`--guided` (adaptive derivation + governance-block splice), surfacing the recommendation for human approval, then `veritas init --apply` once the standards-authoring flow's human-approval gate is satisfied. Wraps the veritas CLI; reimplements no evaluation or derivation. The agent action for both steps of the standards-authoring flow."
     }
   ],
   "assets": [
