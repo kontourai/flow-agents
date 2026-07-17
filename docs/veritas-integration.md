@@ -4,6 +4,18 @@ title: Veritas Integration Boundary
 
 # Veritas Integration Boundary
 
+> **Superseded by the shipped kit.** This doc records the early rationale for how Flow Agents
+> should integrate Veritas. That decision has since been made and shipped as the **Veritas
+> Governance Kit** (`kits/veritas-governance`): an agentless kit that wraps the `veritas` CLI and
+> projects its recorded readiness verdict into a `software-readiness-verdict` trust.bundle gate,
+> and that owns the repo-installed governance surface (standards scaffold, hooks, standards
+> authoring, just-in-time agent guidance). For the current integration, read the
+> [kit README](../kits/veritas-governance/docs/README.md), [Engine and kits](architecture-engine-and-kits.md),
+> and veritas's [Engine / Surface Seam](https://github.com/kontourai/veritas/blob/main/docs/architecture/engine-surface-seam.md).
+> The boundary principle below still holds — Veritas is the evaluation engine; the kit wraps it,
+> never reimplements it — but the concrete adapter shape described here predates and is replaced by
+> the kit's flows + trust.bundle adapter.
+
 Veritas is a strong fit for Flow Agents' development evidence and governance layer, but it should stay optional and adapter-driven.
 
 The guiding rule is simple: Flow owns generic process enforcement, Flow Agents projects Flow-backed workflows into agent harnesses, and Veritas owns repo-local standards, authority, and evidence-check semantics.
