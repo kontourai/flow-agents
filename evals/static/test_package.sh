@@ -210,6 +210,12 @@ for (const gateId of ["verify-gate", "merge-ready-gate"]) {
   for (const [reason, target] of Object.entries(expected)) if (gate.on_route_back?.[reason] !== target) throw new Error(`${gateId} ${reason} should route to ${target}`);
   if (gate.route_back_policy?.on_exceeded !== "block") throw new Error(`${gateId} route_back_policy should block on exceeded attempts`);
 }
+// #695 item (a): pr-open must not be a one-way door — the composed publish-learn
+// pr-open-gate declares the missing_evidence repair route back to verify.
+const prOpenGate = publishLearn.gates?.["pr-open-gate"] || {};
+if (prOpenGate.on_route_back?.missing_evidence !== "verify") throw new Error("pr-open-gate missing_evidence should route to verify");
+if (prOpenGate.on_route_back?.default !== "verify") throw new Error("pr-open-gate default route-back should target verify");
+if (prOpenGate.route_back_policy?.on_exceeded !== "block") throw new Error("pr-open-gate route_back_policy should block on exceeded attempts");
 for (const stepId of ["pr-open", "merge-ready-ci", "learn"]) {
   const step = (flow.steps || []).find((item) => item.id === stepId);
   if (step?.uses_flow !== "builder.publish-learn") throw new Error(`${stepId} should compose builder.publish-learn`);

@@ -1,6 +1,6 @@
 {
   "id": "builder.publish-learn",
-  "version": "1.1",
+  "version": "1.2",
   "description": "Reusable delivery closeout extension: publish the verified change, confirm merge readiness from provider/CI evidence, and record learning feedback.",
   "steps": [
     { "id": "pr-open", "next": "merge-ready-ci" },
@@ -17,6 +17,14 @@
   "gates": {
     "pr-open-gate": {
       "step": "pr-open",
+      "on_route_back": {
+        "missing_evidence": "verify",
+        "default": "verify"
+      },
+      "route_back_policy": {
+        "max_attempts": 3,
+        "on_exceeded": "block"
+      },
       "expects": [
         {
           "id": "pull-request-opened",
