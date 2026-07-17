@@ -1,0 +1,1035 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "trust.checkpoint.json",
+      "digest": {
+        "sha256": "9c96c450e0d5f4923ae61a5ec255e9066b8535e26df18f13d02fa9b838987b1a"
+      }
+    }
+  ],
+  "predicateType": "https://hachure.org/v1/bundle",
+  "predicate": {
+    "schemaVersion": 5,
+    "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+    "claims": [
+      {
+        "id": "kontourai-flow-agents-441-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-441-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-6a8823b17795fdda6c167efcdf0c5612dc375deef011496b2ee8f33d778e8935-gate-visit-2026-07-17t03-48-24z",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-441/gate-claim-selected-work",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "Work Item kontourai/flow-agents#441 is durably assigned to the active workflow actor (assignment sha256:6a8823b17795fdda6c167efcdf0c5612dc375deef011496b2ee8f33d778e8935).",
+        "value": "pass",
+        "createdAt": "2026-07-17T04:29:21.725Z",
+        "updatedAt": "2026-07-17T04:29:21.725Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#441",
+          "expected_producer": "builder.pull-work",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "selected-work"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/assignment/kontourai-flow-agents-441.json",
+              "summary": "Durable local assignment record for the selected Work Item and active actor; sha256:6a8823b17795fdda6c167efcdf0c5612dc375deef011496b2ee8f33d778e8935."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-441/assignment-provider-state.json",
+              "summary": "Provider assignment state confirming ownership before the local runtime lease was mirrored; sha256:2115ce10979687f80a15f195a5ebbaaa41e0a6b88449d688d0bf3ed470d94775."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-441/kontourai-flow-agents-441--pull-work.md",
+              "summary": "Concrete pull-work selection report for kontourai/flow-agents#441."
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "selected-work",
+            "claim_type": "builder.pull-work.selected",
+            "subject_type": "work-item",
+            "step_id": "pull-work",
+            "identity_version": 2,
+            "recorded_at": "2026-07-17T03:48:24Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-441-gate-claim-pickup-probe-readiness.flow-agents-workflow.provider-grounded-pickup-probe-complete-441-open-and-claimed-agent-claimed-assignmentclaimrecord-comment-ic-kwdos1a8tm8aaaabkfnmdq-effective-state-held-self-is-holder-base-origin-main-14ba90d-isolated-worktree-board-readiness-441-no-conflicting-actors-parallel-663-lane-has-zero-file-overlap-planning-readiness-pass-central-finding-the-issue-s-2026-07-06-premise-is-now-false-live-verification-shows-org-project-kontourai-1-is-the-auto-populated-board-468-items-306-triage-14-ready-auto-add-workflow-targets-it-status-taxonomy-triage-ready-in-progress-blocked-review-done-agent-token-has-project-scope-and-live-board-driven-pull-work-returns-a-14-item-cross-repo-ready-queue-with-zero-warnings-gate-visit-2026-07-17t03-51-25-595z",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-441/gate-claim-pickup-probe-readiness",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.design-probe.pickup-readiness",
+        "fieldOrBehavior": "Provider-grounded pickup probe complete: #441 OPEN and claimed (agent:claimed + AssignmentClaimRecord comment IC_kwDOS1A8TM8AAAABKfNMDQ), effective state held/self_is_holder, base origin/main@14ba90d, isolated worktree board-readiness-441, no conflicting actors (parallel #663 lane has zero file overlap); planning readiness PASS. Central finding: the issue's 2026-07-06 premise is now false — live verification shows org project kontourai/1 IS the auto-populated board (468 items, 306 Triage/14 Ready, auto-add workflow targets it, Status taxonomy Triage/Ready/In Progress/Blocked/Review/Done, agent token has project scope), and live board-driven pull-work returns a 14-item cross-repo ready queue with zero warnings.",
+        "value": "pass",
+        "createdAt": "2026-07-17T04:29:21.725Z",
+        "updatedAt": "2026-07-17T04:29:21.725Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.design-probe.pickup-readiness:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#441",
+          "expected_producer": "builder.pickup-probe",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "pickup-probe"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-441/kontourai-flow-agents-441--pull-work.md",
+              "excerpt": "Pull-work selection, live board snapshot, claim evidence"
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-441/kontourai-flow-agents-441--pickup-probe.json",
+              "excerpt": "Pickup probe readiness assessment with fresh 2026-07-16 board verification"
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "pickup-probe-readiness",
+            "claim_type": "builder.design-probe.pickup-readiness",
+            "subject_type": "work-item",
+            "step_id": "design-probe",
+            "identity_version": 2,
+            "recorded_at": "2026-07-17T03:51:25.595Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-441-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.design-decisions-recorded-pickup-probe-d1-d9-d1-board-based-readiness-option-b-on-org-project-kontourai-1-option-a-labels-rejected-on-fresh-2026-07-16-evidence-auto-add-automation-live-org-wide-agent-token-has-project-scope-board-adds-cross-repo-priority-ranking-d2-durable-decision-record-docs-decisions-backlog-readiness-source-md-context-md-vocabulary-regenerated-index-d3-taxonomy-truth-triage-added-to-schema-enum-declared-in-settings-d4-board-provider-bypassed-warning-on-the-issue-listing-path-d5-skill-level-no-silent-fallback-rule-accepted-gaps-disclosed-not-absorbed-doctor-board-health-check-follows-with-321-443-item-5-one-time-sweep-of-306-triage-items-routed-as-follow-up-mechanism-first-ready-set-already-non-empty-at-14-items-board-path-exclude-statuses-stays-declarative-443-444-gate-visit-2026-07-17t03-52-18-683z",
+        "subjectType": "decision",
+        "subjectId": "kontourai-flow-agents-441/gate-claim-probe-decisions-or-accepted-gaps",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.design-probe.decisions",
+        "fieldOrBehavior": "Design decisions recorded (pickup-probe D1-D9): D1 board-based readiness (Option B) on org project kontourai/1 — Option A labels rejected on fresh 2026-07-16 evidence (auto-add automation live org-wide, agent token has project scope, board adds cross-repo Priority ranking); D2 durable decision record docs/decisions/backlog-readiness-source.md + CONTEXT.md vocabulary + regenerated index; D3 taxonomy truth (triage added to schema enum + declared in settings); D4 board_provider_bypassed warning on the issue-listing path; D5 skill-level no-silent-fallback rule. Accepted gaps disclosed, not absorbed: doctor board-health check follows with #321/#443 item 5; one-time sweep of ~306 Triage items routed as follow-up (mechanism-first, Ready set already non-empty at 14 items); board-path exclude_statuses stays declarative (#443/#444).",
+        "value": "pass",
+        "createdAt": "2026-07-17T04:29:21.725Z",
+        "updatedAt": "2026-07-17T04:29:21.725Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.design-probe.decisions:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#441",
+          "expected_producer": "builder.pickup-probe",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "pickup-probe"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-441/kontourai-flow-agents-441--pull-work.md",
+              "excerpt": "Selected scope, live board snapshot, claim evidence"
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-441/kontourai-flow-agents-441--pickup-probe.json",
+              "excerpt": "Full decisions D1-D9, risks, accepted gaps"
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "probe-decisions-or-accepted-gaps",
+            "claim_type": "builder.design-probe.decisions",
+            "subject_type": "decision",
+            "step_id": "design-probe",
+            "identity_version": 2,
+            "recorded_at": "2026-07-17T03:52:18.683Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-441-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-recorded-wave-1-decision-record-docs-decisions-backlog-readiness-source-md-schema-validated-frontmatter-evidence-linked-to-441-pr-449-c19c3e6-context-md-vocabulary-regenerated-decisions-index-wave-2-settings-taxonomy-truth-triage-added-to-schema-exclude-statuses-enum-declared-in-repo-settings-workspace-example-board-pointer-kontourai-1-verified-correct-unchanged-wave-3-fallback-surfacing-board-provider-bypassed-warning-on-the-issue-listing-path-in-pull-work-provider-ts-readiness-source-integrity-rule-in-pull-work-skill-md-wave-4-eval-coverage-in-test-pull-work-board-sh-context-map-drift-check-verification-build-eval-static-on-final-head-targeted-board-provider-settings-decisions-suites-live-board-read-acceptance-evidence-scope-boundary-excludes-board-writes-doctor-implementation-444-workspace-behavior-and-663-lane-files-gate-visit-2026-07-17t03-53-17-364z",
+        "subjectType": "artifact",
+        "subjectId": "kontourai-flow-agents-441/gate-claim-implementation-plan",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.plan.implementation",
+        "fieldOrBehavior": "Implementation plan recorded: Wave 1 decision record (docs/decisions/backlog-readiness-source.md, schema-validated frontmatter, evidence-linked to #441/PR #449/c19c3e6) + CONTEXT.md vocabulary + regenerated decisions index; Wave 2 settings-taxonomy truth (triage added to schema exclude_statuses enum, declared in repo settings + workspace example; board pointer kontourai/1 verified correct, unchanged); Wave 3 fallback surfacing (board_provider_bypassed warning on the issue-listing path in pull-work-provider.ts; Readiness Source Integrity rule in pull-work SKILL.md); Wave 4 eval coverage in test_pull_work_board.sh + context-map drift check. Verification: build + eval:static on final HEAD, targeted board/provider/settings/decisions suites, live board-read acceptance evidence. Scope boundary excludes board writes, doctor implementation, #444 workspace behavior, and #663 lane files.",
+        "value": "pass",
+        "createdAt": "2026-07-17T04:29:21.725Z",
+        "updatedAt": "2026-07-17T04:29:21.725Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.plan.implementation:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#441",
+          "expected_producer": "builder.plan-work",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "implementation-plan"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-441/kontourai-flow-agents-441--plan-work.md",
+              "excerpt": "Implementation plan: decision, waves, file ownership, tests->ACs, scope boundary"
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "implementation-plan",
+            "claim_type": "builder.plan.implementation",
+            "subject_type": "artifact",
+            "step_id": "plan",
+            "identity_version": 2,
+            "recorded_at": "2026-07-17T03:53:17.364Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-441-gate-claim-implementation-scope.flow-agents-workflow.implemented-scope-matches-the-plan-exactly-commit-af04efa-9-files-135-4-decision-record-vocabulary-wave-1-settings-taxonomy-truth-with-ajv-valid-settings-wave-2-board-provider-bypassed-warning-readiness-source-integrity-skill-rule-wave-3-eval-coverage-positive-negative-wave-4-no-board-writes-no-doctor-implementation-no-663-lane-files-in-lane-checks-build-pass-pull-work-provider-board-effective-workspace-settings-decisions-suites-pass-context-map-current-validate-source-pass-live-board-read-returns-14-item-ready-queue-with-zero-warnings-gate-visit-2026-07-17t03-56-51-477z",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-441/gate-claim-implementation-scope",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Implemented scope matches the plan exactly (commit af04efa, 9 files, +135/-4): decision record + vocabulary (wave 1), settings-taxonomy truth with ajv-VALID settings (wave 2), board_provider_bypassed warning + Readiness Source Integrity skill rule (wave 3), eval coverage positive+negative (wave 4). No board writes, no doctor implementation, no #663-lane files. In-lane checks: build pass; pull-work provider/board, effective/workspace settings, decisions suites pass; context-map current; validate:source pass; live board read returns 14-item ready queue with zero warnings.",
+        "value": "pass",
+        "createdAt": "2026-07-17T04:29:21.725Z",
+        "updatedAt": "2026-07-17T04:29:21.725Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#441",
+          "expected_producer": "builder.execute-plan",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "implementation-scope"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-441/kontourai-flow-agents-441--deliver.md",
+              "excerpt": "Execution progress: per-file implemented scope, checks run, live acceptance evidence"
+            },
+            {
+              "kind": "command",
+              "excerpt": "git show --stat af04efa",
+              "summary": "Implementation commit: 9 files changed, 135 insertions(+), 4 deletions(-)"
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "implementation-scope",
+            "claim_type": "builder.execute.scope",
+            "subject_type": "change",
+            "step_id": "execute",
+            "identity_version": 2,
+            "recorded_at": "2026-07-17T03:56:51.477Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-441-gate-claim-acceptance-criteria.flow-agents-workflow.issue-441-acceptance-verified-ac-1-decision-recorded-docs-decisions-backlog-readiness-source-md-schema-valid-frontmatter-check-decisions-28-topics-pass-evidence-linked-to-441-pr-449-c19c3e64a214be7d5b2585004fd3c4f2597781e5-session-ac-2-settings-reflect-the-chosen-source-and-pull-work-returns-a-non-empty-intentional-ready-set-boardprovider-kontourai-1-verified-live-as-the-auto-populated-org-board-468-items-auto-add-triage-done-automation-status-taxonomy-incl-ready-triage-declared-in-schema-enum-settings-ajv-valid-live-board-read-returns-ready-queue-14-cross-repo-p0-p2-ranked-warnings-intake-gaps-0-ac-3-silent-fallback-replaced-by-explicit-warning-zero-ready-items-on-the-empty-board-path-pr-449-unregressed-new-board-provider-bypassed-on-the-issue-listing-path-when-a-board-is-configured-readiness-source-integrity-rule-in-pull-work-skill-md-eval-coverage-positive-negative-disclosed-doctor-board-health-surface-not-built-321-443-item-5-one-time-triage-sweep-306-items-routed-as-follow-up-mechanism-first-ready-set-already-non-empty-gate-visit-2026-07-17t04-02-48-117z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-441/gate-claim-acceptance-criteria",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "Issue #441 acceptance verified. AC-1 decision recorded: docs/decisions/backlog-readiness-source.md, schema-valid frontmatter (check-decisions: 28 topics pass), evidence-linked to #441/PR #449/c19c3e64a214be7d5b2585004fd3c4f2597781e5/session. AC-2 settings reflect the chosen source and pull-work returns a non-empty intentional ready set: BoardProvider kontourai/1 verified live as the auto-populated org board (468 items, auto-add Triage/Done automation, Status taxonomy incl Ready); triage declared in schema enum + settings (ajv VALID); live board read returns ready_queue=14 (cross-repo, P0-P2 ranked), warnings [], intake_gaps 0. AC-3 silent fallback replaced by explicit warning: zero_ready_items on the empty-board path (PR #449, unregressed) + NEW board_provider_bypassed on the issue-listing path when a board is configured + Readiness Source Integrity rule in pull-work SKILL.md; eval coverage positive+negative. DISCLOSED: doctor board-health surface not built (#321/#443 item 5); one-time Triage sweep (~306 items) routed as follow-up (mechanism-first; Ready set already non-empty).",
+        "value": "pass",
+        "createdAt": "2026-07-17T04:29:21.725Z",
+        "updatedAt": "2026-07-17T04:29:21.725Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "command",
+          "workflow_subject_ref": "kontourai/flow-agents#441",
+          "expected_producer": "builder.verify-work",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "acceptance-criteria",
+            "tests-evidence",
+            "policy-compliance"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "command",
+              "excerpt": "bash evals/integration/test_pull_work_provider.sh",
+              "summary": "Issues-path normalization + NEW bypass-warning positive/negative assertions: all pass"
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-441/kontourai-flow-agents-441--deliver.md",
+              "summary": "Full verification report: builds, suites, live board acceptance evidence, disclosed follow-ups"
+            }
+          ],
+          "output_digest": {
+            "algorithm": "sha256",
+            "hex": "2ec604bde5dd76b39fa437579cd41814ffcb3875c7a37c237159c66b4f503f8f"
+          },
+          "observed_commands": [
+            {
+              "command": "bash evals/integration/test_pull_work_provider.sh",
+              "exit_code": 0,
+              "output_sha256": "2ec604bde5dd76b39fa437579cd41814ffcb3875c7a37c237159c66b4f503f8f"
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "acceptance-criteria",
+            "claim_type": "workflow.acceptance.criterion",
+            "subject_type": "flow-step",
+            "step_id": "verify",
+            "identity_version": 2,
+            "recorded_at": "2026-07-17T04:02:48.117Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-441-gate-claim-tests-evidence.flow-agents-workflow.manifest-lane-proof-supersedes-the-prior-tests-evidence-claim-whose-labeled-command-npm-run-test-unit-was-off-the-reconcile-manifest-evidence-shape-correction-substantive-verification-unchanged-labeled-command-the-run-baseline-manifest-lane-kit-install-merge-integration-87-87-executed-writer-observed-on-the-delivered-branch-feat-board-readiness-441-af04efa-session-artifact-root-pinned-to-this-worktree-it-exercises-the-kit-install-machinery-that-ships-this-lane-s-pull-work-skill-md-change-the-direct-behavioral-proof-for-this-change-is-the-pull-work-provider-integration-lane-bash-evals-integration-test-pull-work-provider-sh-all-pass-incl-the-two-new-board-provider-bypassed-positive-negative-assertions-and-the-pull-work-board-integration-lane-bash-evals-integration-test-pull-work-board-sh-zero-ready-items-unregressed-both-green-writer-observed-here-and-both-re-executed-by-ci-through-those-exact-manifest-lanes-they-cannot-be-this-claim-s-labeled-command-because-their-scripts-use-set-uo-pipefail-without-e-and-print-no-aggregate-count-which-the-canonical-writer-s-execution-proof-heuristic-rejects-full-battery-also-green-on-af04efa-build-tsc-eval-static-exit-0-test-unit-541-541-effective-workspace-settings-decisions-workflow-skills-builder-skill-coherence-context-map-validate-source-ajv-valid-settings-docs-independent-codex-review-clean-at-all-severities-re-recorded-for-this-gate-visit-reviewed-diff-unchanged-known-environmental-on-this-host-ci-authority-test-bundle-install-sh-119-120-test-builder-step-producers-sh-gate-visit-2026-07-17t04-28-17-748z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-441/gate-claim-tests-evidence",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "Manifest-lane proof (supersedes the prior tests-evidence claim whose labeled command npm run test:unit was off the reconcile manifest — evidence-shape correction, substantive verification unchanged). Labeled command: the run-baseline manifest lane Kit install merge integration (87/87), executed writer-observed on the delivered branch (feat/board-readiness-441 @ af04efa; session artifact root pinned to this worktree) — it exercises the kit install machinery that ships this lane's pull-work SKILL.md change. The DIRECT behavioral proof for this change is the Pull work provider integration lane (bash evals/integration/test_pull_work_provider.sh — all pass incl the two NEW board_provider_bypassed positive/negative assertions) and the Pull work board integration lane (bash evals/integration/test_pull_work_board.sh — zero_ready_items unregressed), both green writer-observed here and both re-executed by CI through those exact manifest lanes; they cannot be this claim's labeled command because their scripts use set -uo pipefail without -e and print no aggregate count, which the canonical writer's execution-proof heuristic rejects. Full battery also green on af04efa: build (tsc), eval:static (exit 0), test:unit 541/541, effective/workspace settings, decisions, workflow-skills, builder-skill-coherence, context-map, validate:source, ajv-valid settings docs. Independent Codex review: clean at all severities (re-recorded for this gate visit; reviewed diff unchanged). Known-environmental on this host (CI authority): test_bundle_install.sh 119/120, test_builder_step_producers.sh.",
+        "value": "pass",
+        "createdAt": "2026-07-17T04:29:21.725Z",
+        "updatedAt": "2026-07-17T04:29:21.725Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.verify.tests:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "command",
+          "workflow_subject_ref": "kontourai/flow-agents#441",
+          "expected_producer": "builder.verify-work",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "acceptance-criteria",
+            "tests-evidence",
+            "policy-compliance"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "command",
+              "excerpt": "bash evals/integration/test_install_merge.sh",
+              "summary": "Manifest lane (87/87) executed by the canonical writer for this verification result"
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-441/kontourai-flow-agents-441--deliver.md",
+              "summary": "Full battery incl provider/board lanes green + live 14-item ready-queue acceptance evidence"
+            }
+          ],
+          "output_digest": {
+            "algorithm": "sha256",
+            "hex": "ad08c1f7d4a06a151667fdfe37177d100a3013bc4247625c9d16c96f077eeeab"
+          },
+          "observed_commands": [
+            {
+              "command": "bash evals/integration/test_install_merge.sh",
+              "exit_code": 0,
+              "output_sha256": "ad08c1f7d4a06a151667fdfe37177d100a3013bc4247625c9d16c96f077eeeab",
+              "test_count": 1,
+              "execution_proof": {
+                "kind": "local-process-exit",
+                "runner": "bash",
+                "static_test_units": 1
+              }
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "tests-evidence",
+            "claim_type": "builder.verify.tests",
+            "subject_type": "flow-step",
+            "step_id": "verify",
+            "identity_version": 2,
+            "recorded_at": "2026-07-17T04:28:17.748Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-441-gate-claim-merge-readiness.flow-agents-workflow.merge-readiness-re-assessed-ready-for-merge-review-after-the-evidence-shape-correction-tests-evidence-now-labeled-with-the-manifest-lane-test-install-merge-sh-87-87-substantive-verification-unchanged-reviewed-diff-af04efa-byte-identical-critique-re-recorded-clean-for-the-current-gate-visit-scope-integrity-single-commit-af04efa-matches-plan-waves-1-4-exactly-no-out-of-plan-files-663-lane-boundary-honored-no-board-mutations-base-origin-main-14ba90d-evidence-independent-env-scrubbed-codex-review-clean-at-all-severities-writer-observed-battery-green-on-the-delivered-branch-build-eval-static-exit-0-test-unit-541-541-provider-board-settings-decisions-skills-lanes-context-map-validate-source-ajv-valid-settings-live-acceptance-evidence-shows-the-configured-readiness-source-alive-14-item-cross-repo-priority-ranked-ready-queue-zero-warnings-zero-intake-gaps-a-silent-revert-of-the-new-warning-would-fail-the-new-positive-ci-lane-assertion-disclosed-accepted-gaps-doctor-board-health-surface-not-built-443-item-5-321-one-time-triage-sweep-routed-to-443-item-2-known-environmental-host-failures-test-bundle-install-119-120-test-builder-step-producers-reproduce-on-pristine-main-with-ci-as-authority-stops-at-pr-open-publish-is-orchestrator-owned-gate-visit-2026-07-17t04-29-21-725z",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-441/gate-claim-merge-readiness",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.merge-ready.readiness",
+        "fieldOrBehavior": "Merge-readiness re-assessed READY for merge review after the evidence-shape correction (tests-evidence now labeled with the manifest lane test_install_merge.sh 87/87; substantive verification unchanged; reviewed diff af04efa byte-identical; critique re-recorded clean for the current gate visit). Scope integrity: single commit af04efa matches plan waves 1-4 exactly, no out-of-plan files, #663 lane boundary honored, no board mutations, base origin/main@14ba90d. Evidence: independent env-scrubbed Codex review clean at all severities; writer-observed battery green on the delivered branch (build, eval:static exit 0, test:unit 541/541, provider/board/settings/decisions/skills lanes, context-map, validate:source, ajv-valid settings); live acceptance evidence shows the configured readiness source alive (14-item cross-repo priority-ranked ready queue, zero warnings, zero intake gaps). A silent revert of the new warning would fail the new positive CI-lane assertion. Disclosed accepted gaps: doctor board-health surface not built (#443 item 5/#321); one-time Triage sweep routed to #443 item 2; known-environmental host failures (test_bundle_install 119/120, test_builder_step_producers) reproduce on pristine main with CI as authority. Stops at pr-open: publish is orchestrator-owned.",
+        "value": "pass",
+        "createdAt": "2026-07-17T04:29:21.725Z",
+        "updatedAt": "2026-07-17T04:29:21.725Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.merge-ready.readiness:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#441",
+          "expected_producer": "builder.evidence-gate",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "merge-readiness"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-441/kontourai-flow-agents-441--evidence-gate.md",
+              "summary": "Confidence report: scope integrity, verification summary, per-AC confidence, disclosed gaps"
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-441/kontourai-flow-agents-441--deliver.md",
+              "summary": "Verification report and execution record"
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "merge-readiness",
+            "claim_type": "builder.merge-ready.readiness",
+            "subject_type": "change",
+            "step_id": "merge-ready",
+            "identity_version": 2,
+            "recorded_at": "2026-07-17T04:29:21.725Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-441-complete-the-requested-outcome-deliver-kontourai-flow-agents-441-through-builder-build.flow-agents-workflow.complete-the-requested-outcome-deliver-kontourai-flow-agents-441-through-builder-build-verified-2026-07-17t04-28-17-748z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-441/complete-the-requested-outcome-deliver-kontourai-flow-agents-441-through-builder-build",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "Complete the requested outcome: Deliver kontourai/flow-agents#441 through builder.build",
+        "value": "pass",
+        "createdAt": "2026-07-17T04:28:17.748Z",
+        "updatedAt": "2026-07-17T04:28:17.748Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
+        "metadata": {
+          "origin": "acceptance",
+          "criterion": {
+            "id": "complete-the-requested-outcome-deliver-kontourai-flow-agents-441-through-builder-build",
+            "description": "Complete the requested outcome: Deliver kontourai/flow-agents#441 through builder.build",
+            "status": "pass",
+            "evidence_refs": [
+              {
+                "kind": "command",
+                "excerpt": "bash evals/integration/test_install_merge.sh",
+                "summary": "Manifest lane 87/87 green writer-observed on the delivered branch"
+              },
+              {
+                "kind": "artifact",
+                "file": ".kontourai/flow-agents/kontourai-flow-agents-441/kontourai-flow-agents-441--deliver.md",
+                "summary": "Change-specific provider/board lane results + live board acceptance evidence"
+              }
+            ],
+            "observed_commands": [
+              {
+                "command": "bash evals/integration/test_install_merge.sh",
+                "exit_code": 0,
+                "output_sha256": "ad08c1f7d4a06a151667fdfe37177d100a3013bc4247625c9d16c96f077eeeab",
+                "test_count": 1,
+                "execution_proof": {
+                  "kind": "local-process-exit",
+                  "runner": "bash",
+                  "static_test_units": 1
+                }
+              }
+            ],
+            "identity_version": 2,
+            "verified_at": "2026-07-17T04:28:17.748Z"
+          },
+          "workflow_subject_ref": "kontourai/flow-agents#441"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-441-review.flow-agents-workflow.independent-report-only-review-by-codex-codex-cli-0-144-1-session-019f6e38-db69-7bf2-a0e5-0df4844ae711-launched-env-scrubbed-of-claudecode-claude-code-session-id-and-related-vars-read-only-sandbox-identity-distinct-from-the-implementer-verdict-on-af04efa-no-blocker-major-minor-or-nit-findings-reviewer-gaps-disclosed-sandbox-denied-mktemp-so-stock-integration-scripts-did-not-run-end-to-end-in-review-writer-observed-green-in-this-worktree-ci-re-runs-authoritative-live-github-board-facts-not-independently-refreshed-network-restricted-full-ci-not-run-in-review-reviewed-2026-07-17t04-02-08-504z-superseded-review-2026-07-17t04-28-02-567z",
+        "subjectType": "workflow-critique",
+        "subjectId": "kontourai-flow-agents-441/review",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.critique.review",
+        "fieldOrBehavior": "Independent report-only review by Codex (codex-cli 0.144.1, session 019f6e38-db69-7bf2-a0e5-0df4844ae711, launched env-scrubbed of CLAUDECODE/CLAUDE_CODE_SESSION_ID and related vars, read-only sandbox, identity distinct from the implementer). Verdict on af04efa: NO blocker, major, minor, or nit findings. Reviewer gaps disclosed: sandbox denied mktemp so stock integration scripts did not run end-to-end in-review (writer-observed green in this worktree; CI re-runs authoritative); live GitHub board facts not independently refreshed (network-restricted); full CI not run in-review.",
+        "value": "pass",
+        "createdAt": "2026-07-17T04:29:21.725Z",
+        "updatedAt": "2026-07-17T04:29:21.725Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:workflow.critique.review",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "codex-cli019f6e38-db69-7bf2-a0e5-0df4844ae711Kontour",
+          "reviewed_at": "2026-07-17T04:02:08.504Z",
+          "identity_version": 2,
+          "findings": [],
+          "lanes": [
+            {
+              "id": "decision-record-conformance",
+              "status": "pass",
+              "summary": "Decision frontmatter conforms to decision-record schema with issue/PR/commit/session evidence refs; check-decisions passes.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": "docs/decisions/backlog-readiness-source.md",
+                  "summary": "Reviewer-verified frontmatter and evidence links"
+                }
+              ]
+            },
+            {
+              "id": "provider-warning-behavior",
+              "status": "pass",
+              "summary": "board_provider_bypassed correctly restricted to the --issues-json path; board routing unchanged; zero_ready_items from PR #449 intact. Proven by four read-only CLI probes: configured issues path emits the bypass warning, boardless emits none, non-empty board path unchanged, empty board emits zero_ready_items.",
+              "evidence_refs": [
+                {
+                  "kind": "command",
+                  "excerpt": "node scripts/pull-work-provider.js --settings-json context/settings/backlog-provider-settings.json --issues-json evals/fixtures/pull-work-provider/github-issues.json",
+                  "summary": "configured issues path: 12 items, board_provider_bypassed"
+                }
+              ]
+            },
+            {
+              "id": "eval-coverage",
+              "status": "pass",
+              "summary": "Positive and negative bypass-warning cases added to test_pull_work_provider.sh; unchanged test_pull_work_board.sh still covers ready ordering and zero-ready warning.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": "evals/integration/test_pull_work_provider.sh",
+                  "summary": "New assertions at the Readiness Source Integrity block"
+                }
+              ]
+            }
+          ],
+          "review_target": {
+            "artifacts": [
+              {
+                "file": ".kontourai/flow-agents/kontourai-flow-agents-441/kontourai-flow-agents-441--deliver.md",
+                "sha256": "762d3f2b960e2b0e1ac0c220c0d97c54a6369506765acd9666ebd99a754df4d1"
+              }
+            ],
+            "workspace_snapshot": {
+              "version": 1,
+              "kind": "git-worktree",
+              "algorithm": "sha256",
+              "digest": "3ac74debe4cd690b185a6d11d44cc7cff38df42370b27c9c7227cace1d20284e",
+              "head_sha": "af04efa278d7e59565c98618c5224fe8cd3b87cd"
+            }
+          },
+          "artifact_refs": [
+            ".kontourai/flow-agents/kontourai-flow-agents-441/kontourai-flow-agents-441--deliver.md"
+          ],
+          "workflow_subject_ref": "kontourai/flow-agents#441",
+          "superseded_by": "review@2026-07-17T04:28:02.567Z"
+        },
+        "status": "superseded"
+      },
+      {
+        "id": "kontourai-flow-agents-441-review.flow-agents-workflow.re-recorded-for-the-current-verify-gate-visit-after-the-missing-evidence-route-back-an-evidence-shape-correction-only-the-tests-evidence-claim-label-changed-from-npm-run-test-unit-to-the-manifest-lane-test-install-merge-sh-the-reviewed-diff-af04efa-is-byte-identical-so-the-review-verdict-stands-unchanged-independent-report-only-review-by-codex-codex-cli-0-144-1-session-019f6e38-db69-7bf2-a0e5-0df4844ae711-env-scrubbed-of-claudecode-claude-code-session-id-read-only-sandbox-identity-distinct-from-the-implementer-verdict-on-af04efa-no-blocker-major-minor-or-nit-findings-reviewer-gaps-disclosed-sandbox-denied-mktemp-so-stock-integration-scripts-did-not-run-end-to-end-in-review-writer-observed-green-in-this-worktree-ci-re-runs-authoritative-live-github-board-facts-not-independently-refreshed-network-restricted-full-ci-not-run-in-review-reviewed-2026-07-17t04-28-02-567z",
+        "subjectType": "workflow-critique",
+        "subjectId": "kontourai-flow-agents-441/review",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.critique.review",
+        "fieldOrBehavior": "Re-recorded for the current verify gate visit after the missing_evidence route-back (an evidence-shape correction only: the tests-evidence claim label changed from npm run test:unit to the manifest lane test_install_merge.sh; the reviewed diff af04efa is byte-identical, so the review verdict stands unchanged). Independent report-only review by Codex (codex-cli 0.144.1, session 019f6e38-db69-7bf2-a0e5-0df4844ae711, env-scrubbed of CLAUDECODE/CLAUDE_CODE_SESSION_ID, read-only sandbox, identity distinct from the implementer). Verdict on af04efa: NO blocker, major, minor, or nit findings. Reviewer gaps disclosed: sandbox denied mktemp so stock integration scripts did not run end-to-end in-review (writer-observed green in this worktree; CI re-runs authoritative); live GitHub board facts not independently refreshed (network-restricted); full CI not run in-review.",
+        "value": "pass",
+        "createdAt": "2026-07-17T04:29:21.725Z",
+        "updatedAt": "2026-07-17T04:29:21.725Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:workflow.critique.review",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "codex-cli019f6e38-db69-7bf2-a0e5-0df4844ae711Kontour",
+          "reviewed_at": "2026-07-17T04:28:02.567Z",
+          "identity_version": 2,
+          "findings": [],
+          "lanes": [
+            {
+              "id": "decision-record-conformance",
+              "status": "pass",
+              "summary": "Decision frontmatter conforms to decision-record schema with issue/PR/commit/session evidence refs; check-decisions passes.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": "docs/decisions/backlog-readiness-source.md",
+                  "summary": "Reviewer-verified frontmatter and evidence links"
+                }
+              ]
+            },
+            {
+              "id": "provider-warning-behavior",
+              "status": "pass",
+              "summary": "board_provider_bypassed correctly restricted to the --issues-json path; board routing unchanged; zero_ready_items from PR #449 intact. Proven by four read-only CLI probes: configured issues path emits the bypass warning, boardless emits none, non-empty board path unchanged, empty board emits zero_ready_items.",
+              "evidence_refs": [
+                {
+                  "kind": "command",
+                  "excerpt": "node scripts/pull-work-provider.js --settings-json context/settings/backlog-provider-settings.json --issues-json evals/fixtures/pull-work-provider/github-issues.json",
+                  "summary": "configured issues path: 12 items, board_provider_bypassed"
+                }
+              ]
+            },
+            {
+              "id": "eval-coverage",
+              "status": "pass",
+              "summary": "Positive and negative bypass-warning cases added to test_pull_work_provider.sh; unchanged test_pull_work_board.sh still covers ready ordering and zero-ready warning.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": "evals/integration/test_pull_work_provider.sh",
+                  "summary": "New assertions at the Readiness Source Integrity block"
+                }
+              ]
+            }
+          ],
+          "review_target": {
+            "artifacts": [
+              {
+                "file": ".kontourai/flow-agents/kontourai-flow-agents-441/kontourai-flow-agents-441--deliver.md",
+                "sha256": "eb7514dfe590a101caff16f682dcd7675e22bfefcd2fdb852b23a7a9c0c915ca"
+              }
+            ],
+            "workspace_snapshot": {
+              "version": 1,
+              "kind": "git-worktree",
+              "algorithm": "sha256",
+              "digest": "3ac74debe4cd690b185a6d11d44cc7cff38df42370b27c9c7227cace1d20284e",
+              "head_sha": "af04efa278d7e59565c98618c5224fe8cd3b87cd"
+            }
+          },
+          "artifact_refs": [
+            ".kontourai/flow-agents/kontourai-flow-agents-441/kontourai-flow-agents-441--deliver.md"
+          ],
+          "workflow_subject_ref": "kontourai/flow-agents#441"
+        },
+        "status": "verified"
+      }
+    ],
+    "evidence": [
+      {
+        "id": "ev:kontourai-flow-agents-441-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-441-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-6a8823b17795fdda6c167efcdf0c5612dc375deef011496b2ee8f33d778e8935-gate-visit-2026-07-17t03-48-24z",
+        "claimId": "kontourai-flow-agents-441-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-441-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-6a8823b17795fdda6c167efcdf0c5612dc375deef011496b2ee8f33d778e8935-gate-visit-2026-07-17t03-48-24z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-441/evidence.json",
+        "excerptOrSummary": "Work Item kontourai/flow-agents#441 is durably assigned to the active workflow actor (assignment sha256:6a8823b17795fdda6c167efcdf0c5612dc375deef011496b2ee8f33d778e8935).",
+        "observedAt": "2026-07-17T04:29:21.725Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-441-gate-claim-pickup-probe-readiness.flow-agents-workflow.provider-grounded-pickup-probe-complete-441-open-and-claimed-agent-claimed-assignmentclaimrecord-comment-ic-kwdos1a8tm8aaaabkfnmdq-effective-state-held-self-is-holder-base-origin-main-14ba90d-isolated-worktree-board-readiness-441-no-conflicting-actors-parallel-663-lane-has-zero-file-overlap-planning-readiness-pass-central-finding-the-issue-s-2026-07-06-premise-is-now-false-live-verification-shows-org-project-kontourai-1-is-the-auto-populated-board-468-items-306-triage-14-ready-auto-add-workflow-targets-it-status-taxonomy-triage-ready-in-progress-blocked-review-done-agent-token-has-project-scope-and-live-board-driven-pull-work-returns-a-14-item-cross-repo-ready-queue-with-zero-warnings-gate-visit-2026-07-17t03-51-25-595z",
+        "claimId": "kontourai-flow-agents-441-gate-claim-pickup-probe-readiness.flow-agents-workflow.provider-grounded-pickup-probe-complete-441-open-and-claimed-agent-claimed-assignmentclaimrecord-comment-ic-kwdos1a8tm8aaaabkfnmdq-effective-state-held-self-is-holder-base-origin-main-14ba90d-isolated-worktree-board-readiness-441-no-conflicting-actors-parallel-663-lane-has-zero-file-overlap-planning-readiness-pass-central-finding-the-issue-s-2026-07-06-premise-is-now-false-live-verification-shows-org-project-kontourai-1-is-the-auto-populated-board-468-items-306-triage-14-ready-auto-add-workflow-targets-it-status-taxonomy-triage-ready-in-progress-blocked-review-done-agent-token-has-project-scope-and-live-board-driven-pull-work-returns-a-14-item-cross-repo-ready-queue-with-zero-warnings-gate-visit-2026-07-17t03-51-25-595z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-441/evidence.json",
+        "excerptOrSummary": "Provider-grounded pickup probe complete: #441 OPEN and claimed (agent:claimed + AssignmentClaimRecord comment IC_kwDOS1A8TM8AAAABKfNMDQ), effective state held/self_is_holder, base origin/main@14ba90d, isolated worktree board-readiness-441, no conflicting actors (parallel #663 lane has zero file overlap); planning readiness PASS. Central finding: the issue's 2026-07-06 premise is now false — live verification shows org project kontourai/1 IS the auto-populated board (468 items, 306 Triage/14 Ready, auto-add workflow targets it, Status taxonomy Triage/Ready/In Progress/Blocked/Review/Done, agent token has project scope), and live board-driven pull-work returns a 14-item cross-repo ready queue with zero warnings.",
+        "observedAt": "2026-07-17T04:29:21.725Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-441-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.design-decisions-recorded-pickup-probe-d1-d9-d1-board-based-readiness-option-b-on-org-project-kontourai-1-option-a-labels-rejected-on-fresh-2026-07-16-evidence-auto-add-automation-live-org-wide-agent-token-has-project-scope-board-adds-cross-repo-priority-ranking-d2-durable-decision-record-docs-decisions-backlog-readiness-source-md-context-md-vocabulary-regenerated-index-d3-taxonomy-truth-triage-added-to-schema-enum-declared-in-settings-d4-board-provider-bypassed-warning-on-the-issue-listing-path-d5-skill-level-no-silent-fallback-rule-accepted-gaps-disclosed-not-absorbed-doctor-board-health-check-follows-with-321-443-item-5-one-time-sweep-of-306-triage-items-routed-as-follow-up-mechanism-first-ready-set-already-non-empty-at-14-items-board-path-exclude-statuses-stays-declarative-443-444-gate-visit-2026-07-17t03-52-18-683z",
+        "claimId": "kontourai-flow-agents-441-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.design-decisions-recorded-pickup-probe-d1-d9-d1-board-based-readiness-option-b-on-org-project-kontourai-1-option-a-labels-rejected-on-fresh-2026-07-16-evidence-auto-add-automation-live-org-wide-agent-token-has-project-scope-board-adds-cross-repo-priority-ranking-d2-durable-decision-record-docs-decisions-backlog-readiness-source-md-context-md-vocabulary-regenerated-index-d3-taxonomy-truth-triage-added-to-schema-enum-declared-in-settings-d4-board-provider-bypassed-warning-on-the-issue-listing-path-d5-skill-level-no-silent-fallback-rule-accepted-gaps-disclosed-not-absorbed-doctor-board-health-check-follows-with-321-443-item-5-one-time-sweep-of-306-triage-items-routed-as-follow-up-mechanism-first-ready-set-already-non-empty-at-14-items-board-path-exclude-statuses-stays-declarative-443-444-gate-visit-2026-07-17t03-52-18-683z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-441/evidence.json",
+        "excerptOrSummary": "Design decisions recorded (pickup-probe D1-D9): D1 board-based readiness (Option B) on org project kontourai/1 — Option A labels rejected on fresh 2026-07-16 evidence (auto-add automation live org-wide, agent token has project scope, board adds cross-repo Priority ranking); D2 durable decision record docs/decisions/backlog-readiness-source.md + CONTEXT.md vocabulary + regenerated index; D3 taxonomy truth (triage added to schema enum + declared in settings); D4 board_provider_bypassed warning on the issue-listing path; D5 skill-level no-silent-fallback rule. Accepted gaps disclosed, not absorbed: doctor board-health check follows with #321/#443 item 5; one-time sweep of ~306 Triage items routed as follow-up (mechanism-first, Ready set already non-empty at 14 items); board-path exclude_statuses stays declarative (#443/#444).",
+        "observedAt": "2026-07-17T04:29:21.725Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-441-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-recorded-wave-1-decision-record-docs-decisions-backlog-readiness-source-md-schema-validated-frontmatter-evidence-linked-to-441-pr-449-c19c3e6-context-md-vocabulary-regenerated-decisions-index-wave-2-settings-taxonomy-truth-triage-added-to-schema-exclude-statuses-enum-declared-in-repo-settings-workspace-example-board-pointer-kontourai-1-verified-correct-unchanged-wave-3-fallback-surfacing-board-provider-bypassed-warning-on-the-issue-listing-path-in-pull-work-provider-ts-readiness-source-integrity-rule-in-pull-work-skill-md-wave-4-eval-coverage-in-test-pull-work-board-sh-context-map-drift-check-verification-build-eval-static-on-final-head-targeted-board-provider-settings-decisions-suites-live-board-read-acceptance-evidence-scope-boundary-excludes-board-writes-doctor-implementation-444-workspace-behavior-and-663-lane-files-gate-visit-2026-07-17t03-53-17-364z",
+        "claimId": "kontourai-flow-agents-441-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-recorded-wave-1-decision-record-docs-decisions-backlog-readiness-source-md-schema-validated-frontmatter-evidence-linked-to-441-pr-449-c19c3e6-context-md-vocabulary-regenerated-decisions-index-wave-2-settings-taxonomy-truth-triage-added-to-schema-exclude-statuses-enum-declared-in-repo-settings-workspace-example-board-pointer-kontourai-1-verified-correct-unchanged-wave-3-fallback-surfacing-board-provider-bypassed-warning-on-the-issue-listing-path-in-pull-work-provider-ts-readiness-source-integrity-rule-in-pull-work-skill-md-wave-4-eval-coverage-in-test-pull-work-board-sh-context-map-drift-check-verification-build-eval-static-on-final-head-targeted-board-provider-settings-decisions-suites-live-board-read-acceptance-evidence-scope-boundary-excludes-board-writes-doctor-implementation-444-workspace-behavior-and-663-lane-files-gate-visit-2026-07-17t03-53-17-364z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-441/evidence.json",
+        "excerptOrSummary": "Implementation plan recorded: Wave 1 decision record (docs/decisions/backlog-readiness-source.md, schema-validated frontmatter, evidence-linked to #441/PR #449/c19c3e6) + CONTEXT.md vocabulary + regenerated decisions index; Wave 2 settings-taxonomy truth (triage added to schema exclude_statuses enum, declared in repo settings + workspace example; board pointer kontourai/1 verified correct, unchanged); Wave 3 fallback surfacing (board_provider_bypassed warning on the issue-listing path in pull-work-provider.ts; Readiness Source Integrity rule in pull-work SKILL.md); Wave 4 eval coverage in test_pull_work_board.sh + context-map drift check. Verification: build + eval:static on final HEAD, targeted board/provider/settings/decisions suites, live board-read acceptance evidence. Scope boundary excludes board writes, doctor implementation, #444 workspace behavior, and #663 lane files.",
+        "observedAt": "2026-07-17T04:29:21.725Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-441-gate-claim-implementation-scope.flow-agents-workflow.implemented-scope-matches-the-plan-exactly-commit-af04efa-9-files-135-4-decision-record-vocabulary-wave-1-settings-taxonomy-truth-with-ajv-valid-settings-wave-2-board-provider-bypassed-warning-readiness-source-integrity-skill-rule-wave-3-eval-coverage-positive-negative-wave-4-no-board-writes-no-doctor-implementation-no-663-lane-files-in-lane-checks-build-pass-pull-work-provider-board-effective-workspace-settings-decisions-suites-pass-context-map-current-validate-source-pass-live-board-read-returns-14-item-ready-queue-with-zero-warnings-gate-visit-2026-07-17t03-56-51-477z",
+        "claimId": "kontourai-flow-agents-441-gate-claim-implementation-scope.flow-agents-workflow.implemented-scope-matches-the-plan-exactly-commit-af04efa-9-files-135-4-decision-record-vocabulary-wave-1-settings-taxonomy-truth-with-ajv-valid-settings-wave-2-board-provider-bypassed-warning-readiness-source-integrity-skill-rule-wave-3-eval-coverage-positive-negative-wave-4-no-board-writes-no-doctor-implementation-no-663-lane-files-in-lane-checks-build-pass-pull-work-provider-board-effective-workspace-settings-decisions-suites-pass-context-map-current-validate-source-pass-live-board-read-returns-14-item-ready-queue-with-zero-warnings-gate-visit-2026-07-17t03-56-51-477z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-441/evidence.json",
+        "excerptOrSummary": "Implemented scope matches the plan exactly (commit af04efa, 9 files, +135/-4): decision record + vocabulary (wave 1), settings-taxonomy truth with ajv-VALID settings (wave 2), board_provider_bypassed warning + Readiness Source Integrity skill rule (wave 3), eval coverage positive+negative (wave 4). No board writes, no doctor implementation, no #663-lane files. In-lane checks: build pass; pull-work provider/board, effective/workspace settings, decisions suites pass; context-map current; validate:source pass; live board read returns 14-item ready queue with zero warnings.",
+        "observedAt": "2026-07-17T04:29:21.725Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-441-gate-claim-acceptance-criteria.flow-agents-workflow.issue-441-acceptance-verified-ac-1-decision-recorded-docs-decisions-backlog-readiness-source-md-schema-valid-frontmatter-check-decisions-28-topics-pass-evidence-linked-to-441-pr-449-c19c3e64a214be7d5b2585004fd3c4f2597781e5-session-ac-2-settings-reflect-the-chosen-source-and-pull-work-returns-a-non-empty-intentional-ready-set-boardprovider-kontourai-1-verified-live-as-the-auto-populated-org-board-468-items-auto-add-triage-done-automation-status-taxonomy-incl-ready-triage-declared-in-schema-enum-settings-ajv-valid-live-board-read-returns-ready-queue-14-cross-repo-p0-p2-ranked-warnings-intake-gaps-0-ac-3-silent-fallback-replaced-by-explicit-warning-zero-ready-items-on-the-empty-board-path-pr-449-unregressed-new-board-provider-bypassed-on-the-issue-listing-path-when-a-board-is-configured-readiness-source-integrity-rule-in-pull-work-skill-md-eval-coverage-positive-negative-disclosed-doctor-board-health-surface-not-built-321-443-item-5-one-time-triage-sweep-306-items-routed-as-follow-up-mechanism-first-ready-set-already-non-empty-gate-visit-2026-07-17t04-02-48-117z",
+        "claimId": "kontourai-flow-agents-441-gate-claim-acceptance-criteria.flow-agents-workflow.issue-441-acceptance-verified-ac-1-decision-recorded-docs-decisions-backlog-readiness-source-md-schema-valid-frontmatter-check-decisions-28-topics-pass-evidence-linked-to-441-pr-449-c19c3e64a214be7d5b2585004fd3c4f2597781e5-session-ac-2-settings-reflect-the-chosen-source-and-pull-work-returns-a-non-empty-intentional-ready-set-boardprovider-kontourai-1-verified-live-as-the-auto-populated-org-board-468-items-auto-add-triage-done-automation-status-taxonomy-incl-ready-triage-declared-in-schema-enum-settings-ajv-valid-live-board-read-returns-ready-queue-14-cross-repo-p0-p2-ranked-warnings-intake-gaps-0-ac-3-silent-fallback-replaced-by-explicit-warning-zero-ready-items-on-the-empty-board-path-pr-449-unregressed-new-board-provider-bypassed-on-the-issue-listing-path-when-a-board-is-configured-readiness-source-integrity-rule-in-pull-work-skill-md-eval-coverage-positive-negative-disclosed-doctor-board-health-surface-not-built-321-443-item-5-one-time-triage-sweep-306-items-routed-as-follow-up-mechanism-first-ready-set-already-non-empty-gate-visit-2026-07-17t04-02-48-117z",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-441/command-log.jsonl",
+        "excerptOrSummary": "Issue #441 acceptance verified. AC-1 decision recorded: docs/decisions/backlog-readiness-source.md, schema-valid frontmatter (check-decisions: 28 topics pass), evidence-linked to #441/PR #449/c19c3e64a214be7d5b2585004fd3c4f2597781e5/session. AC-2 settings reflect the chosen source and pull-work returns a non-empty intentional ready set: BoardProvider kontourai/1 verified live as the auto-populated org board (468 items, auto-add Triage/Done automation, Status taxonomy incl Ready); triage declared in schema enum + settings (ajv VALID); live board read returns ready_queue=14 (cross-repo, P0-P2 ranked), warnings [], intake_gaps 0. AC-3 silent fallback replaced by explicit warning: zero_ready_items on the empty-board path (PR #449, unregressed) + NEW board_provider_bypassed on the issue-listing path when a board is configured + Readiness Source Integrity rule in pull-work SKILL.md; eval coverage positive+negative. DISCLOSED: doctor board-health surface not built (#321/#443 item 5); one-time Triage sweep (~306 items) routed as follow-up (mechanism-first; Ready set already non-empty).",
+        "observedAt": "2026-07-17T04:29:21.725Z",
+        "collectedBy": "flow-agents/evidence-capture",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_pull_work_provider.sh",
+          "isError": false,
+          "exitCode": 0
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-441-gate-claim-tests-evidence.flow-agents-workflow.manifest-lane-proof-supersedes-the-prior-tests-evidence-claim-whose-labeled-command-npm-run-test-unit-was-off-the-reconcile-manifest-evidence-shape-correction-substantive-verification-unchanged-labeled-command-the-run-baseline-manifest-lane-kit-install-merge-integration-87-87-executed-writer-observed-on-the-delivered-branch-feat-board-readiness-441-af04efa-session-artifact-root-pinned-to-this-worktree-it-exercises-the-kit-install-machinery-that-ships-this-lane-s-pull-work-skill-md-change-the-direct-behavioral-proof-for-this-change-is-the-pull-work-provider-integration-lane-bash-evals-integration-test-pull-work-provider-sh-all-pass-incl-the-two-new-board-provider-bypassed-positive-negative-assertions-and-the-pull-work-board-integration-lane-bash-evals-integration-test-pull-work-board-sh-zero-ready-items-unregressed-both-green-writer-observed-here-and-both-re-executed-by-ci-through-those-exact-manifest-lanes-they-cannot-be-this-claim-s-labeled-command-because-their-scripts-use-set-uo-pipefail-without-e-and-print-no-aggregate-count-which-the-canonical-writer-s-execution-proof-heuristic-rejects-full-battery-also-green-on-af04efa-build-tsc-eval-static-exit-0-test-unit-541-541-effective-workspace-settings-decisions-workflow-skills-builder-skill-coherence-context-map-validate-source-ajv-valid-settings-docs-independent-codex-review-clean-at-all-severities-re-recorded-for-this-gate-visit-reviewed-diff-unchanged-known-environmental-on-this-host-ci-authority-test-bundle-install-sh-119-120-test-builder-step-producers-sh-gate-visit-2026-07-17t04-28-17-748z",
+        "claimId": "kontourai-flow-agents-441-gate-claim-tests-evidence.flow-agents-workflow.manifest-lane-proof-supersedes-the-prior-tests-evidence-claim-whose-labeled-command-npm-run-test-unit-was-off-the-reconcile-manifest-evidence-shape-correction-substantive-verification-unchanged-labeled-command-the-run-baseline-manifest-lane-kit-install-merge-integration-87-87-executed-writer-observed-on-the-delivered-branch-feat-board-readiness-441-af04efa-session-artifact-root-pinned-to-this-worktree-it-exercises-the-kit-install-machinery-that-ships-this-lane-s-pull-work-skill-md-change-the-direct-behavioral-proof-for-this-change-is-the-pull-work-provider-integration-lane-bash-evals-integration-test-pull-work-provider-sh-all-pass-incl-the-two-new-board-provider-bypassed-positive-negative-assertions-and-the-pull-work-board-integration-lane-bash-evals-integration-test-pull-work-board-sh-zero-ready-items-unregressed-both-green-writer-observed-here-and-both-re-executed-by-ci-through-those-exact-manifest-lanes-they-cannot-be-this-claim-s-labeled-command-because-their-scripts-use-set-uo-pipefail-without-e-and-print-no-aggregate-count-which-the-canonical-writer-s-execution-proof-heuristic-rejects-full-battery-also-green-on-af04efa-build-tsc-eval-static-exit-0-test-unit-541-541-effective-workspace-settings-decisions-workflow-skills-builder-skill-coherence-context-map-validate-source-ajv-valid-settings-docs-independent-codex-review-clean-at-all-severities-re-recorded-for-this-gate-visit-reviewed-diff-unchanged-known-environmental-on-this-host-ci-authority-test-bundle-install-sh-119-120-test-builder-step-producers-sh-gate-visit-2026-07-17t04-28-17-748z",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-441/command-log.jsonl",
+        "excerptOrSummary": "Manifest-lane proof (supersedes the prior tests-evidence claim whose labeled command npm run test:unit was off the reconcile manifest — evidence-shape correction, substantive verification unchanged). Labeled command: the run-baseline manifest lane Kit install merge integration (87/87), executed writer-observed on the delivered branch (feat/board-readiness-441 @ af04efa; session artifact root pinned to this worktree) — it exercises the kit install machinery that ships this lane's pull-work SKILL.md change. The DIRECT behavioral proof for this change is the Pull work provider integration lane (bash evals/integration/test_pull_work_provider.sh — all pass incl the two NEW board_provider_bypassed positive/negative assertions) and the Pull work board integration lane (bash evals/integration/test_pull_work_board.sh — zero_ready_items unregressed), both green writer-observed here and both re-executed by CI through those exact manifest lanes; they cannot be this claim's labeled command because their scripts use set -uo pipefail without -e and print no aggregate count, which the canonical writer's execution-proof heuristic rejects. Full battery also green on af04efa: build (tsc), eval:static (exit 0), test:unit 541/541, effective/workspace settings, decisions, workflow-skills, builder-skill-coherence, context-map, validate:source, ajv-valid settings docs. Independent Codex review: clean at all severities (re-recorded for this gate visit; reviewed diff unchanged). Known-environmental on this host (CI authority): test_bundle_install.sh 119/120, test_builder_step_producers.sh.",
+        "observedAt": "2026-07-17T04:29:21.725Z",
+        "collectedBy": "flow-agents/evidence-capture",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_install_merge.sh",
+          "isError": false,
+          "exitCode": 0
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-441-gate-claim-merge-readiness.flow-agents-workflow.merge-readiness-re-assessed-ready-for-merge-review-after-the-evidence-shape-correction-tests-evidence-now-labeled-with-the-manifest-lane-test-install-merge-sh-87-87-substantive-verification-unchanged-reviewed-diff-af04efa-byte-identical-critique-re-recorded-clean-for-the-current-gate-visit-scope-integrity-single-commit-af04efa-matches-plan-waves-1-4-exactly-no-out-of-plan-files-663-lane-boundary-honored-no-board-mutations-base-origin-main-14ba90d-evidence-independent-env-scrubbed-codex-review-clean-at-all-severities-writer-observed-battery-green-on-the-delivered-branch-build-eval-static-exit-0-test-unit-541-541-provider-board-settings-decisions-skills-lanes-context-map-validate-source-ajv-valid-settings-live-acceptance-evidence-shows-the-configured-readiness-source-alive-14-item-cross-repo-priority-ranked-ready-queue-zero-warnings-zero-intake-gaps-a-silent-revert-of-the-new-warning-would-fail-the-new-positive-ci-lane-assertion-disclosed-accepted-gaps-doctor-board-health-surface-not-built-443-item-5-321-one-time-triage-sweep-routed-to-443-item-2-known-environmental-host-failures-test-bundle-install-119-120-test-builder-step-producers-reproduce-on-pristine-main-with-ci-as-authority-stops-at-pr-open-publish-is-orchestrator-owned-gate-visit-2026-07-17t04-29-21-725z",
+        "claimId": "kontourai-flow-agents-441-gate-claim-merge-readiness.flow-agents-workflow.merge-readiness-re-assessed-ready-for-merge-review-after-the-evidence-shape-correction-tests-evidence-now-labeled-with-the-manifest-lane-test-install-merge-sh-87-87-substantive-verification-unchanged-reviewed-diff-af04efa-byte-identical-critique-re-recorded-clean-for-the-current-gate-visit-scope-integrity-single-commit-af04efa-matches-plan-waves-1-4-exactly-no-out-of-plan-files-663-lane-boundary-honored-no-board-mutations-base-origin-main-14ba90d-evidence-independent-env-scrubbed-codex-review-clean-at-all-severities-writer-observed-battery-green-on-the-delivered-branch-build-eval-static-exit-0-test-unit-541-541-provider-board-settings-decisions-skills-lanes-context-map-validate-source-ajv-valid-settings-live-acceptance-evidence-shows-the-configured-readiness-source-alive-14-item-cross-repo-priority-ranked-ready-queue-zero-warnings-zero-intake-gaps-a-silent-revert-of-the-new-warning-would-fail-the-new-positive-ci-lane-assertion-disclosed-accepted-gaps-doctor-board-health-surface-not-built-443-item-5-321-one-time-triage-sweep-routed-to-443-item-2-known-environmental-host-failures-test-bundle-install-119-120-test-builder-step-producers-reproduce-on-pristine-main-with-ci-as-authority-stops-at-pr-open-publish-is-orchestrator-owned-gate-visit-2026-07-17t04-29-21-725z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-441/evidence.json",
+        "excerptOrSummary": "Merge-readiness re-assessed READY for merge review after the evidence-shape correction (tests-evidence now labeled with the manifest lane test_install_merge.sh 87/87; substantive verification unchanged; reviewed diff af04efa byte-identical; critique re-recorded clean for the current gate visit). Scope integrity: single commit af04efa matches plan waves 1-4 exactly, no out-of-plan files, #663 lane boundary honored, no board mutations, base origin/main@14ba90d. Evidence: independent env-scrubbed Codex review clean at all severities; writer-observed battery green on the delivered branch (build, eval:static exit 0, test:unit 541/541, provider/board/settings/decisions/skills lanes, context-map, validate:source, ajv-valid settings); live acceptance evidence shows the configured readiness source alive (14-item cross-repo priority-ranked ready queue, zero warnings, zero intake gaps). A silent revert of the new warning would fail the new positive CI-lane assertion. Disclosed accepted gaps: doctor board-health surface not built (#443 item 5/#321); one-time Triage sweep routed to #443 item 2; known-environmental host failures (test_bundle_install 119/120, test_builder_step_producers) reproduce on pristine main with CI as authority. Stops at pr-open: publish is orchestrator-owned.",
+        "observedAt": "2026-07-17T04:29:21.725Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-441-complete-the-requested-outcome-deliver-kontourai-flow-agents-441-through-builder-build.flow-agents-workflow.complete-the-requested-outcome-deliver-kontourai-flow-agents-441-through-builder-build-verified-2026-07-17t04-28-17-748z:79bd9ced5c6a80f1",
+        "claimId": "kontourai-flow-agents-441-complete-the-requested-outcome-deliver-kontourai-flow-agents-441-through-builder-build.flow-agents-workflow.complete-the-requested-outcome-deliver-kontourai-flow-agents-441-through-builder-build-verified-2026-07-17t04-28-17-748z",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-441/observed-command",
+        "excerptOrSummary": "bash evals/integration/test_install_merge.sh",
+        "observedAt": "2026-07-17T04:28:17.748Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_install_merge.sh",
+          "isError": false,
+          "exitCode": 0
+        }
+      }
+    ],
+    "policies": [
+      {
+        "id": "policy:workflow.check.external:attestation",
+        "claimType": "workflow.check.external",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.external claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.pull-work.selected:attestation",
+        "claimType": "builder.pull-work.selected",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.pull-work.selected claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.design-probe.pickup-readiness:attestation",
+        "claimType": "builder.design-probe.pickup-readiness",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.design-probe.pickup-readiness claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.design-probe.decisions:attestation",
+        "claimType": "builder.design-probe.decisions",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.design-probe.decisions claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.plan.implementation:attestation",
+        "claimType": "builder.plan.implementation",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.plan.implementation claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.execute.scope:attestation",
+        "claimType": "builder.execute.scope",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.execute.scope claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.check.command:test_output",
+        "claimType": "workflow.check.command",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.command claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.acceptance.criterion:test_output",
+        "claimType": "workflow.acceptance.criterion",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.acceptance.criterion claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.verify.tests:test_output",
+        "claimType": "builder.verify.tests",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.verify.tests claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.merge-ready.readiness:attestation",
+        "claimType": "builder.merge-ready.readiness",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.merge-ready.readiness claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.critique.review",
+        "claimType": "workflow.critique.review",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.critique.review claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "medium"
+      }
+    ],
+    "events": [
+      {
+        "id": "evt:kontourai-flow-agents-441-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-441-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-6a8823b17795fdda6c167efcdf0c5612dc375deef011496b2ee8f33d778e8935-gate-visit-2026-07-17t03-48-24z",
+        "claimId": "kontourai-flow-agents-441-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-441-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-6a8823b17795fdda6c167efcdf0c5612dc375deef011496b2ee8f33d778e8935-gate-visit-2026-07-17t03-48-24z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-441-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-441-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-6a8823b17795fdda6c167efcdf0c5612dc375deef011496b2ee8f33d778e8935-gate-visit-2026-07-17t03-48-24z"
+        ],
+        "createdAt": "2026-07-17T04:29:21.725Z",
+        "verifiedAt": "2026-07-17T04:29:21.725Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-441-gate-claim-pickup-probe-readiness.flow-agents-workflow.provider-grounded-pickup-probe-complete-441-open-and-claimed-agent-claimed-assignmentclaimrecord-comment-ic-kwdos1a8tm8aaaabkfnmdq-effective-state-held-self-is-holder-base-origin-main-14ba90d-isolated-worktree-board-readiness-441-no-conflicting-actors-parallel-663-lane-has-zero-file-overlap-planning-readiness-pass-central-finding-the-issue-s-2026-07-06-premise-is-now-false-live-verification-shows-org-project-kontourai-1-is-the-auto-populated-board-468-items-306-triage-14-ready-auto-add-workflow-targets-it-status-taxonomy-triage-ready-in-progress-blocked-review-done-agent-token-has-project-scope-and-live-board-driven-pull-work-returns-a-14-item-cross-repo-ready-queue-with-zero-warnings-gate-visit-2026-07-17t03-51-25-595z",
+        "claimId": "kontourai-flow-agents-441-gate-claim-pickup-probe-readiness.flow-agents-workflow.provider-grounded-pickup-probe-complete-441-open-and-claimed-agent-claimed-assignmentclaimrecord-comment-ic-kwdos1a8tm8aaaabkfnmdq-effective-state-held-self-is-holder-base-origin-main-14ba90d-isolated-worktree-board-readiness-441-no-conflicting-actors-parallel-663-lane-has-zero-file-overlap-planning-readiness-pass-central-finding-the-issue-s-2026-07-06-premise-is-now-false-live-verification-shows-org-project-kontourai-1-is-the-auto-populated-board-468-items-306-triage-14-ready-auto-add-workflow-targets-it-status-taxonomy-triage-ready-in-progress-blocked-review-done-agent-token-has-project-scope-and-live-board-driven-pull-work-returns-a-14-item-cross-repo-ready-queue-with-zero-warnings-gate-visit-2026-07-17t03-51-25-595z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-441-gate-claim-pickup-probe-readiness.flow-agents-workflow.provider-grounded-pickup-probe-complete-441-open-and-claimed-agent-claimed-assignmentclaimrecord-comment-ic-kwdos1a8tm8aaaabkfnmdq-effective-state-held-self-is-holder-base-origin-main-14ba90d-isolated-worktree-board-readiness-441-no-conflicting-actors-parallel-663-lane-has-zero-file-overlap-planning-readiness-pass-central-finding-the-issue-s-2026-07-06-premise-is-now-false-live-verification-shows-org-project-kontourai-1-is-the-auto-populated-board-468-items-306-triage-14-ready-auto-add-workflow-targets-it-status-taxonomy-triage-ready-in-progress-blocked-review-done-agent-token-has-project-scope-and-live-board-driven-pull-work-returns-a-14-item-cross-repo-ready-queue-with-zero-warnings-gate-visit-2026-07-17t03-51-25-595z"
+        ],
+        "createdAt": "2026-07-17T04:29:21.725Z",
+        "verifiedAt": "2026-07-17T04:29:21.725Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-441-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.design-decisions-recorded-pickup-probe-d1-d9-d1-board-based-readiness-option-b-on-org-project-kontourai-1-option-a-labels-rejected-on-fresh-2026-07-16-evidence-auto-add-automation-live-org-wide-agent-token-has-project-scope-board-adds-cross-repo-priority-ranking-d2-durable-decision-record-docs-decisions-backlog-readiness-source-md-context-md-vocabulary-regenerated-index-d3-taxonomy-truth-triage-added-to-schema-enum-declared-in-settings-d4-board-provider-bypassed-warning-on-the-issue-listing-path-d5-skill-level-no-silent-fallback-rule-accepted-gaps-disclosed-not-absorbed-doctor-board-health-check-follows-with-321-443-item-5-one-time-sweep-of-306-triage-items-routed-as-follow-up-mechanism-first-ready-set-already-non-empty-at-14-items-board-path-exclude-statuses-stays-declarative-443-444-gate-visit-2026-07-17t03-52-18-683z",
+        "claimId": "kontourai-flow-agents-441-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.design-decisions-recorded-pickup-probe-d1-d9-d1-board-based-readiness-option-b-on-org-project-kontourai-1-option-a-labels-rejected-on-fresh-2026-07-16-evidence-auto-add-automation-live-org-wide-agent-token-has-project-scope-board-adds-cross-repo-priority-ranking-d2-durable-decision-record-docs-decisions-backlog-readiness-source-md-context-md-vocabulary-regenerated-index-d3-taxonomy-truth-triage-added-to-schema-enum-declared-in-settings-d4-board-provider-bypassed-warning-on-the-issue-listing-path-d5-skill-level-no-silent-fallback-rule-accepted-gaps-disclosed-not-absorbed-doctor-board-health-check-follows-with-321-443-item-5-one-time-sweep-of-306-triage-items-routed-as-follow-up-mechanism-first-ready-set-already-non-empty-at-14-items-board-path-exclude-statuses-stays-declarative-443-444-gate-visit-2026-07-17t03-52-18-683z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-441-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.design-decisions-recorded-pickup-probe-d1-d9-d1-board-based-readiness-option-b-on-org-project-kontourai-1-option-a-labels-rejected-on-fresh-2026-07-16-evidence-auto-add-automation-live-org-wide-agent-token-has-project-scope-board-adds-cross-repo-priority-ranking-d2-durable-decision-record-docs-decisions-backlog-readiness-source-md-context-md-vocabulary-regenerated-index-d3-taxonomy-truth-triage-added-to-schema-enum-declared-in-settings-d4-board-provider-bypassed-warning-on-the-issue-listing-path-d5-skill-level-no-silent-fallback-rule-accepted-gaps-disclosed-not-absorbed-doctor-board-health-check-follows-with-321-443-item-5-one-time-sweep-of-306-triage-items-routed-as-follow-up-mechanism-first-ready-set-already-non-empty-at-14-items-board-path-exclude-statuses-stays-declarative-443-444-gate-visit-2026-07-17t03-52-18-683z"
+        ],
+        "createdAt": "2026-07-17T04:29:21.725Z",
+        "verifiedAt": "2026-07-17T04:29:21.725Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-441-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-recorded-wave-1-decision-record-docs-decisions-backlog-readiness-source-md-schema-validated-frontmatter-evidence-linked-to-441-pr-449-c19c3e6-context-md-vocabulary-regenerated-decisions-index-wave-2-settings-taxonomy-truth-triage-added-to-schema-exclude-statuses-enum-declared-in-repo-settings-workspace-example-board-pointer-kontourai-1-verified-correct-unchanged-wave-3-fallback-surfacing-board-provider-bypassed-warning-on-the-issue-listing-path-in-pull-work-provider-ts-readiness-source-integrity-rule-in-pull-work-skill-md-wave-4-eval-coverage-in-test-pull-work-board-sh-context-map-drift-check-verification-build-eval-static-on-final-head-targeted-board-provider-settings-decisions-suites-live-board-read-acceptance-evidence-scope-boundary-excludes-board-writes-doctor-implementation-444-workspace-behavior-and-663-lane-files-gate-visit-2026-07-17t03-53-17-364z",
+        "claimId": "kontourai-flow-agents-441-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-recorded-wave-1-decision-record-docs-decisions-backlog-readiness-source-md-schema-validated-frontmatter-evidence-linked-to-441-pr-449-c19c3e6-context-md-vocabulary-regenerated-decisions-index-wave-2-settings-taxonomy-truth-triage-added-to-schema-exclude-statuses-enum-declared-in-repo-settings-workspace-example-board-pointer-kontourai-1-verified-correct-unchanged-wave-3-fallback-surfacing-board-provider-bypassed-warning-on-the-issue-listing-path-in-pull-work-provider-ts-readiness-source-integrity-rule-in-pull-work-skill-md-wave-4-eval-coverage-in-test-pull-work-board-sh-context-map-drift-check-verification-build-eval-static-on-final-head-targeted-board-provider-settings-decisions-suites-live-board-read-acceptance-evidence-scope-boundary-excludes-board-writes-doctor-implementation-444-workspace-behavior-and-663-lane-files-gate-visit-2026-07-17t03-53-17-364z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-441-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-recorded-wave-1-decision-record-docs-decisions-backlog-readiness-source-md-schema-validated-frontmatter-evidence-linked-to-441-pr-449-c19c3e6-context-md-vocabulary-regenerated-decisions-index-wave-2-settings-taxonomy-truth-triage-added-to-schema-exclude-statuses-enum-declared-in-repo-settings-workspace-example-board-pointer-kontourai-1-verified-correct-unchanged-wave-3-fallback-surfacing-board-provider-bypassed-warning-on-the-issue-listing-path-in-pull-work-provider-ts-readiness-source-integrity-rule-in-pull-work-skill-md-wave-4-eval-coverage-in-test-pull-work-board-sh-context-map-drift-check-verification-build-eval-static-on-final-head-targeted-board-provider-settings-decisions-suites-live-board-read-acceptance-evidence-scope-boundary-excludes-board-writes-doctor-implementation-444-workspace-behavior-and-663-lane-files-gate-visit-2026-07-17t03-53-17-364z"
+        ],
+        "createdAt": "2026-07-17T04:29:21.725Z",
+        "verifiedAt": "2026-07-17T04:29:21.725Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-441-gate-claim-implementation-scope.flow-agents-workflow.implemented-scope-matches-the-plan-exactly-commit-af04efa-9-files-135-4-decision-record-vocabulary-wave-1-settings-taxonomy-truth-with-ajv-valid-settings-wave-2-board-provider-bypassed-warning-readiness-source-integrity-skill-rule-wave-3-eval-coverage-positive-negative-wave-4-no-board-writes-no-doctor-implementation-no-663-lane-files-in-lane-checks-build-pass-pull-work-provider-board-effective-workspace-settings-decisions-suites-pass-context-map-current-validate-source-pass-live-board-read-returns-14-item-ready-queue-with-zero-warnings-gate-visit-2026-07-17t03-56-51-477z",
+        "claimId": "kontourai-flow-agents-441-gate-claim-implementation-scope.flow-agents-workflow.implemented-scope-matches-the-plan-exactly-commit-af04efa-9-files-135-4-decision-record-vocabulary-wave-1-settings-taxonomy-truth-with-ajv-valid-settings-wave-2-board-provider-bypassed-warning-readiness-source-integrity-skill-rule-wave-3-eval-coverage-positive-negative-wave-4-no-board-writes-no-doctor-implementation-no-663-lane-files-in-lane-checks-build-pass-pull-work-provider-board-effective-workspace-settings-decisions-suites-pass-context-map-current-validate-source-pass-live-board-read-returns-14-item-ready-queue-with-zero-warnings-gate-visit-2026-07-17t03-56-51-477z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-441-gate-claim-implementation-scope.flow-agents-workflow.implemented-scope-matches-the-plan-exactly-commit-af04efa-9-files-135-4-decision-record-vocabulary-wave-1-settings-taxonomy-truth-with-ajv-valid-settings-wave-2-board-provider-bypassed-warning-readiness-source-integrity-skill-rule-wave-3-eval-coverage-positive-negative-wave-4-no-board-writes-no-doctor-implementation-no-663-lane-files-in-lane-checks-build-pass-pull-work-provider-board-effective-workspace-settings-decisions-suites-pass-context-map-current-validate-source-pass-live-board-read-returns-14-item-ready-queue-with-zero-warnings-gate-visit-2026-07-17t03-56-51-477z"
+        ],
+        "createdAt": "2026-07-17T04:29:21.725Z",
+        "verifiedAt": "2026-07-17T04:29:21.725Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-441-gate-claim-acceptance-criteria.flow-agents-workflow.issue-441-acceptance-verified-ac-1-decision-recorded-docs-decisions-backlog-readiness-source-md-schema-valid-frontmatter-check-decisions-28-topics-pass-evidence-linked-to-441-pr-449-c19c3e64a214be7d5b2585004fd3c4f2597781e5-session-ac-2-settings-reflect-the-chosen-source-and-pull-work-returns-a-non-empty-intentional-ready-set-boardprovider-kontourai-1-verified-live-as-the-auto-populated-org-board-468-items-auto-add-triage-done-automation-status-taxonomy-incl-ready-triage-declared-in-schema-enum-settings-ajv-valid-live-board-read-returns-ready-queue-14-cross-repo-p0-p2-ranked-warnings-intake-gaps-0-ac-3-silent-fallback-replaced-by-explicit-warning-zero-ready-items-on-the-empty-board-path-pr-449-unregressed-new-board-provider-bypassed-on-the-issue-listing-path-when-a-board-is-configured-readiness-source-integrity-rule-in-pull-work-skill-md-eval-coverage-positive-negative-disclosed-doctor-board-health-surface-not-built-321-443-item-5-one-time-triage-sweep-306-items-routed-as-follow-up-mechanism-first-ready-set-already-non-empty-gate-visit-2026-07-17t04-02-48-117z",
+        "claimId": "kontourai-flow-agents-441-gate-claim-acceptance-criteria.flow-agents-workflow.issue-441-acceptance-verified-ac-1-decision-recorded-docs-decisions-backlog-readiness-source-md-schema-valid-frontmatter-check-decisions-28-topics-pass-evidence-linked-to-441-pr-449-c19c3e64a214be7d5b2585004fd3c4f2597781e5-session-ac-2-settings-reflect-the-chosen-source-and-pull-work-returns-a-non-empty-intentional-ready-set-boardprovider-kontourai-1-verified-live-as-the-auto-populated-org-board-468-items-auto-add-triage-done-automation-status-taxonomy-incl-ready-triage-declared-in-schema-enum-settings-ajv-valid-live-board-read-returns-ready-queue-14-cross-repo-p0-p2-ranked-warnings-intake-gaps-0-ac-3-silent-fallback-replaced-by-explicit-warning-zero-ready-items-on-the-empty-board-path-pr-449-unregressed-new-board-provider-bypassed-on-the-issue-listing-path-when-a-board-is-configured-readiness-source-integrity-rule-in-pull-work-skill-md-eval-coverage-positive-negative-disclosed-doctor-board-health-surface-not-built-321-443-item-5-one-time-triage-sweep-306-items-routed-as-follow-up-mechanism-first-ready-set-already-non-empty-gate-visit-2026-07-17t04-02-48-117z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-441-gate-claim-acceptance-criteria.flow-agents-workflow.issue-441-acceptance-verified-ac-1-decision-recorded-docs-decisions-backlog-readiness-source-md-schema-valid-frontmatter-check-decisions-28-topics-pass-evidence-linked-to-441-pr-449-c19c3e64a214be7d5b2585004fd3c4f2597781e5-session-ac-2-settings-reflect-the-chosen-source-and-pull-work-returns-a-non-empty-intentional-ready-set-boardprovider-kontourai-1-verified-live-as-the-auto-populated-org-board-468-items-auto-add-triage-done-automation-status-taxonomy-incl-ready-triage-declared-in-schema-enum-settings-ajv-valid-live-board-read-returns-ready-queue-14-cross-repo-p0-p2-ranked-warnings-intake-gaps-0-ac-3-silent-fallback-replaced-by-explicit-warning-zero-ready-items-on-the-empty-board-path-pr-449-unregressed-new-board-provider-bypassed-on-the-issue-listing-path-when-a-board-is-configured-readiness-source-integrity-rule-in-pull-work-skill-md-eval-coverage-positive-negative-disclosed-doctor-board-health-surface-not-built-321-443-item-5-one-time-triage-sweep-306-items-routed-as-follow-up-mechanism-first-ready-set-already-non-empty-gate-visit-2026-07-17t04-02-48-117z"
+        ],
+        "createdAt": "2026-07-17T04:29:21.725Z",
+        "verifiedAt": "2026-07-17T04:29:21.725Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-441-gate-claim-tests-evidence.flow-agents-workflow.manifest-lane-proof-supersedes-the-prior-tests-evidence-claim-whose-labeled-command-npm-run-test-unit-was-off-the-reconcile-manifest-evidence-shape-correction-substantive-verification-unchanged-labeled-command-the-run-baseline-manifest-lane-kit-install-merge-integration-87-87-executed-writer-observed-on-the-delivered-branch-feat-board-readiness-441-af04efa-session-artifact-root-pinned-to-this-worktree-it-exercises-the-kit-install-machinery-that-ships-this-lane-s-pull-work-skill-md-change-the-direct-behavioral-proof-for-this-change-is-the-pull-work-provider-integration-lane-bash-evals-integration-test-pull-work-provider-sh-all-pass-incl-the-two-new-board-provider-bypassed-positive-negative-assertions-and-the-pull-work-board-integration-lane-bash-evals-integration-test-pull-work-board-sh-zero-ready-items-unregressed-both-green-writer-observed-here-and-both-re-executed-by-ci-through-those-exact-manifest-lanes-they-cannot-be-this-claim-s-labeled-command-because-their-scripts-use-set-uo-pipefail-without-e-and-print-no-aggregate-count-which-the-canonical-writer-s-execution-proof-heuristic-rejects-full-battery-also-green-on-af04efa-build-tsc-eval-static-exit-0-test-unit-541-541-effective-workspace-settings-decisions-workflow-skills-builder-skill-coherence-context-map-validate-source-ajv-valid-settings-docs-independent-codex-review-clean-at-all-severities-re-recorded-for-this-gate-visit-reviewed-diff-unchanged-known-environmental-on-this-host-ci-authority-test-bundle-install-sh-119-120-test-builder-step-producers-sh-gate-visit-2026-07-17t04-28-17-748z",
+        "claimId": "kontourai-flow-agents-441-gate-claim-tests-evidence.flow-agents-workflow.manifest-lane-proof-supersedes-the-prior-tests-evidence-claim-whose-labeled-command-npm-run-test-unit-was-off-the-reconcile-manifest-evidence-shape-correction-substantive-verification-unchanged-labeled-command-the-run-baseline-manifest-lane-kit-install-merge-integration-87-87-executed-writer-observed-on-the-delivered-branch-feat-board-readiness-441-af04efa-session-artifact-root-pinned-to-this-worktree-it-exercises-the-kit-install-machinery-that-ships-this-lane-s-pull-work-skill-md-change-the-direct-behavioral-proof-for-this-change-is-the-pull-work-provider-integration-lane-bash-evals-integration-test-pull-work-provider-sh-all-pass-incl-the-two-new-board-provider-bypassed-positive-negative-assertions-and-the-pull-work-board-integration-lane-bash-evals-integration-test-pull-work-board-sh-zero-ready-items-unregressed-both-green-writer-observed-here-and-both-re-executed-by-ci-through-those-exact-manifest-lanes-they-cannot-be-this-claim-s-labeled-command-because-their-scripts-use-set-uo-pipefail-without-e-and-print-no-aggregate-count-which-the-canonical-writer-s-execution-proof-heuristic-rejects-full-battery-also-green-on-af04efa-build-tsc-eval-static-exit-0-test-unit-541-541-effective-workspace-settings-decisions-workflow-skills-builder-skill-coherence-context-map-validate-source-ajv-valid-settings-docs-independent-codex-review-clean-at-all-severities-re-recorded-for-this-gate-visit-reviewed-diff-unchanged-known-environmental-on-this-host-ci-authority-test-bundle-install-sh-119-120-test-builder-step-producers-sh-gate-visit-2026-07-17t04-28-17-748z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-441-gate-claim-tests-evidence.flow-agents-workflow.manifest-lane-proof-supersedes-the-prior-tests-evidence-claim-whose-labeled-command-npm-run-test-unit-was-off-the-reconcile-manifest-evidence-shape-correction-substantive-verification-unchanged-labeled-command-the-run-baseline-manifest-lane-kit-install-merge-integration-87-87-executed-writer-observed-on-the-delivered-branch-feat-board-readiness-441-af04efa-session-artifact-root-pinned-to-this-worktree-it-exercises-the-kit-install-machinery-that-ships-this-lane-s-pull-work-skill-md-change-the-direct-behavioral-proof-for-this-change-is-the-pull-work-provider-integration-lane-bash-evals-integration-test-pull-work-provider-sh-all-pass-incl-the-two-new-board-provider-bypassed-positive-negative-assertions-and-the-pull-work-board-integration-lane-bash-evals-integration-test-pull-work-board-sh-zero-ready-items-unregressed-both-green-writer-observed-here-and-both-re-executed-by-ci-through-those-exact-manifest-lanes-they-cannot-be-this-claim-s-labeled-command-because-their-scripts-use-set-uo-pipefail-without-e-and-print-no-aggregate-count-which-the-canonical-writer-s-execution-proof-heuristic-rejects-full-battery-also-green-on-af04efa-build-tsc-eval-static-exit-0-test-unit-541-541-effective-workspace-settings-decisions-workflow-skills-builder-skill-coherence-context-map-validate-source-ajv-valid-settings-docs-independent-codex-review-clean-at-all-severities-re-recorded-for-this-gate-visit-reviewed-diff-unchanged-known-environmental-on-this-host-ci-authority-test-bundle-install-sh-119-120-test-builder-step-producers-sh-gate-visit-2026-07-17t04-28-17-748z"
+        ],
+        "createdAt": "2026-07-17T04:29:21.725Z",
+        "verifiedAt": "2026-07-17T04:29:21.725Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-441-gate-claim-merge-readiness.flow-agents-workflow.merge-readiness-re-assessed-ready-for-merge-review-after-the-evidence-shape-correction-tests-evidence-now-labeled-with-the-manifest-lane-test-install-merge-sh-87-87-substantive-verification-unchanged-reviewed-diff-af04efa-byte-identical-critique-re-recorded-clean-for-the-current-gate-visit-scope-integrity-single-commit-af04efa-matches-plan-waves-1-4-exactly-no-out-of-plan-files-663-lane-boundary-honored-no-board-mutations-base-origin-main-14ba90d-evidence-independent-env-scrubbed-codex-review-clean-at-all-severities-writer-observed-battery-green-on-the-delivered-branch-build-eval-static-exit-0-test-unit-541-541-provider-board-settings-decisions-skills-lanes-context-map-validate-source-ajv-valid-settings-live-acceptance-evidence-shows-the-configured-readiness-source-alive-14-item-cross-repo-priority-ranked-ready-queue-zero-warnings-zero-intake-gaps-a-silent-revert-of-the-new-warning-would-fail-the-new-positive-ci-lane-assertion-disclosed-accepted-gaps-doctor-board-health-surface-not-built-443-item-5-321-one-time-triage-sweep-routed-to-443-item-2-known-environmental-host-failures-test-bundle-install-119-120-test-builder-step-producers-reproduce-on-pristine-main-with-ci-as-authority-stops-at-pr-open-publish-is-orchestrator-owned-gate-visit-2026-07-17t04-29-21-725z",
+        "claimId": "kontourai-flow-agents-441-gate-claim-merge-readiness.flow-agents-workflow.merge-readiness-re-assessed-ready-for-merge-review-after-the-evidence-shape-correction-tests-evidence-now-labeled-with-the-manifest-lane-test-install-merge-sh-87-87-substantive-verification-unchanged-reviewed-diff-af04efa-byte-identical-critique-re-recorded-clean-for-the-current-gate-visit-scope-integrity-single-commit-af04efa-matches-plan-waves-1-4-exactly-no-out-of-plan-files-663-lane-boundary-honored-no-board-mutations-base-origin-main-14ba90d-evidence-independent-env-scrubbed-codex-review-clean-at-all-severities-writer-observed-battery-green-on-the-delivered-branch-build-eval-static-exit-0-test-unit-541-541-provider-board-settings-decisions-skills-lanes-context-map-validate-source-ajv-valid-settings-live-acceptance-evidence-shows-the-configured-readiness-source-alive-14-item-cross-repo-priority-ranked-ready-queue-zero-warnings-zero-intake-gaps-a-silent-revert-of-the-new-warning-would-fail-the-new-positive-ci-lane-assertion-disclosed-accepted-gaps-doctor-board-health-surface-not-built-443-item-5-321-one-time-triage-sweep-routed-to-443-item-2-known-environmental-host-failures-test-bundle-install-119-120-test-builder-step-producers-reproduce-on-pristine-main-with-ci-as-authority-stops-at-pr-open-publish-is-orchestrator-owned-gate-visit-2026-07-17t04-29-21-725z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-441-gate-claim-merge-readiness.flow-agents-workflow.merge-readiness-re-assessed-ready-for-merge-review-after-the-evidence-shape-correction-tests-evidence-now-labeled-with-the-manifest-lane-test-install-merge-sh-87-87-substantive-verification-unchanged-reviewed-diff-af04efa-byte-identical-critique-re-recorded-clean-for-the-current-gate-visit-scope-integrity-single-commit-af04efa-matches-plan-waves-1-4-exactly-no-out-of-plan-files-663-lane-boundary-honored-no-board-mutations-base-origin-main-14ba90d-evidence-independent-env-scrubbed-codex-review-clean-at-all-severities-writer-observed-battery-green-on-the-delivered-branch-build-eval-static-exit-0-test-unit-541-541-provider-board-settings-decisions-skills-lanes-context-map-validate-source-ajv-valid-settings-live-acceptance-evidence-shows-the-configured-readiness-source-alive-14-item-cross-repo-priority-ranked-ready-queue-zero-warnings-zero-intake-gaps-a-silent-revert-of-the-new-warning-would-fail-the-new-positive-ci-lane-assertion-disclosed-accepted-gaps-doctor-board-health-surface-not-built-443-item-5-321-one-time-triage-sweep-routed-to-443-item-2-known-environmental-host-failures-test-bundle-install-119-120-test-builder-step-producers-reproduce-on-pristine-main-with-ci-as-authority-stops-at-pr-open-publish-is-orchestrator-owned-gate-visit-2026-07-17t04-29-21-725z"
+        ],
+        "createdAt": "2026-07-17T04:29:21.725Z",
+        "verifiedAt": "2026-07-17T04:29:21.725Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-441-complete-the-requested-outcome-deliver-kontourai-flow-agents-441-through-builder-build.flow-agents-workflow.complete-the-requested-outcome-deliver-kontourai-flow-agents-441-through-builder-build-verified-2026-07-17t04-28-17-748z",
+        "claimId": "kontourai-flow-agents-441-complete-the-requested-outcome-deliver-kontourai-flow-agents-441-through-builder-build.flow-agents-workflow.complete-the-requested-outcome-deliver-kontourai-flow-agents-441-through-builder-build-verified-2026-07-17t04-28-17-748z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-441-complete-the-requested-outcome-deliver-kontourai-flow-agents-441-through-builder-build.flow-agents-workflow.complete-the-requested-outcome-deliver-kontourai-flow-agents-441-through-builder-build-verified-2026-07-17t04-28-17-748z:79bd9ced5c6a80f1"
+        ],
+        "createdAt": "2026-07-17T04:28:17.748Z",
+        "verifiedAt": "2026-07-17T04:28:17.748Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-441-review.flow-agents-workflow.re-recorded-for-the-current-verify-gate-visit-after-the-missing-evidence-route-back-an-evidence-shape-correction-only-the-tests-evidence-claim-label-changed-from-npm-run-test-unit-to-the-manifest-lane-test-install-merge-sh-the-reviewed-diff-af04efa-is-byte-identical-so-the-review-verdict-stands-unchanged-independent-report-only-review-by-codex-codex-cli-0-144-1-session-019f6e38-db69-7bf2-a0e5-0df4844ae711-env-scrubbed-of-claudecode-claude-code-session-id-read-only-sandbox-identity-distinct-from-the-implementer-verdict-on-af04efa-no-blocker-major-minor-or-nit-findings-reviewer-gaps-disclosed-sandbox-denied-mktemp-so-stock-integration-scripts-did-not-run-end-to-end-in-review-writer-observed-green-in-this-worktree-ci-re-runs-authoritative-live-github-board-facts-not-independently-refreshed-network-restricted-full-ci-not-run-in-review-reviewed-2026-07-17t04-28-02-567z",
+        "claimId": "kontourai-flow-agents-441-review.flow-agents-workflow.re-recorded-for-the-current-verify-gate-visit-after-the-missing-evidence-route-back-an-evidence-shape-correction-only-the-tests-evidence-claim-label-changed-from-npm-run-test-unit-to-the-manifest-lane-test-install-merge-sh-the-reviewed-diff-af04efa-is-byte-identical-so-the-review-verdict-stands-unchanged-independent-report-only-review-by-codex-codex-cli-0-144-1-session-019f6e38-db69-7bf2-a0e5-0df4844ae711-env-scrubbed-of-claudecode-claude-code-session-id-read-only-sandbox-identity-distinct-from-the-implementer-verdict-on-af04efa-no-blocker-major-minor-or-nit-findings-reviewer-gaps-disclosed-sandbox-denied-mktemp-so-stock-integration-scripts-did-not-run-end-to-end-in-review-writer-observed-green-in-this-worktree-ci-re-runs-authoritative-live-github-board-facts-not-independently-refreshed-network-restricted-full-ci-not-run-in-review-reviewed-2026-07-17t04-28-02-567z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-17T04:29:21.725Z",
+        "verifiedAt": "2026-07-17T04:29:21.725Z"
+      }
+    ]
+  }
+}
