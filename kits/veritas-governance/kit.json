@@ -30,6 +30,11 @@
       "id": "veritas-governance.standards-authoring",
       "path": "skills/standards-authoring/SKILL.md",
       "description": "Author or re-derive a repo's Veritas Repo Standards by running `veritas init --explore`/`--guided` (adaptive derivation + governance-block splice), surfacing the recommendation for human approval, then `veritas init --apply` once the standards-authoring flow's human-approval gate is satisfied. Wraps the veritas CLI; reimplements no evaluation or derivation. The agent action for both steps of the standards-authoring flow."
+    },
+    {
+      "id": "veritas-governance.consult-standards",
+      "path": "skills/consult-standards/SKILL.md",
+      "description": "Just-in-time governance guidance before editing: run `veritas explain --file <path>` (or `--work-area <id>`) to see the governance excerpt, the Repo Standards rules that apply, their do/don't/examples, and the latest surface status, then edit within those rules. Pull-based advisory (does not block; the PreToolUse hook is enforcement). No MCP server -- the agent-pull replacement for a guidance server (ADR 0011). Wraps the veritas CLI; reimplements no evaluation."
     }
   ],
   "assets": [
