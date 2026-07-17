@@ -1860,6 +1860,92 @@ test("publish-change reports an external capability gap and self-authored result
   await releaseBuilderFlowAssignment({ sessionDir: session.sessionDir, reason: `test cleanup for ${ambient.actorKey}` });
 });
 
+async function advanceSessionToPrOpen(session) {
+  await startBuilderFlowSession({ sessionDir: session.sessionDir });
+  const steps = [
+    () => [bundleClaim({ expectation: "selected-work", claimType: "builder.pull-work.selected", subjectType: "work-item" })],
+    () => [
+      bundleClaim({ expectation: "pickup-probe-readiness", claimType: "builder.design-probe.pickup-readiness", subjectType: "work-item" }),
+      bundleClaim({ expectation: "probe-decisions-or-accepted-gaps", claimType: "builder.design-probe.decisions", subjectType: "decision" }),
+    ],
+    () => [bundleClaim({ expectation: "implementation-plan", claimType: "builder.plan.implementation", subjectType: "artifact" })],
+    () => [bundleClaim({ expectation: "implementation-scope", claimType: "builder.execute.scope", subjectType: "change" })],
+    () => [bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step" }), ...verifiedTestsPrerequisites(session)],
+    () => [bundleClaim({ expectation: "merge-readiness", claimType: "builder.merge-ready.readiness", subjectType: "change" })],
+  ];
+  let latest = null;
+  for (const entries of steps) latest = await writeAndSync(session, entries());
+  assert.equal(latest.run.state.current_step, "pr-open");
+  return latest;
+}
+
+test("pr-open route-back with missing_evidence returns the run to verify and supports repair re-entry (#695 item a)", async () => {
+  const session = makeSession("propen-routeback");
+  await advanceSessionToPrOpen(session);
+
+  // The #663 wedge scenario: a trust divergence is discovered at pr-open. A failing
+  // pull-request-opened claim declaring the missing_evidence route reason must land
+  // the canonical run back at verify — the sanctioned repair surface — not throw.
+  const failureTimestamp = new Date().toISOString();
+  const routed = await writeAndSync(session, [bundleClaim({
+    expectation: "pull-request-opened",
+    claimType: "builder.pr-open.pull-request",
+    subjectType: "pull-request",
+    status: "fail",
+    routeReason: "missing_evidence",
+    timestamp: failureTimestamp,
+  })]);
+
+  assert.equal(routed.attached, true);
+  assert.equal(routed.run.state.current_step, "verify");
+  const routeBacks = routed.run.state.transitions.filter((transition) => transition.type === "route_back");
+  assert.equal(routeBacks.length, 1);
+  assert.equal(routeBacks[0].from_step, "pr-open");
+  assert.equal(routeBacks[0].to_step, "verify");
+  assert.equal(routeBacks[0].route_reason, "missing_evidence");
+  assert.equal(routeBacks[0].gate_id, "builder.publish-learn:pr-open-gate");
+  assert.equal(routed.projection.flow_run.route_back_attempt, 1);
+  assert.equal(routed.projection.flow_run.route_back_max_attempts, 3);
+  assert.match(routed.projection.next_action.summary, /Route-back history: attempt 1\/3 returned to `verify` for `missing_evidence`/);
+
+  // Repair loop: fresh verify evidence re-passes verify, fresh merge-readiness
+  // re-passes merge-ready, and the run returns to pr-open.
+  const repairedAt = new Date(Date.parse(routed.run.state.transitions.at(-1).at) + 1).toISOString();
+  const reverified = await writeAndSync(session, [
+    withIdentitySuffix(bundleClaim({ expectation: "tests-evidence", claimType: "builder.verify.tests", subjectType: "flow-step", timestamp: repairedAt }), "repair"),
+    ...verifiedTestsPrerequisites(session, repairedAt).map((entry, index) => withIdentitySuffix(entry, `repair-${index}`)),
+  ]);
+  assert.equal(reverified.run.state.current_step, "merge-ready");
+  const returned = await writeAndSync(session, [
+    withIdentitySuffix(bundleClaim({ expectation: "merge-readiness", claimType: "builder.merge-ready.readiness", subjectType: "change", timestamp: new Date().toISOString() }), "repair"),
+  ]);
+  assert.equal(returned.run.state.current_step, "pr-open");
+});
+
+test("pr-open route-back with an undeclared reason still throws and mutates nothing", async () => {
+  const session = makeSession("propen-undeclared-reason");
+  await advanceSessionToPrOpen(session);
+
+  const flowDirectory = runDir(session.slug, session.projectRoot);
+  const beforeState = readJson(path.join(flowDirectory, "state.json"));
+  const beforeManifest = readJson(path.join(flowDirectory, FLOW_RUN_EVIDENCE_MANIFEST_PATH));
+
+  writeBundle(session.sessionDir, [bundleClaim({
+    expectation: "pull-request-opened",
+    claimType: "builder.pr-open.pull-request",
+    subjectType: "pull-request",
+    status: "fail",
+    routeReason: "stale_critique",
+    timestamp: new Date().toISOString(),
+  })]);
+  await assert.rejects(
+    () => syncBuilderFlowSession({ sessionDir: session.sessionDir }),
+    /route_reason.*is not declared by gate builder\.publish-learn:pr-open-gate/,
+  );
+  assert.deepEqual(readJson(path.join(flowDirectory, "state.json")), beforeState);
+  assert.deepEqual(readJson(path.join(flowDirectory, FLOW_RUN_EVIDENCE_MANIFEST_PATH)), beforeManifest);
+});
+
 test("recovery loads the slug-bound run, restores every matching projection, and preserves every Flow byte", async () => {
   const session = makeSession("recover-active");
   await startBuilderFlowSession({ sessionDir: session.sessionDir });
