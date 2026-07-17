@@ -11,6 +11,7 @@ mkdir -p "$LOG_DIR"
 
 CHECKS=(
   "Content boundary|npm run check:content-boundary --"
+  "Layer boundary|npm run check:layer-boundary --"
   "Hachure boundary|npm run check:hachure-boundary --"
   "Decision registry|npm run check:decisions --"
   "Source tree validation|npm run validate:source --"
@@ -120,6 +121,7 @@ CHECKS=(
 
 LANE_SOURCE_AND_STATIC=(
   "Content boundary"
+  "Layer boundary"
   "Hachure boundary"
   "Decision registry"
   "Source tree validation"
