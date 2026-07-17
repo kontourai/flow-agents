@@ -133,6 +133,72 @@ echo "--- exemption-issuance: gate blocks without a verified approval, passes wi
 exemption_gate_case "$KIT/fixtures/exemption/approved.trust-bundle.json"     "exemption-positive" 0
 exemption_gate_case "$KIT/fixtures/exemption/not-approved.trust-bundle.json" "exemption-negative" 1
 
+# --- standards-authoring flow (Slice 2 PR3): registration, gate shape, gate cases ---
+# Agentless propose -> apply flow whose human-approval-gate blocks the `veritas init --apply`
+# write until a human-authored standards-authoring-approval claim is verified. The kit only
+# gates the sign-off; Veritas does the derivation and the write (no evaluation reimplemented).
+AUTHORING_FLOWDEF="$KIT/flows/standards-authoring.flow.json"
+if node -e "const f=require('$AUTHORING_FLOWDEF'); if(f.id!=='veritas-governance.standards-authoring') process.exit(1);" 2>/dev/null; then
+  pass "standards-authoring flow file has id veritas-governance.standards-authoring"
+else
+  fail "standards-authoring flow file missing or has unexpected id"
+fi
+if rg -q '"id": *"veritas-governance\.standards-authoring"' "$KIT/kit.json" && rg -q '"path": *"flows/standards-authoring\.flow\.json"' "$KIT/kit.json"; then
+  pass "standards-authoring flow is registered in kit.json flows[]"
+else
+  fail "standards-authoring flow is NOT registered in kit.json flows[]"
+fi
+if rg -q '"id": *"veritas-governance\.standards-authoring"' "$KIT/kit.json" && rg -q '"path": *"skills/standards-authoring/SKILL.md"' "$KIT/kit.json"; then
+  pass "standards-authoring skill is registered in kit.json skills[]"
+else
+  fail "standards-authoring skill is NOT registered in kit.json skills[]"
+fi
+# Agentless invariant: the kit declares no flow_step_actions (would opt into Builder's
+# producer-ownership contract and break the agentless gate flows).
+if rg -q 'flow_step_actions' "$KIT/kit.json"; then
+  fail "kit.json declares flow_step_actions — veritas-governance flows are agentless"
+else
+  pass "kit stays agentless (no flow_step_actions)"
+fi
+if node -e "
+const f=require('$AUTHORING_FLOWDEF');
+const g=f.gates['human-approval-gate'];
+const bc=g.expects[0].bundle_claim;
+if (g.expects[0].kind!=='trust.bundle') process.exit(1);
+if (bc.claimType!=='standards-authoring-approval') process.exit(1);
+if (bc.subjectType!=='repo-governance-change') process.exit(1);
+if (JSON.stringify(bc.accepted_statuses)!=='[\"verified\"]') process.exit(1);
+" 2>/dev/null; then
+  pass "standards-authoring gate expects[] kind is trust.bundle and pins claimType/subjectType/accepted_statuses exactly"
+else
+  fail "standards-authoring gate expects[] shape does not match the pinned claim selector"
+fi
+# Positive/negative gate cases against the committed fixtures. $1 bundle, $2 label, $3 expect.
+authoring_gate_case() {
+  local bundle="$1" label="$2" expect="$3"
+  local work="$TMP_DIR/$label"; mkdir -p "$work"; ( cd "$work" && node "$FLOW_CLI" init >/dev/null 2>&1 )
+  ( cd "$work" && node "$FLOW_CLI" start "$AUTHORING_FLOWDEF" --run-id "$label" >/dev/null 2>&1 )
+  ( cd "$work" && node "$FLOW_CLI" attach-evidence "$label" --gate human-approval-gate --file "$bundle" --bundle >"$work/attach.out" 2>&1 )
+  if ! rg -q 'kind: trust.bundle' "$work/attach.out"; then
+    fail "[$label] evidence did not attach as kind: trust.bundle"; sed -n '1,20p' "$work/attach.out"; return
+  fi
+  ( cd "$work" && node "$FLOW_CLI" evaluate "$label" --gate human-approval-gate --exit-code >"$work/eval.out" 2>&1 )
+  local got=$?
+  if [[ "$got" == "$expect" ]]; then
+    pass "[$label] standards-authoring gate evaluate exit $got as expected"
+  else
+    fail "[$label] standards-authoring gate evaluate exit $got, expected $expect"; sed -n '1,20p' "$work/eval.out"
+  fi
+}
+authoring_gate_case "$KIT/fixtures/standards-authoring/approved.trust-bundle.json"     "authoring-positive" 0
+authoring_gate_case "$KIT/fixtures/standards-authoring/not-approved.trust-bundle.json" "authoring-negative" 1
+# No-fork: the authoring skill wraps the veritas CLI; it must not vendor rule/claim evaluation.
+if rg -q -i 'evaluateRepoStandards|evidence-check-runner\.mjs|class +[A-Za-z]*RuleEngine|repo-standards/default\.repo-standards\.json' "$KIT/skills/standards-authoring" "$KIT/flows/standards-authoring.flow.json" 2>/dev/null; then
+  fail "standards-authoring skill/flow appears to vendor Veritas evaluation logic (no-fork violated)"
+else
+  pass "no-fork: standards-authoring wraps the veritas CLI, no vendored rule/claim engine"
+fi
+
 # --- exemption-issuance: issue-step DECLARED append semantics (AC4) --------------
 # Seed a scratch delivery/DECLARED with main's real 2-entry array (inlined here, not read
 # live from the repo, so this eval is not coupled to that file's future contents), then
