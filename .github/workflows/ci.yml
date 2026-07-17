@@ -68,6 +68,10 @@ jobs:
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check content-boundary
 
+      - name: Layer boundary
+        continue-on-error: true
+        run: bash evals/ci/run-baseline.sh --check layer-boundary
+
       - name: Hachure boundary
         continue-on-error: true
         run: bash evals/ci/run-baseline.sh --check hachure-boundary
