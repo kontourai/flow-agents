@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs, flagBool, flagString } from "../lib/args.js";
 import { assertPathContained, assertPathsDisjoint, atomicWriteJson, copyDirAtomic, ensureSafeDirectory, isoNow, readJson, walkFiles } from "../lib/fs.js";
 import { assertKitRepository, deriveKitTargets, parseKitDependencies, validateKitRepositoryDiagnostics } from "../flow-kit/validate.js";
+import { provisionKit, ProvisionConflictError } from "../flow-kit/provision.js";
 import { activateCodexLocal, activateStrandsLocal } from "../runtime-adapters.js";
 import { defaultCodexHome } from "../lib/local-artifact-root.js";
 import { root } from "../tools/common.js";
@@ -33,6 +34,17 @@ function resolveCatalogKitSource(source: string): string | null {
   const rel = (entry as Record<string, unknown>).path;
   if (typeof rel !== "string") return null;
   return path.resolve(path.dirname(repoCatalogPath), "..", rel);
+}
+
+function resolveProvisionKitSource(source: string, dest: string): string | null {
+  const localPath = path.resolve(source);
+  if (fs.existsSync(localPath)) return localPath;
+  const installed = loadRegistry(dest).kits.find((entry) => entry.id === source);
+  if (installed) {
+    const installedSource = installedPath(dest, source);
+    if (fs.existsSync(installedSource)) return installedSource;
+  }
+  return resolveCatalogKitSource(source);
 }
 
 function loadRegistry(dest: string): { schema_version: string; kits: Record<string, unknown>[] } {
@@ -338,6 +350,60 @@ function activate(argv: string[]): number {
   return Array.isArray(result.errors) && result.errors.length ? 1 : 0;
 }
 
+async function validate(argv: string[]): Promise<number> {
+  const args = parseArgs(argv);
+  const kitDir = path.resolve(args.positionals[0] ?? ".");
+  const diagnostics = await validateKitRepositoryDiagnostics(kitDir);
+  for (const warning of diagnostics.warnings) console.log(`warning: ${warning}`);
+  if (diagnostics.errors.length) {
+    console.log("Flow Kit repository validation failed:");
+    for (const error of diagnostics.errors) console.log(` - ${error}`);
+    return 1;
+  }
+  console.log(`Flow Kit repository validation passed: ${kitDir}`);
+  return 0;
+}
+
+async function provision(argv: string[]): Promise<number> {
+  const args = parseArgs(argv);
+  const source = args.positionals[0];
+  if (!source) {
+    console.error("provision: missing <kit-id-or-path> argument");
+    console.error("usage: flow-agents kit provision <kit-id-or-path> [--target <dir>] [--force] [--dry-run]");
+    return 2;
+  }
+  const dest = resolveDest(args.flags);
+  const kitDir = resolveProvisionKitSource(source, dest);
+  if (!kitDir) {
+    console.error(`provision: kit '${source}' was not found as a local path, installed kit, or catalog kit`);
+    return 1;
+  }
+  const target = path.resolve(flagString(args.flags, "target", process.cwd()) ?? process.cwd());
+  try {
+    const result = await provisionKit(kitDir, target, {
+      force: flagBool(args.flags, "force"),
+      dryRun: flagBool(args.flags, "dry-run"),
+    });
+    for (const file of result.files) console.log(`${result.dry_run ? "would provision" : "provisioned"}: ${file.source} -> ${file.destination}`);
+    if (result.dry_run) console.log(`dry-run: ${result.files.length} file(s) declared by kit '${result.kit_id}'; no files written`);
+    else if (result.files.length === 0) console.log(`kit '${result.kit_id}' declares no provisions`);
+    else console.log(`provisioned ${result.files.length} file(s) from kit '${result.kit_id}' into ${target}`);
+    return 0;
+  } catch (error) {
+    if (error instanceof ProvisionConflictError) {
+      console.error(`provision: ${error.message}; rerun with --force to overwrite`);
+      for (const conflict of error.conflicts) console.error(`conflict: ${conflict.target} (${conflict.destination})`);
+      return 1;
+    }
+    const diagnostics = (error as Error & { diagnostics?: string[] }).diagnostics;
+    if (diagnostics?.length) {
+      console.error("Flow Kit repository validation failed:");
+      for (const diagnostic of diagnostics) console.error(` - ${diagnostic}`);
+    } else console.error(`provision: ${(error as Error).message}`);
+    return 1;
+  }
+}
+
 /**
  * inspect <kit-dir> [--json]
  *
@@ -386,8 +452,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (command === "list") return list(rest);
   if (command === "status") return status(rest);
   if (command === "activate") return activate(rest);
+  if (command === "validate") return await validate(rest);
+  if (command === "provision") return await provision(rest);
   if (command === "inspect") return await inspect(rest);
-  console.error("usage: flow-agents kit <install|activate|inspect|list|status> ...");
+  console.error("usage: flow-agents kit <install|activate|validate|provision|inspect|list|status> ...");
   return 2;
 }
 
