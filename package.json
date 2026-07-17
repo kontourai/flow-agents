@@ -141,6 +141,7 @@
     "promptfoo": "PROMPTFOO_CONFIG_DIR=.promptfoo PROMPTFOO_DISABLE_WAL_MODE=true PROMPTFOO_DISABLE_TELEMETRY=true promptfoo",
     "promptfoo:view": "PROMPTFOO_CONFIG_DIR=.promptfoo PROMPTFOO_DISABLE_WAL_MODE=true PROMPTFOO_DISABLE_TELEMETRY=true promptfoo view",
     "check:content-boundary": "node scripts/check-content-boundary.cjs",
+    "check:layer-boundary": "node scripts/check-layer-boundary.mjs",
     "check:hachure-boundary": "node scripts/check-hachure-boundary.mjs",
     "check:decisions": "node scripts/check-decisions.cjs check",
     "gen:decisions-index": "node scripts/check-decisions.cjs gen-index",
