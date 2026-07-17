@@ -571,6 +571,55 @@ else
   fi
 fi
 
+# --- consult-standards skill (Slice 4 / #649): JIT guidance via `veritas explain` ---------
+# A pull-based advisory skill telling an agent to run `veritas explain --file <path>` before
+# editing. No MCP server; wraps the veritas CLI, reimplements no evaluation.
+echo "--- consult-standards skill ---"
+CONSULT_SKILL="$KIT/skills/consult-standards/SKILL.md"
+if [[ -f "$CONSULT_SKILL" ]]; then
+  pass "consult-standards SKILL.md is present"
+else
+  fail "consult-standards SKILL.md is missing"
+fi
+if rg -q '"id": *"veritas-governance\.consult-standards"' "$KIT/kit.json" && rg -q '"path": *"skills/consult-standards/SKILL.md"' "$KIT/kit.json"; then
+  pass "consult-standards skill is registered in kit.json skills[]"
+else
+  fail "consult-standards skill is NOT registered in kit.json skills[]"
+fi
+# It must point agents at `veritas explain` (the JIT producer), not vendor evaluation.
+if grep -qF 'veritas explain' "$CONSULT_SKILL"; then
+  pass "consult-standards points at the veritas explain CLI"
+else
+  fail "consult-standards does not reference veritas explain"
+fi
+if rg -q -i 'evaluateRepoStandards|evidence-check-runner\.mjs|class +[A-Za-z]*RuleEngine' "$KIT/skills/consult-standards" 2>/dev/null; then
+  fail "consult-standards appears to vendor Veritas evaluation logic (no-fork violated)"
+else
+  pass "no-fork: consult-standards wraps the veritas CLI, no vendored rule/claim engine"
+fi
+# No-MCP invariant (#649 / ADR 0011): the kit ships no MCP server CODE and declares no MCP
+# dependency. Scoped to non-markdown files so the docs' explicit "no MCP server" prose (which
+# names the concept precisely to say the kit avoids it) does not trip the check.
+if rg -q -i 'modelcontextprotocol|new +McpServer|StdioServerTransport|createMcpServer' "$KIT" --glob '!*.md' 2>/dev/null; then
+  fail "kit ships MCP server code/dependency — #649 guidance is a skill, not an MCP server (ADR 0011)"
+else
+  pass "no MCP server: JIT guidance is an agent-pull skill (ADR 0011)"
+fi
+# Live leg: with a Veritas binary, a scaffolded repo's `veritas explain --file` produces JIT context.
+VBIN3="${VERITAS_BIN:-veritas}"
+if command -v "$VBIN3" >/dev/null 2>&1 || [[ -x "$VBIN3" ]]; then
+  cs="$TMP_DIR/consult-repo"; mkdir -p "$cs"
+  ( cd "$cs" && git init -q && printf '{"name":"consult-eval","scripts":{"test":"node -e \\"process.exit(0)\\""}}\n' > package.json && "$VBIN3" init >/dev/null 2>&1 )
+  explain_out="$( cd "$cs" && "$VBIN3" explain --file package.json 2>&1 )"
+  if printf '%s' "$explain_out" | grep -qF 'Veritas JIT Context'; then
+    pass "veritas explain --file produces JIT context on a governed repo (the guidance the skill invokes)"
+  else
+    fail "veritas explain --file did not produce JIT context"; printf '%s\n' "$explain_out" | sed -n '1,8p'
+  fi
+else
+  echo "  - SKIP consult-standards live leg (no Veritas binary; set VERITAS_BIN to enable)"
+fi
+
 echo ""
 if [[ "$errors" -eq 0 ]]; then
   echo "PASS: veritas-governance kit gate demo (positive passes, negative blocks)"

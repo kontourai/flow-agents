@@ -30,6 +30,7 @@ doc, which also freezes the CLI + artifact + claim-shape contract this kit's ada
 | Provisions | `assets/starter-hooks/githooks/**` → `provisions[]` | The two governance git hooks (`veritas setup repo-hooks`'s static output): `.githooks/pre-push` (`npm run --if-present prepush`) and `.githooks/post-commit` (`veritas readiness`). Shipped verbatim; landed non-executable — activation (`chmod +x` + `git config core.hooksPath`) is a documented operator step a copy cannot perform. See "Provisioning the governance hooks". |
 | Flow | `flows/standards-authoring.flow.json` | Single-gate agentless flow `propose -> human-approval-gate -> apply`. The gate requires a **verified** `standards-authoring-approval` trust.bundle claim (`subjectType: "repo-governance-change"`) before `veritas init --apply` writes the derived standards. Veritas derives and writes; the kit gates the human sign-off. See "How to author standards for a repo". |
 | Skill | `skills/standards-authoring/SKILL.md` | Runbook for the standards-authoring flow: runs `veritas init --explore`/`--guided` to derive a recommendation (project name, adaptive Repo Map nodes, evidence-check inference, governance-block splice), surfaces it for human approval, then `veritas init --apply`. Wraps the veritas CLI; reimplements nothing. |
+| Skill | `skills/consult-standards/SKILL.md` | Just-in-time governance guidance before editing: tells an agent to run `veritas explain --file <path>` (or `--work-area <id>`) to see the governance excerpt, applicable Repo Standards rules (do/don't/examples), and latest surface status, then edit within them. Pull-based advisory — does not block (the PreToolUse hook is enforcement). No MCP server. See "Consulting standards just in time". |
 
 The gate uses provider-neutral Flow vocabulary (`kind: "trust.bundle"`, `bundle_claim`) — the
 same vocabulary `kits/builder/flows/build.flow.json` uses. Veritas is simply the producer that
@@ -143,6 +144,30 @@ themselves only **invoke** the `veritas` CLI (`npm run prepush`, `veritas readin
 reimplements no evaluation, and the live per-edit PreToolUse *evaluation* entry point stays in the
 engine (`evaluatePreToolUse` → `evaluateRepoStandards`), reached by the installed hook shelling
 into `veritas` — hook wiring is the kit's; per-edit evaluation is the engine's.
+
+## Consulting standards just in time
+
+The `consult-standards` skill (`skills/consult-standards/SKILL.md`) gives an agent just-in-time
+governance guidance **before** it edits a file, so it shapes the change to pass rather than
+learning about a violation only when the PreToolUse hook blocks the write:
+
+```bash
+veritas explain --file src/path/to/file.ts     # rules that apply to this file
+veritas explain --work-area <work-area-id>      # rules for a whole Repo Map work area
+```
+
+`veritas explain` prints a **`Veritas JIT Context`** briefing — the `.veritas/GOVERNANCE.md`
+excerpt, one block per matching Repo Standard (`Rule`/`Kind`/`Enforcement Level`/`Summary`/
+`Do`/`Do not`/`Good`/`Bad`/`Context`), and the latest recorded surface status for each. The skill
+is **pull-based advisory**: it never blocks (enforcement stays the engine-side PreToolUse hook)
+and reimplements no rule evaluation — `veritas explain` does the matching and projection.
+
+**No MCP server.** Just-in-time guidance here is an agent invoking `veritas explain`, not a
+standing MCP service. Per the flow-agents MCP posture (ADR 0011), MCP never carries the gate and
+enforcement stays hooks; this skill is the deliberate agent-pull replacement for a guidance
+server — the veritas-owned MCP guidance server the migration once imagined was never actually
+built (the `@modelcontextprotocol/sdk` dependency in veritas is only the evidence-check *client*),
+so this slice builds the guidance path new in the kit rather than moving one.
 
 ## How to issue a no-agent-delivery exemption
 

@@ -100,6 +100,7 @@ Primary tools: public `flow-agents workflow`, `trust.bundle`, artifact validatio
 | agentic-engineering | skills/agentic-engineering/SKILL.md | Eval-first execution, task decomposition, and cost-aware model routing for AI-driven development workflows. |
 | browser-test | skills/browser-test/SKILL.md | Headless browser automation via Playwright — screenshots, accessibility checks, form filling, UI testing, DOM inspection. |
 | builder-shape | kits/builder/skills/builder-shape/SKILL.md | Builder Kit shaping entrypoint. Turns a raw idea into a provider-neutral, reviewable backlog proposal and stops before build selection unless the user explicitly continues. |
+| consult-standards | kits/veritas-governance/skills/consult-standards/SKILL.md | Get just-in-time Veritas governance guidance for a file or work area before editing it: run `veritas explain --file <path>` (or `--work-area <id>`) to see the governance excerpt, the Repo Standards rules that apply, their do/don't/exampl... |
 | dependency-update | skills/dependency-update/SKILL.md | Analyze and upgrade project dependencies — latest versions, security vulnerabilities, actionable update plan across all package managers. |
 | design-probe | kits/builder/skills/design-probe/SKILL.md | Generic one-question-at-a-time design probe for turning unclear goals, designs, and handoffs into shared understanding. |
 | eval-rebuild | skills/eval-rebuild/SKILL.md | Project-specific build and install commands for the eval feedback loop. Injected into eval-builder agent. Replace this skill for different build systems. |
