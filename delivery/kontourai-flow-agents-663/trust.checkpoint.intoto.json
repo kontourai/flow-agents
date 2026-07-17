@@ -1,0 +1,1400 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "trust.checkpoint.json",
+      "digest": {
+        "sha256": "eb9524037c08fef788312192d508fb1471e2537be876a45eb925617908ea3831"
+      }
+    }
+  ],
+  "predicateType": "https://hachure.org/v1/bundle",
+  "predicate": {
+    "schemaVersion": 5,
+    "source": "flow-agents/workflow-sidecar;statusFunctionVersion=2",
+    "claims": [
+      {
+        "id": "kontourai-flow-agents-663-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-663-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-8069dcadc8521b1dc4b2e0e9fe66b1d12c7808f3c8ccd69b38025477f5c31d60-gate-visit-2026-07-17t14-26-46z",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-663/gate-claim-selected-work",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.pull-work.selected",
+        "fieldOrBehavior": "Work Item kontourai/flow-agents#663 is durably assigned to the active workflow actor (assignment sha256:8069dcadc8521b1dc4b2e0e9fe66b1d12c7808f3c8ccd69b38025477f5c31d60).",
+        "value": "pass",
+        "createdAt": "2026-07-17T14:31:26.968Z",
+        "updatedAt": "2026-07-17T14:31:26.968Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.pull-work.selected:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#663",
+          "expected_producer": "builder.pull-work",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "selected-work"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/assignment/kontourai-flow-agents-663.json",
+              "summary": "Durable local assignment record for the selected Work Item and active actor; sha256:8069dcadc8521b1dc4b2e0e9fe66b1d12c7808f3c8ccd69b38025477f5c31d60."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-663/assignment-provider-state.json",
+              "summary": "Provider assignment state confirming ownership before the local runtime lease was mirrored; sha256:3dd3663e95969ccf8a57d2123e3052b2bcb75622a0397a9abf9974f6d7c8b08b."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-663/kontourai-flow-agents-663--pull-work.md",
+              "summary": "Concrete pull-work selection report for kontourai/flow-agents#663."
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "selected-work",
+            "claim_type": "builder.pull-work.selected",
+            "subject_type": "work-item",
+            "step_id": "pull-work",
+            "identity_version": 2,
+            "recorded_at": "2026-07-17T14:26:46Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-663-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-preserved-artifact-records-goal-fit-scope-dependencies-risks-and-planning-readiness-accepted-gap-ready-re-grounded-post-rebase-on-d8b83df-gate-visit-2026-07-17t14-26-56-015z",
+        "subjectType": "work-item",
+        "subjectId": "kontourai-flow-agents-663/gate-claim-pickup-probe-readiness",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.design-probe.pickup-readiness",
+        "fieldOrBehavior": "Pickup probe (preserved artifact) records goal fit, scope, dependencies, risks, and planning readiness (accepted_gap_ready); re-grounded post-rebase on d8b83df.",
+        "value": "pass",
+        "createdAt": "2026-07-17T14:31:26.968Z",
+        "updatedAt": "2026-07-17T14:31:26.968Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.design-probe.pickup-readiness:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#663",
+          "expected_producer": "builder.pickup-probe",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "pickup-probe"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-663/kontourai-flow-agents-663--pull-work.md",
+              "summary": "Pickup readiness, scope, dependencies, risks, and planning decision."
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "pickup-probe-readiness",
+            "claim_type": "builder.design-probe.pickup-readiness",
+            "subject_type": "work-item",
+            "step_id": "design-probe",
+            "identity_version": 2,
+            "recorded_at": "2026-07-17T14:26:56.015Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-663-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-manifest-home-status-vocabulary-reconciliation-semantics-test-plan-and-accepted-gaps-baseline-no-writer-subcommand-in-slice-1-are-explicit-in-the-preserved-record-gate-visit-2026-07-17t14-26-56-157z",
+        "subjectType": "decision",
+        "subjectId": "kontourai-flow-agents-663/gate-claim-probe-decisions-or-accepted-gaps",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.design-probe.decisions",
+        "fieldOrBehavior": "Probe decisions (manifest home, status vocabulary, reconciliation semantics, test plan) and accepted gaps (baseline, no writer subcommand in slice 1) are explicit in the preserved record.",
+        "value": "pass",
+        "createdAt": "2026-07-17T14:31:26.968Z",
+        "updatedAt": "2026-07-17T14:31:26.968Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.design-probe.decisions:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#663",
+          "expected_producer": "builder.pickup-probe",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "pickup-probe"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-663/kontourai-flow-agents-663--pull-work.md",
+              "summary": "Probe decisions, unresolved questions, accepted gaps, route reason, and next action."
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "probe-decisions-or-accepted-gaps",
+            "claim_type": "builder.design-probe.decisions",
+            "subject_type": "decision",
+            "step_id": "design-probe",
+            "identity_version": 2,
+            "recorded_at": "2026-07-17T14:26:56.157Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-663-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-preserved-records-scope-sequencing-stable-acceptance-criteria-task-to-criterion-mapping-and-required-evidence-slice-2-boundary-explicit-base-re-grounded-to-d8b83df-post-rebase-gate-visit-2026-07-17t14-27-05-473z",
+        "subjectType": "artifact",
+        "subjectId": "kontourai-flow-agents-663/gate-claim-implementation-plan",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.plan.implementation",
+        "fieldOrBehavior": "Implementation plan (preserved) records scope, sequencing, stable acceptance criteria, task-to-criterion mapping, and required evidence; slice-2 boundary explicit; base re-grounded to d8b83df post-rebase.",
+        "value": "pass",
+        "createdAt": "2026-07-17T14:31:26.968Z",
+        "updatedAt": "2026-07-17T14:31:26.968Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.plan.implementation:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#663",
+          "expected_producer": "builder.plan-work",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "implementation-plan"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-663/kontourai-flow-agents-663--plan-work.md",
+              "summary": "Execution-ready plan with Definition Of Done and task-to-criterion mapping."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-663/acceptance.json",
+              "summary": "Stable acceptance criteria and evidence requirements."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-663/handoff.json",
+              "summary": "Execution handoff, route reason, and next action."
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "implementation-plan",
+            "claim_type": "builder.plan.implementation",
+            "subject_type": "artifact",
+            "step_id": "plan",
+            "identity_version": 2,
+            "recorded_at": "2026-07-17T14:27:05.473Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-663-gate-claim-implementation-scope.flow-agents-workflow.implementation-stayed-within-recorded-scope-9-files-rebased-commits-2414549-f6a7534-on-base-d8b83df-changed-files-and-supported-acceptance-criteria-documented-session-waves-reconciled-with-no-not-reported-workers-gate-visit-2026-07-17t14-27-14-349z",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-663/gate-claim-implementation-scope",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.execute.scope",
+        "fieldOrBehavior": "Implementation stayed within recorded scope (9 files, rebased commits 2414549+f6a7534 on base d8b83df); changed files and supported acceptance criteria documented; session waves reconciled with no not_reported workers.",
+        "value": "pass",
+        "createdAt": "2026-07-17T14:31:26.968Z",
+        "updatedAt": "2026-07-17T14:31:26.968Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.execute.scope:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#663",
+          "expected_producer": "builder.execute-plan",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "implementation-scope"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-663/kontourai-flow-agents-663--deliver.md",
+              "summary": "Execution report with changed scope, acceptance mapping, per-wave reconciliation, and rebase/replay record."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-663/state.json",
+              "summary": "Current execution state and canonical next action."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-663/waves.json",
+              "summary": "Session wave manifest: three execute waves and two review waves declared and reconciled N of M."
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "implementation-scope",
+            "claim_type": "builder.execute.scope",
+            "subject_type": "change",
+            "step_id": "execute",
+            "identity_version": 2,
+            "recorded_at": "2026-07-17T14:27:14.349Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-663-gate-claim-acceptance-criteria.flow-agents-workflow.all-six-slice-1-acceptance-criteria-pass-with-reviewable-evidence-on-rebased-head-f6a7534-base-d8b83df-ac1-ac3-proven-by-the-waves-fixture-blocks-in-the-writer-observed-integration-run-recorded-here-ac4-ac5-by-static-skill-contract-assertions-bash-evals-run-sh-static-exit-0-this-session-ac6-by-build-static-integration-source-map-checks-acceptance-evidence-table-in-the-deliver-artifact-gate-visit-2026-07-17t14-30-15-314z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-663/gate-claim-acceptance-criteria",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "All six slice-1 acceptance criteria pass with reviewable evidence on rebased HEAD f6a7534 (base d8b83df): AC1-AC3 proven by the waves fixture blocks in the writer-observed integration run recorded here; AC4-AC5 by static skill/contract assertions (bash evals/run.sh static exit 0 this session); AC6 by build/static/integration/source/map checks. Acceptance Evidence table in the deliver artifact.",
+        "value": "pass",
+        "createdAt": "2026-07-17T14:31:26.968Z",
+        "updatedAt": "2026-07-17T14:31:26.968Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "command",
+          "workflow_subject_ref": "kontourai/flow-agents#663",
+          "expected_producer": "builder.verify-work",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "acceptance-criteria",
+            "tests-evidence",
+            "policy-compliance"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "command",
+              "excerpt": "bash evals/integration/test_workflow_artifacts.sh",
+              "summary": "Writer-observed integration run: all waves fixtures pass/fail as designed, exit 0."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-663/kontourai-flow-agents-663--deliver.md",
+              "summary": "Acceptance Evidence table and per-AC status with evidence."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-663/acceptance.json",
+              "summary": "Declared stable acceptance criteria for this run."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-663/waves.json",
+              "summary": "Session wave manifest reconciled: 3 execute waves + 3 review waves, all N of M reported."
+            }
+          ],
+          "output_digest": {
+            "algorithm": "sha256",
+            "hex": "00081de5587bf1e12b68170b50ccf0f787fc4a720826c48e7858df93c3df501f"
+          },
+          "observed_commands": [
+            {
+              "command": "bash evals/integration/test_workflow_artifacts.sh",
+              "exit_code": 0,
+              "output_sha256": "00081de5587bf1e12b68170b50ccf0f787fc4a720826c48e7858df93c3df501f"
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "acceptance-criteria",
+            "claim_type": "workflow.acceptance.criterion",
+            "subject_type": "flow-step",
+            "step_id": "verify",
+            "identity_version": 2,
+            "recorded_at": "2026-07-17T14:30:15.314Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-663-gate-claim-tests-evidence.flow-agents-workflow.verification-on-rebased-head-f6a7534-manifest-verbatim-ci-lane-install-merge-integration-is-the-labeled-writer-observed-command-87-87-locally-change-specific-proof-lanes-disclosed-per-695a-discipline-bash-evals-integration-test-workflow-artifacts-sh-exit-0-7-waves-fixtures-writer-observed-on-the-acceptance-criteria-claim-node-test-src-cli-validate-waves-test-mjs-5-5-runs-in-ci-inside-static-eval-suite-via-test-unit-helpers-sh-bash-evals-run-sh-static-exit-0-13-skill-contract-assertions-npm-run-validate-source-and-npm-run-context-map-check-both-clean-gate-visit-2026-07-17t14-30-20-695z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-663/gate-claim-tests-evidence",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.verify.tests",
+        "fieldOrBehavior": "Verification on rebased HEAD f6a7534: Manifest-verbatim CI lane install-merge-integration is the labeled writer-observed command (87/87 locally). Change-specific proof lanes disclosed per #695a discipline: bash evals/integration/test_workflow_artifacts.sh exit 0 (7 waves fixtures; writer-observed on the acceptance-criteria claim), node --test src/cli/validate-waves.test.mjs 5/5 (runs in CI inside static-eval-suite via test_unit_helpers.sh), bash evals/run.sh static exit 0 (13 skill/contract assertions), npm run validate:source -- and npm run context-map -- --check both clean.",
+        "value": "pass",
+        "createdAt": "2026-07-17T14:31:26.968Z",
+        "updatedAt": "2026-07-17T14:31:26.968Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.verify.tests:test_output",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "command",
+          "workflow_subject_ref": "kontourai/flow-agents#663",
+          "expected_producer": "builder.verify-work",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "acceptance-criteria",
+            "tests-evidence",
+            "policy-compliance"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "command",
+              "excerpt": "bash evals/integration/test_install_merge.sh",
+              "summary": "Exact substantive manifest-lane test command recorded and re-executed by the canonical writer for this verification result."
+            },
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-663/kontourai-flow-agents-663--plan-work.md",
+              "summary": "Accepted criterion and planned verification mapping (Acceptance Evidence table)."
+            }
+          ],
+          "output_digest": {
+            "algorithm": "sha256",
+            "hex": "d9ad90425ca9b8ea7b0b214e987e0e75900f358ebb5542146639aa89a39c074d"
+          },
+          "observed_commands": [
+            {
+              "command": "bash evals/integration/test_install_merge.sh",
+              "exit_code": 0,
+              "output_sha256": "d9ad90425ca9b8ea7b0b214e987e0e75900f358ebb5542146639aa89a39c074d",
+              "test_count": 1,
+              "execution_proof": {
+                "kind": "local-process-exit",
+                "runner": "bash",
+                "static_test_units": 1
+              }
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "tests-evidence",
+            "claim_type": "builder.verify.tests",
+            "subject_type": "flow-step",
+            "step_id": "verify",
+            "identity_version": 2,
+            "recorded_at": "2026-07-17T14:30:20.695Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-663-gate-claim-merge-readiness.flow-agents-workflow.evidence-confidence-pass-on-rebased-head-f6a7534-under-publish-learn-v1-2-all-six-acs-command-backed-fresh-critique-binds-current-digest-reconcile-preflight-ok-before-this-record-residual-risks-and-the-manifest-lane-labeling-compromise-disclosed-in-the-evidence-gate-artifact-gate-visit-2026-07-17t14-31-26-968z",
+        "subjectType": "change",
+        "subjectId": "kontourai-flow-agents-663/gate-claim-merge-readiness",
+        "facet": "flow-agents.workflow",
+        "claimType": "builder.merge-ready.readiness",
+        "fieldOrBehavior": "Evidence confidence PASS on rebased HEAD f6a7534 under publish-learn v1.2: all six ACs command-backed; fresh critique binds current digest; reconcile-preflight OK before this record; residual risks and the manifest-lane labeling compromise disclosed in the evidence-gate artifact.",
+        "value": "pass",
+        "createdAt": "2026-07-17T14:31:26.968Z",
+        "updatedAt": "2026-07-17T14:31:26.968Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:builder.merge-ready.readiness:attestation",
+        "metadata": {
+          "origin": "check",
+          "check_kind": "external",
+          "workflow_subject_ref": "kontourai/flow-agents#663",
+          "expected_producer": "builder.evidence-gate",
+          "recorded_by": "claude-coded6d7b37b-2908-4eaa-b684-9e2389bc5d57Kontour",
+          "self_produced_trust_slices": [
+            "merge-readiness"
+          ],
+          "artifact_refs": [
+            {
+              "kind": "artifact",
+              "file": ".kontourai/flow-agents/kontourai-flow-agents-663/kontourai-flow-agents-663--evidence-gate.md",
+              "summary": "Evidence confidence, criterion coverage, scope-integrity decision, and replay addendum."
+            }
+          ],
+          "gate_claim": {
+            "expectation_id": "merge-readiness",
+            "claim_type": "builder.merge-ready.readiness",
+            "subject_type": "change",
+            "step_id": "merge-ready",
+            "identity_version": 2,
+            "recorded_at": "2026-07-17T14:31:26.968Z"
+          }
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-663-ac1-a-wave-manifest-shape-exists-schemas-workflow-waves-schema-json-validated-by-validate-workflow-artifacts-when-waves-json-is-present-additive-absent-file-changes-nothing-not-in-the-required-sidecar-list.flow-agents-workflow.ac1-a-wave-manifest-shape-exists-schemas-workflow-waves-schema-json-validated-by-validate-workflow-artifacts-when-waves-json-is-present-additive-absent-file-changes-nothing-not-in-the-required-sidecar-list-verified-2026-07-17t14-30-20-695z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-663/ac1-a-wave-manifest-shape-exists-schemas-workflow-waves-schema-json-validated-by-validate-workflow-artifacts-when-waves-json-is-present-additive-absent-file-changes-nothing-not-in-the-required-sidecar-list",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "AC1: A wave manifest shape exists — `schemas/workflow-waves.schema.json`, validated by validate-workflow-artifacts when `waves.json` is present, additive (absent file changes nothing; not in the required-sidecar list)",
+        "value": "pass",
+        "createdAt": "2026-07-17T14:30:20.695Z",
+        "updatedAt": "2026-07-17T14:30:20.695Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
+        "metadata": {
+          "origin": "acceptance",
+          "criterion": {
+            "id": "ac1-a-wave-manifest-shape-exists-schemas-workflow-waves-schema-json-validated-by-validate-workflow-artifacts-when-waves-json-is-present-additive-absent-file-changes-nothing-not-in-the-required-sidecar-list",
+            "description": "AC1: A wave manifest shape exists — `schemas/workflow-waves.schema.json`, validated by validate-workflow-artifacts when `waves.json` is present, additive (absent file changes nothing; not in the required-sidecar list)",
+            "status": "pass",
+            "evidence_refs": [
+              {
+                "kind": "command",
+                "excerpt": "bash evals/integration/test_install_merge.sh",
+                "summary": "Manifest-verbatim labeled lane for this claim; AC1 change-specific proof: waves fixtures in test_workflow_artifacts.sh (writer-observed on acceptance-criteria claim) and validate-waves units (CI static lane)."
+              },
+              {
+                "kind": "source",
+                "file": "src/cli/validate-workflow-artifacts.ts",
+                "line_start": 24,
+                "line_end": 25,
+                "excerpt": "\"waves.json\": \"schemas/workflow-waves.schema.json\",",
+                "summary": "waves.json registered against the new schema; not in the required-sidecar list."
+              }
+            ],
+            "observed_commands": [
+              {
+                "command": "bash evals/integration/test_install_merge.sh",
+                "exit_code": 0,
+                "output_sha256": "d9ad90425ca9b8ea7b0b214e987e0e75900f358ebb5542146639aa89a39c074d",
+                "test_count": 1,
+                "execution_proof": {
+                  "kind": "local-process-exit",
+                  "runner": "bash",
+                  "static_test_units": 1
+                }
+              }
+            ],
+            "identity_version": 2,
+            "verified_at": "2026-07-17T14:30:20.695Z"
+          },
+          "workflow_subject_ref": "kontourai/flow-agents#663"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-663-ac2-per-worker-terminal-status-vocabulary-is-completed-failed-blocked-not-reported-enforced-by-schema-enum-with-not-reported-reserved-for-reconciliation.flow-agents-workflow.ac2-per-worker-terminal-status-vocabulary-is-completed-failed-blocked-not-reported-enforced-by-schema-enum-with-not-reported-reserved-for-reconciliation-verified-2026-07-17t14-30-20-695z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-663/ac2-per-worker-terminal-status-vocabulary-is-completed-failed-blocked-not-reported-enforced-by-schema-enum-with-not-reported-reserved-for-reconciliation",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "AC2: Per-worker terminal status vocabulary is `completed|failed|blocked|not_reported` enforced by schema enum, with `not_reported` reserved for reconciliation",
+        "value": "pass",
+        "createdAt": "2026-07-17T14:30:20.695Z",
+        "updatedAt": "2026-07-17T14:30:20.695Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
+        "metadata": {
+          "origin": "acceptance",
+          "criterion": {
+            "id": "ac2-per-worker-terminal-status-vocabulary-is-completed-failed-blocked-not-reported-enforced-by-schema-enum-with-not-reported-reserved-for-reconciliation",
+            "description": "AC2: Per-worker terminal status vocabulary is `completed|failed|blocked|not_reported` enforced by schema enum, with `not_reported` reserved for reconciliation",
+            "status": "pass",
+            "evidence_refs": [
+              {
+                "kind": "command",
+                "excerpt": "bash evals/integration/test_install_merge.sh",
+                "summary": "Manifest-verbatim labeled lane; AC2 change-specific proof: bad-status fixtures fail against the schema enum in both test lanes (disclosed in claim summary)."
+              },
+              {
+                "kind": "source",
+                "file": "schemas/workflow-waves.schema.json",
+                "line_start": 218,
+                "line_end": 226,
+                "excerpt": "\"enum\": [\n            \"completed\",\n            \"failed\",\n            \"blocked\",\n            \"not_reported\"\n          ]",
+                "summary": "Terminal status vocabulary schema-enforced."
+              }
+            ],
+            "observed_commands": [
+              {
+                "command": "bash evals/integration/test_install_merge.sh",
+                "exit_code": 0,
+                "output_sha256": "d9ad90425ca9b8ea7b0b214e987e0e75900f358ebb5542146639aa89a39c074d",
+                "test_count": 1,
+                "execution_proof": {
+                  "kind": "local-process-exit",
+                  "runner": "bash",
+                  "static_test_units": 1
+                }
+              }
+            ],
+            "identity_version": 2,
+            "verified_at": "2026-07-17T14:30:20.695Z"
+          },
+          "workflow_subject_ref": "kontourai/flow-agents#663"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-663-ac3-reconcile-against-manifest-is-machine-checkable-exactly-one-terminal-record-per-declared-worker-no-undeclared-reporters-counts-consistent-complete-forbids-missing-not-reported-the-3-workers-scenario-yields-2-of-3-reported-worker-3-not-reported-as-passing-data-while-a-false-complete-fails.flow-agents-workflow.ac3-reconcile-against-manifest-is-machine-checkable-exactly-one-terminal-record-per-declared-worker-no-undeclared-reporters-counts-consistent-complete-forbids-missing-not-reported-the-3-workers-scenario-yields-2-of-3-reported-worker-3-not-reported-as-passing-data-while-a-false-complete-fails-verified-2026-07-17t14-30-20-695z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-663/ac3-reconcile-against-manifest-is-machine-checkable-exactly-one-terminal-record-per-declared-worker-no-undeclared-reporters-counts-consistent-complete-forbids-missing-not-reported-the-3-workers-scenario-yields-2-of-3-reported-worker-3-not-reported-as-passing-data-while-a-false-complete-fails",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "AC3: Reconcile-against-manifest is machine-checkable — exactly one terminal record per declared worker, no undeclared reporters, counts consistent, `complete` forbids missing/not_reported; the 3-workers scenario yields \"2 of 3 reported; worker-3 not_reported\" as passing data while a false `complete` fails",
+        "value": "pass",
+        "createdAt": "2026-07-17T14:30:20.695Z",
+        "updatedAt": "2026-07-17T14:30:20.695Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
+        "metadata": {
+          "origin": "acceptance",
+          "criterion": {
+            "id": "ac3-reconcile-against-manifest-is-machine-checkable-exactly-one-terminal-record-per-declared-worker-no-undeclared-reporters-counts-consistent-complete-forbids-missing-not-reported-the-3-workers-scenario-yields-2-of-3-reported-worker-3-not-reported-as-passing-data-while-a-false-complete-fails",
+            "description": "AC3: Reconcile-against-manifest is machine-checkable — exactly one terminal record per declared worker, no undeclared reporters, counts consistent, `complete` forbids missing/not_reported; the 3-workers scenario yields \"2 of 3 reported; worker-3 not_reported\" as passing data while a false `complete` fails",
+            "status": "pass",
+            "evidence_refs": [
+              {
+                "kind": "command",
+                "excerpt": "bash evals/integration/test_install_merge.sh",
+                "summary": "Manifest-verbatim labeled lane; AC3 change-specific proof: 2-of-3 not_reported scenario valid as data, silent-drop/false-complete/duplicate/undeclared rejected — waves fixtures + validate-waves units (disclosed in claim summary)."
+              },
+              {
+                "kind": "source",
+                "file": "src/cli/validate-workflow-artifacts.ts",
+                "line_start": 339,
+                "line_end": 379,
+                "excerpt": "function validateWaves(file: string, value: any, issues: Issue[]): void {",
+                "summary": "Cross-record reconciliation checks enforced in code."
+              }
+            ],
+            "observed_commands": [
+              {
+                "command": "bash evals/integration/test_install_merge.sh",
+                "exit_code": 0,
+                "output_sha256": "d9ad90425ca9b8ea7b0b214e987e0e75900f358ebb5542146639aa89a39c074d",
+                "test_count": 1,
+                "execution_proof": {
+                  "kind": "local-process-exit",
+                  "runner": "bash",
+                  "static_test_units": 1
+                }
+              }
+            ],
+            "identity_version": 2,
+            "verified_at": "2026-07-17T14:30:20.695Z"
+          },
+          "workflow_subject_ref": "kontourai/flow-agents#663"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-663-ac4-execute-plan-between-waves-and-review-work-fan-out-are-rewritten-from-prose-collect-to-reconcile-against-manifest-with-explicit-n-of-m-reported-language-and-the-missing-workers-become-not-reported-rule.flow-agents-workflow.ac4-execute-plan-between-waves-and-review-work-fan-out-are-rewritten-from-prose-collect-to-reconcile-against-manifest-with-explicit-n-of-m-reported-language-and-the-missing-workers-become-not-reported-rule-verified-2026-07-17t14-30-20-695z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-663/ac4-execute-plan-between-waves-and-review-work-fan-out-are-rewritten-from-prose-collect-to-reconcile-against-manifest-with-explicit-n-of-m-reported-language-and-the-missing-workers-become-not-reported-rule",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "AC4: execute-plan \"Between waves\" and review-work fan-out are rewritten from prose-collect to reconcile-against-manifest with explicit \"N of M reported\" language and the missing-workers-become-not_reported rule",
+        "value": "pass",
+        "createdAt": "2026-07-17T14:30:20.695Z",
+        "updatedAt": "2026-07-17T14:30:20.695Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
+        "metadata": {
+          "origin": "acceptance",
+          "criterion": {
+            "id": "ac4-execute-plan-between-waves-and-review-work-fan-out-are-rewritten-from-prose-collect-to-reconcile-against-manifest-with-explicit-n-of-m-reported-language-and-the-missing-workers-become-not-reported-rule",
+            "description": "AC4: execute-plan \"Between waves\" and review-work fan-out are rewritten from prose-collect to reconcile-against-manifest with explicit \"N of M reported\" language and the missing-workers-become-not_reported rule",
+            "status": "pass",
+            "evidence_refs": [
+              {
+                "kind": "command",
+                "excerpt": "bash evals/integration/test_install_merge.sh",
+                "summary": "Manifest-verbatim labeled lane; AC4 change-specific proof: static suite assertions on N-of-M and not_reported language in both skills (bash evals/run.sh static exit 0 this session; CI static-eval-suite lane)."
+              },
+              {
+                "kind": "source",
+                "file": "kits/builder/skills/execute-plan/SKILL.md",
+                "line_start": 36,
+                "line_end": 37,
+                "excerpt": "Between waves, reconcile results against the wave manifest",
+                "summary": "execute-plan collect step is reconcile-against-manifest with explicit N of M reported language."
+              },
+              {
+                "kind": "source",
+                "file": "kits/builder/skills/review-work/SKILL.md",
+                "line_start": 62,
+                "line_end": 72,
+                "excerpt": "Reconcile against\n   that manifest at collection",
+                "summary": "review-work fan-out declares reviewer lanes and records missing reviewers as not_reported."
+              }
+            ],
+            "observed_commands": [
+              {
+                "command": "bash evals/integration/test_install_merge.sh",
+                "exit_code": 0,
+                "output_sha256": "d9ad90425ca9b8ea7b0b214e987e0e75900f358ebb5542146639aa89a39c074d",
+                "test_count": 1,
+                "execution_proof": {
+                  "kind": "local-process-exit",
+                  "runner": "bash",
+                  "static_test_units": 1
+                }
+              }
+            ],
+            "identity_version": 2,
+            "verified_at": "2026-07-17T14:30:20.695Z"
+          },
+          "workflow_subject_ref": "kontourai/flow-agents#663"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-663-ac5-context-contracts-execution-contract-md-states-the-reconciliation-contract.flow-agents-workflow.ac5-context-contracts-execution-contract-md-states-the-reconciliation-contract-verified-2026-07-17t14-30-20-695z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-663/ac5-context-contracts-execution-contract-md-states-the-reconciliation-contract",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "AC5: context/contracts/execution-contract.md states the reconciliation contract",
+        "value": "pass",
+        "createdAt": "2026-07-17T14:30:20.695Z",
+        "updatedAt": "2026-07-17T14:30:20.695Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
+        "metadata": {
+          "origin": "acceptance",
+          "criterion": {
+            "id": "ac5-context-contracts-execution-contract-md-states-the-reconciliation-contract",
+            "description": "AC5: context/contracts/execution-contract.md states the reconciliation contract",
+            "status": "pass",
+            "evidence_refs": [
+              {
+                "kind": "command",
+                "excerpt": "bash evals/integration/test_install_merge.sh",
+                "summary": "Manifest-verbatim labeled lane; AC5 change-specific proof: static suite asserts the Wave Manifest And Reconciliation contract section verbatim."
+              },
+              {
+                "kind": "source",
+                "file": "context/contracts/execution-contract.md",
+                "line_start": 50,
+                "line_end": 58,
+                "excerpt": "## Wave Manifest And Reconciliation",
+                "summary": "Reconciliation contract stated: declare before dispatch, one terminal record per worker, N of M reported, never silently absorb."
+              }
+            ],
+            "observed_commands": [
+              {
+                "command": "bash evals/integration/test_install_merge.sh",
+                "exit_code": 0,
+                "output_sha256": "d9ad90425ca9b8ea7b0b214e987e0e75900f358ebb5542146639aa89a39c074d",
+                "test_count": 1,
+                "execution_proof": {
+                  "kind": "local-process-exit",
+                  "runner": "bash",
+                  "static_test_units": 1
+                }
+              }
+            ],
+            "identity_version": 2,
+            "verified_at": "2026-07-17T14:30:20.695Z"
+          },
+          "workflow_subject_ref": "kontourai/flow-agents#663"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-663-ac6-repo-validation-green-on-final-head-npm-run-build-bash-evals-run-sh-static-targeted-integration-tests-test-workflow-artifacts-sh-known-environmental-exceptions-disclosed.flow-agents-workflow.ac6-repo-validation-green-on-final-head-npm-run-build-bash-evals-run-sh-static-targeted-integration-tests-test-workflow-artifacts-sh-known-environmental-exceptions-disclosed-verified-2026-07-17t14-30-20-695z",
+        "subjectType": "flow-step",
+        "subjectId": "kontourai-flow-agents-663/ac6-repo-validation-green-on-final-head-npm-run-build-bash-evals-run-sh-static-targeted-integration-tests-test-workflow-artifacts-sh-known-environmental-exceptions-disclosed",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.acceptance.criterion",
+        "fieldOrBehavior": "AC6: Repo validation green on final HEAD: npm run build, bash evals/run.sh static, targeted integration tests (test_workflow_artifacts.sh; known-environmental exceptions disclosed)",
+        "value": "pass",
+        "createdAt": "2026-07-17T14:30:20.695Z",
+        "updatedAt": "2026-07-17T14:30:20.695Z",
+        "impactLevel": "high",
+        "verificationPolicyId": "policy:workflow.acceptance.criterion:test_output",
+        "metadata": {
+          "origin": "acceptance",
+          "criterion": {
+            "id": "ac6-repo-validation-green-on-final-head-npm-run-build-bash-evals-run-sh-static-targeted-integration-tests-test-workflow-artifacts-sh-known-environmental-exceptions-disclosed",
+            "description": "AC6: Repo validation green on final HEAD: npm run build, bash evals/run.sh static, targeted integration tests (test_workflow_artifacts.sh; known-environmental exceptions disclosed)",
+            "status": "pass",
+            "evidence_refs": [
+              {
+                "kind": "command",
+                "excerpt": "bash evals/integration/test_install_merge.sh",
+                "summary": "Writer-observed manifest lane exit 0 on rebased HEAD; session runs also recorded exit 0 for npm run build, bash evals/run.sh static, bash evals/integration/test_workflow_artifacts.sh, node --test src/cli/validate-waves.test.mjs, npm run validate:source --, npm run context-map -- --check."
+              }
+            ],
+            "observed_commands": [
+              {
+                "command": "bash evals/integration/test_install_merge.sh",
+                "exit_code": 0,
+                "output_sha256": "d9ad90425ca9b8ea7b0b214e987e0e75900f358ebb5542146639aa89a39c074d",
+                "test_count": 1,
+                "execution_proof": {
+                  "kind": "local-process-exit",
+                  "runner": "bash",
+                  "static_test_units": 1
+                }
+              }
+            ],
+            "identity_version": 2,
+            "verified_at": "2026-07-17T14:30:20.695Z"
+          },
+          "workflow_subject_ref": "kontourai/flow-agents#663"
+        },
+        "status": "verified"
+      },
+      {
+        "id": "kontourai-flow-agents-663-review.flow-agents-workflow.fresh-critique-for-the-v1-2-replay-gate-visit-rebased-tree-reviewed-with-no-blocking-findings-reviewed-2026-07-17t14-29-35-545z",
+        "subjectType": "workflow-critique",
+        "subjectId": "kontourai-flow-agents-663/review",
+        "facet": "flow-agents.workflow",
+        "claimType": "workflow.critique.review",
+        "fieldOrBehavior": "Fresh critique for the v1.2 replay gate visit; rebased tree reviewed with no blocking findings.",
+        "value": "pass",
+        "createdAt": "2026-07-17T14:31:26.968Z",
+        "updatedAt": "2026-07-17T14:31:26.968Z",
+        "impactLevel": "medium",
+        "verificationPolicyId": "policy:workflow.critique.review",
+        "metadata": {
+          "origin": "critique",
+          "reviewer": "codex:thread-d7a7f30a8c26d3dcd1c29607:Kontour",
+          "reviewed_at": "2026-07-17T14:29:35.545Z",
+          "identity_version": 2,
+          "findings": [],
+          "lanes": [
+            {
+              "id": "code-review",
+              "status": "pass",
+              "summary": "Fresh independent review found no blocking findings; the rebased patch series is content-identical and both required test lanes pass.",
+              "evidence_refs": [
+                {
+                  "kind": "artifact",
+                  "file": ".kontourai/flow-agents/kontourai-flow-agents-663/kontourai-flow-agents-663--deliver.md",
+                  "summary": "Reviewed delivery artifact and changed-scope context."
+                },
+                {
+                  "kind": "command",
+                  "excerpt": "node --test src/cli/validate-waves.test.mjs",
+                  "summary": "Re-ran the unit tests during review."
+                }
+              ]
+            }
+          ],
+          "review_target": {
+            "artifacts": [
+              {
+                "file": ".kontourai/flow-agents/kontourai-flow-agents-663/kontourai-flow-agents-663--deliver.md",
+                "sha256": "f5c7b908aca39d22aa12b21322b5c0d1788029a7141ff866da43552285bbee47"
+              },
+              {
+                "file": "schemas/workflow-waves.schema.json",
+                "sha256": "7e8bfc33df5500a30a057779d39027985fea1ef452e70107e0e4b2fca8dd6f07"
+              },
+              {
+                "file": "src/cli/validate-workflow-artifacts.ts",
+                "sha256": "7282944eae6bbe229be688ac52af1851c36769182081823b7bd0232be78e8e8f"
+              },
+              {
+                "file": "src/cli/validate-waves.test.mjs",
+                "sha256": "9e21e549230f4d6d361288374a3418f621a0ae50e6dfd884c3e31ffa01790276"
+              },
+              {
+                "file": "kits/builder/skills/execute-plan/SKILL.md",
+                "sha256": "9a86da057ef13344b4c060b9b5ebf11a0e2e2bdb6e0576c69bb21784c83b6256"
+              },
+              {
+                "file": "kits/builder/skills/review-work/SKILL.md",
+                "sha256": "152f0e6ef6118030d176870964d3ac58b6896a7e56833429db3219e8369ba225"
+              },
+              {
+                "file": "context/contracts/execution-contract.md",
+                "sha256": "b96566464452e2785eca114be4aa6efabc9e85fee9937e74d10ba76755f968f4"
+              },
+              {
+                "file": "evals/integration/test_workflow_artifacts.sh",
+                "sha256": "933ed35b640b7d6f213add933f8270088aceb62582ba1bdfbf076a8435aa41c4"
+              },
+              {
+                "file": "evals/static/test_workflow_skills.sh",
+                "sha256": "0c58bda809ad1df7f860cffc4b36955b5a27e3213ee3bbe344d5a77f1395d378"
+              }
+            ],
+            "workspace_snapshot": {
+              "version": 1,
+              "kind": "git-worktree",
+              "algorithm": "sha256",
+              "digest": "2008a885116af4f7e2c9c67ec1c945babaddafca6770b13ebb4a2c0a24641e4e",
+              "head_sha": "f6a7534ae2761d3667605b814947013e74f40ffc"
+            }
+          },
+          "artifact_refs": [
+            ".kontourai/flow-agents/kontourai-flow-agents-663/kontourai-flow-agents-663--deliver.md",
+            "schemas/workflow-waves.schema.json",
+            "src/cli/validate-workflow-artifacts.ts",
+            "src/cli/validate-waves.test.mjs",
+            "kits/builder/skills/execute-plan/SKILL.md",
+            "kits/builder/skills/review-work/SKILL.md",
+            "context/contracts/execution-contract.md",
+            "evals/integration/test_workflow_artifacts.sh",
+            "evals/static/test_workflow_skills.sh"
+          ],
+          "workflow_subject_ref": "kontourai/flow-agents#663"
+        },
+        "status": "verified"
+      }
+    ],
+    "evidence": [
+      {
+        "id": "ev:kontourai-flow-agents-663-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-663-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-8069dcadc8521b1dc4b2e0e9fe66b1d12c7808f3c8ccd69b38025477f5c31d60-gate-visit-2026-07-17t14-26-46z",
+        "claimId": "kontourai-flow-agents-663-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-663-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-8069dcadc8521b1dc4b2e0e9fe66b1d12c7808f3c8ccd69b38025477f5c31d60-gate-visit-2026-07-17t14-26-46z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-663/evidence.json",
+        "excerptOrSummary": "Work Item kontourai/flow-agents#663 is durably assigned to the active workflow actor (assignment sha256:8069dcadc8521b1dc4b2e0e9fe66b1d12c7808f3c8ccd69b38025477f5c31d60).",
+        "observedAt": "2026-07-17T14:31:26.968Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-663-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-preserved-artifact-records-goal-fit-scope-dependencies-risks-and-planning-readiness-accepted-gap-ready-re-grounded-post-rebase-on-d8b83df-gate-visit-2026-07-17t14-26-56-015z",
+        "claimId": "kontourai-flow-agents-663-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-preserved-artifact-records-goal-fit-scope-dependencies-risks-and-planning-readiness-accepted-gap-ready-re-grounded-post-rebase-on-d8b83df-gate-visit-2026-07-17t14-26-56-015z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-663/evidence.json",
+        "excerptOrSummary": "Pickup probe (preserved artifact) records goal fit, scope, dependencies, risks, and planning readiness (accepted_gap_ready); re-grounded post-rebase on d8b83df.",
+        "observedAt": "2026-07-17T14:31:26.968Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-663-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-manifest-home-status-vocabulary-reconciliation-semantics-test-plan-and-accepted-gaps-baseline-no-writer-subcommand-in-slice-1-are-explicit-in-the-preserved-record-gate-visit-2026-07-17t14-26-56-157z",
+        "claimId": "kontourai-flow-agents-663-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-manifest-home-status-vocabulary-reconciliation-semantics-test-plan-and-accepted-gaps-baseline-no-writer-subcommand-in-slice-1-are-explicit-in-the-preserved-record-gate-visit-2026-07-17t14-26-56-157z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-663/evidence.json",
+        "excerptOrSummary": "Probe decisions (manifest home, status vocabulary, reconciliation semantics, test plan) and accepted gaps (baseline, no writer subcommand in slice 1) are explicit in the preserved record.",
+        "observedAt": "2026-07-17T14:31:26.968Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-663-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-preserved-records-scope-sequencing-stable-acceptance-criteria-task-to-criterion-mapping-and-required-evidence-slice-2-boundary-explicit-base-re-grounded-to-d8b83df-post-rebase-gate-visit-2026-07-17t14-27-05-473z",
+        "claimId": "kontourai-flow-agents-663-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-preserved-records-scope-sequencing-stable-acceptance-criteria-task-to-criterion-mapping-and-required-evidence-slice-2-boundary-explicit-base-re-grounded-to-d8b83df-post-rebase-gate-visit-2026-07-17t14-27-05-473z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-663/evidence.json",
+        "excerptOrSummary": "Implementation plan (preserved) records scope, sequencing, stable acceptance criteria, task-to-criterion mapping, and required evidence; slice-2 boundary explicit; base re-grounded to d8b83df post-rebase.",
+        "observedAt": "2026-07-17T14:31:26.968Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-663-gate-claim-implementation-scope.flow-agents-workflow.implementation-stayed-within-recorded-scope-9-files-rebased-commits-2414549-f6a7534-on-base-d8b83df-changed-files-and-supported-acceptance-criteria-documented-session-waves-reconciled-with-no-not-reported-workers-gate-visit-2026-07-17t14-27-14-349z",
+        "claimId": "kontourai-flow-agents-663-gate-claim-implementation-scope.flow-agents-workflow.implementation-stayed-within-recorded-scope-9-files-rebased-commits-2414549-f6a7534-on-base-d8b83df-changed-files-and-supported-acceptance-criteria-documented-session-waves-reconciled-with-no-not-reported-workers-gate-visit-2026-07-17t14-27-14-349z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-663/evidence.json",
+        "excerptOrSummary": "Implementation stayed within recorded scope (9 files, rebased commits 2414549+f6a7534 on base d8b83df); changed files and supported acceptance criteria documented; session waves reconciled with no not_reported workers.",
+        "observedAt": "2026-07-17T14:31:26.968Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-663-gate-claim-acceptance-criteria.flow-agents-workflow.all-six-slice-1-acceptance-criteria-pass-with-reviewable-evidence-on-rebased-head-f6a7534-base-d8b83df-ac1-ac3-proven-by-the-waves-fixture-blocks-in-the-writer-observed-integration-run-recorded-here-ac4-ac5-by-static-skill-contract-assertions-bash-evals-run-sh-static-exit-0-this-session-ac6-by-build-static-integration-source-map-checks-acceptance-evidence-table-in-the-deliver-artifact-gate-visit-2026-07-17t14-30-15-314z",
+        "claimId": "kontourai-flow-agents-663-gate-claim-acceptance-criteria.flow-agents-workflow.all-six-slice-1-acceptance-criteria-pass-with-reviewable-evidence-on-rebased-head-f6a7534-base-d8b83df-ac1-ac3-proven-by-the-waves-fixture-blocks-in-the-writer-observed-integration-run-recorded-here-ac4-ac5-by-static-skill-contract-assertions-bash-evals-run-sh-static-exit-0-this-session-ac6-by-build-static-integration-source-map-checks-acceptance-evidence-table-in-the-deliver-artifact-gate-visit-2026-07-17t14-30-15-314z",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-663/command-log.jsonl",
+        "excerptOrSummary": "All six slice-1 acceptance criteria pass with reviewable evidence on rebased HEAD f6a7534 (base d8b83df): AC1-AC3 proven by the waves fixture blocks in the writer-observed integration run recorded here; AC4-AC5 by static skill/contract assertions (bash evals/run.sh static exit 0 this session); AC6 by build/static/integration/source/map checks. Acceptance Evidence table in the deliver artifact.",
+        "observedAt": "2026-07-17T14:31:26.968Z",
+        "collectedBy": "flow-agents/evidence-capture",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_workflow_artifacts.sh",
+          "isError": false,
+          "exitCode": 0
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-663-gate-claim-tests-evidence.flow-agents-workflow.verification-on-rebased-head-f6a7534-manifest-verbatim-ci-lane-install-merge-integration-is-the-labeled-writer-observed-command-87-87-locally-change-specific-proof-lanes-disclosed-per-695a-discipline-bash-evals-integration-test-workflow-artifacts-sh-exit-0-7-waves-fixtures-writer-observed-on-the-acceptance-criteria-claim-node-test-src-cli-validate-waves-test-mjs-5-5-runs-in-ci-inside-static-eval-suite-via-test-unit-helpers-sh-bash-evals-run-sh-static-exit-0-13-skill-contract-assertions-npm-run-validate-source-and-npm-run-context-map-check-both-clean-gate-visit-2026-07-17t14-30-20-695z",
+        "claimId": "kontourai-flow-agents-663-gate-claim-tests-evidence.flow-agents-workflow.verification-on-rebased-head-f6a7534-manifest-verbatim-ci-lane-install-merge-integration-is-the-labeled-writer-observed-command-87-87-locally-change-specific-proof-lanes-disclosed-per-695a-discipline-bash-evals-integration-test-workflow-artifacts-sh-exit-0-7-waves-fixtures-writer-observed-on-the-acceptance-criteria-claim-node-test-src-cli-validate-waves-test-mjs-5-5-runs-in-ci-inside-static-eval-suite-via-test-unit-helpers-sh-bash-evals-run-sh-static-exit-0-13-skill-contract-assertions-npm-run-validate-source-and-npm-run-context-map-check-both-clean-gate-visit-2026-07-17t14-30-20-695z",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-663/command-log.jsonl",
+        "excerptOrSummary": "Verification on rebased HEAD f6a7534: Manifest-verbatim CI lane install-merge-integration is the labeled writer-observed command (87/87 locally). Change-specific proof lanes disclosed per #695a discipline: bash evals/integration/test_workflow_artifacts.sh exit 0 (7 waves fixtures; writer-observed on the acceptance-criteria claim), node --test src/cli/validate-waves.test.mjs 5/5 (runs in CI inside static-eval-suite via test_unit_helpers.sh), bash evals/run.sh static exit 0 (13 skill/contract assertions), npm run validate:source -- and npm run context-map -- --check both clean.",
+        "observedAt": "2026-07-17T14:31:26.968Z",
+        "collectedBy": "flow-agents/evidence-capture",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_install_merge.sh",
+          "isError": false,
+          "exitCode": 0
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-663-gate-claim-merge-readiness.flow-agents-workflow.evidence-confidence-pass-on-rebased-head-f6a7534-under-publish-learn-v1-2-all-six-acs-command-backed-fresh-critique-binds-current-digest-reconcile-preflight-ok-before-this-record-residual-risks-and-the-manifest-lane-labeling-compromise-disclosed-in-the-evidence-gate-artifact-gate-visit-2026-07-17t14-31-26-968z",
+        "claimId": "kontourai-flow-agents-663-gate-claim-merge-readiness.flow-agents-workflow.evidence-confidence-pass-on-rebased-head-f6a7534-under-publish-learn-v1-2-all-six-acs-command-backed-fresh-critique-binds-current-digest-reconcile-preflight-ok-before-this-record-residual-risks-and-the-manifest-lane-labeling-compromise-disclosed-in-the-evidence-gate-artifact-gate-visit-2026-07-17t14-31-26-968z",
+        "evidenceType": "attestation",
+        "method": "corroboration",
+        "sourceRef": "kontourai-flow-agents-663/evidence.json",
+        "excerptOrSummary": "Evidence confidence PASS on rebased HEAD f6a7534 under publish-learn v1.2: all six ACs command-backed; fresh critique binds current digest; reconcile-preflight OK before this record; residual risks and the manifest-lane labeling compromise disclosed in the evidence-gate artifact.",
+        "observedAt": "2026-07-17T14:31:26.968Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true
+      },
+      {
+        "id": "ev:kontourai-flow-agents-663-ac1-a-wave-manifest-shape-exists-schemas-workflow-waves-schema-json-validated-by-validate-workflow-artifacts-when-waves-json-is-present-additive-absent-file-changes-nothing-not-in-the-required-sidecar-list.flow-agents-workflow.ac1-a-wave-manifest-shape-exists-schemas-workflow-waves-schema-json-validated-by-validate-workflow-artifacts-when-waves-json-is-present-additive-absent-file-changes-nothing-not-in-the-required-sidecar-list-verified-2026-07-17t14-30-20-695z:79bd9ced5c6a80f1",
+        "claimId": "kontourai-flow-agents-663-ac1-a-wave-manifest-shape-exists-schemas-workflow-waves-schema-json-validated-by-validate-workflow-artifacts-when-waves-json-is-present-additive-absent-file-changes-nothing-not-in-the-required-sidecar-list.flow-agents-workflow.ac1-a-wave-manifest-shape-exists-schemas-workflow-waves-schema-json-validated-by-validate-workflow-artifacts-when-waves-json-is-present-additive-absent-file-changes-nothing-not-in-the-required-sidecar-list-verified-2026-07-17t14-30-20-695z",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-663/observed-command",
+        "excerptOrSummary": "bash evals/integration/test_install_merge.sh",
+        "observedAt": "2026-07-17T14:30:20.695Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_install_merge.sh",
+          "isError": false,
+          "exitCode": 0
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-663-ac2-per-worker-terminal-status-vocabulary-is-completed-failed-blocked-not-reported-enforced-by-schema-enum-with-not-reported-reserved-for-reconciliation.flow-agents-workflow.ac2-per-worker-terminal-status-vocabulary-is-completed-failed-blocked-not-reported-enforced-by-schema-enum-with-not-reported-reserved-for-reconciliation-verified-2026-07-17t14-30-20-695z:79bd9ced5c6a80f1",
+        "claimId": "kontourai-flow-agents-663-ac2-per-worker-terminal-status-vocabulary-is-completed-failed-blocked-not-reported-enforced-by-schema-enum-with-not-reported-reserved-for-reconciliation.flow-agents-workflow.ac2-per-worker-terminal-status-vocabulary-is-completed-failed-blocked-not-reported-enforced-by-schema-enum-with-not-reported-reserved-for-reconciliation-verified-2026-07-17t14-30-20-695z",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-663/observed-command",
+        "excerptOrSummary": "bash evals/integration/test_install_merge.sh",
+        "observedAt": "2026-07-17T14:30:20.695Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_install_merge.sh",
+          "isError": false,
+          "exitCode": 0
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-663-ac3-reconcile-against-manifest-is-machine-checkable-exactly-one-terminal-record-per-declared-worker-no-undeclared-reporters-counts-consistent-complete-forbids-missing-not-reported-the-3-workers-scenario-yields-2-of-3-reported-worker-3-not-reported-as-passing-data-while-a-false-complete-fails.flow-agents-workflow.ac3-reconcile-against-manifest-is-machine-checkable-exactly-one-terminal-record-per-declared-worker-no-undeclared-reporters-counts-consistent-complete-forbids-missing-not-reported-the-3-workers-scenario-yields-2-of-3-reported-worker-3-not-reported-as-passing-data-while-a-false-complete-fails-verified-2026-07-17t14-30-20-695z:79bd9ced5c6a80f1",
+        "claimId": "kontourai-flow-agents-663-ac3-reconcile-against-manifest-is-machine-checkable-exactly-one-terminal-record-per-declared-worker-no-undeclared-reporters-counts-consistent-complete-forbids-missing-not-reported-the-3-workers-scenario-yields-2-of-3-reported-worker-3-not-reported-as-passing-data-while-a-false-complete-fails.flow-agents-workflow.ac3-reconcile-against-manifest-is-machine-checkable-exactly-one-terminal-record-per-declared-worker-no-undeclared-reporters-counts-consistent-complete-forbids-missing-not-reported-the-3-workers-scenario-yields-2-of-3-reported-worker-3-not-reported-as-passing-data-while-a-false-complete-fails-verified-2026-07-17t14-30-20-695z",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-663/observed-command",
+        "excerptOrSummary": "bash evals/integration/test_install_merge.sh",
+        "observedAt": "2026-07-17T14:30:20.695Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_install_merge.sh",
+          "isError": false,
+          "exitCode": 0
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-663-ac4-execute-plan-between-waves-and-review-work-fan-out-are-rewritten-from-prose-collect-to-reconcile-against-manifest-with-explicit-n-of-m-reported-language-and-the-missing-workers-become-not-reported-rule.flow-agents-workflow.ac4-execute-plan-between-waves-and-review-work-fan-out-are-rewritten-from-prose-collect-to-reconcile-against-manifest-with-explicit-n-of-m-reported-language-and-the-missing-workers-become-not-reported-rule-verified-2026-07-17t14-30-20-695z:79bd9ced5c6a80f1",
+        "claimId": "kontourai-flow-agents-663-ac4-execute-plan-between-waves-and-review-work-fan-out-are-rewritten-from-prose-collect-to-reconcile-against-manifest-with-explicit-n-of-m-reported-language-and-the-missing-workers-become-not-reported-rule.flow-agents-workflow.ac4-execute-plan-between-waves-and-review-work-fan-out-are-rewritten-from-prose-collect-to-reconcile-against-manifest-with-explicit-n-of-m-reported-language-and-the-missing-workers-become-not-reported-rule-verified-2026-07-17t14-30-20-695z",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-663/observed-command",
+        "excerptOrSummary": "bash evals/integration/test_install_merge.sh",
+        "observedAt": "2026-07-17T14:30:20.695Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_install_merge.sh",
+          "isError": false,
+          "exitCode": 0
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-663-ac5-context-contracts-execution-contract-md-states-the-reconciliation-contract.flow-agents-workflow.ac5-context-contracts-execution-contract-md-states-the-reconciliation-contract-verified-2026-07-17t14-30-20-695z:79bd9ced5c6a80f1",
+        "claimId": "kontourai-flow-agents-663-ac5-context-contracts-execution-contract-md-states-the-reconciliation-contract.flow-agents-workflow.ac5-context-contracts-execution-contract-md-states-the-reconciliation-contract-verified-2026-07-17t14-30-20-695z",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-663/observed-command",
+        "excerptOrSummary": "bash evals/integration/test_install_merge.sh",
+        "observedAt": "2026-07-17T14:30:20.695Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_install_merge.sh",
+          "isError": false,
+          "exitCode": 0
+        }
+      },
+      {
+        "id": "ev:kontourai-flow-agents-663-ac6-repo-validation-green-on-final-head-npm-run-build-bash-evals-run-sh-static-targeted-integration-tests-test-workflow-artifacts-sh-known-environmental-exceptions-disclosed.flow-agents-workflow.ac6-repo-validation-green-on-final-head-npm-run-build-bash-evals-run-sh-static-targeted-integration-tests-test-workflow-artifacts-sh-known-environmental-exceptions-disclosed-verified-2026-07-17t14-30-20-695z:79bd9ced5c6a80f1",
+        "claimId": "kontourai-flow-agents-663-ac6-repo-validation-green-on-final-head-npm-run-build-bash-evals-run-sh-static-targeted-integration-tests-test-workflow-artifacts-sh-known-environmental-exceptions-disclosed.flow-agents-workflow.ac6-repo-validation-green-on-final-head-npm-run-build-bash-evals-run-sh-static-targeted-integration-tests-test-workflow-artifacts-sh-known-environmental-exceptions-disclosed-verified-2026-07-17t14-30-20-695z",
+        "evidenceType": "test_output",
+        "method": "validation",
+        "sourceRef": "kontourai-flow-agents-663/observed-command",
+        "excerptOrSummary": "bash evals/integration/test_install_merge.sh",
+        "observedAt": "2026-07-17T14:30:20.695Z",
+        "collectedBy": "flow-agents/workflow-sidecar",
+        "passing": true,
+        "execution": {
+          "runner": "bash",
+          "label": "bash evals/integration/test_install_merge.sh",
+          "isError": false,
+          "exitCode": 0
+        }
+      }
+    ],
+    "policies": [
+      {
+        "id": "policy:workflow.check.external:attestation",
+        "claimType": "workflow.check.external",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.external claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.pull-work.selected:attestation",
+        "claimType": "builder.pull-work.selected",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.pull-work.selected claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.design-probe.pickup-readiness:attestation",
+        "claimType": "builder.design-probe.pickup-readiness",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.design-probe.pickup-readiness claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.design-probe.decisions:attestation",
+        "claimType": "builder.design-probe.decisions",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.design-probe.decisions claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.plan.implementation:attestation",
+        "claimType": "builder.plan.implementation",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.plan.implementation claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.execute.scope:attestation",
+        "claimType": "builder.execute.scope",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.execute.scope claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.check.command:test_output",
+        "claimType": "workflow.check.command",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.check.command claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.acceptance.criterion:test_output",
+        "claimType": "workflow.acceptance.criterion",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.acceptance.criterion claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.verify.tests:test_output",
+        "claimType": "builder.verify.tests",
+        "requiredEvidence": [
+          "test_output"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.verify.tests claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:builder.merge-ready.readiness:attestation",
+        "claimType": "builder.merge-ready.readiness",
+        "requiredEvidence": [
+          "attestation"
+        ],
+        "acceptanceCriteria": [
+          "A verified verification event must support a builder.merge-ready.readiness claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "high"
+      },
+      {
+        "id": "policy:workflow.critique.review",
+        "claimType": "workflow.critique.review",
+        "requiredEvidence": [],
+        "acceptanceCriteria": [
+          "A verified verification event must support a workflow.critique.review claim."
+        ],
+        "reviewAuthority": "system",
+        "validityRule": {
+          "kind": "manual"
+        },
+        "stalenessTriggers": [],
+        "conflictRules": [],
+        "impactLevel": "medium"
+      }
+    ],
+    "events": [
+      {
+        "id": "evt:kontourai-flow-agents-663-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-663-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-8069dcadc8521b1dc4b2e0e9fe66b1d12c7808f3c8ccd69b38025477f5c31d60-gate-visit-2026-07-17t14-26-46z",
+        "claimId": "kontourai-flow-agents-663-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-663-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-8069dcadc8521b1dc4b2e0e9fe66b1d12c7808f3c8ccd69b38025477f5c31d60-gate-visit-2026-07-17t14-26-46z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-663-gate-claim-selected-work.flow-agents-workflow.work-item-kontourai-flow-agents-663-is-durably-assigned-to-the-active-workflow-actor-assignment-sha256-8069dcadc8521b1dc4b2e0e9fe66b1d12c7808f3c8ccd69b38025477f5c31d60-gate-visit-2026-07-17t14-26-46z"
+        ],
+        "createdAt": "2026-07-17T14:31:26.968Z",
+        "verifiedAt": "2026-07-17T14:31:26.968Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-663-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-preserved-artifact-records-goal-fit-scope-dependencies-risks-and-planning-readiness-accepted-gap-ready-re-grounded-post-rebase-on-d8b83df-gate-visit-2026-07-17t14-26-56-015z",
+        "claimId": "kontourai-flow-agents-663-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-preserved-artifact-records-goal-fit-scope-dependencies-risks-and-planning-readiness-accepted-gap-ready-re-grounded-post-rebase-on-d8b83df-gate-visit-2026-07-17t14-26-56-015z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-663-gate-claim-pickup-probe-readiness.flow-agents-workflow.pickup-probe-preserved-artifact-records-goal-fit-scope-dependencies-risks-and-planning-readiness-accepted-gap-ready-re-grounded-post-rebase-on-d8b83df-gate-visit-2026-07-17t14-26-56-015z"
+        ],
+        "createdAt": "2026-07-17T14:31:26.968Z",
+        "verifiedAt": "2026-07-17T14:31:26.968Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-663-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-manifest-home-status-vocabulary-reconciliation-semantics-test-plan-and-accepted-gaps-baseline-no-writer-subcommand-in-slice-1-are-explicit-in-the-preserved-record-gate-visit-2026-07-17t14-26-56-157z",
+        "claimId": "kontourai-flow-agents-663-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-manifest-home-status-vocabulary-reconciliation-semantics-test-plan-and-accepted-gaps-baseline-no-writer-subcommand-in-slice-1-are-explicit-in-the-preserved-record-gate-visit-2026-07-17t14-26-56-157z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-663-gate-claim-probe-decisions-or-accepted-gaps.flow-agents-workflow.probe-decisions-manifest-home-status-vocabulary-reconciliation-semantics-test-plan-and-accepted-gaps-baseline-no-writer-subcommand-in-slice-1-are-explicit-in-the-preserved-record-gate-visit-2026-07-17t14-26-56-157z"
+        ],
+        "createdAt": "2026-07-17T14:31:26.968Z",
+        "verifiedAt": "2026-07-17T14:31:26.968Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-663-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-preserved-records-scope-sequencing-stable-acceptance-criteria-task-to-criterion-mapping-and-required-evidence-slice-2-boundary-explicit-base-re-grounded-to-d8b83df-post-rebase-gate-visit-2026-07-17t14-27-05-473z",
+        "claimId": "kontourai-flow-agents-663-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-preserved-records-scope-sequencing-stable-acceptance-criteria-task-to-criterion-mapping-and-required-evidence-slice-2-boundary-explicit-base-re-grounded-to-d8b83df-post-rebase-gate-visit-2026-07-17t14-27-05-473z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-663-gate-claim-implementation-plan.flow-agents-workflow.implementation-plan-preserved-records-scope-sequencing-stable-acceptance-criteria-task-to-criterion-mapping-and-required-evidence-slice-2-boundary-explicit-base-re-grounded-to-d8b83df-post-rebase-gate-visit-2026-07-17t14-27-05-473z"
+        ],
+        "createdAt": "2026-07-17T14:31:26.968Z",
+        "verifiedAt": "2026-07-17T14:31:26.968Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-663-gate-claim-implementation-scope.flow-agents-workflow.implementation-stayed-within-recorded-scope-9-files-rebased-commits-2414549-f6a7534-on-base-d8b83df-changed-files-and-supported-acceptance-criteria-documented-session-waves-reconciled-with-no-not-reported-workers-gate-visit-2026-07-17t14-27-14-349z",
+        "claimId": "kontourai-flow-agents-663-gate-claim-implementation-scope.flow-agents-workflow.implementation-stayed-within-recorded-scope-9-files-rebased-commits-2414549-f6a7534-on-base-d8b83df-changed-files-and-supported-acceptance-criteria-documented-session-waves-reconciled-with-no-not-reported-workers-gate-visit-2026-07-17t14-27-14-349z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-663-gate-claim-implementation-scope.flow-agents-workflow.implementation-stayed-within-recorded-scope-9-files-rebased-commits-2414549-f6a7534-on-base-d8b83df-changed-files-and-supported-acceptance-criteria-documented-session-waves-reconciled-with-no-not-reported-workers-gate-visit-2026-07-17t14-27-14-349z"
+        ],
+        "createdAt": "2026-07-17T14:31:26.968Z",
+        "verifiedAt": "2026-07-17T14:31:26.968Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-663-gate-claim-acceptance-criteria.flow-agents-workflow.all-six-slice-1-acceptance-criteria-pass-with-reviewable-evidence-on-rebased-head-f6a7534-base-d8b83df-ac1-ac3-proven-by-the-waves-fixture-blocks-in-the-writer-observed-integration-run-recorded-here-ac4-ac5-by-static-skill-contract-assertions-bash-evals-run-sh-static-exit-0-this-session-ac6-by-build-static-integration-source-map-checks-acceptance-evidence-table-in-the-deliver-artifact-gate-visit-2026-07-17t14-30-15-314z",
+        "claimId": "kontourai-flow-agents-663-gate-claim-acceptance-criteria.flow-agents-workflow.all-six-slice-1-acceptance-criteria-pass-with-reviewable-evidence-on-rebased-head-f6a7534-base-d8b83df-ac1-ac3-proven-by-the-waves-fixture-blocks-in-the-writer-observed-integration-run-recorded-here-ac4-ac5-by-static-skill-contract-assertions-bash-evals-run-sh-static-exit-0-this-session-ac6-by-build-static-integration-source-map-checks-acceptance-evidence-table-in-the-deliver-artifact-gate-visit-2026-07-17t14-30-15-314z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-663-gate-claim-acceptance-criteria.flow-agents-workflow.all-six-slice-1-acceptance-criteria-pass-with-reviewable-evidence-on-rebased-head-f6a7534-base-d8b83df-ac1-ac3-proven-by-the-waves-fixture-blocks-in-the-writer-observed-integration-run-recorded-here-ac4-ac5-by-static-skill-contract-assertions-bash-evals-run-sh-static-exit-0-this-session-ac6-by-build-static-integration-source-map-checks-acceptance-evidence-table-in-the-deliver-artifact-gate-visit-2026-07-17t14-30-15-314z"
+        ],
+        "createdAt": "2026-07-17T14:31:26.968Z",
+        "verifiedAt": "2026-07-17T14:31:26.968Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-663-gate-claim-tests-evidence.flow-agents-workflow.verification-on-rebased-head-f6a7534-manifest-verbatim-ci-lane-install-merge-integration-is-the-labeled-writer-observed-command-87-87-locally-change-specific-proof-lanes-disclosed-per-695a-discipline-bash-evals-integration-test-workflow-artifacts-sh-exit-0-7-waves-fixtures-writer-observed-on-the-acceptance-criteria-claim-node-test-src-cli-validate-waves-test-mjs-5-5-runs-in-ci-inside-static-eval-suite-via-test-unit-helpers-sh-bash-evals-run-sh-static-exit-0-13-skill-contract-assertions-npm-run-validate-source-and-npm-run-context-map-check-both-clean-gate-visit-2026-07-17t14-30-20-695z",
+        "claimId": "kontourai-flow-agents-663-gate-claim-tests-evidence.flow-agents-workflow.verification-on-rebased-head-f6a7534-manifest-verbatim-ci-lane-install-merge-integration-is-the-labeled-writer-observed-command-87-87-locally-change-specific-proof-lanes-disclosed-per-695a-discipline-bash-evals-integration-test-workflow-artifacts-sh-exit-0-7-waves-fixtures-writer-observed-on-the-acceptance-criteria-claim-node-test-src-cli-validate-waves-test-mjs-5-5-runs-in-ci-inside-static-eval-suite-via-test-unit-helpers-sh-bash-evals-run-sh-static-exit-0-13-skill-contract-assertions-npm-run-validate-source-and-npm-run-context-map-check-both-clean-gate-visit-2026-07-17t14-30-20-695z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-663-gate-claim-tests-evidence.flow-agents-workflow.verification-on-rebased-head-f6a7534-manifest-verbatim-ci-lane-install-merge-integration-is-the-labeled-writer-observed-command-87-87-locally-change-specific-proof-lanes-disclosed-per-695a-discipline-bash-evals-integration-test-workflow-artifacts-sh-exit-0-7-waves-fixtures-writer-observed-on-the-acceptance-criteria-claim-node-test-src-cli-validate-waves-test-mjs-5-5-runs-in-ci-inside-static-eval-suite-via-test-unit-helpers-sh-bash-evals-run-sh-static-exit-0-13-skill-contract-assertions-npm-run-validate-source-and-npm-run-context-map-check-both-clean-gate-visit-2026-07-17t14-30-20-695z"
+        ],
+        "createdAt": "2026-07-17T14:31:26.968Z",
+        "verifiedAt": "2026-07-17T14:31:26.968Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-663-gate-claim-merge-readiness.flow-agents-workflow.evidence-confidence-pass-on-rebased-head-f6a7534-under-publish-learn-v1-2-all-six-acs-command-backed-fresh-critique-binds-current-digest-reconcile-preflight-ok-before-this-record-residual-risks-and-the-manifest-lane-labeling-compromise-disclosed-in-the-evidence-gate-artifact-gate-visit-2026-07-17t14-31-26-968z",
+        "claimId": "kontourai-flow-agents-663-gate-claim-merge-readiness.flow-agents-workflow.evidence-confidence-pass-on-rebased-head-f6a7534-under-publish-learn-v1-2-all-six-acs-command-backed-fresh-critique-binds-current-digest-reconcile-preflight-ok-before-this-record-residual-risks-and-the-manifest-lane-labeling-compromise-disclosed-in-the-evidence-gate-artifact-gate-visit-2026-07-17t14-31-26-968z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-663-gate-claim-merge-readiness.flow-agents-workflow.evidence-confidence-pass-on-rebased-head-f6a7534-under-publish-learn-v1-2-all-six-acs-command-backed-fresh-critique-binds-current-digest-reconcile-preflight-ok-before-this-record-residual-risks-and-the-manifest-lane-labeling-compromise-disclosed-in-the-evidence-gate-artifact-gate-visit-2026-07-17t14-31-26-968z"
+        ],
+        "createdAt": "2026-07-17T14:31:26.968Z",
+        "verifiedAt": "2026-07-17T14:31:26.968Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-663-ac1-a-wave-manifest-shape-exists-schemas-workflow-waves-schema-json-validated-by-validate-workflow-artifacts-when-waves-json-is-present-additive-absent-file-changes-nothing-not-in-the-required-sidecar-list.flow-agents-workflow.ac1-a-wave-manifest-shape-exists-schemas-workflow-waves-schema-json-validated-by-validate-workflow-artifacts-when-waves-json-is-present-additive-absent-file-changes-nothing-not-in-the-required-sidecar-list-verified-2026-07-17t14-30-20-695z",
+        "claimId": "kontourai-flow-agents-663-ac1-a-wave-manifest-shape-exists-schemas-workflow-waves-schema-json-validated-by-validate-workflow-artifacts-when-waves-json-is-present-additive-absent-file-changes-nothing-not-in-the-required-sidecar-list.flow-agents-workflow.ac1-a-wave-manifest-shape-exists-schemas-workflow-waves-schema-json-validated-by-validate-workflow-artifacts-when-waves-json-is-present-additive-absent-file-changes-nothing-not-in-the-required-sidecar-list-verified-2026-07-17t14-30-20-695z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-663-ac1-a-wave-manifest-shape-exists-schemas-workflow-waves-schema-json-validated-by-validate-workflow-artifacts-when-waves-json-is-present-additive-absent-file-changes-nothing-not-in-the-required-sidecar-list.flow-agents-workflow.ac1-a-wave-manifest-shape-exists-schemas-workflow-waves-schema-json-validated-by-validate-workflow-artifacts-when-waves-json-is-present-additive-absent-file-changes-nothing-not-in-the-required-sidecar-list-verified-2026-07-17t14-30-20-695z:79bd9ced5c6a80f1"
+        ],
+        "createdAt": "2026-07-17T14:30:20.695Z",
+        "verifiedAt": "2026-07-17T14:30:20.695Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-663-ac2-per-worker-terminal-status-vocabulary-is-completed-failed-blocked-not-reported-enforced-by-schema-enum-with-not-reported-reserved-for-reconciliation.flow-agents-workflow.ac2-per-worker-terminal-status-vocabulary-is-completed-failed-blocked-not-reported-enforced-by-schema-enum-with-not-reported-reserved-for-reconciliation-verified-2026-07-17t14-30-20-695z",
+        "claimId": "kontourai-flow-agents-663-ac2-per-worker-terminal-status-vocabulary-is-completed-failed-blocked-not-reported-enforced-by-schema-enum-with-not-reported-reserved-for-reconciliation.flow-agents-workflow.ac2-per-worker-terminal-status-vocabulary-is-completed-failed-blocked-not-reported-enforced-by-schema-enum-with-not-reported-reserved-for-reconciliation-verified-2026-07-17t14-30-20-695z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-663-ac2-per-worker-terminal-status-vocabulary-is-completed-failed-blocked-not-reported-enforced-by-schema-enum-with-not-reported-reserved-for-reconciliation.flow-agents-workflow.ac2-per-worker-terminal-status-vocabulary-is-completed-failed-blocked-not-reported-enforced-by-schema-enum-with-not-reported-reserved-for-reconciliation-verified-2026-07-17t14-30-20-695z:79bd9ced5c6a80f1"
+        ],
+        "createdAt": "2026-07-17T14:30:20.695Z",
+        "verifiedAt": "2026-07-17T14:30:20.695Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-663-ac3-reconcile-against-manifest-is-machine-checkable-exactly-one-terminal-record-per-declared-worker-no-undeclared-reporters-counts-consistent-complete-forbids-missing-not-reported-the-3-workers-scenario-yields-2-of-3-reported-worker-3-not-reported-as-passing-data-while-a-false-complete-fails.flow-agents-workflow.ac3-reconcile-against-manifest-is-machine-checkable-exactly-one-terminal-record-per-declared-worker-no-undeclared-reporters-counts-consistent-complete-forbids-missing-not-reported-the-3-workers-scenario-yields-2-of-3-reported-worker-3-not-reported-as-passing-data-while-a-false-complete-fails-verified-2026-07-17t14-30-20-695z",
+        "claimId": "kontourai-flow-agents-663-ac3-reconcile-against-manifest-is-machine-checkable-exactly-one-terminal-record-per-declared-worker-no-undeclared-reporters-counts-consistent-complete-forbids-missing-not-reported-the-3-workers-scenario-yields-2-of-3-reported-worker-3-not-reported-as-passing-data-while-a-false-complete-fails.flow-agents-workflow.ac3-reconcile-against-manifest-is-machine-checkable-exactly-one-terminal-record-per-declared-worker-no-undeclared-reporters-counts-consistent-complete-forbids-missing-not-reported-the-3-workers-scenario-yields-2-of-3-reported-worker-3-not-reported-as-passing-data-while-a-false-complete-fails-verified-2026-07-17t14-30-20-695z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-663-ac3-reconcile-against-manifest-is-machine-checkable-exactly-one-terminal-record-per-declared-worker-no-undeclared-reporters-counts-consistent-complete-forbids-missing-not-reported-the-3-workers-scenario-yields-2-of-3-reported-worker-3-not-reported-as-passing-data-while-a-false-complete-fails.flow-agents-workflow.ac3-reconcile-against-manifest-is-machine-checkable-exactly-one-terminal-record-per-declared-worker-no-undeclared-reporters-counts-consistent-complete-forbids-missing-not-reported-the-3-workers-scenario-yields-2-of-3-reported-worker-3-not-reported-as-passing-data-while-a-false-complete-fails-verified-2026-07-17t14-30-20-695z:79bd9ced5c6a80f1"
+        ],
+        "createdAt": "2026-07-17T14:30:20.695Z",
+        "verifiedAt": "2026-07-17T14:30:20.695Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-663-ac4-execute-plan-between-waves-and-review-work-fan-out-are-rewritten-from-prose-collect-to-reconcile-against-manifest-with-explicit-n-of-m-reported-language-and-the-missing-workers-become-not-reported-rule.flow-agents-workflow.ac4-execute-plan-between-waves-and-review-work-fan-out-are-rewritten-from-prose-collect-to-reconcile-against-manifest-with-explicit-n-of-m-reported-language-and-the-missing-workers-become-not-reported-rule-verified-2026-07-17t14-30-20-695z",
+        "claimId": "kontourai-flow-agents-663-ac4-execute-plan-between-waves-and-review-work-fan-out-are-rewritten-from-prose-collect-to-reconcile-against-manifest-with-explicit-n-of-m-reported-language-and-the-missing-workers-become-not-reported-rule.flow-agents-workflow.ac4-execute-plan-between-waves-and-review-work-fan-out-are-rewritten-from-prose-collect-to-reconcile-against-manifest-with-explicit-n-of-m-reported-language-and-the-missing-workers-become-not-reported-rule-verified-2026-07-17t14-30-20-695z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-663-ac4-execute-plan-between-waves-and-review-work-fan-out-are-rewritten-from-prose-collect-to-reconcile-against-manifest-with-explicit-n-of-m-reported-language-and-the-missing-workers-become-not-reported-rule.flow-agents-workflow.ac4-execute-plan-between-waves-and-review-work-fan-out-are-rewritten-from-prose-collect-to-reconcile-against-manifest-with-explicit-n-of-m-reported-language-and-the-missing-workers-become-not-reported-rule-verified-2026-07-17t14-30-20-695z:79bd9ced5c6a80f1"
+        ],
+        "createdAt": "2026-07-17T14:30:20.695Z",
+        "verifiedAt": "2026-07-17T14:30:20.695Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-663-ac5-context-contracts-execution-contract-md-states-the-reconciliation-contract.flow-agents-workflow.ac5-context-contracts-execution-contract-md-states-the-reconciliation-contract-verified-2026-07-17t14-30-20-695z",
+        "claimId": "kontourai-flow-agents-663-ac5-context-contracts-execution-contract-md-states-the-reconciliation-contract.flow-agents-workflow.ac5-context-contracts-execution-contract-md-states-the-reconciliation-contract-verified-2026-07-17t14-30-20-695z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-663-ac5-context-contracts-execution-contract-md-states-the-reconciliation-contract.flow-agents-workflow.ac5-context-contracts-execution-contract-md-states-the-reconciliation-contract-verified-2026-07-17t14-30-20-695z:79bd9ced5c6a80f1"
+        ],
+        "createdAt": "2026-07-17T14:30:20.695Z",
+        "verifiedAt": "2026-07-17T14:30:20.695Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-663-ac6-repo-validation-green-on-final-head-npm-run-build-bash-evals-run-sh-static-targeted-integration-tests-test-workflow-artifacts-sh-known-environmental-exceptions-disclosed.flow-agents-workflow.ac6-repo-validation-green-on-final-head-npm-run-build-bash-evals-run-sh-static-targeted-integration-tests-test-workflow-artifacts-sh-known-environmental-exceptions-disclosed-verified-2026-07-17t14-30-20-695z",
+        "claimId": "kontourai-flow-agents-663-ac6-repo-validation-green-on-final-head-npm-run-build-bash-evals-run-sh-static-targeted-integration-tests-test-workflow-artifacts-sh-known-environmental-exceptions-disclosed.flow-agents-workflow.ac6-repo-validation-green-on-final-head-npm-run-build-bash-evals-run-sh-static-targeted-integration-tests-test-workflow-artifacts-sh-known-environmental-exceptions-disclosed-verified-2026-07-17t14-30-20-695z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [
+          "ev:kontourai-flow-agents-663-ac6-repo-validation-green-on-final-head-npm-run-build-bash-evals-run-sh-static-targeted-integration-tests-test-workflow-artifacts-sh-known-environmental-exceptions-disclosed.flow-agents-workflow.ac6-repo-validation-green-on-final-head-npm-run-build-bash-evals-run-sh-static-targeted-integration-tests-test-workflow-artifacts-sh-known-environmental-exceptions-disclosed-verified-2026-07-17t14-30-20-695z:79bd9ced5c6a80f1"
+        ],
+        "createdAt": "2026-07-17T14:30:20.695Z",
+        "verifiedAt": "2026-07-17T14:30:20.695Z"
+      },
+      {
+        "id": "evt:kontourai-flow-agents-663-review.flow-agents-workflow.fresh-critique-for-the-v1-2-replay-gate-visit-rebased-tree-reviewed-with-no-blocking-findings-reviewed-2026-07-17t14-29-35-545z",
+        "claimId": "kontourai-flow-agents-663-review.flow-agents-workflow.fresh-critique-for-the-v1-2-replay-gate-visit-rebased-tree-reviewed-with-no-blocking-findings-reviewed-2026-07-17t14-29-35-545z",
+        "status": "verified",
+        "actor": "flow-agents/workflow-sidecar",
+        "method": "validation",
+        "evidenceIds": [],
+        "createdAt": "2026-07-17T14:31:26.968Z",
+        "verifiedAt": "2026-07-17T14:31:26.968Z"
+      }
+    ]
+  }
+}
