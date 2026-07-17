@@ -4,7 +4,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { resolveEffectiveFlowDefinition, resolveFlowFilePath } from "../../build/src/lib/flow-resolver.js";
+import { validateDefinition } from "@kontourai/flow";
+
+import { resolveEffectiveFlowDefinition, resolveFlowFilePath, resolveFlowStep } from "../../build/src/lib/flow-resolver.js";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../..");
 
@@ -24,6 +26,23 @@ test("effective Builder definition materializes uses_flow and Flow-native comple
     definition.gates["builder.publish-learn:pr-open-gate"].expects[0].bundle_claim.accepted_statuses,
     ["verified", "trusted", "accepted"],
   );
+});
+
+test("composed pr-open-gate declares the missing_evidence repair route to verify (#695 item a)", () => {
+  const definition = resolveEffectiveFlowDefinition("builder.build", REPO_ROOT);
+  assert.ok(definition);
+  const gate = definition.gates["builder.publish-learn:pr-open-gate"];
+  assert.deepEqual(gate.on_route_back, { missing_evidence: "verify", default: "verify" });
+  assert.deepEqual(gate.route_back_policy, { max_attempts: 3, on_exceeded: "block" });
+  // Every declared route-back target must exist in the EFFECTIVE step set — the
+  // composed definition (where `verify` lives) must stay a valid Flow definition.
+  assert.doesNotThrow(() => validateDefinition(definition));
+  // The live resolver surfaces the declared reasons at the composed step, which is
+  // what record-gate-claim's --route-reason validation reads.
+  const step = resolveFlowStep("builder.build", "pr-open", REPO_ROOT);
+  assert.ok(step);
+  assert.equal(step.gateId, "builder.publish-learn:pr-open-gate");
+  assert.deepEqual([...step.routeBackReasons].sort(), ["default", "missing_evidence"]);
 });
 
 test("installed package definitions resolve when a consumer repo has no kits directory", () => {
