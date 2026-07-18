@@ -179,13 +179,22 @@ function readActiveSlug(root, actorKey) {
  * @returns {{tool: string}|undefined}
  */
 function sanitizeActivity(activity) {
-  if (!activity || typeof activity !== 'object') return undefined;
-  const out = {};
-  if (activity.tool != null && String(activity.tool).trim()) {
-    const tool = sanitizeSegment(activity.tool);
-    if (tool && tool !== 'unknown') out.tool = tool;
+  // Fully self-contained fail-safe: this runs on the hot path just BEFORE the durable local append
+  // in maybeEmitHeartbeat, and local-first is sacred (ADR 0012 §5) — enriching the pulse must never
+  // be able to prevent the write. `String(activity.tool)` could in principle throw for an exotic
+  // caller value (a throwing toString/valueOf); swallow it here and degrade to a plain aliveness
+  // pulse rather than letting the durable write be skipped.
+  try {
+    if (!activity || typeof activity !== 'object') return undefined;
+    const out = {};
+    if (activity.tool != null && String(activity.tool).trim()) {
+      const tool = sanitizeSegment(activity.tool);
+      if (tool && tool !== 'unknown') out.tool = tool;
+    }
+    return Object.keys(out).length ? out : undefined;
+  } catch {
+    return undefined;
   }
-  return Object.keys(out).length ? out : undefined;
 }
 
 /**

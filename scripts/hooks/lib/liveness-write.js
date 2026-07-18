@@ -40,6 +40,16 @@ const relayEnabledCache = new Map();
  * intentionally lenient (no mode-600 trust gate). relay.sh re-sources config.sh, which applies the
  * trust gate and is the authoritative decision for both enablement and the POST endpoint, so a
  * lenient "enabled" here at worst spawns a relay.sh that then trust-gates itself to a no-op.
+ *
+ * ACCEPTED, BY DESIGN (security review LOW, A04): because this pre-gate does NOT re-apply
+ * config.sh's mode-600/owner gate, it can read an explicit key from an UNtrusted default-path conf
+ * (a mode-644 .kontourai/telemetry-console.conf a local tool dropped) that config.sh would skip.
+ * This is fail-toward-no-op, never fail-toward-exfil: the only divergence is (a) we spawn a
+ * relay.sh that config.sh then no-ops (harmless), or (b) an untrusted `=0` here suppresses a spawn
+ * that a trusted conf would have enabled (a missed pulse — availability only, requiring local FS
+ * write access). The pre-gate deliberately does not guarantee relay AVAILABILITY — only that we
+ * avoid spawning when nothing plausibly enables it. It NEVER weakens the exfil defense, which lives
+ * entirely in relay.sh's authoritative, trust-gated re-resolution.
  * @returns {string|null}  first readable conf path, or null
  */
 function resolveConsoleConfPath(env) {

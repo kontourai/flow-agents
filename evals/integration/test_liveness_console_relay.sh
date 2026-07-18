@@ -217,6 +217,35 @@ sleep 1
 [[ ! -s "$RECV" ]] && pass "explicit console_liveness_relay=0 suppresses the relay even with a url (opt-out wins)" || fail "a POST happened despite console_liveness_relay=0"
 stop_stub
 
+# ─── 8. EXFIL DEFENSE: an UNTRUSTED (mode 644) default-path conf must NOT relay (trust gate) ─────
+# The cases above drive enablement through TELEMETRY_CONFIG_FILE, which is trusted BY DESIGN (an
+# explicit env override bypasses the mode-600 gate). This case exercises the actual supply-chain
+# defense end-to-end: a conf planted at the user-global default slot (~/.flow-agents/…, reached via
+# the hermetic HOME set at the top) pointing at an attacker stub with console_liveness_relay=1, but
+# mode 644 — exactly what a non-operator drop (clone/tarball/local tool) can produce, since git can
+# only ship 644/755, never 600. relay.sh re-sources config.sh, whose telemetry_conf_trusted gate
+# (mode 600 + owner + not-a-symlink) rejects it, so no URL resolves and nothing is POSTed — while
+# the durable local write still happens. NO env flag, NO TELEMETRY_CONFIG_FILE, NO endpoint env:
+# the untrusted conf is the ONLY possible signal, so a POST here would be a real exfil regression.
+echo "--- 8. exfil defense: an untrusted (mode 644) ~/.flow-agents conf with an attacker url never relays ---"
+: > "$RECV"; start_stub ok
+ROOT_X="$TMPDIR_EVAL/x"
+mkdir -p "$HOME/.flow-agents"
+UNTRUSTED_CONF="$HOME/.flow-agents/telemetry-console.conf"
+printf 'console_telemetry_url=http://127.0.0.1:%s\nconsole_liveness_relay=1\n' "$PORT" > "$UNTRUSTED_CONF"
+chmod 644 "$UNTRUSTED_CONF"
+(
+  unset FLOW_AGENTS_CONSOLE_LIVENESS_RELAY
+  unset TELEMETRY_CONFIG_FILE
+  unset FLOW_AGENTS_CONSOLE_LIVENESS_ENDPOINT_URL
+  emit_event "$ROOT_X" '{"type":"claim","subjectId":"exfil-x","actor":"a","at":"t"}'
+)
+sleep 1
+[[ -s "$ROOT_X/liveness/events.jsonl" ]] && pass "local write happened (untrusted-conf case, local-first intact)" || fail "local write missing (untrusted conf)"
+[[ ! -s "$RECV" ]] && pass "an untrusted (644) default-path conf naming an attacker url NEVER relays (trust gate holds, no exfil)" || fail "EXFIL: a POST reached the attacker stub from an untrusted 644 conf"
+rm -f "$UNTRUSTED_CONF"
+stop_stub
+
 echo ""
 if [[ "$errors" -eq 0 ]]; then
   echo "test_liveness_console_relay: all checks passed."
