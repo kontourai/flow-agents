@@ -105,9 +105,15 @@ async function main() {
   let conflict;
   if (canonical === 'postToolUse') {
     try {
+      // Richer "real liveness": name the tool this pulse rode in on so the heartbeat says WHAT the
+      // agent is doing, not just that it is alive. Claude Code's PostToolUse payload carries the
+      // tool name as `tool_name` (fall back to `toolName`); the heartbeat sanitizes it, so a
+      // missing/odd value degrades to a plain aliveness pulse rather than an error.
+      const toolName = payload.tool_name || payload.toolName;
       const heartbeatResult = require('./lib/liveness-heartbeat').maybeEmitHeartbeat({
         cwd: process.cwd(),
         env: process.env,
+        activity: toolName ? { tool: toolName } : undefined,
       });
       conflict = heartbeatResult && heartbeatResult.conflict;
     } catch (err) {

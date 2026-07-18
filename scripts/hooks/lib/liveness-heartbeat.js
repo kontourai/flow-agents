@@ -165,6 +165,30 @@ function readActiveSlug(root, actorKey) {
 }
 
 /**
+ * Sanitize an optional caller-supplied `activity` descriptor into a clean, bounded shape suitable
+ * for embedding in the emitted heartbeat event (issue: richer "real liveness" signals). The point
+ * is to make each pulse say WHAT the agent is doing right now — the tool it just ran — not merely
+ * that it is alive. Every field flows both into the local append-only JSONL and (via relay.sh) into
+ * the hosted Console record, so each value is passed through the same allowlist+64-cap
+ * `sanitizeSegment` the write side already applies to actors/slugs: a hostile or oversized tool
+ * name (a custom MCP tool string, a hand-edited hook payload) can never inject control bytes or
+ * unbounded text downstream. Returns `undefined` when there is no usable activity, so the caller
+ * omits the field entirely rather than emitting `activity: {}` noise.
+ *
+ * @param {{tool?: string}|undefined} activity
+ * @returns {{tool: string}|undefined}
+ */
+function sanitizeActivity(activity) {
+  if (!activity || typeof activity !== 'object') return undefined;
+  const out = {};
+  if (activity.tool != null && String(activity.tool).trim()) {
+    const tool = sanitizeSegment(activity.tool);
+    if (tool && tool !== 'unknown') out.tool = tool;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/**
  * Filter a list of parsed liveness events down to the ones matching a given
  * (subjectId, actor) pair. Shared by the bounded tail read and the full-read
  * fallback so both filter identically.
@@ -270,7 +294,11 @@ function attachConflictField(result, conflict) {
  *     wall-clock timer), so it fires once per genuinely new conflicting event, independent of
  *     whether our own heartbeat emits or throttles this call.
  *
- * @param {{cwd?: string, env?: NodeJS.ProcessEnv, now?: Date|string}} [opts]
+ * @param {{cwd?: string, env?: NodeJS.ProcessEnv, now?: Date|string, activity?: {tool?: string}}} [opts]
+ *   `activity` is an optional descriptor of what the agent is doing right now (e.g. the tool this
+ *   postToolUse pulse rode in on); when present + usable it is sanitized and embedded in the emitted
+ *   heartbeat so the fleet view shows WHAT, not just aliveness. Purely additive — never affects the
+ *   throttle/emit/conflict decisions.
  * @returns {{emitted: boolean, reason?: string, conflict?: {actor: string, lastAt: string, ttlSeconds: number}}}
  */
 function maybeEmitHeartbeat(opts = {}) {
@@ -383,12 +411,16 @@ function maybeEmitHeartbeat(opts = {}) {
     const conflict = computeConflict(holderEvents, slug, actor, nowMs, last.at);
 
     const nowIso = new Date(nowMs).toISOString();
+    const activity = sanitizeActivity(opts.activity);
     appendLivenessEvent(root, {
       type: 'heartbeat',
       subjectId: slug,
       actor,
       at: nowIso,
       source: 'tool-activity',
+      // Richer "real liveness": name the tool this pulse rode in on, so the fleet view shows WHAT
+      // each agent is doing, not just that it is alive. Omitted entirely when no usable activity.
+      ...(activity ? { activity } : {}),
     });
     return attachConflictField({ emitted: true }, conflict);
   } catch (err) {

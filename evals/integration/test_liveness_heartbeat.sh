@@ -704,6 +704,72 @@ else
   _fail "maybeEmitHeartbeat did not neutralize an orphan heartbeat as expected: $J1_OUT"
 fi
 
+# ─── K. Richer "real liveness": activity descriptor on the emitted heartbeat ────────────────
+echo "--- K. Activity enrichment (tool name on the pulse) ---"
+
+# call_heartbeat_activity <scratch_root> <env_json> <now_iso> <activity_json>
+# Like call_heartbeat, but passes an `activity` descriptor through opts so we can prove the emitted
+# heartbeat carries a sanitized activity field (the "what is this agent doing right now" signal).
+call_heartbeat_activity() {
+  local root="$1" env_json="$2" now="$3" activity_json="$4"
+  MODULE_ARG="$HEARTBEAT_MODULE" ROOT_ARG="$root" ENV_JSON_ARG="$env_json" NOW_ARG="$now" ACTIVITY_ARG="$activity_json" \
+    node - <<'NODE'
+const { maybeEmitHeartbeat } = require(process.env.MODULE_ARG);
+const env = JSON.parse(process.env.ENV_JSON_ARG);
+const opts = { cwd: process.env.ROOT_ARG, env, now: process.env.NOW_ARG, activity: JSON.parse(process.env.ACTIVITY_ARG) };
+process.stdout.write(JSON.stringify(maybeEmitHeartbeat(opts)));
+NODE
+}
+
+# K1: a clean tool name rides through onto the emitted heartbeat as activity.tool.
+K1_ROOT="$(new_scratch)"
+seed_claim "$K1_ROOT" "k1-subj" "agent-k1" "2026-06-25T12:00:00.000Z" 1800
+K1_RESULT="$(call_heartbeat_activity "$K1_ROOT" '{"FLOW_AGENTS_ACTOR":"agent-k1"}' "2026-06-25T12:01:00.000Z" '{"tool":"Bash"}')"
+K1_LINE="$(tail -n 1 "$(stream_file "$K1_ROOT")" 2>/dev/null)"
+if [[ "$K1_RESULT" == '{"emitted":true}' ]] \
+  && grep -q '"type":"heartbeat"' <<<"$K1_LINE" \
+  && grep -q '"activity":{"tool":"Bash"}' <<<"$K1_LINE"; then
+  _pass "the emitted heartbeat carries a sanitized activity.tool (what the agent is doing right now)"
+else
+  _fail "the heartbeat did not carry the expected activity.tool: result=$K1_RESULT line=$K1_LINE"
+fi
+
+# K2: an MCP-style tool name (double underscores + hyphens) survives sanitizeSegment intact.
+K2_ROOT="$(new_scratch)"
+seed_claim "$K2_ROOT" "k2-subj" "agent-k2" "2026-06-25T12:00:00.000Z" 1800
+call_heartbeat_activity "$K2_ROOT" '{"FLOW_AGENTS_ACTOR":"agent-k2"}' "2026-06-25T12:01:00.000Z" '{"tool":"mcp__claude-in-chrome__navigate"}' >/dev/null
+K2_LINE="$(tail -n 1 "$(stream_file "$K2_ROOT")" 2>/dev/null)"
+if grep -q '"activity":{"tool":"mcp__claude-in-chrome__navigate"}' <<<"$K2_LINE"; then
+  _pass "an MCP tool name (double underscores + hyphens) rides through the allowlist sanitizer intact"
+else
+  _fail "the MCP tool name was not preserved on the activity descriptor: line=$K2_LINE"
+fi
+
+# K3: a hostile tool name (control bytes / injection payload) is stripped to the allowlist charset —
+# never emitted raw into the append-only stream.
+K3_ROOT="$(new_scratch)"
+seed_claim "$K3_ROOT" "k3-subj" "agent-k3" "2026-06-25T12:00:00.000Z" 1800
+call_heartbeat_activity "$K3_ROOT" '{"FLOW_AGENTS_ACTOR":"agent-k3"}' "2026-06-25T12:01:00.000Z" '{"tool":"Ba\"sh\n{\"x\":1}"}' >/dev/null
+K3_LINE="$(tail -n 1 "$(stream_file "$K3_ROOT")" 2>/dev/null)"
+# The allowlist keeps only [A-Za-z0-9_.-], so the payload collapses to "Bashx1".
+if grep -q '"activity":{"tool":"Bashx1"}' <<<"$K3_LINE" && ! grep -q 'Ba"sh' <<<"$K3_LINE"; then
+  _pass "a hostile tool name is stripped to the allowlist charset, never emitted raw (injection discipline)"
+else
+  _fail "the hostile tool name was not sanitized as expected: line=$K3_LINE"
+fi
+
+# K4: no activity supplied → the heartbeat is a plain aliveness pulse with NO activity key (the field
+# is omitted, not emitted empty).
+K4_ROOT="$(new_scratch)"
+seed_claim "$K4_ROOT" "k4-subj" "agent-k4" "2026-06-25T12:00:00.000Z" 1800
+call_heartbeat "$K4_ROOT" '{"FLOW_AGENTS_ACTOR":"agent-k4"}' "2026-06-25T12:01:00.000Z" >/dev/null
+K4_LINE="$(tail -n 1 "$(stream_file "$K4_ROOT")" 2>/dev/null)"
+if grep -q '"type":"heartbeat"' <<<"$K4_LINE" && ! grep -q '"activity"' <<<"$K4_LINE"; then
+  _pass "with no activity supplied the heartbeat omits the activity field entirely (no empty-object noise)"
+else
+  _fail "the no-activity heartbeat unexpectedly carried an activity field: line=$K4_LINE"
+fi
+
 echo ""
 if [[ "$errors" -eq 0 ]]; then
   echo "Liveness heartbeat integration passed."
