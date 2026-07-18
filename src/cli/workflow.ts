@@ -717,7 +717,13 @@ function assertDistinctReviewActor(sessionDir: string, slug: string): ReturnType
   const assignment = readActiveAssignment(sessionDir, slug);
   const caller = resolveCurrentAssignmentActor();
   if (assignment.actor_key === caller.actorKey) {
-    throw new Error("workflow critique requires a reviewer identity distinct from the active implementation assignment actor");
+    throw new Error(
+      "workflow critique requires a reviewer identity distinct from the active implementation assignment actor. " +
+        "The reviewer identity is derived from the runtime actor, so an orchestrator that implemented and now reviews " +
+        "resolves to the same actor. To record an independent review, run the reviewer under a distinct actor: set " +
+        "FLOW_AGENTS_ACTOR=<reviewer-id> on the reviewing process, or run the reviewer in a separate runtime session " +
+        "(the runtime session id seeds the actor).",
+    );
   }
   return caller;
 }
