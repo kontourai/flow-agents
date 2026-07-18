@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.2.0](https://github.com/kontourai/flow-agents/compare/v4.1.0...v4.2.0) (2026-07-18)
+
+
+### Features
+
+* **liveness:** conf-driven console relay enablement ([#567](https://github.com/kontourai/flow-agents/issues/567)) + richer real-liveness signals ([#705](https://github.com/kontourai/flow-agents/issues/705)) ([b1dd5b0](https://github.com/kontourai/flow-agents/commit/b1dd5b081280d49c07d4e92ff2ffc5103dc89800))
+
 ## [4.1.0](https://github.com/kontourai/flow-agents/compare/v4.0.0...v4.1.0) (2026-07-18)
 
 
