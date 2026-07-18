@@ -152,6 +152,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
+    "gcp-metadata": "7.0.1",
     "promptfoo": "^0.121.18",
     "typescript": "^7.0.2"
   },
