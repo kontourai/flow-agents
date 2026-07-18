@@ -246,6 +246,30 @@ codex_banner_teeth(){
   else
     _f "Codex banner CALL_ID: did not record pass/exitCode:0 for the call_id-matched entry: $(cat "$log_callid" 2>/dev/null)"
   fi
+
+  # --- PARALLEL command correlation (#644): current Codex exec_command calls
+  # store arguments under `cmd`. With no hook call_id, each PostToolUse event
+  # must resolve its exact function_call/output pair by normalized command.
+  local proj_parallel; proj_parallel="$(mktemp -d)"
+  mkdir -p "$proj_parallel/.kontourai/flow-agents/cap-codex-parallel"
+  printf '# Repo\n' > "$proj_parallel/AGENTS.md"
+  printf '%s' '{"schema_version":"1.0","task_slug":"cap-codex-parallel","status":"in_progress","phase":"verification","updated_at":"2026-06-23T00:00:00Z"}' > "$proj_parallel/.kontourai/flow-agents/cap-codex-parallel/state.json"
+  local rollout_parallel="$proj_parallel/rollout-parallel.jsonl"
+  printf '%s\n' '{"timestamp":"2026-06-23T00:00:00Z","type":"response_item","payload":{"type":"function_call","call_id":"call_pass","name":"exec_command","arguments":"{\"cmd\":\"find seed -type f\"}"}}' > "$rollout_parallel"
+  printf '%s\n' '{"timestamp":"2026-06-23T00:00:01Z","type":"response_item","payload":{"type":"function_call","call_id":"call_fail","name":"exec_command","arguments":"{\"cmd\":\"cat seed/src/window.js\"}"}}' >> "$rollout_parallel"
+  printf '%s\n' '{"timestamp":"2026-06-23T00:00:02Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_pass","output":"Process exited with code 0\nOutput:\n..."}}' >> "$rollout_parallel"
+  printf '%s\n' '{"timestamp":"2026-06-23T00:00:03Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_fail","output":"Process exited with code 1\nOutput:\n..."}}' >> "$rollout_parallel"
+  printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","cwd":"%s","tool_input":{"command":"find seed -type f"},"transcript_path":"%s"}' "$proj_parallel" "$rollout_parallel" \
+    | env CODEX_HOME="$home" CLAUDE_PROJECT_DIR="$home" bash -c "$capcmd" >/dev/null 2>&1 || true
+  printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","cwd":"%s","tool_input":{"command":"cat seed/src/window.js"},"transcript_path":"%s"}' "$proj_parallel" "$rollout_parallel" \
+    | env CODEX_HOME="$home" CLAUDE_PROJECT_DIR="$home" bash -c "$capcmd" >/dev/null 2>&1 || true
+  local log_parallel="$proj_parallel/.kontourai/flow-agents/cap-codex-parallel/command-log.jsonl"
+  if rg -q '"command":"find seed -type f","observedResult":"pass","exitCode":0' "$log_parallel" 2>/dev/null \
+    && rg -q '"command":"cat seed/src/window.js","observedResult":"fail","exitCode":1' "$log_parallel" 2>/dev/null; then
+    _p "Codex banner PARALLEL: cmd correlation keeps each command attached to its own exit code"
+  else
+    _f "Codex banner PARALLEL: command/result attribution crossed or stayed unresolved: $(cat "$log_parallel" 2>/dev/null)"
+  fi
 }
 
 run_bundle "Claude Code" "$ROOT/dist/claude-code/install.sh" ".claude/settings.json" "CLAUDE_PROJECT_DIR"
