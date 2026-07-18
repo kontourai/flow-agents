@@ -1,5 +1,32 @@
 # Changelog
 
+## [4.1.0](https://github.com/kontourai/flow-agents/compare/v4.0.0...v4.1.0) (2026-07-18)
+
+
+### Features
+
+* **backlog:** board-based readiness source decision + surfaced fallback warnings ([#441](https://github.com/kontourai/flow-agents/issues/441)) ([#692](https://github.com/kontourai/flow-agents/issues/692)) ([8dc292d](https://github.com/kontourai/flow-agents/commit/8dc292d8df1e25373e603fe4d81a598aed063584))
+* **ci:** enforce kits wrap the veritas engine via CLI, not as a library ([#651](https://github.com/kontourai/flow-agents/issues/651)) ([#701](https://github.com/kontourai/flow-agents/issues/701)) ([1fd0380](https://github.com/kontourai/flow-agents/commit/1fd0380ff0310d89db9c168d363a74c0df5aee04))
+* **kit:** kit-provisioning primitive — declare files a kit scaffolds into a consumer repo ([#647](https://github.com/kontourai/flow-agents/issues/647)) ([#691](https://github.com/kontourai/flow-agents/issues/691)) ([a85bdad](https://github.com/kontourai/flow-agents/commit/a85bdad05676415cd9948b470b2d5cc079d5e6c7))
+* **kits:** standing trigger-guards contract and agent_spawn_triggers validation warning ([#664](https://github.com/kontourai/flow-agents/issues/664)) ([#686](https://github.com/kontourai/flow-agents/issues/686)) ([ffcf0d9](https://github.com/kontourai/flow-agents/commit/ffcf0d98febc1815882c1586234806b831b90912))
+* **veritas-governance:** consult-standards skill — JIT guidance via veritas explain (flow-agents[#649](https://github.com/kontourai/flow-agents/issues/649)) ([#700](https://github.com/kontourai/flow-agents/issues/700)) ([f1e8db2](https://github.com/kontourai/flow-agents/commit/f1e8db288b241e55b132be5a09dbfbdc4aaaa6b7))
+* **veritas-governance:** provision governance git hooks (flow-agents[#648](https://github.com/kontourai/flow-agents/issues/648)) ([#699](https://github.com/kontourai/flow-agents/issues/699)) ([22965dd](https://github.com/kontourai/flow-agents/commit/22965ddeaf408ee9d5f8241cea60869a793a6495))
+* **veritas-governance:** scaffold starter Repo Standards via kit provisions (flow-agents[#647](https://github.com/kontourai/flow-agents/issues/647)) ([#696](https://github.com/kontourai/flow-agents/issues/696)) ([6943362](https://github.com/kontourai/flow-agents/commit/6943362e39088682fabdbef032283041a3567411))
+* **veritas-governance:** standards-authoring flow + skill ([#647](https://github.com/kontourai/flow-agents/issues/647)) ([#698](https://github.com/kontourai/flow-agents/issues/698)) ([6591a26](https://github.com/kontourai/flow-agents/commit/6591a268b8d16b41622c5203f4c97ca051170e29))
+* **workflow:** machine-checkable wave-result reconciliation manifest ([#663](https://github.com/kontourai/flow-agents/issues/663) slice 1) ([#702](https://github.com/kontourai/flow-agents/issues/702)) ([282d2fd](https://github.com/kontourai/flow-agents/commit/282d2fdd28a941e6eb2d17fcd312d2f478f5e72d))
+
+
+### Fixes
+
+* **builder:** declare pr-open-gate route-back so missing_evidence repairs at verify ([#695](https://github.com/kontourai/flow-agents/issues/695) item a) ([#697](https://github.com/kontourai/flow-agents/issues/697)) ([d8b83df](https://github.com/kontourai/flow-agents/commit/d8b83dfd484828fadca3561bc51afdfd5d691f34))
+* make workflow critique usable for single-orchestrator review ([#689](https://github.com/kontourai/flow-agents/issues/689), [#690](https://github.com/kontourai/flow-agents/issues/690)) ([#704](https://github.com/kontourai/flow-agents/issues/704)) ([a838b2e](https://github.com/kontourai/flow-agents/commit/a838b2e162e3bd31f6cc7314507f9bee7ac4ef5d))
+
+
+### Documentation
+
+* reconcile flow-agents docs to the veritas engine/kit split ([#652](https://github.com/kontourai/flow-agents/issues/652)) ([#703](https://github.com/kontourai/flow-agents/issues/703)) ([147b87a](https://github.com/kontourai/flow-agents/commit/147b87a3de14e8cc0d127e866c8136b60ab9b5b7))
+* **veritas-governance:** point to the ratified engine/surface seam doc; refresh fixed veritas[#106](https://github.com/kontourai/flow-agents/issues/106) status ([#688](https://github.com/kontourai/flow-agents/issues/688)) ([14ba90d](https://github.com/kontourai/flow-agents/commit/14ba90db7ec844286479fc0a31af1ae5c1bc12ed))
+
 ## [4.0.0](https://github.com/kontourai/flow-agents/compare/v3.12.1...v4.0.0) (2026-07-16)
 
 
